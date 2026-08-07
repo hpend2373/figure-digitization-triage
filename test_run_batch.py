@@ -487,6 +487,17 @@ check("a registered reviewer who inspected nothing is not an error",
           Registered_By="Test Fixture", Registration_Date="2026-08-01",
           Human_Attestation="HUMAN_CONFIRMED", Note="")]))
 
+# The CLI docstring is the only place a user learns what the runner needs, and
+# it silently fell one file behind `MANIFEST_FILES` the moment a manifest was
+# added. Documentation that can drift is documentation that will.
+_doc = RB.__doc__ or ""
+_undocumented = sorted(n for n in RB.MANIFEST_FILES.values() if n not in _doc)
+check("every mandatory manifest is named in the runner's usage text",
+      _undocumented == [], "undocumented: %s" % _undocumented)
+check("the usage text says how many there are",
+      "eleven" in _doc and len(RB.MANIFEST_FILES) == 11,
+      "%d manifests" % len(RB.MANIFEST_FILES))
+
 check("an unverified visual inventory blocks the run",
       "SOURCE_INVENTORY_NOT_VERIFIED" in validate(
           source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},

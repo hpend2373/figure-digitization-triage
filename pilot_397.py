@@ -125,15 +125,27 @@ LINE_FIGURES = [
 
 FIGURES, GRIDS, UNITS, PANELS, SERIES, POSITIONS = [], [], [], [], [], []
 SOURCE_DOCUMENTS, SOURCE_FIGURES, SOURCE_PANELS = [], [], []
-# The ledger the source manifests point at. One row here, because one person
-# did the inspection - and their name is written in Hangul, which the previous
-# ASCII-only check on `Inspector` could not accept.
+# The ledger the source manifests point at.
+#
+# This is an EXAMPLE row and it ships with an example identity on purpose. A
+# worked example that travels with somebody's personal address publishes it to
+# everyone the zip reaches, and the field exists so a reviewer can be contacted
+# about a panel count - not so a mailbox can be harvested from a package. The
+# name and ORCID below are ORCID's own fictional demonstration record.
+#
+# Set FDT_REVIEWER_NAME and FDT_REVIEWER_ORCID to attest a real run. Nothing
+# downstream depends on it here: this pilot ends at ACCEPTED 0.
+_EXAMPLE_NAME, _EXAMPLE_ORCID = "Josiah Carberry", "0000-0002-1825-0097"
+_REVIEWER_NAME = os.environ.get("FDT_REVIEWER_NAME", "").strip() or _EXAMPLE_NAME
+_REVIEWER_ORCID = os.environ.get("FDT_REVIEWER_ORCID", "").strip() or _EXAMPLE_ORCID
 REVIEWERS = [dict(
-    Reviewer_ID="RV_MYK", Reviewer_Name="\uae40\ubbfc\uc5fd",
-    Contact_Type="EMAIL", Reviewer_Contact="alsduq2373@gmail.com",
-    Registered_By="\uae40\ubbfc\uc5fd", Registration_Date="2026-08-07",
+    Reviewer_ID="RV_INSPECTOR", Reviewer_Name=_REVIEWER_NAME,
+    Contact_Type="ORCID", Reviewer_Contact=_REVIEWER_ORCID,
+    Registered_By=_REVIEWER_NAME, Registration_Date="2026-08-07",
     Human_Attestation="HUMAN_CONFIRMED",
-    Note="opened all five publisher rasters and counted the panels")]
+    Note=("EXAMPLE identity - replace before treating any output as data"
+          if _REVIEWER_ORCID == _EXAMPLE_ORCID else
+          "opened all five publisher rasters and counted the panels"))]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="ARM", Factor_Level=lv,
                Level_Order=i, Note="") for i, lv in enumerate(("FLUID", "NON_FLUID"))]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="SESSION", Factor_Level=lv,
@@ -358,7 +370,7 @@ SOURCE_DOCUMENTS.append(dict(
     Document_Role="MAIN_ARTICLE", Source_File="397.pdf",
     Article_Page_Range="full target article", Observed_Figure_Count=5,
     Inventory_Status="VISUALLY_VERIFIED", Figure_Count_Method="HUMAN_VISUAL",
-    Reviewer_ID="RV_MYK", Inspection_Date="2026-08-07",
+    Reviewer_ID="RV_INSPECTOR", Inspection_Date="2026-08-07",
     Note="all five publisher figures inventoried"))
 for fig_no, specs in sorted(_SOURCE_SPECS.items()):
     SOURCE_FIGURES.append(dict(
@@ -367,7 +379,7 @@ for fig_no, specs in sorted(_SOURCE_SPECS.items()):
         Figure_Number="FIG%d" % fig_no, Source_File="397.pdf", Source_Page=0,
         Source_Image=os.path.join(RASTERS, "397_fig%d.jpeg" % fig_no),
         Observed_Panel_Count=len(specs), Inventory_Status="VISUALLY_VERIFIED",
-        Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_MYK",
+        Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_INSPECTOR",
         Inspection_Date="2026-08-07", Note="counted on the full publisher raster"))
     for order, (spid, outcome, target, disposition) in enumerate(specs, 1):
         SOURCE_PANELS.append(dict(

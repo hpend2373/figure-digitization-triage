@@ -176,8 +176,13 @@ def check_reviewer_registry(reviewers, flag, kernel=None):
     twice over: nothing connected two spellings of the same person, and nothing
     distinguished a person from a process.  A foreign key into a registered
     ledger fixes the first completely and the second as far as software can -
-    registering a non-person now takes a deliberate, signed, reviewable act
-    instead of typing three letters into a column nobody reads.
+    registering a non-person now takes a deliberate, attributable, reviewable
+    act instead of typing three letters into a column nobody reads.
+
+    `Human_Attestation` is a declared enum, not a cryptographic signature. It
+    says a person typed HUMAN_CONFIRMED next to a contact; it does not prove
+    who typed it. What it buys is traceability - a row that can be asked about -
+    and calling it anything stronger would overstate it.
     """
     import datetime
     if kernel is None:

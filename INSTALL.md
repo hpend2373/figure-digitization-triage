@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.9 (full package)
+# figure-digitization-triage — v7.9.1 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -75,10 +75,39 @@ It fires only when every letter-bearing token of a name is a software word, so
 caught by stripping trailing digits. That list is unbounded by construction and
 anyone determined to write a person's name where there is no person will
 succeed. What makes the attestation *auditable* is `Reviewer_Contact` plus a
-signed `Human_Attestation` — a named, contactable person on the hook — not a
+registered `Human_Attestation` — a named, contactable person on the hook — not a
 denylist.
 
+**`Human_Attestation` is a declared enum, not a cryptographic signature.** It
+records that someone typed `HUMAN_CONFIRMED` into a registry row alongside a
+contact, and its whole value is that the row can be traced back to a person who
+can be asked. It does not prove authorship of the row and is not evidence in any
+stronger sense. If this package ever needs a real signature — a detached
+key over the registry, or an ORCID-authenticated attestation — that is a new
+field, not a reinterpretation of this one.
+
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## Non-blocking cleanup (v7.9 review)
+
+- **No personal address ships in the package.** `pilot_397.py` registered a
+  private Gmail; a worked example that travels with somebody's mailbox
+  publishes it to everyone the zip reaches. The example row now uses ORCID's
+  own fictional demonstration record (Josiah Carberry, `0000-0002-1825-0097`)
+  and labels itself `EXAMPLE identity - replace before treating any output as
+  data`. `FDT_REVIEWER_NAME` and `FDT_REVIEWER_ORCID` override it for a real
+  run.
+- **The runner's usage text lists all eleven mandatory manifests**, plus
+  `source_panel_coverage.csv` and `figure_manifest.csv` on the output side. Two
+  scenarios now assert the docstring against `MANIFEST_FILES`, because a usage
+  list that can drift is a usage list that will — it fell one file behind the
+  moment `reviewer_registry.csv` was added.
+- **`Human_Attestation` is described as a declared enum, not a signature**, in
+  INSTALL.md, SKILL_ADDENDUM.md and the code. It records that a person typed
+  `HUMAN_CONFIRMED` next to a contact; it buys traceability, not proof of
+  authorship. A real signature would be a new field.
+- **No `__pycache__` in the zip** (the v7.9 archive was already clean; the
+  packaging step drops it explicitly).
 
 ## MEDIUM (v7.8 review) — three scripts, three different answers to a missing raster
 

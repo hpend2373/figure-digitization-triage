@@ -58,7 +58,9 @@ If the source supplies no panel letters, assign stable reading-order labels
 who did the counting.
 
 That ID is a foreign key into `reviewer_registry.csv`, which holds the name, a
-contact (EMAIL or a checksum-valid ORCID) and a `Human_Attestation`.  Register
+contact (EMAIL or a checksum-valid ORCID) and a `Human_Attestation` — a declared
+enum, not a cryptographic signature: it records that a person typed
+HUMAN_CONFIRMED next to a contact, which buys traceability, not proof.  Register
 each extractor once.  Names are compared after NFKC normalization on Unicode
 alphanumerics, so `김민엽` and `李明` are names like any other; what is refused is a
 row where nobody contactable stands behind the count.  Machine

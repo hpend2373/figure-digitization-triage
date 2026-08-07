@@ -2,8 +2,11 @@
 
     python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR] [--date YYYY-MM-DD]
 
-Input  (MANIFEST_DIR): source_document_manifest.csv, source_figure_manifest.csv,
-                       source_panel_inventory.csv,
+Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
+                       INPUT_LOAD_FAILED, not a default
+
+                       reviewer_registry.csv, source_document_manifest.csv,
+                       source_figure_manifest.csv, source_panel_inventory.csv,
                        figure_manifest.csv, grid_definitions.csv,
                        unit_manifest.csv, panel_manifest.csv,
                        series_manifest.csv, position_manifest.csv,
@@ -12,8 +15,9 @@ Output (OUTPUT_DIR):   figure_values_accepted.csv  <- the only file to pool from
                        figure_values_raw.csv       <- everything read, with
                                                       Value_Status/QC_Codes/
                                                       Pooling_Eligible per row
+                       source_panel_coverage.csv   <- one row per physical panel
                        run_manifest.csv, manual_queue.csv, qc_problems.csv,
-                       run_stamp.json, raw/, projects/
+                       figure_manifest.csv, run_stamp.json, raw/, projects/
 
 The design commitment is that **a panel the reader could not do is louder than a
 panel it could**. Every panel lands on exactly one state, and everything short of
@@ -53,7 +57,7 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
-PIPELINE_VERSION = "7.9"
+PIPELINE_VERSION = "7.9.1"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",

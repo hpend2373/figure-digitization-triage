@@ -427,6 +427,8 @@ for fig_no, specs in sorted(_SOURCE_SPECS.items()):
         Source_Document_ID="SD397_MAIN", Publication_ID=397,
         Figure_Number="FIG%d" % fig_no, Source_File="397.pdf", Source_Page=0,
         Source_Image=os.path.join(RASTERS, "397_fig%d.jpeg" % fig_no),
+        Source_Image_SHA256=MR.sha256_of(
+            os.path.join(RASTERS, "397_fig%d.jpeg" % fig_no)),
         Observed_Panel_Count=len(specs), Inventory_Status="VISUALLY_VERIFIED",
         Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_INSPECTOR",
         Inspection_Date=INSPECTION_DATE, Note="counted on the full publisher raster"))
@@ -483,12 +485,17 @@ if summary["status"] == "DEMO_OUTPUT_REFUSED":
 import pandas as pd                                                # noqa: E402
 run = pd.read_csv(os.path.join(OUT, "run_manifest.csv"))
 raw = pd.read_csv(os.path.join(OUT, "figure_values_raw.csv"))
-accepted = pd.read_csv(os.path.join(OUT, "figure_values_accepted.csv"))
+machine_qc = pd.read_csv(os.path.join(OUT, "figure_values_machine_qc.csv"))
+review = pd.read_csv(os.path.join(OUT, "review_queue.csv"))
 
+# There is no ACCEPTED column to print here any more, and that is the change.
+# This script ends at machine QC; `finalize_batch.py` turns approved panels into
+# poolable values, and nothing else does.
 print("publication 397 - every figure, one run  [%s]" % summary["run_mode"])
-print("  panels %d | cells declared %d | read %d | ACCEPTED %d"
+print("  panels %d | cells declared %d | read %d | MACHINE_QC_PASSED %d"
       % (summary["panels"], int(run["Cells_Declared"].sum()), len(raw),
-         len(accepted)))
+         len(machine_qc)))
+print("  awaiting human review: %d panels" % len(review))
 print()
 print("  %-16s %-22s %s" % ("PANEL", "STATE", "READ / DECLARED"))
 for _, r in run.iterrows():

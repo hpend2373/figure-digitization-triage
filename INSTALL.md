@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.12 (full package)
+# figure-digitization-triage — v7.13 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,71 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## P0-3 (v7.11 review) — a person approves the values, or there are none
+
+`run_batch.py` no longer writes `figure_values_accepted.csv`. It stops at
+`figure_values_machine_qc.csv`, and the name is the point: the gate found
+nothing wrong, which is a different claim from anybody having looked at where
+the marks landed. Those two claims used to be the same file.
+
+    AUTO_EXTRACTED      the reader produced marks
+    MACHINE_QC_PASSED   the gate found nothing wrong          <- run_batch ends
+    HUMAN_APPROVED      a registered person looked and agreed <- value_review.csv
+    POOLING_ELIGIBLE    written by finalize_batch.py, nowhere else
+
+**Every passing panel gets a picture.** `review/<Panel_ID>_overlay.png` is the
+panel as printed with every mark the reader placed drawn on it, each labelled
+with the identity the manifest gave it and the value that identity will carry
+into the analysis. A WebPlotDigitizer project is the right artifact for
+re-deriving a number and the wrong one for the question a reviewer has 116
+times, which is whether `FLUID / POST` is sitting on the bar a human would call
+`FLUID / POST`. That question is answered by looking.
+
+**The approval names the extraction, not the panel.** Each review row carries a
+`Panel_Fingerprint` over the image hash, the config hash, the reader version,
+the pipeline code hash and the cell count. Re-run with different code and the
+approval is `APPROVAL_STALE`, not inherited.
+
+    python3 finalize_batch.py RUN_DIR --template   # unfilled decision file
+    # fill Decision / Reviewer_ID / Reviewed_At
+    python3 finalize_batch.py RUN_DIR
+
+Four refusals, each with a scenario behind it: an unregistered or
+`DEMO_IDENTITY` approver; an approval whose fingerprint does not match this run;
+a decision for a panel that never passed machine QC; and a DEMO_ONLY run, which
+no number of approvals promotes. Absence is refusal — a panel with no decision
+row is not approved, and the default output is the empty file.
+
+On the dispersion-resolved ID397 copy: 12 panels awaiting review, 11 approved
+and 1 rejected → `FINALIZED | panels approved 11 | values accepted 44`. Bump
+`READER_VERSION` and re-run with the same decisions → `APPROVAL_STALE`,
+`NOTHING_APPROVED`, no accepted file.
+
+45 scenarios in `test_finalize.py`, on a fixture that does accept values.
+Reverting the split fails 3 run scenarios and the reproducibility suite;
+narrowing the fingerprint to the panel ID fails 2.
+
+## P0-2 (v7.11 review) — one raster, one hash, checked end to end
+
+The same fact was declared in four places and joined in none: the source
+figure's `Source_Image`, the figure manifest's `Source_Image`, the panel's
+`Image_Path`, and the hash written beside them. Each file was individually
+valid, so a panel could read raster A while its inventory row, its
+reconciliation and its provenance all described raster B.
+
+`source_figure_manifest.csv` gains a mandatory `Source_Image_SHA256`, checked
+against the bytes on disk (`SOURCE_IMAGE_HASH_MISMATCH`). Every panel's
+`Image_Path` is then hashed and compared against the source figure its
+`Source_Panel_ID` belongs to (`PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE`). Moving a
+raster is fine; moving it without its hash is not.
+
+The first thing the check caught was the regression fixture itself, which put
+four panels drawn on four different files under a single `Source_Figure_ID`
+whose `Source_Image` was one of them — a physical figure that was four files at
+once. That is a fair result for the check.
+
+5 scenarios.
 
 ## HIGH (v7.11 review) — figure-grain QC never reached the values
 

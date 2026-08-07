@@ -597,7 +597,7 @@ def source_figure_manifest_columns():
     """Physical figures, before any outcome-specific virtual split."""
     return [
         "Source_Figure_ID", "Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File",
-        "Source_Page", "Source_Image", "Observed_Panel_Count",
+        "Source_Page", "Source_Image", "Source_Image_SHA256", "Observed_Panel_Count",
         "Inventory_Status", "Panel_Count_Method", "Reviewer_ID",
         "Inspection_Date", "Note",
     ]
@@ -833,6 +833,17 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
              "be promoted by the caller" % ", ".join(demo_ids))
 
     root = os.path.realpath(file_root)
+    _hash_cache = {}
+
+    def sha256_of_file(path):
+        """Hash a raster once per validation, however many rows name it."""
+        if path not in _hash_cache:
+            h = hashlib.sha256()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            _hash_cache[path] = h.hexdigest()
+        return _hash_cache[path]
 
     def resolve(p):
         """A declared image path, confined to `file_root`.
@@ -899,6 +910,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 
     source_figure_index = {}
     source_figures_by_document = {}
+    # The one hash every other layer is measured against. A figure is the raster
+    # it names; if the file changed, the panel count, the boxes and the
+    # calibrations were all taken from something else.
+    source_figure_sha = {}
     for i, r in source_figures.iterrows():
         line = "source_figures:%d" % (i + 2)
         sfid = str(r.get("Source_Figure_ID", "")).strip()
@@ -920,11 +935,28 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      sdid, source_document_index[sdid].get("Publication_ID"),
                      r.get("Publication_ID")))
         for c in ("Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File", "Source_Page",
-                  "Source_Image", "Observed_Panel_Count", "Inventory_Status",
-                  "Panel_Count_Method", "Reviewer_ID", "Inspection_Date"):
+                  "Source_Image", "Source_Image_SHA256", "Observed_Panel_Count",
+                  "Inventory_Status", "Panel_Count_Method", "Reviewer_ID",
+                  "Inspection_Date"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
         check_attestation(r, line, flag, reviewer_index)
+        declared_sha = str(r.get("Source_Image_SHA256", "")).strip().lower()
+        source_figure_sha[sfid] = declared_sha
+        if check_files and declared_sha:
+            resolved_source = resolve(r.get("Source_Image"))
+            if resolved_source is None:
+                flag(line, "SOURCE_FILE_NOT_FOUND",
+                     "Source_Image=%r is not on disk under %s"
+                     % (r.get("Source_Image"), root))
+            else:
+                actual = sha256_of_file(resolved_source)
+                if actual != declared_sha:
+                    flag(line, "SOURCE_IMAGE_HASH_MISMATCH",
+                         "Source_Image_SHA256 says %s..., the file on disk is "
+                         "%s.... The inventory was taken from a different raster "
+                         "than the one that will be read"
+                         % (declared_sha[:16], actual[:16]))
         try:
             count = _as_int(r.get("Observed_Panel_Count"))
             if count < 1:
@@ -1077,7 +1109,27 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         if check_files and not blank(r.get("Image_Path")) and img is None:
             flag(line, "SOURCE_FILE_NOT_FOUND",
                  "Image_Path=%r is not on disk" % r.get("Image_Path"))
-        elif check_files and img is not None and box is not None:
+        # The chain the reader is actually going to walk:
+        #     panel.Image_Path -> its bytes
+        #     panel.Source_Panel_ID -> source_panel.Source_Figure_ID
+        #                           -> source_figure.Source_Image_SHA256
+        # These were separate declarations that nobody joined, so a panel could
+        # read image A while its inventory row, its provenance and its
+        # reconciliation all described image B, with every file individually
+        # valid. One hash, checked here, is what makes Source_Figure_ID mean
+        # something.
+        if check_files and img is not None and spid and spid in source_panel_index:
+            owning = str(source_panel_index[spid].get("Source_Figure_ID", "")).strip()
+            expected = source_figure_sha.get(owning, "")
+            if expected:
+                actual = sha256_of_file(img)
+                if actual != expected:
+                    flag(line, "PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE",
+                         "Image_Path hashes to %s..., but %s belongs to %s whose "
+                         "Source_Image_SHA256 is %s.... The values would be read "
+                         "from one raster and attributed to another"
+                         % (actual[:16], spid, owning, expected[:16]))
+        if check_files and img is not None and box is not None:
             try:
                 from PIL import Image as _Image
                 w, h = _Image.open(img).size

@@ -57,6 +57,15 @@ If the source supplies no panel letters, assign stable reading-order labels
 `P01`, `P02`, ... .  Record the count method, and the `Reviewer_ID` of the person
 who did the counting.
 
+`run_batch.py` stops at `figure_values_machine_qc.csv`.  Nothing it writes is
+poolable.  Each passing panel also gets `review/<Panel_ID>_overlay.png` — the
+panel as printed with every mark the reader placed drawn and labelled on it —
+and a row in `review_queue.csv` carrying a `Panel_Fingerprint` over the image,
+the config, the reader and the pipeline code.  A person fills `Decision`,
+`Reviewer_ID` and `Reviewed_At` in `value_review.csv`, and `finalize_batch.py`
+writes `figure_values_accepted.csv` for the approved panels only.  Re-run with
+different code and the old approvals are `APPROVAL_STALE`, not inherited.
+
 Whether a run may produce poolable values is decided by `Reviewer_Record_Type`
 (`HUMAN` or `DEMO_IDENTITY`) on the rows the inventory names, not by a flag at
 the call site — a flag does not travel with the manifests.  A run resting on a

@@ -132,9 +132,35 @@ demo_stamp = json.load(open(os.path.join(tempfile.gettempdir(), "fdt_demo",
                                          "run_stamp.json")))
 assert demo_stamp["Run_Mode"] == "DEMO_ONLY", demo_stamp
 assert demo_stamp["Values_Accepted"] == 0, demo_stamp
-demo_accepted = os.path.join(tempfile.gettempdir(), "fdt_demo",
-                             "figure_values_accepted.csv")
-assert not os.path.getsize(demo_accepted) or sum(
-    1 for _ in open(demo_accepted, encoding="utf-8")) <= 1, (
-    "a DEMO_ONLY run wrote poolable rows")
+demo_dir = os.path.join(tempfile.gettempdir(), "fdt_demo")
+assert not os.path.exists(os.path.join(demo_dir, "figure_values_accepted.csv")), (
+    "a DEMO_ONLY run left an accepted file")
 print("no attestation runs as DEMO_ONLY with zero accepted: PASS")
+
+# --------------------------------------------------------------------------
+# the approval gate, end to end
+# --------------------------------------------------------------------------
+# MACHINE_QC_PASSED means the gate found nothing wrong. It does not mean anybody
+# looked at where the marks landed - and a reader that puts a plausible number
+# on the wrong bar produces exactly the output the gate has nothing to say
+# about. `run_batch` used to write `figure_values_accepted.csv` itself, so the
+# two claims were the same file.
+FIN = os.path.join(HERE, "finalize_batch.py")
+
+
+def sh(*argv):
+    return subprocess.run([sys.executable] + list(argv), capture_output=True,
+                          text=True)
+
+
+att_dir = os.path.join(tempfile.gettempdir(), "fdt_attested")
+assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv")), (
+    "run_batch wrote an accepted file; only finalize_batch may")
+assert os.path.exists(os.path.join(att_dir, "figure_values_machine_qc.csv"))
+assert os.path.exists(os.path.join(att_dir, "review_queue.csv"))
+print("run_batch stops at machine QC and writes a review queue: PASS")
+
+empty = sh(FIN, att_dir)
+assert empty.returncode == 1 and "NOTHING_APPROVED" in empty.stdout, empty.stdout
+assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv"))
+print("an unreviewed run finalizes to nothing: PASS")

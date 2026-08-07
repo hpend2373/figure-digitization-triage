@@ -18,13 +18,21 @@ Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        unit_manifest.csv, panel_manifest.csv,
                        series_manifest.csv, position_manifest.csv,
                        reader_config.csv
-Output (OUTPUT_DIR):   figure_values_accepted.csv  <- the only file to pool from
+Output (OUTPUT_DIR):   figure_values_machine_qc.csv <- passed the gate; NOT poolable
+                       review_queue.csv            <- one row per panel a person
+                                                      must now look at
+                       review/<Panel_ID>_overlay.png <- what the reader saw,
+                                                      drawn on what it read
                        figure_values_raw.csv       <- everything read, with
-                                                      Value_Status/QC_Codes/
-                                                      Pooling_Eligible per row
+                                                      Value_Status/QC_Codes per row
                        source_panel_coverage.csv   <- one row per physical panel
                        run_manifest.csv, manual_queue.csv, qc_problems.csv,
                        figure_manifest.csv, run_stamp.json, raw/, projects/
+
+**This module does not write `figure_values_accepted.csv`.** It stops at
+MACHINE_QC_PASSED, which means the gate found nothing wrong - a different claim
+from a person having looked at where the marks landed. `finalize_batch.py` reads
+`value_review.csv` and writes the accepted file for approved panels only.
 
 The design commitment is that **a panel the reader could not do is louder than a
 panel it could**. Every panel lands on exactly one state, and everything short of
@@ -63,11 +71,13 @@ import grid_engine as GE                                           # noqa: E402
 import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
+import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.12"
+PIPELINE_VERSION = "7.13"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
+    "review_overlay.py", "finalize_batch.py",
 )
 
 
@@ -110,6 +120,35 @@ RUN_MANIFEST_COLUMNS = [
     "Reader_Version", "Pipeline_Version", "Pipeline_Code_SHA256",
     "Raw_Data_File", "WPD_Project_File", "Run_Date", "Detail",
 ]
+
+REVIEW_QUEUE_COLUMNS = [
+    "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type",
+    "Cells_Read", "Cells_Declared",
+    "Overlay_File", "WPD_Project_File", "Raw_Data_File",
+    # What the approval is an approval OF. Change the raster, the manifests or
+    # the code and this changes, which is what makes a stale approval visible
+    # instead of inherited.
+    "Panel_Fingerprint",
+    # Filled in by a person, then read by finalize_batch.py.
+    "Decision", "Reviewer_ID", "Reviewed_At", "Note",
+]
+
+#: What a reviewer is allowed to write in `Decision`.
+REVIEW_DECISIONS = ("APPROVED", "REJECTED")
+
+
+def panel_fingerprint(run_row):
+    """Everything that would have to be identical for an approval to still hold.
+
+    A person approves a picture of a particular extraction: this image, read by
+    this code, configured this way. If any of those change the picture may be
+    different, and an approval carried across is a signature on work nobody saw.
+    """
+    material = "|".join(str(run_row.get(k, "")) for k in (
+        "Panel_ID", "Unit_ID", "Mark_Type", "Image_SHA256", "Config_SHA256",
+        "Reader_Version", "Pipeline_Code_SHA256", "Cells_Read"))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
 
 MANUAL_QUEUE_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
@@ -236,12 +275,14 @@ def _x_positions(rows):
 
 class PanelOutcome(object):
     def __init__(self, state, values=None, detail="", raw=None,
-                 declared=0, read=0, with_dispersion=0, missing=(), project=None):
+                 declared=0, read=0, with_dispersion=0, missing=(), project=None,
+                 overlay=None):
         self.state = state
         self.values = values or []
         self.detail = detail
         self.raw = raw
         self.project = project
+        self.overlay = overlay
         self.declared = declared
         self.read = read
         self.with_dispersion = with_dispersion
@@ -249,7 +290,7 @@ class PanelOutcome(object):
 
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
-              file_root=".", project_dir=None):
+              file_root=".", project_dir=None, review_dir=None):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -455,11 +496,21 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         project = write_panel_project(
             os.path.join(project_dir, "%s.tar" % pid),
             dict(panel, Image_Path=resolved), kept, xcal, ycal)
+    overlay = None
+    if review_dir:
+        overlay = OVERLAY.draw_panel_overlay(
+            os.path.join(review_dir, "%s_overlay.png" % pid), resolved, box, kept,
+            title="%s  %s  %s" % (pid, unit_id, mark),
+            subtitle="%d marks read of %d declared cells - approve only if each "
+                     "label sits on the mark a reader would give it"
+                     % (len(kept), declared),
+            series_order=sorted(series_level))
     with_disp = sum(1 for r in records
                     if r.get("Dispersion_Value") is not None or r.get("Q1") is not None)
     seen = {r["Cell_Key"] for r in records}
     missing = sorted(_all_cells(series_level, position_level) - seen)
     return PanelOutcome("AUTO_PASS", values=records, raw=raw_path, project=project,
+                        overlay=overlay,
                         declared=declared, read=len(records),
                         with_dispersion=with_disp, missing=missing,
                         detail=("" if not missing else
@@ -692,12 +743,18 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
 #: Everything a run owns in its output directory. A run clears all of it before
 #: doing anything else, so no output can outlive the run that produced it.
 CANONICAL_OUTPUTS = (
-    "figure_values_accepted.csv", "figure_values_raw.csv", "figure_values.csv",
+    # `figure_values_accepted.csv` is NOT written by this module any more - it is
+    # `finalize_batch.py`'s output. It stays on this list because a new run must
+    # still delete the last finalization: values approved against a previous run
+    # are not approved against this one, and a stale accepted file sitting beside
+    # fresh raw values is the most poolable thing in the directory.
+    "figure_values_accepted.csv", "finalize_stamp.json", "review_queue.csv",
+    "figure_values_machine_qc.csv", "figure_values_raw.csv", "figure_values.csv",
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
     "source_panel_coverage.csv",
 )
-CANONICAL_DIRS = ("raw", "projects")
+CANONICAL_DIRS = ("raw", "projects", "review")
 STAGING = ".staging"
 
 
@@ -721,7 +778,7 @@ def clear_outputs(output_dir):
 
 
 #: The last file moved into place. Its presence is what says a run committed.
-COMMIT_MARKER = "figure_values_accepted.csv"
+COMMIT_MARKER = "figure_values_machine_qc.csv"
 
 #: Whether the run stands behind its own output.
 #:
@@ -798,8 +855,8 @@ RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED",
 
 
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
-                panels=0, read=0, accepted=0, qc_problems=0, problems=0,
-                detail="", run_mode="ATTESTED"):
+                panels=0, read=0, accepted=0, machine_qc=0, qc_problems=0,
+                problems=0, detail="", run_mode="ATTESTED"):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
@@ -816,7 +873,8 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
             "Pipeline_Code_SHA256": pipeline_code_sha256(),
             "Config_SHA256": cfg_hash,
             "Manifest_SHA256": manifest_hashes or {},
-            "Panels": panels, "Values_Read": read, "Values_Accepted": accepted,
+            "Panels": panels, "Values_Read": read,
+            "Values_Machine_QC_Passed": machine_qc, "Values_Accepted": accepted,
             "QC_Problems": qc_problems, "Manifest_Problems": problems,
             "Detail": detail,
         }, fh, indent=1, sort_keys=True)
@@ -904,6 +962,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     os.makedirs(raw_dir, exist_ok=True)
     project_dir = os.path.join(output_dir, "projects")
     os.makedirs(project_dir, exist_ok=True)
+    review_dir = os.path.join(output_dir, "review")
+    os.makedirs(review_dir, exist_ok=True)
 
     options_by_config = BM.load_reader_configs(
         m["configs"],
@@ -920,13 +980,16 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
     values, run_rows, queue_rows, projects_by_figure = [], [], [], {}
+    overlays_by_panel = {}
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
         options = options_by_config.get(_s(panel.get("Config_ID")), {})
         outcome = run_panel(panel, series_by_panel.get(pid, []),
                             positions_by_panel.get(pid, []), options, unit,
-                            raw_dir, file_root=file_root, project_dir=project_dir)
+                            raw_dir, file_root=file_root, project_dir=project_dir,
+                            review_dir=review_dir)
+        overlays_by_panel[pid] = outcome.overlay or ""
         if outcome.project:
             projects_by_figure.setdefault(_s(panel.get("Figure_ID")), outcome.project)
         # Stamp the panel onto every value it produced. A unit is normally one
@@ -1099,16 +1162,19 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         elif own != "AUTO_PASS" or worst != "AUTO_PASS":
             statuses.append("PANEL_NOT_PASSED")
         else:
-            statuses.append("ACCEPTED")
+            statuses.append("MACHINE_QC_PASSED")
         codes.append(";".join(unit_codes))
-        eligible.append("TRUE" if statuses[-1] == "ACCEPTED" else "FALSE")
+        # Nothing this module writes is poolable. MACHINE_QC_PASSED means the
+        # machine could find nothing wrong with it, which is a different claim
+        # from a person having looked at where the reader put its marks.
+        eligible.append("FALSE")
     raw_df = values_df.copy()
     raw_df["Run_Panel_ID"] = run_panel_ids
     raw_df["Source_Panel_ID"] = source_panel_ids
     raw_df["Value_Status"] = statuses
     raw_df["QC_Codes"] = codes
     raw_df["Pooling_Eligible"] = eligible
-    accepted_df = raw_df[raw_df["Pooling_Eligible"] == "TRUE"].copy()
+    machine_qc_df = raw_df[raw_df["Value_Status"] == "MACHINE_QC_PASSED"].copy()
 
     # Source-level coverage is the antidote to virtual Figure_IDs masking
     # omissions.  Every physical panel appears exactly once here, including
@@ -1149,38 +1215,65 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # refusing here means the only thing this run leaves behind is the stamp
     # saying why. `clear_outputs` has already run, so there is nothing stale to
     # be mistaken for a result.
-    if run_mode == "DEMO_ONLY" and len(accepted_df):
+    # The review queue: one row per panel a person now has to look at, with the
+    # picture, the project and the run fingerprint the approval will be bound to.
+    review_rows = []
+    for row in run_rows:
+        if row["Run_State"] != "AUTO_PASS":
+            continue
+        review_rows.append({
+            "Panel_ID": row["Panel_ID"], "Source_Panel_ID": row["Source_Panel_ID"],
+            "Figure_ID": row["Figure_ID"], "Unit_ID": row["Unit_ID"],
+            "Mark_Type": row["Mark_Type"],
+            "Cells_Read": row["Cells_Read"], "Cells_Declared": row["Cells_Declared"],
+            "Overlay_File": overlays_by_panel.get(row["Panel_ID"], ""),
+            "WPD_Project_File": row["WPD_Project_File"],
+            "Raw_Data_File": row["Raw_Data_File"],
+            "Panel_Fingerprint": panel_fingerprint(row),
+            "Decision": "", "Reviewer_ID": "", "Reviewed_At": "", "Note": "",
+        })
+    review_df = pd.DataFrame(review_rows, columns=REVIEW_QUEUE_COLUMNS)
+    # An empty review directory beside twelve panels awaiting review would read
+    # as "nothing to look at". Say which pictures could not be drawn.
+    overlay_failures = OVERLAY.failures()
+    stamp_detail = ("" if not overlay_failures else
+                    "%d review overlay(s) could not be drawn: %s"
+                    % (len(overlay_failures), "; ".join(overlay_failures[:5])))
+
+    if run_mode == "DEMO_ONLY" and len(machine_qc_df):
         shutil.rmtree(work_dir, ignore_errors=True)
         # raw/ and projects/ are written at their final paths, because the
         # value rows have to name them. They are digitized data too - a point
         # cloud is the reading, not a note about it - so a refusal that left
         # them behind would refuse the summary and keep the measurements.
-        for leftover in ("raw", "projects"):
+        for leftover in ("raw", "projects", "review"):
             shutil.rmtree(os.path.join(output_dir, leftover), ignore_errors=True)
         detail = ("%d values passed the gate under a DEMO_ONLY reviewer "
                   "registry. Register the person who actually inspected the "
                   "figures and re-run; a demonstration identity cannot stand "
-                  "behind a poolable value" % len(accepted_df))
+                  "behind a poolable value" % len(machine_qc_df))
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "DEMO_OUTPUT_REFUSED", run_date, run_mode=run_mode,
                     cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                     panels=len(run_df), read=len(raw_df), accepted=0,
                     qc_problems=int(len(qc)), detail=detail)
         return dict(status="DEMO_OUTPUT_REFUSED", panels=len(run_df),
-                    values=0, accepted=0, would_accept=len(accepted_df),
+                    values=0, accepted=0, would_accept=len(machine_qc_df),
                     run_mode=run_mode, detail=detail)
 
     raw_df.to_csv(os.path.join(work_dir, "figure_values_raw.csv"), index=False)
-    accepted_df.to_csv(os.path.join(work_dir, "figure_values_accepted.csv"),
-                       index=False)
+    machine_qc_df.to_csv(os.path.join(work_dir, "figure_values_machine_qc.csv"),
+                         index=False)
+    review_df.to_csv(os.path.join(work_dir, "review_queue.csv"), index=False)
     run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
     coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
-                run_mode=run_mode,
+                run_mode=run_mode, detail=stamp_detail,
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
-                panels=len(run_df), read=len(raw_df), accepted=len(accepted_df),
+                panels=len(run_df), read=len(raw_df), accepted=0,
+                machine_qc=len(machine_qc_df),
                 qc_problems=int(len(qc)))
     try:
         promote(work_dir, output_dir, fault_after=fault_after)
@@ -1191,7 +1284,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}
     return dict(status="RAN", panels=len(run_df), values=len(raw_df),
-                accepted=len(accepted_df), qc_problems=int(len(qc)),
+                accepted=0, machine_qc=len(machine_qc_df), qc_problems=int(len(qc)),
                 states=counts, manual_queue=len(queue_df),
                 run_mode=run_mode, config_sha256=cfg_hash)
 

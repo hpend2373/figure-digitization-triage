@@ -154,20 +154,31 @@ REVIEWERS = [dict(
 SOURCE_DOCUMENTS = [dict(
     Source_Document_ID="SD1", Publication_ID=1, Document_Role="MAIN_ARTICLE",
     Source_File="synthetic.pdf", Article_Page_Range="1-1",
-    Observed_Figure_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Observed_Figure_Count=4, Inventory_Status="VISUALLY_VERIFIED",
     Figure_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
-    Inspection_Date="2026-08-06", Note="one synthetic source figure")]
+    Inspection_Date="2026-08-06", Note="four synthetic source figures")]
+
+# One source figure per raster. The fixture used to put all four panels under a
+# single Source_Figure_ID whose Source_Image was only one of the four files -
+# a physical figure that is four different files at once. Nothing noticed until
+# the hash chain was enforced, which is a fair result for the check: the first
+# thing it caught was an inventory that could not describe anything real.
+_SOURCE_RASTERS = (("SF1", "P_LINE", LINE_IMG), ("SF2", "P_SCAT", SCAT_IMG),
+                   ("SF3", "P_FLAT", FLAT_IMG), ("SF4", "P_MANUAL", BLANK_IMG))
+_FIGURE_OF_PANEL = {pid: sfid for sfid, pid, _ in _SOURCE_RASTERS}
 
 SOURCE_FIGURES = [dict(
-    Source_Figure_ID="SF1", Source_Document_ID="SD1",
-    Publication_ID=1, Figure_Number="FIG1",
-    Source_File="synthetic.pdf", Source_Page=1, Source_Image=LINE_IMG,
-    Observed_Panel_Count=4, Inventory_Status="VISUALLY_VERIFIED",
+    Source_Figure_ID=sfid, Source_Document_ID="SD1",
+    Publication_ID=1, Figure_Number="FIG%s" % sfid[-1],
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=img,
+    Source_Image_SHA256=MR.sha256_of(img),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
     Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
-    Inspection_Date="2026-08-06", Note="four visible axes regions")]
+    Inspection_Date="2026-08-06", Note="one visible axes region")
+    for sfid, _pid, img in _SOURCE_RASTERS]
 
 SOURCE_PANELS = [dict(
-    Source_Panel_ID=pid, Source_Figure_ID="SF1", Panel_Label=pid,
+    Source_Panel_ID=pid, Source_Figure_ID=_FIGURE_OF_PANEL[pid], Panel_Label=pid,
     Outcome_Label=("Heart rate" if pid != "P_SCAT" else "Heart-rate association"),
     Target_Status="TARGET",
     Panel_Disposition=("MANUAL_DIGITIZE" if pid == "P_MANUAL" else
@@ -732,7 +743,7 @@ summary = RB.run_batch(MDIR, ODIR, file_root=ROOT, run_date="2026-08-06")
 check("the batch ran", summary["status"] == "RAN", "%s" % summary)
 
 values = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"), dtype=object).fillna("")
-accepted = pd.read_csv(os.path.join(ODIR, "figure_values_accepted.csv"), dtype=object).fillna("")
+accepted = pd.read_csv(os.path.join(ODIR, "figure_values_machine_qc.csv"), dtype=object).fillna("")
 run = pd.read_csv(os.path.join(ODIR, "run_manifest.csv"), dtype=object).fillna("")
 queue = pd.read_csv(os.path.join(ODIR, "manual_queue.csv"), dtype=object).fillna("")
 qc = pd.read_csv(os.path.join(ODIR, "qc_problems.csv"), dtype=object).fillna("")
@@ -824,16 +835,24 @@ check("every raw row carries its own verdict, so no join is needed",
       {"Value_Status", "QC_Codes", "Pooling_Eligible"} <= set(values.columns),
       "%s" % sorted(values.columns)[-4:])
 check("every raw status is in the declared vocabulary",
-      set(values["Value_Status"]) <= {"ACCEPTED", "QC_FAILED", "PANEL_NOT_PASSED"},
+      set(values["Value_Status"]) <= {"MACHINE_QC_PASSED", "QC_FAILED", "PANEL_NOT_PASSED"},
       "%s" % sorted(set(values["Value_Status"])))
-check("Pooling_Eligible is TRUE exactly when the status is ACCEPTED",
-      all((r["Pooling_Eligible"] == "TRUE") == (r["Value_Status"] == "ACCEPTED")
-          for _, r in values.iterrows()))
-check("the accepted file is the eligible subset, nothing more",
-      len(accepted) == sum(values["Pooling_Eligible"] == "TRUE")
+# Nothing this module writes is poolable. MACHINE_QC_PASSED means the machine
+# found nothing wrong, which is a different claim from a person having looked
+# at where the reader put its marks - and it was the same column before, so
+# "the gate is happy" and "somebody checked" were indistinguishable downstream.
+check("no row the run writes claims to be poolable",
+      set(values["Pooling_Eligible"]) == {"FALSE"},
+      "%s" % sorted(set(values["Pooling_Eligible"])))
+check("the run writes no accepted file at all",
+      not os.path.exists(os.path.join(ODIR, "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(ODIR)))
+check("the machine-QC file is the MACHINE_QC_PASSED subset, nothing more",
+      len(accepted) == sum(values["Value_Status"] == "MACHINE_QC_PASSED")
       and set(accepted["Cell_Key"]) ==
-      set(values[values["Pooling_Eligible"] == "TRUE"]["Cell_Key"]),
-      "%d vs %d" % (len(accepted), sum(values["Pooling_Eligible"] == "TRUE")))
+      set(values[values["Value_Status"] == "MACHINE_QC_PASSED"]["Cell_Key"]),
+      "%d vs %d" % (len(accepted),
+                    sum(values["Value_Status"] == "MACHINE_QC_PASSED")))
 check("every accepted row belongs to an AUTO_PASS panel",
       all(states.get(_p) == "AUTO_PASS"
           for _p, _u in zip(run["Panel_ID"], run["Unit_ID"])
@@ -850,7 +869,7 @@ _mdir = write_manifests(os.path.join(ROOT, "m_unres"), units=_unresolved)
 _o = os.path.join(ROOT, "o_unres")
 _su = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
 _raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
-_acc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+_acc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
                    dtype=object).fillna("")
 _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 check("an unresolved SD/SEM unit is still read into the raw file",
@@ -882,7 +901,7 @@ _mdir = write_manifests(os.path.join(ROOT, "m_allbad"), units=_all_bad,
                             Disposition_Reason="excluded from this all-bad fixture"))
 _o = os.path.join(ROOT, "o_allbad")
 _sa = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
-_acc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+_acc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
                    dtype=object).fillna("")
 _raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
 check("when every panel fails QC the accepted file has zero rows",
@@ -903,9 +922,9 @@ print("a failed re-run leaves no trace of the run before it")
 _seq = os.path.join(ROOT, "o_seq")
 _good = write_manifests(os.path.join(ROOT, "m_seq_good"))
 _first = RB.run_batch(_good, _seq, file_root=ROOT, run_date="2026-08-06")
-check("the first run leaves an accepted file with rows in it",
-      _first["accepted"] > 0
-      and len(pd.read_csv(os.path.join(_seq, "figure_values_accepted.csv"))) > 0,
+check("the first run leaves a machine-QC file with rows in it",
+      _first["machine_qc"] > 0
+      and len(pd.read_csv(os.path.join(_seq, "figure_values_machine_qc.csv"))) > 0,
       "%s" % _first)
 _bad_seq = write_manifests(
     os.path.join(ROOT, "m_seq_bad"),
@@ -914,7 +933,7 @@ _bad_seq = write_manifests(
 _second = RB.run_batch(_bad_seq, _seq, file_root=ROOT, run_date="2026-08-07")
 check("the second run is rejected", _second["status"] == "MANIFEST_REJECTED",
       "%s" % _second)
-for _name in ("figure_values_accepted.csv", "figure_values_raw.csv",
+for _name in ("figure_values_machine_qc.csv", "figure_values_raw.csv",
               "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
     check("a rejected re-run leaves no stale %s" % _name,
           not os.path.exists(os.path.join(_seq, _name)),
@@ -948,7 +967,7 @@ check("a good run after a rejection clears the rejection's own outputs",
 check("and its stamp says RAN",
       json.load(open(os.path.join(_seq, "run_stamp.json")))["Status"] == "RAN")
 check("every canonical output name is one the run actually clears",
-      {"figure_values_accepted.csv", "figure_values_raw.csv", "run_manifest.csv",
+      {"figure_values_machine_qc.csv", "figure_values_raw.csv", "run_manifest.csv",
        "manual_queue.csv", "qc_problems.csv", "manifest_problems.csv",
        "run_stamp.json"} <= set(RB.CANONICAL_OUTPUTS),
       "%s" % sorted(RB.CANONICAL_OUTPUTS))
@@ -962,7 +981,7 @@ print("an input that cannot even be loaded is a failure, not a silence")
 _load = os.path.join(ROOT, "o_load")
 RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
 check("the setup run leaves an accepted file to go stale",
-      len(pd.read_csv(os.path.join(_load, "figure_values_accepted.csv"))) > 0)
+      len(pd.read_csv(os.path.join(_load, "figure_values_machine_qc.csv"))) > 0)
 
 for _name, _break in (
         ("a manifest directory that does not exist",
@@ -989,7 +1008,7 @@ for _name, _break in (
     check("%s is a catchable Exception, not SystemExit" % _name,
           isinstance(_raised, Exception)
           and not isinstance(_raised, SystemExit), "%r" % type(_raised))
-    for _f in ("figure_values_accepted.csv", "figure_values_raw.csv",
+    for _f in ("figure_values_machine_qc.csv", "figure_values_raw.csv",
                "run_manifest.csv", "qc_problems.csv"):
         check("%s leaves no stale %s" % (_name, _f),
               not os.path.exists(os.path.join(_load, _f)),
@@ -1033,6 +1052,9 @@ check("and writes no raw values file either",
       "figure_values_raw.csv" not in _demo_files, "%s" % _demo_files)
 check("and leaves nothing but the stamp behind",
       _demo_files == ["run_stamp.json"], "%s" % _demo_files)
+check("and the review overlays go with it - no picture of a refused run",
+      not os.path.isdir(os.path.join(_demo, "review")),
+      "%s" % _demo_files)
 check("and the stamp records DEMO_ONLY, not a silent ATTESTED",
       _demo_stamp.get("Run_Mode") == "DEMO_ONLY"
       and _demo_stamp.get("Status") == "DEMO_OUTPUT_REFUSED"
@@ -1078,6 +1100,44 @@ except Exception as exc:                                  # pragma: no cover
     _bad_mode = "wrong exception: %r" % exc
 check("an invented run mode is a programming error, not a default",
       "run_mode must be" in _bad_mode and "PROBABLY_FINE" in _bad_mode, _bad_mode)
+
+
+print("one raster, one hash, checked end to end")
+# The same fact was declared in four places and joined in none: the source
+# figure's image, the figure manifest's image, the panel's Image_Path, and the
+# hash written beside them. Each file was individually valid, so a panel could
+# read raster A while its inventory row, its reconciliation and its provenance
+# all described raster B.
+check("a source figure must declare the hash of its own raster",
+      "MISSING_REQUIRED" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_Image_SHA256="")))
+check("a declared hash that is not the file's hash is refused",
+      "SOURCE_IMAGE_HASH_MISMATCH" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_Image_SHA256="0" * 64)),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Source_Image_SHA256="0" * 64)))
+check("a panel reading a raster its source figure does not own is refused",
+      "PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                                    Image_Path=FLAT_IMG)))
+check("and swapping the panel's Source_Panel_ID instead does not help",
+      "PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                        Source_Panel_ID="P_FLAT")),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                                    Source_Panel_ID="P_FLAT")))
+check("moving the raster and its hash together is fine",
+      validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+          Source_Image=FLAT_IMG, Source_Image_SHA256=MR.sha256_of(FLAT_IMG)),
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)) == [],
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+          Source_Image=FLAT_IMG, Source_Image_SHA256=MR.sha256_of(FLAT_IMG)),
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)))
 
 
 print("an identifier that becomes a filename cannot leave the output directory")
@@ -1141,9 +1201,9 @@ for _label, _figs, _want in (
                        _d, file_root=ROOT, run_date="2026-08-06")
     _qc = pd.read_csv(os.path.join(_d, "qc_problems.csv")) if os.path.exists(
         os.path.join(_d, "qc_problems.csv")) else pd.DataFrame(columns=["where", "check"])
-    _acc = pd.read_csv(os.path.join(_d, "figure_values_accepted.csv"),
+    _acc = pd.read_csv(os.path.join(_d, "figure_values_machine_qc.csv"),
                        dtype=object) if os.path.exists(
-        os.path.join(_d, "figure_values_accepted.csv")) else pd.DataFrame()
+        os.path.join(_d, "figure_values_machine_qc.csv")) else pd.DataFrame()
     check("%s is caught at the figure grain" % _label,
           any(str(w).startswith("figures:") for w in _qc.get("where", [])),
           "%s" % _qc.to_dict("records")[:4])
@@ -1168,7 +1228,7 @@ _gs = RB.run_batch(
 _gq = pd.read_csv(os.path.join(_gd, "qc_problems.csv"))
 _g_scoped = any(str(w).startswith(("grid:", "grids:")) for w in _gq["where"])
 if _g_scoped:
-    _ga = pd.read_csv(os.path.join(_gd, "figure_values_accepted.csv"), dtype=object)
+    _ga = pd.read_csv(os.path.join(_gd, "figure_values_machine_qc.csv"), dtype=object)
     _units_on_g_time = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] == "G_TIME"}
     _units_elsewhere = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] != "G_TIME"}
     check("a grid-grain problem blocks every unit declaring that grid",
@@ -1213,8 +1273,7 @@ _demo_reg = [dict(REVIEWERS[0], Reviewer_ID="RV_DEMO",
 _demo_mdir = write_manifests(
     os.path.join(ROOT, "m_demo_identity"), reviewers=_demo_reg,
     source_documents=[dict(SOURCE_DOCUMENTS[0], Reviewer_ID="RV_DEMO")],
-    source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
-                          Reviewer_ID="RV_DEMO"))
+    source_figures=[dict(f, Reviewer_ID="RV_DEMO") for f in SOURCE_FIGURES])
 
 _replay = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_replay"),
                        file_root=ROOT, run_date="2026-08-06")
@@ -1291,7 +1350,7 @@ for _n in (1, 2, 3):
           and _sj.get("Values_Accepted") == 0,
           "no stamp at all" if not _sj else "%r" % _sj)
 check("the marker is the values file a downstream reader would pool",
-      RB.COMMIT_MARKER == "figure_values_accepted.csv", RB.COMMIT_MARKER)
+      RB.COMMIT_MARKER == "figure_values_machine_qc.csv", RB.COMMIT_MARKER)
 
 # Ordering and withdrawal each cover the other, so neither is proven by the
 # end-to-end runs above. Exercise them separately, on a directory of stubs.
@@ -1303,7 +1362,7 @@ for _d in (_stage, _dest):
 for _f in ("aaa_first.csv", RB.COMMIT_MARKER, "zzz_last.csv", "run_stamp.json"):
     open(os.path.join(_stage, _f), "w").write("stub")
 _raised = None
-# Two files in, deliberately: sorted() puts `figure_values_accepted.csv` SECOND
+# Two files in, deliberately: sorted() puts `figure_values_machine_qc.csv` SECOND
 # among these stubs, so a run that promotes in listing order has already moved
 # the marker by here and a run that orders it last has not. Faulting at one
 # would pass either way and prove nothing.
@@ -1384,24 +1443,32 @@ _split_positions = [
          Timepoint_Days=i * 7, Note="")
     for p in ("P_HALF_A", "P_HALF_B") for i, (q, x) in enumerate(zip(POSITIONS, XS))]
 _split_units = UNITS + [unit("U_SPLIT", "G_TIME", "CONTINUOUS")]
+# P_HALF_A is drawn on BLANK_IMG and P_HALF_B on LINE_IMG, so they belong to
+# different physical figures - which is the point of the fixture: one unit fed
+# by two panels the reader treats independently.
 _split_source_panels = SOURCE_PANELS + [dict(
-    Source_Panel_ID=p, Source_Figure_ID="SF1", Panel_Label=p,
+    Source_Panel_ID=p, Source_Figure_ID=sf, Panel_Label=p,
     Outcome_Label="Heart rate", Target_Status="TARGET",
     Panel_Disposition="AUTO_DIGITIZE",
     Disposition_Reason="two-panel one-unit regression fixture", Note="")
-    for p in ("P_HALF_A", "P_HALF_B")]
+    for p, sf in (("P_HALF_A", "SF4"), ("P_HALF_B", "SF1"))]
 _mdir = write_manifests(os.path.join(ROOT, "m_split"),
                         panels=PANELS + _split_panels,
                         series_rows=SERIES + _split_series,
                         positions=POSITION_ROWS + _split_positions,
                         units=_split_units,
-                        source_figures=[dict(SOURCE_FIGURES[0], Observed_Panel_Count=6)],
+                        source_figures=[
+                            dict(f, Observed_Panel_Count=2)
+                            if f["Source_Figure_ID"] in ("SF1", "SF4") else f
+                            for f in SOURCE_FIGURES],
                         source_panels=_split_source_panels)
 _o = os.path.join(ROOT, "o_split")
-RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_split_summary = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+check("the two-panel-one-unit fixture actually ran",
+      _split_summary["status"] == "RAN", "%s" % _split_summary)
 _sr = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 _sraw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
-_sacc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+_sacc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
                     dtype=object).fillna("")
 _sstates = dict(zip(_sr["Panel_ID"], _sr["Run_State"]))
 check("two panels of one unit keep two separate run rows",
@@ -1439,7 +1506,7 @@ check("each run row carries the image hash it read",
 ODIR2 = os.path.join(ROOT, "out2")
 RB.run_batch(MDIR, ODIR2, file_root=ROOT, run_date="2026-08-06")
 _same = []
-for name in ("figure_values_raw.csv", "figure_values_accepted.csv",
+for name in ("figure_values_raw.csv", "figure_values_machine_qc.csv",
              "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
     # The output directory is embedded in the paths a run writes, so compare the
     # runs with their own root removed. Everything else must match exactly.
@@ -1468,7 +1535,7 @@ check("a duplicated option is caught at validation, before any reading",
 check("a rejected batch writes its reasons and no values",
       os.path.exists(os.path.join(ODIR3, "manifest_problems.csv"))
       and not os.path.exists(os.path.join(ODIR3, "figure_values_raw.csv"))
-      and not os.path.exists(os.path.join(ODIR3, "figure_values_accepted.csv")))
+      and not os.path.exists(os.path.join(ODIR3, "figure_values_machine_qc.csv")))
 
 MDIR4 = write_manifests(os.path.join(ROOT, "manifests4"),
                         configs=[dict(c, Value=("30" if c["Option"] == "x_window"
@@ -1555,9 +1622,15 @@ for _x, _y in SCATTER_XY[:2]:
     _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
     _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
 _si.save(_sparse_img)
+# Swapping the raster under a panel means swapping the physical figure it is a
+# panel of - the hash chain will not let the two drift apart, which is what it
+# is for.
 _sparse = write_manifests(
     os.path.join(ROOT, "m_sparse"),
-    panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Image_Path=_sparse_img))
+    panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Image_Path=_sparse_img),
+    source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF2"},
+                          Source_Image=_sparse_img,
+                          Source_Image_SHA256=MR.sha256_of(_sparse_img)))
 _o = os.path.join(ROOT, "o_sparse")
 RB.run_batch(_sparse, _o, file_root=ROOT, run_date="2026-08-06")
 _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")

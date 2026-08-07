@@ -192,9 +192,12 @@ check("and wrote no accepted file",
 QUEUE = pd.read_csv(os.path.join(OUT, "review_queue.csv"), dtype=object).fillna("")
 check("every passing panel is in the review queue",
       set(QUEUE["Panel_ID"]) == {"P1"}, "%s" % sorted(set(QUEUE["Panel_ID"])))
+# Recorded relative to the run, so the queue still points at the right picture
+# after the directory is moved or copied to another machine.
 check("with a picture a person can judge",
       bool(QUEUE.loc[0, "Overlay_File"])
-      and os.path.exists(QUEUE.loc[0, "Overlay_File"]),
+      and not os.path.isabs(QUEUE.loc[0, "Overlay_File"])
+      and os.path.exists(RB.resolve_artifact(OUT, QUEUE.loc[0, "Overlay_File"])),
       "%r" % QUEUE.loc[0, "Overlay_File"])
 check("and the WPD project for re-deriving the number",
       bool(QUEUE.loc[0, "WPD_Project_File"]))
@@ -463,6 +466,46 @@ for _label, _target, _edit in (
           "%s" % sorted(os.listdir(_tamper_out)))
 
 print()
+print("every failure ends in a stamp, including one it cannot parse")
+# Hashing is bytes; parsing is interpretation. Doing them the other way round
+# meant a machine-QC CSV with a broken quote raised out of pd.read_csv before
+# verification ran - and by then the previous accepted file and stamp had
+# already been deleted, so the run was left with neither a result nor a stamp
+# saying why.
+for _target, _corrupt in (("figure_values_machine_qc.csv", True),
+                          ("review_queue.csv", True),
+                          ("panel_artifacts.csv", True)):
+    _p_out, _ = fresh_run("run_parse_%s" % _target.split(".")[0][:12])
+    _pq = pd.read_csv(os.path.join(_p_out, "review_queue.csv"), dtype=object)
+    _prv = review([dict(Review_ID="R001", Panel_ID="P1",
+                        Review_Subject_SHA256=_pq.loc[0, "Review_Subject_SHA256"],
+                        Reviewer_ID="RV_H", Decision="APPROVED",
+                        Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                  os.path.join(_p_out, "value_review.csv"))
+    with open(os.path.join(_p_out, _target), "a", encoding="utf-8") as _fh:
+        _fh.write('"unterminated,,,\n')
+    try:
+        _pr = FIN.finalize(_p_out, review_path=_prv, run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    except Exception as _exc:
+        # Which is the defect: the accepted file and the stamp are deleted
+        # first, so an exception here leaves the run with neither a result nor
+        # an explanation.
+        _pr = dict(status="RAISED %s: %s" % (type(_exc).__name__, _exc),
+                   accepted=0)
+    check("a malformed %s is refused, not raised" % _target,
+          _pr["status"] in ("RUN_ARTIFACT_MODIFIED", "RUN_NOT_FINALIZABLE")
+          and _pr["accepted"] == 0, "%s" % _pr["status"])
+    check("  and leaves a stamp saying so (%s)" % _target,
+          os.path.exists(os.path.join(_p_out, "finalize_stamp.json"))
+          and json.load(open(os.path.join(_p_out, "finalize_stamp.json")))["Status"]
+          == _pr["status"],
+          "%s" % sorted(os.listdir(_p_out)))
+    check("  and no accepted file (%s)" % _target,
+          not os.path.exists(os.path.join(_p_out, "figure_values_accepted.csv")))
+
+
+print()
 print("a run directory can be moved, and finalized from anywhere")
 # The ledger recorded absolute paths and the finalizer checked them with
 # os.path.exists, so a run produced with a relative output directory and
@@ -487,6 +530,30 @@ check("a moved run finalizes from an unrelated working directory",
       _moved.returncode == 0
       and os.path.exists(os.path.join(_mv_dst, "figure_values_accepted.csv")),
       "%s%s" % (_moved.stdout[-400:], _moved.stderr[-200:]))
+# Finalizing is not the whole of portability. The queue tells a person which
+# picture to open and the accepted file tells a re-analyst where the points
+# are; both used to record the path the run happened to have, so handing the
+# finished data to another folder or another machine broke every one of those
+# links while the file still looked complete.
+_mv_q = pd.read_csv(os.path.join(_mv_dst, "review_queue.csv"), dtype=object).fillna("")
+check("and the moved queue still points at pictures that exist",
+      all(RB.resolve_artifact(_mv_dst, r["Overlay_File"])
+          and os.path.exists(RB.resolve_artifact(_mv_dst, r["Overlay_File"]))
+          for _, r in _mv_q.iterrows()),
+      "%s" % list(_mv_q["Overlay_File"]))
+_mv_acc = pd.read_csv(os.path.join(_mv_dst, "figure_values_accepted.csv"),
+                      dtype=object).fillna("")
+_mv_refs = [v for c in ("Point_Data_Reference", "WPD_Project_File")
+            for v in _mv_acc.get(c, []) if v]
+check("and every provenance reference in the accepted file still resolves",
+      _mv_refs and all(
+          RB.resolve_artifact(_mv_dst, v)
+          and os.path.exists(RB.resolve_artifact(_mv_dst, v)) for v in _mv_refs),
+      "%s" % sorted(set(_mv_refs))[:4])
+check("and none of them names the directory the run happened in",
+      not any(os.path.isabs(v) for v in _mv_refs)
+      and not any(os.path.isabs(v) for v in _mv_q["Overlay_File"] if v),
+      "%s" % [v for v in _mv_refs if os.path.isabs(v)][:3])
 
 
 print()

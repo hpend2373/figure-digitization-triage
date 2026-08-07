@@ -296,7 +296,17 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
              "panel_artifacts.csv is missing - this run predates artifact "
              "verification and cannot be finalized")
         return False
-    for _, art in pd.read_csv(ledger, dtype=object).fillna("").iterrows():
+    try:
+        ledger_df = pd.read_csv(ledger, dtype=object).fillna("")
+    except Exception as exc:
+        # It hashed correctly and still will not parse. Refusing is the only
+        # honest answer, and it has to be a flagged refusal rather than a
+        # traceback, or the run ends with no stamp explaining itself.
+        flag("run", "RUN_ARTIFACT_MODIFIED",
+             "panel_artifacts.csv could not be parsed (%s: %s)"
+             % (type(exc).__name__, exc))
+        return False
+    for _, art in ledger_df.iterrows():
         recorded_path = _s(art.get("Artifact_Path"))
         recorded_hash = _s(art.get("SHA256"))
         label = "%s %s" % (_s(art.get("Artifact_Type")),
@@ -327,7 +337,14 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
 
     registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
     if os.path.exists(registry_path):
-        actual = RB.frame_sha256(pd.read_csv(registry_path, dtype=object).fillna(""))
+        try:
+            registry_df = pd.read_csv(registry_path, dtype=object).fillna("")
+        except Exception as exc:
+            flag("run", "REVIEWER_REGISTRY_CHANGED",
+                 "the registry at %s could not be read (%s: %s)"
+                 % (manifest_dir, type(exc).__name__, exc))
+            return False
+        actual = RB.frame_sha256(registry_df)
         if actual != _s(run_stamp.get("Reviewer_Registry_SHA256")):
             flag("run", "REVIEWER_REGISTRY_CHANGED",
                  "the registry at %s is not the one the run validated. An "
@@ -425,13 +442,32 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "the run says Run_Mode=%s. No number of approvals promotes a "
                     "demonstration" % run_stamp.get("Run_Mode"))
 
+    # ---- verify BEFORE parsing --------------------------------------------
+    # Hashing is bytes; parsing is interpretation. Doing them the other way
+    # round meant a `figure_values_machine_qc.csv` with a broken quote raised
+    # out of `pd.read_csv` before verification ran - and by then the previous
+    # accepted file and stamp had already been deleted, so the run was left
+    # with neither a result nor a stamp saying why. Every failure this module
+    # can reach has to end in a stamp.
     machine_path = os.path.join(run_dir, "figure_values_machine_qc.csv")
     queue_path = os.path.join(run_dir, "review_queue.csv")
     for path in (machine_path, queue_path):
         if not os.path.exists(path):
             return stop("RUN_NOT_FINALIZABLE", "%s is missing" % path)
-    machine = pd.read_csv(machine_path, dtype=object).fillna("")
-    queue = pd.read_csv(queue_path, dtype=object).fillna("")
+
+    if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
+        return stop("RUN_ARTIFACT_MODIFIED",
+                    "the run this approval refers to is not the run on disk")
+
+    try:
+        machine = pd.read_csv(machine_path, dtype=object).fillna("")
+        queue = pd.read_csv(queue_path, dtype=object).fillna("")
+    except Exception as exc:
+        # The bytes hashed correctly and still will not parse: that is a run
+        # this module cannot read, not an approval it can refuse on the merits.
+        return stop("RUN_NOT_FINALIZABLE",
+                    "a verified run output could not be parsed (%s: %s)"
+                    % (type(exc).__name__, exc))
 
     try:
         reviewers = pd.read_csv(os.path.join(manifest_dir, "reviewer_registry.csv"),
@@ -441,16 +477,18 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "reviewer_registry.csv could not be read from %s (%s)"
                     % (manifest_dir, exc))
 
-    if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
-        return stop("RUN_ARTIFACT_MODIFIED",
-                    "the run this approval refers to is not the run on disk")
-
     reviews = load_reviews(review_path, flag)
     # Which artifacts the run says each panel has. Read after the verification
     # above, so every entry here is one whose bytes have just been confirmed.
     artifact_types = {}
-    for _, art in pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
-                              dtype=object).fillna("").iterrows():
+    try:
+        ledger_rows = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
+                                  dtype=object).fillna("")
+    except Exception as exc:
+        return stop("RUN_NOT_FINALIZABLE",
+                    "the artifact ledger could not be parsed (%s: %s)"
+                    % (type(exc).__name__, exc))
+    for _, art in ledger_rows.iterrows():
         artifact_types.setdefault(_s(art.get("Panel_ID")), set()).add(
             _s(art.get("Artifact_Type")))
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,

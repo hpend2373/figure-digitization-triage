@@ -32,18 +32,34 @@ split by outcome and is never used to prove completeness.
 
 A hand-curated set names these whatever suits it — `id323_figure_values.csv` in
 the worked example. **A batch run does not.** `run_batch.py` writes the values
-grain as two files and deliberately never as `figure_values.csv`:
+grain as several files and deliberately never as `figure_values.csv`:
 
-| Output | Contains |
-|---|---|
-| `figure_values_accepted.csv` | only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem — the only file to pool from |
-| `figure_values_raw.csv` | every reading, each row carrying `Run_Panel_ID`, physical `Source_Panel_ID`, `Value_Status`, `QC_Codes` and `Pooling_Eligible` |
-| `source_panel_coverage.csv` | every physical panel, including non-target, not-data, manual and no-reader dispositions |
+| Output | Written by | Contains |
+|---|---|---|
+| `figure_values_raw.csv` | `run_batch.py` | every reading, each row carrying `Run_Panel_ID`, physical `Source_Panel_ID`, `Value_Status`, `QC_Codes` and `Pooling_Eligible` |
+| `figure_values_machine_qc.csv` | `run_batch.py` | the rows the gate found nothing wrong with. **Not poolable** — machine QC is not a person having looked |
+| `review_queue.csv` | `run_batch.py` | one row per panel awaiting review, with its `Review_Mode`, its artifacts and `Review_Subject_SHA256` |
+| `panel_artifacts.csv` | `run_batch.py` | every overlay, project, mark file and point file, by run-relative path and SHA-256 |
+| `figure_values_accepted.csv` | **`finalize_batch.py`** | only rows a registered human approved against that exact extraction — the only file to pool from |
+| `source_panel_coverage.csv` | `run_batch.py` | every physical panel, including non-target, not-data, manual and no-reader dispositions |
+
+Since 7.13 `run_batch.py` does **not** write `figure_values_accepted.csv`. It
+stops at machine QC; the accepted file is `finalize_batch.py`'s output and
+exists only where somebody looked at the extraction and said so. If you are
+upgrading from a version whose runner wrote it directly, that is the one change
+that alters what "the poolable file" means.
 
 The plain name is gone on purpose. A single `figure_values.csv` once carried
 eight means whose SD-versus-SEM was unresolved while the panels sat at
 `QC_FAILED` in a different file, and anything that read "the values file" would
 have pooled them.
+
+`figure_extraction_template_v7.csv` is the flat single-table template of the
+**pre-batch hand-extraction path**, which `kernel.fig_validate_extraction` still
+serves and `build_id323.py` still demonstrates. It is not an input to
+`run_batch.py` and never was. It is regenerated from `fig_template_columns()`
+by the suite, so it cannot drift from the code, but do not start a batch from
+it — start from an extraction plan.
 
 `Cell_Key` is `FACTOR=LEVEL` pairs joined by `;`, canonicalised on parse — factor
 order and case do not matter, so `POSTURE=supine;TIMEPOINT=b-1` and

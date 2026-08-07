@@ -34,6 +34,17 @@ LABEL_MARGIN = 150
 _FAILURES = []
 
 
+def reset_failures():
+    """Forget the previous run's drawing failures.
+
+    `_FAILURES` is module state, and a batch runner processing 116 publications
+    in one process is the normal case here - so without this the second run's
+    stamp inherits the first run's "3 overlays could not be drawn", naming
+    panels that are not in it. Called at the top of every `run_batch`.
+    """
+    _FAILURES.clear()
+
+
 def failures():
     return list(_FAILURES)
 

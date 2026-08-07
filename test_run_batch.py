@@ -837,12 +837,26 @@ check("the association carries its point file and its provenance",
       bool(_scat["Point_Data_Reference"]) and bool(_scat["P_Value_Extraction_Method"])
       and bool(_scat["Ties_Present"]),
       "%r" % dict(_scat))
+# Recorded relative to the run, so handing the accepted file to another folder
+# or another machine does not leave every provenance link pointing at a
+# directory that exists only where the run happened.
+_scat_points = RB.resolve_artifact(ODIR, _scat["Point_Data_Reference"])
+check("the value's point reference is relative to the run, not to this machine",
+      not os.path.isabs(_scat["Point_Data_Reference"])
+      and _scat["Point_Data_Reference"].startswith("raw/"),
+      "%r" % _scat["Point_Data_Reference"])
 check("the point file the run wrote is on disk and re-derivable",
-      os.path.exists(_scat["Point_Data_Reference"])
-      and MR.read_point_data(_scat["Point_Data_Reference"])["Unit_ID"] == "U_SCAT")
+      _scat_points and os.path.exists(_scat_points)
+      and MR.read_point_data(_scat_points)["Unit_ID"] == "U_SCAT",
+      "%r" % _scat_points)
 check("the point file names the cell it backs",
-      MR.read_point_data(_scat["Point_Data_Reference"])["Cell_Key"]
-      == _scat["Cell_Key"])
+      MR.read_point_data(_scat_points)["Cell_Key"] == _scat["Cell_Key"])
+check("and so is every other output-facing path the run recorded",
+      not any(os.path.isabs(v) for v in
+              list(values["WPD_Project_File"]) + list(values["Point_Data_Reference"])
+              + list(run["Raw_Data_File"]) + list(run["WPD_Project_File"]) if v),
+      "%s" % [v for v in list(values["WPD_Project_File"])
+              + list(run["Raw_Data_File"]) if v and os.path.isabs(v)][:3])
 # `N_Pairs` is how many blobs survived the area filter. On its own it cannot
 # say whether that is the study's sample: it IS the number the association was
 # computed from, so it agrees with itself by construction.
@@ -1334,12 +1348,14 @@ _listed = [p for p in str(_fm.loc[0, "WPD_Project_File"]).split(";") if p]
 check("and the figure lists every panel project it produced, not just the first",
       len(_listed) == sum(1 for v in _by_panel.values() if str(v).strip()),
       "%s" % [os.path.basename(p) for p in _listed])
-check("and each one is on disk",
-      all(os.path.exists(p) for p in _listed), "%s" % _listed)
+check("and each one is on disk, resolved against the run it belongs to",
+      all(RB.resolve_artifact(_mo, p)
+          and os.path.exists(RB.resolve_artifact(_mo, p)) for p in _listed),
+      "%s" % _listed)
 
 # Two ticks were saved out of however many the calibration was fitted on, so the
 # artifact that exists for re-deriving a value could not reproduce the fit.
-_proj = _listed[0]
+_proj = RB.resolve_artifact(_mo, _listed[0])
 with tarfile.open(_proj) as _tf:
     _info = json.loads(_tf.extractfile("info.json").read().decode("utf-8")) \
         if "info.json" in _tf.getnames() else {}
@@ -1952,8 +1968,8 @@ for name in ("figure_values_raw.csv", "figure_values_machine_qc.csv",
     _same.append((name, _a == _b))
 check("a second run over the same inputs is identical but for its own path",
       all(ok for _, ok in _same), "%s" % [n for n, ok in _same if not ok])
-_p1 = MR.read_point_data(_scat["Point_Data_Reference"])
-_p2 = MR.read_point_data(_scat["Point_Data_Reference"].replace(ODIR, ODIR2))
+_p1 = MR.read_point_data(RB.resolve_artifact(ODIR, _scat["Point_Data_Reference"]))
+_p2 = MR.read_point_data(RB.resolve_artifact(ODIR2, _scat["Point_Data_Reference"]))
 check("and the point clouds it wrote are identical pixel for pixel",
       _p1["points"] == _p2["points"])
 _changed = json.load(open(os.path.join(ODIR2, "run_stamp.json")))
@@ -2089,7 +2105,8 @@ check("a cloud too sparse to summarize is NOT_CONVERTIBLE, not a shaky r",
       "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
 
 print("an automated extraction is re-openable by hand")
-_proj = dict(zip(run["Panel_ID"], run["WPD_Project_File"]))
+_proj = {p: RB.resolve_artifact(ODIR, v) if v else ""
+         for p, v in zip(run["Panel_ID"], run["WPD_Project_File"])}
 check("every passing panel saved a WPD project",
       all(_proj[p] and os.path.exists(_proj[p]) for p in ("P_LINE", "P_SCAT")),
       "%s" % _proj)
@@ -2250,10 +2267,14 @@ for _, _a in _art.iterrows():
 check("the scatter panel reached the review queue",
       "P_SCAT" in set(_rq["Panel_ID"]), "%s" % sorted(set(_rq["Panel_ID"])))
 check("and it has an overlay, like every other queued panel",
-      all(r["Overlay_File"] and os.path.exists(r["Overlay_File"])
+      all(r["Overlay_File"]
+          and os.path.exists(RB.resolve_artifact(ODIR, r["Overlay_File"]) or "")
           for _, r in _rq.iterrows()),
-      "%s" % [(r["Panel_ID"], r["Overlay_File"]) for _, r in _rq.iterrows()
-              if not r["Overlay_File"]])
+      "%s" % [(r["Panel_ID"], r["Overlay_File"]) for _, r in _rq.iterrows()])
+check("named relative to the run, so the queue survives being moved",
+      not any(os.path.isabs(r["Overlay_File"]) or os.path.isabs(r["WPD_Project_File"])
+              for _, r in _rq.iterrows()),
+      "%s" % [(r["Overlay_File"], r["WPD_Project_File"]) for _, r in _rq.iterrows()])
 check("the overlay is in the ledger too, so tampering with it is caught",
       all("OVERLAY" in _by_panel.get(p, set()) for p in _rq["Panel_ID"]),
       "%s" % {p: sorted(_by_panel.get(p, ())) for p in _rq["Panel_ID"]})
@@ -2475,6 +2496,65 @@ _two_sum = RB.run_batch(_two_md, _two_out, file_root=ROOT, run_date="2026-08-06"
 _two_run = pd.read_csv(os.path.join(_two_out, "run_manifest.csv"),
                        dtype=object).fillna("")
 _two_state = dict(zip(_two_run["Panel_ID"], _two_run["Run_State"]))
+# The same panel, but with the second series too SPARSE rather than
+# unreconcilable. This exit ran AFTER the point files were written, so the
+# first series' JSON was on disk, named by no ledger and referenced by no run
+# row, while `missing` held only the sparse series - so the queue told a hand
+# digitizer to read series B and said nothing about series A, whose numbers had
+# just been discarded. Cells_Read said 1; figure_values_raw.csv had none.
+_SHORT_IMG = os.path.join(IMAGES, "scatter_short.png")
+_sim = Image.new("RGB", (800, 520), "white")
+_sd = ImageDraw.Draw(_sim)
+for _x, _y in SCATTER_XY:
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
+for _x, _y in ((1.0, 2.0), (5.0, 6.0)):     # two red points: below the minimum
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=RED)
+_sim.save(_SHORT_IMG)
+_short_md = write_manifests(
+    os.path.join(ROOT, "shortseries", "manifests"),
+    panels=[dict(p, Image_Path=_SHORT_IMG) if p["Panel_ID"] == "P_TWO" else p
+            for p in _two_panels],
+    series_rows=_two_series, units=_two_units, grids=_two_grids,
+    source_figures=[dict(f, Source_Image=_SHORT_IMG,
+                         Source_Image_SHA256=MR.sha256_of(_SHORT_IMG))
+                    if f["Source_Figure_ID"] == "SF5" else f for f in _two_sfigs],
+    source_panels=_two_spanels, source_documents=_two_docs)
+_short_out = os.path.join(ROOT, "shortseries", "out")
+RB.run_batch(_short_md, _short_out, file_root=ROOT, run_date="2026-08-06")
+_sh_run = pd.read_csv(os.path.join(_short_out, "run_manifest.csv"),
+                      dtype=object).fillna("")
+_sh = _sh_run[_sh_run["Panel_ID"] == "P_TWO"].iloc[0]
+_sh_vals = pd.read_csv(os.path.join(_short_out, "figure_values_raw.csv"),
+                       dtype=object).fillna("")
+_sh_art = pd.read_csv(os.path.join(_short_out, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+_sh_q = pd.read_csv(os.path.join(_short_out, "manual_queue.csv"),
+                    dtype=object).fillna("")
+_sh_cells = pd.read_csv(os.path.join(_short_out, "manual_queue_cells.csv"),
+                        dtype=object).fillna("")
+_sh_raw = sorted(f for f in os.listdir(os.path.join(_short_out, "raw"))
+                 if f.startswith("P_TWO"))
+check("one sparse series sends the whole panel to a person",
+      _sh["Run_State"] == "MANUAL_POINT_READ", "%s" % _sh["Run_State"])
+check("  and the panel reports nothing read, because nothing was kept",
+      _sh["Cells_Read"] == "0" and not len(_sh_vals[_sh_vals["Unit_ID"] == "U_TWO"]),
+      "Cells_Read=%s, %d value rows"
+      % (_sh["Cells_Read"], len(_sh_vals[_sh_vals["Unit_ID"] == "U_TWO"])))
+check("  and no point file was written for the series that could have passed",
+      not _sh_raw, "%s" % _sh_raw)
+check("  and the ledger names no artifact for the panel",
+      not len(_sh_art[_sh_art["Panel_ID"] == "P_TWO"]),
+      "%s" % _sh_art[_sh_art["Panel_ID"] == "P_TWO"].to_dict("records"))
+check("  and EVERY declared cell is queued for hand reading, not just the sparse one",
+      set(_sh_cells[_sh_cells["Panel_ID"] == "P_TWO"]["Cell_Key"])
+      == {GE.fig_cell_key({"ARM": lv}) for lv in ("BLUE", "RED")},
+      "%s" % sorted(_sh_cells[_sh_cells["Panel_ID"] == "P_TWO"]["Cell_Key"]))
+check("  and the count agrees with the cell ledger",
+      _sh_q[_sh_q["Panel_ID"] == "P_TWO"]["Missing_Cell_Count"].iloc[0] == "2",
+      "%s" % _sh_q[_sh_q["Panel_ID"] == "P_TWO"].to_dict("records"))
+
 check("one unreconcilable series sends the whole panel to a person",
       _two_state.get("P_TWO") == "MANUAL_POINT_READ",
       "%s | %s" % (_two_state.get("P_TWO"),
@@ -2664,6 +2744,27 @@ for _spelling in ("blue", "BLUE", " Blue "):
 check("the spelling of the mask changes nothing about the numbers",
       len({tuple(sorted(v.items())) for v in _mask_means.values()}) == 1,
       "%s" % {k: sorted(v.items())[:1] for k, v in _mask_means.items()})
+
+
+print("a run's overlay failures are its own")
+# `_FAILURES` is module state with no reset, and an agent working through 116
+# publications in one process is the normal case - so the second run's stamp
+# inherited the first run's "3 overlays could not be drawn", naming panels that
+# run never saw.
+RB.OVERLAY._FAILURES.append("leftover_from_a_previous_publication.png: boom")
+check("the fixture really seeds a stale failure",
+      any("leftover" in f for f in RB.OVERLAY.failures()))
+_clean_md = write_manifests(os.path.join(ROOT, "freshfail", "manifests"))
+RB.run_batch(_clean_md, os.path.join(ROOT, "freshfail", "out"), file_root=ROOT,
+             run_date="2026-08-06")
+_fresh_stamp = json.load(open(os.path.join(ROOT, "freshfail", "out",
+                                           "run_stamp.json")))
+check("a new run does not inherit the last one's overlay failures",
+      "leftover" not in _fresh_stamp.get("Detail", ""),
+      "%r" % _fresh_stamp.get("Detail"))
+check("and the module state is the run's own by the end of it",
+      not any("leftover" in f for f in RB.OVERLAY.failures()),
+      "%s" % RB.OVERLAY.failures()[:2])
 
 
 print("templates are generated from the column functions, never typed")

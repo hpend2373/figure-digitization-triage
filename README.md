@@ -80,7 +80,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-1310 scenarios at v7.20, verified in a clean room with scipy blocked — the
+1334 scenarios at v7.21, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
@@ -104,8 +104,10 @@ Machine QC is not approval. `run_batch.py` stops at `MACHINE_QC_PASSED`, which
 means the gate found nothing wrong; it does not mean anybody looked at where
 the marks landed, and a reader that puts a plausible number on the wrong bar
 produces exactly the output the gate has nothing to say about. Each passing
-panel gets an overlay PNG, and `finalize_batch.py` writes the accepted file for
-panels a registered human approved against that specific extraction.
+panel is queued with a `Review_Mode` naming what to open — an overlay PNG in
+almost every case, the WPD project when the picture could not be drawn — and
+`finalize_batch.py` writes the accepted file for panels a registered human
+approved against that specific extraction.
 
 What the approval is bound to is `Review_Subject_SHA256`: the values themselves
 with their cell keys, every manifest, the raw marks, the WPD project and the

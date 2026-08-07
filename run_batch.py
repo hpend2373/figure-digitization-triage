@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.20"
+PIPELINE_VERSION = "7.21"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -1018,42 +1018,58 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         summary = dict(MR.summarize_association(mine, association), **audit)
         planned.append((sid, factor, level, mine, summary))
 
-    records, raw_files = [], []
-    if not (disputed or (not planned)):
-        for sid, factor, level, mine, summary in planned:
-            cell_key = GE.fig_cell_key({factor: level})
-            path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
-            MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
-                                source_image=image_path, image_sha256=sha,
-                                x_calibration=xcal, y_calibration=ycal,
-                                panel_id=pid, reader="SCATTER")
-            raw_files.append(path)
-            records.extend(MR.to_value_records(
-                [summary], "ASSOCIATION", unit_id,
-                cell_levels={factor: level}, point_data_reference=path))
-    if ycal is not None:
-        for record in records:
-            record.setdefault("Calibration_Max_Residual",
-                              float(getattr(ycal, "max_residual", 0.0)))
+    # ---- every refusal, BEFORE a single file is written --------------------
+    # A scatter panel is all or nothing. It used to write each planned series'
+    # point file and then discover that another series was too sparse: the
+    # panel returned MANUAL_POINT_READ carrying no values, no raw and no
+    # artifacts, while the written file stayed in raw/ named by no ledger - and
+    # the missing list held only the sparse series, so `manual_queue_cells.csv`
+    # excluded the series whose numbers had just been thrown away. A hand
+    # digitizer following the queue would never see it. Cells_Read said 1 and
+    # `figure_values_raw.csv` had none.
+    #
+    # There is no channel for merging a partial automatic result with a later
+    # hand reading, so a partial result is not a result. Every exit below
+    # reports the WHOLE panel as unread.
+    all_scatter_cells = sorted(_all_cells(series_level, {}))
     if disputed:
         # Not NOT_CONVERTIBLE: the marks are readable, they just do not add up
         # to a point set anybody can vouch for. That is a counting job for a
-        # person. No point file was written, so there is nothing on disk the
-        # ledger does not name.
+        # person.
         return PanelOutcome(
             "MANUAL_POINT_READ", declared=declared, read=0,
             detail="the detected points cannot be reconciled with the source, "
                    "so no association was computed - " + "; ".join(disputed),
-            missing=sorted(_all_cells(series_level, {})))
-    if not records:
-        return PanelOutcome("NOT_CONVERTIBLE", declared=declared,
-                            detail="no series reached three points: " + "; ".join(short))
-    if short:
+            missing=all_scatter_cells)
+    if short and planned:
         return PanelOutcome(
-            "MANUAL_POINT_READ", declared=declared, read=len(records),
-            detail="some series were too sparse to summarize: " + "; ".join(short),
-            missing=sorted(_all_cells(series_level, {}) -
-                           {r["Cell_Key"] for r in records}))
+            "MANUAL_POINT_READ", declared=declared, read=0,
+            detail="some series were too sparse to summarize, so the panel is "
+                   "read by hand as a whole rather than half automatically: "
+                   + "; ".join(short),
+            missing=all_scatter_cells)
+    if not planned:
+        return PanelOutcome(
+            "NOT_CONVERTIBLE", declared=declared, read=0,
+            detail="no series reached three points: " + "; ".join(short),
+            missing=all_scatter_cells)
+
+    records, raw_files = [], []
+    for sid, factor, level, mine, summary in planned:
+        cell_key = GE.fig_cell_key({factor: level})
+        path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
+        MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
+                            source_image=image_path, image_sha256=sha,
+                            x_calibration=xcal, y_calibration=ycal,
+                            panel_id=pid, reader="SCATTER")
+        raw_files.append(path)
+        records.extend(MR.to_value_records(
+            [summary], "ASSOCIATION", unit_id,
+            cell_levels={factor: level}, point_data_reference=path))
+    if ycal is not None:
+        for record in records:
+            record.setdefault("Calibration_Max_Residual",
+                              float(getattr(ycal, "max_residual", 0.0)))
     project = None
     if project_dir:
         project = write_panel_project(
@@ -1333,6 +1349,10 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     os.makedirs(project_dir, exist_ok=True)
     review_dir = os.path.join(output_dir, "review")
     os.makedirs(review_dir, exist_ok=True)
+    # Module state, cleared per run. An agent working through 116 publications
+    # in one process would otherwise carry every previous run's drawing
+    # failures into this run's stamp, naming panels this run never saw.
+    OVERLAY.reset_failures()
 
     options_by_config = BM.load_reader_configs(
         m["configs"],
@@ -1380,9 +1400,10 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                         manifest_hashes=manifest_hashes,
                         detail="%s" % exc)
             raise
-        overlays_by_panel[pid] = outcome.overlay or ""
+        overlays_by_panel[pid] = (_run_relative(outcome.overlay, output_dir)
+                                  if outcome.overlay else "")
         if outcome.project:
-            projects_by_panel[pid] = outcome.project
+            projects_by_panel[pid] = _run_relative(outcome.project, output_dir)
         # Hashed the moment they are written, before anything else touches the
         # directory - so what the manifest records is what the run produced.
         #
@@ -1403,6 +1424,15 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         for record in outcome.values:
             record["Run_Panel_ID"] = pid
             record["Source_Panel_ID"] = _s(panel.get("Source_Panel_ID"))
+            # Every path a value carries into the accepted file is recorded
+            # relative to the run. They used to be absolute, so handing the
+            # finished data to another folder or another machine left
+            # `Point_Data_Reference` and `WPD_Project_File` pointing at a
+            # directory that exists only on the machine the run happened on -
+            # the provenance link is the whole reason those columns are there.
+            for column in ("Point_Data_Reference", "WPD_Project_File"):
+                if record.get(column):
+                    record[column] = _run_relative(record[column], output_dir)
         values.extend(outcome.values)
         image_path = _s(panel.get("Image_Path"))
         resolved = image_path if os.path.exists(image_path) \
@@ -1421,8 +1451,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
             "Pipeline_Code_SHA256": pipeline_code_sha256(),
-            "Raw_Data_File": outcome.raw or "",
-            "WPD_Project_File": outcome.project or "", "Run_Date": run_date,
+            "Raw_Data_File": ";".join(
+                _run_relative(p, output_dir)
+                for p in (outcome.raw or "").split(";") if p),
+            "WPD_Project_File": (_run_relative(outcome.project, output_dir)
+                                 if outcome.project else ""),
+            "Run_Date": run_date,
             "Detail": outcome.detail,
         })
         if outcome.state != "AUTO_PASS" or outcome.missing:
@@ -1505,6 +1539,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
 
     qc = GE.fig_validate_bundle(figures, m["grids"], m["units"], values_df,
                                 kernel=K, file_root=file_root,
+                                # Outputs are recorded relative to the run, so
+                                # the gate needs to know where the run is.
+                                run_dir=output_dir,
                                 check_files=check_files)
 
     # A panel whose values the gate rejected did not pass, whatever the reader

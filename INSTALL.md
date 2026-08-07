@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.20 (full package)
+# figure-digitization-triage — v7.21 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -159,6 +159,93 @@ Also from the same review: the run records `Manifest_Dir`, so the finalizer
 finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
+
+## v7.21 review — a scatter panel is all or nothing, and a run is portable
+
+### P0. A sparse series made a panel lose the series that read cleanly
+
+`_scatter_outcome` classified every series before writing — but the `short`
+exit ran *after* the write block. So on a two-series panel:
+
+    Series A: 10 points -> planned, point file written, records built
+    Series B:  2 points -> short
+    -> MANUAL_POINT_READ, carrying no values, no raw, no artifacts
+
+Seven consequences, all reproduced: A's point JSON sat in `raw/` named by no
+ledger and referenced by no run row; `Cells_Read` said 1 while
+`figure_values_raw.csv` had none; and `missing` held only B — so
+`manual_queue_cells.csv` told a hand digitizer to read series B and said
+nothing about series A, whose numbers had just been discarded. Following the
+queue, series A disappears from the review entirely.
+
+There is no channel for merging a partial automatic result with a later hand
+reading, so a partial result is not a result. Every refusal now happens before
+a single file is written, and reports the **whole** panel as unread with every
+declared cell queued. Revert: 4.
+
+### P1. A run directory was portable only in its ledger
+
+v7.20 made `panel_artifacts.csv` run-relative. Everything else still recorded
+the path the run happened to have:
+
+    review_queue.csv        Overlay_File, WPD_Project_File, Raw_Data_File
+    figure_values_*.csv     Point_Data_Reference, WPD_Project_File
+    run_manifest.csv        Raw_Data_File, WPD_Project_File
+
+and the finalizer copies machine-QC rows straight into the accepted file. So a
+finished dataset handed to another folder or another machine looked complete
+while every provenance link in it pointed at a directory that exists nowhere.
+The v7.20 move test only proved finalization succeeded; it never opened a queue
+artifact or resolved an accepted row's reference afterwards.
+
+Every output-facing path is now recorded relative to the run directory, and the
+grid gate takes a `run_dir` root alongside `file_root` so it can still check
+they exist. The move test now finalizes, then resolves every queue overlay and
+every accepted `Point_Data_Reference` and `WPD_Project_File` in the new
+location. Reverts: value paths 5, overlay path 4, the gate's run root 11.
+
+`Artifact_ID` indirection was considered and not adopted. It would give a join
+key, not new integrity: every artifact is already hashed in the ledger and every
+one of a panel's artifacts is already inside `Review_Subject_SHA256`, so an
+accepted row's point file is content-bound through the approval. Relative paths
+close the portability gap; a second identifier for the same thing is a second
+place to drift.
+
+### P1. `SKILL.md` told an agent to open a file that may not exist
+
+The run steps still said "open `review/<Panel_ID>_overlay.png` for every row",
+while the code has allowed `Review_Mode=WPD_ONLY` since v7.20. The review step
+is now a branch — mode, what to open, and what "approve only if" means for each
+— with an explicit *do not approve* row for a missing artifact. The README's
+"each passing panel gets an overlay PNG" is corrected the same way, and the
+relative-path rule is stated where a reviewer will hit it.
+
+### P2. The finalizer parsed before it verified
+
+`figure_values_machine_qc.csv` was parsed, then hashed. A file with a broken
+quote raised out of `pd.read_csv` — after the previous accepted file and stamp
+had already been deleted, so the run ended with neither a result nor a stamp
+saying why, against a system rule that every failure is a structured stamp.
+Bytes are hashed first; parsing failures on verified bytes are
+`RUN_NOT_FINALIZABLE` with a stamp. Malformed `figure_values_machine_qc.csv`,
+`review_queue.csv` and `panel_artifacts.csv` are each a scenario. Revert: 4.
+
+### P2. Overlay failures leaked between runs
+
+`review_overlay._FAILURES` is module state with no reset, and an agent working
+through 116 publications in one process is the normal case — so the second
+run's stamp inherited the first run's "3 overlays could not be drawn", naming
+panels it never saw. `reset_failures()` at the top of every run. Revert: 2.
+
+### Documents
+
+`MIGRATION.md` still said `run_batch.py` writes `figure_values_accepted.csv`,
+which stopped being true at 7.13; it now lists every values-grain output with
+which module writes it, and says plainly that the accepted file is the
+finalizer's. `figure_extraction_template_v7.csv` is the flat template of the
+pre-batch hand path — it is generated from `fig_template_columns()` and now
+checked against it by name, since it does not follow the `*_TEMPLATE.csv`
+convention the sweep globs.
 
 ## v7.20 review — the scatter path, and what a queued panel promises
 
@@ -1419,17 +1506,17 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 439 |
+| `test_run_batch.py` | 451 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
+| `test_finalize.py` | 129 |
 | `test_compile_plan.py` | 123 |
-| `test_finalize.py` | 117 |
 | `test_mark_readers.py` | 92 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 18 |
-| **total** | **1310** |
+| **total** | **1334** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

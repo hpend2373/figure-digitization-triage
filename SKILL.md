@@ -22,10 +22,27 @@ version, an environment and a person who looked at the picture and said yes.
 INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
 COMPILE    python3 compile_plan.py PLAN.json MANIFESTS/ --file-root .
 RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root .        -> MACHINE_QC_PASSED
-REVIEW     open review/<Panel_ID>_overlay.png for every row of OUT/review_queue.csv,
+REVIEW     for every row of OUT/review_queue.csv, open what its Review_Mode names
+           (OVERLAY -> Overlay_File, WPD_ONLY -> WPD_Project_File in WebPlotDigitizer),
            then fill Review_ID / Decision / Reviewer_ID / Reviewed_At in value_review.csv
 FINALIZE   python3 finalize_batch.py OUT/ --review value_review.csv   -> FINALIZED
 ```
+
+Reviewing is a branch, not a single instruction. `Review_Mode` says what the
+run produced for this panel and therefore what to look at:
+
+| `Review_Mode` | open | approve only if |
+|---|---|---|
+| `OVERLAY` | `Overlay_File` | every cross sits on the mark a reader would give it, and none is missed |
+| `WPD_ONLY` | `WPD_Project_File`, in WebPlotDigitizer | the marks re-derive the values in the row |
+| anything else, or the named file is absent | — | **do not approve.** The finalizer refuses it anyway (`REVIEW_MODE_UNKNOWN` / `REVIEW_ARTIFACT_MISSING`) |
+
+`WPD_ONLY` is uncommon: it means the picture could not be drawn, which never
+fails a panel that produced values but does change what a reviewer has to open.
+
+Paths in the queue and in the values are recorded **relative to the run
+directory**, so a run can be moved or handed to somebody else with its
+provenance intact. Resolve them against the run directory, not the working one.
 
 **Success** is `OUT/figure_values_accepted.csv` beside an
 `OUT/finalize_stamp.json` whose `Status` is `FINALIZED` and whose

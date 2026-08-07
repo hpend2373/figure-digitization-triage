@@ -761,7 +761,7 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
 
 def fig_validate_bundle(figures, grids, units, values, kernel,
                         require_dual=False, dual_tolerance_pct=5.0, ranges=None,
-                        file_root=".", check_files=True):
+                        file_root=".", check_files=True, run_dir=None):
     """Validate the four-file bundle. `kernel` is required, not optional.
 
     File existence is checked by DEFAULT. A manifest pointing at an image or a
@@ -789,18 +789,27 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
 
     blank, num = kernel.fig_is_blank, kernel.fig_as_number
 
+    # Two roots, and a path may be relative to either. `file_root` is where the
+    # publisher rasters live. `run_dir` is where a run wrote its own outputs -
+    # the point files, the WPD projects, the overlays - and those are recorded
+    # RELATIVE to it, so that a run directory can be moved or handed to someone
+    # else without every provenance link in the accepted file going stale.
+    _roots = [r for r in (file_root, run_dir) if r]
+
+    def _candidates(v):
+        p = str(v).strip()
+        return [p] + [os.path.join(r, p) for r in _roots]
+
     def missing_file(v):
         if not check_files or blank(v):
             return False
-        p = str(v).strip()
-        return not (os.path.exists(p) or os.path.exists(os.path.join(file_root, p)))
+        return not any(os.path.exists(c) for c in _candidates(v))
 
     def resolved_file(v):
-        p = str(v).strip()
-        if os.path.exists(p):
-            return p
-        q = os.path.join(file_root, p)
-        return q if os.path.exists(q) else None
+        for c in _candidates(v):
+            if os.path.exists(c):
+                return c
+        return None
 
     # ------------------------------------------------------------- figures
     fig = {}

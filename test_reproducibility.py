@@ -227,6 +227,22 @@ TEMPLATE_COLUMNS = dict(
        ("figure_values", GE_T.fig_values_columns),
        ("value_review", FIN_T.value_review_columns)])
 
+# The flat single-table template belongs to the pre-batch hand-extraction path
+# that `kernel.fig_validate_extraction` still serves. It does not follow the
+# `*_TEMPLATE.csv` naming, so the glob missed it and nothing could tell whether
+# it was current - which is exactly the state `value_review_TEMPLATE.csv` was
+# found in. It is generated from `fig_template_columns`, so it is checked here
+# by name.
+import kernel as K_T                                               # noqa: E402
+
+LEGACY_TEMPLATES = {os.path.join(HERE, "figure_extraction_template_v7.csv"):
+                    K_T.fig_template_columns}
+for _path, _fn in LEGACY_TEMPLATES.items():
+    assert os.path.exists(_path), "%s is referenced but not shipped" % _path
+    with open(_path, newline="", encoding="utf-8") as fh:
+        assert next(csv.reader(fh)) == _fn(), (
+            "%s no longer matches fig_template_columns()" % os.path.basename(_path))
+
 shipped = sorted(glob.glob(os.path.join(HERE, "*_TEMPLATE.csv")))
 unmapped = [os.path.basename(p) for p in shipped
             if os.path.basename(p)[:-len("_TEMPLATE.csv")] not in TEMPLATE_COLUMNS]

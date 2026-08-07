@@ -640,6 +640,115 @@ check("the stamp records read and accepted separately",
       json.load(open(os.path.join(_o, "run_stamp.json")))["Values_Accepted"] == 0)
 
 
+print("a failed re-run leaves no trace of the run before it")
+# The sequence that matters: a good run, then a rejected one into the SAME
+# directory. Clearing up at the end of a successful run is not enough - the
+# rejected run never gets to the end, and the previous accepted file sits there
+# looking like the current answer.
+_seq = os.path.join(ROOT, "o_seq")
+_good = write_manifests(os.path.join(ROOT, "m_seq_good"))
+_first = RB.run_batch(_good, _seq, file_root=ROOT, run_date="2026-08-06")
+check("the first run leaves an accepted file with rows in it",
+      _first["accepted"] > 0
+      and len(pd.read_csv(os.path.join(_seq, "figure_values_accepted.csv"))) > 0,
+      "%s" % _first)
+_bad_seq = write_manifests(
+    os.path.join(ROOT, "m_seq_bad"),
+    configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="x_window",
+                            Value="14", Note="")])
+_second = RB.run_batch(_bad_seq, _seq, file_root=ROOT, run_date="2026-08-07")
+check("the second run is rejected", _second["status"] == "MANIFEST_REJECTED",
+      "%s" % _second)
+for _name in ("figure_values_accepted.csv", "figure_values_raw.csv",
+              "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
+    check("a rejected re-run leaves no stale %s" % _name,
+          not os.path.exists(os.path.join(_seq, _name)),
+          "the previous run's file survived and now reads as current")
+for _name in ("raw", "projects"):
+    check("a rejected re-run leaves no stale %s/ directory" % _name,
+          not os.path.isdir(os.path.join(_seq, _name)))
+_stamp_path = os.path.join(_seq, "run_stamp.json")
+check("a rejected run still writes a stamp", os.path.exists(_stamp_path),
+      "no stamp at all - the directory now says nothing about why it is empty")
+_stamp = json.load(open(_stamp_path)) if os.path.exists(_stamp_path) else {}
+check("the stamp records the rejection rather than the last success",
+      _stamp.get("Status") == "MANIFEST_REJECTED", "%r" % _stamp)
+check("and reports zero read and zero accepted",
+      _stamp.get("Values_Read") == 0 and _stamp.get("Values_Accepted") == 0,
+      "%r" % _stamp)
+check("and counts the manifest problems that stopped it",
+      _stamp.get("Manifest_Problems") == _second["problems"], "%r" % _stamp)
+check("the rejection summary reports zero values too, not a missing key",
+      _second["values"] == 0 and _second["accepted"] == 0, "%s" % _second)
+check("manifest_problems.csv is written and names the cause",
+      "DUPLICATE_READER_OPTION" in set(pd.read_csv(
+          os.path.join(_seq, "manifest_problems.csv"))["check"]))
+check("no staging directory is left behind",
+      not os.path.isdir(os.path.join(_seq, RB.STAGING)))
+# And the reverse order: a good run into a directory holding a rejection.
+_third = RB.run_batch(_good, _seq, file_root=ROOT, run_date="2026-08-08")
+check("a good run after a rejection clears the rejection's own outputs",
+      _third["status"] == "RAN"
+      and not os.path.exists(os.path.join(_seq, "manifest_problems.csv")))
+check("and its stamp says RAN",
+      json.load(open(os.path.join(_seq, "run_stamp.json")))["Status"] == "RAN")
+check("every canonical output name is one the run actually clears",
+      {"figure_values_accepted.csv", "figure_values_raw.csv", "run_manifest.csv",
+       "manual_queue.csv", "qc_problems.csv", "manifest_problems.csv",
+       "run_stamp.json"} <= set(RB.CANONICAL_OUTPUTS),
+      "%s" % sorted(RB.CANONICAL_OUTPUTS))
+
+
+print("a value is judged by the panel that produced it, not by its unit's last")
+check("every raw row names the panel it came from",
+      "Source_Panel_ID" in values.columns and all(values["Source_Panel_ID"]),
+      "%s" % sorted(set(values.get("Source_Panel_ID", []))))
+check("and the panel it names really ran",
+      set(values["Source_Panel_ID"]) <= set(run["Panel_ID"]),
+      "%s" % sorted(set(values["Source_Panel_ID"]) - set(run["Panel_ID"])))
+
+# Two panels, one unit: the first cannot be read, the second reads cleanly.
+# Keying panel state by Unit_ID let the second overwrite the first and the whole
+# unit came out ACCEPTED - including the half nobody could read.
+_split_panels = [
+    panel("P_HALF_A", "U_SPLIT", "LINE_COLOR", BLANK_IMG, (100, 500, 40, 440)),
+    panel("P_HALF_B", "U_SPLIT", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440)),
+]
+_split_series = [series(p, s, lv, Colour_Hex=hx)
+                 for p in ("P_HALF_A", "P_HALF_B")
+                 for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                   ("S_RED", "TREATED", "#d72d2d"))]
+_split_positions = [
+    dict(Panel_ID=p, Position_ID=q, X_Pixel=x, Slot_Index=i, Display_Order=i,
+         Factor_Name="TIMEPOINT", Factor_Level=q, Timepoint_Label=q,
+         Timepoint_Days=i * 7, Note="")
+    for p in ("P_HALF_A", "P_HALF_B") for i, (q, x) in enumerate(zip(POSITIONS, XS))]
+_split_units = UNITS + [unit("U_SPLIT", "G_TIME", "CONTINUOUS")]
+_mdir = write_manifests(os.path.join(ROOT, "m_split"),
+                        panels=PANELS + _split_panels,
+                        series_rows=SERIES + _split_series,
+                        positions=POSITION_ROWS + _split_positions,
+                        units=_split_units)
+_o = os.path.join(ROOT, "o_split")
+RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_sr = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_sraw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+_sacc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+                    dtype=object).fillna("")
+_sstates = dict(zip(_sr["Panel_ID"], _sr["Run_State"]))
+check("two panels of one unit keep two separate run rows",
+      _sstates.get("P_HALF_A") and _sstates.get("P_HALF_B"), "%s" % _sstates)
+check("the blank panel of the pair did not pass",
+      _sstates.get("P_HALF_A") != "AUTO_PASS", "%s" % _sstates)
+check("the readable panel's rows name the readable panel",
+      set(_sraw[_sraw["Unit_ID"] == "U_SPLIT"]["Source_Panel_ID"]) == {"P_HALF_B"},
+      "%s" % sorted(set(_sraw[_sraw["Unit_ID"] == "U_SPLIT"]["Source_Panel_ID"])))
+check("and the unit is not silently accepted on the strength of one panel",
+      not len(_sacc[_sacc["Unit_ID"] == "U_SPLIT"]),
+      "%d rows accepted for a unit whose other panel could not be read"
+      % len(_sacc[_sacc["Unit_ID"] == "U_SPLIT"]))
+
+
 print("the run records what would have to match for it to be reproducible")
 stamp = json.load(open(os.path.join(ODIR, "run_stamp.json")))
 check("the stamp carries the reader version and the config hash",

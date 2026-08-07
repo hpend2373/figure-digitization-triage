@@ -1,19 +1,87 @@
-# figure-digitization-triage — v7.3 (full package)
+# figure-digitization-triage — v7.4 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
 
-**v7.3 closes the four defects from the v7.2 review.** Each fix was reverted in
-a scratch copy and the suite re-run, so none of the new scenarios is decoration:
+**v7.4 closes the three defects from the v7.3 review**, on top of the four from
+v7.2. Every fix in both rounds was reverted in a scratch copy and the suite
+re-run, so no new scenario is decoration:
 
 | reverted | scenarios that fail |
 |---|---|
+| clear-up moved back to the end of a run | 8 |
+| no stamp on a rejected run | 4 |
+| unit state keyed by the last panel seen | 1 |
 | one values file, no status columns | 6 |
 | `n_slots` back on BAR_MONO | 3 (including the introspection test) |
 | option range checks removed | 4 |
 | LINE_MONO accepting line style alone | 1 |
 
-## HIGH — a QC-failed value could reach master by reading one file
+## HIGH (v7.3) — a failed re-run left the previous run's accepted file in place
+
+Reproduced exactly as described: a clean run into a directory, then a rejected
+run into the same directory, and `figure_values_accepted.csv` still held eight
+rows with a `run_stamp.json` claiming `Values_Accepted=8`. Nothing inside either
+file said it belonged to a run that had since been superseded by a failure.
+
+The ordering was the whole defect. A run that tidies up after itself only tidies
+when it gets that far, and a rejected run returns before it gets anywhere.
+
+Three changes, all of them required:
+
+- **`clear_outputs()` runs before validation**, not after the work. Every
+  canonical output — the two values files, the run manifest, the queue, the QC
+  problems, the stamp, the completed figure manifest, and the `raw/` and
+  `projects/` directories — is removed the moment the run starts. Nothing a
+  previous run produced can outlive the run that replaces it, whatever happens
+  next, including a crash.
+- **the summary CSVs are staged and promoted in one move.** They are built under
+  `.staging` and moved into place only once the run has finished, so an
+  interruption leaves the directory empty rather than half-populated with files
+  that look like a result. The point clouds and WPD projects are written at
+  their final paths deliberately: value rows *name* those files, and staging a
+  file whose path is recorded inside another file means rewriting paths, which
+  is exactly where a stale reference survives.
+- **a rejected run still writes `run_stamp.json`**, with
+  `Status=MANIFEST_REJECTED`, `Values_Read=0`, `Values_Accepted=0` and the
+  manifest problem count. A stamp that is absent when things go wrong is worse
+  than no stamp — it is only ever there to reassure. `Status` is new, so a
+  reader can tell a rejection from a run that legitimately accepted nothing.
+
+The `run_batch()` return value now carries `values` and `accepted` on the
+rejection path too, so a caller cannot hit a missing key and fall back to a
+stale number.
+
+Nine scenarios fix the sequence: clean run → rejected run → nothing stale, and
+then rejected run → clean run → the rejection's own outputs gone.
+
+## MEDIUM (v7.3) — a unit's state was whichever panel came last
+
+`{r["Unit_ID"]: r["Run_State"] for r in run_rows}` keeps the last panel's state.
+Two panels feeding one unit, first one failing, second passing, and the unit
+read as `AUTO_PASS`.
+
+Fixed the robust way rather than by forbidding the structure — a unit whose
+cells genuinely come from two panels is legal in this schema, and blocking it
+would be a schema change to paper over a bookkeeping bug:
+
+- **every value row carries `Source_Panel_ID`**, stamped where the panel is
+  known, and is judged by that panel's state
+- **and by the worst state among all panels building its unit.** This is the
+  half that is easy to miss: when the readable panel fills the entire grid the
+  gate has nothing to complain about, but nobody knows whether the panel that
+  could not be read would have agreed with the one that could. "The readable
+  half says so" is not a reading of the figure.
+
+## LOW (v7.3) — MIGRATION.md still described `figure_values.csv`
+
+Rewritten. It described three grains where there are now four, and named the
+values file by a name the batch layer deliberately no longer writes. It now
+distinguishes the values *grain* (which a hand-curated set may name what it
+likes, as `build_id323.py` does) from the batch *outputs*, which are always the
+accepted/raw pair.
+
+## HIGH (v7.2) — a QC-failed value could reach master by reading one file
 
 `figure_values.csv` held every value the readers produced, whatever the gate
 said about them. On publication 397 that file carried eight means whose
@@ -125,7 +193,7 @@ it placed into a real `.tar` that opens in WPD. That is the only cheap way to
 catch a systematically misplaced series — a reviewer looks at where the reader
 thought the marks were.
 
-## MEDIUM 1 — `n_slots` was offered to a reader that has no such parameter
+## MEDIUM 1 (v7.2) — `n_slots` was offered to a reader that has no such parameter
 
 `read_monochrome_bar_panel` derives its slot count from the number of declared
 series and takes no `n_slots`. The option table said otherwise, so the manifest
@@ -139,7 +207,7 @@ receives the keywords, and a scenario asserts by `inspect.signature` that every
 option names a parameter its reader accepts. A future table edit that repeats
 this fails the suite instead of the batch.
 
-## MEDIUM 2 — the manifest allowed a figure the shipped reader cannot read
+## MEDIUM 2 (v7.2) — the manifest allowed a figure the shipped reader cannot read
 
 `Mark_Type=LINE_MONO` with `Marker_Shape=NONE` and series told apart by
 `SOLID`/`DASHED` validated cleanly. The released LINE_MONO reader matches by
@@ -159,7 +227,7 @@ Both halves fixed:
   work sits. Naming it beats silence: the alternative is `BAD_MARK_TYPE`, which
   reads as "you made that up".
 
-## MEDIUM 3 — options were type-checked but never range-checked
+## MEDIUM 3 (v7.2) — options were type-checked but never range-checked
 
 `threshold=-1`, `threshold=300`, `x_window=0`, `colour_tolerance=-5` and
 `min_marker_area=500` beside `max_marker_area=10` all parsed cleanly. Each then
@@ -255,13 +323,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_kernel.py` | 222 |
 | `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 107 |
+| `test_run_batch.py` | 132 |
 | `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **610** |
+| **total** | **635** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

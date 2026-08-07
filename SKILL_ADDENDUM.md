@@ -182,6 +182,22 @@ Any gate problem charged to a unit disqualifies **all** of that unit's cells.
 The individual readings may be fine; a unit with a hole in its grid is not
 poolable, and the raw file keeps the numbers for whoever resolves it.
 
+Every value row also carries `Source_Panel_ID`, and is judged by **its own**
+panel plus the worst state among every panel building that unit. Two panels can
+feed one unit; keying state by `Unit_ID` alone let the last panel seen overwrite
+the first, so a unit whose readable half filled the whole grid came out accepted
+while its unreadable half was never mentioned. Nobody knows whether the panel
+that could not be read would have agreed.
+
+**Clearing up happens at the START of a run, not the end.** A run that tidies
+after itself only tidies when it gets that far: reject a manifest and the
+previous run's `figure_values_accepted.csv` is still sitting there, and nothing
+inside that file says it belongs to a run that has since been superseded by a
+failure. Every output is removed before validation, the summary CSVs are built
+in a staging directory and promoted in one move, and a rejected run still writes
+`run_stamp.json` with `Status=MANIFEST_REJECTED` and zero counts. A stamp that
+is absent when things go wrong is only ever there to reassure.
+
 ## A run has to be re-runnable, and that costs more than a timestamp
 
 `run_manifest.csv` records, per panel: the image SHA-256, the config SHA-256, the

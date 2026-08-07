@@ -10,13 +10,28 @@ well-formed 6-session x 2-posture figure, and how the next step would have been
 A 6x2 session-by-posture figure, a 4x3 gravity-by-load figure and a two-cell
 pre/post study differ in their factors and levels, not in their validation logic.
 
-## The three files
+## The four grains
 
-| File | Grain | Answers |
+| Grain | One row per | Answers |
 |---|---|---|
-| `figure_manifest.csv` | figure x panel | what is plotted, how it was read, how the grid must behave |
-| `figure_dimensions.csv` | figure x factor x level | what the axes and series actually are |
-| `figure_values.csv` | cell | the reading, addressed by `Cell_Key` |
+| figure manifest | figure | the source, the image, the panel reconciliation |
+| grid definitions | grid x factor x level | what the axes and series actually are |
+| unit manifest | figure x panel x outcome x statistic | how it was read, and how the grid must behave |
+| **figure values** | cell | the reading, addressed by `Cell_Key` |
+
+A hand-curated set names these whatever suits it — `id323_figure_values.csv` in
+the worked example. **A batch run does not.** `run_batch.py` writes the values
+grain as two files and deliberately never as `figure_values.csv`:
+
+| Output | Contains |
+|---|---|
+| `figure_values_accepted.csv` | only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem — the only file to pool from |
+| `figure_values_raw.csv` | every reading, each row carrying `Source_Panel_ID`, `Value_Status`, `QC_Codes` and `Pooling_Eligible` |
+
+The plain name is gone on purpose. A single `figure_values.csv` once carried
+eight means whose SD-versus-SEM was unresolved while the panels sat at
+`QC_FAILED` in a different file, and anything that read "the values file" would
+have pooled them.
 
 `Cell_Key` is `FACTOR=LEVEL` pairs joined by `;`, canonicalised on parse — factor
 order and case do not matter, so `POSTURE=supine;TIMEPOINT=b-1` and

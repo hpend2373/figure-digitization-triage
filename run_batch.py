@@ -35,6 +35,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
 
 import pandas as pd
@@ -564,23 +565,106 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
 # the batch
 # --------------------------------------------------------------------------
 
+#: Everything a run owns in its output directory. A run clears all of it before
+#: doing anything else, so no output can outlive the run that produced it.
+CANONICAL_OUTPUTS = (
+    "figure_values_accepted.csv", "figure_values_raw.csv", "figure_values.csv",
+    "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
+    "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
+)
+CANONICAL_DIRS = ("raw", "projects")
+STAGING = ".staging"
+
+
+def clear_outputs(output_dir):
+    """Remove every output a previous run left, before this one starts.
+
+    This runs BEFORE validation, and that ordering is the whole point. A run
+    that clears up after itself only cleans up when it gets that far: reject a
+    manifest and the previous run's `figure_values_accepted.csv` is still
+    sitting there, newer than nothing and older than the failure nobody can see
+    from inside the file. Somebody pools it.
+    """
+    for name in CANONICAL_OUTPUTS:
+        path = os.path.join(output_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+    for name in CANONICAL_DIRS + (STAGING,):
+        path = os.path.join(output_dir, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+
+
+def promote(work_dir, output_dir):
+    """Move a completed run's outputs into place, then drop the staging dir.
+
+    Everything is built in `.staging` and moved only once the run has finished,
+    so a crash halfway through leaves the output directory empty rather than
+    half-populated with files that look like a result.
+    """
+    for name in os.listdir(work_dir):
+        src, dst = os.path.join(work_dir, name), os.path.join(output_dir, name)
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        elif os.path.exists(dst):
+            os.remove(dst)
+        shutil.move(src, dst)
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
+                panels=0, read=0, accepted=0, qc_problems=0, problems=0):
+    """The run's verdict, written on EVERY outcome including a rejection.
+
+    A rejected run used to write no stamp at all, which left the previous run's
+    stamp in place claiming `Values_Accepted=8`. A stamp that is absent when
+    things go wrong is worse than no stamp at all - it is only ever there to
+    reassure.
+    """
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({
+            "schema": "figure-digitization-triage/run-stamp/3",
+            "Status": status, "Run_Date": run_date,
+            "Reader_Version": MR.READER_VERSION, "Config_SHA256": cfg_hash,
+            "Manifest_SHA256": manifest_hashes or {},
+            "Panels": panels, "Values_Read": read, "Values_Accepted": accepted,
+            "QC_Problems": qc_problems, "Manifest_Problems": problems,
+        }, fh, indent=1, sort_keys=True)
+
+
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
               check_files=True):
     """Validate, read, convert, gate, and report. Returns a summary dict."""
     m = load_manifests(manifest_dir)
     os.makedirs(output_dir, exist_ok=True)
-    raw_dir = os.path.join(output_dir, "raw")
-    os.makedirs(raw_dir, exist_ok=True)
-    project_dir = os.path.join(output_dir, "projects")
-    os.makedirs(project_dir, exist_ok=True)
+    clear_outputs(output_dir)
+    manifest_hashes = {k: frame_sha256(v) for k, v in sorted(m.items())}
 
     problems = BM.validate_batch_manifests(
         m["panels"], m["series"], m["positions"], m["configs"],
         units=m["units"], file_root=file_root, check_files=check_files)
     if len(problems):
-        problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"), index=False)
+        problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
+                        index=False)
+        write_stamp(os.path.join(output_dir, "run_stamp.json"),
+                    "MANIFEST_REJECTED", run_date,
+                    manifest_hashes=manifest_hashes, problems=len(problems))
         return dict(status="MANIFEST_REJECTED", problems=len(problems),
+                    values=0, accepted=0,
                     detail=sorted(set(problems["check"])))
+
+    # Only now, once the batch is known to be runnable, does anything get
+    # created. The point clouds and WPD projects live at their final paths
+    # because the value rows have to NAME them - staging a file whose path is
+    # recorded inside another file means rewriting paths, and a path rewrite is
+    # a place for a stale reference to survive. The summary CSVs, which name
+    # nothing, are staged and promoted in one move at the end.
+    work_dir = os.path.join(output_dir, STAGING)
+    os.makedirs(work_dir, exist_ok=True)
+    raw_dir = os.path.join(output_dir, "raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    project_dir = os.path.join(output_dir, "projects")
+    os.makedirs(project_dir, exist_ok=True)
 
     options_by_config = BM.load_reader_configs(
         m["configs"],
@@ -606,6 +690,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                             raw_dir, file_root=file_root, project_dir=project_dir)
         if outcome.project:
             projects_by_figure.setdefault(_s(panel.get("Figure_ID")), outcome.project)
+        # Stamp the panel onto every value it produced. A unit is normally one
+        # panel, but nothing forbids two panels feeding one - and keying panel
+        # state by Unit_ID meant the LAST panel's state won, so a unit whose
+        # first panel failed and whose second passed came out ACCEPTED. Each
+        # value now carries where it came from and is judged on that.
+        for record in outcome.values:
+            record["Source_Panel_ID"] = pid
         values.extend(outcome.values)
         image_path = _s(panel.get("Image_Path"))
         resolved = image_path if os.path.exists(image_path) \
@@ -653,7 +744,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             (projects_by_figure.get(_s(r.get("Figure_ID")), "")
              if BM.blank(r.get("WPD_Project_File")) else r.get("WPD_Project_File"))
             for _, r in figures.iterrows()]
-        figures.to_csv(os.path.join(output_dir, "figure_manifest.csv"), index=False)
+        figures.to_csv(os.path.join(work_dir, "figure_manifest.csv"), index=False)
 
     qc = GE.fig_validate_bundle(figures, m["grids"], m["units"], values_df,
                                 kernel=K, file_root=file_root,
@@ -692,47 +783,58 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # The safe file is now the one with the plainest name, the unsafe one
     # carries its own verdict in every row, and neither can be mistaken for the
     # other by a script that does not know to join.
-    panel_state = {r["Unit_ID"]: r["Run_State"] for r in run_rows if r["Unit_ID"]}
+    panel_state = {r["Panel_ID"]: r["Run_State"] for r in run_rows}
+    # A unit's state, when it has to be summarised, is the WORST of the panels
+    # that build it - never the last one seen. Only used as a fallback for a row
+    # whose Source_Panel_ID is somehow missing; the per-row link is primary.
+    unit_state = {}
+    for r in run_rows:
+        uid = r["Unit_ID"]
+        if not uid:
+            continue
+        if r["Run_State"] != "AUTO_PASS" or uid not in unit_state:
+            unit_state[uid] = r["Run_State"]
     blamed = _units_named_by(qc, values_df, m["units"]) if len(qc) else {}
+    source_panels = [_s(rec.get("Source_Panel_ID")) for rec in values]
     statuses, codes, eligible = [], [], []
-    for _, row in values_df.iterrows():
+    for i, (_, row) in enumerate(values_df.iterrows()):
         uid = _s(row.get("Unit_ID"))
         unit_codes = sorted(blamed.get(uid, ()))
-        state = panel_state.get(uid, "")
+        pid = source_panels[i] if i < len(source_panels) else ""
+        own = panel_state.get(pid) or unit_state.get(uid, "")
+        # Both tests, and the second is the one that is easy to miss. A unit
+        # built from two panels where one failed and the other filled the whole
+        # grid leaves the gate nothing to complain about - the cells are all
+        # there. But nobody knows whether the panel that could not be read would
+        # have agreed with the one that could, and "the readable half says so"
+        # is not a reading of the figure.
+        worst = unit_state.get(uid, own)
         if unit_codes:
             statuses.append("QC_FAILED")
-        elif state != "AUTO_PASS":
+        elif own != "AUTO_PASS" or worst != "AUTO_PASS":
             statuses.append("PANEL_NOT_PASSED")
         else:
             statuses.append("ACCEPTED")
         codes.append(";".join(unit_codes))
         eligible.append("TRUE" if statuses[-1] == "ACCEPTED" else "FALSE")
     raw_df = values_df.copy()
+    raw_df["Source_Panel_ID"] = source_panels
     raw_df["Value_Status"] = statuses
     raw_df["QC_Codes"] = codes
     raw_df["Pooling_Eligible"] = eligible
     accepted_df = raw_df[raw_df["Pooling_Eligible"] == "TRUE"].copy()
 
-    raw_df.to_csv(os.path.join(output_dir, "figure_values_raw.csv"), index=False)
-    accepted_df.to_csv(os.path.join(output_dir, "figure_values_accepted.csv"),
+    raw_df.to_csv(os.path.join(work_dir, "figure_values_raw.csv"), index=False)
+    accepted_df.to_csv(os.path.join(work_dir, "figure_values_accepted.csv"),
                        index=False)
-    run_df.to_csv(os.path.join(output_dir, "run_manifest.csv"), index=False)
-    queue_df.to_csv(os.path.join(output_dir, "manual_queue.csv"), index=False)
-    qc.to_csv(os.path.join(output_dir, "qc_problems.csv"), index=False)
-    stale = os.path.join(output_dir, "figure_values.csv")
-    if os.path.exists(stale):
-        os.remove(stale)          # never leave the ambiguous name lying around
-
-    with open(os.path.join(output_dir, "run_stamp.json"), "w", encoding="utf-8") as fh:
-        json.dump({
-            "schema": "figure-digitization-triage/run-stamp/2",
-            "Run_Date": run_date, "Reader_Version": MR.READER_VERSION,
-            "Config_SHA256": cfg_hash,
-            "Manifest_SHA256": {k: frame_sha256(v) for k, v in sorted(m.items())},
-            "Panels": len(run_df), "Values_Read": len(raw_df),
-            "Values_Accepted": len(accepted_df),
-            "QC_Problems": int(len(qc)),
-        }, fh, indent=1, sort_keys=True)
+    run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
+    queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
+    qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
+    write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
+                cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
+                panels=len(run_df), read=len(raw_df), accepted=len(accepted_df),
+                qc_problems=int(len(qc)))
+    promote(work_dir, output_dir)
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}
     return dict(status="RAN", panels=len(run_df), values=len(raw_df),

@@ -26,6 +26,7 @@ pixels, which is under half a millimetre of print and worth about a fifth of a
 unit on the cardiac-output axis.
 """
 import csv
+import datetime
 import os
 import sys
 
@@ -56,6 +57,67 @@ if _absent:
     print("BLOCKED: publisher rasters not found in %s: %s"
           % (RASTERS, ", ".join(_absent)), file=sys.stderr)
     raise SystemExit(2)
+
+# --------------------------------------------------------------------------
+# who stands behind this run
+# --------------------------------------------------------------------------
+# A worked example needs a reviewer, and it must not ship somebody's personal
+# address to everyone the zip reaches. The first attempt at that was a fictional
+# identity carrying `Note="EXAMPLE - replace before treating any output as
+# data"`, and a note is a request, not a gate. Three things were wrong with it:
+#
+#   FDT_REVIEWER_NAME alone   -> a real name vouching for a fictional ORCID
+#   FDT_REVIEWER_ORCID alone  -> a fictional name against a real ORCID, and the
+#                                Note flipped to "opened all five rasters"
+#   neither                   -> a fictional person marked HUMAN_CONFIRMED,
+#                                Status=RAN
+#
+# The last one was only harmless because ID397's dispersion definition happens
+# to be unresolved, so nothing is accepted. Resolve it and the same fictional
+# row signs off poolable values. A safety property that holds by coincidence is
+# not a property.
+#
+# So: all four or none. A partial attestation is not an attestation, and the
+# no-attestation case is declared to the runner as DEMO_ONLY rather than left
+# to look like a real run.
+DEMO_NAME, DEMO_ORCID, DEMO_DATE = "Josiah Carberry", "0000-0002-1825-0097", "2026-08-07"
+ATTESTATION_ENV = ("FDT_REVIEWER_NAME", "FDT_REVIEWER_ORCID",
+                   "FDT_INSPECTION_DATE", "FDT_REGISTRATION_DATE")
+_env = {k: os.environ.get(k, "").strip() for k in ATTESTATION_ENV}
+_given = [k for k in ATTESTATION_ENV if _env[k]]
+if _given and len(_given) < len(ATTESTATION_ENV):
+    print("BLOCKED: a partial attestation is not an attestation.\n"
+          "  set: %s\n  missing: %s\n"
+          "Set all four to attest a real inspection, or none to run the "
+          "demonstration." % (", ".join(_given),
+                              ", ".join(k for k in ATTESTATION_ENV if not _env[k])),
+          file=sys.stderr)
+    raise SystemExit(2)
+
+if _given:
+    RUN_MODE = "ATTESTED"
+    # The dates are asked for rather than assumed. A hardcoded 2026-08-07 is a
+    # false record on every run after the day it was written, and an inspection
+    # date is the one field whose whole purpose is to be comparable later.
+    ATTESTATION = dict(
+        Reviewer_ID="RV_INSPECTOR", Reviewer_Name=_env["FDT_REVIEWER_NAME"],
+        Contact_Type="ORCID", Reviewer_Contact=_env["FDT_REVIEWER_ORCID"],
+        Registered_By=_env["FDT_REVIEWER_NAME"],
+        Registration_Date=_env["FDT_REGISTRATION_DATE"],
+        Human_Attestation="HUMAN_CONFIRMED",
+        Note="opened all five publisher rasters and counted the panels")
+    INSPECTION_DATE = _env["FDT_INSPECTION_DATE"]
+    RUN_DATE = (os.environ.get("FDT_RUN_DATE", "").strip()
+                or datetime.date.today().isoformat())
+else:
+    RUN_MODE = "DEMO_ONLY"
+    ATTESTATION = dict(
+        Reviewer_ID="RV_INSPECTOR", Reviewer_Name=DEMO_NAME,
+        Contact_Type="ORCID", Reviewer_Contact=DEMO_ORCID,
+        Registered_By=DEMO_NAME, Registration_Date=DEMO_DATE,
+        Human_Attestation="HUMAN_CONFIRMED",
+        Note="DEMO_ONLY - ORCID's fictional demonstration record")
+    INSPECTION_DATE = RUN_DATE = DEMO_DATE
 
 SESSIONS = [("PRE", "Pre HDT Stand"), ("POST", "Post HDT Stand")]
 HDT = ["0:30", "1:00", "1:30", "2:00", "2:30", "3:00",
@@ -125,27 +187,7 @@ LINE_FIGURES = [
 
 FIGURES, GRIDS, UNITS, PANELS, SERIES, POSITIONS = [], [], [], [], [], []
 SOURCE_DOCUMENTS, SOURCE_FIGURES, SOURCE_PANELS = [], [], []
-# The ledger the source manifests point at.
-#
-# This is an EXAMPLE row and it ships with an example identity on purpose. A
-# worked example that travels with somebody's personal address publishes it to
-# everyone the zip reaches, and the field exists so a reviewer can be contacted
-# about a panel count - not so a mailbox can be harvested from a package. The
-# name and ORCID below are ORCID's own fictional demonstration record.
-#
-# Set FDT_REVIEWER_NAME and FDT_REVIEWER_ORCID to attest a real run. Nothing
-# downstream depends on it here: this pilot ends at ACCEPTED 0.
-_EXAMPLE_NAME, _EXAMPLE_ORCID = "Josiah Carberry", "0000-0002-1825-0097"
-_REVIEWER_NAME = os.environ.get("FDT_REVIEWER_NAME", "").strip() or _EXAMPLE_NAME
-_REVIEWER_ORCID = os.environ.get("FDT_REVIEWER_ORCID", "").strip() or _EXAMPLE_ORCID
-REVIEWERS = [dict(
-    Reviewer_ID="RV_INSPECTOR", Reviewer_Name=_REVIEWER_NAME,
-    Contact_Type="ORCID", Reviewer_Contact=_REVIEWER_ORCID,
-    Registered_By=_REVIEWER_NAME, Registration_Date="2026-08-07",
-    Human_Attestation="HUMAN_CONFIRMED",
-    Note=("EXAMPLE identity - replace before treating any output as data"
-          if _REVIEWER_ORCID == _EXAMPLE_ORCID else
-          "opened all five publisher rasters and counted the panels"))]
+REVIEWERS = [ATTESTATION]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="ARM", Factor_Level=lv,
                Level_Order=i, Note="") for i, lv in enumerate(("FLUID", "NON_FLUID"))]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="SESSION", Factor_Level=lv,
@@ -185,7 +227,7 @@ def unit(uid, fid, grid, panel_label, outcome, units, domain, **kw):
         Axis_Calib_Y2_Value=100, Axis_Calib_Y2_Pixel=100,
         Extractor_1="run_batch", Extractor_2="",
         Independent_Verification_Status="", Discrepancy_Note="",
-        Date="2026-08-07", Note="")
+        Date=RUN_DATE, Note="")
     base.update(kw)
     UNITS.append(base)
 
@@ -370,7 +412,7 @@ SOURCE_DOCUMENTS.append(dict(
     Document_Role="MAIN_ARTICLE", Source_File="397.pdf",
     Article_Page_Range="full target article", Observed_Figure_Count=5,
     Inventory_Status="VISUALLY_VERIFIED", Figure_Count_Method="HUMAN_VISUAL",
-    Reviewer_ID="RV_INSPECTOR", Inspection_Date="2026-08-07",
+    Reviewer_ID="RV_INSPECTOR", Inspection_Date=INSPECTION_DATE,
     Note="all five publisher figures inventoried"))
 for fig_no, specs in sorted(_SOURCE_SPECS.items()):
     SOURCE_FIGURES.append(dict(
@@ -380,7 +422,7 @@ for fig_no, specs in sorted(_SOURCE_SPECS.items()):
         Source_Image=os.path.join(RASTERS, "397_fig%d.jpeg" % fig_no),
         Observed_Panel_Count=len(specs), Inventory_Status="VISUALLY_VERIFIED",
         Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_INSPECTOR",
-        Inspection_Date="2026-08-07", Note="counted on the full publisher raster"))
+        Inspection_Date=INSPECTION_DATE, Note="counted on the full publisher raster"))
     for order, (spid, outcome, target, disposition) in enumerate(specs, 1):
         SOURCE_PANELS.append(dict(
             Source_Panel_ID=spid, Source_Figure_ID="SF397_%d" % fig_no,
@@ -415,19 +457,27 @@ def write(directory):
 
 
 write(MANIFESTS)
-summary = RB.run_batch(MANIFESTS, OUT, file_root=RASTERS, run_date="2026-08-07")
+summary = RB.run_batch(MANIFESTS, OUT, file_root=RASTERS,
+                       run_date=RUN_DATE, run_mode=RUN_MODE)
 if summary["status"] == "MANIFEST_REJECTED":
     import pandas as pd
     print("manifests rejected: %s" % summary["detail"])
     print(pd.read_csv(os.path.join(OUT, "manifest_problems.csv")).to_string())
     raise SystemExit(2)
 
+# Before the summary is read, because a refused run wrote no summary to read.
+if summary["status"] == "DEMO_OUTPUT_REFUSED":
+    print("DEMO_OUTPUT_REFUSED: %s" % summary["detail"], file=sys.stderr)
+    print("set FDT_REVIEWER_NAME, FDT_REVIEWER_ORCID, FDT_INSPECTION_DATE and "
+          "FDT_REGISTRATION_DATE to run this as attested work", file=sys.stderr)
+    raise SystemExit(4)
+
 import pandas as pd                                                # noqa: E402
 run = pd.read_csv(os.path.join(OUT, "run_manifest.csv"))
 raw = pd.read_csv(os.path.join(OUT, "figure_values_raw.csv"))
 accepted = pd.read_csv(os.path.join(OUT, "figure_values_accepted.csv"))
 
-print("publication 397 - every figure, one run")
+print("publication 397 - every figure, one run  [%s]" % RUN_MODE)
 print("  panels %d | cells declared %d | read %d | ACCEPTED %d"
       % (summary["panels"], int(run["Cells_Declared"].sum()), len(raw),
          len(accepted)))

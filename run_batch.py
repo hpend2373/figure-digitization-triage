@@ -1,6 +1,12 @@
 """Read a whole batch of declared panels, and say honestly what it could not do.
 
-    python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR] [--date YYYY-MM-DD]
+    python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR]
+                         [--date YYYY-MM-DD] [--demo-only]
+
+`--demo-only` says the reviewer registry behind this run is illustrative. The
+run executes in full, but if the gate accepts anything the run is refused
+(exit 4) rather than writing values a fictional reviewer would appear to have
+attested.
 
 Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        INPUT_LOAD_FAILED, not a default
@@ -57,7 +63,7 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
-PIPELINE_VERSION = "7.9.1"
+PIPELINE_VERSION = "7.10"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -663,6 +669,18 @@ def clear_outputs(output_dir):
 #: The last file moved into place. Its presence is what says a run committed.
 COMMIT_MARKER = "figure_values_accepted.csv"
 
+#: Whether the run stands behind its own output.
+#:
+#: DEMO_ONLY exists because a worked example needs an identity and must not be
+#: allowed to lend that identity to real numbers. The pilot shipped a fictional
+#: reviewer with a `Note` that said "EXAMPLE - replace before treating any
+#: output as data", and a note is a request, not a gate: the only thing actually
+#: keeping the demo harmless was that the dispersion definition happened to be
+#: unresolved, so nothing was accepted. Resolve it and the same fictional
+#: registry row would have signed off poolable values. A property that holds by
+#: coincidence is not a property.
+RUN_MODES = ("ATTESTED", "DEMO_ONLY")
+
 
 def promote(work_dir, output_dir, fault_after=None):
     """Move a completed run's outputs into place, marker last.
@@ -703,7 +721,7 @@ def promote(work_dir, output_dir, fault_after=None):
     shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def withdraw_commit(output_dir, run_date, detail):
+def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED"):
     """Undo a half-finished promotion: no marker, and a stamp that says why.
 
     Called when `promote` raises. The accepted file is removed whether or not it
@@ -716,17 +734,18 @@ def withdraw_commit(output_dir, run_date, detail):
         os.remove(marker)
     shutil.rmtree(os.path.join(output_dir, STAGING), ignore_errors=True)
     write_stamp(os.path.join(output_dir, "run_stamp.json"), "PROMOTE_FAILED",
-                run_date, detail=detail)
+                run_date, run_mode=run_mode, detail=detail)
 
 
 #: Every verdict a run directory can carry. RAN is the only one under which
 #: `figure_values_accepted.csv` may exist.
-RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED")
+RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED",
+                "PROMOTE_FAILED", "DEMO_OUTPUT_REFUSED")
 
 
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
                 panels=0, read=0, accepted=0, qc_problems=0, problems=0,
-                detail=""):
+                detail="", run_mode="ATTESTED"):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
@@ -736,8 +755,8 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
     """
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/4",
-            "Status": status, "Run_Date": run_date,
+            "schema": "figure-digitization-triage/run-stamp/5",
+            "Status": status, "Run_Mode": run_mode, "Run_Date": run_date,
             "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
             "Pipeline_Code_SHA256": pipeline_code_sha256(),
@@ -750,12 +769,23 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
 
 
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
-              check_files=True, fault_after=None):
+              check_files=True, fault_after=None, run_mode="ATTESTED"):
     """Validate, read, convert, gate, and report. Returns a summary dict.
+
+    `run_mode="DEMO_ONLY"` declares that the reviewer registry behind this run
+    is illustrative. The run still executes in full - the point of a demo is to
+    show what the pipeline does - but if it reaches the end holding values the
+    grid gate accepted, it refuses to write any of them and returns
+    DEMO_OUTPUT_REFUSED. A demonstration identity may produce a queue, a
+    coverage ledger and a list of QC failures; it may not produce a row anybody
+    could pool.
 
     `fault_after` is a test hook that aborts promotion partway through; it has
     no effect on a normal run.
     """
+    if run_mode not in RUN_MODES:
+        raise ValueError("run_mode must be one of %s, got %r"
+                         % (", ".join(RUN_MODES), run_mode))
     # Clear BEFORE anything can fail, including the load. Reading the manifests
     # first looked harmless and was not: a missing directory, a malformed CSV or
     # an unreadable file raised before `clear_outputs` was ever called, so the
@@ -768,7 +798,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         m = load_manifests(manifest_dir)
     except Exception as exc:
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
-                    "INPUT_LOAD_FAILED", run_date,
+                    "INPUT_LOAD_FAILED", run_date, run_mode=run_mode,
                     detail="%s: %s" % (type(exc).__name__, exc))
         raise
     manifest_hashes = {k: frame_sha256(v) for k, v in sorted(m.items())}
@@ -784,10 +814,10 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
                         index=False)
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
-                    "MANIFEST_REJECTED", run_date,
+                    "MANIFEST_REJECTED", run_date, run_mode=run_mode,
                     manifest_hashes=manifest_hashes, problems=len(problems))
         return dict(status="MANIFEST_REJECTED", problems=len(problems),
-                    values=0, accepted=0,
+                    values=0, accepted=0, run_mode=run_mode,
                     detail=sorted(set(problems["check"])))
 
     # Only now, once the batch is known to be runnable, does anything get
@@ -1035,6 +1065,32 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         coverage_rows.append(rec)
     coverage_df = pd.DataFrame(coverage_rows)
 
+    # The demo gate, placed before a single output file is written. Refusing
+    # after promotion would mean deleting a file somebody may already have read;
+    # refusing here means the only thing this run leaves behind is the stamp
+    # saying why. `clear_outputs` has already run, so there is nothing stale to
+    # be mistaken for a result.
+    if run_mode == "DEMO_ONLY" and len(accepted_df):
+        shutil.rmtree(work_dir, ignore_errors=True)
+        # raw/ and projects/ are written at their final paths, because the
+        # value rows have to name them. They are digitized data too - a point
+        # cloud is the reading, not a note about it - so a refusal that left
+        # them behind would refuse the summary and keep the measurements.
+        for leftover in ("raw", "projects"):
+            shutil.rmtree(os.path.join(output_dir, leftover), ignore_errors=True)
+        detail = ("%d values passed the gate under a DEMO_ONLY reviewer "
+                  "registry. Register the person who actually inspected the "
+                  "figures and re-run; a demonstration identity cannot stand "
+                  "behind a poolable value" % len(accepted_df))
+        write_stamp(os.path.join(output_dir, "run_stamp.json"),
+                    "DEMO_OUTPUT_REFUSED", run_date, run_mode=run_mode,
+                    cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
+                    panels=len(run_df), read=len(raw_df), accepted=0,
+                    qc_problems=int(len(qc)), detail=detail)
+        return dict(status="DEMO_OUTPUT_REFUSED", panels=len(run_df),
+                    values=0, accepted=0, would_accept=len(accepted_df),
+                    run_mode=run_mode, detail=detail)
+
     raw_df.to_csv(os.path.join(work_dir, "figure_values_raw.csv"), index=False)
     accepted_df.to_csv(os.path.join(work_dir, "figure_values_accepted.csv"),
                        index=False)
@@ -1043,20 +1099,22 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
     coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
+                run_mode=run_mode,
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=len(accepted_df),
                 qc_problems=int(len(qc)))
     try:
         promote(work_dir, output_dir, fault_after=fault_after)
     except Exception as exc:
-        withdraw_commit(output_dir, run_date, "%s: %s" % (type(exc).__name__, exc))
+        withdraw_commit(output_dir, run_date, "%s: %s" % (type(exc).__name__, exc),
+                        run_mode=run_mode)
         raise
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}
     return dict(status="RAN", panels=len(run_df), values=len(raw_df),
                 accepted=len(accepted_df), qc_problems=int(len(qc)),
                 states=counts, manual_queue=len(queue_df),
-                config_sha256=cfg_hash)
+                run_mode=run_mode, config_sha256=cfg_hash)
 
 
 def emit_templates(directory):
@@ -1079,16 +1137,23 @@ def main(argv=None):
     ap.add_argument("--file-root", default=".")
     ap.add_argument("--date", default="")
     ap.add_argument("--no-file-check", action="store_true")
+    ap.add_argument("--demo-only", action="store_true",
+                    help="the reviewer registry is illustrative; refuse to "
+                         "write any value the gate accepts")
     args = ap.parse_args(argv)
     try:
         summary = run_batch(args.manifest_dir, args.output_dir,
                             file_root=args.file_root, run_date=args.date,
-                            check_files=not args.no_file_check)
+                            check_files=not args.no_file_check,
+                            run_mode="DEMO_ONLY" if args.demo_only else "ATTESTED")
     except ManifestLoadError as exc:
         print("inputs could not be loaded: %s" % exc)
         print("the output directory was cleared and run_stamp.json records "
               "Status=INPUT_LOAD_FAILED")
         return 3
+    if summary["status"] == "DEMO_OUTPUT_REFUSED":
+        print("DEMO_OUTPUT_REFUSED: %s" % summary["detail"])
+        return 4
     if summary["status"] == "MANIFEST_REJECTED":
         print("manifests rejected: %d problems" % summary["problems"])
         for code in summary["detail"]:

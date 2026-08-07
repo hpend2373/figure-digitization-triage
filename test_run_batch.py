@@ -1005,8 +1005,78 @@ for _name, _break in (
     RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
 
 check("every status a stamp can carry is declared",
-      {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED"}
-      == set(RB.RUN_STATUSES), "%s" % sorted(RB.RUN_STATUSES))
+      {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED",
+       "DEMO_OUTPUT_REFUSED"} == set(RB.RUN_STATUSES),
+      "%s" % sorted(RB.RUN_STATUSES))
+
+
+print("a demonstration identity cannot stand behind a poolable value")
+# The worked example needs a reviewer, and a fictional one is the honest choice
+# - but the only thing that kept it harmless was that ID397's dispersion
+# definition happened to be unresolved, so nothing was accepted. Resolve it and
+# the same fictional row signs off real numbers. This batch DOES accept values,
+# which is what makes it the right fixture: the gate has to be what stops them.
+_demo = os.path.join(ROOT, "o_demo")
+_demo_summary = RB.run_batch(_good, _demo, file_root=ROOT,
+                             run_date="2026-08-06", run_mode="DEMO_ONLY")
+_demo_files = sorted(os.listdir(_demo)) if os.path.isdir(_demo) else []
+_demo_stamp = json.load(open(os.path.join(_demo, "run_stamp.json")))
+check("a DEMO_ONLY run that accepts values is refused",
+      _demo_summary["status"] == "DEMO_OUTPUT_REFUSED", "%s" % _demo_summary)
+check("and says how many values it refused to write",
+      _demo_summary["would_accept"] > 0 and _demo_summary["accepted"] == 0,
+      "%s" % _demo_summary)
+check("and writes no accepted file",
+      RB.COMMIT_MARKER not in _demo_files, "%s" % _demo_files)
+check("and writes no raw values file either",
+      "figure_values_raw.csv" not in _demo_files, "%s" % _demo_files)
+check("and leaves nothing but the stamp behind",
+      _demo_files == ["run_stamp.json"], "%s" % _demo_files)
+check("and the stamp records DEMO_ONLY, not a silent ATTESTED",
+      _demo_stamp.get("Run_Mode") == "DEMO_ONLY"
+      and _demo_stamp.get("Status") == "DEMO_OUTPUT_REFUSED"
+      and _demo_stamp.get("Values_Accepted") == 0, "%r" % _demo_stamp)
+check("and the stamp says why", "DEMO_ONLY" in _demo_stamp.get("Detail", ""),
+      "%r" % _demo_stamp)
+
+# A demo that accepts nothing is the normal case and must still run - otherwise
+# the mode is unusable for the thing it exists for.
+_demo_ok = os.path.join(ROOT, "o_demo_ok")
+_demo_ok_summary = RB.run_batch(
+    write_manifests(os.path.join(ROOT, "m_demo_ok"), units=_all_bad,
+                    panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
+                    series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"],
+                    source_panels=edited(
+                        SOURCE_PANELS, {"Source_Panel_ID": "P_SCAT"},
+                        Panel_Disposition="NO_SUMMARY_STATISTIC",
+                        Disposition_Reason="excluded from this all-bad fixture")),
+    _demo_ok, file_root=ROOT, run_date="2026-08-06", run_mode="DEMO_ONLY")
+check("a DEMO_ONLY run that accepts nothing still runs",
+      _demo_ok_summary["status"] == "RAN"
+      and _demo_ok_summary["accepted"] == 0, "%s" % _demo_ok_summary)
+check("and still writes everything that is not a poolable value",
+      {"figure_values_raw.csv", "run_manifest.csv", "manual_queue.csv",
+       "qc_problems.csv", "source_panel_coverage.csv"}
+      <= set(os.listdir(_demo_ok)), "%s" % sorted(os.listdir(_demo_ok)))
+check("and its stamp still records DEMO_ONLY",
+      json.load(open(os.path.join(_demo_ok, "run_stamp.json"))).get("Run_Mode")
+      == "DEMO_ONLY")
+
+_attested = os.path.join(ROOT, "o_attested")
+RB.run_batch(_good, _attested, file_root=ROOT, run_date="2026-08-06")
+check("the default run mode is ATTESTED",
+      json.load(open(os.path.join(_attested, "run_stamp.json"))).get("Run_Mode")
+      == "ATTESTED")
+_bad_mode = "caught"
+try:
+    RB.run_batch(_good, os.path.join(ROOT, "o_badmode"), file_root=ROOT,
+                 run_mode="PROBABLY_FINE")
+except ValueError as exc:
+    _bad_mode = str(exc)
+except Exception as exc:                                  # pragma: no cover
+    _bad_mode = "wrong exception: %r" % exc
+check("an invented run mode is a programming error, not a default",
+      "run_mode must be one of" in _bad_mode, _bad_mode)
 
 
 print("a promotion that dies partway leaves nothing poolable")

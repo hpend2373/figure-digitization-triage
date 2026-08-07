@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.9.1 (full package)
+# figure-digitization-triage — v7.10 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,56 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## HIGH (v7.9.1 review) — the demo identity was only harmless by coincidence
+
+Replacing the personal Gmail with a fictional reviewer and a `Note` reading
+`EXAMPLE - replace before treating any output as data` fixed the privacy
+problem and left a worse one. A note is a request, not a gate, and three paths
+walked straight through it:
+
+| environment | v7.9.1 | v7.10 |
+|---|---|---|
+| `FDT_REVIEWER_NAME` only | a real name vouching for a fictional ORCID | `BLOCKED`, exit 2 |
+| `FDT_REVIEWER_ORCID` only | a fictional name against a real ORCID, `Note` flipped to "opened all five rasters" | `BLOCKED`, exit 2 |
+| neither | a fictional person `HUMAN_CONFIRMED`, `Status=RAN` | `DEMO_ONLY`, accepted forced to 0 |
+
+The third was safe only because ID397's dispersion definition happens to be
+unresolved, so nothing is accepted. **A safety property that holds by
+coincidence is not a property.** Resolving it in a scratch copy — one edit to
+`BAR_ERRORBAR_SOURCE`, as if the author had answered the query — makes the same
+fictional row sign off 48 poolable values.
+
+Three changes, in the two places that can actually enforce them.
+
+**All four or none.** `FDT_REVIEWER_NAME`, `FDT_REVIEWER_ORCID`,
+`FDT_INSPECTION_DATE`, `FDT_REGISTRATION_DATE`. A partial attestation is not an
+attestation; the pilot names which are set, which are missing, and exits 2.
+
+**`DEMO_ONLY` is a run mode the runner knows about**, not a comment in a
+script. `run_batch(..., run_mode="DEMO_ONLY")` (CLI: `--demo-only`) executes in
+full — a demo should show what the pipeline does — but if it reaches the end
+holding values the grid gate accepted, it writes none of them and returns
+`DEMO_OUTPUT_REFUSED` (exit 4). The refusal drops `raw/` and `projects/` too: a
+point cloud is the reading, not a note about it, so a refusal that kept them
+would refuse the summary and keep the measurements. Every stamp carries
+`Run_Mode` (schema `run-stamp/5`).
+
+On the dispersion-resolved scratch copy:
+
+    DEMO_ONLY  -> DEMO_OUTPUT_REFUSED: 48 values passed the gate under a
+                  DEMO_ONLY reviewer registry ... (exit 4)
+    ATTESTED   -> panels 18 | cells declared 144 | read 48 | ACCEPTED 48
+
+**The dates are asked for, not assumed.** `Inspection_Date` and
+`Registration_Date` were hardcoded `2026-08-07`, which is a false record on
+every run after the day it was written — and an inspection date is the one
+field whose entire purpose is to be comparable later. `Run_Date` follows the
+clock in attested mode and stays fixed in demo mode, so the demonstration stays
+reproducible.
+
+Ten scenarios. Reverting the demo gate fails 7; allowing a partial attestation
+fails the name-only case; rehardcoding the dates fails the registry check.
 
 ## Non-blocking cleanup (v7.9 review)
 

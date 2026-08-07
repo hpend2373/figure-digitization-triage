@@ -38,6 +38,13 @@ outcome, sex, axis or reader configuration; it therefore cannot prove that the
 publisher's physical figure was covered.  A set of virtual figures can each say
 `2/2 MATCHED` while most of the original raster is absent.
 
+Do not write the CSVs by hand.  Write one `extraction-plan` JSON per
+publication and run `compile_plan.py`: hashes, figure rows and unit
+calibrations are derived from the plan rather than retyped, which is where
+several of this package's shipped defects came from.  `plan_397.json` is a
+worked example.  The four source manifests below are what the compiler emits,
+and what follows describes what the plan has to say.
+
 Create four source manifests before creating any reader row:
 
     reviewer_registry.csv       one row per person allowed to attest an inventory

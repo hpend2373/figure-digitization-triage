@@ -1,3 +1,10 @@
+# Lower bounds are what this package needs to import. They are NOT what a run
+# is reproducible against: contour finding, raster decoding and least-squares
+# fitting all live here, and a bar top found at row 312 by one OpenCV and row
+# 313 by the next is a different number in the accepted file.
+#
+# `run_stamp.json` records the versions a run actually used, under
+# "Environment". To reproduce a run, install requirements-lock.txt.
 numpy>=1.24
 pandas>=2.0
 Pillow>=10.0

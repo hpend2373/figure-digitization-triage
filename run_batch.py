@@ -73,11 +73,11 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.15"
+PIPELINE_VERSION = "7.16"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
-    "review_overlay.py", "finalize_batch.py",
+    "review_overlay.py", "finalize_batch.py", "compile_plan.py",
 )
 
 
@@ -179,6 +179,34 @@ def file_sha256(path):
 def frame_sha256(df):
     return hashlib.sha256(
         df.to_csv(index=False).encode("utf-8")).hexdigest()
+
+
+def environment_record():
+    """Everything outside this package that a value depended on.
+
+    A run recorded its own code hash and nothing about what that code ran on.
+    Contour finding, raster decoding and least-squares fitting all live in
+    libraries this package pins only by lower bound, and a bar top found at row
+    312 by one OpenCV and row 313 by the next is a different number in the
+    accepted file. Reproducing a run means reproducing this too, so the run
+    writes it down instead of leaving it to be reconstructed from a memory of
+    which machine it was on.
+    """
+    import platform
+    versions = {}
+    for name in ("numpy", "pandas", "PIL", "cv2"):
+        try:
+            module = __import__(name)
+        except Exception:                                    # pragma: no cover
+            versions[name] = "not installed"
+        else:
+            versions[name] = str(getattr(module, "__version__", "unknown"))
+    return {
+        "Python": platform.python_version(),
+        "Implementation": platform.python_implementation(),
+        "Platform": platform.platform(),
+        "Libraries": versions,
+    }
 
 
 def pipeline_code_sha256():
@@ -946,11 +974,12 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
     """
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/5",
+            "schema": "figure-digitization-triage/run-stamp/6",
             "Status": status, "Run_Mode": run_mode, "Run_Date": run_date,
             "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
             "Pipeline_Code_SHA256": pipeline_code_sha256(),
+            "Environment": environment_record(),
             "Config_SHA256": cfg_hash,
             "Manifest_SHA256": manifest_hashes or {},
             "Panels": panels, "Values_Read": read,

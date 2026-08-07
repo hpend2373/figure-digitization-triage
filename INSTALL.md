@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.15 (full package)
+# figure-digitization-triage — v7.16 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,64 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## P1-9 (v7.11 review) — one typed plan in, eleven manifests out
+
+Everything before this assumed the manifests already existed. Writing them is
+the part an agent actually has to do, and asking one to fill eleven CSVs by
+hand is asking it to hold the whole foreign-key graph in its head:
+`Source_Panel_ID` in two files, `Figure_ID` in three, `Grid_ID` in two, a
+SHA-256 typed twice, a calibration typed once as ticks and again as four
+numbers. Several of the defects in this review were exactly that.
+
+`compile_plan.py` takes one JSON document per publication and writes all
+eleven. The split is the point:
+
+**The plan says what is true about the paper** — which figures exist, how many
+panels each has, who counted them, what the caption does and does not say about
+the error bars, where the boxes and ticks are, what each series and position
+means.
+
+**The compiler says what follows.** Hashes are read off the files, never typed.
+A unit's `Axis_Calib_*` is derived from the ticks of the panel that fills it, so
+the gate's copy and the reader's copy cannot drift. A `Figure_ID` row is built
+from the panels that claim it, with counts reconciled rather than asserted — a
+plan cannot say `MATCHED`, because a plan never says `MATCHED`.
+
+What it will not do is invent an observation: it never guesses a panel count,
+never fills a blank `Errorbar_Definition_Source`, and never promotes a
+`MANUAL_DIGITIZE` disposition because a reader happens to exist.
+
+    python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root .
+    python3 run_batch.py MANIFEST_DIR OUT --file-root .
+
+The acceptance test is publication 397. `plan_397.json` describes it once;
+compiled and run, it produces **the same 48 values as the hand-written pilot,
+cell for cell** — same panel count, same three terminal states, all 36 physical
+panels still accounted for, still `ACCEPTED 0` because the paper still does not
+say whether its bars are SD or SEM.
+
+46 scenarios. Fifteen ways a plan can be wrong are refused at the plan, against
+the thing the author typed, and none of them writes a manifest.
+
+## P1-10 (v7.11 review) — what the run ran on
+
+The stamp recorded the pipeline's own code hash and nothing about the
+environment. Contour finding, raster decoding and least-squares fitting all
+live in libraries pinned only by a lower bound, and a bar top found at row 312
+by one OpenCV and row 313 by the next is a different number in the accepted
+file.
+
+Every stamp now carries `Environment`: Python version and implementation, the
+platform, and the versions of numpy, pandas, Pillow and OpenCV actually
+imported. `requirements-lock.txt` pins the versions the shipped results were
+produced on; `requirements.txt` keeps the lower bounds and says plainly that
+they are not what a run is reproducible against.
+
+`.github/workflows/suite.yml` installs the lock file, prints the environment,
+and runs every test file, every forward test, and the plan-to-run path. A test
+asserts CI covers every `test_*.py` in the package — a suite nobody runs is a
+suite that will be broken the next time somebody looks.
 
 ## P1-12 (v7.11 review) — a defect in a reader is not a difficult figure
 

@@ -164,3 +164,50 @@ empty = sh(FIN, att_dir)
 assert empty.returncode == 1 and "NOTHING_APPROVED" in empty.stdout, empty.stdout
 assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv"))
 print("an unreviewed run finalizes to nothing: PASS")
+
+
+# --------------------------------------------------------------------------
+# the environment a value depended on
+# --------------------------------------------------------------------------
+# The run recorded its own code hash and nothing about what that code ran on.
+# Contour finding, raster decoding and least-squares fitting all live in
+# libraries this package pins only by lower bound, and a bar top found at row
+# 312 by one OpenCV and row 313 by the next is a different number in the
+# accepted file.
+import glob                                                        # noqa: E402
+import re                                                          # noqa: E402
+
+sys.path.insert(0, HERE)
+import run_batch as RB_ENV                                         # noqa: E402
+
+env = RB_ENV.environment_record()
+assert env["Python"] and env["Platform"], env
+assert set(env["Libraries"]) == {"numpy", "pandas", "PIL", "cv2"}, env
+assert all(v and v != "unknown" for v in env["Libraries"].values()), env
+print("the runner can describe its own environment: PASS")
+
+stamp = json.load(open(os.path.join(att_dir, "run_stamp.json")))
+assert stamp.get("Environment", {}).get("Python"), stamp
+assert stamp["Environment"]["Libraries"]["numpy"] == env["Libraries"]["numpy"], stamp
+print("and every run stamp carries it: PASS")
+
+LOCK = os.path.join(HERE, "requirements-lock.txt")
+assert os.path.exists(LOCK), "requirements-lock.txt is not in the package"
+locked = dict(re.findall(r"^([A-Za-z0-9_.-]+)==([^\s]+)$",
+                         open(LOCK, encoding="utf-8").read(), re.M))
+lower = {re.split(r"[><=]", line)[0].strip().lower()
+         for line in open(os.path.join(HERE, "requirements.txt"), encoding="utf-8")
+         if line.strip() and not line.startswith("#")}
+assert lower <= {k.lower() for k in locked}, (
+    "%s is required but not pinned" % sorted(lower - {k.lower() for k in locked}))
+print("every requirement is pinned in the lock file: PASS")
+
+# CI must run every suite in the package. A test file nobody runs is a test
+# file that will be broken the next time somebody looks.
+CI = os.path.join(HERE, ".github", "workflows", "suite.yml")
+assert os.path.exists(CI), "no CI workflow in the package"
+ci_text = open(CI, encoding="utf-8").read()
+suites = {os.path.basename(p)[:-3] for p in glob.glob(os.path.join(HERE, "test_*.py"))}
+unrun = sorted(s for s in suites if s not in ci_text)
+assert not unrun, "CI does not run: %s" % unrun
+print("CI runs every test file in the package (%d): PASS" % len(suites))

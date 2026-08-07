@@ -1,0 +1,45 @@
+# Every test file is a standalone script that exits non-zero on the first
+# failure, so CI is the same command a person runs. No pytest, no discovery, no
+# collection order: a scenario that only passes when something else ran first is
+# a scenario that proves nothing.
+name: suite
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install the pinned environment
+        run: python -m pip install -r requirements-lock.txt
+      - name: record what we are running on
+        run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
+      - name: suite
+        run: |
+          set -e
+          for t in test_reproducibility test_kernel test_grid_engine \
+                   test_bar_reader test_mark_readers test_mono_bar \
+                   test_integration test_run_batch test_finalize \
+                   test_compile_plan; do
+            echo "--- $t"
+            python "$t.py"
+          done
+      - name: forward tests and worked examples
+        run: |
+          set -e
+          for s in crosscheck_id323 build_id323 forward_test_397_mono_bar \
+                   forward_test_real_monochrome pilot_397; do
+            echo "--- $s"
+            python "$s.py"
+          done
+      - name: the plan compiles to the pilot's manifests
+        run: |
+          python compile_plan.py plan_397.json /tmp/m --file-root . --date 2026-08-07
+          python run_batch.py /tmp/m /tmp/o --file-root . --date 2026-08-07

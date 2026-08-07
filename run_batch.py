@@ -221,6 +221,19 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     mark = _upper(panel.get("Mark_Type"))
     statistic = _upper(unit.get("Statistic_Type")) if unit is not None else ""
     mode = _upper(panel.get("Panel_Mode")) or "AUTO"
+    if mark in BM.UNRELEASED_MARK_TYPES:
+        # Decided before the image is opened: there is nothing to try.
+        series_level = {_s(r.get("Series_ID")): (_upper(r.get("Factor_Name")),
+                                                 _s(r.get("Factor_Level")))
+                        for r in series_rows}
+        position_level = {_s(r.get("Position_ID")): (_upper(r.get("Factor_Name")),
+                                                     _s(r.get("Factor_Level")))
+                          for r in position_rows}
+        return PanelOutcome(
+            "NO_READER_AVAILABLE",
+            declared=max(1, len(series_level)) * max(1, len(position_level)),
+            detail="%s: %s" % (mark, BM.UNRELEASED_MARK_TYPES[mark]),
+            missing=sorted(_all_cells(series_level, position_level)))
     if mode == "MANUAL":
         return PanelOutcome("MANUAL_POINT_READ",
                             detail="Panel_Mode=MANUAL: declared unreadable before the run")
@@ -301,6 +314,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                                  y_calibration=ycal,
                                  series=_series_specs(series_rows, mark, options),
                                  **kwargs)
+        elif mark in BM.UNRELEASED_MARK_TYPES:
+            return PanelOutcome(
+                "NO_READER_AVAILABLE", declared=declared,
+                detail="%s: %s" % (mark, BM.UNRELEASED_MARK_TYPES[mark]),
+                missing=sorted(_all_cells(series_level, position_level)))
         else:
             return PanelOutcome("NOT_CONVERTIBLE",
                                 detail="no reader for Mark_Type=%s" % mark)

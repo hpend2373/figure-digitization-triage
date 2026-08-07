@@ -453,10 +453,22 @@ for _name, _kw, _want in (
               configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
                                       Value="150", Note="")]),
          "LINE_STYLE_NOT_READ"),
-        ("a mark type that is designed but not released",
+        # An unreleased mark type is not a manifest error, but its series still
+        # have to be separable by the discriminant that reader WILL use.
+        ("an unreleased mark type whose series share a line style",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
-                            Mark_Type="LINE_MONO_STYLE")),
-         "MARK_TYPE_NOT_RELEASED"),
+                            Mark_Type="LINE_MONO_STYLE", Config_ID=""),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style="SOLID")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES]),
+         "SERIES_NOT_SEPARABLE"),
+        ("an unreleased mark type whose series declare no line style",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Mark_Type="LINE_MONO_STYLE", Config_ID=""),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style="NONE")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES]),
+         "MISSING_SERIES_DISCRIMINANT"),
 ):
     _got = validate(**_kw)
     check(_name + " is rejected", _want in _got, "got %s" % _got)
@@ -1061,6 +1073,44 @@ check("the run filled the figure manifest's WPD_Project_File itself",
           os.path.join(ODIR, "figure_manifest.csv"), dtype=object).fillna("").columns
       and bool(pd.read_csv(os.path.join(ODIR, "figure_manifest.csv"),
                            dtype=object).fillna("").iloc[0]["WPD_Project_File"]))
+
+print("a mark type with no reader is queued, not treated as a bad manifest")
+# One panel nobody can read yet must not stop every panel that can be. On
+# publication 397 that was two line figures against twenty-four readable bar
+# cells - rejecting the batch would have cost the twenty-four.
+_unreleased_series = [
+    dict(r, Colour_Hex="", Marker_Shape="NONE",
+         Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE" else "DASHED"))
+    if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
+_ur = write_manifests(
+    os.path.join(ROOT, "m_unreleased"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO_STYLE",
+                  Config_ID=""),
+    series_rows=_unreleased_series)
+_o = os.path.join(ROOT, "o_unreleased")
+_su = RB.run_batch(_ur, _o, file_root=ROOT, run_date="2026-08-06")
+check("a batch containing an unreleased mark type still runs",
+      _su["status"] == "RAN", "%s" % _su)
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("the unreleased panel is NO_READER_AVAILABLE, not a manifest error",
+      _st.get("P_LINE") == "NO_READER_AVAILABLE", "%s" % _st)
+check("and the readable panels in the same batch still pass",
+      _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
+_q = pd.read_csv(os.path.join(_o, "manual_queue.csv"), dtype=object).fillna("")
+_qrow = _q[_q["Panel_ID"] == "P_LINE"]
+check("its queue row names the cells nobody can read yet",
+      len(_qrow) and bool(_qrow.iloc[0]["Missing_Cells"]),
+      "%s" % (list(_qrow["Missing_Cells"]) if len(_qrow) else "no queue row"))
+check("and says why, pointing at where the work stands",
+      len(_qrow) and "wip/" in _qrow.iloc[0]["Detail"],
+      "%s" % (list(_qrow["Detail"]) if len(_qrow) else ""))
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("it contributes no values at all",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+check("NO_READER_AVAILABLE is in the declared state vocabulary",
+      "NO_READER_AVAILABLE" in BM.RUN_STATES)
+
 
 print("the option table is checked against the readers it configures")
 # Declaring that an option "applies to" a mark type is a promise about a

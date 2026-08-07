@@ -1,9 +1,11 @@
-# figure-digitization-triage — v7.5 (full package)
+# figure-digitization-triage — v7.6 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
 
-**v7.5 closes the two defects from the v7.4 review**, on top of the three from
+**v7.6 is the first real pilot: publication 397, all five figures, one run.**
+Two defects it found are fixed below. **v7.5 closed the two defects from the
+v7.4 review**, on top of the three from
 v7.3 and the four from v7.2. Every fix in every round was reverted in a scratch
 copy and the suite re-run, so no scenario is decoration:
 
@@ -21,6 +23,73 @@ copy and the suite re-run, so no scenario is decoration:
 | `n_slots` back on BAR_MONO | 3 (including the introspection test) |
 | option range checks removed | 4 |
 | LINE_MONO accepting line style alone | 1 |
+
+## What the pilot did
+
+    python3 pilot_397.py
+
+14 panels, 128 declared cells, one run.
+
+| | panels | cells |
+|---|---|---|
+| read, all 4 of 4 cells each (BAR_MONO) | 8 | 32 |
+| `NO_READER_AVAILABLE` — solid/dashed lines | 4 | 96 declared, 0 read |
+| `MANUAL_POINT_READ` — single-subject traces | 2 | n/a |
+| **`ACCEPTED`** | | **0** |
+
+Zero accepted, and that is the correct answer. Every one of the 32 readings is
+right — spot-checked against the printed figures, worst disagreement under
+1 unit on every axis — and every one is blocked by a single unresolved fact:
+Figures 3 and 4 never say whether their whiskers are SD or SEM.
+
+That is not a guess by the system. The paper's running text defines the bars for
+the *line* figures — "physiological responses (30-min means and SEMs)" — and the
+captions for the *bar* figures give only the averaging window: "Cardiovascular
+responses to pre-HDT stand tests and post-HDT stand tests (3-min means)". Two
+different figures, one definition, and the definition does not reach the other.
+One sentence from a human unblocks all 32 cells.
+
+### Defect 1 the pilot found: one unreadable panel stopped every readable one
+
+`MARK_TYPE_NOT_RELEASED` was a manifest *error*, so declaring the two
+solid/dashed line figures honestly rejected the whole batch — including the 32
+bar cells that read perfectly. That is backwards. The manifest is correct; the
+software is behind it. An unreleased mark type now validates and the RUN gives
+it `NO_READER_AVAILABLE`, a new run state, with its declared cells named in the
+manual queue and a pointer to where the work stands.
+
+The distinction it preserves is worth having: Figures 1–2 are
+`NO_READER_AVAILABLE` (a software gap this project will close), Figure 5 is
+`MANUAL_POINT_READ` (two named individuals plotted beat by beat — not a summary
+statistic, and no reader will ever change that). Counting them separately is how
+you decide what to build next.
+
+Its series are still validated on the rules that reader *will* use — line style
+declared, and two series not sharing one — so the manifest is right the day the
+reader ships rather than wrong and unnoticed.
+
+### Defect 2 the pilot found: a hedge passed where a placeholder was blocked
+
+`UNRESOLVED_ERRORBAR_DEFINITION` blocked "TBD", "assumed SE" and "not stated".
+It did **not** block `"probably SEM"`, `"LIKELY SEM"`, `"inferred from the
+Figure 1 caption"`, `"by analogy with Figure 1"` or `"taken to be SEM"` — which
+are exactly what a careful extractor writes when a paper is silent, because
+leaving the cell blank feels like losing information.
+
+A hedge is a non-answer in a politer register, and on this field it decides the
+pooled weight by sqrt(n). Twelve hedging forms are now blocked. `"ESTIMATED"` is
+deliberately **not** among them: "estimated marginal means ± SE" is a real
+caption, and a check that rejects it has stopped being a check and become a word
+filter. Eight scenarios; reverting the vocabulary fails all eight.
+
+### Also exercised
+
+`forward_test_real_monochrome.py` (publication 386, four black series told apart
+by marker shape and fill) defaulted to a path in one person's Downloads folder
+and had been silently SKIPping. The raster ships with the package; it now looks
+beside itself first and runs: 13 of 32 cells auto-emitted, 19 left missing where
+marks overlap, 13/13 correct series identity, worst 0.87 bpm against an
+independent reading. Failing closed on overlap is the property under test.
 
 ## HIGH (v7.4) — an input that could not be loaded left the previous result
 
@@ -384,15 +453,15 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_kernel.py` | 222 |
+| `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 182 |
+| `test_run_batch.py` | 190 |
 | `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **685** |
+| **total** | **703** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

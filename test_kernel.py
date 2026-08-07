@@ -726,9 +726,25 @@ for _txt in ("HARNESS PLACEHOLDER - unresolved for this figure", "TBD", "unknown
              "presumed SEM"):
     expect("placeholder %r is blocked" % _txt[:34],
            B(Errorbar_Definition_Source=_txt), want=["UNRESOLVED_ERRORBAR_DEFINITION"])
+# A hedge is a non-answer in a politer register. When a paper is silent, a
+# careful extractor does not write "TBD" - they write "probably SEM", because
+# leaving the cell blank feels like losing information. Found by running the
+# pilot on publication 397, whose Figure 3 and 4 captions give the averaging
+# window and never say what the whiskers are.
+for _txt in ("probably SEM", "LIKELY SEM", "presumably the same as Figure 1",
+             "INFERRED from the Fig. 1 caption (30-min means and SEMs)",
+             "by analogy with Figure 1", "taken to be SEM",
+             "seems to be standard error", "implied by the Methods section"):
+    expect("hedged non-answer %r is blocked" % _txt[:34],
+           B(Errorbar_Definition_Source=_txt), want=["UNRESOLVED_ERRORBAR_DEFINITION"])
 for _txt in ("caption: values are mean +- SEM",
              "Methods: data are presented as mean +/- standard deviation",
-             "figure legend states bars are SE"):
+             "figure legend states bars are SE",
+             # "estimated marginal means" is a real statistical term, and a
+             # check that rejects it has stopped being a check and become a
+             # word filter.
+             "caption Fig 2: estimated marginal means +/- SE",
+             "Methods: least-squares means with standard errors"):
     expect("real source wording %r passes" % _txt[:30],
            B(Errorbar_Definition_Source=_txt), forbid=["UNRESOLVED_ERRORBAR_DEFINITION"])
 

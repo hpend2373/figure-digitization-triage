@@ -83,6 +83,7 @@ PANEL_MODES = ("AUTO", "MANUAL")
 #: Terminal states a panel can reach in a run. Every panel lands on exactly one.
 RUN_STATES = (
     "AUTO_PASS",                 # read, converted, and clean through the gate
+    "NO_READER_AVAILABLE",       # correctly declared, but no released reader
     "MANUAL_POINT_READ",         # reader produced nothing usable; hand-digitize
     "SERIES_IDENTITY_UNRESOLVED",  # marks found, but which series is ambiguous
     "PANEL_GEOMETRY_UNRESOLVED",   # box or calibration cannot be trusted
@@ -407,10 +408,12 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
         mark = str(r.get("Mark_Type", "")).strip().upper()
-        if mark in UNRELEASED_MARK_TYPES:
-            flag(line, "MARK_TYPE_NOT_RELEASED",
-                 "Mark_Type=%s is %s" % (mark, UNRELEASED_MARK_TYPES[mark]))
-        elif mark and mark not in BATCH_MARK_TYPES:
+        # An unreleased mark type is NOT a manifest error. The file is correct;
+        # the software is behind it. Rejecting the batch would mean one panel
+        # nobody can read yet stops every panel that can be - on publication 397
+        # that was two line figures blocking twenty-four readable bar cells.
+        # It validates, and the RUN gives it NO_READER_AVAILABLE.
+        if mark and mark not in BATCH_MARK_TYPES and mark not in UNRELEASED_MARK_TYPES:
             flag(line, "BAD_MARK_TYPE",
                  "Mark_Type=%s (expected %s)" % (mark, "/".join(BATCH_MARK_TYPES)))
         panel_mark[pid] = mark
@@ -558,7 +561,15 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 parse_colour(r.get("Colour_Hex"))
             except ValueError as exc:
                 flag(line, "BAD_SERIES_COLOUR", str(exc))
-        if mark == "LINE_MONO":
+        if mark in UNRELEASED_MARK_TYPES:
+            # Still checked, on the rules the reader WOULD use, so the manifest
+            # is ready the day the reader ships rather than wrong and unnoticed.
+            style = str(r.get("Line_Style", "")).strip().upper()
+            if style in ("", "NONE"):
+                flag(line, "MISSING_SERIES_DISCRIMINANT",
+                     "%s separates series by line style - declare Line_Style"
+                     % mark)
+        elif mark == "LINE_MONO":
             # The released LINE_MONO reader separates series by MARKER geometry
             # and never looks at Line_Style. Accepting a series declared purely
             # as SOLID-versus-DASHED let a manifest describe a figure the shipped
@@ -594,7 +605,9 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         mark = panel_mark.get(pid, "")
         rows = [r for _, r in series.iterrows()
                 if str(r.get("Panel_ID", "")).strip() == pid]
-        if mark in MONO_MARK_TYPES:
+        if mark in UNRELEASED_MARK_TYPES:
+            keys = [str(r.get("Line_Style", "")).strip().upper() for r in rows]
+        elif mark in MONO_MARK_TYPES:
             keys = [(str(r.get("Marker_Shape", "")).strip().upper(),
                      str(r.get("Marker_Fill", "")).strip().upper(),
                      str(r.get("Line_Style", "")).strip().upper(),
@@ -664,6 +677,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "or the reader will be given a grid it does not use")
 
     for pid, mark in panel_mark.items():
+        if mark in UNRELEASED_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
+            flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
+                 "%s will read at declared x positions and none are declared"
+                 % mark)
         if mark in POSITIONAL_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
             flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
                  "%s reads at declared x positions and none are declared" % mark)

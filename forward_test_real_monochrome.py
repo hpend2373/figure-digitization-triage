@@ -1,22 +1,30 @@
 """Forward test on the real four-series monochrome plot from publication 386.
 
-The publisher raster is intentionally not redistributed.  Pass its path, or
-leave it in Downloads under the filename used by this project.  This test is a
-forward challenge, not publication-specific logic in the reader.
+Four black series told apart by marker shape and open/filled state, which is
+what the released LINE_MONO reader is for. Overlapping marks are expected to
+stay missing rather than be assigned to a series - that is the property under
+test, not an accuracy figure.
+
+    python3 forward_test_real_monochrome.py [PATH]
+
+The raster ships with the package, so it looks beside this file first. A
+forward test that SKIPs because it was pointed at somebody else's Downloads
+folder is a forward test nobody runs.
 """
 import os
 import sys
 
 from PIL import Image
 
-from mark_readers import AxisCalibration, SeriesSpec, read_monochrome_marker_panel
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mark_readers import (AxisCalibration, SeriesSpec,             # noqa: E402
+                          read_monochrome_marker_panel)
 
-
-if len(sys.argv) != 2:
-    print("USAGE: python forward_test_real_monochrome.py /path/to/ID386_Fig2.png",
-          file=sys.stderr)
-    raise SystemExit(2)
-path = sys.argv[1]
+HERE = os.path.dirname(os.path.abspath(__file__))
+CANDIDATES = (os.path.join(HERE, "ID386_Fig2_publisher_898x1662.png"),
+              "/Users/minyeop/Downloads/ID386_Fig2_publisher_898x1662.png")
+path = sys.argv[1] if len(sys.argv) > 1 else next(
+    (p for p in CANDIDATES if os.path.exists(p)), CANDIDATES[0])
 if not os.path.exists(path):
     print("BLOCKED: publisher raster not found: %s" % path, file=sys.stderr)
     raise SystemExit(2)

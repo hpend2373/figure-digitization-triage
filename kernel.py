@@ -26,10 +26,24 @@ FIG_PANEL_RECON = ("MATCHED", "UNLISTED_PANELS_FOUND", "WORKLIST_OVERCOUNTS", "P
 # source's own wording; a placeholder there means the SD/SE question was never
 # settled, and getting it wrong scales the meta-analytic weight by sqrt(n). A
 # blank-only check cannot see these, so they are named explicitly.
+#: Wordings that are not an answer, however they are phrased. The first group is
+#: the obvious one - a blank cell wearing a label. The second was found by
+#: running the pilot: when a paper is silent, a careful extractor does not write
+#: "TBD", they write "probably SEM" or "inferred from the Figure 1 caption",
+#: because leaving it blank feels like losing information. Those passed. A
+#: hedge is a non-answer in a politer register, and on this field it decides
+#: whether the pooled weight is right or wrong by sqrt(n).
+#:
+#: "ESTIMATED" is deliberately NOT here: "estimated marginal means +/- SE" is a
+#: real caption, and a check that rejects it has become a word filter.
 FIG_UNRESOLVED_MARKERS = ("PLACEHOLDER", "UNRESOLVED", "TBD", "TODO", "UNKNOWN",
                           "UNCLEAR", "NOT STATED", "NOT SPECIFIED", "NOT REPORTED",
                           "NOT GIVEN", "NOT DEFINED", "ASSUMED", "PRESUMED",
-                          "GUESS", "FIXME", "XXX", "???", "HARNESS")
+                          "GUESS", "FIXME", "XXX", "???", "HARNESS",
+                          "INFERRED", "INFERENCE", "PROBABLY", "LIKELY",
+                          "PRESUMABLY", "APPEARS TO", "SEEMS TO", "BY ANALOGY",
+                          "DEDUCED", "IMPLIED", "SUSPECT", "BELIEVED",
+                          "TAKEN TO BE", "INTERPRETED AS")
 FIG_BOOL_TRUE = ("TRUE", "T", "YES", "Y", "1")
 FIG_BOOL_FALSE = ("FALSE", "F", "NO", "N", "0")
 FIG_ASSOCIATION_TYPES = {

@@ -1,1 +1,1 @@
-Panel_ID,Figure_ID,Unit_ID,Panel_Label,Mark_Type,Image_Path,Panel_X0,Panel_X1,Panel_Y0,Panel_Y1,Axis_X_Region,Axis_Y_Region,Axis_X_Scale,Axis_Y_Scale,Axis_X_Ticks,Axis_Y_Ticks,Baseline_Value,Association_Type,Config_ID,Panel_Mode,Note
+Panel_ID,Figure_ID,Unit_ID,Panel_Label,Mark_Type,Image_Path,Panel_X0,Panel_X1,Panel_Y0,Panel_Y1,Axis_X_Region,Axis_Y_Region,Axis_X_Scale,Axis_Y_Scale,Axis_X_Ticks,Axis_Y_Ticks,Baseline_Value,Panel_Disposition,Association_Type,Config_ID,Panel_Mode,Note

@@ -1,16 +1,20 @@
-# figure-digitization-triage — v7.6 (full package)
+# figure-digitization-triage — v7.7 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
 
-**v7.6 is the first real pilot: publication 397, all five figures, one run.**
-Two defects it found are fixed below. **v7.5 closed the two defects from the
+**v7.7 declares all 36 panels of publication 397, not 14.** The three defects
+from the v7.6 review are fixed below. **v7.5 closed the two defects from the
 v7.4 review**, on top of the three from
 v7.3 and the four from v7.2. Every fix in every round was reverted in a scratch
 copy and the suite re-run, so no scenario is decoration:
 
 | reverted | scenarios that fail |
 |---|---|
+| the panel-count reconciliation removed | 2 |
+| a non-extract panel needing no reason | 1 |
+| the queue back to a delimited string | 3 |
+| the stamp back to the reader version | 2 |
 | manifests loaded before the clear-up | 18 |
 | loader raising `SystemExit` again | 12 |
 | commit marker not ordered last | 1 |
@@ -24,17 +28,74 @@ copy and the suite re-run, so no scenario is decoration:
 | option range checks removed | 4 |
 | LINE_MONO accepting line style alone | 1 |
 
-## What the pilot did
+## HIGH (v7.6) — the pilot declared 14 panels of 36
+
+The count was right and the declaration was not. `pilot_397.py` split each
+printed figure into per-outcome *virtual* figures — `F397_4_HR`, `F397_4_SV`,
+`F397_4_CO` — gave each `Observed_Panel_Count=2`, and every one reported
+`MATCHED`. Twenty-two real panels had no row anywhere, sixteen of them target
+cardiovascular outcomes, and the panel reconciliation that exists to catch
+exactly this saw nothing wrong, because each virtual figure counted only the
+panels it had been handed.
+
+Four of the sixteen were Figure 3's TPR and finger-pulse-volume panels, which
+the released BAR_MONO reader could already do. **They are now read: 48 cells
+instead of 32.**
+
+Fixed in the manifest *and* in the validator, because a rule enforced only by
+whoever writes the file is not a rule:
+
+- **one `Figure_ID` per printed figure**, carrying the real count (8/8/6/6/8)
+- **`Panel_Disposition` on every panel** — `EXTRACT` / `NON_TARGET` /
+  `NO_SUMMARY_STATISTIC` / `DUPLICATE_OF_TABLE`. A non-extract panel needs no
+  unit, reader, calibration, series or positions — only a reason in `Note`,
+  because demanding the rest is what makes people delete the row. It runs to the
+  new `NOT_TARGETED` state.
+- **`PANEL_MANIFEST_INCOMPLETE`**: per figure, the number of `panel_manifest`
+  rows must equal `Observed_Panel_Count`. Under- and over-declaration both fail.
+  `FIGURE_NOT_FOUND` catches a panel pointing at a figure nobody declared.
+
+The two reconciliations are different and both are needed: the figure grain
+checks the figure against the **screen**, this checks the run against the
+**figure grain**.
+
+Skin temperature and skin conductance are `NON_TARGET` — real measurements,
+outside a cardiovascular review. All eight Figure 5 panels are
+`NO_SUMMARY_STATISTIC`: two named subjects beat by beat. Both are decisions
+somebody can now disagree with, rather than absences nobody can see.
+
+## MEDIUM (v7.6) — the manual queue could not be parsed
+
+A `Cell_Key` joins its factors with `;`. Joining *cells* with `;` too produced
+`ARM=FLUID;TIMEPOINT=0:30;ARM=FLUID;TIMEPOINT=1:00`, from which the cell
+boundaries cannot be recovered once the arity is not fixed. `Missing_Cells` is
+replaced by `Missing_Cells_JSON` (a JSON array) plus `Missing_Cell_Count`, and
+`manual_queue_cells.csv` carries one row per missing cell for anyone who would
+rather join than parse. The cell file is expanded from the list the runner
+already holds, not by re-parsing the string it just wrote.
+
+## MEDIUM (v7.6) — the stamp could not identify the code that produced it
+
+v7.5 and v7.6 both reported `Reader_Version` 7.2 while judging the same
+manifests differently, because the changes were in the gate, the option table
+and the run states. `READER_VERSION` moves only when a reader's *numbers* can
+change, which is right for a reader and useless for a run. The stamp now
+carries `Pipeline_Version` and `Code_SHA256` — one digest plus a per-file map
+over `run_batch.py`, `batch_manifests.py`, `grid_engine.py`, `mark_readers.py`,
+`bar_reader.py` and `kernel.py` — so a working copy with an edited gate is not
+the version it claims to be.
+
+## What the pilot does now
 
     python3 pilot_397.py
 
-14 panels, 128 declared cells, one run.
+36 panels, 336 declared cells, one run.
 
 | | panels | cells |
 |---|---|---|
-| read, all 4 of 4 cells each (BAR_MONO) | 8 | 32 |
-| `NO_READER_AVAILABLE` — solid/dashed lines | 4 | 96 declared, 0 read |
-| `MANUAL_POINT_READ` — single-subject traces | 2 | n/a |
+| read, 4 of 4 each (BAR_MONO, Figures 3 and 4) | 12 | **48** |
+| `NO_READER_AVAILABLE` — solid/dashed lines | 12 | 288 declared, 0 read |
+| `NOT_TARGETED` — skin temp, skin conductance, single-subject traces | 12 | n/a |
 | **`ACCEPTED`** | | **0** |
 
 Zero accepted, and that is the correct answer. Every one of the 32 readings is
@@ -49,7 +110,7 @@ responses to pre-HDT stand tests and post-HDT stand tests (3-min means)". Two
 different figures, one definition, and the definition does not reach the other.
 One sentence from a human unblocks all 32 cells.
 
-### Defect 1 the pilot found: one unreadable panel stopped every readable one
+### Defect the first pilot found: one unreadable panel stopped every readable one
 
 `MARK_TYPE_NOT_RELEASED` was a manifest *error*, so declaring the two
 solid/dashed line figures honestly rejected the whole batch — including the 32
@@ -68,7 +129,7 @@ Its series are still validated on the rules that reader *will* use — line styl
 declared, and two series not sharing one — so the manifest is right the day the
 reader ships rather than wrong and unnoticed.
 
-### Defect 2 the pilot found: a hedge passed where a placeholder was blocked
+### Defect the first pilot found: a hedge passed where a placeholder was blocked
 
 `UNRESOLVED_ERRORBAR_DEFINITION` blocked "TBD", "assumed SE" and "not stated".
 It did **not** block `"probably SEM"`, `"LIKELY SEM"`, `"inferred from the
@@ -455,13 +516,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 190 |
+| `test_run_batch.py` | 214 |
 | `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **703** |
+| **total** | **727** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

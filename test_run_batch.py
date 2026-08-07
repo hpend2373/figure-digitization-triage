@@ -267,6 +267,20 @@ def fr(rows, cols):
                         columns=cols)
 
 
+def validate_with_figures(panels=PANELS, series_rows=SERIES,
+                          positions=POSITION_ROWS, configs=CONFIGS, units=UNITS,
+                          figures=FIGURES):
+    """Validation WITH the figure grain, so panel counts can be reconciled."""
+    p = BM.validate_batch_manifests(
+        fr(panels, BM.panel_manifest_columns()),
+        fr(series_rows, BM.series_manifest_columns()),
+        fr(positions, BM.position_manifest_columns()),
+        fr(configs, BM.reader_config_columns()),
+        units=fr(units, GE.fig_unit_columns()),
+        figures=fr(figures, GE.fig_figure_columns()), file_root=ROOT)
+    return sorted(set(p["check"])) if len(p) else []
+
+
 def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
              configs=CONFIGS, units=UNITS):
     p = BM.validate_batch_manifests(
@@ -634,9 +648,14 @@ check("the clean scatter unit is unaffected and still accepted",
 
 # The whole-figure case the review named: publication 397, every panel rejected.
 _all_bad = [dict(u, Errorbar_Definition_Source="TBD") for u in UNITS]
+# Dropping a panel means the figure now has three, and the figure manifest has
+# to say so - a panel with no row is exactly what PANEL_MANIFEST_INCOMPLETE is
+# for, and this scenario is about QC, not about under-declaring.
 _mdir = write_manifests(os.path.join(ROOT, "m_allbad"), units=_all_bad,
                         panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
-                        series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"])
+                        series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"],
+                        figures=[dict(FIGURES[0], Observed_Panel_Count=3,
+                                      Worklist_Panel_Count=3)])
 _o = os.path.join(ROOT, "o_allbad")
 _sa = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
 _acc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
@@ -890,7 +909,9 @@ _mdir = write_manifests(os.path.join(ROOT, "m_split"),
                         panels=PANELS + _split_panels,
                         series_rows=SERIES + _split_series,
                         positions=POSITION_ROWS + _split_positions,
-                        units=_split_units)
+                        units=_split_units,
+                        figures=[dict(FIGURES[0], Observed_Panel_Count=6,
+                                      Worklist_Panel_Count=6)])
 _o = os.path.join(ROOT, "o_split")
 RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
 _sr = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
@@ -1074,6 +1095,139 @@ check("the run filled the figure manifest's WPD_Project_File itself",
       and bool(pd.read_csv(os.path.join(ODIR, "figure_manifest.csv"),
                            dtype=object).fillna("").iloc[0]["WPD_Project_File"]))
 
+print("a panel with no row is invisible, so every panel needs a row")
+# The figure grain reconciles the figure against the SCREEN. This reconciles the
+# RUN against the figure grain, and both are needed: publication 397 was
+# declared as fourteen panels of thirty-six with every figure reporting MATCHED,
+# because each figure counted only the panels it had been handed.
+check("declaring fewer panels than the figure says exist is rejected",
+      "PANEL_MANIFEST_INCOMPLETE" in validate_with_figures(
+          panels=[p for p in PANELS if p["Panel_ID"] != "P_FLAT"]),
+      "%s" % validate_with_figures(
+          panels=[p for p in PANELS if p["Panel_ID"] != "P_FLAT"]))
+check("and so is declaring more",
+      "PANEL_MANIFEST_INCOMPLETE" in validate_with_figures(
+          panels=PANELS + [panel("P_EXTRA", "U_LINE", "LINE_COLOR", LINE_IMG,
+                                 (100, 500, 40, 440))]))
+check("the reference batch, which declares all four, is clean",
+      validate_with_figures() == [], "%s" % validate_with_figures())
+check("a panel pointing at a figure the manifest does not declare is rejected",
+      "FIGURE_NOT_FOUND" in validate_with_figures(
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Figure_ID="F_GHOST")))
+
+# A panel that exists but is not a target still gets a row, and the row says so.
+_nt = [dict(p, Panel_Disposition="NON_TARGET", Unit_ID="", Mark_Type="",
+            Config_ID="", Note="thermoregulatory, outside this review")
+       if p["Panel_ID"] == "P_FLAT" else p for p in PANELS]
+_nt_series = [s for s in SERIES if s["Panel_ID"] != "P_FLAT"]
+_nt_pos = [q for q in POSITION_ROWS if q["Panel_ID"] != "P_FLAT"]
+check("a NON_TARGET panel needs no unit, reader, series or positions",
+      validate_with_figures(panels=_nt, series_rows=_nt_series,
+                            positions=_nt_pos) == [],
+      "%s" % validate_with_figures(panels=_nt, series_rows=_nt_series,
+                                   positions=_nt_pos))
+check("but it does need a reason a reviewer can disagree with",
+      "MISSING_DISPOSITION_REASON" in validate_with_figures(
+          panels=[dict(p, Note="") if p["Panel_ID"] == "P_FLAT" else p
+                  for p in _nt], series_rows=_nt_series, positions=_nt_pos))
+check("a disposition outside the vocabulary is rejected",
+      "BAD_PANEL_DISPOSITION" in validate_with_figures(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                        Panel_Disposition="MAYBE_LATER")))
+check("series left behind on a non-extract panel are rejected",
+      "SERIES_ON_NON_EXTRACT_PANEL" in validate_with_figures(
+          panels=_nt, positions=_nt_pos),
+      "series rows that will never be read must not sit there looking declared")
+
+_ntdir = write_manifests(os.path.join(ROOT, "m_nontarget"), panels=_nt,
+                         series_rows=_nt_series, positions=_nt_pos)
+_o = os.path.join(ROOT, "o_nontarget")
+_snt = RB.run_batch(_ntdir, _o, file_root=ROOT, run_date="2026-08-06")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_stt = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("a NON_TARGET panel runs to NOT_TARGETED, never read",
+      _stt.get("P_FLAT") == "NOT_TARGETED", "%s" % _stt)
+check("and the readable panels beside it still pass",
+      _stt.get("P_LINE") == "AUTO_PASS" and _stt.get("P_SCAT") == "AUTO_PASS",
+      "%s" % _stt)
+check("its reason reaches the run manifest, not just the manifest file",
+      "thermoregulatory" in _r[_r["Panel_ID"] == "P_FLAT"].iloc[0]["Detail"],
+      "%s" % _r[_r["Panel_ID"] == "P_FLAT"].iloc[0]["Detail"])
+check("NOT_TARGETED is in the declared state vocabulary",
+      "NOT_TARGETED" in BM.RUN_STATES)
+
+
+print("the manual queue can be parsed, not just read")
+# A Cell_Key already joins its factors with ";". Joining CELLS with ";" too
+# produced "ARM=FLUID;TIMEPOINT=0:30;ARM=FLUID;TIMEPOINT=1:00", from which the
+# cell boundaries cannot be recovered once the arity is not fixed.
+# Use a run that actually leaves cells missing. The reference batch queues two
+# panels with no missing-cell list, so every JSON check on it would pass on an
+# empty string and prove nothing - a vacuous scenario is worse than none.
+_jdir = write_manifests(
+    os.path.join(ROOT, "m_json"),
+    series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                       Colour_Hex="#0a7a10"))
+_jout = os.path.join(ROOT, "o_json")
+RB.run_batch(_jdir, _jout, file_root=ROOT, run_date="2026-08-06")
+_qq = pd.read_csv(os.path.join(_jout, "manual_queue.csv"), dtype=object).fillna("")
+check("the fixture run really does leave multi-factor cells missing",
+      any(int(v) >= 2 for v in _qq["Missing_Cell_Count"]),
+      "%s" % list(_qq["Missing_Cell_Count"]))
+check("Missing_Cells is JSON, not a delimited string",
+      "Missing_Cells_JSON" in _qq.columns and "Missing_Cells" not in _qq.columns,
+      "%s" % sorted(_qq.columns))
+def _as_cells(value):
+    """Parse one queue row's cell list, or None if it is not JSON at all."""
+    try:
+        parsed = json.loads(value or "[]")
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
+_parsed = [_as_cells(v) for v in _qq["Missing_Cells_JSON"]]
+check("every row parses as a list of whole Cell_Keys",
+      all(v is not None for v in _parsed)
+      and all(isinstance(c, str) for v in _parsed for c in v),
+      "a delimited string is back - cell boundaries cannot be recovered from "
+      "it once a Cell_Key has more than one factor")
+_parsed = [v for v in _parsed if v is not None]
+check("and each parsed cell round-trips through the Cell_Key parser",
+      all(GE.fig_parse_cell_key(c) for v in _parsed for c in v),
+      "%s" % [c for v in _parsed for c in v][:3])
+check("the count column agrees with the parsed list",
+      all(int(r["Missing_Cell_Count"]) == len(_as_cells(r["Missing_Cells_JSON"]) or [])
+          for _, r in _qq.iterrows()))
+_qc = pd.read_csv(os.path.join(_jout, "manual_queue_cells.csv"), dtype=object).fillna("")
+check("manual_queue_cells.csv carries one row per missing cell",
+      len(_qc) == sum(len(v) for v in _parsed), "%d vs %d" % (len(_qc), sum(len(v) for v in _parsed)))
+check("and each of those rows names a single parseable cell",
+      all(GE.fig_parse_cell_key(c) for c in _qc["Cell_Key"]) if len(_qc) else True)
+
+
+print("the stamp identifies the code that produced it")
+check("the stamp carries a pipeline version distinct from the reader version",
+      stamp["Pipeline_Version"] == RB.PIPELINE_VERSION
+      and stamp["Pipeline_Version"] != stamp["Reader_Version"],
+      "pipeline %r vs reader %r" % (stamp.get("Pipeline_Version"),
+                                    stamp.get("Reader_Version")))
+check("and a hash over every module that can change a verdict",
+      len(stamp["Code_SHA256"]) == 64
+      and set(stamp["Code_SHA256_By_File"]) == set(RB.VERSIONED_MODULES),
+      "%s" % sorted(stamp.get("Code_SHA256_By_File", {})))
+check("the gate, the option table and the readers are all in that set",
+      {"grid_engine.py", "batch_manifests.py", "mark_readers.py", "kernel.py"}
+      <= set(RB.VERSIONED_MODULES), "%s" % sorted(RB.VERSIONED_MODULES))
+_edited = os.path.join(ROOT, "edited_module.py")
+open(_edited, "w").write("# a working copy is not the version it says it is\n")
+_before = RB.code_hash()
+check("the code hash is stable across runs of the same code",
+      RB.code_hash() == _before)
+check("and every module hashes to something different from its neighbours",
+      len(set(RB.pipeline_hashes().values())) == len(RB.VERSIONED_MODULES))
+
+
 print("a mark type with no reader is queued, not treated as a bad manifest")
 # One panel nobody can read yet must not stop every panel that can be. On
 # publication 397 that was two line figures against twenty-four readable bar
@@ -1100,8 +1254,8 @@ check("and the readable panels in the same batch still pass",
 _q = pd.read_csv(os.path.join(_o, "manual_queue.csv"), dtype=object).fillna("")
 _qrow = _q[_q["Panel_ID"] == "P_LINE"]
 check("its queue row names the cells nobody can read yet",
-      len(_qrow) and bool(_qrow.iloc[0]["Missing_Cells"]),
-      "%s" % (list(_qrow["Missing_Cells"]) if len(_qrow) else "no queue row"))
+      len(_qrow) and int(_qrow.iloc[0]["Missing_Cell_Count"]) > 0,
+      "%s" % (list(_qrow["Missing_Cells_JSON"]) if len(_qrow) else "no queue row"))
 check("and says why, pointing at where the work stands",
       len(_qrow) and "wip/" in _qrow.iloc[0]["Detail"],
       "%s" % (list(_qrow["Detail"]) if len(_qrow) else ""))

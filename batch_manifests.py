@@ -80,9 +80,24 @@ SCATTER_ASSOCIATION_TYPES = ("PEARSON_R", "SPEARMAN_RHO", "KENDALL_TAU",
 #: queue row instead of attempting it and reporting a plausible number.
 PANEL_MODES = ("AUTO", "MANUAL")
 
+#: Why a panel that EXISTS is or is not being extracted. Every panel in a
+#: declared figure gets a row, including the ones nobody wants - deleting them
+#: is what let a five-figure publication be declared as fourteen panels when it
+#: has thirty-six, with every figure reporting MATCHED.
+PANEL_DISPOSITIONS = (
+    "EXTRACT",                 # a target outcome, to be read
+    "NON_TARGET",              # a real panel, outside this review's outcomes
+    "NO_SUMMARY_STATISTIC",    # individual traces, n=1, nothing to pool
+    "DUPLICATE_OF_TABLE",      # the same numbers are tabulated in the text
+)
+
+#: Dispositions that mean "do not read this", so the runner does not try.
+NON_EXTRACT_DISPOSITIONS = tuple(d for d in PANEL_DISPOSITIONS if d != "EXTRACT")
+
 #: Terminal states a panel can reach in a run. Every panel lands on exactly one.
 RUN_STATES = (
     "AUTO_PASS",                 # read, converted, and clean through the gate
+    "NOT_TARGETED",              # a real panel this review does not extract
     "NO_READER_AVAILABLE",       # correctly declared, but no released reader
     "MANUAL_POINT_READ",         # reader produced nothing usable; hand-digitize
     "SERIES_IDENTITY_UNRESOLVED",  # marks found, but which series is ambiguous
@@ -201,7 +216,7 @@ def panel_manifest_columns():
         "Axis_X_Scale", "Axis_Y_Scale",
         # "v1:px1;v2:px2" - at least two points per axis in use
         "Axis_X_Ticks", "Axis_Y_Ticks",
-        "Baseline_Value",
+        "Baseline_Value", "Panel_Disposition",
         # which association a scatter panel is meant to yield. It is a run
         # instruction, not a finding: the paper says which statistic it reports,
         # and the reader must not pick one by looking at the points.
@@ -356,7 +371,7 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
 
 
 def validate_batch_manifests(panels, series, positions, configs, units=None,
-                             file_root=".", check_files=True):
+                             figures=None, file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
 
     Returns a DataFrame of problems - empty means the run may proceed. The
@@ -391,9 +406,14 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     if units is not None:
         for _, u in units.iterrows():
             unit_index[str(u.get("Unit_ID", "")).strip()] = u
+    figure_index = {}
+    if figures is not None:
+        for _, f in figures.iterrows():
+            figure_index[str(f.get("Figure_ID", "")).strip()] = f
 
     # -------------------------------------------------------------- panels
-    panel_index, panel_mark, mark_by_config = {}, {}, {}
+    panel_index, panel_mark, mark_by_config, panel_disposition = {}, {}, {}, {}
+    panels_by_figure = {}
     for i, r in panels.iterrows():
         line = "panels:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
@@ -404,9 +424,30 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag(line, "DUPLICATE_PANEL_ID", pid)
             continue
         panel_index[pid] = r
-        for c in ("Figure_ID", "Unit_ID", "Mark_Type", "Image_Path"):
+        panels_by_figure.setdefault(str(r.get("Figure_ID", "")).strip(), []).append(pid)
+        disposition = str(r.get("Panel_Disposition", "")).strip().upper() or "EXTRACT"
+        if disposition not in PANEL_DISPOSITIONS:
+            flag(line, "BAD_PANEL_DISPOSITION",
+                 "Panel_Disposition=%s (expected %s)"
+                 % (disposition, "/".join(PANEL_DISPOSITIONS)))
+            disposition = "EXTRACT"
+        panel_disposition[pid] = disposition
+        required = ("Figure_ID", "Image_Path")
+        if disposition == "EXTRACT":
+            required += ("Unit_ID", "Mark_Type")
+        for c in required:
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
+        if disposition in NON_EXTRACT_DISPOSITIONS:
+            # A record that this panel exists and why it is not being read. It
+            # needs no reader, no calibration, no series and no positions - only
+            # a reason. Demanding the rest is what makes people delete the row.
+            if blank(r.get("Note")):
+                flag(line, "MISSING_DISPOSITION_REASON",
+                     "Panel_Disposition=%s - say in Note why this panel is not "
+                     "extracted, or a reviewer cannot tell a decision from an "
+                     "oversight" % disposition)
+            continue
         mark = str(r.get("Mark_Type", "")).strip().upper()
         # An unreleased mark type is NOT a manifest error. The file is correct;
         # the software is behind it. Rejecting the batch would mean one panel
@@ -516,6 +557,32 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Association_Type is set on a %s panel, which yields no "
                  "association" % mark)
 
+    # Every panel the figure says exists must have a row here. Without this the
+    # batch layer can quietly declare a subset: publication 397 was declared as
+    # fourteen panels of thirty-six, and every figure still reported MATCHED
+    # because each virtual figure counted only the panels it had been given.
+    # The figure grain reconciles the figure against the SCREEN; this reconciles
+    # the run against the figure grain, and both are needed.
+    for fid, f in figure_index.items():
+        declared = panels_by_figure.get(fid, [])
+        observed = f.get("Observed_Panel_Count")
+        try:
+            observed = int(float(str(observed).strip()))
+        except (TypeError, ValueError):
+            continue                       # the figure grain reports that itself
+        if len(declared) != observed:
+            flag("figures:%s" % fid, "PANEL_MANIFEST_INCOMPLETE",
+                 "the figure manifest says %d panels and panel_manifest declares "
+                 "%d (%s). Record every panel, using Panel_Disposition to say "
+                 "which are not extracted - a panel with no row is invisible to "
+                 "reconciliation" % (observed, len(declared),
+                                     ", ".join(sorted(declared)) or "none"))
+    for fid in sorted(set(panels_by_figure) - set(figure_index)):
+        if figure_index:
+            flag("panels:%s" % fid, "FIGURE_NOT_FOUND",
+                 "panels reference Figure_ID=%s, which the figure manifest does "
+                 "not declare" % fid)
+
     # -------------------------------------------------------------- series
     seen_series, factors_by_panel = set(), {}
     for i, r in series.iterrows():
@@ -527,6 +594,12 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         if pid not in panel_index:
             flag(line, "PANEL_NOT_FOUND", pid)
+            continue
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
+            flag(line, "SERIES_ON_NON_EXTRACT_PANEL",
+                 "%s is %s, so its series will never be read; delete the row or "
+                 "change the disposition"
+                 % (pid, panel_disposition.get(pid)))
             continue
         if (pid, sid) in seen_series:
             flag(line, "DUPLICATE_SERIES_ID", "%s/%s" % (pid, sid))
@@ -596,12 +669,16 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Bar_Fill_Pattern required")
 
     for pid, r in panel_index.items():
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
+            continue
         if not any(p == pid for p, _ in seen_series):
             flag("panels:%s" % pid, "PANEL_HAS_NO_SERIES",
                  "nothing declares what the marks in this panel mean")
 
     # Two series of one panel that are told apart by nothing are not two series.
     for pid in panel_index:
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
+            continue
         mark = panel_mark.get(pid, "")
         rows = [r for _, r in series.iterrows()
                 if str(r.get("Panel_ID", "")).strip() == pid]
@@ -633,6 +710,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         if pid not in panel_index:
             flag(line, "PANEL_NOT_FOUND", pid)
+            continue
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
             continue
         if (pid, qid) in seen_pos:
             flag(line, "DUPLICATE_POSITION_ID", "%s/%s" % (pid, qid))
@@ -677,6 +756,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "or the reader will be given a grid it does not use")
 
     for pid, mark in panel_mark.items():
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
+            continue
         if mark in UNRELEASED_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
             flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
                  "%s will read at declared x positions and none are declared"
@@ -687,6 +768,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 
     # A factor cannot be both the series axis and the position axis of one panel.
     for pid in panel_index:
+        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
+            continue
         s_factors = {str(r.get("Factor_Name", "")).strip().upper()
                      for _, r in series.iterrows()
                      if str(r.get("Panel_ID", "")).strip() == pid

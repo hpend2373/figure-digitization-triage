@@ -58,6 +58,36 @@ import mark_readers as MR                                          # noqa: E402
 #: `n_slots` came to be accepted for BAR_MONO, pass validation, and then raise
 #: TypeError mid-run - which surfaced as PANEL_GEOMETRY_UNRESOLVED, a message
 #: about the figure for a defect in this table.
+#: The version of the whole pipeline, not of one reader. `MR.READER_VERSION`
+#: moves only when a reader's numbers can change, which is right for a reader
+#: and useless for a run: v7.5 and v7.6 both report reader 7.2 while judging the
+#: same manifests differently, because the CHANGES were in the gate, the option
+#: table and the run states. A stamp has to identify the code that produced it.
+PIPELINE_VERSION = "7.7"
+
+#: Modules whose contents decide a verdict. Hashed into every stamp, so two runs
+#: that disagree can be told apart even between released versions - a working
+#: copy with an edited grid_engine.py is not the version it says it is.
+VERSIONED_MODULES = ("run_batch.py", "batch_manifests.py", "grid_engine.py",
+                     "mark_readers.py", "bar_reader.py", "kernel.py")
+
+
+def pipeline_hashes():
+    """SHA-256 of each module that can change a verdict, by filename."""
+    out = {}
+    for name in VERSIONED_MODULES:
+        path = os.path.join(HERE, name)
+        if os.path.exists(path):
+            out[name] = file_sha256(path)
+    return out
+
+
+def code_hash():
+    """One digest over all of them, for a quick 'same code?' comparison."""
+    joined = json.dumps(pipeline_hashes(), sort_keys=True)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
 def reader_functions():
     from bar_reader import read_bar_panel
     return {
@@ -89,7 +119,18 @@ RUN_MANIFEST_COLUMNS = [
 
 MANUAL_QUEUE_COLUMNS = [
     "Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
-    "Missing_Cells", "Image_Path", "Panel_Box", "Detail",
+    # JSON, not a delimited string. A Cell_Key already joins its factors with
+    # ";", so joining CELLS with ";" too produced
+    # "ARM=FLUID;TIMEPOINT=0:30;ARM=FLUID;TIMEPOINT=1:00" - from which the cell
+    # boundaries cannot be recovered at all once the arity is not fixed.
+    "Missing_Cells_JSON", "Missing_Cell_Count",
+    "Image_Path", "Panel_Box", "Detail",
+]
+
+#: One row per missing cell, for anyone who would rather join than parse.
+MANUAL_QUEUE_CELL_COLUMNS = [
+    "Panel_ID", "Figure_ID", "Unit_ID", "Run_State", "Cell_Key", "Image_Path",
+    "Panel_Box", "Detail",
 ]
 
 
@@ -220,6 +261,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
     statistic = _upper(unit.get("Statistic_Type")) if unit is not None else ""
+    disposition = _upper(panel.get("Panel_Disposition")) or "EXTRACT"
+    if disposition in BM.NON_EXTRACT_DISPOSITIONS:
+        return PanelOutcome("NOT_TARGETED",
+                            detail="%s: %s" % (disposition,
+                                               _s(panel.get("Note")) or "no reason given"))
     mode = _upper(panel.get("Panel_Mode")) or "AUTO"
     if mark in BM.UNRELEASED_MARK_TYPES:
         # Decided before the image is opened: there is nothing to try.
@@ -608,6 +654,7 @@ CANONICAL_OUTPUTS = (
     "figure_values_accepted.csv", "figure_values_raw.csv", "figure_values.csv",
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
+    "manual_queue_cells.csv",
 )
 CANONICAL_DIRS = ("raw", "projects")
 STAGING = ".staging"
@@ -708,8 +755,10 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
     """
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/3",
+            "schema": "figure-digitization-triage/run-stamp/4",
             "Status": status, "Run_Date": run_date,
+            "Pipeline_Version": PIPELINE_VERSION,
+            "Code_SHA256": code_hash(), "Code_SHA256_By_File": pipeline_hashes(),
             "Reader_Version": MR.READER_VERSION, "Config_SHA256": cfg_hash,
             "Manifest_SHA256": manifest_hashes or {},
             "Panels": panels, "Values_Read": read, "Values_Accepted": accepted,
@@ -744,7 +793,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
 
     problems = BM.validate_batch_manifests(
         m["panels"], m["series"], m["positions"], m["configs"],
-        units=m["units"], file_root=file_root, check_files=check_files)
+        units=m["units"], figures=m["figures"], file_root=file_root,
+        check_files=check_files)
     if len(problems):
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
                         index=False)
@@ -783,6 +833,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
     values, run_rows, queue_rows, projects_by_figure = [], [], [], {}
+    queue_missing = []
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -824,12 +875,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 "Unit_ID": _s(panel.get("Unit_ID")),
                 "Mark_Type": _upper(panel.get("Mark_Type")),
                 "Run_State": outcome.state,
-                "Missing_Cells": ";".join(outcome.missing),
+                "Missing_Cells_JSON": json.dumps(outcome.missing),
+                "Missing_Cell_Count": len(outcome.missing),
                 "Image_Path": image_path,
                 "Panel_Box": ",".join(_s(panel.get(c)) for c in
                                       ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")),
                 "Detail": outcome.detail,
             })
+            queue_missing.append(list(outcome.missing))
 
     values_df = pd.DataFrame(
         [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in values],
@@ -867,10 +920,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             queue_rows.append({
                 "Panel_ID": row["Panel_ID"], "Figure_ID": row["Figure_ID"],
                 "Unit_ID": uid, "Mark_Type": row["Mark_Type"],
-                "Run_State": "QC_FAILED", "Missing_Cells": "",
+                "Run_State": "QC_FAILED", "Missing_Cells_JSON": "[]",
+                "Missing_Cell_Count": 0,
                 "Image_Path": row["Image_Path"], "Panel_Box": "",
                 "Detail": row["Detail"],
             })
+            queue_missing.append([])
 
     run_df = pd.DataFrame(run_rows, columns=RUN_MANIFEST_COLUMNS)
     queue_df = pd.DataFrame(queue_rows, columns=MANUAL_QUEUE_COLUMNS)
@@ -931,6 +986,17 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                        index=False)
     run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
+    # Expanded from the list the runner already holds, not by re-parsing the
+    # string it just serialised. A round-trip through a delimited format is
+    # where cell boundaries get lost, and this file exists precisely so nobody
+    # has to guess where they are.
+    cell_rows = []
+    for q, cells in zip(queue_rows, queue_missing):
+        for cell in cells:
+            cell_rows.append({c: (cell if c == "Cell_Key" else q.get(c, ""))
+                              for c in MANUAL_QUEUE_CELL_COLUMNS})
+    pd.DataFrame(cell_rows, columns=MANUAL_QUEUE_CELL_COLUMNS).to_csv(
+        os.path.join(work_dir, "manual_queue_cells.csv"), index=False)
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,

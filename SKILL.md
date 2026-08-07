@@ -152,9 +152,11 @@ If the source supplies no panel letters, assign stable reading-order labels
 who did the counting.
 
 `run_batch.py` stops at `figure_values_machine_qc.csv`.  Nothing it writes is
-poolable.  Each passing panel also gets `review/<Panel_ID>_overlay.png` — the
-panel as printed with every mark the reader placed drawn and labelled on it —
-and a row in `review_queue.csv` carrying `Review_Subject_SHA256`: a hash over
+poolable.  Each passing panel gets one `review_queue.csv` row whose
+`Review_Mode` names the artifact a reviewer must open — almost always
+`review/<Panel_ID>_overlay.png`, the panel as printed with every mark the reader
+placed drawn on it, and `WPD_ONLY` with the project when that picture could not
+be drawn.  Every such row carries `Review_Subject_SHA256`: a hash over
 the run row, every manifest, the environment record, every machine-QC value of
 that panel with its `Cell_Key`, **and every artifact the panel produced**
 (overlay, WPD project, raw marks, point files), each by content.  A person fills

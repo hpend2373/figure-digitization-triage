@@ -466,6 +466,41 @@ for _label, _target, _edit in (
           "%s" % sorted(os.listdir(_tamper_out)))
 
 print()
+print("a run stamp that cannot be read is a refusal, not a traceback")
+# Every other file this module reads is guarded; `run_stamp.json` was not, and
+# the accepted file and the previous stamp are deleted before it is opened - so
+# a truncated one raised out of the finalizer leaving the run with no result
+# AND no stamp explaining the absence.
+for _label, _write in (
+        ("truncated JSON", lambda p: open(p, "a", encoding="utf-8").write("{{")),
+        ("a JSON list", lambda p: open(p, "w", encoding="utf-8").write("[1, 2]")),
+        ("a bare scalar", lambda p: open(p, "w", encoding="utf-8").write("42")),
+        ("bytes that are not UTF-8", lambda p: open(p, "wb").write(b"\xff\xfe{}")),
+        ("nothing at all", lambda p: open(p, "w", encoding="utf-8").write(""))):
+    _s_out, _ = fresh_run("run_stamp_%d" % (abs(hash(_label)) % 10 ** 6))
+    _sq = pd.read_csv(os.path.join(_s_out, "review_queue.csv"), dtype=object)
+    _srv = review([dict(Review_ID="R001", Panel_ID="P1",
+                        Review_Subject_SHA256=_sq.loc[0, "Review_Subject_SHA256"],
+                        Reviewer_ID="RV_H", Decision="APPROVED",
+                        Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                  os.path.join(_s_out, "value_review.csv"))
+    _write(os.path.join(_s_out, "run_stamp.json"))
+    try:
+        _sr = FIN.finalize(_s_out, review_path=_srv, run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    except Exception as _exc:
+        _sr = dict(status="RAISED %s" % type(_exc).__name__, accepted=0)
+    check("a run stamp that is %s is refused, not raised" % _label,
+          _sr["status"] == "RUN_NOT_FINALIZABLE" and _sr["accepted"] == 0,
+          "%s" % _sr["status"])
+    check("  and the refusal is itself on the record (%s)" % _label,
+          os.path.exists(os.path.join(_s_out, "finalize_stamp.json")),
+          "%s" % sorted(os.listdir(_s_out)))
+    check("  and nothing poolable survives it (%s)" % _label,
+          not os.path.exists(os.path.join(_s_out, "figure_values_accepted.csv")))
+
+
+print()
 print("every failure ends in a stamp, including one it cannot parse")
 # Hashing is bytes; parsing is interpretation. Doing them the other way round
 # meant a machine-QC CSV with a broken quote raised out of pd.read_csv before
@@ -521,10 +556,14 @@ review([dict(Review_ID="R001", Panel_ID="P1",
        os.path.join(_mv_src, "value_review.csv"))
 _mv_dst = os.path.join(ROOT, "moved_elsewhere")
 shutil.move(_mv_src, _mv_dst)
+# No --manifests. The stamp records the absolute directory the run used, which
+# is a path on the machine the run happened on; a `manifests/` directory sitting
+# inside the run travels with it, and is now looked for first. Without that, a
+# run folder handed to somebody else needed the sender to also explain where
+# their manifests had been.
 _moved = subprocess.run(
     [sys.executable, os.path.join(HERE, "finalize_batch.py"), _mv_dst,
-     "--review", os.path.join(_mv_dst, "value_review.csv"),
-     "--manifests", os.path.join(_mv_dst, "manifests"), "--date", "2026-08-06"],
+     "--review", os.path.join(_mv_dst, "value_review.csv"), "--date", "2026-08-06"],
     capture_output=True, text=True, cwd=tempfile.gettempdir())
 check("a moved run finalizes from an unrelated working directory",
       _moved.returncode == 0
@@ -554,6 +593,44 @@ check("and none of them names the directory the run happened in",
       not any(os.path.isabs(v) for v in _mv_refs)
       and not any(os.path.isabs(v) for v in _mv_q["Overlay_File"] if v),
       "%s" % [v for v in _mv_refs if os.path.isabs(v)][:3])
+
+
+# Bytes, not decoded text. Text hashing goes through an encoding and a newline
+# convention, so a file that does not decode cannot be hashed at all - and the
+# thing being protected is the file on disk, not a string derived from it.
+_bh_out, _ = fresh_run("run_bytehash")
+_bh_stamp = json.load(open(os.path.join(_bh_out, "run_stamp.json")))
+check("the run hashes its outputs as bytes",
+      all(_bh_stamp["Output_SHA256"][n] == RB.file_sha256(os.path.join(_bh_out, n))
+          for n in _bh_stamp["Output_SHA256"]),
+      "%s" % sorted(_bh_stamp["Output_SHA256"]))
+check("and the finalizer checks them the same way",
+      all(n in _bh_stamp["Output_SHA256"] for n in FIN.VERIFIED_OUTPUTS),
+      "%s" % sorted(set(FIN.VERIFIED_OUTPUTS) - set(_bh_stamp["Output_SHA256"])))
+# The difference is reachable. Text hashing opens the file as UTF-8, so an
+# output corrupted with bytes that are not valid UTF-8 raised out of the
+# verifier instead of failing it - after the accepted file and stamp were
+# already gone.
+_bh_rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                      Review_Subject_SHA256=pd.read_csv(
+                          os.path.join(_bh_out, "review_queue.csv"),
+                          dtype=object).loc[0, "Review_Subject_SHA256"],
+                      Reviewer_ID="RV_H", Decision="APPROVED",
+                      Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                os.path.join(_bh_out, "value_review.csv"))
+with open(os.path.join(_bh_out, "run_manifest.csv"), "ab") as _fh:
+    _fh.write(b"\xff\xfe not utf-8\n")
+try:
+    _bh_r = FIN.finalize(_bh_out, review_path=_bh_rv, run_date="2026-08-06",
+                         today=datetime.date(2026, 8, 6))
+except Exception as _exc:
+    _bh_r = dict(status="RAISED %s" % type(_exc).__name__, accepted=0)
+check("an output corrupted with non-UTF-8 bytes is refused, not raised",
+      _bh_r["status"] == "RUN_ARTIFACT_MODIFIED" and _bh_r["accepted"] == 0,
+      "%s" % _bh_r["status"])
+check("  and it leaves a stamp saying so",
+      os.path.exists(os.path.join(_bh_out, "finalize_stamp.json"))
+      and not os.path.exists(os.path.join(_bh_out, "figure_values_accepted.csv")))
 
 
 print()
@@ -702,9 +779,9 @@ _fs = json.load(open(os.path.join(_clean_out, "finalize_stamp.json")))
 check("a clean finalization commits and records what it committed",
       _ok2["status"] == "FINALIZED" and len(_fs["Accepted_SHA256"]) == 64
       and len(_fs["Run_Stamp_SHA256"]) == 64, "%s" % _fs)
-with open(os.path.join(_clean_out, FIN.FINALIZE_MARKER), encoding="utf-8") as _fh:
-    check("and the recorded hash is the file that landed",
-          RB.sha256_of_text(_fh.read()) == _fs["Accepted_SHA256"])
+check("and the recorded hash is the file that landed",
+      RB.file_sha256(os.path.join(_clean_out, FIN.FINALIZE_MARKER))
+      == _fs["Accepted_SHA256"])
 # The stamp named the review file by path and said nothing about its contents,
 # so "which decisions produced this accepted file" was answerable only by
 # trusting that the file had not been edited since.

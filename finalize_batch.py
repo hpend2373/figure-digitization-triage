@@ -276,8 +276,7 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
             flag("run", "RUN_ARTIFACT_MODIFIED", "%s is gone" % name)
             ok = False
             continue
-        with open(path, encoding="utf-8") as fh:
-            actual = RB.sha256_of_text(fh.read())
+        actual = RB.file_sha256(path)
         if actual != recorded.get(name):
             flag("run", "RUN_ARTIFACT_MODIFIED",
                  "%s hashes to %s..., the run recorded %s.... It was edited "
@@ -424,14 +423,32 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     if not os.path.exists(run_stamp_path):
         run_stamp = {}
         return stop("RUN_NOT_FINALIZABLE", "no run_stamp.json in %s" % run_dir)
-    with open(run_stamp_path, encoding="utf-8") as fh:
-        run_stamp_text = fh.read()
-    run_stamp_sha = RB.sha256_of_text(run_stamp_text)
-    run_stamp = json.loads(run_stamp_text)
-    # The run says where its manifests were. Defaulting to RUN_DIR/manifests
-    # meant the README's own three commands - compile to one directory, run to
-    # another - produced a run the finalizer could not read the registry for.
-    manifest_dir = (manifest_dir or _s(run_stamp.get("Manifest_Dir"))
+    # Guarded, like every other file this module reads. It was not, and the
+    # accepted file and the previous stamp are deleted before this point - so
+    # a truncated or non-UTF-8 `run_stamp.json` raised out of the finalizer
+    # leaving the run with no result AND no stamp explaining the absence, which
+    # is the one outcome this module is supposed to make impossible.
+    run_stamp_sha = RB.file_sha256_or_blank(run_stamp_path)
+    try:
+        with open(run_stamp_path, encoding="utf-8") as fh:
+            run_stamp = json.load(fh)
+        if not isinstance(run_stamp, dict):
+            raise ValueError("run_stamp.json holds a %s, not an object"
+                             % type(run_stamp).__name__)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        run_stamp = {}
+        return stop("RUN_NOT_FINALIZABLE",
+                    "run_stamp.json could not be interpreted (%s: %s)"
+                    % (type(exc).__name__, exc))
+    # Where the manifests are, in the order that survives a moved run. The
+    # stamp records an absolute path, so a run folder handed to somebody else
+    # named a directory on the machine it was produced on; a `manifests/`
+    # directory sitting inside the run is the one answer that travels with it.
+    manifest_dir = (manifest_dir
+                    or (os.path.join(run_dir, "manifests")
+                        if os.path.isdir(os.path.join(run_dir, "manifests"))
+                        else "")
+                    or _s(run_stamp.get("Manifest_Dir"))
                     or os.path.join(run_dir, "manifests"))
     if run_stamp.get("Status") != "RAN":
         return stop("RUN_NOT_FINALIZABLE",
@@ -520,8 +537,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     os.makedirs(staging, exist_ok=True)
     staged_accepted = os.path.join(staging, FINALIZE_MARKER)
     keep.to_csv(staged_accepted, index=False)
-    with open(staged_accepted, encoding="utf-8") as fh:
-        accepted_sha = RB.sha256_of_text(fh.read())
+    accepted_sha = RB.file_sha256(staged_accepted)
     stamp("FINALIZED", "", approved=len(approved), accepted=len(keep),
           accepted_sha=accepted_sha, directory=staging)
     try:

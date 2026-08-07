@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.21 (full package)
+# figure-digitization-triage — v7.22 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -159,6 +159,55 @@ Also from the same review: the run records `Manifest_Dir`, so the finalizer
 finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
+
+## v7.22 review — failure durability
+
+No accepted-value defect this round. Four things that make a run harder to
+audit or harder to hand over.
+
+### 1. A run with nothing automatic in it wrote no figure manifest
+
+The figure manifest's **write** sat inside `if projects_by_panel and
+"WPD_Project_File" in figures.columns` — the condition that decides whether the
+project column needs filling in. So a batch where every panel was manual,
+unreadable or unsupported produced no `figure_manifest.csv` at all, while
+`CANONICAL_OUTPUTS` and the documentation both call it a run output. The runs
+with nothing automatic in them are exactly the ones somebody audits by hand.
+
+Only the column is conditional now; the write is not. Revert: 1.
+
+### 2. A moved run could not find its own manifests
+
+Outputs became portable at 7.21, but `run_stamp.json` records `Manifest_Dir` as
+the absolute path the run used — a directory on the machine the run happened
+on. The 7.21 move test passed `--manifests` explicitly, so it never exercised
+the default. A `manifests/` directory sitting inside the run travels with it and
+is now looked for first: explicit `--manifests`, then `RUN_DIR/manifests` if it
+exists, then the stamp's record. The move test no longer passes `--manifests`.
+Revert: 1.
+
+### 3. `run_stamp.json` was the one file read without a guard
+
+Every other file this module reads is guarded — and the accepted file and the
+previous stamp are deleted *before* the stamp is opened. So a truncated stamp,
+a stamp holding a list, or one with bytes that are not UTF-8 raised out of the
+finalizer and left the run with no result **and** no stamp explaining the
+absence, which is the single outcome this module exists to make impossible.
+Five malformed shapes, each a scenario. Revert: 10.
+
+Output hashing moved from decoded text to bytes at the same time, on both
+sides. That is not cosmetic: `sha256_of_text(open(path, encoding="utf-8")
+.read())` *raises* on a file that is not valid UTF-8, so an output corrupted
+with stray bytes came out of the verifier as a traceback rather than as
+`RUN_ARTIFACT_MODIFIED`. Revert: 2.
+
+### 4. One sentence in `SKILL.md` still promised an overlay
+
+The run steps branch on `Review_Mode` correctly; the protocol body further down
+still said "each passing panel also gets `review/<Panel_ID>_overlay.png`",
+which is the contract the code stopped holding when `WPD_ONLY` appeared. The
+suite now refuses both that sentence and the old unconditional instruction by
+exact string, so the two halves of the document cannot drift apart again.
 
 ## v7.21 review — a scatter panel is all or nothing, and a run is portable
 
@@ -1506,17 +1555,17 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 451 |
+| `test_run_batch.py` | 455 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
-| `test_finalize.py` | 129 |
+| `test_finalize.py` | 148 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 92 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 18 |
-| **total** | **1334** |
+| **total** | **1357** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

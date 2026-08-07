@@ -286,6 +286,15 @@ for status in ("MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "DEMO_OUTPUT_REFUSED",
                "INTERNAL_ERROR", "RUN_ARTIFACT_MODIFIED", "NOTHING_APPROVED",
                "FINALIZED"):
     assert status in skill_text, "SKILL.md does not say what %s means" % status
+# The run steps were corrected to branch on Review_Mode; the protocol body
+# further down still said every passing panel gets an overlay, which is the
+# contract the code stopped holding when WPD_ONLY appeared.
+assert "WPD_ONLY" in skill_text and "Review_Mode" in skill_text, (
+    "SKILL.md does not tell a reviewer what to open when there is no overlay")
+for stale in ("Each passing panel also gets `review/",
+              "open review/<Panel_ID>_overlay.png for every row"):
+    assert stale not in skill_text, (
+        "SKILL.md still says %r, which contradicts Review_Mode=WPD_ONLY" % stale)
 assert "sections to add" not in skill_text, (
     "SKILL.md is still written as an addendum to some other document")
 assert not os.path.exists(os.path.join(HERE, "SKILL_ADDENDUM.md")), (

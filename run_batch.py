@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.21"
+PIPELINE_VERSION = "7.22"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -1535,7 +1535,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             (";".join(by_figure.get(_s(r.get("Figure_ID")), []))
              if BM.blank(r.get("WPD_Project_File")) else r.get("WPD_Project_File"))
             for _, r in figures.iterrows()]
-        figures.to_csv(os.path.join(work_dir, "figure_manifest.csv"), index=False)
+    # Written unconditionally. Only the project column above is conditional -
+    # but the WRITE used to sit inside that condition too, so a batch where
+    # every panel was manual or unreadable produced no `figure_manifest.csv` at
+    # all, while `CANONICAL_OUTPUTS` and the documentation both call it a run
+    # output. The runs with nothing automatic in them are exactly the ones
+    # somebody audits by hand.
+    figures.to_csv(os.path.join(work_dir, "figure_manifest.csv"), index=False)
 
     qc = GE.fig_validate_bundle(figures, m["grids"], m["units"], values_df,
                                 kernel=K, file_root=file_root,
@@ -1788,9 +1794,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 # to decide whether a value is poolable is hashed here, so a
                 # file edited between the run and the approval is a refusal
                 # rather than an input.
+                # Hashed as BYTES, not as decoded text. Text hashing goes
+                # through an encoding and a newline convention, so two files
+                # that differ on disk can hash the same and one that does not
+                # decode cannot be hashed at all. The verifier does the same.
                 output_sha256={
-                    name: sha256_of_text(
-                        open(os.path.join(work_dir, name), encoding="utf-8").read())
+                    name: file_sha256(os.path.join(work_dir, name))
                     for name in ("figure_values_machine_qc.csv",
                                  "review_queue.csv", "figure_values_raw.csv",
                                  "run_manifest.csv", "panel_artifacts.csv")},

@@ -2746,6 +2746,37 @@ check("the spelling of the mask changes nothing about the numbers",
       "%s" % {k: sorted(v.items())[:1] for k, v in _mask_means.items()})
 
 
+print("a run with nothing automatic in it is still fully audited")
+# The figure manifest's WRITE sat inside `if projects_by_panel and ...`, so a
+# batch where every panel was manual or unreadable produced no
+# `figure_manifest.csv` at all - while CANONICAL_OUTPUTS and the documentation
+# both call it a run output. The runs with nothing automatic in them are
+# exactly the ones somebody audits by hand.
+_am_md = write_manifests(os.path.join(ROOT, "allmanual", "manifests"),
+                         panels=[dict(p, Panel_Mode="MANUAL") for p in PANELS])
+_am_out = os.path.join(ROOT, "allmanual", "out")
+_am = RB.run_batch(_am_md, _am_out, file_root=ROOT, run_date="2026-08-06")
+check("an all-manual batch still runs",
+      _am["status"] == "RAN" and set(_am["states"]) == {"MANUAL_POINT_READ"},
+      "%s" % _am)
+check("  and it produced no WPD project at all, which is the trigger",
+      not os.path.exists(os.path.join(_am_out, "projects"))
+      or not os.listdir(os.path.join(_am_out, "projects")),
+      "%s" % (os.path.exists(os.path.join(_am_out, "projects"))
+              and os.listdir(os.path.join(_am_out, "projects"))))
+_am_missing = [f for f in RB.CANONICAL_OUTPUTS
+               if f not in ("figure_values_accepted.csv", "finalize_stamp.json",
+                            "figure_values.csv", "manifest_problems.csv")
+               and not os.path.exists(os.path.join(_am_out, f))]
+check("  and every canonical output a completed run owns is on disk",
+      not _am_missing, "%s" % _am_missing)
+_am_fig = pd.read_csv(os.path.join(_am_out, "figure_manifest.csv"),
+                      dtype=object).fillna("")
+check("  including the figure manifest, with its rows intact",
+      set(_am_fig["Figure_ID"]) == {f["Figure_ID"] for f in FIGURES},
+      "%s" % sorted(set(_am_fig["Figure_ID"])))
+
+
 print("a run's overlay failures are its own")
 # `_FAILURES` is module state with no reset, and an agent working through 116
 # publications in one process is the normal case - so the second run's stamp

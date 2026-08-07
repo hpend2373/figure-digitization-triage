@@ -335,6 +335,17 @@ check("more marks than subjects is MORE_DETECTED",
       == "MORE_DETECTED")
 check("with no declared n the audit says so rather than agreeing with itself",
       _MR.point_count_audit(_lin)["Point_Count_Agreement"] == "NO_SOURCE_N")
+# `int(float("10.5"))` is 10, so a malformed n quietly became a plausible one
+# and the comparison then agreed with it. A sample size that has to be
+# truncated to be used is not a sample size.
+for _bad_n in ("10.5", "-6", "0", "twelve", float("nan")):
+    check("a declared n of %r is not truncated into agreement" % _bad_n,
+          _MR.point_count_audit(_lin, expected_n=_bad_n)["Point_Count_Agreement"]
+          == "NO_SOURCE_N",
+          "%r" % _MR.point_count_audit(_lin, expected_n=_bad_n))
+check("while a whole number still counts, written either way",
+      _MR.point_count_audit(_lin, expected_n="6")["Point_Count_Agreement"] == "MATCH"
+      and _MR.point_count_audit(_lin, expected_n=6.0)["Point_Count_Agreement"] == "MATCH")
 # Two contours a pixel apart are one printed marker split by a gridline. Counting
 # both is how a ten-point figure becomes an eleven-pair correlation.
 _split = _lin + [dict(_lin[0], point_px_x=_lin[0]["point_px_x"] + 1.0)]
@@ -423,9 +434,13 @@ path = _mr.write_point_data(points, _os.path.join(_e2e_dir, "UA_points.json"),
                             source_image=_scatter_path, image_sha256=_scatter_sha,
                             x_calibration=sxcal, y_calibration=sycal,
                             panel_id="P1", reader="SCATTER")
-record = to_value_records([summary], "ASSOCIATION", "UA",
-                          cell_levels={"PANEL": "ALL"},
-                          point_data_reference=path)[0]
+# Merged the way `_scatter_outcome` merges it: an association and the count it
+# was computed from travel together, because the gate now refuses a digitized
+# association that does not say how many marks it found.
+record = to_value_records(
+    [dict(summary, **_MR.point_count_audit(points, expected_n=len(points)))],
+    "ASSOCIATION", "UA", cell_levels={"PANEL": "ALL"},
+    point_data_reference=path)[0]
 # The three asserts the review asked for, stated as asserts.
 assert record["P_Value_Extraction_Method"], "adapter dropped P_Value_Extraction_Method"
 assert record["Ties_Present"], "adapter dropped Ties_Present"

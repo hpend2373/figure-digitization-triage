@@ -109,6 +109,11 @@ MARKER_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "DIAMOND", "NONE")
 MARKER_FILLS = ("OPEN", "FILLED", "ANY")
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED", "NONE")
 BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "OPEN", "NONE")
+#: The built-in BAR_COLOR masks, lower case, as `bar_reader.colour_masks` keys
+#: them. Kept here rather than imported so this module stays free of numpy and
+#: cv2; `test_bar_reader.py` asserts the two definitions agree, so adding a mask
+#: in one place and not the other fails the suite.
+BAR_COLOR_MASK_KEYS = ("blue", "red", "dark")
 AXIS_SCALES = ("LINEAR", "LOG")
 
 #: Associations `summarize_association` can compute from a digitized cloud.
@@ -1309,6 +1314,27 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                     flag(line, "MISSING_SERIES_DISCRIMINANT",
                          "BAR_COLOR separates series by colour - give "
                          "Colour_Hex, or Mask_Key for one of the built-in masks")
+                elif not blank(r.get("Mask_Key")):
+                    # `Mask_Key` names a mask the reader already has. It was
+                    # accepted unchecked, so BLUE, GREEN and foo all validated
+                    # and then raised KeyError inside the reader - which is an
+                    # InternalReaderError, which aborts the whole batch. A
+                    # manifest typo is not a reader defect.
+                    key = str(r.get("Mask_Key")).strip().casefold()
+                    if key not in BAR_COLOR_MASK_KEYS:
+                        flag(line, "BAD_MASK_KEY",
+                             "Mask_Key=%s is not a built-in mask (expected %s). "
+                             "Any other colour is declared with Colour_Hex"
+                             % (r.get("Mask_Key"), "/".join(BAR_COLOR_MASK_KEYS)))
+                    if not blank(r.get("Colour_Hex")):
+                        # Silently preferring one over the other means the
+                        # manifest says two things and the run believes
+                        # whichever the code happens to check first.
+                        flag(line, "SERIES_DISCRIMINANT_AMBIGUOUS",
+                             "this series declares both Mask_Key=%s and "
+                             "Colour_Hex=%s; give exactly one, because the "
+                             "reader can only use one and the manifest should "
+                             "say which" % (r.get("Mask_Key"), r.get("Colour_Hex")))
             elif blank(r.get("Colour_Hex")):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
                      "%s separates series by colour - Colour_Hex required" % mark)

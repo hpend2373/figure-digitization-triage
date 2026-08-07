@@ -35,6 +35,7 @@ import kernel as K                 # noqa: E402
 import grid_engine as GE            # noqa: E402
 import mark_readers as MR           # noqa: E402
 import run_batch as RB              # noqa: E402
+import bar_reader as BR             # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -719,6 +720,47 @@ for _name, _kw, _want in (
 ):
     _got = validate(**_kw)
     check(_name + " is rejected", _want in _got, "got %s" % _got)
+
+# `Mask_Key` names one of the reader's three built-in masks and was accepted
+# unchecked. The masks are keyed in lower case, so BLUE - the natural way to
+# write it - validated, reached `masks["BLUE"]`, raised KeyError inside the
+# reader, and became an InternalReaderError, which aborts the whole batch. A
+# manifest typo must not be reported as a defect in the reader.
+def _bar_series(**kw):
+    return dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                              Mark_Type="BAR_COLOR", Config_ID="C_DEFAULT"),
+                series_rows=[dict(r, **kw) if r["Panel_ID"] == "P_LINE" else r
+                             for r in SERIES],
+                positions=POSITION_ROWS)
+
+
+def _two_masks(first, second, hex_=""):
+    return dict(_bar_series(), series_rows=[
+        dict(r, Colour_Hex=hex_,
+             Mask_Key=(first if r["Series_ID"] == "S_BLUE" else second))
+        if r["Panel_ID"] == "P_LINE" else r for r in SERIES])
+
+
+for _name, _kw, _want in (
+        ("Mask_Key naming a mask that does not exist",
+         _two_masks("GREEN", "red"), "BAD_MASK_KEY"),
+        ("Mask_Key that is not a mask name at all",
+         _two_masks("foo", "red"), "BAD_MASK_KEY"),
+        # Two discriminants means the manifest says two things and the run
+        # believes whichever the code checks first.
+        ("a series declaring both a mask and a colour",
+         _two_masks("blue", "red", hex_="#2d50dc"),
+         "SERIES_DISCRIMINANT_AMBIGUOUS")):
+    _got = validate(**_kw)
+    check(_name + " is rejected", _want in _got, "got %s" % _got)
+for _spelling in ("blue", "BLUE", "Blue", " blue "):
+    _got = validate(**_two_masks(_spelling, "red"))
+    check("Mask_Key=%r is accepted, whatever the case" % _spelling,
+          "BAD_MASK_KEY" not in _got and "SERIES_DISCRIMINANT_AMBIGUOUS" not in _got,
+          "got %s" % _got)
+check("the validator's mask list is the reader's own",
+      tuple(sorted(BM.BAR_COLOR_MASK_KEYS)) == tuple(sorted(BR.BUILTIN_MASK_KEYS)),
+      "%s vs %s" % (BM.BAR_COLOR_MASK_KEYS, BR.BUILTIN_MASK_KEYS))
 
 check("a panel with no series declared is rejected",
       "PANEL_HAS_NO_SERIES" in validate(
@@ -2189,6 +2231,180 @@ for _label, _n, _agreement in (("more subjects than marks", 14, "FEWER_DETECTED"
     check("the gate reaches the same verdict from the file alone (%s)" % _label,
           "POINT_COUNT_DISAGREES_WITH_SOURCE" in set(_cp["check"]),
           "%s" % sorted(set(_cp["check"])))
+
+
+print("one panel, one terminal state, in every file that names it")
+# A panel that read most of its cells returns AUTO_PASS with a missing list, so
+# it entered the manual queue as AUTO_PASS. The grid gate then found the same
+# missing cells, flipped the run row to QC_FAILED, and APPENDED a second queue
+# row - with the removed `Missing_Cells` key, so its count came out blank. One
+# panel, two rows, two contradictory states, and `manual_queue_cells.csv`
+# filing the missing cells under the state `run_manifest.csv` had withdrawn.
+_PART_IMG = os.path.join(IMAGES, "partial_line.png")
+_pim = Image.open(LINE_IMG).convert("RGB")
+# Erase the last two timepoints, so the panel reads four of its eight cells.
+ImageDraw.Draw(_pim).rectangle((XS[-2] - 20, 30, 700, 470), fill="white")
+_pim.save(_PART_IMG)
+_part_panels = edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=_PART_IMG)
+_part_sfigs = [dict(f, Source_Image=_PART_IMG,
+                    Source_Image_SHA256=MR.sha256_of(_PART_IMG))
+               if f["Source_Figure_ID"] == "SF1" else f for f in SOURCE_FIGURES]
+_pmd = write_manifests(os.path.join(ROOT, "partial", "manifests"),
+                       panels=_part_panels, source_figures=_part_sfigs)
+_psum = RB.run_batch(_pmd, os.path.join(ROOT, "partial", "out"), file_root=ROOT,
+                     run_date="2026-08-06")
+_pq = pd.read_csv(os.path.join(ROOT, "partial", "out", "manual_queue.csv"),
+                  dtype=object).fillna("")
+_pr = pd.read_csv(os.path.join(ROOT, "partial", "out", "run_manifest.csv"),
+                  dtype=object).fillna("")
+_pc = pd.read_csv(os.path.join(ROOT, "partial", "out", "manual_queue_cells.csv"),
+                  dtype=object).fillna("")
+_pstate = dict(zip(_pr["Panel_ID"], _pr["Run_State"]))
+check("the fixture really produces a partial read",
+      _pstate["P_LINE"] == "QC_FAILED"
+      and 0 < len(_pc[_pc["Panel_ID"] == "P_LINE"]) < 8,
+      "%s / %d cells" % (_pstate.get("P_LINE"), len(_pc[_pc["Panel_ID"] == "P_LINE"])))
+check("the manual queue names each panel exactly once",
+      list(_pq[_pq["Panel_ID"] != ""]["Panel_ID"]).count("P_LINE") == 1,
+      "%s" % _pq[["Panel_ID", "Run_State", "Missing_Cell_Count"]].to_dict("records"))
+check("and the state it gives is the one the run manifest ended on",
+      set(_pq[_pq["Panel_ID"] == "P_LINE"]["Run_State"]) == {_pstate["P_LINE"]},
+      "%s vs %s" % (set(_pq[_pq["Panel_ID"] == "P_LINE"]["Run_State"]),
+                    _pstate["P_LINE"]))
+check("the missing cells survive the state change rather than being blanked",
+      _pq[_pq["Panel_ID"] == "P_LINE"]["Missing_Cell_Count"].iloc[0]
+      == str(len(_pc[_pc["Panel_ID"] == "P_LINE"])),
+      "%r vs %d cells"
+      % (_pq[_pq["Panel_ID"] == "P_LINE"]["Missing_Cell_Count"].iloc[0],
+         len(_pc[_pc["Panel_ID"] == "P_LINE"])))
+check("and the cell ledger agrees with the state too",
+      set(_pc[_pc["Panel_ID"] == "P_LINE"]["Run_State"]) == {_pstate["P_LINE"]},
+      "%s" % set(_pc[_pc["Panel_ID"] == "P_LINE"]["Run_State"]))
+check("every queued panel's state matches the run manifest, not just this one",
+      all(_pstate[p] == s for p, s in zip(_pq["Panel_ID"], _pq["Run_State"]) if p),
+      "%s" % [(p, s, _pstate.get(p)) for p, s in
+              zip(_pq["Panel_ID"], _pq["Run_State"]) if p and _pstate.get(p) != s])
+check("and the count column stays a whole number of cells",
+      all(v == "" or v.isdigit() for v in _pq["Missing_Cell_Count"]),
+      "%s" % list(_pq["Missing_Cell_Count"]))
+
+
+print("a mask name in the wrong case is a manifest problem, not a batch abort")
+# `Mask_Key` chose one of the reader's three built-in masks and nothing checked
+# it against them. The masks are keyed in lower case, so `Mask_Key=BLUE` - the
+# obvious way to write it, and the way every other vocabulary column in these
+# manifests is written - validated, reached `masks["BLUE"]` inside the reader,
+# raised KeyError, and became an InternalReaderError. That aborts the ENTIRE
+# batch: 115 other publications stop because one manifest cell has capitals.
+#
+# The raster is the frozen bar fixture the reader suite measures against, so
+# the numbers below are known independently of this file.
+_BARIMG = os.path.join(IMAGES, "bar_fixture.png")
+shutil.copy2(os.path.join(HERE, "bar_fixture.png"), _BARIMG)
+_BARTRUTH = json.load(open(os.path.join(HERE, "bar_fixture_truth.json")))
+_BAR_SESSIONS = sorted({b["session"] for b in _BARTRUTH["bars"]},
+                       key=lambda s: min(b["x_pixel"] for b in _BARTRUTH["bars"]
+                                         if b["session"] == s))
+_BAR_ANCHOR = {s: sum(b["x_pixel"] for b in _BARTRUTH["bars"] if b["session"] == s)
+               / sum(1 for b in _BARTRUTH["bars"] if b["session"] == s)
+               for s in _BAR_SESSIONS}
+_BAR_MEAN = {(b["series"], b["session"]): b["true_mean"] for b in _BARTRUTH["bars"]}
+
+_bar_panels = [panel("P_BAR", "U_BAR", "BAR_COLOR", _BARIMG,
+                     tuple(_BARTRUTH["panel_box"]), Figure_ID="F_BAR",
+                     Source_Panel_ID="P_BAR", Baseline_Value="0",
+                     Axis_Y_Ticks=";".join("%g:%g" % (v, y)
+                                           for v, y in _BARTRUTH["ticks"]),
+                     Config_ID="C_BAR")]
+_bar_units = [unit("U_BAR", "G_BAR", "CONTINUOUS", Figure_ID="F_BAR",
+                   Bar_Top_Definition="OUTLINE_CENTER",
+                   Errorbar_Stem_Confirmed="TRUE", Dispersion_Type="SD",
+                   Errorbar_Definition_Source="caption: mean +/- SD",
+                   Axis_Calib_Y1_Value=_BARTRUTH["ticks"][0][0],
+                   Axis_Calib_Y1_Pixel=_BARTRUTH["ticks"][0][1],
+                   Axis_Calib_Y2_Value=_BARTRUTH["ticks"][-1][0],
+                   Axis_Calib_Y2_Pixel=_BARTRUTH["ticks"][-1][1])]
+_bar_grids = [dict(Grid_ID="G_BAR", Factor_Name=f, Factor_Level=lv,
+                   Level_Order=i, Note="")
+              for f, levels in (("ARM", ["SUPINE", "ORTHOSTASIS"]),
+                                ("TIMEPOINT", _BAR_SESSIONS))
+              for i, lv in enumerate(levels)]
+_bar_positions = [
+    dict(Panel_ID="P_BAR", Position_ID=s, X_Pixel=_BAR_ANCHOR[s], Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=s,
+         Timepoint_Label=s, Timepoint_Days=i * 7, Note="")
+    for i, s in enumerate(_BAR_SESSIONS)]
+_bar_figures = [dict(Figure_ID="F_BAR", Publication_ID=1,
+                     Source_Figure_ID="SF_BAR", Figure_Number="FIGBAR",
+                     Source_File="synthetic.pdf", Source_Page=1,
+                     Source_Image=_BARIMG,
+                     Source_Image_SHA256=MR.sha256_of(_BARIMG),
+                     Panel_Count_Declared=1, Panel_Count_Observed=1,
+                     Panel_Count_Reconciliation="MATCHED",
+                     Unlisted_Panels="", Note="")]
+_bar_sfigs = [dict(Source_Figure_ID="SF_BAR", Source_Document_ID="SD1",
+                   Publication_ID=1, Figure_Number="FIGBAR",
+                   Source_File="synthetic.pdf", Source_Page=1,
+                   Source_Image=_BARIMG,
+                   Source_Image_SHA256=MR.sha256_of(_BARIMG),
+                   Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+                   Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+                   Inspection_Date="2026-08-06", Note="one visible axes region")]
+_bar_spanels = [dict(Source_Panel_ID="P_BAR", Source_Figure_ID="SF_BAR",
+                     Panel_Label="P_BAR", Outcome_Label="Heart rate",
+                     Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                     Disposition_Reason="reader configured", Note="")]
+_bar_docs = [dict(d, Observed_Figure_Count=1) for d in SOURCE_DOCUMENTS]
+
+
+def _mask_run(spelling, name):
+    rows = [series("P_BAR", "S_SUP", "SUPINE", Mask_Key=spelling),
+            series("P_BAR", "S_ORT", "ORTHOSTASIS", Mask_Key="red")]
+    md = write_manifests(
+        os.path.join(ROOT, name, "manifests"), panels=_bar_panels,
+        series_rows=rows, positions=_bar_positions, units=_bar_units,
+        grids=_bar_grids, figures=_bar_figures, source_figures=_bar_sfigs,
+        source_panels=_bar_spanels, source_documents=_bar_docs,
+        configs=[dict(Config_ID="C_BAR", Option="colour_tolerance",
+                      Value="70", Note="")])
+    try:
+        summary = RB.run_batch(md, os.path.join(ROOT, name, "out"),
+                               file_root=ROOT, run_date="2026-08-06")
+    except Exception as exc:
+        # A reader that cannot find a declared mask aborts the whole batch as
+        # an InternalReaderError. Catching it here is how this scenario reports
+        # "the batch died" rather than taking the suite down with it.
+        summary = dict(status="RAISED %s: %s" % (type(exc).__name__, exc))
+    return summary, os.path.join(ROOT, name, "out")
+
+
+_mask_means = {}
+for _spelling in ("blue", "BLUE", " Blue "):
+    _bs, _bout = _mask_run(_spelling, "maskrun_%d" % (abs(hash(_spelling)) % 10 ** 6))
+    check("Mask_Key=%r runs instead of aborting the batch" % _spelling,
+          _bs["status"] == "RAN", "%s" % _bs)
+    if _bs["status"] != "RAN":
+        check("  and reads all twelve bars (%r)" % _spelling, False, "%s" % _bs)
+        check("  and recovers the fixture's true means (%r)" % _spelling, False,
+              "%s" % _bs)
+        continue
+    _brun = pd.read_csv(os.path.join(_bout, "run_manifest.csv"),
+                        dtype=object).fillna("")
+    check("  and reads all twelve bars (%r)" % _spelling,
+          int(_brun.loc[0, "Cells_Read"]) == 12, "%s" % _brun.loc[0].to_dict())
+    _bv = pd.read_csv(os.path.join(_bout, "figure_values_raw.csv"),
+                      dtype=object).fillna("")
+    _mask_means[_spelling] = {r["Cell_Key"]: round(float(r["Mean"]), 6)
+                              for _, r in _bv.iterrows()}
+    _err = max(abs(float(r["Mean"]) - _BAR_MEAN[(
+        dict(p.split("=") for p in r["Cell_Key"].split(";"))["ARM"],
+        dict(p.split("=") for p in r["Cell_Key"].split(";"))["TIMEPOINT"])])
+        for _, r in _bv.iterrows())
+    check("  and recovers the fixture's true means (%r)" % _spelling, _err < 1.0,
+          "max %.3f" % _err)
+check("the spelling of the mask changes nothing about the numbers",
+      len({tuple(sorted(v.items())) for v in _mask_means.values()}) == 1,
+      "%s" % {k: sorted(v.items())[:1] for k, v in _mask_means.items()})
 
 
 print("templates are generated from the column functions, never typed")

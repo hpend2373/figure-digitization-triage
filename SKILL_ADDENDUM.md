@@ -4,6 +4,32 @@ Insert after "## Extraction protocol (hand this to whoever reads the figures)".
 
 ---
 
+## The whole path, in five lines
+
+An agent that reads only one section should read this one. Every other section
+below explains why a step is the way it is; this is the step order.
+
+```
+INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
+COMPILE    python3 compile_plan.py PLAN.json MANIFESTS/ --file-root .
+RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root .        -> MACHINE_QC_PASSED
+REVIEW     open review/<Panel_ID>_overlay.png for every row of OUT/review_queue.csv,
+           then fill Review_ID / Decision / Reviewer_ID / Reviewed_At in value_review.csv
+FINALIZE   python3 finalize_batch.py OUT/ --review value_review.csv   -> FINALIZED
+```
+
+**Success** is `OUT/figure_values_accepted.csv` beside a
+`OUT/finalize_stamp.json` whose `Status` is `FINALIZED` and whose
+`Accepted_SHA256` is the hash of that file. Nothing else is a result.
+
+**Never** write the eleven manifests by hand — that is what the compiler is for,
+and hand-written manifests are where two files quietly disagree. **Never** pool
+`figure_values_machine_qc.csv`: machine QC finding nothing wrong is a different
+claim from somebody having looked at where the marks landed. **Never** treat a
+`DEMO_ONLY` run as data.
+
+---
+
 ## Record HOW the mark was read
 
 Two geometric facts decide whether a digitized number is right, and neither is
@@ -67,11 +93,22 @@ who did the counting.
 `run_batch.py` stops at `figure_values_machine_qc.csv`.  Nothing it writes is
 poolable.  Each passing panel also gets `review/<Panel_ID>_overlay.png` — the
 panel as printed with every mark the reader placed drawn and labelled on it —
-and a row in `review_queue.csv` carrying a `Panel_Fingerprint` over the image,
-the config, the reader and the pipeline code.  A person fills `Decision`,
-`Reviewer_ID` and `Reviewed_At` in `value_review.csv`, and `finalize_batch.py`
-writes `figure_values_accepted.csv` for the approved panels only.  Re-run with
-different code and the old approvals are `APPROVAL_STALE`, not inherited.
+and a row in `review_queue.csv` carrying `Review_Subject_SHA256`: a hash over
+the run row, every manifest, the environment record, every machine-QC value of
+that panel with its `Cell_Key`, **and every artifact the panel produced**
+(overlay, WPD project, raw marks, point files), each by content.  A person fills
+`Review_ID`, `Decision`, `Reviewer_ID` and `Reviewed_At` in `value_review.csv`,
+and `finalize_batch.py` writes `figure_values_accepted.csv` for the approved
+panels only.  Re-run with different code and the old approvals are
+`APPROVAL_STALE`, not inherited.
+
+The finalizer re-hashes before it reads a single decision: the four run CSVs and
+`panel_artifacts.csv` against `Output_SHA256` in the run stamp, the reviewer
+registry against `Reviewer_Registry_SHA256`, and every artifact in the ledger
+against its recorded hash.  Any mismatch is `RUN_ARTIFACT_MODIFIED` and no
+accepted file is written.  This is what makes an approval a statement about a
+specific picture: swapping `review/P1_overlay.png` after the fact used to
+finalize, because the numbers were verified and the picture was not.
 
 Whether a run may produce poolable values is decided by `Reviewer_Record_Type`
 (`HUMAN` or `DEMO_IDENTITY`) on the rows the inventory names, not by a flag at

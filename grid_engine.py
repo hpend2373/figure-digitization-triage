@@ -280,6 +280,18 @@ def validate_unit(row, kernel, flag, line, figure=None):
             flag(line, "UNRESOLVED_ERRORBAR_DEFINITION",
                  "contains %r - Dispersion_Type=%s is then a guess"
                  % (unresolved(src), dt))
+    elif st == "ASSOCIATION" and not blank(row.get("N_Outcome")):
+        # An association's n may be absent - a paper does not always give one -
+        # but if it is there it is the number the reader's detected point count
+        # is measured against, and `int(float("10.5"))` is 10. A sample size
+        # that has to be truncated to be used is not a sample size.
+        n = num(row.get("N_Outcome"))
+        if n is None:
+            flag(line, "NON_NUMERIC_VALUE", "N_Outcome=%r" % row.get("N_Outcome"))
+        elif n <= 0 or n != int(n):
+            flag(line, "N_INVALID",
+                 "N_Outcome=%g must be a whole number of subjects; it is what "
+                 "the detected point count is compared against" % n)
 
     if method == "DIGITIZED":
         btd = str(row.get("Bar_Top_Definition", "")).strip().upper()
@@ -681,6 +693,35 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
         # that went into the calculation.
         agreement = ("" if blank(row.get("Point_Count_Agreement"))
                      else str(row.get("Point_Count_Agreement")).strip().upper())
+        # Required wherever there IS a point cloud. The runner fills these, so
+        # an automated row always has them - but a hand-assembled bundle, a new
+        # reader, or an adapter that quietly drops a column would produce rows
+        # the gate then judged on the numbers alone, which is the state this
+        # whole block exists to end. A transcribed association has no cloud and
+        # is not asked.
+        if digitized:
+            for field in ("Detected_Unique_Point_Count", "Point_Count_Agreement",
+                          "Overplotting_Possible", "Series_Mask_Overlap_Count"):
+                if blank(row.get(field)):
+                    flag(line, "MISSING_POINT_COUNT_AUDIT",
+                         "%s is blank - a digitized association must say how "
+                         "many marks it found and whether that is the sample "
+                         "the paper describes" % field)
+            # `Expected_N_From_Source` is the one field that may legitimately be
+            # empty, because the paper does not always give an n. Saying so is
+            # NO_SOURCE_N; leaving both blank is saying nothing.
+            if (blank(row.get("Expected_N_From_Source"))
+                    and agreement and agreement != "NO_SOURCE_N"):
+                flag(line, "MISSING_POINT_COUNT_AUDIT",
+                     "Expected_N_From_Source is blank but Point_Count_Agreement "
+                     "says %s; a comparison needs both numbers, and a source "
+                     "that gives no n is Point_Count_Agreement=NO_SOURCE_N"
+                     % agreement)
+            elif (not blank(row.get("Expected_N_From_Source"))
+                    and agreement == "NO_SOURCE_N"):
+                flag(line, "POINT_COUNT_AUDIT_CONTRADICTS_SOURCE",
+                     "Point_Count_Agreement=NO_SOURCE_N beside "
+                     "Expected_N_From_Source=%s" % row.get("Expected_N_From_Source"))
         if agreement and agreement not in FIG_POINT_COUNT_AGREEMENT:
             flag(line, "BAD_POINT_COUNT_AGREEMENT",
                  "Point_Count_Agreement=%s (expected %s)"

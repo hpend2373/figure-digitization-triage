@@ -472,6 +472,31 @@ check("and a slightly-off declared colour still reads at a sane tolerance",
       / max(1, int(_amasks["GREEN"].sum())) < 0.05,
       "%d vs %d" % (int(_wide.sum()), int(_amasks["GREEN"].sum())))
 
+print("Mask_Key names a mask the reader has, or the manifest is refused")
+# `Mask_Key` picked one of three hard-coded masks and was never checked against
+# them. The masks are lower case, so `Mask_Key=BLUE` - the natural way to write
+# it - validated, reached `masks[key]`, raised KeyError, and became an
+# InternalReaderError, which aborts the entire batch. A manifest typo is not a
+# reader defect and must not be reported as one.
+import batch_manifests as _BM  # noqa: E402
+import bar_reader as BR  # noqa: E402
+import numpy as np  # noqa: E402
+check("the reader's built-in masks and the validator's list are one list",
+      tuple(sorted(BR.BUILTIN_MASK_KEYS)) == tuple(sorted(_BM.BAR_COLOR_MASK_KEYS)),
+      "%s vs %s" % (BR.BUILTIN_MASK_KEYS, _BM.BAR_COLOR_MASK_KEYS))
+check("and they are the keys colour_masks actually returns",
+      set(BR.BUILTIN_MASK_KEYS)
+      <= set(BR.colour_masks(np.zeros((4, 4, 3), dtype=np.uint8))),
+      "%s" % sorted(BR.colour_masks(np.zeros((4, 4, 3), dtype=np.uint8))))
+for _key in ("BLUE", "GREEN", "foo", "Dark "):
+    _built = BR.colour_masks(np.zeros((4, 4, 3), dtype=np.uint8))
+    check("Mask_Key=%r is not a mask the reader has" % _key,
+          _key not in _built,
+          "it is, so the validator would be wrong to refuse it")
+check("but case-folding turns the ones that name a real mask into it",
+      all(_k.strip().casefold() in BR.BUILTIN_MASK_KEYS
+          for _k in ("BLUE", "Dark ", "Red")))
+
 print("%d scenarios run" % (len(FAILURES) + _PASSED[0]))
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))

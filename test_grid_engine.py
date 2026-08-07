@@ -515,10 +515,18 @@ def _assoc(at="KENDALL_TAU", em="DIGITIZED", npairs=20, **vk):
                 P_Value_Method=("KENDALL_EXACT_PERMUTATION" if at == "KENDALL_TAU"
                                 else "FISHER_Z_APPROX"),
                 P_Value_Extraction_Method="DIGITIZED", Ties_Present="FALSE",
-                Point_Data_Reference=_POINTS)
+                Point_Data_Reference=_POINTS,
+                # What the reader counted, which a digitized association is now
+                # required to state. Scenarios about the p override the p; these
+                # are here so those scenarios are about the p.
+                Expected_N_From_Source=npairs,
+                Detected_Unique_Point_Count=npairs,
+                Point_Count_Agreement="MATCH", Overplotting_Possible="FALSE",
+                Series_Mask_Overlap_Count=0)
+    unit = dict({"Statistic_Type": "ASSOCIATION", "Extraction_Method": em,
+                 "Bar_Top_Definition": "NOT_A_BAR"}, **(vk.pop("_unit", None) or {}))
     base.update(vk)
-    return run(unit={"Statistic_Type": "ASSOCIATION", "Extraction_Method": em,
-                     "Bar_Top_Definition": "NOT_A_BAR"},
+    return run(unit=unit,
                vals=[dict(Unit_ID="U1", Cell_Key="PHASE=%s" % lv, **base)
                      for lv in ("PRE", "POST")])
 for _n, _kw, _w in (
@@ -607,6 +615,35 @@ check("a Spearman method claiming a computed p beside a blank one is caught",
       "P_METHOD_CLAIMS_UNCOMPUTED_P" in _assoc(
           at="SPEARMAN_RHO", P_Value_Method="SPEARMAN_T_APPROX"))
 
+print("an association's declared n is a whole number of subjects or nothing")
+# It is what the reader's detected point count is measured against, and the
+# audit used to reach it through `int(float(n))` - so "10.5" quietly became 10
+# and the comparison then agreed with itself. It is checked here because the
+# audit no longer guesses: a declared n it cannot use, it does not use.
+_UNIT_ASSOC = {"Statistic_Type": "ASSOCIATION", "Extraction_Method": "DIGITIZED",
+               "Bar_Top_Definition": "NOT_A_BAR"}
+for _n, _want in (("10.5", "N_INVALID"), ("-6", "N_INVALID"), ("0", "N_INVALID"),
+                  ("twelve", "NON_NUMERIC_VALUE")):
+    _g = _assoc(at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+                _unit=dict(_UNIT_ASSOC, N_Outcome=_n))
+    check("an association declaring n=%s is refused" % _n, _want in _g, "%s" % _g)
+for _n in ("", "12"):
+    _g = _assoc(at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+                Expected_N_From_Source=(_n or ""),
+                Point_Count_Agreement=("NO_SOURCE_N" if not _n else "MATCH"),
+                Detected_Unique_Point_Count=(20 if not _n else 20),
+                _unit=dict(_UNIT_ASSOC, N_Outcome=_n))
+    check("while n=%r is accepted" % _n,
+          "N_INVALID" not in _g and "NON_NUMERIC_VALUE" not in _g, "%s" % _g)
+# The reader's own count still has to agree with whatever the unit declared.
+check("and a mismatching pair is still caught even with a legal n",
+      "POINT_COUNT_DISAGREES_WITH_SOURCE" in _assoc(
+          at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+          Expected_N_From_Source=12, Detected_Unique_Point_Count=20,
+          Point_Count_Agreement="MORE_DETECTED",
+          _unit=dict(_UNIT_ASSOC, N_Outcome="12")))
+
+
 print("N_Pairs is the reader's count, so something else has to check it")
 _count = dict(Expected_N_From_Source=20, Detected_Unique_Point_Count=20,
               Point_Count_Agreement="MATCH", Overplotting_Possible="FALSE",
@@ -645,7 +682,43 @@ check("a transcribed association is not asked how many marks it found",
       _assoc(at="PEARSON_R", em="TRANSCRIBED", P_Value=0.02,
              P_Value_Method="SOURCE_REPORTED",
              P_Value_Extraction_Method="TRANSCRIBED",
-             Point_Data_Reference="") == [])
+             Point_Data_Reference="", Expected_N_From_Source="",
+             Detected_Unique_Point_Count="", Point_Count_Agreement="",
+             Overplotting_Possible="", Series_Mask_Overlap_Count="") == [],
+      "%s" % _assoc(at="PEARSON_R", em="TRANSCRIBED", P_Value=0.02,
+                    P_Value_Method="SOURCE_REPORTED",
+                    P_Value_Extraction_Method="TRANSCRIBED",
+                    Point_Data_Reference="", Expected_N_From_Source="",
+                    Detected_Unique_Point_Count="", Point_Count_Agreement="",
+                    Overplotting_Possible="", Series_Mask_Overlap_Count=""))
+# But a DIGITIZED one is. The runner fills these fields, so an automated row
+# always carries them - which is exactly why the gate must demand them
+# independently: a hand-assembled bundle, a new reader, or an adapter that
+# drops a column would otherwise be judged on the numbers alone, which is the
+# state this whole block exists to end.
+for _blanked in ("Detected_Unique_Point_Count", "Point_Count_Agreement",
+                 "Overplotting_Possible", "Series_Mask_Overlap_Count"):
+    check("a digitized association with no %s is refused" % _blanked,
+          "MISSING_POINT_COUNT_AUDIT" in _assoc(
+              at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+              **{_blanked: ""}),
+          "%s" % _assoc(at="PEARSON_R", P_Value=0.03,
+                        P_Value_Method="PEARSON_T_TEST", **{_blanked: ""}))
+# A source that gives no n is a real and common case, and it has a way to say so.
+check("a source with no n says NO_SOURCE_N and passes",
+      _assoc(at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+             Expected_N_From_Source="", Point_Count_Agreement="NO_SOURCE_N") == [],
+      "%s" % _assoc(at="PEARSON_R", P_Value=0.03,
+                    P_Value_Method="PEARSON_T_TEST", Expected_N_From_Source="",
+                    Point_Count_Agreement="NO_SOURCE_N"))
+check("but leaving the expected n blank while claiming a comparison is not",
+      "MISSING_POINT_COUNT_AUDIT" in _assoc(
+          at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+          Expected_N_From_Source=""))
+check("and neither is NO_SOURCE_N beside a source n",
+      "POINT_COUNT_AUDIT_CONTRADICTS_SOURCE" in _assoc(
+          at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+          Point_Count_Agreement="NO_SOURCE_N"))
 
 print("the effect and the p may come from different places")
 check("a p copied from the text on a digitized effect is legitimate",

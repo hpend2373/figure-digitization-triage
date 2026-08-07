@@ -262,7 +262,20 @@ for _label, _rows, _want in (
         ("two decisions for one panel, reject first",
          [row(Decision="REJECTED"), row(Review_ID="R002")], "DUPLICATE_REVIEW"),
         ("one Review_ID used twice",
-         [row(), row(Panel_ID="P_OTHER")], "DUPLICATE_REVIEW_ID")):
+         [row(), row(Panel_ID="P_OTHER")], "DUPLICATE_REVIEW_ID"),
+        # A duplicated Review_ID voided its rows and a MISSING one did not, so
+        # the identifier a decision is audited by could just be left out - and
+        # every accepted value then carried Review_ID="".
+        ("an approval with no Review_ID at all", [row(Review_ID="")],
+         "MISSING_REQUIRED"),
+        ("an approval whose Review_ID is only whitespace",
+         [row(Review_ID="   ")], "MISSING_REQUIRED"),
+        # It lands in a CSV column somebody joins on, so it takes the same
+        # SAFE_ID rule as every other identifier here.
+        ("a Review_ID that would walk out of a directory",
+         [row(Review_ID="../../etc/passwd")], "UNSAFE_ID"),
+        ("a Review_ID carrying a separator the files use",
+         [row(Review_ID="R001;R002")], "UNSAFE_ID")):
     _path = os.path.join(OUT, "review_case.csv")
     if _rows is None:
         if os.path.exists(_path):
@@ -371,15 +384,44 @@ check("and the Cell_Key a value sits in",
                                {}, {})
       != RB.review_subject_sha256({"Panel_ID": "P1"}, [{"Cell_Key": "B", "Mean": 1}],
                                   {}, {}))
-_raw_probe = os.path.join(ROOT, "probe_raw.json")
-open(_raw_probe, "w").write("{}")
-_with_raw = RB.review_subject_sha256(
-    {"Panel_ID": "P1", "Raw_Data_File": _raw_probe}, [], {}, {})
-open(_raw_probe, "w").write('{"marks": []}')
-check("and the raw mark file the overlay was drawn from",
-      RB.review_subject_sha256({"Panel_ID": "P1", "Raw_Data_File": _raw_probe},
-                               [], {}, {}) != _with_raw,
-      "editing the raw marks gives the same hash")
+# Every artifact, by content. The subject used to take two of them off the run
+# row by path - `Raw_Data_File` and `WPD_Project_File` - which left the overlay
+# out entirely although the docstring listed it, and turned a multi-series
+# scatter's ";"-joined point files into a path that does not exist and hashes
+# to "".
+_base_art = [("OVERLAY", "/x/P1_overlay.png", "a" * 64),
+             ("WPD_PROJECT", "/x/P1.tar", "b" * 64),
+             ("RAW_MARKS", "/x/P1_marks.json", "c" * 64)]
+_with_art = RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {},
+                                     artifacts=_base_art)
+for _i, _label in enumerate(("the overlay a person looked at",
+                             "the WPD project behind the number",
+                             "the raw marks the overlay was drawn from")):
+    _changed = list(_base_art)
+    _changed[_i] = (_changed[_i][0], _changed[_i][1], "d" * 64)
+    check("the approval subject covers %s" % _label,
+          RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {},
+                                   artifacts=_changed) != _with_art,
+          "editing it gives the same hash")
+check("and an artifact appearing at all changes the subject",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {},
+                               artifacts=_base_art[:2]) != _with_art)
+# Order must not matter: the ledger is a set of facts about a panel, not a
+# sequence, and a reader that sorted differently would expire every approval.
+check("but the order the artifacts are listed in does not",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {},
+                               artifacts=list(reversed(_base_art))) == _with_art)
+# Two point files, which is what a two-series scatter produces. Under the old
+# ";"-join both of them were invisible to the subject.
+_two = [("POINT_DATA", "/x/P2_S1_points.json", "e" * 64),
+        ("POINT_DATA", "/x/P2_S2_points.json", "f" * 64)]
+check("a scatter's second point file is in the subject too",
+      RB.review_subject_sha256({"Panel_ID": "P2"}, [], {}, {}, artifacts=_two)
+      != RB.review_subject_sha256(
+          {"Panel_ID": "P2"}, [], {}, {},
+          artifacts=[_two[0], (_two[1][0], _two[1][1], "0" * 64)]))
+check("and joining their paths with ';' is not a file the run tries to hash",
+      RB.file_sha256_or_blank(";".join(p for _, p, _h in _two)) == "")
 
 
 print()
@@ -419,6 +461,81 @@ for _label, _target, _edit in (
           not os.path.exists(os.path.join(_tamper_out, "figure_values_accepted.csv")),
           "%s" % sorted(os.listdir(_tamper_out)))
 
+print()
+print("the picture the person approved is also the picture on disk")
+# The four CSVs were verified and nothing else. So the numbers could not be
+# edited, but the overlay could: replace `review/P1_overlay.png` with a red
+# rectangle - or with a different panel's overlay - and the approval bound to
+# it still finalized 8 values. An approval says "I looked at this and it is
+# right"; nothing established what "this" was.
+for _label, _relative, _mutate in (
+        ("the overlay a person judged", os.path.join("review", "P1_overlay.png"),
+         lambda p: Image.new("RGB", (600, 480), "red").save(p)),
+        ("the WPD project behind the number", os.path.join("projects", "P1.tar"),
+         lambda p: open(p, "ab").write(b"\0" * 1024)),
+        ("the raw marks the overlay was drawn from",
+         os.path.join("raw", "P1_marks.json"),
+         lambda p: open(p, "a", encoding="utf-8").write(" ")),):
+    _a_out, _ = fresh_run("run_artifact_%d" % (abs(hash(_label)) % 10 ** 6))
+    _q = pd.read_csv(os.path.join(_a_out, "review_queue.csv"), dtype=object)
+    _rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                       Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                       Reviewer_ID="RV_H", Decision="APPROVED",
+                       Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                 os.path.join(_a_out, "value_review.csv"))
+    _before = FIN.finalize(_a_out, review_path=_rv, run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    check("  %s finalizes untouched" % _label,
+          _before["status"] == "FINALIZED" and _before["accepted"] > 0,
+          "%s" % _before["status"])
+    _target_path = os.path.join(_a_out, _relative)
+    check("  and the run wrote it where the ledger says",
+          os.path.exists(_target_path), _target_path)
+    _mutate(_target_path)
+    _after = FIN.finalize(_a_out, review_path=_rv, run_date="2026-08-06",
+                          today=datetime.date(2026, 8, 6))
+    check("editing %s after the approval is refused" % _label,
+          _after["status"] == "RUN_ARTIFACT_MODIFIED" and _after["accepted"] == 0,
+          "%s" % _after["status"])
+    check("  and no accepted file survives it (%s)" % _label,
+          not os.path.exists(os.path.join(_a_out, "figure_values_accepted.csv")))
+    # Deleting is not a way round it either.
+    os.remove(_target_path)
+    _gone = FIN.finalize(_a_out, review_path=_rv, run_date="2026-08-06",
+                         today=datetime.date(2026, 8, 6))
+    check("  and deleting it is refused too (%s)" % _label,
+          _gone["status"] == "RUN_ARTIFACT_MODIFIED", "%s" % _gone["status"])
+
+# The ledger is what makes the per-artifact hashes trustworthy, so it is itself
+# one of the verified outputs - otherwise it could simply be rewritten to agree
+# with a tampered file.
+_led_out, _ = fresh_run("run_ledger")
+_q = pd.read_csv(os.path.join(_led_out, "review_queue.csv"), dtype=object)
+_rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                   Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                   Reviewer_ID="RV_H", Decision="APPROVED",
+                   Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+             os.path.join(_led_out, "value_review.csv"))
+_ledger = pd.read_csv(os.path.join(_led_out, "panel_artifacts.csv"), dtype=object)
+check("the run writes an artifact ledger",
+      set(_ledger["Artifact_Type"]) == {"OVERLAY", "WPD_PROJECT", "RAW_MARKS"},
+      "%s" % sorted(set(_ledger["Artifact_Type"])))
+check("with a real hash for every artifact it names",
+      all(len(h) == 64 for h in _ledger["SHA256"])
+      and all(os.path.exists(p) for p in _ledger["Artifact_Path"]),
+      "%s" % _ledger.to_dict("records"))
+Image.new("RGB", (600, 480), "red").save(os.path.join(_led_out, "review",
+                                                      "P1_overlay.png"))
+_ledger.loc[_ledger["Artifact_Type"] == "OVERLAY", "SHA256"] = MR.sha256_of(
+    os.path.join(_led_out, "review", "P1_overlay.png"))
+_ledger.to_csv(os.path.join(_led_out, "panel_artifacts.csv"), index=False)
+_forged = FIN.finalize(_led_out, review_path=_rv, run_date="2026-08-06",
+                       today=datetime.date(2026, 8, 6))
+check("rewriting the ledger to match a swapped overlay is refused",
+      _forged["status"] == "RUN_ARTIFACT_MODIFIED" and _forged["accepted"] == 0,
+      "%s" % _forged["status"])
+
+print()
 _swap_out, _ = fresh_run("run_registry_swap")
 _q = pd.read_csv(os.path.join(_swap_out, "review_queue.csv"), dtype=object)
 _rv = review([dict(Review_ID="R001", Panel_ID="P1",
@@ -482,6 +599,17 @@ check("a clean finalization commits and records what it committed",
 with open(os.path.join(_clean_out, FIN.FINALIZE_MARKER), encoding="utf-8") as _fh:
     check("and the recorded hash is the file that landed",
           RB.sha256_of_text(_fh.read()) == _fs["Accepted_SHA256"])
+# The stamp named the review file by path and said nothing about its contents,
+# so "which decisions produced this accepted file" was answerable only by
+# trusting that the file had not been edited since.
+check("and the decisions themselves are hashed, not merely named",
+      _fs.get("Review_File_SHA256") == RB.file_sha256(_rv)
+      and len(_fs.get("Review_File_SHA256", "")) == 64,
+      "%s" % _fs.get("Review_File_SHA256"))
+with open(_rv, "a", encoding="utf-8") as _fh:
+    _fh.write("\n")
+check("editing the review file changes what the stamp records",
+      RB.file_sha256(_rv) != _fs.get("Review_File_SHA256"))
 
 
 print()

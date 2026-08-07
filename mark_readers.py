@@ -408,10 +408,17 @@ def point_count_audit(points, expected_n=None):
     overlap = sum(int(p.get("mask_overlap") or 0) for p in points)
     expected = None
     if expected_n not in (None, ""):
+        # No truncation. `int(float("10.5"))` is 10, so a malformed n silently
+        # became a plausible one and the comparison below then agreed with it.
+        # A declared n that is not a whole number of subjects is not a number
+        # this can be measured against; the validator refuses it upstream and
+        # here it simply is not used.
         try:
-            expected = int(float(expected_n))
+            value = float(expected_n)
         except (TypeError, ValueError):
-            expected = None
+            value = None
+        if value is not None and value > 0 and value == int(value):
+            expected = int(value)
     if expected is None:
         agreement = "NO_SOURCE_N"
     elif expected == unique:

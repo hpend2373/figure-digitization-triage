@@ -76,7 +76,11 @@ VALUE_REVIEW_COLUMNS = [
 #: Files the finalizer reads to decide whether a value is poolable. Each is
 #: hashed by the run and re-hashed here.
 VERIFIED_OUTPUTS = ("figure_values_machine_qc.csv", "review_queue.csv",
-                    "figure_values_raw.csv", "run_manifest.csv")
+                    "figure_values_raw.csv", "run_manifest.csv",
+                    # The ledger of everything else. Verifying it is what makes
+                    # the per-artifact hashes below trustworthy: without it the
+                    # ledger could be rewritten to match tampered artifacts.
+                    "panel_artifacts.csv")
 
 FINALIZE_STAGING = ".finalize-staging"
 
@@ -170,6 +174,22 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
         if not pid:
             flag(line, "MISSING_REQUIRED", "Panel_ID")
             continue
+        # A duplicated Review_ID voided its rows, and a blank one did not - so
+        # the identifier a decision is audited by could simply be left out, and
+        # the accepted file carried `Review_ID=""` on every value. It also ends
+        # up in a CSV column somebody will join on, so it takes the same SAFE_ID
+        # rule as every other identifier in this package.
+        rid_ = _s(r.get("Review_ID"))
+        if not rid_:
+            flag(line, "MISSING_REQUIRED",
+                 "Review_ID - a decision with no identifier cannot be cited, "
+                 "audited or withdrawn")
+            continue
+        if not BM.SAFE_ID.match(rid_):
+            flag(line, "UNSAFE_ID",
+                 "Review_ID=%r; identifiers must match %s"
+                 % (rid_, BM.SAFE_ID.pattern))
+            continue
         if pid not in expected:
             flag(line, "REVIEW_PANEL_NOT_IN_QUEUE",
                  "%s did not pass machine QC in this run, so there is nothing "
@@ -241,6 +261,34 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
                  "after the run that produced it"
                  % (name, actual[:16], _s(recorded.get(name))[:16] or "(nothing)"))
             ok = False
+    # ---- the artifacts the person actually looked at ----------------------
+    # Four CSVs were verified and nothing else, so the numbers could not be
+    # edited but the picture could. Replace `review/P1_overlay.png` with a
+    # different panel's overlay, or with a blank rectangle, and the approval
+    # bound to it still finalized: the reviewer's decision says "I looked at
+    # this and it is right", and nothing established what "this" was.
+    ledger = os.path.join(run_dir, "panel_artifacts.csv")
+    if not os.path.exists(ledger):
+        flag("run", "RUN_ARTIFACT_MODIFIED",
+             "panel_artifacts.csv is missing - this run predates artifact "
+             "verification and cannot be finalized")
+        return False
+    for _, art in pd.read_csv(ledger, dtype=object).fillna("").iterrows():
+        path, recorded_hash = _s(art.get("Artifact_Path")), _s(art.get("SHA256"))
+        label = "%s %s" % (_s(art.get("Artifact_Type")), os.path.basename(path))
+        if not os.path.exists(path):
+            flag("panel:%s" % _s(art.get("Panel_ID")), "RUN_ARTIFACT_MODIFIED",
+                 "%s is gone; the run recorded it at %s" % (label, path))
+            ok = False
+            continue
+        actual = RB.file_sha256(path)
+        if actual != recorded_hash:
+            flag("panel:%s" % _s(art.get("Panel_ID")), "RUN_ARTIFACT_MODIFIED",
+                 "%s hashes to %s..., the run recorded %s.... The reviewer "
+                 "approved what the run produced, not this"
+                 % (label, actual[:16], recorded_hash[:16] or "(nothing)"))
+            ok = False
+
     registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
     if os.path.exists(registry_path):
         actual = RB.frame_sha256(pd.read_csv(registry_path, dtype=object).fillna(""))
@@ -302,6 +350,12 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    "Pipeline_Code_SHA256": RB.pipeline_code_sha256(),
                    "Environment": RB.environment_record(),
                    "Review_File": review_path,
+                   # The decisions themselves, hashed. The stamp named the
+                   # review file by path and recorded nothing about its
+                   # contents, so "which decisions produced this accepted
+                   # file" was answerable only by trusting that nobody had
+                   # since edited the answer.
+                   "Review_File_SHA256": RB.file_sha256_or_blank(review_path),
                    "Problems": problems, "Detail": detail}
         with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
                   "w", encoding="utf-8") as fh:

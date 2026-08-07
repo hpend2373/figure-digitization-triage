@@ -67,6 +67,165 @@ def _ticks_text(ticks):
     return ";".join("%s:%s" % (t[0], t[1]) for t in ticks)
 
 
+#: A scalar a manifest cell can hold. `bool` is an `int` subclass and passes,
+#: which is deliberate: TRUE/FALSE is a legal cell value.
+_SCALARS = (str, int, float)
+
+
+def _nested_shape_problems(plan):
+    """Every nested structure the compiler will walk, checked before it walks it.
+
+    The top-level sections and their rows were checked; what was inside a row
+    was not. `factors: {"ARM": 3}` is an object, so it passed, and then
+    `for level in levels` raised TypeError inside the compiler. So did a
+    `series` of strings, a scalar `positions`, a string in `reader_configs`,
+    a non-object `options`, and an `x_calibration` of bare numbers.
+    """
+    problems = []
+
+    def bad(where, name, value, expected):
+        problems.append(_problem(where, "PLAN_BAD_FIELD_TYPE",
+                                 "%s is %s, expected %s"
+                                 % (name, type(value).__name__, expected)))
+
+    def rows_of(section):
+        """Enumerate a section's object rows, reporting the ones that are not.
+
+        `reader_configs` is optional, so it is not in the required-section loop
+        above and its rows had nobody checking them at all: a plan whose
+        `reader_configs` was `["oops"]` validated clean and then raised
+        `AttributeError: 'str' object has no attribute 'get'` in the compiler.
+        Reporting here as well as there costs a duplicate problem on a section
+        that is wrong in two ways, which is the harmless direction.
+        """
+        value = plan.get(section)
+        if not isinstance(value, list):
+            if value is not None:
+                bad("plan", section, value, "a list of objects")
+            return
+        for i, row in enumerate(value):
+            if isinstance(row, dict):
+                yield "%s[%d]" % (section, i), row
+            else:
+                problems.append(_problem(
+                    "%s[%d]" % (section, i), "PLAN_ROW_NOT_AN_OBJECT",
+                    "%s, not an object" % type(row).__name__))
+
+    def object_list(where, name, value):
+        """A list whose every element is an object, or a reported problem."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            bad(where, name, value, "a list of objects")
+            return []
+        out = []
+        for i, row in enumerate(value):
+            if not isinstance(row, dict):
+                problems.append(_problem(
+                    "%s.%s[%d]" % (where, name, i), "PLAN_ROW_NOT_AN_OBJECT",
+                    "%s, not an object" % type(row).__name__))
+                continue
+            out.append(("%s.%s[%d]" % (where, name, i), row))
+        return out
+
+    def pair_list(where, name, value):
+        """[[value, pixel], ...] - the shape every calibration in a plan takes."""
+        if value is None:
+            return
+        if not isinstance(value, list):
+            return bad(where, name, value, "a list of [value, pixel] pairs")
+        for i, pair in enumerate(value):
+            label = "%s[%d]" % (name, i)
+            if not isinstance(pair, (list, tuple)):
+                bad(where, label, pair, "a [value, pixel] pair")
+            elif len(pair) != 2:
+                problems.append(_problem(
+                    where, "PLAN_BAD_FIELD_TYPE",
+                    "%s has %d entries, expected exactly [value, pixel]"
+                    % (label, len(pair))))
+            else:
+                for part in pair:
+                    if not _finite(part):
+                        problems.append(_problem(
+                            where, "PLAN_BAD_FIELD_TYPE",
+                            "%s contains %r, which is not a finite number"
+                            % (label, part)))
+
+    # ---- grids: factors is a map of factor name -> its levels ---------------
+    for where, grid in rows_of("grids"):
+        factors = grid.get("factors")
+        if factors is None:
+            continue
+        if not isinstance(factors, dict):
+            bad(where, "factors", factors, "an object of factor -> levels")
+            continue
+        for factor, levels in factors.items():
+            label = "factors[%r]" % factor
+            if not isinstance(levels, list):
+                bad(where, label, levels, "a list of levels")
+                continue
+            if not levels:
+                problems.append(_problem(
+                    where, "PLAN_BAD_FIELD_TYPE",
+                    "%s is empty; a factor with no levels defines no cells"
+                    % label))
+            for level in levels:
+                if not isinstance(level, _SCALARS):
+                    bad(where, "%s entry" % label, level,
+                        "a level name, not a structure")
+
+    # ---- units: the x calibration a categorical panel falls back to ---------
+    for where, unit in rows_of("units"):
+        pair_list(where, "x_calibration", unit.get("x_calibration"))
+
+    # ---- reader_configs: config_id + an options object of scalars -----------
+    for where, config in rows_of("reader_configs"):
+        options = config.get("options")
+        if options is None:
+            continue
+        if not isinstance(options, dict):
+            bad(where, "options", options, "an object of option -> value")
+            continue
+        for option, value in options.items():
+            if not isinstance(option, str):
+                bad(where, "an option name", option, "a string")
+            if not isinstance(value, _SCALARS):
+                bad(where, "options[%r]" % option, value, "a scalar value")
+
+    # ---- figures: panels, each with a `read` block the compiler descends ----
+    for where, figure in rows_of("figures"):
+        panels = figure.get("panels")
+        if panels is not None and not isinstance(panels, list):
+            bad(where, "panels", panels, "a list of objects")
+            continue
+        for pwhere, panel in object_list(where, "panels", panels):
+            read = panel.get("read")
+            if read is None:
+                continue
+            if not isinstance(read, dict):
+                bad(pwhere, "read", read, "an object")
+                continue
+            object_list(pwhere + ".read", "series", read.get("series"))
+            object_list(pwhere + ".read", "positions", read.get("positions"))
+            pair_list(pwhere + ".read", "y_ticks", read.get("y_ticks"))
+            pair_list(pwhere + ".read", "x_ticks", read.get("x_ticks"))
+            # `box` is deliberately NOT checked here. The content pass
+            # already reports every way it can be wrong - empty, short, a
+            # string entry, an infinity - as PLAN_READ_INCOMPLETE, which names
+            # the author's actual mistake better than a type would. All this
+            # pass owes it is not crashing before that runs.
+            if read.get("box") is not None and not isinstance(
+                    read.get("box"), (list, tuple)):
+                bad(pwhere + ".read", "box", read.get("box"),
+                    "[x0, x1, y0, y1] as four numbers")
+
+    # ---- figure_views: a map, and the compiler indexes it by view name ------
+    views = plan.get("figure_views")
+    if views is not None and not isinstance(views, dict):
+        bad("plan", "figure_views", views, "an object keyed by view name")
+    return problems
+
+
 def validate_plan(plan, file_root="."):
     """Everything wrong with the plan, before a single CSV is written.
 
@@ -110,31 +269,7 @@ def validate_plan(plan, file_root="."):
         problems.append(_problem("plan", "PLAN_BAD_FIELD_TYPE",
                                  "publication_id is %s"
                                  % type(plan.get("publication_id")).__name__))
-    for section, key, kind in (("figures", "panels", list),
-                               ("grids", "factors", dict)):
-        for i, row in enumerate(plan.get(section) or []):
-            if not isinstance(row, dict):
-                continue
-            value = row.get(key)
-            if value is not None and not isinstance(value, kind):
-                problems.append(_problem(
-                    "%s[%d]" % (section, i), "PLAN_BAD_FIELD_TYPE",
-                    "%s is %s, expected %s" % (key, type(value).__name__,
-                                               kind.__name__)))
-    for i, figure in enumerate(plan.get("figures") or []):
-        if not isinstance(figure, dict):
-            continue
-        for j, panel in enumerate(figure.get("panels") or []):
-            if not isinstance(panel, dict):
-                problems.append(_problem(
-                    "figures[%d].panels[%d]" % (i, j), "PLAN_ROW_NOT_AN_OBJECT",
-                    type(panel).__name__))
-                continue
-            read = panel.get("read")
-            if read is not None and not isinstance(read, dict):
-                problems.append(_problem(
-                    "figures[%d].panels[%d]" % (i, j), "PLAN_BAD_FIELD_TYPE",
-                    "read is %s, expected an object" % type(read).__name__))
+    problems.extend(_nested_shape_problems(plan))
     if problems:
         return problems
 

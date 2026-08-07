@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.18"
+PIPELINE_VERSION = "7.19"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -154,7 +154,8 @@ def file_sha256_or_blank(path):
         return ""
 
 
-def review_subject_sha256(run_row, values, manifest_hashes, environment):
+def review_subject_sha256(run_row, values, manifest_hashes, environment,
+                          artifacts=()):
     """Everything a person is actually approving when they approve a panel.
 
     The first version hashed the panel id, the unit id, the mark type, the image
@@ -190,9 +191,18 @@ def review_subject_sha256(run_row, values, manifest_hashes, environment):
             "Pipeline_Code_SHA256")),
         "manifests:" + json.dumps(manifest_hashes, sort_keys=True),
         "environment:" + json.dumps(environment, sort_keys=True),
-        "raw:" + file_sha256_or_blank(_s(run_row.get("Raw_Data_File"))),
-        "project:" + file_sha256_or_blank(_s(run_row.get("WPD_Project_File"))),
-    ]
+        # Every artifact this panel produced, by type and content. This used to
+        # be two lines - `raw:` and `project:` - each hashing one path out of
+        # the run row. The overlay, the picture the person is actually looking
+        # at, was named in the docstring above and hashed nowhere; and a
+        # multi-series scatter's `Raw_Data_File` is several paths joined with
+        # ";", which is not a file, so it hashed to the empty string and the
+        # point clouds were not in the subject at all.
+        #
+        # Basenames, not full paths: the subject is what the person saw, and
+        # moving the output directory does not change that.
+    ] + ["artifact:%s|%s|%s" % (kind, os.path.basename(_s(path)), digest)
+         for kind, path, digest in sorted(artifacts)]
     for row in sorted(values, key=lambda r: _s(r.get("Cell_Key"))):
         material.append("value:" + "|".join(
             "%s=%s" % (k, row.get(k, "")) for k in sorted(row)
@@ -377,7 +387,7 @@ def _x_positions(rows):
 class PanelOutcome(object):
     def __init__(self, state, values=None, detail="", raw=None,
                  declared=0, read=0, with_dispersion=0, missing=(), project=None,
-                 overlay=None):
+                 overlay=None, artifacts=()):
         self.state = state
         self.values = values or []
         self.detail = detail
@@ -388,6 +398,36 @@ class PanelOutcome(object):
         self.read = read
         self.with_dispersion = with_dispersion
         self.missing = list(missing)
+        # Every file this panel produced that a person might look at or a
+        # script might re-derive from, as (TYPE, path) pairs. `raw` was a
+        # single string, and a multi-series scatter joined its point files with
+        # ";" - so the one thing that hashed it got a path that does not exist
+        # and recorded an empty hash. A list cannot be joined into a lie.
+        self.artifacts = list(artifacts)
+
+
+#: Everything a run leaves on disk that a person looks at or a script re-derives
+#: from. The four CSVs were hashed and re-checked; these were not, so the
+#: picture a reviewer approved could be swapped for a different picture after
+#: they approved it and the finalizer had nothing to say.
+PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA")
+PANEL_ARTIFACT_COLUMNS = ["Panel_ID", "Artifact_Type", "Artifact_Path", "SHA256"]
+
+
+def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
+    """(TYPE, path) pairs for one panel, in a fixed order, skipping what is absent."""
+    out = []
+    if overlay:
+        out.append(("OVERLAY", overlay))
+    if project:
+        out.append(("WPD_PROJECT", project))
+    for path in raw_marks:
+        if path:
+            out.append(("RAW_MARKS", path))
+    for path in point_data:
+        if path:
+            out.append(("POINT_DATA", path))
+    return out
 
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
@@ -507,7 +547,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             for r in series_rows:
                 sid = _s(r.get("Series_ID"))
                 if not BM.blank(r.get("Mask_Key")):
-                    mapping[sid] = _s(r.get("Mask_Key"))
+                    # Case-folded, because the mask names are lower case and a
+                    # manifest is written by a person. The validator refuses a
+                    # key that names no mask, so this can only be a spelling.
+                    mapping[sid] = _s(r.get("Mask_Key")).casefold()
                     continue
                 tol = (float(r.get("Colour_Tolerance"))
                        if not BM.blank(r.get("Colour_Tolerance"))
@@ -691,6 +734,8 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     missing = sorted(_all_cells(series_level, position_level) - seen)
     return PanelOutcome("AUTO_PASS", values=records, raw=raw_path, project=project,
                         overlay=overlay,
+                        artifacts=_panel_artifacts(raw_marks=[raw_path],
+                                                   project=project, overlay=overlay),
                         declared=declared, read=len(records),
                         with_dispersion=with_disp, missing=missing,
                         detail=("" if not missing else
@@ -948,6 +993,11 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         record.setdefault("WPD_Project_File", project or "")
     return PanelOutcome("AUTO_PASS", values=records, raw=";".join(raw_files),
                         project=project, declared=declared, read=len(records),
+                        # One entry per point file. `raw` stays a ";"-joined
+                        # string for the run manifest column, but nothing
+                        # hashes that string as a path any more.
+                        artifacts=_panel_artifacts(point_data=raw_files,
+                                                   project=project),
                         with_dispersion=len(records))
 
 
@@ -967,7 +1017,7 @@ CANONICAL_OUTPUTS = (
     "figure_values_machine_qc.csv", "figure_values_raw.csv", "figure_values.csv",
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
-    "manual_queue_cells.csv",
+    "manual_queue_cells.csv", "panel_artifacts.csv",
     "source_panel_coverage.csv",
 )
 CANONICAL_DIRS = ("raw", "projects", "review")
@@ -1208,13 +1258,19 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     for _, r in m["positions"].iterrows():
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
-    values, run_rows, queue_rows = [], [], []
+    values, run_rows = [], []
+    # A panel gets exactly one queue entry, keyed so a later pass revises it
+    # instead of contradicting it. Inventory-only panels have no Panel_ID to
+    # key on and no state that can change, so they are a plain list appended
+    # after, which also keeps the file's row order what it was.
+    queue_by_panel, unlinked_queue_rows = {}, []
     # Was `projects_by_figure`, filled with `setdefault` - so a figure with six
     # auto panels recorded the first panel's project and the other five vanished
     # from the figure manifest. The project the gate checked was then a
     # different panel's marks and a different panel's calibration.
     projects_by_panel = {}
     overlays_by_panel = {}
+    artifacts_by_panel = {}
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -1237,6 +1293,11 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         overlays_by_panel[pid] = outcome.overlay or ""
         if outcome.project:
             projects_by_panel[pid] = outcome.project
+        # Hashed the moment they are written, before anything else touches the
+        # directory - so what the manifest records is what the run produced.
+        artifacts_by_panel[pid] = [
+            (kind, path, file_sha256_or_blank(path))
+            for kind, path in outcome.artifacts]
         # Stamp the panel onto every value it produced. A unit is normally one
         # panel, but nothing forbids two panels feeding one - and keying panel
         # state by Unit_ID meant the LAST panel's state won, so a unit whose
@@ -1268,7 +1329,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Detail": outcome.detail,
         })
         if outcome.state != "AUTO_PASS" or outcome.missing:
-            queue_rows.append({
+            # Keyed by panel, not appended. A panel that read most of its cells
+            # returns AUTO_PASS with a missing list, so it entered the queue
+            # here as AUTO_PASS; the grid gate then found the same missing cells
+            # and appended a SECOND row saying QC_FAILED. One panel, two rows,
+            # two different terminal states, and `manual_queue_cells.csv`
+            # attributing the missing cells to the state the run manifest no
+            # longer claimed.
+            queue_by_panel[pid] = {
                 "Panel_ID": pid, "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
                 "Figure_ID": _s(panel.get("Figure_ID")),
                 "Unit_ID": _s(panel.get("Unit_ID")),
@@ -1280,7 +1348,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 "Panel_Box": ",".join(_s(panel.get(c)) for c in
                                       ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")),
                 "Detail": outcome.detail,
-            })
+            }
 
     # Inventory-only target panels are actionable work, not merely a coverage
     # statistic.  They have no geometry/config yet, so they cannot enter the
@@ -1301,7 +1369,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 "MANUAL_DIGITIZE", "NO_READER_AVAILABLE"):
             continue
         sf = source_fig_by_id.get(_s(sr.get("Source_Figure_ID")), {})
-        queue_rows.append({
+        unlinked_queue_rows.append({
             "Panel_ID": "", "Source_Panel_ID": spid, "Figure_ID": "",
             "Unit_ID": "", "Mark_Type": "",
             "Run_State": ("NO_READER_AVAILABLE" if disposition ==
@@ -1355,17 +1423,30 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             row["Run_State"] = "QC_FAILED"
             row["Detail"] = ("the grid gate rejected this unit's values: %s"
                              % ", ".join(sorted(blamed[uid])))
-            queue_rows.append({
-                "Panel_ID": row["Panel_ID"],
-                "Source_Panel_ID": row["Source_Panel_ID"],
-                "Figure_ID": row["Figure_ID"],
-                "Unit_ID": uid, "Mark_Type": row["Mark_Type"],
-                "Run_State": "QC_FAILED", "Missing_Cells": "",
-                "Image_Path": row["Image_Path"], "Panel_Box": "",
-                "Detail": row["Detail"],
-            })
+            # Update the panel's existing queue entry rather than adding a
+            # second one, and keep the missing cells it already carried. The
+            # old code appended, with the removed `Missing_Cells` key and no
+            # `_cells`, so a partially-read panel appeared twice - once
+            # AUTO_PASS with its cells, once QC_FAILED with an empty count -
+            # and `manual_queue_cells.csv` filed those cells under a state the
+            # run manifest had already withdrawn.
+            existing = queue_by_panel.get(row["Panel_ID"])
+            if existing is None:
+                existing = queue_by_panel[row["Panel_ID"]] = {
+                    "Panel_ID": row["Panel_ID"],
+                    "Source_Panel_ID": row["Source_Panel_ID"],
+                    "Figure_ID": row["Figure_ID"],
+                    "Unit_ID": uid, "Mark_Type": row["Mark_Type"],
+                    "Missing_Cell_Count": 0, "_cells": [],
+                    "Image_Path": row["Image_Path"], "Panel_Box": "",
+                }
+            existing["Run_State"] = "QC_FAILED"
+            existing["Detail"] = row["Detail"]
 
     run_df = pd.DataFrame(run_rows, columns=RUN_MANIFEST_COLUMNS)
+    # Assembled once, AFTER every state revision, so the queue and the run
+    # manifest cannot tell a reviewer two different stories about one panel.
+    queue_rows = list(queue_by_panel.values()) + unlinked_queue_rows
     queue_cell_rows = []
     for row in queue_rows:
         for cell in row.pop("_cells", []):
@@ -1496,10 +1577,21 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Review_Subject_SHA256": review_subject_sha256(
                 row, [v for v in machine_qc_df.to_dict("records")
                       if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]],
-                manifest_hashes, environment_record()),
+                manifest_hashes, environment_record(),
+                artifacts=artifacts_by_panel.get(row["Panel_ID"], [])),
             "Decision": "", "Reviewer_ID": "", "Reviewed_At": "", "Note": "",
         })
     review_df = pd.DataFrame(review_rows, columns=REVIEW_QUEUE_COLUMNS)
+    # One row per artifact, for every panel that produced one - not only the
+    # ones awaiting review. A panel that failed still has a picture and a point
+    # file somebody may look at, and the ledger is the record of what this run
+    # wrote, not of what it wants approved.
+    artifact_df = pd.DataFrame(
+        [{"Panel_ID": pid, "Artifact_Type": kind, "Artifact_Path": path,
+          "SHA256": digest}
+         for pid in sorted(artifacts_by_panel)
+         for kind, path, digest in artifacts_by_panel[pid]],
+        columns=PANEL_ARTIFACT_COLUMNS)
     # An empty review directory beside twelve panels awaiting review would read
     # as "nothing to look at". Say which pictures could not be drawn.
     overlay_failures = OVERLAY.failures()
@@ -1533,6 +1625,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     machine_qc_df.to_csv(os.path.join(work_dir, "figure_values_machine_qc.csv"),
                          index=False)
     review_df.to_csv(os.path.join(work_dir, "review_queue.csv"), index=False)
+    artifact_df.to_csv(os.path.join(work_dir, "panel_artifacts.csv"), index=False)
     run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
     queue_cells_df.to_csv(os.path.join(work_dir, "manual_queue_cells.csv"),
@@ -1555,7 +1648,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                         open(os.path.join(work_dir, name), encoding="utf-8").read())
                     for name in ("figure_values_machine_qc.csv",
                                  "review_queue.csv", "figure_values_raw.csv",
-                                 "run_manifest.csv")},
+                                 "run_manifest.csv", "panel_artifacts.csv")},
                 reviewer_registry_sha256=manifest_hashes.get("reviewers", ""))
     try:
         promote(work_dir, output_dir, fault_after=fault_after)

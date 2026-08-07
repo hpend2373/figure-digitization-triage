@@ -34,6 +34,14 @@ def runs(idx, gap=1):
     return out
 
 
+#: The three masks this reader was born with, and the only values `Mask_Key`
+#: may take. Lower case, because that is the key `colour_masks` returns - a
+#: manifest saying `Mask_Key=BLUE` used to validate and then raise `KeyError`
+#: inside the reader, which aborts the whole batch as an INTERNAL_ERROR.
+#: `batch_manifests.BAR_COLOR_MASK_KEYS` must equal this; the suite asserts it.
+BUILTIN_MASK_KEYS = ("blue", "red", "dark")
+
+
 def colour_masks(rgb, declared=None):
     """Boolean masks from an RGB uint8 array.
 

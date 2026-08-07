@@ -254,7 +254,55 @@ for _label, _mutate, _want in (
              source_figure_id=p["figures"][0]["source_figure_id"]),
          "PLAN_DUPLICATE_ID"),
         ("a Source_Figure_ID that would become a filename",
-         lambda p: p["figures"][0].update(source_figure_id="../sf"), "UNSAFE_ID")):
+         lambda p: p["figures"][0].update(source_figure_id="../sf"), "UNSAFE_ID"),
+        # Nested structures. The top-level sections and their rows were
+        # checked; what was INSIDE a row was not, so each of these validated
+        # clean and then came out of the compiler as a traceback about
+        # `'int' object is not iterable` rather than a sentence about the field
+        # the author typed.
+        ("a factor whose levels are a number",
+         lambda p: p["grids"][0].update(factors={"ARM": 3}), "PLAN_BAD_FIELD_TYPE"),
+        ("a factor whose levels are objects",
+         lambda p: p["grids"][0].update(factors={"ARM": [{"level": "A"}]}),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a factor with no levels at all",
+         lambda p: p["grids"][0].update(factors={"ARM": []}), "PLAN_BAD_FIELD_TYPE"),
+        ("a series list of bare strings",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(series=["S1"]),
+         "PLAN_ROW_NOT_AN_OBJECT"),
+        ("a series list that is not a list",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(series="S1"),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("positions that are a number",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(positions=5),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a position that is a string",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(positions=["T0"]),
+         "PLAN_ROW_NOT_AN_OBJECT"),
+        ("a reader config that is a string",
+         lambda p: p.update(reader_configs=["oops"]), "PLAN_ROW_NOT_AN_OBJECT"),
+        ("reader_configs that are not a list",
+         lambda p: p.update(reader_configs={"C1": {}}), "PLAN_BAD_FIELD_TYPE"),
+        ("options that are not an object",
+         lambda p: p.update(reader_configs=[dict(config_id="C1", options="wide")]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("an option whose value is a list",
+         lambda p: p.update(reader_configs=[
+             dict(config_id="C1", options={"colour_tolerance": [70]})]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("an x calibration that is a number",
+         lambda p: p["units"][0].update(x_calibration=7), "PLAN_BAD_FIELD_TYPE"),
+        ("an x calibration of bare numbers",
+         lambda p: p["units"][0].update(x_calibration=[1, 2]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("an x calibration pair of the wrong length",
+         lambda p: p["units"][0].update(x_calibration=[[1, 2, 3]]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("an x calibration pixel that is NaN",
+         lambda p: p["units"][0].update(x_calibration=[[1, float("nan")]]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("figure_views that are a list",
+         lambda p: p.update(figure_views=["F1"]), "PLAN_BAD_FIELD_TYPE")):
     _p = copy.deepcopy(PLAN)
     _mutate(_p)
     try:
@@ -266,6 +314,66 @@ for _label, _mutate, _want in (
           _raised is None and _want in codes(_probs),
           "%r / %s" % (_raised, codes(_probs)))
     check("  and nothing is written", not _w, "%s" % sorted(_w))
+
+
+print()
+print("the validator reports; it never raises, at any depth")
+# The scenarios above are the shapes that actually broke. This is the property
+# behind them, applied to EVERY field in the plan rather than the ones somebody
+# thought of: a plan is a document an agent writes, so half-formed structure is
+# the normal input, and a traceback out of the validator is the one answer that
+# tells the author nothing.
+_WRONG = (None, 7, "x", [], {}, [7], {"k": 7}, [[1]], float("nan"))
+
+
+def _paths(node, prefix=()):
+    """Every addressable field in the plan, to a bounded depth."""
+    if len(prefix) > 5:
+        return
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield prefix + (key,)
+            for path in _paths(value, prefix + (key,)):
+                yield path
+    elif isinstance(node, list):
+        for i, value in enumerate(node[:2]):
+            yield prefix + (i,)
+            for path in _paths(value, prefix + (i,)):
+                yield path
+
+
+def _put(node, path, value):
+    for step in path[:-1]:
+        node = node[step]
+    node[path[-1]] = value
+
+
+_paths_seen = list(_paths(PLAN))
+_raised, _probed = [], 0
+for _path in _paths_seen:
+    for _wrong in _WRONG:
+        _p = copy.deepcopy(PLAN)
+        try:
+            _put(_p, _path, _wrong)
+        except (KeyError, IndexError, TypeError):
+            continue
+        _probed += 1
+        try:
+            CP.validate_plan(_p, file_root=HERE)
+        except Exception as exc:                                # pragma: no cover
+            _raised.append(("%s = %r" % (".".join(map(str, _path)), _wrong),
+                            "%s: %s" % (type(exc).__name__, exc)))
+check("every field in the plan, given nine wrong values, is reported not raised",
+      not _raised, "%d of %d raised, e.g. %s" % (len(_raised), _probed, _raised[:3]))
+check("and the probe really covered the nested structure",
+      _probed > 1500 and any(len(p) >= 4 for p in _paths_seen),
+      "%d probes over %d paths, deepest %d"
+      % (_probed, len(_paths_seen), max(len(p) for p in _paths_seen)))
+# A validator that reports everything by reporting nothing specific would pass
+# the property above. The plan itself must still come out clean.
+check("and the untouched plan still validates",
+      not CP.validate_plan(copy.deepcopy(PLAN), file_root=HERE),
+      "%s" % codes(CP.validate_plan(copy.deepcopy(PLAN), file_root=HERE)))
 
 
 _missing = copy.deepcopy(PLAN)

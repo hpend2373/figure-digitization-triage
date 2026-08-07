@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.18 (full package)
+# figure-digitization-triage — v7.19 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -160,7 +160,117 @@ finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
 
-## Items 7–11 of the same review, in the order they were written
+## v7.19 review — the artifact the person approved
+
+### 1. The picture was not part of the approval (BLOCKING, now closed)
+
+`Review_Subject_SHA256` covered the run row, every manifest, the environment
+and every machine-QC value of the panel. Its docstring also claimed it covered
+"the raw mark JSON, the WPD project and the overlay PNG". It covered the first
+two by path off the run row and the overlay not at all — and the finalizer
+re-hashed four CSVs and nothing else. So:
+
+    run → replace review/P1_overlay.png with a red rectangle → approve → finalize
+    FINALIZED, 8 values accepted
+
+The same for the WPD tar and the raw marks. The numbers could not be edited
+after the fact; the picture could, and an approval is a statement about a
+picture.
+
+A multi-series scatter was worse still. `Raw_Data_File` is several point-file
+paths joined with `;`, and the subject hashed that string as one path — it does
+not exist, so it hashed to the empty string and the point clouds were not in
+the subject at all.
+
+`panel_artifacts.csv` is a new run output: one row per artifact per panel
+(`OVERLAY` / `WPD_PROJECT` / `RAW_MARKS` / `POINT_DATA`) with its SHA-256,
+hashed the moment it is written. It is folded into `Review_Subject_SHA256` by
+content and by type, it joins `Output_SHA256` in the run stamp — so the ledger
+cannot be rewritten to agree with a tampered file — and the finalizer re-hashes
+every artifact it names before it reads a single decision. `finalize_stamp.json`
+also records `Review_File_SHA256`, so which decisions produced an accepted file
+is answerable without trusting that nobody edited the answer.
+
+Reverting: the subject without artifacts fails 5; the finalizer not re-hashing
+them 9; the ledger outside the verified set 1; the review-file hash 1.
+
+### 2. `Mask_Key` was accepted unchecked
+
+The three built-in BAR_COLOR masks are keyed `blue`, `red`, `dark`.
+`Mask_Key=BLUE` — the obvious spelling, and the way every other vocabulary
+column in these manifests is written — validated, reached `masks["BLUE"]`,
+raised `KeyError`, and became an `InternalReaderError`. That aborts the **whole
+batch**: 115 other publications stop because one manifest cell has capitals in
+it. A manifest typo must not be reported as a defect in the reader.
+
+`Mask_Key` is now case-folded and checked against the reader's own list
+(`BAD_MASK_KEY`), the runner case-folds what it passes down, and declaring both
+`Mask_Key` and `Colour_Hex` is `SERIES_DISCRIMINANT_AMBIGUOUS` rather than a
+silent precedence. Reverting the check fails 3; reverting the case-fold fails 6,
+including an end-to-end run over the frozen 12-bar fixture.
+
+### 3. One panel could hold two terminal states
+
+A panel that read most of its cells returns `AUTO_PASS` with a missing list, so
+it entered the manual queue as `AUTO_PASS`. The grid gate then found the same
+missing cells, flipped the run row to `QC_FAILED`, and **appended** a second
+queue row — with the removed `Missing_Cells` key, so its count came out blank.
+One panel, two rows, contradictory states, and `manual_queue_cells.csv` filing
+the missing cells under the state `run_manifest.csv` had already withdrawn.
+
+The queue is keyed by panel and assembled once, after every state revision. A
+later pass revises the entry instead of contradicting it, and the missing cells
+survive the revision. Reverting fails 6.
+
+### 4. The plan validator now checks shape at every depth
+
+Top-level sections and their rows were checked; what was *inside* a row was not.
+`factors: {"ARM": 3}` is an object, so it passed, and then `for level in levels`
+raised `TypeError` **inside the compiler**. Seven more shapes did the same: a
+`series` of strings, a scalar `positions`, a string in `reader_configs`, a
+non-object `options`, an `x_calibration` of bare numbers, a pair of the wrong
+length, a NaN pixel.
+
+Every nested structure the compiler walks is checked before it walks it. The
+property behind the scenarios is now tested directly: every field in the shipped
+plan, given nine wrong values each — over 1500 probes — must be *reported* and
+never *raised*. Reverting the shape pass fails 25.
+
+### 5. The point-count audit is a contract, not a courtesy
+
+The five audit fields were validated when present and not required when absent,
+so a hand-assembled bundle, a new reader or an adapter that dropped a column
+would be judged on the numbers alone — which is the state the audit exists to
+end. A `DIGITIZED` association must now carry all five
+(`MISSING_POINT_COUNT_AUDIT`); a source that gives no n says so explicitly with
+`Point_Count_Agreement=NO_SOURCE_N`, and saying that beside a declared n is
+`POINT_COUNT_AUDIT_CONTRADICTS_SOURCE`. A transcribed association has no point
+cloud and is not asked.
+
+`N_Outcome` on an association is validated as blank or a positive whole number,
+and the audit no longer reaches it through `int(float(n))` — `"10.5"` quietly
+became `10` and the comparison then agreed with itself. A declared n the audit
+cannot use, it does not use. Reverting the requirement fails 6, the truncation 3,
+the `N_Outcome` check 4.
+
+### 6. The agent-facing documents match the code
+
+`SKILL_ADDENDUM.md` still described `Panel_Fingerprint`, a field that has not
+existed since 7.16, and gave no entrypoint contract at all — an agent following
+it would generate the wrong review schema. It now opens with the five-line path
+(plan → compile → run → review → finalize), what counts as success, and the
+three things never to do. The README's scenario count and 397's declared-cell
+count are current.
+
+### 7. A decision with no identifier
+
+A duplicated `Review_ID` voided its rows; a **blank** one did not. So the
+identifier a decision is audited by could simply be left out, and every accepted
+value carried `Review_ID=""`. `Review_ID` is now required on an approval and
+takes the same `SAFE_ID` rule as every other identifier here, since it lands in
+a column somebody will join on. Reverting fails 8.
+
+## Items 7–11 of the release-gate review, in the order they were written
 
 ### 7. `Slot_Index` without `X_Pixel`
 
@@ -1211,17 +1321,17 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 392 |
+| `test_run_batch.py` | 417 |
 | `test_kernel.py` | 232 |
-| `test_grid_engine.py` | 157 |
-| `test_mark_readers.py` | 86 |
-| `test_compile_plan.py` | 80 |
-| `test_finalize.py` | 80 |
-| `test_bar_reader.py` | 66 |
+| `test_grid_engine.py` | 171 |
+| `test_compile_plan.py` | 115 |
+| `test_finalize.py` | 114 |
+| `test_mark_readers.py` | 92 |
+| `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 16 |
-| **total** | **1154** |
+| **total** | **1275** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

@@ -80,7 +80,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-1040 scenarios at v7.17, verified in a clean room with scipy blocked — the
+1275 scenarios at v7.19, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
@@ -137,7 +137,7 @@ protocol as an extractor reads it; `MIGRATION.md` covers the schema changes.
 
 ## Status
 
-Publication 397 runs end to end: 18 panels, 144 declared cells, 48 read,
+Publication 397 runs end to end: 18 panels, 192 declared cells, 48 read,
 **0 accepted**. That is the correct answer, not a failure — the running text
 gives "30-min means and SEMs" for the line figures, while the Figure 3/4
 captions say only "(3-min means)". Whether the bars are SD or SEM is not in the

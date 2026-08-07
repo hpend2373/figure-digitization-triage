@@ -80,7 +80,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-1004 scenarios at v7.16, verified in a clean room with scipy blocked — the
+1040 scenarios at v7.17, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
@@ -105,8 +105,15 @@ means the gate found nothing wrong; it does not mean anybody looked at where
 the marks landed, and a reader that puts a plausible number on the wrong bar
 produces exactly the output the gate has nothing to say about. Each passing
 panel gets an overlay PNG, and `finalize_batch.py` writes the accepted file for
-panels a registered human approved against that specific extraction. Re-run
-with different code and the approval is `APPROVAL_STALE`, not inherited.
+panels a registered human approved against that specific extraction.
+
+What the approval is bound to is `Review_Subject_SHA256`: the values themselves
+with their cell keys, every manifest, the raw marks, the WPD project and the
+environment that produced them. Change any of it — swap what `CONTROL` and
+`TREATED` mean, nudge a tick, upgrade OpenCV — and the approval is
+`APPROVAL_STALE`, not inherited. The finalizer also re-hashes everything it
+reads before consulting a decision, so editing a value after approving the
+overlay is `RUN_ARTIFACT_MODIFIED` rather than an input.
 
 To run the pilot as attested work:
 

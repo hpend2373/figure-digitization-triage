@@ -31,6 +31,62 @@ Both are required on `Extraction_Method=DIGITIZED` rows and skipped on
 `TRANSCRIBED` ones, so `Extraction_Method` is itself a required column — a
 template that omits it makes both checks inert.
 
+## Inventory the physical figure before any outcome-specific split
+
+Completeness is a different grain from extraction.  `Figure_ID` may be split by
+outcome, sex, axis or reader configuration; it therefore cannot prove that the
+publisher's physical figure was covered.  A set of virtual figures can each say
+`2/2 MATCHED` while most of the original raster is absent.
+
+Create three source manifests before creating any reader row:
+
+    source_document_manifest.csv one row per main article/supplement/chapter
+    source_figure_manifest.csv  one row per physical publisher figure
+    source_panel_inventory.csv  one row per visually distinct source subpanel
+
+Use an immutable `Source_Document_ID` and record the complete target article or
+supplement page range.  Its `Observed_Figure_Count` must equal the number of
+physical source figures attached to it, which prevents an entire figure from
+vanishing before the panel check begins.  Then use an immutable
+`Source_Figure_ID` such as `PMID123_MAIN_FIG2`.  Count panels on the
+full raster, not from the caption.  Count plots, photographs, schematics and
+table/inset subpanels before deciding whether they contain target data.  A legend
+or colour bar is not a panel, while an inset with its own independent content is.
+If the source supplies no panel letters, assign stable reading-order labels
+`P01`, `P02`, ... .  Record the count method and human verifier.  Machine
+segmentation may propose boxes, but `Inventory_Status=VISUALLY_VERIFIED` is the
+gate because captions and layout detectors both miss unlabeled panels.
+
+Every visible panel receives exactly one disposition:
+
+    AUTO_DIGITIZE          MANUAL_DIGITIZE       NO_READER_AVAILABLE
+    ASSOCIATION_EXTRACT    BINARY_EXTRACT         NO_SUMMARY_STATISTIC
+    NON_TARGET_OUTCOME     NOT_DATA               DUPLICATE_OR_DECORATIVE
+    UNRESOLVED
+
+`UNRESOLVED` and an unverified inventory block the run.  Non-target and not-data
+panels are retained as closed rows rather than deleted.  Target panels routed to
+automatic extraction must link to at least one `panel_manifest.csv` row through
+`Source_Panel_ID`; multiple run panels may link to one physical panel when one
+axes region yields several units.  Reader-unavailable and manual panels need no
+dummy geometry: the batch emits them into `manual_queue.csv` from the source
+inventory itself.
+
+The mandatory equality is:
+
+    Observed_Panel_Count == number of source_panel_inventory rows
+
+It is evaluated only in the `Source_Figure_ID` namespace.  Counts on virtual
+`Figure_ID` rows cannot satisfy it.  The run emits `source_panel_coverage.csv`,
+one row per physical panel, so publication coverage and value acceptance remain
+separate claims.  `figure_values_accepted.csv` says which numbers may be pooled;
+it never says every source panel was considered.
+
+For a large corpus, use two passes: (1) inventory every physical figure and close
+or route every panel, then (2) configure readers only for the routed target
+panels.  This bounds manual work without allowing a reader's capability to
+determine what enters the evidence base.
+
 ## Reconcile panels against the worklist, per figure
 
 A caption-derived panel list can only miss panels, never invent them, so the
@@ -127,11 +183,14 @@ and not to the schema now fails the suite instead of the batch.
 
 ## Declare the run before you make it
 
-Four more files describe the RUN, as distinct from the data. They are separate
+Seven files describe source completeness and the RUN, as distinct from the data. They are separate
 from the four data grains on purpose: a values file has to be reviewable by
 someone who never touches a raster, and a run has to be re-executable by someone
 who never reads the paper.
 
+    source_document_manifest.csv article/supplement/chapter figure inventory
+    source_figure_manifest.csv physical publisher figures and verified counts
+    source_panel_inventory.csv every visible panel and its disposition
     panel_manifest.csv     panel box, Mark_Type, axis calibration, and the unit
                            it fills
     series_manifest.csv    colour / marker / fill / line style / bar fill, and
@@ -278,12 +337,18 @@ than by the figure.
     python3 test_mark_readers.py    # non-bar readers, adapter, reader->gate chain
     python3 test_mono_bar.py        # monochrome bars, fill patterns, cap trap
     python3 test_integration.py     # template -> reader -> CSV -> validator
-    python3 test_run_batch.py       # manifests -> run -> values -> gate -> queue
+    python3 test_run_batch.py       # source inventory -> manifests -> values -> gate -> queue
     python3 test_reproducibility.py # clean-room import, no scipy
     python3 crosscheck_id323.py     # second independent reading of one figure
     python3 forward_test_397_mono_bar.py   # a real publisher raster
 
 Run all of them after ANY edit. They fail in different ways on purpose.
+
+`test_run_batch.py` includes the completeness counterexample: a physical figure
+declares 36 visible panels while 14 virtual rows each appear internally complete.
+The batch must fail with `SOURCE_PANEL_COVERAGE_INCOMPLETE`.  A second fixture
+shows that unconfigured manual/no-reader panels survive in the source coverage
+ledger and queue instead of blocking readable panels or disappearing.
 
 A synthetic fixture proves a reader is self-consistent. It cannot prove the
 reader survives JPEG softening, a 1 px hatch outline that misses the threshold,

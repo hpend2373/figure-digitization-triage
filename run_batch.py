@@ -2,7 +2,9 @@
 
     python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR] [--date YYYY-MM-DD]
 
-Input  (MANIFEST_DIR): figure_manifest.csv, grid_definitions.csv,
+Input  (MANIFEST_DIR): source_document_manifest.csv, source_figure_manifest.csv,
+                       source_panel_inventory.csv,
+                       figure_manifest.csv, grid_definitions.csv,
                        unit_manifest.csv, panel_manifest.csv,
                        series_manifest.csv, position_manifest.csv,
                        reader_config.csv
@@ -51,6 +53,12 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
+PIPELINE_VERSION = "7.8"
+PIPELINE_CODE_FILES = (
+    "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
+    "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
+)
+
 
 #: Mark_Type -> the function that actually receives the reader keywords, so a
 #: test can introspect it. Declaring that an option "applies to" a mark type is
@@ -58,36 +66,6 @@ import mark_readers as MR                                          # noqa: E402
 #: `n_slots` came to be accepted for BAR_MONO, pass validation, and then raise
 #: TypeError mid-run - which surfaced as PANEL_GEOMETRY_UNRESOLVED, a message
 #: about the figure for a defect in this table.
-#: The version of the whole pipeline, not of one reader. `MR.READER_VERSION`
-#: moves only when a reader's numbers can change, which is right for a reader
-#: and useless for a run: v7.5 and v7.6 both report reader 7.2 while judging the
-#: same manifests differently, because the CHANGES were in the gate, the option
-#: table and the run states. A stamp has to identify the code that produced it.
-PIPELINE_VERSION = "7.7"
-
-#: Modules whose contents decide a verdict. Hashed into every stamp, so two runs
-#: that disagree can be told apart even between released versions - a working
-#: copy with an edited grid_engine.py is not the version it says it is.
-VERSIONED_MODULES = ("run_batch.py", "batch_manifests.py", "grid_engine.py",
-                     "mark_readers.py", "bar_reader.py", "kernel.py")
-
-
-def pipeline_hashes():
-    """SHA-256 of each module that can change a verdict, by filename."""
-    out = {}
-    for name in VERSIONED_MODULES:
-        path = os.path.join(HERE, name)
-        if os.path.exists(path):
-            out[name] = file_sha256(path)
-    return out
-
-
-def code_hash():
-    """One digest over all of them, for a quick 'same code?' comparison."""
-    joined = json.dumps(pipeline_hashes(), sort_keys=True)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
-
-
 def reader_functions():
     from bar_reader import read_bar_panel
     return {
@@ -101,6 +79,9 @@ def reader_functions():
 
 
 MANIFEST_FILES = {
+    "source_documents": "source_document_manifest.csv",
+    "source_figures": "source_figure_manifest.csv",
+    "source_panels": "source_panel_inventory.csv",
     "figures": "figure_manifest.csv",
     "grids": "grid_definitions.csv",
     "units": "unit_manifest.csv",
@@ -111,26 +92,16 @@ MANIFEST_FILES = {
 }
 
 RUN_MANIFEST_COLUMNS = [
-    "Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
+    "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
     "Cells_Declared", "Cells_Read", "Cells_With_Dispersion",
     "Image_Path", "Image_SHA256", "Config_ID", "Config_SHA256",
-    "Reader_Version", "Raw_Data_File", "WPD_Project_File", "Run_Date", "Detail",
+    "Reader_Version", "Pipeline_Version", "Pipeline_Code_SHA256",
+    "Raw_Data_File", "WPD_Project_File", "Run_Date", "Detail",
 ]
 
 MANUAL_QUEUE_COLUMNS = [
-    "Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
-    # JSON, not a delimited string. A Cell_Key already joins its factors with
-    # ";", so joining CELLS with ";" too produced
-    # "ARM=FLUID;TIMEPOINT=0:30;ARM=FLUID;TIMEPOINT=1:00" - from which the cell
-    # boundaries cannot be recovered at all once the arity is not fixed.
-    "Missing_Cells_JSON", "Missing_Cell_Count",
-    "Image_Path", "Panel_Box", "Detail",
-]
-
-#: One row per missing cell, for anyone who would rather join than parse.
-MANUAL_QUEUE_CELL_COLUMNS = [
-    "Panel_ID", "Figure_ID", "Unit_ID", "Run_State", "Cell_Key", "Image_Path",
-    "Panel_Box", "Detail",
+    "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
+    "Missing_Cells", "Image_Path", "Panel_Box", "Detail",
 ]
 
 
@@ -157,6 +128,16 @@ def file_sha256(path):
 def frame_sha256(df):
     return hashlib.sha256(
         df.to_csv(index=False).encode("utf-8")).hexdigest()
+
+
+def pipeline_code_sha256():
+    h = hashlib.sha256()
+    for name in PIPELINE_CODE_FILES:
+        path = os.path.join(HERE, name)
+        h.update(name.encode("utf-8") + b"\0")
+        with open(path, "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()
 
 
 class ManifestLoadError(Exception):
@@ -261,11 +242,6 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
     statistic = _upper(unit.get("Statistic_Type")) if unit is not None else ""
-    disposition = _upper(panel.get("Panel_Disposition")) or "EXTRACT"
-    if disposition in BM.NON_EXTRACT_DISPOSITIONS:
-        return PanelOutcome("NOT_TARGETED",
-                            detail="%s: %s" % (disposition,
-                                               _s(panel.get("Note")) or "no reason given"))
     mode = _upper(panel.get("Panel_Mode")) or "AUTO"
     if mark in BM.UNRELEASED_MARK_TYPES:
         # Decided before the image is opened: there is nothing to try.
@@ -654,7 +630,7 @@ CANONICAL_OUTPUTS = (
     "figure_values_accepted.csv", "figure_values_raw.csv", "figure_values.csv",
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
-    "manual_queue_cells.csv",
+    "source_panel_coverage.csv",
 )
 CANONICAL_DIRS = ("raw", "projects")
 STAGING = ".staging"
@@ -757,9 +733,10 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
         json.dump({
             "schema": "figure-digitization-triage/run-stamp/4",
             "Status": status, "Run_Date": run_date,
+            "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
-            "Code_SHA256": code_hash(), "Code_SHA256_By_File": pipeline_hashes(),
-            "Reader_Version": MR.READER_VERSION, "Config_SHA256": cfg_hash,
+            "Pipeline_Code_SHA256": pipeline_code_sha256(),
+            "Config_SHA256": cfg_hash,
             "Manifest_SHA256": manifest_hashes or {},
             "Panels": panels, "Values_Read": read, "Values_Accepted": accepted,
             "QC_Problems": qc_problems, "Manifest_Problems": problems,
@@ -793,7 +770,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
 
     problems = BM.validate_batch_manifests(
         m["panels"], m["series"], m["positions"], m["configs"],
-        units=m["units"], figures=m["figures"], file_root=file_root,
+        units=m["units"], source_documents=m["source_documents"],
+        source_figures=m["source_figures"],
+        source_panels=m["source_panels"], file_root=file_root,
         check_files=check_files)
     if len(problems):
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
@@ -833,7 +812,6 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
     values, run_rows, queue_rows, projects_by_figure = [], [], [], {}
-    queue_missing = []
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -849,13 +827,15 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # first panel failed and whose second passed came out ACCEPTED. Each
         # value now carries where it came from and is judged on that.
         for record in outcome.values:
-            record["Source_Panel_ID"] = pid
+            record["Run_Panel_ID"] = pid
+            record["Source_Panel_ID"] = _s(panel.get("Source_Panel_ID"))
         values.extend(outcome.values)
         image_path = _s(panel.get("Image_Path"))
         resolved = image_path if os.path.exists(image_path) \
             else os.path.join(file_root, image_path)
         run_rows.append({
-            "Panel_ID": pid, "Figure_ID": _s(panel.get("Figure_ID")),
+            "Panel_ID": pid, "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
+            "Figure_ID": _s(panel.get("Figure_ID")),
             "Unit_ID": _s(panel.get("Unit_ID")),
             "Mark_Type": _upper(panel.get("Mark_Type")),
             "Run_State": outcome.state, "Cells_Declared": outcome.declared,
@@ -865,24 +845,56 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Image_SHA256": (file_sha256(resolved) if os.path.exists(resolved) else ""),
             "Config_ID": _s(panel.get("Config_ID")), "Config_SHA256": cfg_hash,
             "Reader_Version": MR.READER_VERSION,
+            "Pipeline_Version": PIPELINE_VERSION,
+            "Pipeline_Code_SHA256": pipeline_code_sha256(),
             "Raw_Data_File": outcome.raw or "",
             "WPD_Project_File": outcome.project or "", "Run_Date": run_date,
             "Detail": outcome.detail,
         })
         if outcome.state != "AUTO_PASS" or outcome.missing:
             queue_rows.append({
-                "Panel_ID": pid, "Figure_ID": _s(panel.get("Figure_ID")),
+                "Panel_ID": pid, "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
+                "Figure_ID": _s(panel.get("Figure_ID")),
                 "Unit_ID": _s(panel.get("Unit_ID")),
                 "Mark_Type": _upper(panel.get("Mark_Type")),
                 "Run_State": outcome.state,
-                "Missing_Cells_JSON": json.dumps(outcome.missing),
-                "Missing_Cell_Count": len(outcome.missing),
+                "Missing_Cells": ";".join(outcome.missing),
                 "Image_Path": image_path,
                 "Panel_Box": ",".join(_s(panel.get(c)) for c in
                                       ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")),
                 "Detail": outcome.detail,
             })
-            queue_missing.append(list(outcome.missing))
+
+    # Inventory-only target panels are actionable work, not merely a coverage
+    # statistic.  They have no geometry/config yet, so they cannot enter the
+    # reader loop; put them in the same manual queue with their physical image
+    # and stated reason.  This is what lets a 100-paper batch expose every
+    # unconfigured target panel without inventing dummy reader manifests.
+    linked_source_ids = {
+        _s(r.get("Source_Panel_ID")) for _, r in m["panels"].iterrows()
+        if _s(r.get("Source_Panel_ID"))
+    }
+    source_fig_by_id = {
+        _s(r.get("Source_Figure_ID")): r for _, r in m["source_figures"].iterrows()
+    }
+    for _, sr in m["source_panels"].iterrows():
+        spid = _s(sr.get("Source_Panel_ID"))
+        disposition = _upper(sr.get("Panel_Disposition"))
+        if spid in linked_source_ids or disposition not in (
+                "MANUAL_DIGITIZE", "NO_READER_AVAILABLE"):
+            continue
+        sf = source_fig_by_id.get(_s(sr.get("Source_Figure_ID")), {})
+        queue_rows.append({
+            "Panel_ID": "", "Source_Panel_ID": spid, "Figure_ID": "",
+            "Unit_ID": "", "Mark_Type": "",
+            "Run_State": ("NO_READER_AVAILABLE" if disposition ==
+                          "NO_READER_AVAILABLE" else "MANUAL_POINT_READ"),
+            "Missing_Cells": "", "Image_Path": _s(sf.get("Source_Image")),
+            "Panel_Box": "",
+            "Detail": "%s | %s | %s" % (
+                _s(sr.get("Panel_Label")), _s(sr.get("Outcome_Label")),
+                _s(sr.get("Disposition_Reason"))),
+        })
 
     values_df = pd.DataFrame(
         [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in values],
@@ -918,14 +930,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             row["Detail"] = ("the grid gate rejected this unit's values: %s"
                              % ", ".join(sorted(blamed[uid])))
             queue_rows.append({
-                "Panel_ID": row["Panel_ID"], "Figure_ID": row["Figure_ID"],
+                "Panel_ID": row["Panel_ID"],
+                "Source_Panel_ID": row["Source_Panel_ID"],
+                "Figure_ID": row["Figure_ID"],
                 "Unit_ID": uid, "Mark_Type": row["Mark_Type"],
-                "Run_State": "QC_FAILED", "Missing_Cells_JSON": "[]",
-                "Missing_Cell_Count": 0,
+                "Run_State": "QC_FAILED", "Missing_Cells": "",
                 "Image_Path": row["Image_Path"], "Panel_Box": "",
                 "Detail": row["Detail"],
             })
-            queue_missing.append([])
 
     run_df = pd.DataFrame(run_rows, columns=RUN_MANIFEST_COLUMNS)
     queue_df = pd.DataFrame(queue_rows, columns=MANUAL_QUEUE_COLUMNS)
@@ -952,12 +964,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         if r["Run_State"] != "AUTO_PASS" or uid not in unit_state:
             unit_state[uid] = r["Run_State"]
     blamed = _units_named_by(qc, values_df, m["units"]) if len(qc) else {}
-    source_panels = [_s(rec.get("Source_Panel_ID")) for rec in values]
+    run_panel_ids = [_s(rec.get("Run_Panel_ID")) for rec in values]
+    source_panel_ids = [_s(rec.get("Source_Panel_ID")) for rec in values]
     statuses, codes, eligible = [], [], []
     for i, (_, row) in enumerate(values_df.iterrows()):
         uid = _s(row.get("Unit_ID"))
         unit_codes = sorted(blamed.get(uid, ()))
-        pid = source_panels[i] if i < len(source_panels) else ""
+        pid = run_panel_ids[i] if i < len(run_panel_ids) else ""
         own = panel_state.get(pid) or unit_state.get(uid, "")
         # Both tests, and the second is the one that is easy to miss. A unit
         # built from two panels where one failed and the other filled the whole
@@ -975,29 +988,54 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         codes.append(";".join(unit_codes))
         eligible.append("TRUE" if statuses[-1] == "ACCEPTED" else "FALSE")
     raw_df = values_df.copy()
-    raw_df["Source_Panel_ID"] = source_panels
+    raw_df["Run_Panel_ID"] = run_panel_ids
+    raw_df["Source_Panel_ID"] = source_panel_ids
     raw_df["Value_Status"] = statuses
     raw_df["QC_Codes"] = codes
     raw_df["Pooling_Eligible"] = eligible
     accepted_df = raw_df[raw_df["Pooling_Eligible"] == "TRUE"].copy()
+
+    # Source-level coverage is the antidote to virtual Figure_IDs masking
+    # omissions.  Every physical panel appears exactly once here, including
+    # non-target, not-data, manual and no-reader panels.  The accepted values
+    # file remains the pooling surface; this is the completeness ledger.
+    runs_by_source = {}
+    for _, rr in run_df.iterrows():
+        spid = _s(rr.get("Source_Panel_ID"))
+        if spid:
+            runs_by_source.setdefault(spid, []).append(rr)
+    coverage_rows = []
+    for _, sr in m["source_panels"].iterrows():
+        spid = _s(sr.get("Source_Panel_ID"))
+        linked = runs_by_source.get(spid, [])
+        states = sorted({_s(x.get("Run_State")) for x in linked if _s(x.get("Run_State"))})
+        disposition = _upper(sr.get("Panel_Disposition"))
+        if linked:
+            coverage_status = ("AUTO_PASS" if states == ["AUTO_PASS"]
+                               else "QUEUED_OR_FAILED")
+        elif disposition in ("MANUAL_DIGITIZE", "NO_READER_AVAILABLE"):
+            coverage_status = "QUEUED_SOURCE_ONLY"
+        elif disposition in BM._CLOSED_WITHOUT_READER:
+            coverage_status = "CLOSED_%s" % disposition
+        else:
+            coverage_status = "UNRESOLVED"
+        rec = {c: sr.get(c, "") for c in BM.source_panel_inventory_columns()}
+        rec.update({
+            "Linked_Run_Panel_Count": len(linked),
+            "Linked_Panel_IDs": ";".join(sorted({_s(x.get("Panel_ID")) for x in linked})),
+            "Run_States": ";".join(states),
+            "Coverage_Status": coverage_status,
+        })
+        coverage_rows.append(rec)
+    coverage_df = pd.DataFrame(coverage_rows)
 
     raw_df.to_csv(os.path.join(work_dir, "figure_values_raw.csv"), index=False)
     accepted_df.to_csv(os.path.join(work_dir, "figure_values_accepted.csv"),
                        index=False)
     run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
-    # Expanded from the list the runner already holds, not by re-parsing the
-    # string it just serialised. A round-trip through a delimited format is
-    # where cell boundaries get lost, and this file exists precisely so nobody
-    # has to guess where they are.
-    cell_rows = []
-    for q, cells in zip(queue_rows, queue_missing):
-        for cell in cells:
-            cell_rows.append({c: (cell if c == "Cell_Key" else q.get(c, ""))
-                              for c in MANUAL_QUEUE_CELL_COLUMNS})
-    pd.DataFrame(cell_rows, columns=MANUAL_QUEUE_CELL_COLUMNS).to_csv(
-        os.path.join(work_dir, "manual_queue_cells.csv"), index=False)
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
+    coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=len(accepted_df),

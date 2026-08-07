@@ -12,6 +12,17 @@ pre/post study differ in their factors and levels, not in their validation logic
 
 ## The four grains
 
+The four analytical grains are preceded by three source-completeness grains:
+
+| Grain | One row per | Answers |
+|---|---|---|
+| source document manifest | main article/supplement/chapter | complete page range and how many physical figures it contains |
+| source figure manifest | physical publisher figure | how many plot regions are actually visible, and who verified the full raster |
+| source panel inventory | visually distinct source subpanel | target status and disposition, including non-data panels and panels not configured for a reader |
+
+These use `Source_Figure_ID`/`Source_Panel_ID`.  Analytical `Figure_ID` may be
+split by outcome and is never used to prove completeness.
+
 | Grain | One row per | Answers |
 |---|---|---|
 | figure manifest | figure | the source, the image, the panel reconciliation |
@@ -26,7 +37,8 @@ grain as two files and deliberately never as `figure_values.csv`:
 | Output | Contains |
 |---|---|
 | `figure_values_accepted.csv` | only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem — the only file to pool from |
-| `figure_values_raw.csv` | every reading, each row carrying `Source_Panel_ID`, `Value_Status`, `QC_Codes` and `Pooling_Eligible` |
+| `figure_values_raw.csv` | every reading, each row carrying `Run_Panel_ID`, physical `Source_Panel_ID`, `Value_Status`, `QC_Codes` and `Pooling_Eligible` |
+| `source_panel_coverage.csv` | every physical panel, including non-target, not-data, manual and no-reader dispositions |
 
 The plain name is gone on purpose. A single `figure_values.csv` once carried
 eight means whose SD-versus-SEM was unresolved while the panels sat at

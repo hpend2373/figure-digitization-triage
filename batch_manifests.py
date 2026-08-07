@@ -1,11 +1,16 @@
 """Declarative execution layer: what to read, and how, stated before any run.
 
 The four grains in `grid_engine.py` describe the DATA - what a figure claims.
-These four describe the RUN - where the marks are, which reader sees them, and
+The first three manifests below describe SOURCE COMPLETENESS; the remaining four
+describe the RUN - where the marks are, which reader sees them, and
 what each mark means. Keeping them apart matters: a value file must be reviewable
 by someone who never touches a raster, and a run file must be re-executable by
 someone who never reads the paper.
 
+    source_document_manifest.csv one row per article/supplement/chapter source
+    source_figure_manifest.csv one row per physical publisher figure
+    source_panel_inventory.csv one row per visible plot region, including panels
+                               that will not be digitized
     panel_manifest.csv     one row per readable panel: box, mark type, axis
                            calibration, and the unit it fills
     series_manifest.csv    one row per series within a panel: how the reader
@@ -80,24 +85,9 @@ SCATTER_ASSOCIATION_TYPES = ("PEARSON_R", "SPEARMAN_RHO", "KENDALL_TAU",
 #: queue row instead of attempting it and reporting a plausible number.
 PANEL_MODES = ("AUTO", "MANUAL")
 
-#: Why a panel that EXISTS is or is not being extracted. Every panel in a
-#: declared figure gets a row, including the ones nobody wants - deleting them
-#: is what let a five-figure publication be declared as fourteen panels when it
-#: has thirty-six, with every figure reporting MATCHED.
-PANEL_DISPOSITIONS = (
-    "EXTRACT",                 # a target outcome, to be read
-    "NON_TARGET",              # a real panel, outside this review's outcomes
-    "NO_SUMMARY_STATISTIC",    # individual traces, n=1, nothing to pool
-    "DUPLICATE_OF_TABLE",      # the same numbers are tabulated in the text
-)
-
-#: Dispositions that mean "do not read this", so the runner does not try.
-NON_EXTRACT_DISPOSITIONS = tuple(d for d in PANEL_DISPOSITIONS if d != "EXTRACT")
-
 #: Terminal states a panel can reach in a run. Every panel lands on exactly one.
 RUN_STATES = (
     "AUTO_PASS",                 # read, converted, and clean through the gate
-    "NOT_TARGETED",              # a real panel this review does not extract
     "NO_READER_AVAILABLE",       # correctly declared, but no released reader
     "MANUAL_POINT_READ",         # reader produced nothing usable; hand-digitize
     "SERIES_IDENTITY_UNRESOLVED",  # marks found, but which series is ambiguous
@@ -106,6 +96,85 @@ RUN_STATES = (
     "NOT_CONVERTIBLE",           # the mark cannot become the declared statistic
     "QC_FAILED",                 # values produced, but the grid gate rejected them
 )
+
+# Source completeness is deliberately independent of reader capability.  A
+# panel may be closed as non-target or not-data, or queued because no reader is
+# available, but it may not disappear simply because nobody created a run row.
+SOURCE_INVENTORY_STATUSES = ("VISUALLY_VERIFIED", "PENDING")
+SOURCE_PANEL_COUNT_METHODS = ("HUMAN_VISUAL", "MACHINE_PLUS_HUMAN")
+SOURCE_DOCUMENT_ROLES = ("MAIN_ARTICLE", "SUPPLEMENT", "APPENDIX",
+                         "PROCEEDINGS_CHAPTER")
+
+
+def check_attestation(row, line, flag, kernel=None):
+    """The one human act this whole layer rests on has to be a real answer.
+
+    No software can count the panels in an arbitrary published figure, so the
+    inventory's correctness reduces to a person having opened it and looked.
+    Everything above this - coverage, routing, the queue - is only as good as
+    that attestation, which makes it the single most important field in the
+    package and the one most worth being strict about.
+
+    Requiring it to be non-blank is not enough: `Inspector=TBD` and
+    `Inspection_Date=soon` both passed, and so did `2026-13-45`, which is not a
+    date at all. That is the same defect as a hedged `Errorbar_Definition_Source`
+    - a non-answer occupying the field that is supposed to hold the answer - and
+    it is worse here, because there is no second source to fall back on.
+    """
+    import datetime
+    import re
+    if kernel is None:
+        import kernel as kernel_module
+        kernel = kernel_module
+    who = str(row.get("Inspector", "")).strip()
+    when = str(row.get("Inspection_Date", "")).strip()
+    for field, value in (("Inspector", who), ("Inspection_Date", when)):
+        marker = kernel.fig_unresolved_marker(value)
+        if marker:
+            flag(line, "UNRESOLVED_INVENTORY_ATTESTATION",
+                 "%s contains %r. Nobody has looked at this figure yet, and the "
+                 "panel count below is therefore not evidence of anything"
+                 % (field, marker))
+    if who and len(re.sub(r"[^0-9A-Za-z]", "", who)) < 2:
+        flag(line, "UNRESOLVED_INVENTORY_ATTESTATION",
+             "Inspector=%r is not a name or a pair of initials - the point of "
+             "the field is that somebody can be asked about the count" % who)
+    if when:
+        try:
+            parsed = datetime.date.fromisoformat(when)
+        except ValueError:
+            flag(line, "BAD_INSPECTION_DATE",
+                 "Inspection_Date=%r is not an ISO date (YYYY-MM-DD). A free-text "
+                 "date cannot be compared with anything, which is the only "
+                 "reason to record one" % when)
+        else:
+            if parsed > datetime.date.today():
+                flag(line, "BAD_INSPECTION_DATE",
+                     "Inspection_Date=%s is in the future - an inspection that "
+                     "has not happened is not an inspection" % when)
+SOURCE_TARGET_STATUSES = ("TARGET", "NON_TARGET", "NOT_DATA", "UNCERTAIN")
+SOURCE_PANEL_DISPOSITIONS = (
+    "AUTO_DIGITIZE",
+    "MANUAL_DIGITIZE",
+    "NO_READER_AVAILABLE",
+    "ASSOCIATION_EXTRACT",
+    "BINARY_EXTRACT",
+    "NO_SUMMARY_STATISTIC",
+    "NON_TARGET_OUTCOME",
+    "NOT_DATA",
+    "DUPLICATE_OR_DECORATIVE",
+    "UNRESOLVED",
+)
+
+_TARGET_DISPOSITIONS = {
+    "AUTO_DIGITIZE", "MANUAL_DIGITIZE", "NO_READER_AVAILABLE",
+    "ASSOCIATION_EXTRACT", "BINARY_EXTRACT", "NO_SUMMARY_STATISTIC",
+}
+_RUN_LINK_REQUIRED = {"AUTO_DIGITIZE", "ASSOCIATION_EXTRACT", "BINARY_EXTRACT"}
+_CLOSED_WITHOUT_READER = {
+    "MANUAL_DIGITIZE", "NO_READER_AVAILABLE", "NO_SUMMARY_STATISTIC",
+    "NON_TARGET_OUTCOME", "NOT_DATA", "DUPLICATE_OR_DECORATIVE",
+}
 
 
 # --------------------------------------------------------------------------
@@ -206,7 +275,7 @@ PAIRED_OPTION_RULES = (
 
 def panel_manifest_columns():
     return [
-        "Panel_ID", "Figure_ID", "Unit_ID", "Panel_Label", "Mark_Type",
+        "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Panel_Label", "Mark_Type",
         "Image_Path",
         # the plot area, in image pixels
         "Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1",
@@ -216,7 +285,7 @@ def panel_manifest_columns():
         "Axis_X_Scale", "Axis_Y_Scale",
         # "v1:px1;v2:px2" - at least two points per axis in use
         "Axis_X_Ticks", "Axis_Y_Ticks",
-        "Baseline_Value", "Panel_Disposition",
+        "Baseline_Value",
         # which association a scatter panel is meant to yield. It is a run
         # instruction, not a finding: the paper says which statistic it reports,
         # and the reader must not pick one by looking at the points.
@@ -250,7 +319,41 @@ def reader_config_columns():
     return ["Config_ID", "Option", "Value", "Note"]
 
 
+def source_figure_manifest_columns():
+    """Physical figures, before any outcome-specific virtual split."""
+    return [
+        "Source_Figure_ID", "Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File",
+        "Source_Page", "Source_Image", "Observed_Panel_Count",
+        "Inventory_Status", "Panel_Count_Method", "Inspector",
+        "Inspection_Date", "Note",
+    ]
+
+
+def source_document_manifest_columns():
+    """One row per source document whose full article range was inventoried."""
+    return [
+        "Source_Document_ID", "Publication_ID", "Document_Role", "Source_File",
+        "Article_Page_Range", "Observed_Figure_Count", "Inventory_Status",
+        "Figure_Count_Method", "Inspector", "Inspection_Date", "Note",
+    ]
+
+
+def source_panel_inventory_columns():
+    """One row per visually distinct source subpanel in a physical figure.
+
+    Include plots, photographs, schematics and table/inset panels.  Whether a
+    panel contains extractable data is its disposition, not a reason to omit it.
+    """
+    return [
+        "Source_Panel_ID", "Source_Figure_ID", "Panel_Label", "Outcome_Label",
+        "Target_Status", "Panel_Disposition", "Disposition_Reason", "Note",
+    ]
+
+
 BATCH_TEMPLATES = (
+    ("source_document_manifest", source_document_manifest_columns),
+    ("source_figure_manifest", source_figure_manifest_columns),
+    ("source_panel_inventory", source_panel_inventory_columns),
     ("panel_manifest", panel_manifest_columns),
     ("series_manifest", series_manifest_columns),
     ("position_manifest", position_manifest_columns),
@@ -371,7 +474,8 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
 
 
 def validate_batch_manifests(panels, series, positions, configs, units=None,
-                             figures=None, file_root=".", check_files=True):
+                             source_documents=None, source_figures=None, source_panels=None,
+                             file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
 
     Returns a DataFrame of problems - empty means the run may proceed. The
@@ -384,7 +488,16 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     def flag(where, check, detail):
         problems.append(dict(where=where, check=check, detail=detail))
 
-    frames = (("panels", panels, panel_manifest_columns()),
+    if source_documents is None:
+        source_documents = pd.DataFrame()
+    if source_figures is None:
+        source_figures = pd.DataFrame()
+    if source_panels is None:
+        source_panels = pd.DataFrame()
+    frames = (("source_documents", source_documents, source_document_manifest_columns()),
+              ("source_figures", source_figures, source_figure_manifest_columns()),
+              ("source_panels", source_panels, source_panel_inventory_columns()),
+              ("panels", panels, panel_manifest_columns()),
               ("series", series, series_manifest_columns()),
               ("positions", positions, position_manifest_columns()),
               ("configs", configs, reader_config_columns()))
@@ -406,14 +519,170 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     if units is not None:
         for _, u in units.iterrows():
             unit_index[str(u.get("Unit_ID", "")).strip()] = u
-    figure_index = {}
-    if figures is not None:
-        for _, f in figures.iterrows():
-            figure_index[str(f.get("Figure_ID", "")).strip()] = f
+
+    # ----------------------------------------------------- source completeness
+    # Figure_ID may be an outcome-specific virtual view.  It is therefore
+    # forbidden as the completeness namespace: only Source_Figure_ID can prove
+    # that every visible panel in the publisher's physical figure was handled.
+    source_document_index = {}
+    for i, r in source_documents.iterrows():
+        line = "source_documents:%d" % (i + 2)
+        sdid = str(r.get("Source_Document_ID", "")).strip()
+        if not sdid:
+            flag(line, "MISSING_REQUIRED", "Source_Document_ID")
+            continue
+        if sdid in source_document_index:
+            flag(line, "DUPLICATE_SOURCE_DOCUMENT_ID", sdid)
+            continue
+        source_document_index[sdid] = r
+        for c in ("Publication_ID", "Document_Role", "Source_File",
+                  "Article_Page_Range", "Observed_Figure_Count",
+                  "Inventory_Status", "Figure_Count_Method", "Inspector",
+                  "Inspection_Date"):
+            if blank(r.get(c)):
+                flag(line, "MISSING_REQUIRED", c)
+        check_attestation(r, line, flag)
+        role = str(r.get("Document_Role", "")).strip().upper()
+        if role not in SOURCE_DOCUMENT_ROLES:
+            flag(line, "BAD_SOURCE_DOCUMENT_ROLE", role)
+        status = str(r.get("Inventory_Status", "")).strip().upper()
+        method = str(r.get("Figure_Count_Method", "")).strip().upper()
+        if status not in SOURCE_INVENTORY_STATUSES:
+            flag(line, "BAD_SOURCE_INVENTORY_STATUS", status)
+        elif status != "VISUALLY_VERIFIED":
+            flag(line, "SOURCE_DOCUMENT_NOT_VERIFIED",
+                 "review the full article/supplement range before execution")
+        if method not in SOURCE_PANEL_COUNT_METHODS:
+            flag(line, "BAD_SOURCE_FIGURE_COUNT_METHOD", method)
+        try:
+            count = _as_int(r.get("Observed_Figure_Count"))
+            if count < 0:
+                raise ValueError("must not be negative")
+        except (TypeError, ValueError) as exc:
+            flag(line, "SOURCE_FIGURE_COUNT_INVALID", str(exc))
+
+    source_figure_index = {}
+    source_figures_by_document = {}
+    for i, r in source_figures.iterrows():
+        line = "source_figures:%d" % (i + 2)
+        sfid = str(r.get("Source_Figure_ID", "")).strip()
+        if not sfid:
+            flag(line, "MISSING_REQUIRED", "Source_Figure_ID")
+            continue
+        if sfid in source_figure_index:
+            flag(line, "DUPLICATE_SOURCE_FIGURE_ID", sfid)
+            continue
+        source_figure_index[sfid] = r
+        sdid = str(r.get("Source_Document_ID", "")).strip()
+        source_figures_by_document.setdefault(sdid, []).append(sfid)
+        if sdid not in source_document_index:
+            flag(line, "SOURCE_DOCUMENT_NOT_FOUND", sdid)
+        elif str(r.get("Publication_ID", "")).strip() != str(
+                source_document_index[sdid].get("Publication_ID", "")).strip():
+            flag(line, "SOURCE_DOCUMENT_PUBLICATION_MISMATCH",
+                 "%s belongs to Publication_ID=%s, not %s" % (
+                     sdid, source_document_index[sdid].get("Publication_ID"),
+                     r.get("Publication_ID")))
+        for c in ("Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File", "Source_Page",
+                  "Source_Image", "Observed_Panel_Count", "Inventory_Status",
+                  "Panel_Count_Method", "Inspector", "Inspection_Date"):
+            if blank(r.get(c)):
+                flag(line, "MISSING_REQUIRED", c)
+        check_attestation(r, line, flag)
+        try:
+            count = _as_int(r.get("Observed_Panel_Count"))
+            if count < 1:
+                raise ValueError("must be at least 1")
+        except (TypeError, ValueError) as exc:
+            flag(line, "SOURCE_PANEL_COUNT_INVALID", str(exc))
+        status = str(r.get("Inventory_Status", "")).strip().upper()
+        method = str(r.get("Panel_Count_Method", "")).strip().upper()
+        if status not in SOURCE_INVENTORY_STATUSES:
+            flag(line, "BAD_SOURCE_INVENTORY_STATUS", status)
+        elif status != "VISUALLY_VERIFIED":
+            flag(line, "SOURCE_INVENTORY_NOT_VERIFIED",
+                 "the physical figure must be counted on screen before execution")
+        if method not in SOURCE_PANEL_COUNT_METHODS:
+            flag(line, "BAD_SOURCE_PANEL_COUNT_METHOD", method)
+
+    for sdid, r in source_document_index.items():
+        try:
+            observed = _as_int(r.get("Observed_Figure_Count"))
+        except (TypeError, ValueError):
+            continue
+        inventoried = len(source_figures_by_document.get(sdid, ()))
+        if inventoried != observed:
+            flag("source_document:%s" % sdid, "SOURCE_FIGURE_COVERAGE_INCOMPLETE",
+                 "document has %d visible figures but source figure manifest has %d"
+                 % (observed, inventoried))
+
+    source_panel_index = {}
+    source_panels_by_figure = {}
+    for i, r in source_panels.iterrows():
+        line = "source_panels:%d" % (i + 2)
+        spid = str(r.get("Source_Panel_ID", "")).strip()
+        sfid = str(r.get("Source_Figure_ID", "")).strip()
+        if not spid or not sfid:
+            flag(line, "MISSING_REQUIRED", "Source_Panel_ID and Source_Figure_ID")
+            continue
+        if spid in source_panel_index:
+            flag(line, "DUPLICATE_SOURCE_PANEL_ID", spid)
+            continue
+        source_panel_index[spid] = r
+        source_panels_by_figure.setdefault(sfid, []).append(spid)
+        if sfid not in source_figure_index:
+            flag(line, "SOURCE_FIGURE_NOT_FOUND", sfid)
+        for c in ("Panel_Label", "Target_Status", "Panel_Disposition",
+                  "Disposition_Reason"):
+            if blank(r.get(c)):
+                flag(line, "MISSING_REQUIRED", c)
+        target = str(r.get("Target_Status", "")).strip().upper()
+        disposition = str(r.get("Panel_Disposition", "")).strip().upper()
+        if target not in SOURCE_TARGET_STATUSES:
+            flag(line, "BAD_TARGET_STATUS", target)
+        if disposition not in SOURCE_PANEL_DISPOSITIONS:
+            flag(line, "BAD_PANEL_DISPOSITION", disposition)
+        if target == "TARGET":
+            if blank(r.get("Outcome_Label")):
+                flag(line, "MISSING_TARGET_OUTCOME_LABEL",
+                     "a target panel must name the outcome visible on screen")
+            if disposition not in _TARGET_DISPOSITIONS:
+                flag(line, "TARGET_DISPOSITION_CONTRADICTION",
+                     "TARGET cannot be closed as %s" % disposition)
+        elif target == "NON_TARGET" and disposition != "NON_TARGET_OUTCOME":
+            flag(line, "TARGET_DISPOSITION_CONTRADICTION",
+                 "NON_TARGET requires NON_TARGET_OUTCOME, not %s" % disposition)
+        elif target == "NOT_DATA" and disposition not in (
+                "NOT_DATA", "DUPLICATE_OR_DECORATIVE"):
+            flag(line, "TARGET_DISPOSITION_CONTRADICTION",
+                 "NOT_DATA cannot be routed as %s" % disposition)
+        elif target == "UNCERTAIN" or disposition == "UNRESOLVED":
+            flag(line, "SOURCE_PANEL_UNRESOLVED",
+                 "visually classify the panel before execution")
+
+    for sfid, r in source_figure_index.items():
+        try:
+            observed = _as_int(r.get("Observed_Panel_Count"))
+        except (TypeError, ValueError):
+            continue
+        inventoried = len(source_panels_by_figure.get(sfid, ()))
+        if inventoried != observed:
+            flag("source_figure:%s" % sfid, "SOURCE_PANEL_COVERAGE_INCOMPLETE",
+                 "physical figure has %d visible panels but inventory has %d; "
+                 "virtual Figure_ID counts cannot satisfy this gate"
+                 % (observed, inventoried))
+
+    # A source-panel label is local to its physical figure.  Duplicate labels
+    # within one source figure usually mean the same panel was inventoried twice.
+    for sfid, ids in source_panels_by_figure.items():
+        labels = [str(source_panel_index[x].get("Panel_Label", "")).strip().upper()
+                  for x in ids]
+        if len(labels) != len(set(labels)):
+            flag("source_figure:%s" % sfid, "DUPLICATE_SOURCE_PANEL_LABEL",
+                 "Panel_Label must be unique within a physical figure")
 
     # -------------------------------------------------------------- panels
-    panel_index, panel_mark, mark_by_config, panel_disposition = {}, {}, {}, {}
-    panels_by_figure = {}
+    panel_index, panel_mark, mark_by_config = {}, {}, {}
     for i, r in panels.iterrows():
         line = "panels:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
@@ -424,30 +693,20 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag(line, "DUPLICATE_PANEL_ID", pid)
             continue
         panel_index[pid] = r
-        panels_by_figure.setdefault(str(r.get("Figure_ID", "")).strip(), []).append(pid)
-        disposition = str(r.get("Panel_Disposition", "")).strip().upper() or "EXTRACT"
-        if disposition not in PANEL_DISPOSITIONS:
-            flag(line, "BAD_PANEL_DISPOSITION",
-                 "Panel_Disposition=%s (expected %s)"
-                 % (disposition, "/".join(PANEL_DISPOSITIONS)))
-            disposition = "EXTRACT"
-        panel_disposition[pid] = disposition
-        required = ("Figure_ID", "Image_Path")
-        if disposition == "EXTRACT":
-            required += ("Unit_ID", "Mark_Type")
-        for c in required:
+        for c in ("Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Image_Path"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
-        if disposition in NON_EXTRACT_DISPOSITIONS:
-            # A record that this panel exists and why it is not being read. It
-            # needs no reader, no calibration, no series and no positions - only
-            # a reason. Demanding the rest is what makes people delete the row.
-            if blank(r.get("Note")):
-                flag(line, "MISSING_DISPOSITION_REASON",
-                     "Panel_Disposition=%s - say in Note why this panel is not "
-                     "extracted, or a reviewer cannot tell a decision from an "
-                     "oversight" % disposition)
-            continue
+        spid = str(r.get("Source_Panel_ID", "")).strip()
+        if spid and spid not in source_panel_index:
+            flag(line, "SOURCE_PANEL_NOT_IN_INVENTORY", spid)
+        elif spid:
+            disposition = str(source_panel_index[spid].get(
+                "Panel_Disposition", "")).strip().upper()
+            if disposition in ("NON_TARGET_OUTCOME", "NOT_DATA",
+                               "DUPLICATE_OR_DECORATIVE"):
+                flag(line, "RUN_PANEL_CONTRADICTS_DISPOSITION",
+                     "%s is linked to a run panel but inventory says %s"
+                     % (spid, disposition))
         mark = str(r.get("Mark_Type", "")).strip().upper()
         # An unreleased mark type is NOT a manifest error. The file is correct;
         # the software is behind it. Rejecting the batch would mean one panel
@@ -557,32 +816,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Association_Type is set on a %s panel, which yields no "
                  "association" % mark)
 
-    # Every panel the figure says exists must have a row here. Without this the
-    # batch layer can quietly declare a subset: publication 397 was declared as
-    # fourteen panels of thirty-six, and every figure still reported MATCHED
-    # because each virtual figure counted only the panels it had been given.
-    # The figure grain reconciles the figure against the SCREEN; this reconciles
-    # the run against the figure grain, and both are needed.
-    for fid, f in figure_index.items():
-        declared = panels_by_figure.get(fid, [])
-        observed = f.get("Observed_Panel_Count")
-        try:
-            observed = int(float(str(observed).strip()))
-        except (TypeError, ValueError):
-            continue                       # the figure grain reports that itself
-        if len(declared) != observed:
-            flag("figures:%s" % fid, "PANEL_MANIFEST_INCOMPLETE",
-                 "the figure manifest says %d panels and panel_manifest declares "
-                 "%d (%s). Record every panel, using Panel_Disposition to say "
-                 "which are not extracted - a panel with no row is invisible to "
-                 "reconciliation" % (observed, len(declared),
-                                     ", ".join(sorted(declared)) or "none"))
-    for fid in sorted(set(panels_by_figure) - set(figure_index)):
-        if figure_index:
-            flag("panels:%s" % fid, "FIGURE_NOT_FOUND",
-                 "panels reference Figure_ID=%s, which the figure manifest does "
-                 "not declare" % fid)
-
     # -------------------------------------------------------------- series
     seen_series, factors_by_panel = set(), {}
     for i, r in series.iterrows():
@@ -594,12 +827,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         if pid not in panel_index:
             flag(line, "PANEL_NOT_FOUND", pid)
-            continue
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
-            flag(line, "SERIES_ON_NON_EXTRACT_PANEL",
-                 "%s is %s, so its series will never be read; delete the row or "
-                 "change the disposition"
-                 % (pid, panel_disposition.get(pid)))
             continue
         if (pid, sid) in seen_series:
             flag(line, "DUPLICATE_SERIES_ID", "%s/%s" % (pid, sid))
@@ -669,16 +896,22 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Bar_Fill_Pattern required")
 
     for pid, r in panel_index.items():
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
-            continue
         if not any(p == pid for p, _ in seen_series):
             flag("panels:%s" % pid, "PANEL_HAS_NO_SERIES",
                  "nothing declares what the marks in this panel mean")
 
+    linked_source_panels = {
+        str(r.get("Source_Panel_ID", "")).strip()
+        for _, r in panels.iterrows() if not blank(r.get("Source_Panel_ID"))
+    }
+    for spid, r in source_panel_index.items():
+        disposition = str(r.get("Panel_Disposition", "")).strip().upper()
+        if disposition in _RUN_LINK_REQUIRED and spid not in linked_source_panels:
+            flag("source_panel:%s" % spid, "SOURCE_PANEL_RUN_LINK_MISSING",
+                 "%s requires at least one panel_manifest row" % disposition)
+
     # Two series of one panel that are told apart by nothing are not two series.
     for pid in panel_index:
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
-            continue
         mark = panel_mark.get(pid, "")
         rows = [r for _, r in series.iterrows()
                 if str(r.get("Panel_ID", "")).strip() == pid]
@@ -710,8 +943,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         if pid not in panel_index:
             flag(line, "PANEL_NOT_FOUND", pid)
-            continue
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
             continue
         if (pid, qid) in seen_pos:
             flag(line, "DUPLICATE_POSITION_ID", "%s/%s" % (pid, qid))
@@ -756,8 +987,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "or the reader will be given a grid it does not use")
 
     for pid, mark in panel_mark.items():
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
-            continue
         if mark in UNRELEASED_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
             flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
                  "%s will read at declared x positions and none are declared"
@@ -768,8 +997,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 
     # A factor cannot be both the series axis and the position axis of one panel.
     for pid in panel_index:
-        if panel_disposition.get(pid) in NON_EXTRACT_DISPOSITIONS:
-            continue
         s_factors = {str(r.get("Factor_Name", "")).strip().upper()
                      for _, r in series.iterrows()
                      if str(r.get("Panel_ID", "")).strip() == pid

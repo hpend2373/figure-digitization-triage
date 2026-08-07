@@ -1,0 +1,61 @@
+{
+ "ticks": [
+  [
+   -25,
+   520
+  ],
+  [
+   -20,
+   457
+  ],
+  [
+   -15,
+   394
+  ],
+  [
+   -10,
+   331
+  ],
+  [
+   -5,
+   269
+  ],
+  [
+   0,
+   206
+  ],
+  [
+   5,
+   143
+  ],
+  [
+   10,
+   80
+  ]
+ ],
+ "bars": [
+  {
+   "session": "B-1",
+   "series": "SUPINE",
+   "order": 0,
+   "true_mean": -7.5,
+   "true_sd": 2.2,
+   "direction": "DOWN"
+  },
+  {
+   "session": "B-1",
+   "series": "ORTHOSTASIS",
+   "order": 0,
+   "true_mean": 0.2,
+   "true_sd": 2.0,
+   "direction": "UP"
+  }
+ ],
+ "outline_w": 4,
+ "panel_box": [
+  110,
+  910,
+  20,
+  560
+ ]
+}

@@ -1,0 +1,121 @@
+{
+ "ticks": [
+  [
+   0,
+   520
+  ],
+  [
+   30,
+   432
+  ],
+  [
+   60,
+   344
+  ],
+  [
+   90,
+   256
+  ],
+  [
+   120,
+   168
+  ],
+  [
+   150,
+   80
+  ]
+ ],
+ "bars": [
+  {
+   "session": "B-1",
+   "series": "SUPINE",
+   "order": 0,
+   "true_mean": 124.0,
+   "true_sd": 3.0
+  },
+  {
+   "session": "B-1",
+   "series": "ORTHOSTASIS",
+   "order": 0,
+   "true_mean": 117.0,
+   "true_sd": 4.5
+  },
+  {
+   "session": "DI7",
+   "series": "SUPINE",
+   "order": 1,
+   "true_mean": 127.0,
+   "true_sd": 3.0
+  },
+  {
+   "session": "DI7",
+   "series": "ORTHOSTASIS",
+   "order": 1,
+   "true_mean": 112.0,
+   "true_sd": 4.5
+  },
+  {
+   "session": "DI14",
+   "series": "SUPINE",
+   "order": 2,
+   "true_mean": 118.0,
+   "true_sd": 4.0
+  },
+  {
+   "session": "DI14",
+   "series": "ORTHOSTASIS",
+   "order": 2,
+   "true_mean": 97.0,
+   "true_sd": 5.0
+  },
+  {
+   "session": "DI19",
+   "series": "SUPINE",
+   "order": 3,
+   "true_mean": 121.0,
+   "true_sd": 3.0
+  },
+  {
+   "session": "DI19",
+   "series": "ORTHOSTASIS",
+   "order": 3,
+   "true_mean": 107.0,
+   "true_sd": 4.0
+  },
+  {
+   "session": "R1",
+   "series": "SUPINE",
+   "order": 4,
+   "true_mean": 114.0,
+   "true_sd": 3.0
+  },
+  {
+   "session": "R1",
+   "series": "ORTHOSTASIS",
+   "order": 4,
+   "true_mean": 105.0,
+   "true_sd": 4.5
+  },
+  {
+   "session": "R5",
+   "series": "SUPINE",
+   "order": 5,
+   "true_mean": 121.0,
+   "true_sd": 3.0
+  },
+  {
+   "session": "R5",
+   "series": "ORTHOSTASIS",
+   "order": 5,
+   "true_mean": 117.0,
+   "true_sd": 3.5
+  }
+ ],
+ "outline_w": 4,
+ "panel_box": [
+  110,
+  910,
+  20,
+  530
+ ]
+}

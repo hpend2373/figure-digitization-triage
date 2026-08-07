@@ -1,0 +1,129 @@
+{
+ "publication_id": 323,
+ "figure": "FIGURE 1",
+ "source_file": "323_10.3389_fphys.2020.00455.pdf",
+ "source_page": 4,
+ "embedded_image_xref": 301,
+ "note": "Six panels. The v442 worklist listed five and omitted PAP entirely; the caption itself enumerates (A)-(F) including (D) PAP, so the omission is confirmed against the source text. NOTE: this is FIGURE 1 (page 4). It was mislabelled Figure 2 in an earlier pass - page 5 carries the separate percent-change figure.",
+ "observed_panel_count": 6,
+ "worklist_panel_count": 5,
+ "unlisted_panels": "PAP",
+ "sessions": [
+  "B-1",
+  "DI7",
+  "DI14",
+  "DI19",
+  "R1",
+  "R5"
+ ],
+ "series": {
+  "SUPINE": "blue",
+  "ORTHOSTASIS": "red"
+ },
+ "panels": [
+  {
+   "name": "SAP",
+   "unit": "mmHg",
+   "box": [
+    90,
+    960,
+    140,
+    600
+   ],
+   "tick_values": [
+    150,
+    120,
+    90,
+    60,
+    30,
+    0
+   ]
+  },
+  {
+   "name": "DAP",
+   "unit": "mmHg",
+   "box": [
+    1100,
+    1950,
+    140,
+    600
+   ],
+   "tick_values": [
+    90,
+    60,
+    30,
+    0
+   ]
+  },
+  {
+   "name": "MAP",
+   "unit": "mmHg",
+   "box": [
+    90,
+    960,
+    690,
+    1140
+   ],
+   "tick_values": [
+    120,
+    90,
+    60,
+    30,
+    0
+   ]
+  },
+  {
+   "name": "PAP",
+   "unit": "mmHg",
+   "box": [
+    1100,
+    1950,
+    690,
+    1140
+   ],
+   "tick_values": [
+    60,
+    40,
+    20,
+    0
+   ]
+  },
+  {
+   "name": "HR",
+   "unit": "bpm",
+   "box": [
+    90,
+    960,
+    1250,
+    1684
+   ],
+   "tick_values": [
+    150,
+    100,
+    50,
+    0
+   ]
+  },
+  {
+   "name": "SV",
+   "unit": "ml",
+   "box": [
+    1100,
+    1950,
+    1250,
+    1684
+   ],
+   "tick_values": [
+    120,
+    90,
+    60,
+    30,
+    0
+   ]
+  }
+ ],
+ "caption_verbatim": "FIGURE 1 | Changes in hemodynamic parameters during tilt test 1 day before dry immersion (B-1), during dry immersion (DI7, DI14, and DI19) and during the recovery period (R1 and R5). (A) Systolic arterial pressure, SAP; (B) diastolic arterial pressure, DAP; (C) mean arterial pressure, MAP; (D) pulse arterial pressure, PAP; (E) heart rate, HR; (F) stroke volume, SV. Data are given for a group of 10 subjects (Mean +/- SEM).",
+ "dispersion_type": "SEM",
+ "errorbar_definition_source": "caption: \"Data are given for a group of 10 subjects (Mean +/- SEM)\"; Statistical Analysis: \"The values are given as mean and SEM, besides anthropometric data and time intervals which are given as mean and SD\"",
+ "n_outcome": 10
+}

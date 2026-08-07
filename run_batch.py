@@ -118,16 +118,35 @@ def frame_sha256(df):
         df.to_csv(index=False).encode("utf-8")).hexdigest()
 
 
+class ManifestLoadError(Exception):
+    """A manifest could not be read at all - missing, malformed or unreadable.
+
+    A plain Exception on purpose. This used to be `SystemExit`, which derives
+    from BaseException, so the obvious `except Exception` around the load would
+    have sailed straight past it and the caller would never have got the chance
+    to record what happened.
+    """
+
+
 def load_manifests(directory):
-    out, missing = {}, []
+    out, missing, broken = {}, [], []
     for key, name in MANIFEST_FILES.items():
         path = os.path.join(directory, name)
         if not os.path.exists(path):
             missing.append(name)
             continue
-        out[key] = pd.read_csv(path, dtype=object).fillna("")
-    if missing:
-        raise SystemExit("missing manifest file(s): " + ", ".join(sorted(missing)))
+        try:
+            out[key] = pd.read_csv(path, dtype=object).fillna("")
+        except Exception as exc:                 # malformed CSV, encoding, perms
+            broken.append("%s (%s: %s)" % (name, type(exc).__name__, exc))
+    if missing or broken:
+        parts = []
+        if missing:
+            parts.append("missing: " + ", ".join(sorted(missing)))
+        if broken:
+            parts.append("unreadable: " + "; ".join(sorted(broken)))
+        raise ManifestLoadError("cannot load manifests from %s - %s"
+                                % (directory, " | ".join(parts)))
     return out
 
 
@@ -595,25 +614,73 @@ def clear_outputs(output_dir):
             shutil.rmtree(path)
 
 
-def promote(work_dir, output_dir):
-    """Move a completed run's outputs into place, then drop the staging dir.
+#: The last file moved into place. Its presence is what says a run committed.
+COMMIT_MARKER = "figure_values_accepted.csv"
 
-    Everything is built in `.staging` and moved only once the run has finished,
-    so a crash halfway through leaves the output directory empty rather than
-    half-populated with files that look like a result.
+
+def promote(work_dir, output_dir, fault_after=None):
+    """Move a completed run's outputs into place, marker last.
+
+    A directory rename would be genuinely atomic and is not available here: the
+    value rows NAME their point files and WPD projects, so those have to be
+    written at their final paths, and a rename would only cover the summary
+    CSVs. What is available is an ORDER.
+
+    `figure_values_accepted.csv` moves last and nothing else depends on it, so
+    it works as a commit marker. Die partway and the pooling file is the one
+    thing that is not there - the failure mode is "no result", not "a result
+    missing its audit trail". Everything else is promoted first precisely so
+    that, if the marker does land, the files explaining it already have.
+
+    Promotion is then verified: if any expected file failed to arrive the marker
+    is withdrawn, because a marker whose evidence is incomplete is worse than no
+    marker. `fault_after` is a test hook - the suite injects a failure partway
+    through and asserts the directory is not poolable afterwards.
     """
-    for name in os.listdir(work_dir):
+    names = sorted(os.listdir(work_dir))
+    ordered = ([n for n in names if n != COMMIT_MARKER]
+               + [n for n in names if n == COMMIT_MARKER])
+    for i, name in enumerate(ordered):
+        if fault_after is not None and i >= fault_after:
+            raise RuntimeError(
+                "fault injected after promoting %d of %d files" % (i, len(ordered)))
         src, dst = os.path.join(work_dir, name), os.path.join(output_dir, name)
         if os.path.isdir(dst):
             shutil.rmtree(dst)
         elif os.path.exists(dst):
             os.remove(dst)
         shutil.move(src, dst)
+    absent = [n for n in ordered
+              if not os.path.exists(os.path.join(output_dir, n))]
+    if absent:
+        raise RuntimeError("promotion incomplete, missing: " + ", ".join(absent))
     shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def withdraw_commit(output_dir, run_date, detail):
+    """Undo a half-finished promotion: no marker, and a stamp that says why.
+
+    Called when `promote` raises. The accepted file is removed whether or not it
+    made it across, the staging directory is dropped, and the stamp is rewritten
+    to PROMOTE_FAILED with zero accepted - so a directory left by a killed
+    process reads as a failure rather than as a small result.
+    """
+    marker = os.path.join(output_dir, COMMIT_MARKER)
+    if os.path.exists(marker):
+        os.remove(marker)
+    shutil.rmtree(os.path.join(output_dir, STAGING), ignore_errors=True)
+    write_stamp(os.path.join(output_dir, "run_stamp.json"), "PROMOTE_FAILED",
+                run_date, detail=detail)
+
+
+#: Every verdict a run directory can carry. RAN is the only one under which
+#: `figure_values_accepted.csv` may exist.
+RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED")
+
+
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
-                panels=0, read=0, accepted=0, qc_problems=0, problems=0):
+                panels=0, read=0, accepted=0, qc_problems=0, problems=0,
+                detail=""):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
@@ -629,15 +696,32 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
             "Manifest_SHA256": manifest_hashes or {},
             "Panels": panels, "Values_Read": read, "Values_Accepted": accepted,
             "QC_Problems": qc_problems, "Manifest_Problems": problems,
+            "Detail": detail,
         }, fh, indent=1, sort_keys=True)
 
 
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
-              check_files=True):
-    """Validate, read, convert, gate, and report. Returns a summary dict."""
-    m = load_manifests(manifest_dir)
+              check_files=True, fault_after=None):
+    """Validate, read, convert, gate, and report. Returns a summary dict.
+
+    `fault_after` is a test hook that aborts promotion partway through; it has
+    no effect on a normal run.
+    """
+    # Clear BEFORE anything can fail, including the load. Reading the manifests
+    # first looked harmless and was not: a missing directory, a malformed CSV or
+    # an unreadable file raised before `clear_outputs` was ever called, so the
+    # previous run's accepted file and its `Status=RAN` stamp both survived a
+    # run that never happened. "Nothing outlives the run that replaces it" only
+    # holds if the clearing is the first thing the run does.
     os.makedirs(output_dir, exist_ok=True)
     clear_outputs(output_dir)
+    try:
+        m = load_manifests(manifest_dir)
+    except Exception as exc:
+        write_stamp(os.path.join(output_dir, "run_stamp.json"),
+                    "INPUT_LOAD_FAILED", run_date,
+                    detail="%s: %s" % (type(exc).__name__, exc))
+        raise
     manifest_hashes = {k: frame_sha256(v) for k, v in sorted(m.items())}
 
     problems = BM.validate_batch_manifests(
@@ -834,7 +918,11 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=len(accepted_df),
                 qc_problems=int(len(qc)))
-    promote(work_dir, output_dir)
+    try:
+        promote(work_dir, output_dir, fault_after=fault_after)
+    except Exception as exc:
+        withdraw_commit(output_dir, run_date, "%s: %s" % (type(exc).__name__, exc))
+        raise
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}
     return dict(status="RAN", panels=len(run_df), values=len(raw_df),
@@ -864,9 +952,15 @@ def main(argv=None):
     ap.add_argument("--date", default="")
     ap.add_argument("--no-file-check", action="store_true")
     args = ap.parse_args(argv)
-    summary = run_batch(args.manifest_dir, args.output_dir,
-                        file_root=args.file_root, run_date=args.date,
-                        check_files=not args.no_file_check)
+    try:
+        summary = run_batch(args.manifest_dir, args.output_dir,
+                            file_root=args.file_root, run_date=args.date,
+                            check_files=not args.no_file_check)
+    except ManifestLoadError as exc:
+        print("inputs could not be loaded: %s" % exc)
+        print("the output directory was cleared and run_stamp.json records "
+              "Status=INPUT_LOAD_FAILED")
+        return 3
     if summary["status"] == "MANIFEST_REJECTED":
         print("manifests rejected: %d problems" % summary["problems"])
         for code in summary["detail"]:

@@ -1,14 +1,19 @@
-# figure-digitization-triage — v7.4 (full package)
+# figure-digitization-triage — v7.5 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
 
-**v7.4 closes the three defects from the v7.3 review**, on top of the four from
-v7.2. Every fix in both rounds was reverted in a scratch copy and the suite
-re-run, so no new scenario is decoration:
+**v7.5 closes the two defects from the v7.4 review**, on top of the three from
+v7.3 and the four from v7.2. Every fix in every round was reverted in a scratch
+copy and the suite re-run, so no scenario is decoration:
 
 | reverted | scenarios that fail |
 |---|---|
+| manifests loaded before the clear-up | 18 |
+| loader raising `SystemExit` again | 12 |
+| commit marker not ordered last | 1 |
+| no withdrawal after a failed promotion | 6 |
+| no verify pass after promotion | 1 |
 | clear-up moved back to the end of a run | 8 |
 | no stamp on a rejected run | 4 |
 | unit state keyed by the last panel seen | 1 |
@@ -16,6 +21,64 @@ re-run, so no new scenario is decoration:
 | `n_slots` back on BAR_MONO | 3 (including the introspection test) |
 | option range checks removed | 4 |
 | LINE_MONO accepting line style alone | 1 |
+
+## HIGH (v7.4) — an input that could not be loaded left the previous result
+
+Reproduced: clean run, then a run pointed at a manifest directory that does not
+exist, and `figure_values_accepted.csv` still held eight rows under a
+`Status=RAN` stamp. `load_manifests` was called before `clear_outputs`, so a
+missing directory, a malformed CSV or a permissions error raised before the
+clearing ever happened — and "nothing outlives the run that replaces it" only
+holds if the clearing is the first thing the run does. It now is.
+
+Two details that the obvious fix would have got wrong:
+
+- **the loader raises a plain `ManifestLoadError`, not `SystemExit`.** It used
+  to raise `SystemExit`, which derives from `BaseException`, so an
+  `except Exception` around the load sails straight past it and the stamp never
+  gets written. The scenarios catch `BaseException` and assert the type, so a
+  regression fails a check instead of taking the suite down with it.
+- **`Status=INPUT_LOAD_FAILED` carries a `Detail`.** An empty directory with a
+  stamp that says only "failed" tells a returning user nothing about whether to
+  re-run or go looking for a file.
+
+`RUN_STATUSES` is now declared: `RAN` / `MANIFEST_REJECTED` /
+`INPUT_LOAD_FAILED` / `PROMOTE_FAILED`. Only `RAN` may have an accepted file
+beside it. `main()` exits 3 on a load failure with a message pointing at the
+stamp.
+
+Nine scenarios per failure mode, over all three the review named: a missing
+directory, a deleted manifest file, and a malformed CSV.
+
+## MEDIUM (v7.4) — promotion moved files one at a time
+
+`promote()` walked `os.listdir()` and moved each file, so a process killed
+partway could leave the accepted file complete beside a missing run manifest.
+
+A directory rename would be genuinely atomic and is not available here: value
+rows NAME their point files and WPD projects, so those have to be written at
+their final paths, and a rename would only cover the summary CSVs. What is
+available is an order:
+
+- **`figure_values_accepted.csv` moves last, as a commit marker.** Nothing
+  depends on it, so dying partway means the pooling file is the one thing that
+  is not there. The failure mode is "no result", not "a result missing its
+  audit trail".
+- **everything that explains a result is promoted before it** — the stamp, the
+  run manifest, the QC problems, the queue, the raw values. If the marker lands,
+  the files that justify it already have.
+- **every file's arrival is verified after the moves.** A marker whose evidence
+  is incomplete is worse than no marker, so a missing file raises.
+- **a failure withdraws the commit**: the accepted file is removed whether or
+  not it arrived, the staging directory is dropped, and the stamp is rewritten
+  to `PROMOTE_FAILED` with zero accepted.
+
+`run_batch(fault_after=N)` is a test hook that aborts promotion partway. The
+suite kills it at three points and asserts the directory is not poolable after
+any of them, then kills `promote()` directly with a stub set whose alphabetical
+order puts the marker second — so the ordering is proven independently of the
+withdrawal, and vice versa. A monkey-patched `shutil.move` that silently loses
+a file proves the verify pass.
 
 ## HIGH (v7.3) — a failed re-run left the previous run's accepted file in place
 
@@ -323,13 +386,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_kernel.py` | 222 |
 | `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 132 |
+| `test_run_batch.py` | 182 |
 | `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **635** |
+| **total** | **685** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

@@ -189,7 +189,8 @@ the first, so a unit whose readable half filled the whole grid came out accepted
 while its unreadable half was never mentioned. Nobody knows whether the panel
 that could not be read would have agreed.
 
-**Clearing up happens at the START of a run, not the end.** A run that tidies
+**Clearing up happens at the START of a run, before anything can fail** —
+including reading the manifests. A run that tidies
 after itself only tidies when it gets that far: reject a manifest and the
 previous run's `figure_values_accepted.csv` is still sitting there, and nothing
 inside that file says it belongs to a run that has since been superseded by a
@@ -197,6 +198,28 @@ failure. Every output is removed before validation, the summary CSVs are built
 in a staging directory and promoted in one move, and a rejected run still writes
 `run_stamp.json` with `Status=MANIFEST_REJECTED` and zero counts. A stamp that
 is absent when things go wrong is only ever there to reassure.
+
+Reading the manifests first looked harmless and was not: a missing directory or
+a malformed CSV raised before the clearing ever happened, so a run that never
+started left the previous run's accepted file and its `Status=RAN` stamp intact.
+`Status` is one of `RAN` / `MANIFEST_REJECTED` / `INPUT_LOAD_FAILED` /
+`PROMOTE_FAILED`, and only `RAN` may have an accepted file beside it.
+
+The loader raises a plain `ManifestLoadError`. It used to raise `SystemExit`,
+which derives from `BaseException` — so the obvious `except Exception` around
+the load sails straight past it and the caller never gets to record what
+happened. A test catches `BaseException` and asserts the type, so a regression
+fails a scenario rather than taking the suite down.
+
+**Promotion is ordered, because it cannot be atomic.** A directory rename would
+be atomic and is not available: value rows NAME their point files and WPD
+projects, so those must be written at their final paths. What is available is an
+order. `figure_values_accepted.csv` moves last and nothing depends on it, so it
+is a commit marker — die partway and the pooling file is the one thing that is
+not there. Everything that explains a result is promoted before it, the arrival
+of every file is verified afterwards, and a failure withdraws the marker and
+stamps `PROMOTE_FAILED`. A fault-injection test kills the promotion at three
+points and asserts the directory is not poolable after any of them.
 
 ## A run has to be re-runnable, and that costs more than a timestamp
 

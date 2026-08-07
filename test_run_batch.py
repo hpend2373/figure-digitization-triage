@@ -699,6 +699,156 @@ check("every canonical output name is one the run actually clears",
       "%s" % sorted(RB.CANONICAL_OUTPUTS))
 
 
+print("an input that cannot even be loaded is a failure, not a silence")
+# The clearing has to be the FIRST thing a run does. Reading the manifests
+# first looked harmless: a missing directory, a malformed CSV or an unreadable
+# file raised before anything was cleared, so the previous run's accepted file
+# and its Status=RAN stamp both survived a run that never happened.
+_load = os.path.join(ROOT, "o_load")
+RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
+check("the setup run leaves an accepted file to go stale",
+      len(pd.read_csv(os.path.join(_load, "figure_values_accepted.csv"))) > 0)
+
+for _name, _break in (
+        ("a manifest directory that does not exist",
+         lambda d: "/nope/no/such/manifests"),
+        ("a manifest file deleted from the set",
+         lambda d: (os.remove(os.path.join(d, "unit_manifest.csv")), d)[1]),
+        ("a malformed CSV in the set",
+         lambda d: (open(os.path.join(d, "panel_manifest.csv"), "w").write(
+             'a,b\n1,2,3,4\n"unclosed\n'), d)[1])):
+    _md = os.path.join(ROOT, "m_load_%d" % len(_name))
+    shutil.rmtree(_md, ignore_errors=True)
+    shutil.copytree(_good, _md)
+    _target = _break(_md)
+    _raised = None
+    try:
+        RB.run_batch(_target, _load, file_root=ROOT, run_date="2026-08-07")
+    except BaseException as exc:      # BaseException on purpose - see next check
+        _raised = exc
+    check("%s raises rather than returning a result" % _name,
+          _raised is not None, "the run returned normally")
+    # SystemExit derives from BaseException, so `except Exception` sails past
+    # it. If the loader ever goes back to raising one, this fails here rather
+    # than taking the suite down with it.
+    check("%s is a catchable Exception, not SystemExit" % _name,
+          isinstance(_raised, Exception)
+          and not isinstance(_raised, SystemExit), "%r" % type(_raised))
+    for _f in ("figure_values_accepted.csv", "figure_values_raw.csv",
+               "run_manifest.csv", "qc_problems.csv"):
+        check("%s leaves no stale %s" % (_name, _f),
+              not os.path.exists(os.path.join(_load, _f)),
+              "the previous run's file survived an input failure")
+    _st = os.path.join(_load, "run_stamp.json")
+    check("%s still writes a stamp" % _name, os.path.exists(_st))
+    _sj = json.load(open(_st)) if os.path.exists(_st) else {}
+    check("%s records INPUT_LOAD_FAILED with zero counts" % _name,
+          _sj.get("Status") == "INPUT_LOAD_FAILED"
+          and _sj.get("Values_Read") == 0 and _sj.get("Values_Accepted") == 0,
+          "%r" % _sj)
+    check("%s says what went wrong" % _name, bool(_sj.get("Detail")), "%r" % _sj)
+    # restore for the next case
+    RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
+
+check("every status a stamp can carry is declared",
+      {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED"}
+      == set(RB.RUN_STATUSES), "%s" % sorted(RB.RUN_STATUSES))
+
+
+print("a promotion that dies partway leaves nothing poolable")
+# promote() moves files one at a time, so it is not atomic. What it can be is
+# ORDERED: the accepted file goes last and works as a commit marker, and a
+# failure withdraws it. The fault is injected rather than argued about.
+_fault = os.path.join(ROOT, "o_fault")
+RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-06")
+_full = sorted(f for f in os.listdir(_fault) if os.path.isfile(os.path.join(_fault, f)))
+check("a clean run commits the marker last and it is present",
+      RB.COMMIT_MARKER in _full, "%s" % _full)
+for _n in (1, 2, 3):
+    _raised = None
+    try:
+        RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-07",
+                     fault_after=_n)
+    except Exception as exc:
+        _raised = exc
+    check("a fault after %d promoted files raises" % _n, _raised is not None)
+    check("and leaves no accepted file to pool from (fault after %d)" % _n,
+          not os.path.exists(os.path.join(_fault, RB.COMMIT_MARKER)),
+          "the commit marker survived a failed promotion")
+    check("and no staging directory (fault after %d)" % _n,
+          not os.path.isdir(os.path.join(_fault, RB.STAGING)))
+    _sp = os.path.join(_fault, "run_stamp.json")
+    _sj = json.load(open(_sp)) if os.path.exists(_sp) else {}
+    check("and a stamp saying PROMOTE_FAILED (fault after %d)" % _n,
+          _sj.get("Status") == "PROMOTE_FAILED"
+          and _sj.get("Values_Accepted") == 0,
+          "no stamp at all" if not _sj else "%r" % _sj)
+check("the marker is the values file a downstream reader would pool",
+      RB.COMMIT_MARKER == "figure_values_accepted.csv", RB.COMMIT_MARKER)
+
+# Ordering and withdrawal each cover the other, so neither is proven by the
+# end-to-end runs above. Exercise them separately, on a directory of stubs.
+_stage = os.path.join(ROOT, "promote_unit")
+_dest = os.path.join(ROOT, "promote_dest")
+for _d in (_stage, _dest):
+    shutil.rmtree(_d, ignore_errors=True)
+    os.makedirs(_d)
+for _f in ("aaa_first.csv", RB.COMMIT_MARKER, "zzz_last.csv", "run_stamp.json"):
+    open(os.path.join(_stage, _f), "w").write("stub")
+_raised = None
+# Two files in, deliberately: sorted() puts `figure_values_accepted.csv` SECOND
+# among these stubs, so a run that promotes in listing order has already moved
+# the marker by here and a run that orders it last has not. Faulting at one
+# would pass either way and prove nothing.
+try:
+    RB.promote(_stage, _dest, fault_after=2)
+except Exception as exc:
+    _raised = exc
+check("promote() raises when a move fails partway", _raised is not None)
+check("and the commit marker was never moved, whatever the filenames sort to",
+      os.path.exists(os.path.join(_stage, RB.COMMIT_MARKER))
+      and not os.path.exists(os.path.join(_dest, RB.COMMIT_MARKER)),
+      "the marker is not ordered last - alphabetical order put it first")
+check("while the files that explain a result did move first",
+      os.path.exists(os.path.join(_dest, "aaa_first.csv")))
+open(os.path.join(_dest, RB.COMMIT_MARKER), "w").write("stub")
+RB.withdraw_commit(_dest, "2026-08-06", "unit test")
+check("withdraw_commit() removes a marker that did land",
+      not os.path.exists(os.path.join(_dest, RB.COMMIT_MARKER)))
+check("and leaves a PROMOTE_FAILED stamp behind it",
+      json.load(open(os.path.join(_dest, "run_stamp.json")))["Status"]
+      == "PROMOTE_FAILED")
+# A promotion that silently loses a file must not commit either.
+shutil.rmtree(_stage, ignore_errors=True)
+os.makedirs(_stage)
+open(os.path.join(_stage, RB.COMMIT_MARKER), "w").write("stub")
+_orig_move = shutil.move
+
+
+def _lossy_move(src, dst):
+    if os.path.basename(src) == RB.COMMIT_MARKER:
+        os.remove(src)                       # "moved" but never arrived
+        return dst
+    return _orig_move(src, dst)
+
+
+shutil.move = _lossy_move
+try:
+    RB.promote(_stage, _dest)
+    _lost = "committed anyway"
+except Exception as exc:
+    _lost = str(exc)
+finally:
+    shutil.move = _orig_move
+check("a file that vanishes mid-promotion is caught by the verify pass",
+      "missing" in _lost, _lost)
+_recovered = RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-08")
+check("a clean run after a failed promotion commits normally",
+      _recovered["status"] == "RAN"
+      and os.path.exists(os.path.join(_fault, RB.COMMIT_MARKER))
+      and json.load(open(os.path.join(_fault, "run_stamp.json")))["Status"] == "RAN")
+
+
 print("a value is judged by the panel that produced it, not by its unit's last")
 check("every raw row names the panel it came from",
       "Source_Panel_ID" in values.columns and all(values["Source_Panel_ID"]),

@@ -73,7 +73,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.14"
+PIPELINE_VERSION = "7.15"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -189,6 +189,20 @@ def pipeline_code_sha256():
         with open(path, "rb") as fh:
             h.update(fh.read())
     return h.hexdigest()
+
+
+class InternalReaderError(Exception):
+    """A reader raised something it was not built to raise.
+
+    Not a figure problem, and not a queue row. `run_panel` wrapped every reader
+    call in `except Exception` and reported the result as
+    PANEL_GEOMETRY_UNRESOLVED, so a TypeError from a misspelled keyword reached
+    a human as "re-read this figure". Over 116 publications that turns a defect
+    in this package into hours of correct manual work that nobody knows was
+    unnecessary - and leaves the defect in place for the next batch.
+
+    This stops the run and keeps the traceback.
+    """
 
 
 class ManifestLoadError(Exception):
@@ -322,9 +336,15 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         ycal = _calibration(panel, "Y")
         xcal = _calibration(panel, "X")
         image = Image.open(resolved).convert("RGB")
-    except Exception as exc:
+    except (ValueError, OSError) as exc:
+        # A box that does not parse, a calibration that cannot be fitted, a
+        # raster that will not open. All three are about the figure.
         return PanelOutcome("PANEL_GEOMETRY_UNRESOLVED",
                             detail="%s: %s" % (type(exc).__name__, exc))
+    except Exception as exc:
+        raise InternalReaderError(
+            "preparing panel %s raised %s: %s"
+            % (pid, type(exc).__name__, exc)) from exc
 
     series_level = {_s(r.get("Series_ID")): (_upper(r.get("Factor_Name")),
                                              _s(r.get("Factor_Level")))
@@ -344,9 +364,27 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                                  series=_series_specs(series_rows, mark, options),
                                  **kwargs)
         elif mark == "BOX_VIOLIN":
+            # The released reader finds boxes at declared x positions and does
+            # not tell two overlaid groups apart. The batch layer requires a
+            # series row on every positional panel, so a two-series box panel
+            # validated, ran, and produced half a grid - the reader's rows
+            # carried no series at all and every TREATED cell came out missing.
+            # One declared series is honoured; more is refused before the run.
+            if len(series_level) != 1:
+                raise MR.UnsupportedCapabilityError(
+                    "BOX_VIOLIN reads boxes at declared x positions and cannot "
+                    "separate %d series drawn in one panel. Declare one series "
+                    "for the whole panel, or route the panel to MANUAL until a "
+                    "grouped box reader ships" % len(series_level))
             rows = MR.read_panel("BOX_VIOLIN", image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
                                  y_calibration=ycal, **kwargs)
+            # The reader returns positions; the single declared series is what
+            # they mean. Stamped here so the relabel below is the same code path
+            # as every other mark type.
+            only = next(iter(series_level))
+            for row in rows:
+                row["series"] = only
         elif mark == "LINE_COLOR":
             rows = MR.read_panel("LINE_COLOR", image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
@@ -402,9 +440,24 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         else:
             return PanelOutcome("NOT_CONVERTIBLE",
                                 detail="no reader for Mark_Type=%s" % mark)
-    except Exception as exc:
-        return PanelOutcome("PANEL_GEOMETRY_UNRESOLVED",
+    except MR.SeriesIdentityError as exc:
+        return PanelOutcome("SERIES_IDENTITY_UNRESOLVED", declared=declared,
+                            missing=sorted(_all_cells(series_level, position_level)),
+                            detail="%s" % exc)
+    except MR.UnsupportedCapabilityError as exc:
+        return PanelOutcome("NO_READER_AVAILABLE", declared=declared,
+                            missing=sorted(_all_cells(series_level, position_level)),
+                            detail="%s" % exc)
+    except (MR.GeometryResolutionError, ValueError, OSError) as exc:
+        return PanelOutcome("PANEL_GEOMETRY_UNRESOLVED", declared=declared,
+                            missing=sorted(_all_cells(series_level, position_level)),
                             detail="%s: %s" % (type(exc).__name__, exc))
+    except Exception as exc:
+        # TypeError, KeyError, AttributeError, IndexError - a reader raising one
+        # of these is a defect in this package, not a difficult figure.
+        raise InternalReaderError(
+            "reader %s on panel %s raised %s: %s"
+            % (mark, pid, type(exc).__name__, exc)) from exc
 
     if not rows:
         return PanelOutcome("MANUAL_POINT_READ", declared=declared,
@@ -520,6 +573,8 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         for record in records:
             record.setdefault("Calibration_Max_Residual",
                               float(getattr(ycal, "max_residual", 0.0)))
+    for record in records:
+        record.setdefault("WPD_Project_File", project or "")
     seen = {r["Cell_Key"] for r in records}
     missing = sorted(_all_cells(series_level, position_level) - seen)
     return PanelOutcome("AUTO_PASS", values=records, raw=raw_path, project=project,
@@ -565,12 +620,18 @@ def write_panel_project(path, panel, marks, xcal, ycal):
 
 
 def _calibration_points(panel, xcal, ycal):
-    """Two x and two y reference points, in the form WPD stores them."""
+    """EVERY declared reference point, in the form WPD stores them.
+
+    This took `[:2]`, so a panel calibrated on four ticks saved a project a
+    reviewer could only re-derive from two of them. The residual that made the
+    four-tick fit worth doing was invisible in the artifact that exists to let
+    somebody check the fit.
+    """
     out = []
     for axis, cal, key in (("x", xcal, "Axis_X_Ticks"), ("y", ycal, "Axis_Y_Ticks")):
         if cal is None or BM.blank(panel.get(key)):
             continue
-        for value, pixel in BM.parse_ticks(panel.get(key))[:2]:
+        for value, pixel in BM.parse_ticks(panel.get(key)):
             if axis == "x":
                 out.append(dict(px=float(pixel), py=0.0, dx=value, dy=""))
             else:
@@ -748,6 +809,8 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         project = write_panel_project(
             os.path.join(project_dir, "%s.tar" % pid),
             dict(panel, Image_Path=image_path), points, xcal, ycal)
+    for record in records:
+        record.setdefault("WPD_Project_File", project or "")
     return PanelOutcome("AUTO_PASS", values=records, raw=";".join(raw_files),
                         project=project, declared=declared, read=len(records),
                         with_dispersion=len(records))
@@ -868,7 +931,7 @@ def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED"):
 #: Every verdict a run directory can carry. RAN is the only one under which
 #: `figure_values_accepted.csv` may exist.
 RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED",
-                "PROMOTE_FAILED", "DEMO_OUTPUT_REFUSED")
+                "PROMOTE_FAILED", "DEMO_OUTPUT_REFUSED", "INTERNAL_ERROR")
 
 
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
@@ -996,19 +1059,35 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     for _, r in m["positions"].iterrows():
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
-    values, run_rows, queue_rows, projects_by_figure = [], [], [], {}
+    values, run_rows, queue_rows = [], [], []
+    # Was `projects_by_figure`, filled with `setdefault` - so a figure with six
+    # auto panels recorded the first panel's project and the other five vanished
+    # from the figure manifest. The project the gate checked was then a
+    # different panel's marks and a different panel's calibration.
+    projects_by_panel = {}
     overlays_by_panel = {}
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
         options = options_by_config.get(_s(panel.get("Config_ID")), {})
-        outcome = run_panel(panel, series_by_panel.get(pid, []),
-                            positions_by_panel.get(pid, []), options, unit,
-                            raw_dir, file_root=file_root, project_dir=project_dir,
-                            review_dir=review_dir)
+        try:
+            outcome = run_panel(panel, series_by_panel.get(pid, []),
+                                positions_by_panel.get(pid, []), options, unit,
+                                raw_dir, file_root=file_root,
+                                project_dir=project_dir, review_dir=review_dir)
+        except InternalReaderError as exc:
+            # The whole batch stops. A defect in a reader is not confined to the
+            # panel that happened to trip it, and 115 more publications read by
+            # the same broken code is a worse outcome than a loud halt.
+            clear_outputs(output_dir)
+            write_stamp(os.path.join(output_dir, "run_stamp.json"),
+                        "INTERNAL_ERROR", run_date, run_mode=run_mode,
+                        manifest_hashes=manifest_hashes,
+                        detail="%s" % exc)
+            raise
         overlays_by_panel[pid] = outcome.overlay or ""
         if outcome.project:
-            projects_by_figure.setdefault(_s(panel.get("Figure_ID")), outcome.project)
+            projects_by_panel[pid] = outcome.project
         # Stamp the panel onto every value it produced. A unit is normally one
         # panel, but nothing forbids two panels feeding one - and keying panel
         # state by Unit_ID meant the LAST panel's state won, so a unit whose
@@ -1094,9 +1173,17 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # against the figure rather than leaving the column blank and arguing the
     # requirement does not apply to machines; it applies most to machines.
     figures = m["figures"].copy()
-    if projects_by_figure and "WPD_Project_File" in figures.columns:
+    if projects_by_panel and "WPD_Project_File" in figures.columns:
+        # A figure gets EVERY project its panels produced, in panel order, so
+        # the column can still answer "is this figure re-openable" without
+        # claiming one panel's tar speaks for six.
+        by_figure = {}
+        for _, p in m["panels"].iterrows():
+            project = projects_by_panel.get(_s(p.get("Panel_ID")))
+            if project:
+                by_figure.setdefault(_s(p.get("Figure_ID")), []).append(project)
         figures["WPD_Project_File"] = [
-            (projects_by_figure.get(_s(r.get("Figure_ID")), "")
+            (";".join(by_figure.get(_s(r.get("Figure_ID")), []))
              if BM.blank(r.get("WPD_Project_File")) else r.get("WPD_Project_File"))
             for _, r in figures.iterrows()]
         figures.to_csv(os.path.join(work_dir, "figure_manifest.csv"), index=False)
@@ -1341,6 +1428,13 @@ def main(argv=None):
                             file_root=args.file_root, run_date=args.date,
                             check_files=not args.no_file_check,
                             run_mode=requested)
+    except InternalReaderError as exc:
+        import traceback
+        traceback.print_exc()
+        print("INTERNAL_ERROR: %s" % exc)
+        print("this is a defect in the package, not a difficult figure - the "
+              "batch stopped and run_stamp.json records Status=INTERNAL_ERROR")
+        return 5
     except ManifestLoadError as exc:
         print("inputs could not be loaded: %s" % exc)
         print("the output directory was cleared and run_stamp.json records "

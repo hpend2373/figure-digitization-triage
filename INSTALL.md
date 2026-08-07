@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.14 (full package)
+# figure-digitization-triage — v7.15 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,78 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## P1-12 (v7.11 review) — a defect in a reader is not a difficult figure
+
+Every reader call sat inside `except Exception`, and whatever came out was
+reported as `PANEL_GEOMETRY_UNRESOLVED`. A `TypeError` from a misspelled
+keyword, a `KeyError` from a renamed field and a genuinely unreadable axis all
+reached a human as the same queue row: go and look at this figure again. Over
+116 publications that turns a defect in this package into hours of correct
+manual work nobody knows was unnecessary — and leaves the defect in place.
+
+Readers now raise a typed error for conditions they were built to meet:
+
+| raised | run state |
+|---|---|
+| `GeometryResolutionError` (also a `ValueError`) | `PANEL_GEOMETRY_UNRESOLVED` |
+| `SeriesIdentityError` | `SERIES_IDENTITY_UNRESOLVED` |
+| `UnsupportedCapabilityError` | `NO_READER_AVAILABLE` |
+| anything else | **`InternalReaderError` — the batch stops** |
+
+An internal error clears the outputs, writes `Status=INTERNAL_ERROR` with the
+exception named, keeps the traceback and exits 5. A bug in a reader is not
+confined to the panel that tripped it, and 115 more publications read by the
+same broken code is a worse outcome than a loud halt.
+
+18 scenarios by fault injection. Collapsing back to one broad handler fails 14.
+
+## P1-11 (v7.11 review) — the WPD project was recorded per figure
+
+`projects_by_figure.setdefault(Figure_ID, outcome.project)` kept whichever
+panel of a figure finished first, and the gate then looked the project up **on
+the figure**. On publication 397's Figure 3 that meant every value named the
+MEN panel's tar — somebody else's marks, read off somebody else's calibration —
+and the other panels' projects were not written down anywhere the gate could
+see. The saved project also stored `parse_ticks(...)[:2]`, so a panel
+calibrated on four ticks produced an artifact that could not reproduce its own
+fit.
+
+`WPD_Project_File` is now a **value-grain** column: each row names the project
+that re-derives it, and the gate checks that first, falling back to the figure
+only for a hand-assembled bundle. The figure column lists every panel project,
+semicolon-separated, and every tick is saved.
+
+7 scenarios. Reverting the grain fails 2; reverting the tick slice fails 1.
+
+## P1-8 (v7.11 review) — BOX_VIOLIN's series contract did not exist
+
+The batch layer requires a series row on every positional panel. The released
+box/violin reader returns positions and no series at all. So a two-series box
+panel validated, ran, and produced half a grid — every cell of the second
+series missing, reported as a difficult figure rather than as a capability this
+package does not have.
+
+One declared series is honoured (the reader's positions carry that series'
+factor level). Two or more is `UNSUPPORTED_CAPABILITY` before the run, naming
+the reader limit and the two ways out: declare one series for the panel, or set
+`Panel_Mode=MANUAL` until a grouped box reader ships.
+
+## P1-9 (v7.11 review) — a capability matrix, so the gap is a sentence
+
+`grid_engine` validates four statistic types; the batch layer has raster
+readers for three. `BINARY_EVENT` has a source-panel disposition
+(`BINARY_EXTRACT`) and a validator and no reader, and `run_batch` sends every
+AUTO panel to a raster reader — so a coherent declaration went to a reader that
+could not produce it and came back as a difficult figure.
+
+`CAPABILITY_MATRIX` names every statistic the gate validates as either
+`AUTO_SUPPORTED` (with which readers) or `VALIDATOR_ONLY` (with what to do
+instead). An AUTO panel declaring a `VALIDATOR_ONLY` statistic is refused
+before the run; the same panel declared `MANUAL` goes to the queue as it
+should. A test asserts the matrix covers `FIG_STATISTIC_TYPES` exactly, so a
+fifth statistic cannot be added to the gate without saying whether the runner
+can execute it.
 
 ## P0-4 (v7.11 review) — three numeric defects in BAR_COLOR
 

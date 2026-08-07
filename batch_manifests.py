@@ -61,6 +61,39 @@ COLOUR_MARK_TYPES = ("BAR_COLOR", "LINE_COLOR")
 #: Which mark types separate series by drawn form rather than by colour.
 MONO_MARK_TYPES = ("BAR_MONO", "LINE_MONO")
 
+#: What the batch layer can actually EXECUTE, per statistic type, and how.
+#:
+#: `grid_engine` validates four statistic types. The batch layer has raster
+#: readers for two of them. `BINARY_EVENT` has a source-panel disposition
+#: (`BINARY_EXTRACT`) and a validator and no reader; a transcribed value has a
+#: validator and no input channel at all, because `run_batch` sends every run
+#: panel to a raster reader. So a manifest could declare a statistic this
+#: package validates, be told nothing, and then be routed to a reader that
+#: cannot produce it.
+#:
+#: A capability the package does not have should be a sentence, not a discovery.
+CAPABILITY_MATRIX = {
+    "CONTINUOUS": ("AUTO_SUPPORTED",
+                   "BAR_COLOR, BAR_MONO, LINE_COLOR and LINE_MONO read means "
+                   "and error bars at declared positions"),
+    "ASSOCIATION": ("AUTO_SUPPORTED",
+                    "SCATTER digitizes the cloud and summarizes it; the paper "
+                    "declares which association it reports"),
+    "QUANTILE_SUMMARY": ("AUTO_SUPPORTED",
+                         "BOX_VIOLIN reads a five-number summary at declared "
+                         "positions, one series per panel"),
+    "BINARY_EVENT": ("VALIDATOR_ONLY",
+                     "the grid engine checks events against N at risk, but no "
+                     "released reader produces counts from a raster. Inventory "
+                     "the panel as BINARY_EXTRACT and transcribe the numbers"),
+}
+
+#: Statistic types the validator understands and the runner cannot execute.
+VALIDATOR_ONLY_STATISTICS = tuple(
+    k for k, (status, _) in sorted(CAPABILITY_MATRIX.items())
+    if status == "VALIDATOR_ONLY")
+
+
 #: Mark types this project has a name and a design for, but no released reader.
 #: Naming them is better than silence: a manifest that declares one gets told
 #: why it cannot run and where the work stands, instead of being quietly
@@ -1180,6 +1213,13 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "Unit_ID=%s is not in the unit manifest" % uid)
             else:
                 ustat = str(unit_index[uid].get("Statistic_Type", "")).strip().upper()
+                # A statistic the validator understands and the runner cannot
+                # execute is a sentence, not a discovery halfway through a run.
+                if ustat in VALIDATOR_ONLY_STATISTICS and \
+                        str(r.get("Panel_Mode", "")).strip().upper() != "MANUAL":
+                    flag(line, "UNSUPPORTED_CAPABILITY",
+                         "Statistic_Type=%s is %s: %s"
+                         % ((ustat,) + CAPABILITY_MATRIX[ustat]))
                 if mark == "BOX_VIOLIN" and ustat not in ("QUANTILE_SUMMARY", ""):
                     flag(line, "MARK_TYPE_CONTRADICTS_STATISTIC",
                          "a box/violin yields a five-number summary, but the unit "
@@ -1211,6 +1251,23 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "association" % mark)
 
     # -------------------------------------------------------------- series
+    # How many series each panel declares, before any reader sees it. Needed
+    # because a capability limit is a property of the panel as declared, not
+    # something to discover halfway through reading it.
+    series_count = {}
+    for _, r in series.iterrows():
+        series_count[str(r.get("Panel_ID", "")).strip()] = series_count.get(
+            str(r.get("Panel_ID", "")).strip(), 0) + 1
+    for pid_, r in panel_mark.items():
+        if str(r).strip().upper() == "BOX_VIOLIN" and series_count.get(pid_, 0) > 1:
+            flag("panel:%s" % pid_, "UNSUPPORTED_CAPABILITY",
+                 "BOX_VIOLIN declares %d series. The released reader finds boxes "
+                 "at declared x positions and cannot tell overlaid groups apart, "
+                 "so the extra series would come out as missing cells rather "
+                 "than as an error. Declare one series for the panel, or set "
+                 "Panel_Mode=MANUAL until a grouped box reader ships"
+                 % series_count[pid_])
+
     seen_series, factors_by_panel = set(), {}
     for i, r in series.iterrows():
         line = "series:%d" % (i + 2)

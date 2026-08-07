@@ -138,6 +138,11 @@ def fig_values_columns():
         "Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
         "Position_Assignment", "Calibration_Max_Residual",
         "Slot_Assignment_Residual_Px",
+        # The project that can re-derive THIS value. It used to be looked up on
+        # the figure, where a run stored whichever panel finished first - so on
+        # a six-panel figure five values named a project of somebody else's
+        # marks, read off somebody else's calibration.
+        "WPD_Project_File",
         "Verification_Status", "Reconciliation_Note",
         "Note",
     ]
@@ -285,12 +290,15 @@ def validate_unit(row, kernel, flag, line, figure=None):
                 flag(line, "MISSING_PROVENANCE",
                      "%s - a value read off an axis of undeclared type cannot be "
                      "re-checked" % c)
-        # The WPD project belongs to the figure, not the panel: one saved project
-        # per image. Look it up rather than demanding a copy on every unit.
-        if figure is not None and blank(figure.get("WPD_Project_File")):
+        # The project that re-derives THIS value, if the row names one; the
+        # figure's column only as a fallback for a hand-assembled bundle. A
+        # figure-level lookup was wrong on any figure with more than one
+        # digitized panel: whichever panel ran first spoke for all of them.
+        if blank(row.get("WPD_Project_File")) and (
+                figure is None or blank(figure.get("WPD_Project_File"))):
             flag(line, "MISSING_PROVENANCE",
-                 "WPD_Project_File (from Figure_ID) - a digitized value with no "
-                 "saved project cannot be re-opened")
+                 "WPD_Project_File - a digitized value with no saved project "
+                 "cannot be re-opened")
         # A log axis cannot be calibrated at zero or below: the transform is
         # undefined there, so the mapping every value depends on is meaningless.
         for ax in ("X", "Y"):
@@ -696,10 +704,15 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
         for c in ("Publication_ID", "Source_File", "Source_Page", "Figure_Number"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
-        for c in ("Source_Image", "WPD_Project_File"):
-            if missing_file(r.get(c)):
+        if missing_file(r.get("Source_Image")):
+            flag(line, "SOURCE_FILE_NOT_FOUND",
+                 "Source_Image=%r is recorded but not on disk" % r.get("Source_Image"))
+        # A figure with several digitized panels names several projects, one per
+        # panel, because one tar cannot re-derive six panels' marks.
+        for part in str(r.get("WPD_Project_File", "")).split(";"):
+            if part.strip() and missing_file(part.strip()):
                 flag(line, "SOURCE_FILE_NOT_FOUND",
-                     "%s=%r is recorded but not on disk" % (c, r.get(c)))
+                     "WPD_Project_File=%r is recorded but not on disk" % part.strip())
         # The image identity is part of provenance, not decoration.  A saved
         # WPD project can be perfectly reproducible against the wrong raster,
         # so verify both dimensions and the recorded SHA-256 prefix/full hash.

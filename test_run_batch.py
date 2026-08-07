@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 
 import pandas as pd
@@ -128,7 +129,11 @@ def ticks(cal, values):
     return ";".join("%g:%g" % (v, cal.value_to_pixel(v)) for v in values)
 
 
-Y_TICKS = ticks(LINE_CAL, (0, 100))
+# Four ticks, not two. A calibration fitted on four is a different, checkable
+# object from one fitted on two - and the WPD project used to save only the
+# first two, so the artifact that exists for re-deriving a value could not
+# reproduce the fit behind it.
+Y_TICKS = ticks(LINE_CAL, (0, 25, 50, 100))
 SX_TICKS = ticks(SX_CAL, (0, 10))
 SY_TICKS = ticks(SY_CAL, (0, 20))
 
@@ -1029,8 +1034,240 @@ for _name, _break in (
 
 check("every status a stamp can carry is declared",
       {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED",
-       "DEMO_OUTPUT_REFUSED"} == set(RB.RUN_STATUSES),
+       "DEMO_OUTPUT_REFUSED", "INTERNAL_ERROR"} == set(RB.RUN_STATUSES),
       "%s" % sorted(RB.RUN_STATUSES))
+
+
+print("a statistic the runner cannot execute is a sentence, not a discovery")
+# `grid_engine` validates four statistic types; the batch layer has raster
+# readers for three. BINARY_EVENT has a source-panel disposition and a
+# validator and no reader, and `run_batch` sends every AUTO panel to a raster
+# reader - so a coherent declaration went to a reader that could not produce it
+# and came back as a difficult figure.
+check("every statistic the gate validates has a capability entry",
+      set(BM.CAPABILITY_MATRIX) == set(GE.FIG_STATISTIC_TYPES),
+      "%s" % sorted(set(BM.CAPABILITY_MATRIX) ^ set(GE.FIG_STATISTIC_TYPES)))
+check("and every entry says AUTO_SUPPORTED or VALIDATOR_ONLY",
+      all(v[0] in ("AUTO_SUPPORTED", "VALIDATOR_ONLY")
+          for v in BM.CAPABILITY_MATRIX.values()),
+      "%s" % sorted({v[0] for v in BM.CAPABILITY_MATRIX.values()}))
+_bin_unit = unit("U_BIN", "G_TIME", "BINARY_EVENT")
+_bin_panel = panel("P_BIN", "U_BIN", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440))
+_bin_source = dict(Source_Panel_ID="P_BIN", Source_Figure_ID="SF1",
+                   Panel_Label="P_BIN", Outcome_Label="Presyncope",
+                   Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                   Disposition_Reason="binary fixture", Note="")
+
+
+def _bin(mode):
+    return validate(
+        panels=PANELS + [dict(_bin_panel, Panel_Mode=mode)],
+        units=UNITS + [_bin_unit],
+        series_rows=SERIES + [series("P_BIN", "S_A", "CONTROL")],
+        positions=POSITION_ROWS + [dict(r, Panel_ID="P_BIN")
+                                   for r in POSITION_ROWS
+                                   if r["Panel_ID"] == "P_LINE"],
+        source_panels=SOURCE_PANELS + [
+            dict(_bin_source,
+                 Panel_Disposition="MANUAL_DIGITIZE" if mode == "MANUAL"
+                 else "AUTO_DIGITIZE")],
+        source_figures=[dict(f, Observed_Panel_Count=2)
+                        if f["Source_Figure_ID"] == "SF1" else f
+                        for f in SOURCE_FIGURES])
+
+
+check("an AUTO panel declaring a validator-only statistic is refused",
+      "UNSUPPORTED_CAPABILITY" in _bin("AUTO"), "%s" % _bin("AUTO"))
+check("and the same panel declared MANUAL is allowed through to the queue",
+      "UNSUPPORTED_CAPABILITY" not in _bin("MANUAL"), "%s" % _bin("MANUAL"))
+check("BINARY_EVENT is the validator-only one",
+      BM.VALIDATOR_ONLY_STATISTICS == ("BINARY_EVENT",),
+      "%s" % (BM.VALIDATOR_ONLY_STATISTICS,))
+
+
+print("every allowed declaration is either read exactly, or refused")
+# The batch layer requires a series row on every positional panel. The released
+# box/violin reader returns positions and no series at all. So a two-series box
+# panel validated, ran, and produced half a grid - every cell of the second
+# series missing, reported as a difficult figure rather than as a capability
+# the package does not have.
+_bv_panel = panel("P_BOX", "U_BOX", "BOX_VIOLIN", LINE_IMG, (100, 500, 40, 440))
+_bv_unit = unit("U_BOX", "G_TIME", "QUANTILE_SUMMARY")
+_bv_source = dict(Source_Panel_ID="P_BOX", Source_Figure_ID="SF1",
+                  Panel_Label="P_BOX", Outcome_Label="Heart rate",
+                  Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                  Disposition_Reason="box fixture", Note="")
+
+
+def _bv(series_ids):
+    return validate(
+        panels=PANELS + [_bv_panel], units=UNITS + [_bv_unit],
+        series_rows=SERIES + [series("P_BOX", s, lv) for s, lv in series_ids],
+        positions=POSITION_ROWS + [dict(r, Panel_ID="P_BOX")
+                                   for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+        source_panels=SOURCE_PANELS + [_bv_source],
+        source_figures=[dict(f, Observed_Panel_Count=2)
+                        if f["Source_Figure_ID"] == "SF1" else f
+                        for f in SOURCE_FIGURES])
+
+
+check("a two-series box panel is refused before the run, not read into holes",
+      "UNSUPPORTED_CAPABILITY" in _bv([("S_A", "CONTROL"), ("S_B", "TREATED")]),
+      "%s" % _bv([("S_A", "CONTROL"), ("S_B", "TREATED")]))
+check("and a one-series box panel is allowed",
+      "UNSUPPORTED_CAPABILITY" not in _bv([("S_A", "ALL")]),
+      "%s" % _bv([("S_A", "ALL")]))
+_bv_problems = BM.validate_batch_manifests(
+    fr(PANELS + [_bv_panel], BM.panel_manifest_columns()),
+    fr(SERIES + [series("P_BOX", s, lv)
+                 for s, lv in (("S_A", "CONTROL"), ("S_B", "TREATED"))],
+       BM.series_manifest_columns()),
+    fr(POSITION_ROWS + [dict(r, Panel_ID="P_BOX") for r in POSITION_ROWS
+                        if r["Panel_ID"] == "P_LINE"],
+       BM.position_manifest_columns()),
+    fr(CONFIGS, BM.reader_config_columns()),
+    units=fr(UNITS + [_bv_unit], GE.fig_unit_columns()),
+    source_documents=fr(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
+    source_figures=fr([dict(f, Observed_Panel_Count=2)
+                       if f["Source_Figure_ID"] == "SF1" else f
+                       for f in SOURCE_FIGURES],
+                      BM.source_figure_manifest_columns()),
+    source_panels=fr(SOURCE_PANELS + [_bv_source],
+                     BM.source_panel_inventory_columns()),
+    reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()), file_root=ROOT)
+check("UNSUPPORTED_CAPABILITY names the reader limit, not the figure",
+      any("grouped box reader" in str(p["detail"])
+          for _, p in _bv_problems.iterrows()
+          if p["check"] == "UNSUPPORTED_CAPABILITY"),
+      "%s" % [p["detail"] for _, p in _bv_problems.iterrows()
+              if p["check"] == "UNSUPPORTED_CAPABILITY"])
+
+
+print("a figure with more than one digitized panel keeps every project")
+# `projects_by_figure.setdefault(Figure_ID, outcome.project)` recorded whichever
+# panel of a figure finished first, and the gate then looked the project up ON
+# THE FIGURE. On publication 397's Figure 3 that meant six panels' values all
+# named the MEN panel's tar - somebody else's marks, read off somebody else's
+# calibration - and the five WOMEN panels' projects were simply not written
+# down anywhere the gate could see.
+# Two AUTO panels of the same Figure_ID, on different rasters - which is what a
+# publisher figure with MEN and WOMEN sides actually is.
+_multi = write_manifests(
+    os.path.join(ROOT, "m_multi"),
+    units=UNITS + [unit("U_LINE_B", "G_TIME", "CONTINUOUS")],
+    panels=PANELS + [panel("P_LINE_B", "U_LINE_B", "LINE_COLOR", LINE_IMG,
+                           (100, 500, 40, 440))],
+    series_rows=SERIES + [series("P_LINE_B", s, lv, Colour_Hex=hx)
+                          for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                            ("S_RED", "TREATED", "#d72d2d"))],
+    positions=POSITION_ROWS + [dict(r, Panel_ID="P_LINE_B")
+                               for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+    source_panels=SOURCE_PANELS + [dict(
+        Source_Panel_ID="P_LINE_B", Source_Figure_ID="SF1", Panel_Label="P_LINE_B",
+        Outcome_Label="Heart rate", Target_Status="TARGET",
+        Panel_Disposition="AUTO_DIGITIZE",
+        Disposition_Reason="second digitized panel of one figure", Note="")],
+    source_figures=[dict(f, Observed_Panel_Count=2)
+                    if f["Source_Figure_ID"] == "SF1" else f
+                    for f in SOURCE_FIGURES])
+_mo = os.path.join(ROOT, "o_multi")
+RB.run_batch(_multi, _mo, file_root=ROOT, run_date="2026-08-06")
+_raw = pd.read_csv(os.path.join(_mo, "figure_values_raw.csv"), dtype=object).fillna("")
+_rm = pd.read_csv(os.path.join(_mo, "run_manifest.csv"), dtype=object).fillna("")
+_by_panel = dict(zip(_rm["Panel_ID"], _rm["WPD_Project_File"]))
+check("every value names the project that can re-derive it",
+      len(_raw) and all(str(v).strip() for v in _raw["WPD_Project_File"]),
+      "%d blank of %d" % (sum(1 for v in _raw["WPD_Project_File"]
+                              if not str(v).strip()), len(_raw)))
+check("and it is its own panel's project, not a sibling's",
+      all(r["WPD_Project_File"] == _by_panel.get(r["Run_Panel_ID"], "")
+          for _, r in _raw.iterrows() if r["Run_Panel_ID"] in _by_panel),
+      "%s" % {r["Run_Panel_ID"]: os.path.basename(r["WPD_Project_File"])
+              for _, r in _raw.iterrows()})
+_fm = pd.read_csv(os.path.join(_mo, "figure_manifest.csv"), dtype=object).fillna("")
+_listed = [p for p in str(_fm.loc[0, "WPD_Project_File"]).split(";") if p]
+check("and the figure lists every panel project it produced, not just the first",
+      len(_listed) == sum(1 for v in _by_panel.values() if str(v).strip()),
+      "%s" % [os.path.basename(p) for p in _listed])
+check("and each one is on disk",
+      all(os.path.exists(p) for p in _listed), "%s" % _listed)
+
+# Two ticks were saved out of however many the calibration was fitted on, so the
+# artifact that exists for re-deriving a value could not reproduce the fit.
+_proj = _listed[0]
+with tarfile.open(_proj) as _tf:
+    _info = json.loads(_tf.extractfile("info.json").read().decode("utf-8")) \
+        if "info.json" in _tf.getnames() else {}
+    _wpd = json.loads(_tf.extractfile(
+        next(n for n in _tf.getnames() if n.endswith("wpd.json"))).read().decode("utf-8"))
+_declared_ticks = len(BM.parse_ticks(PANELS[0]["Axis_Y_Ticks"]))
+_saved = sum(1 for a in _wpd.get("axesColl", [])
+             for _c in a.get("calibrationPoints", []) if _c.get("dy") != "")
+check("the project saves every declared tick, not the first two",
+      _saved >= _declared_ticks, "%d saved of %d declared" % (_saved, _declared_ticks))
+
+
+print("a defect in a reader is not a difficult figure")
+# Every reader call sat inside `except Exception`, and whatever came out was
+# reported as PANEL_GEOMETRY_UNRESOLVED. A TypeError from a misspelled keyword
+# and a genuinely unreadable axis reached a human as the same queue row: go and
+# look at this figure again. Over 116 publications that turns a defect in this
+# package into hours of correct manual work nobody knows was unnecessary.
+_orig_read_panel = MR.read_panel
+_real_calibration = MR.AxisCalibration.from_points
+
+
+def _raising(exc):
+    def _fake(*a, **k):
+        raise exc
+    return _fake
+
+
+for _label, _exc, _want_state, _aborts in (
+        ("a KeyError from a renamed field", KeyError("Series_ID"), None, True),
+        ("a TypeError from a misspelled keyword",
+         TypeError("read_panel() got an unexpected keyword 'n_slot'"), None, True),
+        ("an IndexError walking off a list", IndexError("list index out of range"),
+         None, True),
+        ("an axis the reader cannot fit",
+         MR.GeometryResolutionError("axis calibration needs two distinct pixels"),
+         "PANEL_GEOMETRY_UNRESOLVED", False),
+        ("two series the reader cannot tell apart",
+         MR.SeriesIdentityError("S_BLUE and S_RED share every mark"),
+         "SERIES_IDENTITY_UNRESOLVED", False),
+        ("a declaration no released reader honours",
+         MR.UnsupportedCapabilityError("stacked bars are not released"),
+         "NO_READER_AVAILABLE", False)):
+    _out = os.path.join(ROOT, "o_exc_%d" % (abs(hash(_label)) % 10 ** 6))
+    MR.read_panel = _raising(_exc)
+    try:
+        _summary = RB.run_batch(_good, _out, file_root=ROOT, run_date="2026-08-06")
+        _raised = None
+    except RB.InternalReaderError as exc:
+        _summary, _raised = None, exc
+    except Exception as exc:                                   # pragma: no cover
+        _summary, _raised = None, exc
+    finally:
+        MR.read_panel = _orig_read_panel
+    if _aborts:
+        check("%s stops the batch" % _label,
+              isinstance(_raised, RB.InternalReaderError), "%r" % _raised)
+        _js = json.load(open(os.path.join(_out, "run_stamp.json")))
+        check("  and the stamp says INTERNAL_ERROR, not a figure problem",
+              _js.get("Status") == "INTERNAL_ERROR", "%r" % _js.get("Status"))
+        check("  and names the exception so it can be fixed",
+              type(_exc).__name__ in _js.get("Detail", ""), "%r" % _js.get("Detail"))
+        check("  and leaves nothing poolable behind",
+              not os.path.exists(os.path.join(_out, RB.COMMIT_MARKER))
+              and not os.path.exists(os.path.join(_out, "figure_values_accepted.csv")),
+              "%s" % sorted(os.listdir(_out)))
+    else:
+        check("%s is a panel state, not a crash" % _label,
+              _raised is None and _summary and _summary["status"] == "RAN",
+              "%r %s" % (_raised, _summary))
+        _rm = pd.read_csv(os.path.join(_out, "run_manifest.csv"), dtype=object)
+        check("  and every auto panel lands on %s" % _want_state,
+              _want_state in set(_rm["Run_State"]), "%s" % sorted(set(_rm["Run_State"])))
 
 
 print("a demonstration identity cannot stand behind a poolable value")

@@ -26,6 +26,37 @@ def _runs(indices, gap=1):
     return out
 
 
+class ReaderError(Exception):
+    """A condition the reader was built to meet, met.
+
+    The runner used to wrap every reader call in a bare `except Exception` and
+    report whatever came out as PANEL_GEOMETRY_UNRESOLVED. A TypeError from a
+    misspelled keyword, a KeyError from a renamed field and a genuinely
+    unreadable axis all arrived at a human as the same queue row: "go and look
+    at this figure again". Two of those three are bugs in this package, and
+    sending them to a person to re-read is how a defect hides inside 116
+    publications of honest manual work.
+
+    Readers raise these for things that are ACTUALLY about the figure. Anything
+    else that escapes a reader is a defect, and `run_batch` stops the batch.
+    """
+
+
+class GeometryResolutionError(ReaderError, ValueError):
+    """The box, the calibration or the raster cannot be trusted.
+
+    Also a ValueError, so callers that predate the taxonomy still catch it.
+    """
+
+
+class SeriesIdentityError(ReaderError):
+    """Marks were found but which series they belong to is ambiguous."""
+
+
+class UnsupportedCapabilityError(ReaderError):
+    """The declaration is coherent and no released reader can honour it."""
+
+
 @dataclass(frozen=True)
 class AxisCalibration:
     slope: float
@@ -44,13 +75,15 @@ class AxisCalibration:
         values = np.asarray([p[0] for p in points], dtype=float)
         pixels = np.asarray([p[1] for p in points], dtype=float)
         if len(points) < 2 or len(set(pixels)) < 2:
-            raise ValueError("axis calibration needs two distinct pixels")
+            raise GeometryResolutionError(
+                "axis calibration needs two distinct pixels")
         if scale == "LOG":
             if np.any(values <= 0):
-                raise ValueError("LOG calibration values must be positive")
+                raise GeometryResolutionError(
+                    "LOG calibration values must be positive")
             values = np.log(values)
         elif scale != "LINEAR":
-            raise ValueError("scale must be LINEAR or LOG")
+            raise GeometryResolutionError("scale must be LINEAR or LOG")
         slope, intercept = np.polyfit(pixels, values, 1)
         resid = float(np.abs(values - (slope * pixels + intercept)).max())
         return cls(float(slope), float(intercept), scale, resid)

@@ -80,7 +80,7 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
     magnitude - the only monochrome-free reader that did not use the shared
     calibration was also the only one that could not read a log axis.
     """
-    from mark_readers import AxisCalibration
+    from mark_readers import AxisCalibration, GeometryResolutionError
 
     x0, x1, y0, y1 = panel_box
     dark = masks["dark"]
@@ -95,8 +95,9 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
     # one - a number inside the panel, used silently to decide which way every
     # bar grows.
     if y_calibration.scale == "LOG" and baseline_value <= 0:
-        raise ValueError("baseline_value must be positive on a LOG axis, got %r"
-                         % baseline_value)
+        raise GeometryResolutionError(
+            "baseline_value must be positive on a LOG axis, got %r"
+            % baseline_value)
     zero_row = y_calibration.value_to_pixel(baseline_value)
     out = []
     for sname, key in series.items():

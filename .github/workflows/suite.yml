@@ -39,7 +39,26 @@ jobs:
             echo "--- $s"
             python "$s.py"
           done
-      - name: the plan compiles to the pilot's manifests
+      # Publication 397 ships with 108 QC problems on purpose: its dispersion
+      # definition is unresolved. A run that reproduces them exactly has done
+      # its job, so this step asserts the expected verdict rather than a bare
+      # exit code - a green here that did not read 48 values would be worse
+      # than a red one.
+      - name: the plan compiles and runs to the pilot's numbers
         run: |
+          set -e
           python compile_plan.py plan_397.json /tmp/m --file-root . --date 2026-08-07
           python run_batch.py /tmp/m /tmp/o --file-root . --date 2026-08-07
+          python - <<'PY'
+          import json
+          stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
+          assert stamp["Status"] == "RAN", stamp["Status"]
+          assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
+          assert stamp["Values_Read"] == 48, stamp["Values_Read"]
+          assert stamp["Values_Machine_QC_Passed"] == 0, stamp
+          assert stamp["Values_Accepted"] == 0, stamp
+          assert stamp["QC_Problems"] == 108, stamp["QC_Problems"]
+          assert stamp["Environment"]["Libraries"]["cv2"], stamp
+          print("plan -> run reproduces the pilot:", stamp["Status"],
+                stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")
+          PY

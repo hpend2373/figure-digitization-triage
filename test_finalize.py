@@ -197,10 +197,10 @@ check("with a picture a person can judge",
       "%r" % QUEUE.loc[0, "Overlay_File"])
 check("and the WPD project for re-deriving the number",
       bool(QUEUE.loc[0, "WPD_Project_File"]))
-check("and a fingerprint of the extraction being approved",
-      len(QUEUE.loc[0, "Panel_Fingerprint"]) == 64)
+check("and the subject of the approval, hashed",
+      len(QUEUE.loc[0, "Review_Subject_SHA256"]) == 64)
 
-FP = QUEUE.loc[0, "Panel_Fingerprint"]
+FP = QUEUE.loc[0, "Review_Subject_SHA256"]
 REVIEW = os.path.join(OUT, "value_review.csv")
 
 
@@ -214,7 +214,7 @@ def review(rows, path=REVIEW):
 
 
 def row(**kw):
-    base = dict(Review_ID="R001", Panel_ID="P1", Panel_Fingerprint=FP,
+    base = dict(Review_ID="R001", Panel_ID="P1", Review_Subject_SHA256=FP,
                 Reviewer_ID="RV_H", Decision="APPROVED",
                 Reviewed_At="2026-08-06T10:00:00Z", Note="")
     base.update(kw)
@@ -247,18 +247,22 @@ for _label, _rows, _want in (
          "REVIEWER_NOT_HUMAN_OR_NOT_REGISTERED"),
         ("a blank reviewer", [row(Reviewer_ID="")],
          "REVIEWER_NOT_HUMAN_OR_NOT_REGISTERED"),
-        ("an approval carrying no fingerprint", [row(Panel_Fingerprint="")],
+        ("an approval carrying no fingerprint", [row(Review_Subject_SHA256="")],
          "APPROVAL_STALE"),
         ("an approval carrying somebody else's fingerprint",
-         [row(Panel_Fingerprint="0" * 64)], "APPROVAL_STALE"),
+         [row(Review_Subject_SHA256="0" * 64)], "APPROVAL_STALE"),
         ("a review timestamp that is not a timestamp",
          [row(Reviewed_At="last tuesday")], "BAD_REVIEWED_AT"),
         ("a review dated in the future",
          [row(Reviewed_At="2099-01-01T00:00:00Z")], "BAD_REVIEWED_AT"),
         ("an approval for a panel that never passed machine QC",
          [row(Panel_ID="P_GHOST")], "REVIEW_PANEL_NOT_IN_QUEUE"),
-        ("two decisions for one panel",
-         [row(), row(Review_ID="R002", Decision="REJECTED")], "DUPLICATE_REVIEW")):
+        ("two decisions for one panel, approve first",
+         [row(), row(Review_ID="R002", Decision="REJECTED")], "DUPLICATE_REVIEW"),
+        ("two decisions for one panel, reject first",
+         [row(Decision="REJECTED"), row(Review_ID="R002")], "DUPLICATE_REVIEW"),
+        ("one Review_ID used twice",
+         [row(), row(Panel_ID="P_OTHER")], "DUPLICATE_REVIEW_ID")):
     _path = os.path.join(OUT, "review_case.csv")
     if _rows is None:
         if os.path.exists(_path):
@@ -269,11 +273,7 @@ for _label, _rows, _want in (
                       today=datetime.date(2026, 8, 6))
     _codes = {p["check"] for p in _r["problems"]}
     _accepted_exists = os.path.exists(os.path.join(OUT, "figure_values_accepted.csv"))
-    if _label == "two decisions for one panel":
-        # The first decision stands and the duplicate is reported; what must not
-        # happen is a second, contradictory decision silently overwriting it.
-        check("%s is reported" % _label, "DUPLICATE_REVIEW" in _codes, "%s" % _codes)
-        continue
+
     check("%s accepts nothing" % _label,
           _r["accepted"] == 0 and not _accepted_exists,
           "%s | file=%s" % (_r, _accepted_exists))
@@ -308,7 +308,181 @@ check("an approval from the previous run is stale, not inherited",
       and _stale["accepted"] == 0, "%s" % _stale)
 _q2 = pd.read_csv(os.path.join(OUT2, "review_queue.csv"), dtype=object).fillna("")
 check("and the new run asks for a new decision",
-      _q2.loc[0, "Panel_Fingerprint"] != FP)
+      _q2.loc[0, "Review_Subject_SHA256"] != FP)
+
+print()
+print("an approval is bound to the numbers, not to the panel's name")
+# The first subject hash covered the panel id, the unit id, the mark type, the
+# image hash, the config hash, the reader version, the pipeline hash and the
+# cell count - and claimed in its docstring to expire whenever "the image, the
+# config, the reader or the pipeline" changed. It did not cover the Mean the
+# person read off the overlay, the Cell_Key it sat in, what CONTROL and TREATED
+# mean, the panel box, the ticks, the unit and grid manifests, the OpenCV
+# version, or any of the artifacts. So an approval survived swapping two factor
+# labels, editing a value, and changing the library that produced it.
+_QUEUE_PATH = os.path.join(OUT, "review_queue.csv")
+
+
+def subject_after(**over):
+    """The subject hash the run produces once `over` is applied to the plan."""
+    out, _ = fresh_run("run_subject_%d" % (abs(hash(repr(over))) % 10 ** 6), **over)
+    q = pd.read_csv(os.path.join(out, "review_queue.csv"), dtype=object).fillna("")
+    return out, (q.loc[0, "Review_Subject_SHA256"] if len(q) else "")
+
+
+_base_out, _base_subject = subject_after()
+check("the same inputs give the same subject",
+      subject_after()[1] == _base_subject, "%s" % _base_subject[:16])
+
+for _label, _over in (
+        ("swapping what CONTROL and TREATED mean",
+         dict(series_manifest=[dict(SERIES[0], Factor_Level="TREATED"),
+                               dict(SERIES[1], Factor_Level="CONTROL")])),
+        ("moving a declared x position by one pixel",
+         dict(position_manifest=[dict(POSITIONS[0], X_Pixel=int(POSITIONS[0]["X_Pixel"]) + 1)]
+              + POSITIONS[1:])),
+        ("nudging the panel box",
+         dict(panel_manifest=[dict(PANELS[0], Panel_Y0=41)])),
+        ("changing a tick",
+         dict(panel_manifest=[dict(PANELS[0], Axis_Y_Ticks="221:40;0:440")])),
+        ("renaming a grid level",
+         dict(grid_definitions=[dict(g, Factor_Level="EARLY")
+                                if g["Factor_Level"] == "T0" else g
+                                for g in GRIDS])),
+        ("changing the unit's declared dispersion",
+         dict(unit_manifest=[dict(UNITS[0], Dispersion_Type="SEM")]))):
+    _out, _subject = subject_after(**_over)
+    check("%s changes the subject" % _label, _subject != _base_subject,
+          "%s vs %s" % (_subject[:16], _base_subject[:16]))
+
+# The three a reviewer cannot see in a manifest diff at all.
+check("the environment is part of the subject",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {"Python": "3.11"})
+      != RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {"Python": "3.12"}),
+      "a different OpenCV gives the same hash")
+check("and so are the values themselves",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [{"Cell_Key": "A", "Mean": 1}],
+                               {}, {})
+      != RB.review_subject_sha256({"Panel_ID": "P1"}, [{"Cell_Key": "A", "Mean": 2}],
+                                  {}, {}),
+      "a different Mean gives the same hash")
+check("and the Cell_Key a value sits in",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [{"Cell_Key": "A", "Mean": 1}],
+                               {}, {})
+      != RB.review_subject_sha256({"Panel_ID": "P1"}, [{"Cell_Key": "B", "Mean": 1}],
+                                  {}, {}))
+_raw_probe = os.path.join(ROOT, "probe_raw.json")
+open(_raw_probe, "w").write("{}")
+_with_raw = RB.review_subject_sha256(
+    {"Panel_ID": "P1", "Raw_Data_File": _raw_probe}, [], {}, {})
+open(_raw_probe, "w").write('{"marks": []}')
+check("and the raw mark file the overlay was drawn from",
+      RB.review_subject_sha256({"Panel_ID": "P1", "Raw_Data_File": _raw_probe},
+                               [], {}, {}) != _with_raw,
+      "editing the raw marks gives the same hash")
+
+
+print()
+print("the run the approval refers to has to be the run on disk")
+# The finalizer re-read four files to decide whether a value was poolable and
+# trusted every one. Approve a correct overlay, then edit a Mean in
+# figure_values_machine_qc.csv, and the edited number came out HUMAN_APPROVED.
+for _label, _target, _edit in (
+        # The one that matters: approve a correct overlay, then change a number.
+        ("a Mean in the machine-QC values", "figure_values_machine_qc.csv",
+         lambda text: text.replace(text.split("\n")[1].split(",")[
+             text.split("\n")[0].split(",").index("Mean")],
+             "999.0", 1)),
+        ("the review queue", "review_queue.csv", lambda text: text + "\n"),
+        ("the raw values", "figure_values_raw.csv", lambda text: text + "\n"),
+        ("the run manifest", "run_manifest.csv", lambda text: text + "\n")):
+    _tamper_out, _ = fresh_run("run_tamper_%d" % (abs(hash(_label)) % 10 ** 6))
+    _q = pd.read_csv(os.path.join(_tamper_out, "review_queue.csv"), dtype=object)
+    _rv = os.path.join(_tamper_out, "value_review.csv")
+    review([dict(Review_ID="R001", Panel_ID="P1",
+                 Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                 Reviewer_ID="RV_H", Decision="APPROVED",
+                 Reviewed_At="2026-08-06T10:00:00Z", Note="")], _rv)
+    _clean = FIN.finalize(_tamper_out, review_path=_rv, run_date="2026-08-06",
+                          today=datetime.date(2026, 8, 6))
+    _path = os.path.join(_tamper_out, _target)
+    with open(_path, encoding="utf-8") as fh:
+        _text = fh.read()
+    with open(_path, "w", encoding="utf-8") as fh:
+        fh.write(_edit(_text))
+    _after = FIN.finalize(_tamper_out, review_path=_rv, run_date="2026-08-06",
+                          today=datetime.date(2026, 8, 6))
+    check("editing %s after the run is refused" % _label,
+          _after["status"] == "RUN_ARTIFACT_MODIFIED" and _after["accepted"] == 0,
+          "%s" % _after["status"])
+    check("  and no accepted file survives it",
+          not os.path.exists(os.path.join(_tamper_out, "figure_values_accepted.csv")),
+          "%s" % sorted(os.listdir(_tamper_out)))
+
+_swap_out, _ = fresh_run("run_registry_swap")
+_q = pd.read_csv(os.path.join(_swap_out, "review_queue.csv"), dtype=object)
+_rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                   Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                   Reviewer_ID="RV_EXTRA", Decision="APPROVED",
+                   Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+              os.path.join(_swap_out, "value_review.csv"))
+_other = write_manifests(os.path.join(ROOT, "m_extra_reviewer"),
+                         reviewer_registry=REVIEWERS + [dict(
+                             REVIEWERS[0], Reviewer_ID="RV_EXTRA",
+                             Reviewer_Name="Added Later")])
+_swapped = FIN.finalize(_swap_out, review_path=_rv, manifest_dir=_other,
+                        run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("an approver added to a different registry is refused",
+      _swapped["status"] == "RUN_ARTIFACT_MODIFIED"
+      and any(p["check"] == "REVIEWER_REGISTRY_CHANGED" for p in _swapped["problems"]),
+      "%s" % _swapped)
+
+
+print()
+print("a finalization that dies partway leaves nothing poolable")
+# The accepted file was written directly and the stamp written after it, so a
+# process killed between the two left poolable values with a stale stamp or no
+# stamp at all. The same shape run_batch already fixed with staging and a
+# commit marker.
+for _fault in (0, 1):
+    _f_out, _ = fresh_run("run_fault_%d" % _fault)
+    _q = pd.read_csv(os.path.join(_f_out, "review_queue.csv"), dtype=object)
+    _rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                       Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                       Reviewer_ID="RV_H", Decision="APPROVED",
+                       Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                 os.path.join(_f_out, "value_review.csv"))
+    _r = FIN.finalize(_f_out, review_path=_rv, run_date="2026-08-06",
+                      today=datetime.date(2026, 8, 6), fault_after=_fault)
+    check("a fault after %d promoted file(s) does not commit" % _fault,
+          _r["status"] == "COMMIT_FAILED", "%s" % _r["status"])
+    check("  and leaves no accepted file (fault after %d)" % _fault,
+          not os.path.exists(os.path.join(_f_out, FIN.FINALIZE_MARKER)),
+          "%s" % sorted(os.listdir(_f_out)))
+    check("  and no staging directory (fault after %d)" % _fault,
+          not os.path.isdir(os.path.join(_f_out, FIN.FINALIZE_STAGING)),
+          "%s" % sorted(os.listdir(_f_out)))
+    check("  and a stamp that says so (fault after %d)" % _fault,
+          json.load(open(os.path.join(_f_out, "finalize_stamp.json")))["Status"]
+          == "COMMIT_FAILED")
+
+_clean_out, _ = fresh_run("run_commit_ok")
+_q = pd.read_csv(os.path.join(_clean_out, "review_queue.csv"), dtype=object)
+_rv = review([dict(Review_ID="R001", Panel_ID="P1",
+                   Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+                   Reviewer_ID="RV_H", Decision="APPROVED",
+                   Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+             os.path.join(_clean_out, "value_review.csv"))
+_ok2 = FIN.finalize(_clean_out, review_path=_rv, run_date="2026-08-06",
+                    today=datetime.date(2026, 8, 6))
+_fs = json.load(open(os.path.join(_clean_out, "finalize_stamp.json")))
+check("a clean finalization commits and records what it committed",
+      _ok2["status"] == "FINALIZED" and len(_fs["Accepted_SHA256"]) == 64
+      and len(_fs["Run_Stamp_SHA256"]) == 64, "%s" % _fs)
+with open(os.path.join(_clean_out, FIN.FINALIZE_MARKER), encoding="utf-8") as _fh:
+    check("and the recorded hash is the file that landed",
+          RB.sha256_of_text(_fh.read()) == _fs["Accepted_SHA256"])
+
 
 print()
 print("a finalization does not outlive the run that justified it")

@@ -25,9 +25,18 @@ So:
 Four rules make the approval mean something.
 
 **The approval names the extraction, not the panel.** Each review row carries a
-`Panel_Fingerprint` over the image hash, the config hash, the reader version,
-the pipeline code hash and the cell count. Re-run with different code and every
-prior approval goes stale; it is not inherited.
+`Review_Subject_SHA256` over the values themselves, every manifest, the raw
+marks, the WPD project and the environment that produced them. Change any of
+those and the approval is stale, not inherited.
+
+**The run must be untouched.** `run_stamp.json` records the SHA-256 of every
+file this module reads, and they are recomputed before any decision is
+consulted. Approving an overlay and then editing a Mean is `RUN_ARTIFACT_MODIFIED`.
+
+**A duplicated decision voids the panel.** Two decisions for one panel used to
+resolve to whichever came first in the file, so APPROVED-then-REJECTED
+approved and REJECTED-then-APPROVED did not. A scientific result must not
+depend on CSV row order.
 
 **The approver is a registered human.** `Reviewer_ID` must resolve to a
 `Reviewer_Record_Type=HUMAN` row in `reviewer_registry.csv`. A DEMO_IDENTITY
@@ -45,6 +54,7 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import sys
 
 import pandas as pd
@@ -59,12 +69,22 @@ import run_batch as RB                                             # noqa: E402
 FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
 
 VALUE_REVIEW_COLUMNS = [
-    "Review_ID", "Panel_ID", "Panel_Fingerprint", "Reviewer_ID", "Decision",
+    "Review_ID", "Panel_ID", "Review_Subject_SHA256", "Reviewer_ID", "Decision",
     "Reviewed_At", "Note",
 ]
 
+#: Files the finalizer reads to decide whether a value is poolable. Each is
+#: hashed by the run and re-hashed here.
+VERIFIED_OUTPUTS = ("figure_values_machine_qc.csv", "review_queue.csv",
+                    "figure_values_raw.csv", "run_manifest.csv")
+
+FINALIZE_STAGING = ".finalize-staging"
+
+#: Moved last. Its presence is what says a finalization committed.
+FINALIZE_MARKER = "figure_values_accepted.csv"
+
 FINALIZE_STATUSES = ("FINALIZED", "NOTHING_APPROVED", "RUN_NOT_FINALIZABLE",
-                     "REVIEW_REJECTED")
+                     "RUN_ARTIFACT_MODIFIED", "COMMIT_FAILED")
 
 
 def value_review_columns():
@@ -83,7 +103,7 @@ def write_review_template(path, review_queue):
         w.writerow(VALUE_REVIEW_COLUMNS)
         for i, (_, r) in enumerate(review_queue.iterrows(), 1):
             w.writerow(["R%03d" % i, r.get("Panel_ID", ""),
-                        r.get("Panel_Fingerprint", ""), "", "", "", ""])
+                        r.get("Review_Subject_SHA256", ""), "", "", "", ""])
     return path
 
 
@@ -116,13 +136,36 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
         for _, r in reviewers.iterrows():
             if _s(r.get("Reviewer_Record_Type")).upper() == "HUMAN":
                 human.add(_s(r.get("Reviewer_ID")))
-    expected = {_s(r.get("Panel_ID")): _s(r.get("Panel_Fingerprint"))
+    expected = {_s(r.get("Panel_ID")): _s(r.get("Review_Subject_SHA256"))
                 for _, r in queue.iterrows()}
 
-    out, seen = {}, {}
+    # A duplicated decision voids the panel outright. Keeping the first made a
+    # scientific result depend on CSV row order: APPROVED then REJECTED
+    # approved, REJECTED then APPROVED did not.
+    counts, id_counts = {}, {}
+    for _, r in reviews.iterrows():
+        counts[_s(r.get("Panel_ID"))] = counts.get(_s(r.get("Panel_ID")), 0) + 1
+        id_counts[_s(r.get("Review_ID"))] = id_counts.get(
+            _s(r.get("Review_ID")), 0) + 1
+    voided = {p for p, n in counts.items() if p and n > 1}
+    for panel in sorted(voided):
+        flag("panel:%s" % panel, "DUPLICATE_REVIEW",
+             "%d decisions exist for this panel; none is applied, because "
+             "which one wins would otherwise be the order of the rows"
+             % counts[panel])
+    # A Review_ID identifies a decision. Two decisions wearing one identifier
+    # cannot be told apart in an audit, so neither is applied.
+    reused = {i for i, n in id_counts.items() if i and n > 1}
+    for review_id in sorted(reused):
+        flag("review:%s" % review_id, "DUPLICATE_REVIEW_ID",
+             "%d rows share this Review_ID; none of them is applied" % id_counts[review_id])
+
+    out = {}
     for i, r in reviews.iterrows():
         line = "review:%d" % (i + 2)
         pid = _s(r.get("Panel_ID"))
+        if pid in voided or _s(r.get("Review_ID")) in reused:
+            continue
         decision = _s(r.get("Decision")).upper()
         if not pid:
             flag(line, "MISSING_REQUIRED", "Panel_ID")
@@ -132,11 +175,6 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
                  "%s did not pass machine QC in this run, so there is nothing "
                  "for a decision to apply to" % pid)
             continue
-        if pid in seen:
-            flag(line, "DUPLICATE_REVIEW",
-                 "%s already has a decision at %s" % (pid, seen[pid]))
-            continue
-        seen[pid] = line
         if decision and decision not in RB.REVIEW_DECISIONS:
             flag(line, "BAD_REVIEW_DECISION",
                  "%r is not one of %s" % (decision, ", ".join(RB.REVIEW_DECISIONS)))
@@ -150,12 +188,12 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
                  "Reviewer_ID=%r is not a Reviewer_Record_Type=HUMAN row in "
                  "reviewer_registry.csv" % rid)
             continue
-        got = _s(r.get("Panel_Fingerprint"))
+        got = _s(r.get("Review_Subject_SHA256"))
         if got != expected[pid]:
             flag(line, "APPROVAL_STALE",
-                 "the approval is for fingerprint %s..., this run produced "
-                 "%s.... The image, the config, the reader or the pipeline "
-                 "changed since somebody looked"
+                 "the approval is for subject %s..., this run produced "
+                 "%s.... The values, the manifests, the artifacts or the "
+                 "environment changed since somebody looked"
                  % (got[:16] or "(blank)", expected[pid][:16]))
             continue
         when = _s(r.get("Reviewed_At"))
@@ -173,7 +211,69 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
     return out
 
 
-def finalize(run_dir, review_path=None, manifest_dir=None, run_date="", today=None):
+def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
+    """The run must be the run that was reviewed, byte for byte.
+
+    The finalizer re-reads four files to decide whether a value is poolable, and
+    trusted every one of them. So: run, look at a correct overlay, approve it,
+    then edit a Mean in `figure_values_machine_qc.csv` and finalize - the edited
+    number came out HUMAN_APPROVED. The reviewer registry had the same hole from
+    the other side, since `--manifests` takes any directory.
+    """
+    recorded = run_stamp.get("Output_SHA256") or {}
+    if not recorded:
+        flag("run", "RUN_ARTIFACT_MODIFIED",
+             "run_stamp.json records no Output_SHA256 - this run predates "
+             "output verification and cannot be finalized")
+        return False
+    ok = True
+    for name in VERIFIED_OUTPUTS:
+        path = os.path.join(run_dir, name)
+        if not os.path.exists(path):
+            flag("run", "RUN_ARTIFACT_MODIFIED", "%s is gone" % name)
+            ok = False
+            continue
+        with open(path, encoding="utf-8") as fh:
+            actual = RB.sha256_of_text(fh.read())
+        if actual != recorded.get(name):
+            flag("run", "RUN_ARTIFACT_MODIFIED",
+                 "%s hashes to %s..., the run recorded %s.... It was edited "
+                 "after the run that produced it"
+                 % (name, actual[:16], _s(recorded.get(name))[:16] or "(nothing)"))
+            ok = False
+    registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
+    if os.path.exists(registry_path):
+        actual = RB.frame_sha256(pd.read_csv(registry_path, dtype=object).fillna(""))
+        if actual != _s(run_stamp.get("Reviewer_Registry_SHA256")):
+            flag("run", "REVIEWER_REGISTRY_CHANGED",
+                 "the registry at %s is not the one the run validated. An "
+                 "approver cannot be added between the run and the approval"
+                 % manifest_dir)
+            ok = False
+    return ok
+
+
+def _promote(staging, run_dir, fault_after=None):
+    """Move the finalization into place, the accepted file last.
+
+    The same shape as `run_batch.promote`, for the same reason: the accepted
+    file is the commit marker, so a process killed partway leaves a stamp
+    explaining an incomplete finalization rather than poolable values with no
+    stamp behind them.
+    """
+    names = sorted(os.listdir(staging))
+    ordered = ([n for n in names if n != FINALIZE_MARKER]
+               + [n for n in names if n == FINALIZE_MARKER])
+    for i, name in enumerate(ordered):
+        if fault_after is not None and i == fault_after:
+            raise RuntimeError("fault injected after promoting %d of %d files"
+                               % (i, len(ordered)))
+        shutil.move(os.path.join(staging, name), os.path.join(run_dir, name))
+    shutil.rmtree(staging, ignore_errors=True)
+
+
+def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
+             today=None, fault_after=None):
     """Read a completed run plus its decisions; write the accepted file or not."""
     problems = []
 
@@ -181,32 +281,51 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="", today=No
         problems.append(dict(where=where, check=check, detail=detail))
 
     review_path = review_path or os.path.join(run_dir, "value_review.csv")
-    manifest_dir = manifest_dir or os.path.join(run_dir, "manifests")
-    accepted_path = os.path.join(run_dir, "figure_values_accepted.csv")
+    accepted_path = os.path.join(run_dir, FINALIZE_MARKER)
     stamp_path = os.path.join(run_dir, "finalize_stamp.json")
+    staging = os.path.join(run_dir, FINALIZE_STAGING)
 
     # Whatever happens, the previous finalization does not survive this one.
-    if os.path.exists(accepted_path):
-        os.remove(accepted_path)
+    for stale in (accepted_path, stamp_path):
+        if os.path.exists(stale):
+            os.remove(stale)
+    shutil.rmtree(staging, ignore_errors=True)
+
+    def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
+              directory=None):
+        payload = {"schema": FINALIZE_SCHEMA, "Status": status,
+                   "Run_Date": run_date, "Panels_Approved": approved,
+                   "Values_Accepted": accepted,
+                   "Accepted_SHA256": accepted_sha,
+                   "Run_Stamp_SHA256": run_stamp_sha,
+                   "Pipeline_Version": RB.PIPELINE_VERSION,
+                   "Pipeline_Code_SHA256": RB.pipeline_code_sha256(),
+                   "Environment": RB.environment_record(),
+                   "Review_File": review_path,
+                   "Problems": problems, "Detail": detail}
+        with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
+                  "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=1, sort_keys=True)
 
     def stop(status, detail, approved=0, accepted=0):
-        with open(stamp_path, "w", encoding="utf-8") as fh:
-            json.dump({"schema": FINALIZE_SCHEMA, "Status": status,
-                       "Run_Date": run_date, "Panels_Approved": approved,
-                       "Values_Accepted": accepted,
-                       "Pipeline_Version": RB.PIPELINE_VERSION,
-                       "Pipeline_Code_SHA256": RB.pipeline_code_sha256(),
-                       "Review_File": review_path,
-                       "Problems": problems, "Detail": detail},
-                      fh, indent=1, sort_keys=True)
+        stamp(status, detail, approved=approved, accepted=accepted)
         return dict(status=status, approved=approved, accepted=accepted,
                     problems=problems, detail=detail)
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
+    run_stamp_sha = ""
     if not os.path.exists(run_stamp_path):
+        run_stamp = {}
         return stop("RUN_NOT_FINALIZABLE", "no run_stamp.json in %s" % run_dir)
     with open(run_stamp_path, encoding="utf-8") as fh:
-        run_stamp = json.load(fh)
+        run_stamp_text = fh.read()
+    run_stamp_sha = RB.sha256_of_text(run_stamp_text)
+    run_stamp = json.loads(run_stamp_text)
+    # The run says where its manifests were. Defaulting to RUN_DIR/manifests
+    # meant the README's own three commands - compile to one directory, run to
+    # another - produced a run the finalizer could not read the registry for.
+    manifest_dir = (manifest_dir or _s(run_stamp.get("Manifest_Dir"))
+                    or os.path.join(run_dir, "manifests"))
     if run_stamp.get("Status") != "RAN":
         return stop("RUN_NOT_FINALIZABLE",
                     "the run says Status=%s; only a completed run can be "
@@ -232,6 +351,10 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="", today=No
                     "reviewer_registry.csv could not be read from %s (%s)"
                     % (manifest_dir, exc))
 
+    if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
+        return stop("RUN_ARTIFACT_MODIFIED",
+                    "the run this approval refers to is not the run on disk")
+
     reviews = load_reviews(review_path, flag)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today)
 
@@ -252,10 +375,31 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="", today=No
     keep["Review_ID"] = [_s(approved[p].get("Review_ID")) for p in keep["Run_Panel_ID"]]
     keep["Reviewer_ID"] = [_s(approved[p].get("Reviewer_ID")) for p in keep["Run_Panel_ID"]]
     keep["Reviewed_At"] = [_s(approved[p].get("Reviewed_At")) for p in keep["Run_Panel_ID"]]
-    keep["Panel_Fingerprint"] = [_s(approved[p].get("Panel_Fingerprint"))
-                                 for p in keep["Run_Panel_ID"]]
-    keep.to_csv(accepted_path, index=False)
-    return stop("FINALIZED", "", approved=len(approved), accepted=len(keep))
+    keep["Review_Subject_SHA256"] = [
+        _s(approved[p].get("Review_Subject_SHA256")) for p in keep["Run_Panel_ID"]]
+
+    # Staged, then promoted with the accepted file last. Writing it directly and
+    # stamping afterwards left a window where poolable values existed with no
+    # stamp behind them - the same shape `run_batch` already fixed.
+    os.makedirs(staging, exist_ok=True)
+    staged_accepted = os.path.join(staging, FINALIZE_MARKER)
+    keep.to_csv(staged_accepted, index=False)
+    with open(staged_accepted, encoding="utf-8") as fh:
+        accepted_sha = RB.sha256_of_text(fh.read())
+    stamp("FINALIZED", "", approved=len(approved), accepted=len(keep),
+          accepted_sha=accepted_sha, directory=staging)
+    try:
+        _promote(staging, run_dir, fault_after=fault_after)
+    except Exception as exc:
+        for leftover in (accepted_path,):
+            if os.path.exists(leftover):
+                os.remove(leftover)
+        shutil.rmtree(staging, ignore_errors=True)
+        flag("commit", "COMMIT_FAILED", "%s: %s" % (type(exc).__name__, exc))
+        return stop("COMMIT_FAILED",
+                    "the finalization did not complete; nothing is poolable")
+    return dict(status="FINALIZED", approved=len(approved), accepted=len(keep),
+                problems=problems, detail="")
 
 
 def main(argv=None):

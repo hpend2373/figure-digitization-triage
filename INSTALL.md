@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.16 (full package)
+# figure-digitization-triage — v7.17 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,78 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## Release gate (v7.16 review) — five conditions, all met
+
+The review named five conditions for a 116-publication production batch. Each
+is below with what was actually wrong.
+
+### 1. CI green
+
+`run_batch.py` returned exit 1 whenever `qc_problems > 0`. Publication 397 is
+in the package *because* its dispersion definition is unresolved, so the one
+step that proves the plan-to-run path works reproduced 108 expected problems
+and CI called the whole workflow red.
+
+A QC problem is a result, not a failed run. Exit 0 now means the run completed;
+`run_stamp.json` carries the verdict. The CI step asserts the expected stamp —
+`RAN`, 48 read, 0 machine-QC-passed, 108 problems — rather than a bare exit
+code, because a green that did not read 48 values would be worse than a red.
+
+The CLI banner also still said `ACCEPTED 0` and `pool from
+figure_values_accepted.csv`, for a file this module has not written since 7.13.
+
+### 2. The approval is bound to the values
+
+`Panel_Fingerprint` hashed eight fields and its docstring claimed an approval
+expired whenever "the image, the config, the reader or the pipeline" changed.
+The guarantee was narrower than the sentence: it covered none of the Mean, the
+`Cell_Key`, what `CONTROL` and `TREATED` mean, the panel box, the ticks, the
+unit and grid manifests, the OpenCV version, or any artifact. An approval
+survived swapping two factor labels and editing a value.
+
+`Review_Subject_SHA256` covers the run row, every manifest hash, the
+environment record, the raw mark file, the WPD project, and every machine-QC
+value of the panel with its cell key. Manifests are taken whole rather than
+sliced per panel — that expires some approvals that did not need to expire,
+which is the right way round: re-approving costs an afternoon, a stale approval
+surviving costs the analysis.
+
+### 3. The finalizer verifies the run
+
+It re-read four files to decide whether a value was poolable and trusted every
+one, and `--manifests` took any directory. So: approve a correct overlay, edit
+a Mean, finalize — the edited number came out `HUMAN_APPROVED`.
+
+`run_stamp.json` records `Output_SHA256` for all four files and
+`Reviewer_Registry_SHA256`. Both are recomputed before any decision is read;
+either mismatching is `RUN_ARTIFACT_MODIFIED` / `REVIEWER_REGISTRY_CHANGED` and
+no accepted file is written.
+
+### 4. Finalization is atomic
+
+The accepted file was written directly and the stamp after it, so a process
+killed between the two left poolable values with a stale stamp or none — the
+shape `run_batch` already fixed. Finalization now stages, records the accepted
+file's own SHA-256 and the source run stamp's in the finalize stamp, and
+promotes with the accepted file last as the commit marker. Fault injection at
+each step.
+
+### 5. Duplicate reviews are order-independent
+
+Two decisions for one panel resolved to whichever came first, so
+APPROVED-then-REJECTED approved and REJECTED-then-APPROVED did not. A
+scientific result must not depend on CSV row order. A duplicated `Panel_ID`
+now voids every decision for that panel, and a `Review_ID` used twice voids the
+rows that share it.
+
+**80 scenarios in `test_finalize.py`.** Reverting the subject hash fails 9; the
+artifact verification 9; the duplicate rule 6.
+
+Also from the same review: the run records `Manifest_Dir`, so the finalizer
+finds the registry when the README's own three commands put manifests beside
+the run rather than inside it; and `opencv-python` is out of the lock file,
+since it and `opencv-python-headless` both provide `cv2`.
 
 ## P1-9 (v7.11 review) — one typed plan in, eleven manifests out
 

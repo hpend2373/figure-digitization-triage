@@ -200,7 +200,10 @@ lower = {re.split(r"[><=]", line)[0].strip().lower()
          if line.strip() and not line.startswith("#")}
 assert lower <= {k.lower() for k in locked}, (
     "%s is required but not pinned" % sorted(lower - {k.lower() for k in locked}))
-print("every requirement is pinned in the lock file: PASS")
+assert "opencv-python==" not in open(LOCK, encoding="utf-8").read(), (
+    "opencv-python and opencv-python-headless both provide cv2; pinning both "
+    "leaves which one answers an import to resolution order")
+print("every requirement is pinned in the lock file, exactly once: PASS")
 
 # CI must run every suite in the package. A test file nobody runs is a test
 # file that will be broken the next time somebody looks.

@@ -5,8 +5,11 @@
 # Reproduced with Python 3.11.15 on Linux-6.18.5-fc-v18-x86_64-with-glibc2.39. A run records the versions it
 # actually used in run_stamp.json under "Environment"; if those do not
 # match this file, the run is not the run this file describes.
+#
+# opencv-python is deliberately absent: it and opencv-python-headless
+# both provide the cv2 namespace, and installing both leaves which one
+# answers an import up to resolution order.
 numpy==2.4.4
 opencv-python-headless==4.13.0.92
-opencv-python==4.13.0.92
 pandas==3.0.2
 pillow==12.2.0

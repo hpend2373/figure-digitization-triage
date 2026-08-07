@@ -3,6 +3,12 @@
     python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR]
                          [--date YYYY-MM-DD] [--demo-only]
 
+Exit 0 means the run completed, NOT that everything read cleanly. QC problems
+are a result: publication 397 ships with 108 of them because its dispersion
+definition is unresolved, and a run reproducing them has done its job exactly.
+Read `run_stamp.json` for the verdict. Non-zero exits are 2 manifests rejected,
+3 inputs unloadable, 4 demo output refused, 5 an internal defect.
+
 The run mode is derived from `reviewer_registry.csv`: a reviewer recorded as
 `Reviewer_Record_Type=DEMO_IDENTITY` makes the run DEMO_ONLY, which executes in
 full but refuses (exit 4) rather than writing values a fictional reviewer would
@@ -73,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.16"
+PIPELINE_VERSION = "7.17"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -125,10 +131,10 @@ REVIEW_QUEUE_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type",
     "Cells_Read", "Cells_Declared",
     "Overlay_File", "WPD_Project_File", "Raw_Data_File",
-    # What the approval is an approval OF. Change the raster, the manifests or
-    # the code and this changes, which is what makes a stale approval visible
-    # instead of inherited.
-    "Panel_Fingerprint",
+    # What the approval is an approval OF: the values, the manifests, the
+    # artifacts and the environment. Change any of them and this changes, which
+    # is what makes a stale approval visible instead of inherited.
+    "Review_Subject_SHA256",
     # Filled in by a person, then read by finalize_batch.py.
     "Decision", "Reviewer_ID", "Reviewed_At", "Note",
 ]
@@ -137,17 +143,61 @@ REVIEW_QUEUE_COLUMNS = [
 REVIEW_DECISIONS = ("APPROVED", "REJECTED")
 
 
-def panel_fingerprint(run_row):
-    """Everything that would have to be identical for an approval to still hold.
+def sha256_of_text(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    A person approves a picture of a particular extraction: this image, read by
-    this code, configured this way. If any of those change the picture may be
-    different, and an approval carried across is a signature on work nobody saw.
+
+def file_sha256_or_blank(path):
+    try:
+        return file_sha256(path)
+    except Exception:
+        return ""
+
+
+def review_subject_sha256(run_row, values, manifest_hashes, environment):
+    """Everything a person is actually approving when they approve a panel.
+
+    The first version hashed the panel id, the unit id, the mark type, the image
+    hash, the config hash, the reader version, the pipeline code hash and the
+    cell count - and its docstring claimed an approval went stale whenever "the
+    image, the config, the reader or the pipeline" changed. The guarantee was
+    narrower than the sentence. None of these were covered:
+
+        the Mean and Dispersion_Value the person read off the overlay
+        the Cell_Key each value carries
+        the Factor_Name/Factor_Level a series or position MEANS
+        the panel box and the axis ticks
+        the unit and grid manifests
+        the OpenCV version that found the marks
+        the raw mark JSON, the WPD project and the overlay PNG
+
+    So an approval survived swapping CONTROL and TREATED, editing a Mean, or
+    changing the library that produced it. What a reviewer approves is a
+    picture of particular numbers, and the subject of the approval has to be
+    those numbers.
+
+    The manifest hashes are taken whole rather than sliced per panel. That
+    expires some approvals that did not need to expire - edit one unrelated
+    panel's box and every decision in the batch goes stale - which is the right
+    way round: re-approving work you already looked at costs an afternoon, and
+    a stale approval surviving costs the analysis.
     """
-    material = "|".join(str(run_row.get(k, "")) for k in (
-        "Panel_ID", "Unit_ID", "Mark_Type", "Image_SHA256", "Config_SHA256",
-        "Reader_Version", "Pipeline_Code_SHA256", "Cells_Read"))
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    material = [
+        "run_row:" + "|".join("%s=%s" % (k, run_row.get(k, "")) for k in (
+            "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type",
+            "Run_State", "Cells_Declared", "Cells_Read", "Image_SHA256",
+            "Config_SHA256", "Reader_Version", "Pipeline_Version",
+            "Pipeline_Code_SHA256")),
+        "manifests:" + json.dumps(manifest_hashes, sort_keys=True),
+        "environment:" + json.dumps(environment, sort_keys=True),
+        "raw:" + file_sha256_or_blank(_s(run_row.get("Raw_Data_File"))),
+        "project:" + file_sha256_or_blank(_s(run_row.get("WPD_Project_File"))),
+    ]
+    for row in sorted(values, key=lambda r: _s(r.get("Cell_Key"))):
+        material.append("value:" + "|".join(
+            "%s=%s" % (k, row.get(k, "")) for k in sorted(row)
+            if k not in ("Note", "Reconciliation_Note")))
+    return sha256_of_text("\n".join(material))
 
 
 MANUAL_QUEUE_COLUMNS = [
@@ -964,7 +1014,9 @@ RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED",
 
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
                 panels=0, read=0, accepted=0, machine_qc=0, qc_problems=0,
-                problems=0, detail="", run_mode="ATTESTED"):
+                problems=0, detail="", run_mode="ATTESTED",
+                output_sha256=None, reviewer_registry_sha256="",
+                manifest_dir=""):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
@@ -974,7 +1026,7 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
     """
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/6",
+            "schema": "figure-digitization-triage/run-stamp/7",
             "Status": status, "Run_Mode": run_mode, "Run_Date": run_date,
             "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
@@ -985,6 +1037,14 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
             "Panels": panels, "Values_Read": read,
             "Values_Machine_QC_Passed": machine_qc, "Values_Accepted": accepted,
             "QC_Problems": qc_problems, "Manifest_Problems": problems,
+            "Output_SHA256": output_sha256 or {},
+            "Reviewer_Registry_SHA256": reviewer_registry_sha256,
+            # Where the manifests came from, so the finalizer does not have to
+            # be told. The README's own three commands put them beside the run
+            # rather than inside it, and the finalizer defaulted to
+            # OUT/manifests - so following the documentation produced a run
+            # whose registry the finalizer could not find.
+            "Manifest_Dir": manifest_dir,
             "Detail": detail,
         }, fh, indent=1, sort_keys=True)
 
@@ -1031,6 +1091,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     except Exception as exc:
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "INPUT_LOAD_FAILED", run_date, run_mode=run_mode,
+                    manifest_dir=os.path.realpath(manifest_dir),
                     detail="%s: %s" % (type(exc).__name__, exc))
         raise
     manifest_hashes = {k: frame_sha256(v) for k, v in sorted(m.items())}
@@ -1054,6 +1115,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                         index=False)
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "MANIFEST_REJECTED", run_date, run_mode=run_mode,
+                    manifest_dir=os.path.realpath(manifest_dir),
                     manifest_hashes=manifest_hashes, problems=len(problems))
         return dict(status="MANIFEST_REJECTED", problems=len(problems),
                     values=0, accepted=0, run_mode=run_mode,
@@ -1362,7 +1424,10 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Overlay_File": overlays_by_panel.get(row["Panel_ID"], ""),
             "WPD_Project_File": row["WPD_Project_File"],
             "Raw_Data_File": row["Raw_Data_File"],
-            "Panel_Fingerprint": panel_fingerprint(row),
+            "Review_Subject_SHA256": review_subject_sha256(
+                row, [v for v in machine_qc_df.to_dict("records")
+                      if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]],
+                manifest_hashes, environment_record()),
             "Decision": "", "Reviewer_ID": "", "Reviewed_At": "", "Note": "",
         })
     review_df = pd.DataFrame(review_rows, columns=REVIEW_QUEUE_COLUMNS)
@@ -1387,6 +1452,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                   "behind a poolable value" % len(machine_qc_df))
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "DEMO_OUTPUT_REFUSED", run_date, run_mode=run_mode,
+                    manifest_dir=os.path.realpath(manifest_dir),
                     cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                     panels=len(run_df), read=len(raw_df), accepted=0,
                     qc_problems=int(len(qc)), detail=detail)
@@ -1404,10 +1470,22 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
                 run_mode=run_mode, detail=stamp_detail,
+                manifest_dir=os.path.realpath(manifest_dir),
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=0,
                 machine_qc=len(machine_qc_df),
-                qc_problems=int(len(qc)))
+                qc_problems=int(len(qc)),
+                # What the finalizer must find unchanged. Everything it reads
+                # to decide whether a value is poolable is hashed here, so a
+                # file edited between the run and the approval is a refusal
+                # rather than an input.
+                output_sha256={
+                    name: sha256_of_text(
+                        open(os.path.join(work_dir, name), encoding="utf-8").read())
+                    for name in ("figure_values_machine_qc.csv",
+                                 "review_queue.csv", "figure_values_raw.csv",
+                                 "run_manifest.csv")},
+                reviewer_registry_sha256=manifest_hashes.get("reviewers", ""))
     try:
         promote(work_dir, output_dir, fault_after=fault_after)
     except Exception as exc:
@@ -1478,14 +1556,19 @@ def main(argv=None):
             print("  " + code)
         print("see manifest_problems.csv")
         return 2
-    print("panels %d | values read %d | ACCEPTED %d | qc problems %d | queue %d"
-          % (summary["panels"], summary["values"], summary["accepted"],
+    print("panels %d | values read %d | MACHINE_QC_PASSED %d | qc problems %d "
+          "| manual queue %d"
+          % (summary["panels"], summary["values"], summary["machine_qc"],
              summary["qc_problems"], summary["manual_queue"]))
     for state, n in sorted(summary["states"].items()):
         print("  %-28s %d" % (state, n))
-    print("pool from figure_values_accepted.csv; figure_values_raw.csv carries "
-          "everything read, with Value_Status on every row")
-    return 0 if summary["qc_problems"] == 0 else 1
+    print("review the panels in review_queue.csv; finalize_batch.py writes "
+          "figure_values_accepted.csv, and nothing else does")
+    # A QC problem is a RESULT, not a failure of the run. Publication 397 is in
+    # the package precisely because its dispersion definition is unresolved, so
+    # a run that reproduces those 108 problems has done its job exactly. Exit 1
+    # made that success indistinguishable from a crash, and CI called it red.
+    return 0 if summary["status"] == "RAN" else 1
 
 
 if __name__ == "__main__":

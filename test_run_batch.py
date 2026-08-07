@@ -1812,7 +1812,20 @@ _p2 = MR.read_point_data(_scat["Point_Data_Reference"].replace(ODIR, ODIR2))
 check("and the point clouds it wrote are identical pixel for pixel",
       _p1["points"] == _p2["points"])
 _changed = json.load(open(os.path.join(ODIR2, "run_stamp.json")))
-check("and its stamp agrees", _changed == stamp)
+# Every field but the ones that ARE the output directory. `Output_SHA256` hashes
+# files whose rows carry absolute paths, so two runs into two directories
+# legitimately differ there - and comparing them anyway would have quietly
+# turned this into a test that the paths are equal.
+_ignore = {"Output_SHA256"}
+check("and its stamp agrees",
+      {k: v for k, v in _changed.items() if k not in _ignore}
+      == {k: v for k, v in stamp.items() if k not in _ignore},
+      "%s" % sorted(k for k in set(_changed) | set(stamp)
+                    if k not in _ignore and _changed.get(k) != stamp.get(k)))
+check("and the hashes it recorded are of the files it actually wrote",
+      all(RB.sha256_of_text(open(os.path.join(ODIR2, n), encoding="utf-8").read())
+          == h for n, h in _changed["Output_SHA256"].items()),
+      "%s" % sorted(_changed["Output_SHA256"]))
 
 print("a changed input is visible in the stamp, not silent")
 MDIR3 = write_manifests(os.path.join(ROOT, "manifests3"),

@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.19"
+PIPELINE_VERSION = "7.20"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -130,6 +130,12 @@ RUN_MANIFEST_COLUMNS = [
 REVIEW_QUEUE_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type",
     "Cells_Read", "Cells_Declared",
+    # HOW this panel can be judged. The protocol says to open the overlay for
+    # every queued row, and a scatter had none - so the column was silently
+    # empty and an approval was a statement about nothing in particular. A
+    # panel now declares what a reviewer will actually be looking at, and the
+    # finalizer refuses an approval whose declared artifact is not there.
+    "Review_Mode",
     "Overlay_File", "WPD_Project_File", "Raw_Data_File",
     # What the approval is an approval OF: the values, the manifests, the
     # artifacts and the environment. Change any of them and this changes, which
@@ -141,6 +147,14 @@ REVIEW_QUEUE_COLUMNS = [
 
 #: What a reviewer is allowed to write in `Decision`.
 REVIEW_DECISIONS = ("APPROVED", "REJECTED")
+
+#: What a queued panel offers a reviewer, and which `panel_artifacts.csv`
+#: Artifact_Type must therefore be present for it. `OVERLAY` is the normal case. `WPD_ONLY` exists because
+#: `draw_panel_overlay` never raises - a picture that cannot be painted must not
+#: fail a panel that produced values - so a panel can legitimately reach the
+#: queue with a project and no overlay. What it may NOT do is reach the queue
+#: claiming a review nobody can perform.
+REVIEW_MODES = {"OVERLAY": "OVERLAY", "WPD_ONLY": "WPD_PROJECT"}
 
 
 def sha256_of_text(text):
@@ -414,6 +428,36 @@ PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA")
 PANEL_ARTIFACT_COLUMNS = ["Panel_ID", "Artifact_Type", "Artifact_Path", "SHA256"]
 
 
+def _run_relative(path, run_dir):
+    """An artifact path as the run directory sees it: `review/P1_overlay.png`.
+
+    The ledger has to survive `mv OUT /elsewhere` and has to be readable from a
+    process whose working directory is not the one the run had. Neither an
+    absolute path nor a bare relative one does both.
+    """
+    try:
+        return os.path.relpath(os.path.realpath(path),
+                               os.path.realpath(run_dir)).replace(os.sep, "/")
+    except ValueError:                                          # pragma: no cover
+        # Different drives on Windows. Falling back to the absolute path keeps
+        # the ledger honest; `resolve_artifact` will refuse it as outside.
+        return path
+
+
+def resolve_artifact(run_dir, recorded):
+    """The absolute path a ledger entry names, or None if it escapes the run.
+
+    A relative entry is joined to the run directory. Anything that resolves
+    outside it is refused rather than read: a ledger is a statement about what
+    this run wrote into its own directory, and `../../etc/passwd` is not that.
+    """
+    root = os.path.realpath(run_dir)
+    candidate = os.path.realpath(os.path.join(root, recorded))
+    if candidate != root and not candidate.startswith(root + os.sep):
+        return None
+    return candidate
+
+
 def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
     """(TYPE, path) pairs for one panel, in a fixed order, skipping what is absent."""
     out = []
@@ -638,7 +682,7 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     if mark == "SCATTER":
         return _scatter_outcome(rows, panel, series_level, series_factor, unit,
                                 statistic, resolved, xcal, ycal, raw_dir, declared,
-                                project_dir)
+                                project_dir, review_dir=review_dir, box=box)
 
     # ---- relabel reader output with the DECLARED identity before it becomes a
     # ---- value row. The reader never learns what a series means.
@@ -921,7 +965,8 @@ def _jsonable(rows):
 
 
 def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic,
-                     image_path, xcal, ycal, raw_dir, declared, project_dir=None):
+                     image_path, xcal, ycal, raw_dir, declared, project_dir=None,
+                     review_dir=None, box=None):
     """A scatter yields one association per series, each with its point file."""
     pid = _s(panel.get("Panel_ID"))
     unit_id = _s(panel.get("Unit_ID"))
@@ -934,7 +979,12 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
     # What the paper says this scatter contains. A count the reader can be
     # measured against, rather than one it declares by counting itself.
     expected_n = _s(unit.get("N_Outcome"))
-    records, raw_files, short, disputed = [], [], [], []
+    # Every series is audited and summarized BEFORE anything is written. The
+    # point files used to be written inside this loop, so a panel that a later
+    # series sent to MANUAL_POINT_READ left point JSONs on disk that no ledger
+    # named and no run row referenced - files a run produced and did not admit
+    # to. Nothing here touches the filesystem.
+    planned, short, disputed = [], [], []
     for sid, (factor, level) in sorted(series_level.items()):
         mine = [p for p in points if p.get("series") == sid]
         if len(mine) < 3:
@@ -952,28 +1002,48 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                    audit["Detected_Unique_Point_Count"], len(mine),
                    audit["Series_Mask_Overlap_Count"]))
             continue
+        if (audit["Overplotting_Possible"] == "TRUE"
+                and audit["Point_Count_Agreement"] == "NO_SOURCE_N"):
+            # Overplotting evidence with nothing to check the count against.
+            # A blob wider than a marker, or two centroids a pixel apart, means
+            # marks may be hiding behind marks - and where the paper gives no n
+            # there is no second opinion. Detected == expected is what makes a
+            # merged blob tolerable; here there is no expected.
+            disputed.append(
+                "%s: %d marks read with signs of overplotting (%d distinct of "
+                "%d contours) and no declared n to check the count against"
+                % (sid, len(mine), audit["Detected_Unique_Point_Count"],
+                   len(mine)))
+            continue
         summary = dict(MR.summarize_association(mine, association), **audit)
-        cell_key = GE.fig_cell_key({factor: level})
-        path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
-        MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
-                            source_image=image_path, image_sha256=sha,
-                            x_calibration=xcal, y_calibration=ycal,
-                            panel_id=pid, reader="SCATTER")
-        raw_files.append(path)
-        records.extend(MR.to_value_records(
-            [summary], "ASSOCIATION", unit_id,
-            cell_levels={factor: level}, point_data_reference=path))
+        planned.append((sid, factor, level, mine, summary))
+
+    records, raw_files = [], []
+    if not (disputed or (not planned)):
+        for sid, factor, level, mine, summary in planned:
+            cell_key = GE.fig_cell_key({factor: level})
+            path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
+            MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
+                                source_image=image_path, image_sha256=sha,
+                                x_calibration=xcal, y_calibration=ycal,
+                                panel_id=pid, reader="SCATTER")
+            raw_files.append(path)
+            records.extend(MR.to_value_records(
+                [summary], "ASSOCIATION", unit_id,
+                cell_levels={factor: level}, point_data_reference=path))
     if ycal is not None:
         for record in records:
             record.setdefault("Calibration_Max_Residual",
                               float(getattr(ycal, "max_residual", 0.0)))
     if disputed:
         # Not NOT_CONVERTIBLE: the marks are readable, they just do not add up
-        # to the sample the paper claims. That is a counting job for a person.
+        # to a point set anybody can vouch for. That is a counting job for a
+        # person. No point file was written, so there is nothing on disk the
+        # ledger does not name.
         return PanelOutcome(
-            "MANUAL_POINT_READ", declared=declared, read=len(records),
-            detail="the detected point count contradicts the declared n, so no "
-                   "association was computed - " + "; ".join(disputed),
+            "MANUAL_POINT_READ", declared=declared, read=0,
+            detail="the detected points cannot be reconciled with the source, "
+                   "so no association was computed - " + "; ".join(disputed),
             missing=sorted(_all_cells(series_level, {})))
     if not records:
         return PanelOutcome("NOT_CONVERTIBLE", declared=declared,
@@ -991,13 +1061,33 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
             dict(panel, Image_Path=image_path), points, xcal, ycal)
     for record in records:
         record.setdefault("WPD_Project_File", project or "")
+    # A scatter went into the review queue with `Overlay_File=""`. The review
+    # protocol says to open the overlay for every queued panel and approve only
+    # if each mark sits where a reader would put it - so an empty overlay column
+    # is an approval with nothing to approve against. The reader has had
+    # `point_px_x`/`point_px_y` all along; nobody passed it a review directory.
+    overlay = None
+    if review_dir and box is not None:
+        overlay = OVERLAY.draw_panel_overlay(
+            os.path.join(review_dir, "%s_overlay.png" % pid), image_path, box,
+            [p for _s_, _f_, _l_, mine, _sum_ in planned for p in mine],
+            title="%s  %s  SCATTER" % (pid, unit_id),
+            subtitle="%d points read in %d series - approve only if every "
+                     "cross sits on a printed marker and none is missed"
+                     % (len(records) and sum(len(m) for _a, _b, _c, m, _d in planned),
+                        len(planned)),
+            series_order=sorted(series_level),
+            # Thirty labelled crosses cover the cloud they exist to show.
+            label_marks=False)
     return PanelOutcome("AUTO_PASS", values=records, raw=";".join(raw_files),
-                        project=project, declared=declared, read=len(records),
+                        project=project, overlay=overlay,
+                        declared=declared, read=len(records),
                         # One entry per point file. `raw` stays a ";"-joined
                         # string for the run manifest column, but nothing
                         # hashes that string as a path any more.
                         artifacts=_panel_artifacts(point_data=raw_files,
-                                                   project=project),
+                                                   project=project,
+                                                   overlay=overlay),
                         with_dispersion=len(records))
 
 
@@ -1295,8 +1385,15 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             projects_by_panel[pid] = outcome.project
         # Hashed the moment they are written, before anything else touches the
         # directory - so what the manifest records is what the run produced.
+        #
+        # Recorded RELATIVE to the output directory. An absolute path breaks
+        # when the run directory is moved or copied; a bare relative one breaks
+        # when the finalizer is launched from a different working directory,
+        # which is the normal case for a scheduler or an agent. Either way the
+        # finalizer reports RUN_ARTIFACT_MODIFIED for a file that is sitting
+        # right there - safe, but a false refusal nobody can act on.
         artifacts_by_panel[pid] = [
-            (kind, path, file_sha256_or_blank(path))
+            (kind, _run_relative(path, output_dir), file_sha256_or_blank(path))
             for kind, path in outcome.artifacts]
         # Stamp the panel onto every value it produced. A unit is normally one
         # panel, but nothing forbids two panels feeding one - and keying panel
@@ -1566,12 +1663,23 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     for row in run_rows:
         if row["Run_State"] != "AUTO_PASS":
             continue
+        overlay_file = overlays_by_panel.get(row["Panel_ID"], "")
+        # What a reviewer will actually be looking at, declared rather than
+        # assumed. A scatter reached this queue with `Overlay_File=""` and the
+        # protocol still said "open the overlay", so the instruction pointed at
+        # nothing. A panel with neither a picture nor a project would get a
+        # blank mode here - it cannot, because a digitized value with no saved
+        # project is already MISSING_PROVENANCE at the gate, but the finalizer
+        # refuses a blank mode anyway rather than trusting that ordering.
+        mode = ("OVERLAY" if overlay_file
+                else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({
             "Panel_ID": row["Panel_ID"], "Source_Panel_ID": row["Source_Panel_ID"],
             "Figure_ID": row["Figure_ID"], "Unit_ID": row["Unit_ID"],
             "Mark_Type": row["Mark_Type"],
             "Cells_Read": row["Cells_Read"], "Cells_Declared": row["Cells_Declared"],
-            "Overlay_File": overlays_by_panel.get(row["Panel_ID"], ""),
+            "Review_Mode": mode,
+            "Overlay_File": overlay_file,
             "WPD_Project_File": row["WPD_Project_File"],
             "Raw_Data_File": row["Raw_Data_File"],
             "Review_Subject_SHA256": review_subject_sha256(

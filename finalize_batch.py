@@ -132,7 +132,8 @@ def load_reviews(path, flag):
     return df
 
 
-def approved_panels(reviews, queue, reviewers, flag, today=None):
+def approved_panels(reviews, queue, reviewers, flag, today=None,
+                    artifact_types=None):
     """Panel_ID -> the review row that approves it. Everything else is refused."""
     today = today or datetime.date.today()
     human = set()
@@ -142,6 +143,16 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
                 human.add(_s(r.get("Reviewer_ID")))
     expected = {_s(r.get("Panel_ID")): _s(r.get("Review_Subject_SHA256"))
                 for _, r in queue.iterrows()}
+    # What each queued panel said a reviewer would be looking at. A scatter used
+    # to reach the queue with `Overlay_File=""`, so "open the overlay and
+    # approve only if every mark sits where a reader would put it" pointed at
+    # nothing. The queue now declares its review mode, and the ledger - already
+    # re-hashed by `verify_run_outputs` - is what says the artifact is there.
+    # Checking the ledger rather than the queue's own path column is also what
+    # lets a run directory be moved: the ledger's paths are run-relative.
+    review_mode = {_s(r.get("Panel_ID")): _s(r.get("Review_Mode"))
+                   for _, r in queue.iterrows()}
+    artifact_types = artifact_types or {}
 
     # A duplicated decision voids the panel outright. Keeping the first made a
     # scientific result depend on CSV row order: APPROVED then REJECTED
@@ -207,6 +218,18 @@ def approved_panels(reviews, queue, reviewers, flag, today=None):
             flag(line, "REVIEWER_NOT_HUMAN_OR_NOT_REGISTERED",
                  "Reviewer_ID=%r is not a Reviewer_Record_Type=HUMAN row in "
                  "reviewer_registry.csv" % rid)
+            continue
+        mode = review_mode.get(pid, "")
+        if mode not in RB.REVIEW_MODES:
+            flag(line, "REVIEW_MODE_UNKNOWN",
+                 "the queue says Review_Mode=%r for %s; expected %s"
+                 % (mode, pid, "/".join(sorted(RB.REVIEW_MODES))))
+            continue
+        if RB.REVIEW_MODES[mode] not in artifact_types.get(pid, set()):
+            flag(line, "REVIEW_ARTIFACT_MISSING",
+                 "%s was queued for %s review, and the run's artifact ledger "
+                 "carries no %s for it. There is nothing this approval can be "
+                 "an approval of" % (pid, mode, RB.REVIEW_MODES[mode]))
             continue
         got = _s(r.get("Review_Subject_SHA256"))
         if got != expected[pid]:
@@ -274,11 +297,24 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
              "verification and cannot be finalized")
         return False
     for _, art in pd.read_csv(ledger, dtype=object).fillna("").iterrows():
-        path, recorded_hash = _s(art.get("Artifact_Path")), _s(art.get("SHA256"))
-        label = "%s %s" % (_s(art.get("Artifact_Type")), os.path.basename(path))
+        recorded_path = _s(art.get("Artifact_Path"))
+        recorded_hash = _s(art.get("SHA256"))
+        label = "%s %s" % (_s(art.get("Artifact_Type")),
+                           os.path.basename(recorded_path))
+        # Ledger paths are relative to the run directory, so the check survives
+        # the directory being moved and the finalizer being launched from
+        # anywhere. A path that resolves outside the run is not an artifact of
+        # this run and is refused rather than read.
+        path = RB.resolve_artifact(run_dir, recorded_path)
+        if path is None:
+            flag("panel:%s" % _s(art.get("Panel_ID")), "ARTIFACT_PATH_OUTSIDE_RUN",
+                 "the ledger names %s at %r, which is outside the run directory"
+                 % (label, recorded_path))
+            ok = False
+            continue
         if not os.path.exists(path):
             flag("panel:%s" % _s(art.get("Panel_ID")), "RUN_ARTIFACT_MODIFIED",
-                 "%s is gone; the run recorded it at %s" % (label, path))
+                 "%s is gone; the run recorded it at %s" % (label, recorded_path))
             ok = False
             continue
         actual = RB.file_sha256(path)
@@ -410,7 +446,15 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "the run this approval refers to is not the run on disk")
 
     reviews = load_reviews(review_path, flag)
-    approved = approved_panels(reviews, queue, reviewers, flag, today=today)
+    # Which artifacts the run says each panel has. Read after the verification
+    # above, so every entry here is one whose bytes have just been confirmed.
+    artifact_types = {}
+    for _, art in pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
+                              dtype=object).fillna("").iterrows():
+        artifact_types.setdefault(_s(art.get("Panel_ID")), set()).add(
+            _s(art.get("Artifact_Type")))
+    approved = approved_panels(reviews, queue, reviewers, flag, today=today,
+                               artifact_types=artifact_types)
 
     if not approved:
         return stop("NOTHING_APPROVED",

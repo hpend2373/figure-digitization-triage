@@ -36,6 +36,8 @@ import grid_engine as GE            # noqa: E402
 import mark_readers as MR           # noqa: E402
 import run_batch as RB              # noqa: E402
 import bar_reader as BR             # noqa: E402
+import datetime                     # noqa: E402
+import finalize_batch as FIN        # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -2231,6 +2233,263 @@ for _label, _n, _agreement in (("more subjects than marks", 14, "FEWER_DETECTED"
     check("the gate reaches the same verdict from the file alone (%s)" % _label,
           "POINT_COUNT_DISAGREES_WITH_SOURCE" in set(_cp["check"]),
           "%s" % sorted(set(_cp["check"])))
+
+
+print("a queued panel has something a person can actually open")
+# The protocol says: open review/<Panel_ID>_overlay.png for every row of the
+# review queue and approve only if each mark sits where a reader would put it.
+# `_scatter_outcome` was never passed a review directory, so a scatter reached
+# the queue with Overlay_File="" and no OVERLAY artifact - and that instruction
+# pointed at nothing. The overlay code has handled point_px_x/point_px_y all
+# along; nobody called it.
+_rq = pd.read_csv(os.path.join(ODIR, "review_queue.csv"), dtype=object).fillna("")
+_art = pd.read_csv(os.path.join(ODIR, "panel_artifacts.csv"), dtype=object).fillna("")
+_by_panel = {}
+for _, _a in _art.iterrows():
+    _by_panel.setdefault(_a["Panel_ID"], set()).add(_a["Artifact_Type"])
+check("the scatter panel reached the review queue",
+      "P_SCAT" in set(_rq["Panel_ID"]), "%s" % sorted(set(_rq["Panel_ID"])))
+check("and it has an overlay, like every other queued panel",
+      all(r["Overlay_File"] and os.path.exists(r["Overlay_File"])
+          for _, r in _rq.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Overlay_File"]) for _, r in _rq.iterrows()
+              if not r["Overlay_File"]])
+check("the overlay is in the ledger too, so tampering with it is caught",
+      all("OVERLAY" in _by_panel.get(p, set()) for p in _rq["Panel_ID"]),
+      "%s" % {p: sorted(_by_panel.get(p, ())) for p in _rq["Panel_ID"]})
+_scat_overlay = os.path.join(ODIR, "review", "P_SCAT_overlay.png")
+check("and the scatter's overlay is a real image of its panel",
+      os.path.exists(_scat_overlay)
+      and Image.open(_scat_overlay).size[0] > 100,
+      "%s" % sorted(os.listdir(os.path.join(ODIR, "review"))))
+# Every queued panel declares HOW it can be reviewed, and the artifact it names
+# must be one the run actually produced.
+check("every queued panel declares its review mode",
+      set(_rq["Review_Mode"]) <= set(RB.REVIEW_MODES) and len(set(_rq["Review_Mode"])),
+      "%s" % sorted(set(_rq["Review_Mode"])))
+check("and the mode it declares is backed by a ledger artifact",
+      all(RB.REVIEW_MODES[r["Review_Mode"]] in _by_panel.get(r["Panel_ID"], set())
+          for _, r in _rq.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Review_Mode"]) for _, r in _rq.iterrows()])
+
+
+# `draw_panel_overlay` never raises: a picture that cannot be painted must not
+# fail a panel that produced values. That is right, and it means any panel can
+# reach the queue with no overlay - so the contract has to be enforced rather
+# than assumed. Injected here, because a drawing failure cannot be provoked
+# from a manifest.
+_no_overlay = lambda *a, **k: None                                  # noqa: E731
+_real_overlay = RB.OVERLAY.draw_panel_overlay
+_real_project = RB.write_panel_project
+try:
+    RB.OVERLAY.draw_panel_overlay = _no_overlay
+    _wpd_md = write_manifests(os.path.join(ROOT, "wpdonly", "manifests"))
+    _wpd_sum = RB.run_batch(_wpd_md, os.path.join(ROOT, "wpdonly", "out"),
+                            file_root=ROOT, run_date="2026-08-06")
+    _wq = pd.read_csv(os.path.join(ROOT, "wpdonly", "out", "review_queue.csv"),
+                      dtype=object).fillna("")
+    check("a panel whose picture could not be drawn is still reviewable in WPD",
+          len(_wq) and set(_wq["Review_Mode"]) == {"WPD_ONLY"}
+          and all(r["WPD_Project_File"] for _, r in _wq.iterrows()),
+          "%s" % _wq[["Panel_ID", "Review_Mode", "Overlay_File"]].to_dict("records"))
+    # Neither a picture nor a project: nothing a reviewer could open.
+    RB.write_panel_project = lambda *a, **k: None
+    _none_md = write_manifests(os.path.join(ROOT, "noreview", "manifests"))
+    RB.run_batch(_none_md, os.path.join(ROOT, "noreview", "out"),
+                 file_root=ROOT, run_date="2026-08-06")
+    _nq = pd.read_csv(os.path.join(ROOT, "noreview", "out", "review_queue.csv"),
+                      dtype=object).fillna("")
+    _nr = pd.read_csv(os.path.join(ROOT, "noreview", "out", "run_manifest.csv"),
+                      dtype=object).fillna("")
+    _nm = pd.read_csv(os.path.join(ROOT, "noreview", "out", "manual_queue.csv"),
+                      dtype=object).fillna("")
+    check("a panel with neither is not queued for a review nobody can perform",
+          "P_LINE" not in set(_nq["Panel_ID"]),
+          "%s" % _nq[["Panel_ID", "Review_Mode"]].to_dict("records"))
+    # It is the grid gate that catches this one, not the review contract: a
+    # digitized value with no saved project is MISSING_PROVENANCE, so the panel
+    # is QC_FAILED before anything asks whether it could be reviewed. Worth
+    # writing down, because it is why the runner has no separate demotion for
+    # the case - an unreachable branch is decoration - and why the finalizer
+    # refuses a blank Review_Mode instead of trusting that ordering to hold.
+    check("  it is refused with its reason on the record",
+          dict(zip(_nr["Panel_ID"], _nr["Run_State"]))["P_LINE"] != "AUTO_PASS"
+          and len(_nm[_nm["Panel_ID"] == "P_LINE"]) == 1
+          and _nm[_nm["Panel_ID"] == "P_LINE"]["Detail"].iloc[0],
+          "%s" % _nm[_nm["Panel_ID"] == "P_LINE"][["Run_State", "Detail"]].to_dict("records"))
+    check("  and its values are not machine-QC-passed either",
+          not len(pd.read_csv(
+              os.path.join(ROOT, "noreview", "out", "figure_values_machine_qc.csv"),
+              dtype=object).fillna("").query("Unit_ID == 'U_LINE'")),
+          "some survived")
+finally:
+    RB.OVERLAY.draw_panel_overlay = _real_overlay
+    RB.write_panel_project = _real_project
+
+# The finalizer holds the same contract from its own side, because a review
+# queue is a file and a file can come from anywhere.
+_fake_queue = pd.DataFrame([dict(Panel_ID="PX", Review_Mode="OVERLAY",
+                                 Review_Subject_SHA256="a" * 64)])
+_fake_reviews = pd.DataFrame([dict(Review_ID="R001", Panel_ID="PX",
+                                   Review_Subject_SHA256="a" * 64,
+                                   Reviewer_ID="RV_H", Decision="APPROVED",
+                                   Reviewed_At="2026-08-06T10:00:00Z", Note="")])
+_fake_reviewers = pd.DataFrame([dict(Reviewer_ID="RV_H",
+                                     Reviewer_Record_Type="HUMAN")])
+for _label, _have, _ok in (("with the overlay the queue promised", {"OVERLAY"}, True),
+                           ("with only a project behind it", {"WPD_PROJECT"}, False),
+                           ("with nothing behind it", set(), False)):
+    pass
+# And a queue row that declares no mode at all - which is what a panel with
+# neither artifact would produce - is refused rather than approved.
+_blank_mode = pd.DataFrame([dict(Panel_ID="PX", Review_Mode="",
+                                 Review_Subject_SHA256="a" * 64)])
+_bm_probs = []
+check("an approval for a panel that declared no review mode is refused",
+      not FIN.approved_panels(
+          _fake_reviews, _blank_mode, _fake_reviewers,
+          lambda w, c, d: _bm_probs.append(c), today=datetime.date(2026, 8, 6),
+          artifact_types={"PX": {"OVERLAY"}})
+      and "REVIEW_MODE_UNKNOWN" in _bm_probs, "%s" % _bm_probs)
+for _label, _have, _ok in (("with the overlay the queue promised", {"OVERLAY"}, True),
+                           ("with only a project behind it", {"WPD_PROJECT"}, False),
+                           ("with nothing behind it", set(), False)):
+    _probs = []
+    _got = FIN.approved_panels(
+        _fake_reviews, _fake_queue, _fake_reviewers,
+        lambda w, c, d: _probs.append(c), today=datetime.date(2026, 8, 6),
+        artifact_types={"PX": _have})
+    check("an OVERLAY approval %s -> %s" % (_label, "approved" if _ok else "refused"),
+          bool(_got) == _ok
+          and (_ok or "REVIEW_ARTIFACT_MISSING" in _probs), "%s" % _probs)
+
+
+print("overplotting with nothing to check the count against is not computed")
+# The audit detected a blob too wide to be one marker and set
+# Overplotting_Possible=TRUE - and then the runner computed the association
+# anyway, because only a COUNT MISMATCH halted it. With no declared n there is
+# no count to mismatch, so an r of 0.99 reached MACHINE_QC_PASSED off a cloud
+# that may have had points hidden inside other points.
+_OVER_IMG = os.path.join(IMAGES, "scatter_overplot.png")
+_oim = Image.open(SCAT_IMG).convert("RGB")
+_od = ImageDraw.Draw(_oim)
+_opx, _opy = SX_CAL.value_to_pixel(4.4), SY_CAL.value_to_pixel(9.6)
+_od.ellipse((_opx - 10, _opy - 10, _opx + 10, _opy + 10), fill=BLUE)
+_oim.save(_OVER_IMG)
+_over_panels = edited(PANELS, {"Panel_ID": "P_SCAT"}, Image_Path=_OVER_IMG)
+_over_sfigs = [dict(f, Source_Image=_OVER_IMG,
+                    Source_Image_SHA256=MR.sha256_of(_OVER_IMG))
+               if f["Source_Figure_ID"] == "SF2" else f for f in SOURCE_FIGURES]
+for _label, _n, _want in (("with no declared n", "", "MANUAL_POINT_READ"),
+                          ("with a matching declared n", len(SCATTER_XY), "AUTO_PASS")):
+    _od_dir = os.path.join(ROOT, "overplot_%s" % (_n or "none"))
+    _omd = write_manifests(
+        os.path.join(_od_dir, "manifests"), panels=_over_panels,
+        source_figures=_over_sfigs,
+        units=edited(UNITS, {"Unit_ID": "U_SCAT"}, N_Outcome=_n))
+    _osum = RB.run_batch(_omd, os.path.join(_od_dir, "out"), file_root=ROOT,
+                         run_date="2026-08-06")
+    _orun = pd.read_csv(os.path.join(_od_dir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _ostate = dict(zip(_orun["Panel_ID"], _orun["Run_State"]))
+    check("a blob too wide to be one marker %s -> %s" % (_label, _want),
+          _ostate["P_SCAT"] == _want,
+          "%s | %s" % (_ostate.get("P_SCAT"),
+                       dict(zip(_orun["Panel_ID"], _orun["Detail"])).get("P_SCAT")))
+    _ovals = pd.read_csv(os.path.join(_od_dir, "out", "figure_values_raw.csv"),
+                         dtype=object).fillna("")
+    _scat_rows = _ovals[_ovals["Unit_ID"] == "U_SCAT"]
+    if _want == "MANUAL_POINT_READ":
+        check("  and no association was computed from it",
+              not len(_scat_rows), "%d rows" % len(_scat_rows))
+        # Nothing may be left on disk that the ledger does not name: the point
+        # files used to be written inside the series loop, so a panel a later
+        # series sent to manual left JSONs nothing referenced.
+        _oart = pd.read_csv(os.path.join(_od_dir, "out", "panel_artifacts.csv"),
+                            dtype=object).fillna("")
+        _ledgered = {os.path.basename(p) for p in _oart["Artifact_Path"]}
+        _on_disk = set(os.listdir(os.path.join(_od_dir, "out", "raw")))
+        check("  and the run left no point file the ledger does not name",
+              _on_disk <= _ledgered, "%s" % sorted(_on_disk - _ledgered))
+    else:
+        check("  and a corroborated count still yields its association",
+              len(_scat_rows) == 1
+              and _scat_rows.iloc[0]["Overplotting_Possible"] == "TRUE",
+              "%s" % _scat_rows.to_dict("records"))
+
+
+print("a run leaves nothing on disk its ledger does not name")
+# The point files were written inside the per-series loop, so a two-series
+# scatter whose SECOND series could not be reconciled returned
+# MANUAL_POINT_READ with the FIRST series' point JSON already on disk - a file
+# the run produced, that no ledger names, that no run row references, and that
+# a later reader would find sitting in raw/ looking like data.
+_TWO_IMG = os.path.join(IMAGES, "scatter_two_series.png")
+_tim = Image.new("RGB", (800, 520), "white")
+_td = ImageDraw.Draw(_tim)
+for _x, _y in SCATTER_XY:
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _td.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
+_RED_XY = [(0.9, 2.0), (2.0, 3.1), (3.1, 4.0), (4.2, 5.4), (5.3, 6.1),
+           (6.4, 7.7), (7.5, 8.2), (8.6, 9.9)]
+for _i, (_x, _y) in enumerate(_RED_XY):
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    # One red marker twice the size: a blob too wide to be a single point.
+    _r = 10 if _i == 3 else 5
+    _td.ellipse((_px - _r, _py - _r, _px + _r, _py + _r), fill=RED)
+_tim.save(_TWO_IMG)
+_two_grids = GRIDS + [dict(Grid_ID="G_TWO", Factor_Name="ARM", Factor_Level=lv,
+                           Level_Order=i, Note="")
+                      for i, lv in enumerate(("BLUE", "RED"))]
+_two_units = UNITS + [unit("U_TWO", "G_TWO", "ASSOCIATION",
+                           Bar_Top_Definition="NOT_A_BAR",
+                           Errorbar_Stem_Confirmed="NOT_A_BAR", Dispersion_Type="",
+                           N_Outcome="",
+                           Errorbar_Definition_Source="NO_ERRORBAR")]
+_two_panels = PANELS + [panel("P_TWO", "U_TWO", "SCATTER", _TWO_IMG,
+                              (70, 730, 40, 460), Axis_X_Ticks=SX_TICKS,
+                              Axis_Y_Ticks=SY_TICKS, Association_Type="PEARSON_R",
+                              Config_ID="C_SCATTER", Source_Panel_ID="P_TWO")]
+_two_series = SERIES + [series("P_TWO", "S_B2", "BLUE", Colour_Hex="#2d50dc"),
+                        series("P_TWO", "S_R2", "RED", Colour_Hex="#d72d2d")]
+_two_sfigs = SOURCE_FIGURES + [dict(
+    Source_Figure_ID="SF5", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG5", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=_TWO_IMG, Source_Image_SHA256=MR.sha256_of(_TWO_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one visible axes region")]
+_two_spanels = SOURCE_PANELS + [dict(
+    Source_Panel_ID="P_TWO", Source_Figure_ID="SF5", Panel_Label="P_TWO",
+    Outcome_Label="Heart-rate association", Target_Status="TARGET",
+    Panel_Disposition="ASSOCIATION_EXTRACT", Disposition_Reason="configured",
+    Note="")]
+_two_docs = [dict(d, Observed_Figure_Count=5) for d in SOURCE_DOCUMENTS]
+_two_md = write_manifests(os.path.join(ROOT, "twoseries", "manifests"),
+                          panels=_two_panels, series_rows=_two_series,
+                          units=_two_units, grids=_two_grids,
+                          source_figures=_two_sfigs, source_panels=_two_spanels,
+                          source_documents=_two_docs)
+_two_out = os.path.join(ROOT, "twoseries", "out")
+_two_sum = RB.run_batch(_two_md, _two_out, file_root=ROOT, run_date="2026-08-06")
+_two_run = pd.read_csv(os.path.join(_two_out, "run_manifest.csv"),
+                       dtype=object).fillna("")
+_two_state = dict(zip(_two_run["Panel_ID"], _two_run["Run_State"]))
+check("one unreconcilable series sends the whole panel to a person",
+      _two_state.get("P_TWO") == "MANUAL_POINT_READ",
+      "%s | %s" % (_two_state.get("P_TWO"),
+                   dict(zip(_two_run["Panel_ID"], _two_run["Detail"])).get("P_TWO")))
+_two_art = pd.read_csv(os.path.join(_two_out, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_two_ledgered = {os.path.basename(p) for p in _two_art["Artifact_Path"]}
+_two_on_disk = set(os.listdir(os.path.join(_two_out, "raw")))
+check("and the series that DID reconcile left no unledgered point file",
+      not any(f.startswith("P_TWO") for f in _two_on_disk - _two_ledgered),
+      "%s on disk, ledger has %s"
+      % (sorted(f for f in _two_on_disk if f.startswith("P_TWO")),
+         sorted(f for f in _two_ledgered if f.startswith("P_TWO"))))
+check("and nothing in raw/ anywhere is missing from the ledger",
+      _two_on_disk <= _two_ledgered, "%s" % sorted(_two_on_disk - _two_ledgered))
 
 
 print("one panel, one terminal state, in every file that names it")

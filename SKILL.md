@@ -1,13 +1,22 @@
-# SKILL.md — sections to add
-
-Insert after "## Extraction protocol (hand this to whoever reads the figures)".
-
+---
+name: figure-digitization-triage
+description: >-
+  Plan, execute and QC graph-only data extraction for a systematic review or
+  meta-analysis. Screens figure captions into routes, compiles one typed plan
+  into eleven manifests, reads panels with declared readers, gates the values on
+  a universal factorial grid, puts every extraction in front of a named human,
+  and writes a poolable file only for what that person approved.
 ---
 
-## The whole path, in five lines
+# Figure digitization triage
 
-An agent that reads only one section should read this one. Every other section
-below explains why a step is the way it is; this is the step order.
+Use this when a study reports its outcome only as a graph and the numbers have
+to be recovered, at a scale where doing it by hand once per paper is not a
+protocol. It is a pipeline, not a helper: the point is that the number which
+ends up in a meta-analysis can be traced to a raster, a calibration, a reader
+version, an environment and a person who looked at the picture and said yes.
+
+## Run it
 
 ```
 INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
@@ -18,17 +27,52 @@ REVIEW     open review/<Panel_ID>_overlay.png for every row of OUT/review_queue.
 FINALIZE   python3 finalize_batch.py OUT/ --review value_review.csv   -> FINALIZED
 ```
 
-**Success** is `OUT/figure_values_accepted.csv` beside a
+**Success** is `OUT/figure_values_accepted.csv` beside an
 `OUT/finalize_stamp.json` whose `Status` is `FINALIZED` and whose
 `Accepted_SHA256` is the hash of that file. Nothing else is a result.
 
-**Never** write the eleven manifests by hand — that is what the compiler is for,
-and hand-written manifests are where two files quietly disagree. **Never** pool
-`figure_values_machine_qc.csv`: machine QC finding nothing wrong is a different
-claim from somebody having looked at where the marks landed. **Never** treat a
-`DEMO_ONLY` run as data.
+**Failure states, and what each means**
 
----
+| where | status | means |
+|---|---|---|
+| compile | problems returned, no manifests written | the plan is wrong; fix the plan |
+| run | `MANIFEST_REJECTED` | the manifests contradict each other or the files |
+| run | `INPUT_LOAD_FAILED` | a manifest could not be read at all |
+| run | `DEMO_OUTPUT_REFUSED` | the reviewer registry is a demo identity |
+| run | `INTERNAL_ERROR` | a reader has a defect; the whole batch stops |
+| run | `RAN` | finished — read `run_stamp.json` for the verdict |
+| finalize | `NOTHING_APPROVED` | no valid approval; the default |
+| finalize | `RUN_NOT_FINALIZABLE` | not a completed ATTESTED run |
+| finalize | `RUN_ARTIFACT_MODIFIED` | something changed after the run |
+| finalize | `FINALIZED` | the only state that produces poolable values |
+
+**Never**
+
+- write the eleven manifests by hand — that is what `compile_plan.py` is for,
+  and hand-written manifests are where two files quietly disagree
+- pool `figure_values_machine_qc.csv` — machine QC finding nothing wrong is a
+  different claim from anybody having looked at where the marks landed
+- treat a `DEMO_ONLY` run as data
+- add a rule keyed on a publication ID; every check here is keyed on a declared
+  data type or a declared dimension, and a per-paper exception is a defect
+
+## Files
+
+```
+compile_plan.py     one typed plan  -> eleven manifests
+run_batch.py        manifests       -> values + review queue + artifact ledger
+finalize_batch.py   decisions       -> figure_values_accepted.csv
+grid_engine.py      the universal factorial gate
+kernel.py           the field-level checks the gate is built from
+mark_readers.py     readers for line, marker, box/violin and scatter panels
+bar_reader.py       colour and monochrome bar readers
+review_overlay.py   the picture a person judges
+*_TEMPLATE.csv      every schema, generated from its column function
+```
+
+Everything below is the protocol: what each rule exists to prevent, stated
+against the defect that produced it.
+
 
 ## Record HOW the mark was read
 

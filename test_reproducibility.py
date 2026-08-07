@@ -205,6 +205,78 @@ assert "opencv-python==" not in open(LOCK, encoding="utf-8").read(), (
     "leaves which one answers an import to resolution order")
 print("every requirement is pinned in the lock file, exactly once: PASS")
 
+# --------------------------------------------------------------------------
+# the templates the package ships
+# --------------------------------------------------------------------------
+# A template is a promise about a schema, and `value_review_TEMPLATE.csv` still
+# offered `Panel_Fingerprint` - a column that has not existed since 7.16.
+# Anybody starting from it got REVIEW_SCHEMA_INCOMPLETE: safe, but the shipped
+# artifact contradicted the running code, and 1275 scenarios passed anyway
+# because nothing tested a static file. The check below is over EVERY template
+# on disk, and an unmapped one is a failure - so a new template cannot be added
+# without a column function behind it.
+import batch_manifests as BM_T                                     # noqa: E402
+import grid_engine as GE_T                                         # noqa: E402
+import finalize_batch as FIN_T                                     # noqa: E402
+
+TEMPLATE_COLUMNS = dict(
+    [(name, fn) for name, fn in BM_T.BATCH_TEMPLATES]
+    + [("figure_manifest", GE_T.fig_figure_columns),
+       ("grid_definitions", GE_T.fig_grid_columns),
+       ("unit_manifest", GE_T.fig_unit_columns),
+       ("figure_values", GE_T.fig_values_columns),
+       ("value_review", FIN_T.value_review_columns)])
+
+shipped = sorted(glob.glob(os.path.join(HERE, "*_TEMPLATE.csv")))
+unmapped = [os.path.basename(p) for p in shipped
+            if os.path.basename(p)[:-len("_TEMPLATE.csv")] not in TEMPLATE_COLUMNS]
+assert not unmapped, (
+    "%s ships with no column function behind it, so nothing can tell whether "
+    "it is current" % unmapped)
+drifted = []
+for path in shipped:
+    name = os.path.basename(path)[:-len("_TEMPLATE.csv")]
+    with open(path, newline="", encoding="utf-8") as fh:
+        header = next(csv.reader(fh))
+    want = TEMPLATE_COLUMNS[name]()
+    if header != want:
+        drifted.append("%s: %s" % (
+            os.path.basename(path),
+            {"missing": [c for c in want if c not in header],
+             "stale": [c for c in header if c not in want]}))
+assert not drifted, "shipped templates disagree with the code: %s" % drifted
+assert len(shipped) == len(TEMPLATE_COLUMNS), (
+    "%d column functions but %d templates on disk"
+    % (len(TEMPLATE_COLUMNS), len(shipped)))
+print("every shipped template matches its column function (%d): PASS" % len(shipped))
+
+# The skill the package ships is the skill an agent installs. It was an
+# addendum - "sections to add", to be pasted into a SKILL.md that lived
+# somewhere else - so what got installed depended on somebody doing the pasting
+# correctly, and the entrypoint contract was in neither document.
+SKILL = os.path.join(HERE, "SKILL.md")
+assert os.path.exists(SKILL), "SKILL.md is not in the package"
+skill_text = open(SKILL, encoding="utf-8").read()
+assert skill_text.startswith("---\nname: "), (
+    "SKILL.md has no front matter, so nothing can discover it")
+for required in ("compile_plan.py", "run_batch.py", "finalize_batch.py",
+                 "figure_values_accepted.csv", "finalize_stamp.json",
+                 "value_review.csv", "review_queue.csv"):
+    assert required in skill_text, (
+        "SKILL.md never mentions %s, so it does not describe the run" % required)
+# The contract has to name the states a run can end in, or an agent cannot tell
+# a refusal from a result.
+for status in ("MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "DEMO_OUTPUT_REFUSED",
+               "INTERNAL_ERROR", "RUN_ARTIFACT_MODIFIED", "NOTHING_APPROVED",
+               "FINALIZED"):
+    assert status in skill_text, "SKILL.md does not say what %s means" % status
+assert "sections to add" not in skill_text, (
+    "SKILL.md is still written as an addendum to some other document")
+assert not os.path.exists(os.path.join(HERE, "SKILL_ADDENDUM.md")), (
+    "both SKILL.md and SKILL_ADDENDUM.md ship; one of them is stale by "
+    "construction")
+print("SKILL.md is standalone and states the run contract: PASS")
+
 # CI must run every suite in the package. A test file nobody runs is a test
 # file that will be broken the next time somebody looks.
 CI = os.path.join(HERE, ".github", "workflows", "suite.yml")

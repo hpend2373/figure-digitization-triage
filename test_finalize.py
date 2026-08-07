@@ -13,6 +13,7 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -462,6 +463,33 @@ for _label, _target, _edit in (
           "%s" % sorted(os.listdir(_tamper_out)))
 
 print()
+print("a run directory can be moved, and finalized from anywhere")
+# The ledger recorded absolute paths and the finalizer checked them with
+# os.path.exists, so a run produced with a relative output directory and
+# finalized from a different working directory reported RUN_ARTIFACT_MODIFIED
+# for files sitting right there. Safe, but a false refusal nobody can act on -
+# and a scheduler or an agent changes working directory as a matter of course.
+_mv_src, _ = fresh_run("run_move")
+_q = pd.read_csv(os.path.join(_mv_src, "review_queue.csv"), dtype=object)
+review([dict(Review_ID="R001", Panel_ID="P1",
+             Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
+             Reviewer_ID="RV_H", Decision="APPROVED",
+             Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+       os.path.join(_mv_src, "value_review.csv"))
+_mv_dst = os.path.join(ROOT, "moved_elsewhere")
+shutil.move(_mv_src, _mv_dst)
+_moved = subprocess.run(
+    [sys.executable, os.path.join(HERE, "finalize_batch.py"), _mv_dst,
+     "--review", os.path.join(_mv_dst, "value_review.csv"),
+     "--manifests", os.path.join(_mv_dst, "manifests"), "--date", "2026-08-06"],
+    capture_output=True, text=True, cwd=tempfile.gettempdir())
+check("a moved run finalizes from an unrelated working directory",
+      _moved.returncode == 0
+      and os.path.exists(os.path.join(_mv_dst, "figure_values_accepted.csv")),
+      "%s%s" % (_moved.stdout[-400:], _moved.stderr[-200:]))
+
+
+print()
 print("the picture the person approved is also the picture on disk")
 # The four CSVs were verified and nothing else. So the numbers could not be
 # edited, but the overlay could: replace `review/P1_overlay.png` with a red
@@ -522,8 +550,19 @@ check("the run writes an artifact ledger",
       "%s" % sorted(set(_ledger["Artifact_Type"])))
 check("with a real hash for every artifact it names",
       all(len(h) == 64 for h in _ledger["SHA256"])
-      and all(os.path.exists(p) for p in _ledger["Artifact_Path"]),
+      and all(os.path.exists(RB.resolve_artifact(_led_out, p))
+              for p in _ledger["Artifact_Path"]),
       "%s" % _ledger.to_dict("records"))
+# Relative to the run directory, so the check survives `mv OUT elsewhere` and a
+# finalizer launched from a different working directory.
+check("and the paths are relative to the run, not to whoever ran it",
+      not any(os.path.isabs(p) for p in _ledger["Artifact_Path"])
+      and all(p.startswith(("review/", "projects/", "raw/"))
+              for p in _ledger["Artifact_Path"]),
+      "%s" % list(_ledger["Artifact_Path"]))
+check("a ledger entry pointing outside the run is refused, not read",
+      RB.resolve_artifact(_led_out, "../../etc/passwd") is None
+      and RB.resolve_artifact(_led_out, "review/P1_overlay.png") is not None)
 Image.new("RGB", (600, 480), "red").save(os.path.join(_led_out, "review",
                                                       "P1_overlay.png"))
 _ledger.loc[_ledger["Artifact_Type"] == "OVERLAY", "SHA256"] = MR.sha256_of(

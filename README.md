@@ -80,7 +80,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-1275 scenarios at v7.19, verified in a clean room with scipy blocked — the
+1310 scenarios at v7.20, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
@@ -132,8 +132,9 @@ produced it. Every fix in every round was reverted in a scratch copy and the
 suite re-run — a test that passes before and after a fix is decoration, and the
 commit messages record how many scenarios each revert broke.
 
-`INSTALL.md` is the long-form version of that record. `SKILL_ADDENDUM.md` is the
-protocol as an extractor reads it; `MIGRATION.md` covers the schema changes.
+`INSTALL.md` is the long-form version of that record. `SKILL.md` is the whole
+protocol as an extractor - or an agent - reads it, standalone and installable;
+`MIGRATION.md` covers the schema changes.
 
 ## Status
 

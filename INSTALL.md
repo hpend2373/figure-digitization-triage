@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.19 (full package)
+# figure-digitization-triage — v7.20 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -160,6 +160,104 @@ finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
 
+## v7.20 review — the scatter path, and what a queued panel promises
+
+### 1. A scatter was queued for review with no picture (HIGH)
+
+`_scatter_outcome` was never passed a review directory, so a scatter reached
+`review_queue.csv` with `Overlay_File=""` and no `OVERLAY` row in the artifact
+ledger — while the protocol said, for every queued row, "open
+`review/<Panel_ID>_overlay.png` and approve only if each mark sits on the mark a
+reader would give it". The instruction pointed at nothing. The overlay code has
+handled `point_px_x`/`point_px_y` since it was written; nobody called it.
+
+Scatter panels now draw their cloud, unlabelled — thirty labelled crosses cover
+the cloud they exist to show — and the overlay joins the ledger like any other
+artifact, so tampering with it is `RUN_ARTIFACT_MODIFIED`.
+
+The contract is now explicit rather than assumed. Every queued row carries
+`Review_Mode` (`OVERLAY` or `WPD_ONLY`), and the finalizer refuses an approval
+whose declared artifact is not in the run's own ledger
+(`REVIEW_ARTIFACT_MISSING`) or whose mode is blank (`REVIEW_MODE_UNKNOWN`).
+`WPD_ONLY` exists because `draw_panel_overlay` deliberately never raises — a
+picture that cannot be painted must not fail a panel that produced values — so
+any panel can legitimately arrive with a project and no overlay. What none may
+do is arrive claiming a review nobody can perform.
+
+The runner has no separate demotion for "neither artifact", because there is no
+such panel: a digitized value with no saved project is already
+`MISSING_PROVENANCE` at the gate. An unreachable branch is decoration, so it is
+not there; the finalizer refuses a blank mode instead of trusting that ordering.
+
+Reverts: the scatter overlay 3, the declared mode 1, the finalizer's check 3.
+
+### 2. Overplotting with nothing to check the count against (HIGH)
+
+The audit detected a blob too wide to be one marker and set
+`Overplotting_Possible=TRUE` — and the runner computed the association anyway,
+because only a count *mismatch* halted it. Where the paper gives no n there is
+no count to mismatch. Reproduced: a ten-point cloud with one doubled marker,
+`N_Outcome` blank, r = 0.9915, `MACHINE_QC_PASSED` — off a cloud that may have
+had points hidden inside points, and (before item 1) with no overlay for anybody
+to notice.
+
+`Overplotting_Possible=TRUE` **with** `Point_Count_Agreement=NO_SOURCE_N` now
+halts the calculation. A matching declared n still passes: detected == expected
+is exactly what makes a merged blob tolerable, and blocking it would send every
+figure with variable marker sizes to manual for no reason. Revert: 2.
+
+### 3. The shipped review template was two schemas old
+
+`value_review_TEMPLATE.csv` still offered `Panel_Fingerprint`, gone since 7.16.
+Anyone starting from it got `REVIEW_SCHEMA_INCOMPLETE` — safe, but the shipped
+artifact contradicted the running code, and 1275 scenarios passed because
+nothing tested a static file.
+
+It is regenerated, and the suite now checks **every** `*_TEMPLATE.csv` on disk
+against its column function, with an unmapped template counting as a failure —
+so a new template cannot ship without a function behind it. Thirteen templates,
+one check. Revert: the suite aborts naming the missing and stale columns.
+
+### 4. `figure_views` values
+
+The outer object was checked and its values were not, while the compiler does
+`views.get(view, {}).get("caption")`. A view written as a bare caption string —
+the obvious way to write it — validated clean and raised `AttributeError` inside
+the compiler. Values must be objects and keys must be strings. Revert: 5.
+
+### 5. The artifact ledger depended on the working directory
+
+Paths were recorded as the run saw them and checked with `os.path.exists`. Run
+with a relative output directory, finalize from anywhere else, and every
+artifact reported `RUN_ARTIFACT_MODIFIED` — a false refusal, safe but
+unactionable, and schedulers and agents change working directory as a matter of
+course.
+
+The ledger records paths relative to the run directory, and the finalizer
+resolves them against it, refusing anything that escapes
+(`ARTIFACT_PATH_OUTSIDE_RUN`). The review-mode check reads the ledger rather
+than the queue's own path column for the same reason. A whole run directory can
+now be moved and finalized from an unrelated working directory. Revert: 2.
+
+### 6. Point files a run wrote and did not admit to
+
+`_scatter_outcome` wrote each series' point JSON inside the loop, so a
+two-series panel whose second series could not be reconciled returned
+`MANUAL_POINT_READ` with the first series' file already on disk — named by no
+ledger, referenced by no run row, sitting in `raw/` looking like data. Every
+series is now audited and summarized before anything is written. Revert: 2.
+
+### 7. The skill was an addendum, not a skill
+
+`SKILL_ADDENDUM.md` began "sections to add — insert after…", so what an agent
+installed depended on somebody pasting it correctly into a document that lived
+somewhere else. It is now `SKILL.md`: front matter, the five-line run path, the
+success condition, a table of every failure state and what it means, the four
+prohibitions, and the file map — then the protocol. The suite asserts it is
+standalone, names all three entrypoints, and explains every terminal status;
+shipping both files at once is itself a failure, so one cannot go stale behind
+the other.
+
 ## v7.19 review — the artifact the person approved
 
 ### 1. The picture was not part of the approval (BLOCKING, now closed)
@@ -255,7 +353,7 @@ the `N_Outcome` check 4.
 
 ### 6. The agent-facing documents match the code
 
-`SKILL_ADDENDUM.md` still described `Panel_Fingerprint`, a field that has not
+`SKILL_ADDENDUM.md` (now `SKILL.md`) still described `Panel_Fingerprint`, a field that has not
 existed since 7.16, and gave no entrypoint contract at all — an agent following
 it would generate the wrong review schema. It now opens with the five-line path
 (plan → compile → run → review → finalize), what counts as success, and the
@@ -783,7 +881,7 @@ fails the name-only case; rehardcoding the dates fails the registry check.
   list that can drift is a usage list that will — it fell one file behind the
   moment `reviewer_registry.csv` was added.
 - **`Human_Attestation` is described as a declared enum, not a signature**, in
-  INSTALL.md, SKILL_ADDENDUM.md and the code. It records that a person typed
+  INSTALL.md, SKILL.md and the code. It records that a person typed
   `HUMAN_CONFIRMED` next to a contact; it buys traceability, not proof of
   authorship. A real signature would be a new field.
 - **No `__pycache__` in the zip** (the v7.9 archive was already clean; the
@@ -1112,7 +1210,7 @@ On publication 397 `figure_values_accepted.csv` is **0 rows**, and
         test_run_batch crosscheck_id323 forward_test_397_mono_bar; \
         do python3 $t.py || break; done
 
-Then append `SKILL_ADDENDUM.md` and `MIGRATION.md` to `SKILL.md`.
+`SKILL.md` is complete and standalone - copy it as it is. `MIGRATION.md` covers the schema changes if you are upgrading an existing skill folder.
 
 I cannot write into the skill folder from this session — skill files here are a
 read-only cache. Until you run the copy the active skill is unchanged.
@@ -1321,17 +1419,17 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 417 |
+| `test_run_batch.py` | 439 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
-| `test_compile_plan.py` | 115 |
-| `test_finalize.py` | 114 |
+| `test_compile_plan.py` | 123 |
+| `test_finalize.py` | 117 |
 | `test_mark_readers.py` | 92 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 16 |
-| **total** | **1275** |
+| `test_reproducibility.py` | 18 |
+| **total** | **1310** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

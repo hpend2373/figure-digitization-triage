@@ -221,8 +221,23 @@ def _nested_shape_problems(plan):
 
     # ---- figure_views: a map, and the compiler indexes it by view name ------
     views = plan.get("figure_views")
-    if views is not None and not isinstance(views, dict):
+    if views is None:
+        pass
+    elif not isinstance(views, dict):
         bad("plan", "figure_views", views, "an object keyed by view name")
+    else:
+        # Only the outer object was checked. The compiler then does
+        # `views.get(view, {}).get("caption")`, so a view whose value is a bare
+        # caption string - the obvious way to write it, and wrong - validated
+        # clean and raised AttributeError inside the compiler.
+        for view_id, spec in views.items():
+            if not isinstance(view_id, str):
+                bad("figure_views", "the view key %r" % (view_id,), view_id,
+                    "a string")
+                continue
+            if not isinstance(spec, dict):
+                bad("figure_views[%r]" % view_id, "the view specification", spec,
+                    "an object such as {'caption': '...'}")
     return problems
 
 

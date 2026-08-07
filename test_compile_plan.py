@@ -302,7 +302,24 @@ for _label, _mutate, _want in (
          lambda p: p["units"][0].update(x_calibration=[[1, float("nan")]]),
          "PLAN_BAD_FIELD_TYPE"),
         ("figure_views that are a list",
-         lambda p: p.update(figure_views=["F1"]), "PLAN_BAD_FIELD_TYPE")):
+         lambda p: p.update(figure_views=["F1"]), "PLAN_BAD_FIELD_TYPE"),
+        # Only the outer object was checked, and the compiler then does
+        # `views.get(view, {}).get("caption")` - so a view written as a bare
+        # caption string, which is the obvious way to write it, validated clean
+        # and raised AttributeError inside the compiler.
+        ("a figure view that is a bare caption string",
+         lambda p: p["figure_views"].update(
+             {list(p["figure_views"])[0]: "Mean arterial pressure"}),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a figure view that is a list",
+         lambda p: p["figure_views"].update({list(p["figure_views"])[0]: ["cap"]}),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a figure view that is null",
+         lambda p: p["figure_views"].update({list(p["figure_views"])[0]: None}),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a figure view keyed by something that is not a name",
+         lambda p: p["figure_views"].update({7: {"caption": "x"}}),
+         "PLAN_BAD_FIELD_TYPE")):
     _p = copy.deepcopy(PLAN)
     _mutate(_p)
     try:

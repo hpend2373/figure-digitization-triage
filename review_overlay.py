@@ -65,11 +65,15 @@ def _mark_y(mark):
 
 
 def draw_panel_overlay(path, image_path, panel_box, marks, title="",
-                       subtitle="", series_order=()):
+                       subtitle="", series_order=(), label_marks=True):
     """Write one review PNG. Returns the path, or None if it could not be drawn.
 
     Never raises: a panel that produced values must not fail its run because
     its picture could not be painted.
+
+    `label_marks=False` draws the crosses and the legend without per-mark text.
+    A time course has six labelled points and reads well; a scatter has thirty
+    and the labels cover the cloud they are there to let somebody judge.
     """
     try:
         source = Image.open(image_path).convert("RGB")
@@ -110,6 +114,8 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
                 cy = float(cap) - oy
                 draw.line((mx, my, mx, cy), fill=colour, width=1)
                 draw.line((mx - 5, cy, mx + 5, cy), fill=colour, width=1)
+            if not label_marks:
+                continue
             label = "%s/%s" % (mark.get("series", "?"), mark.get("x_label", "?"))
             value = mark.get("mean", mark.get("median"))
             if value is not None:

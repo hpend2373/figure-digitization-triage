@@ -57,11 +57,14 @@ If the source supplies no panel letters, assign stable reading-order labels
 `P01`, `P02`, ... .  Record the count method, and the `Reviewer_ID` of the person
 who did the counting.
 
-A run whose registry is illustrative rather than real must declare itself:
-`run_batch(..., run_mode="DEMO_ONLY")`, or `--demo-only` on the command line.
-A demo may produce a queue, a coverage ledger and a list of QC failures; if it
-reaches the end holding values the gate accepted it writes none of them and
-returns `DEMO_OUTPUT_REFUSED`.  Every stamp records `Run_Mode`.
+Whether a run may produce poolable values is decided by `Reviewer_Record_Type`
+(`HUMAN` or `DEMO_IDENTITY`) on the rows the inventory names, not by a flag at
+the call site — a flag does not travel with the manifests.  A run resting on a
+`DEMO_IDENTITY` reviewer is DEMO_ONLY wherever it is launched from: it may
+produce a queue, a coverage ledger and a list of QC failures, but if it reaches
+the end holding values the gate accepted it writes none of them and returns
+`DEMO_OUTPUT_REFUSED`.  `--demo-only` demotes a real registry; nothing promotes
+a demo one.  Every stamp records `Run_Mode`.
 
 That ID is a foreign key into `reviewer_registry.csv`, which holds the name, a
 contact (EMAIL or a checksum-valid ORCID) and a `Human_Attestation` — a declared

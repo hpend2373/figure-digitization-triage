@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.10 (full package)
+# figure-digitization-triage — v7.11 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,53 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## HIGH (v7.10 review) — the run mode was the caller's promise, not the manifest's property
+
+`run_batch(..., run_mode="DEMO_ONLY")` is a statement made at one call site.
+The manifests it describes are files, and files walk away from call sites:
+
+    python3 pilot_397.py                        -> Run_Mode=DEMO_ONLY
+    python3 run_batch.py out_pilot_397/manifests out
+                                                -> Status=RAN, Run_Mode=ATTESTED
+
+Same fictional Josiah Carberry, now unqualified. Accepted was 0 only because
+ID397's dispersion is unresolved — the same coincidence as the round before,
+one layer out.
+
+**The mode is now derived from `reviewer_registry.csv`.** A new mandatory
+column, `Reviewer_Record_Type` ∈ `HUMAN | DEMO_IDENTITY`, travels with the
+manifests. If any reviewer the source inventory *names* is a DEMO_IDENTITY, the
+run is DEMO_ONLY wherever it is launched from. A demo row sitting unreferenced
+in a registry demotes nothing.
+
+`Human_Attestation` gains `DEMO_EXAMPLE`, and the two columns must agree:
+
+| record type | attestation | verdict |
+|---|---|---|
+| HUMAN | HUMAN_CONFIRMED | runs |
+| HUMAN | AUTOMATED_AGENT | `REVIEWER_NOT_HUMAN` |
+| HUMAN | DEMO_EXAMPLE | `REVIEWER_RECORD_TYPE_MISMATCH` |
+| DEMO_IDENTITY | HUMAN_CONFIRMED | `REVIEWER_RECORD_TYPE_MISMATCH` |
+| DEMO_IDENTITY | DEMO_EXAMPLE | runs as DEMO_ONLY |
+
+so editing one column alone cannot quietly change what a row means.
+
+**Demotion yes, promotion no.** `run_mode="DEMO_ONLY"` (`--demo-only`) still
+demotes a real registry — throwing results away is always allowed. Asserting
+`ATTESTED` (`--attested`) over a demo registry is `RUN_MODE_REVIEWER_MISMATCH`
+and rejects the batch before a raster is opened, rather than being silently
+corrected: the point of saying ATTESTED out loud is that somebody believed it.
+
+On the dispersion-resolved scratch copy, replaying the demo pilot's own
+manifests through the plain CLI:
+
+    DEMO_OUTPUT_REFUSED: 48 values passed the gate under a DEMO_ONLY
+    reviewer registry ...                                        (exit 4)
+    files left in the output directory: ['run_stamp.json']
+
+11 scenarios, on a fixture that *does* accept values. Reverting the derivation
+fails 4; reverting the promotion block fails 1.
 
 ## HIGH (v7.9.1 review) — the demo identity was only harmless by coincidence
 

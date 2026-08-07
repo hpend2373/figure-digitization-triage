@@ -101,6 +101,7 @@ if _given:
     # date is the one field whose whole purpose is to be comparable later.
     ATTESTATION = dict(
         Reviewer_ID="RV_INSPECTOR", Reviewer_Name=_env["FDT_REVIEWER_NAME"],
+        Reviewer_Record_Type="HUMAN",
         Contact_Type="ORCID", Reviewer_Contact=_env["FDT_REVIEWER_ORCID"],
         Registered_By=_env["FDT_REVIEWER_NAME"],
         Registration_Date=_env["FDT_REGISTRATION_DATE"],
@@ -111,12 +112,18 @@ if _given:
                 or datetime.date.today().isoformat())
 else:
     RUN_MODE = "DEMO_ONLY"
+    # DEMO_IDENTITY travels with the manifests. The mode used to be an
+    # argument this script passed to the runner, which meant the demonstration's
+    # own manifest set replayed through the plain CLI came back Status=RAN,
+    # Run_Mode=ATTESTED - the promise stayed at the call site while the files
+    # walked away without it.
     ATTESTATION = dict(
         Reviewer_ID="RV_INSPECTOR", Reviewer_Name=DEMO_NAME,
+        Reviewer_Record_Type="DEMO_IDENTITY",
         Contact_Type="ORCID", Reviewer_Contact=DEMO_ORCID,
         Registered_By=DEMO_NAME, Registration_Date=DEMO_DATE,
-        Human_Attestation="HUMAN_CONFIRMED",
-        Note="DEMO_ONLY - ORCID's fictional demonstration record")
+        Human_Attestation="DEMO_EXAMPLE",
+        Note="ORCID's fictional demonstration record")
     INSPECTION_DATE = RUN_DATE = DEMO_DATE
 
 SESSIONS = [("PRE", "Pre HDT Stand"), ("POST", "Post HDT Stand")]
@@ -457,8 +464,9 @@ def write(directory):
 
 
 write(MANIFESTS)
-summary = RB.run_batch(MANIFESTS, OUT, file_root=RASTERS,
-                       run_date=RUN_DATE, run_mode=RUN_MODE)
+# No run_mode argument: the registry above says what this run is, and the
+# runner reads it from there.
+summary = RB.run_batch(MANIFESTS, OUT, file_root=RASTERS, run_date=RUN_DATE)
 if summary["status"] == "MANIFEST_REJECTED":
     import pandas as pd
     print("manifests rejected: %s" % summary["detail"])
@@ -477,7 +485,7 @@ run = pd.read_csv(os.path.join(OUT, "run_manifest.csv"))
 raw = pd.read_csv(os.path.join(OUT, "figure_values_raw.csv"))
 accepted = pd.read_csv(os.path.join(OUT, "figure_values_accepted.csv"))
 
-print("publication 397 - every figure, one run  [%s]" % RUN_MODE)
+print("publication 397 - every figure, one run  [%s]" % summary["run_mode"])
 print("  panels %d | cells declared %d | read %d | ACCEPTED %d"
       % (summary["panels"], int(run["Cells_Declared"].sum()), len(raw),
          len(accepted)))

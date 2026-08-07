@@ -108,7 +108,24 @@ SOURCE_DOCUMENT_ROLES = ("MAIN_ARTICLE", "SUPPLEMENT", "APPENDIX",
                          "PROCEEDINGS_CHAPTER")
 
 
-REVIEWER_ATTESTATIONS = ("HUMAN_CONFIRMED", "AUTOMATED_AGENT")
+REVIEWER_ATTESTATIONS = ("HUMAN_CONFIRMED", "AUTOMATED_AGENT", "DEMO_EXAMPLE")
+
+#: Whether a registry row describes a person or an illustration.
+#:
+#: The run mode used to be an argument: `run_batch(..., run_mode="DEMO_ONLY")`.
+#: That is the caller's promise about the manifests, and a promise made at one
+#: call site does not travel with the files. Running the demonstration and then
+#: replaying its own manifests through the plain CLI produced Status=RAN,
+#: Run_Mode=ATTESTED - the same fictional reviewer, now unqualified. Whether a
+#: run may produce poolable values is a property of who attested it, so it is
+#: recorded next to them and derived from there.
+REVIEWER_RECORD_TYPES = ("HUMAN", "DEMO_IDENTITY")
+
+#: Which attestation each record type may hold. A demo row cannot claim
+#: HUMAN_CONFIRMED and a human row cannot hide behind DEMO_EXAMPLE, so editing
+#: either column alone cannot quietly change what the row means.
+_ATTESTATION_FOR_RECORD = {"HUMAN": ("HUMAN_CONFIRMED", "AUTOMATED_AGENT"),
+                           "DEMO_IDENTITY": ("DEMO_EXAMPLE",)}
 REVIEWER_CONTACT_TYPES = ("EMAIL", "ORCID")
 
 # Whole-name tokens that name a class of software rather than a person.  This
@@ -199,8 +216,9 @@ def check_reviewer_registry(reviewers, flag, kernel=None):
             flag(line, "DUPLICATE_REVIEWER_ID", rid)
             continue
         index[rid] = r
-        for c in ("Reviewer_Name", "Contact_Type", "Reviewer_Contact",
-                  "Registered_By", "Registration_Date", "Human_Attestation"):
+        for c in ("Reviewer_Name", "Reviewer_Record_Type", "Contact_Type",
+                  "Reviewer_Contact", "Registered_By", "Registration_Date",
+                  "Human_Attestation"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
 
@@ -234,10 +252,23 @@ def check_reviewer_registry(reviewers, flag, kernel=None):
                      "person is meant, record the full name; no software counted "
                      "the panels in a published figure" % (field, value))
 
+        record_type = str(r.get("Reviewer_Record_Type", "")).strip().upper()
+        if record_type and record_type not in REVIEWER_RECORD_TYPES:
+            flag(line, "BAD_REVIEWER_RECORD_TYPE",
+                 "%r is not one of %s" % (record_type, ", ".join(REVIEWER_RECORD_TYPES)))
+
         attestation = str(r.get("Human_Attestation", "")).strip().upper()
         if attestation and attestation not in REVIEWER_ATTESTATIONS:
             flag(line, "BAD_HUMAN_ATTESTATION",
                  "%r is not one of %s" % (attestation, ", ".join(REVIEWER_ATTESTATIONS)))
+        elif (record_type in _ATTESTATION_FOR_RECORD and attestation
+                and attestation not in _ATTESTATION_FOR_RECORD[record_type]):
+            flag(line, "REVIEWER_RECORD_TYPE_MISMATCH",
+                 "Reviewer_Record_Type=%s with Human_Attestation=%s. A %s row "
+                 "may only hold %s - the two columns say what the row is, and "
+                 "they have to agree"
+                 % (record_type, attestation, record_type,
+                    " or ".join(_ATTESTATION_FOR_RECORD[record_type])))
         elif attestation == "AUTOMATED_AGENT":
             flag(line, "REVIEWER_NOT_HUMAN",
                  "%s is declared AUTOMATED_AGENT. The panel count is only "
@@ -274,6 +305,38 @@ def check_reviewer_registry(reviewers, flag, kernel=None):
                     flag(line, "BAD_REGISTRATION_DATE",
                          "Registration_Date=%s is in the future" % when)
     return index
+
+
+def referenced_reviewer_ids(*frames):
+    """Every Reviewer_ID an inventory actually leans on."""
+    out = set()
+    for df in frames:
+        if df is None or not len(df) or "Reviewer_ID" not in getattr(df, "columns", ()):
+            continue
+        for value in df["Reviewer_ID"]:
+            rid = str(value).strip()
+            if rid:
+                out.add(rid)
+    return out
+
+
+def derive_run_mode(reviewers, *inventory_frames):
+    """DEMO_ONLY if any reviewer this inventory rests on is an illustration.
+
+    Derived, not asked for. An unreferenced DEMO_IDENTITY row sitting in the
+    registry is harmless - nobody attested anything with it - so only the rows
+    the source manifests actually name are consulted.
+    """
+    if reviewers is None or not len(reviewers):
+        return "ATTESTED"
+    used = referenced_reviewer_ids(*inventory_frames)
+    for _, r in reviewers.iterrows():
+        rid = str(r.get("Reviewer_ID", "")).strip()
+        if used and rid not in used:
+            continue
+        if str(r.get("Reviewer_Record_Type", "")).strip().upper() == "DEMO_IDENTITY":
+            return "DEMO_ONLY"
+    return "ATTESTED"
 
 
 def check_attestation(row, line, flag, reviewer_index=None, kernel=None):
@@ -502,8 +565,9 @@ def reviewer_registry_columns():
     into something a second reader can audit.
     """
     return [
-        "Reviewer_ID", "Reviewer_Name", "Contact_Type", "Reviewer_Contact",
-        "Registered_By", "Registration_Date", "Human_Attestation", "Note",
+        "Reviewer_ID", "Reviewer_Name", "Reviewer_Record_Type", "Contact_Type",
+        "Reviewer_Contact", "Registered_By", "Registration_Date",
+        "Human_Attestation", "Note",
     ]
 
 
@@ -664,7 +728,7 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
 
 def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
-                             reviewers=None,
+                             reviewers=None, requested_run_mode=None,
                              file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
 
@@ -710,6 +774,22 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         return pd.DataFrame(problems)
 
     reviewer_index = check_reviewer_registry(reviewers, flag)
+
+    # A caller may demote a real run to a demonstration - that only throws
+    # results away. It may not promote a demonstration to an attested run, and
+    # asking to is an error rather than a silent correction: the point of
+    # saying ATTESTED out loud is that somebody believed it.
+    derived_mode = derive_run_mode(reviewers, source_documents, source_figures)
+    if requested_run_mode == "ATTESTED" and derived_mode == "DEMO_ONLY":
+        demo_ids = sorted(
+            str(r.get("Reviewer_ID", "")).strip()
+            for _, r in reviewers.iterrows()
+            if str(r.get("Reviewer_Record_Type", "")).strip().upper() == "DEMO_IDENTITY")
+        flag("reviewers", "RUN_MODE_REVIEWER_MISMATCH",
+             "run_mode=ATTESTED was requested, but the inventory is attested by "
+             "%s, which is Reviewer_Record_Type=DEMO_IDENTITY. Register the "
+             "person who inspected the figures; a demonstration identity cannot "
+             "be promoted by the caller" % ", ".join(demo_ids))
 
     def resolve(p):
         p = str(p).strip()

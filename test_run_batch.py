@@ -145,7 +145,8 @@ FIGURES = [dict(Figure_ID="F1", Publication_ID=1, Figure_Number="FIG1",
                 Panel_Reconciliation_Status="MATCHED", Note="")]
 
 REVIEWERS = [dict(
-    Reviewer_ID="RV_T1", Reviewer_Name="Test Fixture", Contact_Type="EMAIL",
+    Reviewer_ID="RV_T1", Reviewer_Name="Test Fixture",
+    Reviewer_Record_Type="HUMAN", Contact_Type="EMAIL",
     Reviewer_Contact="fixture@example.org", Registered_By="Test Fixture",
     Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
     Note="synthetic regression reviewer")]
@@ -478,12 +479,12 @@ check("a manifest still carrying the old Inspector column is refused",
 check("a registered reviewer who inspected nothing is not an error",
       validate(reviewers=REVIEWERS + [dict(
           Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
-          Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Reviewer_Record_Type="HUMAN", Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
           Registered_By="Test Fixture", Registration_Date="2026-08-01",
           Human_Attestation="HUMAN_CONFIRMED", Note="")]) == [],
       "%s" % validate(reviewers=REVIEWERS + [dict(
           Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
-          Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Reviewer_Record_Type="HUMAN", Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
           Registered_By="Test Fixture", Registration_Date="2026-08-01",
           Human_Attestation="HUMAN_CONFIRMED", Note="")]))
 
@@ -1076,7 +1077,71 @@ except ValueError as exc:
 except Exception as exc:                                  # pragma: no cover
     _bad_mode = "wrong exception: %r" % exc
 check("an invented run mode is a programming error, not a default",
-      "run_mode must be one of" in _bad_mode, _bad_mode)
+      "run_mode must be" in _bad_mode and "PROBABLY_FINE" in _bad_mode, _bad_mode)
+
+
+print("the run mode belongs to the registry, not to the caller")
+# The replay: run the demonstration, then hand its own manifests to the plain
+# CLI. `run_mode` was an argument, so the promise stayed at the first call site
+# and the files walked away without it - Status=RAN, Run_Mode=ATTESTED, same
+# fictional reviewer. This fixture DOES accept values, which is the point.
+_demo_reg = [dict(REVIEWERS[0], Reviewer_ID="RV_DEMO",
+                  Reviewer_Name="Josiah Carberry",
+                  Reviewer_Record_Type="DEMO_IDENTITY",
+                  Contact_Type="ORCID",
+                  Reviewer_Contact="0000-0002-1825-0097",
+                  Registered_By="Josiah Carberry",
+                  Human_Attestation="DEMO_EXAMPLE")]
+_demo_mdir = write_manifests(
+    os.path.join(ROOT, "m_demo_identity"), reviewers=_demo_reg,
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Reviewer_ID="RV_DEMO")],
+    source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                          Reviewer_ID="RV_DEMO"))
+
+_replay = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_replay"),
+                       file_root=ROOT, run_date="2026-08-06")
+check("replaying a demo manifest set through the plain runner is still DEMO_ONLY",
+      _replay["run_mode"] == "DEMO_ONLY", "%s" % _replay)
+check("and its accepted values are refused, not written",
+      _replay["status"] == "DEMO_OUTPUT_REFUSED" and _replay["would_accept"] > 0,
+      "%s" % _replay)
+check("and no accepted file survives the replay",
+      RB.COMMIT_MARKER not in os.listdir(os.path.join(ROOT, "o_replay")),
+      "%s" % sorted(os.listdir(os.path.join(ROOT, "o_replay"))))
+check("and the stamp on the replay says DEMO_ONLY",
+      json.load(open(os.path.join(ROOT, "o_replay", "run_stamp.json"))
+                )["Run_Mode"] == "DEMO_ONLY")
+
+_promote = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_promote"),
+                        file_root=ROOT, run_date="2026-08-06",
+                        run_mode="ATTESTED")
+check("the caller cannot promote a demo identity to ATTESTED",
+      _promote["status"] == "MANIFEST_REJECTED"
+      and "RUN_MODE_REVIEWER_MISMATCH" in _promote["detail"], "%s" % _promote)
+check("but the caller may still demote a real registry",
+      RB.run_batch(_good, os.path.join(ROOT, "o_demote"), file_root=ROOT,
+                   run_date="2026-08-06",
+                   run_mode="DEMO_ONLY")["run_mode"] == "DEMO_ONLY")
+
+check("a DEMO_IDENTITY row must not claim HUMAN_CONFIRMED",
+      "REVIEWER_RECORD_TYPE_MISMATCH" in validate(
+          reviewers=_reviewer(Reviewer_Record_Type="DEMO_IDENTITY",
+                              Human_Attestation="HUMAN_CONFIRMED")),
+      "%s" % validate(reviewers=_reviewer(Reviewer_Record_Type="DEMO_IDENTITY",
+                                          Human_Attestation="HUMAN_CONFIRMED")))
+check("a HUMAN row must not hide behind DEMO_EXAMPLE",
+      "REVIEWER_RECORD_TYPE_MISMATCH" in validate(
+          reviewers=_reviewer(Human_Attestation="DEMO_EXAMPLE")))
+check("an invented record type is refused",
+      "BAD_REVIEWER_RECORD_TYPE" in validate(
+          reviewers=_reviewer(Reviewer_Record_Type="PROBABLY_REAL")))
+check("a missing record type is refused",
+      "MISSING_REQUIRED" in validate(reviewers=_reviewer(Reviewer_Record_Type="")))
+check("a demo row nobody attested with does not demote the run",
+      RB.run_batch(write_manifests(os.path.join(ROOT, "m_unused_demo"),
+                                   reviewers=REVIEWERS + _demo_reg),
+                   os.path.join(ROOT, "o_unused_demo"), file_root=ROOT,
+                   run_date="2026-08-06")["run_mode"] == "ATTESTED")
 
 
 print("a promotion that dies partway leaves nothing poolable")

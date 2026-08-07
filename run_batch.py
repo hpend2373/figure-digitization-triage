@@ -3,10 +3,11 @@
     python3 run_batch.py MANIFEST_DIR OUTPUT_DIR [--file-root DIR]
                          [--date YYYY-MM-DD] [--demo-only]
 
-`--demo-only` says the reviewer registry behind this run is illustrative. The
-run executes in full, but if the gate accepts anything the run is refused
-(exit 4) rather than writing values a fictional reviewer would appear to have
-attested.
+The run mode is derived from `reviewer_registry.csv`: a reviewer recorded as
+`Reviewer_Record_Type=DEMO_IDENTITY` makes the run DEMO_ONLY, which executes in
+full but refuses (exit 4) rather than writing values a fictional reviewer would
+appear to have attested. `--demo-only` demotes a real registry; `--attested`
+asserts a real one and fails with RUN_MODE_REVIEWER_MISMATCH if it is not.
 
 Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        INPUT_LOAD_FAILED, not a default
@@ -63,7 +64,7 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
-PIPELINE_VERSION = "7.10"
+PIPELINE_VERSION = "7.11"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -769,23 +770,34 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
 
 
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
-              check_files=True, fault_after=None, run_mode="ATTESTED"):
+              check_files=True, fault_after=None, run_mode=None):
     """Validate, read, convert, gate, and report. Returns a summary dict.
 
-    `run_mode="DEMO_ONLY"` declares that the reviewer registry behind this run
-    is illustrative. The run still executes in full - the point of a demo is to
-    show what the pipeline does - but if it reaches the end holding values the
-    grid gate accepted, it refuses to write any of them and returns
-    DEMO_OUTPUT_REFUSED. A demonstration identity may produce a queue, a
-    coverage ledger and a list of QC failures; it may not produce a row anybody
-    could pool.
+    The run mode is DERIVED from `reviewer_registry.csv`: if any reviewer the
+    source inventory names is `Reviewer_Record_Type=DEMO_IDENTITY`, the run is
+    DEMO_ONLY. It executes in full - the point of a demo is to show what the
+    pipeline does - but if it reaches the end holding values the grid gate
+    accepted, it writes none of them and returns DEMO_OUTPUT_REFUSED. A
+    demonstration identity may produce a queue, a coverage ledger and a list of
+    QC failures; it may not produce a row anybody could pool.
+
+    It was an argument before, and that was the bug: an argument is the
+    caller's promise about the manifests, and replaying the demonstration's own
+    manifests through the plain CLI dropped the promise on the floor -
+    Status=RAN, Run_Mode=ATTESTED, same fictional reviewer. Pass
+    `run_mode="DEMO_ONLY"` to demote a real registry; passing "ATTESTED" over a
+    demo registry is RUN_MODE_REVIEWER_MISMATCH, not a promotion.
 
     `fault_after` is a test hook that aborts promotion partway through; it has
     no effect on a normal run.
     """
-    if run_mode not in RUN_MODES:
-        raise ValueError("run_mode must be one of %s, got %r"
-                         % (", ".join(RUN_MODES), run_mode))
+    if run_mode is not None and run_mode not in RUN_MODES:
+        raise ValueError("run_mode must be None (derive from the registry) or "
+                         "one of %s, got %r" % (", ".join(RUN_MODES), run_mode))
+    requested_run_mode = run_mode
+    # Until the manifests load there is nothing to derive from, so an early
+    # failure stamps what the caller asked for rather than inventing a verdict.
+    run_mode = requested_run_mode or "ATTESTED"
     # Clear BEFORE anything can fail, including the load. Reading the manifests
     # first looked harmless and was not: a missing directory, a malformed CSV or
     # an unreadable file raised before `clear_outputs` was ever called, so the
@@ -808,8 +820,15 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         units=m["units"], source_documents=m["source_documents"],
         source_figures=m["source_figures"],
         source_panels=m["source_panels"], reviewers=m["reviewers"],
+        requested_run_mode=requested_run_mode,
         file_root=file_root,
         check_files=check_files)
+    # Derived even when the batch is rejected, so the stamp on a failed run
+    # still says which kind of run it would have been.
+    derived = BM.derive_run_mode(m["reviewers"], m["source_documents"],
+                                 m["source_figures"])
+    run_mode = ("DEMO_ONLY" if "DEMO_ONLY" in (derived, requested_run_mode)
+                else "ATTESTED")
     if len(problems):
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
                         index=False)
@@ -1137,15 +1156,21 @@ def main(argv=None):
     ap.add_argument("--file-root", default=".")
     ap.add_argument("--date", default="")
     ap.add_argument("--no-file-check", action="store_true")
-    ap.add_argument("--demo-only", action="store_true",
-                    help="the reviewer registry is illustrative; refuse to "
-                         "write any value the gate accepts")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--demo-only", action="store_true",
+                      help="demote: treat a real registry as illustrative and "
+                           "refuse to write any value the gate accepts")
+    mode.add_argument("--attested", action="store_true",
+                      help="assert the registry is real; fails with "
+                           "RUN_MODE_REVIEWER_MISMATCH if it is not")
     args = ap.parse_args(argv)
+    requested = ("DEMO_ONLY" if args.demo_only else
+                 "ATTESTED" if args.attested else None)
     try:
         summary = run_batch(args.manifest_dir, args.output_dir,
                             file_root=args.file_root, run_date=args.date,
                             check_files=not args.no_file_check,
-                            run_mode="DEMO_ONLY" if args.demo_only else "ATTESTED")
+                            run_mode=requested)
     except ManifestLoadError as exc:
         print("inputs could not be loaded: %s" % exc)
         print("the output directory was cleared and run_stamp.json records "

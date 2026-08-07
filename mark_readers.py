@@ -65,6 +65,14 @@ class SeriesSpec:
     marker: str = "CIRCLE"
     fill: str = "ANY"
     tolerance: float = 70.0
+    #: How a monochrome BAR series is told apart - SOLID / HATCHED / OPEN.
+    #: Deliberately separate from `fill`, which is the OPEN/FILLED state of a
+    #: MARKER. Overloading one field for both meant an open circle and an
+    #: unfilled bar were the same declaration, and a panel carrying both could
+    #: not be described at all.
+    bar_fill: str = ""
+    #: How a monochrome LINE series is told apart when the markers match.
+    line_style: str = ""
 
 
 def _rgb_mask(rgb, target, tolerance):
@@ -97,8 +105,18 @@ def _marker_and_errorbar(mask, x, y0, y1, half_window=12):
     # pixels, otherwise every SD is inflated by half a cap stroke at both ends.
     above = [g for g in groups if g[-1] < marker[0]]
     below = [g for g in groups if g[0] > marker[-1]]
-    top = float(np.mean(max(above, key=lambda g: g[-1]))) if above else float(whisker[0])
-    bottom = float(np.mean(min(below, key=lambda g: g[0]))) if below else float(whisker[-1])
+    # `groups` index into the CROPPED patch; `whisker` indexes the full column.
+    # Returning one of each put the cap rows y0 pixels high whenever the panel
+    # did not start at row 0, which on a 400 px panel with y0=40 shifted both
+    # bounds by 11 units - while leaving their DIFFERENCE, and therefore the
+    # dispersion, exactly right. A suite that checks means and dispersions sees
+    # nothing; the first thing to notice was the gate saying the mean sat
+    # outside its own error bar.
+    off = max(0, y0)
+    top = (off + float(np.mean(max(above, key=lambda g: g[-1])))) if above \
+        else float(whisker[0])
+    bottom = (off + float(np.mean(min(below, key=lambda g: g[0])))) if below \
+        else float(whisker[-1])
     return cy, top, bottom, bool(above and below)
 
 
@@ -522,7 +540,299 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
     return out
 
 
-MARK_TYPES = ("BAR_COLOR", "LINE_COLOR", "LINE_MONO", "SCATTER", "BOX_VIOLIN")
+BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "OPEN")
+
+#: Interior dark density separates the three printed fills. Measured on a real
+#: monochrome figure: solid 0.93, diagonal hatch 0.26, outline-only ~0.02. The
+#: bands leave a wide dead zone on purpose - a bar landing in it is ambiguous
+#: and is dropped rather than assigned to whichever series is listed first.
+_FILL_BANDS = {"SOLID": (0.72, 1.01), "HATCHED": (0.12, 0.60), "OPEN": (-0.01, 0.06)}
+
+#: A slot column counts as part of the bar when this fraction of the rows just
+#: above the baseline are dark. Low enough for a hatched fill, high enough to
+#: exclude the gap between two bars.
+_FOOT_MIN_FRACTION = 0.15
+
+#: Absolute floor for "this row is still inside the bar". An error-bar stem is
+#: two pixels wide, so on a 55 px bar it reads about 0.04 - the floor has to sit
+#: above that, or the walk climbs the whisker on an open bar.
+_INSIDE_MIN_DENSITY = 0.15
+
+
+def classify_bar_fill(interior):
+    """SOLID / HATCHED / OPEN for a bar interior, or None when ambiguous."""
+    if interior.size == 0:
+        return None, 0.0
+    density = float(interior.mean())
+    hits = [k for k, (lo, hi) in _FILL_BANDS.items() if lo <= density < hi]
+    return (hits[0] if len(hits) == 1 else None), density
+
+
+def _mono_bar_errorbar(gray, dark, xc, edge, down, y0, y1, half_width=2,
+                       max_whisker_px=90, min_cap_px=5, stem_threshold=200,
+                       skip_px=2, min_stem_px=1):
+    """Cap centre above a monochrome bar, only if a stem reaches the bar.
+
+    The same trap as the colour reader: a significance glyph sits exactly where
+    a cap sits and is exactly as black. The rule is physical - a cap counts only
+    when a continuous vertical stroke joins it to the bar end.
+
+    The stem gets its OWN, far more permissive threshold, and that is not a
+    fudge. Grey level in a raster is ink coverage: a filled bar covers its
+    pixels completely and reads near 0, while a one-pixel hairline at 60%
+    coverage reads about 140 on the same figure. Thresholding both at 128 found
+    every cap and no stem, so on publication 397 the reader confirmed nothing
+    and returned no dispersion at all - a fail-closed answer produced by a
+    measurement error rather than by the figure.
+
+    Returns (cap_row, stem_confirmed) or (None, False).
+    """
+    step = 1 if down else -1
+    edge = int(round(edge))
+    start = edge + step * skip_px            # clear of the bar's own top stroke
+    limit = (min(int(y1), start + max_whisker_px) if down
+             else max(int(y0), start - max_whisker_px))
+    rows = (range(start + 1, limit) if down else range(limit, start))
+    faint = gray < stem_threshold
+    # One pixel is enough, and has to be: a hairline stem IS one pixel wide.
+    # Demanding two meant the reader confirmed no stem anywhere on publication
+    # 397 and reported no dispersion at all. The protection against noise is not
+    # the per-row count - it is that the run must be contiguous and must reach
+    # the bar, which a stray speck never does.
+    stem = [y for y in rows
+            if faint[y, max(0, xc - half_width):xc + half_width + 1].sum()
+            >= min_stem_px]
+    if not stem:
+        return None, False
+    groups = _runs(stem, gap=2)
+    attached = [g for g in groups
+                if ((g[0] <= start + 4) if down else (g[-1] >= start - 4))]
+    if not attached:
+        return None, False
+    segment = attached[0] if down else attached[-1]
+    if len(segment) < 3:
+        return None, False        # a speck touching the bar is not a whisker
+    far = segment[-1] if down else segment[0]
+    caps = []
+    for n in range(8):
+        y = far - step * n
+        if not (0 <= y < dark.shape[0]):
+            break
+        if dark[y, max(0, xc - 12):xc + 13].sum() >= min_cap_px:
+            caps.append(y)
+        elif caps:
+            break
+    return ((caps[0] + caps[-1]) / 2.0 if caps else float(far)), True
+
+
+def _mono_bar_extent(column, zero_rel, foot_px=10, stroke_px=8,
+                     edge_rule="BASELINE_WALK"):
+    """Bar end, column range and direction for one slot, walked from the baseline.
+
+    Finding the end by "the first row spanning half the slot" looks right and is
+    not. An error-bar cap is drawn about 70% of the bar's width, so on a narrow
+    bar the cap clears that bar and the reader takes the whisker tip as the
+    value - reading every mean high by one SD, silently, in one direction.
+
+    Walking UP FROM THE BASELINE instead removes the cap from the question
+    entirely: a bar has two side strokes continuous from the baseline to its
+    end, and a floating cap has none. The walk stops before it ever reaches the
+    cap. It also works identically for solid, hatched and open bars, which the
+    density-based approach does not - an open bar has nothing but its outline.
+
+    Returns (edge_row, bar_x0, bar_x1, is_downward) or None.
+    """
+    height, width = column.shape
+    zero = int(round(zero_rel))
+    if width < 4 or not (0 <= zero < height):
+        return None
+    # Measure the true bar width where the bar certainly is: against the
+    # baseline. The slot includes the gap to the next bar; the bar does not.
+    foot = column[max(0, zero - foot_px):max(1, zero - 1)]
+    if not foot.size:
+        return None
+    present = np.where(foot.sum(axis=0) >= _FOOT_MIN_FRACTION * foot.shape[0])[0]
+    if not len(present):
+        # An empty slot, or a bar so short it never rises above the baseline.
+        return None
+    bx0, bx1 = int(present[0]), int(present[-1])
+    body = column[:, bx0:bx1 + 1]
+    if body.shape[1] < 4:
+        return None
+    if edge_rule == "FIRST_WIDE_ROW":
+        # The defective rule, kept callable so the suite can SHOW the cap being
+        # taken as the bar end rather than merely assert it is not. Never used
+        # by the reader itself.
+        wide = np.where(column.sum(axis=1) >= 0.5 * column.shape[1])[0]
+        if not len(wide):
+            return None
+        down = abs(int(wide.max()) - zero) > abs(int(wide.min()) - zero)
+        return float(wide.max() if down else wide.min()), bx0, bx1, down
+    if edge_rule != "BASELINE_WALK":
+        raise ValueError("edge_rule must be BASELINE_WALK or FIRST_WIDE_ROW")
+    # Two independent signs that a row is still inside the bar, because no one
+    # of them survives all three fills on a real raster:
+    #
+    #   side strokes - definitive for an OPEN bar, which is nothing but its
+    #     outline, and reliable for a crisp vector figure
+    #   row density  - the only thing left on a JPEG-softened HATCHED bar, whose
+    #     1 px outline does not survive the threshold at all. Measured against
+    #     the bar's OWN density at the baseline, so a 25%-dark hatch is compared
+    #     with a 25%-dark hatch and not with a solid fill.
+    #
+    # The floor matters as much as the ratio: an open bar's foot density is
+    # about 0.04, and half of that is below the density of the error-bar STEM,
+    # so a purely relative rule walks straight up the whisker.
+    left, right = body[:, :2].any(axis=1), body[:, -2:].any(axis=1)
+    bar_w = bx1 - bx0 + 1
+    foot_density = float(foot[:, bx0:bx1 + 1].mean()) if foot.size else 0.0
+    floor = max(0.5 * foot_density, _INSIDE_MIN_DENSITY)
+    density = body.sum(axis=1) / float(bar_w)
+
+    def inside(row):
+        return bool((left[row] and right[row]) or density[row] >= floor)
+
+    def walk(start, step):
+        row = start
+        while 0 <= row + step < height and inside(row + step):
+            row += step
+        return row
+
+    up_end, down_end = walk(zero - 2, -1), walk(zero + 2, 1) if zero + 2 < height else zero
+    down = abs(down_end - zero) > abs(up_end - zero)
+    edge = down_end if down else up_end
+    # A stroked outline's data coordinate is the centre of the stroke. A solid
+    # fill has no separate outline, so its edge IS the coordinate - extend only
+    # across a stroke-thick run, never across the body of a filled bar.
+    step = 1 if down else -1
+    far = edge
+    while (0 <= far + (-step) < height and abs(far - edge) < stroke_px
+           and body[far + (-step)].sum() >= 0.8 * bar_w):
+        far += -step
+    return (((edge + far) / 2.0 if abs(far - edge) < stroke_px else float(edge)),
+            bx0, bx1, down)
+
+
+def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, series,
+                              group_window=70, threshold=128, baseline_value=0.0,
+                              min_bar_px=12, edge_rule="BASELINE_WALK",
+                              stem_threshold=200):
+    """Read grouped monochrome bars separated by FILL PATTERN, not by colour.
+
+    Solid-versus-hatched is how a black-and-white bar chart names its series,
+    and no colour mask can see the difference. Within one x group the bars are
+    adjacent, so the group is split into len(series) slots and each slot is
+    classified by the dark density of its interior.
+
+    Two geometric rules carry over from the colour reader because they are facts
+    about printed figures, not about one publication:
+
+    * the data coordinate is the OUTLINE, found as the first row spanning half
+      the slot width - not the topmost dark pixel, which is the error-bar cap.
+      Sampling the interior below that pixel lands in the whisker's white space
+      and reads every fill as OPEN.
+    * a cap counts only when a stem physically joins it to the bar.
+
+    Fail-closed: if two slots classify the same way, or any slot is ambiguous,
+    the whole group is dropped. A group that cannot be told apart produces no
+    rows and the grid gate reports the missing cells.
+    """
+    rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
+    gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+    dark = gray < int(threshold)
+    x0, x1, y0, y1 = map(int, panel_box)
+    zero_row = y_calibration.value_to_pixel(baseline_value)
+    want = []
+    for spec in series:
+        pattern = str(spec.bar_fill or "").strip().upper()
+        if pattern not in BAR_FILL_PATTERNS:
+            raise ValueError(
+                "SeriesSpec.bar_fill must be one of %s for a monochrome bar "
+                "series; %r declares %r" % ("/".join(BAR_FILL_PATTERNS),
+                                            spec.name, spec.bar_fill))
+        want.append(pattern)
+    if len(set(want)) != len(want):
+        raise ValueError("two monochrome bar series share a fill pattern, so no "
+                         "reader can separate them: %s" % want)
+    out = []
+    for order, (label, gx) in enumerate(x_positions.items()):
+        xa, xb = max(x0, int(gx) - group_window), min(x1, int(gx) + group_window + 1)
+        band = dark[y0:y1, xa:xb]
+        columns = band.sum(axis=0)
+        idx = [i for i, v in enumerate(columns) if v > 0.06 * band.shape[0]]
+        if not idx:
+            continue
+        lo, hi = idx[0], idx[-1]
+        if hi - lo + 1 < min_bar_px * len(series):
+            continue
+        width = (hi - lo + 1) / float(len(series))
+        slots = []
+        for k in range(len(series)):
+            sa = int(round(lo + k * width)) + 2
+            sb = int(round(lo + (k + 1) * width)) - 2
+            if sb - sa < 4:
+                slots = []
+                break
+            found = _mono_bar_extent(band[:, sa:sb], zero_row - y0,
+                                     edge_rule=edge_rule)
+            if found is None:
+                slots = []
+                break
+            edge, bx0, bx1, down = found
+            # Sample the interior INSIDE the outline. Including the two side
+            # strokes lifted an open bar's density from ~0.02 to 0.16 and put it
+            # in the hatched band - the reader then named the wrong series with
+            # complete confidence, which is worse than reading nothing.
+            inset = max(3, int(round(0.16 * (bx1 - bx0 + 1))))
+            body = band[:, sa + bx0 + inset:sa + bx1 + 1 - inset]
+            if body.shape[1] < 3:
+                slots = []
+                break
+            inner = int(round(edge))
+            interior = (body[max(0, inner - 40):max(0, inner - 6)] if down
+                        else body[inner + 6:inner + 46])
+            fill, density = classify_bar_fill(interior)
+            slots.append(dict(fill=fill, density=density, edge=y0 + edge, down=down,
+                              xc=xa + sa + (bx0 + bx1) // 2))
+        if not slots or any(s["fill"] is None for s in slots):
+            continue
+        if sorted(s["fill"] for s in slots) != sorted(want):
+            continue          # cannot name the series - leave the cells missing
+        group = []
+        for spec in series:
+            match = [s for s in slots
+                     if s["fill"] == str(spec.bar_fill).strip().upper()]
+            if len(match) != 1:
+                group = []
+                break
+            s = match[0]
+            cap, stem = _mono_bar_errorbar(gray, dark, s["xc"], s["edge"],
+                                           s["down"], y0, y1,
+                                           stem_threshold=stem_threshold)
+            mean = y_calibration.pixel_to_value(s["edge"])
+            dispersion = (None if cap is None
+                          else abs(y_calibration.pixel_to_value(cap) - mean))
+            group.append(dict(
+                series=spec.name, order=order, x_label=label, x=float(s["xc"]),
+                top_px=float(s["edge"]), cap_px=(None if cap is None else float(cap)),
+                mean=mean, dispersion=dispersion,
+                fill_pattern=s["fill"], fill_density=round(s["density"], 3),
+                Bar_Direction="DOWN" if s["down"] else "UP",
+                Bar_Top_Definition="OUTLINE_CENTER",
+                Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
+            ))
+        out.extend(group)
+    out.sort(key=lambda row: (row["series"], row["order"]))
+    return out
+
+
+MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",
+              "BOX_VIOLIN")
+
+#: Bumped whenever a reader's numerical output can change. A batch run records
+#: it beside the image hash and the config hash, so "the numbers moved" can be
+#: attributed instead of argued about.
+READER_VERSION = "7.2"
 
 
 def read_panel(mark_type, **kwargs):
@@ -536,6 +846,8 @@ def read_panel(mark_type, **kwargs):
         return read_line_marker_panel(**kwargs)
     if kind == "LINE_MONO":
         return read_monochrome_marker_panel(**kwargs)
+    if kind == "BAR_MONO":
+        return read_monochrome_bar_panel(**kwargs)
     if kind == "SCATTER":
         return read_scatter_panel(**kwargs)
     if kind == "BOX_VIOLIN":
@@ -560,24 +872,133 @@ ASSOCIATION_CARRIED = (
 )
 
 
-def write_point_data(points, path):
+POINT_DATA_SCHEMA = "figure-digitization-triage/point-data/2"
+
+
+def _calibration_record(cal):
+    if cal is None:
+        return None
+    return dict(slope=float(cal.slope), intercept=float(cal.intercept),
+                scale=str(cal.scale))
+
+
+def write_point_data(points, path, unit_id, cell_key, source_image,
+                     image_sha256, x_calibration, y_calibration,
+                     panel_id=None, reader=None, tolerance=1e-6):
     """Persist the digitized point cloud an association was computed from.
 
     A digitized r or tau is a claim about a set of coordinates nobody else can
     see. Writing them next to the value is what makes the claim checkable, and
     the validator requires the path on every digitized association row.
+
+    Calibrated x/y alone are NOT enough to reproduce anything. They are already
+    the reader's answer: if the calibration was wrong, the saved values are
+    wrong in exactly the same way and nothing in the file disagrees with
+    anything else. What makes the record checkable is the pair - the raw pixel
+    the reader actually measured, and the calibration it applied - plus enough
+    identity to say which image, which cell and which series each point belongs
+    to. All of it is required; a point file that cannot be traced back to a row
+    is not provenance.
+
+    Every point is re-derived from its own pixel and calibration before the file
+    is written, and a mismatch beyond `tolerance` raises. A file whose values do
+    not follow from its own pixels is internally inconsistent, and the moment to
+    find that out is at write time.
+
     Returns `path`, so it composes into a `to_value_records` call.
     """
     import json
     import os
-    rows = [{"x_value": float(p["x_value"]), "y_value": float(p["y_value"])}
-            for p in points]
+    for name, value in (("unit_id", unit_id), ("cell_key", cell_key),
+                        ("source_image", source_image),
+                        ("image_sha256", image_sha256),
+                        ("y_calibration", y_calibration)):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError(
+                "write_point_data needs %s: a point cloud that cannot be traced "
+                "back to an image and a cell is not provenance" % name)
+    rows = []
+    for i, p in enumerate(points):
+        for key in ("x_value", "y_value", "point_px_x", "point_px_y"):
+            if p.get(key) is None:
+                raise ValueError(
+                    "point %d has no %s - a digitized point without its raw "
+                    "pixel cannot be re-derived, only re-trusted" % (i, key))
+        px, py = float(p["point_px_x"]), float(p["point_px_y"])
+        xv, yv = float(p["x_value"]), float(p["y_value"])
+        if x_calibration is not None:
+            back = x_calibration.pixel_to_value(px)
+            if abs(back - xv) > tolerance * max(1.0, abs(xv)):
+                raise ValueError(
+                    "point %d: x_value=%r does not follow from pixel %r under "
+                    "the given calibration (would be %r)" % (i, xv, px, back))
+        back = y_calibration.pixel_to_value(py)
+        if abs(back - yv) > tolerance * max(1.0, abs(yv)):
+            raise ValueError(
+                "point %d: y_value=%r does not follow from pixel %r under the "
+                "given calibration (would be %r)" % (i, yv, py, back))
+        rows.append(dict(series=(None if p.get("series") is None else str(p["series"])),
+                         point_px_x=px, point_px_y=py, x_value=xv, y_value=yv))
+    record = {
+        "schema": POINT_DATA_SCHEMA,
+        "Unit_ID": str(unit_id), "Cell_Key": str(cell_key),
+        "Panel_ID": None if panel_id is None else str(panel_id),
+        "Source_Image": str(source_image), "Image_SHA256": str(image_sha256),
+        "Reader": None if reader is None else str(reader),
+        "Reader_Version": READER_VERSION,
+        "X_Calibration": _calibration_record(x_calibration),
+        "Y_Calibration": _calibration_record(y_calibration),
+        "n_pairs": len(rows), "points": rows,
+    }
     directory = os.path.dirname(os.path.abspath(path))
     if directory:
         os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"n_pairs": len(rows), "points": rows}, fh, indent=1, sort_keys=True)
+        json.dump(record, fh, indent=1, sort_keys=True)
     return path
+
+
+def read_point_data(path):
+    """Load a point file and re-derive every value from its own pixels.
+
+    Raises if the file was written by an older schema, if a value no longer
+    follows from its pixel under the recorded calibration, or if the recorded
+    pair count disagrees with the points actually present.
+    """
+    import json
+    with open(path, encoding="utf-8") as fh:
+        record = json.load(fh)
+    if record.get("schema") != POINT_DATA_SCHEMA:
+        raise ValueError("%s is schema %r, expected %r - an older point file "
+                         "has no pixels to re-derive from"
+                         % (path, record.get("schema"), POINT_DATA_SCHEMA))
+    points = record.get("points") or []
+    if record.get("n_pairs") != len(points):
+        raise ValueError("%s says n_pairs=%r but carries %d points"
+                         % (path, record.get("n_pairs"), len(points)))
+    for axis, key in (("Y_Calibration", "y_value"), ("X_Calibration", "x_value")):
+        cal = record.get(axis)
+        if cal is None:
+            continue
+        fitted = AxisCalibration(float(cal["slope"]), float(cal["intercept"]),
+                                 str(cal["scale"]))
+        pixel_key = "point_px_y" if axis.startswith("Y") else "point_px_x"
+        for i, p in enumerate(points):
+            back = fitted.pixel_to_value(float(p[pixel_key]))
+            if abs(back - float(p[key])) > 1e-6 * max(1.0, abs(float(p[key]))):
+                raise ValueError("%s point %d: %s does not follow from %s"
+                                 % (path, i, key, pixel_key))
+    return record
+
+
+def sha256_of(path):
+    """SHA-256 of a file, for the image identity a point file records."""
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _cell_key(levels):

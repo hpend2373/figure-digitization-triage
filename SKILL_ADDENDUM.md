@@ -125,17 +125,112 @@ The ASSOCIATION branch now copies a declared tuple, `ASSOCIATION_CARRIED`, and
 every name in it exists in `fig_values_columns()`. Adding a field to the reader
 and not to the schema now fails the suite instead of the batch.
 
+## Declare the run before you make it
+
+Four more files describe the RUN, as distinct from the data. They are separate
+from the four data grains on purpose: a values file has to be reviewable by
+someone who never touches a raster, and a run has to be re-executable by someone
+who never reads the paper.
+
+    panel_manifest.csv     panel box, Mark_Type, axis calibration, and the unit
+                           it fills
+    series_manifest.csv    colour / marker / fill / line style / bar fill, and
+                           the factor level the series IS
+    position_manifest.csv  x pixel or slot, and the factor level the position IS
+    reader_config.csv      long-form options, one row per option
+
+**Identity is declared, never inferred.** A series is `ARM=FLUID` because the
+manifest says so, not because it was drawn first. A bar is `SESSION=POST`
+because the manifest says so, not because it is the second from the left. This
+is the same principle as the grid engine's, moved one layer earlier: when a
+reader cannot resolve a mark, no row appears and the gate names the hole.
+
+**Options are validated against the reader that will receive them.** A
+misspelled option, or a real option that means nothing to this mark type, is an
+error before the run rather than a default silently applied during it. `run_batch`
+validates every manifest before it opens a single raster, because discovering on
+figure 140 that a Config_ID was mistyped is an expensive way to learn it.
+
+**Every panel lands on exactly one state**, and anything short of `AUTO_PASS`
+goes to `manual_queue.csv` with the reason and the coordinates a human needs:
+
+    AUTO_PASS  MANUAL_POINT_READ  SERIES_IDENTITY_UNRESOLVED
+    PANEL_GEOMETRY_UNRESOLVED  NO_VARIANCE  NOT_CONVERTIBLE  QC_FAILED
+
+`SERIES_IDENTITY_UNRESOLVED` is the one worth knowing about. If one declared
+series produces marks and another produces none, the panel does not contribute
+half its cells - it contributes none. A reader that can find one of two curves
+cannot be trusted about which curve it found.
+
+## A run has to be re-runnable, and that costs more than a timestamp
+
+`run_manifest.csv` records, per panel: the image SHA-256, the config SHA-256, the
+reader version, the raw data file, the WPD project, and the run date.
+`run_stamp.json` adds a hash of every input manifest. A second run over the same
+inputs produces identical outputs, and the suite asserts it.
+
+Two pieces are worth calling out.
+
+**The run saves its own WebPlotDigitizer project.** The gate requires a
+re-openable project on every digitized row, and it is right to - "the reader said
+so" is not something a second person can check. An automated run has no
+human-saved project, so it writes one: the raster, the calibration it used, and
+every mark it placed. A reviewer opens it in WPD and sees where the reader
+thought the marks were, which is the only cheap way to catch a systematically
+misplaced series.
+
+**A point file stores pixels, not just values.** Calibrated x/y alone are the
+reader's answer: if the calibration was wrong, the saved values are wrong in
+exactly the same way and nothing in the file disagrees with anything else.
+`write_point_data` requires the raw pixel of every point, both calibrations, the
+image hash, the Unit_ID and the Cell_Key, and it re-derives every value from its
+own pixel before writing - a file whose numbers do not follow from its own
+pixels is rejected at write time. `read_point_data` re-checks the same thing on
+load, so a file edited afterwards does not pass silently.
+
+## Monochrome bars are named by fill, and the cap is not the bar
+
+A black-and-white bar chart names its series by FILL PATTERN - solid, hatched,
+open - and no colour mask can see the difference. Interior dark density
+separates the three, sampled INSIDE the outline: including the two side strokes
+lifted an open bar from 0.02 to 0.16, into the hatched band, and the reader then
+named the wrong series with complete confidence.
+
+Finding the bar's end by "the first row spanning half the slot" looks right and
+is not. An error-bar cap is drawn about 70% of the bar's width, so on a narrow
+bar the cap clears that test and the whisker tip becomes the value - every mean
+high by a whole SD, in one direction, silently. Walking UP FROM THE BASELINE
+removes the cap from the question: a bar has two side strokes continuous from
+the baseline to its end and a floating cap has none, so the walk stops before it
+ever reaches one.
+
+**The stem gets its own threshold, and that is not a fudge.** Grey level is ink
+coverage: a filled bar reads near 0, a one-pixel hairline stem at 60% coverage
+reads about 140 on the same figure. Thresholding both at 128 found every cap and
+no stem, so on publication 397 the reader confirmed nothing and returned no
+dispersion at all - a fail-closed answer produced by a measurement error rather
+than by the figure.
+
 ## The four suites, and why there are four
 
-    python3 test_kernel.py         # validator against hand-built rows
-    python3 test_grid_engine.py    # four-grain grid + value engine
-    python3 test_bar_reader.py     # reader against real rasters
-    python3 test_mark_readers.py   # non-bar readers, adapter, reader->gate chain
-    python3 test_integration.py    # template -> reader -> CSV -> validator
-    python3 test_reproducibility.py# clean-room import, no scipy
-    python3 crosscheck_id323.py    # second independent reading of one figure
+    python3 test_kernel.py          # validator against hand-built rows
+    python3 test_grid_engine.py     # four-grain grid + value engine
+    python3 test_bar_reader.py      # colour bar reader against real rasters
+    python3 test_mark_readers.py    # non-bar readers, adapter, reader->gate chain
+    python3 test_mono_bar.py        # monochrome bars, fill patterns, cap trap
+    python3 test_integration.py     # template -> reader -> CSV -> validator
+    python3 test_run_batch.py       # manifests -> run -> values -> gate -> queue
+    python3 test_reproducibility.py # clean-room import, no scipy
+    python3 crosscheck_id323.py     # second independent reading of one figure
+    python3 forward_test_397_mono_bar.py   # a real publisher raster
 
 Run all of them after ANY edit. They fail in different ways on purpose.
+
+A synthetic fixture proves a reader is self-consistent. It cannot prove the
+reader survives JPEG softening, a 1 px hatch outline that misses the threshold,
+or two panels of one figure whose axes are four pixels apart - and every one of
+those broke the monochrome bar reader the first time it met a real figure. That
+is what the forward tests are for, and why a reader without one is not released.
 
 **A unit suite cannot see a template that disagrees with the validator.** The
 geometry checks above shipped once with `Extraction_Method` absent from

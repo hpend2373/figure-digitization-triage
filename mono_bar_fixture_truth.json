@@ -1,0 +1,104 @@
+{
+ "collide_group": null,
+ "group_x": [
+  190,
+  330,
+  470,
+  610
+ ],
+ "groups": [
+  "T0",
+  "T1",
+  "T2",
+  "T3"
+ ],
+ "panel_box": [
+  90,
+  720,
+  40,
+  430
+ ],
+ "patterns": [
+  "SOLID",
+  "HATCHED",
+  "OPEN"
+ ],
+ "series": {
+  "HATCHED": {
+   "T0": {
+    "dispersion": 5.0,
+    "mean": 48.0,
+    "x": 190
+   },
+   "T1": {
+    "dispersion": 5.0,
+    "mean": 53.0,
+    "x": 330
+   },
+   "T2": {
+    "dispersion": 5.0,
+    "mean": 57.0,
+    "x": 470
+   },
+   "T3": {
+    "dispersion": 5.0,
+    "mean": 44.0,
+    "x": 610
+   }
+  },
+  "OPEN": {
+   "T0": {
+    "dispersion": 4.0,
+    "mean": 30.0,
+    "x": 222
+   },
+   "T1": {
+    "dispersion": 4.0,
+    "mean": 34.0,
+    "x": 362
+   },
+   "T2": {
+    "dispersion": 4.0,
+    "mean": 39.0,
+    "x": 502
+   },
+   "T3": {
+    "dispersion": 4.0,
+    "mean": 27.0,
+    "x": 642
+   }
+  },
+  "SOLID": {
+   "T0": {
+    "dispersion": 6.0,
+    "mean": 62.0,
+    "x": 158
+   },
+   "T1": {
+    "dispersion": 6.0,
+    "mean": 68.0,
+    "x": 298
+   },
+   "T2": {
+    "dispersion": 6.0,
+    "mean": 74.0,
+    "x": 438
+   },
+   "T3": {
+    "dispersion": 6.0,
+    "mean": 58.0,
+    "x": 578
+   }
+  }
+ },
+ "y_ticks": [
+  [
+   0,
+   420
+  ],
+  [
+   100,
+   60
+  ]
+ ]
+}

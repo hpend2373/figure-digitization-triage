@@ -71,6 +71,17 @@ check("line error bars recover within 1 unit", max(derr) < 1.0,
       "max %.3f" % max(derr))
 check("every line error bar has a connected stem",
       all(r["Errorbar_Stem_Confirmed"] == "TRUE" for r in rows))
+# A dispersion is a DIFFERENCE, so a constant pixel offset on both cap rows
+# cancels in it and survives every mean-and-dispersion check. The bounds are
+# absolute, and they are where the offset shows.
+check("the error bar brackets its own mean",
+      all(r["errorbar_lower"] <= r["mean"] <= r["errorbar_upper"] for r in rows),
+      "%r" % [(r["errorbar_lower"], r["mean"], r["errorbar_upper"])
+              for r in rows if not r["errorbar_lower"] <= r["mean"] <= r["errorbar_upper"]][:2])
+_berr = max(max(abs(r["errorbar_lower"] - (r["mean"] - 5.0)),
+                abs(r["errorbar_upper"] - (r["mean"] + 5.0))) for r in rows)
+check("the bounds themselves land within 1 unit, not just their spread",
+      _berr < 1.0, "max %.3f" % _berr)
 
 
 def monochrome_fixture():
@@ -262,11 +273,20 @@ import grid_engine as _ge  # noqa: E402
 import kernel as _k  # noqa: E402
 
 _e2e_dir = _tempfile.mkdtemp(prefix="fdt_e2e_")
-points = [dict(x_value=float(i), y_value=float((i * 7) % 13)) for i in range(13)]
+# Real reader output, not hand-written dicts: these carry the raw pixels, which
+# is what makes the point file re-derivable rather than merely re-readable.
+_scatter_path = _os.path.join(_e2e_dir, "scatter.png")
+sim.save(_scatter_path)
+_scatter_sha = _mr.sha256_of(_scatter_path)
+points = spoints
 summary = summarize_association(points, "KENDALL_TAU")
 assert summary["Ties_Present"] == "FALSE" and summary["P_Value"] is not None, \
     "this fixture must be untied, or the p provenance is legitimately blank"
-path = _mr.write_point_data(points, _os.path.join(_e2e_dir, "UA_points.json"))
+path = _mr.write_point_data(points, _os.path.join(_e2e_dir, "UA_points.json"),
+                            unit_id="UA", cell_key="PANEL=ALL",
+                            source_image=_scatter_path, image_sha256=_scatter_sha,
+                            x_calibration=sxcal, y_calibration=sycal,
+                            panel_id="P1", reader="SCATTER")
 record = to_value_records([summary], "ASSOCIATION", "UA",
                           cell_levels={"PANEL": "ALL"},
                           point_data_reference=path)[0]
@@ -350,10 +370,18 @@ for _drop, _want in (("P_Value_Extraction_Method", "MISSING_P_VALUE_PROVENANCE")
 # A tied Kendall has no computed p, so P_Value_Extraction_Method is legitimately
 # blank - but the tie claim and the points are exactly what make that legitimate,
 # so those two must still arrive.
-_tied_points = [dict(x_value=float(i), y_value=float(v))
-                for i, v in enumerate((0, 1, 1, 3, 4, 6, 6, 8))]
+_tied_points = []
+for _i, _v in enumerate((0, 1, 1, 3, 4, 6, 6, 8)):
+    _px, _py = sxcal.value_to_pixel(_i), sycal.value_to_pixel(_v)
+    _tied_points.append(dict(series="ALL", point_px_x=_px, point_px_y=_py,
+                             x_value=sxcal.pixel_to_value(_px),
+                             y_value=sycal.pixel_to_value(_py)))
 _tied = summarize_association(_tied_points, "KENDALL_TAU")
-_tied_path = _mr.write_point_data(_tied_points, _os.path.join(_e2e_dir, "UT_points.json"))
+_tied_path = _mr.write_point_data(_tied_points, _os.path.join(_e2e_dir, "UT_points.json"),
+                                  unit_id="UT", cell_key="PANEL=ALL",
+                                  source_image=_scatter_path, image_sha256=_scatter_sha,
+                                  x_calibration=sxcal, y_calibration=sycal,
+                                  panel_id="P1", reader="SCATTER")
 _tied_rec = to_value_records([_tied], "ASSOCIATION", "UT",
                              cell_levels={"PANEL": "ALL"},
                              point_data_reference=_tied_path)[0]
@@ -369,6 +397,93 @@ _row_path = to_value_records([dict(_tied, Point_Data_Reference="/from/the/row.js
 check("a path already on the reader row wins over the adapter default",
       _row_path["Point_Data_Reference"] == "/from/the/row.json",
       "%r" % _row_path["Point_Data_Reference"])
+
+
+print("a point file is re-derivable, not merely re-readable")
+_pd = _mr.read_point_data(path)
+check("the point file names its unit, cell and panel",
+      (_pd["Unit_ID"], _pd["Cell_Key"], _pd["Panel_ID"]) == ("UA", "PANEL=ALL", "P1"),
+      "%r" % _pd)
+check("the point file records the image it was read off",
+      _pd["Source_Image"] == _scatter_path and _pd["Image_SHA256"] == _scatter_sha)
+check("the point file records the reader and its version",
+      _pd["Reader"] == "SCATTER" and _pd["Reader_Version"] == _mr.READER_VERSION,
+      "%r" % ((_pd["Reader"], _pd["Reader_Version"]),))
+check("both calibrations are stored, not just the answers",
+      _pd["X_Calibration"]["slope"] == sxcal.slope
+      and _pd["Y_Calibration"]["intercept"] == sycal.intercept,
+      "%r" % ((_pd["X_Calibration"], _pd["Y_Calibration"]),))
+check("every point keeps its raw pixel and its series",
+      all(p.get("point_px_x") is not None and p.get("point_px_y") is not None
+          and p.get("series") == "ALL" for p in _pd["points"]),
+      "%r" % _pd["points"][:2])
+# The whole point of storing the pixel: the value can be recomputed and
+# disagreed with. A file that only holds calibrated values agrees with itself
+# no matter how wrong the calibration was.
+_recomputed = [sycal.pixel_to_value(p["point_px_y"]) for p in _pd["points"]]
+check("recomputing y from the stored pixel reproduces the stored value",
+      max(abs(a - p["y_value"]) for a, p in zip(_recomputed, _pd["points"])) < 1e-9)
+_orig_r = summarize_association(points, "PEARSON_R")["Association_Value"]
+_reread = summarize_association(_pd["points"], "PEARSON_R")["Association_Value"]
+check("the association recomputes from the file alone",
+      abs(_orig_r - _reread) < 1e-12, "%.12f vs %.12f" % (_orig_r, _reread))
+
+for _n, _kw, _frag in (
+        ("no Unit_ID", dict(unit_id=""), "unit_id"),
+        ("no Cell_Key", dict(cell_key=""), "cell_key"),
+        ("no image hash", dict(image_sha256=""), "image_sha256"),
+        ("no y calibration", dict(y_calibration=None), "y_calibration")):
+    _args = dict(unit_id="UA", cell_key="PANEL=ALL", source_image=_scatter_path,
+                 image_sha256=_scatter_sha, x_calibration=sxcal, y_calibration=sycal)
+    _args.update(_kw)
+    try:
+        _mr.write_point_data(points, _os.path.join(_e2e_dir, "reject.json"), **_args)
+        _msg = "accepted"
+    except ValueError as exc:
+        _msg = str(exc)
+    check("a point file with %s is refused" % _n, _frag in _msg, _msg)
+try:
+    _mr.write_point_data([dict(x_value=1.0, y_value=2.0)],
+                         _os.path.join(_e2e_dir, "reject.json"), unit_id="UA",
+                         cell_key="PANEL=ALL", source_image=_scatter_path,
+                         image_sha256=_scatter_sha, x_calibration=sxcal,
+                         y_calibration=sycal)
+    _msg = "accepted"
+except ValueError as exc:
+    _msg = str(exc)
+check("a point with no raw pixel is refused", "point_px_x" in _msg, _msg)
+_lying = [dict(p, y_value=p["y_value"] + 5.0) for p in points]
+try:
+    _mr.write_point_data(_lying, _os.path.join(_e2e_dir, "reject.json"), unit_id="UA",
+                         cell_key="PANEL=ALL", source_image=_scatter_path,
+                         image_sha256=_scatter_sha, x_calibration=sxcal,
+                         y_calibration=sycal)
+    _msg = "accepted"
+except ValueError as exc:
+    _msg = str(exc)
+check("a value that does not follow from its own pixel is refused",
+      "does not follow" in _msg, _msg)
+import json as _json  # noqa: E402
+_tampered = _os.path.join(_e2e_dir, "tampered.json")
+_raw = _json.load(open(path))
+_raw["points"][0]["y_value"] += 3.0
+_json.dump(_raw, open(_tampered, "w"))
+try:
+    _mr.read_point_data(_tampered)
+    _msg = "accepted"
+except ValueError as exc:
+    _msg = str(exc)
+check("reading catches a point file edited after the fact",
+      "does not follow" in _msg, _msg)
+_old = _os.path.join(_e2e_dir, "old_schema.json")
+_json.dump({"n_pairs": 2, "points": [{"x_value": 1, "y_value": 2}]}, open(_old, "w"))
+try:
+    _mr.read_point_data(_old)
+    _msg = "accepted"
+except ValueError as exc:
+    _msg = str(exc)
+check("a values-only point file from the old schema is refused",
+      "schema" in _msg, _msg)
 
 
 print("single-colour scatter and association families")

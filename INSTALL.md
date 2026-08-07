@@ -1,24 +1,18 @@
-# figure-digitization-triage — v7.1 (full package)
+# figure-digitization-triage — v7.2 (full package)
 
-This is the **whole system**, not a patch. `field_provenance_gate_1.zip` was four
-files; this replaces the skill folder wholesale, so there is no version of
-`grid_engine.py` and `mark_readers.py` that can drift apart from each other.
-
-Both HIGH defects from the last review are fixed, and each one has a test that
-**fails against the old code**. That was checked by reverting the fix in a scratch
-copy and re-running — evidence in "Proof the tests are load-bearing" below.
+The declarative execution layer, plus the monochrome bar reader, plus the
+point-file hardening. Full package, not a patch.
 
 ## Install
 
-Runtime dependencies are in `requirements.txt`. SciPy is deliberately not
-required; association summaries use NumPy and the standard library.
-
     SKILL=~/.claude-science/orgs/dd143201-4dc0-4233-9a3f-240a058d710f/skills/figure-digitization-triage
     python3 -m pip install -r requirements.txt
-    cp *.py *.md *.csv *.png *.json *.tar "$SKILL"/
+    cp *.py *.md *.csv *.png *.jpeg *.json *.tar "$SKILL"/
     mkdir -p "$SKILL"/fixtures && cp fixtures/* "$SKILL"/fixtures/
+    mkdir -p "$SKILL"/wip && cp wip/* "$SKILL"/wip/
     cd "$SKILL" && for t in test_reproducibility test_kernel test_grid_engine \
-        test_bar_reader test_mark_readers test_integration crosscheck_id323; \
+        test_bar_reader test_mark_readers test_mono_bar test_integration \
+        test_run_batch crosscheck_id323 forward_test_397_mono_bar; \
         do python3 $t.py || break; done
 
 Then append `SKILL_ADDENDUM.md` and `MIGRATION.md` to `SKILL.md`.
@@ -26,169 +20,201 @@ Then append `SKILL_ADDENDUM.md` and `MIGRATION.md` to `SKILL.md`.
 I cannot write into the skill folder from this session — skill files here are a
 read-only cache. Until you run the copy the active skill is unchanged.
 
-## HIGH 1 — the adapter dropped three provenance fields
+## The declarative execution layer
 
-`to_value_records()`'s ASSOCIATION branch copied five of the seven fields the
-reader emits and the validator requires. `P_Value_Extraction_Method`,
-`Ties_Present` and `Point_Data_Reference` died in transit, between a reader that
-filled them correctly and a gate that demanded them.
+Four manifests describe the RUN, kept separate from the four grains that
+describe the DATA. A values file has to be reviewable by someone who never
+touches a raster; a run has to be re-executable by someone who never reads the
+paper.
 
-The shape of the bug matters more than the three names. A per-statistic
-`record.update(a=..., b=...)` has no relationship to `fig_values_columns()`, so
-adding a column to the reader and to the validator leaves a third place nobody
-edits and no suite covers. Both halves passed their own suites. The batch would
-not have.
+| file | one row per | carries |
+|---|---|---|
+| `panel_manifest.csv` | readable panel | box, `Mark_Type`, axis ticks and scale, baseline, the `Unit_ID` it fills, `Panel_Mode` |
+| `series_manifest.csv` | series in a panel | colour / mask key / marker shape / marker fill / line style / bar fill pattern, and the `Factor_Name`+`Factor_Level` it IS |
+| `position_manifest.csv` | x position in a panel | pixel or slot, display order, and the `Factor_Name`+`Factor_Level` it IS |
+| `reader_config.csv` | option | long form, so a reader's options are extensible without a schema change |
 
-Fixed by declaring the set once and copying it:
+`run_batch.py` loads all seven manifests, validates, dispatches by `Mark_Type`,
+saves the raw marks, converts to the standard value grain, runs the grid gate,
+and writes `figure_values.csv`, `run_manifest.csv`, `manual_queue.csv`,
+`qc_problems.csv`, `run_stamp.json`, `raw/` and `projects/`.
 
-```python
-ASSOCIATION_CARRIED = (
-    "Association_Type", "Association_Value", "P_Value", "P_Value_Method",
-    "N_Pairs", "P_Value_Extraction_Method", "Ties_Present",
-    "Point_Data_Reference",
-)
-...
-elif kind == "ASSOCIATION":
-    for key in ASSOCIATION_CARRIED:
-        record[key] = row.get(key)
-    if not record.get("Point_Data_Reference") and point_data_reference:
-        record["Point_Data_Reference"] = point_data_reference
-```
+Three design commitments, each of which is a scenario in `test_run_batch.py`:
 
-`test_mark_readers.py` asserts `set(ASSOCIATION_CARRIED) <=
-set(fig_values_columns())`, so a name in the adapter that the schema does not
-ship fails the suite rather than the run.
+**Manifests are validated before a raster is opened.** 25 rejection scenarios: a
+box that does not fit its image, ticks outside the panel they calibrate, a
+misspelled option, an option that is real but meaningless for this reader, two
+series told apart by nothing, a factor on both the series and the position axis,
+a scatter with declared x positions. Discovering on figure 140 that a Config_ID
+was mistyped is an expensive way to learn it.
 
-**Where the path comes from.** `summarize_association()` cannot know where the
-caller chose to write the points, so it cannot emit `Point_Data_Reference`. Two
-things close that: `write_point_data(points, path)` persists the cloud and
-returns the path, and `to_value_records(..., point_data_reference=path)` fills
-the column on rows that do not already carry one. A path already on the reader
-row wins — the adapter default never overwrites a real reading.
+**Identity is declared, never inferred.** The reader is never told what a series
+means; the manifest maps `Series_ID` and `Position_ID` onto factor levels after
+the fact. A test asserts the Cell_Keys come from the manifest and not from the
+reader's own labels.
 
-The regression the review asked for, run end to end:
+**Every panel lands on exactly one state**, and everything short of `AUTO_PASS`
+goes to the manual queue with its reason and coordinates:
 
-```python
-summary = summarize_association(points, "KENDALL_TAU")
-path    = write_point_data(points, ".../UA_points.json")
-record  = to_value_records([summary], "ASSOCIATION", "UA",
-                           cell_levels={"PANEL": "ALL"},
-                           point_data_reference=path)[0]
-assert record["P_Value_Extraction_Method"]
-assert record["Ties_Present"]
-assert record["Point_Data_Reference"]
-```
+    AUTO_PASS  MANUAL_POINT_READ  SERIES_IDENTITY_UNRESOLVED
+    PANEL_GEOMETRY_UNRESOLVED  NO_VARIANCE  NOT_CONVERTIBLE  QC_FAILED
 
-The record then goes straight into `fig_validate_bundle()` on a DIGITIZED unit
-with nothing hand-filled: **0 problems**. Blanking any one of the three in transit
-raises `MISSING_POINT_DATA_REFERENCE`, `MISSING_P_VALUE_PROVENANCE` or
-`MISSING_TIES_PRESENT` respectively — the chain is covered at the join now, not
-only at each end.
+Each is reachable and each has a scenario. `SERIES_IDENTITY_UNRESOLVED` is the
+one worth knowing: if one declared series produces marks and another produces
+none, the panel contributes **no** cells, not half of them. A reader that finds
+one of two curves cannot be trusted about which one it found.
 
-One thing the first draft of this test got wrong, worth keeping: a **tied**
-Kendall has no computed p, so `P_Value_Extraction_Method` is legitimately `""` and
-the assert fails on it. That is correct behaviour — a blank p attributes nothing.
-The fixture is asserted untied, and a separate scenario covers the tied row, where
-the tie claim and the point file are exactly what make the blank provenance
-legitimate and so must still arrive.
+`QC_FAILED` exists so `run_manifest.csv` and `qc_problems.csv` cannot tell a
+reviewer two different stories — a panel whose values the gate rejected is
+re-stated as failed, whatever the reader thought of them.
 
-## HIGH 2 — a digitized association could pass without its points
+### Reproducibility is recorded, and checked
 
-The old rule was `P_Value_Extraction_Method == DIGITIZED and P_Value_Method in
-COMPUTED`. Reworded: *a computed p needs its points*. The correction is right, and
-the reasoning is worth stating because the two rules sound equivalent:
+`run_manifest.csv` carries per panel: image SHA-256, config SHA-256, reader
+version, raw data file, WPD project, run date. `run_stamp.json` adds a hash of
+every input manifest. A second run over the same inputs is asserted identical.
 
-The point cloud is the record of the **effect**, not of the p. A digitized r is a
-claim about coordinates nobody else can see, whatever the p's origin — or whether
-there is a p at all. Gating on the p provenance let two classes through:
+**The run saves its own WebPlotDigitizer project.** The gate requires a
+re-openable project on every digitized row, and it is right to: "the reader said
+so" is not something a second person can check. An automated run has no
+human-saved one, so it writes the raster, the calibration it used and every mark
+it placed into a real `.tar` that opens in WPD. That is the only cheap way to
+catch a systematically misplaced series — a reviewer looks at where the reader
+thought the marks were.
 
-- a digitized effect whose p was transcribed from the running text
-- a digitized Kendall with ties, `SOURCE_P_REQUIRED_TIES`, and no p
+## `write_point_data` — the minor item, taken further than asked
 
-Both were fully valid rows under every other check. Now:
+The review asked for pixel coordinates, series, `Unit_ID`, `Cell_Key`, image hash
+and calibration. All are stored, and all are **required** rather than optional,
+because the reason is stronger than convenience:
 
-```python
-if digitized and blank(row.get("Point_Data_Reference")):
-    flag(line, "MISSING_POINT_DATA_REFERENCE", ...)
-```
+Calibrated x/y alone are already the reader's answer. If the calibration was
+wrong, the saved values are wrong in exactly the same way and nothing in the file
+disagrees with anything else — the file is self-consistent and useless. Storing
+the raw pixel next to the calibration is what makes the value *checkable*, so
+the function refuses to write a point that has no pixel.
 
-where `digitized` is the **unit's** `Extraction_Method`, and the branch is already
-inside `Statistic_Type == ASSOCIATION`. Nothing about the p enters it.
+Two further checks fall straight out of that:
 
-The condition keys on `== "DIGITIZED"`, not on `!= "TRANSCRIBED"`. A blank
-`Extraction_Method` must not back into a point-file requirement — it has its own
-code, and one missing field should raise one error.
+- **at write time**, every value is re-derived from its own pixel under the given
+  calibration; a mismatch raises. A file whose numbers do not follow from its own
+  pixels is internally inconsistent, and the moment to find out is before it is
+  written.
+- **at read time**, `read_point_data` re-checks the same thing, so a file edited
+  after the fact does not load silently. The old values-only schema is refused
+  outright rather than half-understood.
 
-## Proof the tests are load-bearing
+`sha256_of()` is exported for the image identity. 15 scenarios cover it,
+including "the association recomputes from the file alone".
 
-Both fixes were reverted in a scratch copy and the suites re-run. A test that
-passes before and after the fix is decoration.
+## BAR_MONO — monochrome grouped bars, with a real forward test
 
-| reverted | result |
-|---|---|
-| HIGH 2 → old p-gated condition | 3 FAILED, exactly the three classes named above |
-| HIGH 1 → old five-field `update()` | `KeyError: 'P_Value_Extraction_Method'` at the first assert |
+Held back from the last release for having no fixture. It has two now, plus a
+publisher raster.
 
-This is the check that was skipped when a column patch silently no-opped earlier
-in this project. Every string patch in this round asserted its anchor first.
+A black-and-white bar chart names its series by FILL PATTERN — solid, hatched,
+open — and no colour mask sees the difference. `SeriesSpec.bar_fill` is separate
+from `SeriesSpec.fill`: overloading one field meant an open circle and an
+unfilled bar were the same declaration, and a panel carrying both could not be
+described at all.
+
+Three things it gets right that are easy to get wrong:
+
+**The cap is not the bar.** Finding the bar's end by "the first row spanning half
+the slot" clears an error-bar cap, which is drawn about 70% of the bar's width —
+so the whisker tip becomes the value and every mean reads high by a whole SD, in
+one direction, silently. The reader walks UP FROM THE BASELINE instead: a bar has
+two side strokes continuous from the baseline to its end and a floating cap has
+none, so the walk stops before it ever reaches one. `edge_rule="FIRST_WIDE_ROW"`
+reproduces the defect on demand, and the suite measures its cost rather than
+asserting the fix — on a plain bar it lands on the cap one SD high, and on a bar
+carrying a significance glyph it goes higher still.
+
+**The interior is sampled inside the outline.** Including the two side strokes
+lifted an open bar's density from 0.02 to 0.16, into the hatched band, and the
+reader then named the wrong series with complete confidence.
+
+**The stem gets its own threshold.** Grey level is ink coverage: a filled bar
+reads near 0, a one-pixel hairline stem at 60% coverage reads about 140 on the
+same figure. Thresholding both at 128 found every cap and no stem, so on
+publication 397 the reader confirmed nothing and returned no dispersion at all —
+a fail-closed answer produced by a measurement error rather than by the figure.
+
+`forward_test_397_mono_bar.py` reads all 8 cells of publication 397 Figure 3,
+worst mean **0.75 mmHg** from an independent eye reading on a 100 mmHg axis, all
+8 error bars stem-confirmed. The two panels' axes are four pixels apart; sharing
+one calibration between them put the second panel's baseline below its own bars
+and returned nothing for all four of its cells. Panel geometry is per panel, and
+the forward test says so.
+
+## A defect the batch layer found on its way through
+
+`read_line_marker_panel` returned `errorbar_lower`/`errorbar_upper` in
+patch-relative rows while returning the centre in image rows. On a panel starting
+at row 40 both bounds sat 11 units high — and their **difference**, the
+dispersion, was exactly right. Every mean-and-dispersion check passed. The first
+thing to notice was the grid gate saying a mean sat outside its own error bar,
+which only happened once whole panels started flowing through it.
+
+Two scenarios now guard the bounds themselves, not just their spread.
 
 ## Suites
 
-All run with scipy hard-blocked by a `sys.meta_path` finder that raises on
-`scipy` and `scipy.*`.
+All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
 | `test_kernel.py` | 222 |
 | `test_grid_engine.py` | 132 |
+| `test_run_batch.py` | 76 |
+| `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
-| `test_mark_readers.py` | 43 |
+| `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **460** |
+| **total** | **579** |
 
-New since the last package: **+5** grid scenarios (the broadened point-file rule,
-including the two negative cases that must still pass) and **+14** reader
-scenarios (the adapter contract and the reader→adapter→gate chain).
+Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
+primitives), `forward_test_397_mono_bar.py`, and two worked examples:
 
-`crosscheck_id323.py` exits 0: max |Δmean| 0.50 px, max |Δdispersion| 2.50 px over
-72 bars, two independent primitives.
+- `build_id323.py` — 2 figures, 12 units, 107 values, 2 problems, both the known
+  `TIMEPOINT=DI19` hole where two bars overlap past separating
+- `build_397.py` — one real publication read **from manifests alone**, no raster
+  handling in the script at all. 8 values, and both panels land on `QC_FAILED` —
+  which is the demonstration, not a defect. The caption does not say whether the
+  whiskers are SD or SEM, so `Errorbar_Definition_Source` records `UNRESOLVED`
+  and the gate refuses `Dispersion_Type=SD` beside it. The means are read, saved
+  and auditable; the figure cannot enter a pooled variance until somebody reads
+  the methods.
 
-`build_id323.py` — 2 figures, 14 grid rows, 12 units, 107 values, **2 problems**,
-both the same known hole: `FACTOR_LEVEL_MISSING` / `FACTORIAL_CELL_MISSING` for
-`TIMEPOINT=DI19` on FIG2 DAP, where two bars overlap past separating. That is
-fail-closed working — the cell is named, not guessed.
+## Not shipped: solid/dashed LINE_MONO
 
-## What is in the package
+It is built, it is measured, and it is in `wip/` rather than in the reader set.
 
-| File | Role |
-|---|---|
-| `kernel.py` | shared primitives: null tokens, vocabularies, normalizers |
-| `grid_engine.py` | the four-grain validator — figures / grids / units / values |
-| `mark_readers.py` | non-bar readers, `summarize_association`, the value adapter |
-| `bar_reader.py` | colour bar panels, outline-centre tops, stem-confirmed caps |
-| `crosscheck_id323.py` | second independent reading of one figure, different primitive |
-| `build_id323.py` | worked example: raster → four CSVs → gate |
-| `make_wpd_project.py` | emit a WebPlotDigitizer project from a calibration |
-| `make_bar_fixture.py` | synthetic bar rasters with known truth |
-| `forward_test_real_monochrome.py` | forward challenge on a publisher raster (not redistributed) |
-| `*_TEMPLATE.csv` | the four blank grain templates, generated from the column functions |
-| `fixtures/`, `*.jpeg`, `*.png`, `*.tar` | rasters, panel geometry, WPD projects |
+On a synthetic fixture it reads 16 of 18 separable cells, assigns both styles
+correctly and recovers means within 1.5 units on a 50-unit axis. That is close
+to working and not the same as working:
 
-## Not in this package, deliberately
+- at a deliberate **crossing**, where the two curves land on the same value, it
+  emits both cells instead of dropping them. The whole design of this system is
+  that an unresolvable mark produces no row; this one produces two
+- 2 of 18 separable cells go missing and the reason is not characterised
+- it has not been run against publication 397 at all
 
-`read_monochrome_bar_panel` (BAR_MONO — hatched / solid / open monochrome bars,
-found missing during the 397 pilot) stays on the pilot branch. It works on 397
-Figure 3 live, but it has no synthetic fixture and no regression scenarios, and
-shipping an unhardened reader inside a release whose whole point is that fields
-cannot drift silently would be the same mistake in a new place. It comes next,
-with a fixture.
+Shipping it would put numbers in a values file nobody can defend — the same
+reason BAR_MONO was held back last time, and the standard BAR_MONO has now met.
+`wip/line_style_mono.py` records what was learned so the next attempt does not
+restart: a whole-panel sequential tracer does not work (a dash *tip* biases the
+run centre enough to lose a steep curve, and one miss fragments the series); a
+short windowed fit does, provided it is quadratic, counts only the span the ink
+covers, and lets the collection band follow the first fit.
+
+`wip/test_line_style_mono.py` runs and reports 6 failures. It is deliberately
+not in the release gate.
 
 ## Still open
 
-- 397 Figures 3–4: 12 panels × 4 cells, pending BAR_MONO hardening
-- 397 Figures 1, 2, 5: solid-vs-dashed `LINE_MONO`, 8 panels × 24 cells
-- 386 Figures 3–4
+- 397 Figures 1, 2, 5 — solid/dashed, blocked on the above
+- 397 Figure 4, 386 Figures 3–4
 - ID 323 FIG2 DAP DI19 (1 cell) and 4 unpaired cells need a human reading
-- the declarative batch layer (`panel_manifest.csv`, `series_manifest.csv`,
-  `position_manifest.csv`, `reader_config`, `run_batch.py`) is designed, not built
+- ID 323 and 397 both need their SD/SEM wording resolved from the methods text

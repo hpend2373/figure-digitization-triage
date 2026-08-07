@@ -1,6 +1,6 @@
 """Pilot: publication 397, every figure, through the batch layer.
 
-    python3 pilot_397.py [OUTPUT_DIR]
+    python3 pilot_397.py [OUTPUT_DIR] [RASTER_DIR]
 
 Five figures, declared honestly - the two that a released reader can do and the
 three it cannot, in one manifest set and one run. That mix is the point. A batch
@@ -39,6 +39,24 @@ import run_batch as RB                                             # noqa: E402
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "out_pilot_397")
 MANIFESTS = os.path.join(OUT, "manifests")
+RASTERS = sys.argv[2] if len(sys.argv) > 2 else HERE
+
+# Every raster this pilot names, checked before anything is built.
+#
+# There was a check for three of these, and it sat at the bottom of the file -
+# after the manifests, which hash their own rasters as they are assembled. It
+# could therefore never fire: a missing figure raised FileNotFoundError out of
+# `sha256_of` two hundred lines earlier, and a guard that can only run once its
+# subject has already crashed is decoration. Ahead of the first open, and
+# exiting 2 rather than 0, it says which files are absent and stops.
+FIGURE_RASTERS = tuple("397_fig%d.jpeg" % n for n in range(1, 6))
+_absent = [f for f in FIGURE_RASTERS
+           if not os.path.exists(os.path.join(RASTERS, f))]
+if _absent:
+    print("BLOCKED: publisher rasters not found in %s: %s"
+          % (RASTERS, ", ".join(_absent)), file=sys.stderr)
+    raise SystemExit(2)
+
 SESSIONS = [("PRE", "Pre HDT Stand"), ("POST", "Post HDT Stand")]
 HDT = ["0:30", "1:00", "1:30", "2:00", "2:30", "3:00",
        "3:30", "4:00", "4:30", "5:00", "5:30", "6:00"]
@@ -107,6 +125,15 @@ LINE_FIGURES = [
 
 FIGURES, GRIDS, UNITS, PANELS, SERIES, POSITIONS = [], [], [], [], [], []
 SOURCE_DOCUMENTS, SOURCE_FIGURES, SOURCE_PANELS = [], [], []
+# The ledger the source manifests point at. One row here, because one person
+# did the inspection - and their name is written in Hangul, which the previous
+# ASCII-only check on `Inspector` could not accept.
+REVIEWERS = [dict(
+    Reviewer_ID="RV_MYK", Reviewer_Name="\uae40\ubbfc\uc5fd",
+    Contact_Type="EMAIL", Reviewer_Contact="alsduq2373@gmail.com",
+    Registered_By="\uae40\ubbfc\uc5fd", Registration_Date="2026-08-07",
+    Human_Attestation="HUMAN_CONFIRMED",
+    Note="opened all five publisher rasters and counted the panels")]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="ARM", Factor_Level=lv,
                Level_Order=i, Note="") for i, lv in enumerate(("FLUID", "NON_FLUID"))]
 GRIDS += [dict(Grid_ID="G_SESSION", Factor_Name="SESSION", Factor_Level=lv,
@@ -121,10 +148,10 @@ def figure(fid, image, caption, panels):
     FIGURES.append(dict(
         Figure_ID=fid, Publication_ID=397, Figure_Number=fid.split("_")[1],
         Source_File="397.pdf", Source_Page=0,
-        Source_Image=os.path.join(HERE, image),
+        Source_Image=os.path.join(RASTERS, image),
         Source_Caption_Verbatim=caption,
         Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(
-            os.path.join(HERE, image))[:24],
+            os.path.join(RASTERS, image))[:24],
         WPD_Project_File="", Observed_Panel_Count=panels,
         Worklist_Panel_Count=panels, Unlisted_Panels="",
         Panel_Reconciliation_Status="MATCHED", Note=""))
@@ -173,7 +200,7 @@ for fid, image, outcome, units, domain, rows in BAR_FIGURES:
              Errorbar_Definition_Source=BAR_ERRORBAR_SOURCE)
         PANELS.append(dict(
             Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid, Unit_ID=uid, Panel_Label=sex,
-            Mark_Type="BAR_MONO", Image_Path=os.path.join(HERE, image),
+            Mark_Type="BAR_MONO", Image_Path=os.path.join(RASTERS, image),
             Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
             Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",
             Axis_Y_Scale="LINEAR", Axis_X_Ticks="", Axis_Y_Ticks=ticks,
@@ -204,7 +231,7 @@ for fid, image, outcome, units, rows in LINE_FIGURES:
              Errorbar_Definition_Source=LINE_ERRORBAR_SOURCE)
         PANELS.append(dict(
             Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid, Unit_ID=uid, Panel_Label=sex,
-            Mark_Type="LINE_MONO_STYLE", Image_Path=os.path.join(HERE, image),
+            Mark_Type="LINE_MONO_STYLE", Image_Path=os.path.join(RASTERS, image),
             Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
             Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",
             Axis_Y_Scale="LINEAR", Axis_X_Ticks="", Axis_Y_Ticks=ticks,
@@ -244,7 +271,7 @@ for pid, sex, box in (("P5_NOFLUID", "NO_FLUID_HDT", (84, 430, 60, 300)),
          Note="single-subject trace - not a group summary")
     PANELS.append(dict(
         Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F397_5", Unit_ID=uid, Panel_Label=sex,
-        Mark_Type="LINE_MONO", Image_Path=os.path.join(HERE, "397_fig5.jpeg"),
+        Mark_Type="LINE_MONO", Image_Path=os.path.join(RASTERS, "397_fig5.jpeg"),
         Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
         Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",
         Axis_Y_Scale="LINEAR", Axis_X_Ticks="", Axis_Y_Ticks="100:60;50:290",
@@ -331,16 +358,16 @@ SOURCE_DOCUMENTS.append(dict(
     Document_Role="MAIN_ARTICLE", Source_File="397.pdf",
     Article_Page_Range="full target article", Observed_Figure_Count=5,
     Inventory_Status="VISUALLY_VERIFIED", Figure_Count_Method="HUMAN_VISUAL",
-    Inspector="v7.7 completeness audit", Inspection_Date="2026-08-07",
+    Reviewer_ID="RV_MYK", Inspection_Date="2026-08-07",
     Note="all five publisher figures inventoried"))
 for fig_no, specs in sorted(_SOURCE_SPECS.items()):
     SOURCE_FIGURES.append(dict(
         Source_Figure_ID="SF397_%d" % fig_no,
         Source_Document_ID="SD397_MAIN", Publication_ID=397,
         Figure_Number="FIG%d" % fig_no, Source_File="397.pdf", Source_Page=0,
-        Source_Image=os.path.join(HERE, "397_fig%d.jpeg" % fig_no),
+        Source_Image=os.path.join(RASTERS, "397_fig%d.jpeg" % fig_no),
         Observed_Panel_Count=len(specs), Inventory_Status="VISUALLY_VERIFIED",
-        Panel_Count_Method="HUMAN_VISUAL", Inspector="v7.7 completeness audit",
+        Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_MYK",
         Inspection_Date="2026-08-07", Note="counted on the full publisher raster"))
     for order, (spid, outcome, target, disposition) in enumerate(specs, 1):
         SOURCE_PANELS.append(dict(
@@ -355,6 +382,7 @@ for fig_no, specs in sorted(_SOURCE_SPECS.items()):
 def write(directory):
     os.makedirs(directory, exist_ok=True)
     for name, rows, cols in (
+            ("reviewer_registry", REVIEWERS, BM.reviewer_registry_columns()),
             ("source_document_manifest", SOURCE_DOCUMENTS,
              BM.source_document_manifest_columns()),
             ("source_figure_manifest", SOURCE_FIGURES, BM.source_figure_manifest_columns()),
@@ -374,13 +402,8 @@ def write(directory):
                 w.writerow([r.get(c, "") for c in cols])
 
 
-if not all(os.path.exists(os.path.join(HERE, f))
-           for f in ("397_fig1.jpeg", "397_fig3.jpeg", "397_fig4.jpeg")):
-    print("SKIP: publisher rasters not found")
-    raise SystemExit(0)
-
 write(MANIFESTS)
-summary = RB.run_batch(MANIFESTS, OUT, file_root=HERE, run_date="2026-08-07")
+summary = RB.run_batch(MANIFESTS, OUT, file_root=RASTERS, run_date="2026-08-07")
 if summary["status"] == "MANIFEST_REJECTED":
     import pandas as pd
     print("manifests rejected: %s" % summary["detail"])

@@ -53,7 +53,7 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
-PIPELINE_VERSION = "7.8"
+PIPELINE_VERSION = "7.9"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -79,6 +79,7 @@ def reader_functions():
 
 
 MANIFEST_FILES = {
+    "reviewers": "reviewer_registry.csv",
     "source_documents": "source_document_manifest.csv",
     "source_figures": "source_figure_manifest.csv",
     "source_panels": "source_panel_inventory.csv",
@@ -772,7 +773,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         m["panels"], m["series"], m["positions"], m["configs"],
         units=m["units"], source_documents=m["source_documents"],
         source_figures=m["source_figures"],
-        source_panels=m["source_panels"], file_root=file_root,
+        source_panels=m["source_panels"], reviewers=m["reviewers"],
+        file_root=file_root,
         check_files=check_files)
     if len(problems):
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),

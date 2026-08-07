@@ -38,8 +38,9 @@ outcome, sex, axis or reader configuration; it therefore cannot prove that the
 publisher's physical figure was covered.  A set of virtual figures can each say
 `2/2 MATCHED` while most of the original raster is absent.
 
-Create three source manifests before creating any reader row:
+Create four source manifests before creating any reader row:
 
+    reviewer_registry.csv       one row per person allowed to attest an inventory
     source_document_manifest.csv one row per main article/supplement/chapter
     source_figure_manifest.csv  one row per physical publisher figure
     source_panel_inventory.csv  one row per visually distinct source subpanel
@@ -53,7 +54,14 @@ full raster, not from the caption.  Count plots, photographs, schematics and
 table/inset subpanels before deciding whether they contain target data.  A legend
 or colour bar is not a panel, while an inset with its own independent content is.
 If the source supplies no panel letters, assign stable reading-order labels
-`P01`, `P02`, ... .  Record the count method and human verifier.  Machine
+`P01`, `P02`, ... .  Record the count method, and the `Reviewer_ID` of the person
+who did the counting.
+
+That ID is a foreign key into `reviewer_registry.csv`, which holds the name, a
+contact (EMAIL or a checksum-valid ORCID) and a `Human_Attestation`.  Register
+each extractor once.  Names are compared after NFKC normalization on Unicode
+alphanumerics, so `김민엽` and `李明` are names like any other; what is refused is a
+row where nobody contactable stands behind the count.  Machine
 segmentation may propose boxes, but `Inventory_Status=VISUALLY_VERIFIED` is the
 gate because captions and layout detectors both miss unlabeled panels.
 
@@ -183,11 +191,12 @@ and not to the schema now fails the suite instead of the batch.
 
 ## Declare the run before you make it
 
-Seven files describe source completeness and the RUN, as distinct from the data. They are separate
+Eight files describe source completeness and the RUN, as distinct from the data. They are separate
 from the four data grains on purpose: a values file has to be reviewable by
 someone who never touches a raster, and a run has to be re-executable by someone
 who never reads the paper.
 
+    reviewer_registry.csv  who may attest an inventory, and how to reach them
     source_document_manifest.csv article/supplement/chapter figure inventory
     source_figure_manifest.csv physical publisher figures and verified counts
     source_panel_inventory.csv every visible panel and its disposition

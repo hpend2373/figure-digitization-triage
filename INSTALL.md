@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.8 (full package)
+# figure-digitization-triage — v7.9 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -32,13 +32,85 @@ copy and the suite re-run, so no scenario is decoration:
 | option range checks removed | 4 |
 | LINE_MONO accepting line style alone | 1 |
 
+## HIGH (v7.8 review) — the attestation check could not spell the reviewer's name
+
+`Inspector` was free text, and the rule that guarded it was
+
+    len(re.sub(r"[^0-9A-Za-z]", "", who)) < 2
+
+which is a statement that reviewers are named in the Latin alphabet. It got
+both halves of its job backwards:
+
+| written in `Inspector` | v7.8 | v7.9 |
+|---|---|---|
+| `김민엽`, `李明`, `홍길동` | **rejected** | registers |
+| `AI`, `BOT`, `LLM`, `Codex`, `Claude` | **accepted** | refused |
+
+Stripping every non-ASCII character left the empty string, so the person who
+actually did this inventory could not record that they had — while five names
+for the software that cannot do it passed on length alone.
+
+Both halves are now structural rather than lexical.
+
+**`reviewer_registry.csv`** is a new mandatory manifest, and `Reviewer_ID` on
+the two source manifests is a foreign key into it (`REVIEWER_NOT_REGISTERED`).
+A name, a contact and a human attestation are declared once, by a registered
+registrar, instead of being retyped per row where nothing connects two
+spellings of the same person. `Inspector` is gone; a manifest still carrying
+the column is refused with `LEGACY_INSPECTOR_COLUMN` rather than having it
+silently ignored.
+
+**Names are compared after NFKC normalization, on Unicode `isalnum()` tokens.**
+`김민엽`, `李明`, `홍길동`, `Ólafur Þórsson`, `О. Иванов` and `ＫＩＭ` all register.
+
+The registry validates what can actually be validated: `Contact_Type` is EMAIL
+or ORCID, an ORCID must pass its ISO 7064 MOD 11-2 check digit, and
+`Human_Attestation=AUTOMATED_AGENT` is a legal declaration that is then refused
+(`REVIEWER_NOT_HUMAN`) — an agent may be recorded, but it may not hold the
+attestation.
+
+The name-token check is a **courtesy, not the guarantee**, and the code says so.
+It fires only when every letter-bearing token of a name is a software word, so
+`Claude Bernard` registers and a bare `Claude` does not; `GPT-4` and `gpt4` are
+caught by stripping trailing digits. That list is unbounded by construction and
+anyone determined to write a person's name where there is no person will
+succeed. What makes the attestation *auditable* is `Reviewer_Contact` plus a
+signed `Human_Attestation` — a named, contactable person on the hook — not a
+denylist.
+
+41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## MEDIUM (v7.8 review) — three scripts, three different answers to a missing raster
+
+| script | v7.8 | v7.9 |
+|---|---|---|
+| `forward_test_real_monochrome.py` | `BLOCKED`, exit 2 | unchanged |
+| `forward_test_397_mono_bar.py` | `SKIP`, **exit 0** | `BLOCKED`, exit 2 |
+| `pilot_397.py` | guard unreachable, **traceback, exit 1** | `BLOCKED`, exit 2 |
+
+Exit 0 on a missing input is the worst available answer: a suite that never
+opened a figure reports the same green as one that read every cell correctly.
+
+The pilot's guard was worse than wrong, it was dead. It checked three of the
+five rasters and sat at the *bottom* of the file — but the manifests hash their
+own rasters as they are assembled, two hundred lines earlier, so a missing
+figure raised `FileNotFoundError` out of `sha256_of` long before the guard could
+run. A guard that can only execute once its subject has already crashed is
+decoration.
+
+It now checks all five ahead of the first open, names the absent files, and
+takes an optional raster directory as `argv[2]` so the empty case is testable at
+all. `test_reproducibility.py` runs all three scripts against a missing raster
+and requires exit 2 *and* the word `BLOCKED` in the output; reverting either
+SKIP fails it.
+
 ## HIGH (v7.7 review) — the inventory attestation accepted non-answers
 
 The source-inventory layer is right, and it rests on one thing software cannot
 do: a person opened the figure and counted the panels. Every guarantee above it
 — coverage, routing, the queue — is only as good as that attestation, which
-makes `Inspector` and `Inspection_Date` the two most load-bearing fields in the
-package.
+makes the reviewer field and `Inspection_Date` the two most load-bearing fields
+in the package.
 
 They were checked for blankness and nothing else. All of these ran:
 
@@ -52,9 +124,8 @@ can least afford it — a non-answer occupying the slot that is supposed to hold
 the answer, with no second source to fall back on.
 
 `check_attestation()` now runs both fields through the unresolved-marker
-vocabulary (`UNRESOLVED_INVENTORY_ATTESTATION`), requires `Inspector` to be at
-least two alphanumerics — the point of the field is that somebody can be *asked*
-about the count — and parses `Inspection_Date` as an ISO date that is not in the
+vocabulary (`UNRESOLVED_INVENTORY_ATTESTATION`), requires a real name — the
+point of the field is that somebody can be *asked* about the count — and parses `Inspection_Date` as an ISO date that is not in the
 future (`BAD_INSPECTION_DATE`). A free-text date cannot be compared with
 anything, which is the only reason to record one. 20 scenarios; reverting the
 two call sites fails all 20.

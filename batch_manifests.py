@@ -35,6 +35,8 @@ between a config file and a suggestion.
 import hashlib
 import json
 import os
+import re
+import unicodedata
 
 import pandas as pd
 
@@ -106,7 +108,170 @@ SOURCE_DOCUMENT_ROLES = ("MAIN_ARTICLE", "SUPPLEMENT", "APPENDIX",
                          "PROCEEDINGS_CHAPTER")
 
 
-def check_attestation(row, line, flag, kernel=None):
+REVIEWER_ATTESTATIONS = ("HUMAN_CONFIRMED", "AUTOMATED_AGENT")
+REVIEWER_CONTACT_TYPES = ("EMAIL", "ORCID")
+
+# Whole-name tokens that name a class of software rather than a person.  This
+# list is a courtesy check, NOT the guarantee - it is unbounded by construction
+# and anyone determined to write a person's name where there is no person will
+# succeed.  What makes the attestation auditable is `Reviewer_Contact` plus
+# `Human_Attestation`, both of which name someone who can be asked.  The check
+# fires only when EVERY token of the name is one of these, so that a real
+# Claude Bernard registers without argument and a bare `Claude` does not.
+NON_HUMAN_NAME_TOKENS = frozenset((
+    "AI", "BOT", "LLM", "GPT", "CHATGPT", "CODEX", "CLAUDE", "COPILOT",
+    "GEMINI", "LLAMA", "ROBOT", "SCRIPT", "AUTO", "AUTOMATED", "AUTOMATION",
+    "MACHINE", "AGENT", "ASSISTANT", "MODEL", "SYSTEM", "PIPELINE", "TOOL",
+))
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
+_ORCID_RE = re.compile(r"^(\d{4})-(\d{4})-(\d{4})-(\d{3}[\dX])$")
+
+
+def name_tokens(value):
+    """Alphanumeric tokens of a personal name, Unicode-aware.
+
+    The first version of this used `re.sub(r"[^0-9A-Za-z]", "", who)`, which is
+    a statement that names are written in the Latin alphabet.  It rejected
+    `김민엽`, `李明` and `홍길동` outright - every CJK character was stripped, the
+    remainder was empty, and the person who actually did the inspection could
+    not record that they had.  A validator that refuses the reviewer's own name
+    does not make the attestation stronger; it makes it impossible.
+
+    NFKC first, because `ＡＢ` and `AB` are the same two letters and only one of
+    them is typed on purpose.
+    """
+    normalized = unicodedata.normalize("NFKC", str(value))
+    token, out = [], []
+    for ch in normalized:
+        if ch.isalnum():
+            token.append(ch)
+        elif token:
+            out.append("".join(token))
+            token = []
+    if token:
+        out.append("".join(token))
+    return out
+
+
+def orcid_checksum_ok(digits):
+    """ISO 7064 MOD 11-2, the check digit ORCID actually uses.
+
+    Worth doing: it is the one identity field in this package that can be
+    checked without asking anybody, and a mistyped ORCID is indistinguishable
+    from a fabricated one until somebody tries to write to it.
+    """
+    total = 0
+    for ch in digits[:-1]:
+        total = (total + int(ch)) * 2
+    remainder = total % 11
+    expected = (12 - remainder) % 11
+    return ("X" if expected == 10 else str(expected)) == digits[-1].upper()
+
+
+def check_reviewer_registry(reviewers, flag, kernel=None):
+    """The ledger the source manifests point at, and the only place a name lives.
+
+    `Inspector` was free text on every source row, which made it unverifiable
+    twice over: nothing connected two spellings of the same person, and nothing
+    distinguished a person from a process.  A foreign key into a registered
+    ledger fixes the first completely and the second as far as software can -
+    registering a non-person now takes a deliberate, signed, reviewable act
+    instead of typing three letters into a column nobody reads.
+    """
+    import datetime
+    if kernel is None:
+        import kernel as kernel_module
+        kernel = kernel_module
+    index = {}
+    for i, r in reviewers.iterrows():
+        line = "reviewers:%d" % (i + 2)
+        rid = str(r.get("Reviewer_ID", "")).strip()
+        if not rid:
+            flag(line, "MISSING_REQUIRED", "Reviewer_ID")
+            continue
+        if rid in index:
+            flag(line, "DUPLICATE_REVIEWER_ID", rid)
+            continue
+        index[rid] = r
+        for c in ("Reviewer_Name", "Contact_Type", "Reviewer_Contact",
+                  "Registered_By", "Registration_Date", "Human_Attestation"):
+            if blank(r.get(c)):
+                flag(line, "MISSING_REQUIRED", c)
+
+        for field in ("Reviewer_ID", "Reviewer_Name", "Reviewer_Contact",
+                      "Registered_By"):
+            value = str(r.get(field, "")).strip()
+            marker = kernel.fig_unresolved_marker(value)
+            if marker:
+                flag(line, "UNRESOLVED_REVIEWER_IDENTITY",
+                     "%s contains %r - a reviewer nobody can name is not a "
+                     "reviewer" % (field, marker))
+
+        for field in ("Reviewer_Name", "Registered_By"):
+            value = str(r.get(field, "")).strip()
+            if not value:
+                continue
+            tokens = name_tokens(value)
+            glyphs = sum(len(t) for t in tokens)
+            # Version numbers do not rescue a model name: `GPT-4` splits into
+            # GPT and 4, only the letters carry the claim, and `gpt4` is the
+            # same token with the hyphen left out.
+            worded = [t for t in tokens if any(ch.isalpha() for ch in t)]
+            if glyphs < 2 or not worded:
+                flag(line, "UNRESOLVED_REVIEWER_IDENTITY",
+                     "%s=%r is not a name - the point of the field is that "
+                     "somebody can be asked about the count" % (field, value))
+            elif all(t.upper().rstrip("0123456789") in NON_HUMAN_NAME_TOKENS
+                     for t in worded):
+                flag(line, "REVIEWER_NOT_HUMAN",
+                     "%s=%r names a class of software, not a person. If a real "
+                     "person is meant, record the full name; no software counted "
+                     "the panels in a published figure" % (field, value))
+
+        attestation = str(r.get("Human_Attestation", "")).strip().upper()
+        if attestation and attestation not in REVIEWER_ATTESTATIONS:
+            flag(line, "BAD_HUMAN_ATTESTATION",
+                 "%r is not one of %s" % (attestation, ", ".join(REVIEWER_ATTESTATIONS)))
+        elif attestation == "AUTOMATED_AGENT":
+            flag(line, "REVIEWER_NOT_HUMAN",
+                 "%s is declared AUTOMATED_AGENT. The panel count is only "
+                 "evidence because a person opened the figure and looked at it, "
+                 "so an automated agent cannot hold that attestation" % rid)
+
+        ctype = str(r.get("Contact_Type", "")).strip().upper()
+        contact = str(r.get("Reviewer_Contact", "")).strip()
+        if ctype and ctype not in REVIEWER_CONTACT_TYPES:
+            flag(line, "BAD_CONTACT_TYPE",
+                 "%r is not one of %s" % (ctype, ", ".join(REVIEWER_CONTACT_TYPES)))
+        elif contact and ctype == "EMAIL" and not _EMAIL_RE.match(contact):
+            flag(line, "BAD_REVIEWER_CONTACT",
+                 "Reviewer_Contact=%r is not an address anyone could write to" % contact)
+        elif contact and ctype == "ORCID":
+            m = _ORCID_RE.match(contact)
+            if not m:
+                flag(line, "BAD_REVIEWER_CONTACT",
+                     "Reviewer_Contact=%r is not an ORCID (0000-0000-0000-0000)" % contact)
+            elif not orcid_checksum_ok(contact.replace("-", "")):
+                flag(line, "BAD_REVIEWER_CONTACT",
+                     "ORCID %s fails its ISO 7064 check digit - it is a typo or "
+                     "it was made up" % contact)
+
+        when = str(r.get("Registration_Date", "")).strip()
+        if when:
+            try:
+                parsed = datetime.date.fromisoformat(when)
+            except ValueError:
+                flag(line, "BAD_REGISTRATION_DATE",
+                     "Registration_Date=%r is not an ISO date (YYYY-MM-DD)" % when)
+            else:
+                if parsed > datetime.date.today():
+                    flag(line, "BAD_REGISTRATION_DATE",
+                         "Registration_Date=%s is in the future" % when)
+    return index
+
+
+def check_attestation(row, line, flag, reviewer_index=None, kernel=None):
     """The one human act this whole layer rests on has to be a real answer.
 
     No software can count the panels in an arbitrary published figure, so the
@@ -120,25 +285,29 @@ def check_attestation(row, line, flag, kernel=None):
     date at all. That is the same defect as a hedged `Errorbar_Definition_Source`
     - a non-answer occupying the field that is supposed to hold the answer - and
     it is worse here, because there is no second source to fall back on.
+
+    Checking the spelling of a free-text name was the next version of the same
+    mistake. `Reviewer_ID` is now a foreign key: the name, the contact and the
+    human attestation live once in `reviewer_registry.csv`, and this row either
+    points at a registered person or does not run.
     """
     import datetime
-    import re
     if kernel is None:
         import kernel as kernel_module
         kernel = kernel_module
-    who = str(row.get("Inspector", "")).strip()
+    who = str(row.get("Reviewer_ID", "")).strip()
     when = str(row.get("Inspection_Date", "")).strip()
-    for field, value in (("Inspector", who), ("Inspection_Date", when)):
+    for field, value in (("Reviewer_ID", who), ("Inspection_Date", when)):
         marker = kernel.fig_unresolved_marker(value)
         if marker:
             flag(line, "UNRESOLVED_INVENTORY_ATTESTATION",
                  "%s contains %r. Nobody has looked at this figure yet, and the "
                  "panel count below is therefore not evidence of anything"
                  % (field, marker))
-    if who and len(re.sub(r"[^0-9A-Za-z]", "", who)) < 2:
-        flag(line, "UNRESOLVED_INVENTORY_ATTESTATION",
-             "Inspector=%r is not a name or a pair of initials - the point of "
-             "the field is that somebody can be asked about the count" % who)
+    if who and reviewer_index is not None and who not in reviewer_index:
+        flag(line, "REVIEWER_NOT_REGISTERED",
+             "Reviewer_ID=%r is not in reviewer_registry.csv. Register the "
+             "person who did the inspection before their count is used" % who)
     if when:
         try:
             parsed = datetime.date.fromisoformat(when)
@@ -319,12 +488,26 @@ def reader_config_columns():
     return ["Config_ID", "Option", "Value", "Note"]
 
 
+def reviewer_registry_columns():
+    """The people whose visual inspections this package is allowed to trust.
+
+    Small by nature - a 160-publication review has a handful of extractors - and
+    worth keeping by hand.  Every `Reviewer_ID` in the source manifests must
+    appear here, which is what turns `Inspector` from an unverifiable string
+    into something a second reader can audit.
+    """
+    return [
+        "Reviewer_ID", "Reviewer_Name", "Contact_Type", "Reviewer_Contact",
+        "Registered_By", "Registration_Date", "Human_Attestation", "Note",
+    ]
+
+
 def source_figure_manifest_columns():
     """Physical figures, before any outcome-specific virtual split."""
     return [
         "Source_Figure_ID", "Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File",
         "Source_Page", "Source_Image", "Observed_Panel_Count",
-        "Inventory_Status", "Panel_Count_Method", "Inspector",
+        "Inventory_Status", "Panel_Count_Method", "Reviewer_ID",
         "Inspection_Date", "Note",
     ]
 
@@ -334,7 +517,7 @@ def source_document_manifest_columns():
     return [
         "Source_Document_ID", "Publication_ID", "Document_Role", "Source_File",
         "Article_Page_Range", "Observed_Figure_Count", "Inventory_Status",
-        "Figure_Count_Method", "Inspector", "Inspection_Date", "Note",
+        "Figure_Count_Method", "Reviewer_ID", "Inspection_Date", "Note",
     ]
 
 
@@ -351,6 +534,7 @@ def source_panel_inventory_columns():
 
 
 BATCH_TEMPLATES = (
+    ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
     ("source_figure_manifest", source_figure_manifest_columns),
     ("source_panel_inventory", source_panel_inventory_columns),
@@ -475,6 +659,7 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
 
 def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
+                             reviewers=None,
                              file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
 
@@ -494,7 +679,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         source_figures = pd.DataFrame()
     if source_panels is None:
         source_panels = pd.DataFrame()
-    frames = (("source_documents", source_documents, source_document_manifest_columns()),
+    if reviewers is None:
+        reviewers = pd.DataFrame()
+    frames = (("reviewers", reviewers, reviewer_registry_columns()),
+              ("source_documents", source_documents, source_document_manifest_columns()),
               ("source_figures", source_figures, source_figure_manifest_columns()),
               ("source_panels", source_panels, source_panel_inventory_columns()),
               ("panels", panels, panel_manifest_columns()),
@@ -505,8 +693,18 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         missing = [c for c in cols if c not in df.columns]
         if missing:
             flag(name, "SCHEMA_INCOMPLETE", "missing columns: " + ", ".join(missing))
+        # A renamed column is the one schema change that can pass silently: the
+        # old column is simply ignored, so a manifest that still records who
+        # looked at the figure reads as one where nobody did.
+        if "Inspector" in getattr(df, "columns", ()):
+            flag(name, "LEGACY_INSPECTOR_COLUMN",
+                 "Inspector was replaced by Reviewer_ID, a foreign key into "
+                 "reviewer_registry.csv. Register each inspector once, then put "
+                 "their Reviewer_ID here and delete the Inspector column")
     if problems:
         return pd.DataFrame(problems)
+
+    reviewer_index = check_reviewer_registry(reviewers, flag)
 
     def resolve(p):
         p = str(p).strip()
@@ -537,11 +735,11 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         source_document_index[sdid] = r
         for c in ("Publication_ID", "Document_Role", "Source_File",
                   "Article_Page_Range", "Observed_Figure_Count",
-                  "Inventory_Status", "Figure_Count_Method", "Inspector",
+                  "Inventory_Status", "Figure_Count_Method", "Reviewer_ID",
                   "Inspection_Date"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
-        check_attestation(r, line, flag)
+        check_attestation(r, line, flag, reviewer_index)
         role = str(r.get("Document_Role", "")).strip().upper()
         if role not in SOURCE_DOCUMENT_ROLES:
             flag(line, "BAD_SOURCE_DOCUMENT_ROLE", role)
@@ -585,10 +783,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      r.get("Publication_ID")))
         for c in ("Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File", "Source_Page",
                   "Source_Image", "Observed_Panel_Count", "Inventory_Status",
-                  "Panel_Count_Method", "Inspector", "Inspection_Date"):
+                  "Panel_Count_Method", "Reviewer_ID", "Inspection_Date"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
-        check_attestation(r, line, flag)
+        check_attestation(r, line, flag, reviewer_index)
         try:
             count = _as_int(r.get("Observed_Panel_Count"))
             if count < 1:

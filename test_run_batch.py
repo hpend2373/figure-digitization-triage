@@ -144,11 +144,17 @@ FIGURES = [dict(Figure_ID="F1", Publication_ID=1, Figure_Number="FIG1",
                 Worklist_Panel_Count=4, Unlisted_Panels="",
                 Panel_Reconciliation_Status="MATCHED", Note="")]
 
+REVIEWERS = [dict(
+    Reviewer_ID="RV_T1", Reviewer_Name="Test Fixture", Contact_Type="EMAIL",
+    Reviewer_Contact="fixture@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="synthetic regression reviewer")]
+
 SOURCE_DOCUMENTS = [dict(
     Source_Document_ID="SD1", Publication_ID=1, Document_Role="MAIN_ARTICLE",
     Source_File="synthetic.pdf", Article_Page_Range="1-1",
     Observed_Figure_Count=1, Inventory_Status="VISUALLY_VERIFIED",
-    Figure_Count_Method="HUMAN_VISUAL", Inspector="test fixture",
+    Figure_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
     Inspection_Date="2026-08-06", Note="one synthetic source figure")]
 
 SOURCE_FIGURES = [dict(
@@ -156,7 +162,7 @@ SOURCE_FIGURES = [dict(
     Publication_ID=1, Figure_Number="FIG1",
     Source_File="synthetic.pdf", Source_Page=1, Source_Image=LINE_IMG,
     Observed_Panel_Count=4, Inventory_Status="VISUALLY_VERIFIED",
-    Panel_Count_Method="HUMAN_VISUAL", Inspector="test fixture",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
     Inspection_Date="2026-08-06", Note="four visible axes regions")]
 
 SOURCE_PANELS = [dict(
@@ -270,9 +276,11 @@ def write_manifests(directory, panels=PANELS, series_rows=SERIES,
                     positions=POSITION_ROWS, configs=CONFIGS, units=UNITS,
                     figures=FIGURES, grids=GRIDS,
                     source_documents=SOURCE_DOCUMENTS,
-                    source_figures=SOURCE_FIGURES, source_panels=SOURCE_PANELS):
+                    source_figures=SOURCE_FIGURES, source_panels=SOURCE_PANELS,
+                    reviewers=REVIEWERS):
     os.makedirs(directory, exist_ok=True)
     for name, rows, cols in (
+            ("reviewer_registry", reviewers, BM.reviewer_registry_columns()),
             ("source_document_manifest", source_documents,
              BM.source_document_manifest_columns()),
             ("source_figure_manifest", source_figures, BM.source_figure_manifest_columns()),
@@ -300,7 +308,8 @@ def fr(rows, cols):
 
 def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
              configs=CONFIGS, units=UNITS, source_figures=SOURCE_FIGURES,
-             source_panels=SOURCE_PANELS, source_documents=SOURCE_DOCUMENTS):
+             source_panels=SOURCE_PANELS, source_documents=SOURCE_DOCUMENTS,
+             reviewers=REVIEWERS):
     p = BM.validate_batch_manifests(
         fr(panels, BM.panel_manifest_columns()),
         fr(series_rows, BM.series_manifest_columns()),
@@ -310,6 +319,7 @@ def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
         source_documents=fr(source_documents, BM.source_document_manifest_columns()),
         source_figures=fr(source_figures, BM.source_figure_manifest_columns()),
         source_panels=fr(source_panels, BM.source_panel_inventory_columns()),
+        reviewers=fr(reviewers, BM.reviewer_registry_columns()),
         file_root=ROOT)
     return sorted(set(p["check"])) if len(p) else []
 
@@ -351,10 +361,10 @@ check("fourteen virtual declarations cannot satisfy a 36-panel physical figure",
 # Inspector=TBD and Inspection_Date=soon straight through, which is the hedged
 # non-answer defect in the field that can least afford it.
 for _fld, _val, _want in (
-        ("Inspector", "TBD", "UNRESOLVED_INVENTORY_ATTESTATION"),
-        ("Inspector", "TODO", "UNRESOLVED_INVENTORY_ATTESTATION"),
-        ("Inspector", "?", "UNRESOLVED_INVENTORY_ATTESTATION"),
-        ("Inspector", "x", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Reviewer_ID", "TBD", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Reviewer_ID", "TODO", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Reviewer_ID", "?", "REVIEWER_NOT_REGISTERED"),
+        ("Reviewer_ID", "x", "REVIEWER_NOT_REGISTERED"),
         ("Inspection_Date", "TBD", "UNRESOLVED_INVENTORY_ATTESTATION"),
         ("Inspection_Date", "soon", "BAD_INSPECTION_DATE"),
         ("Inspection_Date", "later", "BAD_INSPECTION_DATE"),
@@ -369,14 +379,114 @@ for _fld, _val, _want in (
     check("document inventory attested with %s=%r is refused" % (_fld, _val),
           _want in validate(source_documents=[dict(SOURCE_DOCUMENTS[0],
                                                    **{_fld: _val})]))
-for _fld, _val in (("Inspector", "JS"), ("Inspector", "minyeop"),
-                   ("Inspection_Date", "2026-08-06")):
+for _fld, _val in (("Reviewer_ID", "RV_T1"), ("Inspection_Date", "2026-08-06")):
     check("a real attestation %s=%r passes" % (_fld, _val),
           validate(source_figures=edited(SOURCE_FIGURES,
                                          {"Source_Figure_ID": "SF1"},
                                          **{_fld: _val})) == [],
           "%s" % validate(source_figures=edited(
               SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, **{_fld: _val})))
+
+# --------------------------------------------------------------------------
+# the reviewer registry
+# --------------------------------------------------------------------------
+# The attestation check used to read a free-text `Inspector` and test it with
+# `re.sub(r"[^0-9A-Za-z]", "", who)`, which is a statement that reviewers are
+# named in the Latin alphabet. It rejected the name of the person who actually
+# did this inventory and accepted the name of the software that cannot do it.
+
+
+def _reviewer(**changes):
+    return edited(REVIEWERS, {"Reviewer_ID": "RV_T1"}, **changes)
+
+
+for _name in ("김민엽", "李明", "홍길동", "Ólafur Þórsson", "О. Иванов",
+              "Nguyễn Thị Hoa", "ＫＩＭ", "JS", "Claude Bernard"):
+    check("a reviewer named %s can register" % _name,
+          validate(reviewers=_reviewer(Reviewer_Name=_name)) == [],
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+for _name in ("AI", "BOT", "LLM", "Codex", "Claude", "GPT-4", "gpt4",
+              "auto script", "automated agent"):
+    check("a reviewer named %r is refused as non-human" % _name,
+          "REVIEWER_NOT_HUMAN" in validate(reviewers=_reviewer(Reviewer_Name=_name)),
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+for _name in ("x", "", "12", "-"):
+    check("a reviewer named %r is not a name" % _name,
+          set(validate(reviewers=_reviewer(Reviewer_Name=_name)))
+          & {"UNRESOLVED_REVIEWER_IDENTITY", "MISSING_REQUIRED"},
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+check("a reviewer registering under a placeholder is refused",
+      "UNRESOLVED_REVIEWER_IDENTITY" in validate(reviewers=_reviewer(Reviewer_Name="TBD")))
+check("a registrar named as software is refused",
+      "REVIEWER_NOT_HUMAN" in validate(reviewers=_reviewer(Registered_By="Claude")))
+
+# The registry is the only place a person is described, so an attestation that
+# points nowhere is the whole defect coming back one level up.
+check("an inventory naming an unregistered reviewer is refused",
+      "REVIEWER_NOT_REGISTERED" in validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Reviewer_ID="RV_NOBODY")))
+check("a document naming an unregistered reviewer is refused",
+      "REVIEWER_NOT_REGISTERED" in validate(
+          source_documents=[dict(SOURCE_DOCUMENTS[0], Reviewer_ID="RV_NOBODY")]))
+check("an empty registry cannot back any inventory",
+      "REVIEWER_NOT_REGISTERED" in validate(reviewers=[]))
+check("two rows claiming one Reviewer_ID are refused",
+      "DUPLICATE_REVIEWER_ID" in validate(
+          reviewers=REVIEWERS + [dict(REVIEWERS[0], Reviewer_Name="Someone Else")]))
+
+check("a reviewer declared AUTOMATED_AGENT cannot hold the attestation",
+      "REVIEWER_NOT_HUMAN" in validate(
+          reviewers=_reviewer(Human_Attestation="AUTOMATED_AGENT")))
+check("an invented attestation value is refused",
+      "BAD_HUMAN_ATTESTATION" in validate(
+          reviewers=_reviewer(Human_Attestation="PROBABLY_HUMAN")))
+for _ct, _contact, _want in (
+        ("EMAIL", "not-an-address", "BAD_REVIEWER_CONTACT"),
+        ("EMAIL", "someone@localhost", "BAD_REVIEWER_CONTACT"),
+        ("ORCID", "0000-0002-1825-0097", None),
+        ("ORCID", "0000-0002-1694-233X", None),
+        ("ORCID", "0000-0002-1825-0098", "BAD_REVIEWER_CONTACT"),
+        ("ORCID", "0000-0002-1825", "BAD_REVIEWER_CONTACT"),
+        ("POSTCARD", "somewhere", "BAD_CONTACT_TYPE")):
+    _got = validate(reviewers=_reviewer(Contact_Type=_ct, Reviewer_Contact=_contact))
+    check("%s contact %r %s" % (_ct, _contact, "passes" if _want is None else "is refused"),
+          (_got == []) if _want is None else (_want in _got), "%s" % _got)
+check("a registration dated in the future is refused",
+      "BAD_REGISTRATION_DATE" in validate(reviewers=_reviewer(Registration_Date="2099-01-01")))
+check("a free-text registration date is refused",
+      "BAD_REGISTRATION_DATE" in validate(reviewers=_reviewer(Registration_Date="last week")))
+
+# A renamed column is the one schema change that can pass in silence: the old
+# column is ignored, so a manifest that still records who looked reads as one
+# where nobody did.
+check("a manifest still carrying the old Inspector column is refused",
+      "LEGACY_INSPECTOR_COLUMN" in (
+          lambda p: sorted(set(p["check"])) if len(p) else [])(
+          BM.validate_batch_manifests(
+              fr(PANELS, BM.panel_manifest_columns()),
+              fr(SERIES, BM.series_manifest_columns()),
+              fr(POSITION_ROWS, BM.position_manifest_columns()),
+              fr(CONFIGS, BM.reader_config_columns()),
+              units=fr(UNITS, GE.fig_unit_columns()),
+              source_documents=fr(
+                  [dict(SOURCE_DOCUMENTS[0], Inspector="test fixture")],
+                  BM.source_document_manifest_columns() + ["Inspector"]),
+              source_figures=fr(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
+              source_panels=fr(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+              reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()),
+              file_root=ROOT)))
+check("a registered reviewer who inspected nothing is not an error",
+      validate(reviewers=REVIEWERS + [dict(
+          Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
+          Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Registered_By="Test Fixture", Registration_Date="2026-08-01",
+          Human_Attestation="HUMAN_CONFIRMED", Note="")]) == [],
+      "%s" % validate(reviewers=REVIEWERS + [dict(
+          Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
+          Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Registered_By="Test Fixture", Registration_Date="2026-08-01",
+          Human_Attestation="HUMAN_CONFIRMED", Note="")]))
+
 check("an unverified visual inventory blocks the run",
       "SOURCE_INVENTORY_NOT_VERIFIED" in validate(
           source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
@@ -598,6 +708,7 @@ check("a manifest missing a column is rejected as a schema error",
                                   BM.source_document_manifest_columns()),
               source_figures=fr(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
               source_panels=fr(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+              reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()),
               file_root=ROOT)))
 
 

@@ -35,12 +35,30 @@ for kind in ("PEARSON_R", "SPEARMAN_RHO", "KENDALL_TAU", "R_SQUARED", "SLOPE"):
 
 print("clean-room import without scipy: PASS")
 
-missing = subprocess.run(
-    [sys.executable, os.path.join(HERE, "forward_test_real_monochrome.py"),
-     os.path.join(HERE, "fixtures", "definitely_missing.png")],
-    capture_output=True, text=True,
-)
-assert missing.returncode == 2, (
-    "a missing forward-test fixture must be BLOCKED (exit 2), got %d\n%s%s"
-    % (missing.returncode, missing.stdout, missing.stderr))
-print("missing forward fixture exits 2: PASS")
+# A script that cannot find its input has two honest answers and one dishonest
+# one. It can say so and stop, or it can be told the input is genuinely optional
+# - but it must not exit 0, because a suite that never opened a figure then
+# reports the same green as one that read every cell correctly. Only
+# `forward_test_real_monochrome.py` got this right; the other two shipped a
+# SKIP, and the pilot's SKIP sat below the code that hashes the rasters, so it
+# could not even reach the exit it was wrong about.
+import tempfile                                                     # noqa: E402
+
+ABSENT = os.path.join(HERE, "fixtures", "definitely_missing.png")
+NOWHERE = os.path.join(tempfile.gettempdir(), "fdt_no_rasters_here")
+for label, argv in (
+        ("forward_test_real_monochrome.py",
+         ["forward_test_real_monochrome.py", ABSENT]),
+        ("forward_test_397_mono_bar.py",
+         ["forward_test_397_mono_bar.py", ABSENT]),
+        ("pilot_397.py",
+         ["pilot_397.py", os.path.join(NOWHERE, "out"), NOWHERE])):
+    argv = [os.path.join(HERE, argv[0])] + argv[1:]
+    missing = subprocess.run([sys.executable] + argv, capture_output=True, text=True)
+    assert missing.returncode == 2, (
+        "%s with a missing raster must be BLOCKED (exit 2), got %d\n%s%s"
+        % (label, missing.returncode, missing.stdout, missing.stderr))
+    assert "BLOCKED" in (missing.stdout + missing.stderr), (
+        "%s exited 2 without saying which raster is missing\n%s%s"
+        % (label, missing.stdout, missing.stderr))
+    print("missing raster BLOCKS %s: PASS" % label)

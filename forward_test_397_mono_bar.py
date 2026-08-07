@@ -25,9 +25,13 @@ import mark_readers as MR                                          # noqa: E402
 
 DEFAULT = os.path.join(HERE, "397_fig3.jpeg")
 path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
+# The raster ships with the package, so its absence means the package is
+# incomplete, not that this run has nothing to do. Exiting 0 on a missing input
+# is the worst available answer: a suite that never opened a figure reports the
+# same green as one that read every cell correctly.
 if not os.path.exists(path):
-    print("SKIP: publisher raster not found: %s" % path)
-    raise SystemExit(0)
+    print("BLOCKED: publisher raster not found: %s" % path, file=sys.stderr)
+    raise SystemExit(2)
 
 SPECS = [MR.SeriesSpec("FLUID", bar_fill="SOLID"),
          MR.SeriesSpec("NON_FLUID", bar_fill="HATCHED")]

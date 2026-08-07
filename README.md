@@ -10,6 +10,21 @@ only usable if the pipeline that produced it can say exactly what it did.
 three publications (323, 386, 397), held for reproducibility of the extraction.
 They are not licensed for redistribution.
 
+## The path a number takes
+
+    plan_397.json                one typed document per publication
+      | compile_plan.py          hashes, figure rows and calibrations DERIVED
+      v
+    eleven manifests             validated before a raster is opened
+      | run_batch.py
+      v
+    figure_values_machine_qc.csv the gate found nothing wrong. NOT poolable.
+    review/<Panel_ID>_overlay.png what the reader saw, drawn on what it read
+      | a person looks, and fills value_review.csv
+      | finalize_batch.py
+      v
+    figure_values_accepted.csv   the only file to pool from
+
 ## What it does
 
     reviewer_registry.csv        who may attest an inventory, and how to reach them
@@ -29,8 +44,10 @@ They are not licensed for redistribution.
     position_manifest.csv        x pixel or slot, and what that position MEANS
     reader_config.csv            long-form reader options, one row per option
 
-`run_batch.py` executes the run layer, gates the result against the data
-grains, and reports what it could not do.
+`compile_plan.py` writes all eleven from one plan. `run_batch.py` executes the
+run layer, gates the result against the data grains, and reports what it could
+not do. `finalize_batch.py` turns approved panels into poolable values, and
+nothing else does.
 
 ## Three rules
 
@@ -45,21 +62,30 @@ to fill it.
 
 **Fail closed, and loudly.** Every panel lands on exactly one terminal state,
 and everything short of `AUTO_PASS` goes to `manual_queue.csv` with the reason
-attached. A panel the reader could not do is louder than one it could.
+attached. A panel the reader could not do is louder than one it could — and a
+defect in a reader stops the batch rather than arriving in somebody's queue as
+"go and look at this figure again".
 
 ## Running it
 
-    pip install -r requirements.txt
-    python3 pilot_397.py                 # the worked example, publication 397
-    python3 run_batch.py MANIFEST_DIR OUTPUT_DIR --file-root .
+    pip install -r requirements-lock.txt     # the versions results were produced on
+    python3 pilot_397.py                     # the worked example, publication 397
+
+    python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root .
+    python3 run_batch.py MANIFEST_DIR OUT --file-root .
+    python3 finalize_batch.py OUT --template # then fill in the decisions
+    python3 finalize_batch.py OUT
 
 Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-814 scenarios at v7.11, verified in a clean room with scipy blocked — the
+1004 scenarios at v7.16, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
-p-value.
+p-value. Every run records the Python, platform and library versions it used;
+`requirements-lock.txt` pins what the shipped results were produced on, because
+a bar top found at row 312 by one OpenCV and row 313 by the next is a different
+number in the accepted file.
 
 ## Attestation
 
@@ -73,6 +99,14 @@ gate accepted it writes none of them.
 
 `Human_Attestation` is a declared enum, not a cryptographic signature. It buys
 traceability — a row that can be asked about — not proof of authorship.
+
+Machine QC is not approval. `run_batch.py` stops at `MACHINE_QC_PASSED`, which
+means the gate found nothing wrong; it does not mean anybody looked at where
+the marks landed, and a reader that puts a plausible number on the wrong bar
+produces exactly the output the gate has nothing to say about. Each passing
+panel gets an overlay PNG, and `finalize_batch.py` writes the accepted file for
+panels a registered human approved against that specific extraction. Re-run
+with different code and the approval is `APPROVAL_STALE`, not inherited.
 
 To run the pilot as attested work:
 

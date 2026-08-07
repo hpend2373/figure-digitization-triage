@@ -388,6 +388,75 @@ for _name, _kw, _want in (
          dict(configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="x_window",
                                       Value="20", Note="")]),
          "DUPLICATE_READER_OPTION"),
+        # n_slots is a BAR_COLOR keyword. read_monochrome_bar_panel derives its
+        # slot count from the declared series and has no such parameter, so
+        # accepting it here bought a TypeError at run time reported as a figure
+        # problem.
+        ("n_slots on a monochrome bar panel",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
+                            Config_ID="C_MONO"),
+              series_rows=[dict(r, Colour_Hex="", Bar_Fill_Pattern=(
+                  "SOLID" if r["Series_ID"] == "S_BLUE" else "HATCHED"))
+                  if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONO", Option="n_slots",
+                                      Value="4", Note="")]),
+         "OPTION_WRONG_FOR_MARK_TYPE"),
+        # Ranges, not just types. Each of these parsed cleanly and then selected
+        # nothing at all, which reads downstream as an unreadable figure.
+        ("a negative grey threshold",
+         dict(configs=CONFIGS + [dict(Config_ID="C_SCATTER", Option="threshold",
+                                      Value="-1", Note="")]),
+         "BAD_READER_OPTION_VALUE"),
+        ("a grey threshold above 255",
+         dict(configs=CONFIGS + [dict(Config_ID="C_SCATTER", Option="threshold",
+                                      Value="300", Note="")]),
+         "BAD_READER_OPTION_VALUE"),
+        ("a zero-width matching window",
+         dict(configs=edited(CONFIGS, {"Config_ID": "C_DEFAULT",
+                                       "Option": "x_window"}, Value="0")),
+         "BAD_READER_OPTION_VALUE"),
+        ("a negative colour tolerance",
+         dict(configs=edited(CONFIGS, {"Config_ID": "C_SCATTER",
+                                       "Option": "colour_tolerance"}, Value="-5")),
+         "BAD_READER_OPTION_VALUE"),
+        ("a marker area window that excludes everything",
+         dict(configs=edited(edited(CONFIGS, {"Config_ID": "C_SCATTER",
+                                              "Option": "min_marker_area"},
+                                    Value="500"),
+                             {"Config_ID": "C_SCATTER", "Option": "min_marker_area"},
+                             Value="500")
+              + [dict(Config_ID="C_SCATTER", Option="max_marker_area",
+                      Value="10", Note="")]),
+         "READER_OPTIONS_CONTRADICT"),
+        # The released LINE_MONO reader matches by marker geometry and never
+        # looks at Line_Style, so a manifest describing a solid-versus-dashed
+        # figure must not validate against it.
+        ("a LINE_MONO series told apart only by line style",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE"
+                                            else "DASHED"))
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "MISSING_SERIES_DISCRIMINANT"),
+        ("a LINE_MONO series promising a line style the reader ignores",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="CIRCLE",
+                                Marker_Fill=("OPEN" if r["Series_ID"] == "S_BLUE"
+                                             else "FILLED"),
+                                Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE"
+                                            else "DASHED"))
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "LINE_STYLE_NOT_READ"),
+        ("a mark type that is designed but not released",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Mark_Type="LINE_MONO_STYLE")),
+         "MARK_TYPE_NOT_RELEASED"),
 ):
     _got = validate(**_kw)
     check(_name + " is rejected", _want in _got, "got %s" % _got)
@@ -420,7 +489,8 @@ ODIR = os.path.join(ROOT, "out")
 summary = RB.run_batch(MDIR, ODIR, file_root=ROOT, run_date="2026-08-06")
 check("the batch ran", summary["status"] == "RAN", "%s" % summary)
 
-values = pd.read_csv(os.path.join(ODIR, "figure_values.csv"), dtype=object).fillna("")
+values = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"), dtype=object).fillna("")
+accepted = pd.read_csv(os.path.join(ODIR, "figure_values_accepted.csv"), dtype=object).fillna("")
 run = pd.read_csv(os.path.join(ODIR, "run_manifest.csv"), dtype=object).fillna("")
 queue = pd.read_csv(os.path.join(ODIR, "manual_queue.csv"), dtype=object).fillna("")
 qc = pd.read_csv(os.path.join(ODIR, "qc_problems.csv"), dtype=object).fillna("")
@@ -495,6 +565,81 @@ check("a panel that failed produced no values",
       not len(values[values["Unit_ID"].isin(["U_FLAT", "U_MANUAL"])]),
       "%d rows" % len(values[values["Unit_ID"].isin(["U_FLAT", "U_MANUAL"])]))
 
+print("nothing unaccepted can reach master by reading one file")
+check("there is no file called figure_values.csv at all",
+      not os.path.exists(os.path.join(ODIR, "figure_values.csv")),
+      "the ambiguous name is back - a downstream reader will pool from it")
+check("every raw row carries its own verdict, so no join is needed",
+      {"Value_Status", "QC_Codes", "Pooling_Eligible"} <= set(values.columns),
+      "%s" % sorted(values.columns)[-4:])
+check("every raw status is in the declared vocabulary",
+      set(values["Value_Status"]) <= {"ACCEPTED", "QC_FAILED", "PANEL_NOT_PASSED"},
+      "%s" % sorted(set(values["Value_Status"])))
+check("Pooling_Eligible is TRUE exactly when the status is ACCEPTED",
+      all((r["Pooling_Eligible"] == "TRUE") == (r["Value_Status"] == "ACCEPTED")
+          for _, r in values.iterrows()))
+check("the accepted file is the eligible subset, nothing more",
+      len(accepted) == sum(values["Pooling_Eligible"] == "TRUE")
+      and set(accepted["Cell_Key"]) ==
+      set(values[values["Pooling_Eligible"] == "TRUE"]["Cell_Key"]),
+      "%d vs %d" % (len(accepted), sum(values["Pooling_Eligible"] == "TRUE")))
+check("every accepted row belongs to an AUTO_PASS panel",
+      all(states.get(_p) == "AUTO_PASS"
+          for _p, _u in zip(run["Panel_ID"], run["Unit_ID"])
+          if _u in set(accepted["Unit_ID"])),
+      "%s" % states)
+
+# A unit whose dispersion definition is a placeholder is read fine and rejected
+# by the gate. Its numbers are real; they are also unpoolable, and the whole
+# point of the split is that a downstream script cannot get at them by accident.
+_unresolved = [dict(u, Errorbar_Definition_Source=(
+    "UNRESOLVED - the caption does not say whether these are SD or SEM"))
+    if u["Unit_ID"] == "U_LINE" else u for u in UNITS]
+_mdir = write_manifests(os.path.join(ROOT, "m_unres"), units=_unresolved)
+_o = os.path.join(ROOT, "o_unres")
+_su = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+_acc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+                   dtype=object).fillna("")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("an unresolved SD/SEM unit is still read into the raw file",
+      len(_raw[_raw["Unit_ID"] == "U_LINE"]) == 8,
+      "%d" % len(_raw[_raw["Unit_ID"] == "U_LINE"]))
+check("and every one of its rows is marked QC_FAILED",
+      set(_raw[_raw["Unit_ID"] == "U_LINE"]["Value_Status"]) == {"QC_FAILED"},
+      "%s" % sorted(set(_raw[_raw["Unit_ID"] == "U_LINE"]["Value_Status"])))
+check("and names the gate code that rejected it",
+      all("UNRESOLVED_ERRORBAR_DEFINITION" in c
+          for c in _raw[_raw["Unit_ID"] == "U_LINE"]["QC_Codes"]),
+      "%s" % sorted(set(_raw[_raw["Unit_ID"] == "U_LINE"]["QC_Codes"])))
+check("and none of them reaches the accepted file",
+      not len(_acc[_acc["Unit_ID"] == "U_LINE"]), "%d rows" % len(_acc))
+check("the panel is QC_FAILED in the run manifest too",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "QC_FAILED",
+      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+check("the clean scatter unit is unaffected and still accepted",
+      set(_acc["Unit_ID"]) == {"U_SCAT"}, "%s" % sorted(set(_acc["Unit_ID"])))
+
+# The whole-figure case the review named: publication 397, every panel rejected.
+_all_bad = [dict(u, Errorbar_Definition_Source="TBD") for u in UNITS]
+_mdir = write_manifests(os.path.join(ROOT, "m_allbad"), units=_all_bad,
+                        panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
+                        series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"])
+_o = os.path.join(ROOT, "o_allbad")
+_sa = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_acc = pd.read_csv(os.path.join(_o, "figure_values_accepted.csv"),
+                   dtype=object).fillna("")
+_raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("when every panel fails QC the accepted file has zero rows",
+      len(_acc) == 0, "%d rows" % len(_acc))
+check("while the raw file still holds every reading, for the audit trail",
+      len(_raw) == 8, "%d rows" % len(_raw))
+check("the summary reports both counts, so a caller cannot read only one",
+      _sa["values"] == 8 and _sa["accepted"] == 0, "%s" % _sa)
+check("the stamp records read and accepted separately",
+      json.load(open(os.path.join(_o, "run_stamp.json")))["Values_Accepted"] == 0)
+
+
 print("the run records what would have to match for it to be reproducible")
 stamp = json.load(open(os.path.join(ODIR, "run_stamp.json")))
 check("the stamp carries the reader version and the config hash",
@@ -508,8 +653,8 @@ check("each run row carries the image hash it read",
 ODIR2 = os.path.join(ROOT, "out2")
 RB.run_batch(MDIR, ODIR2, file_root=ROOT, run_date="2026-08-06")
 _same = []
-for name in ("figure_values.csv", "run_manifest.csv", "manual_queue.csv",
-             "qc_problems.csv"):
+for name in ("figure_values_raw.csv", "figure_values_accepted.csv",
+             "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
     # The output directory is embedded in the paths a run writes, so compare the
     # runs with their own root removed. Everything else must match exactly.
     _a = open(os.path.join(ODIR, name)).read().replace(ODIR, "<OUT>")
@@ -536,7 +681,8 @@ check("a duplicated option is caught at validation, before any reading",
       and "DUPLICATE_READER_OPTION" in _s3["detail"], "%s" % _s3)
 check("a rejected batch writes its reasons and no values",
       os.path.exists(os.path.join(ODIR3, "manifest_problems.csv"))
-      and not os.path.exists(os.path.join(ODIR3, "figure_values.csv")))
+      and not os.path.exists(os.path.join(ODIR3, "figure_values_raw.csv"))
+      and not os.path.exists(os.path.join(ODIR3, "figure_values_accepted.csv")))
 
 MDIR4 = write_manifests(os.path.join(ROOT, "manifests4"),
                         configs=[dict(c, Value=("30" if c["Option"] == "x_window"
@@ -573,7 +719,7 @@ _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 check("a series the reader cannot find is SERIES_IDENTITY_UNRESOLVED, not a hole",
       dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "SERIES_IDENTITY_UNRESOLVED",
       "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
-_v = pd.read_csv(os.path.join(_o, "figure_values.csv"), dtype=object).fillna("")
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
 check("and it contributes no half-panel of values",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 
@@ -598,7 +744,7 @@ _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 check("a bar reader pointed at a line panel finds nothing and queues it",
       dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "MANUAL_POINT_READ",
       "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
-_v = pd.read_csv(os.path.join(_o, "figure_values.csv"), dtype=object).fillna("")
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
 check("and it invents no bars from the line markers",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 
@@ -656,6 +802,39 @@ check("the run filled the figure manifest's WPD_Project_File itself",
           os.path.join(ODIR, "figure_manifest.csv"), dtype=object).fillna("").columns
       and bool(pd.read_csv(os.path.join(ODIR, "figure_manifest.csv"),
                            dtype=object).fillna("").iloc[0]["WPD_Project_File"]))
+
+print("the option table is checked against the readers it configures")
+# Declaring that an option "applies to" a mark type is a promise about a
+# function signature. `n_slots` was declared for BAR_MONO, whose reader has no
+# such parameter: the manifest validated, the run raised TypeError, and the
+# runner reported PANEL_GEOMETRY_UNRESOLVED - a message about the figure for a
+# defect in a table. Introspection closes the class, not the instance.
+import inspect  # noqa: E402
+
+_readers = RB.reader_functions()
+check("every batch mark type has a reader function to introspect",
+      set(_readers) == set(BM.BATCH_MARK_TYPES),
+      "%s" % sorted(set(_readers) ^ set(BM.BATCH_MARK_TYPES)))
+_mismatch = []
+for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items()):
+    if _keyword is None:
+        continue                    # consumed by the runner, not by a reader
+    for _mark in _applies:
+        if _keyword not in inspect.signature(_readers[_mark]).parameters:
+            _mismatch.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
+check("every reader option names a parameter its reader actually accepts",
+      not _mismatch, "; ".join(_mismatch))
+check("n_slots is offered to BAR_COLOR only",
+      BM.READER_OPTIONS["n_slots"][1] == ("BAR_COLOR",),
+      "%s" % (BM.READER_OPTIONS["n_slots"][1],))
+check("and BAR_MONO derives its slot count from the declared series instead",
+      "n_slots" not in inspect.signature(_readers["BAR_MONO"]).parameters)
+check("every option has a range check, not just a parser",
+      all(callable(v[3]) for v in BM.READER_OPTIONS.values()))
+check("an unreleased mark type is named rather than silently unknown",
+      "LINE_MONO_STYLE" in BM.UNRELEASED_MARK_TYPES
+      and "LINE_MONO_STYLE" not in BM.BATCH_MARK_TYPES)
+
 
 print("templates are generated from the column functions, never typed")
 _tdir = os.path.join(ROOT, "templates")

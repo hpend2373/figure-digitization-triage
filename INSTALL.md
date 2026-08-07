@@ -1,7 +1,49 @@
-# figure-digitization-triage — v7.2 (full package)
+# figure-digitization-triage — v7.3 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
+
+**v7.3 closes the four defects from the v7.2 review.** Each fix was reverted in
+a scratch copy and the suite re-run, so none of the new scenarios is decoration:
+
+| reverted | scenarios that fail |
+|---|---|
+| one values file, no status columns | 6 |
+| `n_slots` back on BAR_MONO | 3 (including the introspection test) |
+| option range checks removed | 4 |
+| LINE_MONO accepting line style alone | 1 |
+
+## HIGH — a QC-failed value could reach master by reading one file
+
+`figure_values.csv` held every value the readers produced, whatever the gate
+said about them. On publication 397 that file carried eight means whose
+SD-versus-SEM was unresolved, while both panels sat at `QC_FAILED` in a
+different file. Reading "the values file" — the obvious thing for a downstream
+script to do — would have pooled them, and SD/SEM confusion scales the
+meta-analytic weight by sqrt(n).
+
+**There is no file called `figure_values.csv` any more.** The run writes two,
+and if a stale one is present in the output directory it is deleted:
+
+- **`figure_values_accepted.csv`** — the only file to pool from. A row is here
+  only if its panel reached `AUTO_PASS` **and** its unit drew no gate problem.
+- **`figure_values_raw.csv`** — everything read, for the audit trail, with
+  `Value_Status` (`ACCEPTED` / `QC_FAILED` / `PANEL_NOT_PASSED`), `QC_Codes`
+  (the gate codes charged to that unit) and `Pooling_Eligible` on **every row**.
+
+Both were done rather than either: the safe file has the plainest name, and the
+unsafe one carries its own verdict in every row so nobody needs to know to join
+against `run_manifest.csv`. `run_stamp.json` reports `Values_Read` and
+`Values_Accepted` separately, and the `run_batch()` return value carries both,
+so a caller cannot read one count and assume the other.
+
+The blame rule is deliberately conservative: **any** gate problem charged to a
+unit disqualifies **all** of that unit's cells. The individual readings may be
+perfectly good, but a unit with a hole in its grid is not poolable, and the raw
+file keeps every number for whoever resolves it.
+
+On publication 397 `figure_values_accepted.csv` is **0 rows**, and `build_397.py`
+now exits non-zero unless that is true.
 
 ## Install
 
@@ -36,12 +78,13 @@ paper.
 
 `run_batch.py` loads all seven manifests, validates, dispatches by `Mark_Type`,
 saves the raw marks, converts to the standard value grain, runs the grid gate,
-and writes `figure_values.csv`, `run_manifest.csv`, `manual_queue.csv`,
-`qc_problems.csv`, `run_stamp.json`, `raw/` and `projects/`.
+and writes `figure_values_accepted.csv`, `figure_values_raw.csv`,
+`run_manifest.csv`, `manual_queue.csv`, `qc_problems.csv`, `run_stamp.json`,
+`raw/` and `projects/`.
 
 Three design commitments, each of which is a scenario in `test_run_batch.py`:
 
-**Manifests are validated before a raster is opened.** 25 rejection scenarios: a
+**Manifests are validated before a raster is opened.** 34 rejection scenarios: a
 box that does not fit its image, ticks outside the panel they calibrate, a
 misspelled option, an option that is real but meaningless for this reader, two
 series told apart by nothing, a factor on both the series and the position axis,
@@ -81,6 +124,52 @@ human-saved one, so it writes the raster, the calibration it used and every mark
 it placed into a real `.tar` that opens in WPD. That is the only cheap way to
 catch a systematically misplaced series — a reviewer looks at where the reader
 thought the marks were.
+
+## MEDIUM 1 — `n_slots` was offered to a reader that has no such parameter
+
+`read_monochrome_bar_panel` derives its slot count from the number of declared
+series and takes no `n_slots`. The option table said otherwise, so the manifest
+validated and the run then raised `TypeError`, which the runner reported as
+`PANEL_GEOMETRY_UNRESOLVED` — a message about the figure for a defect in a table.
+
+`n_slots` is now BAR_COLOR only. More usefully, the class is closed: declaring
+that an option "applies to" a mark type is a promise about a function signature,
+so `reader_functions()` maps every mark type to the callable that actually
+receives the keywords, and a scenario asserts by `inspect.signature` that every
+option names a parameter its reader accepts. A future table edit that repeats
+this fails the suite instead of the batch.
+
+## MEDIUM 2 — the manifest allowed a figure the shipped reader cannot read
+
+`Mark_Type=LINE_MONO` with `Marker_Shape=NONE` and series told apart by
+`SOLID`/`DASHED` validated cleanly. The released LINE_MONO reader matches by
+marker geometry and never looks at `Line_Style`, so the run would have matched
+those marks by shape alone. The documentation said the solid/dashed reader was
+not shipped; the manifest contract said the opposite.
+
+Both halves fixed:
+
+- LINE_MONO now **requires** `Marker_Shape` (`MISSING_SERIES_DISCRIMINANT`), and
+  the message names what such a figure would need instead
+- a LINE_MONO series that also sets `Line_Style` gets `LINE_STYLE_NOT_READ` —
+  recording a discriminant the run will not apply is a promise the file cannot
+  keep
+- `LINE_MONO_STYLE` is a named `UNRELEASED_MARK_TYPE`. Declaring it yields
+  `MARK_TYPE_NOT_RELEASED` with what it is, why it is held back, and where the
+  work sits. Naming it beats silence: the alternative is `BAD_MARK_TYPE`, which
+  reads as "you made that up".
+
+## MEDIUM 3 — options were type-checked but never range-checked
+
+`threshold=-1`, `threshold=300`, `x_window=0`, `colour_tolerance=-5` and
+`min_marker_area=500` beside `max_marker_area=10` all parsed cleanly. Each then
+selects nothing at all, and an empty panel is indistinguishable downstream from
+an unreadable figure.
+
+Every entry in `READER_OPTIONS` now carries a range check as well as a parser —
+greys 0–255, windows and areas and bar widths positive, tolerances non-negative,
+`n_slots` at least 1 — and `PAIRED_OPTION_RULES` catches
+`min_marker_area >= max_marker_area`, which no single-value check can see.
 
 ## `write_point_data` — the minor item, taken further than asked
 
@@ -166,13 +255,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_kernel.py` | 222 |
 | `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 76 |
+| `test_run_batch.py` | 107 |
 | `test_mark_readers.py` | 60 |
 | `test_bar_reader.py` | 42 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 2 |
-| **total** | **579** |
+| **total** | **610** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:
@@ -180,7 +269,8 @@ primitives), `forward_test_397_mono_bar.py`, and two worked examples:
 - `build_id323.py` — 2 figures, 12 units, 107 values, 2 problems, both the known
   `TIMEPOINT=DI19` hole where two bars overlap past separating
 - `build_397.py` — one real publication read **from manifests alone**, no raster
-  handling in the script at all. 8 values, and both panels land on `QC_FAILED` —
+  handling in the script at all. 8 values read, **0 accepted**, both panels on
+  `QC_FAILED` —
   which is the demonstration, not a defect. The caption does not say whether the
   whiskers are SD or SEM, so `Errorbar_Definition_Source` records `UNRESOLVED`
   and the gate refuses `Dispersion_Type=SD` beside it. The means are read, saved

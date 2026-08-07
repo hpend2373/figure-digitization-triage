@@ -54,6 +54,17 @@ COLOUR_MARK_TYPES = ("BAR_COLOR", "LINE_COLOR")
 #: Which mark types separate series by drawn form rather than by colour.
 MONO_MARK_TYPES = ("BAR_MONO", "LINE_MONO")
 
+#: Mark types this project has a name and a design for, but no released reader.
+#: Naming them is better than silence: a manifest that declares one gets told
+#: why it cannot run and where the work stands, instead of being quietly
+#: routed to a reader that ignores half its declaration.
+UNRELEASED_MARK_TYPES = {
+    "LINE_MONO_STYLE": ("monochrome lines separated by SOLID/DASHED line style "
+                        "rather than by marker. Built and measured but not "
+                        "released - it emits cells where two curves cross "
+                        "instead of dropping them. See wip/line_style_mono.py"),
+}
+
 MARKER_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "DIAMOND", "NONE")
 MARKER_FILLS = ("OPEN", "FILLED", "ANY")
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED", "NONE")
@@ -105,24 +116,72 @@ def _as_bool(v):
     raise ValueError("expected TRUE or FALSE, got %r" % v)
 
 
-#: option -> (parser, mark types that accept it, the reader keyword it becomes)
+def _grey(v):
+    """A 8-bit grey threshold. Outside 0-255 it selects everything or nothing."""
+    if not (0 <= v <= 255):
+        raise ValueError("a grey threshold must be 0-255, got %r" % v)
+    return v
+
+
+def _positive(v):
+    if v <= 0:
+        raise ValueError("must be greater than zero, got %r" % v)
+    return v
+
+
+def _non_negative(v):
+    if v < 0:
+        raise ValueError("must not be negative, got %r" % v)
+    return v
+
+
+def _at_least_one(v):
+    if v < 1:
+        raise ValueError("must be at least 1, got %r" % v)
+    return v
+
+
+def _anything(v):
+    return v
+
+
+#: option -> (parser, mark types that accept it, the reader keyword it becomes,
+#:            range check). The range check is not decoration: `threshold=-1`
+#: selects no pixels at all and `max_marker_area=10` below `min_marker_area=500`
+#: selects no contours, and both of those used to pass validation and then
+#: produce an empty panel that looked like an unreadable figure.
 READER_OPTIONS = {
-    "threshold":        (_as_int, ("BAR_MONO", "LINE_MONO", "BOX_VIOLIN"), "threshold"),
-    "stem_threshold":   (_as_int, ("BAR_MONO",), "stem_threshold"),
-    "group_window":     (_as_int, ("BAR_MONO",), "group_window"),
-    "colour_tolerance": (_as_float, COLOUR_MARK_TYPES + ("SCATTER",), None),
-    "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO"), "x_window"),
-    "half_window":      (_as_int, ("BOX_VIOLIN",), "half_window"),
-    "min_marker_area":  (_as_float, ("SCATTER",), "min_area"),
-    "max_marker_area":  (_as_float, ("SCATTER",), "max_area"),
-    "min_bar_px":       (_as_int, ("BAR_COLOR", "BAR_MONO"), "min_bar_px"),
-    "stem_half_width":  (_as_int, ("BAR_COLOR",), "stem_half_width"),
-    "max_whisker_px":   (_as_int, ("BAR_COLOR",), "max_whisker_px"),
-    "stem_required":    (_as_bool, ("BAR_COLOR",), "stem_required"),
-    "baseline_value":   (_as_float, ("BAR_COLOR", "BAR_MONO"), "baseline_value"),
-    "n_slots":          (_as_int, ("BAR_COLOR", "BAR_MONO"), "n_slots"),
-    "dual_tolerance_pct": (_as_float, BATCH_MARK_TYPES, None),
+    "threshold":        (_as_int, ("BAR_MONO", "LINE_MONO", "BOX_VIOLIN"),
+                         "threshold", _grey),
+    "stem_threshold":   (_as_int, ("BAR_MONO",), "stem_threshold", _grey),
+    "group_window":     (_as_int, ("BAR_MONO",), "group_window", _positive),
+    "colour_tolerance": (_as_float, COLOUR_MARK_TYPES + ("SCATTER",), None,
+                         _non_negative),
+    "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO"), "x_window", _positive),
+    "half_window":      (_as_int, ("BOX_VIOLIN",), "half_window", _positive),
+    "min_marker_area":  (_as_float, ("SCATTER",), "min_area", _positive),
+    "max_marker_area":  (_as_float, ("SCATTER",), "max_area", _positive),
+    "min_bar_px":       (_as_int, ("BAR_COLOR", "BAR_MONO"), "min_bar_px", _positive),
+    "stem_half_width":  (_as_int, ("BAR_COLOR",), "stem_half_width", _positive),
+    "max_whisker_px":   (_as_int, ("BAR_COLOR",), "max_whisker_px", _positive),
+    "stem_required":    (_as_bool, ("BAR_COLOR",), "stem_required", _anything),
+    "baseline_value":   (_as_float, ("BAR_COLOR", "BAR_MONO"), "baseline_value",
+                         _anything),
+    # BAR_COLOR only. `read_monochrome_bar_panel` derives its slot count from
+    # the number of declared series and has no n_slots parameter at all - the
+    # manifest used to accept the option here, and the run then died with a
+    # TypeError that surfaced as PANEL_GEOMETRY_UNRESOLVED. A reader-signature
+    # introspection test now makes that class of mismatch impossible to ship.
+    "n_slots":          (_as_int, ("BAR_COLOR",), "n_slots", _at_least_one),
+    "dual_tolerance_pct": (_as_float, BATCH_MARK_TYPES, None, _non_negative),
 }
+
+#: Options that only make sense against each other.
+PAIRED_OPTION_RULES = (
+    ("min_marker_area", "max_marker_area",
+     lambda lo, hi: lo < hi,
+     "min_marker_area must be below max_marker_area, or no contour can match"),
+)
 
 
 # --------------------------------------------------------------------------
@@ -269,16 +328,17 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
                  "ignored otherwise, and the run reports the default as if it "
                  "had been chosen" % opt)
             continue
-        parser, applies, _ = READER_OPTIONS[opt]
+        parser, applies, _, check = READER_OPTIONS[opt]
         bucket = out.setdefault(cid, {})
         if opt in bucket:
             flag(line, "DUPLICATE_READER_OPTION",
                  "%s is set twice in config %s" % (opt, cid))
             continue
         try:
-            bucket[opt] = parser(r.get("Value"))
+            bucket[opt] = check(parser(r.get("Value")))
         except (TypeError, ValueError) as exc:
             flag(line, "BAD_READER_OPTION_VALUE", "%s=%r: %s" % (opt, r.get("Value"), exc))
+            bucket.pop(opt, None)
             continue
         used_by = mark_type_by_config.get(cid, set())
         wrong = sorted(m for m in used_by if m not in applies)
@@ -286,6 +346,11 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
             flag(line, "OPTION_WRONG_FOR_MARK_TYPE",
                  "%s does not apply to %s (accepted by %s)"
                  % (opt, ", ".join(wrong), ", ".join(applies)))
+    for cid, bucket in out.items():
+        for a, b, ok, message in PAIRED_OPTION_RULES:
+            if a in bucket and b in bucket and not ok(bucket[a], bucket[b]):
+                flag("config:%s" % cid, "READER_OPTIONS_CONTRADICT",
+                     "%s=%r, %s=%r - %s" % (a, bucket[a], b, bucket[b], message))
     return out
 
 
@@ -342,7 +407,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
         mark = str(r.get("Mark_Type", "")).strip().upper()
-        if mark and mark not in BATCH_MARK_TYPES:
+        if mark in UNRELEASED_MARK_TYPES:
+            flag(line, "MARK_TYPE_NOT_RELEASED",
+                 "Mark_Type=%s is %s" % (mark, UNRELEASED_MARK_TYPES[mark]))
+        elif mark and mark not in BATCH_MARK_TYPES:
             flag(line, "BAD_MARK_TYPE",
                  "Mark_Type=%s (expected %s)" % (mark, "/".join(BATCH_MARK_TYPES)))
         panel_mark[pid] = mark
@@ -491,12 +559,25 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             except ValueError as exc:
                 flag(line, "BAD_SERIES_COLOUR", str(exc))
         if mark == "LINE_MONO":
+            # The released LINE_MONO reader separates series by MARKER geometry
+            # and never looks at Line_Style. Accepting a series declared purely
+            # as SOLID-versus-DASHED let a manifest describe a figure the shipped
+            # reader cannot read, and the run then matched marks by shape alone -
+            # the manifest contract has to say what the reader actually does,
+            # not what the module is eventually meant to do.
             shape = str(r.get("Marker_Shape", "")).strip().upper()
-            style = str(r.get("Line_Style", "")).strip().upper()
-            if shape in ("", "NONE") and style in ("", "NONE"):
+            if shape in ("", "NONE"):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
-                     "a monochrome line series is told apart by marker shape/fill "
-                     "or by line style; this row declares neither")
+                     "the released LINE_MONO reader separates series by marker "
+                     "shape and fill - declare Marker_Shape. Series told apart "
+                     "only by SOLID/DASHED need %s, which has no released reader"
+                     % "/".join(sorted(UNRELEASED_MARK_TYPES)))
+            elif str(r.get("Line_Style", "")).strip().upper() not in ("", "NONE"):
+                flag(line, "LINE_STYLE_NOT_READ",
+                     "Line_Style is recorded but the released LINE_MONO reader "
+                     "does not use it; the series will be matched by marker "
+                     "geometry alone. Blank it, or the manifest promises a "
+                     "discriminant the run will not apply")
         if mark == "BAR_MONO" and str(r.get("Bar_Fill_Pattern", "")).strip().upper() \
                 in ("", "NONE"):
             flag(line, "MISSING_SERIES_DISCRIMINANT",

@@ -162,6 +162,26 @@ series produces marks and another produces none, the panel does not contribute
 half its cells - it contributes none. A reader that can find one of two curves
 cannot be trusted about which curve it found.
 
+## Only one output file is safe to pool from
+
+A run writes **`figure_values_accepted.csv`** and **`figure_values_raw.csv`**,
+and deliberately nothing called `figure_values.csv`. The accepted file holds
+only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem;
+the raw file holds every reading, each row carrying `Value_Status`, `QC_Codes`
+and `Pooling_Eligible`.
+
+The reason for two files rather than one flagged file is that the failure mode
+is a *script*, not a person. A single `figure_values.csv` once carried eight
+means whose SD-versus-SEM was unresolved while the panels sat at `QC_FAILED` in
+a different file; anything that read "the values file" and pooled it would have
+been wrong by a factor of sqrt(n) and would never have known. The safe file now
+has the plainest name, and the unsafe one answers the question in every row so
+nobody has to know to join.
+
+Any gate problem charged to a unit disqualifies **all** of that unit's cells.
+The individual readings may be fine; a unit with a hole in its grid is not
+poolable, and the raw file keeps the numbers for whoever resolves it.
+
 ## A run has to be re-runnable, and that costs more than a timestamp
 
 `run_manifest.csv` records, per panel: the image SHA-256, the config SHA-256, the

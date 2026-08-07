@@ -6,8 +6,12 @@ Input  (MANIFEST_DIR): figure_manifest.csv, grid_definitions.csv,
                        unit_manifest.csv, panel_manifest.csv,
                        series_manifest.csv, position_manifest.csv,
                        reader_config.csv
-Output (OUTPUT_DIR):   figure_values.csv, run_manifest.csv, manual_queue.csv,
-                       qc_problems.csv, raw/<Panel_ID>*.json
+Output (OUTPUT_DIR):   figure_values_accepted.csv  <- the only file to pool from
+                       figure_values_raw.csv       <- everything read, with
+                                                      Value_Status/QC_Codes/
+                                                      Pooling_Eligible per row
+                       run_manifest.csv, manual_queue.csv, qc_problems.csv,
+                       run_stamp.json, raw/, projects/
 
 The design commitment is that **a panel the reader could not do is louder than a
 panel it could**. Every panel lands on exactly one state, and everything short of
@@ -45,6 +49,24 @@ import grid_engine as GE                                           # noqa: E402
 import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
+
+
+#: Mark_Type -> the function that actually receives the reader keywords, so a
+#: test can introspect it. Declaring that an option "applies to" a mark type is
+#: a promise about a function signature, and a promise nobody checks is how
+#: `n_slots` came to be accepted for BAR_MONO, pass validation, and then raise
+#: TypeError mid-run - which surfaced as PANEL_GEOMETRY_UNRESOLVED, a message
+#: about the figure for a defect in this table.
+def reader_functions():
+    from bar_reader import read_bar_panel
+    return {
+        "BAR_COLOR": read_bar_panel,
+        "BAR_MONO": MR.read_monochrome_bar_panel,
+        "LINE_COLOR": MR.read_line_marker_panel,
+        "LINE_MONO": MR.read_monochrome_marker_panel,
+        "SCATTER": MR.read_scatter_panel,
+        "BOX_VIOLIN": MR.read_box_violin_panel,
+    }
 
 
 MANIFEST_FILES = {
@@ -120,7 +142,7 @@ def _reader_kwargs(options, mark_type):
     """Translate declared options into the keywords this reader accepts."""
     out = {}
     for name, value in (options or {}).items():
-        _, applies, keyword = BM.READER_OPTIONS[name]
+        _, applies, keyword, _check = BM.READER_OPTIONS[name]
         if keyword and mark_type in applies:
             out[keyword] = value
     return out
@@ -642,7 +664,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # cannot tell a reviewer two different stories about the same unit.
     if len(qc):
         blamed = _units_named_by(qc, values_df, m["units"])
-        for row in run_rows:
+        for row in run_rows:  # noqa: B007
             uid = row["Unit_ID"]
             if row["Run_State"] != "AUTO_PASS" or not uid or uid not in blamed:
                 continue
@@ -659,25 +681,64 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
 
     run_df = pd.DataFrame(run_rows, columns=RUN_MANIFEST_COLUMNS)
     queue_df = pd.DataFrame(queue_rows, columns=MANUAL_QUEUE_COLUMNS)
-    values_df.to_csv(os.path.join(output_dir, "figure_values.csv"), index=False)
+
+    # ---- what a downstream reader is allowed to pool ----------------------
+    # There is deliberately no file called `figure_values.csv` any more. One
+    # existed, it held every value the readers produced, and on publication 397
+    # it carried eight means whose SD-versus-SEM was unresolved while both
+    # panels sat at QC_FAILED in a different file. Anyone reading "the values
+    # file" - which is the obvious thing to do - would have pooled them.
+    #
+    # The safe file is now the one with the plainest name, the unsafe one
+    # carries its own verdict in every row, and neither can be mistaken for the
+    # other by a script that does not know to join.
+    panel_state = {r["Unit_ID"]: r["Run_State"] for r in run_rows if r["Unit_ID"]}
+    blamed = _units_named_by(qc, values_df, m["units"]) if len(qc) else {}
+    statuses, codes, eligible = [], [], []
+    for _, row in values_df.iterrows():
+        uid = _s(row.get("Unit_ID"))
+        unit_codes = sorted(blamed.get(uid, ()))
+        state = panel_state.get(uid, "")
+        if unit_codes:
+            statuses.append("QC_FAILED")
+        elif state != "AUTO_PASS":
+            statuses.append("PANEL_NOT_PASSED")
+        else:
+            statuses.append("ACCEPTED")
+        codes.append(";".join(unit_codes))
+        eligible.append("TRUE" if statuses[-1] == "ACCEPTED" else "FALSE")
+    raw_df = values_df.copy()
+    raw_df["Value_Status"] = statuses
+    raw_df["QC_Codes"] = codes
+    raw_df["Pooling_Eligible"] = eligible
+    accepted_df = raw_df[raw_df["Pooling_Eligible"] == "TRUE"].copy()
+
+    raw_df.to_csv(os.path.join(output_dir, "figure_values_raw.csv"), index=False)
+    accepted_df.to_csv(os.path.join(output_dir, "figure_values_accepted.csv"),
+                       index=False)
     run_df.to_csv(os.path.join(output_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(output_dir, "manual_queue.csv"), index=False)
     qc.to_csv(os.path.join(output_dir, "qc_problems.csv"), index=False)
+    stale = os.path.join(output_dir, "figure_values.csv")
+    if os.path.exists(stale):
+        os.remove(stale)          # never leave the ambiguous name lying around
 
     with open(os.path.join(output_dir, "run_stamp.json"), "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/1",
+            "schema": "figure-digitization-triage/run-stamp/2",
             "Run_Date": run_date, "Reader_Version": MR.READER_VERSION,
             "Config_SHA256": cfg_hash,
             "Manifest_SHA256": {k: frame_sha256(v) for k, v in sorted(m.items())},
-            "Panels": len(run_df), "Values": len(values_df),
+            "Panels": len(run_df), "Values_Read": len(raw_df),
+            "Values_Accepted": len(accepted_df),
             "QC_Problems": int(len(qc)),
         }, fh, indent=1, sort_keys=True)
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}
-    return dict(status="RAN", panels=len(run_df), values=len(values_df),
-                qc_problems=int(len(qc)), states=counts,
-                manual_queue=len(queue_df), config_sha256=cfg_hash)
+    return dict(status="RAN", panels=len(run_df), values=len(raw_df),
+                accepted=len(accepted_df), qc_problems=int(len(qc)),
+                states=counts, manual_queue=len(queue_df),
+                config_sha256=cfg_hash)
 
 
 def emit_templates(directory):
@@ -710,11 +771,13 @@ def main(argv=None):
             print("  " + code)
         print("see manifest_problems.csv")
         return 2
-    print("panels %d | values %d | qc problems %d | manual queue %d"
-          % (summary["panels"], summary["values"], summary["qc_problems"],
-             summary["manual_queue"]))
+    print("panels %d | values read %d | ACCEPTED %d | qc problems %d | queue %d"
+          % (summary["panels"], summary["values"], summary["accepted"],
+             summary["qc_problems"], summary["manual_queue"]))
     for state, n in sorted(summary["states"].items()):
         print("  %-28s %d" % (state, n))
+    print("pool from figure_values_accepted.csv; figure_values_raw.csv carries "
+          "everything read, with Value_Status on every row")
     return 0 if summary["qc_problems"] == 0 else 1
 
 

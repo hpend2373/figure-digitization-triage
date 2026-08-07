@@ -141,19 +141,21 @@ if summary["status"] == "MANIFEST_REJECTED":
     raise SystemExit(2)
 
 print("publication 397 Figure 3, read from manifests alone")
-print("  panels %d | values %d | qc problems %d | manual queue %d"
-      % (summary["panels"], summary["values"], summary["qc_problems"],
-         summary["manual_queue"]))
+print("  panels %d | values read %d | ACCEPTED %d | qc problems %d | queue %d"
+      % (summary["panels"], summary["values"], summary["accepted"],
+         summary["qc_problems"], summary["manual_queue"]))
 for state, n in sorted(summary["states"].items()):
     print("  %-28s %d" % (state, n))
 
 import pandas as pd                                                # noqa: E402
-values = pd.read_csv(os.path.join(OUT, "figure_values.csv"))
+values = pd.read_csv(os.path.join(OUT, "figure_values_raw.csv"))
+accepted = pd.read_csv(os.path.join(OUT, "figure_values_accepted.csv"))
 for _, r in values.iterrows():
-    print("  %-12s %-32s mean %6.1f  sd %s"
+    print("  %-12s %-30s mean %6.1f  sd %-5s %s"
           % (r["Unit_ID"], r["Cell_Key"], r["Mean"],
              "----" if pd.isna(r["Dispersion_Value"])
-             else "%.1f" % r["Dispersion_Value"]))
+             else "%.1f" % r["Dispersion_Value"], r["Value_Status"]))
+print("  figure_values_accepted.csv: %d rows" % len(accepted))
 print()
 print("  outputs in %s" % OUT)
 print()
@@ -164,4 +166,5 @@ print("  accept Dispersion_Type=SD sitting beside it, because SD-versus-SEM")
 print("  scales the meta-analytic weight by sqrt(n). The eight means are read,")
 print("  saved and auditable; the figure cannot enter a pooled variance until")
 print("  somebody reads the paper's methods. That is the state of the evidence.")
-raise SystemExit(0 if summary["values"] == 8 else 1)
+raise SystemExit(0 if (summary["values"] == 8 and summary["accepted"] == 0)
+                 else 1)

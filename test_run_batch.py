@@ -1080,6 +1080,124 @@ check("an invented run mode is a programming error, not a default",
       "run_mode must be" in _bad_mode and "PROBABLY_FINE" in _bad_mode, _bad_mode)
 
 
+print("an identifier that becomes a filename cannot leave the output directory")
+# Panel_ID and Series_ID are interpolated into {Panel_ID}_marks.json,
+# {Panel_ID}.tar and {Panel_ID}_{Series_ID}_points.json with nothing checking
+# them. Panel_ID="../../escaped" wrote escaped.tar and escaped_marks.json two
+# directories above the output root - and the run still reported ACCEPTED.
+for _bad in ("../../escaped", "/etc/passwd", "a/b", "..", ".hidden", "",
+             "x" * 200):
+    if not _bad:
+        continue
+    check("Panel_ID=%r is refused before anything is written" % _bad,
+          "UNSAFE_ID" in validate(
+              panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Panel_ID=_bad)),
+          "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Panel_ID=_bad)))
+check("Series_ID is checked too, not just Panel_ID",
+      "UNSAFE_ID" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Series_ID="../x")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Series_ID="../x")))
+for _ok in ("P_FLAT", "P3_TPR_MEN", "id323.fig2-b", "A1"):
+    check("a normal identifier like %r still passes" % _ok,
+          not BM.SAFE_ID.match(_ok) is None)
+
+# The image path is the other half: an absolute path anywhere on the machine
+# used to resolve, because the resolver tried the string as given first.
+_outside = os.path.join(tempfile.gettempdir(), "fdt_outside_root.png")
+Image.new("RGB", (40, 40), "white").save(_outside)
+check("an image outside file_root is not found, however it is spelled",
+      "SOURCE_FILE_NOT_FOUND" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Image_Path=_outside)),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Image_Path=_outside)))
+check("and neither is one reached by walking out and back in",
+      "SOURCE_FILE_NOT_FOUND" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                        Image_Path="../%s" % os.path.basename(_outside))))
+
+
+print("a problem charged to a figure condemns every value read from it")
+# The gate reports IMAGE_HASH_MISMATCH at `figures:2` - the raster on disk is
+# not the raster the manifest names, so nothing measured from it is evidence of
+# anything. `_units_named_by` read only `unit:`, `units:` and `values:`, so the
+# figure grain fell on the floor and every value was still ACCEPTED. On the
+# dispersion-resolved ID397 copy that was 48 poolable rows from an image the
+# batch had been told, nine times, was the wrong one.
+for _label, _figs, _want in (
+        ("a figure hash that does not match the raster",
+         [dict(FIGURES[0], Image_Resolution_Or_Hash="600x480 sha256:" + "0" * 64)],
+         "IMAGE_HASH_MISMATCH"),
+        ("a figure whose panel count is still unreconciled",
+         [dict(FIGURES[0], Panel_Reconciliation_Status="PENDING")],
+         None),
+        ("a figure whose source image is not on disk",
+         [dict(FIGURES[0], Source_Image=os.path.join(ROOT, "no_such_figure.png"))],
+         None)):
+    _d = os.path.join(ROOT, "o_fig_" + str(abs(hash(_label)) % 10 ** 8))
+    _sm = RB.run_batch(write_manifests(os.path.join(ROOT, "m_fig_%d"
+                                                    % (abs(hash(_label)) % 10 ** 8)),
+                                       figures=_figs),
+                       _d, file_root=ROOT, run_date="2026-08-06")
+    _qc = pd.read_csv(os.path.join(_d, "qc_problems.csv")) if os.path.exists(
+        os.path.join(_d, "qc_problems.csv")) else pd.DataFrame(columns=["where", "check"])
+    _acc = pd.read_csv(os.path.join(_d, "figure_values_accepted.csv"),
+                       dtype=object) if os.path.exists(
+        os.path.join(_d, "figure_values_accepted.csv")) else pd.DataFrame()
+    check("%s is caught at the figure grain" % _label,
+          any(str(w).startswith("figures:") for w in _qc.get("where", [])),
+          "%s" % _qc.to_dict("records")[:4])
+    if _want:
+        check("and the code is %s" % _want, _want in set(_qc.get("check", [])),
+              "%s" % sorted(set(_qc.get("check", []))))
+    check("and not one value from that figure is poolable (%s)" % _label,
+          len(_acc) == 0, "%d accepted" % len(_acc))
+    _rm = pd.read_csv(os.path.join(_d, "run_manifest.csv"))
+    check("and its auto panels are QC_FAILED, not AUTO_PASS (%s)" % _label,
+          "AUTO_PASS" not in set(_rm["Run_State"]), "%s" % sorted(set(_rm["Run_State"])))
+
+# A grid problem is the same argument one grain along: every unit that declares
+# the grid inherits it.
+_gd = os.path.join(ROOT, "o_grid_scope")
+_gs = RB.run_batch(
+    write_manifests(os.path.join(ROOT, "m_grid_scope"),
+                    grids=GRIDS + [dict(Grid_ID="G_TIME", Factor_Name="ARM",
+                                        Factor_Level="CONTROL", Level_Order=0,
+                                        Note="duplicate level")]),
+    _gd, file_root=ROOT, run_date="2026-08-06")
+_gq = pd.read_csv(os.path.join(_gd, "qc_problems.csv"))
+_g_scoped = any(str(w).startswith(("grid:", "grids:")) for w in _gq["where"])
+if _g_scoped:
+    _ga = pd.read_csv(os.path.join(_gd, "figure_values_accepted.csv"), dtype=object)
+    _units_on_g_time = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] == "G_TIME"}
+    _units_elsewhere = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] != "G_TIME"}
+    check("a grid-grain problem blocks every unit declaring that grid",
+          not (set(_ga["Unit_ID"]) & _units_on_g_time),
+          "%s still accepted" % sorted(set(_ga["Unit_ID"]) & _units_on_g_time))
+    # Inheritance is downward, not sideways. A unit on another grid was not
+    # measured any less carefully because this one is broken.
+    check("and leaves units on other grids alone",
+          bool(set(_ga["Unit_ID"]) & _units_elsewhere) or not _units_elsewhere,
+          "accepted=%s other=%s" % (sorted(set(_ga["Unit_ID"])), sorted(_units_elsewhere)))
+else:
+    check("a grid-grain problem blocks every unit declaring that grid",
+          _gs["status"] == "MANIFEST_REJECTED", "%s" % _gs)
+
+# The failure above was silent because an unknown prefix simply did not match.
+# The next grain the gate grows must not repeat it.
+_fake = pd.DataFrame([dict(where="constellations:2", check="INVENTED_SCOPE",
+                           detail="a grain this function has never seen")])
+_charged = RB._units_named_by(_fake, pd.DataFrame(), fr(UNITS, GE.fig_unit_columns()))
+check("a QC scope nobody taught the runner condemns every unit",
+      set(_charged) == {str(u["Unit_ID"]) for u in UNITS} and all(
+          any(c.startswith("UNATTRIBUTED_QC_SCOPE") for c in codes)
+          for codes in _charged.values()),
+      "%s" % _charged)
+check("every scope the gate emits is one the runner resolves",
+      {"unit", "units", "values", "figures", "grids", "grid"} == set(RB.QC_SCOPES),
+      "%s" % sorted(RB.QC_SCOPES))
+
+
 print("the run mode belongs to the registry, not to the caller")
 # The replay: run the demonstration, then hand its own manifests to the plain
 # CLI. `run_mode` was an argument, so the promise stayed at the first call site

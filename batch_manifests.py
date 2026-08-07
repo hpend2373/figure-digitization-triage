@@ -141,6 +141,28 @@ NON_HUMAN_NAME_TOKENS = frozenset((
     "MACHINE", "AGENT", "ASSISTANT", "MODEL", "SYSTEM", "PIPELINE", "TOOL",
 ))
 
+#: The shape an identifier must have to be safe as part of a filename.
+#:
+#: `Panel_ID` and `Series_ID` are interpolated straight into artifact names -
+#: `{Panel_ID}_marks.json`, `{Panel_ID}.tar`, `{Panel_ID}_{Series_ID}_points.json`
+#: - and nothing checked them. `Panel_ID="../../escaped"` wrote `escaped.tar` and
+#: `escaped_marks.json` two directories above the output root, and the batch
+#: still reported ACCEPTED. In a workflow where an agent drafts the manifests,
+#: a mistyped ID is enough; it does not take malice.
+SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+#: Which columns hold an identifier that becomes part of a path.
+PATH_FORMING_ID_COLUMNS = {
+    "panels": ("Panel_ID", "Config_ID"),
+    "series": ("Panel_ID", "Series_ID"),
+    "positions": ("Panel_ID", "Position_ID"),
+    "configs": ("Config_ID",),
+    "source_panels": ("Source_Panel_ID",),
+    "source_figures": ("Source_Figure_ID",),
+    "source_documents": ("Source_Document_ID",),
+    "reviewers": ("Reviewer_ID",),
+}
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
 _ORCID_RE = re.compile(r"^(\d{4})-(\d{4})-(\d{4})-(\d{3}[\dX])$")
 
@@ -773,6 +795,25 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     if problems:
         return pd.DataFrame(problems)
 
+    # Identifiers become filenames, so they are checked before anything is
+    # written with them - not by the code that writes, which would be one
+    # forgotten call site away from the escape it is meant to stop.
+    for name, df in (("reviewers", reviewers), ("source_documents", source_documents),
+                     ("source_figures", source_figures), ("source_panels", source_panels),
+                     ("panels", panels), ("series", series),
+                     ("positions", positions), ("configs", configs)):
+        for column in PATH_FORMING_ID_COLUMNS.get(name, ()):
+            if column not in getattr(df, "columns", ()):
+                continue
+            for i, value in enumerate(df[column]):
+                text = str(value).strip()
+                if text and not SAFE_ID.match(text):
+                    flag("%s:%d" % (name, i + 2), "UNSAFE_ID",
+                         "%s=%r is interpolated into an artifact filename. "
+                         "Allowed: letters, digits, dot, underscore, hyphen, "
+                         "starting with a letter or digit, at most 128 characters"
+                         % (column, text))
+
     reviewer_index = check_reviewer_registry(reviewers, flag)
 
     # A caller may demote a real run to a demonstration - that only throws
@@ -791,12 +832,24 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
              "person who inspected the figures; a demonstration identity cannot "
              "be promoted by the caller" % ", ".join(demo_ids))
 
+    root = os.path.realpath(file_root)
+
     def resolve(p):
+        """A declared image path, confined to `file_root`.
+
+        The old version tried the string as given first, so an absolute path
+        anywhere on the machine resolved happily, and `../` walked out of the
+        root without comment. A manifest names a figure inside the corpus; it
+        does not get to name a file outside it.
+        """
         p = str(p).strip()
-        if os.path.exists(p):
-            return p
-        q = os.path.join(file_root, p)
-        return q if os.path.exists(q) else None
+        if not p:
+            return None
+        candidate = p if os.path.isabs(p) else os.path.join(root, p)
+        real = os.path.realpath(candidate)
+        if real != root and not real.startswith(root + os.sep):
+            return None
+        return real if os.path.exists(real) else None
 
     unit_index = {}
     if units is not None:

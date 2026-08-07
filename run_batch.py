@@ -64,7 +64,7 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
-PIPELINE_VERSION = "7.11"
+PIPELINE_VERSION = "7.12"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -514,31 +514,84 @@ def _calibration_points(panel, xcal, ycal):
     return out
 
 
-def _units_named_by(qc, values_df, units_df):
-    """Unit_ID -> the set of gate codes charged to it.
+#: Every grain the grid gate can charge a problem to, and how wide the damage
+#: is. A problem at a coarse grain condemns everything under it: a figure whose
+#: raster is not the raster that was read poisons every unit measured from it,
+#: however clean each unit looked on its own.
+QC_SCOPES = ("unit", "units", "values", "figures", "grids", "grid")
+
+
+def _units_named_by(qc, values_df, units_df, figures_df=None, grids_df=None):
+    """Unit_ID -> the set of gate codes charged to it, including inherited ones.
 
     The gate locates a problem the way a reviewer would open the file - by grain
-    and row (`values:14`) or by unit (`unit:U1`). Both have to resolve back to a
-    Unit_ID, or a rejected panel keeps reporting AUTO_PASS in run_manifest.csv
-    while qc_problems.csv says otherwise. Two files disagreeing about the same
-    unit is worse than either being wrong.
+    and row (`values:14`, `figures:2`) or by name (`unit:U1`, `grid:G_TIME`).
+    All of those have to resolve back to a Unit_ID, or a rejected panel keeps
+    reporting AUTO_PASS in run_manifest.csv while qc_problems.csv says
+    otherwise. Two files disagreeing about the same unit is worse than either
+    being wrong.
+
+    This used to read only `unit:`, `units:` and `values:`, and silently dropped
+    everything coarser. `IMAGE_HASH_MISMATCH` is charged to `figures:2`, so a
+    batch could be told in writing that the raster it read was not the raster
+    the manifest names - nine times over - and still write every value into
+    `figure_values_accepted.csv`. That is the one invariant this package exists
+    to hold, and it was resolving a string prefix to decide it.
+
+    Two rules make the resolution safe rather than merely wider:
+
+    **Inheritance is downward and total.** A `figures:` problem condemns every
+    unit of that figure; a `grid:` problem condemns every unit declaring that
+    grid. A unit is only as trustworthy as the figure it was measured from.
+
+    **An unrecognised scope condemns everything.** If the gate grows a grain
+    this function has not been taught, the batch fails closed and says so rather
+    than quietly ignoring it - the failure mode above, exactly, one grain along.
     """
     out = {}
+    units_df = units_df if units_df is not None else pd.DataFrame()
+    all_units = ([str(u).strip() for u in units_df["Unit_ID"]]
+                 if "Unit_ID" in getattr(units_df, "columns", ()) else [])
+
+    def charge(uids, code):
+        for uid in uids:
+            if uid:
+                out.setdefault(uid, set()).add(code)
+
+    def by_row(frame, where, column):
+        try:
+            idx = int(where.split(":", 1)[1]) - 2
+        except ValueError:
+            return None
+        if frame is None or not (0 <= idx < len(frame)):
+            return None
+        if column not in getattr(frame, "columns", ()):
+            return None
+        return str(frame.iloc[idx][column]).strip()
+
+    def units_of(column, value):
+        if not value or column not in getattr(units_df, "columns", ()):
+            return []
+        return [str(u.get("Unit_ID", "")).strip() for _, u in units_df.iterrows()
+                if str(u.get(column, "")).strip() == value]
+
     for _, p in qc.iterrows():
         where, code = str(p.get("where", "")), str(p.get("check", ""))
-        uid = None
-        if where.startswith("unit:"):
-            uid = where.split(":", 1)[1]
-        elif where.startswith("values:") or where.startswith("units:"):
-            frame = values_df if where.startswith("values:") else units_df
-            try:
-                idx = int(where.split(":", 1)[1]) - 2
-            except ValueError:
-                idx = -1
-            if 0 <= idx < len(frame) and "Unit_ID" in frame.columns:
-                uid = str(frame.iloc[idx]["Unit_ID"]).strip()
-        if uid:
-            out.setdefault(uid, set()).add(code)
+        scope = where.split(":", 1)[0] if ":" in where else where
+        if scope == "unit":
+            charge([where.split(":", 1)[1]], code)
+        elif scope == "units":
+            charge([by_row(units_df, where, "Unit_ID")], code)
+        elif scope == "values":
+            charge([by_row(values_df, where, "Unit_ID")], code)
+        elif scope == "figures":
+            charge(units_of("Figure_ID", by_row(figures_df, where, "Figure_ID")), code)
+        elif scope == "grids":
+            charge(units_of("Grid_ID", by_row(grids_df, where, "Grid_ID")), code)
+        elif scope == "grid":
+            charge(units_of("Grid_ID", where.split(":", 1)[1]), code)
+        else:
+            charge(all_units, "UNATTRIBUTED_QC_SCOPE:%s" % (where or "?"))
     return out
 
 
@@ -976,7 +1029,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # thought of them. Re-state it here, so run_manifest.csv and qc_problems.csv
     # cannot tell a reviewer two different stories about the same unit.
     if len(qc):
-        blamed = _units_named_by(qc, values_df, m["units"])
+        blamed = _units_named_by(qc, values_df, m["units"],
+                                 figures_df=m["figures"], grids_df=m["grids"])
         for row in run_rows:  # noqa: B007
             uid = row["Unit_ID"]
             if row["Run_State"] != "AUTO_PASS" or not uid or uid not in blamed:
@@ -1018,7 +1072,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             continue
         if r["Run_State"] != "AUTO_PASS" or uid not in unit_state:
             unit_state[uid] = r["Run_State"]
-    blamed = _units_named_by(qc, values_df, m["units"]) if len(qc) else {}
+    # Same inheritance as the run-manifest pass above, and it has to be the same
+    # call: this is the one that writes Pooling_Eligible onto each row, so a
+    # narrower view here would put a value in the accepted file that the run
+    # manifest has already marked QC_FAILED.
+    blamed = (_units_named_by(qc, values_df, m["units"],
+                              figures_df=m["figures"], grids_df=m["grids"])
+              if len(qc) else {})
     run_panel_ids = [_s(rec.get("Run_Panel_ID")) for rec in values]
     source_panel_ids = [_s(rec.get("Source_Panel_ID")) for rec in values]
     statuses, codes, eligible = [], [], []

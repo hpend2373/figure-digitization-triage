@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.11 (full package)
+# figure-digitization-triage — v7.12 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,65 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## HIGH (v7.11 review) — figure-grain QC never reached the values
+
+The single worst defect found so far, and it was found by a static read.
+
+`_units_named_by()` resolved a gate problem to a Unit_ID by looking at the
+`where` string. It understood `unit:`, `units:` and `values:` — and silently
+dropped everything coarser. `IMAGE_HASH_MISMATCH` is charged to `figures:2`.
+
+Reproduced on a dispersion-resolved copy of ID397, where the batch does accept
+values. Corrupt every figure hash in the manifest and replay:
+
+    panels 18 | values read 48 | ACCEPTED 48 | qc problems 105
+    IMAGE_HASH_MISMATCH        9
+
+Forty-eight poolable rows from an image the batch had been told, nine times,
+was not the image the manifest names. The same hole applied to
+`PANEL_RECONCILIATION_PENDING`, `SOURCE_FILE_NOT_FOUND`,
+`PANEL_STATUS_CONTRADICTS_COUNTS` and `UNLISTED_PANELS_NOT_RECORDED`.
+
+Now:
+
+    panels 18 | values read 48 | ACCEPTED 0 | qc problems 105
+    QC_FAILED 12 | NO_READER_AVAILABLE 4 | MANUAL_POINT_READ 2
+
+Two rules, both in `_units_named_by`:
+
+**Inheritance is downward and total.** A `figures:` problem condemns every unit
+of that figure; a `grid:`/`grids:` problem condemns every unit declaring that
+grid. Not sideways: a unit on another grid was not measured less carefully
+because this one is broken.
+
+**An unrecognised scope condemns everything.** A grain the resolver has not
+been taught yields `UNATTRIBUTED_QC_SCOPE:<where>` charged to every unit. The
+original defect was a string prefix failing to match and nothing noticing; the
+next grain the gate grows will fail closed instead.
+
+Both call sites were changed — the run-manifest pass and the pass that writes
+`Pooling_Eligible` onto each row. A narrower view in the second would have put
+a value in the accepted file that the run manifest already called QC_FAILED.
+
+13 scenarios. Reverting the resolver fails 8.
+
+## HIGH (v7.11 review) — an identifier could write outside the output directory
+
+`Panel_ID` and `Series_ID` are interpolated straight into artifact names —
+`{Panel_ID}_marks.json`, `{Panel_ID}.tar`, `{Panel_ID}_{Series_ID}_points.json`
+— and nothing checked them. `Panel_ID="../../escaped"` wrote `escaped.tar` and
+`escaped_marks.json` two directories above the output root, and the run still
+reported `ACCEPTED`. The image resolver had the mirror problem: it tried the
+declared string as given *before* joining `file_root`, so an absolute path
+anywhere on the machine resolved happily.
+
+`SAFE_ID` (`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`) is now checked on every
+path-forming column before anything is written, and `resolve()` confines every
+image to the realpath of `file_root`. In a workflow where an agent drafts the
+manifests, a mistyped ID is enough; it does not take malice.
+
+9 scenarios. Reverting either half fails them.
 
 ## HIGH (v7.10 review) — the run mode was the caller's promise, not the manifest's property
 

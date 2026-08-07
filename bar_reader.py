@@ -58,26 +58,46 @@ def calibrate(ticks):
     return (lambda py: float(k * py + b)), resid
 
 
-def read_bar_panel(masks, panel_box, ticks, series, min_bar_px=15,
+def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                    stem_half_width=3, max_whisker_px=90, stem_required=True,
-                   baseline_value=0.0, n_slots=None):
+                   baseline_value=0.0, y_calibration=None, x_positions=None,
+                   slot_tolerance_px=None):
     """Read every bar of one panel.
 
-    masks       : dict from colour_masks
-    panel_box   : (x0, x1, y0, y1) bounding the plot area
-    ticks       : [(value, pixel_row), ...] for the y axis
-    series      : {series_name: mask_key}, e.g. {"SUPINE": "blue"}
+    masks         : dict from colour_masks
+    panel_box     : (x0, x1, y0, y1) bounding the plot area
+    y_calibration : a shared `mark_readers.AxisCalibration`. LINEAR or LOG.
+    ticks         : [(value, pixel_row), ...] - only a fallback for direct
+                    callers; the batch layer always passes `y_calibration`
+    series        : {series_name: mask_key}, e.g. {"SUPINE": "blue"}
+    x_positions   : {Position_ID: x_pixel} declared in `position_manifest.csv`.
+                    Bars are matched to these anchors, never to each other.
 
-    Each returned bar carries the two provenance flags the template requires.
+    Each returned bar carries the provenance flags the template requires.
+
+    This used to fit its own linear map with `np.polyfit`, which meant
+    `Axis_Y_Scale=LOG` validated, ran, and produced values off by an order of
+    magnitude - the only monochrome-free reader that did not use the shared
+    calibration was also the only one that could not read a log axis.
     """
+    from mark_readers import AxisCalibration
+
     x0, x1, y0, y1 = panel_box
     dark = masks["dark"]
-    y2v, resid = calibrate(ticks)
-    # Pixel row of the baseline the bars grow from, by inverting the calibration.
-    vs = np.array([t[0] for t in ticks], dtype=float)
-    ys = np.array([t[1] for t in ticks], dtype=float)
-    kk, bb = np.polyfit(vs, ys, 1)
-    zero_row = float(kk * baseline_value + bb)
+    if y_calibration is None:
+        if not ticks:
+            raise ValueError("read_bar_panel needs y_calibration or ticks")
+        y_calibration = AxisCalibration.from_points(ticks)
+    y2v = y_calibration.pixel_to_value
+    resid = float(getattr(y_calibration, "max_residual", 0.0))
+    # Pixel row of the baseline the bars grow from. On a log axis zero is not a
+    # row on the paper, and the old code inverted a second linear fit to invent
+    # one - a number inside the panel, used silently to decide which way every
+    # bar grows.
+    if y_calibration.scale == "LOG" and baseline_value <= 0:
+        raise ValueError("baseline_value must be positive on a LOG axis, got %r"
+                         % baseline_value)
+    zero_row = y_calibration.value_to_pixel(baseline_value)
     out = []
     for sname, key in series.items():
         m = np.zeros_like(dark)
@@ -165,31 +185,67 @@ def read_bar_panel(masks, panel_box, ticks, series, min_bar_px=15,
                 top_px=top_c, fill_top_px=float(fill_top), cap_px=cap_c,
                 mean=y2v(top_c),
                 mean_if_read_at_fill_edge=y2v(float(fill_top)),
-                dispersion=None if cap_c is None else y2v(cap_c) - y2v(top_c),
+                # A magnitude, always. The whisker points away from zero, so a
+                # down bar's signed difference is negative - and the grid gate
+                # rejects Dispersion_Value <= 0, so a correctly-read down bar
+                # failed end to end while both components had passing tests.
+                # Direction is kept, in the field whose job that is.
+                dispersion=None if cap_c is None else abs(y2v(cap_c) - y2v(top_c)),
+                dispersion_signed=(None if cap_c is None
+                                   else y2v(cap_c) - y2v(top_c)),
                 Bar_Direction="DOWN" if down else "UP",
                 Bar_Top_Definition="OUTLINE_CENTER",
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,
             ))
     out.sort(key=lambda d: (d["series"], d["x"]))
-    if n_slots:
-        # Assign each bar to the nearest of n_slots evenly spaced positions
-        # instead of counting them off left to right. A bar that could not be
-        # seen - a value so close to the baseline that its fill is covered -
-        # otherwise shifts every label after it, which silently renames real
-        # readings instead of leaving a hole the grid engine can catch.
-        xs_all = [d["x"] for d in out]
-        if xs_all:
-            lo, hi = min(xs_all), max(xs_all)
-            pitch = (hi - lo) / (n_slots - 1) if n_slots > 1 else 1.0
-            for s in set(d["series"] for d in out):
-                grp = [d for d in out if d["series"] == s]
-                gl = min(d["x"] for d in grp)
-                for d in grp:
-                    d["order"] = int(round((d["x"] - gl) / pitch)) if pitch else 0
-                    d["slot_residual_px"] = abs((d["x"] - gl) - d["order"] * pitch)
+    if x_positions:
+        # Identity is declared, never inferred. Each bar goes to the NEAREST
+        # DECLARED anchor, and one that is not near any of them is dropped so
+        # the cell stays missing for the grid gate to name.
+        #
+        # The previous version rebuilt a pitch from the detected bars: global
+        # min/max for the spacing, each series' own leftmost bar for the origin.
+        # Two failure modes followed, both silent. A series whose FIRST bar was
+        # invisible had every later bar shifted one label left. And when a whole
+        # slot went undetected the derived pitch collapsed - measured 123 px to
+        # 108 px on the signed fixture - so a real slot-4 bar was emitted as
+        # slot 5. Neither produced a large residual, so the residual could not
+        # have caught them even if anything had been reading it.
+        anchors = sorted(x_positions.items(), key=lambda kv: float(kv[1]))
+        spans = [abs(float(b[1]) - float(a[1]))
+                 for a, b in zip(anchors, anchors[1:])]
+        tolerance = (float(slot_tolerance_px) if slot_tolerance_px is not None
+                     else (0.5 * min(spans) if spans else float(x1 - x0)))
+        kept = []
+        for d in out:
+            best, distance = None, None
+            for i, (pid, px) in enumerate(anchors):
+                gap = abs(d["x"] - float(px))
+                if distance is None or gap < distance:
+                    best, distance = i, gap
+            if best is None or distance > tolerance:
+                continue
+            d["order"] = best
+            d["x_label"] = anchors[best][0]
+            d["slot_residual_px"] = float(distance)
+            d["Position_Assignment"] = "DECLARED_ANCHOR"
+            kept.append(d)
+        # Two bars of one series claiming one position is an ambiguity, not a
+        # duplicate: neither can be trusted, so both go.
+        seen = {}
+        for d in kept:
+            seen.setdefault((d["series"], d["order"]), []).append(d)
+        out = [group[0] for group in seen.values() if len(group) == 1]
+        out.sort(key=lambda d: (d["series"], d["order"]))
     else:
-        for s in set(d["series"] for d in out):
-            for i, d in enumerate([d for d in out if d["series"] == s]):
+        # No declared anchors: count the bars off left to right and SAY SO. This
+        # is the inference the batch layer must never do - a bar that could not
+        # be seen shifts every label after it - so the marker is on every row
+        # and `run_batch` refuses it. It stays reachable for direct callers
+        # working a single figure by hand, where the panel is in front of them.
+        for s_name in set(d["series"] for d in out):
+            for i, d in enumerate([d for d in out if d["series"] == s_name]):
                 d["order"] = i
+                d["Position_Assignment"] = "SEQUENTIAL"
     return out

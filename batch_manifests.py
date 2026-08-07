@@ -516,7 +516,13 @@ READER_OPTIONS = {
     # manifest used to accept the option here, and the run then died with a
     # TypeError that surfaced as PANEL_GEOMETRY_UNRESOLVED. A reader-signature
     # introspection test now makes that class of mismatch impossible to ship.
-    "n_slots":          (_as_int, ("BAR_COLOR",), "n_slots", _at_least_one),
+    # `n_slots` is gone. It existed so a colour bar panel could rebuild its own
+    # x spacing from the bars it happened to detect - which is inference, and
+    # got the labels wrong whenever the leftmost bar of a series was invisible.
+    # BAR_COLOR now matches bars to the pixels in `position_manifest.csv`, so
+    # the count is not something a config file needs to say.
+    "slot_tolerance_px": (_as_float, ("BAR_COLOR",), "slot_tolerance_px",
+                          _positive),
     "dual_tolerance_pct": (_as_float, BATCH_MARK_TYPES, None, _non_negative),
 }
 

@@ -30,6 +30,7 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import batch_manifests as BM        # noqa: E402
+import kernel as K                 # noqa: E402
 import grid_engine as GE            # noqa: E402
 import mark_readers as MR           # noqa: E402
 import run_batch as RB              # noqa: E402
@@ -623,17 +624,19 @@ for _name, _kw, _want in (
          dict(configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="x_window",
                                       Value="20", Note="")]),
          "DUPLICATE_READER_OPTION"),
-        # n_slots is a BAR_COLOR keyword. read_monochrome_bar_panel derives its
-        # slot count from the declared series and has no such parameter, so
-        # accepting it here bought a TypeError at run time reported as a figure
-        # problem.
-        ("n_slots on a monochrome bar panel",
+        # slot_tolerance_px is a BAR_COLOR keyword; the monochrome bar reader
+        # has no such parameter, so accepting it here bought a TypeError at run
+        # time reported as a figure problem. (`n_slots` used to be the example.
+        # It is gone: it existed so BAR_COLOR could rebuild its own x spacing
+        # from the bars it happened to detect, which is inference.)
+        ("slot_tolerance_px on a monochrome bar panel",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
                             Config_ID="C_MONO"),
               series_rows=[dict(r, Colour_Hex="", Bar_Fill_Pattern=(
                   "SOLID" if r["Series_ID"] == "S_BLUE" else "HATCHED"))
                   if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
-              configs=CONFIGS + [dict(Config_ID="C_MONO", Option="n_slots",
+              configs=CONFIGS + [dict(Config_ID="C_MONO",
+                                      Option="slot_tolerance_px",
                                       Value="4", Note="")]),
          "OPTION_WRONG_FOR_MARK_TYPE"),
         # Ranges, not just types. Each of these parsed cleanly and then selected
@@ -1100,6 +1103,58 @@ except Exception as exc:                                  # pragma: no cover
     _bad_mode = "wrong exception: %r" % exc
 check("an invented run mode is a programming error, not a default",
       "run_mode must be" in _bad_mode and "PROBABLY_FINE" in _bad_mode, _bad_mode)
+
+
+print("what the reader found for a cell outranks what a person typed for the unit")
+# The readers produce Errorbar_Stem_Confirmed per MARK. `run_panel` only flagged
+# NO_VARIANCE when ALL marks were False, and `to_value_records` then copied
+# mean, dispersion and bounds and dropped everything else - so the gate fell
+# back to a single human-typed field on the unit manifest. Three confirmed
+# whiskers and one unconfirmed passed on the strength of the three.
+_prov = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"),
+                    dtype=object).fillna("")
+for _col in ("Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
+             "Position_Assignment", "Calibration_Max_Residual",
+             "Slot_Assignment_Residual_Px"):
+    check("the value schema has room for %s" % _col,
+          _col in _prov.columns, "%s" % sorted(_prov.columns))
+# Room is not the same as carried. The calibration residual is stamped on every
+# row by the runner, so it is blank only if the carry is broken - it was
+# computed inside `bar_reader` and returned under a name nothing read.
+check("every value row carries the residual of the calibration that produced it",
+      len(_prov) and all(str(v).strip() for v in _prov["Calibration_Max_Residual"]),
+      "%d of %d blank" % (sum(1 for v in _prov["Calibration_Max_Residual"]
+                              if not str(v).strip()), len(_prov)))
+
+_mixed = GE.fig_validate_bundle(
+    fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+    fr([dict(UNITS[0], Errorbar_Stem_Confirmed="TRUE")], GE.fig_unit_columns()),
+    fr([dict(Unit_ID=UNITS[0]["Unit_ID"], Cell_Key="ARM=CONTROL;TIMEPOINT=%s" % q,
+             Mean=50 + i, Dispersion_Value=2,
+             Errorbar_Stem_Confirmed="TRUE" if i else "FALSE",
+             Bar_Top_Definition="NOT_A_BAR", Verification_Status="SINGLE")
+        for i, q in enumerate(POSITIONS)], GE.fig_values_columns()),
+    K, check_files=False)
+_codes = sorted(set(_mixed["check"])) if len(_mixed) else []
+check("one unconfirmed whisker in a panel of confirmed ones is caught",
+      "CELL_ERRORBAR_STEM_UNCONFIRMED" in _codes, "%s" % _codes)
+check("and only that cell is named",
+      sum(1 for _, p in _mixed.iterrows()
+          if p["check"] == "CELL_ERRORBAR_STEM_UNCONFIRMED") == 1,
+      "%s" % _mixed[_mixed["check"] == "CELL_ERRORBAR_STEM_UNCONFIRMED"].to_dict("records"))
+
+_inferred = GE.fig_validate_bundle(
+    fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+    fr([UNITS[0]], GE.fig_unit_columns()),
+    fr([dict(Unit_ID=UNITS[0]["Unit_ID"], Cell_Key="ARM=CONTROL;TIMEPOINT=%s" % q,
+             Mean=50, Dispersion_Value=2, Errorbar_Stem_Confirmed="TRUE",
+             Bar_Top_Definition="NOT_A_BAR", Position_Assignment="SEQUENTIAL",
+             Verification_Status="SINGLE")
+        for q in POSITIONS], GE.fig_values_columns()),
+    K, check_files=False)
+check("a cell whose x identity was counted off rather than declared is caught",
+      "POSITION_INFERRED" in (sorted(set(_inferred["check"])) if len(_inferred) else []),
+      "%s" % (sorted(set(_inferred["check"])) if len(_inferred) else []))
 
 
 print("one raster, one hash, checked end to end")
@@ -1721,11 +1776,19 @@ for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items
             _mismatch.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
 check("every reader option names a parameter its reader actually accepts",
       not _mismatch, "; ".join(_mismatch))
-check("n_slots is offered to BAR_COLOR only",
-      BM.READER_OPTIONS["n_slots"][1] == ("BAR_COLOR",),
-      "%s" % (BM.READER_OPTIONS["n_slots"][1],))
-check("and BAR_MONO derives its slot count from the declared series instead",
-      "n_slots" not in inspect.signature(_readers["BAR_MONO"]).parameters)
+check("slot_tolerance_px is offered to BAR_COLOR only",
+      BM.READER_OPTIONS["slot_tolerance_px"][1] == ("BAR_COLOR",),
+      "%s" % (BM.READER_OPTIONS["slot_tolerance_px"][1],))
+check("n_slots is gone - a reader does not reconstruct its own x spacing",
+      "n_slots" not in BM.READER_OPTIONS
+      and all("n_slots" not in inspect.signature(f).parameters
+              for f in _readers.values()),
+      "%s" % sorted(BM.READER_OPTIONS))
+check("every positional reader takes the declared x pixels",
+      all("x_positions" in inspect.signature(_readers[m]).parameters
+          for m in BM.POSITIONAL_MARK_TYPES),
+      "%s" % [m for m in BM.POSITIONAL_MARK_TYPES
+              if "x_positions" not in inspect.signature(_readers[m]).parameters])
 check("every option has a range check, not just a parser",
       all(callable(v[3]) for v in BM.READER_OPTIONS.values()))
 check("an unreleased mark type is named rather than silently unknown",

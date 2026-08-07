@@ -57,7 +57,7 @@ for F in FIGS:
     exp=int(np.prod([len(v) for v in F["factors"].values()]))
     for name,box,tv,outcome,unit in F["panels"]:
         tk=list(zip(tv,ticks_of(dark,box,len(tv))))
-        bars=read_bar_panel(masks, box, tk, F["series"], baseline_value=0.0, n_slots=len(SESS))
+        bars=read_bar_panel(masks, box, tk, F["series"], baseline_value=0.0)
         # R2 is a genuinely independent re-reading: a column scan with a median
         # statistic, not a second call into the same function. Storing it here
         # makes the dual extraction part of the record instead of a side check.

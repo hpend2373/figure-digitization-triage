@@ -129,6 +129,15 @@ def fig_values_columns():
         "Q1_R1", "Q1_R2", "Q1", "Q3_R1", "Q3_R2", "Q3",
         "Whisker_Lower_R1", "Whisker_Lower_R2", "Whisker_Lower",
         "Whisker_Upper_R1", "Whisker_Upper_R2", "Whisker_Upper",
+        # What the READER found for THIS cell, as opposed to what a person
+        # typed once for the whole unit. `Errorbar_Stem_Confirmed` lived only on
+        # the unit manifest, so a panel where three whiskers were confirmed and
+        # one was not passed on the strength of the three: the gate consulted a
+        # human's single assertion and the reader's per-mark finding was
+        # discarded by `to_value_records`.
+        "Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
+        "Position_Assignment", "Calibration_Max_Residual",
+        "Slot_Assignment_Residual_Px",
         "Verification_Status", "Reconciliation_Note",
         "Note",
     ]
@@ -812,6 +821,29 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
             if lvl not in decl[fac]:
                 flag(line, "UNDECLARED_FACTOR_LEVEL",
                      "%s: %s=%s is not among %s" % (uid, fac, lvl, decl[fac]))
+        # What the reader found for THIS cell outranks what a person typed once
+        # for the whole unit. A panel with three confirmed whiskers and one
+        # unconfirmed used to pass on the strength of the three, because the
+        # gate never saw the per-mark result at all.
+        if str(u.get("Extraction_Method", "")).strip().upper() == "DIGITIZED" \
+                and str(u.get("Statistic_Type", "")).strip().upper() == "CONTINUOUS" \
+                and str(u.get("Dispersion_Type", "")).strip().upper() != "NO_ERRORBAR" \
+                and not blank(r.get("Dispersion_Value")):
+            cell_stem = kernel.fig_as_bool(r.get("Errorbar_Stem_Confirmed"))
+            if cell_stem == "BAD":
+                flag(line, "BAD_ERRORBAR_STEM_FLAG",
+                     "Errorbar_Stem_Confirmed=%r on this cell"
+                     % r.get("Errorbar_Stem_Confirmed"))
+            elif cell_stem is False:
+                flag(line, "CELL_ERRORBAR_STEM_UNCONFIRMED",
+                     "the reader could not connect this cell's whisker to its "
+                     "mark, whatever the unit row asserts")
+        if not blank(r.get("Position_Assignment")) and str(
+                r.get("Position_Assignment")).strip().upper() != "DECLARED_ANCHOR":
+            flag(line, "POSITION_INFERRED",
+                 "Position_Assignment=%s - this cell's x identity was counted "
+                 "off rather than matched to a declared pixel"
+                 % r.get("Position_Assignment"))
         key = fig_cell_key(cell)
         if key in seen.setdefault(uid, {}):
             flag(line, "FACTORIAL_CELL_DUPLICATE",

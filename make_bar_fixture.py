@@ -68,7 +68,7 @@ def build(path="bar_fixture.png", meta_path="bar_fixture_truth.json",
                 # a significance glyph floating above the cap - no stem to the bar
                 d.line([xc - 6, ycap - 26, xc + 6, ycap - 26], fill=(0, 0, 0), width=4)
                 d.line([xc - 6, ycap - 32, xc + 6, ycap - 32], fill=(0, 0, 0), width=4)
-            bars.append(dict(session=sess, series=name, order=i,
+            bars.append(dict(session=sess, series=name, order=i, x_pixel=xc,
                              true_mean=mean, true_sd=sd))
         if with_glyphs:
             # a comparison bracket spanning the pair, well above both caps
@@ -148,7 +148,7 @@ def build_signed(path="bar_fixture_signed.png", meta_path="bar_fixture_signed_tr
             # a significance glyph further out, unattached
             off = 26 if mean < 0 else -26
             d.line([xc - 6, ycap + off, xc + 6, ycap + off], fill=(0, 0, 0), width=4)
-            bars.append(dict(session=sess, series=name, order=i,
+            bars.append(dict(session=sess, series=name, order=i, x_pixel=xc,
                              true_mean=mean, true_sd=sd,
                              direction="DOWN" if mean < 0 else "UP"))
     im.save(path)

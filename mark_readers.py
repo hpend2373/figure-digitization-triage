@@ -31,6 +31,11 @@ class AxisCalibration:
     slope: float
     intercept: float
     scale: str = "LINEAR"
+    #: Largest absolute residual of the fit, in axis units (log units on a LOG
+    #: axis). Emitted so a bad calibration is a number somebody can gate on
+    #: rather than a shape nobody looked at. `bar_reader` computed exactly this
+    #: and returned it under a different name, where nothing read it.
+    max_residual: float = 0.0
 
     @classmethod
     def from_points(cls, points, scale="LINEAR"):
@@ -47,7 +52,8 @@ class AxisCalibration:
         elif scale != "LINEAR":
             raise ValueError("scale must be LINEAR or LOG")
         slope, intercept = np.polyfit(pixels, values, 1)
-        return cls(float(slope), float(intercept), scale)
+        resid = float(np.abs(values - (slope * pixels + intercept)).max())
+        return cls(float(slope), float(intercept), scale, resid)
 
     def pixel_to_value(self, pixel):
         raw = self.slope * float(pixel) + self.intercept
@@ -865,6 +871,19 @@ def read_panel(mark_type, **kwargs):
 #: reader-supplied provenance fields died between the reader and the gate. Keep
 #: this list and `fig_values_columns()` in step - `test_mark_readers.py` asserts
 #: the containment, so adding a field to one and not the other fails the suite.
+#: Mark-level facts every value row carries out of the reader, whatever the
+#: statistic. These used to stop at `to_value_records`, which copied mean,
+#: dispersion and bounds and dropped the rest - so nothing downstream could tell
+#: a whisker the reader had confirmed from one it had not.
+MARK_CARRIED = (
+    ("Errorbar_Stem_Confirmed", "Errorbar_Stem_Confirmed"),
+    ("Bar_Top_Definition", "Bar_Top_Definition"),
+    ("Bar_Direction", "Bar_Direction"),
+    ("Position_Assignment", "Position_Assignment"),
+    ("calib_max_resid", "Calibration_Max_Residual"),
+    ("slot_residual_px", "Slot_Assignment_Residual_Px"),
+)
+
 ASSOCIATION_CARRIED = (
     "Association_Type", "Association_Value", "P_Value", "P_Value_Method",
     "N_Pairs", "P_Value_Extraction_Method", "Ties_Present",
@@ -879,7 +898,8 @@ def _calibration_record(cal):
     if cal is None:
         return None
     return dict(slope=float(cal.slope), intercept=float(cal.intercept),
-                scale=str(cal.scale))
+                scale=str(cal.scale),
+                max_residual=float(getattr(cal, "max_residual", 0.0)))
 
 
 def write_point_data(points, path, unit_id, cell_key, source_image,
@@ -1031,6 +1051,9 @@ def to_value_records(rows, statistic_type, unit_id, x_factor=None,
         if not levels:
             raise ValueError("at least one Cell_Key factor must be supplied")
         record = dict(Unit_ID=unit_id, Cell_Key=_cell_key(levels))
+        for source, column in MARK_CARRIED:
+            if row.get(source) is not None:
+                record[column] = row.get(source)
         if kind == "CONTINUOUS":
             record.update(Mean=row.get("mean"), Dispersion_Value=row.get("dispersion"),
                           Errorbar_Lower=row.get("errorbar_lower"),

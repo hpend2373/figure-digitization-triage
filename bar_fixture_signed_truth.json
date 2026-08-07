@@ -38,6 +38,7 @@
    "session": "B-1",
    "series": "SUPINE",
    "order": 0,
+   "x_pixel": 170,
    "true_mean": -7.5,
    "true_sd": 2.2,
    "direction": "DOWN"
@@ -46,6 +47,7 @@
    "session": "B-1",
    "series": "ORTHOSTASIS",
    "order": 0,
+   "x_pixel": 217,
    "true_mean": 3.5,
    "true_sd": 3.2,
    "direction": "UP"
@@ -54,6 +56,7 @@
    "session": "DI7",
    "series": "SUPINE",
    "order": 1,
+   "x_pixel": 293,
    "true_mean": -12.0,
    "true_sd": 2.5,
    "direction": "DOWN"
@@ -62,6 +65,7 @@
    "session": "DI7",
    "series": "ORTHOSTASIS",
    "order": 1,
+   "x_pixel": 340,
    "true_mean": -4.0,
    "true_sd": 2.7,
    "direction": "DOWN"
@@ -70,6 +74,7 @@
    "session": "DI14",
    "series": "SUPINE",
    "order": 2,
+   "x_pixel": 416,
    "true_mean": -17.5,
    "true_sd": 2.4,
    "direction": "DOWN"
@@ -78,6 +83,7 @@
    "session": "DI14",
    "series": "ORTHOSTASIS",
    "order": 2,
+   "x_pixel": 463,
    "true_mean": -7.0,
    "true_sd": 3.1,
    "direction": "DOWN"
@@ -86,6 +92,7 @@
    "session": "DI19",
    "series": "SUPINE",
    "order": 3,
+   "x_pixel": 540,
    "true_mean": -11.5,
    "true_sd": 2.6,
    "direction": "DOWN"
@@ -94,6 +101,7 @@
    "session": "DI19",
    "series": "ORTHOSTASIS",
    "order": 3,
+   "x_pixel": 587,
    "true_mean": 5.2,
    "true_sd": 2.4,
    "direction": "UP"
@@ -102,6 +110,7 @@
    "session": "R1",
    "series": "SUPINE",
    "order": 4,
+   "x_pixel": 663,
    "true_mean": -8.2,
    "true_sd": 2.3,
    "direction": "DOWN"
@@ -110,6 +119,7 @@
    "session": "R1",
    "series": "ORTHOSTASIS",
    "order": 4,
+   "x_pixel": 710,
    "true_mean": 2.8,
    "true_sd": 2.6,
    "direction": "UP"
@@ -118,6 +128,7 @@
    "session": "R5",
    "series": "SUPINE",
    "order": 5,
+   "x_pixel": 786,
    "true_mean": -2.5,
    "true_sd": 2.4,
    "direction": "DOWN"
@@ -126,6 +137,7 @@
    "session": "R5",
    "series": "ORTHOSTASIS",
    "order": 5,
+   "x_pixel": 833,
    "true_mean": 6.0,
    "true_sd": 2.1,
    "direction": "UP"

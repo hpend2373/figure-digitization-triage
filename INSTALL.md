@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.13 (full package)
+# figure-digitization-triage — v7.14 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -87,6 +87,72 @@ key over the registry, or an ORCID-authenticated attestation — that is a new
 field, not a reinterpretation of this one.
 
 41 scenarios. Reverting the ASCII rule fails 6; removing the registry fails 32.
+
+## P0-4 (v7.11 review) — three numeric defects in BAR_COLOR
+
+**Log axes were read linearly.** `Axis_Y_Scale=LOG` has validated since v7.1,
+and BAR_COLOR was the one reader that did not take the shared
+`AxisCalibration` — it re-fitted the ticks with `np.polyfit`. On decade ticks
+1/10/100/1000, pixel row 350 read **277.75** instead of **31.62**, with a saved
+WPD project recording `scale: LOG` beside it. The default baseline of 0 was
+inverted through a second linear fit into a row *inside* the panel, and used
+silently to decide which way every bar grew. Every reader now takes the same
+calibration object; a baseline of zero on a log axis is refused rather than
+invented.
+
+**Slots were rebuilt from the bars that happened to be detected** — global
+min/max for the pitch, each series' own leftmost bar for the origin. Two silent
+failures, measured on the signed fixture:
+
+| what was missing | before | now |
+|---|---|---|
+| a series' first bar | every later bar shifted one label left | the hole is where the bar is |
+| a whole slot | pitch collapsed 123 px → 108 px, slot 4 emitted as **slot 5** | slot simply absent |
+| a middle bar | already correct | unchanged |
+
+Bars are now matched to the pixels in `position_manifest.csv`, nearest anchor
+within a tolerance, and a bar near no anchor is **dropped** so the cell stays
+missing. Two bars of one series claiming one position are both dropped —
+ambiguity, not duplication. `n_slots` is gone: it existed so a reader could
+reconstruct its own x spacing, which is inference. Counting off left to right
+is still reachable for a direct caller working one figure by hand, and every
+such row is stamped `Position_Assignment=SEQUENTIAL`, which the batch layer
+refuses and the grid gate flags as `POSITION_INFERRED`.
+
+**Downward bars produced negative dispersion.** The sign was deliberate and
+asserted by `test_bar_reader`; `grid_engine` rejects `Dispersion_Value <= 0`.
+Two components, each with a passing test, asserting opposite contracts — so a
+correctly-read change-from-zero bar failed end to end with
+`DISPERSION_NONPOSITIVE`, which reads as a bad extraction. `dispersion` is now
+a magnitude, the direction stays in `Bar_Direction`, and the raw difference in
+`dispersion_signed`.
+
+15 new scenarios in `test_bar_reader.py`, including a log-axis fixture with
+known values. Reverting the shared calibration fails the log case; reverting
+the anchor matching fails 5.
+
+## P0-5 (v7.11 review) — mark-level findings reached the value rows
+
+`to_value_records` copied mean, dispersion and bounds and dropped everything
+else, so `Errorbar_Stem_Confirmed` — which the readers produce **per mark** —
+never became a value. `run_panel` only flagged `NO_VARIANCE` when *all* marks
+were unconfirmed, and the gate then consulted a single human-typed field on the
+unit manifest. A panel with three confirmed whiskers and one unconfirmed passed
+on the strength of the three.
+
+Six fields now travel with every cell: `Errorbar_Stem_Confirmed`,
+`Bar_Top_Definition`, `Bar_Direction`, `Position_Assignment`,
+`Calibration_Max_Residual`, `Slot_Assignment_Residual_Px`. The gate reads the
+cell's own finding (`CELL_ERRORBAR_STEM_UNCONFIRMED`) rather than the unit's
+assertion, and names only the cell that failed.
+
+`calib_max_resid` and `slot_residual_px` were computed and returned under names
+nothing read. `AxisCalibration` now carries `max_residual` and the runner stamps
+it on every value row — on the log axis misread as linear it is 332 axis units,
+the loudest single number available, and it was going straight into the bin.
+
+8 scenarios. Reverting the carry raises `KeyError`; reverting the stamp fails 1;
+reverting the per-cell gate fails 3.
 
 ## P0-3 (v7.11 review) — a person approves the values, or there are none
 

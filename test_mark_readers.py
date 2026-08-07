@@ -9,7 +9,7 @@ import itertools
 from mark_readers import (AxisCalibration, SeriesSpec, read_line_marker_panel,
                           read_monochrome_marker_panel, read_scatter_panel,
                           summarize_association, read_box_violin_panel,
-                          read_panel, to_value_records)
+                          read_panel, to_value_records, MARK_CARRIED)
 
 
 FAILURES = []
@@ -590,3 +590,37 @@ print("%d scenarios run" % (PASSED + len(FAILURES)))
 if FAILURES:
     raise SystemExit("%d FAILED: %s" % (len(FAILURES), FAILURES))
 print("all scenarios passed")
+
+
+# ---------------------------------------------------------------------------
+# mark-level provenance survives the adapter
+# ---------------------------------------------------------------------------
+# `to_value_records` copied mean, dispersion and bounds out of a reader row and
+# dropped everything else, so `Errorbar_Stem_Confirmed` - which the readers
+# produce per MARK - never reached a value. The gate then fell back to a single
+# human-typed field on the unit manifest, and a panel with three confirmed
+# whiskers and one unconfirmed passed on the strength of the three.
+_rows = [dict(series="A", x_label="T0", mean=10.0, dispersion=1.0,
+              errorbar_lower=9.0, errorbar_upper=11.0,
+              Errorbar_Stem_Confirmed="TRUE", Bar_Top_Definition="OUTLINE_CENTER",
+              Bar_Direction="UP", Position_Assignment="DECLARED_ANCHOR",
+              calib_max_resid=0.25, slot_residual_px=1.5),
+         dict(series="A", x_label="T1", mean=12.0, dispersion=1.2,
+              errorbar_lower=10.8, errorbar_upper=13.2,
+              Errorbar_Stem_Confirmed="FALSE", Bar_Top_Definition="OUTLINE_CENTER",
+              Bar_Direction="UP", Position_Assignment="SEQUENTIAL",
+              calib_max_resid=0.25, slot_residual_px=40.0)]
+_recs = to_value_records(_rows, "CONTINUOUS", "U1", x_factor="TIMEPOINT",
+                         series_factor="ARM")
+check("every mark-level field the reader emitted reaches its value row",
+      all(all(col in r for _src, col in MARK_CARRIED) for r in _recs),
+      "%s" % sorted(_recs[0]))
+check("and the two cells keep their own stem findings, not one shared answer",
+      [r["Errorbar_Stem_Confirmed"] for r in _recs] == ["TRUE", "FALSE"],
+      "%s" % [r.get("Errorbar_Stem_Confirmed") for r in _recs])
+check("and their own slot residuals",
+      [r["Slot_Assignment_Residual_Px"] for r in _recs] == [1.5, 40.0],
+      "%s" % [r.get("Slot_Assignment_Residual_Px") for r in _recs])
+check("and the position-assignment marker travels with the cell",
+      [r["Position_Assignment"] for r in _recs] == ["DECLARED_ANCHOR", "SEQUENTIAL"],
+      "%s" % [r.get("Position_Assignment") for r in _recs])

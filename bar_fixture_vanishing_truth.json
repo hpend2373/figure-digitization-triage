@@ -38,6 +38,7 @@
    "session": "B-1",
    "series": "SUPINE",
    "order": 0,
+   "x_pixel": 275,
    "true_mean": -7.5,
    "true_sd": 2.2,
    "direction": "DOWN"
@@ -46,6 +47,7 @@
    "session": "B-1",
    "series": "ORTHOSTASIS",
    "order": 0,
+   "x_pixel": 532,
    "true_mean": 0.2,
    "true_sd": 2.0,
    "direction": "UP"

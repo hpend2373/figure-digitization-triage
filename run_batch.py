@@ -73,7 +73,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.13"
+PIPELINE_VERSION = "7.14"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -360,25 +360,30 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                                  series=_series_specs(series_rows, mark, options),
                                  **kwargs)
         elif mark == "BAR_COLOR":
-            ticks = [(v, px) for v, px in BM.parse_ticks(panel.get("Axis_Y_Ticks"))]
+            # The same AxisCalibration every other reader gets, so LOG is a
+            # scale rather than a silent linear fit, and the declared x pixels
+            # rather than a pitch reconstructed from whatever was detected.
             mapping = {_s(r.get("Series_ID")): _s(r.get("Mask_Key"))
                        for r in series_rows}
             if BM.blank(panel.get("Baseline_Value")):
                 kwargs.setdefault("baseline_value", 0.0)
             else:
                 kwargs["baseline_value"] = float(panel.get("Baseline_Value"))
-            kwargs.setdefault("n_slots", len(position_level) or None)
             rows = MR.read_panel("BAR_COLOR", image=image, panel_box=box,
-                                 ticks=ticks, series=mapping, **kwargs)
-            order_to_position = [pid_ for pid_, _ in sorted(
-                position_level.items(),
-                key=lambda kv: _position_order(position_rows, kv[0]))]
-            for row in rows:
-                idx = row.get("order")
-                row["x_label"] = (order_to_position[idx]
-                                  if isinstance(idx, int) and 0 <= idx < len(order_to_position)
-                                  else None)
-            rows = [r for r in rows if r.get("x_label")]
+                                 y_calibration=ycal,
+                                 x_positions=_x_positions(position_rows),
+                                 series=mapping, **kwargs)
+            # Belt and braces: if the anchors were empty the reader would fall
+            # back to counting bars off left to right, and a batch value must
+            # never carry a position nobody declared.
+            inferred = [r_ for r_ in rows
+                        if r_.get("Position_Assignment") != "DECLARED_ANCHOR"]
+            if inferred:
+                return PanelOutcome(
+                    "SERIES_IDENTITY_UNRESOLVED", declared=declared,
+                    missing=sorted(_all_cells(series_level, position_level)),
+                    detail="%d bar(s) were positioned by sequence rather than "
+                           "by a declared X_Pixel" % len(inferred))
         elif mark == "BAR_MONO":
             if BM.blank(panel.get("Baseline_Value")):
                 kwargs.setdefault("baseline_value", 0.0)
@@ -507,6 +512,14 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             series_order=sorted(series_level))
     with_disp = sum(1 for r in records
                     if r.get("Dispersion_Value") is not None or r.get("Q1") is not None)
+    # The calibration's own residual, on every row it produced. It was computed
+    # inside `bar_reader` and returned under a name nothing read; on a log axis
+    # misread as linear it is 332 axis units, which is the loudest single number
+    # available and was going straight into the bin.
+    if ycal is not None:
+        for record in records:
+            record.setdefault("Calibration_Max_Residual",
+                              float(getattr(ycal, "max_residual", 0.0)))
     seen = {r["Cell_Key"] for r in records}
     missing = sorted(_all_cells(series_level, position_level) - seen)
     return PanelOutcome("AUTO_PASS", values=records, raw=raw_path, project=project,
@@ -717,6 +730,10 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         records.extend(MR.to_value_records(
             [summary], "ASSOCIATION", unit_id,
             cell_levels={factor: level}, point_data_reference=path))
+    if ycal is not None:
+        for record in records:
+            record.setdefault("Calibration_Max_Residual",
+                              float(getattr(ycal, "max_residual", 0.0)))
     if not records:
         return PanelOutcome("NOT_CONVERTIBLE", declared=declared,
                             detail="no series reached three points: " + "; ".join(short))

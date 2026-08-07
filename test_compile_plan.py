@@ -204,6 +204,70 @@ for _label, _mutate, _want in (
     check("  and no manifest is written", not _w and not os.path.isdir(_out),
           "%s" % sorted(_w))
 
+print()
+print("a half-formed plan is a problem list, not a traceback")
+# Every check called `.get()` on a row and iterated a section, so a section that
+# was null, a string or an object - and a row that was a number - produced an
+# AttributeError or a TypeError. A plan written by an agent is exactly where a
+# half-formed structure arrives, and being reliable about ill-formed input
+# matters more here than being fast about well-formed input.
+for _label, _mutate, _want in (
+        ("a section that is null", lambda p: p.update(units=None),
+         "PLAN_SECTION_NOT_A_LIST"),
+        ("a section that is a string", lambda p: p.update(grids="G_SESSION"),
+         "PLAN_SECTION_NOT_A_LIST"),
+        ("a section that is an object", lambda p: p.update(reviewers={"a": 1}),
+         "PLAN_SECTION_NOT_A_LIST"),
+        ("a row that is a number", lambda p: p["units"].append(7),
+         "PLAN_ROW_NOT_AN_OBJECT"),
+        ("a row that is a string", lambda p: p["documents"].append("SD397_MAIN"),
+         "PLAN_ROW_NOT_AN_OBJECT"),
+        ("a publication id that is an object",
+         lambda p: p.update(publication_id={"id": 397}), "PLAN_BAD_FIELD_TYPE"),
+        ("panels that are not a list",
+         lambda p: p["figures"][0].update(panels="six"), "PLAN_BAD_FIELD_TYPE"),
+        ("factors that are not an object",
+         lambda p: p["grids"][0].update(factors=["ARM"]), "PLAN_BAD_FIELD_TYPE"),
+        ("a panel that is a string",
+         lambda p: p["figures"][0]["panels"].append("P1"),
+         "PLAN_ROW_NOT_AN_OBJECT"),
+        ("a read block that is a list",
+         lambda p: p["figures"][2]["panels"][0].update(read=[1, 2]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a box with three numbers",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(box=[1, 2, 3]),
+         "PLAN_READ_INCOMPLETE"),
+        ("a box containing a string",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(box=[1, 2, 3, "x"]),
+         "PLAN_READ_INCOMPLETE"),
+        ("a box containing infinity",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(
+             box=[1, 2, 3, float("inf")]), "PLAN_READ_INCOMPLETE"),
+        ("a tick that is not a pair",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(y_ticks=[[1]]),
+         "PLAN_BAD_FIELD_TYPE"),
+        ("a tick pixel that is NaN",
+         lambda p: p["figures"][2]["panels"][0]["read"].update(
+             y_ticks=[[1.0, float("nan")], [2.0, 3.0]]), "PLAN_BAD_FIELD_TYPE"),
+        ("two figures claiming one Source_Figure_ID",
+         lambda p: p["figures"][1].update(
+             source_figure_id=p["figures"][0]["source_figure_id"]),
+         "PLAN_DUPLICATE_ID"),
+        ("a Source_Figure_ID that would become a filename",
+         lambda p: p["figures"][0].update(source_figure_id="../sf"), "UNSAFE_ID")):
+    _p = copy.deepcopy(PLAN)
+    _mutate(_p)
+    try:
+        _out, (_w, _probs) = compile_to("m_shape", plan=_p)
+        _raised = None
+    except Exception as exc:                                    # pragma: no cover
+        _out, _w, _probs, _raised = None, {}, [], exc
+    check("%s is reported, not raised" % _label,
+          _raised is None and _want in codes(_probs),
+          "%r / %s" % (_raised, codes(_probs)))
+    check("  and nothing is written", not _w, "%s" % sorted(_w))
+
+
 _missing = copy.deepcopy(PLAN)
 del _missing["units"]
 check("a plan missing a whole section is refused",

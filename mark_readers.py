@@ -361,6 +361,78 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
     return out
 
 
+def _pixel_claimed_by(masks, px, py, radius=1):
+    """How many OTHER series masks also cover this marker's centre."""
+    hits = 0
+    for mask in masks:
+        r0, r1 = max(0, int(round(py)) - radius), int(round(py)) + radius + 1
+        c0, c1 = max(0, int(round(px)) - radius), int(round(px)) + radius + 1
+        if mask[r0:r1, c0:c1].any():
+            hits += 1
+    return hits
+
+
+#: Two centroids closer than this many pixels are one printed marker as far as a
+#: reader is concerned - contour finding can split a marker crossed by a grid
+#: line into two blobs, and counting both would inflate N.
+_COINCIDENT_POINT_PX = 3.0
+
+#: A blob this many times the series' median marker area is more than one
+#: overlapping marker, not one large one.
+_MERGED_MARKER_AREA_RATIO = 1.6
+
+
+def point_count_audit(points, expected_n=None):
+    """Does the number of detected marks match the sample the paper claims?
+
+    `N_Pairs` used to be however many contours survived the area filter, and
+    that number went into the values file as though it were the study's n. It is
+    not: two subjects plotted at the same coordinates are one contour, a marker
+    crossed by a gridline can be two, and a point claimed by two colour masks is
+    counted twice. None of that is visible downstream unless the counts are
+    written down beside the association and compared with what the source says.
+    """
+    detected = []
+    for point in points:
+        px, py = float(point.get("point_px_x", 0.0)), float(point.get("point_px_y", 0.0))
+        if any(math.hypot(px - qx, py - qy) < _COINCIDENT_POINT_PX
+               for qx, qy in detected):
+            continue
+        detected.append((px, py))
+    unique = len(detected)
+    areas = sorted(float(p.get("marker_area_px") or 0.0) for p in points)
+    merged = False
+    if areas and areas[len(areas) // 2] > 0:
+        median = areas[len(areas) // 2]
+        merged = any(a > _MERGED_MARKER_AREA_RATIO * median for a in areas)
+    overlap = sum(int(p.get("mask_overlap") or 0) for p in points)
+    expected = None
+    if expected_n not in (None, ""):
+        try:
+            expected = int(float(expected_n))
+        except (TypeError, ValueError):
+            expected = None
+    if expected is None:
+        agreement = "NO_SOURCE_N"
+    elif expected == unique:
+        agreement = "MATCH"
+    elif unique < expected:
+        agreement = "FEWER_DETECTED"
+    else:
+        agreement = "MORE_DETECTED"
+    # Fewer marks than subjects is the classic overplot; so is a blob too big to
+    # be one marker, or a duplicate centroid dropped just above.
+    possible = (agreement == "FEWER_DETECTED" or merged
+                or unique < len(points))
+    return dict(
+        Expected_N_From_Source=("" if expected is None else expected),
+        Detected_Unique_Point_Count=unique,
+        Point_Count_Agreement=agreement,
+        Overplotting_Possible="TRUE" if possible else "FALSE",
+        Series_Mask_Overlap_Count=overlap,
+    )
+
+
 def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
                        min_area=12, max_area=500):
     """Read coloured or a single monochrome scatter series.
@@ -371,14 +443,22 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
     x0, x1, y0, y1 = map(int, panel_box)
     out = []
+    # Build every series mask before reading any of them. Two colours that are
+    # close enough to claim the same pixel produce two points from one marker,
+    # and the count that becomes N_Pairs cannot show it unless the masks are
+    # compared with each other.
+    masks = {}
     for spec in series:
         if spec.rgb is None:
             if len(series) != 1:
                 raise ValueError("multiple monochrome scatter series need explicit marker routing")
             gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            mask = (gray < 150).astype(np.uint8) * 255
+            masks[spec.name] = (gray < 150).astype(np.uint8) * 255
         else:
-            mask = _rgb_mask(rgb, spec.rgb, spec.tolerance).astype(np.uint8) * 255
+            masks[spec.name] = _rgb_mask(rgb, spec.rgb, spec.tolerance).astype(np.uint8) * 255
+    for spec in series:
+        mask = masks[spec.name]
+        others = [m for name, m in masks.items() if name != spec.name]
         crop = mask[max(0, y0):min(mask.shape[0], y1), max(0, x0):min(mask.shape[1], x1)]
         opened = cv2.morphologyEx(
             crop, cv2.MORPH_OPEN,
@@ -402,6 +482,7 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
                 x_value=x_calibration.pixel_to_value(px),
                 y_value=y_calibration.pixel_to_value(py),
                 Marker_Definition=spec.marker.upper(), marker_area_px=float(area),
+                mask_overlap=int(_pixel_claimed_by(others, px, py)),
             ))
         points.sort(key=lambda row: (row["x_value"], row["y_value"]))
         for order, row in enumerate(points):
@@ -431,8 +512,134 @@ def _pearson(x, y):
     return float(np.corrcoef(x, y)[0, 1])
 
 
+def _betacf(a, b, x):
+    """Continued fraction for the incomplete beta, Lentz's method."""
+    tiny = 1e-30
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    if abs(d) < tiny:
+        d = tiny
+    d = 1.0 / d
+    h = d
+    for m_ in range(1, 300):
+        m2 = 2 * m_
+        aa = m_ * (b - m_) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        c = 1.0 + aa / c
+        if abs(d) < tiny:
+            d = tiny
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m_) * (qab + m_) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        c = 1.0 + aa / c
+        if abs(d) < tiny:
+            d = tiny
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 3e-16:
+            break
+    return h
+
+
+def regularized_incomplete_beta(a, b, x):
+    """I_x(a, b), hand-rolled because this package does not import scipy.
+
+    The one function every exact p below needs. Written out rather than
+    approximated, so a Student-t tail is a Student-t tail rather than a normal
+    one wearing its name.
+    """
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+                     + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1.0 - x) / b
+
+
+def student_t_two_sided(t, df):
+    """P(|T_df| >= |t|). Exact, not a normal approximation."""
+    if df <= 0:
+        return None
+    t = abs(float(t))
+    if not math.isfinite(t):
+        return 0.0
+    return float(regularized_incomplete_beta(df / 2.0, 0.5,
+                                             df / (df + t * t)))
+
+
+def _t_p_from_r(r, n):
+    """Two-sided p for a correlation, from the t statistic it implies.
+
+    t = r*sqrt((n-2)/(1-r^2)) on n-2 degrees of freedom. This is the standard
+    test for a Pearson r, and it is NOT the Fisher-z normal approximation that
+    stood here for every statistic at once. On the small n a digitized scatter
+    gives - a dozen points is typical - the two disagree by enough to move a
+    result across 0.05.
+    """
+    if n <= 2:
+        return None
+    if abs(r) >= 1:
+        return 0.0
+    t = r * math.sqrt((n - 2) / (1.0 - r * r))
+    return student_t_two_sided(t, n - 2)
+
+
+def snedecor_f_upper_tail(f, df1, df2):
+    """P(F_{df1,df2} >= f), from the same incomplete beta as the t tail."""
+    if df1 <= 0 or df2 <= 0:
+        return None
+    f = float(f)
+    if not math.isfinite(f):
+        return 0.0
+    if f <= 0:
+        return 1.0
+    return float(regularized_incomplete_beta(df2 / 2.0, df1 / 2.0,
+                                             df2 / (df2 + df1 * f)))
+
+
+def _slope_t_p(x, y):
+    """(slope, two-sided p) from the regression's OWN residual variance.
+
+    t = b / SE(b), SE(b) = sqrt(SSE/(n-2) / Sxx), on n-2 degrees of freedom.
+    For a one-predictor fit this is algebraically the Pearson t, but it is
+    computed from the residuals rather than borrowed from a correlation, and it
+    is labelled SLOPE_T_TEST so the values file records which test was run
+    rather than which one happened to be lying around.
+    """
+    n = len(x)
+    slope, intercept = (float(v) for v in np.polyfit(x, y, 1))
+    if n <= 2:
+        return slope, None
+    sxx = float(np.sum((x - float(np.mean(x))) ** 2))
+    if sxx == 0:
+        raise ValueError("association needs variation on both axes")
+    sse = float(np.sum((y - (slope * x + intercept)) ** 2))
+    if sse <= 0:
+        # A perfectly collinear cloud. The residual variance is zero, so the
+        # t statistic is infinite and the tail is zero - not undefined.
+        return slope, 0.0
+    se = math.sqrt(sse / (n - 2) / sxx)
+    if se == 0:
+        return slope, 0.0
+    return slope, student_t_two_sided(slope / se, n - 2)
+
+
 def _normal_p_from_r(r, n):
-    """Two-sided Fisher-z normal approximation; None when n is too small."""
+    """Two-sided Fisher-z normal approximation; None when n is too small.
+
+    Kept because `_kendall_tau_b` uses it for its own asymptotic branch, where a
+    normal approximation IS the standard test. It is no longer applied to
+    Pearson, Spearman, R-squared and slope alike.
+    """
     if n <= 3:
         return None
     if abs(r) >= 1:
@@ -507,25 +714,46 @@ def summarize_association(points, association_type="PEARSON_R"):
     y = np.asarray([p["y_value"] for p in points], dtype=float)
     if len(x) < 3:
         raise ValueError("at least three pairs are required")
+    ties = bool(len(set(x)) < len(x) or len(set(y)) < len(y))
+    # One test per statistic. Every branch below used to end in the same
+    # Fisher-z normal approximation, labelled FISHER_Z_APPROX on all five - so a
+    # slope, an R-squared and a rank correlation were reported as though the
+    # same null distribution described them, on the ten-to-thirty points a
+    # digitized scatter actually has.
     if kind == "PEARSON_R":
         value = _pearson(x, y)
-        p = _normal_p_from_r(value, len(x))
+        p, p_method = _t_p_from_r(value, len(x)), "PEARSON_T_TEST"
     elif kind == "SPEARMAN_RHO":
         value = _pearson(_average_ranks(x), _average_ranks(y))
-        p = _normal_p_from_r(value, len(x))
+        if ties:
+            # Average ranks change the permutation null, and the untied
+            # t-approximation is anticonservative under them. Same rule as
+            # Kendall: keep the coefficient, refuse the p.
+            p, p_method = None, "SOURCE_P_REQUIRED_TIES"
+        else:
+            # With no ties the rank pairs are a permutation of 1..n and the
+            # t on n-2 df is the standard asymptotic test.
+            p, p_method = _t_p_from_r(value, len(x)), "SPEARMAN_T_APPROX"
     elif kind == "KENDALL_TAU":
         value, p, p_method = _kendall_tau_b(x, y)
     elif kind == "R_SQUARED":
         r = _pearson(x, y)
-        p = _normal_p_from_r(r, len(x))
         value = r * r
+        # The model's own F: MSR/MSE with 1 and n-2 degrees of freedom. For a
+        # one-predictor fit F = t^2 and the tail equals the Pearson t's, which
+        # is the point - it is named for the test that was run.
+        n = len(x)
+        if value >= 1.0:
+            p = 0.0
+        else:
+            p = snedecor_f_upper_tail((value / (1.0 - value)) * (n - 2), 1, n - 2)
+        p_method = "R_SQUARED_F_TEST"
     elif kind == "SLOPE":
-        value = float(np.polyfit(x, y, 1)[0])
-        p = _normal_p_from_r(_pearson(x, y), len(x))
+        value, p = _slope_t_p(x, y)
+        p_method = "SLOPE_T_TEST"
     else:
         raise ValueError("unsupported association type: %s" % association_type)
-    ties = bool(len(set(x)) < len(x) or len(set(y)) < len(y))
-    method = p_method if kind == "KENDALL_TAU" else "FISHER_Z_APPROX"
+    method = p_method
     return dict(Association_Type=kind, Association_Value=float(value),
                 P_Value=None if p is None else float(p), N_Pairs=int(len(x)),
                 P_Value_Method=method,
@@ -894,7 +1122,14 @@ def read_panel(mark_type, **kwargs):
     if kind == "BAR_COLOR":
         from bar_reader import colour_masks, read_bar_panel
         image = kwargs.pop("image")
-        masks = colour_masks(image.convert("RGB") if isinstance(image, Image.Image) else image)
+        # `declared_colours` is {Series_ID: (hex, tolerance)}. When it is given,
+        # each series gets a mask built from what the manifest says its colour
+        # is, instead of choosing between three hard-coded ones tuned on a
+        # single publication.
+        declared = kwargs.pop("declared_colours", None)
+        masks = colour_masks(
+            image.convert("RGB") if isinstance(image, Image.Image) else image,
+            declared=declared)
         return read_bar_panel(masks=masks, **kwargs)
     raise ValueError("unknown mark type %r; expected %s" % (mark_type, "/".join(MARK_TYPES)))
 
@@ -921,6 +1156,12 @@ ASSOCIATION_CARRIED = (
     "Association_Type", "Association_Value", "P_Value", "P_Value_Method",
     "N_Pairs", "P_Value_Extraction_Method", "Ties_Present",
     "Point_Data_Reference",
+    # What the reader counted, against what the paper says it should have
+    # counted. `N_Pairs` alone cannot distinguish "twelve subjects" from "twelve
+    # blobs that survived an area filter".
+    "Expected_N_From_Source", "Detected_Unique_Point_Count",
+    "Point_Count_Agreement", "Overplotting_Possible",
+    "Series_Mask_Overlap_Count",
 )
 
 
@@ -1102,7 +1343,7 @@ def to_value_records(rows, statistic_type, unit_id, x_factor=None,
             # or worse, rows that passed because the gate saw blanks it read as
             # "not applicable". ASSOCIATION_CARRIED is asserted by the tests.
             for key in ASSOCIATION_CARRIED:
-                record[key] = row.get(key)
+                record[key] = row.get(key, "")
             if not record.get("Point_Data_Reference") and point_data_reference:
                 record["Point_Data_Reference"] = point_data_reference
         else:

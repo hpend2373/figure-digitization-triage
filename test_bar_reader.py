@@ -385,6 +385,93 @@ check("and the bars carry it too, per mark",
       all(abs(b["calib_max_resid"] - _log_resid) < 1e-12 for b in _lbars),
       "%s" % sorted({round(b["calib_max_resid"], 6) for b in _lbars}))
 
+
+# --------------------------------------------------- colours the manifest names
+print("a bar panel drawn in any two colours reads by what the manifest declares")
+# `colour_masks` returned exactly three masks - blue, red and dark - tuned on
+# one publication, and `Mask_Key` chose between them. `Colour_Hex` was required
+# on every colour series, validated, and then ignored; `colour_tolerance` was
+# offered as a BAR_COLOR option whose reader keyword was None. So a figure drawn
+# in green and purple validated and had no way through.
+ANY_IMG = os.path.join(HERE, "fixtures", "any_colour_bars.png")
+os.makedirs(os.path.dirname(ANY_IMG), exist_ok=True)
+_GREEN, _PURPLE = (26, 148, 74), (126, 74, 168)
+_ATRUE = [("T0", 30.0, 45.0), ("T1", 55.0, 70.0), ("T2", 80.0, 62.0)]
+_ax0, _ax1, _ay0, _ay1 = 110, 700, 50, 520
+
+
+def _av2y(value):
+    return _ay1 + (_ay0 - _ay1) * (value / 100.0)
+
+
+_ai = Image.new("RGB", (760, 600), "white")
+_ad = ImageDraw.Draw(_ai)
+_aticks = [(v, int(round(_av2y(v)))) for v in (0, 25, 50, 75, 100)]
+for _v, _y in _aticks:
+    _ad.line([_ax0 - 14, _y, _ax0 - 4, _y], fill=(0, 0, 0), width=3)
+_ad.line([_ax0, _ay0 - 10, _ax0, _ay1 + 10], fill=(0, 0, 0), width=4)
+_ad.line([_ax0, _ay1, _ax1, _ay1], fill=(0, 0, 0), width=4)
+_AANCHORS = {}
+for _i, (_lab, _g, _p) in enumerate(_ATRUE):
+    _base = _ax0 + 70 + 190 * _i
+    for _j, (_val, _fill) in enumerate(((_g, _GREEN), (_p, _PURPLE))):
+        _xl = _base + _j * 62
+        _ad.rectangle([_xl, int(round(_av2y(_val))), _xl + 48, _ay1],
+                      fill=_fill, outline=(0, 0, 0), width=3)
+    _AANCHORS[_lab] = _base + 55
+_ai.save(ANY_IMG)
+
+_amasks = colour_masks(_ai, declared={"GREEN": ("#1a944a", 60),
+                                      "PURPLE": ("#7e4aa8", 60)})
+check("a declared colour produces a mask of its own",
+      {"GREEN", "PURPLE"} <= set(_amasks) and _amasks["GREEN"].any()
+      and _amasks["PURPLE"].any(),
+      "%s" % sorted(_amasks))
+check("and the built-in three are still there for the worked examples",
+      {"blue", "red", "dark"} <= set(_amasks))
+check("and the two declared masks do not overlap",
+      not (_amasks["GREEN"] & _amasks["PURPLE"]).any(),
+      "%d pixels claimed twice" % int((_amasks["GREEN"] & _amasks["PURPLE"]).sum()))
+
+_abars = read_bar_panel(
+    _amasks, (_ax0, _ax1, _ay0, _ay1),
+    series={"GREEN": "GREEN", "PURPLE": "PURPLE"},
+    y_calibration=AxisCalibration.from_points(_aticks),
+    x_positions=_AANCHORS, baseline_value=0.0, stem_required=False)
+_agot = {(b["series"], b["x_label"]): b["mean"] for b in _abars}
+_awant = {}
+for _lab, _g, _p in _ATRUE:
+    _awant[("GREEN", _lab)] = _g
+    _awant[("PURPLE", _lab)] = _p
+check("every bar of a green-and-purple panel is found",
+      set(_agot) == set(_awant), "%s" % sorted(set(_awant) ^ set(_agot)))
+check("and read within one unit of its true value",
+      _agot and max(abs(_agot[k] - v) for k, v in _awant.items() if k in _agot) < 1.0,
+      "%s" % {k: round(v, 2) for k, v in sorted(_agot.items())})
+
+# The old three masks cannot see this panel at all, which is the point.
+_legacy = read_bar_panel(
+    colour_masks(_ai), (_ax0, _ax1, _ay0, _ay1),
+    series={"GREEN": "blue", "PURPLE": "red"},
+    y_calibration=AxisCalibration.from_points(_aticks),
+    x_positions=_AANCHORS, baseline_value=0.0, stem_required=False)
+check("while the built-in blue/red masks find nothing in it",
+      len(_legacy) < len(_awant),
+      "%d bars found with the hard-coded masks" % len(_legacy))
+
+# The real case: the printed colour is never exactly the swatch in the legend.
+# "#20a050" is about 15 RGB units from the ink actually on this fixture.
+_near, _far = "#20a050", "#20a050"
+_wide = colour_masks(_ai, declared={"GREEN": (_near, 40)})["GREEN"]
+_tight = colour_masks(_ai, declared={"GREEN": (_far, 4)})["GREEN"]
+check("tolerance is honoured, not decorative",
+      int(_tight.sum()) == 0 < int(_wide.sum()),
+      "tight %d, wide %d" % (int(_tight.sum()), int(_wide.sum())))
+check("and a slightly-off declared colour still reads at a sane tolerance",
+      abs(int(_wide.sum()) - int(_amasks["GREEN"].sum())) * 1.0
+      / max(1, int(_amasks["GREEN"].sum())) < 0.05,
+      "%d vs %d" % (int(_wide.sum()), int(_amasks["GREEN"].sum())))
+
 print("%d scenarios run" % (len(FAILURES) + _PASSED[0]))
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))

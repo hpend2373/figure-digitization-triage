@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.17"
+PIPELINE_VERSION = "7.18"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
@@ -202,7 +202,16 @@ def review_subject_sha256(run_row, values, manifest_hashes, environment):
 
 MANUAL_QUEUE_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
-    "Missing_Cells", "Image_Path", "Panel_Box", "Detail",
+    # A COUNT, not a list. This joined cell keys with ";" - and a Cell_Key is
+    # itself FACTOR=LEVEL pairs joined by ";", so "ARM=A;T=1;ARM=B;T=1" could
+    # not be split back into the two cells it came from. The list lives in
+    # `manual_queue_cells.csv`, one row per cell, where it can be counted,
+    # filtered and joined.
+    "Missing_Cell_Count", "Image_Path", "Panel_Box", "Detail",
+]
+
+MANUAL_QUEUE_CELL_COLUMNS = [
+    "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Run_State", "Cell_Key",
 ]
 
 
@@ -388,22 +397,37 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     mark = _upper(panel.get("Mark_Type"))
     statistic = _upper(unit.get("Statistic_Type")) if unit is not None else ""
     mode = _upper(panel.get("Panel_Mode")) or "AUTO"
+
+    # What this panel CLAIMS, computed first and used by every exit below.
+    #
+    # `Panel_Mode=MANUAL` returned before any of this, and so did an unopenable
+    # raster and an unparseable box, so those panels reported Cells_Declared=0
+    # and Missing_Cells="". A manual panel with twenty-four cells came out as
+    # "MANUAL_POINT_READ 0 / 0" - the queue understated the hand-digitizing left
+    # to do, on exactly the panels that are nothing but hand-digitizing. Only
+    # the unreleased-mark-type path bothered to compute it, so two paths out of
+    # three lied about the same thing.
+    series_level = {_s(r.get("Series_ID")): (_upper(r.get("Factor_Name")),
+                                             _s(r.get("Factor_Level")))
+                    for r in series_rows}
+    position_level = {_s(r.get("Position_ID")): (_upper(r.get("Factor_Name")),
+                                                 _s(r.get("Factor_Level")))
+                      for r in position_rows}
+    series_factor = next((f for f, _ in series_level.values() if f), None)
+    position_factor = next((f for f, _ in position_level.values() if f), None)
+    declared = max(1, len(series_level)) * max(1, len(position_level))
+    all_cells = sorted(_all_cells(series_level, position_level))
+
     if mark in BM.UNRELEASED_MARK_TYPES:
         # Decided before the image is opened: there is nothing to try.
-        series_level = {_s(r.get("Series_ID")): (_upper(r.get("Factor_Name")),
-                                                 _s(r.get("Factor_Level")))
-                        for r in series_rows}
-        position_level = {_s(r.get("Position_ID")): (_upper(r.get("Factor_Name")),
-                                                     _s(r.get("Factor_Level")))
-                          for r in position_rows}
         return PanelOutcome(
-            "NO_READER_AVAILABLE",
-            declared=max(1, len(series_level)) * max(1, len(position_level)),
+            "NO_READER_AVAILABLE", declared=declared,
             detail="%s: %s" % (mark, BM.UNRELEASED_MARK_TYPES[mark]),
-            missing=sorted(_all_cells(series_level, position_level)))
+            missing=all_cells)
     if mode == "MANUAL":
-        return PanelOutcome("MANUAL_POINT_READ",
-                            detail="Panel_Mode=MANUAL: declared unreadable before the run")
+        return PanelOutcome(
+            "MANUAL_POINT_READ", declared=declared, missing=all_cells,
+            detail="Panel_Mode=MANUAL: declared unreadable before the run")
 
     image_path = _s(panel.get("Image_Path"))
     resolved = image_path if os.path.exists(image_path) \
@@ -417,23 +441,15 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     except (ValueError, OSError) as exc:
         # A box that does not parse, a calibration that cannot be fitted, a
         # raster that will not open. All three are about the figure.
-        return PanelOutcome("PANEL_GEOMETRY_UNRESOLVED",
+        return PanelOutcome("PANEL_GEOMETRY_UNRESOLVED", declared=declared,
+                            missing=all_cells,
                             detail="%s: %s" % (type(exc).__name__, exc))
     except Exception as exc:
         raise InternalReaderError(
             "preparing panel %s raised %s: %s"
             % (pid, type(exc).__name__, exc)) from exc
 
-    series_level = {_s(r.get("Series_ID")): (_upper(r.get("Factor_Name")),
-                                             _s(r.get("Factor_Level")))
-                    for r in series_rows}
-    position_level = {_s(r.get("Position_ID")): (_upper(r.get("Factor_Name")),
-                                                 _s(r.get("Factor_Level")))
-                      for r in position_rows}
-    series_factor = next((f for f, _ in series_level.values() if f), None)
-    position_factor = next((f for f, _ in position_level.values() if f), None)
     kwargs = _reader_kwargs(options, mark)
-    declared = max(1, len(series_level)) * max(1, len(position_level))
 
     try:
         if mark == "SCATTER":
@@ -479,8 +495,26 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # The same AxisCalibration every other reader gets, so LOG is a
             # scale rather than a silent linear fit, and the declared x pixels
             # rather than a pitch reconstructed from whatever was detected.
-            mapping = {_s(r.get("Series_ID")): _s(r.get("Mask_Key"))
-                       for r in series_rows}
+            # Each series reads through a mask built from ITS OWN declared
+            # colour. `Mask_Key` picked one of three hard-coded masks tuned on
+            # one publication, so a figure drawn in green and purple had no way
+            # through - while `Colour_Hex` was required, validated and ignored,
+            # and `colour_tolerance` was an option with no reader keyword.
+            # Mask_Key still works where it is declared, for the two worked
+            # examples that use it.
+            default_tolerance = float(options.get("colour_tolerance", 60.0))
+            declared_colours, mapping = {}, {}
+            for r in series_rows:
+                sid = _s(r.get("Series_ID"))
+                if not BM.blank(r.get("Mask_Key")):
+                    mapping[sid] = _s(r.get("Mask_Key"))
+                    continue
+                tol = (float(r.get("Colour_Tolerance"))
+                       if not BM.blank(r.get("Colour_Tolerance"))
+                       else default_tolerance)
+                declared_colours[sid] = (_s(r.get("Colour_Hex")), tol)
+                mapping[sid] = sid
+            kwargs["declared_colours"] = declared_colours
             if BM.blank(panel.get("Baseline_Value")):
                 kwargs.setdefault("baseline_value", 0.0)
             else:
@@ -852,13 +886,28 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                                    % statistic)
     association = _upper(panel.get("Association_Type"))
     sha = file_sha256(image_path)
-    records, raw_files, short = [], [], []
+    # What the paper says this scatter contains. A count the reader can be
+    # measured against, rather than one it declares by counting itself.
+    expected_n = _s(unit.get("N_Outcome"))
+    records, raw_files, short, disputed = [], [], [], []
     for sid, (factor, level) in sorted(series_level.items()):
         mine = [p for p in points if p.get("series") == sid]
         if len(mine) < 3:
             short.append("%s (%d points)" % (sid, len(mine)))
             continue
-        summary = MR.summarize_association(mine, association)
+        audit = MR.point_count_audit(mine, expected_n)
+        if audit["Point_Count_Agreement"] in ("FEWER_DETECTED", "MORE_DETECTED"):
+            # The association is a function of the point set, so a point set
+            # that is not the study's point set produces a number that is not
+            # the study's association. Stop before computing it.
+            disputed.append(
+                "%s: the source declares n=%s, the reader found %d distinct "
+                "marks (%d contours, %d claimed by another series' mask)"
+                % (sid, audit["Expected_N_From_Source"],
+                   audit["Detected_Unique_Point_Count"], len(mine),
+                   audit["Series_Mask_Overlap_Count"]))
+            continue
+        summary = dict(MR.summarize_association(mine, association), **audit)
         cell_key = GE.fig_cell_key({factor: level})
         path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
         MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
@@ -873,6 +922,14 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         for record in records:
             record.setdefault("Calibration_Max_Residual",
                               float(getattr(ycal, "max_residual", 0.0)))
+    if disputed:
+        # Not NOT_CONVERTIBLE: the marks are readable, they just do not add up
+        # to the sample the paper claims. That is a counting job for a person.
+        return PanelOutcome(
+            "MANUAL_POINT_READ", declared=declared, read=len(records),
+            detail="the detected point count contradicts the declared n, so no "
+                   "association was computed - " + "; ".join(disputed),
+            missing=sorted(_all_cells(series_level, {})))
     if not records:
         return PanelOutcome("NOT_CONVERTIBLE", declared=declared,
                             detail="no series reached three points: " + "; ".join(short))
@@ -910,6 +967,7 @@ CANONICAL_OUTPUTS = (
     "figure_values_machine_qc.csv", "figure_values_raw.csv", "figure_values.csv",
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
+    "manual_queue_cells.csv",
     "source_panel_coverage.csv",
 )
 CANONICAL_DIRS = ("raw", "projects", "review")
@@ -1216,7 +1274,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 "Unit_ID": _s(panel.get("Unit_ID")),
                 "Mark_Type": _upper(panel.get("Mark_Type")),
                 "Run_State": outcome.state,
-                "Missing_Cells": ";".join(outcome.missing),
+                "Missing_Cell_Count": len(outcome.missing),
+                "_cells": list(outcome.missing),
                 "Image_Path": image_path,
                 "Panel_Box": ",".join(_s(panel.get(c)) for c in
                                       ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")),
@@ -1247,7 +1306,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Unit_ID": "", "Mark_Type": "",
             "Run_State": ("NO_READER_AVAILABLE" if disposition ==
                           "NO_READER_AVAILABLE" else "MANUAL_POINT_READ"),
-            "Missing_Cells": "", "Image_Path": _s(sf.get("Source_Image")),
+            "Missing_Cell_Count": "", "Image_Path": _s(sf.get("Source_Image")),
             "Panel_Box": "",
             "Detail": "%s | %s | %s" % (
                 _s(sr.get("Panel_Label")), _s(sr.get("Outcome_Label")),
@@ -1307,7 +1366,17 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             })
 
     run_df = pd.DataFrame(run_rows, columns=RUN_MANIFEST_COLUMNS)
+    queue_cell_rows = []
+    for row in queue_rows:
+        for cell in row.pop("_cells", []):
+            queue_cell_rows.append({
+                "Panel_ID": row["Panel_ID"],
+                "Source_Panel_ID": row["Source_Panel_ID"],
+                "Figure_ID": row["Figure_ID"], "Unit_ID": row["Unit_ID"],
+                "Run_State": row["Run_State"], "Cell_Key": cell})
     queue_df = pd.DataFrame(queue_rows, columns=MANUAL_QUEUE_COLUMNS)
+    queue_cells_df = pd.DataFrame(queue_cell_rows,
+                                  columns=MANUAL_QUEUE_CELL_COLUMNS)
 
     # ---- what a downstream reader is allowed to pool ----------------------
     # There is deliberately no file called `figure_values.csv` any more. One
@@ -1466,6 +1535,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     review_df.to_csv(os.path.join(work_dir, "review_queue.csv"), index=False)
     run_df.to_csv(os.path.join(work_dir, "run_manifest.csv"), index=False)
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
+    queue_cells_df.to_csv(os.path.join(work_dir, "manual_queue_cells.csv"),
+                          index=False)
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
     coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,

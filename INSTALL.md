@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.17 (full package)
+# figure-digitization-triage — v7.18 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -159,6 +159,87 @@ Also from the same review: the run records `Manifest_Dir`, so the finalizer
 finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
+
+## Items 7–11 of the same review, in the order they were written
+
+### 7. `Slot_Index` without `X_Pixel`
+
+A position row could declare a slot and no pixel. The runner needs a pixel, so
+the panel failed later with `MISSING_POSITION_GEOMETRY` — a message about a
+missing declaration, for a row that had declared something the reader cannot
+use. `Slot_Index` alone is now `UNSUPPORTED_CAPABILITY` at manifest validation,
+named for what it is: a capability this package does not have. Reverting fails
+1 scenario.
+
+### 8. BAR_COLOR reads any declared colour
+
+The reader had three hard-coded masks — blue, red, dark — so a figure drawn in
+green and purple was unreadable by a package whose manifest has had a
+`Colour_Hex` column all along. `colour_mask()` takes `#rrggbb` and a tolerance
+in Euclidean RGB distance; `colour_masks(rgb, declared=…)` builds one mask per
+declared series, and the runner passes what the series manifest says. The three
+built-ins remain for manifests that name them by `Mask_Key`. New green/purple
+fixture; `test_bar_reader.py` is at 66 scenarios and reverting raises
+`KeyError: 'GREEN'`.
+
+### 9. A manual panel declared zero cells
+
+`Declared_Cells` was computed *after* the UNRELEASED, MANUAL and
+geometry-failure exits, so every panel that did not run reported `0/0` — the
+one number that says how much of the figure is still missing was zero exactly
+when it mattered. Publication 397 went from 144 declared cells to **192**: two
+manual panels in Figure 5 were reporting 0 for 24 cells each.
+
+While there, `Missing_Cells` was a `;`-joined string of cell keys — and a cell
+key is itself `FACTOR=LEVEL` pairs joined by `;`, so the field was ambiguous by
+construction. It is now `Missing_Cell_Count`, beside a new
+`manual_queue_cells.csv` with one row per missing cell. Reverting fails 5
+scenarios.
+
+### 10. The plan validator checks shape before content
+
+`compile_plan.validate_plan()` read `row["panel_id"]` on rows it had not
+established were objects, so a plan with a string where a list belonged raised
+`TypeError` out of the validator instead of being reported as a bad plan. Shape
+checks run first (`PLAN_SECTION_NOT_A_LIST`, `PLAN_ROW_NOT_AN_OBJECT`,
+`PLAN_BAD_FIELD_TYPE`), NaN and infinity are rejected as non-finite, and boxes
+and ticks are checked structurally. `test_compile_plan.py` is at 80 scenarios,
+17 of them malformed structures, each asserting the plan was *reported* and not
+*raised*.
+
+### 11. One approximation stood beside five different statistics
+
+Every association p — Pearson, Spearman, Kendall's asymptotic branch, R² and
+slope — was the Fisher-z normal approximation, and every row said
+`FISHER_Z_APPROX`. The label was accurate and the statistics were not: a
+six-point r of 0.94 is p=0.0053 by the t and p=0.0026 by the z. Off by a factor
+of two, in the direction that makes a finding look stronger, on exactly the
+sample sizes a digitized scatter has.
+
+Each statistic now gets its own test, computed from a hand-rolled regularized
+incomplete beta (this package does not import scipy): `PEARSON_T_TEST`,
+`SPEARMAN_T_APPROX` (untied only — a tied Spearman keeps its rho and refuses a
+p, the rule Kendall already had), `R_SQUARED_F_TEST` from the model F, and
+`SLOPE_T_TEST` from the regression's own residual variance. The gate refuses a
+method that does not belong to its statistic. The t and F tails are checked
+against published critical values, and the three derivations that must coincide
+for a one-predictor fit are asserted to coincide.
+
+**`N_Pairs` cannot audit itself.** It is however many contours survived the area
+filter — the same number the association was computed from, so it agrees with
+itself by construction. Five fields sit beside it: `Expected_N_From_Source` (the
+unit's `N_Outcome`), `Detected_Unique_Point_Count` (after coincident centroids
+are merged), `Point_Count_Agreement`, `Overplotting_Possible` and
+`Series_Mask_Overlap_Count`. A disagreement **halts the calculation**: the panel
+goes to `MANUAL_POINT_READ` naming both numbers, rather than publishing an r
+computed from a point set that is not the study's. The gate reaches the same
+verdict from the file alone, because a hand-edited values file never went
+through the runner.
+
+Reverting, one change at a time: the per-statistic tests fail 5 scenarios; the
+count halt 4; the gate's per-statistic table 8; the gate's count checks 8; the
+mask-overlap detection 2; the coincident-centroid merge 1; the merged-blob
+heuristic 1; the carry into the value row 1; the new columns 7.
 
 ## P1-9 (v7.11 review) — one typed plan in, eleven manifests out
 
@@ -1130,15 +1211,17 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
+| `test_run_batch.py` | 392 |
 | `test_kernel.py` | 232 |
-| `test_grid_engine.py` | 132 |
-| `test_run_batch.py` | 204 |
-| `test_mark_readers.py` | 60 |
-| `test_bar_reader.py` | 42 |
+| `test_grid_engine.py` | 157 |
+| `test_mark_readers.py` | 86 |
+| `test_compile_plan.py` | 80 |
+| `test_finalize.py` | 80 |
+| `test_bar_reader.py` | 66 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 2 |
-| **total** | **717** |
+| `test_reproducibility.py` | 16 |
+| **total** | **1154** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

@@ -532,6 +532,10 @@ READER_OPTIONS = {
                          "threshold", _grey),
     "stem_threshold":   (_as_int, ("BAR_MONO",), "stem_threshold", _grey),
     "group_window":     (_as_int, ("BAR_MONO",), "group_window", _positive),
+    # Consumed by the RUNNER, not passed to a reader: LINE_COLOR and SCATTER
+    # take it through SeriesSpec, and BAR_COLOR now builds each series' mask
+    # from its Colour_Hex at this tolerance. It used to be a no-op for
+    # BAR_COLOR - declared, validated, and changing nothing.
     "colour_tolerance": (_as_float, COLOUR_MARK_TYPES + ("SCATTER",), None,
                          _non_negative),
     "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO"), "x_window", _positive),
@@ -1301,9 +1305,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "%s=%s (expected %s)" % (col, v, "/".join(vocab)))
         if mark in COLOUR_MARK_TYPES:
             if mark == "BAR_COLOR":
-                if blank(r.get("Mask_Key")):
+                if blank(r.get("Mask_Key")) and blank(r.get("Colour_Hex")):
                     flag(line, "MISSING_SERIES_DISCRIMINANT",
-                         "BAR_COLOR separates series by colour mask - Mask_Key required")
+                         "BAR_COLOR separates series by colour - give "
+                         "Colour_Hex, or Mask_Key for one of the built-in masks")
             elif blank(r.get("Colour_Hex")):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
                      "%s separates series by colour - Colour_Hex required" % mark)
@@ -1407,9 +1412,21 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             factors_by_panel.setdefault(pid, set()).add(
                 str(r.get("Factor_Name")).strip().upper())
         mark = panel_mark.get(pid, "")
-        if blank(r.get("X_Pixel")) and blank(r.get("Slot_Index")):
-            flag(line, "MISSING_POSITION_GEOMETRY",
-                 "give X_Pixel, or Slot_Index for a slot-based bar panel")
+        # `Slot_Index` used to satisfy this on its own, and `_x_positions` only
+        # ever passes rows that have an `X_Pixel` - so a Slot_Index-only
+        # manifest validated and then reached the reader as an empty position
+        # map, which surfaces as an unreadable figure. No released reader is
+        # slot-based. Slot_Index stays in the schema as an ordering hint for the
+        # day one ships; until then it is not geometry.
+        if blank(r.get("X_Pixel")):
+            if blank(r.get("Slot_Index")):
+                flag(line, "MISSING_POSITION_GEOMETRY", "give X_Pixel")
+            else:
+                flag(line, "UNSUPPORTED_CAPABILITY",
+                     "Slot_Index=%s with no X_Pixel. Every released positional "
+                     "reader matches marks to declared pixels; a slot index is "
+                     "an ordering hint, and this row would reach the reader as "
+                     "no position at all" % r.get("Slot_Index"))
         if not blank(r.get("X_Pixel")):
             try:
                 x = float(r.get("X_Pixel"))

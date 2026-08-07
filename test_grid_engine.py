@@ -565,6 +565,88 @@ _g = _assoc(at="PEARSON_R", em="TRANSCRIBED", P_Value=0.02,
             Point_Data_Reference="")
 check("a transcribed p may say SOURCE_REPORTED", _g == [], "%s" % _g)
 
+# One approximation used to stand beside all five statistics, so the field
+# recorded that a p had been computed and nothing about which test computed it.
+for _at, _pm in (("PEARSON_R", "PEARSON_T_TEST"),
+                 ("SPEARMAN_RHO", "SPEARMAN_T_APPROX"),
+                 ("R_SQUARED", "R_SQUARED_F_TEST"),
+                 ("SLOPE", "SLOPE_T_TEST")):
+    _g = _assoc(at=_at, P_Value=0.03, P_Value_Method=_pm)
+    check("%s beside %s passes" % (_pm, _at), _g == [], "%s" % _g)
+for _at, _pm in (("SLOPE", "PEARSON_T_TEST"), ("R_SQUARED", "SLOPE_T_TEST"),
+                 ("SPEARMAN_RHO", "PEARSON_T_TEST"),
+                 ("SLOPE", "FISHER_Z_APPROX"),
+                 ("R_SQUARED", "FISHER_Z_APPROX"),
+                 ("SPEARMAN_RHO", "FISHER_Z_APPROX"),
+                 ("PEARSON_R", "SLOPE_T_TEST"),
+                 ("KENDALL_TAU", "SPEARMAN_T_APPROX")):
+    check("%s beside %s is caught" % (_pm, _at),
+          "P_METHOD_WRONG_FOR_STATISTIC" in _assoc(at=_at, P_Value=0.03,
+                                                   P_Value_Method=_pm),
+          "%s" % _assoc(at=_at, P_Value=0.03, P_Value_Method=_pm))
+# Spearman's test depends on ties exactly as Kendall's does, and the row was
+# only ever asked about them when the statistic was Kendall.
+check("a tied Spearman may leave its p blank",
+      _assoc(at="SPEARMAN_RHO", P_Value_Method="SOURCE_P_REQUIRED_TIES",
+             Ties_Present="TRUE", P_Value_Extraction_Method="") == [],
+      "%s" % _assoc(at="SPEARMAN_RHO", P_Value_Method="SOURCE_P_REQUIRED_TIES",
+                    Ties_Present="TRUE", P_Value_Extraction_Method=""))
+check("a tied Spearman claiming the untied test is caught",
+      "TIES_CONTRADICT_P_METHOD" in _assoc(
+          at="SPEARMAN_RHO", P_Value=0.03, P_Value_Method="SPEARMAN_T_APPROX",
+          Ties_Present="TRUE"))
+check("a Spearman row that never says whether there were ties is caught",
+      "MISSING_TIES_PRESENT" in _assoc(
+          at="SPEARMAN_RHO", P_Value=0.03, P_Value_Method="SPEARMAN_T_APPROX",
+          Ties_Present=""))
+check("an untied Spearman cannot claim the tie exemption",
+      "TIES_CONTRADICT_P_METHOD" in _assoc(
+          at="SPEARMAN_RHO", P_Value_Method="SOURCE_P_REQUIRED_TIES",
+          Ties_Present="FALSE", P_Value_Extraction_Method=""))
+check("a Spearman method claiming a computed p beside a blank one is caught",
+      "P_METHOD_CLAIMS_UNCOMPUTED_P" in _assoc(
+          at="SPEARMAN_RHO", P_Value_Method="SPEARMAN_T_APPROX"))
+
+print("N_Pairs is the reader's count, so something else has to check it")
+_count = dict(Expected_N_From_Source=20, Detected_Unique_Point_Count=20,
+              Point_Count_Agreement="MATCH", Overplotting_Possible="FALSE",
+              Series_Mask_Overlap_Count=0)
+check("a cloud that matches the declared sample passes",
+      _assoc(at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+             **_count) == [],
+      "%s" % _assoc(at="PEARSON_R", P_Value=0.03,
+                    P_Value_Method="PEARSON_T_TEST", **_count))
+for _n, _kw, _w in (
+        ("fewer marks than the paper's n",
+         dict(_count, Expected_N_From_Source=24,
+              Point_Count_Agreement="FEWER_DETECTED"),
+         "POINT_COUNT_DISAGREES_WITH_SOURCE"),
+        ("more marks than the paper's n",
+         dict(_count, Expected_N_From_Source=16,
+              Point_Count_Agreement="MORE_DETECTED"),
+         "POINT_COUNT_DISAGREES_WITH_SOURCE"),
+        ("an agreement verdict outside the vocabulary",
+         dict(_count, Point_Count_Agreement="PROBABLY"),
+         "BAD_POINT_COUNT_AGREEMENT"),
+        ("an association computed from more contours than distinct positions",
+         dict(_count, Detected_Unique_Point_Count=17),
+         "POINT_COUNT_INCLUDES_COINCIDENT_MARKS"),
+        ("marks two colour masks both claim",
+         dict(_count, Series_Mask_Overlap_Count=3), "SERIES_MASK_OVERLAP"),
+        ("an unreadable overplotting claim",
+         dict(_count, Overplotting_Possible="MAYBE"),
+         "BAD_OVERPLOTTING_POSSIBLE")):
+    _g = _assoc(at="PEARSON_R", P_Value=0.03, P_Value_Method="PEARSON_T_TEST",
+                **_kw)
+    check(_n, _w in _g, "%s" % _g)
+# A transcribed association has no point cloud, so it has no counts to declare
+# and must not be asked for any.
+check("a transcribed association is not asked how many marks it found",
+      _assoc(at="PEARSON_R", em="TRANSCRIBED", P_Value=0.02,
+             P_Value_Method="SOURCE_REPORTED",
+             P_Value_Extraction_Method="TRANSCRIBED",
+             Point_Data_Reference="") == [])
+
 print("the effect and the p may come from different places")
 check("a p copied from the text on a digitized effect is legitimate",
       _assoc(P_Value=0.08, P_Value_Method="SOURCE_REPORTED",

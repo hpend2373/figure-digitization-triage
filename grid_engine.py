@@ -49,20 +49,46 @@ FIG_DUAL_OK = ("AGREED", "RECONCILED")
 # How the p beside an association was arrived at. The field is only provenance if
 # it is checked: a Kendall p from the exact permutation test labelled
 # FISHER_Z_APPROX misdescribes the one number a reader would use to judge it.
-FIG_P_VALUE_METHODS = ("FISHER_Z_APPROX", "KENDALL_EXACT_PERMUTATION",
+FIG_P_VALUE_METHODS = ("PEARSON_T_TEST", "SPEARMAN_T_APPROX", "SLOPE_T_TEST",
+                       "R_SQUARED_F_TEST", "FISHER_Z_APPROX",
+                       "KENDALL_EXACT_PERMUTATION",
                        "KENDALL_NORMAL_APPROX_N_GT_200", "SOURCE_P_REQUIRED_TIES",
                        "SOURCE_REPORTED")
 # Which method may appear beside which statistic. Kendall has its own null
 # distribution, so its methods are exclusive in both directions.
 FIG_KENDALL_P_METHODS = ("KENDALL_EXACT_PERMUTATION", "KENDALL_NORMAL_APPROX_N_GT_200",
                          "SOURCE_P_REQUIRED_TIES")
+#: Every statistic's own null distribution, named. One shared approximation for
+#: all five is what this table replaces: a slope's t comes from the residual
+#: variance, an R-squared's p from the model F, and a rank correlation's from a
+#: permutation null that ties invalidate. `SOURCE_REPORTED` is legal everywhere
+#: because the paper's own p can always be copied instead of computed.
+FIG_STATISTIC_P_METHODS = {
+    # Fisher's z is a Pearson-r method - it is the one place the old label was
+    # not simply wrong, so a transcribed Fisher-z p is still accepted here.
+    "PEARSON_R": ("PEARSON_T_TEST", "FISHER_Z_APPROX"),
+    "SPEARMAN_RHO": ("SPEARMAN_T_APPROX", "SOURCE_P_REQUIRED_TIES"),
+    "KENDALL_TAU": FIG_KENDALL_P_METHODS,
+    "R_SQUARED": ("R_SQUARED_F_TEST",),
+    "SLOPE": ("SLOPE_T_TEST",),
+}
+#: Methods whose validity depends on there being no ties in the ranks.
+FIG_UNTIED_P_METHODS = ("KENDALL_EXACT_PERMUTATION", "KENDALL_NORMAL_APPROX_N_GT_200",
+                        "SPEARMAN_T_APPROX")
+#: Statistics computed on ranks, where the tie state selects the test.
+FIG_RANK_STATISTICS = ("KENDALL_TAU", "SPEARMAN_RHO")
 FIG_EXACT_KENDALL_MAX_N = 200
+#: Whether the marks the reader found are the sample the paper describes.
+FIG_POINT_COUNT_AGREEMENT = ("MATCH", "FEWER_DETECTED", "MORE_DETECTED",
+                             "NO_SOURCE_N")
 # Provenance is per FIELD, not per row. A scatter plot routinely gives its effect
 # to the digitizer and its p to the running text, and a single unit-level
 # Extraction_Method cannot say that.
 FIG_FIELD_PROVENANCE = ("DIGITIZED", "TRANSCRIBED")
 # Which p-methods are computed from the digitized cloud, and which are copied.
-FIG_COMPUTED_P_METHODS = ("FISHER_Z_APPROX", "KENDALL_EXACT_PERMUTATION",
+FIG_COMPUTED_P_METHODS = ("PEARSON_T_TEST", "SPEARMAN_T_APPROX", "SLOPE_T_TEST",
+                          "R_SQUARED_F_TEST", "FISHER_Z_APPROX",
+                          "KENDALL_EXACT_PERMUTATION",
                           "KENDALL_NORMAL_APPROX_N_GT_200")
 FIG_COPIED_P_METHODS = ("SOURCE_REPORTED", "SOURCE_P_REQUIRED_TIES")
 # Does zero mean "none of the quantity" (RATIO) or "no change" (CHANGE)? The
@@ -125,6 +151,13 @@ def fig_values_columns():
         # claim and where the points live is what makes it checkable rather than
         # taken on trust.
         "Ties_Present", "Point_Data_Reference",
+        # N_Pairs is how many marks the reader found. These say how many the
+        # paper says there are, how many distinct ones survived deduplication,
+        # whether the two agree, and whether anything could be hiding behind
+        # anything else.
+        "Expected_N_From_Source", "Detected_Unique_Point_Count",
+        "Point_Count_Agreement", "Overplotting_Possible",
+        "Series_Mask_Overlap_Count",
         "Median_R1", "Median_R2", "Median",
         "Q1_R1", "Q1_R2", "Q1", "Q3_R1", "Q3_R2", "Q3",
         "Whisker_Lower_R1", "Whisker_Lower_R2", "Whisker_Lower",
@@ -555,12 +588,16 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
         elif pm not in FIG_P_VALUE_METHODS:
             flag(line, "BAD_P_VALUE_METHOD",
                  "P_Value_Method=%s (expected %s)" % (pm, "/".join(FIG_P_VALUE_METHODS)))
+        elif (at in FIG_STATISTIC_P_METHODS
+                and pm not in FIG_STATISTIC_P_METHODS[at]
+                and pm != "SOURCE_REPORTED"):
+            # One approximation used to stand beside all five statistics. The
+            # label is only provenance if the row cannot carry somebody else's.
+            flag(line, "P_METHOD_WRONG_FOR_STATISTIC",
+                 "%s beside %s - each statistic has its own null distribution; "
+                 "expected %s" % (pm, at, "/".join(FIG_STATISTIC_P_METHODS[at])))
         elif at == "KENDALL_TAU":
-            if pm not in FIG_KENDALL_P_METHODS and pm != "SOURCE_REPORTED":
-                flag(line, "P_METHOD_WRONG_FOR_STATISTIC",
-                     "%s beside a Kendall tau - tau has its own null distribution; "
-                     "expected %s" % (pm, "/".join(FIG_KENDALL_P_METHODS)))
-            elif p is None and pm not in ("SOURCE_P_REQUIRED_TIES", "SOURCE_REPORTED"):
+            if p is None and pm not in ("SOURCE_P_REQUIRED_TIES", "SOURCE_REPORTED"):
                 flag(line, "P_METHOD_CLAIMS_UNCOMPUTED_P",
                      "%s reports a computed p, but P_Value is blank; ties make the "
                      "exact test inapplicable and only SOURCE_P_REQUIRED_TIES may "
@@ -575,9 +612,10 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                     if pm != want:
                         flag(line, "P_METHOD_CONTRADICTS_N",
                              "N_Pairs=%g selects %s, not %s" % (np_, want, pm))
-        elif pm in FIG_KENDALL_P_METHODS:
-            flag(line, "P_METHOD_WRONG_FOR_STATISTIC",
-                 "%s is a Kendall-only method but the statistic is %s" % (pm, at or raw_at))
+        elif at == "SPEARMAN_RHO" and p is None and pm != "SOURCE_P_REQUIRED_TIES":
+            flag(line, "P_METHOD_CLAIMS_UNCOMPUTED_P",
+                 "%s reports a computed p, but P_Value is blank; only "
+                 "SOURCE_P_REQUIRED_TIES may leave it empty" % pm)
         if p is None and pm in FIG_COMPUTED_P_METHODS:
             flag(line, "P_METHOD_CLAIMS_UNCOMPUTED_P",
                  "%s names a computation but P_Value is blank" % pm)
@@ -610,17 +648,16 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                      "digitized point cloud for a computed p")
 
         # ---- the tie claim must be recorded, and backed by the points -----
-        if at == "KENDALL_TAU":
+        if at in FIG_RANK_STATISTICS:
             ties = kernel.fig_as_bool(row.get("Ties_Present"))
             if ties is None:
                 flag(line, "MISSING_TIES_PRESENT",
-                     "Kendall's null distribution depends on ties - record "
-                     "Ties_Present TRUE/FALSE")
+                     "a rank statistic's null distribution depends on ties - "
+                     "record Ties_Present TRUE/FALSE")
             elif ties == "BAD":
                 flag(line, "BAD_TIES_PRESENT",
                      "Ties_Present=%r (expected TRUE/FALSE)" % row.get("Ties_Present"))
-            elif ties is True and pm in ("KENDALL_EXACT_PERMUTATION",
-                                         "KENDALL_NORMAL_APPROX_N_GT_200"):
+            elif ties is True and pm in FIG_UNTIED_P_METHODS:
                 flag(line, "TIES_CONTRADICT_P_METHOD",
                      "%s assumes untied ranks, but Ties_Present=TRUE" % pm)
             elif ties is False and pm == "SOURCE_P_REQUIRED_TIES":
@@ -636,6 +673,40 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
             flag(line, "MISSING_POINT_DATA_REFERENCE",
                  "a digitized association is only auditable against the points it "
                  "was computed from - record where they are, whatever the p's origin")
+
+        # ---- did the reader count the study, or count its own blobs? ------
+        # An association is a function of a point set. If the point set is not
+        # the one the paper describes, the number is not the paper's number -
+        # and `N_Pairs` on its own cannot show that, because it IS the count
+        # that went into the calculation.
+        agreement = ("" if blank(row.get("Point_Count_Agreement"))
+                     else str(row.get("Point_Count_Agreement")).strip().upper())
+        if agreement and agreement not in FIG_POINT_COUNT_AGREEMENT:
+            flag(line, "BAD_POINT_COUNT_AGREEMENT",
+                 "Point_Count_Agreement=%s (expected %s)"
+                 % (agreement, "/".join(FIG_POINT_COUNT_AGREEMENT)))
+        elif agreement in ("FEWER_DETECTED", "MORE_DETECTED"):
+            flag(line, "POINT_COUNT_DISAGREES_WITH_SOURCE",
+                 "the source declares n=%s and the reader found %s distinct marks"
+                 % (row.get("Expected_N_From_Source"),
+                    row.get("Detected_Unique_Point_Count")))
+        unique = num(row.get("Detected_Unique_Point_Count"))
+        if unique is not None and np_ is not None and unique < np_:
+            flag(line, "POINT_COUNT_INCLUDES_COINCIDENT_MARKS",
+                 "N_Pairs=%g was computed from more marks than the %g distinct "
+                 "positions found; coincident contours were counted twice"
+                 % (np_, unique))
+        overlap = num(row.get("Series_Mask_Overlap_Count"))
+        if overlap is not None and overlap > 0:
+            flag(line, "SERIES_MASK_OVERLAP",
+                 "%g detected marks fall inside another series' colour mask, so "
+                 "which series they belong to is not established by colour"
+                 % overlap)
+        overplot = kernel.fig_as_bool(row.get("Overplotting_Possible"))
+        if overplot == "BAD":
+            flag(line, "BAD_OVERPLOTTING_POSSIBLE",
+                 "Overplotting_Possible=%r (expected TRUE/FALSE)"
+                 % row.get("Overplotting_Possible"))
 
         if require_dual:
             _dual(kernel, row, flag, line,

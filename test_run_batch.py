@@ -223,8 +223,12 @@ def unit(uid, grid, statistic, **kw):
 
 UNITS = [
     unit("U_LINE", "G_TIME", "CONTINUOUS"),
+    # The declared n is the number of points the figure actually carries. It
+    # used to be the shared default of 12 against a ten-point cloud, and the run
+    # recorded N_Pairs=10 beside N_Outcome=12 without a word.
     unit("U_SCAT", "G_ONE", "ASSOCIATION", Bar_Top_Definition="NOT_A_BAR",
          Errorbar_Stem_Confirmed="NOT_A_BAR", Dispersion_Type="",
+         N_Outcome=len(SCATTER_XY),
          Errorbar_Definition_Source="NO_ERRORBAR"),
     unit("U_FLAT", "G_TIME", "CONTINUOUS"),
     unit("U_MANUAL", "G_TIME", "CONTINUOUS"),
@@ -795,6 +799,22 @@ check("the point file the run wrote is on disk and re-derivable",
 check("the point file names the cell it backs",
       MR.read_point_data(_scat["Point_Data_Reference"])["Cell_Key"]
       == _scat["Cell_Key"])
+# `N_Pairs` is how many blobs survived the area filter. On its own it cannot
+# say whether that is the study's sample: it IS the number the association was
+# computed from, so it agrees with itself by construction.
+check("the association records the count it was measured against",
+      int(_scat["Expected_N_From_Source"]) == len(SCATTER_XY)
+      and int(_scat["Detected_Unique_Point_Count"]) == len(SCATTER_XY)
+      and _scat["Point_Count_Agreement"] == "MATCH",
+      "%r" % {k: _scat[k] for k in ("Expected_N_From_Source",
+                                    "Detected_Unique_Point_Count",
+                                    "Point_Count_Agreement")})
+check("and says nothing is hiding behind anything",
+      _scat["Overplotting_Possible"] == "FALSE"
+      and int(_scat["Series_Mask_Overlap_Count"]) == 0,
+      "%r" % dict(_scat))
+check("the p is the Pearson t, named for the test that produced it",
+      _scat["P_Value_Method"] == "PEARSON_T_TEST", "%r" % _scat["P_Value_Method"])
 # The two queued panels produced nothing, and the gate says so - that is the
 # fail-closed property working, not a defect. What must be true is that the
 # complaints are confined to those units and never touch the ones that ran.
@@ -1036,6 +1056,87 @@ check("every status a stamp can carry is declared",
       {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED",
        "DEMO_OUTPUT_REFUSED", "INTERNAL_ERROR"} == set(RB.RUN_STATUSES),
       "%s" % sorted(RB.RUN_STATUSES))
+
+
+print("a panel nobody can read still says how much work it is")
+# `Panel_Mode=MANUAL` returned before the series and position maps were built,
+# and so did an unopenable raster and an unparseable box - so those panels
+# reported Cells_Declared=0 and Missing_Cells="". A manual panel with 24 cells
+# came out "MANUAL_POINT_READ 0 / 0": the queue understated the hand-digitizing
+# left to do, on exactly the panels that are nothing but hand-digitizing.
+_declared_expect = len({r["Series_ID"] for r in SERIES
+                        if r["Panel_ID"] == "P_MANUAL"}) * len(
+    {r["Position_ID"] for r in POSITION_ROWS if r["Panel_ID"] == "P_MANUAL"})
+_rm_now = pd.read_csv(os.path.join(ODIR, "run_manifest.csv"), dtype=object).fillna("")
+_manual = _rm_now[_rm_now["Panel_ID"] == "P_MANUAL"].iloc[0]
+check("a MANUAL panel declares its cells",
+      int(_manual["Cells_Declared"]) == _declared_expect,
+      "%s declared, expected %d" % (_manual["Cells_Declared"], _declared_expect))
+_q_now = pd.read_csv(os.path.join(ODIR, "manual_queue.csv"), dtype=object).fillna("")
+_mq = _q_now[_q_now["Panel_ID"] == "P_MANUAL"]
+check("and its queue row counts every cell a person has to read",
+      len(_mq) and int(_mq.iloc[0]["Missing_Cell_Count"]) == _declared_expect,
+      "%r" % (_mq.iloc[0]["Missing_Cell_Count"] if len(_mq) else None))
+# The list itself is rows, not a delimited string: cell keys ARE ";"-joined
+# FACTOR=LEVEL pairs, so "ARM=A;T=1;ARM=B;T=1" could not be split back into the
+# two cells it came from.
+_qc = pd.read_csv(os.path.join(ODIR, "manual_queue_cells.csv"), dtype=object).fillna("")
+check("and every one of them is a row of its own",
+      len(_qc[_qc["Panel_ID"] == "P_MANUAL"]) == _declared_expect,
+      "%d rows" % len(_qc[_qc["Panel_ID"] == "P_MANUAL"]))
+check("each parsing as a whole cell key, not half of one",
+      all(GE.fig_parse_cell_key(k) is not None for k in _qc["Cell_Key"]),
+      "%s" % [k for k in _qc["Cell_Key"] if GE.fig_parse_cell_key(k) is None][:2])
+check("Missing_Cells the ambiguous string is gone",
+      "Missing_Cells" not in RB.MANUAL_QUEUE_COLUMNS,
+      "%s" % RB.MANUAL_QUEUE_COLUMNS)
+
+# Validation normally catches a bad box or a degenerate calibration first, which
+# is right. `check_files=False` is how a caller skips the raster checks, and it
+# is the path where the runner meets the geometry itself.
+_d = os.path.join(ROOT, "o_decl_geometry")
+_s2 = RB.run_batch(write_manifests(
+    os.path.join(ROOT, "m_decl_geometry"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                  Image_Path=os.path.join(IMAGES, "vanished_for_geometry.png"))),
+    _d, file_root=ROOT, run_date="2026-08-06", check_files=False)
+_r2 = pd.read_csv(os.path.join(_d, "run_manifest.csv"), dtype=object).fillna("")
+_row = _r2[_r2["Panel_ID"] == "P_LINE"].iloc[0]
+check("a raster the runner cannot open is PANEL_GEOMETRY_UNRESOLVED",
+      _row["Run_State"] == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _row["Run_State"])
+check("and it still declares its cells",
+      int(_row["Cells_Declared"]) > 0, "%s" % _row["Cells_Declared"])
+_qc2 = pd.read_csv(os.path.join(_d, "manual_queue_cells.csv"), dtype=object).fillna("")
+check("and names every one of them for the person who now has to read it",
+      len(_qc2[_qc2["Panel_ID"] == "P_LINE"]) == int(_row["Cells_Declared"]),
+      "%d rows for %s declared" % (len(_qc2[_qc2["Panel_ID"] == "P_LINE"]),
+                                   _row["Cells_Declared"]))
+
+check("every panel in the run declares at least one cell",
+      all(int(v) > 0 for v in _rm_now["Cells_Declared"]),
+      "%s" % dict(zip(_rm_now["Panel_ID"], _rm_now["Cells_Declared"])))
+
+
+print("a position without a pixel is not a position")
+# The validator accepted X_Pixel OR Slot_Index. `_x_positions` only ever passes
+# rows that have an X_Pixel, and no released reader is slot-based - so a
+# Slot_Index-only manifest validated, reached the reader as an empty position
+# map, and came back as an unreadable figure.
+_slot_only = edited(POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+                    X_Pixel="")
+check("a Slot_Index-only position is refused as a capability, not geometry",
+      "UNSUPPORTED_CAPABILITY" in validate(positions=_slot_only),
+      "%s" % validate(positions=_slot_only))
+check("and a position with neither is still missing geometry",
+      "MISSING_POSITION_GEOMETRY" in validate(
+          positions=edited(POSITION_ROWS,
+                           {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+                           X_Pixel="", Slot_Index="")),
+      "%s" % validate(positions=edited(
+          POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+          X_Pixel="", Slot_Index="")))
+check("Slot_Index remains in the schema, as the ordering hint it is",
+      "Slot_Index" in BM.position_manifest_columns())
 
 
 print("a statistic the runner cannot execute is a sentence, not a discovery")
@@ -1993,8 +2094,8 @@ check("and the readable panels in the same batch still pass",
 _q = pd.read_csv(os.path.join(_o, "manual_queue.csv"), dtype=object).fillna("")
 _qrow = _q[_q["Panel_ID"] == "P_LINE"]
 check("its queue row names the cells nobody can read yet",
-      len(_qrow) and bool(_qrow.iloc[0]["Missing_Cells"]),
-      "%s" % (list(_qrow["Missing_Cells"]) if len(_qrow) else "no queue row"))
+      len(_qrow) and int(_qrow.iloc[0]["Missing_Cell_Count"]) > 0,
+      "%s" % (list(_qrow["Missing_Cell_Count"]) if len(_qrow) else "no queue row"))
 check("and says why, pointing at where the work stands",
       len(_qrow) and "wip/" in _qrow.iloc[0]["Detail"],
       "%s" % (list(_qrow["Detail"]) if len(_qrow) else ""))
@@ -2044,6 +2145,50 @@ check("every option has a range check, not just a parser",
 check("an unreleased mark type is named rather than silently unknown",
       "LINE_MONO_STYLE" in BM.UNRELEASED_MARK_TYPES
       and "LINE_MONO_STYLE" not in BM.BATCH_MARK_TYPES)
+
+
+print("a scatter whose marks do not add up to the declared sample is not computed")
+# An association is a function of a point set. If the reader's point set is not
+# the study's point set, the r it produces is not the study's r - and the run
+# used to publish it anyway, with `N_Pairs` set to however many contours had
+# survived the area filter, which agrees with itself by construction.
+for _label, _n, _agreement in (("more subjects than marks", 14, "FEWER_DETECTED"),
+                               ("fewer subjects than marks", 7, "MORE_DETECTED")):
+    _cdir = os.path.join(ROOT, "count_%d" % _n)
+    _cmd = write_manifests(os.path.join(_cdir, "manifests"),
+                           units=edited(UNITS, {"Unit_ID": "U_SCAT"}, N_Outcome=_n))
+    _csum = RB.run_batch(_cmd, os.path.join(_cdir, "out"), file_root=ROOT,
+                         run_date="2026-08-06")
+    _crun = pd.read_csv(os.path.join(_cdir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _cvals = pd.read_csv(os.path.join(_cdir, "out", "figure_values_raw.csv"),
+                         dtype=object).fillna("")
+    _crow = _crun[_crun["Panel_ID"] == "P_SCAT"].iloc[0]
+    check("%s sends the panel to a person, not to the values file" % _label,
+          _crow["Run_State"] == "MANUAL_POINT_READ"
+          and not len(_cvals[_cvals["Unit_ID"] == "U_SCAT"]),
+          "%s / %d rows" % (_crow["Run_State"],
+                            len(_cvals[_cvals["Unit_ID"] == "U_SCAT"])))
+    check("and says which two numbers disagree (%s)" % _label,
+          "n=%d" % _n in _crow["Detail"] and "%d distinct" % len(SCATTER_XY)
+          in _crow["Detail"], "%s" % _crow["Detail"])
+    # The validator must be able to reach the same verdict from the file alone,
+    # because a hand-edited values file never went through the runner.
+    _forced = dict(Unit_ID="U_SCAT", Cell_Key="ARM=SINGLE",
+                   Association_Type="PEARSON_R", Association_Value=0.9,
+                   P_Value=0.01, P_Value_Method="PEARSON_T_TEST", N_Pairs=10,
+                   P_Value_Extraction_Method="DIGITIZED", Ties_Present="FALSE",
+                   Point_Data_Reference="points.json",
+                   Expected_N_From_Source=_n, Detected_Unique_Point_Count=10,
+                   Point_Count_Agreement=_agreement,
+                   Overplotting_Possible="TRUE", Series_Mask_Overlap_Count=0)
+    _cp = GE.fig_validate_bundle(
+        fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+        fr([u for u in UNITS if u["Unit_ID"] == "U_SCAT"], GE.fig_unit_columns()),
+        fr([_forced], GE.fig_values_columns()), kernel=K)
+    check("the gate reaches the same verdict from the file alone (%s)" % _label,
+          "POINT_COUNT_DISAGREES_WITH_SOURCE" in set(_cp["check"]),
+          "%s" % sorted(set(_cp["check"])))
 
 
 print("templates are generated from the column functions, never typed")

@@ -171,17 +171,71 @@ obtained. `P_Value_Extraction_Method` (`DIGITIZED` / `TRANSCRIBED`) sits on the
 **value row** and describes only the p. They may differ, and the gate checks
 each against the method that produced it:
 
-- a computed method (`FISHER_Z_APPROX`, `KENDALL_EXACT_PERMUTATION`,
+- a computed method (`PEARSON_T_TEST`, `SPEARMAN_T_APPROX`, `SLOPE_T_TEST`,
+  `R_SQUARED_F_TEST`, `FISHER_Z_APPROX`, `KENDALL_EXACT_PERMUTATION`,
   `KENDALL_NORMAL_APPROX_N_GT_200`) beside `TRANSCRIBED` is a contradiction
 - `SOURCE_REPORTED` beside `DIGITIZED` is a contradiction
 - `DIGITIZED` on a unit whose `Extraction_Method=TRANSCRIBED` is a contradiction:
   there is no point cloud to compute from
 - a blank p attributes nothing, so the provenance may be blank too
 
-`Ties_Present` TRUE/FALSE is required on every Kendall row, because Kendall's
-null distribution depends on it. It is not a note — the gate contradicts the
-reader with it: `KENDALL_EXACT_PERMUTATION` beside `Ties_Present=TRUE` fails, and
-so does `SOURCE_P_REQUIRED_TIES` beside `Ties_Present=FALSE`.
+`Ties_Present` TRUE/FALSE is required on every **rank** row — Kendall and
+Spearman both — because a rank statistic's null distribution depends on it. It is
+not a note: the gate contradicts the reader with it. `KENDALL_EXACT_PERMUTATION`
+or `SPEARMAN_T_APPROX` beside `Ties_Present=TRUE` fails, and so does
+`SOURCE_P_REQUIRED_TIES` beside `Ties_Present=FALSE`.
+
+## Every statistic has its own null distribution
+
+One label used to stand beside all five association types: every p — Pearson,
+Spearman, Kendall's asymptotic branch, R², slope — was the Fisher-z normal
+approximation, recorded as `FISHER_Z_APPROX`. On the ten to thirty points a
+digitized scatter actually carries, that is not a rounding difference. A
+six-point r of 0.94 is p=0.0053 by the t and p=0.0026 by the z — a factor of two,
+in the direction that makes the finding look stronger.
+
+Each statistic now names the test that produced its p, and the gate refuses any
+other:
+
+| `Association_Type` | `P_Value_Method` | test |
+|---|---|---|
+| `PEARSON_R` | `PEARSON_T_TEST` | t = r√((n−2)/(1−r²)) on n−2 df |
+| `SPEARMAN_RHO` | `SPEARMAN_T_APPROX` | the same t on the rank correlation — **untied only** |
+| `SPEARMAN_RHO` (tied) | `SOURCE_P_REQUIRED_TIES` | no p; average ranks change the null |
+| `KENDALL_TAU` | `KENDALL_EXACT_PERMUTATION` / `KENDALL_NORMAL_APPROX_N_GT_200` | selected by n |
+| `R_SQUARED` | `R_SQUARED_F_TEST` | F = R²/(1−R²)·(n−2) on 1 and n−2 df |
+| `SLOPE` | `SLOPE_T_TEST` | t = b/SE(b) from the regression's residual variance |
+
+`FISHER_Z_APPROX` survives in the vocabulary for `PEARSON_R` only, because a
+paper may report one. Beside a slope, an R² or a rank correlation it is
+`P_METHOD_WRONG_FOR_STATISTIC`.
+
+The t and F tails are computed from a hand-rolled regularized incomplete beta —
+this package does not import scipy, and an exact tail written out is preferable
+to a normal approximation wearing an exact name.
+
+## `N_Pairs` is the reader's own count, so something else has to check it
+
+`N_Pairs` is however many contours survived the area filter. It cannot show that
+the reader missed a point, because it *is* the number the association was
+computed from: it agrees with itself by construction. Five fields sit beside it:
+
+- `Expected_N_From_Source` — the unit's `N_Outcome`, i.e. what the paper says
+- `Detected_Unique_Point_Count` — distinct marker positions, after centroids
+  closer than 3 px are merged (a marker crossed by a gridline is two contours)
+- `Point_Count_Agreement` — `MATCH` / `FEWER_DETECTED` / `MORE_DETECTED` /
+  `NO_SOURCE_N`
+- `Overplotting_Possible` — TRUE when marks are missing, when a blob is more than
+  1.6× the median marker area, or when coincident contours were merged
+- `Series_Mask_Overlap_Count` — marks that fall inside another series' colour
+  mask, so colour does not establish which series they belong to
+
+A disagreeing count **halts the calculation**. The panel goes to
+`MANUAL_POINT_READ` with both numbers in its detail rather than publishing an
+association computed from a point set that is not the study's. The gate reaches
+the same verdict independently from the file
+(`POINT_COUNT_DISAGREES_WITH_SOURCE`), because a hand-edited values file never
+went through the runner.
 
 ## A digitized association without its points is not evidence
 

@@ -170,88 +170,88 @@
       ],
       "positions": [
        {
-        "position_id": "T030",
+        "position_id": "0_30",
         "factor": "TIMEPOINT",
         "level": "0:30",
-        "x_pixel": "",
-        "timepoint_label": "0:30"
+        "timepoint_label": "0:30",
+        "x_pixel": 109
        },
        {
-        "position_id": "T100",
+        "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
-        "x_pixel": "",
-        "timepoint_label": "1:00"
+        "timepoint_label": "1:00",
+        "x_pixel": 137
        },
        {
-        "position_id": "T130",
+        "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
-        "x_pixel": "",
-        "timepoint_label": "1:30"
+        "timepoint_label": "1:30",
+        "x_pixel": 165
        },
        {
-        "position_id": "T200",
+        "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
-        "x_pixel": "",
-        "timepoint_label": "2:00"
+        "timepoint_label": "2:00",
+        "x_pixel": 192
        },
        {
-        "position_id": "T230",
+        "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
-        "x_pixel": "",
-        "timepoint_label": "2:30"
+        "timepoint_label": "2:30",
+        "x_pixel": 220
        },
        {
-        "position_id": "T300",
+        "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
-        "x_pixel": "",
-        "timepoint_label": "3:00"
+        "timepoint_label": "3:00",
+        "x_pixel": 248
        },
        {
-        "position_id": "T330",
+        "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
-        "x_pixel": "",
-        "timepoint_label": "3:30"
+        "timepoint_label": "3:30",
+        "x_pixel": 276
        },
        {
-        "position_id": "T400",
+        "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
-        "x_pixel": "",
-        "timepoint_label": "4:00"
+        "timepoint_label": "4:00",
+        "x_pixel": 304
        },
        {
-        "position_id": "T430",
+        "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
-        "x_pixel": "",
-        "timepoint_label": "4:30"
+        "timepoint_label": "4:30",
+        "x_pixel": 332
        },
        {
-        "position_id": "T500",
+        "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
-        "x_pixel": "",
-        "timepoint_label": "5:00"
+        "timepoint_label": "5:00",
+        "x_pixel": 359
        },
        {
-        "position_id": "T530",
+        "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
-        "x_pixel": "",
-        "timepoint_label": "5:30"
+        "timepoint_label": "5:30",
+        "x_pixel": 387
        },
        {
-        "position_id": "T600",
+        "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
-        "x_pixel": "",
-        "timepoint_label": "6:00"
+        "timepoint_label": "6:00",
+        "x_pixel": 415
        }
       ]
      }
@@ -306,88 +306,88 @@
       ],
       "positions": [
        {
-        "position_id": "T030",
+        "position_id": "0_30",
         "factor": "TIMEPOINT",
         "level": "0:30",
-        "x_pixel": "",
-        "timepoint_label": "0:30"
+        "timepoint_label": "0:30",
+        "x_pixel": 545
        },
        {
-        "position_id": "T100",
+        "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
-        "x_pixel": "",
-        "timepoint_label": "1:00"
+        "timepoint_label": "1:00",
+        "x_pixel": 573
        },
        {
-        "position_id": "T130",
+        "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
-        "x_pixel": "",
-        "timepoint_label": "1:30"
+        "timepoint_label": "1:30",
+        "x_pixel": 601
        },
        {
-        "position_id": "T200",
+        "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
-        "x_pixel": "",
-        "timepoint_label": "2:00"
+        "timepoint_label": "2:00",
+        "x_pixel": 630
        },
        {
-        "position_id": "T230",
+        "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
-        "x_pixel": "",
-        "timepoint_label": "2:30"
+        "timepoint_label": "2:30",
+        "x_pixel": 658
        },
        {
-        "position_id": "T300",
+        "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
-        "x_pixel": "",
-        "timepoint_label": "3:00"
+        "timepoint_label": "3:00",
+        "x_pixel": 686
        },
        {
-        "position_id": "T330",
+        "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
-        "x_pixel": "",
-        "timepoint_label": "3:30"
+        "timepoint_label": "3:30",
+        "x_pixel": 714
        },
        {
-        "position_id": "T400",
+        "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
-        "x_pixel": "",
-        "timepoint_label": "4:00"
+        "timepoint_label": "4:00",
+        "x_pixel": 742
        },
        {
-        "position_id": "T430",
+        "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
-        "x_pixel": "",
-        "timepoint_label": "4:30"
+        "timepoint_label": "4:30",
+        "x_pixel": 770
        },
        {
-        "position_id": "T500",
+        "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
-        "x_pixel": "",
-        "timepoint_label": "5:00"
+        "timepoint_label": "5:00",
+        "x_pixel": 799
        },
        {
-        "position_id": "T530",
+        "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
-        "x_pixel": "",
-        "timepoint_label": "5:30"
+        "timepoint_label": "5:30",
+        "x_pixel": 827
        },
        {
-        "position_id": "T600",
+        "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
-        "x_pixel": "",
-        "timepoint_label": "6:00"
+        "timepoint_label": "6:00",
+        "x_pixel": 855
        }
       ]
      }
@@ -512,88 +512,88 @@
       ],
       "positions": [
        {
-        "position_id": "T030",
+        "position_id": "0_30",
         "factor": "TIMEPOINT",
         "level": "0:30",
-        "x_pixel": "",
-        "timepoint_label": "0:30"
+        "timepoint_label": "0:30",
+        "x_pixel": 109
        },
        {
-        "position_id": "T100",
+        "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
-        "x_pixel": "",
-        "timepoint_label": "1:00"
+        "timepoint_label": "1:00",
+        "x_pixel": 137
        },
        {
-        "position_id": "T130",
+        "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
-        "x_pixel": "",
-        "timepoint_label": "1:30"
+        "timepoint_label": "1:30",
+        "x_pixel": 165
        },
        {
-        "position_id": "T200",
+        "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
-        "x_pixel": "",
-        "timepoint_label": "2:00"
+        "timepoint_label": "2:00",
+        "x_pixel": 192
        },
        {
-        "position_id": "T230",
+        "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
-        "x_pixel": "",
-        "timepoint_label": "2:30"
+        "timepoint_label": "2:30",
+        "x_pixel": 220
        },
        {
-        "position_id": "T300",
+        "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
-        "x_pixel": "",
-        "timepoint_label": "3:00"
+        "timepoint_label": "3:00",
+        "x_pixel": 248
        },
        {
-        "position_id": "T330",
+        "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
-        "x_pixel": "",
-        "timepoint_label": "3:30"
+        "timepoint_label": "3:30",
+        "x_pixel": 276
        },
        {
-        "position_id": "T400",
+        "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
-        "x_pixel": "",
-        "timepoint_label": "4:00"
+        "timepoint_label": "4:00",
+        "x_pixel": 304
        },
        {
-        "position_id": "T430",
+        "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
-        "x_pixel": "",
-        "timepoint_label": "4:30"
+        "timepoint_label": "4:30",
+        "x_pixel": 332
        },
        {
-        "position_id": "T500",
+        "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
-        "x_pixel": "",
-        "timepoint_label": "5:00"
+        "timepoint_label": "5:00",
+        "x_pixel": 359
        },
        {
-        "position_id": "T530",
+        "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
-        "x_pixel": "",
-        "timepoint_label": "5:30"
+        "timepoint_label": "5:30",
+        "x_pixel": 387
        },
        {
-        "position_id": "T600",
+        "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
-        "x_pixel": "",
-        "timepoint_label": "6:00"
+        "timepoint_label": "6:00",
+        "x_pixel": 415
        }
       ]
      }
@@ -648,88 +648,88 @@
       ],
       "positions": [
        {
-        "position_id": "T030",
+        "position_id": "0_30",
         "factor": "TIMEPOINT",
         "level": "0:30",
-        "x_pixel": "",
-        "timepoint_label": "0:30"
+        "timepoint_label": "0:30",
+        "x_pixel": 545
        },
        {
-        "position_id": "T100",
+        "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
-        "x_pixel": "",
-        "timepoint_label": "1:00"
+        "timepoint_label": "1:00",
+        "x_pixel": 573
        },
        {
-        "position_id": "T130",
+        "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
-        "x_pixel": "",
-        "timepoint_label": "1:30"
+        "timepoint_label": "1:30",
+        "x_pixel": 601
        },
        {
-        "position_id": "T200",
+        "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
-        "x_pixel": "",
-        "timepoint_label": "2:00"
+        "timepoint_label": "2:00",
+        "x_pixel": 630
        },
        {
-        "position_id": "T230",
+        "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
-        "x_pixel": "",
-        "timepoint_label": "2:30"
+        "timepoint_label": "2:30",
+        "x_pixel": 658
        },
        {
-        "position_id": "T300",
+        "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
-        "x_pixel": "",
-        "timepoint_label": "3:00"
+        "timepoint_label": "3:00",
+        "x_pixel": 686
        },
        {
-        "position_id": "T330",
+        "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
-        "x_pixel": "",
-        "timepoint_label": "3:30"
+        "timepoint_label": "3:30",
+        "x_pixel": 714
        },
        {
-        "position_id": "T400",
+        "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
-        "x_pixel": "",
-        "timepoint_label": "4:00"
+        "timepoint_label": "4:00",
+        "x_pixel": 742
        },
        {
-        "position_id": "T430",
+        "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
-        "x_pixel": "",
-        "timepoint_label": "4:30"
+        "timepoint_label": "4:30",
+        "x_pixel": 770
        },
        {
-        "position_id": "T500",
+        "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
-        "x_pixel": "",
-        "timepoint_label": "5:00"
+        "timepoint_label": "5:00",
+        "x_pixel": 799
        },
        {
-        "position_id": "T530",
+        "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
-        "x_pixel": "",
-        "timepoint_label": "5:30"
+        "timepoint_label": "5:30",
+        "x_pixel": 827
        },
        {
-        "position_id": "T600",
+        "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
-        "x_pixel": "",
-        "timepoint_label": "6:00"
+        "timepoint_label": "6:00",
+        "x_pixel": 855
        }
       ]
      }

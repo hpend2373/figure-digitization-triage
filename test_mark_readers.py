@@ -221,6 +221,142 @@ check("association p-value method survives the common value adapter",
       "%r" % assoc_record)
 
 
+print("two colour masks that claim the same marks say so")
+import mark_readers as _MR  # noqa: E402
+# A scatter's series identity is a colour claim, and two claims can cover the
+# same pixel. Every such marker is then read twice, once into each series, and
+# both associations are computed from a point set that includes the other's
+# points. The reader is the only place this is visible - by the time the rows
+# exist they look like ordinary points.
+_near = [SeriesSpec("BLUE", rgb=(45, 80, 220), marker="CIRCLE", tolerance=140.0),
+         SeriesSpec("NAVY", rgb=(40, 60, 190), marker="CIRCLE", tolerance=140.0)]
+_ambiguous = read_scatter_panel(sim, panel_box=(70, 730, 40, 460),
+                                x_calibration=sxcal, y_calibration=sycal,
+                                series=_near)
+check("a marker both masks cover is flagged on the point itself",
+      all(p["mask_overlap"] >= 1 for p in _ambiguous) and len(_ambiguous) > 0,
+      "%s" % [p.get("mask_overlap") for p in _ambiguous][:6])
+check("and the overlap count reaches the audit",
+      _MR.point_count_audit(
+          [p for p in _ambiguous if p["series"] == "BLUE"],
+          expected_n=len(struth))["Series_Mask_Overlap_Count"] == len(struth),
+      "%r" % _MR.point_count_audit(
+          [p for p in _ambiguous if p["series"] == "BLUE"], expected_n=len(struth)))
+check("while two masks that cannot both be right about a pixel report nothing",
+      all(p["mask_overlap"] == 0 for p in read_scatter_panel(
+          sim, panel_box=(70, 730, 40, 460), x_calibration=sxcal,
+          y_calibration=sycal,
+          series=[SeriesSpec("BLUE", rgb=(45, 80, 220), marker="CIRCLE"),
+                  SeriesSpec("RED", rgb=(215, 45, 45), marker="CIRCLE")])))
+
+
+print("each statistic gets its own null distribution, not one shared one")
+# Published two-sided Student-t critical values. The tail has to be the t's,
+# because a normal one is what stood here for every statistic at once.
+for _t, _df, _want in ((2.228, 10, 0.05), (3.169, 10, 0.01), (2.776, 4, 0.05),
+                       (12.706, 1, 0.05), (1.960, 100000, 0.05)):
+    _got = _MR.student_t_two_sided(_t, _df)
+    check("t=%.3f on %d df is p=%.2f" % (_t, _df, _want),
+          abs(_got - _want) < 5e-4, "got %.6f" % _got)
+# The F tail is the same machinery, and for one predictor F = t^2.
+check("the F tail agrees with the squared t it must equal",
+      abs(_MR.snedecor_f_upper_tail(2.228 ** 2, 1, 10) - 0.05) < 5e-4,
+      "%.6f" % _MR.snedecor_f_upper_tail(2.228 ** 2, 1, 10))
+
+_lin = [dict(x_value=x, y_value=y, point_px_x=10.0 * x, point_px_y=10.0 * y,
+             marker_area_px=20.0)
+        for x, y in ((1, 2), (2, 3), (3, 5), (4, 4), (5, 8), (6, 9))]
+_by_kind = {k: summarize_association(_lin, k)
+            for k in ("PEARSON_R", "SPEARMAN_RHO", "R_SQUARED", "SLOPE")}
+check("every statistic names the test that produced its p",
+      [_by_kind[k]["P_Value_Method"] for k in
+       ("PEARSON_R", "SPEARMAN_RHO", "R_SQUARED", "SLOPE")]
+      == ["PEARSON_T_TEST", "SPEARMAN_T_APPROX", "R_SQUARED_F_TEST",
+          "SLOPE_T_TEST"],
+      "%s" % {k: v["P_Value_Method"] for k, v in _by_kind.items()})
+check("no statistic is labelled with the shared approximation any more",
+      "FISHER_Z_APPROX" not in {v["P_Value_Method"] for v in _by_kind.values()})
+# The Pearson t and the Fisher z are not the same number on the ten-to-thirty
+# points a digitized scatter has. n=6 here: 0.0053 against 0.0026 - a factor of
+# two, in the direction that makes a result look stronger than it is.
+_fisher = _MR._normal_p_from_r(_by_kind["PEARSON_R"]["Association_Value"], 6)
+check("and the t is not the z it replaced",
+      _by_kind["PEARSON_R"]["P_Value"] > 1.5 * _fisher,
+      "t-test %.6f vs Fisher z %.6f" % (_by_kind["PEARSON_R"]["P_Value"], _fisher))
+# The slope's t is computed from the regression's residual variance. For one
+# predictor that equals the Pearson t, which is the check: two different
+# derivations must land on the same number, or one of them is wrong.
+_sx = np.array([p["x_value"] for p in _lin], dtype=float)
+_sy = np.array([p["y_value"] for p in _lin], dtype=float)
+_b, _a = np.polyfit(_sx, _sy, 1)
+_sse = float(np.sum((_sy - (_b * _sx + _a)) ** 2))
+_sxx = float(np.sum((_sx - _sx.mean()) ** 2))
+_se_b = (_sse / (len(_sx) - 2) / _sxx) ** 0.5
+_want_slope_p = _MR.student_t_two_sided(_b / _se_b, len(_sx) - 2)
+check("the slope p comes from the regression's own residual variance",
+      abs(_by_kind["SLOPE"]["P_Value"] - _want_slope_p) < 1e-12,
+      "%r vs %r" % (_by_kind["SLOPE"]["P_Value"], _want_slope_p))
+check("which for one predictor must land on the correlation t",
+      abs(_by_kind["SLOPE"]["P_Value"] - _by_kind["PEARSON_R"]["P_Value"]) < 1e-12,
+      "%r" % [_by_kind["SLOPE"]["P_Value"], _by_kind["PEARSON_R"]["P_Value"]])
+check("and the R-squared F lands there too, under its own name",
+      abs(_by_kind["R_SQUARED"]["P_Value"] - _by_kind["PEARSON_R"]["P_Value"]) < 1e-12,
+      "%r" % [_by_kind["R_SQUARED"]["P_Value"], _by_kind["PEARSON_R"]["P_Value"]])
+# A slope on a steeper y is a different slope with the same correlation, so the
+# value must move while the p does not.
+_steep = [dict(p, y_value=p["y_value"] * 3) for p in _lin]
+check("the slope is the fitted slope, not the correlation",
+      abs(summarize_association(_steep, "SLOPE")["Association_Value"]
+          - 3 * _by_kind["SLOPE"]["Association_Value"]) < 1e-9)
+_tied_spearman = summarize_association(
+    [dict(x_value=x, y_value=y) for x, y in
+     ((1, 2), (2, 2), (3, 5), (4, 5), (5, 8), (6, 9))], "SPEARMAN_RHO")
+check("a tied Spearman refuses a p rather than using the untied one",
+      _tied_spearman["P_Value"] is None
+      and _tied_spearman["P_Value_Method"] == "SOURCE_P_REQUIRED_TIES"
+      and _tied_spearman["Ties_Present"] == "TRUE",
+      "%r" % _tied_spearman)
+
+
+print("the point count is measured against the source, not declared by the reader")
+_audit = _MR.point_count_audit(_lin, expected_n=6)
+check("a clean cloud that matches the declared n says so",
+      _audit["Point_Count_Agreement"] == "MATCH"
+      and _audit["Detected_Unique_Point_Count"] == 6
+      and _audit["Overplotting_Possible"] == "FALSE"
+      and _audit["Series_Mask_Overlap_Count"] == 0, "%r" % _audit)
+check("a source that declares more subjects than there are marks is FEWER_DETECTED",
+      _MR.point_count_audit(_lin, expected_n=9)["Point_Count_Agreement"]
+      == "FEWER_DETECTED")
+check("and overplotting is the reading it gets",
+      _MR.point_count_audit(_lin, expected_n=9)["Overplotting_Possible"] == "TRUE")
+check("more marks than subjects is MORE_DETECTED",
+      _MR.point_count_audit(_lin, expected_n=4)["Point_Count_Agreement"]
+      == "MORE_DETECTED")
+check("with no declared n the audit says so rather than agreeing with itself",
+      _MR.point_count_audit(_lin)["Point_Count_Agreement"] == "NO_SOURCE_N")
+# Two contours a pixel apart are one printed marker split by a gridline. Counting
+# both is how a ten-point figure becomes an eleven-pair correlation.
+_split = _lin + [dict(_lin[0], point_px_x=_lin[0]["point_px_x"] + 1.0)]
+check("two contours on one marker count once",
+      _MR.point_count_audit(_split, expected_n=6)["Detected_Unique_Point_Count"] == 6
+      and _MR.point_count_audit(_split, expected_n=6)["Overplotting_Possible"] == "TRUE",
+      "%r" % _MR.point_count_audit(_split, expected_n=6))
+_fat = [dict(p, marker_area_px=(120.0 if i == 0 else 20.0))
+        for i, p in enumerate(_lin)]
+check("a blob too big to be one marker is read as overplotting",
+      _MR.point_count_audit(_fat, expected_n=6)["Overplotting_Possible"] == "TRUE",
+      "%r" % _MR.point_count_audit(_fat, expected_n=6))
+_claimed = [dict(p, mask_overlap=(1 if i < 2 else 0)) for i, p in enumerate(_lin)]
+check("marks claimed by two series masks are counted",
+      _MR.point_count_audit(_claimed, expected_n=6)["Series_Mask_Overlap_Count"] == 2)
+_audited_record = to_value_records(
+    [dict(summarize_association(_lin, "PEARSON_R"), **_audit)],
+    "ASSOCIATION", "UA", cell_levels={"PANEL": "ALL"})[0]
+check("and the whole audit reaches the value row",
+      all(_audited_record.get(k) == _audit[k] for k in _audit), "%r" % _audited_record)
+
+
 def brute_kendall_two_sided_p(y):
     """Exact no-tie permutation p for a small regression fixture."""
     n = len(y)

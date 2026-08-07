@@ -87,6 +87,57 @@ def validate_plan(plan, file_root="."):
         problems.append(_problem("plan", "PLAN_SCHEMA_UNKNOWN",
                                  "%r is not %s" % (plan.get("schema"), PLAN_SCHEMA)))
 
+    # Shape before content. Every check below calls `.get()` on a row and
+    # iterates a section, so a section that is null, a string or an object - and
+    # a row that is a number - produced an AttributeError or a TypeError instead
+    # of a problem the author could read. A plan written by an agent is exactly
+    # where a half-formed structure arrives, so being reliable about ill-formed
+    # input matters more here than being fast about well-formed input.
+    for section in ("reviewers", "documents", "grids", "figures", "units"):
+        rows = plan.get(section)
+        if not isinstance(rows, list):
+            problems.append(_problem(
+                "plan", "PLAN_SECTION_NOT_A_LIST",
+                "%s is %s; it must be a list of objects"
+                % (section, type(rows).__name__)))
+            continue
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                problems.append(_problem(
+                    "%s[%d]" % (section, i), "PLAN_ROW_NOT_AN_OBJECT",
+                    "%s, not an object" % type(row).__name__))
+    if not isinstance(plan.get("publication_id"), (int, str)):
+        problems.append(_problem("plan", "PLAN_BAD_FIELD_TYPE",
+                                 "publication_id is %s"
+                                 % type(plan.get("publication_id")).__name__))
+    for section, key, kind in (("figures", "panels", list),
+                               ("grids", "factors", dict)):
+        for i, row in enumerate(plan.get(section) or []):
+            if not isinstance(row, dict):
+                continue
+            value = row.get(key)
+            if value is not None and not isinstance(value, kind):
+                problems.append(_problem(
+                    "%s[%d]" % (section, i), "PLAN_BAD_FIELD_TYPE",
+                    "%s is %s, expected %s" % (key, type(value).__name__,
+                                               kind.__name__)))
+    for i, figure in enumerate(plan.get("figures") or []):
+        if not isinstance(figure, dict):
+            continue
+        for j, panel in enumerate(figure.get("panels") or []):
+            if not isinstance(panel, dict):
+                problems.append(_problem(
+                    "figures[%d].panels[%d]" % (i, j), "PLAN_ROW_NOT_AN_OBJECT",
+                    type(panel).__name__))
+                continue
+            read = panel.get("read")
+            if read is not None and not isinstance(read, dict):
+                problems.append(_problem(
+                    "figures[%d].panels[%d]" % (i, j), "PLAN_BAD_FIELD_TYPE",
+                    "read is %s, expected an object" % type(read).__name__))
+    if problems:
+        return problems
+
     reviewer_ids = {_s(r.get("reviewer_id")) for r in plan["reviewers"]}
     document_ids = {_s(d.get("document_id")) for d in plan["documents"]}
     grid_ids = {_s(g.get("grid_id")) for g in plan["grids"]}
@@ -109,12 +160,18 @@ def validate_plan(plan, file_root="."):
             if not BM.SAFE_ID.match(ident):
                 problems.append(_problem(where, "UNSAFE_ID", "%s=%r" % (key, ident)))
 
-    panel_ids, views = set(), {}
+    panel_ids, figure_ids, views = set(), set(), {}
     for fi, figure in enumerate(plan["figures"]):
         where = "figures[%d]" % fi
         sfid = _s(figure.get("source_figure_id"))
         if not sfid:
             problems.append(_problem(where, "PLAN_MISSING_ID", "source_figure_id"))
+        elif not BM.SAFE_ID.match(sfid):
+            problems.append(_problem(where, "UNSAFE_ID",
+                                     "source_figure_id=%r" % sfid))
+        elif sfid in figure_ids:
+            problems.append(_problem(where, "PLAN_DUPLICATE_ID", sfid))
+        figure_ids.add(sfid)
         if _s(figure.get("document_id")) not in document_ids:
             problems.append(_problem(where, "PLAN_DOCUMENT_NOT_FOUND",
                                      _s(figure.get("document_id"))))
@@ -172,9 +229,22 @@ def validate_plan(plan, file_root="."):
                 problems.append(_problem(pwhere, "PLAN_UNIT_NOT_FOUND", uid))
             views.setdefault(_s(read.get("figure_view")), []).append((sfid, panel))
             box = read.get("box") or []
-            if len(box) != 4:
-                problems.append(_problem(pwhere, "PLAN_READ_INCOMPLETE",
-                                         "box must be [x0, x1, y0, y1]"))
+            if not isinstance(box, list) or len(box) != 4 or not all(
+                    _finite(v) for v in box):
+                problems.append(_problem(
+                    pwhere, "PLAN_READ_INCOMPLETE",
+                    "box must be [x0, x1, y0, y1] of finite numbers, got %r" % (box,)))
+            for axis in ("x_ticks", "y_ticks"):
+                ticks = read.get(axis)
+                if ticks is None:
+                    continue
+                if not isinstance(ticks, list) or not all(
+                        isinstance(t, list) and len(t) == 2
+                        and all(_finite(v) for v in t) for t in ticks):
+                    problems.append(_problem(
+                        pwhere, "PLAN_BAD_FIELD_TYPE",
+                        "%s must be [[value, pixel], ...] of finite numbers"
+                        % axis))
 
     for ui, u in enumerate(plan["units"]):
         where = "units[%d]" % ui
@@ -190,6 +260,18 @@ def validate_plan(plan, file_root="."):
                 "%s is declared but no panel fills it - a unit nobody reads is "
                 "a grid of missing cells" % _s(u.get("unit_id"))))
     return problems
+
+
+def _finite(value):
+    """A number a calibration can actually use.
+
+    NaN and infinity survive JSON round-trips through most encoders and then
+    poison a least-squares fit silently - a calibration fitted on inf produces
+    values nobody can tell are wrong by looking.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value and abs(value) != float("inf")
 
 
 def _resolve(path, file_root):

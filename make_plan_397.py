@@ -76,10 +76,14 @@ for fid, image, outcome, unit, rows in LINE_FIGURES:
             series=[dict(series_id=s, factor="ARM", level=s, line_style=style,
                          marker="NONE", note="legend: %s" % style.lower())
                     for s, style in (("FLUID", "SOLID"), ("NON_FLUID", "DASHED"))],
-            positions=[dict(position_id="T%s" % t.replace(":", ""),
-                            factor="TIMEPOINT", level=t, x_pixel="",
-                            timepoint_label=t)
-                       for t in HDT])
+            # The x pixels are declared even though no released reader can use
+            # this panel yet: a position without a pixel is not a position, and
+            # the manifests have to be valid the day the reader ships.
+            positions=[dict(position_id=t.replace(":", "_"),
+                            factor="TIMEPOINT", level=t, timepoint_label=t,
+                            x_pixel=box[0] + 25
+                            + round(o * (box[1] - box[0] - 40) / (len(HDT) - 1)))
+                       for o, t in enumerate(HDT)])
         UNITS.append(dict(
             unit_id=uid, figure_view=fid, grid_id="G_HDT", panel=sex,
             outcome_name=outcome, domain="CV_HEMO", unit=unit,

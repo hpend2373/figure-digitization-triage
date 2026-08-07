@@ -34,15 +34,47 @@ def runs(idx, gap=1):
     return out
 
 
-def colour_masks(rgb):
-    """Blue / red / dark boolean masks from an RGB uint8 array."""
+def colour_masks(rgb, declared=None):
+    """Boolean masks from an RGB uint8 array.
+
+    `blue`, `red` and `dark` are the three this reader was born with, tuned on
+    one publication. They are kept because `dark` is what finds outlines and
+    error bars, and because two worked examples name them - but they are not a
+    colour model. A figure drawn in green and purple, or in two pastels, had no
+    way through: `Colour_Hex` was required on the series manifest, validated,
+    and then ignored, while `colour_tolerance` was offered as a BAR_COLOR
+    option whose reader keyword is None.
+
+    `declared` is {name: (hex, tolerance)} and produces one mask per series from
+    what the manifest actually says, which is the version that generalises.
+    """
     a = np.asarray(rgb).astype(int)
     R, G, B = a[:, :, 0], a[:, :, 1], a[:, :, 2]
-    return {
+    out = {
         "blue": (B - R > 50) & (B - G > 40) & (B > 110),
         "red": (R - G > 60) & (R - B > 60) & (R > 110),
         "dark": a.mean(axis=2) < 110,
     }
+    for name, (colour, tolerance) in (declared or {}).items():
+        out[name] = colour_mask(a, colour, tolerance)
+    return out
+
+
+def colour_mask(rgb, colour, tolerance=60.0):
+    """Pixels within `tolerance` of `colour`, by Euclidean RGB distance.
+
+    Euclidean RGB is crude next to a perceptual space, and it is what the
+    monochrome and marker readers already use for the same job - one distance
+    metric across the package beats a better one in a single reader. The
+    tolerance is per series and declared, because how far apart two printed
+    colours are is a fact about the figure.
+    """
+    a = np.asarray(rgb).astype(float)
+    if isinstance(colour, str):
+        text = colour.strip().lstrip("#")
+        colour = tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+    target = np.asarray(colour, dtype=float)
+    return np.sqrt(((a - target) ** 2).sum(axis=2)) <= float(tolerance)
 
 
 def calibrate(ticks):

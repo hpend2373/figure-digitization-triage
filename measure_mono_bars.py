@@ -617,7 +617,8 @@ def trim_to_own_bar(gray, box, window, footprint, edge_row, zero_row, stroke,
 #: What an inked structure beyond the bar end turns out to be. The distinction
 #: matters because only the first of these means the walk was wrong.
 REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "BAR_EDGE_REMNANT",
-                "ANNOTATION_OR_GLYPH", "UNRESOLVED_REMOTE_SUPPORT")
+                "NEIGHBOUR_STRUCTURE", "ANNOTATION_OR_GLYPH",
+                "UNRESOLVED_REMOTE_SUPPORT")
 
 
 def stem_band(stem_dark, scan, bar_w, stroke, max_strokes=4):
@@ -680,6 +681,18 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
       ERRORBAR_CAP            a thin horizontal rule that misses the side
                               tracks and hangs off a central stem. Expected,
                               and where the dispersion comes from.
+      NEIGHBOUR_STRUCTURE     ink that CONTINUES PAST this bar's footprint. A
+                              bar is not wider than its own footprint, so
+                              whatever this is, it is not this bar's body: the
+                              neighbouring bar, a rule spanning the group, a
+                              significance bracket. On publication 397's WOMEN
+                              panel the hatched bar's top rule runs from column
+                              72 to 129 while the solid bar occupies 16 to 74 -
+                              three columns of overhang, above the solid bar's
+                              top, in columns that below it are solid bar. No
+                              trim can take them; they are this bar's columns.
+                              Only what happens OUTSIDE the footprint says whose
+                              the structure is.
       ANNOTATION_OR_GLYPH     provably not this bar: separated from it by white
                               paper and too far away for that gap to be a
                               raster artefact. An asterisk, a bracket, a panel
@@ -708,6 +721,13 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     strip = gray[y0:y1, xa + fx0:xa + fx1 + 1]
     dark = strip < threshold
     stem_dark = strip < stem_threshold
+    # The columns just OUTSIDE the footprint, on both sides, clipped to the
+    # group window. A component that reaches into them is wider than this bar.
+    margin = max(2, stroke)
+    limit = window[1] - window[0] - 1
+    left_margin = gray[y0:y1, xa + max(0, fx0 - margin):xa + fx0] < threshold
+    right_margin = (gray[y0:y1, xa + fx1 + 1:xa + min(limit, fx1 + margin) + 1]
+                    < threshold)
     height = dark.shape[0]
     track = max(1, min(stroke, int(round(0.06 * bar_w))))
     step = -1 if direction == "UP" else 1
@@ -843,7 +863,22 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         distance = int(abs(comp[0] - edge))
         thick = extent >= 2 * stroke
         body_like = both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)
-        if extent < stroke and distance <= stroke:
+        # Does it carry on past the footprint? Only counted when the component
+        # actually reaches the footprint's edge, so a cap in the middle of the
+        # bar cannot inherit a neighbour's ink on the same rows.
+        rows = slice(min(comp), max(comp) + 1)
+        beyond = ((len(occupied) and occupied[0] <= stroke
+                   and left_margin.size and left_margin[rows].any())
+                  or (len(occupied) and occupied[-1] >= bar_w - 1 - stroke
+                      and right_margin.size and right_margin[rows].any()))
+        # Only for a component that does NOT look like a bar body. A footprint
+        # can also UNDER-cover its bar, and then the margin holds this bar's own
+        # ink - which is what the full-width hatch above a printing gap looked
+        # like, and it was being handed to the neighbour. A sliver at one edge is
+        # the case this test is for; a body-shaped component is judged as a body.
+        if beyond and not body_like:
+            kind = "NEIGHBOUR_STRUCTURE"
+        elif extent < stroke and distance <= stroke:
             # Nothing is printed thinner than one stroke, so a sub-stroke
             # component lying against the bar end is the bar's own antialiased
             # edge or the ringing around it - the row the walk stopped just

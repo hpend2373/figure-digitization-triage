@@ -22,7 +22,8 @@ WOMEN's is two rows at 116 px. The stroke is a property of the panel as
 rendered, not of the figure, and an invariant saying otherwise would be false
 here and on publication 127 as well.
 
-**One open defect left on the WOMEN panel, pinned rather than fixed.** The panel
+**The WOMEN panel is closed.** All three of the defects it exposed are fixed and
+this section records what they were, because each was a different mistake. The panel
 was added to the prototype's spec list while writing this file and immediately
 showed them; recording them here is what stops them being rediscovered a third
 time, and stops them getting quietly worse.
@@ -85,10 +86,9 @@ the stem instead of assuming it. That is the defect this panel existed to
 expose; it cost three of publication 397's four WOMEN dispersions and would have
 cost them silently in production.
 
-Until PRE/SOLID is closed, publication 397 yields 8 means from the prototype and
-7 dispersions, and this file asserts exactly that. A run that suddenly produces
-8 is not allowed to pass silently either: it means somebody changed the extent
-rule and owes this file an update.
+Publication 397 now yields 8 means and 8 dispersions from the prototype, with a
+worst mean of 0.75 mmHg against the independent eye reading, and this file
+asserts exactly that.
 """
 import os
 import sys
@@ -118,8 +118,8 @@ STROKE = {"397_fig3_P3_MEN": 1, "397_fig3_P3_WOMEN": 2}
 #: The cells that do not yet yield a dispersion, and the one that does not yet
 #: yield an extent. Pinned so they cannot grow, and so they cannot shrink
 #: without somebody noticing.
-NO_CAP = {("397_fig3_P3_WOMEN", "PRE", 0)}
-NO_EXTENT = {("397_fig3_P3_WOMEN", "PRE", 0)}
+NO_CAP = set()
+NO_EXTENT = set()
 
 FAILURES, PASSED = [], [0]
 
@@ -195,8 +195,8 @@ capless = {(r["figure"], r.get("group"), r.get("slot")) for r in records
            if "dispersion" not in r}
 check("the cells without a cap are the ones on record",
       capless == NO_CAP, "%r against %r" % (sorted(capless), sorted(NO_CAP)))
-check("so seven of eight cells carry a dispersion",
-      sum("dispersion" in r for r in records) == 7,
+check("all eight cells carry a dispersion",
+      sum("dispersion" in r for r in records) == 8,
       repr(sum("dispersion" in r for r in records)))
 check("no cell is contradicted by a body continuation",
       not [r for r in records if r.get("error") == "BAR_EXTENT_UNRESOLVED"],
@@ -207,8 +207,8 @@ check("the figure establishes a reusable fill vocabulary",
       verdict.get("status") == "ESTABLISHED" and verdict.get("prototype_ready"),
       repr(verdict.get("status")))
 resolved = [r for r in records if r.get("identity_status") == "RESOLVED"]
-check("seven of the eight bars are named, the eighth having no fill to sample",
-      len(resolved) == 7, "%d resolved" % len(resolved))
+check("all eight bars are named",
+      len(resolved) == 8, "%d resolved" % len(resolved))
 check("both hatched cells now carry the dispersion their off-centre stem hangs",
       all("dispersion" in r for r in records
           if r.get("declared") == "HATCHED"),

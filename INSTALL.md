@@ -1982,10 +1982,30 @@ touching-bars scenario. "Something was trimmed and the mean survived" passes
 just as well when the trim ate a third of the bar, because a solid bar's top
 does not move when you narrow it.
 
-It is still not enough for that cell. A 2 px wide, 14 row tall structure rises
-from the bar top at columns 72-73, INSIDE the bar's own trimmed footprint, and it
-is neither bar, cap nor glyph. What it is has not been established, and the cell
-stays refused and pinned.
+### And the structure that was left
+
+Trimming was not enough for that cell, and the 2 px by 14 row structure at
+columns 72-73 turned out not to be trimmable at all. Read across a wider span it
+is the HATCHED BAR'S OWN TOP RULE: rows 219-221 are a continuous rule from
+column 72 to column 129 while the solid bar occupies 16 to 74. The neighbour's
+outline overhangs three columns to the left, above the solid bar's top, into
+columns that BELOW that top are solid bar. No trim can take them - they are this
+bar's columns.
+
+So nothing inside the footprint can settle it, and the signal is what happens
+OUTSIDE. A bar is never wider than its own footprint, so a component that
+continues into the margin columns beside it is not this bar's body:
+`NEIGHBOUR_STRUCTURE`, which does not refuse the cell. It is tested only where
+the component reaches the footprint's edge, so a cap in the middle cannot
+inherit a neighbour's ink on the same rows, and only for a component that does
+NOT look like a body - a footprint can also UNDER-cover its bar, and then the
+margin holds this bar's own ink, which is what a full-width hatch above a
+printing gap looked like before that restriction went in.
+
+**Publication 397 now reads 8 means and 8 dispersions**, worst mean 0.75 mmHg
+against the independent eye reading, all eight series named. That is the invariant
+the production reader has to hold while it is rewritten, and the prototype now
+meets it. Publication 127 is unchanged at 18 and 18.
 
 One scenario changed rather than being fixed: the fixture for "ink continuous
 with the bar that is not shaped like the bar" was drawn as a narrow spur ending
@@ -2046,11 +2066,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 120 |
+| `test_measure_mono_bars.py` | 123 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1522** |
+| **total** | **1525** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -1014,6 +1014,33 @@ try:
           "value" in right and right.get("error") is None,
           "%r %r" % (right.get("value"), right.get("error")))
 
+    # -------------------------------------------------- 26j. the neighbour
+    #
+    # REVERT: drop the `beyond` branch in remote_support(). The overhang becomes
+    # a 2 px sliver inside this bar's footprint that is neither bar, cap nor
+    # glyph, and the cell refuses itself - which is what publication 397's WOMEN
+    # PRE/SOLID did until this existed. A bar is never wider than its own
+    # footprint, so nothing outside it can be this bar, and a real body
+    # continuation can never trip this.
+    print("\nthe bar next door reaching over this one is not this one's problem")
+    g3 = Geometry(1.0)
+    img = g3.blank()
+    a0, b0 = g3.slots[0]
+    a1, b1 = g3.slots[1]
+    img[g3.top(40):g3.base, a0:b0 + 1] = 0                 # this bar
+    tall = g3.top(70)
+    img[tall:tall + g3.stroke, b0 - 2:b1 + 1] = 0          # the neighbour's top
+    img[tall:g3.base, a1:a1 + g3.stroke] = 0               # rule, overhanging by
+    img[tall:g3.base, b1 + 1 - g3.stroke:b1 + 1] = 0       # three columns
+    got = M.measure_panel(g3.spec(write(img, "overhang", TMP), ["SOLID", "OPEN"]))
+    mine = only(got, 0)
+    check("the overhang is named as the neighbour's",
+          "NEIGHBOUR_STRUCTURE" in kinds(mine), repr(kinds(mine)))
+    check("and this bar is not refused over it", mine.get("error") is None,
+          "%r %r" % (mine.get("error"), kinds(mine)))
+    check("it reads its own height",
+          abs(mine.get("value", -99) - 40.0) <= 1.0, repr(mine.get("value")))
+
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(

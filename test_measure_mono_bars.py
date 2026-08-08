@@ -960,6 +960,46 @@ try:
     check("the bar is not refused over it", rec.get("error") is None,
           repr(rec.get("error")))
 
+    # -------------------------------------------------- 26i. touching bars
+    #
+    # REVERT: drop the trim_to_own_bar() call. The left bar's footprint keeps
+    # four columns of its neighbour, and above its own top those columns carry
+    # the neighbour's body - a structure inside the footprint that is not this
+    # bar, so the cell refuses itself. This is publication 397's WOMEN panel,
+    # where the solid bar ends at column 73 and the hatched one starts at 78
+    # with diagonals reaching back to 74.
+    print("\ntwo bars that touch do not share a footprint")
+    g2 = Geometry(1.0)
+    img = g2.blank()
+    a0, b0 = g2.slots[0]
+    a1, b1 = g2.slots[1]
+    img[g2.top(40):g2.base, a0:b0 + 1] = 0                 # the left bar, solid
+    # ...carrying an error bar, because the band the occupancy is measured in
+    # has to exclude it. Measuring over the whole slot instead makes the cap's
+    # columns the most inked ones and the bar's own edges the least.
+    mid = (a0 + b0) // 2
+    img[g2.top(40) - 20:g2.top(40), mid - 1:mid + 2] = 0
+    img[g2.top(40) - 22:g2.top(40) - 20, mid - 35:mid + 36] = 0
+    tall, edge = g2.top(70), b0 + 1          # adjacent, with NO gap at all
+    img[tall:tall + g2.stroke, edge:b1 + 1] = 0             # a taller neighbour
+    for c in range(edge - (g2.base - tall), b1 + 1, 9):     # whose hatch bleeds
+        for j in range(g2.base - tall):
+            x, y = c + j, g2.base - 1 - j
+            if edge <= x <= b1 and tall <= y < g2.base:
+                img[y, x:x + 2] = 0
+    spec2 = g2.spec(write(img, "touch", TMP), ["SOLID", "HATCHED"])
+    got = M.measure_panel(spec2)
+    left = only(got, 0)
+    check("the left bar's footprint is trimmed back to its own columns",
+          left.get("trimmed_columns"), repr(left.get("trimmed_columns")))
+    check("and it reads its own height rather than refusing itself",
+          abs(left.get("value", -99) - 40.0) <= 1.0,
+          "%r %r" % (left.get("value"), left.get("error")))
+    check("the trim is recorded, so a footprint that moved is auditable",
+          left.get("footprint") and
+          left["footprint"][1] < max(left["trimmed_columns"]),
+          "%r %r" % (left.get("footprint"), left.get("trimmed_columns")))
+
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(

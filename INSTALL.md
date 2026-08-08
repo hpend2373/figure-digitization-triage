@@ -1945,12 +1945,30 @@ columns carry the hatched bar's body. A structure inside the footprint that is
 not this bar, correctly refused, and caused by the FOOTPRINT rather than by the
 classifier.
 
-The fix belongs in footprint separation and needs its own round. The
-midpoint-of-the-gap boundary is no help, because the bleed is inside the seed
-run rather than beyond it. The signal to separate on is that a bar's own columns
-are inked over its full height while a neighbour's diagonal crossing into the
-slot is inked only on some rows; `seed_support` thresholds persistence without
-asking which side of the boundary a column's ink belongs to.
+`trim_to_own_bar` now closes the footprint half of it. Each column's VERTICAL
+OCCUPANCY is measured in the body band between the provisional bar top and the
+baseline - the part of the slot that is bar and nothing else - and compared with
+the most inked column just inside it; the walk goes in from each end. That takes
+WOMEN PRE/SOLID from 16-77 back to 16-73 and drops all four of the neighbour's
+columns, and POST/SOLID three more.
+
+Three things had to be right at once. The BAND has to exclude the error bar: an
+earlier attempt compared each column's topmost ink instead, on the theory that a
+bar's top is level, and the topmost ink in a column is the cap - the fixture
+lost three bars per group and the corpus fell from 37 dispersions to 23. The
+REFERENCE has to be local: a global median trims an open bar's own side strokes,
+because its interior is paper, and a global maximum trimmed all four of 397's
+hatched cells to nothing, because those bars have a top rule but no side strokes
+and one column catching two diagonals outvotes the rest. And the inward REACH
+has to scale with the footprint: two strokes suffices for a four-column bleed
+and sits inside a forty-column one, so it is bounded at a quarter of the
+footprint - beyond that a trim cannot repair the footprint and the convergence
+guard refuses instead.
+
+It is still not enough for that cell. A 2 px wide, 14 row tall structure rises
+from the bar top at columns 72-73, INSIDE the bar's own trimmed footprint, and it
+is neither bar, cap nor glyph. What it is has not been established, and the cell
+stays refused and pinned.
 
 One scenario changed rather than being fixed: the fixture for "ink continuous
 with the bar that is not shaped like the bar" was drawn as a narrow spur ending
@@ -2011,11 +2029,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 114 |
+| `test_measure_mono_bars.py` | 117 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1516** |
+| **total** | **1519** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

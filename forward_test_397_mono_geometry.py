@@ -22,7 +22,7 @@ WOMEN's is two rows at 116 px. The stroke is a property of the panel as
 rendered, not of the figure, and an invariant saying otherwise would be false
 here and on publication 127 as well.
 
-**Three open defects on the WOMEN panel, pinned rather than fixed.** The panel
+**One open defect left on the WOMEN panel, pinned rather than fixed.** The panel
 was added to the prototype's spec list while writing this file and immediately
 showed them; recording them here is what stops them being rediscovered a third
 time, and stops them getting quietly worse.
@@ -37,7 +37,17 @@ time, and stops them getting quietly worse.
              footprint that is not this bar - correctly unnameable, correctly
              refused, and caused by the footprint rather than by the classifier.
 
-             One approach has been tried and REVERTED, so nobody spends the
+             The footprint IS now trimmed: `trim_to_own_bar` measures each
+             column's occupancy in the body band between the provisional top and
+             the baseline, compares it with the most inked column just inside
+             it, and walks in from each end. That takes this cell's footprint
+             from 16-77 back to 16-73 and drops all four of the neighbour's
+             columns. It is not enough. A 2 px wide, 14 row tall structure rises
+             from the bar top at columns 72-73 - inside the bar's own footprint -
+             and it is neither bar, cap nor glyph, so the cell is still refused.
+             What that structure is has not been established.
+
+             An earlier approach was tried and REVERTED, so nobody spends the
              round on it twice. "A bar's top is level": take each column's
              topmost ink, take the median across the footprint, trim inward
              from each end while the columns disagree. It fails because the

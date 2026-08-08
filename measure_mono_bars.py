@@ -521,6 +521,85 @@ def trace_extent(gray, box, window, footprint, zero_row, stroke,
     return float(probe), method or "NONE"
 
 
+def trim_to_own_bar(gray, box, window, footprint, edge_row, zero_row, stroke,
+                    direction="UP", threshold=128, min_share=0.5):
+    """Drop footprint columns whose ink belongs to the bar next door.
+
+    Two bars that TOUCH defeat everything upstream. On publication 397's WOMEN
+    panel the solid bar occupies columns 16-73 and the hatched one starts at 78,
+    and the hatched bar's leading diagonals reach back to column 74 on some
+    rows. Those columns are seeded, so the footprint comes out 16-77 - four
+    columns into the neighbour - and above the solid bar's top they carry the
+    neighbour's body. Taking the midpoint of the gap BETWEEN footprints is no
+    help: there is no gap, the bleed is inside the seed run.
+
+    The measurement is VERTICAL OCCUPANCY IN THE BODY BAND - the rows between
+    the provisional bar top and the baseline, which is the part of the slot that
+    is bar and nothing else. A column of this bar is inked through that band; a
+    neighbour's diagonal crossing into the slot is inked in a fraction of it.
+
+    The band matters more than the statistic. The first attempt at this compared
+    each column's TOPMOST ink instead, on the theory that a bar's top is level -
+    and the topmost ink in a column is the error bar, not the bar. The synthetic
+    fixture's caps span 70% of the bar, so the median column top was the cap row
+    and every column outside the cap was trimmed; the fixture lost three bars
+    per group and the corpus went from 37 dispersions to 23. Requiring the ink
+    to be contiguous with the baseline does not rescue it either, because a
+    stipple's columns are dotted.
+
+    The comparison is LOCAL: a column is trimmed when it carries much less ink
+    than the most inked column just inside it. Neither a global median nor a
+    global maximum works. An open bar's interior is paper, so its median
+    occupancy is near zero and a median-relative test trims its own side
+    strokes. And publication 397's hatched bars have a top rule but NO side
+    strokes, so every column of them is inked about a third of the time and a
+    single column that happens to catch two diagonals becomes a global maximum
+    that the rest of the bar cannot clear - which trimmed all four hatched cells
+    to nothing. "The bleed is at the edge and the bar is beside it" is a
+    statement about neighbours, so it is tested against neighbours.
+
+    The band's one-stroke inset from the provisional top is defensive rather
+    than load-bearing: adding the error bar's rows would raise the occupancy of
+    a few central columns, which cannot change an EDGE decision unless the cap
+    is wider than its bar. No scenario pins it, and this comment is the record
+    of that rather than a claim it is covered.
+    """
+    x0, x1, y0, y1 = map(int, box)
+    xa = window[0]
+    fx0, fx1 = footprint
+    dark = gray[y0:y1, xa + fx0:xa + fx1 + 1] < threshold
+    top = int(round(min(edge_row, zero_row))) + stroke
+    bottom = int(round(max(edge_row, zero_row))) - stroke
+    if bottom - top < max(3, 2 * stroke):
+        return footprint, []
+    band = dark[top:bottom]
+    occupancy = band.mean(axis=0)
+    if occupancy.max() <= 0:
+        return footprint, []
+    # How far inward the comparison looks. Two strokes is enough when the bleed
+    # is four columns, as on publication 397, and not when it is forty: the
+    # window then sits inside the bleed, sees only more of it, and stops at
+    # once. A quarter of the footprint is the bound, because a footprint whose
+    # outer quarter is somebody else's bar is not one that trimming can repair -
+    # and the convergence guard refuses that case rather than trimming into it.
+    reach = max(3, 2 * stroke, len(occupancy) // 4)
+
+    def inward(index, step):
+        window = occupancy[index + step:index + step * (reach + 1):step]
+        return float(window.max()) if window.size else 0.0
+
+    lo, hi, dropped = 0, len(occupancy) - 1, []
+    while lo < hi and occupancy[lo] < min_share * inward(lo, 1):
+        dropped.append(fx0 + lo)
+        lo += 1
+    while hi > lo and occupancy[hi] < min_share * inward(hi, -1):
+        dropped.append(fx0 + hi)
+        hi -= 1
+    if not dropped:
+        return footprint, []
+    return (fx0 + lo, fx0 + hi), sorted(dropped)
+
+
 #: What an inked structure beyond the bar end turns out to be. The distinction
 #: matters because only the first of these means the walk was wrong.
 REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "BAR_EDGE_REMNANT",
@@ -966,6 +1045,22 @@ def measure_panel(spec):
             # sampled: this script does not implement the reader's walk.
             edge, method = trace_extent(
                 gray, box, window, fp, zero, stroke, direction=direction)
+            # Then trim the footprint against that extent and re-trace, because
+            # a footprint holding four columns of the bar next door traces the
+            # neighbour's outline. One iteration: the trim needs an extent and
+            # the extent needs a footprint, and a second round that moved either
+            # again would mean the two do not agree - which is a refusal, not a
+            # third round.
+            fp, dropped = trim_to_own_bar(gray, box, window, fp, edge, zero,
+                                          stroke, direction=direction)
+            if dropped:
+                rec["trimmed_columns"] = dropped
+                if fp[1] - fp[0] + 1 < max(4, 4 * stroke):
+                    rec["error"] = "FOOTPRINT_DID_NOT_CONVERGE"
+                    records.append(rec)
+                    continue
+                edge, method = trace_extent(
+                    gray, box, window, fp, zero, stroke, direction=direction)
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
                                     direction=direction)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]

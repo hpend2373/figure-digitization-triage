@@ -27,11 +27,27 @@ was added to the prototype's spec list while writing this file and immediately
 showed them; recording them here is what stops them being rediscovered a third
 time, and stops them getting quietly worse.
 
-  PRE/SOLID  the walk stops about seven rows below the bar top, where the ink
-             narrows from 62 px to 34, and the bar refuses itself. The refusal
-             is correct - the ink above it really is bar - but the extent is
-             not yet resolvable. Its provisional value is nonetheless within
-             0.1 mmHg of the eye reading.
+  PRE/SOLID  DIAGNOSED, NOT FIXED. The two bars of this group TOUCH: the solid
+             one occupies columns 16-73 of the panel and the hatched one starts
+             at 78, and the hatched bar's leading diagonals reach back to column
+             74 on some rows. The seed band sees those columns as inked and the
+             solid bar's footprint comes out 16-77, four columns into its
+             neighbour. Above the solid bar's top at row 233 those four columns
+             carry the hatched bar's body, which is a structure inside the
+             footprint that is not this bar - correctly unnameable, correctly
+             refused, and caused by the footprint rather than by the classifier.
+
+             The fix belongs in footprint separation and needs its own round:
+             the midpoint-of-the-gap boundary this file's geometry already
+             computes does not help, because the bleed is INSIDE the seed run
+             rather than beyond it. A bar's own columns are inked over its full
+             height and a neighbour's diagonal crossing into the slot is inked
+             only on some rows, which is the signal to separate them on - and
+             `seed_support` currently thresholds persistence without asking
+             which side of the boundary a column's ink belongs to.
+
+             The provisional value is within 0.1 mmHg of the eye reading and is
+             still not returned, which is the contract working.
 Two of the three are CLOSED. Both hatched cells were missing their cap because
 this figure draws its whiskers off the bar's centre line - at 39% of the bar
 width against a centre slice covering the middle fifth - and `stem_band` finds

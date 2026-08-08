@@ -1935,11 +1935,22 @@ residue the classifier could not name. The band is the UNION of the two: it
 never costs a trace and never leaves more behind.
 
 Publication 397 now yields eight means and **seven** dispersions against five,
-and both hatched cells are closed. What remains pinned is WOMEN PRE/SOLID, whose
-extent does not resolve - a structure sits in the right-hand columns of its
-footprint from the bar top upward, and it is not identifiable as bar, cap or
-glyph. Its provisional value is within 0.1 mmHg of the eye reading and it still
-returns nothing, which is the contract working.
+and both hatched cells are closed. What remains pinned is WOMEN PRE/SOLID, and it is now
+diagnosed rather than merely recorded: the two bars of that group TOUCH. The
+solid bar occupies columns 16-73 and the hatched one starts at 78, and the
+hatched bar's leading diagonals reach back to column 74 on some rows. The seed
+band reads those columns as inked, so the solid bar's footprint comes out 16-77
+- four columns into its neighbour - and above the solid bar's top those four
+columns carry the hatched bar's body. A structure inside the footprint that is
+not this bar, correctly refused, and caused by the FOOTPRINT rather than by the
+classifier.
+
+The fix belongs in footprint separation and needs its own round. The
+midpoint-of-the-gap boundary is no help, because the bleed is inside the seed
+run rather than beyond it. The signal to separate on is that a bar's own columns
+are inked over its full height while a neighbour's diagonal crossing into the
+slot is inked only on some rows; `seed_support` thresholds persistence without
+asking which side of the boundary a column's ink belongs to.
 
 One scenario changed rather than being fixed: the fixture for "ink continuous
 with the bar that is not shaped like the bar" was drawn as a narrow spur ending

@@ -1,10 +1,12 @@
 # figure-digitization-triage
 
-A reproducible figure-digitization and QC system for a 160-publication
-systematic review of cardiovascular responses to spaceflight and head-down bed
-rest. Many of the included studies report their outcomes only as plots, so the
-numbers have to be read off the figures — and a number read off a figure is
-only usable if the pipeline that produced it can say exactly what it did.
+A reproducible figure-digitization and QC system for a systematic review of
+cardiovascular responses to spaceflight and head-down bed rest. The figure-level
+worklist holds 116 publications and 637 figure rows, of which 95 publications
+and 353 figures are to be digitized. Many of the included studies report their
+outcomes only as plots, so the numbers have to be read off the figures — and a
+number read off a figure is only usable if the pipeline that produced it can say
+exactly what it did.
 
 **Private research repository.** It contains publisher figure rasters from
 three publications (323, 386, 397), held for reproducibility of the extraction.
@@ -80,7 +82,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-1417 scenarios at v7.23, verified in a clean room with scipy blocked — the
+1439 scenarios on main after v7.23, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because

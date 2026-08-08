@@ -311,3 +311,14 @@ suites = {os.path.basename(p)[:-3] for p in glob.glob(os.path.join(HERE, "test_*
 unrun = sorted(s for s in suites if s not in ci_text)
 assert not unrun, "CI does not run: %s" % unrun
 print("CI runs every test file in the package (%d): PASS" % len(suites))
+
+# And every forward test, which the pattern above does not match. A forward test
+# is the only thing in the package that opens a publisher figure, so one that
+# nobody runs is exactly the one whose absence is least visible - the suites
+# stay green either way. The ones whose raster is not redistributable SKIP in
+# CI, which is a different outcome from not being there.
+forwards = {os.path.basename(p)[:-3]
+            for p in glob.glob(os.path.join(HERE, "forward_test_*.py"))}
+unrun = sorted(s for s in forwards if s not in ci_text)
+assert not unrun, "CI does not run the forward tests: %s" % unrun
+print("CI runs every forward test in the package (%d): PASS" % len(forwards))

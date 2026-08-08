@@ -36,6 +36,7 @@ jobs:
         run: |
           set -e
           for s in crosscheck_id323 build_id323 forward_test_397_mono_bar \
+                   forward_test_127_mono_bar \
                    forward_test_real_monochrome pilot_397; do
             echo "--- $s"
             python "$s.py"

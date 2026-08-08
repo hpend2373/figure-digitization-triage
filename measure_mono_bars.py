@@ -125,8 +125,29 @@ def _longest_dark_run(strip):
     return out
 
 
-def stroke_scale(gray, box, threshold=128, min_aspect=20, tolerance=0.6):
-    """Line weight in pixels: how thick the longest horizontal rule is.
+def stroke_scale(gray, box, threshold=128, baseline_row=None, min_aspect=20,
+                 tolerance=0.6, search_fraction=0.02):
+    """Line weight in pixels: how thick THE BASELINE RULE is.
+
+    Not the longest rule in the panel - the one the bars stand on. A panel
+    frame, a gridline and a box border are all as long as the axis and can be
+    drawn heavier, and `argmax` returns the FIRST of the tied maxima, which is
+    whichever of them is nearest the top of the panel. The scenario in this
+    package that draws an 8 px frame above a 4 px baseline measured the stroke
+    at 8, and since seed depth, direction margin, remote reach, minimum interior
+    height, component thickness and gap tolerance are all multiples of it, the
+    whole geometry doubled. It passed anyway - which is the point: a stroke that
+    is wrong by a factor of two does not fail, it drifts.
+
+    `baseline_row` is the calibrated zero, so `measure_panel` computes the axis
+    calibration BEFORE the stroke rather than after. The search is a fraction of
+    the panel height around it - the rule sits within a pixel of the calibrated
+    zero on all five panels measured here, and a candidate further away than
+    that is a different line. If nothing rule-shaped is there, this refuses;
+    falling back to the longest run anywhere is how the 8 px frame won.
+
+    Called without a `baseline_row` it still takes the panel's longest run, for
+    ad-hoc inspection. Nothing in the measurement path does that.
 
     Two things were wrong with measuring this as "the thickest band of rows
     whose dark pixel COUNT exceeds half the panel width".
@@ -170,10 +191,23 @@ def stroke_scale(gray, box, threshold=128, min_aspect=20, tolerance=0.6):
     if not strip.size:
         return StrokeScale(reason="the panel box selects no pixels")
     runs = _longest_dark_run(strip)
-    longest = int(runs.max()) if runs.size else 0
-    if longest < 1:
+    if not runs.size or int(runs.max()) < 1:
         return StrokeScale(reason="the panel box holds no dark pixels")
-    lo = hi = int(np.argmax(runs))
+    if baseline_row is None:
+        seed = int(np.argmax(runs))
+    else:
+        reach = max(4, int(round(search_fraction * strip.shape[0])))
+        a = max(0, int(baseline_row) - reach)
+        b = min(len(runs), int(baseline_row) + reach + 1)
+        if b <= a:
+            return StrokeScale(reason="the calibrated baseline is outside the panel")
+        seed = a + int(np.argmax(runs[a:b]))
+        if runs[seed] < 1:
+            return StrokeScale(
+                reason="no ink within %d px of the calibrated baseline at row %d"
+                       % (reach, baseline_row))
+    longest = int(runs[seed])
+    lo = hi = seed
     while lo - 1 >= 0 and runs[lo - 1] >= tolerance * longest:
         lo -= 1
     while hi + 1 < len(runs) and runs[hi + 1] >= tolerance * longest:
@@ -181,9 +215,9 @@ def stroke_scale(gray, box, threshold=128, min_aspect=20, tolerance=0.6):
     thickest = hi - lo + 1
     if longest < min_aspect * thickest:
         return StrokeScale(
-            reason="the longest horizontal run in the panel is %d px across and "
+            reason="the longest horizontal run near row %s is %d px across and "
                    "%d px thick, which is a block and not a rule"
-                   % (longest, thickest))
+                   % (baseline_row, longest, thickest))
     return StrokeScale(value_px=int(thickest), status="MEASURED")
 
 
@@ -554,7 +588,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                         span_fraction=round(float(cap_span), 3),
                         occupied_bins=0,
                         connection_fraction=1.0,
-                        centre_row=int(round(float(np.mean(cap_rows))))))
+                        centre_row_panel=int(round(float(np.mean(cap_rows))))))
     if not inked:
         return out
     components, current = [], [inked[0]]
@@ -603,7 +637,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                         span_fraction=round(float(span), 3), occupied_bins=int(bins),
                         connection_fraction=round(joined, 3),
                         body_like=bool(body_like), reach_px=int(reach),
-                        centre_row=int(round(float(np.mean(comp))))))
+                        centre_row_panel=int(round(float(np.mean(comp))))))
     return out
 
 
@@ -679,13 +713,24 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
 
 
 def measure_panel(spec):
-    """One record per declared bar of one panel."""
+    """One record per declared bar of one panel.
+
+    Row coordinates come in two frames and both are named in every field that
+    carries one. `*_row_panel` counts from the top of the panel BOX, which is
+    what every array in this file is sliced to; `*_px_image` counts from the top
+    of the page, which is what an axis calibration takes. Publication 127's
+    panels start at page rows 620, 1580 and 2510, so a panel row handed to a
+    calibration is out by that much: the error bar drawn 25 px above a bar top
+    reported a dispersion of 142 units instead of 8.3.
+    """
     gray = _gray(spec["path"])
     box = spec["box"]
-    scale = stroke_scale(gray, box)
-    cal = MR.AxisCalibration.from_points([tuple(t) for t in spec["ticks"]])
     x0, x1, y0, y1 = map(int, box)
+    # Calibration first, because the stroke is the thickness of the rule at the
+    # BASELINE and the baseline is where the calibration says the zero is.
+    cal = MR.AxisCalibration.from_points([tuple(t) for t in spec["ticks"]])
     zero = int(round(cal.value_to_pixel(spec.get("baseline", 0.0)))) - y0
+    scale = stroke_scale(gray, box, baseline_row=zero)
     fills = spec["fills"]
     records = []
     if not scale.ok:
@@ -769,13 +814,20 @@ def measure_panel(spec):
             unresolved = [r for r in remote
                           if r["kind"] == "UNRESOLVED_REMOTE_SUPPORT"]
             caps = [r for r in remote if r["kind"] == "ERRORBAR_CAP"]
+            cap_row = caps[0]["centre_row_panel"] if caps else None
             rec.update(slot_bounds=(list(bounds[k]) if bounds[k] else None),
-                       edge_row=round(edge, 1), support=method,
-                       remote=remote,
+                       # Both frames, both named. The bare `cap_px` this
+                       # replaced held a PANEL row under a name the production
+                       # reader uses for a PAGE row, and the production reader
+                       # feeds it straight to a calibration.
+                       edge_row_panel=round(edge, 1),
+                       edge_px_image=round(y0 + edge, 1),
+                       cap_row_panel=cap_row,
+                       cap_px_image=(None if cap_row is None else y0 + cap_row),
+                       support=method, remote=remote,
                        # Only a body continuation says the walk was wrong.
                        contradiction_px=(min(r["distance_px"] for r in body)
                                          if body else 0),
-                       cap_px=(caps[0]["centre_row"] if caps else None),
                        footprint=[int(fp[0]), int(fp[1])],
                        footprint_width=int(fp[1] - fp[0] + 1),
                        seed_segments=len([s for s in segments
@@ -799,6 +851,13 @@ def measure_panel(spec):
                 records.append(rec)
                 continue
             rec["value"] = round(cal.pixel_to_value(y0 + edge), 3)
+            # The dispersion the cap implies, computed HERE rather than left to
+            # a caller, because computing it is what proves the two rows are in
+            # the same frame. A cap row in panel coordinates against a mean in
+            # page coordinates produces a number - it just is not a dispersion.
+            if cap_row is not None:
+                rec["dispersion"] = round(
+                    abs(cal.pixel_to_value(y0 + cap_row) - rec["value"]), 3)
             tex = texture(gray, box, window, fp, edge, zero, stroke,
                           direction=direction)
             if tex is None:

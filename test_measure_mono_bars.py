@@ -125,6 +125,70 @@ def spec(path, fills, anchor=ANCHOR, window=190, tag="t", box=None):
                 baseline=0.0)
 
 
+class Geometry(object):
+    """The same figure at any scale, so "every length is a multiple of the
+    stroke" can be checked rather than asserted.
+
+    Everything in CI is drawn at about a 2 px stroke - 397 is 1, the fixture 2 -
+    and publication 127 at 600 DPI is 3, which CI never sees because its raster
+    is not redistributable. A rule that holds at one stroke width and not at
+    another is a rule about this fixture.
+    """
+
+    def __init__(self, s):
+        r = lambda v: int(round(v * s))                            # noqa: E731
+        self.s, self.r = s, r
+        self.stroke = max(1, r(STROKE))
+        self.x0, self.x1, self.y0, self.y1 = r(X0), r(X1), r(Y0), r(Y1)
+        self.base, self.ppu = r(BASE), PX_PER_UNIT * s
+        self.slots = [(r(a), r(b)) for a, b in SLOTS]
+        self.shape = (r(860), r(480))
+        # A stipple is a lattice, so its pitch is part of the figure and scales
+        # with it. Coverage stays near 0.09 at every scale, which is the band
+        # publication 127's stipple actually reads in.
+        self.dot = max(1, r(2))
+        self.pitch = (max(self.dot + 1, r(7)), max(self.dot + 1, r(6)))
+
+    def blank(self):
+        img = np.full(self.shape, 255, np.uint8)
+        img[self.r(100):self.r(350), :] = 0
+        img[self.base:self.base + self.stroke, self.x0 + 5:self.x1 - 5] = 0
+        return img
+
+    def top(self, units):
+        return int(round(self.base - units * self.ppu))
+
+    def outline(self, img, k, units):
+        a, b = self.slots[k]
+        t, w = self.top(units), self.stroke
+        img[t:self.base, a:a + w] = 0
+        img[t:self.base, b + 1 - w:b + 1] = 0
+        img[t:t + w, a:b + 1] = 0
+
+    def solid(self, img, k, units):
+        a, b = self.slots[k]
+        img[self.top(units):self.base, a:b + 1] = 0
+
+    def stipple(self, img, k, units):
+        """An outlined bar with a dot lattice inside it, which is what
+        publication 127 prints: most rows of the interior are blank paper, and
+        the side strokes are what carries the walk past them."""
+        self.outline(img, k, units)
+        a, b = self.slots[k]
+        t, px, py = self.top(units), self.pitch[0], self.pitch[1]
+        for y in range(t + 2 * self.stroke, self.base - self.stroke, py):
+            for x in range(a + 2 * self.stroke, b + 1 - 2 * self.stroke, px):
+                img[y:y + self.dot, x:x + self.dot] = 0
+
+    def spec(self, path, fills):
+        anchor = (self.slots[0][0] + self.slots[-1][1]) // 2
+        return dict(tag="scale%g" % self.s, path=path,
+                    box=[self.x0, self.x1, self.y0, self.y1],
+                    ticks=[[0, self.base], [100, self.base - 100 * self.ppu]],
+                    anchors={"G": anchor}, fills=fills,
+                    group_window=self.r(190), baseline=0.0)
+
+
 def only(records, slot=0):
     hit = [r for r in records if r.get("slot") == slot]
     return hit[0] if hit else (records[0] if records else {})
@@ -150,6 +214,19 @@ try:
           repr(rec.get("contradiction_px")))
     check("the fill is sampled", rec.get("ink_mass", 0) > 0.9,
           repr(rec.get("ink_mass")))
+    # REVERT: store the cap's panel row under `cap_px` and hand it to the
+    # calibration, as the production reader does with its own `cap_px`. On this
+    # panel - page row 400 - the 8.5 unit error bar reports 141.8.
+    cap_page = top_row(60) - 25.5              # two cap rows, drawn 24 px up
+    check("the cap row is reported in page coordinates",
+          abs(rec.get("cap_px_image", -999) - cap_page) <= 1.0,
+          "%r against %r" % (rec.get("cap_px_image"), cap_page))
+    check("the panel-frame row is kept separately and differs by y0",
+          rec.get("cap_px_image", 0) - rec.get("cap_row_panel", 0) == Y0,
+          "%r %r" % (rec.get("cap_px_image"), rec.get("cap_row_panel")))
+    check("the dispersion the cap implies is the one it was drawn at",
+          abs(rec.get("dispersion", -99) - 25.5 / PX_PER_UNIT) <= 0.5,
+          repr(rec.get("dispersion")))
 
     # -------------------------------------------------- 2. a glyph above it
     print("\na significance glyph above the cap changes nothing")
@@ -303,6 +380,15 @@ try:
     solid(img, 0, 40)
     img[Y0 + 20:Y0 + 28, X0 + 5:X1 - 5] = 0            # the panel's own frame
     rec = only(M.measure_panel(spec(write(img, "frame", TMP), ["SOLID"])))
+    # The frame is drawn to the same length as the baseline and twice its
+    # weight, so it ties on run length and wins on argmax, which returns the
+    # FIRST maximum and the frame is nearer the top of the panel.
+    #
+    # REVERT: call stroke_scale() without baseline_row. Every threshold in the
+    # file doubles and the scenario still passes on its other assertions, which
+    # is the point - a stroke wrong by a factor of two does not fail, it drifts.
+    check("a thicker distant frame does not replace the baseline stroke",
+          rec.get("stroke_px") == STROKE, repr(rec.get("stroke_px")))
     check("the distant rule does not refuse the bar",
           rec.get("error") is None, repr(rec.get("error")))
     check("it is filed as not-this-bar",
@@ -353,7 +439,73 @@ try:
           [round(r.get("value", -99)) for r in got] == [40, 50, 60],
           repr([r.get("value") for r in got]))
 
-    # -------------------------------------------------- 13. the contract
+    # -------------------------------------------------- 13. a real stipple
+    #
+    # The fill publication 127 broke on, and the one no synthetic fixture in
+    # this package had: interior coverage under a tenth, four blank rows in
+    # every six, and the ink in small components spread across the whole bar.
+    # `hatched()` is not a substitute - a diagonal inks every row.
+    print("\na stipple is mostly blank paper and still a filled bar")
+    g = Geometry(1.0)
+    img = g.blank()
+    g.outline(img, 0, 60)
+    g.stipple(img, 1, 60)
+    g.solid(img, 2, 60)
+    got = M.measure_panel(g.spec(write(img, "stipple", TMP),
+                                 ["OPEN", "STIPPLED", "SOLID"]))
+    check("all three bars are read", len(got) == 3 and
+          all("value" in r for r in got), repr([r.get("error") for r in got]))
+    check("and all three are the height they were drawn at",
+          all(abs(r.get("value", -99) - 60.0) <= 0.6 for r in got),
+          repr([r.get("value") for r in got]))
+    ink = [r.get("ink_mass") for r in got]
+    check("the stipple's interior is under a tenth inked",
+          0.05 <= ink[1] <= 0.13, repr(ink))
+    check("the bar is over 180 px tall, so this is not a rounding artefact",
+          got[1].get("bar_height", 0) >= 180, repr(got[1].get("bar_height")))
+    check("most of its rows are empty",
+          got[1]["t128"]["row_coverage_min"] == 0.0,
+          repr(got[1]["t128"]["row_coverage_min"]))
+    check("its ink is in many separate columns, unlike a stem",
+          got[1]["t128"]["column_segments"] >= 5,
+          repr(got[1]["t128"]["column_segments"]))
+    check("open, stipple and solid do not overlap",
+          ink[0] < 0.05 < ink[1] < 0.4 < ink[2], repr(ink))
+
+    # -------------------------------------------------- 14. scale invariance
+    #
+    # Every length in the file is a multiple of the measured stroke, which is
+    # the claim that makes one geometry serve 397 at 1 px, the fixture at 2 and
+    # publication 127 at 3. Nothing checked it: the private raster is the only
+    # thing in the corpus with a stroke above 2, and CI cannot see it.
+    print("\nthe same figure at half, one and double size reads the same")
+    seen = {}
+    for s in (0.5, 1.0, 2.0):
+        g = Geometry(s)
+        img = g.blank()
+        g.outline(img, 0, 30)
+        g.stipple(img, 1, 45)
+        g.solid(img, 2, 60)
+        rows = M.measure_panel(g.spec(write(img, "scale%g" % s, TMP),
+                                      ["OPEN", "STIPPLED", "SOLID"]))
+        seen[s] = rows
+        check("stroke %.0f px measured at scale %g" % (g.stroke, s),
+              rows and rows[0].get("stroke_px") == g.stroke,
+              repr(rows[0].get("stroke_px")) if rows else "no records")
+        check("three bars read at scale %g" % s,
+              len(rows) == 3 and all("value" in r for r in rows),
+              repr([r.get("error") for r in rows]))
+    want = [30.0, 45.0, 60.0]
+    for s, rows in sorted(seen.items()):
+        got = [r.get("value", -99) for r in rows]
+        check("the means survive scale %g" % s,
+              all(abs(a - b) <= 1.0 for a, b in zip(got, want)), repr(got))
+    fills = {s: [r.get("ink_mass") for r in rows] for s, rows in seen.items()}
+    check("and so does the fill ordering, at every scale",
+          all(f[0] < 0.05 < f[1] < 0.4 < f[2] for f in fills.values()),
+          repr(fills))
+
+    # -------------------------------------------------- 15. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(
             os.path.join(TMP, "gap.png"), ["HATCHED"])))),

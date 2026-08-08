@@ -1641,9 +1641,61 @@ be a printing artefact is `UNRESOLVED_REMOTE_SUPPORT`; only distance
 distinguishes it from the rule at the top of 397's panel, which is also wide,
 spanning and thick.
 
+Two more, found by review of the above:
+
+**The stroke is the thickness of the BASELINE rule, not of the longest rule.** A
+panel frame, a gridline and a box border are all as long as the axis and can be
+drawn heavier, and `argmax` returns the first of the tied maxima - the one
+nearest the top of the panel. The scenario in this package that draws an 8 px
+frame above a 4 px baseline measured the stroke at 8, and seed depth, direction
+margin, remote reach, minimum interior height, component thickness and gap
+tolerance all doubled with it. It passed anyway, which is the point: a stroke
+wrong by a factor of two does not fail, it drifts. `measure_panel` now computes
+the axis calibration BEFORE the stroke and hands the calibrated zero to
+`stroke_scale`, which searches 2% of the panel height around it and refuses if
+nothing rule-shaped is there. On the five panels measured here the rule sits
+within one pixel of the calibrated zero. 397's own baseline turns out to be 1 px
+- the 2 px it had been using was measured off a gridline 165 rows away - and
+every value it reads is unchanged.
+
+**Row coordinates now name their frame.** `remote_support` works inside the
+panel crop, so its rows are panel-relative, and `cap_px` handed one to a caller
+under the name the production reader uses for a PAGE row - which it feeds
+straight to an axis calibration. On publication 127 that is an error of 620,
+1580 or 2510 rows: the error bar drawn 25 px above a bar top reports a
+dispersion of 142 units instead of 8.3. Every row-carrying field is now
+`*_row_panel` or `*_px_image`, and `measure_panel` computes the dispersion
+itself, because computing it is what proves the two rows are in the same frame.
+Against the synthetic fixture's declared SDs of 6.0, 5.0 and 4.0 it reads
+5.83-6.11, 4.72-5.00 and 3.61-3.89.
+
 Publication 127 Figure 4 now reads 18 cells of 18, two of them value-only
 because their bars are 15 px tall. The synthetic fixture's worst mean is 0.11
 units on a 100-unit axis.
+
+`forward_test_127_mono_bar.py` holds that result. It SKIPS loudly when the
+raster is absent, FAILS on a hash mismatch, and otherwise checks structure -
+eighteen cells, sixteen with a fill, no extent contradicted, no group refused
+for geometry, one stroke across all three sub-panels, and three fills that do
+not overlap - plus a per-cell baseline. **That baseline is self-measured, not an
+independent reading**; 397 has an eye reading and 127 does not, and until it
+does this file detects drift rather than validating the figure. Reverting the
+recentred anchors fails it; reverting the texture ROI fails it; substituting a
+different page of the same PDF exits 2.
+
+The geometry's fill bands are the MIDPOINTS of the gaps between the measured
+fills, not a fit to them - a band drawn at the gap admits a different render and
+still excludes the neighbouring fill. `source_pdf_sha256` is declared and null:
+the raster hash pins which render was measured, not which publisher PDF bytes
+produced that render, and the forward test prints the gap rather than passing
+over it.
+
+`test_measure_mono_bars.py` also draws the fill publication 127 broke on and
+that no fixture in this package had - a STIPPLED bar, interior under a tenth
+inked, four blank rows in every six, over 180 px tall - and renders the whole
+panel at half, one and double size. Everything in CI is drawn at a 1-2 px
+stroke; the claim that every length is a multiple of the stroke had never been
+checked at any other one.
 
 ## Suites
 
@@ -1658,17 +1710,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 36 |
+| `test_measure_mono_bars.py` | 57 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 18 |
-| **total** | **1417** |
+| `test_reproducibility.py` | 19 |
+| **total** | **1439** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
-primitives), `forward_test_397_mono_bar.py`, and two worked examples:
+primitives), `forward_test_397_mono_bar.py`, `forward_test_127_mono_bar.py`
+(SKIPs in CI: its raster is not redistributable), and two worked examples:
 
 - `build_id323.py` — 2 figures, 12 units, 107 values, 2 problems, both the known
   `TIMEPOINT=DI19` hole where two bars overlap past separating

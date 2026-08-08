@@ -38,24 +38,27 @@
    "OPEN": {
     "ink_mass": [
      0.0,
-     0.06
+     0.07
     ]
    },
    "STIPPLED": {
     "ink_mass": [
-     0.08,
-     0.35
+     0.07,
+     0.45
     ]
    },
    "SOLID": {
     "ink_mass": [
-     0.55,
+     0.45,
      1.0
     ]
    }
   },
   "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held.",
-  "anchor_note": "Anchors are the measured MIDPOINT of each group's outer bar strokes, per panel: the three sub-panels of this figure do not share an x-origin. One shared pair of anchors with a 300 px window put the STANDING group of the middle panel 22 px outside its own window, and footprints_from_seed then divided the visible span by three, which moved every boundary and put the stippled bar's right stroke inside the solid bar's footprint. GROUP_WINDOW_CLIPPED now refuses that instead of reading it."
+  "anchor_note": "Anchors are the measured MIDPOINT of each group's outer bar strokes, per panel: the three sub-panels of this figure do not share an x-origin. One shared pair of anchors with a 300 px window put the STANDING group of the middle panel 22 px outside its own window, and footprints_from_seed then divided the visible span by three, which moved every boundary and put the stippled bar's right stroke inside the solid bar's footprint. GROUP_WINDOW_CLIPPED now refuses that instead of reading it.",
+  "source_pdf_sha256": null,
+  "expected_note": "The bands are the MIDPOINTS of the gaps between the fills as measured on this figure - OPEN reads 0.000, STIPPLED 0.144-0.157, SOLID 0.734-0.754 - not a fit to those numbers. A band drawn at the gap admits a different render or DPI and still excludes the neighbouring fill. The bands mark_readers.py currently ships would put this figure's SOLID inside HATCHED.",
+  "source_pdf_note": "Not recorded. raster_sha256 pins WHICH RENDER the geometry was measured on; it does not pin which publisher PDF bytes produced that render, so a second person with a different copy of the paper cannot prove they regenerated the same page. forward_test_127_mono_bar.py prints the gap rather than passing over it."
  },
  {
   "tag": "pub127_fig4_normal",
@@ -92,7 +95,28 @@
   ],
   "group_window": 320,
   "baseline": 0.0,
-  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held.",
+  "source_pdf_sha256": null,
+  "expected": {
+   "OPEN": {
+    "ink_mass": [
+     0.0,
+     0.07
+    ]
+   },
+   "STIPPLED": {
+    "ink_mass": [
+     0.07,
+     0.45
+    ]
+   },
+   "SOLID": {
+    "ink_mass": [
+     0.45,
+     1.0
+    ]
+   }
+  }
  },
  {
   "tag": "pub127_fig4_lowfreq",
@@ -129,6 +153,27 @@
   ],
   "group_window": 320,
   "baseline": 0.0,
-  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held.",
+  "source_pdf_sha256": null,
+  "expected": {
+   "OPEN": {
+    "ink_mass": [
+     0.0,
+     0.07
+    ]
+   },
+   "STIPPLED": {
+    "ink_mass": [
+     0.07,
+     0.45
+    ]
+   },
+   "SOLID": {
+    "ink_mass": [
+     0.45,
+     1.0
+    ]
+   }
+  }
  }
 ]

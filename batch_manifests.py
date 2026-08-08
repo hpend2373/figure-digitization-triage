@@ -679,6 +679,53 @@ def source_panel_inventory_columns():
     ]
 
 
+#: How a series identity may be established when the reader could not measure
+#: it. Ordered least to most trusted; the reader never writes any of them.
+IDENTITY_EVIDENCE = ("FILL_MEASURED", "LEGEND_DECLARED", "TEXT_DECLARED",
+                     "REVIEWER_INSPECTION")
+
+
+def identity_resolution_columns():
+    """Series identities a person supplied, for cells the reader could not name.
+
+    A BAR_MONO series is identified BY ITS FILL. Publication 127 prints two bars
+    fifteen pixels tall: they have a mean, they have an SE, and they have no
+    interior to sample, so the reader has a geometry with no identity and the
+    only way to name them from the pixels would be to say "first slot, therefore
+    OPEN" - identifying a series by position, which is the one inference this
+    package refuses.
+
+    So a person names them, here, and the naming is a first-class input rather
+    than a decision hidden inside an approval. Three reasons it cannot be folded
+    into `value_review.csv`:
+
+    An approval says "the number the reader produced is right". This says "here
+    is something the reader did not produce". They are different claims, they
+    are made on different evidence, and a reviewer who can check a bar top
+    against an overlay is not thereby qualified to have read the legend.
+
+    It has to carry WHERE the identity came from. `Evidence_Type` distinguishes
+    a legend that labels the fills from a sentence in the methods from a
+    reviewer's own reading of the figure, and `Evidence_Artifact` points at the
+    thing that can be re-examined. "The reviewer said so" is the weakest of the
+    three and is still recorded as itself rather than as a fact.
+
+    And it has to be hashed with everything else. A resolution that can change
+    after the values were approved is a resolution that can silently re-label a
+    series between the review and the pooling.
+
+    One row per (Panel_ID, Group_ID, Geometry_Slot). The slot is the geometric
+    position the reader found, which is how the row is joined to a measurement -
+    it is NOT what names the series, and `Resolved_Series_ID` is.
+    """
+    return [
+        "Resolution_ID", "Panel_ID", "Group_ID", "Geometry_Slot",
+        "Resolved_Series_ID", "Resolved_Fill_Pattern", "Evidence_Type",
+        "Evidence_Artifact", "Evidence_Artifact_SHA256", "Reviewer_ID",
+        "Reviewed_At", "Note",
+    ]
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -688,6 +735,7 @@ BATCH_TEMPLATES = (
     ("series_manifest", series_manifest_columns),
     ("position_manifest", position_manifest_columns),
     ("reader_config", reader_config_columns),
+    ("identity_resolution", identity_resolution_columns),
 )
 
 

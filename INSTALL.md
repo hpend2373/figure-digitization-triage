@@ -1918,24 +1918,93 @@ is `HATCHED` again, silently. Refusing by name leaves the cells unread and
 visible, which is the only honest state until the reader carries the identity
 above.
 
+## The whisker is centred on the series, not on the bar
+
+Publication 397's WOMEN panel was losing three of its four dispersions, and the
+reason was not the cap rule. Its whiskers are drawn at 39% of the bar's
+footprint width; the stem trace looked in the bar's middle fifth and missed them
+by two pixels. `stem_band()` finds the stem instead: among the narrow runs of
+ink in the first rows above the bar, the one nearest the centre - narrow because
+a stem is a hairline, and a run wider than a few strokes is the bar's own
+antialiased top, which is what the first row above a solid bar holds at the stem
+threshold.
+
+Replacing the middle with the measured run found 397's stems and cost five of
+publication 127's cells, whose stems are central and whose masks then left a
+residue the classifier could not name. The band is the UNION of the two: it
+never costs a trace and never leaves more behind.
+
+Publication 397 now yields eight means and **seven** dispersions against five,
+and both hatched cells are closed. What remains pinned is WOMEN PRE/SOLID, whose
+extent does not resolve - a structure sits in the right-hand columns of its
+footprint from the bar top upward, and it is not identifiable as bar, cap or
+glyph. Its provisional value is within 0.1 mmHg of the eye reading and it still
+returns nothing, which is the contract working.
+
+One scenario changed rather than being fixed: the fixture for "ink continuous
+with the bar that is not shaped like the bar" was drawn as a narrow spur ending
+in a wider blob, which is what an error bar IS. Once the stem was measured
+rather than assumed, the reader read it as one - correctly. The fixture is now a
+patch too wide to be a stem, too narrow to be the bar, and off to one side.
+
+## Naming what the reader could not measure
+
+Two of publication 127's bars are fifteen pixels tall. They have a mean, an SE,
+and no interior to sample. A BAR_MONO series is identified BY its fill, so
+naming them from the pixels would mean "first slot, therefore OPEN" - identity
+by position, the one inference this package refuses. Publication 127 cannot be
+finalized while they are unnamed, and no amount of work on the reader will name
+them.
+
+`identity_resolution` is the twelfth manifest: one row per
+(`Panel_ID`, `Group_ID`, `Geometry_Slot`), carrying `Resolved_Series_ID`,
+`Resolved_Fill_Pattern`, `Evidence_Type`, `Evidence_Artifact`,
+`Evidence_Artifact_SHA256`, `Reviewer_ID` and `Reviewed_At`.
+
+Three reasons it is an input rather than a decision inside an approval.
+
+An approval says "the number the reader produced is right". This says "here is
+something the reader did not produce". Those are different claims made on
+different evidence, and a reviewer who can check a bar top against an overlay is
+not thereby qualified to have read the legend.
+
+It has to carry where the identity came from. `Evidence_Type` separates a legend
+that labels the fills (`LEGEND_DECLARED`) from a sentence in the methods
+(`TEXT_DECLARED`) from a reviewer's own reading (`REVIEWER_INSPECTION`), and the
+artifact points at the thing that can be re-examined. The last of the three is
+the weakest and is recorded as itself rather than as a fact.
+
+And it has to be hashed with everything else, or a resolution can change after
+the values were approved and silently re-label a series between the review and
+the pooling.
+
+The slot is how a row joins to a measurement; it is NOT what names the series.
+There is deliberately no `Pattern_Slot_Order` column: a declared order is the
+positional inference with a manifest around it.
+
+**Not yet wired.** The schema, its template and its contract are in place and
+tested; joining it into `run_batch`, the QC gate and the finalizer's subject
+hash is part of the integration commit, because a resolution the finalizer does
+not hash is worse than none.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 460 |
+| `test_run_batch.py` | 468 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 111 |
+| `test_measure_mono_bars.py` | 114 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1505** |
+| **total** | **1516** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -527,6 +527,41 @@ REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "BAR_EDGE_REMNANT",
                 "ANNOTATION_OR_GLYPH", "UNRESOLVED_REMOTE_SUPPORT")
 
 
+def stem_band(stem_dark, scan, bar_w, stroke, max_strokes=4):
+    """Where the whisker actually is, as a column slice, or None.
+
+    Assuming the stem runs up the middle of the bar costs three of publication
+    397's four WOMEN cells their dispersion: its whiskers are drawn at 39% to
+    46% of the bar width, and a centre slice of the bar's middle fifth misses
+    them by two pixels. Nothing says an error bar is centred on its bar - it is
+    centred on the series, and the bar's footprint is measured from ink that can
+    be a few pixels wider than the bar on either side.
+
+    So it is found instead: among the narrow runs of ink in the first rows above
+    the bar, the one nearest the bar's centre. Narrow because a stem is a
+    hairline - a run wider than a few strokes is the bar's own antialiased top,
+    which is what the first row above a solid bar holds at the stem threshold.
+    Nearest the centre because a bar's outline reaches the edges and a stem does
+    not.
+    """
+    centre = (bar_w - 1) / 2.0
+    for row in scan[:max(3, 2 * stroke)]:
+        best = None
+        columns = np.where(stem_dark[row])[0]
+        if not len(columns):
+            continue
+        for run in _runs(list(columns), gap=max(1, stroke // 2)):
+            if run[-1] - run[0] + 1 > max_strokes * stroke:
+                continue
+            offset = abs((run[0] + run[-1]) / 2.0 - centre)
+            if best is None or offset < best[0]:
+                best = (offset, run[0], run[-1])
+        if best is not None:
+            pad = max(1, stroke)
+            return slice(max(0, best[1] - pad), min(bar_w, best[2] + 1 + pad))
+    return None
+
+
 def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                    direction="UP", threshold=128, stem_threshold=200):
     """Everything inked beyond the bar end, classified rather than counted.
@@ -624,9 +659,19 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     scan = [r for r in range(start + step, limit + step, step) if 0 <= r < height]
     if not scan:
         return []
+    # The measured stem AND the bar's middle, together. Replacing the middle
+    # with the measured run found publication 397's off-centre whiskers and lost
+    # five of publication 127's cells, whose stems are central and whose masks
+    # then left a residue the classifier could not name. Widening never costs a
+    # trace and never leaves more behind, so the band is the union.
+    band = np.zeros(bar_w, dtype=bool)
+    band[centre] = True
+    found = stem_band(stem_dark, scan, bar_w, stroke)
+    if found is not None:
+        band[found] = True
     stem_rows = []
     for r in scan:
-        if not stem_dark[r, centre].any():
+        if not stem_dark[r, band].any():
             break
         stem_rows.append(r)
     # An error bar is a NARROW stem carrying a WIDE cap, and that is the whole
@@ -658,7 +703,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                 cap_span = max(cap_span, width / float(bar_w))
     masked = dark.copy()
     for r in stem_rows:
-        masked[r, centre] = False
+        masked[r, band] = False
     for r in cap_rows:
         masked[r, :] = False
 

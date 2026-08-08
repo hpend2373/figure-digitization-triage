@@ -32,20 +32,17 @@ time, and stops them getting quietly worse.
              is correct - the ink above it really is bar - but the extent is
              not yet resolvable. Its provisional value is nonetheless within
              0.1 mmHg of the eye reading.
-  PRE/HATCHED and POST/HATCHED
-             no cap is found. The stem on this panel is one to two pixels and
-             runs off the bar's centre line, so the centre-column trace loses
-             it, and the cap search only looks near the stem's tip.
-  POST/HATCHED
-             a structure exactly as wide as the bar sits above it. A cap may
-             not touch both side tracks - that is what keeps a bar's own top
-             rule from being read as a cap - so this one is rejected, whatever
-             it is.
+Two of the three are CLOSED. Both hatched cells were missing their cap because
+this figure draws its whiskers off the bar's centre line - at 39% of the bar
+width against a centre slice covering the middle fifth - and `stem_band` finds
+the stem instead of assuming it. That is the defect this panel existed to
+expose; it cost three of publication 397's four WOMEN dispersions and would have
+cost them silently in production.
 
-Until those are closed, publication 397 yields 8 means from the prototype and 5
-dispersions, and this file asserts exactly that. A run that suddenly produces 8
-dispersions is not allowed to pass silently either: it means somebody changed
-the cap rule and owes this file an update.
+Until PRE/SOLID is closed, publication 397 yields 8 means from the prototype and
+7 dispersions, and this file asserts exactly that. A run that suddenly produces
+8 is not allowed to pass silently either: it means somebody changed the extent
+rule and owes this file an update.
 """
 import os
 import sys
@@ -75,8 +72,7 @@ STROKE = {"397_fig3_P3_MEN": 1, "397_fig3_P3_WOMEN": 2}
 #: The cells that do not yet yield a dispersion, and the one that does not yet
 #: yield an extent. Pinned so they cannot grow, and so they cannot shrink
 #: without somebody noticing.
-NO_CAP = {("397_fig3_P3_WOMEN", "PRE", 1), ("397_fig3_P3_WOMEN", "POST", 1),
-          ("397_fig3_P3_WOMEN", "PRE", 0)}
+NO_CAP = {("397_fig3_P3_WOMEN", "PRE", 0)}
 NO_EXTENT = {("397_fig3_P3_WOMEN", "PRE", 0)}
 
 FAILURES, PASSED = [], [0]
@@ -132,8 +128,8 @@ capless = {(r["figure"], r.get("group"), r.get("slot")) for r in records
            if "dispersion" not in r}
 check("the cells without a cap are the ones on record",
       capless == NO_CAP, "%r against %r" % (sorted(capless), sorted(NO_CAP)))
-check("so five of eight cells carry a dispersion",
-      sum("dispersion" in r for r in records) == 5,
+check("so seven of eight cells carry a dispersion",
+      sum("dispersion" in r for r in records) == 7,
       repr(sum("dispersion" in r for r in records)))
 check("no cell is contradicted by a body continuation",
       not [r for r in records if r.get("error") == "BAR_EXTENT_UNRESOLVED"],
@@ -146,6 +142,11 @@ check("the figure establishes a reusable fill vocabulary",
 resolved = [r for r in records if r.get("identity_status") == "RESOLVED"]
 check("seven of the eight bars are named, the eighth having no fill to sample",
       len(resolved) == 7, "%d resolved" % len(resolved))
+check("both hatched cells now carry the dispersion their off-centre stem hangs",
+      all("dispersion" in r for r in records
+          if r.get("declared") == "HATCHED"),
+      repr([(r["figure"], r.get("group"), r.get("dispersion")) for r in records
+            if r.get("declared") == "HATCHED"]))
 check("and every name is the fill the spec declares",
       all(r["resolved_fill_pattern"] == r["declared"] for r in resolved),
       repr([(r["figure"], r.get("slot"), r.get("resolved_fill_pattern"),

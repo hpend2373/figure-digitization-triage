@@ -287,8 +287,12 @@ try:
     img = blank()
     solid(img, 0, 40)
     a, _b = SLOTS[0]
-    img[top_row(40) - 40:top_row(40), a + 25:a + 29] = 0        # off-centre spur
-    img[top_row(40) - 46:top_row(40) - 40, a + 20:a + 34] = 0   # ending in a blob
+    # A patch: too wide to be a stem, too narrow to be the bar, off to one side
+    # so it is not the bar's own top, and sitting on the bar so it is not a
+    # separate glyph. The fixture used to be a narrow spur ending in a wider
+    # blob, which is what an error bar IS - and once the stem was measured
+    # rather than assumed central, the reader correctly read it as one.
+    img[top_row(40) - 10:top_row(40), a + 5:a + 35] = 0
     rec = only(M.measure_panel(spec(write(img, "spur", TMP), ["SOLID"])))
     check("an unidentifiable neighbour refuses the bar",
           rec.get("error") == "REMOTE_SUPPORT_UNRESOLVED",
@@ -932,6 +936,29 @@ try:
     check("so the figure refuses to call one of them the emptier",
           verdict3["status"] == "AMBIGUOUS", repr(verdict3["status"]))
     check("and names neither", not ident3, repr(ident3))
+
+    # -------------------------------------------------- 26h. an off-centre stem
+    #
+    # REVERT: drop the stem_band() call and keep only the bar's middle fifth.
+    # Publication 397's WOMEN panel draws its whiskers at 39% of the bar width,
+    # outside that slice, and three of its four cells lost their dispersion to
+    # it - silently, because a bar with no cap is a bar with no dispersion and
+    # nothing says which of the two it was.
+    print("\nan error bar is centred on its series, not on its bar")
+    img = blank()
+    solid(img, 0, 60)
+    a, b = SLOTS[0]
+    off = a + int(0.28 * (b - a))        # outside the bar's middle fifth
+    img[top_row(60) - 24:top_row(60), off:off + 2] = 0
+    img[top_row(60) - 26:top_row(60) - 24, off - 9:off + 11] = 0
+    rec = only(M.measure_panel(spec(write(img, "offstem", TMP), ["SOLID"])))
+    check("the cap on an off-centre stem is found",
+          "ERRORBAR_CAP" in kinds(rec), repr(kinds(rec)))
+    check("and the dispersion it implies is the one it was drawn at",
+          abs(rec.get("dispersion", -99) - 25.0 / PX_PER_UNIT) <= 0.5,
+          repr(rec.get("dispersion")))
+    check("the bar is not refused over it", rec.get("error") is None,
+          repr(rec.get("error")))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

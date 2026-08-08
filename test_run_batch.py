@@ -2837,6 +2837,33 @@ check("and the module state is the run's own by the end of it",
       "%s" % RB.OVERLAY.failures()[:2])
 
 
+print("a channel for identities the reader cannot measure")
+# Publication 127 prints two bars fifteen pixels tall: a mean, an SE, and no
+# interior to sample. A BAR_MONO series is identified by its fill, so naming
+# them from the pixels would mean "first slot, therefore OPEN" - identity by
+# position. A person names them instead, and the naming is an INPUT with its own
+# evidence, not a decision folded into an approval: an approval says "the number
+# the reader produced is right" and this says "here is something the reader did
+# not produce".
+_ir = BM.identity_resolution_columns()
+check("the identity channel is a manifest of its own",
+      "identity_resolution" in dict(BM.BATCH_TEMPLATES), "%s" % (BM.BATCH_TEMPLATES,))
+check("it is keyed by the geometry the reader DID produce",
+      all(c in _ir for c in ("Panel_ID", "Group_ID", "Geometry_Slot")), "%s" % _ir)
+check("and it names a series rather than a slot order",
+      "Resolved_Series_ID" in _ir and not [c for c in _ir if "Order" in c], "%s" % _ir)
+check("every resolution says where the identity came from",
+      all(c in _ir for c in ("Evidence_Type", "Evidence_Artifact",
+                             "Evidence_Artifact_SHA256")), "%s" % _ir)
+check("and who said so, and when",
+      all(c in _ir for c in ("Reviewer_ID", "Reviewed_At")), "%s" % _ir)
+check("a reviewer's own reading is one evidence type among several, not the only one",
+      set(BM.IDENTITY_EVIDENCE) >= {"LEGEND_DECLARED", "TEXT_DECLARED",
+                                    "REVIEWER_INSPECTION"},
+      "%s" % (BM.IDENTITY_EVIDENCE,))
+check("the artifact is hashed, so a resolution cannot change after approval",
+      "Evidence_Artifact_SHA256" in _ir)
+
 print("templates are generated from the column functions, never typed")
 _tdir = os.path.join(ROOT, "templates")
 for _p in RB.emit_templates(_tdir):

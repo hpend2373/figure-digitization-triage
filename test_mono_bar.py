@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import make_mono_bar_fixture as FIX      # noqa: E402
 import mark_readers as MR                # noqa: E402
+import batch_manifests as BM             # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -202,6 +203,44 @@ check("and the adapter turns its rows into grid cells",
       len(MR.to_value_records(rows, "CONTINUOUS", "U1", x_factor="TIMEPOINT",
                               series_factor="ARM")) == 12)
 check("BAR_MONO is in the declared mark vocabulary", "BAR_MONO" in MR.MARK_TYPES)
+
+# A manifest must be able to say what publication 127 prints. If STIPPLED is not
+# in the vocabulary, whoever writes that manifest has to declare the nearest
+# lie - HATCHED, on a fill reading 0.15 against hatching's 0.26-0.32 - and a lie
+# in the manifest is the one error the QC layer cannot catch, because every
+# check downstream agrees with it. So the word is declarable, and the reader
+# refuses it by name instead of banding it.
+#
+# REVERT: remove STIPPLED from UNIMPLEMENTED_FILL_PATTERNS. The declaration is
+# accepted, classify_bar_fill has no band for it, and the bar is assigned to
+# whichever band it lands in - silently, and on 127 that band is HATCHED.
+print()
+print("a fill the manifest can declare and the reader cannot read")
+check("STIPPLED is in the manifest vocabulary",
+      "STIPPLED" in BM.BAR_FILL_PATTERNS, repr(BM.BAR_FILL_PATTERNS))
+check("and in the reader's, so a spec carrying it parses",
+      "STIPPLED" in MR.BAR_FILL_PATTERNS, repr(MR.BAR_FILL_PATTERNS))
+check("but the reader has no band for it and says so",
+      "STIPPLED" in MR.UNIMPLEMENTED_FILL_PATTERNS,
+      repr(MR.UNIMPLEMENTED_FILL_PATTERNS))
+_refused = ""
+try:
+    _truth = json.load(open(TRUTH))
+    MR.read_monochrome_bar_panel(
+        Image.open(IMG), panel_box=tuple(_truth["panel_box"]),
+        x_positions=dict(zip(_truth["groups"], _truth["group_x"])),
+        y_calibration=MR.AxisCalibration.from_points(
+            [(v, p) for v, p in _truth["y_ticks"]]),
+        series=[MR.SeriesSpec("S_STIPPLE", bar_fill="STIPPLED")])
+except ValueError as exc:
+    _refused = str(exc)
+check("reading a STIPPLED series raises rather than guessing",
+      "cannot read it" in _refused, repr(_refused[:80]))
+check("and the refusal names the panel and the pattern",
+      "S_STIPPLE" in _refused and "STIPPLED" in _refused, repr(_refused[:80]))
+check("no other declared fill is refused",
+      not [p for p in MR.BAR_FILL_PATTERNS
+           if p != "STIPPLED" and p in MR.UNIMPLEMENTED_FILL_PATTERNS])
 
 print()
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))

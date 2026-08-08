@@ -169,23 +169,40 @@ class Geometry(object):
         a, b = self.slots[k]
         img[self.top(units):self.base, a:b + 1] = 0
 
-    def stipple(self, img, k, units):
+    def hatch(self, img, k, units, pitch=9):
+        """Diagonals inside an outline. A 45 degree stroke crosses EVERY row of
+        the interior however far apart the strokes are, which is what makes
+        "no blank rows" a property of the word rather than of the density."""
+        self.outline(img, k, units)
+        a, b = self.slots[k]
+        t, w = self.top(units), self.stroke
+        for c in range(a - (self.base - t), b + 1, self.r(pitch)):
+            for j in range(self.base - t):
+                x, y = c + j, self.base - 1 - j
+                if a + w <= x <= b - w and t + w <= y < self.base:
+                    img[y, max(a, x - w // 2):min(b, x + w // 2) + 1] = 0
+
+    def stipple(self, img, k, units, pitch=None, dot=None):
         """An outlined bar with a dot lattice inside it, which is what
         publication 127 prints: most rows of the interior are blank paper, and
         the side strokes are what carries the walk past them."""
         self.outline(img, k, units)
         a, b = self.slots[k]
-        t, px, py = self.top(units), self.pitch[0], self.pitch[1]
+        t = self.top(units)
+        px, py = pitch or self.pitch, (pitch or self.pitch)
+        px, py = (px if isinstance(px, tuple) else (px, px))[0], \
+                 (py if isinstance(py, tuple) else (py, py))[1]
+        d = dot or self.dot
         for y in range(t + 2 * self.stroke, self.base - self.stroke, py):
             for x in range(a + 2 * self.stroke, b + 1 - 2 * self.stroke, px):
-                img[y:y + self.dot, x:x + self.dot] = 0
+                img[y:y + d, x:x + d] = 0
 
-    def spec(self, path, fills):
+    def spec(self, path, fills, anchors=None):
         anchor = (self.slots[0][0] + self.slots[-1][1]) // 2
         return dict(tag="scale%g" % self.s, path=path,
                     box=[self.x0, self.x1, self.y0, self.y1],
                     ticks=[[0, self.base], [100, self.base - 100 * self.ppu]],
-                    anchors={"G": anchor}, fills=fills,
+                    anchors=anchors or {"G": anchor}, fills=fills,
                     group_window=self.r(190), baseline=0.0)
 
 
@@ -612,7 +629,140 @@ try:
     check("the rule is measured from its strong rows, not its weakest",
           got.value_px == 3, repr(got))
 
-    # -------------------------------------------------- 21. the contract
+    # -------------------------------------------------- 21. fill identity
+    print("\nthe series are named by their fill, from the figure's own samples")
+    g = Geometry(1.0)
+    img = g.blank()
+    for k, units in enumerate((30, 45, 60)):
+        (g.outline, g.stipple, g.solid)[k](img, k, units)
+    spec1 = g.spec(write(img, "ident3", TMP), ["OPEN", "STIPPLED", "SOLID"])
+    spec1["anchors"] = {"G1": spec1["anchors"]["G"]}
+    rows = M.measure_panel(spec1)
+    ident, verdict = M.fill_identity(rows)
+    check("the vocabulary is established", verdict["status"] == "ESTABLISHED",
+          repr(verdict))
+    check("every bar is named, and named correctly",
+          len(ident) == 3 and all(ident[(r["figure"], r["group"]), r["slot"]]
+                                  == r["declared"] for r in rows),
+          repr(ident))
+    check("each gap is wider than the spread it separates",
+          all(s["gap"] > s["needed"] for s in verdict["separation"]),
+          repr(verdict["separation"]))
+
+    # -------------------------------------------------- 22. not by position
+    #
+    # REVERT: return the declared list in slot order from _assign_group(). The
+    # scenario passes for every figure whose bars happen to be drawn in the
+    # order they are declared - which is all of them - and this is the one that
+    # says the identity came from the ink.
+    print("\nnaming follows the ink even when it contradicts the slot order")
+    img = g.blank()
+    g.solid(img, 0, 60)                      # drawn solid-first ...
+    g.outline(img, 1, 30)
+    rows = M.measure_panel(g.spec(write(img, "flipped", TMP),
+                                  ["OPEN", "SOLID"]))     # ... declared open-first
+    ident, verdict = M.fill_identity(rows)
+    check("the vocabulary is still established",
+          verdict["status"] == "ESTABLISHED", repr(verdict))
+    got = {r["slot"]: ident.get(((r["figure"], r["group"]), r["slot"])) for r in rows}
+    check("slot 0 is named SOLID though the spec declares OPEN there",
+          got.get(0) == "SOLID", repr(got))
+    check("and slot 1 SOLID's opposite", got.get(1) == "OPEN", repr(got))
+
+    # -------------------------------------------------- 23. structure, not ink
+    #
+    # REVERT: order STIPPLED and HATCHED by ink instead of by whether any row of
+    # the interior is blank. A dense stipple carries more ink than a sparse
+    # hatch, so the two swap names and every value in the figure goes to the
+    # wrong series - silently, because both are still "identified".
+    print("\na dense stipple is darker than a sparse hatch and still a stipple")
+    img = g.blank()
+    g.hatch(img, 0, 60, pitch=16)                        # sparse: less ink
+    g.stipple(img, 1, 60, pitch=5, dot=3)                # dense: more ink
+    rows = M.measure_panel(g.spec(write(img, "swap", TMP), ["HATCHED", "STIPPLED"]))
+    ink = {r["declared"]: r.get("ink_mass") for r in rows}
+    check("the stipple really does carry more ink than the hatch",
+          ink.get("STIPPLED", 0) > ink.get("HATCHED", 1), repr(ink))
+    ident, verdict = M.fill_identity(rows)
+    check("and both are named correctly anyway",
+          verdict["status"] == "ESTABLISHED" and
+          all(ident[((r["figure"], r["group"]), r["slot"])] == r["declared"]
+              for r in rows), "%r %r" % (verdict["status"], ident))
+
+    # -------------------------------------------------- 24. refusal
+    print("\ntwo fills the figure cannot separate name nothing at all")
+    img = g.blank()
+    g.hatch(img, 0, 60, pitch=9)
+    g.hatch(img, 1, 45, pitch=9)
+    rows = M.measure_panel(g.spec(write(img, "same", TMP), ["HATCHED", "STIPPLED"]))
+    ident, verdict = M.fill_identity(rows)
+    check("nothing is named", not ident, repr(ident))
+    check("and the figure says why",
+          verdict["status"] in ("AMBIGUOUS", "NOT_ENOUGH_COMPLETE_GROUPS"),
+          repr(verdict["status"]))
+
+    # -------------------------------------------------- 25. separation
+    #
+    # REVERT: drop the `gap <= need` test in fill_identity(). Every group here
+    # assigns cleanly on its own - OPEN is the emptier of the two bars in both -
+    # and the assignment is still worthless, because what separates the two
+    # patterns across the FIGURE is smaller than how much one of them varies.
+    # Without the test the figure reports ESTABLISHED and names four bars.
+    print("\nseparation smaller than spread names nothing")
+    g = Geometry(1.0)
+    img = g.blank()
+    g.outline(img, 0, 60)                              # OPEN, both groups
+    g.stipple(img, 1, 60, pitch=(200, 6), dot=1)       # almost no ink at all
+    tag = write(img, "sep_a", TMP)
+    rows_a = M.measure_panel(g.spec(tag, ["OPEN", "STIPPLED"]))
+    img = g.blank()
+    g.outline(img, 0, 45)
+    g.stipple(img, 1, 45, pitch=5, dot=3)              # the same pattern, dense
+    rows_b = M.measure_panel(g.spec(write(img, "sep_b", TMP), ["OPEN", "STIPPLED"]))
+    for r in rows_b:
+        r["figure"] = "second_group"
+    both = rows_a + rows_b
+    for r in both:
+        r["figure_id"] = "one_figure"
+    ink = sorted(round(r.get("ink_mass", -1), 4) for r in both)
+    ident, verdict = M.fill_identity(both)
+    check("the two patterns are closer than one of them varies",
+          verdict["status"] == "AMBIGUOUS", "%r  ink %r" % (verdict["status"], ink))
+    check("so nothing is named", not ident, repr(ident))
+
+    # -------------------------------------------------- 26. incomplete groups
+    #
+    # REVERT: calibrate on every group, complete or not. A group with a bar too
+    # short to sample has fewer samples than declared fills, no assignment is
+    # forced, and the whole FIGURE goes AMBIGUOUS - so one 15 px bar costs every
+    # other bar in the figure its name. Publication 127 has two of them.
+    print("\none unsampleable bar does not cost the figure its vocabulary")
+    img = g.blank()
+    g.outline(img, 0, 30)
+    g.stipple(img, 1, 45)
+    g.solid(img, 2, 60)
+    full = M.measure_panel(g.spec(write(img, "whole", TMP),
+                                  ["OPEN", "STIPPLED", "SOLID"]))
+    img = g.blank()
+    g.outline(img, 0, 30)
+    g.stipple(img, 1, 40)
+    g.solid(img, 2, 4)                                  # too short to sample
+    part = M.measure_panel(g.spec(write(img, "holey", TMP),
+                                  ["OPEN", "STIPPLED", "SOLID"]))
+    for r in part:
+        r["figure"] = "holey_group"
+    both = full + part
+    for r in both:
+        r["figure_id"] = "one_figure"
+    ident, verdict = M.fill_identity(both)
+    check("the complete group still establishes the vocabulary",
+          verdict["status"] == "ESTABLISHED", repr(verdict.get("failures") or verdict))
+    check("and names its own three bars",
+          sum(1 for k in ident if k[0][0] != "holey_group") == 3, repr(ident))
+    check("the short bar is not named", not any(
+        k[0][0] == "holey_group" and k[1] == 2 for k in ident), repr(ident))
+
+    # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(
             os.path.join(TMP, "gap.png"), ["HATCHED"])))),

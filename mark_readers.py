@@ -814,7 +814,16 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
     return out
 
 
-BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "OPEN")
+BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "STIPPLED", "OPEN")
+
+#: Declarable, and not yet readable. `measure_mono_bars.py` separates STIPPLED
+#: from the other three on publication 127 - 0.144-0.157 ink mass against
+#: hatching's 0.262-0.318, and blank interior rows where hatching has none - but
+#: that identity is figure-local and this reader is still absolute-banded. A
+#: series declared STIPPLED therefore comes back UNREADABLE_FILL_PATTERN rather
+#: than being squeezed into the HATCHED band, which is where it would land and
+#: where it would be wrong without ever being flagged.
+UNIMPLEMENTED_FILL_PATTERNS = ("STIPPLED",)
 
 #: Interior dark density separates the three printed fills. Measured on a real
 #: monochrome figure: solid 0.93, diagonal hatch 0.26, outline-only ~0.02. The
@@ -1019,6 +1028,14 @@ def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, seri
     want = []
     for spec in series:
         pattern = str(spec.bar_fill or "").strip().upper()
+        if pattern in UNIMPLEMENTED_FILL_PATTERNS:
+            raise ValueError(
+                "SeriesSpec %r declares bar_fill=%r. The manifest vocabulary "
+                "accepts it and this reader cannot read it: its fill classifier "
+                "is absolute-banded and %s has no band, so the bar would be "
+                "assigned to whichever band it happened to fall in. Read the "
+                "panel with measure_mono_bars.py, or queue it for manual "
+                "extraction." % (spec.name, spec.bar_fill, pattern))
         if pattern not in BAR_FILL_PATTERNS:
             raise ValueError(
                 "SeriesSpec.bar_fill must be one of %s for a monochrome bar "

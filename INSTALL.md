@@ -1771,6 +1771,71 @@ panel at half, one and double size. Everything in CI is drawn at a 1-2 px
 stroke; the claim that every length is a multiple of the stroke had never been
 checked at any other one.
 
+## Figure-local one-to-one fill identity
+
+`_FILL_BANDS` names a series by asking which absolute density band its bar falls
+in. That works on the one figure the bands were measured on. `fill_identity()`
+in `measure_mono_bars.py` asks a different question: given the fills this figure
+DECLARES, which bar is which — decided from the figure's own samples, one bar to
+one pattern, or not at all.
+
+Four relations, and none of them is a measurement:
+
+| word | what it means about the interior |
+|---|---|
+| `OPEN` | paper — the LEAST ink in its group |
+| `SOLID` | ink — the MOST |
+| `HATCHED` | continuous strokes, so no row of the interior is blank |
+| `STIPPLED` | isolated islands, so some rows are blank |
+
+The first two are relations within a group and say nothing about absolute
+density. The last two are structural and say nothing about which is darker —
+which matters, because a dense stipple carries more ink than a sparse hatch, so
+ordering all four by ink would be a claim about typesetting rather than about
+the words. A scenario draws exactly that inversion and both bars are still
+named correctly.
+
+**Two stages, because a bar too short to sample a fill would otherwise take the
+identity of the slot it sits in.** Only groups where every slot yielded a fill
+can be assigned from the relations — "least ink in the group" is not a statement
+about a group with a hole in it — and those groups give the figure its own
+prototype range per pattern. Every remaining sample is then matched against
+those ranges, and only when it falls inside exactly one.
+
+**The separation test needs no threshold.** Each pattern has a SPREAD across the
+figure and each pair of patterns a GAP; the vocabulary is established only when
+every gap exceeds the spreads it separates. On publication 127 the spreads are
+0.000–0.020 and the smallest gap is 0.148. A pattern seen once has no spread and
+inherits the widest in the figure, so it is held to the same standard rather
+than to none.
+
+**A figure, not a panel.** Publication 127's Figure 4 is three sub-panels, and
+its middle panel alone offers one sample per pattern — one sample has no spread,
+a figure with no spread cannot estimate its own noise, and nothing matches
+against a prototype of zero width. Pooled across the figure, that panel's three
+uncalibratable cells are named immediately. `figure_id` says which panels are
+one figure and defaults to the panel tag.
+
+Result on the whole corpus: publication 127 **16 of 18 cells named, none wrong**
+— the two unnamed are the 15 px bars with no measurable fill — publication 397
+7 of 8, and the synthetic fixture 12 of 12. Every figure reports ESTABLISHED.
+
+## STIPPLED is declarable before it is readable
+
+`batch_manifests.BAR_FILL_PATTERNS` now accepts `STIPPLED`, and
+`mark_readers.read_monochrome_bar_panel` refuses a series that declares it, by
+name, with the reason.
+
+That combination is deliberate. Without the word, whoever writes publication
+127's manifest has to declare the nearest lie — `HATCHED`, on a fill that reads
+0.144–0.157 against hatching's 0.262–0.318 — and a lie in the manifest is the
+one class of error the QC layer cannot catch, because every check downstream
+agrees with it. With the word but no refusal, the absolute-banded classifier
+would put the bar in whichever band it happened to land in, which on this figure
+is `HATCHED` again, silently. Refusing by name leaves the cells unread and
+visible, which is the only honest state until the reader carries the identity
+above.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -1784,11 +1849,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 70 |
-| `test_mono_bar.py` | 26 |
+| `test_measure_mono_bars.py` | 85 |
+| `test_mono_bar.py` | 32 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1452** |
+| **total** | **1473** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

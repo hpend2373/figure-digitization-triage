@@ -108,7 +108,14 @@ UNRELEASED_MARK_TYPES = {
 MARKER_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "DIAMOND", "NONE")
 MARKER_FILLS = ("OPEN", "FILLED", "ANY")
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED", "NONE")
-BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "OPEN", "NONE")
+#: STIPPLED is here and the reader does not implement it yet, on purpose. The
+#: alternative is a manifest that cannot say what publication 127 prints, which
+#: forces whoever writes it to declare the nearest lie - HATCHED, on a fill that
+#: reads 0.15 against hatching's 0.26-0.32 - and a lie in the manifest is the
+#: one error the QC layer cannot catch, because every downstream check agrees
+#: with it. Declaring STIPPLED is refused by `classify_bar_fill` with a named
+#: reason, so the cells come back unread and visible rather than wrong.
+BAR_FILL_PATTERNS = ("SOLID", "HATCHED", "STIPPLED", "OPEN", "NONE")
 #: The built-in BAR_COLOR masks, lower case, as `bar_reader.colour_masks` keys
 #: them. Kept here rather than imported so this module stays free of numpy and
 #: cv2; `test_bar_reader.py` asserts the two definitions agree, so adding a mask

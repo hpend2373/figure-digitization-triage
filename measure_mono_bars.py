@@ -833,6 +833,7 @@ def measure_panel(spec):
         return [dict(figure=spec["tag"], group=None, stroke=scale.as_dict(),
                      error="STROKE_SCALE_UNRESOLVED")]
     stroke = scale.value_px
+    figure_id = spec.get("figure_id", spec["tag"])
     for label, gx in spec["anchors"].items():
         gw = spec["group_window"]
         window = (max(x0, int(gx) - gw), min(x1, int(gx) + gw + 1))
@@ -894,8 +895,9 @@ def measure_panel(spec):
             continue
         prints, bounds = footprints_from_seed(segments, len(fills))
         for k, fp in enumerate(prints):
-            rec = dict(figure=spec["tag"], group=label, slot=k,
-                       declared=fills[k], stroke_px=stroke, direction=direction)
+            rec = dict(figure=spec["tag"], figure_id=figure_id, group=label,
+                       slot=k, declared=fills[k], stroke_px=stroke,
+                       direction=direction)
             if fp is None:
                 rec["error"] = "NO_SEED_SUPPORT"
                 records.append(rec)
@@ -979,7 +981,7 @@ def builtin_specs():
         dict(tag="397_fig3_P3_MEN", path=os.path.join(HERE, "397_fig3.jpeg"),
              box=[118, 480, 90, 470], ticks=[[150.0, 101.0], [50.0, 465.0]],
              anchors={"PRE": 187, "POST": 390}, fills=["SOLID", "HATCHED"],
-             group_window=75, baseline=50.0),
+             group_window=75, baseline=50.0, figure_id="397_fig3"),
         # The second panel of the SAME figure, four pixels of axis apart from
         # the first. Sharing one calibration between them put this one's
         # baseline below its own bars and returned nothing for all four of its
@@ -989,7 +991,7 @@ def builtin_specs():
         dict(tag="397_fig3_P3_WOMEN", path=os.path.join(HERE, "397_fig3.jpeg"),
              box=[620, 1010, 88, 466], ticks=[[150.0, 95.0], [50.0, 460.0]],
              anchors={"PRE": 720, "POST": 920}, fills=["SOLID", "HATCHED"],
-             group_window=75, baseline=50.0),
+             group_window=75, baseline=50.0, figure_id="397_fig3"),
     ]
     truth = os.path.join(HERE, "mono_bar_fixture_truth.json")
     if os.path.exists(truth):
@@ -1091,3 +1093,173 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+#: What each printed word MEANS about the interior, as a relation rather than a
+#: number. Nothing here is a measurement, and nothing here is figure-specific:
+#: these are the properties that make the words the words.
+#:
+#:   OPEN      the interior is paper - it has the LEAST ink of the group
+#:   SOLID     the interior is ink - it has the MOST
+#:   HATCHED   continuous strokes, so every row of the interior is crossed
+#:   STIPPLED  isolated islands, so some rows of the interior are blank
+#:
+#: The first two are relations WITHIN a group and say nothing about absolute
+#: density; the last two are structural and say nothing about which is darker.
+#: That matters: a dense stipple can carry more ink than a sparse hatch, so
+#: ordering all four by ink would be a claim about typesetting, not about the
+#: words. The measured corpus happens to run OPEN 0.000, STIPPLED 0.14-0.16,
+#: HATCHED 0.26-0.32, SOLID 0.73-1.00, and the identity does not rely on it.
+FILL_VOCABULARY = ("OPEN", "STIPPLED", "HATCHED", "SOLID")
+
+
+def _sample(rec):
+    """The three numbers the identity is decided on, or None."""
+    if "ink_mass" not in rec or "t128" not in rec:
+        return None
+    return dict(ink=float(rec["ink_mass"]),
+                rows_all_inked=float(rec["t128"]["row_coverage_min"]) > 0.0,
+                segments=float(rec["t128"]["segment_density"]))
+
+
+def _assign_group(samples, declared):
+    """One slot to one pattern, from the group's own ink and structure.
+
+    `samples` is {slot: sample} and `declared` the multiset of patterns the
+    group is supposed to contain. Returns {slot: pattern} or None - and None is
+    the answer whenever the assignment is not FORCED, because the alternative is
+    naming a series by where it sits.
+    """
+    if len(samples) != len(declared) or len(set(declared)) != len(declared):
+        return None                # a repeated fill cannot identify anything
+    left, want = dict(samples), list(declared)
+    by_ink = sorted(left, key=lambda s: left[s]["ink"])
+    out = {}
+    if "OPEN" in want:
+        out[by_ink[0]] = "OPEN"
+        want.remove("OPEN")
+    if "SOLID" in want:
+        out[by_ink[-1]] = "SOLID"
+        want.remove("SOLID")
+    if len(set(out.values())) != len(out):
+        return None
+    rest = [s for s in by_ink if s not in out]
+    if sorted(want) == ["HATCHED", "STIPPLED"]:
+        hatched = [s for s in rest if left[s]["rows_all_inked"]]
+        stippled = [s for s in rest if not left[s]["rows_all_inked"]]
+        if len(hatched) != 1 or len(stippled) != 1:
+            return None
+        out[hatched[0]], out[stippled[0]] = "HATCHED", "STIPPLED"
+    elif len(want) == 1 and len(rest) == 1:
+        out[rest[0]] = want[0]
+    elif want or rest:
+        return None
+    return out if len(out) == len(samples) else None
+
+
+def fill_identity(records):
+    """Name the series of one FIGURE by fill, from that figure's own samples.
+
+    A figure, not a panel. Publication 127's Figure 4 is three sub-panels, and
+    its middle panel alone offers one sample of each pattern - one sample has no
+    spread, a figure with no spread has no estimate of its own measurement
+    noise, and nothing can be matched against a prototype of zero width. Pooled
+    across the figure the same patterns have a spread of 0.00-0.02 against gaps
+    of 0.58, and the three cells that panel could not calibrate on its own are
+    matched immediately. `figure_id` is what says which panels are one figure;
+    it defaults to the panel tag, which makes a lone panel its own figure.
+
+    Two stages, because a bar too short to sample a fill would otherwise take
+    the identity of whichever slot it sits in.
+
+    **Calibrate.** Only groups where EVERY slot yielded a fill can be assigned
+    from the relations above, because "least ink in the group" is not a
+    statement about a group with a hole in it. Those groups give the figure its
+    own prototype range for each pattern.
+
+    **Match.** Every remaining sample is matched against those ranges, and only
+    when it falls inside exactly one of them.
+
+    The separation test needs no threshold. Each pattern's samples across the
+    figure have a SPREAD, and each pair of patterns has a GAP; the vocabulary is
+    established only when every gap is larger than the spreads it separates. On
+    publication 127 the spreads are 0.00-0.02 and the smallest gap is 0.58. A
+    pattern seen once has no spread of its own and inherits the widest spread in
+    the figure, so it is held to the same standard rather than to none.
+
+    Returns (identities, verdict). `identities` maps (group, slot) to a pattern
+    for every cell that has one. `verdict["status"]` is ESTABLISHED, AMBIGUOUS
+    or NOT_ENOUGH_COMPLETE_GROUPS, and no identity is returned unless it is
+    ESTABLISHED.
+    """
+    groups, declared = {}, {}
+    for rec in records:
+        if rec.get("group") is None or rec.get("slot") is None:
+            continue
+        # Panel AND group. The three sub-panels of publication 127's Figure 4
+        # each have a SUPINE and a STANDING group, and pooling them by name
+        # alone would make one group out of three.
+        key = (rec["figure"], rec["group"])
+        groups.setdefault(key, {})[rec["slot"]] = _sample(rec)
+        declared.setdefault(key, {})[rec["slot"]] = rec.get("declared")
+
+    complete, partial = {}, {}
+    for key, slots in groups.items():
+        if all(v is not None for v in slots.values()):
+            complete[key] = slots
+        else:
+            partial[key] = slots
+
+    assigned, unassignable = {}, []
+    for key, slots in complete.items():
+        want = [declared[key][s] for s in sorted(slots)]
+        got = _assign_group(slots, want)
+        if got is None:
+            unassignable.append(key)
+            continue
+        for slot, pattern in got.items():
+            assigned[(key, slot)] = pattern
+
+    if not assigned:
+        return {}, dict(status="NOT_ENOUGH_COMPLETE_GROUPS",
+                        complete_groups=len(complete),
+                        unassignable_groups=sorted(unassignable))
+
+    pooled = {}
+    for (key, slot), pattern in assigned.items():
+        pooled.setdefault(pattern, []).append(groups[key][slot]["ink"])
+    spread = {p: max(v) - min(v) for p, v in pooled.items()}
+    floor = max(spread.values())
+
+    order = sorted(pooled, key=lambda p: min(pooled[p]))
+    gaps, failures = [], []
+    for a, b in zip(order, order[1:]):
+        gap = min(pooled[b]) - max(pooled[a])
+        need = max(spread[a], spread[b], floor)
+        gaps.append(dict(between=[a, b], gap=round(gap, 4), needed=round(need, 4)))
+        if gap <= need:
+            failures.append("%s/%s gap %.4f against spread %.4f" % (a, b, gap, need))
+
+    verdict = dict(status="ESTABLISHED" if not (failures or unassignable)
+                   else "AMBIGUOUS",
+                   complete_groups=len(complete),
+                   unassignable_groups=sorted(unassignable),
+                   prototypes={p: [round(min(v), 4), round(max(v), 4)]
+                               for p, v in sorted(pooled.items())},
+                   separation=gaps, failures=failures)
+    if verdict["status"] != "ESTABLISHED":
+        return {}, verdict
+
+    matched = 0
+    for key, slots in partial.items():
+        for slot, sample in slots.items():
+            if sample is None:
+                continue
+            hits = [p for p, v in pooled.items()
+                    if min(v) - floor <= sample["ink"] <= max(v) + floor]
+            if len(hits) == 1:
+                assigned[(key, slot)] = hits[0]
+                matched += 1
+    verdict["matched_against_prototypes"] = matched
+    verdict["cells_identified"] = len(assigned)
+    return assigned, verdict

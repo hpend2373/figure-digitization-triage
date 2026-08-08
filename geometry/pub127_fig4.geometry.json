@@ -60,7 +60,8 @@
   "expected_note": "The bands are the MIDPOINTS of the gaps between the fills as measured on this figure - OPEN reads 0.000, STIPPLED 0.144-0.157, SOLID 0.734-0.754 - not a fit to those numbers. A band drawn at the gap admits a different render or DPI and still excludes the neighbouring fill. These are ink_mass (threshold-free, one minus the mean grey of the interior); the production reader's _FILL_BANDS are binary density at threshold 128 and are NOT the same feature, so the two sets of numbers must not be compared directly. Under the production rule this figure's SOLID bars land at about 0.70, in the 0.60-0.72 dead zone between HATCHED and SOLID rather than inside either.",
   "source_pdf_note": "Not recorded. raster_sha256 pins WHICH RENDER the geometry was measured on; it does not pin which publisher PDF bytes produced that render, so a second person with a different copy of the paper cannot prove they regenerated the same page. forward_test_127_mono_bar.py prints the gap rather than passing over it.",
   "expected_stroke_px": 3,
-  "expected_stroke_note": "Per panel, not per figure. The three sub-panels are one figure at one DPI and still measure 3, 3 and 4, because the printed rule lands on the pixel grid differently in each: publication 397's two panels differ the same way (1 px and 2 px) in a raster the package ships. An invariant that all panels of a figure agree is therefore false, and asserting it would have hidden the per-panel value - which is the number that actually matters, since every threshold in the reader is a multiple of it."
+  "expected_stroke_note": "Per panel, not per figure. The three sub-panels are one figure at one DPI and still measure 3, 3 and 4, because the printed rule lands on the pixel grid differently in each: publication 397's two panels differ the same way (1 px and 2 px) in a raster the package ships. An invariant that all panels of a figure agree is therefore false, and asserting it would have hidden the per-panel value - which is the number that actually matters, since every threshold in the reader is a multiple of it.",
+  "figure_id": "pub127_fig4"
  },
  {
   "tag": "pub127_fig4_normal",
@@ -119,7 +120,8 @@
     ]
    }
   },
-  "expected_stroke_px": 3
+  "expected_stroke_px": 3,
+  "figure_id": "pub127_fig4"
  },
  {
   "tag": "pub127_fig4_lowfreq",
@@ -178,6 +180,7 @@
     ]
    }
   },
-  "expected_stroke_px": 4
+  "expected_stroke_px": 4,
+  "figure_id": "pub127_fig4"
  }
 ]

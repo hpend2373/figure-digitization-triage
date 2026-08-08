@@ -614,6 +614,43 @@ def trim_to_own_bar(gray, box, window, footprint, edge_row, zero_row, stroke,
     return (fx0 + lo, fx0 + hi), sorted(dropped), ""
 
 
+def refine_footprint(footprint, trace, trim):
+    """One trim, one re-trace, one CONFIRMING trim - as a state machine.
+
+    Separated from `measure_panel` so the two refusals it can reach are testable
+    without a raster that produces them. Neither is reachable end to end: a bleed
+    wide enough to spend the trim budget is too faint to seed into the footprint
+    in the first place, and a second pass that moves the footprint again needs a
+    figure nobody has found. Injecting `trace` and `trim` pins the CONTRACT -
+    which refusal, under which name, carrying which record - and the primitives
+    they stand in for are pinned separately.
+
+    Returns (footprint, edge, method, dropped, error, detail).
+    """
+    edge, method = trace(footprint)
+    first, dropped, why = trim(footprint, edge)
+    if why:
+        return (footprint, edge, method, dropped, why,
+                dict(convergence_stage="FIRST_PASS"))
+    if not dropped:
+        return footprint, edge, method, [], "", {}
+    retraced, retraced_method = trace(first)
+    again, more, why_again = trim(first, retraced)
+    if why_again or tuple(again) != tuple(first):
+        # Two different findings, and they used to share one name. An
+        # over-budget trim hands back the footprint it was given, so calling it
+        # a convergence failure produced records whose two footprints AGREE
+        # while the error says they did not.
+        return (first, retraced, retraced_method, sorted(set(dropped) | set(more)),
+                why_again or "FOOTPRINT_DID_NOT_CONVERGE",
+                dict(convergence_stage="SECOND_PASS",
+                     first_trimmed_footprint=[int(first[0]), int(first[1])],
+                     second_trimmed_footprint=[int(again[0]), int(again[1])],
+                     provisional_edge_row_panel=round(float(edge), 1),
+                     retraced_edge_row_panel=round(float(retraced), 1)))
+    return first, retraced, retraced_method, dropped, "", {}
+
+
 #: What an inked structure beyond the bar end turns out to be. The distinction
 #: matters because only the first of these means the walk was wrong.
 REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "BAR_EDGE_REMNANT",
@@ -1090,49 +1127,22 @@ def measure_panel(spec):
                 rec["error"] = "NO_SEED_SUPPORT"
                 records.append(rec)
                 continue
-            # The bar end, measured crudely and only so the interior can be
-            # sampled: this script does not implement the reader's walk.
-            edge, method = trace_extent(
-                gray, box, window, fp, zero, stroke, direction=direction)
-            # Then trim the footprint against that extent and re-trace, because
-            # a footprint holding four columns of the bar next door traces the
-            # neighbour's outline. One iteration: the trim needs an extent and
-            # the extent needs a footprint, and a second round that moved either
-            # again would mean the two do not agree - which is a refusal, not a
-            # third round.
-            first, dropped, refusal = trim_to_own_bar(
-                gray, box, window, fp, edge, zero, stroke, direction=direction)
+            # The bar end and the footprint, refined against each other.
+            fp0 = fp
+            fp, edge, method, dropped, refusal, detail = refine_footprint(
+                fp0,
+                lambda f: trace_extent(gray, box, window, f, zero, stroke,
+                                       direction=direction),
+                lambda f, e: trim_to_own_bar(gray, box, window, f, e, zero,
+                                             stroke, direction=direction))
             if dropped:
                 rec["trimmed_columns"] = dropped
-                rec["provisional_footprint"] = [int(fp[0]), int(fp[1])]
+                rec["provisional_footprint"] = [int(fp0[0]), int(fp0[1])]
             if refusal:
                 rec["error"] = refusal
+                rec.update(detail)
                 records.append(rec)
                 continue
-            if dropped:
-                retraced, method = trace_extent(
-                    gray, box, window, first, zero, stroke, direction=direction)
-                # The SECOND pass, which the first version of this only claimed
-                # in a comment. The trim needs an extent and the extent needs a
-                # footprint, so one round of each proves nothing on its own: if
-                # trimming again from the re-traced extent moves the footprint,
-                # the two do not agree and there is no bar here to measure. The
-                # guard that stood in for this only fired when the footprint had
-                # become narrower than four strokes, which is a different fact
-                # under the same name.
-                again, more, why = trim_to_own_bar(
-                    gray, box, window, first, retraced, zero, stroke,
-                    direction=direction)
-                if why or tuple(again) != tuple(first):
-                    rec["error"] = "FOOTPRINT_DID_NOT_CONVERGE"
-                    rec["first_trimmed_footprint"] = [int(first[0]), int(first[1])]
-                    rec["second_trimmed_footprint"] = [int(again[0]), int(again[1])]
-                    rec["provisional_edge_row_panel"] = round(edge, 1)
-                    rec["retraced_edge_row_panel"] = round(retraced, 1)
-                    rec["trimmed_columns"] = sorted(set(dropped) | set(more))
-                    records.append(rec)
-                    continue
-                fp, edge = first, retraced
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
                                     direction=direction)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]

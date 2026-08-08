@@ -1982,6 +1982,30 @@ touching-bars scenario. "Something was trimmed and the mean survived" passes
 just as well when the trim ate a third of the bar, because a solid bar's top
 does not move when you narrow it.
 
+### Both refusals, pinned
+
+Two branches the trim can reach were implemented and not tested, and neither is
+reachable from a raster: a bleed wide enough to spend the trim budget is too
+faint to seed into a footprint at all, and a second pass that moves the footprint
+again needs a figure nobody has found. So they are pinned in two places instead.
+
+`trim_to_own_bar` takes a footprint, so `EXCESSIVE_TRIM` is pinned by calling the
+primitive directly with a synthetic occupancy profile - a 40-column footprint
+whose right eleven columns fade away - and asserting that the footprint comes
+back untouched with the refusal named, and that the same figure inside budget
+trims cleanly.
+
+`refine_footprint` is the orchestration - one trim, one re-trace, one confirming
+trim - extracted so its state transitions can be driven by fakes. That pins which
+refusal, under which name, carrying which record: a footprint that settles is
+used with both passes run, one that keeps moving is `FOOTPRINT_DID_NOT_CONVERGE`
+with both footprints and both edge rows on the record, and a trim that overruns
+its budget keeps the name `EXCESSIVE_TRIM` on either pass with
+`convergence_stage` saying which. That last one was a real defect: an over-budget
+trim hands back the footprint it was given, so filing it as a convergence failure
+produced records claiming the two passes disagreed while showing two identical
+footprints.
+
 ### And the structure that was left
 
 Trimming was not enough for that cell, and the 2 px by 14 row structure at
@@ -2066,11 +2090,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 123 |
+| `test_measure_mono_bars.py` | 133 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1525** |
+| **total** | **1535** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

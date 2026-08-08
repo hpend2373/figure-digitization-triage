@@ -1041,6 +1041,98 @@ try:
     check("it reads its own height",
           abs(mine.get("value", -99) - 40.0) <= 1.0, repr(mine.get("value")))
 
+    # -------------------------------------------------- 26k. the trim budget
+    #
+    # `trim_to_own_bar` takes a footprint, so the budget branch can be pinned by
+    # calling it directly. Building an end-to-end figure for it does not work: a
+    # bleed wide enough to spend the budget is too faint to seed into the
+    # footprint in the first place, so the whole pipeline never offers the
+    # primitive the input that reaches this branch.
+    #
+    # REVERT: return the trimmed footprint instead of EXCESSIVE_TRIM. A bar whose
+    # footprint is a quarter somebody else's gets measured from whatever columns
+    # survived, with nothing on the record to say so.
+    print("\na footprint a quarter made of the bar next door is refused")
+    stroke_px, e_row, z_row = 2, 10, 110
+    canvas = np.full((120, 60), 255, np.uint8)
+    canvas[e_row + stroke_px:z_row - stroke_px, 0:29] = 0        # this bar
+    depth = (z_row - stroke_px) - (e_row + stroke_px)
+    for col, share in enumerate([0.40, 0.16, 0.06, 0.025, 0.01, 0.004,
+                                 0.002, 0.001, 0.001, 0.001, 0.001], start=29):
+        canvas[e_row + stroke_px:e_row + stroke_px + max(1, int(depth * share)),
+               col] = 0                                          # fading bleed
+    kept, gone, reason = M.trim_to_own_bar(
+        canvas, (0, 60, 0, 120), (0, 60), (0, 39), e_row, z_row, stroke_px)
+    check("more than a quarter of the footprint would have to go",
+          len(gone) > 40 // 4, "%d columns" % len(gone))
+    check("so the trim is refused by name", reason == "EXCESSIVE_TRIM",
+          repr(reason))
+    check("and the footprint is handed back untouched", tuple(kept) == (0, 39),
+          repr(kept))
+    kept2, gone2, reason2 = M.trim_to_own_bar(
+        canvas, (0, 60, 0, 120), (0, 60), (0, 33), e_row, z_row, stroke_px)
+    check("the same figure inside budget trims and is not refused",
+          not reason2 and tuple(kept2) != (0, 33) and gone2,
+          "%r %r %r" % (kept2, len(gone2), reason2))
+
+    # -------------------------------------------------- 26l. the two refusals
+    #
+    # `refine_footprint` is a state machine over trace and trim, so the two
+    # refusals it can reach are pinned with fakes. Neither is reachable from a
+    # raster: a bleed wide enough to spend the trim budget is too faint to seed
+    # into the footprint at all, and a second pass that moves the footprint again
+    # needs a figure nobody has found. What is tested here is the CONTRACT -
+    # which refusal, under which name, carrying which record - and the primitives
+    # it stands in for are pinned separately just above.
+    print("\nthe footprint and the extent have to agree before either is used")
+    trace_calls = []
+
+    def fake_trace(fp):
+        trace_calls.append(tuple(fp))
+        return (100.0 + len(trace_calls), "SIDE_TRACK")
+
+    def settles(fp, edge):
+        return ((0, 18), [19, 20], "") if tuple(fp) == (0, 20) else (tuple(fp), [], "")
+
+    got = M.refine_footprint((0, 20), fake_trace, settles)
+    check("a footprint that settles is used, with both passes run",
+          got[0] == (0, 18) and not got[4] and len(trace_calls) == 2,
+          "%r %r" % (got, trace_calls))
+
+    def keeps_moving(fp, edge):
+        return ((fp[0], fp[1] - 2), [fp[1] - 1, fp[1]], "")
+
+    got = M.refine_footprint((0, 20), fake_trace, keeps_moving)
+    check("a footprint that keeps moving is refused",
+          got[4] == "FOOTPRINT_DID_NOT_CONVERGE", repr(got[4]))
+    check("and the record carries both footprints and both edge rows",
+          got[5].get("convergence_stage") == "SECOND_PASS" and
+          got[5]["first_trimmed_footprint"] != got[5]["second_trimmed_footprint"] and
+          got[5]["provisional_edge_row_panel"] != got[5]["retraced_edge_row_panel"],
+          repr(got[5]))
+
+    # REVERT: `rec["error"] = "FOOTPRINT_DID_NOT_CONVERGE"` unconditionally in
+    # the second pass. An over-budget trim hands back the footprint it was
+    # given, so the record then says the two passes disagree while showing two
+    # footprints that are identical.
+    def over_budget_second(fp, edge):
+        return (((0, 18), [19, 20], "") if tuple(fp) == (0, 20)
+                else (tuple(fp), list(range(10, 19)), "EXCESSIVE_TRIM"))
+
+    got = M.refine_footprint((0, 20), fake_trace, over_budget_second)
+    check("a second pass over budget keeps its own name",
+          got[4] == "EXCESSIVE_TRIM", repr(got[4]))
+    check("and says which pass it happened on",
+          got[5].get("convergence_stage") == "SECOND_PASS", repr(got[5]))
+
+    def over_budget_first(fp, edge):
+        return (tuple(fp), [19, 20], "EXCESSIVE_TRIM")
+
+    got = M.refine_footprint((0, 20), fake_trace, over_budget_first)
+    check("a first pass over budget is named on the first pass",
+          got[4] == "EXCESSIVE_TRIM"
+          and got[5].get("convergence_stage") == "FIRST_PASS", repr(got))
+
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(

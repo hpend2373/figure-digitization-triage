@@ -1598,10 +1598,16 @@ stroke at 124 px, and since every threshold in the file is a multiple of the
 stroke, that panel then read one bar out of three. Half the panel width was also
 a number the script had no business choosing — 397's panel box holds no rule
 longer than a third of its width. The panel's own longest run is the reference
-instead, and the band is the rows contiguous with it. 397 reads 2 px, the
-synthetic fixture 2 px, and the three sub-panels of publication 127's Figure 4 —
-same figure, same DPI, so they must agree — all read 3 px. Taking the thickest
-band anywhere in the panel read 1, 3 and 4.
+instead, and the band is the rows contiguous with it. Measured this way — off
+the panel's longest line — 397 reads 2 px and the synthetic fixture 2 px.
+
+That measurement was superseded in the same round by the baseline-bound one
+below, which asks a different question and gets different answers: 397's MEN
+panel reads 1 px and its WOMEN panel 2 px, and publication 127's three
+sub-panels read 3, 3 and 4. Neither pair is a contradiction. The printed axis
+lands on the pixel grid differently in every panel, so the stroke is a property
+of the panel as rendered, and "all panels of a figure share a stroke" is false.
+It is pinned per panel instead, in the geometry and in the forward tests.
 
 **The seed band clears the rule's fade, not its core.** The stroke is the rule's
 solid core; its inked extent at threshold 128 is wider. Standing one core-stroke
@@ -1654,9 +1660,13 @@ wrong by a factor of two does not fail, it drifts. `measure_panel` now computes
 the axis calibration BEFORE the stroke and hands the calibrated zero to
 `stroke_scale`, which searches 2% of the panel height around it and refuses if
 nothing rule-shaped is there. On the five panels measured here the rule sits
-within one pixel of the calibrated zero. 397's own baseline turns out to be 1 px
-- the 2 px it had been using was measured off a gridline 165 rows away - and
-every value it reads is unchanged.
+within one pixel of the calibrated zero. 397's own baseline turns out to be 1 px in
+the MEN panel and 2 px in the WOMEN panel - the 2 px it had been using globally
+was measured off a gridline 165 rows away - and every value it reads is
+unchanged. The two panels differ because the printed axis lands on the pixel
+grid differently in each, so "all panels of a figure share a stroke" is FALSE
+and is not asserted anywhere; publication 127 reads 3, 3 and 4 for the same
+reason, pinned per panel in its geometry.
 
 **Row coordinates now name their frame.** `remote_support` works inside the
 panel crop, so its rows are panel-relative, and `cap_px` handed one to a caller
@@ -1690,6 +1700,70 @@ the raster hash pins which render was measured, not which publisher PDF bytes
 produced that render, and the forward test prints the gap rather than passing
 over it.
 
+## The error bars publication 127 had all along
+
+The prototype read 18 means from publication 127 and **zero** dispersions, and
+nothing said so, because the forward test checked means and fills only. The
+figure has 18 error bars. What it does not have is caps 30% of the bar wide,
+which is what the cap test demanded - a fraction fitted to the synthetic fixture
+in this package, whose caps are 0.70 of the bar. Publication 397 draws its caps
+at 0.18 of the bar and publication 127 at 0.17-0.19, so the test found none of
+either figure's error bars and the prototype had been reporting no dispersion
+for both since it was written.
+
+An error bar is a NARROW stem carrying a WIDE cap, and that is the whole of the
+distinction. Measured against its own stem instead of against the bar, every cap
+in all three figures reads between 5 and 11 times the stem it hangs from, and
+every non-cap row reads 1.0-1.2. Three further things had to be measured rather
+than assumed before that worked:
+
+**Where the bar ends and the error bar begins.** Skipping a fixed stroke of rows
+is right when the bar's top rule is one stroke thick and wrong when the whole
+error bar is short: on publication 127's SUPINE bars the stem is a SINGLE row
+between the top rule and the cap, and the fixed skip stepped over it. The scan
+now walks off the bar - past rows still as wide as the bar - and starts at the
+first row that is not the bar.
+
+**Which rows a cap may occupy.** "More than a stroke from the edge" was
+consistent with the fixed skip and stopped being so once the skip was measured;
+on a bar whose entire error bar is four rows it excluded the cap itself. It is
+"beyond the bar" now, which is where the measured start already ends.
+
+**The bar's own antialiased edge.** Nothing is printed thinner than one stroke,
+so a sub-stroke component lying against the bar end is the row the walk stopped
+just below, not a structure - `BAR_EDGE_REMNANT`. Both conditions are needed: a
+one-pixel mark a hundred pixels away is a glyph and is still classified as one.
+
+Publication 127 now yields 18 means and 18 SEs, publication 397 eight means and
+five, and the synthetic fixture's SEs land within 0.39 units of the 6.0, 5.0 and
+4.0 they were drawn at.
+
+## Two panels of one figure, two strokes
+
+Adding publication 397's WOMEN panel to the prototype - it had only ever
+measured MEN - showed immediately that the two panels of one JPEG measure
+different strokes: MEN's axis is one row at 118 px, WOMEN's is two rows at
+116 px. Publication 127's three sub-panels read 3, 3 and 4 for the same reason.
+The stroke is a property of the panel as rendered, "all panels of a figure agree"
+is false, and the forward tests pin it per panel instead - which is the stronger
+check anyway, since an invariant passes when every panel is wrong together.
+
+The WOMEN panel also carries three defects that are PINNED RATHER THAN FIXED, in
+`forward_test_397_mono_geometry.py`: one bar whose extent does not resolve
+(correctly refused - the ink above it really is bar), and three cells whose caps
+are not found, because the stem there is one to two pixels and runs off the
+bar's centre line. Its four means are within 0.55 mmHg of the eye reading
+regardless. Recording them is what stops them being rediscovered a third time.
+
+## Series identity is not slot order
+
+Two of publication 127's bars are 15 px tall, have a mean and an SE, and have no
+measurable fill. A BAR_MONO series is identified BY its fill, so those two have a
+geometry and no identity, and calling them OPEN and SOLID because of where they
+sit would be identifying a series by position. Records carry
+`identity_status`; the figure is 18 geometries and 16 identities, and the
+forward test asserts both numbers rather than reporting 18 cells read.
+
 `test_measure_mono_bars.py` also draws the fill publication 127 broke on and
 that no fixture in this package had - a STIPPLED bar, interior under a tenth
 inked, four blank rows in every six, over 180 px tall - and renders the whole
@@ -1710,18 +1784,20 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 57 |
+| `test_measure_mono_bars.py` | 70 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 19 |
-| **total** | **1439** |
+| `test_reproducibility.py` | 20 |
+| **total** | **1452** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
-primitives), `forward_test_397_mono_bar.py`, `forward_test_127_mono_bar.py`
-(SKIPs in CI: its raster is not redistributable), and two worked examples:
+primitives), `forward_test_397_mono_bar.py` (the production reader) and
+`forward_test_397_mono_geometry.py` (the prototype, which shares none of its
+code), `forward_test_127_mono_bar.py` (SKIPs in CI: its raster is not
+redistributable), and two worked examples:
 
 - `build_id323.py` — 2 figures, 12 units, 107 values, 2 problems, both the known
   `TIMEPOINT=DI19` hole where two bars overlap past separating

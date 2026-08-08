@@ -505,7 +505,114 @@ try:
           all(f[0] < 0.05 < f[1] < 0.4 < f[2] for f in fills.values()),
           repr(fills))
 
-    # -------------------------------------------------- 15. the contract
+    # -------------------------------------------------- 15. a real cap ratio
+    #
+    # REVERT: `if width < floor` back to `span < 0.30` with span as a fraction
+    # of the BAR. Every error bar in both real figures disappears - 397 draws
+    # its caps at 0.18 of the bar and publication 127 at 0.17-0.19 - and the
+    # figures report no dispersion at all. The 0.30 was fitted to the fixture in
+    # this file, whose caps are 0.70 of the bar, which is why nothing noticed.
+    print("\na cap is wide next to its stem, not next to the bar")
+    img = blank()
+    solid(img, 0, 60)
+    errorbar(img, 0, 60, length=24, cap_units=0.20)
+    rec = only(M.measure_panel(spec(write(img, "narrowcap", TMP), ["SOLID"])))
+    caps = [m for m in rec.get("remote", []) if m["kind"] == "ERRORBAR_CAP"]
+    check("a cap a fifth of the bar wide is still a cap", len(caps) == 1,
+          repr(kinds(rec)))
+    check("and it is several times wider than the stem it hangs from",
+          caps and caps[0]["cap_width_px"] >= 3 * caps[0]["stem_width_px"],
+          repr(caps))
+    check("the dispersion is the one it was drawn at",
+          abs(rec.get("dispersion", -99) - 25.5 / PX_PER_UNIT) <= 0.5,
+          repr(rec.get("dispersion")))
+
+    # -------------------------------------------------- 16. a one-row stem
+    #
+    # REVERT: `scan = range(edge + step * max(1, stroke), ...)`. On a short bar
+    # the whole error bar is a single row of stem between the top rule and the
+    # cap, a fixed one-stroke skip steps over it, and the cap has nothing to
+    # hang from. Four of publication 127's cells are drawn this way.
+    print("\nan error bar shorter than the bar's own top rule")
+    img = blank()
+    solid(img, 0, 12)
+    errorbar(img, 0, 12, length=1, cap_units=0.20)
+    rec = only(M.measure_panel(spec(write(img, "shortbar", TMP), ["SOLID"])))
+    check("the cap is found through a single row of stem",
+          "ERRORBAR_CAP" in kinds(rec), repr(kinds(rec)))
+    check("the bar still reads its own top",
+          abs(rec.get("value", -99) - 12.0) <= 0.7, repr(rec.get("value")))
+
+    # -------------------------------------------------- 17. the bar's own edge
+    #
+    # REVERT: delete the `extent < stroke and distance <= stroke` branch. The
+    # antialiased row the walk stopped just below becomes an unidentifiable
+    # structure and the bar refuses itself. Three of publication 127's cells did
+    # this the moment the scan start was measured instead of assumed.
+    print("\nthe bar's own antialiased edge is not a separate structure")
+    img = blank()
+    solid(img, 0, 40)
+    img[top_row(40) - 1, 70:110] = 90     # one row of ringing: dark, sub-stroke
+    rec = only(M.measure_panel(spec(write(img, "ring1", TMP), ["SOLID"])))
+    check("the remnant does not refuse the bar", rec.get("error") is None,
+          "%r %r" % (rec.get("error"), kinds(rec)))
+    check("and it is named for what it is",
+          "UNRESOLVED_REMOTE_SUPPORT" not in kinds(rec), repr(kinds(rec)))
+
+    # -------------------------------------------------- 18. an impostor rule
+    #
+    # REVERT: `seed = a + argmax(runs[a:b])` picks the LONGEST run in the search
+    # window, and a gridline just above the baseline that is exactly as long
+    # ties - argmax then takes whichever comes first, which going down the page
+    # is the gridline. Distance to the calibrated zero has to win before length
+    # does.
+    print("\na heavier gridline just above the baseline is not the baseline")
+    img = blank()
+    solid(img, 0, 40)
+    img[BASE - 15:BASE - 7, X0 + 5:X1 - 5] = 0           # 8 px thick, same span
+    gray = np.asarray(Image.open(write(img, "impostor", TMP)).convert("L"))
+    zero = BASE - Y0
+    check("the rule containing the calibrated zero wins over the longer-or-equal one",
+          M.stroke_scale(gray, [X0, X1, Y0, Y1], baseline_row=zero).value_px == STROKE,
+          repr(M.stroke_scale(gray, [X0, X1, Y0, Y1], baseline_row=zero)))
+    check("and without the baseline it is the gridline that is measured",
+          M.stroke_scale(gray, [X0, X1, Y0, Y1]).value_px == 8,
+          repr(M.stroke_scale(gray, [X0, X1, Y0, Y1])))
+
+    # -------------------------------------------------- 19. identity
+    print("\na bar with no measurable fill has a geometry and no identity")
+    img = blank()
+    solid(img, 0, 60)
+    outline(img, 1, 4)
+    got = M.measure_panel(spec(write(img, "identity", TMP), ["SOLID", "OPEN"]))
+    tall, short = only(got, 0), only(got, 1)
+    check("the tall bar's identity is measured",
+          tall.get("identity_status") == "FILL_MEASURED",
+          repr(tall.get("identity_status")))
+    check("the short bar's is not, though its slot declares one",
+          short.get("identity_status") == "UNRESOLVED_NO_FILL",
+          repr(short.get("identity_status")))
+    check("and it still has its geometry", "value" in short)
+
+    # -------------------------------------------------- 20. a ragged rule
+    #
+    # REVERT: `if runs[seed] < max(1, tolerance * strongest)` back to
+    # `< 1`. A printed rule's rows do not all carry the same run - publication
+    # 127's axis reads 182, 456, 654, 1207, 844, 1072 down its six rows - and a
+    # SHORT row seeds a LOOSE band, because the tolerance is a fraction of its
+    # own small length. The loose band swallows rows the rule does not own,
+    # reaches the calibrated zero, and wins on containment: 3 px became 7.
+    print("\na short row of a rule may not speak for the whole rule")
+    img = blank()
+    img[BASE:BASE + STROKE, :] = 255                    # replace the plain rule
+    for offset, run in ((-3, 40), (-2, 150), (-1, 390), (0, 280), (1, 350), (2, 120)):
+        img[BASE + offset, X0 + 5:X0 + 5 + run] = 0
+    gray = np.asarray(Image.open(write(img, "ragged", TMP)).convert("L"))
+    got = M.stroke_scale(gray, [X0, X1, Y0, Y1], baseline_row=BASE + 2 - Y0)
+    check("the rule is measured from its strong rows, not its weakest",
+          got.value_px == 3, repr(got))
+
+    # -------------------------------------------------- 21. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")
     for name, rec_ in (("gap", only(M.measure_panel(spec(
             os.path.join(TMP, "gap.png"), ["HATCHED"])))),

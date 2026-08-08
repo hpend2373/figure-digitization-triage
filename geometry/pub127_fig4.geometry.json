@@ -57,8 +57,10 @@
   "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held.",
   "anchor_note": "Anchors are the measured MIDPOINT of each group's outer bar strokes, per panel: the three sub-panels of this figure do not share an x-origin. One shared pair of anchors with a 300 px window put the STANDING group of the middle panel 22 px outside its own window, and footprints_from_seed then divided the visible span by three, which moved every boundary and put the stippled bar's right stroke inside the solid bar's footprint. GROUP_WINDOW_CLIPPED now refuses that instead of reading it.",
   "source_pdf_sha256": null,
-  "expected_note": "The bands are the MIDPOINTS of the gaps between the fills as measured on this figure - OPEN reads 0.000, STIPPLED 0.144-0.157, SOLID 0.734-0.754 - not a fit to those numbers. A band drawn at the gap admits a different render or DPI and still excludes the neighbouring fill. The bands mark_readers.py currently ships would put this figure's SOLID inside HATCHED.",
-  "source_pdf_note": "Not recorded. raster_sha256 pins WHICH RENDER the geometry was measured on; it does not pin which publisher PDF bytes produced that render, so a second person with a different copy of the paper cannot prove they regenerated the same page. forward_test_127_mono_bar.py prints the gap rather than passing over it."
+  "expected_note": "The bands are the MIDPOINTS of the gaps between the fills as measured on this figure - OPEN reads 0.000, STIPPLED 0.144-0.157, SOLID 0.734-0.754 - not a fit to those numbers. A band drawn at the gap admits a different render or DPI and still excludes the neighbouring fill. These are ink_mass (threshold-free, one minus the mean grey of the interior); the production reader's _FILL_BANDS are binary density at threshold 128 and are NOT the same feature, so the two sets of numbers must not be compared directly. Under the production rule this figure's SOLID bars land at about 0.70, in the 0.60-0.72 dead zone between HATCHED and SOLID rather than inside either.",
+  "source_pdf_note": "Not recorded. raster_sha256 pins WHICH RENDER the geometry was measured on; it does not pin which publisher PDF bytes produced that render, so a second person with a different copy of the paper cannot prove they regenerated the same page. forward_test_127_mono_bar.py prints the gap rather than passing over it.",
+  "expected_stroke_px": 3,
+  "expected_stroke_note": "Per panel, not per figure. The three sub-panels are one figure at one DPI and still measure 3, 3 and 4, because the printed rule lands on the pixel grid differently in each: publication 397's two panels differ the same way (1 px and 2 px) in a raster the package ships. An invariant that all panels of a figure agree is therefore false, and asserting it would have hidden the per-panel value - which is the number that actually matters, since every threshold in the reader is a multiple of it."
  },
  {
   "tag": "pub127_fig4_normal",
@@ -116,7 +118,8 @@
      1.0
     ]
    }
-  }
+  },
+  "expected_stroke_px": 3
  },
  {
   "tag": "pub127_fig4_lowfreq",
@@ -174,6 +177,7 @@
      1.0
     ]
    }
-  }
+  },
+  "expected_stroke_px": 4
  }
 ]

@@ -23,8 +23,13 @@ numbers:
   eighteen cells, sixteen with a fill and two refused for being 15 px tall
   no cell whose extent is contradicted or unresolved
   no group refused for geometry - clipped window, no seed, unclear direction
-  one stroke for all three sub-panels, because they are one figure at one DPI
-  four printed fills that do not overlap in ink mass
+  eighteen error-bar caps, each hanging off a stem, and the SE each implies
+  the stroke each panel measures, pinned per panel - NOT one shared value: the
+    three sub-panels read 3, 3 and 4 because the rule lands on the pixel grid
+    differently in each, exactly as 397's two panels read 1 and 2
+  three printed fills that do not overlap in ink mass
+  sixteen series identities, because two bars are too short to sample a fill
+    and a BAR_MONO series is identified by its fill and never by its slot
 
 **The per-cell values below are a self-measured baseline, not an independent
 reading.** They detect drift - an anchor moved, a bar tracing its neighbour
@@ -45,33 +50,34 @@ import measure_mono_bars as M                                      # noqa: E402
 
 GEOMETRY = os.path.join(HERE, "geometry", "pub127_fig4.geometry.json")
 
-#: figure, group, slot, declared fill, mean, ink mass (None = no interior).
-#: Self-measured; see the module docstring.
+#: figure, group, slot, declared fill, mean, SE, ink mass (None = no interior),
+#: identity status. Self-measured; see the module docstring.
 BASELINE = [
-    ("pub127_fig4_slow", "SUPINE", 0, "OPEN", 2.113, 0.000),
-    ("pub127_fig4_slow", "SUPINE", 1, "STIPPLED", 2.938, 0.148),
-    ("pub127_fig4_slow", "SUPINE", 2, "SOLID", 1.959, 0.754),
-    ("pub127_fig4_slow", "STANDING", 0, "OPEN", 14.897, 0.000),
-    ("pub127_fig4_slow", "STANDING", 1, "STIPPLED", 13.247, 0.153),
-    ("pub127_fig4_slow", "STANDING", 2, "SOLID", 15.567, 0.734),
-    ("pub127_fig4_normal", "SUPINE", 0, "OPEN", 0.225, None),
-    ("pub127_fig4_normal", "SUPINE", 1, "STIPPLED", 0.426, 0.144),
-    ("pub127_fig4_normal", "SUPINE", 2, "SOLID", 0.240, None),
-    ("pub127_fig4_normal", "STANDING", 0, "OPEN", 2.858, 0.000),
-    ("pub127_fig4_normal", "STANDING", 1, "STIPPLED", 3.555, 0.157),
-    ("pub127_fig4_normal", "STANDING", 2, "SOLID", 2.471, 0.742),
-    ("pub127_fig4_lowfreq", "SUPINE", 0, "OPEN", 1.037, 0.000),
-    ("pub127_fig4_lowfreq", "SUPINE", 1, "STIPPLED", 1.961, 0.153),
-    ("pub127_fig4_lowfreq", "SUPINE", 2, "SOLID", 0.975, 0.737),
-    ("pub127_fig4_lowfreq", "STANDING", 0, "OPEN", 5.820, 0.000),
-    ("pub127_fig4_lowfreq", "STANDING", 1, "STIPPLED", 5.307, 0.148),
-    ("pub127_fig4_lowfreq", "STANDING", 2, "SOLID", 6.621, 0.745),
+    ("pub127_fig4_slow", "SUPINE", 0, "OPEN", 2.113, 0.258, 0.000, "FILL_MEASURED"),
+    ("pub127_fig4_slow", "SUPINE", 1, "STIPPLED", 2.938, 0.567, 0.148, "FILL_MEASURED"),
+    ("pub127_fig4_slow", "SUPINE", 2, "SOLID", 1.959, 0.618, 0.754, "FILL_MEASURED"),
+    ("pub127_fig4_slow", "STANDING", 0, "OPEN", 14.897, 6.340, 0.000, "FILL_MEASURED"),
+    ("pub127_fig4_slow", "STANDING", 1, "STIPPLED", 13.247, 6.031, 0.153, "FILL_MEASURED"),
+    ("pub127_fig4_slow", "STANDING", 2, "SOLID", 15.567, 4.845, 0.734, "FILL_MEASURED"),
+    ("pub127_fig4_normal", "SUPINE", 0, "OPEN", 0.225, 0.093, None, "UNRESOLVED_NO_FILL"),
+    ("pub127_fig4_normal", "SUPINE", 1, "STIPPLED", 0.426, 0.077, 0.144, "FILL_MEASURED"),
+    ("pub127_fig4_normal", "SUPINE", 2, "SOLID", 0.240, 0.078, None, "UNRESOLVED_NO_FILL"),
+    ("pub127_fig4_normal", "STANDING", 0, "OPEN", 2.858, 1.255, 0.000, "FILL_MEASURED"),
+    ("pub127_fig4_normal", "STANDING", 1, "STIPPLED", 3.555, 1.704, 0.157, "FILL_MEASURED"),
+    ("pub127_fig4_normal", "STANDING", 2, "SOLID", 2.471, 0.867, 0.742, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "SUPINE", 0, "OPEN", 1.037, 0.287, 0.000, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "SUPINE", 1, "STIPPLED", 1.961, 1.663, 0.153, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "SUPINE", 2, "SOLID", 0.975, 0.226, 0.734, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "STANDING", 0, "OPEN", 5.820, 1.294, 0.000, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "STANDING", 1, "STIPPLED", 5.307, 2.854, 0.148, "FILL_MEASURED"),
+    ("pub127_fig4_lowfreq", "STANDING", 2, "SOLID", 6.621, 1.868, 0.745, "FILL_MEASURED"),
 ]
 
 #: A pixel on the widest of the three axes is 0.05 units, so a tolerance of
 #: 0.15 is three pixels: enough for a different OpenCV build, not enough for a
 #: moved anchor.
 MEAN_TOLERANCE = 0.15
+SE_TOLERANCE = 0.15
 INK_TOLERANCE = 0.03
 
 GEOMETRY_REFUSALS = ("GROUP_WINDOW_CLIPPED", "NO_SEED_SUPPORT",
@@ -146,9 +152,33 @@ def main(argv=None):
           == ["BAR_TOO_SMALL_TO_SAMPLE"] * 2,
           "%d with fill" % len(with_fill))
 
-    strokes = sorted({r["stroke_px"] for r in records if "stroke_px" in r})
-    check("one stroke for all three sub-panels of one figure",
-          len(strokes) == 1, repr(strokes))
+    missing = [r for r in records if "dispersion" not in r]
+    check("every cell has an error-bar cap and the SE it implies", not missing,
+          repr([(r["figure"], r.get("group"), r.get("slot")) for r in missing]))
+    check("every cap hangs off a stem several times narrower than itself",
+          all(c["cap_width_px"] >= 3 * c["stem_width_px"]
+              for r in records for c in r.get("remote", [])
+              if c["kind"] == "ERRORBAR_CAP"),
+          repr([(r["figure"], c["stem_width_px"], c["cap_width_px"])
+                for r in records for c in r.get("remote", [])
+                if c["kind"] == "ERRORBAR_CAP"
+                and c["cap_width_px"] < 3 * c["stem_width_px"]]))
+    identified = [r for r in records if r.get("identity_status") == "FILL_MEASURED"]
+    check("sixteen series identities, and two bars with a geometry and no identity",
+          len(identified) == 16 and
+          all(r.get("identity_status") == "UNRESOLVED_NO_FILL"
+              for r in records if r not in identified),
+          "%d identified" % len(identified))
+    # Pinned PER PANEL. Asserting that the three agree passes when all three are
+    # wrong together, and is false anyway - see expected_stroke_note.
+    by_panel = {}
+    for r in records:
+        by_panel.setdefault(r["figure"], set()).add(r.get("stroke_px"))
+    for spec in specs:
+        want = spec.get("expected_stroke_px")
+        got = by_panel.get(spec["tag"], set())
+        check("%s measures its declared %s px stroke" % (spec["tag"], want),
+              got == {want}, repr(sorted(got)))
 
     bands = {}
     for r in with_fill:
@@ -174,7 +204,7 @@ def main(argv=None):
 
     index = {(r["figure"], r.get("group"), r.get("slot")): r for r in records}
     drift = []
-    for figure, group, slot, fill, mean, ink in BASELINE:
+    for figure, group, slot, fill, mean, se, ink, identity in BASELINE:
         r = index.get((figure, group, slot))
         if r is None:
             drift.append("%s/%s/%d missing" % (figure, group, slot))
@@ -185,6 +215,12 @@ def main(argv=None):
         if abs(r.get("value", -999) - mean) > MEAN_TOLERANCE:
             drift.append("%s/%s/%d mean %s against %s"
                          % (figure, group, slot, r.get("value"), mean))
+        if abs(r.get("dispersion", -999) - se) > SE_TOLERANCE:
+            drift.append("%s/%s/%d SE %s against %s"
+                         % (figure, group, slot, r.get("dispersion"), se))
+        if r.get("identity_status") != identity:
+            drift.append("%s/%s/%d identity %s against %s"
+                         % (figure, group, slot, r.get("identity_status"), identity))
         if (ink is None) != ("ink_mass" not in r):
             drift.append("%s/%s/%d fill presence changed" % (figure, group, slot))
         elif ink is not None and abs(r["ink_mass"] - ink) > INK_TOLERANCE:

@@ -5,10 +5,18 @@
 
 `_FILL_BANDS` and `_INSIDE_MIN_DENSITY` in `mark_readers.py` carry a comment
 saying they were "measured on a real monochrome figure". They were - on ONE.
-Publication 127 is the second, and it disagrees with every one of them: its
-solid fill reads 0.70 against a band that starts at 0.72, its stipple rows read
-0.10 against a floor of 0.15, and its open bar's right stroke does not fall in
-the last two columns of the slot the reader gave it.
+Publication 127 is the second, and it does not fit them: under the production
+reader's binary density rule its solid bars read about 0.70, which is neither
+SOLID (0.72 and up) nor HATCHED (up to 0.60) but the dead zone between the two,
+and its stipple rows read 0.10 against a floor of 0.15. Its open bar's right
+stroke does not fall in the last two columns of the slot the reader gave it.
+
+What this script records is `ink_mass`, which is threshold-free - one minus the
+mean grey of the interior - and is NOT the same feature as the production
+reader's binary density. The two must not be compared as though they were; the
+bands here are drawn from ink_mass measurements and the bands there from density
+ones, and a fill can sit in a clean band under one and in a dead zone under the
+other. That is an argument for replacing the feature, not for retuning it.
 
 This script is the evidence a replacement has to be justified by. It reads
 figures and decides nothing; nothing in the package imports it.
@@ -166,8 +174,14 @@ def stroke_scale(gray, box, threshold=128, baseline_row=None, min_aspect=20,
     horizontal run is the reference instead: whatever the longest run is, the
     rows that carry one within `tolerance` of it are the same rule - a tick mark
     or an antialiased end can shorten it on individual rows - and how thick that
-    band is, is the stroke. 397 reads 2 px, the synthetic fixture 2 px,
-    publication 127 at 600 DPI 3 px, and no fraction was tuned to make it so.
+    band is, is the stroke, and no fraction was tuned to make it so.
+
+    Measured off the panel's longest line, 397 read 2 px; measured off its own
+    baseline it reads 1 px in the MEN panel and 2 px in the WOMEN panel, because
+    that is where the axis lands on the pixel grid in each. The two numbers are
+    not a disagreement - they answer different questions, and the baseline is
+    the one the bars stand on. Publication 127 reads 3, 3 and 4 across its three
+    sub-panels for the same reason.
 
     The band is the rows CONTIGUOUS with the longest one, not every row in the
     panel that clears the bar - the rule is one object, and a stray row
@@ -193,25 +207,64 @@ def stroke_scale(gray, box, threshold=128, baseline_row=None, min_aspect=20,
     runs = _longest_dark_run(strip)
     if not runs.size or int(runs.max()) < 1:
         return StrokeScale(reason="the panel box holds no dark pixels")
+    def band_of(seed):
+        """The rule the row at `seed` belongs to: (lo, hi, its longest run)."""
+        length = int(runs[seed])
+        lo = hi = seed
+        while lo - 1 >= 0 and runs[lo - 1] >= tolerance * length:
+            lo -= 1
+        while hi + 1 < len(runs) and runs[hi + 1] >= tolerance * length:
+            hi += 1
+        return lo, hi, length
+
     if baseline_row is None:
-        seed = int(np.argmax(runs))
+        lo, hi, longest = band_of(int(np.argmax(runs)))
     else:
         reach = max(4, int(round(search_fraction * strip.shape[0])))
         a = max(0, int(baseline_row) - reach)
         b = min(len(runs), int(baseline_row) + reach + 1)
         if b <= a:
             return StrokeScale(reason="the calibrated baseline is outside the panel")
-        seed = a + int(np.argmax(runs[a:b]))
-        if runs[seed] < 1:
+        # A rule-shaped band that CONTAINS the calibrated zero beats one that
+        # does not, and only then does length decide. A gridline a few pixels
+        # above the baseline drawn to the same length ties on length, and
+        # `argmax` breaks a tie by taking whichever comes first, which going
+        # down the page is the gridline.
+        #
+        # Containment, not distance. Ranking candidates by distance looks more
+        # general and is worse: the same physical rule yields NESTED bands
+        # depending on which of its rows seeded them, the loosest of those
+        # reaches nearest the zero row, and preferring it moved publication
+        # 127's stroke from 3 px to 4, 4 and 7 across three panels that must
+        # agree. Containment cannot choose between nested bands of one rule and
+        # does not have to - when no band contains the zero, which is the case
+        # on three of the five panels measured here, the longest run in the
+        # window is the answer and it is the right one.
+        # Only rows that are themselves near the longest run in the window may
+        # seed a candidate. A short run seeds a LOOSE band - its tolerance is a
+        # fraction of its own small length - and a loose band swallows rows the
+        # rule does not own: on publication 127 an 182 px row two below the axis
+        # grew a band of seven rows that reached the zero row and won on
+        # containment, against the three the rule actually occupies.
+        strongest = int(runs[a:b].max())
+        seen, holding, longest_seed = set(), None, None
+        for seed in range(a, b):
+            if runs[seed] < max(1, tolerance * strongest):
+                continue
+            lo, hi, length = band_of(seed)
+            if (lo, hi) in seen:
+                continue
+            seen.add((lo, hi))
+            if longest_seed is None or length > longest_seed[2]:
+                longest_seed = (lo, hi, length)
+            if lo <= baseline_row <= hi and length >= min_aspect * (hi - lo + 1):
+                if holding is None or length > holding[2]:
+                    holding = (lo, hi, length)
+        if holding is None and longest_seed is None:
             return StrokeScale(
-                reason="no ink within %d px of the calibrated baseline at row %d"
+                reason="no ink within %d px of the calibrated baseline at row %s"
                        % (reach, baseline_row))
-    longest = int(runs[seed])
-    lo = hi = seed
-    while lo - 1 >= 0 and runs[lo - 1] >= tolerance * longest:
-        lo -= 1
-    while hi + 1 < len(runs) and runs[hi + 1] >= tolerance * longest:
-        hi += 1
+        lo, hi, longest = holding or longest_seed
     thickest = hi - lo + 1
     if longest < min_aspect * thickest:
         return StrokeScale(
@@ -470,8 +523,8 @@ def trace_extent(gray, box, window, footprint, zero_row, stroke,
 
 #: What an inked structure beyond the bar end turns out to be. The distinction
 #: matters because only the first of these means the walk was wrong.
-REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "ANNOTATION_OR_GLYPH",
-                "UNRESOLVED_REMOTE_SUPPORT")
+REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "BAR_EDGE_REMNANT",
+                "ANNOTATION_OR_GLYPH", "UNRESOLVED_REMOTE_SUPPORT")
 
 
 def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
@@ -549,10 +602,26 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     #
     # After the mask, a component cannot be stem-connected by construction, so
     # the classification is about the component's own shape.
+    def spread(r, mat=None):
+        occupied = np.where((stem_dark if mat is None else mat)[r])[0]
+        return int(occupied[-1] - occupied[0] + 1) if len(occupied) else 0
+
     edge = int(round(edge_row))
     limit = 0 if step < 0 else height - 1
-    scan = range(edge + step * max(1, stroke), limit + step, step)
-    scan = [r for r in scan if 0 <= r < height]
+    # Where the bar ends and the error bar begins, measured rather than assumed
+    # to be one stroke. Skipping a fixed `stroke` rows is right when the bar's
+    # top rule is one stroke thick and wrong when the whole error bar is short:
+    # on publication 127's SUPINE bars the stem is a SINGLE row between the top
+    # rule and the cap, the fixed skip stepped straight over it, and the cap
+    # then had nothing to hang from. So walk off the bar instead - past rows
+    # still as wide as the bar - and start at the first row that is not the bar.
+    start = edge
+    while 0 <= start + step < height:
+        w = spread(start + step, dark)
+        if not w or w < 0.5 * bar_w:
+            break
+        start += step
+    scan = [r for r in range(start + step, limit + step, step) if 0 <= r < height]
     if not scan:
         return []
     stem_rows = []
@@ -560,18 +629,33 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         if not stem_dark[r, centre].any():
             break
         stem_rows.append(r)
-    cap_rows, cap_span = [], 0.0
+    # An error bar is a NARROW stem carrying a WIDE cap, and that is the whole
+    # of the distinction: the stem is the narrowest row of the structure and the
+    # cap is several times wider than it. The rule this replaces asked whether a
+    # row spanned 30% of the BAR, which is a fraction of the wrong thing - it
+    # was fitted to the synthetic fixture in this package, whose caps are 70% of
+    # the bar. Publication 397 draws its caps at 0.18 of the bar and publication
+    # 127 at 0.17-0.19, so the test found none of the 18 error bars in 127 and
+    # the figure had no dispersion at all. Measured against the stem instead,
+    # every cap in all three figures reads between 5 and 11 times its own stem
+    # and every non-cap row reads 1.0-1.2.
+    cap_rows, cap_span, stem_px = [], 0.0, 0
     if stem_rows:
         tip = stem_rows[-1]
+        stem_px = min(spread(r) for r in stem_rows)
+        floor = max(3 * stem_px, 3 * stroke)
+        # Beyond the bar, which is where `start` ends - not "more than a stroke
+        # from the edge". That older form was consistent with a fixed one-stroke
+        # skip and stopped being so when the skip was measured: on a bar whose
+        # whole error bar is four rows, it excluded the cap itself.
         for r in [x for x in range(tip - 2 * stroke, tip + 2 * stroke + 1)
-                  if 0 <= x < height and abs(x - edge) > stroke]:
-            occupied = np.where(stem_dark[r])[0]
-            if not len(occupied):
+                  if 0 <= x < height and (x - start) * step > 0]:
+            width = spread(r)
+            if not width or width < floor:
                 continue
-            span = (occupied[-1] - occupied[0] + 1) / float(bar_w)
-            if span >= 0.30 and not (dark[r, :track].any() and dark[r, -track:].any()):
+            if not (dark[r, :track].any() and dark[r, -track:].any()):
                 cap_rows.append(r)
-                cap_span = max(cap_span, span)
+                cap_span = max(cap_span, width / float(bar_w))
     masked = dark.copy()
     for r in stem_rows:
         masked[r, centre] = False
@@ -588,6 +672,8 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                         span_fraction=round(float(cap_span), 3),
                         occupied_bins=0,
                         connection_fraction=1.0,
+                        stem_width_px=int(stem_px),
+                        cap_width_px=int(round(cap_span * bar_w)),
                         centre_row_panel=int(round(float(np.mean(cap_rows))))))
     if not inked:
         return out
@@ -619,7 +705,17 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         distance = int(abs(comp[0] - edge))
         thick = extent >= 2 * stroke
         body_like = both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)
-        if body_like and joined >= 0.5:
+        if extent < stroke and distance <= stroke:
+            # Nothing is printed thinner than one stroke, so a sub-stroke
+            # component lying against the bar end is the bar's own antialiased
+            # edge or the ringing around it - the row the walk stopped just
+            # below. Both conditions are needed: a one-pixel mark a hundred
+            # pixels away is a glyph and is classified as one. Without this,
+            # three of publication 127's cells refused themselves over a single
+            # row of grey left behind when the scan start was measured instead
+            # of assumed.
+            kind = "BAR_EDGE_REMNANT"
+        elif body_like and joined >= 0.5:
             kind = "BODY_CONTINUATION"
         elif body_like and distance <= reach:
             # Body-shaped, close enough for the gap to be a printing artefact,
@@ -864,6 +960,15 @@ def measure_panel(spec):
                 rec["error"] = "BAR_TOO_SMALL_TO_SAMPLE"
             else:
                 rec.update(tex)
+            # `declared` is the spec's DECLARATION, to be checked against what
+            # the fill measures - never an identification. A BAR_MONO series is
+            # identified by its fill pattern, so a bar whose fill could not be
+            # sampled has a geometry and no identity, and calling it OPEN
+            # because it is the first slot would be identifying a series by
+            # position. Two of publication 127's cells are in exactly that
+            # state: 18 geometries, 16 identities.
+            rec["identity_status"] = ("FILL_MEASURED" if tex is not None
+                                      else "UNRESOLVED_NO_FILL")
             records.append(rec)
     return records
 
@@ -874,6 +979,16 @@ def builtin_specs():
         dict(tag="397_fig3_P3_MEN", path=os.path.join(HERE, "397_fig3.jpeg"),
              box=[118, 480, 90, 470], ticks=[[150.0, 101.0], [50.0, 465.0]],
              anchors={"PRE": 187, "POST": 390}, fills=["SOLID", "HATCHED"],
+             group_window=75, baseline=50.0),
+        # The second panel of the SAME figure, four pixels of axis apart from
+        # the first. Sharing one calibration between them put this one's
+        # baseline below its own bars and returned nothing for all four of its
+        # cells, which is why the production reader takes geometry per panel -
+        # and why measuring only the first panel here would have left the
+        # prototype's version of that mistake undetected.
+        dict(tag="397_fig3_P3_WOMEN", path=os.path.join(HERE, "397_fig3.jpeg"),
+             box=[620, 1010, 88, 466], ticks=[[150.0, 95.0], [50.0, 460.0]],
+             anchors={"PRE": 720, "POST": 920}, fills=["SOLID", "HATCHED"],
              group_window=75, baseline=50.0),
     ]
     truth = os.path.join(HERE, "mono_bar_fixture_truth.json")

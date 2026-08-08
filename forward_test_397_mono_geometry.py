@@ -166,6 +166,27 @@ worst = max(e for _k, e in errors)
 check("every mean is within 1 mmHg of the independent eye reading",
       worst < 1.0, repr(sorted(errors, key=lambda t: -t[1])[:3]))
 
+# The footprints, exactly. The prose said 16-73 and nothing asserted it, so a
+# trim that took the wrong columns - or stopped taking them - would have passed.
+FOOTPRINT = {("397_fig3_P3_WOMEN", "PRE", 0): ([16, 73], [74, 75, 76, 77]),
+             ("397_fig3_P3_WOMEN", "POST", 0): ([16, 74], [75, 76, 77]),
+             ("397_fig3_P3_MEN", "PRE", 0): ([10, 68], [69]),
+             ("397_fig3_P3_MEN", "POST", 0): ([16, 74], [75])}
+for r in records:
+    key = (r["figure"], r.get("group"), r.get("slot"))
+    want = FOOTPRINT.get(key)
+    if want is None:
+        check("%s/%s/%s is not trimmed at all"
+              % (r["figure"].replace("397_fig3_P3_", ""), r.get("group"),
+                 r.get("slot")),
+              not r.get("trimmed_columns"), repr(r.get("trimmed_columns")))
+        continue
+    check("%s/%s/%s keeps its own columns and drops the neighbour's"
+          % (r["figure"].replace("397_fig3_P3_", ""), r.get("group"),
+             r.get("slot")),
+          r.get("footprint") == want[0] and r.get("trimmed_columns") == want[1],
+          "%r %r against %r" % (r.get("footprint"), r.get("trimmed_columns"), want))
+
 refused = {(r["figure"], r.get("group"), r.get("slot")) for r in records
            if "value" not in r}
 check("the extents that do not resolve are the ones on record",

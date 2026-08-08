@@ -995,10 +995,24 @@ try:
     check("and it reads its own height rather than refusing itself",
           abs(left.get("value", -99) - 40.0) <= 1.0,
           "%r %r" % (left.get("value"), left.get("error")))
-    check("the trim is recorded, so a footprint that moved is auditable",
-          left.get("footprint") and
-          left["footprint"][1] < max(left["trimmed_columns"]),
-          "%r %r" % (left.get("footprint"), left.get("trimmed_columns")))
+    # The fixture's geometry is known exactly, so the footprint is pinned
+    # exactly. "Something was trimmed and the mean survived" passes just as well
+    # when the trim ate a third of the bar, because a solid bar's top does not
+    # move when you narrow it.
+    off = max(g2.x0, (g2.slots[0][0] + g2.slots[-1][1]) // 2 - g2.r(190))
+    check("the final footprint is exactly the left bar",
+          left.get("footprint") == [a0 - off, b0 - off],
+          "%r against %r" % (left.get("footprint"), [a0 - off, b0 - off]))
+    check("only the neighbour's columns were removed",
+          all(c > b0 - off for c in left["trimmed_columns"]),
+          repr(left["trimmed_columns"]))
+    check("and the provisional footprint is kept, so the move is auditable",
+          left.get("provisional_footprint", [0, 0])[1] > b0 - off,
+          repr(left.get("provisional_footprint")))
+    right = only(got, 1)
+    check("the neighbour it was trimmed away from is still readable",
+          "value" in right and right.get("error") is None,
+          "%r %r" % (right.get("value"), right.get("error")))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

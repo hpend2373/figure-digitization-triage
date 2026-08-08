@@ -571,11 +571,11 @@ def trim_to_own_bar(gray, box, window, footprint, edge_row, zero_row, stroke,
     top = int(round(min(edge_row, zero_row))) + stroke
     bottom = int(round(max(edge_row, zero_row))) - stroke
     if bottom - top < max(3, 2 * stroke):
-        return footprint, []
+        return footprint, [], ""
     band = dark[top:bottom]
     occupancy = band.mean(axis=0)
     if occupancy.max() <= 0:
-        return footprint, []
+        return footprint, [], ""
     # How far inward the comparison looks. Two strokes is enough when the bleed
     # is four columns, as on publication 397, and not when it is forty: the
     # window then sits inside the bleed, sees only more of it, and stops at
@@ -588,16 +588,30 @@ def trim_to_own_bar(gray, box, window, footprint, edge_row, zero_row, stroke,
         window = occupancy[index + step:index + step * (reach + 1):step]
         return float(window.max()) if window.size else 0.0
 
+    # How far inward the comparison LOOKS and how much it is allowed to REMOVE
+    # are two different numbers, and one `reach` was doing both jobs badly. A
+    # footprint whose outer quarter is somebody else's bar is not one that
+    # trimming can repair, so that is the budget - and it is a refusal, not a
+    # smaller footprint, because the alternative is a bar measured from
+    # whatever survived. NOT PINNED BY A SCENARIO: a synthetic bleed wide enough
+    # to spend the budget did not seed into the footprint at all, so nothing
+    # exercises this branch and this comment is the record of that rather than a
+    # claim of coverage.
+    budget = max(1, len(occupancy) // 4)
     lo, hi, dropped = 0, len(occupancy) - 1, []
     while lo < hi and occupancy[lo] < min_share * inward(lo, 1):
         dropped.append(fx0 + lo)
         lo += 1
+    left = lo
     while hi > lo and occupancy[hi] < min_share * inward(hi, -1):
         dropped.append(fx0 + hi)
         hi -= 1
+    right = len(occupancy) - 1 - hi
+    if left > budget or right > budget:
+        return footprint, sorted(dropped), "EXCESSIVE_TRIM"
     if not dropped:
-        return footprint, []
-    return (fx0 + lo, fx0 + hi), sorted(dropped)
+        return footprint, [], ""
+    return (fx0 + lo, fx0 + hi), sorted(dropped), ""
 
 
 #: What an inked structure beyond the bar end turns out to be. The distinction
@@ -1051,16 +1065,39 @@ def measure_panel(spec):
             # the extent needs a footprint, and a second round that moved either
             # again would mean the two do not agree - which is a refusal, not a
             # third round.
-            fp, dropped = trim_to_own_bar(gray, box, window, fp, edge, zero,
-                                          stroke, direction=direction)
+            first, dropped, refusal = trim_to_own_bar(
+                gray, box, window, fp, edge, zero, stroke, direction=direction)
             if dropped:
                 rec["trimmed_columns"] = dropped
-                if fp[1] - fp[0] + 1 < max(4, 4 * stroke):
+                rec["provisional_footprint"] = [int(fp[0]), int(fp[1])]
+            if refusal:
+                rec["error"] = refusal
+                records.append(rec)
+                continue
+            if dropped:
+                retraced, method = trace_extent(
+                    gray, box, window, first, zero, stroke, direction=direction)
+                # The SECOND pass, which the first version of this only claimed
+                # in a comment. The trim needs an extent and the extent needs a
+                # footprint, so one round of each proves nothing on its own: if
+                # trimming again from the re-traced extent moves the footprint,
+                # the two do not agree and there is no bar here to measure. The
+                # guard that stood in for this only fired when the footprint had
+                # become narrower than four strokes, which is a different fact
+                # under the same name.
+                again, more, why = trim_to_own_bar(
+                    gray, box, window, first, retraced, zero, stroke,
+                    direction=direction)
+                if why or tuple(again) != tuple(first):
                     rec["error"] = "FOOTPRINT_DID_NOT_CONVERGE"
+                    rec["first_trimmed_footprint"] = [int(first[0]), int(first[1])]
+                    rec["second_trimmed_footprint"] = [int(again[0]), int(again[1])]
+                    rec["provisional_edge_row_panel"] = round(edge, 1)
+                    rec["retraced_edge_row_panel"] = round(retraced, 1)
+                    rec["trimmed_columns"] = sorted(set(dropped) | set(more))
                     records.append(rec)
                     continue
-                edge, method = trace_extent(
-                    gray, box, window, fp, zero, stroke, direction=direction)
+                fp, edge = first, retraced
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
                                     direction=direction)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]

@@ -1965,6 +1965,23 @@ and sits inside a forty-column one, so it is bounded at a quarter of the
 footprint - beyond that a trim cannot repair the footprint and the convergence
 guard refuses instead.
 
+Two contracts the first version only claimed in a comment are now real. The
+SECOND PASS: the trim needs an extent and the extent needs a footprint, so one
+round of each proves nothing - trimming again from the re-traced extent must
+leave the footprint where it is, or `FOOTPRINT_DID_NOT_CONVERGE`. The guard that
+stood in for it only fired when the footprint had become narrower than four
+strokes, which is a different fact under the same name. And the TRIM BUDGET is
+separate from the look-ahead reach: a footprint whose outer quarter is somebody
+else's bar is refused with `EXCESSIVE_TRIM` rather than measured from whatever
+survived. That branch is implemented and NOT pinned by a scenario - a synthetic
+bleed wide enough to spend the budget would not seed into the footprint at all -
+and the docstring says so rather than claiming coverage.
+
+The footprints are asserted exactly, in the forward test and in the synthetic
+touching-bars scenario. "Something was trimmed and the mean survived" passes
+just as well when the trim ate a third of the bar, because a solid bar's top
+does not move when you narrow it.
+
 It is still not enough for that cell. A 2 px wide, 14 row tall structure rises
 from the bar top at columns 72-73, INSIDE the bar's own trimmed footprint, and it
 is neither bar, cap nor glyph. What it is has not been established, and the cell
@@ -2029,11 +2046,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 117 |
+| `test_measure_mono_bars.py` | 120 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1519** |
+| **total** | **1522** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

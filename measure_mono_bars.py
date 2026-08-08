@@ -111,19 +111,124 @@ def _runs(indices, gap=1):
     return out
 
 
-def stroke_scale(gray, box, threshold=128, span_fraction=0.5):
-    """Line weight in pixels, from the longest horizontal rule in the panel."""
+def _longest_dark_run(strip):
+    """Length of the longest CONTIGUOUS dark run in each row."""
+    pad = np.zeros((strip.shape[0], 1), dtype=np.int8)
+    edges = np.diff(np.concatenate(
+        [pad, strip.astype(np.int8), pad], axis=1), axis=1)
+    out = np.zeros(strip.shape[0], dtype=int)
+    for i in range(strip.shape[0]):
+        starts = np.where(edges[i] == 1)[0]
+        if not len(starts):
+            continue
+        out[i] = int((np.where(edges[i] == -1)[0] - starts).max())
+    return out
+
+
+def stroke_scale(gray, box, threshold=128, min_aspect=20, tolerance=0.6):
+    """Line weight in pixels: how thick the longest horizontal rule is.
+
+    Two things were wrong with measuring this as "the thickest band of rows
+    whose dark pixel COUNT exceeds half the panel width".
+
+    A rule is CONTIGUOUS. A row that crosses several bars is not a rule even
+    when the bars add up to half the panel, and the band it belongs to is as
+    thick as the bars are tall: three 100 px bars in a 400 px panel measured the
+    stroke at 124 px. Every threshold here is a multiple of the stroke, so the
+    panel then read one bar out of three. Bars are separated by paper; rules are
+    not.
+
+    And half the panel width is a number this script had no business choosing.
+    Publication 397's panel box holds no rule longer than a third of its width,
+    so demanding half refuses the figure, and lowering the fraction until 397
+    passes is how `_INSIDE_MIN_DENSITY` came to exist. The panel's own longest
+    horizontal run is the reference instead: whatever the longest run is, the
+    rows that carry one within `tolerance` of it are the same rule - a tick mark
+    or an antialiased end can shorten it on individual rows - and how thick that
+    band is, is the stroke. 397 reads 2 px, the synthetic fixture 2 px,
+    publication 127 at 600 DPI 3 px, and no fraction was tuned to make it so.
+
+    The band is the rows CONTIGUOUS with the longest one, not every row in the
+    panel that clears the bar - the rule is one object, and a stray row
+    elsewhere in the panel is a different object with a different thickness.
+    Measured that way the three sub-panels of publication 127's Figure 4, which
+    are the same figure at the same DPI and must therefore agree, all read 3 px;
+    taking the thickest band anywhere in the panel read 1, 3 and 4.
+
+    Two numbers are asserted rather than measured, and both are statements about
+    shape rather than about any figure. `min_aspect`: something only twenty
+    times longer than it is thick is a block, and a panel whose longest
+    horizontal structure is a block has no rule in it to measure. `tolerance`:
+    the antialiased outer row of a rule loses a few pixels at each end, never
+    half its length, while the longest run in a row of BARS is one bar - so
+    anything between "widest bar" and "nearly the whole rule" separates them,
+    and 0.6 is the middle of that window. It is at its narrowest on 397, whose
+    panel box crops the axis to 118 px against a 62 px bar.
+    """
     x0, x1, y0, y1 = map(int, box)
     strip = gray[y0:y1, x0:x1] < threshold
     if not strip.size:
         return StrokeScale(reason="the panel box selects no pixels")
-    wide = np.where(strip.sum(axis=1) > span_fraction * strip.shape[1])[0]
-    if not len(wide):
+    runs = _longest_dark_run(strip)
+    longest = int(runs.max()) if runs.size else 0
+    if longest < 1:
+        return StrokeScale(reason="the panel box holds no dark pixels")
+    lo = hi = int(np.argmax(runs))
+    while lo - 1 >= 0 and runs[lo - 1] >= tolerance * longest:
+        lo -= 1
+    while hi + 1 < len(runs) and runs[hi + 1] >= tolerance * longest:
+        hi += 1
+    thickest = hi - lo + 1
+    if longest < min_aspect * thickest:
         return StrokeScale(
-            reason="no horizontal rule spans %.0f%% of the panel width"
-                   % (100 * span_fraction))
-    thickest = max(len(g) for g in _runs(list(wide)))
+            reason="the longest horizontal run in the panel is %d px across and "
+                   "%d px thick, which is a block and not a rule"
+                   % (longest, thickest))
     return StrokeScale(value_px=int(thickest), status="MEASURED")
+
+
+def rule_edge(dark, zero_row, stroke, direction, min_span=0.6, min_ink=0.4):
+    """The last row of the baseline rule, on the side the bars are on.
+
+    The measured stroke is the rule's SOLID CORE - three rows on publication 127
+    at 600 DPI - and the rule's inked extent at threshold 128 is wider than its
+    core, because the edges are antialiased. Standing one core-stroke clear of
+    the baseline leaves the seed band sitting on the rule's fade, every column in
+    the window reads as seeded including the paper at its edges, and the clipping
+    guard then fires on every group in the figure. So the clearance is measured
+    rather than derived from the stroke.
+
+    Finding the rule is easy: it is the row near the baseline whose ink is a
+    SINGLE unbroken run across most of the window, which a row of bars is not,
+    however much of the window the bars add up to. Finding where it ENDS is the
+    part that needs care, because its fading rows are no longer unbroken - on
+    publication 127 the rule reads 0.93, 0.98, 1.00, 0.75, 0.49 of the window
+    and only the middle three are unbroken. Two rules, either sufficient:
+
+      still unbroken across the window   - unambiguously the rule;
+      still inked, and LESS inked than the row before it - a fade. A bar row is
+        as inked as the bar row before it, so a fade terminates on the first row
+        that stops fading, which is the first row that belongs to something else.
+    """
+    step = -1 if direction == "UP" else 1
+    height, width = dark.shape
+    near = [r for r in range(max(0, zero_row - 2 * stroke - 1),
+                             min(height, zero_row + 2 * stroke + 2))]
+    if not near:
+        return int(zero_row)
+    spans = {r: int(_longest_dark_run(dark[r:r + 1])[0]) for r in near}
+    seed = max(near, key=lambda r: spans[r])
+    if spans[seed] < min_span * width:
+        return int(zero_row)
+    row, ink = seed, float(dark[seed].mean())
+    while 0 <= row + step < height:
+        nxt = row + step
+        ink_next = float(dark[nxt].mean())
+        unbroken = _longest_dark_run(dark[nxt:nxt + 1])[0] >= min_span * width
+        if not (unbroken or (ink_next >= min_ink and ink_next < ink)):
+            break
+        row, ink = nxt, ink_next
+    return int(row)
 
 
 def seed_support(gray, box, zero_row, stroke, window, threshold=128,
@@ -132,21 +237,29 @@ def seed_support(gray, box, zero_row, stroke, window, threshold=128,
 
     Ink that does not touch the baseline is an error bar, a significance glyph
     or the neighbouring bar, and none of them is part of this bar. The band
-    starts one stroke clear of the baseline rule, because the rule itself is
-    dark across every column and would make an open bar's footprint the whole
-    slot.
+    starts one row clear of the baseline rule's own inked thickness, because the
+    rule is dark across every column and would make an open bar's footprint the
+    whole slot.
     """
     x0, x1, y0, y1 = map(int, box)
     xa, xb = window
     dark = gray[y0:y1, xa:xb] < threshold
     depth = SEED_DEPTH_STROKES * stroke
+    edge = rule_edge(dark, zero_row, stroke, direction)
     if direction == "UP":
-        top, bottom = max(0, zero_row - stroke - depth), max(1, zero_row - stroke)
+        top, bottom = max(0, edge - 1 - depth), max(1, edge - 1)
     else:
-        top, bottom = min(dark.shape[0] - 1, zero_row + stroke), \
-            min(dark.shape[0], zero_row + stroke + depth)
+        top, bottom = min(dark.shape[0] - 1, edge + 1), \
+            min(dark.shape[0], edge + 1 + depth)
     band = dark[top:bottom]
-    if band.shape[0] < 2:
+    if band.shape[0] < depth:
+        # A short band is not a weak measurement, it is a different one:
+        # SEED_SUPPORT is a fraction of the band, and a quarter of two rows is
+        # one row. Below publication 127's baseline the panel has three rows
+        # left, the last of them the rule's own fade at 0.39 of the window, and
+        # a quarter of three rows made that fade look like 251 px of downward
+        # bar against 246 px of real upward bar - so the direction test called
+        # the group ambiguous and refused a figure it could read.
         return [], np.zeros(xb - xa)
     persistence = band.mean(axis=0)
     keep = [i for i, v in enumerate(persistence) if v >= SEED_SUPPORT]
@@ -217,10 +330,13 @@ def trace_extent(gray, box, window, footprint, zero_row, stroke,
     stipple has blank rows between its dots, and with hysteresis, because it has
     blank windows too. Both are multiples of the measured stroke.
 
-    Returns (edge_row, method, contradiction) where `contradiction` is the
-    distance beyond the edge at which supported ink still exists - the check
-    that stops a walk which stopped too early from being reported as a short
-    bar.
+    Returns (edge_row, method). It used to return a third value, a
+    `contradiction` distance measured by rerunning `supported()` above the edge;
+    that reused the walk's support test without the three gap rules the walk
+    uses to exclude an error-bar cap, so it re-found the cap the walk had just
+    refused and reported it as proof the walk was wrong. Asking what the ink
+    above the bar IS belongs to `remote_support`, which masks the stem and the
+    cap before it looks.
     """
     x0, x1, y0, y1 = map(int, box)
     xa = window[0]
@@ -325,7 +441,7 @@ REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "ANNOTATION_OR_GLYPH",
 
 
 def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
-                   direction="UP", threshold=128):
+                   direction="UP", threshold=128, stem_threshold=200):
     """Everything inked beyond the bar end, classified rather than counted.
 
     The first version of this returned one integer: the distance at which
@@ -344,25 +460,48 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     what each component IS.
 
       BODY_CONTINUATION       side tracks, or distributed ink, sustained over
-                              several strokes. The walk stopped too early and
-                              this bar has no value.
+                              several strokes, CONTINUOUS with the bar. The
+                              walk stopped too early and this bar has no value.
       ERRORBAR_CAP            a thin horizontal rule that misses the side
                               tracks and hangs off a central stem. Expected,
                               and where the dispersion comes from.
-      ANNOTATION_OR_GLYPH     touches neither the tracks nor a stem: an
-                              asterisk, a bracket, a significance marker.
+      ANNOTATION_OR_GLYPH     provably not this bar: separated from it by white
+                              paper and too far away for that gap to be a
+                              raster artefact. An asterisk, a bracket, a panel
+                              rule, a title, the neighbouring group.
       UNRESOLVED_REMOTE_SUPPORT   none of the above cleanly. Fail closed.
+
+    Two thresholds, because a bar edge and a whisker stem are not printed with
+    the same weight. Body geometry - the side tracks, the span, the bins - is
+    measured at `threshold`; the central stem that a cap hangs off is traced at
+    `stem_threshold`, the same 200 the production error-bar reader uses, because
+    a two-pixel antialiased stem on a 600 DPI rescan sits in the 130-190 grey
+    range and is invisible at 128. Where the stem is invisible, the cap above it
+    is not connected to anything and is classified as a free-floating glyph.
+
+    `distance_px` is what separates the last two kinds. A body continuation
+    separated from the bar by white paper is only physically possible when the
+    gap is a raster artefact - a stipple's blank row, a broken outline - which
+    is a small multiple of the stroke. Ink 150 px above the bar with nothing in
+    between is the panel's furniture, and a rule at the top of a panel is wide,
+    spanning and thick, so shape alone cannot tell it from a bar.
     """
     x0, x1, y0, y1 = map(int, box)
     xa = window[0]
     fx0, fx1 = footprint
     bar_w = fx1 - fx0 + 1
-    dark = gray[y0:y1, xa + fx0:xa + fx1 + 1] < threshold
+    strip = gray[y0:y1, xa + fx0:xa + fx1 + 1]
+    dark = strip < threshold
+    stem_dark = strip < stem_threshold
     height = dark.shape[0]
     track = max(1, min(stroke, int(round(0.06 * bar_w))))
     step = -1 if direction == "UP" else 1
     centre = slice(max(0, bar_w // 2 - max(1, bar_w // 10)),
                    min(bar_w, bar_w // 2 + max(1, bar_w // 10) + 1))
+    #: How far a gap between the bar and a body-like component may be and still
+    #: be a printing artefact rather than a boundary. Four strokes, so it scales
+    #: with the figure and not with the DPI it was scanned at.
+    reach = max(2, 4 * stroke)
 
     # The order matters, and the first attempt at this did it wrong. Grouping
     # "rows with any ink" merges the cap, the whisker stem and everything above
@@ -384,7 +523,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         return []
     stem_rows = []
     for r in scan:
-        if not dark[r, centre].any():
+        if not stem_dark[r, centre].any():
             break
         stem_rows.append(r)
     cap_rows, cap_span = [], 0.0
@@ -392,7 +531,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         tip = stem_rows[-1]
         for r in [x for x in range(tip - 2 * stroke, tip + 2 * stroke + 1)
                   if 0 <= x < height and abs(x - edge) > stroke]:
-            occupied = np.where(dark[r])[0]
+            occupied = np.where(stem_dark[r])[0]
             if not len(occupied):
                 continue
             span = (occupied[-1] - occupied[0] + 1) / float(bar_w)
@@ -414,7 +553,7 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
                         side_track_fraction=0.0,
                         span_fraction=round(float(cap_span), 3),
                         occupied_bins=0,
-                        central_stem_fraction=1.0,
+                        connection_fraction=1.0,
                         centre_row=int(round(float(np.mean(cap_rows))))))
     if not inked:
         return out
@@ -437,21 +576,33 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         span = ((occupied[-1] - occupied[0] + 1) / float(bar_w)) if len(occupied) else 0.0
         bins = sum(1 for part in np.array_split(columns, 5) if part.any())
         # Continuous with the bar? After masking, the only way to be connected
-        # is to run down to the bar end through ink of your own.
+        # is to run down to the bar end through ink of your own. This is not a
+        # "central stem fraction", which is what it used to be called - the stem
+        # has been masked out by this point and cannot contribute to it.
         gap = [r for r in range(edge, comp[0], step) if 0 <= r < height]
         joined = (float(np.mean([bool(masked[r].any()) for r in gap]))
                   if gap else 1.0)
+        distance = int(abs(comp[0] - edge))
         thick = extent >= 2 * stroke
-        if (both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)) and joined >= 0.5:
+        body_like = both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)
+        if body_like and joined >= 0.5:
             kind = "BODY_CONTINUATION"
+        elif body_like and distance <= reach:
+            # Body-shaped, close enough for the gap to be a printing artefact,
+            # and not continuous. This is the case that used to be dismissed as
+            # an annotation: a stipple whose top row happens to be blank, or an
+            # outline broken by the rescan, is exactly this shape, and calling
+            # it a glyph let the bar keep a value measured below its own top.
+            kind = "UNRESOLVED_REMOTE_SUPPORT"
         elif joined < 0.5:
             kind = "ANNOTATION_OR_GLYPH"
         else:
             kind = "UNRESOLVED_REMOTE_SUPPORT"
-        out.append(dict(kind=kind, distance_px=int(abs(comp[0] - edge)),
+        out.append(dict(kind=kind, distance_px=distance,
                         extent_px=int(extent), side_track_fraction=round(both_tracks, 3),
                         span_fraction=round(float(span), 3), occupied_bins=int(bins),
-                        central_stem_fraction=round(joined, 3),
+                        connection_fraction=round(joined, 3),
+                        body_like=bool(body_like), reach_px=int(reach),
                         centre_row=int(round(float(np.mean(comp))))))
     return out
 
@@ -463,6 +614,22 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
     The interior is the middle of the bar in both axes, as a FRACTION of the
     bar: the old reader sampled a fixed 40 px starting 6 px in, which is most of
     a 55 px bar and a quarter of a 188 px one.
+
+    `edge_row` and `zero_row` are BOX-relative, like everything else here, and
+    the columns are absolute. The first version of this sliced `gray` with the
+    box-relative rows and the absolute columns in the same expression, so on
+    publication 127 - panel top at page row 1580 - every texture number came
+    from a band 1159 px above the panel. It read white paper and reported
+    `ink_mass 0.000` for a solid black bar, and that number is what the fill
+    vocabulary was about to be built on.
+
+    A bar too short to have an interior gets nothing. The bar's own top rule and
+    the baseline rule are each a stroke thick, so on publication 127's middle
+    panel - SUPINE bars 15 px tall at a stroke of 5 - the two rules ARE the bar,
+    and the previous version, whose inset collapsed back to the full bar when
+    the inset left nothing, reported an OPEN bar at `ink_mass 0.517` and a SOLID
+    one at 0.876. Sampling the strokes and calling it fill would have taught the
+    fill vocabulary that OPEN is half black.
     """
     x0, x1, y0, y1 = map(int, box)
     xa, _xb = window
@@ -473,13 +640,16 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
     top, bottom = (edge_row, zero_row) if direction == "UP" else (zero_row, edge_row)
     top, bottom = int(round(min(top, bottom))), int(round(max(top, bottom)))
     height = bottom - top
-    if height < 4 or cb - ca < 3:
+    #: The thinnest strip of interior worth a number: two strokes, so it cannot
+    #: be one rule and its antialiasing.
+    floor = max(3, 2 * stroke)
+    if height < 4 or cb - ca < floor:
         return None
     keep_top = top + max(2 * stroke, int(round(0.12 * height)))
     keep_bottom = bottom - max(2 * stroke, int(round(0.10 * height)))
-    if keep_bottom - keep_top < 3:
-        keep_top, keep_bottom = top, bottom
-    roi = gray[keep_top:keep_bottom, ca:cb]
+    if keep_bottom - keep_top < floor:
+        return None
+    roi = gray[y0 + keep_top:y0 + keep_bottom, ca:cb]
     if roi.size == 0:
         return None
     out = dict(bar_width=int(bar_w), bar_height=int(height),
@@ -529,10 +699,22 @@ def measure_panel(spec):
         # carries seed support is the side the bars are on.
         support = {}
         for candidate in ("UP", "DOWN"):
-            segs, _pers = seed_support(gray, box, zero, stroke, window,
-                                       direction=candidate)
-            support[candidate] = (sum(len(g) for g in segs), segs)
-        (up_total, up_segs), (down_total, down_segs) = support["UP"], support["DOWN"]
+            segs, pers = seed_support(gray, box, zero, stroke, window,
+                                      direction=candidate)
+            support[candidate] = (sum(len(g) for g in segs), segs, pers)
+        (up_total, up_segs, up_pers) = support["UP"]
+        (down_total, down_segs, down_pers) = support["DOWN"]
+        # Nothing on either side of the baseline. Falling through to the tie
+        # test does not catch this - `min(0, 0) > 0` is false - so the group
+        # went on to footprint an empty segment list, got no footprints back,
+        # and DISAPPEARED: no record, no error, and a panel that quietly
+        # reported fewer bars than it declared.
+        if max(up_total, down_total) == 0:
+            records.append(dict(figure=spec["tag"], group=label,
+                                error="NO_SEED_SUPPORT",
+                                up_support=0, down_support=0,
+                                window=[int(window[0]), int(window[1])]))
+            continue
         # A tie is not UP. Checking UP first and only replacing on a strictly
         # greater total meant an equal split - possible on a very short bar, or
         # on baseline noise - silently declared the bars upward.
@@ -545,6 +727,30 @@ def measure_panel(spec):
             continue
         direction = "UP" if up_total >= down_total else "DOWN"
         segments = up_segs if direction == "UP" else down_segs
+        persistence = up_pers if direction == "UP" else down_pers
+        # Does the group run off the end of the window it was given? If the
+        # outermost column of the window is itself seeded, the bar there has no
+        # measured right (or left) edge - and `footprints_from_seed` divides the
+        # span it CAN see by the declared bar count, so a window 22 px short on
+        # publication 127 moved every boundary and put the neighbouring bar's
+        # right stroke inside the last bar's footprint. The last bar then traced
+        # its neighbour's outline and read 3.37 where the bar was 1.5.
+        #
+        # An anchor that is off-centre is a geometry error and this is where it
+        # becomes visible, so it must refuse rather than widen the window
+        # itself: widening would move the boundary again with nothing to check
+        # it against.
+        clipped = [side for side, v in (("LEFT", persistence[0]),
+                                        ("RIGHT", persistence[-1]))
+                   if v >= SEED_SUPPORT]
+        if clipped:
+            records.append(dict(figure=spec["tag"], group=label,
+                                error="GROUP_WINDOW_CLIPPED", clipped_at=clipped,
+                                direction=direction,
+                                window=[int(window[0]), int(window[1])],
+                                seed_extent=[int(segments[0][0]),
+                                             int(segments[-1][-1])] if segments else None))
+            continue
         prints, bounds = footprints_from_seed(segments, len(fills))
         for k, fp in enumerate(prints):
             rec = dict(figure=spec["tag"], group=label, slot=k,
@@ -560,6 +766,8 @@ def measure_panel(spec):
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
                                     direction=direction)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]
+            unresolved = [r for r in remote
+                          if r["kind"] == "UNRESOLVED_REMOTE_SUPPORT"]
             caps = [r for r in remote if r["kind"] == "ERRORBAR_CAP"]
             rec.update(slot_bounds=(list(bounds[k]) if bounds[k] else None),
                        edge_row=round(edge, 1), support=method,
@@ -568,11 +776,29 @@ def measure_panel(spec):
                        contradiction_px=(min(r["distance_px"] for r in body)
                                          if body else 0),
                        cap_px=(caps[0]["centre_row"] if caps else None),
-                       value=round(cal.pixel_to_value(y0 + edge), 3),
                        footprint=[int(fp[0]), int(fp[1])],
                        footprint_width=int(fp[1] - fp[0] + 1),
                        seed_segments=len([s for s in segments
                                           if fp[0] <= s[0] <= fp[1]]))
+            # Fail closed, and closed means the number does not exist. The
+            # previous version put the classification in the record and then
+            # carried on to write `value` and a full texture block anyway, so a
+            # bar whose top was in doubt entered the fill-identity step as a
+            # clean prototype sample - which is the one place where a wrong
+            # number does the most damage, because it becomes the definition
+            # every other bar is matched against.
+            #
+            # BODY_CONTINUATION means the top is known to be wrong.
+            # UNRESOLVED_REMOTE_SUPPORT means it is not known to be right, which
+            # for a prototype is the same thing.
+            reason = ("BAR_EXTENT_UNRESOLVED" if body else
+                      "REMOTE_SUPPORT_UNRESOLVED" if unresolved else "")
+            if reason:
+                rec["error"] = reason
+                rec["provisional_value"] = round(cal.pixel_to_value(y0 + edge), 3)
+                records.append(rec)
+                continue
+            rec["value"] = round(cal.pixel_to_value(y0 + edge), 3)
             tex = texture(gray, box, window, fp, edge, zero, stroke,
                           direction=direction)
             if tex is None:
@@ -662,9 +888,16 @@ def main(argv=None):
         for r in measure_panel(spec):
             everything.append(r)
             if r.get("error"):
-                print("%-20s %-8s %-4s %-9s  %s"
+                # The provisional number is printed so the refusal can be
+                # audited, and printed in brackets so it cannot be mistaken for
+                # a reading. Nothing downstream may read it.
+                prov = ("  (value %.2f, no fill)" % r["value"]
+                        if "value" in r else
+                        "  (provisional %.2f)" % r["provisional_value"]
+                        if "provisional_value" in r else "")
+                print("%-20s %-8s %-4s %-9s  %s%s"
                       % (r["figure"], r.get("group"), r.get("slot"),
-                         r.get("declared"), r["error"]))
+                         r.get("declared"), r["error"], prov))
                 continue
             cells = " ".join("%.2f/%d" % (r["t%d" % t]["coverage_median_tile"],
                                           r["t%d" % t]["column_segments"])

@@ -1570,6 +1570,81 @@ which only happened once whole panels started flowing through it.
 
 Two scenarios now guard the bounds themselves, not just their spread.
 
+## The monochrome geometry prototype, and what the second figure said
+
+`measure_mono_bars.py` measures monochrome bar panels and decides nothing;
+nothing in the package imports it. It exists because `_FILL_BANDS` and
+`_INSIDE_MIN_DENSITY` in `mark_readers.py` were measured on ONE figure, and
+publication 127 is the second. `test_measure_mono_bars.py` draws each trap on
+purpose; every scenario in it was written by reverting the fix it guards and
+confirming it fails, and the revert is named in a comment above it.
+
+Six defects found by pointing it at a second figure, all of which would have
+shipped a number rather than a refusal:
+
+**`texture()` mixed box-relative rows with absolute columns.** Publication 127's
+panels start at page rows 620, 1580 and 2510, so every fill number came from a
+band up to 1159 px above the panel. It read white paper and reported
+`ink_mass 0.000` for a solid black bar. This is the number the fill vocabulary
+was about to be built on. Corrected, the four printed fills separate with no
+overlap at all — OPEN 0.000, STIPPLED 0.144-0.157, HATCHED 0.262-0.318, SOLID
+0.734-1.000 across 32 bars of three figures — and none of the bands
+`mark_readers.py` currently ships is right.
+
+**A stroke is the thickness of a CONTIGUOUS rule.** Measuring it as the thickest
+band of rows whose dark pixel COUNT clears half the panel width makes a row that
+crosses several bars a rule: three 100 px bars in a 400 px panel measured the
+stroke at 124 px, and since every threshold in the file is a multiple of the
+stroke, that panel then read one bar out of three. Half the panel width was also
+a number the script had no business choosing — 397's panel box holds no rule
+longer than a third of its width. The panel's own longest run is the reference
+instead, and the band is the rows contiguous with it. 397 reads 2 px, the
+synthetic fixture 2 px, and the three sub-panels of publication 127's Figure 4 —
+same figure, same DPI, so they must agree — all read 3 px. Taking the thickest
+band anywhere in the panel read 1, 3 and 4.
+
+**The seed band clears the rule's fade, not its core.** The stroke is the rule's
+solid core; its inked extent at threshold 128 is wider. Standing one core-stroke
+clear left the band on the fade, every column in the window read as seeded
+including the paper at its edges, and the clipping guard fired on every group in
+the figure. `rule_edge()` measures the clearance: a rule row is unbroken across
+the window, or it is still inked and LESS inked than the row before it. A bar row
+is as inked as the bar row before it, so the fade terminates on the first row
+that stops fading.
+
+**A truncated seed band is a different measurement, not a weak one.**
+`SEED_SUPPORT` is a fraction of a band of depth `3 * stroke`, and a quarter of
+two rows is one row. Publication 127's panel box ends three rows below its
+baseline, and the rule's own fade in those rows outvoted 246 px of real upward
+bar, so the direction test called the group ambiguous and refused a figure it
+could read.
+
+**`GROUP_WINDOW_CLIPPED`.** `footprints_from_seed` divides the span it can see by
+the declared bar count. A window 22 px short on publication 127's middle panel
+moved every boundary and put the stippled bar's right stroke inside the solid
+bar's footprint; the solid bar then traced its neighbour's outline and read 3.37
+where the bar is 2.47. The three sub-panels do not share an x-origin, which one
+shared pair of anchors had assumed. Recentring the anchors is a fix to the
+geometry spec; the guard is what makes the next one visible instead of plausible.
+
+**A bar too short to have an interior gets no fill.** The bar's top rule and the
+baseline rule are each a stroke thick, so on 15 px bars at a stroke of 5 the two
+rules ARE the bar. An inset that collapsed back to the full bar when it left
+nothing reported an OPEN bar at `ink_mass 0.517`.
+
+And the fail-closed contract the classification always implied but did not
+enforce: `BODY_CONTINUATION` means the bar top is known to be wrong,
+`UNRESOLVED_REMOTE_SUPPORT` means it is not known to be right, and both now
+suppress `value` and the whole texture block, leaving `provisional_value` for
+audit. A body-shaped component separated from the bar by a gap small enough to
+be a printing artefact is `UNRESOLVED_REMOTE_SUPPORT`; only distance
+distinguishes it from the rule at the top of 397's panel, which is also wide,
+spanning and thick.
+
+Publication 127 Figure 4 now reads 18 cells of 18, two of them value-only
+because their bars are 15 px tall. The synthetic fixture's worst mean is 0.11
+units on a 100-unit axis.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -1581,12 +1656,16 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
-| `test_mark_readers.py` | 92 |
+| `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
+| `test_measure_mono_bars.py` | 36 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 18 |
-| **total** | **1377** |
+| **total** | **1417** |
+
+Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
+been 96 since the point-count audit scenarios went in.
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

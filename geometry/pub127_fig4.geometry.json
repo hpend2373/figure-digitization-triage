@@ -24,15 +24,15 @@
    ]
   ],
   "anchors": {
-   "SUPINE": 3287,
-   "STANDING": 4036
+   "SUPINE": 3285,
+   "STANDING": 4037
   },
   "fills": [
    "OPEN",
    "STIPPLED",
    "SOLID"
   ],
-  "group_window": 300,
+  "group_window": 320,
   "baseline": 0.0,
   "expected": {
    "OPEN": {
@@ -54,7 +54,8 @@
     ]
    }
   },
-  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held.",
+  "anchor_note": "Anchors are the measured MIDPOINT of each group's outer bar strokes, per panel: the three sub-panels of this figure do not share an x-origin. One shared pair of anchors with a 300 px window put the STANDING group of the middle panel 22 px outside its own window, and footprints_from_seed then divided the visible span by three, which moved every boundary and put the stippled bar's right stroke inside the solid bar's footprint. GROUP_WINDOW_CLIPPED now refuses that instead of reading it."
  },
  {
   "tag": "pub127_fig4_normal",
@@ -81,15 +82,15 @@
    ]
   ],
   "anchors": {
-   "SUPINE": 3287,
-   "STANDING": 4036
+   "SUPINE": 3295,
+   "STANDING": 4065
   },
   "fills": [
    "OPEN",
    "STIPPLED",
    "SOLID"
   ],
-  "group_window": 300,
+  "group_window": 320,
   "baseline": 0.0,
   "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
  },
@@ -118,15 +119,15 @@
    ]
   ],
   "anchors": {
-   "SUPINE": 3287,
-   "STANDING": 4036
+   "SUPINE": 3285,
+   "STANDING": 4037
   },
   "fills": [
    "OPEN",
    "STIPPLED",
    "SOLID"
   ],
-  "group_window": 300,
+  "group_window": 320,
   "baseline": 0.0,
   "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
  }

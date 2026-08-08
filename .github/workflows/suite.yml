@@ -26,6 +26,7 @@ jobs:
           set -e
           for t in test_reproducibility test_kernel test_grid_engine \
                    test_bar_reader test_mark_readers test_mono_bar \
+                   test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
                    test_compile_plan; do
             echo "--- $t"

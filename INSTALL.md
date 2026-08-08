@@ -1863,6 +1863,45 @@ matching searched every prototype in the figure, so a group declaring OPEN and
 STIPPLED could come back SOLID if its one sample reached that range. The search
 is restricted to the group's declared set.
 
+## Three more identity contracts, and a design point they exposed
+
+**A complete group nobody can assign is AMBIGUOUS, not absent.** With nothing
+assigned, `fill_identity` reported `NOT_ENOUGH_COMPLETE_GROUPS` whether the
+figure had no complete group or had one and could not tell its patterns apart.
+The second is a finding about the figure and the first is a finding about the
+data, and the wrapper carried the confusion onto every bar as `NOT_CALIBRATED`
+where the truth was `AMBIGUOUS`.
+
+**A group is complete against its DECLARATION, not against what arrived.**
+Completeness was decided from the records in hand, so a group of three whose
+third record was lost to a defect looked like a complete group of two - every
+record present had a fill, and the missing pattern had gone with its record.
+Every record now carries `declared_group_size` and `declared_group_patterns`,
+and a group whose arrivals do not match is `truncated`, named with the slots
+that went missing, and never used to calibrate.
+
+**Structure decides HATCHED against STIPPLED in partial matching too.** Complete
+groups separate them by whether any interior row is blank; matching an
+incomplete group used ink alone, which throws away the only evidence there is
+and re-introduces the ordering this file refuses. A hatch at pitch 14 reads
+0.357 - inside a stipple prototype's range and outside its own - and was renamed
+on that. It is now held to `_structurally_possible` and left unnamed instead.
+
+That change exposed a design point in the separation test. Requiring an ink gap
+between HATCHED and STIPPLED is the same ordering smuggled in as a validity
+check: a sparse hatch and a dense stipple are correctly named by structure and
+have no gap to show. The gap test now applies to pairs decided on ink and
+records `separated_by: STRUCTURE` for the pair that is not.
+
+**And the floor is measured.** `ink_mass_tile_spread` is how much a bar's own
+interior varies across its vertical tiles - a stipple's by a few hundredths, a
+solid bar's by nothing. It is the measurement's uncertainty, taken from the bar,
+and it joins the pooled spread as the floor a gap must clear. A figure with one
+complete group has no cross-group spread, so without it any difference at all
+forced "least" and "most": a bar inked only in its top third has a mean of 0.12
+and varies by 0.35 across itself, and used to be called the darker of two with
+confidence.
+
 ## STIPPLED is declarable before it is readable
 
 `batch_manifests.BAR_FILL_PATTERNS` now accepts `STIPPLED`, and
@@ -1892,11 +1931,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 99 |
+| `test_measure_mono_bars.py` | 111 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1493** |
+| **total** | **1505** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -183,8 +183,8 @@ def main(argv=None):
                  r.get("resolved_fill_pattern"), r["declared"])
                 for r in resolved if r["resolved_fill_pattern"] != r["declared"]]))
     check("and the three fills are separated by more than any one of them varies",
-          all(g["gap"] > g["needed"] for g in verdict.get("separation", [])),
-          repr(verdict.get("separation")))
+          all(g["gap"] > g["needed"] for g in verdict.get("separation", [])
+              if g["separated_by"] == "INK"), repr(verdict.get("separation")))
     # Pinned PER PANEL. Asserting that the three agree passes when all three are
     # wrong together, and is false anyway - see expected_stroke_note.
     by_panel = {}

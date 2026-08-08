@@ -782,8 +782,17 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
     roi = gray[y0 + keep_top:y0 + keep_bottom, ca:cb]
     if roi.size == 0:
         return None
+    # How much `ink_mass` moves across the bar's own interior. This is the
+    # measurement's uncertainty, taken from the bar rather than asserted: a
+    # stipple's tiles disagree by a few hundredths and a solid bar's by nothing,
+    # so a figure with one group - where no pattern has a spread across groups -
+    # still has a floor to hold "least ink" and "most ink" to.
+    _tiles = np.array_split(roi, min(6, max(2, roi.shape[0] // 4)))
+    _mass = [float((1.0 - t / 255.0).mean()) for t in _tiles if t.size]
     out = dict(bar_width=int(bar_w), bar_height=int(height),
                roi_shape=[int(roi.shape[0]), int(roi.shape[1])],
+               ink_mass_tile_spread=round(max(_mass) - min(_mass), 4)
+               if _mass else 0.0,
                # No threshold at all: how much ink is on the paper, 0 for white
                # and 1 for black. A feature that needs no cut point cannot be
                # wrong about where the cut point should be.
@@ -897,7 +906,13 @@ def measure_panel(spec):
         for k, fp in enumerate(prints):
             rec = dict(figure=spec["tag"], figure_id=figure_id, group=label,
                        slot=k, declared=fills[k], stroke_px=stroke,
-                       direction=direction)
+                       direction=direction,
+                       # What the group is SUPPOSED to hold, on every record.
+                       # Without it a group is only knowable from the records
+                       # that came back, so a record lost to a defect takes its
+                       # declaration with it and the remainder looks complete.
+                       declared_group_size=len(fills),
+                       declared_group_patterns=sorted(fills))
             if fp is None:
                 rec["error"] = "NO_SEED_SUPPORT"
                 records.append(rec)
@@ -1122,8 +1137,18 @@ def _sample(rec):
     if "ink_mass" not in rec or "t128" not in rec:
         return None
     return dict(ink=float(rec["ink_mass"]),
+                noise=float(rec.get("ink_mass_tile_spread", 0.0)),
                 rows_all_inked=float(rec["t128"]["row_coverage_min"]) > 0.0,
                 segments=float(rec["t128"]["segment_density"]))
+
+
+def _structurally_possible(pattern, sample):
+    """Whether the word can describe this interior at all, ink aside."""
+    if pattern == "HATCHED":
+        return sample["rows_all_inked"]
+    if pattern == "STIPPLED":
+        return not sample["rows_all_inked"]
+    return True
 
 
 def _assign_group(samples, declared):
@@ -1213,7 +1238,7 @@ def fill_identity(records):
     if len(figure_ids) > 1:
         return {}, dict(status="MULTIPLE_FIGURES",
                         figure_ids=sorted(str(f) for f in figure_ids))
-    groups, declared = {}, {}
+    groups, declared, expected = {}, {}, {}
     for rec in records:
         if rec.get("group") is None or rec.get("slot") is None:
             continue
@@ -1223,10 +1248,23 @@ def fill_identity(records):
         key = (rec["figure"], rec["group"])
         groups.setdefault(key, {})[rec["slot"]] = _sample(rec)
         declared.setdefault(key, {})[rec["slot"]] = rec.get("declared")
+        if rec.get("declared_group_size") is not None:
+            expected[key] = (int(rec["declared_group_size"]),
+                             sorted(rec.get("declared_group_patterns") or []))
 
-    complete, partial = {}, {}
+    complete, partial, truncated = {}, {}, {}
     for key, slots in groups.items():
-        if all(v is not None for v in slots.values()):
+        size, patterns = expected.get(key, (len(slots), sorted(
+            v for v in declared[key].values() if v)))
+        arrived = sorted(v for v in declared[key].values() if v)
+        if len(slots) != size or arrived != patterns:
+            # A slot the panel declared did not come back at all. The records
+            # that DID come back may every one of them carry a fill, and the
+            # group is still not complete - and it cannot be told apart from a
+            # smaller group unless the declaration travels on the records.
+            truncated[key] = sorted(set(range(size)) - set(slots))
+            partial[key] = slots
+        elif all(v is not None for v in slots.values()):
             complete[key] = slots
         else:
             partial[key] = slots
@@ -1242,15 +1280,22 @@ def fill_identity(records):
             assigned[(key, slot)] = pattern
 
     if not assigned:
-        return {}, dict(status="NOT_ENOUGH_COMPLETE_GROUPS",
+        # "No complete group" and "complete groups nobody could assign" are
+        # different findings and were reported as the same one, which also sent
+        # every measured bar to NOT_CALIBRATED when the truth was AMBIGUOUS.
+        return {}, dict(status="AMBIGUOUS" if unassignable
+                        else "NOT_ENOUGH_COMPLETE_GROUPS",
+                        prototype_ready=False,
                         complete_groups=len(complete),
-                        unassignable_groups=sorted(unassignable))
+                        truncated_groups={str(k): v for k, v in truncated.items()},
+                        unassignable_groups=sorted(str(k) for k in unassignable))
 
     pooled = {}
     for (key, slot), pattern in assigned.items():
         pooled.setdefault(pattern, []).append(groups[key][slot]["ink"])
     spread = {p: max(v) - min(v) for p, v in pooled.items()}
-    floor = max(spread.values())
+    noise = max([groups[k][s]["noise"] for k, s in assigned] or [0.0])
+    floor = max(max(spread.values()), noise)
     # A prototype RANGE is only reusable when the figure has shown how much a
     # pattern varies. One complete group gives one sample per pattern, every
     # spread is zero, and a zero-width range with a zero tolerance would match
@@ -1259,15 +1304,24 @@ def fill_identity(records):
     # This is what the docstring always claimed and the code did not do: it
     # reported ESTABLISHED off a single group because any non-zero gap beats a
     # zero floor.
-    prototype_ready = len(complete) >= 2 and floor > 0
+    prototype_ready = len(complete) >= 2
 
     order = sorted(pooled, key=lambda p: min(pooled[p]))
     gaps, failures = [], []
     for a, b in zip(order, order[1:]):
         gap = min(pooled[b]) - max(pooled[a])
         need = max(spread[a], spread[b], floor)
-        gaps.append(dict(between=[a, b], gap=round(gap, 4), needed=round(need, 4)))
-        if gap <= need:
+        # HATCHED and STIPPLED are told apart by whether any interior row is
+        # blank, not by how much ink there is, so requiring an ink gap between
+        # them is the ordering this file refuses, smuggled back in as a
+        # validity test: a sparse hatch and a dense stipple are correctly named
+        # by structure and have no gap to show. Every other pair IS decided on
+        # ink and has to earn it.
+        structural = {a, b} == {"HATCHED", "STIPPLED"}
+        gaps.append(dict(between=[a, b], gap=round(gap, 4),
+                         needed=(None if structural else round(need, 4)),
+                         separated_by="STRUCTURE" if structural else "INK"))
+        if not structural and gap <= need:
             failures.append("%s/%s gap %.4f against spread %.4f" % (a, b, gap, need))
 
     clean = not (failures or unassignable)
@@ -1275,7 +1329,8 @@ def fill_identity(records):
                            else "DIRECT_ONLY" if clean else "AMBIGUOUS"),
                    prototype_ready=bool(prototype_ready),
                    complete_groups=len(complete),
-                   unassignable_groups=sorted(unassignable),
+                   truncated_groups={str(k): v for k, v in truncated.items()},
+                   unassignable_groups=sorted(str(k) for k in unassignable),
                    prototypes={p: [round(min(v), 4), round(max(v), 4)]
                                for p, v in sorted(pooled.items())},
                    separation=gaps, failures=failures)
@@ -1298,8 +1353,13 @@ def fill_identity(records):
         for slot, sample in slots.items():
             if sample is None:
                 continue
+            # Structure decides HATCHED against STIPPLED here as well. Matching
+            # on ink alone throws away the only evidence that separates them and
+            # re-introduces the ordering this file refuses to make: a hatched
+            # bar whose density drifts into the stipple range would be renamed,
+            # silently, against a row structure that says it cannot be one.
             hits = [p for p, v in pooled.items()
-                    if p in allowed
+                    if p in allowed and _structurally_possible(p, sample)
                     and min(v) - floor <= sample["ink"] <= max(v) + floor]
             if len(hits) == 1:
                 assigned[(key, slot)] = hits[0]

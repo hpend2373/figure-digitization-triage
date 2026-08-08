@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.22"
+PIPELINE_VERSION = "7.23"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "bar_reader.py", "make_wpd_project.py",

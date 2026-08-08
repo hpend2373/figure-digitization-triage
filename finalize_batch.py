@@ -263,11 +263,28 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
     number came out HUMAN_APPROVED. The reviewer registry had the same hole from
     the other side, since `--manifests` takes any directory.
     """
-    recorded = run_stamp.get("Output_SHA256") or {}
+    # The type, not only the presence. `run_stamp.json` can be a well-formed
+    # JSON object with a malformed field inside it - `Output_SHA256: ["x"]` is
+    # valid JSON - and `recorded.get(name)` on a list raises AttributeError.
+    # That exception left the finalizer with the accepted file and the previous
+    # stamp already deleted and no new stamp explaining why, which is the shape
+    # the top-level stamp guard exists to prevent. A guard on the outside of a
+    # structure is not a guard on what is inside it.
+    recorded = run_stamp.get("Output_SHA256")
+    if not isinstance(recorded, dict):
+        flag("run", "RUN_STAMP_SCHEMA_INVALID",
+             "Output_SHA256 is %s; it must be an object mapping each verified "
+             "output to its SHA-256" % type(recorded).__name__)
+        return False
     if not recorded:
         flag("run", "RUN_ARTIFACT_MODIFIED",
              "run_stamp.json records no Output_SHA256 - this run predates "
              "output verification and cannot be finalized")
+        return False
+    off_type = sorted(k for k, v in recorded.items() if not isinstance(v, str))
+    if off_type:
+        flag("run", "RUN_STAMP_SCHEMA_INVALID",
+             "Output_SHA256 holds a non-string hash for %s" % ", ".join(off_type))
         return False
     ok = True
     for name in VERIFIED_OUTPUTS:

@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.22 (full package)
+# figure-digitization-triage — v7.23 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -159,6 +159,27 @@ Also from the same review: the run records `Manifest_Dir`, so the finalizer
 finds the registry when the README's own three commands put manifests beside
 the run rather than inside it; and `opencv-python` is out of the lock file,
 since it and `opencv-python-headless` both provide `cv2`.
+
+## v7.23 review — a guard on the outside is not a guard on the inside
+
+`run_stamp.json` is checked at the top level: it must exist, decode as UTF-8,
+parse as JSON, and hold an object. Each of these passes all four:
+
+```json
+{"Status": "RAN", "Run_Mode": "ATTESTED", "Output_SHA256": ["not", "a", "map"]}
+```
+
+`verify_run_outputs` then does `recorded.get(name)` on a list, which raises
+`AttributeError` — after the accepted file and the previous stamp have been
+deleted. The exact failure the top-level guard exists to prevent, one level
+down. Reproduced for a list, a string, a boolean and a number; all four raised
+with no stamp left behind.
+
+`Output_SHA256` must be an object, and every value in it must be a string:
+either way `RUN_STAMP_SCHEMA_INVALID`, refused with a stamp. The scenarios
+assert the fixture is still valid JSON with an object at the root, so they
+cannot pass by accident on the outer guard. Reverting the type check fails 1 and
+crashes the suite; reverting the value check fails 1.
 
 ## v7.22 review — failure durability
 
@@ -1558,14 +1579,14 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_run_batch.py` | 455 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
-| `test_finalize.py` | 148 |
+| `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 92 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 26 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 18 |
-| **total** | **1357** |
+| **total** | **1377** |
 
 Plus `crosscheck_id323.py` (0.50 px / 2.50 px over 72 bars, two independent
 primitives), `forward_test_397_mono_bar.py`, and two worked examples:

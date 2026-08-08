@@ -501,6 +501,49 @@ for _label, _write in (
 
 
 print()
+print("a stamp can be a well-formed object with a malformed field inside it")
+# The top-level guard checks that `run_stamp.json` is an object. It was, in each
+# of these: `Output_SHA256: ["x"]` is valid JSON. `recorded.get(name)` on a list
+# then raised AttributeError - after the accepted file and the previous stamp
+# were deleted - so the exact failure the top-level guard exists to prevent came
+# back one level down. A guard on the outside of a structure is not a guard on
+# what is inside it.
+for _label, _value in (("a list", ["x"]), ("a string", "abcdef"),
+                       ("a boolean", True), ("a number", 7),
+                       ("an object whose hashes are not strings",
+                        {"run_manifest.csv": 5})):
+    _n_out, _ = fresh_run("run_nested_%d" % (abs(hash(_label)) % 10 ** 6))
+    _nq = pd.read_csv(os.path.join(_n_out, "review_queue.csv"), dtype=object)
+    _nrv = review([dict(Review_ID="R001", Panel_ID="P1",
+                        Review_Subject_SHA256=_nq.loc[0, "Review_Subject_SHA256"],
+                        Reviewer_ID="RV_H", Decision="APPROVED",
+                        Reviewed_At="2026-08-06T10:00:00Z", Note="")],
+                  os.path.join(_n_out, "value_review.csv"))
+    _np = os.path.join(_n_out, "run_stamp.json")
+    _nd = json.load(open(_np))
+    _nd["Output_SHA256"] = _value
+    json.dump(_nd, open(_np, "w"))
+    check("  the fixture is still valid JSON with an object at the root (%s)"
+          % _label,
+          isinstance(json.load(open(_np)), dict))
+    try:
+        _nr = FIN.finalize(_n_out, review_path=_nrv, run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    except Exception as _exc:
+        _nr = dict(status="RAISED %s" % type(_exc).__name__, accepted=0)
+    check("Output_SHA256 as %s is refused, not raised" % _label,
+          _nr["status"] in ("RUN_ARTIFACT_MODIFIED", "RUN_NOT_FINALIZABLE")
+          and _nr["accepted"] == 0, "%s" % _nr["status"])
+    check("  and the refusal names the schema, not a hash mismatch (%s)" % _label,
+          any(p["check"] == "RUN_STAMP_SCHEMA_INVALID" for p in _nr["problems"]),
+          "%s" % sorted({p["check"] for p in _nr["problems"]}))
+    check("  and it is on the record with nothing poolable (%s)" % _label,
+          os.path.exists(os.path.join(_n_out, "finalize_stamp.json"))
+          and not os.path.exists(os.path.join(_n_out,
+                                              "figure_values_accepted.csv")))
+
+
+print()
 print("every failure ends in a stamp, including one it cannot parse")
 # Hashing is bytes; parsing is interpretation. Doing them the other way round
 # meant a machine-QC CSV with a broken quote raised out of pd.read_csv before

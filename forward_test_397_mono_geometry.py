@@ -37,6 +37,26 @@ time, and stops them getting quietly worse.
              footprint that is not this bar - correctly unnameable, correctly
              refused, and caused by the footprint rather than by the classifier.
 
+             One approach has been tried and REVERTED, so nobody spends the
+             round on it twice. "A bar's top is level": take each column's
+             topmost ink, take the median across the footprint, trim inward
+             from each end while the columns disagree. It fails because the
+             topmost ink in a column is not the bar top - it is the ERROR BAR.
+             The synthetic fixture's caps span 70% of the bar, so the median
+             column top is the cap row and every column outside the cap gets
+             trimmed; the fixture lost three bars per group and 397 MEN
+             collapsed. "Topmost ink CONTIGUOUS with the baseline" does not
+             rescue it either, because a stipple's columns are dotted and stop
+             at the first blank row.
+
+             Whatever the signal is, it has to be measured in a band that
+             excludes the error bar above and tolerates dots - which means it
+             needs the bar's extent first, so the separation is iterative:
+             trace with the provisional footprint, re-measure the columns below
+             that extent, trim, re-trace. Note also that below the bar top BOTH
+             the bar's columns and the neighbour's overhang are inked, so the
+             discriminator there is density and not presence.
+
              The fix belongs in footprint separation and needs its own round:
              the midpoint-of-the-gap boundary this file's geometry already
              computes does not help, because the bleed is INSIDE the seed run

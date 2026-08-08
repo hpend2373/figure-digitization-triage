@@ -1029,7 +1029,14 @@ def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, seri
     for spec in series:
         pattern = str(spec.bar_fill or "").strip().upper()
         if pattern in UNIMPLEMENTED_FILL_PATTERNS:
-            raise ValueError(
+            # UnsupportedCapabilityError, not ValueError. `run_batch` maps
+            # ValueError to PANEL_GEOMETRY_UNRESOLVED, so raising one here would
+            # file "this reader has no STIPPLED" under "this panel's geometry
+            # cannot be trusted" - fail-closed with the wrong reason on the
+            # record, which is the kind of thing a reviewer acts on and a
+            # maintainer chases. UnsupportedCapabilityError maps to
+            # NO_READER_AVAILABLE, which is what this is.
+            raise UnsupportedCapabilityError(
                 "SeriesSpec %r declares bar_fill=%r. The manifest vocabulary "
                 "accepts it and this reader cannot read it: its fill classifier "
                 "is absolute-banded and %s has no band, so the bar would be "

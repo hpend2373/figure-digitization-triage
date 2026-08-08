@@ -1820,6 +1820,49 @@ Result on the whole corpus: publication 127 **16 of 18 cells named, none wrong**
 — the two unnamed are the 15 px bars with no measurable fill — publication 397
 7 of 8, and the synthetic fixture 12 of 12. Every figure reports ESTABLISHED.
 
+## Five contracts closed before the reader is touched
+
+Each of these is independent of the production rewrite and each would otherwise
+have been carried into it, so they were closed first.
+
+**A refusal must file itself under the right reason.** The STIPPLED refusal
+raised `ValueError`, and `run_batch` maps that to `PANEL_GEOMETRY_UNRESOLVED` -
+so "this reader has no STIPPLED" would be recorded as "this panel's geometry
+cannot be trusted". Fail-closed with the wrong reason is the kind of thing a
+reviewer acts on and a maintainer chases. It raises `UnsupportedCapabilityError`
+now, which maps to `NO_READER_AVAILABLE`, and `test_run_batch.py` asserts the
+terminal state end to end rather than the exception message at the reader.
+
+**Sampling a fill is not naming a series.** One field called `identity_status`
+answered "did this bar have an interior to sample" while the forward tests read
+it as "was this series identified" and reported sixteen identities that were
+sixteen samples. `measure_panel` sets `fill_sample_status`
+(MEASURED / UNRESOLVED_NO_INTERIOR) and nothing else - it measures one panel and
+identity is figure-local, so it cannot name anything.
+`fill_identities_by_figure` sets `identity_status`
+(RESOLVED / AMBIGUOUS / NOT_CALIBRATED / UNRESOLVED_NO_FILL) and
+`resolved_fill_pattern`, and both forward tests now assert the real identity
+against the declared fill.
+
+**One figure per vocabulary.** `figure_id` was recorded and not used:
+`fill_identity` pooled every record it was handed, so passing two publications
+would silently build one figure-local vocabulary out of both. It refuses with
+`MULTIPLE_FIGURES`, and `fill_identities_by_figure` is the entry point that
+splits them.
+
+**A prototype range needs a width before anything is matched against it.** One
+complete group gives one sample per pattern, every spread is zero, and any
+non-zero gap beats a zero floor - so a single group reported ESTABLISHED and
+incomplete groups were matched against ranges of zero width. That is now
+`DIRECT_ONLY`: the complete group keeps the identities it can force from
+relations inside itself, and nothing leans on them. `ESTABLISHED` requires at
+least two complete groups and a non-zero spread.
+
+**A bar is never named a pattern its own group does not declare.** Partial
+matching searched every prototype in the figure, so a group declaring OPEN and
+STIPPLED could come back SOLID if its one sample reached that range. The search
+is restricted to the group's declared set.
+
 ## STIPPLED is declarable before it is readable
 
 `batch_manifests.BAR_FILL_PATTERNS` now accepts `STIPPLED`, and
@@ -1842,18 +1885,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 455 |
+| `test_run_batch.py` | 460 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 85 |
-| `test_mono_bar.py` | 32 |
+| `test_measure_mono_bars.py` | 99 |
+| `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1473** |
+| **total** | **1493** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

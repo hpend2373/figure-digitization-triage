@@ -962,15 +962,19 @@ def measure_panel(spec):
                 rec["error"] = "BAR_TOO_SMALL_TO_SAMPLE"
             else:
                 rec.update(tex)
+            # Whether a fill was SAMPLED, which is not whether the series was
+            # IDENTIFIED. This function measures one panel and identity is
+            # figure-local, so nothing here can name a series; the two were one
+            # field called `identity_status` and the forward tests were counting
+            # samples while saying "identities". `fill_identities_by_figure`
+            # sets `identity_status` and `resolved_fill_pattern`.
+            #
             # `declared` is the spec's DECLARATION, to be checked against what
-            # the fill measures - never an identification. A BAR_MONO series is
-            # identified by its fill pattern, so a bar whose fill could not be
-            # sampled has a geometry and no identity, and calling it OPEN
-            # because it is the first slot would be identifying a series by
-            # position. Two of publication 127's cells are in exactly that
-            # state: 18 geometries, 16 identities.
-            rec["identity_status"] = ("FILL_MEASURED" if tex is not None
-                                      else "UNRESOLVED_NO_FILL")
+            # the fill measures - never an identification. Calling a bar OPEN
+            # because it is the first slot is identifying a series by position.
+            rec["fill_sample_status"] = ("MEASURED" if tex is not None
+                                         else "UNRESOLVED_NO_INTERIOR")
+            rec["identity_status"] = "NOT_CALIBRATED"
             records.append(rec)
     return records
 
@@ -1187,11 +1191,28 @@ def fill_identity(records):
     pattern seen once has no spread of its own and inherits the widest spread in
     the figure, so it is held to the same standard rather than to none.
 
-    Returns (identities, verdict). `identities` maps (group, slot) to a pattern
-    for every cell that has one. `verdict["status"]` is ESTABLISHED, AMBIGUOUS
-    or NOT_ENOUGH_COMPLETE_GROUPS, and no identity is returned unless it is
-    ESTABLISHED.
+    Returns (identities, verdict). `identities` maps (panel, group, slot) to a
+    pattern for every cell that has one, and `verdict["status"]` is one of:
+
+      ESTABLISHED   every complete group assigned, and the figure has shown how
+                    much a pattern varies - at least two complete groups and a
+                    non-zero spread - so the prototype ranges are reusable and
+                    incomplete groups are matched against them.
+      DIRECT_ONLY   every complete group assigned, but from a single group, so
+                    every prototype range has zero width. Those groups keep
+                    their identities; nothing is matched against them.
+      AMBIGUOUS     a group could not be assigned, or two patterns are closer
+                    than one of them varies. Nothing is named.
+      NOT_ENOUGH_COMPLETE_GROUPS   no group had a fill in every slot.
+
+    All records must belong to ONE figure; pass mixed figures and this refuses
+    with MULTIPLE_FIGURES rather than pooling two publications into one
+    vocabulary. `fill_identities_by_figure` does the splitting.
     """
+    figure_ids = {r.get("figure_id", r.get("figure")) for r in records}
+    if len(figure_ids) > 1:
+        return {}, dict(status="MULTIPLE_FIGURES",
+                        figure_ids=sorted(str(f) for f in figure_ids))
     groups, declared = {}, {}
     for rec in records:
         if rec.get("group") is None or rec.get("slot") is None:
@@ -1230,6 +1251,15 @@ def fill_identity(records):
         pooled.setdefault(pattern, []).append(groups[key][slot]["ink"])
     spread = {p: max(v) - min(v) for p, v in pooled.items()}
     floor = max(spread.values())
+    # A prototype RANGE is only reusable when the figure has shown how much a
+    # pattern varies. One complete group gives one sample per pattern, every
+    # spread is zero, and a zero-width range with a zero tolerance would match
+    # nothing honestly and everything by luck - so that case assigns the groups
+    # it can read directly and refuses to match anything else against them.
+    # This is what the docstring always claimed and the code did not do: it
+    # reported ESTABLISHED off a single group because any non-zero gap beats a
+    # zero floor.
+    prototype_ready = len(complete) >= 2 and floor > 0
 
     order = sorted(pooled, key=lambda p: min(pooled[p]))
     gaps, failures = [], []
@@ -1240,26 +1270,85 @@ def fill_identity(records):
         if gap <= need:
             failures.append("%s/%s gap %.4f against spread %.4f" % (a, b, gap, need))
 
-    verdict = dict(status="ESTABLISHED" if not (failures or unassignable)
-                   else "AMBIGUOUS",
+    clean = not (failures or unassignable)
+    verdict = dict(status=("ESTABLISHED" if clean and prototype_ready
+                           else "DIRECT_ONLY" if clean else "AMBIGUOUS"),
+                   prototype_ready=bool(prototype_ready),
                    complete_groups=len(complete),
                    unassignable_groups=sorted(unassignable),
                    prototypes={p: [round(min(v), 4), round(max(v), 4)]
                                for p, v in sorted(pooled.items())},
                    separation=gaps, failures=failures)
-    if verdict["status"] != "ESTABLISHED":
+    if verdict["status"] == "AMBIGUOUS":
         return {}, verdict
+    if verdict["status"] == "DIRECT_ONLY":
+        # The complete groups were assigned from relations inside themselves,
+        # which stands on its own. Nothing else may lean on it.
+        verdict["matched_against_prototypes"] = 0
+        verdict["cells_identified"] = len(assigned)
+        return assigned, verdict
 
     matched = 0
     for key, slots in partial.items():
+        # Only the patterns THIS group declares. Matching against every
+        # prototype in the figure can return a pattern the group does not
+        # contain: a partial group declaring OPEN and STIPPLED could come back
+        # SOLID because its one sample happened to reach the SOLID range.
+        allowed = set(declared[key].values())
         for slot, sample in slots.items():
             if sample is None:
                 continue
             hits = [p for p, v in pooled.items()
-                    if min(v) - floor <= sample["ink"] <= max(v) + floor]
+                    if p in allowed
+                    and min(v) - floor <= sample["ink"] <= max(v) + floor]
             if len(hits) == 1:
                 assigned[(key, slot)] = hits[0]
                 matched += 1
     verdict["matched_against_prototypes"] = matched
     verdict["cells_identified"] = len(assigned)
     return assigned, verdict
+
+
+#: What `identity_status` on a record can say once the figure has been resolved.
+IDENTITY_STATES = ("RESOLVED", "AMBIGUOUS", "NOT_CALIBRATED",
+                   "UNRESOLVED_NO_FILL")
+
+
+def fill_identities_by_figure(records):
+    """Resolve every figure in `records` and write the answer onto the records.
+
+    The public entry point, because `fill_identity` takes one figure and a
+    caller holding a batch has several. Each record gains:
+
+      fill_sample_status    MEASURED / UNRESOLVED_NO_INTERIOR (set at measure
+                            time; whether there was an interior to sample)
+      identity_status       RESOLVED / AMBIGUOUS / NOT_CALIBRATED /
+                            UNRESOLVED_NO_FILL
+      resolved_fill_pattern the pattern, or "" - and this, not `declared`, is
+                            what names the series
+
+    Returns {figure_id: verdict}.
+    """
+    by_figure = {}
+    for rec in records:
+        by_figure.setdefault(rec.get("figure_id", rec.get("figure")), []).append(rec)
+    verdicts = {}
+    for figure_id, rows in by_figure.items():
+        identities, verdict = fill_identity(rows)
+        verdicts[figure_id] = verdict
+        for rec in rows:
+            if rec.get("group") is None or rec.get("slot") is None:
+                continue
+            key = ((rec["figure"], rec["group"]), rec["slot"])
+            pattern = identities.get(key)
+            if pattern:
+                rec["identity_status"] = "RESOLVED"
+                rec["resolved_fill_pattern"] = pattern
+            else:
+                rec["resolved_fill_pattern"] = ""
+                rec["identity_status"] = (
+                    "UNRESOLVED_NO_FILL"
+                    if rec.get("fill_sample_status") != "MEASURED"
+                    else "AMBIGUOUS" if verdict["status"] in
+                    ("AMBIGUOUS", "MULTIPLE_FIGURES") else "NOT_CALIBRATED")
+    return verdicts

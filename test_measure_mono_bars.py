@@ -603,13 +603,16 @@ try:
     outline(img, 1, 4)
     got = M.measure_panel(spec(write(img, "identity", TMP), ["SOLID", "OPEN"]))
     tall, short = only(got, 0), only(got, 1)
-    check("the tall bar's identity is measured",
-          tall.get("identity_status") == "FILL_MEASURED",
-          repr(tall.get("identity_status")))
-    check("the short bar's is not, though its slot declares one",
-          short.get("identity_status") == "UNRESOLVED_NO_FILL",
-          repr(short.get("identity_status")))
-    check("and it still has its geometry", "value" in short)
+    check("the tall bar yielded a fill sample",
+          tall.get("fill_sample_status") == "MEASURED",
+          repr(tall.get("fill_sample_status")))
+    check("the short bar did not, though its slot declares one",
+          short.get("fill_sample_status") == "UNRESOLVED_NO_INTERIOR",
+          repr(short.get("fill_sample_status")))
+    check("neither is named until a figure resolves it",
+          all(r.get("identity_status") == "NOT_CALIBRATED" for r in got),
+          repr([r.get("identity_status") for r in got]))
+    check("and the short bar still has its geometry", "value" in short)
 
     # -------------------------------------------------- 20. a ragged rule
     #
@@ -639,8 +642,11 @@ try:
     spec1["anchors"] = {"G1": spec1["anchors"]["G"]}
     rows = M.measure_panel(spec1)
     ident, verdict = M.fill_identity(rows)
-    check("the vocabulary is established", verdict["status"] == "ESTABLISHED",
-          repr(verdict))
+    # One complete group: assignable from relations inside itself, and not a
+    # reusable prototype - every range has zero width.
+    check("one group names its own bars and claims nothing more",
+          verdict["status"] == "DIRECT_ONLY" and not verdict["prototype_ready"],
+          repr(verdict["status"]))
     check("every bar is named, and named correctly",
           len(ident) == 3 and all(ident[(r["figure"], r["group"]), r["slot"]]
                                   == r["declared"] for r in rows),
@@ -662,8 +668,8 @@ try:
     rows = M.measure_panel(g.spec(write(img, "flipped", TMP),
                                   ["OPEN", "SOLID"]))     # ... declared open-first
     ident, verdict = M.fill_identity(rows)
-    check("the vocabulary is still established",
-          verdict["status"] == "ESTABLISHED", repr(verdict))
+    check("the group is still assigned",
+          verdict["status"] == "DIRECT_ONLY", repr(verdict["status"]))
     got = {r["slot"]: ident.get(((r["figure"], r["group"]), r["slot"])) for r in rows}
     check("slot 0 is named SOLID though the spec declares OPEN there",
           got.get(0) == "SOLID", repr(got))
@@ -685,7 +691,7 @@ try:
           ink.get("STIPPLED", 0) > ink.get("HATCHED", 1), repr(ink))
     ident, verdict = M.fill_identity(rows)
     check("and both are named correctly anyway",
-          verdict["status"] == "ESTABLISHED" and
+          verdict["status"] == "DIRECT_ONLY" and
           all(ident[((r["figure"], r["group"]), r["slot"])] == r["declared"]
               for r in rows), "%r %r" % (verdict["status"], ident))
 
@@ -729,6 +735,20 @@ try:
     check("the two patterns are closer than one of them varies",
           verdict["status"] == "AMBIGUOUS", "%r  ink %r" % (verdict["status"], ink))
     check("so nothing is named", not ident, repr(ident))
+    # REVERT: set identity_status from whether a fill was sampled. Every bar
+    # here HAS an interior and a texture; not one of them has an identity, and
+    # a field that answers the first question while being read as the answer to
+    # the second reports four named series on a figure that named none.
+    M.fill_identities_by_figure(both)
+    check("every bar here did yield a fill sample",
+          all(r.get("fill_sample_status") == "MEASURED" for r in both),
+          repr([r.get("fill_sample_status") for r in both]))
+    check("and not one of them is RESOLVED, because sampling is not naming",
+          not [r for r in both if r.get("identity_status") == "RESOLVED"],
+          repr([r.get("identity_status") for r in both]))
+    check("their status says the figure could not separate them",
+          all(r.get("identity_status") == "AMBIGUOUS" for r in both),
+          repr([r.get("identity_status") for r in both]))
 
     # -------------------------------------------------- 26. incomplete groups
     #
@@ -737,30 +757,88 @@ try:
     # forced, and the whole FIGURE goes AMBIGUOUS - so one 15 px bar costs every
     # other bar in the figure its name. Publication 127 has two of them.
     print("\none unsampleable bar does not cost the figure its vocabulary")
-    img = g.blank()
-    g.outline(img, 0, 30)
-    g.stipple(img, 1, 45)
-    g.solid(img, 2, 60)
-    full = M.measure_panel(g.spec(write(img, "whole", TMP),
-                                  ["OPEN", "STIPPLED", "SOLID"]))
-    img = g.blank()
-    g.outline(img, 0, 30)
-    g.stipple(img, 1, 40)
-    g.solid(img, 2, 4)                                  # too short to sample
-    part = M.measure_panel(g.spec(write(img, "holey", TMP),
-                                  ["OPEN", "STIPPLED", "SOLID"]))
-    for r in part:
-        r["figure"] = "holey_group"
-    both = full + part
-    for r in both:
-        r["figure_id"] = "one_figure"
-    ident, verdict = M.fill_identity(both)
-    check("the complete group still establishes the vocabulary",
-          verdict["status"] == "ESTABLISHED", repr(verdict.get("failures") or verdict))
-    check("and names its own three bars",
-          sum(1 for k in ident if k[0][0] != "holey_group") == 3, repr(ident))
-    check("the short bar is not named", not any(
-        k[0][0] == "holey_group" and k[1] == 2 for k in ident), repr(ident))
+    rows = []
+    for name, units in (("whole_a", (30, 45, 60)), ("whole_b", (33, 48, 63)),
+                        ("holey", (30, 40, 4))):
+        img = g.blank()
+        g.outline(img, 0, units[0])
+        g.stipple(img, 1, units[1])
+        g.solid(img, 2, units[2])
+        got = M.measure_panel(g.spec(write(img, name, TMP),
+                                     ["OPEN", "STIPPLED", "SOLID"]))
+        for r in got:
+            r["figure"], r["figure_id"] = name, "one_figure"
+            r["fill_sample_status"] = ("MEASURED" if "ink_mass" in r
+                                       else "UNRESOLVED_NO_INTERIOR")
+        rows.extend(got)
+    ident, verdict = M.fill_identity(rows)
+    check("two complete groups make the prototypes reusable",
+          verdict["status"] == "ESTABLISHED" and verdict["prototype_ready"],
+          repr(verdict.get("failures") or verdict["status"]))
+    check("and the six bars they hold are named",
+        sum(1 for k in ident if k[0][0] != "holey") == 6, repr(len(ident)))
+    check("the incomplete group's two sampled bars are matched to them",
+          sum(1 for k in ident if k[0][0] == "holey") == 2, repr(ident))
+    check("the short bar is not named",
+          not any(k[0][0] == "holey" and k[1] == 2 for k in ident), repr(ident))
+
+    # -------------------------------------------------- 26b. DIRECT_ONLY
+    #
+    # REVERT: drop `prototype_ready` and report ESTABLISHED whenever the
+    # assignment is clean. A single complete group gives one sample per pattern,
+    # every prototype range has zero width, and matching an incomplete group
+    # against a range of zero width with a tolerance of zero succeeds only by
+    # luck - which is exactly how a wrong identity gets in.
+    one = [r for r in rows if r["figure"] in ("whole_a", "holey")]
+    ident_one, verdict_one = M.fill_identity(one)
+    check("with only one complete group the prototypes are not reusable",
+          verdict_one["status"] == "DIRECT_ONLY", repr(verdict_one["status"]))
+    check("so nothing in the incomplete group is matched",
+          not any(k[0][0] == "holey" for k in ident_one), repr(ident_one))
+    check("while the complete group keeps its three names",
+          sum(1 for k in ident_one if k[0][0] == "whole_a") == 3, repr(ident_one))
+
+    # -------------------------------------------------- 26c. declared set
+    #
+    # REVERT: drop `p in allowed` from the partial match. A group is then
+    # matched against every prototype in the FIGURE rather than against the
+    # patterns it declares, so a bar can come back as a fill its own group does
+    # not contain.
+    holey = [dict(r) for r in rows if r["figure"] == "holey"]
+    for r in holey:
+        if r.get("slot") == 1:
+            r["declared"] = "OPEN"          # this group declares no STIPPLED
+    ident_d, _v = M.fill_identity(
+        [r for r in rows if r["figure"] != "holey"] + holey)
+    check("a bar is never named a pattern its own group does not declare",
+          all(v in ("OPEN", "SOLID") for k, v in ident_d.items()
+              if k[0][0] == "holey"),
+          repr({k: v for k, v in ident_d.items() if k[0][0] == "holey"}))
+
+    # -------------------------------------------------- 26d. one figure
+    print("\ntwo publications are not one figure-local vocabulary")
+    mixed = [dict(r) for r in rows]
+    for r in mixed[:3]:
+        r["figure_id"] = "some_other_publication"
+    ident_m, verdict_m = M.fill_identity(mixed)
+    check("mixed figures are refused rather than pooled",
+          verdict_m["status"] == "MULTIPLE_FIGURES", repr(verdict_m["status"]))
+    check("and nothing is named", not ident_m)
+    verdicts = M.fill_identities_by_figure(rows)
+    check("the by-figure entry point resolves each figure separately",
+          set(verdicts) == {"one_figure"}, repr(sorted(verdicts)))
+    check("and writes the answer onto the records",
+          all(r.get("resolved_fill_pattern") == r["declared"] for r in rows
+              if r.get("identity_status") == "RESOLVED"),
+          repr([(r["figure"], r.get("slot"), r.get("identity_status"),
+                 r.get("resolved_fill_pattern"), r.get("declared")) for r in rows]))
+    check("a sampled bar that could not be named says NOT_CALIBRATED or AMBIGUOUS,"
+          " and an unsampled one says so differently",
+          all(r["identity_status"] == "UNRESOLVED_NO_FILL" for r in rows
+              if r.get("fill_sample_status") == "UNRESOLVED_NO_INTERIOR"),
+          repr([(r["figure"], r.get("slot"), r.get("fill_sample_status"),
+                 r.get("identity_status")) for r in rows
+                if r.get("fill_sample_status") != "MEASURED"]))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

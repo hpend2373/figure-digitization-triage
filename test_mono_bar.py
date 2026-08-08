@@ -223,7 +223,7 @@ check("and in the reader's, so a spec carrying it parses",
 check("but the reader has no band for it and says so",
       "STIPPLED" in MR.UNIMPLEMENTED_FILL_PATTERNS,
       repr(MR.UNIMPLEMENTED_FILL_PATTERNS))
-_refused = ""
+_refused, _kind = "", None
 try:
     _truth = json.load(open(TRUTH))
     MR.read_monochrome_bar_panel(
@@ -232,10 +232,16 @@ try:
         y_calibration=MR.AxisCalibration.from_points(
             [(v, p) for v, p in _truth["y_ticks"]]),
         series=[MR.SeriesSpec("S_STIPPLE", bar_fill="STIPPLED")])
-except ValueError as exc:
-    _refused = str(exc)
+except Exception as exc:                                        # noqa: BLE001
+    _refused, _kind = str(exc), type(exc)
 check("reading a STIPPLED series raises rather than guessing",
       "cannot read it" in _refused, repr(_refused[:80]))
+# The TYPE decides the run state: run_batch maps UnsupportedCapabilityError to
+# NO_READER_AVAILABLE and ValueError to PANEL_GEOMETRY_UNRESOLVED, so a plain
+# ValueError here would file "no STIPPLED reader" as "this panel's geometry
+# cannot be trusted". test_run_batch.py asserts the state end to end.
+check("and raises the capability error, not a geometry one",
+      _kind is MR.UnsupportedCapabilityError, repr(_kind))
 check("and the refusal names the panel and the pattern",
       "S_STIPPLE" in _refused and "STIPPLED" in _refused, repr(_refused[:80]))
 check("no other declared fill is refused",

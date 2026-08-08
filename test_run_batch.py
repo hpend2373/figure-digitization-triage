@@ -2067,6 +2067,45 @@ _v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna
 check("and it invents no bars from the line markers",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 
+print("a fill the manifest can declare and no reader can read yet")
+# STIPPLED is in the manifest vocabulary because publication 127 prints it and
+# a manifest that cannot say so forces its author to declare the nearest lie.
+# The reader refuses it - and WHICH refusal it raises decides what the audit
+# record says. A plain ValueError maps to PANEL_GEOMETRY_UNRESOLVED, which would
+# put "this reader has no STIPPLED" on the record as "this panel's geometry
+# cannot be trusted": fail-closed with the wrong reason, which is the kind of
+# thing a reviewer acts on and a maintainer chases.
+#
+# REVERT: raise ValueError from the UNIMPLEMENTED_FILL_PATTERNS branch in
+# mark_readers. The state below becomes PANEL_GEOMETRY_UNRESOLVED and every
+# other assertion in this scenario still passes.
+_stipple_series = [
+    dict(r, Colour_Hex="",
+         Bar_Fill_Pattern=("SOLID" if r["Series_ID"] == "S_BLUE" else "STIPPLED"))
+    if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
+_stip = write_manifests(
+    os.path.join(ROOT, "m_stipple"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
+                  Config_ID="C_BARMONO"),
+    series_rows=_stipple_series,
+    configs=CONFIGS + [dict(Config_ID="C_BARMONO", Option="threshold",
+                            Value="150", Note="")])
+_o = os.path.join(ROOT, "o_stipple")
+_ss = RB.run_batch(_stip, _o, file_root=ROOT, run_date="2026-08-06")
+check("a batch declaring an unreadable fill still runs", _ss["status"] == "RAN",
+      "%s" % _ss)
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("the panel is NO_READER_AVAILABLE, not a geometry failure",
+      _st.get("P_LINE") == "NO_READER_AVAILABLE", "%s" % _st)
+check("and the other panels in the batch are unaffected",
+      _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("no values are invented for the unreadable fill",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+check("STIPPLED is declarable in the manifest vocabulary",
+      "STIPPLED" in BM.BAR_FILL_PATTERNS, "%s" % (BM.BAR_FILL_PATTERNS,))
+
 _wrong_grid = write_manifests(
     os.path.join(ROOT, "m_qc"),
     grids=[g for g in GRIDS if not (g["Grid_ID"] == "G_TIME"

@@ -138,9 +138,24 @@ check("so five of eight cells carry a dispersion",
 check("no cell is contradicted by a body continuation",
       not [r for r in records if r.get("error") == "BAR_EXTENT_UNRESOLVED"],
       repr([r.get("error") for r in records]))
-check("every fill that was sampled is identified",
-      all(r.get("identity_status") == "FILL_MEASURED"
-          for r in records if "ink_mass" in r))
+verdicts = M.fill_identities_by_figure(records)
+verdict = verdicts.get("397_fig3", {})
+check("the figure establishes a reusable fill vocabulary",
+      verdict.get("status") == "ESTABLISHED" and verdict.get("prototype_ready"),
+      repr(verdict.get("status")))
+resolved = [r for r in records if r.get("identity_status") == "RESOLVED"]
+check("seven of the eight bars are named, the eighth having no fill to sample",
+      len(resolved) == 7, "%d resolved" % len(resolved))
+check("and every name is the fill the spec declares",
+      all(r["resolved_fill_pattern"] == r["declared"] for r in resolved),
+      repr([(r["figure"], r.get("slot"), r.get("resolved_fill_pattern"),
+             r["declared"]) for r in resolved
+            if r["resolved_fill_pattern"] != r["declared"]]))
+check("the bar with no measurable fill is not named by its slot",
+      all(r.get("identity_status") == "UNRESOLVED_NO_FILL"
+          for r in records if r.get("fill_sample_status") != "MEASURED"),
+      repr([(r["figure"], r.get("slot"), r.get("identity_status"))
+            for r in records if r.get("fill_sample_status") != "MEASURED"]))
 
 print("\n%d checks passed, %d failed" % (PASSED[0], len(FAILURES)))
 if FAILURES:

@@ -163,12 +163,28 @@ def main(argv=None):
                 for r in records for c in r.get("remote", [])
                 if c["kind"] == "ERRORBAR_CAP"
                 and c["cap_width_px"] < 3 * c["stem_width_px"]]))
-    identified = [r for r in records if r.get("identity_status") == "FILL_MEASURED"]
+    # The real identity, from fill_identity - not a count of how many bars had
+    # an interior to sample. Those were one field and this test was reporting
+    # the second while saying the first.
+    verdicts = M.fill_identities_by_figure(records)
+    verdict = verdicts.get("pub127_fig4", {})
+    check("the figure establishes a reusable fill vocabulary",
+          verdict.get("status") == "ESTABLISHED" and verdict.get("prototype_ready"),
+          repr(verdict.get("status")))
+    resolved = [r for r in records if r.get("identity_status") == "RESOLVED"]
     check("sixteen series identities, and two bars with a geometry and no identity",
-          len(identified) == 16 and
+          len(resolved) == 16 and
           all(r.get("identity_status") == "UNRESOLVED_NO_FILL"
-              for r in records if r not in identified),
-          "%d identified" % len(identified))
+              for r in records if r not in resolved),
+          "%d resolved" % len(resolved))
+    check("every resolved identity is the fill the geometry declares",
+          all(r["resolved_fill_pattern"] == r["declared"] for r in resolved),
+          repr([(r["figure"], r.get("group"), r.get("slot"),
+                 r.get("resolved_fill_pattern"), r["declared"])
+                for r in resolved if r["resolved_fill_pattern"] != r["declared"]]))
+    check("and the three fills are separated by more than any one of them varies",
+          all(g["gap"] > g["needed"] for g in verdict.get("separation", [])),
+          repr(verdict.get("separation")))
     # Pinned PER PANEL. Asserting that the three agree passes when all three are
     # wrong together, and is false anyway - see expected_stroke_note.
     by_panel = {}
@@ -218,9 +234,12 @@ def main(argv=None):
         if abs(r.get("dispersion", -999) - se) > SE_TOLERANCE:
             drift.append("%s/%s/%d SE %s against %s"
                          % (figure, group, slot, r.get("dispersion"), se))
-        if r.get("identity_status") != identity:
+        want_identity = ("RESOLVED" if identity == "FILL_MEASURED"
+                         else "UNRESOLVED_NO_FILL")
+        if r.get("identity_status") != want_identity:
             drift.append("%s/%s/%d identity %s against %s"
-                         % (figure, group, slot, r.get("identity_status"), identity))
+                         % (figure, group, slot, r.get("identity_status"),
+                            want_identity))
         if (ink is None) != ("ink_mass" not in r):
             drift.append("%s/%s/%d fill presence changed" % (figure, group, slot))
         elif ink is not None and abs(r["ink_mass"] - ink) > INK_TOLERANCE:

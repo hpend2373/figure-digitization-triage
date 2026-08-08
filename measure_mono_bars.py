@@ -162,9 +162,13 @@ def footprints_from_seed(segments, n_bars):
     belongs to which bar follows from where it sits between the first and the
     last. An OPEN bar contributes two narrow segments and a SOLID one
     contributes one wide one; both land in the same bar.
+
+    Returns (footprints, slot_bounds). The footprints are the bars. The bounds
+    are the midpoints BETWEEN them - a place to search, never a bar edge, and
+    the thing the old reader mistook for one.
     """
     if not segments or n_bars < 1:
-        return []
+        return [], []
     lo, hi = segments[0][0], segments[-1][-1]
     pitch = (hi - lo + 1) / float(n_bars)
     buckets = [[] for _ in range(n_bars)]
@@ -172,8 +176,23 @@ def footprints_from_seed(segments, n_bars):
         centre = (seg[0] + seg[-1]) / 2.0
         k = min(n_bars - 1, max(0, int((centre - lo) / pitch)))
         buckets[k].append(seg)
-    return [(bucket[0][0], bucket[-1][-1]) if bucket else None
-            for bucket in buckets]
+    prints = [(bucket[0][0], bucket[-1][-1]) if bucket else None
+              for bucket in buckets]
+    # The boundaries the docstring promises, computed rather than implied.
+    # Even pitch is how a segment is ASSIGNED to a bar; the boundary between
+    # two bars is the midpoint of the gap between the footprints that came out,
+    # which is not the same number and is the one a caller should search in.
+    bounds = []
+    for i, fp in enumerate(prints):
+        if fp is None:
+            bounds.append(None)
+            continue
+        prev = next((p for p in reversed(prints[:i]) if p), None)
+        nxt = next((p for p in prints[i + 1:] if p), None)
+        left = fp[0] if prev is None else int(round((prev[1] + fp[0]) / 2.0))
+        right = fp[1] if nxt is None else int(round((fp[1] + nxt[0]) / 2.0))
+        bounds.append((left, right))
+    return prints, bounds
 
 
 def trace_extent(gray, box, window, footprint, zero_row, stroke,
@@ -278,16 +297,163 @@ def trace_extent(gray, box, window, footprint, zero_row, stroke,
             if method != "SIDE_TRACK" or misses > 2:
                 break
         row += step * win
-    # Did the walk stop early? Anything supported well beyond the edge means the
-    # answer is not a short bar, it is an unresolved one.
-    contradiction = 0
-    probe = last + step * win * 4
-    while 0 <= probe < height:
-        ok, _ = supported(probe)
-        if ok:
-            contradiction = max(contradiction, abs(probe - last))
-        probe += step * win * 4
-    return float(last), method or "NONE", int(contradiction)
+    # The window walk lands within `win` px of the end; refine row by row so the
+    # answer is the bar top and not the last window boundary before it. This is
+    # also what removed the last unit of error against the synthetic fixture's
+    # known means - a 4 px window is 1.1 units on that axis.
+    #
+    # It cannot run on to the cap: between the bar end and the cap lie rows
+    # inked only by the stem, and the first of them fails both tests.
+    probe = last
+    while 0 <= probe + step < height:
+        nxt = probe + step
+        occupied = np.where(dark[nxt])[0]
+        if not len(occupied):
+            break
+        span = (occupied[-1] - occupied[0] + 1) / float(bar_w)
+        tracks = dark[nxt, :track].any() and dark[nxt, -track:].any()
+        if not (tracks or span >= 0.55):
+            break
+        probe = nxt
+    return float(probe), method or "NONE"
+
+
+#: What an inked structure beyond the bar end turns out to be. The distinction
+#: matters because only the first of these means the walk was wrong.
+REMOTE_KINDS = ("BODY_CONTINUATION", "ERRORBAR_CAP", "ANNOTATION_OR_GLYPH",
+                "UNRESOLVED_REMOTE_SUPPORT")
+
+
+def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
+                   direction="UP", threshold=128):
+    """Everything inked beyond the bar end, classified rather than counted.
+
+    The first version of this returned one integer: the distance at which
+    `supported()` was still true. That reused the walk's support test WITHOUT
+    the three rules the walk uses to exclude an error-bar cap - so the cap the
+    walk had just refused was scanned again and reported as evidence that the
+    walk had stopped too early. `!60` on publication 127's normal-paced panel
+    is 0.93 axis units above the bar at a scale of 9 units per 581 px, which is
+    the size of an SE bar on that figure, not the size of a missing bar body.
+
+    Sampling every fourth window made it worse: at 20 px per probe the reported
+    distance is quantised to the probe grid, a thin cap that happens to land on
+    one is counted, and a body that lies between two is missed.
+
+    So: walk the rows above the end, group inked rows into components, and ask
+    what each component IS.
+
+      BODY_CONTINUATION       side tracks, or distributed ink, sustained over
+                              several strokes. The walk stopped too early and
+                              this bar has no value.
+      ERRORBAR_CAP            a thin horizontal rule that misses the side
+                              tracks and hangs off a central stem. Expected,
+                              and where the dispersion comes from.
+      ANNOTATION_OR_GLYPH     touches neither the tracks nor a stem: an
+                              asterisk, a bracket, a significance marker.
+      UNRESOLVED_REMOTE_SUPPORT   none of the above cleanly. Fail closed.
+    """
+    x0, x1, y0, y1 = map(int, box)
+    xa = window[0]
+    fx0, fx1 = footprint
+    bar_w = fx1 - fx0 + 1
+    dark = gray[y0:y1, xa + fx0:xa + fx1 + 1] < threshold
+    height = dark.shape[0]
+    track = max(1, min(stroke, int(round(0.06 * bar_w))))
+    step = -1 if direction == "UP" else 1
+    centre = slice(max(0, bar_w // 2 - max(1, bar_w // 10)),
+                   min(bar_w, bar_w // 2 + max(1, bar_w // 10) + 1))
+
+    # The order matters, and the first attempt at this did it wrong. Grouping
+    # "rows with any ink" merges the cap, the whisker stem and everything above
+    # into one component, because the stem inks every row between them - so a
+    # 2 px cap measured 17 px thick and was called a body continuation.
+    #
+    #   trace the stem up from the bar end
+    #   find the cap at the end of the stem
+    #   mask both
+    #   whatever ink is LEFT beyond the bar end is the question
+    #
+    # After the mask, a component cannot be stem-connected by construction, so
+    # the classification is about the component's own shape.
+    edge = int(round(edge_row))
+    limit = 0 if step < 0 else height - 1
+    scan = range(edge + step * max(1, stroke), limit + step, step)
+    scan = [r for r in scan if 0 <= r < height]
+    if not scan:
+        return []
+    stem_rows = []
+    for r in scan:
+        if not dark[r, centre].any():
+            break
+        stem_rows.append(r)
+    cap_rows, cap_span = [], 0.0
+    if stem_rows:
+        tip = stem_rows[-1]
+        for r in [x for x in range(tip - 2 * stroke, tip + 2 * stroke + 1)
+                  if 0 <= x < height and abs(x - edge) > stroke]:
+            occupied = np.where(dark[r])[0]
+            if not len(occupied):
+                continue
+            span = (occupied[-1] - occupied[0] + 1) / float(bar_w)
+            if span >= 0.30 and not (dark[r, :track].any() and dark[r, -track:].any()):
+                cap_rows.append(r)
+                cap_span = max(cap_span, span)
+    masked = dark.copy()
+    for r in stem_rows:
+        masked[r, centre] = False
+    for r in cap_rows:
+        masked[r, :] = False
+
+    inked = [r for r in scan if masked[r].any()]
+    out = []
+    if cap_rows:
+        out.append(dict(kind="ERRORBAR_CAP",
+                        distance_px=int(abs(cap_rows[0] - edge)),
+                        extent_px=int(len(cap_rows)),
+                        side_track_fraction=0.0,
+                        span_fraction=round(float(cap_span), 3),
+                        occupied_bins=0,
+                        central_stem_fraction=1.0,
+                        centre_row=int(round(float(np.mean(cap_rows))))))
+    if not inked:
+        return out
+    components, current = [], [inked[0]]
+    for r in inked[1:]:
+        if abs(r - current[-1]) <= max(1, stroke // 2):
+            current.append(r)
+        else:
+            components.append(current)
+            current = [r]
+    components.append(current)
+
+    for comp in components:
+        band = masked[min(comp):max(comp) + 1]
+        extent = len(comp)
+        both_tracks = float(np.mean([bool(masked[r, :track].any() and
+                                          masked[r, -track:].any()) for r in comp]))
+        columns = band.any(axis=0)
+        occupied = np.where(columns)[0]
+        span = ((occupied[-1] - occupied[0] + 1) / float(bar_w)) if len(occupied) else 0.0
+        bins = sum(1 for part in np.array_split(columns, 5) if part.any())
+        # Continuous with the bar? After masking, the only way to be connected
+        # is to run down to the bar end through ink of your own.
+        gap = [r for r in range(edge, comp[0], step) if 0 <= r < height]
+        joined = (float(np.mean([bool(masked[r].any()) for r in gap]))
+                  if gap else 1.0)
+        thick = extent >= 2 * stroke
+        if (both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)) and joined >= 0.5:
+            kind = "BODY_CONTINUATION"
+        elif joined < 0.5:
+            kind = "ANNOTATION_OR_GLYPH"
+        else:
+            kind = "UNRESOLVED_REMOTE_SUPPORT"
+        out.append(dict(kind=kind, distance_px=int(abs(comp[0] - edge)),
+                        extent_px=int(extent), side_track_fraction=round(both_tracks, 3),
+                        span_fraction=round(float(span), 3), occupied_bins=int(bins),
+                        central_stem_fraction=round(joined, 3),
+                        centre_row=int(round(float(np.mean(comp))))))
+    return out
 
 
 def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
@@ -361,15 +527,25 @@ def measure_panel(spec):
         window = (max(x0, int(gx) - gw), min(x1, int(gx) + gw + 1))
         # Direction is measured, not declared: whichever side of the baseline
         # carries seed support is the side the bars are on.
-        best = None
-        for direction in ("UP", "DOWN"):
+        support = {}
+        for candidate in ("UP", "DOWN"):
             segs, _pers = seed_support(gray, box, zero, stroke, window,
-                                       direction=direction)
-            total = sum(len(g) for g in segs)
-            if best is None or total > best[0]:
-                best = (total, direction, segs)
-        _total, direction, segments = best
-        prints = footprints_from_seed(segments, len(fills))
+                                       direction=candidate)
+            support[candidate] = (sum(len(g) for g in segs), segs)
+        (up_total, up_segs), (down_total, down_segs) = support["UP"], support["DOWN"]
+        # A tie is not UP. Checking UP first and only replacing on a strictly
+        # greater total meant an equal split - possible on a very short bar, or
+        # on baseline noise - silently declared the bars upward.
+        margin = max(2 * stroke, int(round(0.10 * max(up_total, down_total))))
+        if abs(up_total - down_total) <= margin and min(up_total, down_total) > 0:
+            records.append(dict(figure=spec["tag"], group=label,
+                                error="BAR_DIRECTION_UNRESOLVED",
+                                up_support=up_total, down_support=down_total,
+                                margin=margin))
+            continue
+        direction = "UP" if up_total >= down_total else "DOWN"
+        segments = up_segs if direction == "UP" else down_segs
+        prints, bounds = footprints_from_seed(segments, len(fills))
         for k, fp in enumerate(prints):
             rec = dict(figure=spec["tag"], group=label, slot=k,
                        declared=fills[k], stroke_px=stroke, direction=direction)
@@ -379,10 +555,19 @@ def measure_panel(spec):
                 continue
             # The bar end, measured crudely and only so the interior can be
             # sampled: this script does not implement the reader's walk.
-            edge, method, contradiction = trace_extent(
+            edge, method = trace_extent(
                 gray, box, window, fp, zero, stroke, direction=direction)
-            rec.update(edge_row=round(edge, 1), support=method,
-                       contradiction_px=contradiction,
+            remote = remote_support(gray, box, window, fp, edge, zero, stroke,
+                                    direction=direction)
+            body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]
+            caps = [r for r in remote if r["kind"] == "ERRORBAR_CAP"]
+            rec.update(slot_bounds=(list(bounds[k]) if bounds[k] else None),
+                       edge_row=round(edge, 1), support=method,
+                       remote=remote,
+                       # Only a body continuation says the walk was wrong.
+                       contradiction_px=(min(r["distance_px"] for r in body)
+                                         if body else 0),
+                       cap_px=(caps[0]["centre_row"] if caps else None),
                        value=round(cal.pixel_to_value(y0 + edge), 3),
                        footprint=[int(fp[0]), int(fp[1])],
                        footprint_width=int(fp[1] - fp[0] + 1),
@@ -418,15 +603,23 @@ def builtin_specs():
     return [s for s in specs if os.path.exists(s["path"])]
 
 
-def load_specs(paths):
+def load_specs(paths, raster_root=""):
     """Extra geometries, each checked against the raster it was measured on."""
     out = []
     for path in paths:
         with open(path, encoding="utf-8") as fh:
             for spec in json.load(fh):
+                # Resolved against --raster-root, then the spec's own
+                # directory. The spec is versioned and the raster is not, so
+                # the spec must not name a directory on the machine it was
+                # written on.
                 raster = spec["path"]
                 if not os.path.isabs(raster):
-                    raster = os.path.join(os.path.dirname(path), raster)
+                    for root in [r for r in (raster_root, os.path.dirname(path)) if r]:
+                        candidate = os.path.join(root, raster)
+                        if os.path.exists(candidate):
+                            raster = candidate
+                            break
                 spec["path"] = raster
                 if not os.path.exists(raster):
                     print("SKIP %s: %s is not on this machine" % (spec["tag"], raster))
@@ -448,6 +641,8 @@ def main(argv=None):
     ap.add_argument("--json", default="")
     ap.add_argument("--extra", action="append", default=[],
                     help="JSON of further panel geometries (repeatable)")
+    ap.add_argument("--raster-root", default=os.environ.get("FDT_RASTER_ROOT", ""),
+                    help="where the private rasters the geometry specs name live")
     ap.add_argument("--specs-dir", default=os.path.join(HERE, "geometry"),
                     help="directory of versioned *.geometry.json specs")
     args = ap.parse_args(argv)
@@ -456,8 +651,8 @@ def main(argv=None):
     if os.path.isdir(args.specs_dir):
         specs += load_specs(sorted(
             os.path.join(args.specs_dir, f) for f in os.listdir(args.specs_dir)
-            if f.endswith(".geometry.json")))
-    specs += load_specs(args.extra)
+            if f.endswith(".geometry.json")), raster_root=args.raster_root)
+    specs += load_specs(args.extra, raster_root=args.raster_root)
 
     everything = []
     print("%-20s %-8s %-4s %-9s %-4s %-7s %-7s %-16s %s"

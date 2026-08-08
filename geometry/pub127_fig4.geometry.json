@@ -3,7 +3,7 @@
   "tag": "pub127_fig4_slow",
   "publication_id": 127,
   "note": "Verheyden 2007 Acta Physiol 191:297-308, Figure 4 upper panel. MAP spectral power, slow paced breathing. The raster is a 600 DPI pdftoppm render of page 6 of the publisher PDF and is NOT redistributable, so this spec is versioned and the raster is not: the script skips a panel whose raster is absent or hashes differently, and CI therefore measures 397 and the synthetic fixture only.",
-  "path": "/mnt/user-data/uploads/Downloads/spacecv_figure_rasters/pub127_p6-06.png",
+  "path": "pub127_p6-06.png",
   "raster_sha256": "ce78a097404c60d2c6d874771222e907ebc655a84dccf3a6ac7214deb78e377c",
   "raster_dpi": 600,
   "raster_recipe": "pdftoppm -r 600 -f 6 -l 6 -png <publisher pdf>",
@@ -53,13 +53,14 @@
      1.0
     ]
    }
-  }
+  },
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
  },
  {
   "tag": "pub127_fig4_normal",
   "publication_id": 127,
   "note": "Figure 4 middle panel, normal paced breathing. The SUPINE bars are about 0.2 on a 0-9 axis - roughly two stroke widths tall at 600 DPI - and are the smallest real bars in the calibration set.",
-  "path": "/mnt/user-data/uploads/Downloads/spacecv_figure_rasters/pub127_p6-06.png",
+  "path": "pub127_p6-06.png",
   "raster_sha256": "ce78a097404c60d2c6d874771222e907ebc655a84dccf3a6ac7214deb78e377c",
   "raster_dpi": 600,
   "raster_recipe": "pdftoppm -r 600 -f 6 -l 6 -png <publisher pdf>",
@@ -89,13 +90,14 @@
    "SOLID"
   ],
   "group_window": 300,
-  "baseline": 0.0
+  "baseline": 0.0,
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
  },
  {
   "tag": "pub127_fig4_lowfreq",
   "publication_id": 127,
   "note": "Figure 4 lower panel, spontaneous low-frequency MAP oscillations.",
-  "path": "/mnt/user-data/uploads/Downloads/spacecv_figure_rasters/pub127_p6-06.png",
+  "path": "pub127_p6-06.png",
   "raster_sha256": "ce78a097404c60d2c6d874771222e907ebc655a84dccf3a6ac7214deb78e377c",
   "raster_dpi": 600,
   "raster_recipe": "pdftoppm -r 600 -f 6 -l 6 -png <publisher pdf>",
@@ -125,6 +127,7 @@
    "SOLID"
   ],
   "group_window": 300,
-  "baseline": 0.0
+  "baseline": 0.0,
+  "raster_note": "resolved against --raster-root (or FDT_RASTER_ROOT). The publisher raster is not redistributable; the spec is versioned so the measurement is reproducible wherever the PDF is held."
  }
 ]

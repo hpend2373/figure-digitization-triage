@@ -1185,8 +1185,26 @@ try:
           and M.REMOTE_KINDS is G.REMOTE_KINDS
           and M.THRESHOLDS is G.THRESHOLDS)
     check("the shared module does not import the diagnostic corpus",
-          not hasattr(G, "builtin_specs") and not hasattr(G, "measure_panel"),
-          "%r" % [n for n in ("builtin_specs", "measure_panel") if hasattr(G, n)])
+          not hasattr(G, "builtin_specs") and not hasattr(G, "load_specs"),
+          "%r" % [n for n in ("builtin_specs", "load_specs") if hasattr(G, n)])
+    # The panel loop is in the shared module too, taking an array and a
+    # calibration rather than a spec - so the production reader can call it
+    # without adopting this file's spec format, and cannot end up with its own
+    # copy of the loop.
+    check("the panel loop is shared, and the driver only supplies the spec",
+          callable(getattr(G, "geometry_rows", None)), repr(dir(G)[:0]))
+    check("and it names no series while it measures a panel",
+          all(r.get("resolved_fill_pattern", "") == "" and
+              r.get("identity_status") == "NOT_CALIBRATED"
+              for r in M.measure_panel(spec1) if r.get("slot") is not None),
+          repr([(r.get("slot"), r.get("identity_status")) for r
+                in M.measure_panel(spec1)]))
+    # An import of mark_readers here would close a cycle the moment the
+    # production reader imports this module, which is why geometry_rows takes a
+    # calibration object rather than tick points.
+    check("the shared module imports no axis module, so no cycle can form",
+          not [l for l in open(os.path.join(HERE, "mono_bar_geometry.py"))
+               if l.startswith(("import ", "from ")) and "mark_readers" in l])
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

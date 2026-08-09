@@ -2136,8 +2136,25 @@ shared object rather than an equal copy, and that the shared module does not
 carry the diagnostic corpus - a copy-paste back into the driver leaves every
 other scenario passing and starts diverging on the next fix to either.
 
-The split changed no number: 38 of 38 cells, 397 at 8 means and 8 dispersions,
-127 at 18 and 18.
+The panel loop went with it, as `geometry_rows` - taking an already-loaded
+greyscale array and any object with `value_to_pixel` and `pixel_to_value`,
+rather than a spec. Two reasons, and neither is tidiness. The production reader
+can call it without adopting the diagnostic spec format, so it cannot end up
+with its own copy of the loop. And a calibration OBJECT rather than tick points
+means the module imports no axis module, so no cycle forms the moment
+`mark_readers` imports it - a scenario asserts that no import line in the file
+mentions `mark_readers`.
+
+`geometry_rows` is the ANONYMOUS GRAIN: it names no series. Geometry is per
+panel and identity is per figure, so a reader that names a series while it
+measures a panel is naming it from the only thing a panel knows - where the bar
+sits - which is the inference this package refuses. Its records come back
+`NOT_CALIBRATED` with an empty `resolved_fill_pattern`, and
+`fill_identities_by_figure` names them once every panel of the figure has been
+measured. `measure_panel` is now four lines that supply the spec.
+
+The split changed no number, and the record stream is byte-identical: 38 of 38
+cells, 397 at 8 means and 8 dispersions, 127 at 18 and 18.
 
 ## Suites
 
@@ -2152,11 +2169,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 138 |
+| `test_measure_mono_bars.py` | 141 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1543** |
+| **total** | **1546** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -209,6 +209,23 @@ class Geometry(object):
                     group_window=self.r(190), baseline=0.0)
 
 
+def _raises_type(call):
+    try:
+        call()
+    except TypeError:
+        return True
+    return False
+
+
+def _raises(call, marker):
+    """Whether `call` refuses, by the name the refusal goes by."""
+    try:
+        call()
+    except ValueError as exc:
+        return marker in str(exc)
+    return False
+
+
 def only(records, slot=0):
     hit = [r for r in records if r.get("slot") == slot]
     return hit[0] if hit else (records[0] if records else {})
@@ -1833,25 +1850,42 @@ try:
         else:
             check("editing %s after the stamp is refused" % field, False,
                   "it wrote the row")
-    for field, value in (("identity_status", "RESOLVED"),
-                         ("resolved_fill_pattern", "SOLID"),
-                         ("spec_fill", "NONSENSE")):
-        named = dict(written[0])
-        named[field] = value
-        try:
-            rowz = G.artifact_row(named)
-        except ValueError as exc:
-            check("naming a series is not editing it (%s)" % field, False,
-                  str(exc))
-        else:
-            check("naming a series is not editing it (%s)" % field,
-                  rowz["Geometry_Row_SHA256"] == before[0])
-    # And an unstamped record - a hand-built row, or one from an older run - is
-    # written with the hash it actually has rather than refused.
-    unstamped = {k: v for k, v in written[0].items()
+    check("naming a series is not editing it, so the row still writes",
+          G.artifact_row(written[0])["Geometry_Row_SHA256"] == before[0]
+          and written[0]["identity_status"] == "RESOLVED",
+          repr(written[0]["identity_status"]))
+    check("and the driver's fixture truth is not part of the measurement",
+          G.artifact_row(dict(written[0], spec_fill="NONSENSE"))[
+              "Geometry_Row_SHA256"] == before[0])
+
+    # REVERT: `if stamped and stamped != actual` with no `not stamped` branch -
+    # an unstamped row is then hashed as it now stands. `geometry_rows` stamps
+    # every row it returns, so an unstamped row is a row that LOST its stamp,
+    # and hashing whatever it now says launders an edit into a canonical
+    # artifact by deleting one field.
+    print("\nand refuses a row whose stamp has gone missing")
+    # Measured and not yet named, because a row whose measurement moved also
+    # breaks the identity attestation below - and this scenario is about the
+    # stamp, not about that.
+    unnamed = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
+    laundered = {k: v for k, v in unnamed[0].items()
                  if k != "geometry_row_sha256"}
-    check("an unstamped record is hashed rather than refused",
-          G.artifact_row(unstamped)["Geometry_Row_SHA256"] == before[0])
+    laundered["value"] = laundered["value"] + 1.0
+    try:
+        G.artifact_row(laundered)
+    except ValueError as exc:
+        check("deleting the stamp does not launder an edit",
+              "UNSTAMPED" in str(exc), str(exc))
+    else:
+        check("deleting the stamp does not launder an edit", False,
+              "it wrote the row")
+    check("a migration utility can still read an older row, by saying so",
+          G.artifact_row(laundered, allow_unstamped=True)["Mean"]
+          == laundered["value"])
+    check("and a batch run does not, because that is the default",
+          "allow_unstamped" in G.artifact_rows.__code__.co_varnames
+          and G.artifact_rows.__defaults__ == (False,),
+          repr(G.artifact_rows.__defaults__))
 
     # REVERT: drop the identity_source guard from artifact_row. A caller that
     # applies identity_resolution.csv by overwriting resolved_fill_pattern and
@@ -1876,6 +1910,49 @@ try:
     check("and HUMAN is a declared source, not an ad-hoc string",
           G.IDENTITY_SOURCES == ("AUTO", "HUMAN"), repr(G.IDENTITY_SOURCES))
 
+    # REVERT: check `identity_source` and nothing else. That stops a caller
+    # that is TELLING THE TRUTH, which is not the caller that goes wrong. The
+    # join that overwrites the pattern and forgets to move the source is the
+    # one that files a person's decision under Auto_Fill_Pattern, and a source
+    # field it never touched cannot detect it.
+    print("\nand an auto identity that no longer matches what the figure said")
+    for field, value in (("resolved_fill_pattern", "HATCHED"),
+                         ("identity_status", "AMBIGUOUS")):
+        forged = dict(written[0])
+        forged[field] = value                # source left at AUTO, as the bug
+        try:                                 # leaves it
+            G.artifact_row(forged)
+        except ValueError as exc:
+            check("overwriting %s behind the resolver's back is caught" % field,
+                  "AUTO_IDENTITY_MODIFIED" in str(exc), str(exc))
+        else:
+            check("overwriting %s behind the resolver's back is caught" % field,
+                  False, "it wrote the row")
+    invented = dict(written[0])
+    del invented["auto_identity_sha256"]
+    check("an identity nobody attested to is refused as well",
+          _raises(lambda: G.artifact_row(invented), "AUTO_IDENTITY_UNATTESTED"),
+          "an unattested identity was written")
+    fresh = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
+    check("a row measured and not yet named needs no attestation",
+          G.artifact_row(fresh[0])["Auto_Identity_Status"] == "NOT_CALIBRATED",
+          repr(fresh[0].get("auto_identity_sha256")))
+    # The attestation binds the answer to the ROW and to the FIGURE, so an
+    # identity cannot be carried across from a bar that earned it.
+    swapped = dict(written[1], auto_identity_sha256=written[0][
+        "auto_identity_sha256"])
+    check("nor can one bar's name be moved onto another",
+          _raises(lambda: G.artifact_row(swapped), "AUTO_IDENTITY_MODIFIED"),
+          "a transplanted identity was written")
+    other_figure = dict(written[0], figure_identity_sha256="0" * 64)
+    check("nor can it be carried over from another figure's verdict",
+          _raises(lambda: G.artifact_row(other_figure),
+                  "AUTO_IDENTITY_MODIFIED"),
+          "a transplanted verdict was written")
+    check("and both hashes are columns, so a reader can recompute them",
+          {"Figure_Identity_SHA256", "Auto_Identity_SHA256"}
+          <= set(G.GEOMETRY_ARTIFACT_COLUMNS), repr(G.GEOMETRY_ARTIFACT_COLUMNS))
+
     # REVERT: json.dumps without allow_nan=False, and `return str(obj)` at the
     # end of _plain. Python writes `NaN` into what it calls JSON and no other
     # language's parser reads it back; and a set or a Path is folded into the
@@ -1890,6 +1967,9 @@ try:
         else:
             check("%r is refused rather than written as JSON" % bad, False,
                   G.canonical_json({"v": bad}))
+    check("a non-string dictionary key is refused too",
+          _raises_type(lambda: G.canonical_json({1: "numeric", "1": "string"})),
+          repr(G.canonical_json.__doc__ and ""))
     for bad in ({1, 2}, object()):
         try:
             G.canonical_json({"v": bad})

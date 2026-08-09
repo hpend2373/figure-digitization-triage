@@ -1729,22 +1729,31 @@ def fill_identities_by_figure(records):
     for figure_id, rows in by_figure.items():
         identities, verdict = fill_identity(rows)
         verdicts[figure_id] = verdict
+        # The verdict the whole figure was answered with, hashed once. An
+        # identity attests to this as well as to its own row, so a pattern
+        # cannot be carried over from a figure that reached it differently.
+        bundle = hashlib.sha256(
+            canonical_json(verdict).encode("utf-8")).hexdigest()
         for rec in rows:
-            if rec.get("group") is None or rec.get("slot") is None:
-                continue
-            key = ((rec["figure"], rec["group"]), rec["slot"])
-            pattern = identities.get(key)
+            # Refusals too. They belong to the figure that was answered, and a
+            # row with an attestation is a row an artifact writer can check;
+            # one without is a row it has to take on trust.
             rec["identity_source"] = "AUTO"
-            if pattern:
-                rec["identity_status"] = "RESOLVED"
-                rec["resolved_fill_pattern"] = pattern
-            else:
-                rec["resolved_fill_pattern"] = ""
-                rec["identity_status"] = (
-                    "UNRESOLVED_NO_FILL"
-                    if rec.get("fill_sample_status") != "MEASURED"
-                    else "AMBIGUOUS" if verdict["status"] in
-                    ("AMBIGUOUS", "MULTIPLE_FIGURES") else "NOT_CALIBRATED")
+            rec["figure_identity_sha256"] = bundle
+            if rec.get("group") is not None and rec.get("slot") is not None:
+                pattern = identities.get(((rec["figure"], rec["group"]),
+                                          rec["slot"]))
+                if pattern:
+                    rec["identity_status"] = "RESOLVED"
+                    rec["resolved_fill_pattern"] = pattern
+                else:
+                    rec["resolved_fill_pattern"] = ""
+                    rec["identity_status"] = (
+                        "UNRESOLVED_NO_FILL"
+                        if rec.get("fill_sample_status") != "MEASURED"
+                        else "AMBIGUOUS" if verdict["status"] in
+                        ("AMBIGUOUS", "MULTIPLE_FIGURES") else "NOT_CALIBRATED")
+            rec["auto_identity_sha256"] = auto_identity_sha256(rec)
     return verdicts
 
 
@@ -1773,7 +1782,8 @@ def fill_identities_by_figure(records):
 #: `spec_fill` is the diagnostic driver's fixture truth and is not part of the
 #: measurement either.
 UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
-                   "identity_source", "geometry_row_sha256", "spec_fill")
+                   "identity_source", "figure_identity_sha256",
+                   "auto_identity_sha256", "geometry_row_sha256", "spec_fill")
 
 #: Where an identity came from. This artifact carries AUTO only: the geometry
 #: file is what the FIGURE said, and a human's answer belongs in
@@ -1799,14 +1809,16 @@ ARTIFACT_FIELD_COLUMNS = (
     ("identity_status", "Auto_Identity_Status"),
     ("resolved_fill_pattern", "Auto_Fill_Pattern"),
     ("error", "Geometry_Error_Code"),
+    ("figure_identity_sha256", "Figure_Identity_SHA256"),
+    ("auto_identity_sha256", "Auto_Identity_SHA256"),
 )
 
 GEOMETRY_ARTIFACT_COLUMNS = (
     "Panel_ID", "Figure_ID", "Group_ID", "Geometry_Slot", "Mean",
     "Dispersion_Value", "Edge_Px_Image", "Cap_Px_Image", "Footprint_X0",
     "Footprint_X1", "Fill_Sample_Status", "Auto_Identity_Status",
-    "Auto_Fill_Pattern", "Geometry_Error_Code", "Diagnostics_JSON",
-    "Geometry_Row_SHA256",
+    "Auto_Fill_Pattern", "Geometry_Error_Code", "Figure_Identity_SHA256",
+    "Auto_Identity_SHA256", "Diagnostics_JSON", "Geometry_Row_SHA256",
 )
 
 
@@ -1818,7 +1830,15 @@ def _plain(obj):
     hash differently on two machines while printing the same numbers.
     """
     if isinstance(obj, dict):
-        return {str(k): _plain(v) for k, v in obj.items()}
+        # Keys as strictly as values. `str(k)` folds `1` and `"1"` into the
+        # same JSON key, so one of them disappears - and an object key would
+        # come through as its repr, putting the non-determinism back on the
+        # side the value branch just removed it from.
+        bad = [k for k in obj if not isinstance(k, str)]
+        if bad:
+            raise TypeError("mono_bar_geometry: diagnostic keys must be "
+                            "strings; got %r" % (bad[:3],))
+        return {k: _plain(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_plain(v) for v in obj]
     if isinstance(obj, np.ndarray):
@@ -1863,7 +1883,31 @@ def geometry_row_sha256(record):
          if k not in UNHASHED_FIELDS}).encode("utf-8")).hexdigest()
 
 
-def artifact_row(record):
+def auto_identity_sha256(record):
+    """What the FIGURE said about this row, bound to the row it said it about.
+
+    `identity_source` alone only stops a caller that is telling the truth. The
+    caller bug that matters looks like this:
+
+        fill_identities_by_figure(rows)        # identity_source = AUTO
+        rec["resolved_fill_pattern"] = human   # the join overwrites the pattern
+        rec["identity_status"] = "RESOLVED"    # and forgets the source
+        artifact_row(rec)                      # a person's answer, filed as AUTO
+
+    So the auto answer attests to itself. This covers the row's own measurement
+    hash - so an identity cannot be transplanted onto a different bar - the
+    figure's verdict - so it cannot be transplanted from a different figure -
+    and the two fields the answer consists of.
+    """
+    return hashlib.sha256(canonical_json({
+        "Auto_Fill_Pattern": record.get("resolved_fill_pattern", ""),
+        "Auto_Identity_Status": record.get("identity_status", ""),
+        "Figure_Identity_SHA256": record.get("figure_identity_sha256", ""),
+        "Geometry_Row_SHA256": record.get("geometry_row_sha256", ""),
+    }).encode("utf-8")).hexdigest()
+
+
+def artifact_row(record, allow_unstamped=False):
     """One record, flattened to `GEOMETRY_ARTIFACT_COLUMNS`.
 
     Refuses two things rather than writing them down.
@@ -1875,7 +1919,15 @@ def artifact_row(record):
     measurement it does not contain, which is worse than carrying no hash.
     Identity fields are outside the hash, so naming a series still passes.
 
-    And a record carrying a HUMAN identity. See `IDENTITY_SOURCES`.
+    A record with NO stamp. `geometry_rows` stamps every row it returns, so an
+    unstamped row reaching here is a row that lost its stamp - and hashing
+    whatever it now says would launder an edit into a canonical artifact by
+    deleting one field. `allow_unstamped=True` is for a migration utility
+    reading rows written before the stamp existed, and is not what a batch run
+    uses.
+
+    A record carrying a HUMAN identity, or an auto identity that does not attest
+    to itself. See `IDENTITY_SOURCES` and `auto_identity_sha256`.
     """
     source = record.get("identity_source") or "AUTO"
     if source != "AUTO":
@@ -1885,10 +1937,28 @@ def artifact_row(record):
             "identity_resolution.csv" % (source,))
     actual = geometry_row_sha256(record)
     stamped = record.get("geometry_row_sha256")
+    if not stamped and not allow_unstamped:
+        raise ValueError(
+            "mono_bar_geometry: GEOMETRY_ROW_UNSTAMPED - every row "
+            "`geometry_rows` returns carries a measurement-time hash, so this "
+            "row lost one; pass allow_unstamped=True only from a migration "
+            "utility that records where the row came from")
     if stamped and stamped != actual:
         raise ValueError(
             "mono_bar_geometry: GEOMETRY_ROW_MODIFIED_AFTER_STAMP - this row "
             "was measured as %s and is now %s" % (stamped[:16], actual[:16]))
+    attested = record.get("auto_identity_sha256")
+    if attested:
+        if attested != auto_identity_sha256(record):
+            raise ValueError(
+                "mono_bar_geometry: AUTO_IDENTITY_MODIFIED - this row was "
+                "named %r by the figure and now says %r"
+                % (attested[:16], auto_identity_sha256(record)[:16]))
+    elif (record.get("identity_status") not in (None, "", "NOT_CALIBRATED")
+          or record.get("resolved_fill_pattern")):
+        raise ValueError(
+            "mono_bar_geometry: AUTO_IDENTITY_UNATTESTED - this row carries an "
+            "identity that `fill_identities_by_figure` did not write")
     out = {c: "" for c in GEOMETRY_ARTIFACT_COLUMNS}
     named = {"footprint"}
     for field, column in ARTIFACT_FIELD_COLUMNS:
@@ -1908,5 +1978,5 @@ def artifact_row(record):
     return out
 
 
-def artifact_rows(records):
-    return [artifact_row(r) for r in records]
+def artifact_rows(records, allow_unstamped=False):
+    return [artifact_row(r, allow_unstamped=allow_unstamped) for r in records]

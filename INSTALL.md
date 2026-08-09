@@ -2411,6 +2411,50 @@ of falling back to `str(obj)`: a set, a Path, a dataclass would be folded into
 the hash as text that looks like data, and the first time two runs disagreed the
 difference would be a memory address.
 
+## Three guards that only stop an honest caller
+
+Each of the three below was a guard that worked against a caller doing the
+right thing and not against the caller bug it exists for.
+
+**A missing stamp was a way past the stale-row check.** `artifact_row` refused a
+row whose hash disagreed with its contents and hashed a row that carried no hash
+at all - so deleting one field laundered an edit into a canonical artifact:
+
+    row = geometry_rows(...)[0]
+    del row["geometry_row_sha256"]
+    row["value"] += 1.0
+    artifact_row(row)                # written, with a hash of the new value
+
+`geometry_rows` stamps every row it returns, so an unstamped row is a row that
+LOST its stamp. It is refused now - `GEOMETRY_ROW_UNSTAMPED` - and a migration
+utility reading rows written before the stamp existed has to say so with
+`allow_unstamped=True`. A batch run does not, because that is the default.
+
+**`identity_source` only stops a caller telling the truth.** The join that goes
+wrong does not set the source to HUMAN; it forgets to:
+
+    fill_identities_by_figure(rows)          # identity_source = AUTO
+    rec["resolved_fill_pattern"] = human     # the join overwrites the pattern
+    rec["identity_status"] = "RESOLVED"      # and leaves the source alone
+    artifact_row(rec)                        # a person's answer, filed as AUTO
+
+So the auto answer attests to itself. `auto_identity_sha256` covers the row's
+own measurement hash, the figure's verdict hash, and the two fields the answer
+consists of; `artifact_row` recomputes it and refuses on disagreement. That
+catches an overwritten pattern, an overwritten status, an identity nobody
+attested to at all, one bar's name moved onto another, and a name carried over
+from a different figure's verdict. A row measured and not yet named carries no
+attestation and needs none - its identity fields are still at their
+measurement-time defaults, and that is what the check requires of them.
+
+`Figure_Identity_SHA256` and `Auto_Identity_SHA256` are both columns, so a
+reader can recompute the attestation from the file rather than trusting it.
+
+**Canonical JSON was strict about values and not about keys.** `str(k)` folds
+`1` and `"1"` into one JSON key, so one of them disappears, and an object key
+would arrive as its repr - the non-determinism the value branch had just
+removed, back on the other side. Non-string keys raise.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2419,7 +2463,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 217 |
+| `test_measure_mono_bars.py` | 226 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2428,7 +2472,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1653** |
+| **total** | **1662** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -1018,8 +1018,28 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     return out
 
 
+def _threshold_block(roi, t, stroke, bar_w):
+    """The interior described at ONE threshold."""
+    d = roi < t
+    rows = d.mean(axis=1)
+    # Median over vertical tiles, not one mean: a stipple's dot phase makes
+    # individual rows swing between 0 and 0.3.
+    tiles = np.array_split(d, min(6, max(2, d.shape[0] // 4)))
+    tile_cov = [float(t_.mean()) for t_ in tiles if t_.size]
+    cols = [i for i, v in enumerate(d.mean(axis=0)) if v >= SEED_SUPPORT]
+    segs = _runs(cols, gap=max(2, stroke))
+    return dict(
+        coverage=round(float(d.mean()), 4),
+        coverage_median_tile=round(float(np.median(tile_cov)) if tile_cov else 0.0, 4),
+        row_coverage_min=round(float(rows.min()), 4),
+        column_segments=len(segs),
+        # Normalised, because a raw count grows with bar width, stipple pitch
+        # and DPI. Segments per stroke-width of bar.
+        segment_density=round(len(segs) * stroke / float(bar_w), 4))
+
+
 def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
-            direction="UP"):
+            direction="UP", classification_threshold=128):
     """Everything about the ink inside one bar, at four thresholds and none.
 
     The interior is the middle of the bar in both axes, as a FRACTION of the
@@ -1079,22 +1099,27 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
                # wrong about where the cut point should be.
                ink_mass=round(float((1.0 - roi / 255.0).mean()), 4))
     for t in THRESHOLDS:
-        d = roi < t
-        rows = d.mean(axis=1)
-        # Median over vertical tiles, not one mean: a stipple's dot phase makes
-        # individual rows swing between 0 and 0.3.
-        tiles = np.array_split(d, min(6, max(2, d.shape[0] // 4)))
-        tile_cov = [float(t_.mean()) for t_ in tiles if t_.size]
-        cols = [i for i, v in enumerate(d.mean(axis=0)) if v >= SEED_SUPPORT]
-        segs = _runs(cols, gap=max(2, stroke))
-        out["t%d" % t] = dict(
-            coverage=round(float(d.mean()), 4),
-            coverage_median_tile=round(float(np.median(tile_cov)) if tile_cov else 0.0, 4),
-            row_coverage_min=round(float(rows.min()), 4),
-            column_segments=len(segs),
-            # Normalised, because a raw count grows with bar width, stipple
-            # pitch and DPI. Segments per stroke-width of bar.
-            segment_density=round(len(segs) * stroke / float(bar_w), 4))
+        out["t%d" % t] = _threshold_block(roi, t, stroke, bar_w)
+    # The features the IDENTITY is decided on, computed at the threshold this
+    # panel is being READ at rather than at a fixed 128.
+    #
+    # The four blocks above are diagnostics - a feature that separates at one
+    # threshold and not at another is an artefact of the cut point, and seeing
+    # that requires all four. But `_sample` took its structural answer from
+    # `t128` whatever the caller asked for, so a figure read at 190 was
+    # classified at 128: a grey hatch has ink at 190 and none at 128, comes back
+    # `rows_all_inked = False`, and HATCHED is then structurally impossible for
+    # it. In a complete group that is a refusal; against prototypes already
+    # established by other groups it is a RENAMING, to whichever pattern the ink
+    # happens to reach.
+    #
+    # At the default of 128 this block is `t128` exactly, which is why nothing
+    # in the corpus moves.
+    ident = _threshold_block(roi, classification_threshold, stroke, bar_w)
+    out.update(identity_threshold=int(classification_threshold),
+               identity_row_coverage_min=ident["row_coverage_min"],
+               identity_segment_density=ident["segment_density"],
+               identity_rows_all_inked=bool(ident["row_coverage_min"] > 0.0))
     return out
 
 def geometry_rows(gray, panel_box, calibration, anchors, fills,
@@ -1342,7 +1367,8 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                 rec["dispersion"] = round(
                     abs(cal.pixel_to_value(y0 + cap_row) - rec["value"]), 3)
             tex = texture(gray, box, window, fp, edge, zero, stroke,
-                          direction=direction)
+                          direction=direction,
+                          classification_threshold=threshold)
             if tex is None:
                 rec["error"] = "BAR_TOO_SMALL_TO_SAMPLE"
             else:
@@ -1394,13 +1420,18 @@ FILL_VOCABULARY = ("OPEN", "STIPPLED", "HATCHED", "SOLID")
 
 
 def _sample(rec):
-    """The three numbers the identity is decided on, or None."""
-    if "ink_mass" not in rec or "t128" not in rec:
+    """The three numbers the identity is decided on, or None.
+
+    From the `identity_*` fields, which `texture` computes at the threshold the
+    panel was READ at - not from `t128`, which is one of four diagnostic blocks
+    and is fixed whatever the caller configured.
+    """
+    if "ink_mass" not in rec or "identity_rows_all_inked" not in rec:
         return None
     return dict(ink=float(rec["ink_mass"]),
                 noise=float(rec.get("ink_mass_tile_spread", 0.0)),
-                rows_all_inked=float(rec["t128"]["row_coverage_min"]) > 0.0,
-                segments=float(rec["t128"]["segment_density"]))
+                rows_all_inked=bool(rec["identity_rows_all_inked"]),
+                segments=float(rec["identity_segment_density"]))
 
 
 def _structurally_possible(pattern, sample):
@@ -1703,6 +1734,7 @@ def fill_identities_by_figure(records):
                 continue
             key = ((rec["figure"], rec["group"]), rec["slot"])
             pattern = identities.get(key)
+            rec["identity_source"] = "AUTO"
             if pattern:
                 rec["identity_status"] = "RESOLVED"
                 rec["resolved_fill_pattern"] = pattern
@@ -1741,7 +1773,16 @@ def fill_identities_by_figure(records):
 #: `spec_fill` is the diagnostic driver's fixture truth and is not part of the
 #: measurement either.
 UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
-                   "geometry_row_sha256", "spec_fill")
+                   "identity_source", "geometry_row_sha256", "spec_fill")
+
+#: Where an identity came from. This artifact carries AUTO only: the geometry
+#: file is what the FIGURE said, and a human's answer belongs in
+#: `identity_resolution.csv` with the evidence and the reviewer beside it, to be
+#: joined on afterwards. Writing a human resolution back over
+#: `resolved_fill_pattern` and re-emitting the row would file it under
+#: `Auto_Fill_Pattern`, which is the audit trail saying the machine decided
+#: something a person did.
+IDENTITY_SOURCES = ("AUTO", "HUMAN")
 
 #: record field -> artifact column, for the fields that get a column of their
 #: own. Everything else in the record goes to `Diagnostics_JSON`.
@@ -1786,13 +1827,27 @@ def _plain(obj):
         return obj.item()
     if isinstance(obj, (bool, int, float, str)) or obj is None:
         return obj
-    return str(obj)                                        # pragma: no cover
+    # NOT `str(obj)`. A set, a Path, a dataclass - anything whose repr is not
+    # stable or not reversible - would be folded into the hash as text that
+    # looks like data, and the first time two runs disagreed the difference
+    # would be a memory address. A diagnostic this does not know how to write
+    # down is a diagnostic that has no business in a durable artifact.
+    raise TypeError("mono_bar_geometry: cannot write a %s into the geometry "
+                    "artifact; convert it where it is produced"
+                    % type(obj).__name__)
 
 
 def canonical_json(obj):
-    """One text for one value, whoever writes it."""
+    """One text for one value, whoever writes it.
+
+    `allow_nan=False` because Python will happily write `NaN` and `Infinity`
+    into what it calls JSON and no other language's parser will read them back.
+    A diagnostic that arrives as NaN is a measurement that went wrong, and the
+    place to find that out is here rather than in whatever tries to load the
+    artifact.
+    """
     return json.dumps(_plain(obj), sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False)
+                      ensure_ascii=False, allow_nan=False)
 
 
 def geometry_row_sha256(record):
@@ -1809,7 +1864,31 @@ def geometry_row_sha256(record):
 
 
 def artifact_row(record):
-    """One record, flattened to `GEOMETRY_ARTIFACT_COLUMNS`."""
+    """One record, flattened to `GEOMETRY_ARTIFACT_COLUMNS`.
+
+    Refuses two things rather than writing them down.
+
+    A record whose measurement has MOVED since it was stamped. The hash used to
+    be copied out of the record and the columns filled from the record as it
+    stood, so an edit between the two put a changed `Mean` and an unchanged
+    `Geometry_Row_SHA256` in the same row - the file then attests to a
+    measurement it does not contain, which is worse than carrying no hash.
+    Identity fields are outside the hash, so naming a series still passes.
+
+    And a record carrying a HUMAN identity. See `IDENTITY_SOURCES`.
+    """
+    source = record.get("identity_source") or "AUTO"
+    if source != "AUTO":
+        raise ValueError(
+            "mono_bar_geometry: identity_source=%r; the geometry artifact "
+            "carries what the FIGURE said, and a human resolution belongs in "
+            "identity_resolution.csv" % (source,))
+    actual = geometry_row_sha256(record)
+    stamped = record.get("geometry_row_sha256")
+    if stamped and stamped != actual:
+        raise ValueError(
+            "mono_bar_geometry: GEOMETRY_ROW_MODIFIED_AFTER_STAMP - this row "
+            "was measured as %s and is now %s" % (stamped[:16], actual[:16]))
     out = {c: "" for c in GEOMETRY_ARTIFACT_COLUMNS}
     named = {"footprint"}
     for field, column in ARTIFACT_FIELD_COLUMNS:
@@ -1822,8 +1901,7 @@ def artifact_row(record):
     # The hash travels with the row rather than being recomputed by whoever
     # reads it back: recomputing it would hash what the CSV round-trip
     # produced, which is the thing it is there to check.
-    out["Geometry_Row_SHA256"] = record.get(
-        "geometry_row_sha256") or geometry_row_sha256(record)
+    out["Geometry_Row_SHA256"] = actual
     out["Diagnostics_JSON"] = canonical_json(
         {k: v for k, v in record.items()
          if k not in named and k not in UNHASHED_FIELDS})

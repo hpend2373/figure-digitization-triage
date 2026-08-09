@@ -2354,6 +2354,63 @@ driver and the scenarios call directly, and the `figure_id = figure_id or
 panel_id` fallback it used to have is the same "" bucket that pools two
 publications into one fill vocabulary.
 
+## Read at one threshold, classified at another
+
+The threshold reached the geometry and stopped there. `texture` reports four
+fixed blocks - `t96`, `t128`, `t160`, `t192` - and `_sample` took the STRUCTURAL
+half of the identity from `t128` whatever the caller configured. So a panel read
+at 190 was classified at 128, which is precisely what threading the option
+through was supposed to stop.
+
+The four blocks stay, because a feature that separates at one threshold and not
+at another is an artefact of the cut point and seeing that needs all four. What
+is new is an `identity_*` block computed at the threshold the panel was READ at,
+and `_sample` takes `rows_all_inked` and `segment_density` from it. At the
+default of 128 that block IS `t128`, which is why nothing in the corpus moves.
+
+What it costs is not a refusal. A grey hatch has ink at 190 and none at 128, so
+it came back `rows_all_inked = False` and HATCHED became structurally impossible
+for it. Inside a complete group that is a refusal - the whole group goes
+unassignable. Against prototypes another group has already established it is a
+RENAMING: the bar is matched on ink alone against whichever pattern is still
+structurally possible. The scenario draws exactly that - two black groups
+establish the vocabulary, then a grey hatch at pitch 18 whose INK lands inside
+the black stipple's prototype range - and with the fix reverted it comes back
+STIPPLED.
+
+## What the artifact refuses to write down
+
+Two guards, both on `artifact_row`, both for things that produce a plausible
+file rather than an error.
+
+**A row that moved after it was stamped.** The hash was copied out of the record
+while the columns were filled from the record as it then stood, so an edit
+between the two wrote a changed `Mean` beside an unchanged
+`Geometry_Row_SHA256`. A file attesting to a measurement it does not contain is
+worse than a file carrying no hash. `artifact_row` now recomputes and refuses on
+disagreement - `GEOMETRY_ROW_MODIFIED_AFTER_STAMP` - and because identity fields
+are outside the hash, naming a series still passes. An unstamped record, from a
+hand-built row or an older run, is hashed rather than refused.
+
+**A row carrying a human identity.** `identity_resolution.csv` is where a
+person's answer lives, with the evidence and the reviewer beside it. A caller
+that applied it by overwriting `resolved_fill_pattern` and re-emitting the
+geometry file would record a human decision in a column called
+`Auto_Fill_Pattern` - an audit trail saying the machine decided something a
+person did, in the one file that holds what the FIGURE said.
+`fill_identities_by_figure` stamps `identity_source = AUTO` on every row it
+touches and `artifact_row` refuses anything else, so the join has to happen
+downstream where `Identity_Source` can be recorded honestly.
+
+And the canonical serialiser got stricter in two ways it should have been from
+the start. `allow_nan=False`, because Python will write `NaN` and `Infinity`
+into what it calls JSON and no other language's parser will read them back - a
+diagnostic that arrives as NaN is a measurement that went wrong, and here is
+where to find that out. And `_plain` raises on a type it does not know instead
+of falling back to `str(obj)`: a set, a Path, a dataclass would be folded into
+the hash as text that looks like data, and the first time two runs disagreed the
+difference would be a memory address.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2362,7 +2419,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 195 |
+| `test_measure_mono_bars.py` | 217 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2371,7 +2428,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1631** |
+| **total** | **1653** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

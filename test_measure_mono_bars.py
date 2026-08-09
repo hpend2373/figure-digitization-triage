@@ -1572,6 +1572,125 @@ try:
           repr((two[0].get("identity_status"),
                 two[0].get("fill_sample_status"))))
 
+    # ------------------------------------------- 26s. read at one threshold
+    #
+    # The threshold reached the GEOMETRY and stopped there. `texture` reports
+    # four fixed blocks - t96, t128, t160, t192 - and `_sample` took the
+    # structural half of the identity from `t128` whatever the caller asked
+    # for. So a figure read at 190 was CLASSIFIED at 128, which is the thing
+    # threading the option through was supposed to stop.
+    #
+    # A grey hatch has ink at 190 and none at 128, so it comes back
+    # `rows_all_inked = False` and HATCHED becomes structurally impossible for
+    # it. Inside a complete group that is a refusal - the whole group goes
+    # unassignable. Against prototypes another group already established it is
+    # worse: the bar is matched on ink alone against whichever pattern remains
+    # structurally possible, which is a RENAMING.
+    #
+    # REVERT: `rows_all_inked = float(rec["t128"]["row_coverage_min"]) > 0.0`
+    # in `_sample`. Nothing on the corpus moves - every figure this package can
+    # reach is black on white, where the identity block IS t128 - and both
+    # scenarios below break.
+    print("\nthe identity is decided at the threshold the panel was read at")
+    g7 = Geometry(1.0)
+    GREY = 170
+
+    def grey_panel(name, units=(30, 45, 60), level=GREY, short=None, pitch=9):
+        img = g7.blank()
+        g7.outline(img, 0, units[0])
+        g7.hatch(img, 1, units[1], pitch=pitch)
+        g7.stipple(img, 2, units[2] if short is None else short)
+        if level != 0:
+            # Everything the panel drew, in grey. The baseline rule included,
+            # so nothing here is a two-tone figure that only half exists at 128.
+            img[img == 0] = level
+            img[g7.r(100):g7.r(350), :] = 0        # except the trap band
+        return write(img, name, TMP)
+
+    grey_spec = g7.spec(grey_panel("greyfig"), ["OPEN", "HATCHED", "STIPPLED"])
+
+    def grey_identity(threshold):
+        rows_ = G.geometry_rows(
+            M._gray(grey_spec["path"]), grey_spec["box"],
+            MRX.AxisCalibration.from_points(
+                [tuple(t) for t in grey_spec["ticks"]]),
+            grey_spec["anchors"], grey_spec["fills"], grey_spec["group_window"],
+            baseline=0.0, threshold=threshold, panel_id="grey", figure_id="grey")
+        verdicts = M.fill_identities_by_figure(rows_)
+        return rows_, verdicts["grey"]
+
+    at_190, v190 = grey_identity(190)
+    check("the grey panel is measured at 190",
+          all("value" in r for r in at_190),
+          repr([r.get("error") for r in at_190]))
+    check("t128 sees no interior in it at all, which is the trap",
+          all(r["t128"]["row_coverage_min"] == 0.0 for r in at_190),
+          repr([r["t128"]["row_coverage_min"] for r in at_190]))
+    check("the identity block does see one, because it is read at 190",
+          [r["identity_threshold"] for r in at_190] == [190] * 3
+          and [r["identity_rows_all_inked"] for r in at_190] == [False, True,
+                                                                 False],
+          repr([(r["identity_threshold"], r["identity_rows_all_inked"])
+                for r in at_190]))
+    check("so the group assigns, and the hatch is named HATCHED",
+          v190["status"] == "DIRECT_ONLY"
+          and [r["resolved_fill_pattern"] for r in at_190]
+          == ["OPEN", "HATCHED", "STIPPLED"],
+          "%r %r" % (v190["status"],
+                     [r["resolved_fill_pattern"] for r in at_190]))
+
+    # And the renaming, which is the case that returns an answer rather than
+    # withholding one. Two black groups establish the vocabulary; a partial grey
+    # group is then matched against it.
+    print("\na grey hatch is not renamed against another group's prototypes")
+    proto = []
+    for name, units in (("blk_a", (30, 45, 60)), ("blk_b", (33, 48, 63))):
+        img = g7.blank()
+        g7.outline(img, 0, units[0])
+        g7.hatch(img, 1, units[1])
+        g7.stipple(img, 2, units[2])
+        got = G.geometry_rows(
+            M._gray(write(img, name, TMP)),
+            [g7.x0, g7.x1, g7.y0, g7.y1],
+            MRX.AxisCalibration.from_points([(0, g7.base),
+                                             (100, g7.base - 100 * g7.ppu)]),
+            {"G": (g7.slots[0][0] + g7.slots[-1][1]) // 2},
+            ["OPEN", "HATCHED", "STIPPLED"], g7.r(190), baseline=0.0,
+            threshold=190, panel_id=name, figure_id="mixed")
+        proto.extend(got)
+    partial = G.geometry_rows(
+        # pitch 18 at grey 170 puts this hatch's INK inside the black
+        # STIPPLE's prototype range - which is the whole point. Its structure
+        # is the only thing that says it is not one, and the structure is the
+        # thing the fixed t128 could not see.
+        M._gray(grey_panel("greypart", short=4, pitch=18)),
+        [g7.x0, g7.x1, g7.y0, g7.y1],
+        MRX.AxisCalibration.from_points([(0, g7.base),
+                                         (100, g7.base - 100 * g7.ppu)]),
+        {"G": (g7.slots[0][0] + g7.slots[-1][1]) // 2},
+        ["OPEN", "HATCHED", "STIPPLED"], g7.r(190), baseline=0.0,
+        threshold=190, panel_id="grey_partial", figure_id="mixed")
+    mixed_rows = proto + partial
+    v_mixed = M.fill_identities_by_figure(mixed_rows)["mixed"]
+    check("the two black groups establish a reusable vocabulary",
+          v_mixed["status"] == "ESTABLISHED" and v_mixed["complete_groups"] == 2,
+          "%r over %d" % (v_mixed["status"], v_mixed["complete_groups"]))
+    grey_hatch = next(r for r in partial if r.get("slot") == 1)
+    check("the grey bar in slot 1 really is a hatch - no interior row is blank",
+          grey_hatch["identity_rows_all_inked"]
+          and grey_hatch["t128"]["row_coverage_min"] == 0.0,
+          repr((grey_hatch["identity_rows_all_inked"],
+                grey_hatch["t128"]["row_coverage_min"])))
+    check("its ink lands squarely inside the STIPPLE prototype range",
+          v_mixed["prototypes"]["STIPPLED"][0] - 0.01
+          <= grey_hatch["ink_mass"]
+          <= v_mixed["prototypes"]["STIPPLED"][1] + 0.01,
+          "%r against %r" % (grey_hatch["ink_mass"],
+                             v_mixed["prototypes"]["STIPPLED"]))
+    check("and it is still never called STIPPLED",
+          grey_hatch["resolved_fill_pattern"] in ("", "HATCHED"),
+          repr(grey_hatch["resolved_fill_pattern"]))
+
     # ------------------------------------------- 26r. two groups is not enough
     #
     # `prototype_ready` said "at least two complete groups AND a non-zero
@@ -1692,6 +1811,94 @@ try:
                  resolved_fill_pattern="HATCHED")
     check("nor does a human overriding what the figure said",
           G.geometry_row_sha256(human) == before[0])
+
+    # REVERT: `out["Geometry_Row_SHA256"] = record.get("geometry_row_sha256")
+    # or geometry_row_sha256(record)`. The hash is then copied out of the record
+    # while the columns are filled from the record as it now stands, so a row
+    # edited after it was stamped is written with a changed Mean and an
+    # unchanged hash - a file attesting to a measurement it does not contain,
+    # which is worse than carrying no hash at all. The scenario above does not
+    # catch it: it calls the hash function directly and never writes a row.
+    print("\nthe artifact refuses to write a row that moved after it was stamped")
+    for field, value in (("value", written[0]["value"] + 0.001),
+                         ("footprint", [0, 1]),
+                         ("ink_mass", 0.5)):
+        edited = dict(written[0])
+        edited[field] = value
+        try:
+            G.artifact_row(edited)
+        except ValueError as exc:
+            check("editing %s after the stamp is refused" % field,
+                  "MODIFIED_AFTER_STAMP" in str(exc), str(exc))
+        else:
+            check("editing %s after the stamp is refused" % field, False,
+                  "it wrote the row")
+    for field, value in (("identity_status", "RESOLVED"),
+                         ("resolved_fill_pattern", "SOLID"),
+                         ("spec_fill", "NONSENSE")):
+        named = dict(written[0])
+        named[field] = value
+        try:
+            rowz = G.artifact_row(named)
+        except ValueError as exc:
+            check("naming a series is not editing it (%s)" % field, False,
+                  str(exc))
+        else:
+            check("naming a series is not editing it (%s)" % field,
+                  rowz["Geometry_Row_SHA256"] == before[0])
+    # And an unstamped record - a hand-built row, or one from an older run - is
+    # written with the hash it actually has rather than refused.
+    unstamped = {k: v for k, v in written[0].items()
+                 if k != "geometry_row_sha256"}
+    check("an unstamped record is hashed rather than refused",
+          G.artifact_row(unstamped)["Geometry_Row_SHA256"] == before[0])
+
+    # REVERT: drop the identity_source guard from artifact_row. A caller that
+    # applies identity_resolution.csv by overwriting resolved_fill_pattern and
+    # re-emitting the geometry file then records a HUMAN decision in a column
+    # called Auto_Fill_Pattern - an audit trail saying the machine decided
+    # something a person did, in the one file that is supposed to hold what the
+    # FIGURE said.
+    print("\nthe geometry file holds what the figure said, not what a person did")
+    check("the rows the figure named say so",
+          all(r.get("identity_source") == "AUTO" for r in written),
+          repr({r.get("identity_source") for r in written}))
+    reviewed = dict(written[0], identity_source="HUMAN",
+                    resolved_fill_pattern="HATCHED")
+    try:
+        G.artifact_row(reviewed)
+    except ValueError as exc:
+        check("a human resolution is refused by the geometry artifact",
+              "identity_resolution.csv" in str(exc), str(exc))
+    else:
+        check("a human resolution is refused by the geometry artifact", False,
+              "it wrote the row")
+    check("and HUMAN is a declared source, not an ad-hoc string",
+          G.IDENTITY_SOURCES == ("AUTO", "HUMAN"), repr(G.IDENTITY_SOURCES))
+
+    # REVERT: json.dumps without allow_nan=False, and `return str(obj)` at the
+    # end of _plain. Python writes `NaN` into what it calls JSON and no other
+    # language's parser reads it back; and a set or a Path is folded into the
+    # hash as text that looks like data, where the first disagreement between
+    # two runs would be a memory address.
+    print("\nwhat cannot be written down canonically is not written down")
+    for bad in (float("nan"), float("inf")):
+        try:
+            G.canonical_json({"v": bad})
+        except ValueError:
+            check("%r is refused rather than written as JSON" % bad, True)
+        else:
+            check("%r is refused rather than written as JSON" % bad, False,
+                  G.canonical_json({"v": bad}))
+    for bad in ({1, 2}, object()):
+        try:
+            G.canonical_json({"v": bad})
+        except TypeError as exc:
+            check("a %s is refused rather than stringified"
+                  % type(bad).__name__, "cannot write" in str(exc), str(exc))
+        else:
+            check("a %s is refused rather than stringified"
+                  % type(bad).__name__, False, G.canonical_json({"v": bad}))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

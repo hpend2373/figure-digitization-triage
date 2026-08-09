@@ -2120,6 +2120,25 @@ tested; joining it into `run_batch`, the QC gate and the finalizer's subject
 hash is part of the integration commit, because a resolution the finalizer does
 not hash is worse than none.
 
+## One measurement, two callers
+
+The geometry is now `mono_bar_geometry.py`, imported by the diagnostic driver
+and - once the integration lands - by the production reader. Two implementations
+of one measurement drift, and this project has already paid for that: the
+prototype read publication 397's WOMEN panel for weeks while the production
+reader was never pointed at it, and the two disagreed about that panel's stroke,
+its caps and its footprints with nothing in place to notice.
+
+`measure_mono_bars.py` keeps the spec format, the corpus and the table.
+`mono_bar_geometry.py` opens no figure and decides nothing: it measures and it
+refuses. A scenario asserts that every geometry function the driver uses IS the
+shared object rather than an equal copy, and that the shared module does not
+carry the diagnostic corpus - a copy-paste back into the driver leaves every
+other scenario passing and starts diverging on the next fix to either.
+
+The split changed no number: 38 of 38 cells, 397 at 8 means and 8 dispersions,
+127 at 18 and 18.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2133,11 +2152,11 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 135 |
+| `test_measure_mono_bars.py` | 138 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1540** |
+| **total** | **1543** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -32,6 +32,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import measure_mono_bars as M              # noqa: E402
+import mono_bar_geometry as G              # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -1157,6 +1158,35 @@ try:
     check("a first pass over budget is named on the first pass",
           got[4] == "EXCESSIVE_TRIM"
           and got[5].get("convergence_stage") == "FIRST_PASS", repr(got))
+
+    # -------------------------------------------------- 26m. one measurement
+    #
+    # The geometry lives in `mono_bar_geometry` so the production reader and
+    # this driver run the SAME code. Two implementations of one measurement
+    # drift, and this project has already paid for that: the prototype read
+    # publication 397's WOMEN panel for weeks while the production reader was
+    # never pointed at it, and the two disagreed about that panel's stroke, its
+    # caps and its footprints with nothing to notice.
+    #
+    # REVERT: copy a function back into the driver instead of importing it. The
+    # names still resolve, every other scenario still passes, and the two copies
+    # start diverging on the next fix to either.
+    print("\nthe driver and the shared module are the same measurement")
+    shared = ["stroke_scale", "seed_support", "footprints_from_seed",
+              "trace_extent", "trim_to_own_bar", "refine_footprint",
+              "remote_support", "stem_band", "texture", "fill_identity",
+              "fill_identities_by_figure", "rule_edge"]
+    same = [n for n in shared if getattr(M, n, None) is getattr(G, n, object())]
+    check("every geometry function the driver uses IS the shared one",
+          len(same) == len(shared),
+          repr([n for n in shared if n not in same]))
+    check("and the vocabularies are one object, not two equal tuples",
+          M.FILL_VOCABULARY is G.FILL_VOCABULARY
+          and M.REMOTE_KINDS is G.REMOTE_KINDS
+          and M.THRESHOLDS is G.THRESHOLDS)
+    check("the shared module does not import the diagnostic corpus",
+          not hasattr(G, "builtin_specs") and not hasattr(G, "measure_panel"),
+          "%r" % [n for n in ("builtin_specs", "measure_panel") if hasattr(G, n)])
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

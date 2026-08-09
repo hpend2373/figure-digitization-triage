@@ -1907,7 +1907,35 @@ def auto_identity_sha256(record):
     }).encode("utf-8")).hexdigest()
 
 
-def artifact_row(record, allow_unstamped=False):
+#: The fields `fill_identities_by_figure` writes and nothing else may.
+AUTO_IDENTITY_FIELDS = ("identity_source", "figure_identity_sha256",
+                        "auto_identity_sha256")
+
+
+def _identity_state(record):
+    """PRE_IDENTITY, ATTESTED, or the name of what is wrong with it.
+
+    Three states, and only two of them are states. A row straight out of
+    `geometry_rows` has no identity at all; a row out of
+    `fill_identities_by_figure` has one and attests to it. Anything between the
+    two is a caller that changed some of the fields and not the others, and the
+    artifact cannot say whether auto resolution happened.
+    """
+    if record.get("auto_identity_sha256"):
+        return "ATTESTED"
+    if (record.get("identity_status") not in (None, "", "NOT_CALIBRATED")
+            or record.get("resolved_fill_pattern")):
+        return "AUTO_IDENTITY_UNATTESTED"
+    if any(record.get(f) for f in AUTO_IDENTITY_FIELDS):
+        # A figure verdict hash or an AUTO source with no row attestation: the
+        # figure was resolved and this row's answer was taken off it, or the
+        # answer was deleted and its provenance left behind. Either way the row
+        # contradicts itself about whether auto resolution reached it.
+        return "AUTO_IDENTITY_PARTIAL"
+    return "PRE_IDENTITY"
+
+
+def artifact_row(record, allow_unstamped=False, require_auto_identity=False):
     """One record, flattened to `GEOMETRY_ARTIFACT_COLUMNS`.
 
     Refuses two things rather than writing them down.
@@ -1927,7 +1955,16 @@ def artifact_row(record, allow_unstamped=False):
     uses.
 
     A record carrying a HUMAN identity, or an auto identity that does not attest
-    to itself. See `IDENTITY_SOURCES` and `auto_identity_sha256`.
+    to itself, or one that attests to half of itself. See `IDENTITY_SOURCES`,
+    `auto_identity_sha256` and `_identity_state`.
+
+    `require_auto_identity=True` additionally refuses a row that has not been
+    through `fill_identities_by_figure` at all. A diagnostic dump of a panel
+    before its figure has been resolved is a legitimate thing to write, which is
+    why it is not the default - but a BATCH must not, because the geometry file
+    it leaves behind would say `Auto_Identity_Status: NOT_CALIBRATED` for every
+    row of a figure that was resolved in memory a moment later. Use
+    `canonical_artifact_rows`, which is that mode under a name.
     """
     source = record.get("identity_source") or "AUTO"
     if source != "AUTO":
@@ -1947,18 +1984,43 @@ def artifact_row(record, allow_unstamped=False):
         raise ValueError(
             "mono_bar_geometry: GEOMETRY_ROW_MODIFIED_AFTER_STAMP - this row "
             "was measured as %s and is now %s" % (stamped[:16], actual[:16]))
-    attested = record.get("auto_identity_sha256")
-    if attested:
-        if attested != auto_identity_sha256(record):
+    state = _identity_state(record)
+    if state == "ATTESTED":
+        # The stamp first, because without it the recompute below would report
+        # a modified identity for a row whose identity nobody touched. An
+        # unstamped row cannot carry an attestation forward at all: the
+        # attestation covers `Geometry_Row_SHA256`, which is empty here, while
+        # the column is filled with the hash recomputed at write time - so the
+        # file would pass this writer and fail a reader recomputing the
+        # attestation from the eighteen columns. A migrated row has to be
+        # re-stamped and its figure resolved again.
+        if not record.get("geometry_row_sha256"):
+            raise ValueError(
+                "mono_bar_geometry: AUTO_IDENTITY_ON_UNSTAMPED_ROW - re-stamp "
+                "the measurement and resolve its figure again rather than "
+                "carrying an attestation that names a hash this row has lost")
+        if record["auto_identity_sha256"] != auto_identity_sha256(record):
             raise ValueError(
                 "mono_bar_geometry: AUTO_IDENTITY_MODIFIED - this row was "
                 "named %r by the figure and now says %r"
-                % (attested[:16], auto_identity_sha256(record)[:16]))
-    elif (record.get("identity_status") not in (None, "", "NOT_CALIBRATED")
-          or record.get("resolved_fill_pattern")):
+                % (record["auto_identity_sha256"][:16],
+                   auto_identity_sha256(record)[:16]))
+        if len(str(record.get("figure_identity_sha256", ""))) != 64:
+            raise ValueError(
+                "mono_bar_geometry: AUTO_IDENTITY_PARTIAL - an attested row "
+                "with no figure verdict behind it")
+    elif state != "PRE_IDENTITY":
         raise ValueError(
-            "mono_bar_geometry: AUTO_IDENTITY_UNATTESTED - this row carries an "
-            "identity that `fill_identities_by_figure` did not write")
+            "mono_bar_geometry: %s - this row carries part of an auto identity "
+            "and not the rest of it: %r" % (state, {
+                f: record.get(f) for f in
+                ("identity_status", "resolved_fill_pattern")
+                + AUTO_IDENTITY_FIELDS if record.get(f)}))
+    elif require_auto_identity:
+        raise ValueError(
+            "mono_bar_geometry: AUTO_IDENTITY_MISSING - a batch writes the "
+            "geometry file AFTER the figure has been resolved, so every row "
+            "carries what the figure said; this one has not been resolved")
     out = {c: "" for c in GEOMETRY_ARTIFACT_COLUMNS}
     named = {"footprint"}
     for field, column in ARTIFACT_FIELD_COLUMNS:
@@ -1978,5 +2040,30 @@ def artifact_row(record, allow_unstamped=False):
     return out
 
 
-def artifact_rows(records, allow_unstamped=False):
-    return [artifact_row(r, allow_unstamped=allow_unstamped) for r in records]
+def artifact_rows(records, allow_unstamped=False, require_auto_identity=False):
+    return [artifact_row(r, allow_unstamped=allow_unstamped,
+                         require_auto_identity=require_auto_identity)
+            for r in records]
+
+
+def canonical_artifact_rows(records):
+    """The writer a BATCH uses. There is no flag to forget.
+
+    `mono_bar_geometry.csv` is written ONCE, after `fill_identities_by_figure`
+    has answered every figure in it. Writing it before - which is the order the
+    stages are naturally listed in - produces a perfectly valid file in which
+    `Figure_Identity_SHA256` and `Auto_Identity_SHA256` are blank and every
+    `Auto_Identity_Status` says NOT_CALIBRATED, for a batch that resolved the
+    identities in memory a moment later and then wrote them nowhere. The
+    durable artifact would say the figure was never asked.
+
+    The order this enforces:
+
+        measure every BAR_MONO panel        (anonymous, stamped here)
+        collect the rows by Figure_ID
+        fill_identities_by_figure           (verdict + attestation here)
+        canonical_artifact_rows             (written once, here)
+        read it back and verify
+        identity_resolution.csv joined DOWNSTREAM, never back into this file
+    """
+    return artifact_rows(records, require_auto_identity=True)

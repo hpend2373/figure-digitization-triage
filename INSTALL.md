@@ -2455,6 +2455,55 @@ reader can recompute the attestation from the file rather than trusting it.
 would arrive as its repr - the non-determinism the value branch had just
 removed, back on the other side. Non-string keys raise.
 
+## The order the stages are written in is not the order they run in
+
+The obvious way to list the caller is: measure the panels, write
+`mono_bar_geometry.csv`, resolve the identities. That order produces a
+perfectly valid file in which `Figure_Identity_SHA256` and
+`Auto_Identity_SHA256` are blank and every `Auto_Identity_Status` says
+`NOT_CALIBRATED` - for a batch that resolved the identities in memory a moment
+later and wrote them nowhere. The durable artifact would say the figure was
+never asked.
+
+`canonical_artifact_rows` is that constraint as a function rather than a flag
+somebody has to remember. It refuses a row that has not been through
+`fill_identities_by_figure`, so the file can only be written after the figure
+has answered:
+
+    measure every BAR_MONO panel        (anonymous, stamped here)
+    collect the rows by Figure_ID
+    fill_identities_by_figure           (verdict + attestation here)
+    canonical_artifact_rows             (written once, here)
+    read it back and verify
+    identity_resolution.csv joined DOWNSTREAM, never back into this file
+
+A diagnostic dump of pre-identity rows is still a legitimate thing to write, so
+`artifact_rows` will still do it. A batch does not use `artifact_rows`.
+
+**Half an auto identity is not an auto identity.** The attestation check treated
+"no `auto_identity_sha256`" as "not resolved yet", which is only true if none of
+the other identity fields are there either. A caller that deletes the answer and
+leaves `identity_source` and `figure_identity_sha256` behind - or takes the
+answer off the figure's verdict without attesting the row - writes a file that
+cannot say whether auto resolution reached that row. There are exactly two
+states now, `PRE_IDENTITY` and `ATTESTED`, and everything between them is
+`AUTO_IDENTITY_PARTIAL`.
+
+**A migrated row may not carry an attestation of a hash it has lost.** With
+`allow_unstamped=True` the writer recomputes `Geometry_Row_SHA256` and fills the
+column with it, while an attestation made earlier names the hash the row used to
+have - empty, here. The writer would pass the row and a reader recomputing the
+attestation from the eighteen columns would reject the file. So an unstamped row
+carrying an attestation is refused outright: re-stamp the measurement and
+resolve its figure again.
+
+Note what `Figure_Identity_SHA256` does and does not prove today. It binds a
+row's identity to the verdict the figure was answered with, so an answer cannot
+be carried over from a figure that reached it differently. It does not prove the
+verdict itself - that needs the durable reader to recompute `fill_identity` from
+the rows in the file and get the same hash, which is part of the read-back
+contract the caller integration owes.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2463,7 +2512,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 226 |
+| `test_measure_mono_bars.py` | 233 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2472,7 +2521,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1662** |
+| **total** | **1669** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

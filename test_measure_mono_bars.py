@@ -1883,9 +1883,69 @@ try:
           G.artifact_row(laundered, allow_unstamped=True)["Mean"]
           == laundered["value"])
     check("and a batch run does not, because that is the default",
-          "allow_unstamped" in G.artifact_rows.__code__.co_varnames
-          and G.artifact_rows.__defaults__ == (False,),
+          G.artifact_rows.__defaults__ == (False, False)
+          and "allow_unstamped" in G.artifact_rows.__code__.co_varnames,
           repr(G.artifact_rows.__defaults__))
+
+    # REVERT: leave the two flags to whoever writes the file. `run_batch` then
+    # has to remember `require_auto_identity=True`, and the run that forgets
+    # writes a perfectly valid geometry file in which every Auto_Identity_Status
+    # says NOT_CALIBRATED - for a batch that resolved the identities in memory a
+    # moment later and wrote them nowhere. The stages are naturally listed in
+    # the order that produces exactly that.
+    print("\nthe batch writer has no flag to forget")
+    unresolved = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED",
+                                                    "SOLID"]))
+    check("writing the geometry file before the figure is answered is refused",
+          _raises(lambda: G.canonical_artifact_rows(unresolved),
+                  "AUTO_IDENTITY_MISSING"),
+          repr([r.get("identity_status") for r in unresolved]))
+    check("a diagnostic dump of the same rows is still allowed",
+          [r["Auto_Identity_Status"] for r in G.artifact_rows(unresolved)]
+          == ["NOT_CALIBRATED"] * 3)
+    M.fill_identities_by_figure(unresolved)
+    resolved_rows = G.canonical_artifact_rows(unresolved)
+    check("and after the figure has answered, every row carries both hashes",
+          all(len(r["Figure_Identity_SHA256"]) == 64
+              and len(r["Auto_Identity_SHA256"]) == 64
+              for r in resolved_rows),
+          repr([(r["Figure_Identity_SHA256"][:8],
+                 r["Auto_Identity_SHA256"][:8]) for r in resolved_rows]))
+    check("including the rows the figure could not name",
+          all(r["Auto_Identity_SHA256"] for r in G.canonical_artifact_rows(
+              [dict(x, identity_status="UNRESOLVED_NO_FILL",
+                    resolved_fill_pattern="",
+                    auto_identity_sha256=G.auto_identity_sha256(
+                        dict(x, identity_status="UNRESOLVED_NO_FILL",
+                             resolved_fill_pattern="")))
+               for x in unresolved])))
+
+    # REVERT: treat a row with no `auto_identity_sha256` as pre-identity. A
+    # caller that clears the answer and leaves its provenance behind - or takes
+    # the answer off the figure's verdict without attesting the row - then
+    # writes a file that cannot say whether auto resolution reached this row.
+    print("\nhalf an auto identity is not an auto identity")
+    half = dict(unresolved[0])
+    del half["auto_identity_sha256"]
+    half["identity_status"], half["resolved_fill_pattern"] = "NOT_CALIBRATED", ""
+    check("an answer deleted with its provenance left behind is refused",
+          _raises(lambda: G.artifact_row(half), "AUTO_IDENTITY_PARTIAL"),
+          "it wrote the row")
+    check("and the row that has genuinely never been resolved still writes",
+          G.artifact_row(M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED",
+                                                            "SOLID"]))[0]
+                         )["Auto_Identity_Status"] == "NOT_CALIBRATED")
+
+    # REVERT: let an unstamped row keep its attestation through migration. The
+    # attestation names a Geometry_Row_SHA256 the row no longer has, while the
+    # column is filled with the hash recomputed at write time - so the file
+    # passes the writer and fails a reader recomputing from the columns.
+    carried = {k: v for k, v in unresolved[0].items()
+               if k != "geometry_row_sha256"}
+    check("a migrated row may not carry an attestation of a hash it lost",
+          _raises(lambda: G.artifact_row(carried, allow_unstamped=True),
+                  "AUTO_IDENTITY_ON_UNSTAMPED_ROW"),
+          "it wrote the row")
 
     # REVERT: drop the identity_source guard from artifact_row. A caller that
     # applies identity_resolution.csv by overwriting resolved_fill_pattern and

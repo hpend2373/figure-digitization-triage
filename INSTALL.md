@@ -2156,6 +2156,34 @@ measured. `measure_panel` is now four lines that supply the spec.
 The split changed no number, and the record stream is byte-identical: 38 of 38
 cells, 397 at 8 means and 8 dispersions, 127 at 18 and 18.
 
+## The production module can now measure without naming
+
+`mark_readers.read_monochrome_bar_geometry` is the second half of the extraction:
+the production module measuring a panel through `mono_bar_geometry.geometry_rows`
+and leaving the identity open. It sits BESIDE `read_monochrome_bar_panel` rather
+than replacing it, because the two answer different questions and only one of
+them can be answered by a panel.
+
+The existing reader returns rows carrying a `series`. To do that it decides,
+inside one panel, which bar is which, and the only evidence a panel holds is an
+absolute fill density against `_FILL_BANDS` - measured on one figure and wrong on
+the second. The new one returns `identity_status: NOT_CALIBRATED` and an empty
+`resolved_fill_pattern` on every row, and naming happens afterwards across the
+whole figure in `fill_identities_by_figure`, which needs samples from every panel
+before it can say what the figure's fills look like. That is why this could not
+simply be folded into the old reader: the CALLER has to collect panels first,
+which is a change to `run_batch`, not to a reader.
+
+`mark_readers` imports `mono_bar_geometry` and `mono_bar_geometry` imports
+nothing from `mark_readers` - it takes a calibration object, not tick points - so
+the dependency runs one way and a scenario asserts it.
+
+What remains for publication 127 to reach FINALIZED is the caller: `run_batch`
+collecting BAR_MONO panels by `Figure_ID`, resolving identity across them,
+applying `identity_resolution.csv` to the cells the figure could not name, and
+carrying that file through the validator, the grid gate, the run stamp and
+`Review_Subject_SHA256`.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2170,10 +2198,10 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_measure_mono_bars.py` | 141 |
-| `test_mono_bar.py` | 33 |
+| `test_mono_bar.py` | 40 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1546** |
+| **total** | **1553** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -11,6 +11,13 @@ import numpy as np
 import cv2
 from PIL import Image
 
+# The geometry both this module and the diagnostic driver measure with. Imported
+# rather than reimplemented: two implementations of one measurement drift, and
+# this project has already paid for that on publication 397's WOMEN panel.
+# `mono_bar_geometry` deliberately imports nothing from here - it takes a
+# calibration object, not tick points - so this direction is the only one.
+import mono_bar_geometry as MONO_GEOMETRY
+
 
 def _runs(indices, gap=1):
     out, cur = [], []
@@ -1122,6 +1129,39 @@ def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, seri
         out.extend(group)
     out.sort(key=lambda row: (row["series"], row["order"]))
     return out
+
+
+def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
+                                 fills, group_window=70, baseline_value=0.0,
+                                 panel_id="", figure_id=""):
+    """The bars of one panel, measured and NOT named.
+
+    The production entry point to `mono_bar_geometry`. It exists beside
+    `read_monochrome_bar_panel` rather than replacing it because the two answer
+    different questions and only one of them can be answered by a panel.
+
+    `read_monochrome_bar_panel` returns rows carrying a `series`. To do that it
+    has to decide, inside one panel, which bar is which - and the only evidence a
+    panel holds is an absolute fill density compared against `_FILL_BANDS`, which
+    were measured on a single figure and do not fit the second one. This returns
+    the geometry with the identity left open: every record says
+    `identity_status: NOT_CALIBRATED` and carries an empty
+    `resolved_fill_pattern`.
+
+    Naming happens afterwards, across the whole figure, in
+    `mono_bar_geometry.fill_identities_by_figure` - which needs samples from
+    every panel of the figure before it can say what the figure's fills look
+    like, and refuses when they do not separate. That is why this cannot simply
+    be folded into the existing reader: the caller has to collect panels first.
+
+    `fills` is the DECLARATION each slot is checked against, never an
+    identification.
+    """
+    rgb = np.asarray(image.convert("RGB")).astype(np.uint8)
+    return MONO_GEOMETRY.geometry_rows(
+        MONO_GEOMETRY._gray_from_rgb(rgb), panel_box, y_calibration,
+        x_positions, list(fills), group_window, baseline=baseline_value,
+        panel_id=panel_id, figure_id=figure_id)
 
 
 MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",

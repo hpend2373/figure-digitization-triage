@@ -248,6 +248,46 @@ check("no other declared fill is refused",
       not [p for p in MR.BAR_FILL_PATTERNS
            if p != "STIPPLED" and p in MR.UNIMPLEMENTED_FILL_PATTERNS])
 
+# The two-pass entry point: the production module measuring a panel WITHOUT
+# naming its series. The existing reader has to decide identity inside one
+# panel, and the only evidence a panel holds is an absolute density against
+# _FILL_BANDS - measured on one figure and wrong on the second. This one leaves
+# the identity open for fill_identities_by_figure, which needs every panel of
+# the figure before it can say anything.
+#
+# REVERT: have it return `series` per row like the old reader. The rows look
+# richer and every one of them is a series named by where the bar sat.
+print()
+print("the production module can measure a panel without naming its series")
+_t = json.load(open(TRUTH))
+_geo = MR.read_monochrome_bar_geometry(
+    Image.open(IMG), tuple(_t["panel_box"]),
+    dict(zip(_t["groups"], _t["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
+    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+_cells = [r for r in _geo if r.get("slot") is not None]
+check("it reads every bar the fixture draws", len(_cells) == 12,
+      "%d" % len(_cells))
+check("and gets their means", all("value" in r for r in _cells),
+      "%s" % [r.get("error") for r in _cells if "value" not in r])
+check("no row carries a series name",
+      not [r for r in _cells if r.get("series") or r.get("resolved_fill_pattern")],
+      "%s" % [(r.get("slot"), r.get("resolved_fill_pattern")) for r in _cells][:3])
+check("every row says its identity is not calibrated yet",
+      all(r.get("identity_status") == "NOT_CALIBRATED" for r in _cells),
+      "%s" % {r.get("identity_status") for r in _cells})
+check("the panel and figure it belongs to travel with each row",
+      all(r.get("figure") == "P_MONO" and r.get("figure_id") == "F_MONO"
+          for r in _cells))
+_v = MR.MONO_GEOMETRY.fill_identities_by_figure(_geo)
+check("and the figure names them once every panel has been measured",
+      _v["F_MONO"]["status"] == "ESTABLISHED"
+      and all(r["resolved_fill_pattern"] == r["declared"] for r in _cells),
+      "%s" % _v["F_MONO"]["status"])
+check("the reader measures with the shared geometry, not a copy of it",
+      MR.read_monochrome_bar_geometry.__globals__["MONO_GEOMETRY"].geometry_rows
+      is MR.MONO_GEOMETRY.geometry_rows)
+
 print()
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

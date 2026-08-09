@@ -1476,7 +1476,7 @@ def fill_identity(records):
     if len(figure_ids) > 1:
         return {}, dict(status="MULTIPLE_FIGURES",
                         figure_ids=sorted(str(f) for f in figure_ids))
-    groups, declared, expected = {}, {}, {}
+    groups, declared, expected, arrivals = {}, {}, {}, {}
     for rec in records:
         if rec.get("group") is None or rec.get("slot") is None:
             continue
@@ -1484,6 +1484,7 @@ def fill_identity(records):
         # each have a SUPINE and a STANDING group, and pooling them by name
         # alone would make one group out of three.
         key = (rec["figure"], rec["group"])
+        arrivals.setdefault(key, []).append(rec["slot"])
         groups.setdefault(key, {})[rec["slot"]] = _sample(rec)
         declared.setdefault(key, {})[rec["slot"]] = rec.get("declared")
         if rec.get("declared_group_size") is not None:
@@ -1495,12 +1496,21 @@ def fill_identity(records):
         size, patterns = expected.get(key, (len(slots), sorted(
             v for v in declared[key].values() if v)))
         arrived = sorted(v for v in declared[key].values() if v)
-        if len(slots) != size or arrived != patterns:
-            # A slot the panel declared did not come back at all. The records
-            # that DID come back may every one of them carry a fill, and the
-            # group is still not complete - and it cannot be told apart from a
-            # smaller group unless the declaration travels on the records.
-            truncated[key] = sorted(set(range(size)) - set(slots))
+        # The exact SET, not the count. Slots {0, 1, 3} against a declared size
+        # of three has the right number and the right patterns and is still
+        # missing slot 2 while carrying a slot 3 the panel never declared -
+        # `len(slots) != size` sees none of that. And a slot that arrives TWICE
+        # overwrites its predecessor in the dictionary, so the group looks a
+        # record short while reporting no missing slot at all; the arrival list
+        # is kept beside the dictionary for exactly that.
+        seen = arrivals.get(key, [])
+        duplicated = sorted({v for v in seen if seen.count(v) > 1})
+        missing = sorted(set(range(size)) - set(slots))
+        unexpected = sorted(set(slots) - set(range(size)))
+        if missing or unexpected or duplicated or arrived != patterns:
+            truncated[key] = dict(missing_slots=missing,
+                                  unexpected_slots=unexpected,
+                                  duplicate_slots=duplicated)
             partial[key] = slots
         elif all(v is not None for v in slots.values()):
             complete[key] = slots

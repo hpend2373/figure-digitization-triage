@@ -679,10 +679,23 @@ def source_panel_inventory_columns():
     ]
 
 
-#: How a series identity may be established when the reader could not measure
-#: it. Ordered least to most trusted; the reader never writes any of them.
-IDENTITY_EVIDENCE = ("FILL_MEASURED", "LEGEND_DECLARED", "TEXT_DECLARED",
-                     "REVIEWER_INSPECTION")
+#: How a series identity is established. Split, because the two halves are not
+#: interchangeable and one enum containing both said they were: FILL_MEASURED is
+#: what the READER produces, and a person typing it into
+#: `identity_resolution.csv` would be entering an automatic measurement by hand
+#: for a cell where the reader explicitly could not make one. Only the human
+#: half is accepted in that file.
+AUTO_IDENTITY_EVIDENCE = ("FILL_MEASURED",)
+HUMAN_IDENTITY_EVIDENCE = ("LEGEND_DECLARED", "TEXT_DECLARED",
+                           "REVIEWER_INSPECTION")
+IDENTITY_EVIDENCE = AUTO_IDENTITY_EVIDENCE + HUMAN_IDENTITY_EVIDENCE
+
+#: Strongest first is not the tuple order, so the ranking is written out. The
+#: previous comment said "ordered least to most trusted" over a tuple whose last
+#: entry is the WEAKEST evidence there is - a reviewer's own reading, with no
+#: legend and no sentence behind it.
+IDENTITY_EVIDENCE_RANK = {"FILL_MEASURED": 4, "LEGEND_DECLARED": 3,
+                          "TEXT_DECLARED": 2, "REVIEWER_INSPECTION": 1}
 
 
 def identity_resolution_columns():
@@ -713,6 +726,11 @@ def identity_resolution_columns():
     And it has to be hashed with everything else. A resolution that can change
     after the values were approved is a resolution that can silently re-label a
     series between the review and the pooling.
+
+    `Evidence_Type` accepts HUMAN_IDENTITY_EVIDENCE only. FILL_MEASURED is what
+    the reader writes when it could measure the fill, and this file exists for
+    the cells where it could not - a person entering it here would be recording
+    an automatic measurement that was never made.
 
     One row per (Panel_ID, Group_ID, Geometry_Slot). The slot is the geometric
     position the reader found, which is how the row is joined to a measurement -

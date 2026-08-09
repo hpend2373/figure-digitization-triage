@@ -873,8 +873,33 @@ try:
     check("the truncated group is not used to calibrate",
           verdict_l["complete_groups"] == 1, repr(verdict_l["complete_groups"]))
     check("and it is named, with the slot that went missing",
-          verdict_l["truncated_groups"].get(str(("whole_b", "G"))) == [2],
-          repr(verdict_l["truncated_groups"]))
+          verdict_l["truncated_groups"].get(str(("whole_b", "G")), {})
+          .get("missing_slots") == [2], repr(verdict_l["truncated_groups"]))
+
+    # REVERT: `len(slots) != size` instead of the exact set. Slots {0,1,3}
+    # against a declared three has the right count and the right patterns while
+    # missing slot 2 and carrying a slot the panel never declared.
+    shifted = [dict(r) for r in rows if r["figure"] == "whole_b"]
+    for r in shifted:
+        if r.get("slot") == 2:
+            r["slot"] = 3
+    _i, verdict_x = M.fill_identity(
+        [r for r in rows if r["figure"] != "whole_b"] + shifted)
+    entry = verdict_x["truncated_groups"].get(str(("whole_b", "G")), {})
+    check("a slot set with a hole and a stranger is not complete",
+          entry.get("missing_slots") == [2] and entry.get("unexpected_slots") == [3],
+          repr(verdict_x["truncated_groups"]))
+
+    # REVERT: build the slot dictionary without keeping the arrival list. The
+    # second record for a slot overwrites the first, so the group looks one
+    # record short and reports no missing slot at all.
+    doubled = [dict(r) for r in rows if r["figure"] == "whole_b"]
+    doubled.append(dict(doubled[0]))
+    _i, verdict_d = M.fill_identity(
+        [r for r in rows if r["figure"] != "whole_b"] + doubled)
+    entry = verdict_d["truncated_groups"].get(str(("whole_b", "G")), {})
+    check("a slot that arrives twice is not a complete group either",
+          entry.get("duplicate_slots") == [0], repr(verdict_d["truncated_groups"]))
     check("so one complete group is left and nothing is matched against it",
           verdict_l["status"] == "DIRECT_ONLY", repr(verdict_l["status"]))
 

@@ -1902,6 +1902,31 @@ forced "least" and "most": a bar inked only in its top third has a mean of 0.12
 and varies by 0.35 across itself, and used to be called the darker of two with
 confidence.
 
+## A group is its declared slots, exactly
+
+Completeness compared the slot COUNT and the pattern set. Slots {0, 1, 3}
+against a declared three has the right count and the right patterns while
+missing slot 2 and carrying a slot the panel never declared, and a slot that
+arrives TWICE overwrites its predecessor in the dictionary - the group then
+looks one record short while reporting no missing slot at all. The exact set is
+compared now, the arrival list is kept beside the dictionary so a repeat is
+visible, and a truncated group is named with its `missing_slots`,
+`unexpected_slots` and `duplicate_slots`.
+
+## What the reader writes and what a person may enter
+
+`IDENTITY_EVIDENCE` held both halves, and one enum containing both says they are
+interchangeable. `FILL_MEASURED` is what the READER produces; a person typing it
+into `identity_resolution.csv` would be recording an automatic measurement for a
+cell where the reader explicitly could not make one. `AUTO_IDENTITY_EVIDENCE`
+and `HUMAN_IDENTITY_EVIDENCE` are separate now and only the second is accepted
+in that file.
+
+The trust order is written out as `IDENTITY_EVIDENCE_RANK` rather than implied
+by tuple position, because the old comment said "ordered least to most trusted"
+over a tuple whose LAST entry is the weakest evidence there is - a reviewer's own
+reading, with no legend and no sentence behind it.
+
 ## STIPPLED is declarable before it is readable
 
 `batch_manifests.BAR_FILL_PATTERNS` now accepts `STIPPLED`, and
@@ -2101,18 +2126,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 468 |
+| `test_run_batch.py` | 471 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 133 |
+| `test_measure_mono_bars.py` | 135 |
 | `test_mono_bar.py` | 33 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1535** |
+| **total** | **1540** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

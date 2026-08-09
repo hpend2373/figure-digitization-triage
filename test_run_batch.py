@@ -2858,9 +2858,28 @@ check("every resolution says where the identity came from",
 check("and who said so, and when",
       all(c in _ir for c in ("Reviewer_ID", "Reviewed_At")), "%s" % _ir)
 check("a reviewer's own reading is one evidence type among several, not the only one",
-      set(BM.IDENTITY_EVIDENCE) >= {"LEGEND_DECLARED", "TEXT_DECLARED",
-                                    "REVIEWER_INSPECTION"},
-      "%s" % (BM.IDENTITY_EVIDENCE,))
+      set(BM.HUMAN_IDENTITY_EVIDENCE) == {"LEGEND_DECLARED", "TEXT_DECLARED",
+                                          "REVIEWER_INSPECTION"},
+      "%s" % (BM.HUMAN_IDENTITY_EVIDENCE,))
+# REVERT: one enum holding both halves. A person can then type FILL_MEASURED
+# into identity_resolution.csv for a cell where the reader explicitly could NOT
+# measure a fill, and the record says an automatic measurement was made.
+check("what the reader produces is not what a person may enter",
+      "FILL_MEASURED" in BM.AUTO_IDENTITY_EVIDENCE
+      and "FILL_MEASURED" not in BM.HUMAN_IDENTITY_EVIDENCE,
+      "%s / %s" % (BM.AUTO_IDENTITY_EVIDENCE, BM.HUMAN_IDENTITY_EVIDENCE))
+check("and the two halves together are the whole vocabulary",
+      set(BM.IDENTITY_EVIDENCE) == set(BM.AUTO_IDENTITY_EVIDENCE)
+      | set(BM.HUMAN_IDENTITY_EVIDENCE))
+# REVERT: read the trust order off the tuple. Its last entry is the WEAKEST
+# evidence there is - a reviewer's own reading, with no legend and no sentence
+# behind it - so tuple position says the opposite of the truth.
+check("the trust order is written out, not implied by tuple position",
+      BM.IDENTITY_EVIDENCE_RANK["REVIEWER_INSPECTION"]
+      < BM.IDENTITY_EVIDENCE_RANK["TEXT_DECLARED"]
+      < BM.IDENTITY_EVIDENCE_RANK["LEGEND_DECLARED"]
+      < BM.IDENTITY_EVIDENCE_RANK["FILL_MEASURED"],
+      "%s" % (BM.IDENTITY_EVIDENCE_RANK,))
 check("the artifact is hashed, so a resolution cannot change after approval",
       "Evidence_Artifact_SHA256" in _ir)
 

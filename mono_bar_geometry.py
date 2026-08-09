@@ -660,8 +660,48 @@ def stem_band(stem_dark, scan, bar_w, stroke, max_strokes=4):
     return None
 
 
+def _components_2d(mask):
+    """8-connected components of a boolean array, as an int32 label array.
+
+    Written out rather than taken from `cv2.connectedComponents` because this
+    decides whether a bar keeps its value: cv2 is optional here, and a
+    classification that says one thing where it is installed and another where
+    it is not is not a classification. Two passes with union-find over the inked
+    pixels only, so an empty region above a bar costs one `np.where` per row.
+    """
+    height, width = mask.shape
+    labels = np.zeros((height, width), np.int32)
+    parent = [0]
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for y in range(height):
+        for x in np.where(mask[y])[0]:
+            best = 0
+            for ny, nx in ((y - 1, x - 1), (y - 1, x), (y - 1, x + 1), (y, x - 1)):
+                if 0 <= ny < height and 0 <= nx < width and labels[ny, nx]:
+                    other = find(int(labels[ny, nx]))
+                    if best and best != other:
+                        parent[max(best, other)] = min(best, other)
+                    best = other if not best else min(best, other)
+            if not best:
+                parent.append(len(parent))
+                best = len(parent) - 1
+            labels[y, x] = best
+    flat = labels.ravel()
+    nz = np.where(flat > 0)[0]
+    if len(nz):
+        flat[nz] = [find(int(v)) for v in flat[nz]]
+    return labels
+
+
 def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
-                   direction="UP", threshold=128, stem_threshold=200):
+                   direction="UP", threshold=128, stem_threshold=200,
+                   neighbours=()):
     """Everything inked beyond the bar end, classified rather than counted.
 
     The first version of this returned one integer: the distance at which
@@ -685,18 +725,19 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
       ERRORBAR_CAP            a thin horizontal rule that misses the side
                               tracks and hangs off a central stem. Expected,
                               and where the dispersion comes from.
-      NEIGHBOUR_STRUCTURE     ink that CONTINUES PAST this bar's footprint. A
-                              bar is not wider than its own footprint, so
-                              whatever this is, it is not this bar's body: the
-                              neighbouring bar, a rule spanning the group, a
-                              significance bracket. On publication 397's WOMEN
-                              panel the hatched bar's top rule runs from column
-                              72 to 129 while the solid bar occupies 16 to 74 -
-                              three columns of overhang, above the solid bar's
-                              top, in columns that below it are solid bar. No
-                              trim can take them; they are this bar's columns.
-                              Only what happens OUTSIDE the footprint says whose
-                              the structure is.
+      NEIGHBOUR_STRUCTURE     a 2-D object that reaches from inside this bar's
+                              footprint into a NEIGHBOURING BAR'S. A bar is not
+                              wider than its own footprint, so whatever that is,
+                              it is not this bar's body: the neighbouring bar,
+                              a rule spanning the group, a significance bracket.
+                              On publication 397's WOMEN panel the hatched bar's
+                              top rule runs from column 72 to 129 while the
+                              solid bar occupies 16 to 74 - three columns of
+                              overhang, above the solid bar's top, in columns
+                              that below it are solid bar. No trim can take
+                              them; they are this bar's columns. Only what
+                              happens OUTSIDE the footprint says whose the
+                              structure is.
       ANNOTATION_OR_GLYPH     provably not this bar: separated from it by white
                               paper and too far away for that gap to be a
                               raster artefact. An asterisk, a bracket, a panel
@@ -717,6 +758,11 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     is a small multiple of the stroke. Ink 150 px above the bar with nothing in
     between is the panel's furniture, and a rule at the top of a panel is wide,
     spanning and thick, so shape alone cannot tell it from a bar.
+
+    `neighbours` is the OTHER bars of the same group, as window-relative column
+    ranges. Without them NEIGHBOUR_STRUCTURE is unreachable and the component
+    falls through to a refusal, which is the correct default for a caller that
+    has not said what is next door: it is the one kind here that LIFTS one.
     """
     x0, x1, y0, y1 = map(int, box)
     xa = window[0]
@@ -725,13 +771,6 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     strip = gray[y0:y1, xa + fx0:xa + fx1 + 1]
     dark = strip < threshold
     stem_dark = strip < stem_threshold
-    # The columns just OUTSIDE the footprint, on both sides, clipped to the
-    # group window. A component that reaches into them is wider than this bar.
-    margin = max(2, stroke)
-    limit = window[1] - window[0] - 1
-    left_margin = gray[y0:y1, xa + max(0, fx0 - margin):xa + fx0] < threshold
-    right_margin = (gray[y0:y1, xa + fx1 + 1:xa + min(limit, fx1 + margin) + 1]
-                    < threshold)
     height = dark.shape[0]
     track = max(1, min(stroke, int(round(0.06 * bar_w))))
     step = -1 if direction == "UP" else 1
@@ -824,6 +863,43 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
     for r in cap_rows:
         masked[r, :] = False
 
+    # -------------------------------------------------- what is next door
+    #
+    # The whole group window, labelled in 2-D, so "this ink continues past the
+    # bar" is a statement about an OBJECT rather than about two pixels that
+    # happen to sit side by side on one row. The bar's own stem and cap are
+    # removed from it first, exactly as they are from `masked`, so they cannot
+    # bridge two unrelated structures into one component; and only the rows
+    # above the bar end are kept, so nothing can travel down past the bar and
+    # back up through the neighbouring group.
+    wide = (gray[y0:y1, xa:window[1]] < threshold).copy()
+    wide[:, fx0:fx1 + 1] = masked
+    keep = np.zeros(height, dtype=bool)
+    keep[scan] = True
+    wide[~keep] = False
+    labels = _components_2d(wide)
+    #: The columns a NEIGHBOURING BAR occupies, never this one's. The test used
+    #: to be "reaches the margin", a strip two strokes wide beside the
+    #: footprint, which is satisfied by a footprint that under-covers its own
+    #: bar by two pixels - so a bar could hand its own side stroke away and stop
+    #: refusing itself over it.
+    neighbour_cols = np.zeros(wide.shape[1], dtype=bool)
+    for pair in neighbours or ():
+        if pair is None:
+            continue
+        na, nb = int(pair[0]), int(pair[1])
+        lo, hi = max(0, min(na, nb)), min(wide.shape[1] - 1, max(na, nb))
+        if lo <= hi:
+            neighbour_cols[lo:hi + 1] = True
+    neighbour_cols[fx0:fx1 + 1] = False
+    # One vectorised pass: which labels touch a neighbour's columns anywhere.
+    reaches = np.zeros(int(labels.max()) + 1, dtype=bool)
+    if labels.max():
+        flat = labels.ravel()
+        nz = flat > 0
+        np.logical_or.at(reaches, flat[nz],
+                         np.tile(neighbour_cols, wide.shape[0])[nz])
+
     inked = [r for r in scan if masked[r].any()]
     out = []
     if cap_rows:
@@ -867,35 +943,26 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         distance = int(abs(comp[0] - edge))
         thick = extent >= 2 * stroke
         body_like = both_tracks >= 0.5 or (span >= 0.55 and bins >= 3 and thick)
-        # Does it carry on past the footprint? Only counted when the component
-        # actually reaches the footprint's edge, so a cap in the middle of the
-        # bar cannot inherit a neighbour's ink on the same rows.
-        # Adjacency, row by row: the component's own edge pixel and the margin
-        # pixel beside it, inked on the same row.
+        # Does it carry on past the footprint, and is that ALL it is?
         #
-        # This is NOT the connectivity the classification wants, and labelling
-        # cannot supply it here. Two pixels horizontally adjacent are eight-
-        # connected by definition, so an 8-connected labelling of
-        # [margin | footprint | margin] returns exactly the same answer as this
-        # test - it was written, measured against the corpus, found to change
-        # nothing, and removed rather than shipped as machinery implying more
-        # than it does.
+        # The components in this loop are ROW BANDS - everything inked in a
+        # range of rows - which is the right unit for the shape features above
+        # and the wrong one for this question. A band can hold two unrelated
+        # things: a residual sliver in the middle of the bar and, on the same
+        # rows, a structure running out to the neighbour. The previous test
+        # asked whether ANY pixel of the band sat next to an inked margin pixel
+        # on the same row, so the band inherited the crossing and the residual -
+        # the thing that should have refused the cell - was named the
+        # neighbour's along with it.
         #
-        # What the classification wants is that THE OBJECT BEING CLASSIFIED
-        # crosses the boundary, and the obstacle is upstream: components here
-        # are ROW BANDS, so a band holding a central residual and an unrelated
-        # edge-to-margin structure is one component and inherits the crossing.
-        # Fixing it means 2-D components throughout the classifier, and then
-        # requiring the crossing object to reach a NEIGHBOURING FOOTPRINT rather
-        # than just the margin - which is also what would stop a footprint that
-        # under-covers its own bar from handing its own side stroke away.
-        # NEIGHBOUR_STRUCTURE lifts a refusal, so that is worth doing before the
-        # production reader inherits it.
-        beyond = bool(
-            (right_margin.size
-             and any(masked[r, -1] and right_margin[r, 0] for r in comp))
-            or (left_margin.size
-                and any(masked[r, 0] and left_margin[r, -1] for r in comp)))
+        # So the question is asked of the OBJECTS, in 2-D, over the whole
+        # window: every object this band holds inside the footprint must reach
+        # a neighbouring bar's columns. One that does not is something this bar
+        # has not accounted for, and NEIGHBOUR_STRUCTURE is the one kind here
+        # that lifts a refusal - so it has to be all of them, not one of them.
+        block = labels[min(comp):max(comp) + 1, fx0:fx1 + 1]
+        objects = np.unique(block[block > 0])
+        beyond = bool(len(objects)) and bool(reaches[objects].all())
         if beyond and not body_like:
             kind = "NEIGHBOUR_STRUCTURE"
         elif extent < stroke and distance <= stroke:
@@ -1167,8 +1234,15 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                 rec.update(detail)
                 records.append(rec)
                 continue
+            # The other bars of this group, so `remote_support` can ask whether
+            # a structure reaching out of this footprint reaches a BAR - the
+            # seed footprints, not the refined ones, because the other slots
+            # have not been refined yet when this one is measured and a seed
+            # footprint is already enough to say there is a bar over there.
+            others = [tuple(p) for j, p in enumerate(prints)
+                      if j != k and p is not None]
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
-                                    direction=direction)
+                                    direction=direction, neighbours=others)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]
             unresolved = [r for r in remote
                           if r["kind"] == "UNRESOLVED_REMOTE_SUPPORT"]

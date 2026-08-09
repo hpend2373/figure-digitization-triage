@@ -2042,32 +2042,57 @@ columns that BELOW that top are solid bar. No trim can take them - they are this
 bar's columns.
 
 So nothing inside the footprint can settle it, and the signal is what happens
-OUTSIDE. A bar is never wider than its own footprint, so a component that
-continues into the margin columns beside it is not this bar's body:
-`NEIGHBOUR_STRUCTURE`, which does not refuse the cell. The test is ADJACENCY, row by row - the
-component's own edge pixel and the margin pixel beside it, inked on the same
-row. "The component reaches the edge and there is ink somewhere in the margin at
-these rows" is a weaker claim that the same evidence satisfies, and
-NEIGHBOUR_STRUCTURE is the one classification that LIFTS a refusal, so a false
-positive here returns a number instead of withholding one. Tightening it took
-the corpus from four such components to two without changing a value: two false
-positives.
+OUTSIDE. A bar is never wider than its own footprint, so ink that continues past
+it is not this bar's body: `NEIGHBOUR_STRUCTURE`, which does not refuse the cell.
+It applies only to a component that does NOT look like a body - a footprint can
+also UNDER-cover its bar, and then what lies beside it is this bar's own ink,
+which is what a full-width hatch above a printing gap looked like before that
+restriction went in.
 
-That is still not the connectivity the classification wants, and labelling
-cannot supply it. Two horizontally adjacent pixels are eight-connected by
-definition, so an 8-connected labelling of [margin | footprint | margin] returns
-exactly the same answer as the adjacency test - it was written, measured against
-the corpus, found to change nothing, and removed rather than shipped as
-machinery implying more than it does. The obstacle is upstream: components are
-ROW BANDS, so a band holding a central residual and an unrelated edge-to-margin
-structure is one component and inherits the crossing. Fixing it means 2-D
-components throughout the classifier, and then requiring the crossing object to
-reach a NEIGHBOURING FOOTPRINT rather than merely the margin - which is also what
-would stop a footprint that under-covers its own bar from handing its own side
-stroke away. `NEIGHBOUR_STRUCTURE` lifts a refusal, so that belongs before the
-production reader inherits it. It applies only to a component that does NOT look like a body - a footprint can also UNDER-cover its bar, and then the
-margin holds this bar's own ink, which is what a full-width hatch above a
-printing gap looked like before that restriction went in.
+**What "continues past it" means was wrong twice, and both are now fixed.** The
+test was ADJACENCY, row by row: the component's own edge pixel and a pixel of
+the two-stroke MARGIN beside it, inked on the same row. Two things are wrong
+with that, and NEIGHBOUR_STRUCTURE is the one classification here that LIFTS a
+refusal, so both return a number where one should have been withheld.
+
+The margin is not a bar. A structure that leaves the footprint and stops two
+pixels later in empty paper satisfies the test, and so does a footprint that
+under-covers its own bar by two pixels - it hands its own side stroke away and
+stops refusing itself over it. The test now asks whether the object reaches a
+NEIGHBOURING BAR'S COLUMNS, which `geometry_rows` supplies from the group's
+other seed footprints. A caller that does not say what is next door gets the
+refusal, not the benefit of the doubt.
+
+And the object was not an object. Components in the classifier are ROW BANDS -
+everything inked in a range of rows - so a band holding a residual sliver in the
+middle of the bar AND, on the same rows, a structure running out to the
+neighbour was one component, and the residual inherited the crossing. The
+question is now asked in 2-D over the whole group window, with the bar's own
+stem and cap removed first so they cannot bridge two unrelated structures, and
+of EVERY object the band holds inside the footprint: one that does not reach a
+neighbouring bar is something this bar has not accounted for, and one is enough
+to withhold the number.
+
+An earlier note here said labelling could not supply this, on the grounds that
+two horizontally adjacent pixels are eight-connected by definition so an
+8-connected labelling of [margin | footprint | margin] returns the same answer
+as the adjacency test. That was true of the labelling as it was scoped - three
+strips, one row band at a time - and false of the question. Labelled over the
+whole window, per object, against the neighbour's footprint rather than the
+margin, it is a different answer in three of the four cases the scenarios draw.
+
+The labelling is written out rather than taken from `cv2.connectedComponents`,
+because cv2 is optional here and a classification that says one thing where it
+is installed and another where it is not is not a classification. A scenario
+checks the two agree, on a fixture with diagonal chains, single pixels and
+structures touching both walls.
+
+On the corpus this moves one classification and no value: publication 397's MEN
+POST hatched cell had a component reaching its right-hand margin with no bar
+beyond it - the panel's own furniture - and it is now ANNOTATION_OR_GLYPH.
+Publication 397's WOMEN PRE/SOLID, the cell this whole section exists for, still
+resolves, and now resolves because the hatched bar next to it really is next to
+it. Both figures remain at 8/8 and 18/18.
 
 **Publication 397 now reads 8 means and 8 dispersions**, worst mean 0.75 mmHg
 against the independent eye reading, all eight series named. That is the invariant
@@ -2251,6 +2276,18 @@ Deleted in the same round: a dead `_gray(path)` in `mono_bar_geometry.py` that
 referenced `Image` without importing PIL. It was unreachable, so nothing failed;
 it would have raised `NameError` the first time anyone called it.
 
+**Two panels of one figure, through the production wrapper.** The grain the
+whole design turns on had scenarios at the prototype and none at
+`read_monochrome_bar_geometry`, which is what `run_batch` will call. Three
+panels now go through it: one group each, two of them one figure and the third
+a different publication. One panel alone is DIRECT_ONLY, because every prototype
+range it produces has zero width; the two together are ESTABLISHED and name all
+six bars; the third is answered separately, keeps its own single group, and does
+not change what the first figure says. Pooling by panel instead of by figure
+makes the pair DIRECT_ONLY and leaves publication 127's two unnameable bars
+unnameable; pooling everything handed in makes the third publication part of the
+first one's vocabulary.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2260,15 +2297,15 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_run_batch.py` | 475 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
+| `test_measure_mono_bars.py` | 169 |
 | `test_finalize.py` | 168 |
-| `test_measure_mono_bars.py` | 163 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_mono_bar.py` | 49 |
+| `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1588** |
+| **total** | **1600** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

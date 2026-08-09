@@ -291,6 +291,65 @@ check("the reader measures with the shared geometry, not a copy of it",
       MR.read_monochrome_bar_geometry.__globals__["MONO_GEOMETRY"].geometry_rows
       is MR.MONO_GEOMETRY.geometry_rows)
 
+# The grain the whole design turns on, exercised through the PRODUCTION wrapper
+# rather than the prototype driver: geometry is per PANEL and identity is per
+# FIGURE. One panel of one group can name its own bars from the relations inside
+# them and nothing more, because every prototype range it produces has zero
+# width. Two panels of the same figure have a spread, and only then are the
+# ranges reusable.
+#
+# REVERT: pool by panel instead of by figure_id (drop the figure_id bucketing in
+# fill_identities_by_figure). Each panel then answers alone, all three come back
+# DIRECT_ONLY, and publication 127's two unnameable bars stay unnameable - the
+# figure never gets the chance to be more than the sum of its panels. REVERT the
+# other way - pool everything handed in - and the third panel below, which is a
+# different publication, calibrates the same vocabulary.
+print()
+print("geometry is per panel, identity is per figure, and the two do not mix")
+_cal_f = MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]])
+
+
+def _one_group(group, panel_id, figure_id):
+    return MR.read_monochrome_bar_geometry(
+        Image.open(IMG), tuple(_t["panel_box"]),
+        {group: dict(zip(_t["groups"], _t["group_x"]))[group]},
+        _cal_f, _t["patterns"], group_window=60,
+        panel_id=panel_id, figure_id=figure_id)
+
+
+_pA = _one_group("T0", "P_A", "FIG_ONE")
+_pB = _one_group("T1", "P_B", "FIG_ONE")
+_pC = _one_group("T2", "P_C", "FIG_TWO")     # a different publication entirely
+_alone = MR.MONO_GEOMETRY.fill_identities_by_figure([dict(r) for r in _pA])
+check("one panel of one group names its own bars and claims nothing more",
+      _alone["FIG_ONE"]["status"] == "DIRECT_ONLY"
+      and not _alone["FIG_ONE"]["prototype_ready"],
+      repr(_alone["FIG_ONE"]["status"]))
+_pair = [dict(r) for r in _pA] + [dict(r) for r in _pB]
+_both = MR.MONO_GEOMETRY.fill_identities_by_figure(_pair)
+check("two panels of the same figure make the vocabulary reusable",
+      _both["FIG_ONE"]["status"] == "ESTABLISHED"
+      and _both["FIG_ONE"]["complete_groups"] == 2,
+      "%r over %r groups" % (_both["FIG_ONE"]["status"],
+                             _both["FIG_ONE"]["complete_groups"]))
+check("and all six of their bars are named",
+      sum(r.get("identity_status") == "RESOLVED" for r in _pair) == 6,
+      repr([r.get("identity_status") for r in _pair]))
+_mixed = ([dict(r) for r in _pA] + [dict(r) for r in _pB]
+          + [dict(r) for r in _pC])
+_split = MR.MONO_GEOMETRY.fill_identities_by_figure(_mixed)
+check("a panel of another figure is answered separately",
+      set(_split) == {"FIG_ONE", "FIG_TWO"}, repr(sorted(_split)))
+check("and it never joins the first figure's vocabulary",
+      _split["FIG_ONE"]["complete_groups"] == 2
+      and _split["FIG_TWO"]["complete_groups"] == 1
+      and _split["FIG_TWO"]["status"] == "DIRECT_ONLY",
+      repr({k: (v["status"], v["complete_groups"]) for k, v in _split.items()}))
+check("nor does mixing them change what the first figure says",
+      _split["FIG_ONE"]["prototypes"] == _both["FIG_ONE"]["prototypes"],
+      "%r against %r" % (_split["FIG_ONE"]["prototypes"],
+                         _both["FIG_ONE"]["prototypes"]))
+
 # REVERT: give panel_id and figure_id a default of "". The suite still passes -
 # every scenario above supplies them - and a caller that forgets gets one
 # figure bucket named "" holding every panel it has measured. Those panels then

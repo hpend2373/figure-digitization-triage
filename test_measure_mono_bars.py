@@ -1207,6 +1207,87 @@ try:
           not [l for l in open(os.path.join(HERE, "mono_bar_geometry.py"))
                if l.startswith(("import ", "from ")) and "mark_readers" in l])
 
+    # ------------------------------------------- 26p. whose structure is it
+    #
+    # NEIGHBOUR_STRUCTURE is the one classification here that LIFTS a refusal,
+    # so what it is bound to matters more than what any other kind is bound to.
+    # It used to be bound to two things it should not have been.
+    #
+    # REVERT: `beyond = any(masked[r, -1] and margin[r, 0] for r in comp)`, the
+    # row-by-row adjacency test this replaces. Scenario 26j still passes - the
+    # overhang there really is the neighbour's - and all three cases below come
+    # back NEIGHBOUR_STRUCTURE, which is the same answer for a structure that
+    # ends in empty paper two pixels past the footprint and for a band that is
+    # half something this bar has not accounted for.
+    #
+    # Driven at `remote_support` rather than through a figure, like 26k: the
+    # discriminating cases need a component sitting ON the bar end with a
+    # measured footprint and a declared neighbour, and every end-to-end way of
+    # drawing that either feeds the structure to the stem tracer or moves the
+    # scan start above it.
+    print("\nink leaving this bar has to arrive somewhere for it to be excused")
+    WX0, WX1, WY0, WY1 = 40, 440, 400, 800
+    WBASE, WSTROKE = 720, 4
+    OWN, NEXT_DOOR = (20, 219), (240, 339)       # window-relative footprints
+
+    def neighbour_canvas(right_end, residual=False):
+        img = np.full((860, 480), 255, np.uint8)
+        img[100:350, :] = 0
+        img[WBASE:WBASE + WSTROKE, WX0 + 5:WX1 - 5] = 0
+        img[600:WBASE, 60:260] = 0                       # this bar, 200 px wide
+        img[180:WBASE, 280:380] = 0                      # the bar next door
+        img[595:600, WX0 + 180:WX0 + right_end + 1] = 0  # the structure
+        if residual:
+            # Same rows, not the same object: a sliver this bar has not
+            # accounted for, sitting where the row band cannot tell it from the
+            # structure beside it.
+            img[595:600, WX0 + 150:WX0 + 170] = 0
+        return img
+
+    def remote_kinds(right_end, residual=False, neighbours=(NEXT_DOOR,)):
+        return [r["kind"] for r in G.remote_support(
+            neighbour_canvas(right_end, residual), [WX0, WX1, WY0, WY1],
+            (WX0, WX1), OWN, 200, 320, WSTROKE, direction="UP",
+            neighbours=neighbours)]
+
+    check("a structure running from this bar into the next one is the next"
+          " one's", remote_kinds(339) == ["NEIGHBOUR_STRUCTURE"],
+          repr(remote_kinds(339)))
+    check("the same structure stopping in the paper beside it is not",
+          remote_kinds(225) == ["UNRESOLVED_REMOTE_SUPPORT"],
+          repr(remote_kinds(225)))
+    check("and a band that is half something else is not either",
+          remote_kinds(339, residual=True) == ["UNRESOLVED_REMOTE_SUPPORT"],
+          repr(remote_kinds(339, residual=True)))
+    # A caller that has not said what is next door gets the refusal, not the
+    # benefit of the doubt.
+    check("with no neighbour declared there is nothing to be the neighbour's",
+          remote_kinds(339, neighbours=()) == ["UNRESOLVED_REMOTE_SUPPORT"],
+          repr(remote_kinds(339, neighbours=())))
+    # And the caller that supplies them is `geometry_rows`, not the driver:
+    # 26j reads a real figure and gets NEIGHBOUR_STRUCTURE, which it can only do
+    # if the panel loop passes the other slots' footprints down.
+    check("the panel loop is what tells it, so a real figure still resolves",
+          "NEIGHBOUR_STRUCTURE" in kinds(mine), repr(kinds(mine)))
+
+    # REVERT: use cv2.connectedComponents when cv2 is importable. It agrees
+    # here, and on a machine without cv2 the same figure would be classified by
+    # a different rule - which is not a classification.
+    import cv2 as _cv2_probe                                       # noqa: E402
+    _rng = np.zeros((40, 60), bool)
+    for _y, _x in ((3, 4), (3, 5), (4, 5), (10, 10), (11, 11), (12, 12),
+                   (20, 0), (20, 59), (30, 30), (31, 29), (31, 31), (39, 0)):
+        _rng[_y, _x] = True
+    _mine = G._components_2d(_rng)
+    _n, _theirs = _cv2_probe.connectedComponents(_rng.astype(np.uint8),
+                                                 connectivity=8)
+    _pairs = {(int(a), int(b)) for a, b in zip(_mine[_rng], _theirs[_rng])}
+    check("the hand-written labelling is the same labelling cv2 computes",
+          len(_pairs) == len({a for a, _b in _pairs})
+          and len(_pairs) == len({b for _a, b in _pairs}) == _n - 1,
+          "%d objects against %d, mapping %r" % (len({a for a, _b in _pairs}),
+                                                 _n - 1, sorted(_pairs)))
+
     # ------------------------------------------- 26n. the anonymous grain
     #
     # `fills` is the group's DECLARATION - a MULTISET of the patterns the panel

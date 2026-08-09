@@ -903,11 +903,29 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         # Does it carry on past the footprint? Only counted when the component
         # actually reaches the footprint's edge, so a cap in the middle of the
         # bar cannot inherit a neighbour's ink on the same rows.
-        rows = slice(min(comp), max(comp) + 1)
-        beyond = ((len(occupied) and occupied[0] <= stroke
-                   and left_margin.size and left_margin[rows].any())
-                  or (len(occupied) and occupied[-1] >= bar_w - 1 - stroke
-                      and right_margin.size and right_margin[rows].any()))
+        # ADJACENT, row by row: the component's own edge pixel and the margin
+        # pixel beside it, inked on the same row. "The component reaches the
+        # edge and there is ink somewhere in the margin at these rows" is a
+        # weaker claim that the same evidence satisfies - and NEIGHBOUR_STRUCTURE
+        # is the one classification that LIFTS a refusal, so a false positive
+        # here returns a number instead of withholding one. Two shapes it would
+        # have got wrong: a narrow unidentified thing at the edge with unrelated
+        # annotation beside it, and a footprint that UNDER-covers its own bar,
+        # whose side stroke then continues into the margin because it is the
+        # bar's.
+        #
+        # NOT PINNED BY A SCENARIO. A synthetic sliver at the footprint edge is
+        # picked up as a stem candidate and masked before it can become a
+        # component, so no fixture reaches this branch; what is known is that
+        # tightening the test from "ink somewhere in the margin" to "adjacent,
+        # row by row" took the corpus from four NEIGHBOUR_STRUCTURE components
+        # to two without changing a single value, which is two false positives
+        # removed.
+        beyond = bool(
+            (right_margin.size
+             and any(masked[r, -1] and right_margin[r, 0] for r in comp))
+            or (left_margin.size
+                and any(masked[r, 0] and left_margin[r, -1] for r in comp)))
         # Only for a component that does NOT look like a bar body. A footprint
         # can also UNDER-cover its bar, and then the margin holds this bar's own
         # ink - which is what the full-width hatch above a printing gap looked

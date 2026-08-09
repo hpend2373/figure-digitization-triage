@@ -28,7 +28,9 @@ was added to the prototype's spec list while writing this file and immediately
 showed them; recording them here is what stops them being rediscovered a third
 time, and stops them getting quietly worse.
 
-  PRE/SOLID  DIAGNOSED, NOT FIXED. The two bars of this group TOUCH: the solid
+  PRE/SOLID  RESOLVED, by two separate fixes for two separate defects.
+
+             First, the two bars of this group TOUCH: the solid
              one occupies columns 16-73 of the panel and the hatched one starts
              at 78, and the hatched bar's leading diagonals reach back to column
              74 on some rows. The seed band sees those columns as inked and the
@@ -43,10 +45,19 @@ time, and stops them getting quietly worse.
              the baseline, compares it with the most inked column just inside
              it, and walks in from each end. That takes this cell's footprint
              from 16-77 back to 16-73 and drops all four of the neighbour's
-             columns. It is not enough. A 2 px wide, 14 row tall structure rises
-             from the bar top at columns 72-73 - inside the bar's own footprint -
-             and it is neither bar, cap nor glyph, so the cell is still refused.
-             What that structure is has not been established.
+             columns.
+
+             That was not enough, and the 2 px by 14 row structure left at
+             columns 72-73 turned out not to be trimmable at all. Read across a
+             wider span it is the HATCHED BAR'S OWN TOP RULE: rows 219-221 are
+             one continuous rule from column 72 to 129. The neighbour's outline
+             overhangs three columns to the left, above the solid bar's top,
+             into columns that below that top are solid bar - no trim can take
+             them, they are this bar's columns. So the signal is what happens
+             OUTSIDE the footprint: a bar is never wider than its own footprint,
+             and ink joined to the component that continues past it belongs to
+             something else. NEIGHBOUR_STRUCTURE, which does not invalidate the
+             bar.
 
              An earlier approach was tried and REVERTED, so nobody spends the
              round on it twice. "A bar's top is level": take each column's

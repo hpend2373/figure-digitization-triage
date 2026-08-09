@@ -2019,10 +2019,14 @@ bar's columns.
 So nothing inside the footprint can settle it, and the signal is what happens
 OUTSIDE. A bar is never wider than its own footprint, so a component that
 continues into the margin columns beside it is not this bar's body:
-`NEIGHBOUR_STRUCTURE`, which does not refuse the cell. It is tested only where
-the component reaches the footprint's edge, so a cap in the middle cannot
-inherit a neighbour's ink on the same rows, and only for a component that does
-NOT look like a body - a footprint can also UNDER-cover its bar, and then the
+`NEIGHBOUR_STRUCTURE`, which does not refuse the cell. The test is ADJACENCY, row by row - the
+component's own edge pixel and the margin pixel beside it, inked on the same
+row. "The component reaches the edge and there is ink somewhere in the margin at
+these rows" is a weaker claim that the same evidence satisfies, and
+NEIGHBOUR_STRUCTURE is the one classification that LIFTS a refusal, so a false
+positive here returns a number instead of withholding one. Tightening it took
+the corpus from four such components to two without changing a value: two false
+positives. It applies only to a component that does NOT look like a body - a footprint can also UNDER-cover its bar, and then the
 margin holds this bar's own ink, which is what a full-width hatch above a
 printing gap looked like before that restriction went in.
 

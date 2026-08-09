@@ -8,10 +8,12 @@ mistake the colour reader made unless it is stopped from doing so - so the
 fixture draws each trap on purpose and the scenarios below measure the cost of
 getting it wrong, rather than asserting the current answer is the right one.
 """
+import inspect
 import json
 import os
 import sys
 
+import numpy as np
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -282,11 +284,84 @@ check("the panel and figure it belongs to travel with each row",
 _v = MR.MONO_GEOMETRY.fill_identities_by_figure(_geo)
 check("and the figure names them once every panel has been measured",
       _v["F_MONO"]["status"] == "ESTABLISHED"
-      and all(r["resolved_fill_pattern"] == r["declared"] for r in _cells),
+      and all(r["resolved_fill_pattern"] == _t["patterns"][r["slot"]]
+              for r in _cells),
       "%s" % _v["F_MONO"]["status"])
 check("the reader measures with the shared geometry, not a copy of it",
       MR.read_monochrome_bar_geometry.__globals__["MONO_GEOMETRY"].geometry_rows
       is MR.MONO_GEOMETRY.geometry_rows)
+
+# REVERT: give panel_id and figure_id a default of "". The suite still passes -
+# every scenario above supplies them - and a caller that forgets gets one
+# figure bucket named "" holding every panel it has measured. Those panels then
+# calibrate a SHARED fill vocabulary, so two publications pool into one. That is
+# not a crash; it is a plausible answer computed from the wrong figure, and the
+# only place it would ever be noticed is a value in a meta-analysis.
+print()
+print("the panel and the figure have to be named, and named for real")
+_kw = dict(image=Image.open(IMG), panel_box=tuple(_t["panel_box"]),
+           x_positions=dict(zip(_t["groups"], _t["group_x"])),
+           y_calibration=MR.AxisCalibration.from_points(
+               [(v, p) for v, p in _t["y_ticks"]]),
+           fills=_t["patterns"], group_window=60)
+_sig = inspect.signature(MR.read_monochrome_bar_geometry)
+check("both are keyword-only and neither has a default",
+      all(_sig.parameters[n].kind is inspect.Parameter.KEYWORD_ONLY
+          and _sig.parameters[n].default is inspect.Parameter.empty
+          for n in ("panel_id", "figure_id")),
+      repr([(n, str(_sig.parameters[n])) for n in ("panel_id", "figure_id")]))
+for _missing in ("panel_id", "figure_id"):
+    _args = dict(_kw, panel_id="P", figure_id="F")
+    _args.pop(_missing)
+    try:
+        MR.read_monochrome_bar_geometry(**_args)
+    except TypeError as exc:
+        check("omitting %s is a TypeError, not a nameless figure" % _missing,
+              _missing in str(exc), str(exc))
+    else:
+        check("omitting %s is a TypeError, not a nameless figure" % _missing,
+              False, "it returned rows")
+for _blank in ("", "   "):
+    for _which in ("panel_id", "figure_id"):
+        _args = dict(_kw, panel_id="P", figure_id="F")
+        _args[_which] = _blank
+        try:
+            MR.read_monochrome_bar_geometry(**_args)
+        except ValueError as exc:
+            check("a blank %s is refused as loudly as a missing one" % _which,
+                  _which in str(exc), str(exc))
+        else:
+            check("a blank %s is refused as loudly as a missing one" % _which,
+                  False, "it returned rows")
+
+# REVERT: call image.convert("RGB") unconditionally. A caller holding the array
+# this package works in internally - which is what every function in
+# mono_bar_geometry takes - has to wrap it back into a PIL Image to hand it over.
+print()
+print("the reader takes the array it hands out, as well as an Image")
+_rgb = np.asarray(Image.open(IMG).convert("RGB")).astype(np.uint8)
+# A FRESH read from the Image, because `_geo` above was handed to
+# fill_identities_by_figure and carries the names it wrote.
+_from_image = MR.read_monochrome_bar_geometry(
+    Image.open(IMG), tuple(_t["panel_box"]),
+    dict(zip(_t["groups"], _t["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
+    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+_from_array = MR.read_monochrome_bar_geometry(
+    _rgb, tuple(_t["panel_box"]), dict(zip(_t["groups"], _t["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
+    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+check("an RGB ndarray reads exactly what the Image reads",
+      _from_array == _from_image,
+      "%d rows against %d" % (len(_from_array), len(_from_image)))
+_from_gray = MR.read_monochrome_bar_geometry(
+    MR.MONO_GEOMETRY._gray_from_rgb(_rgb), tuple(_t["panel_box"]),
+    dict(zip(_t["groups"], _t["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
+    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+check("and a 2-D greyscale array is taken as greyscale, not re-converted",
+      _from_gray == _from_image,
+      "%d rows against %d" % (len(_from_gray), len(_from_image)))
 
 print()
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))

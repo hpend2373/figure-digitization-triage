@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.23 (full package)
+# figure-digitization-triage — v7.24 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -2184,24 +2184,91 @@ applying `identity_resolution.csv` to the cells the figure could not name, and
 carrying that file through the validator, the grid gate, the run stamp and
 `Review_Subject_SHA256`.
 
+## Four contracts before the caller is written
+
+Everything above measures. The four items here are about the SHAPE of what it
+hands over, and all four were found by reading the record stream rather than by
+a failing scenario - which is the point: each one produces a plausible answer.
+
+**The measurement was not in the reproducibility stamp.** `run_batch` writes
+`Pipeline_Code_SHA256` so a value that moved between two batches can be
+attributed instead of argued about, and `mono_bar_geometry.py` - the whole
+monochrome bar measurement, stroke to texture - was not among the files it
+hashes. The function that decides where a bar top is could have been rewritten
+between two runs and the stamp would have said the two were produced by
+identical code. It is hashed now, and the scenario does not check the tuple
+against a second hand-written copy of itself: it WALKS the modules `run_batch`
+actually imports, keeps the ones that live in this package, and fails on any
+that is not hashed. Then it appends one byte to `mono_bar_geometry.py`, checks
+the hash moved, and puts the file back.
+
+**A per-slot `declared` was a series named by position.** `geometry_rows` wrote
+`declared=fills[k]` on every record. `fills` is a human's left-to-right reading
+of the printed panel, so a per-slot copy of it inside the anonymous grain is
+exactly the inference this package refuses - and it made the entire record
+stream depend on the order the spec happened to list the fills in. The record
+now carries only `declared_group_size` and `declared_group_patterns`, the
+group's SORTED multiset, and `fill_identity` reads the group-level declaration
+rather than assembling one from slot positions. Three scenarios hold it: the
+same panel measured with the fills listed in three different orders produces
+records that are identical field for field; a deliberately wrong `spec_fill` on
+every record changes no identity; and two records of one group disagreeing about
+their own declaration is now a finding (`INCONSISTENT`) rather than a longer
+list, as is a group with no declaration at all (`MISSING`).
+
+`spec_fill` is what the diagnostic driver staples on AFTER the measurement - the
+pattern the SPEC lists for that slot, which is fixture truth and the only way to
+check that `resolved_fill_pattern`, computed from ink and structure, agrees with
+what a person reading the figure says is there. The permutation and the
+scrambling scenarios are what keep it from quietly becoming an input again.
+
+**A refusal was a different shape from a reading.** Error rows carried no
+`figure_id`, no `slot`, and no identity fields. `fill_identities_by_figure`
+buckets on `figure_id` and falls back to the panel, so a `STROKE_SCALE_UNRESOLVED`
+row from one panel of a two-panel figure landed in a bucket of its own and the
+figure came back with TWO verdicts - the second computed from a panel that had
+already refused. Every row now comes from one `row()` base: `figure`,
+`figure_id`, `group`, `slot`, the group declaration, `fill_sample_status`,
+`identity_status` and `resolved_fill_pattern`, on refusals as much as on
+readings. `NOT_SAMPLED` is a new value and is not `UNRESOLVED_NO_INTERIOR`: the
+first says the bar never reached the sampler, the second that it did and there
+was nothing to read. All four refusal paths are driven in the scenario, and the
+two-panel case is built through the shared entry point with the figure named,
+because re-labelling records afterwards is what hid the defect.
+
+**`panel_id` and `figure_id` are required and keyword-only.** They defaulted to
+`""`, which is the shape that made the same defect invisible from the other
+side: a caller that forgot got one bucket named `""` holding every panel of
+every figure it had measured, and those panels calibrate a SHARED fill
+vocabulary. Two publications pooled into one vocabulary is not a crash - it is a
+plausible answer computed from the wrong figure, and the only place it would
+ever be noticed is a value in a meta-analysis. Blank is refused as loudly as
+missing. The wrapper also takes an ndarray now, RGB or greyscale, so a caller
+holding the array this package works in internally does not have to wrap it back
+into a PIL Image to hand it over.
+
+Deleted in the same round: a dead `_gray(path)` in `mono_bar_geometry.py` that
+referenced `Image` without importing PIL. It was unreachable, so nothing failed;
+it would have raised `NameError` the first time anyone called it.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 471 |
+| `test_run_batch.py` | 475 |
 | `test_kernel.py` | 232 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
+| `test_measure_mono_bars.py` | 163 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
-| `test_measure_mono_bars.py` | 141 |
-| `test_mono_bar.py` | 40 |
+| `test_mono_bar.py` | 49 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 20 |
-| **total** | **1553** |
+| `test_reproducibility.py` | 19 |
+| **total** | **1588** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

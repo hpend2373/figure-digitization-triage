@@ -74,13 +74,6 @@ class StrokeScale(object):
         return dict(value_px=self.value_px, status=self.status, reason=self.reason)
 
 
-def _gray(path):
-    rgb = np.asarray(Image.open(path).convert("RGB")).astype(np.uint8)
-    if cv2 is not None:
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    return rgb.mean(axis=2).astype(np.uint8)   # pragma: no cover
-
-
 def _runs(indices, gap=1):
     out, cur = [], []
     for i in indices:
@@ -1044,17 +1037,57 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
 
     box = panel_box
     x0, x1, y0, y1 = map(int, box)
+    figure_id = figure_id or panel_id
+    fills = list(fills)
+
+    def row(**extra):
+        """The fields EVERY record carries, success or refusal.
+
+        A refusal used to be a different shape from a reading: no `figure_id`,
+        no identity fields, sometimes no `group`. That is not a cosmetic
+        difference. `fill_identities_by_figure` buckets on `figure_id` and falls
+        back to `figure`, so a STROKE_SCALE_UNRESOLVED row from one panel of a
+        two-panel figure landed in a bucket of its own and the figure came back
+        with TWO verdicts - one of them computed from a single panel that had
+        already refused. A consumer counting `identity_status` fields likewise
+        saw a shorter list than the panel declared and could not tell a refusal
+        from a row that never existed.
+        """
+        base = dict(figure=panel_id, figure_id=figure_id, group=None, slot=None,
+                    # What the group is SUPPOSED to hold, on every record.
+                    # Without it a group is only knowable from the records that
+                    # came back, so a record lost to a defect takes its
+                    # declaration with it and the remainder looks complete.
+                    #
+                    # A MULTISET, sorted, and never indexed by slot. `fills` is
+                    # written in the order a human read the panel left to right,
+                    # and a per-slot copy of it is a series name attached to a
+                    # position - the inference this package refuses. It also
+                    # made the record stream depend on the ORDER the spec listed
+                    # the fills in, which no measurement does.
+                    declared_group_size=len(fills),
+                    declared_group_patterns=sorted(fills),
+                    # Set here so no consumer has to know that identity is a
+                    # later pass. Nothing in this function may write anything
+                    # else into `identity_status`.
+                    #
+                    # NOT_SAMPLED is not UNRESOLVED_NO_INTERIOR: the first says
+                    # the bar never reached the sampler, the second that it did
+                    # and there was nothing to read. Collapsing them made a
+                    # refused footprint look like a 15 px bar.
+                    fill_sample_status="NOT_SAMPLED",
+                    identity_status="NOT_CALIBRATED", resolved_fill_pattern="")
+        base.update(extra)
+        return base
+
     # Calibration first, because the stroke is the thickness of the rule at the
     # BASELINE and the baseline is where the calibration says the zero is.
     zero = int(round(cal.value_to_pixel(baseline))) - y0
     scale = stroke_scale(gray, box, baseline_row=zero)
-    fills = fills
     records = []
     if not scale.ok:
-        return [dict(figure=panel_id, group=None, stroke=scale.as_dict(),
-                     error="STROKE_SCALE_UNRESOLVED")]
+        return [row(stroke=scale.as_dict(), error="STROKE_SCALE_UNRESOLVED")]
     stroke = scale.value_px
-    figure_id = figure_id or panel_id
     for label, gx in anchors.items():
         gw = group_window
         window = (max(x0, int(gx) - gw), min(x1, int(gx) + gw + 1))
@@ -1073,20 +1106,18 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         # and DISAPPEARED: no record, no error, and a panel that quietly
         # reported fewer bars than it declared.
         if max(up_total, down_total) == 0:
-            records.append(dict(figure=panel_id, group=label,
-                                error="NO_SEED_SUPPORT",
-                                up_support=0, down_support=0,
-                                window=[int(window[0]), int(window[1])]))
+            records.append(row(group=label, error="NO_SEED_SUPPORT",
+                               up_support=0, down_support=0,
+                               window=[int(window[0]), int(window[1])]))
             continue
         # A tie is not UP. Checking UP first and only replacing on a strictly
         # greater total meant an equal split - possible on a very short bar, or
         # on baseline noise - silently declared the bars upward.
         margin = max(2 * stroke, int(round(0.10 * max(up_total, down_total))))
         if abs(up_total - down_total) <= margin and min(up_total, down_total) > 0:
-            records.append(dict(figure=panel_id, group=label,
-                                error="BAR_DIRECTION_UNRESOLVED",
-                                up_support=up_total, down_support=down_total,
-                                margin=margin))
+            records.append(row(group=label, error="BAR_DIRECTION_UNRESOLVED",
+                               up_support=up_total, down_support=down_total,
+                               margin=margin))
             continue
         direction = "UP" if up_total >= down_total else "DOWN"
         segments = up_segs if direction == "UP" else down_segs
@@ -1107,24 +1138,15 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                                         ("RIGHT", persistence[-1]))
                    if v >= SEED_SUPPORT]
         if clipped:
-            records.append(dict(figure=panel_id, group=label,
-                                error="GROUP_WINDOW_CLIPPED", clipped_at=clipped,
-                                direction=direction,
-                                window=[int(window[0]), int(window[1])],
-                                seed_extent=[int(segments[0][0]),
-                                             int(segments[-1][-1])] if segments else None))
+            records.append(row(group=label, error="GROUP_WINDOW_CLIPPED",
+                               clipped_at=clipped, direction=direction,
+                               window=[int(window[0]), int(window[1])],
+                               seed_extent=[int(segments[0][0]),
+                                            int(segments[-1][-1])] if segments else None))
             continue
         prints, bounds = footprints_from_seed(segments, len(fills))
         for k, fp in enumerate(prints):
-            rec = dict(figure=panel_id, figure_id=figure_id, group=label,
-                       slot=k, declared=fills[k], stroke_px=stroke,
-                       direction=direction,
-                       # What the group is SUPPOSED to hold, on every record.
-                       # Without it a group is only knowable from the records
-                       # that came back, so a record lost to a defect takes its
-                       # declaration with it and the remainder looks complete.
-                       declared_group_size=len(fills),
-                       declared_group_patterns=sorted(fills))
+            rec = row(group=label, slot=k, stroke_px=stroke, direction=direction)
             if fp is None:
                 rec["error"] = "NO_SEED_SUPPORT"
                 records.append(rec)
@@ -1207,13 +1229,8 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
             # field called `identity_status` and the forward tests were counting
             # samples while saying "identities". `fill_identities_by_figure`
             # sets `identity_status` and `resolved_fill_pattern`.
-            #
-            # `declared` is the spec's DECLARATION, to be checked against what
-            # the fill measures - never an identification. Calling a bar OPEN
-            # because it is the first slot is identifying a series by position.
             rec["fill_sample_status"] = ("MEASURED" if tex is not None
                                          else "UNRESOLVED_NO_INTERIOR")
-            rec["identity_status"] = "NOT_CALIBRATED"
             records.append(rec)
     return records
 
@@ -1343,7 +1360,7 @@ def fill_identity(records):
     if len(figure_ids) > 1:
         return {}, dict(status="MULTIPLE_FIGURES",
                         figure_ids=sorted(str(f) for f in figure_ids))
-    groups, declared, expected, arrivals = {}, {}, {}, {}
+    groups, claims, arrivals = {}, {}, {}
     for rec in records:
         if rec.get("group") is None or rec.get("slot") is None:
             continue
@@ -1353,28 +1370,48 @@ def fill_identity(records):
         key = (rec["figure"], rec["group"])
         arrivals.setdefault(key, []).append(rec["slot"])
         groups.setdefault(key, {})[rec["slot"]] = _sample(rec)
-        declared.setdefault(key, {})[rec["slot"]] = rec.get("declared")
-        if rec.get("declared_group_size") is not None:
-            expected[key] = (int(rec["declared_group_size"]),
-                             sorted(rec.get("declared_group_patterns") or []))
+        # The declaration is a property of the GROUP and every record of the
+        # group carries the same copy of it, so what is collected here is a SET
+        # of claims and not a per-slot table. Reading `declared` off each record
+        # meant the group's declaration was assembled from slot positions, which
+        # made this function's answer depend on the order the caller happened to
+        # list the fills in - and let a caller name a series by moving it.
+        claims.setdefault(key, set()).add(
+            None if rec.get("declared_group_size") is None else
+            (int(rec["declared_group_size"]),
+             tuple(sorted(rec.get("declared_group_patterns") or []))))
 
-    complete, partial, truncated = {}, {}, {}
+    complete, partial, truncated, declared = {}, {}, {}, {}
     for key, slots in groups.items():
-        size, patterns = expected.get(key, (len(slots), sorted(
-            v for v in declared[key].values() if v)))
-        arrived = sorted(v for v in declared[key].values() if v)
-        # The exact SET, not the count. Slots {0, 1, 3} against a declared size
-        # of three has the right number and the right patterns and is still
-        # missing slot 2 while carrying a slot 3 the panel never declared -
-        # `len(slots) != size` sees none of that. And a slot that arrives TWICE
-        # overwrites its predecessor in the dictionary, so the group looks a
-        # record short while reporting no missing slot at all; the arrival list
-        # is kept beside the dictionary for exactly that.
+        # A slot that arrives TWICE overwrites its predecessor in the
+        # dictionary, so the group looks a record short while reporting no
+        # missing slot at all; the arrival list is kept beside the dictionary
+        # for exactly that.
         seen = arrivals.get(key, [])
         duplicated = sorted({v for v in seen if seen.count(v) > 1})
+        said = claims.get(key, set())
+        # One claim, held by every record of the group. Two different claims is
+        # not a group with a declaration - it is two groups sharing a name - and
+        # a mixture of one claim and none is a record built by a different path
+        # from its siblings. Neither may calibrate anything.
+        if len(said) != 1 or None in said:
+            truncated[key] = dict(missing_slots=[], unexpected_slots=[],
+                                  duplicate_slots=duplicated,
+                                  declaration=("MISSING" if said <= {None}
+                                               else "INCONSISTENT"),
+                                  declarations=sorted(
+                                      [list(c[1]) for c in said if c]))
+            partial[key] = slots
+            continue
+        size, patterns = next(iter(said))
+        declared[key] = list(patterns)
+        # The exact SET, not the count. Slots {0, 1, 3} against a declared size
+        # of three has the right number and is still missing slot 2 while
+        # carrying a slot 3 the panel never declared - `len(slots) != size` sees
+        # none of that.
         missing = sorted(set(range(size)) - set(slots))
         unexpected = sorted(set(slots) - set(range(size)))
-        if missing or unexpected or duplicated or arrived != patterns:
+        if missing or unexpected or duplicated:
             truncated[key] = dict(missing_slots=missing,
                                   unexpected_slots=unexpected,
                                   duplicate_slots=duplicated)
@@ -1386,8 +1423,7 @@ def fill_identity(records):
 
     assigned, unassignable = {}, []
     for key, slots in complete.items():
-        want = [declared[key][s] for s in sorted(slots)]
-        got = _assign_group(slots, want)
+        got = _assign_group(slots, declared[key])
         if got is None:
             unassignable.append(key)
             continue
@@ -1464,7 +1500,9 @@ def fill_identity(records):
         # prototype in the figure can return a pattern the group does not
         # contain: a partial group declaring OPEN and STIPPLED could come back
         # SOLID because its one sample happened to reach the SOLID range.
-        allowed = set(declared[key].values())
+        # A group whose declaration was missing or inconsistent declares
+        # nothing, so there is nothing it is allowed to be matched to.
+        allowed = set(declared.get(key, ()))
         for slot, sample in slots.items():
             if sample is None:
                 continue

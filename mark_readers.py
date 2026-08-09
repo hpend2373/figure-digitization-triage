@@ -1133,7 +1133,7 @@ def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, seri
 
 def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
                                  fills, group_window=70, baseline_value=0.0,
-                                 panel_id="", figure_id=""):
+                                 *, panel_id, figure_id):
     """The bars of one panel, measured and NOT named.
 
     The production entry point to `mono_bar_geometry`. It exists beside
@@ -1154,14 +1154,42 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
     like, and refuses when they do not separate. That is why this cannot simply
     be folded into the existing reader: the caller has to collect panels first.
 
-    `fills` is the DECLARATION each slot is checked against, never an
-    identification.
+    `fills` is the group's DECLARATION - the multiset of patterns the panel is
+    supposed to contain, checked against what the fills measure. It is not a
+    per-slot identification and the order it is written in does not reach the
+    records: pass the same patterns in any order and the rows are identical.
+
+    **`panel_id` and `figure_id` are required, and keyword-only.** They were
+    keyword arguments defaulting to `""`, which is the shape that made the
+    defect they exist to prevent invisible. `fill_identities_by_figure` buckets
+    on `figure_id`, so a caller that forgot it got one bucket named `""` holding
+    every panel of every figure it had measured - and those panels calibrate a
+    shared fill vocabulary. Two publications pooled into one vocabulary is not a
+    crash; it is a plausible answer, computed from the wrong figure. Blank is
+    refused for the same reason a missing argument is.
+
+    `image` may be a PIL Image or an ndarray. An ndarray is taken as it is
+    given: HxWx3 is treated as RGB and converted, HxW as greyscale already. The
+    wrapper used to call `.convert("RGB")` unconditionally, so a caller holding
+    the array this package works in internally had to wrap it in an Image to
+    hand it back.
     """
-    rgb = np.asarray(image.convert("RGB")).astype(np.uint8)
+    for name, value in (("panel_id", panel_id), ("figure_id", figure_id)):
+        if not str(value or "").strip():
+            raise ValueError(
+                "read_monochrome_bar_geometry: %s must name the %s these rows "
+                "belong to; blank pools unrelated figures into one fill "
+                "vocabulary" % (name, "panel" if name == "panel_id" else "figure"))
+    if isinstance(image, np.ndarray):
+        arr = np.asarray(image)
+        gray = (arr.astype(np.uint8) if arr.ndim == 2 else
+                MONO_GEOMETRY._gray_from_rgb(arr[:, :, :3].astype(np.uint8)))
+    else:
+        gray = MONO_GEOMETRY._gray_from_rgb(
+            np.asarray(image.convert("RGB")).astype(np.uint8))
     return MONO_GEOMETRY.geometry_rows(
-        MONO_GEOMETRY._gray_from_rgb(rgb), panel_box, y_calibration,
-        x_positions, list(fills), group_window, baseline=baseline_value,
-        panel_id=panel_id, figure_id=figure_id)
+        gray, panel_box, y_calibration, x_positions, list(fills), group_window,
+        baseline=baseline_value, panel_id=panel_id, figure_id=figure_id)
 
 
 MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",

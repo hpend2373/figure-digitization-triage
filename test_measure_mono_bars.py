@@ -31,6 +31,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import mark_readers as MRX                 # noqa: E402
 import measure_mono_bars as M              # noqa: E402
 import mono_bar_geometry as G              # noqa: E402
 
@@ -654,7 +655,7 @@ try:
           repr(verdict["status"]))
     check("every bar is named, and named correctly",
           len(ident) == 3 and all(ident[(r["figure"], r["group"]), r["slot"]]
-                                  == r["declared"] for r in rows),
+                                  == r["spec_fill"] for r in rows),
           repr(ident))
     check("each ink-separated gap is wider than the spread it separates",
           all(s["gap"] > s["needed"] for s in verdict["separation"]
@@ -691,13 +692,13 @@ try:
     g.hatch(img, 0, 60, pitch=16)                        # sparse: less ink
     g.stipple(img, 1, 60, pitch=5, dot=3)                # dense: more ink
     rows = M.measure_panel(g.spec(write(img, "swap", TMP), ["HATCHED", "STIPPLED"]))
-    ink = {r["declared"]: r.get("ink_mass") for r in rows}
+    ink = {r["spec_fill"]: r.get("ink_mass") for r in rows}
     check("the stipple really does carry more ink than the hatch",
           ink.get("STIPPLED", 0) > ink.get("HATCHED", 1), repr(ink))
     ident, verdict = M.fill_identity(rows)
     check("and both are named correctly anyway",
           verdict["status"] == "DIRECT_ONLY" and
-          all(ident[((r["figure"], r["group"]), r["slot"])] == r["declared"]
+          all(ident[((r["figure"], r["group"]), r["slot"])] == r["spec_fill"]
               for r in rows), "%r %r" % (verdict["status"], ident))
 
     # -------------------------------------------------- 24. refusal
@@ -784,8 +785,6 @@ try:
                                      ["OPEN", "STIPPLED", "SOLID"]))
         for r in got:
             r["figure"], r["figure_id"] = name, "one_figure"
-            r["fill_sample_status"] = ("MEASURED" if "ink_mass" in r
-                                       else "UNRESOLVED_NO_INTERIOR")
         rows.extend(got)
     ident, verdict = M.fill_identity(rows)
     check("two complete groups make the prototypes reusable",
@@ -822,8 +821,10 @@ try:
     # not contain.
     holey = [dict(r) for r in rows if r["figure"] == "holey"]
     for r in holey:
-        if r.get("slot") == 1:
-            r["declared"] = "OPEN"          # this group declares no STIPPLED
+        # The DECLARATION is a property of the group, so re-declaring it means
+        # re-declaring it on every record of the group. This group now says it
+        # holds two opens and a solid, and no stipple at all.
+        r["declared_group_patterns"] = ["OPEN", "OPEN", "SOLID"]
     ident_d, _v = M.fill_identity(
         [r for r in rows if r["figure"] != "holey"] + holey)
     check("a bar is never named a pattern its own group does not declare",
@@ -850,10 +851,10 @@ try:
           repr({k: v["status"] for k, v in verdicts.items()}))
     verdicts = M.fill_identities_by_figure(rows)
     check("and writes the answer onto the records",
-          all(r.get("resolved_fill_pattern") == r["declared"] for r in rows
+          all(r.get("resolved_fill_pattern") == r["spec_fill"] for r in rows
               if r.get("identity_status") == "RESOLVED"),
           repr([(r["figure"], r.get("slot"), r.get("identity_status"),
-                 r.get("resolved_fill_pattern"), r.get("declared")) for r in rows]))
+                 r.get("resolved_fill_pattern"), r.get("spec_fill")) for r in rows]))
     check("a sampled bar that could not be named says NOT_CALIBRATED or AMBIGUOUS,"
           " and an unsampled one says so differently",
           all(r["identity_status"] == "UNRESOLVED_NO_FILL" for r in rows
@@ -1205,6 +1206,180 @@ try:
     check("the shared module imports no axis module, so no cycle can form",
           not [l for l in open(os.path.join(HERE, "mono_bar_geometry.py"))
                if l.startswith(("import ", "from ")) and "mark_readers" in l])
+
+    # ------------------------------------------- 26n. the anonymous grain
+    #
+    # `fills` is the group's DECLARATION - a MULTISET of the patterns the panel
+    # is supposed to hold - and the order it is written in is a human's
+    # left-to-right reading of the printed figure. A per-slot copy of it inside
+    # the record is a series named by where the bar sits, which is the one
+    # inference this package refuses, and it made the whole record stream depend
+    # on that order.
+    #
+    # REVERT: put `declared=fills[k]` back on the record in `geometry_rows`, and
+    # read it back in `fill_identity`. Every other scenario in this file still
+    # passes - the identity was already decided by ink and structure, so no NAME
+    # moves - and these three stop being the same records.
+    print("\nthe records do not depend on the order the fills are listed")
+    g = Geometry(1.0)
+    img = g.blank()
+    g.outline(img, 0, 30)
+    g.stipple(img, 1, 45)
+    g.solid(img, 2, 60)
+    perm_path = write(img, "perm", TMP)
+    perm_cal = MRX.AxisCalibration.from_points(
+        [(0, g.base), (100, g.base - 100 * g.ppu)])
+    perm_gray = M._gray(perm_path)
+
+    def perm_rows(order):
+        return G.geometry_rows(perm_gray, [g.x0, g.x1, g.y0, g.y1], perm_cal,
+                               {"G": (g.slots[0][0] + g.slots[-1][1]) // 2},
+                               list(order), g.r(190), baseline=0.0,
+                               panel_id="P", figure_id="F")
+
+    orders = (["OPEN", "STIPPLED", "SOLID"], ["SOLID", "OPEN", "STIPPLED"],
+              ["STIPPLED", "SOLID", "OPEN"])
+    streams = [perm_rows(o) for o in orders]
+    check("the panel measures three bars whichever way the spec lists them",
+          all(len(s) == 3 and all("value" in r for r in s) for s in streams),
+          repr([[r.get("error") for r in s] for s in streams]))
+    differs = [k for k in set().union(*[set(r) for s in streams for r in s])
+               if any(a.get(k) != b.get(k)
+                      for a, b in zip(streams[0], streams[1])
+                      ) or any(a.get(k) != b.get(k)
+                               for a, b in zip(streams[0], streams[2]))]
+    check("and the records are IDENTICAL, field for field, not merely equivalent",
+          not differs, "fields that moved: %r" % sorted(differs))
+    check("what every record carries is the group's sorted multiset",
+          all(r["declared_group_patterns"] == ["OPEN", "SOLID", "STIPPLED"]
+              and r["declared_group_size"] == 3
+              for s in streams for r in s),
+          repr([r.get("declared_group_patterns") for r in streams[1]]))
+    for stream, order in zip(streams, orders):
+        M.fill_identities_by_figure(stream)
+    named = [{(r["slot"]): r["resolved_fill_pattern"] for r in s} for s in streams]
+    check("the three bars are named from their ink, the same way each time",
+          named[0] == named[1] == named[2] == {0: "OPEN", 1: "STIPPLED",
+                                               2: "SOLID"},
+          repr(named))
+
+    # REVERT: have `fill_identity` read a per-slot declared field again. This is
+    # the behavioural half of the same fix: `spec_fill` is fixture truth that
+    # the driver staples on AFTER the measurement, and if the identity can see
+    # it then the spec is deciding what the figure says. Scrambling it here must
+    # change nothing at all.
+    scrambled = M.measure_panel(g.spec(perm_path,
+                                       ["OPEN", "STIPPLED", "SOLID"]))
+    M.fill_identities_by_figure(scrambled)
+    honest = {(r["group"], r["slot"]): r["resolved_fill_pattern"]
+              for r in scrambled}
+    lying = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
+    for r in lying:
+        r["spec_fill"] = "SOLID"                 # every slot, deliberately wrong
+    M.fill_identities_by_figure(lying)
+    check("a wrong `spec_fill` on every record changes no identity",
+          {(r["group"], r["slot"]): r["resolved_fill_pattern"]
+           for r in lying} == honest and honest[("G", 0)] == "OPEN",
+          repr(honest))
+
+    # REVERT: fall back to per-slot declarations when the group-level ones are
+    # missing. The declaration is then assembled from whatever arrived, so two
+    # records disagreeing about what their own group holds is not a finding -
+    # it is just a longer list.
+    print("\na group whose records disagree about their own declaration")
+    split = [dict(r) for r in M.measure_panel(
+        g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))]
+    split[1]["declared_group_patterns"] = ["OPEN", "OPEN", "SOLID"]
+    _i, verdict_s = M.fill_identity(split)
+    entry = verdict_s["truncated_groups"].get(str(("scale1", "G")), {})
+    check("two declarations for one group calibrate nothing",
+          verdict_s["complete_groups"] == 0
+          and entry.get("declaration") == "INCONSISTENT",
+          repr(verdict_s["truncated_groups"]))
+    bare = [dict(r) for r in split]
+    for r in bare:
+        r.pop("declared_group_size", None)
+        r.pop("declared_group_patterns", None)
+    _i, verdict_b = M.fill_identity(bare)
+    check("and no declaration at all is a refusal, not an empty one",
+          verdict_b["status"] == "NOT_ENOUGH_COMPLETE_GROUPS"
+          and verdict_b["truncated_groups"].get(
+              str(("scale1", "G")), {}).get("declaration") == "MISSING",
+          repr(verdict_b["truncated_groups"]))
+
+    # ------------------------------------------- 26o. one row shape
+    #
+    # REVERT: build each refusal with its own `dict(...)` again. Every scenario
+    # that reads a refusal still passes, because each reads the one field it
+    # cares about. What breaks is the consumer: `fill_identities_by_figure`
+    # buckets on `figure_id`, and a refusal that carried none fell back to the
+    # PANEL id - so one two-panel figure with one bad panel produced TWO
+    # verdicts, the second computed from the panel that had already refused.
+    print("\nevery row has the same shape, refusal or reading")
+    naked = np.full((860, 480), 255, np.uint8)
+    naked[100:350, :] = 0                            # no baseline rule at all
+    no_rule = M.measure_panel(spec(write(naked, "norule", TMP), ["SOLID"]))
+    img = blank()
+    solid(img, 0, 40)
+    a, b = SLOTS[0]
+    img[BASE + STROKE:BASE + STROKE + 40 * 3, a:b + 1] = 0    # and one below it
+    both_ways = M.measure_panel(spec(write(img, "twoways", TMP), ["SOLID"]))
+    img = blank()
+    solid(img, 0, 60)
+    empty = M.measure_panel(spec(write(img, "empty2", TMP), ["SOLID"],
+                                 anchor=X1 - 20, window=15))
+    img = blank()
+    for k in range(3):
+        solid(img, k, 40 + 10 * k)
+    clip = M.measure_panel(spec(write(img, "clip2", TMP), ["SOLID"] * 3,
+                                window=150))
+    shapes = dict(STROKE_SCALE_UNRESOLVED=no_rule,
+                  BAR_DIRECTION_UNRESOLVED=both_ways,
+                  NO_SEED_SUPPORT=empty, GROUP_WINDOW_CLIPPED=clip)
+    BASE_FIELDS = ("figure", "figure_id", "group", "slot",
+                   "declared_group_size", "declared_group_patterns",
+                   "fill_sample_status", "identity_status",
+                   "resolved_fill_pattern")
+    for want, rows_ in sorted(shapes.items()):
+        check("%s is reachable and is the error it says it is" % want,
+              rows_ and rows_[0].get("error") == want,
+              repr([r.get("error") for r in rows_]))
+        missing = [f for f in BASE_FIELDS if f not in (rows_[0] if rows_ else {})]
+        check("%s carries every field a reading carries" % want,
+              not missing, "missing %r" % missing)
+        check("%s belongs to a named figure, so it buckets with its siblings"
+              % want,
+              bool(rows_) and rows_[0].get("figure_id") == rows_[0].get("figure"),
+              repr((rows_[0].get("figure"), rows_[0].get("figure_id"))
+                   if rows_ else None))
+    good = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
+    check("and a reading carries nothing a refusal does not",
+          not [f for f in BASE_FIELDS if f not in good[0]],
+          repr(sorted(good[0])))
+    # The defect itself, end to end: ONE figure of two panels measured through
+    # the shared entry point with the figure named, one panel refusing outright.
+    # Nothing here re-labels a record afterwards, because re-labelling is what
+    # hid the defect - the caller supplies `figure_id` and the refusal has to
+    # keep it on its own.
+    two = G.geometry_rows(M._gray(write(naked, "norule2", TMP)),
+                          [X0, X1, Y0, Y1],
+                          MRX.AxisCalibration.from_points(
+                              [tuple(t) for t in TICKS]),
+                          {"G": ANCHOR}, ["SOLID"], 190, baseline=0.0,
+                          panel_id="panel_bad", figure_id="one_figure")
+    ok_rows = G.geometry_rows(perm_gray, [g.x0, g.x1, g.y0, g.y1], perm_cal,
+                              {"G": (g.slots[0][0] + g.slots[-1][1]) // 2},
+                              ["OPEN", "STIPPLED", "SOLID"], g.r(190),
+                              baseline=0.0, panel_id="panel_ok",
+                              figure_id="one_figure")
+    verdicts_two = M.fill_identities_by_figure(two + ok_rows)
+    check("a panel that refused does not become a figure of its own",
+          set(verdicts_two) == {"one_figure"}, repr(sorted(verdicts_two)))
+    check("and its refusal row is not mistaken for an unnamed bar",
+          two[0].get("identity_status") == "NOT_CALIBRATED"
+          and two[0].get("fill_sample_status") == "NOT_SAMPLED",
+          repr((two[0].get("identity_status"),
+                two[0].get("fill_sample_status"))))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

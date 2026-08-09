@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 import sys
+import types
 import tarfile
 import tempfile
 
@@ -1953,6 +1954,57 @@ check("the stamp distinguishes pipeline revisions from reader revisions",
 check("the stamp hashes every input manifest",
       set(stamp["Manifest_SHA256"]) == set(RB.MANIFEST_FILES),
       "%s" % sorted(stamp["Manifest_SHA256"]))
+
+# REVERT: drop "mono_bar_geometry.py" from PIPELINE_CODE_FILES. Every other
+# scenario in this file still passes, because the hash is still 64 hex
+# characters and still changes whenever run_batch.py does. What breaks is the
+# only thing the stamp is for: that module holds the WHOLE monochrome bar
+# measurement - stroke, footprint, extent, cap, texture - so the function
+# deciding where a bar top is could be rewritten between two batches and the
+# stamp would say the two runs were produced by identical code.
+#
+# The list is derived here rather than typed out again: a hand-written second
+# copy of the same names agrees with the first by construction and catches
+# nothing. What this walks is what run_batch actually IMPORTS.
+_seen, _reachable = set(), []
+_stack = ["run_batch"]
+while _stack:
+    _name = _stack.pop()
+    if _name in _seen:
+        continue
+    _seen.add(_name)
+    _mod = sys.modules.get(_name)
+    if _mod is None or not getattr(_mod, "__file__", None):
+        continue
+    if os.path.dirname(os.path.abspath(_mod.__file__)) != HERE:
+        continue                       # numpy, pandas, the standard library
+    _reachable.append(os.path.basename(_mod.__file__))
+    for _obj in vars(_mod).values():
+        if isinstance(_obj, types.ModuleType):
+            _stack.append(_obj.__name__)
+_unhashed = sorted(set(_reachable) - set(RB.PIPELINE_CODE_FILES))
+check("every module of this package that run_batch reaches is in the hash",
+      not _unhashed, "not hashed: %r" % _unhashed)
+check("and mono_bar_geometry - the whole monochrome bar measurement - is one",
+      "mono_bar_geometry.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+# Not "the hash is 64 characters" but "editing this file moves it". One byte,
+# in a comment, in the module that was missing.
+_geo_path = os.path.join(HERE, "mono_bar_geometry.py")
+_before = RB.pipeline_code_sha256()
+with open(_geo_path, "rb") as _fh:
+    _original = _fh.read()
+try:
+    with open(_geo_path, "wb") as _fh:
+        _fh.write(_original + b"\n# one byte\n")
+    _after = RB.pipeline_code_sha256()
+finally:
+    with open(_geo_path, "wb") as _fh:
+        _fh.write(_original)
+check("changing one byte of the bar measurement changes the pipeline hash",
+      _after != _before, "%s ... %s" % (_before[:16], _after[:16]))
+check("and putting it back puts the hash back",
+      RB.pipeline_code_sha256() == _before)
 check("each run row carries the image hash it read",
       all(len(h) == 64 for h in run["Image_SHA256"] if h), "%s" % list(run["Image_SHA256"]))
 

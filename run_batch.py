@@ -79,11 +79,23 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.23"
+PIPELINE_VERSION = "7.24"
+#: Every file whose contents can change a number this pipeline writes down.
+#: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
+#: value that moved between two batches can be attributed to the code that
+#: produced it instead of argued about.
+#:
+#: A file that measures and is NOT listed here is the failure mode this stamp
+#: exists to prevent: `mono_bar_geometry.py` holds the whole monochrome bar
+#: measurement - stroke, footprint, extent, cap, texture - and for three commits
+#: it was absent, so editing the function that decides where a bar top is left
+#: the stamp identical and the batch looked reproducible.
+#: `test_run_batch` asserts every module `run_batch` reaches is in this tuple.
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
-    "mark_readers.py", "bar_reader.py", "make_wpd_project.py",
-    "review_overlay.py", "finalize_batch.py", "compile_plan.py",
+    "mark_readers.py", "mono_bar_geometry.py", "bar_reader.py",
+    "make_wpd_project.py", "review_overlay.py", "finalize_batch.py",
+    "compile_plan.py",
 )
 
 

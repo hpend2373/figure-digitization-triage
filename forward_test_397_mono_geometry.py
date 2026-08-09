@@ -155,7 +155,7 @@ for r in records:
     value = r.get("value", r.get("provisional_value"))
     print("  %-18s %-5s %-8s stroke %s  mean %6.2f (eye %3d, d %.2f)  SE %-6s %s"
           % (r["figure"].replace("397_fig3_P3_", ""), r.get("group"),
-             r.get("declared"), r.get("stroke_px"), value, EYE[key],
+             r.get("spec_fill"), r.get("stroke_px"), value, EYE[key],
              abs(value - EYE[key]),
              "%.2f" % r["dispersion"] if "dispersion" in r else "----",
              r.get("error") or ""))
@@ -222,14 +222,14 @@ check("all eight bars are named",
       len(resolved) == 8, "%d resolved" % len(resolved))
 check("both hatched cells now carry the dispersion their off-centre stem hangs",
       all("dispersion" in r for r in records
-          if r.get("declared") == "HATCHED"),
+          if r.get("spec_fill") == "HATCHED"),
       repr([(r["figure"], r.get("group"), r.get("dispersion")) for r in records
-            if r.get("declared") == "HATCHED"]))
+            if r.get("spec_fill") == "HATCHED"]))
 check("and every name is the fill the spec declares",
-      all(r["resolved_fill_pattern"] == r["declared"] for r in resolved),
+      all(r["resolved_fill_pattern"] == r["spec_fill"] for r in resolved),
       repr([(r["figure"], r.get("slot"), r.get("resolved_fill_pattern"),
-             r["declared"]) for r in resolved
-            if r["resolved_fill_pattern"] != r["declared"]]))
+             r["spec_fill"]) for r in resolved
+            if r["resolved_fill_pattern"] != r["spec_fill"]]))
 check("the bar with no measurable fill is not named by its slot",
       all(r.get("identity_status") == "UNRESOLVED_NO_FILL"
           for r in records if r.get("fill_sample_status") != "MEASURED"),

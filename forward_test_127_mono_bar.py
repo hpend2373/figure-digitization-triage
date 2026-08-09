@@ -50,7 +50,7 @@ import measure_mono_bars as M                                      # noqa: E402
 
 GEOMETRY = os.path.join(HERE, "geometry", "pub127_fig4.geometry.json")
 
-#: figure, group, slot, declared fill, mean, SE, ink mass (None = no interior),
+#: figure, group, slot, the spec's fill, mean, SE, ink mass (None = no interior),
 #: identity status. Self-measured; see the module docstring.
 BASELINE = [
     ("pub127_fig4_slow", "SUPINE", 0, "OPEN", 2.113, 0.258, 0.000, "FILL_MEASURED"),
@@ -178,10 +178,10 @@ def main(argv=None):
               for r in records if r not in resolved),
           "%d resolved" % len(resolved))
     check("every resolved identity is the fill the geometry declares",
-          all(r["resolved_fill_pattern"] == r["declared"] for r in resolved),
+          all(r["resolved_fill_pattern"] == r["spec_fill"] for r in resolved),
           repr([(r["figure"], r.get("group"), r.get("slot"),
-                 r.get("resolved_fill_pattern"), r["declared"])
-                for r in resolved if r["resolved_fill_pattern"] != r["declared"]]))
+                 r.get("resolved_fill_pattern"), r["spec_fill"])
+                for r in resolved if r["resolved_fill_pattern"] != r["spec_fill"]]))
     check("and the three fills are separated by more than any one of them varies",
           all(g["gap"] > g["needed"] for g in verdict.get("separation", [])
               if g["separated_by"] == "INK"), repr(verdict.get("separation")))
@@ -198,7 +198,7 @@ def main(argv=None):
 
     bands = {}
     for r in with_fill:
-        bands.setdefault(r["declared"], []).append(r["ink_mass"])
+        bands.setdefault(r["spec_fill"], []).append(r["ink_mass"])
     ordered = ["OPEN", "STIPPLED", "SOLID"]
     check("the three printed fills are all present",
           sorted(bands) == sorted(ordered), repr(sorted(bands)))
@@ -225,9 +225,9 @@ def main(argv=None):
         if r is None:
             drift.append("%s/%s/%d missing" % (figure, group, slot))
             continue
-        if r.get("declared") != fill:
+        if r.get("spec_fill") != fill:
             drift.append("%s/%s/%d declared %s" % (figure, group, slot,
-                                                   r.get("declared")))
+                                                   r.get("spec_fill")))
         if abs(r.get("value", -999) - mean) > MEAN_TOLERANCE:
             drift.append("%s/%s/%d mean %s against %s"
                          % (figure, group, slot, r.get("value"), mean))

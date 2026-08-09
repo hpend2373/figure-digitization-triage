@@ -1133,6 +1133,8 @@ def read_monochrome_bar_panel(image, panel_box, x_positions, y_calibration, seri
 
 def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
                                  fills, group_window=70, baseline_value=0.0,
+                                 threshold=128, stem_threshold=200,
+                                 min_bar_px=MONO_GEOMETRY.MIN_BAR_PX,
                                  *, panel_id, figure_id):
     """The bars of one panel, measured and NOT named.
 
@@ -1168,6 +1170,13 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
     crash; it is a plausible answer, computed from the wrong figure. Blank is
     refused for the same reason a missing argument is.
 
+    Every option `batch_manifests.READER_OPTIONS` declares for BAR_MONO is a
+    parameter here, under the keyword the option maps to, because a declared
+    option that a reader does not take is either a TypeError mid-run or - worse
+    - a setting written in a manifest, validated, and silently ignored.
+    `min_bar_px` changed grain when it moved here; `MONO_GEOMETRY.MIN_BAR_PX`
+    says how, and a manifest carrying the old number keeps working.
+
     `image` may be a PIL Image or an ndarray. An ndarray is taken as it is
     given: HxWx3 is treated as RGB and converted, HxW as greyscale already. The
     wrapper used to call `.convert("RGB")` unconditionally, so a caller holding
@@ -1189,7 +1198,9 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
             np.asarray(image.convert("RGB")).astype(np.uint8))
     return MONO_GEOMETRY.geometry_rows(
         gray, panel_box, y_calibration, x_positions, list(fills), group_window,
-        baseline=baseline_value, panel_id=panel_id, figure_id=figure_id)
+        baseline=baseline_value, threshold=threshold,
+        stem_threshold=stem_threshold, min_bar_px=min_bar_px,
+        panel_id=panel_id, figure_id=figure_id)
 
 
 MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",

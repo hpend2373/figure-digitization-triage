@@ -2279,6 +2279,69 @@ for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items
             _mismatch.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
 check("every reader option names a parameter its reader actually accepts",
       not _mismatch, "; ".join(_mismatch))
+
+# The same promise, made to the reader that has not been wired in yet. Checking
+# it only at the switchover means finding out then that `threshold`,
+# `stem_threshold` and `min_bar_px` are declared for BAR_MONO and not accepted
+# by `read_monochrome_bar_geometry` - and the tempting fix at that point is to
+# filter the options down to the ones it takes, which turns three settings a
+# person wrote in a manifest into three settings nobody applies.
+#
+# REVERT: delete SUCCESSOR_READERS and this block. Every other scenario passes,
+# because the successor is not called by anything yet.
+_ahead = []
+for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items()):
+    if _keyword is None:
+        continue
+    for _mark in _applies:
+        _next = RB.SUCCESSOR_READERS.get(_mark)
+        if _next is not None and _keyword not in inspect.signature(_next).parameters:
+            _ahead.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
+check("and so does the reader that is going to replace it",
+      not _ahead, "; ".join(_ahead))
+check("the successor is declared for BAR_MONO and takes all five of its options",
+      set(RB.SUCCESSOR_READERS) == {"BAR_MONO"}
+      and {"threshold", "stem_threshold", "group_window", "min_bar_px",
+           "baseline_value"} <= set(inspect.signature(
+               RB.SUCCESSOR_READERS["BAR_MONO"]).parameters),
+      repr(sorted(inspect.signature(
+          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters)))
+# And it does not take them as decoration: the two ink thresholds have to reach
+# the measurement, or a manifest could set them and read the same numbers.
+with open(os.path.join(HERE, "mono_bar_fixture_truth.json"), encoding="utf-8") as _fh:
+    _MONO_TRUTH = json.load(_fh)
+_probe_kw = dict(image=Image.open(os.path.join(HERE, "mono_bar_fixture.png")),
+                 panel_box=tuple(_MONO_TRUTH["panel_box"]),
+                 x_positions=dict(zip(_MONO_TRUTH["groups"],
+                                      _MONO_TRUTH["group_x"])),
+                 y_calibration=MR.AxisCalibration.from_points(
+                     [(v, p) for v, p in _MONO_TRUTH["y_ticks"]]),
+                 fills=_MONO_TRUTH["patterns"], group_window=60,
+                 panel_id="P", figure_id="F")
+_at_128 = MR.read_monochrome_bar_geometry(**_probe_kw)
+_at_0 = MR.read_monochrome_bar_geometry(threshold=0, **_probe_kw)
+check("threshold reaches the measurement rather than sitting in the signature",
+      len(_at_128) == 12
+      and [r.get("error") for r in _at_0] == ["STROKE_SCALE_UNRESOLVED"],
+      "%r against %d rows" % ([r.get("error") for r in _at_0], len(_at_128)))
+# This fixture is pure black on pure white, so any threshold between the two
+# reads the same figure - which is why the scenario that shows the threshold
+# reaching the CAP classification, and stem_threshold with it, is drawn in grey
+# in `test_measure_mono_bars`. Here the point is only that the option is not
+# accepted and dropped.
+_wide = MR.read_monochrome_bar_geometry(min_bar_px=400, **_probe_kw)
+_narrow = [r for r in _wide if r.get("error") == "BAR_TOO_NARROW"]
+check("min_bar_px refuses the bars it excludes and names them",
+      len(_narrow) == 12 and all(r.get("footprint_width") for r in _narrow),
+      repr([(r.get("slot"), r.get("error"), r.get("footprint_width"))
+            for r in _wide][:4]))
+# REVERT: `continue` on a bar that fails the width gate, which is what the old
+# reader did with the group-level form of this option. The panel comes back with
+# fewer records than it declared and nothing says why - the failure NO_SEED_
+# SUPPORT exists to close, re-entering through a config file.
+check("and the panel still reports every bar it declared",
+      len([r for r in _wide if r.get("slot") is not None]) == 12,
+      "%d rows" % len([r for r in _wide if r.get("slot") is not None]))
 check("slot_tolerance_px is offered to BAR_COLOR only",
       BM.READER_OPTIONS["slot_tolerance_px"][1] == ("BAR_COLOR",),
       "%s" % (BM.READER_OPTIONS["slot_tolerance_px"][1],))

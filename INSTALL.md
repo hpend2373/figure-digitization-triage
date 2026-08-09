@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.24 (full package)
+# figure-digitization-triage — v7.25 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -2288,16 +2288,82 @@ makes the pair DIRECT_ONLY and leaves publication 127's two unnameable bars
 unnameable; pooling everything handed in makes the third publication part of the
 first one's vocabulary.
 
+## The option contract and the written-down row
+
+Two things had to be settled before `run_batch` could be pointed at the new
+reader, because both are cheapest to get wrong at the switchover.
+
+**Every BAR_MONO option is a parameter of the successor.** The manifest declares
+five for BAR_MONO - `threshold`, `stem_threshold`, `group_window`, `min_bar_px`,
+`baseline_value` - and `read_monochrome_bar_geometry` took two of them. At the
+switchover that is either a `TypeError` on the first batch or, worse, the
+tempting fix: filter the options down to the ones the reader takes, which turns
+three settings a person wrote in a manifest into three settings nobody applies.
+`run_batch.SUCCESSOR_READERS` now declares the replacement before it is wired,
+and the same introspection that guards `reader_functions()` guards it, so the
+contract is checked today rather than discovered later.
+
+The two ink thresholds are threaded all the way down - `stroke_scale`,
+`seed_support`, `trace_extent`, `trim_to_own_bar`, `remote_support` - instead of
+each helper defaulting its own. A panel read at one threshold and classified at
+another is not one measurement. Nothing on the corpus moves, because every
+figure this package can reach is dark ink on white paper and 128 separates them
+all; the scenario that proves the option is not silently dropped is drawn in
+GREY, at 170, where 128 sees nothing and 190 sees the figure. A second scenario
+drops `stem_threshold` below the stem's own grey: the body still reads, the cap
+loses the stem it hangs from, and the cell fails closed rather than quietly
+returning a mean with no dispersion.
+
+**`min_bar_px` changed grain, and had to.** In `read_monochrome_bar_panel` it is
+a test on the whole group's inked span against `min_bar_px * n_series`, and a
+group that fails it is SKIPPED - `continue`, no record, no error. The panel then
+reports fewer bars than it declared and nothing says why, which is the exact
+failure `NO_SEED_SUPPORT` was added to close. Here it is one bar's footprint,
+measured after the trim, and a bar that fails is refused by name with its width
+on the record: `BAR_TOO_NARROW`. The number means the same thing to a person and
+the group no longer disappears around it. The narrowest footprint anywhere in
+the corpus is 27 px, in the synthetic fixture; publication 127's are 182-188.
+
+**`mono_bar_geometry.csv` is canonical or it is nothing.** A geometry record is
+nested - `remote` is a list of dicts, `t96`..`t192` are dicts, `stroke` is a
+dict - and handing that to a CSV writer stringifies it with `repr`: no parser,
+dependent on dict ordering and float repr, and a hash over it moves when the
+same numbers are written by a different interpreter. Sixteen columns are named,
+everything else goes into `Diagnostics_JSON` as JSON with sorted keys, no
+spaces, and numpy scalars converted to the numbers they are rather than through
+a `default=str` that would quote them.
+
+`Geometry_Row_SHA256` is stamped at the end of the measurement and covers the
+ANONYMOUS record only. Identity is written onto records in place, so a hash over
+the whole record would change the moment a series is named - and the question it
+exists to answer, "is this the same measurement the reviewer approved", would
+stop having one. Naming the series, and a human overriding that naming in
+`identity_resolution.csv`, both leave it untouched; a value that moved by 0.001
+does not.
+
+Also settled: `prototype_ready` said "at least two complete groups AND a
+non-zero spread" in the docstring and `len(complete) >= 2` in the code. Two
+groups that reproduce each other exactly have a floor of zero, and matching an
+incomplete group against a zero-width range with a zero tolerance is the luck
+the group count was added to prevent, reached from the other side. It is both
+halves now, with a fixture that draws its two groups at the same height.
+
+And `geometry_rows` requires `panel_id` and `figure_id` as keyword-only
+arguments too, not only the production wrapper. It is a public name that the
+driver and the scenarios call directly, and the `figure_id = figure_id or
+panel_id` fallback it used to have is the same "" bucket that pools two
+publications into one fill vocabulary.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 475 |
+| `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
+| `test_measure_mono_bars.py` | 195 |
 | `test_grid_engine.py` | 171 |
-| `test_measure_mono_bars.py` | 169 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
@@ -2305,7 +2371,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1600** |
+| **total** | **1631** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

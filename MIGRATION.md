@@ -126,3 +126,26 @@ provenance, dual reading — is the same engine for all 160 papers.
 `id323_fig1_figure_{manifest,dimensions,values}.csv`: 6 panels, 48 declared
 levels, 72 cells, **0 problems**. The same data previously raised
 `B_DUPLICATE_CELL` purely because six sessions do not fold onto a two-phase label.
+
+## `min_bar_px` on BAR_MONO changed grain in v7.25
+
+The option is still accepted and still an integer number of pixels, and a
+manifest carrying the old value keeps working. What it measures and what
+happens when a bar fails it both changed, so a person reading a run's refusals
+should know which one they are looking at.
+
+| | `read_monochrome_bar_panel` (before) | `read_monochrome_bar_geometry` (v7.25) |
+|---|---|---|
+| measured | the whole group's inked span, against `min_bar_px * n_series` | ONE bar's footprint, after the trim |
+| on failure | the group is skipped: no record, no error | the bar is refused: `BAR_TOO_NARROW`, with `footprint_width` and `min_bar_px` on the row |
+| the panel then | reports fewer bars than it declared, silently | reports every bar it declared, one of them refused |
+
+The old behaviour is the failure `NO_SEED_SUPPORT` exists to close, reachable
+through a config file. Nothing in the measured corpus is near the default of 12:
+the narrowest footprint anywhere is 27 px, in the synthetic fixture, and
+publication 127's bars are 182-188 px wide.
+
+**No action is needed for existing manifests.** If a manifest set `min_bar_px`
+in order to make a group disappear, that group will now appear with a named
+refusal instead - which is the intended change, and the row can be resolved by a
+reviewer like any other.

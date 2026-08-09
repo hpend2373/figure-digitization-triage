@@ -21,6 +21,7 @@ down the page and paints the band above it solid black, because a coordinate
 mistake that only shows up on a real 600 DPI page render is a mistake a
 synthetic fixture with `y0 = 0` will never catch.
 """
+import json
 import os
 import shutil
 import sys
@@ -1207,6 +1208,115 @@ try:
           not [l for l in open(os.path.join(HERE, "mono_bar_geometry.py"))
                if l.startswith(("import ", "from ")) and "mark_readers" in l])
 
+    # ------------------------------------------- 26o2. the two ink thresholds
+    #
+    # `threshold` and `stem_threshold` are manifest options for BAR_MONO. Every
+    # helper in the geometry used to default them separately, so `geometry_rows`
+    # could be handed one and read the figure at another - and a panel read at
+    # one threshold and classified at a second is not one measurement.
+    #
+    # REVERT: drop the two arguments from geometry_rows and let each helper
+    # default. Nothing on the corpus moves, because every figure this package
+    # can reach is dark ink on white paper and 128 separates them all; a manifest
+    # that sets either option changes nothing, silently.
+    #
+    # Drawn in GREY on purpose. Every other fixture here is pure black on pure
+    # white, where any threshold between 1 and 254 reads the same figure - so
+    # none of them can tell a threaded option from an ignored one.
+    print("\nboth ink thresholds reach the measurement, not just the signature")
+    g4 = Geometry(1.0)
+    INK = 170
+    grey = np.full(g4.shape, 255, np.uint8)
+    grey[g4.r(100):g4.r(350), :] = 0                     # the usual trap band
+    grey[g4.base:g4.base + g4.stroke, g4.x0 + 5:g4.x1 - 5] = INK
+    a4, b4 = g4.slots[0]
+    top4 = g4.top(40)
+    grey[top4:g4.base, a4:b4 + 1] = INK
+    mid = (a4 + b4) // 2
+    grey[top4 - 26:top4, mid - 1:mid + 2] = INK          # a faint stem ...
+    grey[top4 - 30:top4 - 26, mid - 24:mid + 25] = INK   # ... and its cap
+    grey_path = write(grey, "greybar", TMP)
+    grey_gray = M._gray(grey_path)
+    grey_cal = MRX.AxisCalibration.from_points(
+        [(0, g4.base), (100, g4.base - 100 * g4.ppu)])
+
+    def grey_rows(**kw):
+        return G.geometry_rows(
+            grey_gray, [g4.x0, g4.x1, g4.y0, g4.y1], grey_cal,
+            {"G": (g4.slots[0][0] + g4.slots[-1][1]) // 2}, ["SOLID"],
+            g4.r(190), baseline=0.0, panel_id="P", figure_id="F", **kw)
+
+    check("at the default threshold this figure is not ink at all",
+          [r.get("error") for r in grey_rows()] == ["STROKE_SCALE_UNRESOLVED"],
+          repr([r.get("error") for r in grey_rows()]))
+    faint = only(grey_rows(threshold=190))
+    check("raising it reads the bar",
+          abs(faint.get("value", -99) - 40.0) <= 1.0,
+          repr((faint.get("value"), faint.get("error"))))
+    check("and the error bar with it",
+          "dispersion" in faint and abs(faint["dispersion"] - 10.0) < 2.0,
+          repr(faint.get("dispersion")))
+    # The second threshold is a second knob, not the same one: the stem is
+    # traced at `stem_threshold`, so dropping it below the stem's own grey loses
+    # the cap while the body is still read.
+    no_stem = only(grey_rows(threshold=190, stem_threshold=120))
+    check("stem_threshold is a different knob from threshold",
+          no_stem.get("error") == "REMOTE_SUPPORT_UNRESOLVED"
+          and kinds(no_stem) == ["UNRESOLVED_REMOTE_SUPPORT"],
+          repr((no_stem.get("error"), kinds(no_stem))))
+    check("and lowering it fails closed rather than dropping the error bar",
+          "value" not in no_stem and "dispersion" not in no_stem,
+          repr((no_stem.get("value"), no_stem.get("dispersion"))))
+
+    # ------------------------------------------- 26o3. a bar too narrow to be one
+    #
+    # REVERT: `continue` past a bar that fails the width gate, which is what
+    # `read_monochrome_bar_panel` does with the group-level form of this option.
+    # The panel returns fewer records than it declared, with nothing saying why -
+    # the failure NO_SEED_SUPPORT was added to close, re-entering through a
+    # config file. See MIN_BAR_PX for what else changed about the option.
+    print("\na bar narrower than the gate is refused, not dropped")
+    g5 = Geometry(1.0)
+    three = g5.blank()
+    g5.outline(three, 0, 30)
+    g5.stipple(three, 1, 45)
+    g5.solid(three, 2, 60)
+    three_path = write(three, "gated", TMP)
+    three_gray = M._gray(three_path)
+    three_cal = MRX.AxisCalibration.from_points(
+        [(0, g5.base), (100, g5.base - 100 * g5.ppu)])
+
+    def three_rows(**kw):
+        return G.geometry_rows(
+            three_gray, [g5.x0, g5.x1, g5.y0, g5.y1], three_cal,
+            {"G": (g5.slots[0][0] + g5.slots[-1][1]) // 2},
+            ["OPEN", "STIPPLED", "SOLID"], g5.r(190), baseline=0.0,
+            panel_id="P", figure_id="F", **kw)
+
+    check("nothing in the fixture is near the default gate",
+          all(r.get("error") != "BAR_TOO_NARROW" for r in three_rows()),
+          repr([r.get("error") for r in three_rows()]))
+    narrow = three_rows(min_bar_px=400)
+    check("a gate above every bar refuses every bar",
+          [r.get("error") for r in narrow] == ["BAR_TOO_NARROW"] * 3,
+          repr([r.get("error") for r in narrow]))
+    check("and the panel still returns one record per declared bar",
+          len(narrow) == 3, "%d records" % len(narrow))
+    check("each refusal carries the width it was measured at and the gate",
+          all(r.get("footprint_width") and r.get("min_bar_px") == 400
+              for r in narrow),
+          repr([(r.get("footprint_width"), r.get("min_bar_px"))
+                for r in narrow]))
+    check("a refused bar keeps the identity fields every row carries",
+          all(r["identity_status"] == "NOT_CALIBRATED"
+              and r["fill_sample_status"] == "NOT_SAMPLED" for r in narrow),
+          repr([(r["identity_status"], r["fill_sample_status"])
+                for r in narrow]))
+    check("the refusal is fail-closed: no value, no texture",
+          not any("value" in r or "ink_mass" in r for r in narrow),
+          repr([sorted(k for k in r if k in ("value", "ink_mass"))
+                for r in narrow]))
+
     # ------------------------------------------- 26p. whose structure is it
     #
     # NEIGHBOUR_STRUCTURE is the one classification here that LIFTS a refusal,
@@ -1461,6 +1571,127 @@ try:
           and two[0].get("fill_sample_status") == "NOT_SAMPLED",
           repr((two[0].get("identity_status"),
                 two[0].get("fill_sample_status"))))
+
+    # ------------------------------------------- 26r. two groups is not enough
+    #
+    # `prototype_ready` said "at least two complete groups AND a non-zero
+    # spread" in the docstring and `len(complete) >= 2` in the code. The
+    # difference is a figure whose two groups reproduce each other EXACTLY -
+    # every sample equal, every tile spread zero - which has a floor of zero,
+    # and matching an incomplete group against a range of zero width with a
+    # tolerance of zero is the same luck the group count was added to prevent,
+    # reached from the other side.
+    #
+    # REVERT: `prototype_ready = len(complete) >= 2`. The figure below reports
+    # ESTABLISHED and offers reusable prototypes that cannot tolerate a single
+    # unit of drift, and nothing else in the suite notices, because every other
+    # fixture draws its groups at different heights.
+    print("\ntwo groups that agree perfectly have not shown how much they vary")
+    g6 = Geometry(1.0)
+    flat_rows = []
+    for name in ("flat_a", "flat_b"):
+        img = g6.blank()
+        g6.outline(img, 0, 40)
+        g6.solid(img, 1, 40)                 # identical in both groups
+        got = M.measure_panel(g6.spec(write(img, name, TMP), ["OPEN", "SOLID"]))
+        for r in got:
+            r["figure"], r["figure_id"] = name, "flat_figure"
+        flat_rows.extend(got)
+    _i6, verdict6 = M.fill_identity(flat_rows)
+    check("the two groups really are identical to the last decimal",
+          len({(r["ink_mass"], r["ink_mass_tile_spread"]) for r in flat_rows}) == 2,
+          repr(sorted((r["ink_mass"], r["ink_mass_tile_spread"])
+                      for r in flat_rows)))
+    check("two complete groups, and still not a reusable vocabulary",
+          verdict6["complete_groups"] == 2
+          and not verdict6["prototype_ready"]
+          and verdict6["status"] == "DIRECT_ONLY",
+          "%r over %d groups" % (verdict6["status"],
+                                 verdict6["complete_groups"]))
+    check("the four bars they hold are still named from their own relations",
+          len(_i6) == 4, repr(_i6))
+
+    # ------------------------------------------- 26q. the written-down row
+    #
+    # `mono_bar_geometry.csv` is what a batch writes between measuring a panel
+    # and naming its series, and it has to survive being read back by something
+    # that is not this process.
+    #
+    # REVERT: hand a record straight to a CSV writer. Every scenario above still
+    # passes, because none of them writes a file; the artifact then holds
+    # Python `repr` of nested dicts, which has no parser, depends on dict
+    # ordering and float repr, and moves a hash taken over it when the same
+    # numbers are written by a different interpreter.
+    print("\nthe row a batch writes down is one text for one measurement")
+    written = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
+    art = G.artifact_rows(written)
+    check("the artifact has exactly the declared columns, in order",
+          all(list(rowx) == list(G.GEOMETRY_ARTIFACT_COLUMNS) for rowx in art),
+          repr(list(art[0])))
+    flat = [c for c in G.GEOMETRY_ARTIFACT_COLUMNS
+            if any(not isinstance(rowx[c], (str, int, float)) for rowx in art)]
+    check("no cell holds a list or a dict - a CSV cannot carry one",
+          not flat, "not flat: %r" % flat)
+    back = [json.loads(rowx["Diagnostics_JSON"]) for rowx in art]
+    check("and the nested half round-trips as JSON",
+          all(isinstance(d, dict) and "remote" in d for d in back),
+          repr(sorted(back[0])[:6]))
+    check("nothing measured is dropped between the record and the row",
+          all(not (set(rec) - set(d) - {"footprint"} -
+                   {f for f, _c in G.ARTIFACT_FIELD_COLUMNS} -
+                   set(G.UNHASHED_FIELDS))
+              for rec, d in zip(written, back)),
+          repr([sorted(set(rec) - set(d) - {"footprint"}
+                       - {f for f, _c in G.ARTIFACT_FIELD_COLUMNS}
+                       - set(G.UNHASHED_FIELDS))
+                for rec, d in zip(written, back)]))
+    # REVERT: json.dumps(diagnostics) without sort_keys and separators. The two
+    # dicts below hold the same measurement and produce different text, so the
+    # same numbers written twice hash differently.
+    check("canonical JSON does not depend on the order the keys were built in",
+          G.canonical_json({"b": 1, "a": [2, 3]})
+          == G.canonical_json({"a": [2, 3], "b": 1})
+          == '{"a":[2,3],"b":1}',
+          repr(G.canonical_json({"b": 1, "a": [2, 3]})))
+    # REVERT: json.dumps(..., default=str). A numpy number then serialises as a
+    # QUOTED STRING, so a record built with numpy scalars and the same record
+    # built with Python floats hash differently while printing the same numbers.
+    check("a numpy number is written as the number it is",
+          G.canonical_json({"v": np.float64(1.5), "n": np.int64(3),
+                            "a": np.array([1, 2])}) == '{"a":[1,2],"n":3,"v":1.5}',
+          repr(G.canonical_json({"v": np.float64(1.5), "n": np.int64(3),
+                                 "a": np.array([1, 2])})))
+
+    # REVERT: hash the whole record. `fill_identities_by_figure` writes identity
+    # onto the record IN PLACE, so the hash then changes the moment a series is
+    # named - and the question it exists to answer, "is this the same
+    # measurement the reviewer approved", stops having one.
+    print("\nthe row hash is of the measurement, and naming is not measuring")
+    before = [rec["geometry_row_sha256"] for rec in written]
+    check("every row is stamped at measurement time",
+          all(len(h) == 64 for h in before), repr(before[:1]))
+    M.fill_identities_by_figure(written)
+    check("naming the series does not change any of them",
+          [rec["geometry_row_sha256"] for rec in written] == before
+          and all(rec["identity_status"] == "RESOLVED" for rec in written),
+          repr([(rec["identity_status"], rec["geometry_row_sha256"][:8])
+                for rec in written]))
+    check("and recomputing after naming still agrees",
+          [G.geometry_row_sha256(rec) for rec in written] == before)
+    again = M.measure_panel(g.spec(perm_path, ["SOLID", "OPEN", "STIPPLED"]))
+    check("the same panel measured again hashes the same, in any fill order",
+          [rec["geometry_row_sha256"] for rec in again] == before,
+          repr([rec["geometry_row_sha256"][:8] for rec in again]))
+    moved = dict(written[0])
+    moved["value"] = moved["value"] + 0.001
+    check("a measurement that moved hashes differently",
+          G.geometry_row_sha256(moved) != before[0])
+    # A human resolving a fill in identity_resolution.csv must not disturb it
+    # either, which is the same property from the other side.
+    human = dict(written[0], identity_status="RESOLVED",
+                 resolved_fill_pattern="HATCHED")
+    check("nor does a human overriding what the figure said",
+          G.geometry_row_sha256(human) == before[0])
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

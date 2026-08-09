@@ -19,6 +19,9 @@ intensity feature is reported at four thresholds and once without one, and a
 bar's footprint comes from the baseline rather than from its column heights. The
 reasons are in the docstrings below and in INSTALL.md.
 """
+import hashlib
+import json
+
 import numpy as np
 
 try:
@@ -46,6 +49,24 @@ SEED_SUPPORT = 0.25
 #: How deep the seed band goes, as a multiple of the measured stroke. Deep
 #: enough to be inside a short bar, shallow enough not to leave a short one.
 SEED_DEPTH_STROKES = 3
+
+#: The narrowest a single bar's FOOTPRINT may be, in pixels. Default carried
+#: over from `read_monochrome_bar_panel`, and the manifest option `min_bar_px`
+#: sets it - but the grain and the consequence both changed, so a manifest
+#: written against the old reader means something slightly different here.
+#:
+#:   old   the whole group's inked span, against `min_bar_px * n_series`, and a
+#:         group that failed it was SKIPPED - `continue`, no record, no error.
+#:         The panel then reported fewer bars than it declared and nothing said
+#:         why, which is the exact failure NO_SEED_SUPPORT was added to close.
+#:   new   ONE bar's footprint, measured after the trim, and a bar that fails it
+#:         is REFUSED by name with its width on the record: BAR_TOO_NARROW.
+#:
+#: The number means the same thing to a person - "a bar this narrow is not a
+#: bar" - and the group no longer disappears around it. Nothing in the corpus is
+#: near it: the narrowest footprint measured anywhere is 27 px, in the synthetic
+#: fixture, and publication 127's are 182-188.
+MIN_BAR_PX = 12
 
 
 class StrokeScale(object):
@@ -1077,7 +1098,9 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
     return out
 
 def geometry_rows(gray, panel_box, calibration, anchors, fills,
-                  group_window, baseline=0.0, panel_id="", figure_id=""):
+                  group_window, baseline=0.0, threshold=128,
+                  stem_threshold=200, min_bar_px=MIN_BAR_PX, *,
+                  panel_id, figure_id):
     """One record per declared bar of one panel, WITHOUT naming any series.
 
     The anonymous grain. Geometry is per panel and identity is per FIGURE, so a
@@ -1099,12 +1122,25 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
     panels start at page rows 620, 1580 and 2510, so a panel row handed to a
     calibration is out by that much: the error bar drawn 25 px above a bar top
     reported a dispersion of 142 units instead of 8.3.
+
+    `threshold` and `stem_threshold` are the two ink thresholds the whole
+    measurement runs at, threaded through rather than defaulted separately in
+    each helper: a panel read at one threshold and classified at another is not
+    one measurement. `min_bar_px` is the narrowest a single bar's footprint may
+    be - see `MIN_BAR_PX` for what changed about it.
+
+    `panel_id` and `figure_id` are required and keyword-only, for the reason
+    given on `mark_readers.read_monochrome_bar_geometry`: `figure_id` decides
+    which panels share a fill vocabulary, and a default of `""` pools every
+    figure a caller has measured into one.
     """
     cal = calibration
 
     box = panel_box
     x0, x1, y0, y1 = map(int, box)
-    figure_id = figure_id or panel_id
+    for name, value in (("panel_id", panel_id), ("figure_id", figure_id)):
+        if not str(value or "").strip():
+            raise ValueError("geometry_rows: %s must not be blank" % name)
     fills = list(fills)
 
     def row(**extra):
@@ -1150,10 +1186,11 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
     # Calibration first, because the stroke is the thickness of the rule at the
     # BASELINE and the baseline is where the calibration says the zero is.
     zero = int(round(cal.value_to_pixel(baseline))) - y0
-    scale = stroke_scale(gray, box, baseline_row=zero)
+    scale = stroke_scale(gray, box, threshold=threshold, baseline_row=zero)
     records = []
     if not scale.ok:
-        return [row(stroke=scale.as_dict(), error="STROKE_SCALE_UNRESOLVED")]
+        return _stamped(
+            [row(stroke=scale.as_dict(), error="STROKE_SCALE_UNRESOLVED")])
     stroke = scale.value_px
     for label, gx in anchors.items():
         gw = group_window
@@ -1163,7 +1200,7 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         support = {}
         for candidate in ("UP", "DOWN"):
             segs, pers = seed_support(gray, box, zero, stroke, window,
-                                      direction=candidate)
+                                      threshold=threshold, direction=candidate)
             support[candidate] = (sum(len(g) for g in segs), segs, pers)
         (up_total, up_segs, up_pers) = support["UP"]
         (down_total, down_segs, down_pers) = support["DOWN"]
@@ -1223,15 +1260,26 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
             fp, edge, method, dropped, refusal, detail = refine_footprint(
                 fp0,
                 lambda f: trace_extent(gray, box, window, f, zero, stroke,
-                                       direction=direction),
+                                       direction=direction, threshold=threshold),
                 lambda f, e: trim_to_own_bar(gray, box, window, f, e, zero,
-                                             stroke, direction=direction))
+                                             stroke, direction=direction,
+                                             threshold=threshold))
             if dropped:
                 rec["trimmed_columns"] = dropped
                 rec["provisional_footprint"] = [int(fp0[0]), int(fp0[1])]
             if refusal:
                 rec["error"] = refusal
                 rec.update(detail)
+                records.append(rec)
+                continue
+            # The width gate, AFTER the trim, because the trim is what decides
+            # how wide this bar's own columns are. A refusal with the measured
+            # width on it, never a `continue`: see MIN_BAR_PX.
+            if min_bar_px and (fp[1] - fp[0] + 1) < min_bar_px:
+                rec.update(error="BAR_TOO_NARROW",
+                           footprint=[int(fp[0]), int(fp[1])],
+                           footprint_width=int(fp[1] - fp[0] + 1),
+                           min_bar_px=int(min_bar_px))
                 records.append(rec)
                 continue
             # The other bars of this group, so `remote_support` can ask whether
@@ -1242,7 +1290,9 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
             others = [tuple(p) for j, p in enumerate(prints)
                       if j != k and p is not None]
             remote = remote_support(gray, box, window, fp, edge, zero, stroke,
-                                    direction=direction, neighbours=others)
+                                    direction=direction, threshold=threshold,
+                                    stem_threshold=stem_threshold,
+                                    neighbours=others)
             body = [r for r in remote if r["kind"] == "BODY_CONTINUATION"]
             unresolved = [r for r in remote
                           if r["kind"] == "UNRESOLVED_REMOTE_SUPPORT"]
@@ -1306,6 +1356,21 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
             rec["fill_sample_status"] = ("MEASURED" if tex is not None
                                          else "UNRESOLVED_NO_INTERIOR")
             records.append(rec)
+    return _stamped(records)
+
+
+def _stamped(records):
+    """The row hash, taken here and never again.
+
+    At the end of the measurement and before anything can name a series, so
+    `geometry_row_sha256` answers "is this the same measurement" and not "has
+    anyone touched this row since". Stamping it in the caller instead would mean
+    every caller had to remember to do it before calling
+    `fill_identities_by_figure`, and the one that forgot would produce a hash
+    that silently included the identity.
+    """
+    for rec in records:
+        rec["geometry_row_sha256"] = geometry_row_sha256(rec)
     return records
 
 
@@ -1419,9 +1484,11 @@ def fill_identity(records):
                     much a pattern varies - at least two complete groups and a
                     non-zero spread - so the prototype ranges are reusable and
                     incomplete groups are matched against them.
-      DIRECT_ONLY   every complete group assigned, but from a single group, so
-                    every prototype range has zero width. Those groups keep
-                    their identities; nothing is matched against them.
+      DIRECT_ONLY   every complete group assigned, but the figure has not shown
+                    how much a pattern varies - one complete group, or several
+                    that reproduce each other exactly - so every prototype range
+                    has zero width and a zero tolerance. Those groups keep their
+                    identities; nothing is matched against them.
       AMBIGUOUS     a group could not be assigned, or two patterns are closer
                     than one of them varies. Nothing is named.
       NOT_ENOUGH_COMPLETE_GROUPS   no group had a fill in every slot.
@@ -1529,7 +1596,15 @@ def fill_identity(records):
     # This is what the docstring always claimed and the code did not do: it
     # reported ESTABLISHED off a single group because any non-zero gap beats a
     # zero floor.
-    prototype_ready = len(complete) >= 2
+    #
+    # Both halves of the claim, not just the group count. Two complete groups
+    # that reproduce each other EXACTLY - every sample equal, every tile spread
+    # zero - have a floor of zero, and matching an incomplete group against a
+    # range of zero width with a tolerance of zero is the same luck the group
+    # count was added to prevent, arrived at from the other direction. The
+    # figure has to have shown how much a pattern varies, and a floor of zero is
+    # the figure saying it has not.
+    prototype_ready = len(complete) >= 2 and floor > 0
 
     order = sorted(pooled, key=lambda p: min(pooled[p]))
     gaps, failures = [], []
@@ -1639,3 +1714,121 @@ def fill_identities_by_figure(records):
                     else "AMBIGUOUS" if verdict["status"] in
                     ("AMBIGUOUS", "MULTIPLE_FIGURES") else "NOT_CALIBRATED")
     return verdicts
+
+
+# ---------------------------------------------------------------- the artifact
+#
+# `mono_bar_geometry.csv` is what a batch writes down between measuring a panel
+# and naming its series, and it has to survive being read back by something that
+# is not this process. Two things make that fail quietly, and both are decided
+# here rather than by whatever writes the file.
+#
+# A geometry record is NESTED - `remote` is a list of dicts, `t96`..`t192` are
+# dicts, `stroke` is a dict - and handing that to a CSV writer stringifies it
+# with `repr`. There is no parser for that, the text depends on Python's dict
+# ordering and float repr, and a hash taken over it moves when the same numbers
+# are written by a different interpreter. So everything nested goes into ONE
+# column as canonical JSON: sorted keys, no spaces, numpy scalars converted to
+# the numbers they are.
+#
+# And identity is written onto the record AFTER the measurement, in place. A
+# hash taken over the whole record therefore changes when a human resolves a
+# fill, which makes it useless for the one question it exists to answer - was
+# this the same measurement. `geometry_row_sha256` covers the anonymous
+# measurement only.
+
+#: Written by identity, not by measurement, so they are outside the row hash.
+#: `spec_fill` is the diagnostic driver's fixture truth and is not part of the
+#: measurement either.
+UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
+                   "geometry_row_sha256", "spec_fill")
+
+#: record field -> artifact column, for the fields that get a column of their
+#: own. Everything else in the record goes to `Diagnostics_JSON`.
+ARTIFACT_FIELD_COLUMNS = (
+    ("figure", "Panel_ID"),
+    ("figure_id", "Figure_ID"),
+    ("group", "Group_ID"),
+    ("slot", "Geometry_Slot"),
+    ("value", "Mean"),
+    ("dispersion", "Dispersion_Value"),
+    ("edge_px_image", "Edge_Px_Image"),
+    ("cap_px_image", "Cap_Px_Image"),
+    ("fill_sample_status", "Fill_Sample_Status"),
+    ("identity_status", "Auto_Identity_Status"),
+    ("resolved_fill_pattern", "Auto_Fill_Pattern"),
+    ("error", "Geometry_Error_Code"),
+)
+
+GEOMETRY_ARTIFACT_COLUMNS = (
+    "Panel_ID", "Figure_ID", "Group_ID", "Geometry_Slot", "Mean",
+    "Dispersion_Value", "Edge_Px_Image", "Cap_Px_Image", "Footprint_X0",
+    "Footprint_X1", "Fill_Sample_Status", "Auto_Identity_Status",
+    "Auto_Fill_Pattern", "Geometry_Error_Code", "Diagnostics_JSON",
+    "Geometry_Row_SHA256",
+)
+
+
+def _plain(obj):
+    """The same value with nothing numpy-shaped left in it.
+
+    `json.dumps` raises on `np.float64`, and a `default=str` fallback would
+    serialise a numpy number as a QUOTED STRING - so the same measurement could
+    hash differently on two machines while printing the same numbers.
+    """
+    if isinstance(obj, dict):
+        return {str(k): _plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return [_plain(v) for v in obj.tolist()]
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, (bool, int, float, str)) or obj is None:
+        return obj
+    return str(obj)                                        # pragma: no cover
+
+
+def canonical_json(obj):
+    """One text for one value, whoever writes it."""
+    return json.dumps(_plain(obj), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False)
+
+
+def geometry_row_sha256(record):
+    """The hash of the ANONYMOUS measurement in one record.
+
+    Taken before identity and unchanged by it, so `Auto_Fill_Pattern` can be
+    filled in, a human can override it in `identity_resolution.csv`, and the
+    question "is this the same measurement the reviewer approved" still has an
+    answer.
+    """
+    return hashlib.sha256(canonical_json(
+        {k: v for k, v in record.items()
+         if k not in UNHASHED_FIELDS}).encode("utf-8")).hexdigest()
+
+
+def artifact_row(record):
+    """One record, flattened to `GEOMETRY_ARTIFACT_COLUMNS`."""
+    out = {c: "" for c in GEOMETRY_ARTIFACT_COLUMNS}
+    named = {"footprint"}
+    for field, column in ARTIFACT_FIELD_COLUMNS:
+        named.add(field)
+        value = record.get(field)
+        out[column] = "" if value is None else _plain(value)
+    fp = record.get("footprint")
+    out["Footprint_X0"] = "" if not fp else int(fp[0])
+    out["Footprint_X1"] = "" if not fp else int(fp[1])
+    # The hash travels with the row rather than being recomputed by whoever
+    # reads it back: recomputing it would hash what the CSV round-trip
+    # produced, which is the thing it is there to check.
+    out["Geometry_Row_SHA256"] = record.get(
+        "geometry_row_sha256") or geometry_row_sha256(record)
+    out["Diagnostics_JSON"] = canonical_json(
+        {k: v for k, v in record.items()
+         if k not in named and k not in UNHASHED_FIELDS})
+    return out
+
+
+def artifact_rows(records):
+    return [artifact_row(r) for r in records]

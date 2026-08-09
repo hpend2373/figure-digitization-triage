@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.24"
+PIPELINE_VERSION = "7.25"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -115,6 +115,22 @@ def reader_functions():
         "SCATTER": MR.read_scatter_panel,
         "BOX_VIOLIN": MR.read_box_violin_panel,
     }
+
+
+#: Mark_Type -> the reader that will REPLACE the entry in `reader_functions()`,
+#: declared before it is wired so the option contract can be checked now rather
+#: than discovered at the switchover.
+#:
+#: `read_monochrome_bar_geometry` measures a BAR_MONO panel and leaves the
+#: identity open, which is a change to the CALLER and not to a reader - so it
+#: cannot simply be dropped into the table above. But the manifest already
+#: declares five options for BAR_MONO, and a successor that does not take all
+#: five is either a TypeError on the first batch after the switch or, worse, a
+#: setting a person wrote in a manifest, validated, and silently ignored. The
+#: same introspection that guards `reader_functions()` guards this.
+SUCCESSOR_READERS = {
+    "BAR_MONO": MR.read_monochrome_bar_geometry,
+}
 
 
 MANIFEST_FILES = {

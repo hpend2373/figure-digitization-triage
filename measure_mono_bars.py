@@ -903,34 +903,32 @@ def remote_support(gray, box, window, footprint, edge_row, zero_row, stroke,
         # Does it carry on past the footprint? Only counted when the component
         # actually reaches the footprint's edge, so a cap in the middle of the
         # bar cannot inherit a neighbour's ink on the same rows.
-        # ADJACENT, row by row: the component's own edge pixel and the margin
-        # pixel beside it, inked on the same row. "The component reaches the
-        # edge and there is ink somewhere in the margin at these rows" is a
-        # weaker claim that the same evidence satisfies - and NEIGHBOUR_STRUCTURE
-        # is the one classification that LIFTS a refusal, so a false positive
-        # here returns a number instead of withholding one. Two shapes it would
-        # have got wrong: a narrow unidentified thing at the edge with unrelated
-        # annotation beside it, and a footprint that UNDER-covers its own bar,
-        # whose side stroke then continues into the margin because it is the
-        # bar's.
+        # Adjacency, row by row: the component's own edge pixel and the margin
+        # pixel beside it, inked on the same row.
         #
-        # NOT PINNED BY A SCENARIO. A synthetic sliver at the footprint edge is
-        # picked up as a stem candidate and masked before it can become a
-        # component, so no fixture reaches this branch; what is known is that
-        # tightening the test from "ink somewhere in the margin" to "adjacent,
-        # row by row" took the corpus from four NEIGHBOUR_STRUCTURE components
-        # to two without changing a single value, which is two false positives
-        # removed.
+        # This is NOT the connectivity the classification wants, and labelling
+        # cannot supply it here. Two pixels horizontally adjacent are eight-
+        # connected by definition, so an 8-connected labelling of
+        # [margin | footprint | margin] returns exactly the same answer as this
+        # test - it was written, measured against the corpus, found to change
+        # nothing, and removed rather than shipped as machinery implying more
+        # than it does.
+        #
+        # What the classification wants is that THE OBJECT BEING CLASSIFIED
+        # crosses the boundary, and the obstacle is upstream: components here
+        # are ROW BANDS, so a band holding a central residual and an unrelated
+        # edge-to-margin structure is one component and inherits the crossing.
+        # Fixing it means 2-D components throughout the classifier, and then
+        # requiring the crossing object to reach a NEIGHBOURING FOOTPRINT rather
+        # than just the margin - which is also what would stop a footprint that
+        # under-covers its own bar from handing its own side stroke away.
+        # NEIGHBOUR_STRUCTURE lifts a refusal, so that is worth doing before the
+        # production reader inherits it.
         beyond = bool(
             (right_margin.size
              and any(masked[r, -1] and right_margin[r, 0] for r in comp))
             or (left_margin.size
                 and any(masked[r, 0] and left_margin[r, -1] for r in comp)))
-        # Only for a component that does NOT look like a bar body. A footprint
-        # can also UNDER-cover its bar, and then the margin holds this bar's own
-        # ink - which is what the full-width hatch above a printing gap looked
-        # like, and it was being handed to the neighbour. A sliver at one edge is
-        # the case this test is for; a body-shaped component is judged as a body.
         if beyond and not body_like:
             kind = "NEIGHBOUR_STRUCTURE"
         elif extent < stroke and distance <= stroke:

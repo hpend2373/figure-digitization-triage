@@ -2026,7 +2026,21 @@ these rows" is a weaker claim that the same evidence satisfies, and
 NEIGHBOUR_STRUCTURE is the one classification that LIFTS a refusal, so a false
 positive here returns a number instead of withholding one. Tightening it took
 the corpus from four such components to two without changing a value: two false
-positives. It applies only to a component that does NOT look like a body - a footprint can also UNDER-cover its bar, and then the
+positives.
+
+That is still not the connectivity the classification wants, and labelling
+cannot supply it. Two horizontally adjacent pixels are eight-connected by
+definition, so an 8-connected labelling of [margin | footprint | margin] returns
+exactly the same answer as the adjacency test - it was written, measured against
+the corpus, found to change nothing, and removed rather than shipped as
+machinery implying more than it does. The obstacle is upstream: components are
+ROW BANDS, so a band holding a central residual and an unrelated edge-to-margin
+structure is one component and inherits the crossing. Fixing it means 2-D
+components throughout the classifier, and then requiring the crossing object to
+reach a NEIGHBOURING FOOTPRINT rather than merely the margin - which is also what
+would stop a footprint that under-covers its own bar from handing its own side
+stroke away. `NEIGHBOUR_STRUCTURE` lifts a refusal, so that belongs before the
+production reader inherits it. It applies only to a component that does NOT look like a body - a footprint can also UNDER-cover its bar, and then the
 margin holds this bar's own ink, which is what a full-width hatch above a
 printing gap looked like before that restriction went in.
 

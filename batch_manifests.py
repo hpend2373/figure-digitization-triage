@@ -695,6 +695,12 @@ def source_panel_inventory_columns():
 #: gate refuses a VALUE whose `Identity_Source` and `Identity_Evidence_Type`
 #: disagree. Two copies of the tuple would be two chances for the enum a
 #: manifest is validated against to drift from the one values are judged by.
+#: Human evidence that IS A FILE, and therefore has to travel with the run and
+#: be re-hashed at finalization. `REVIEWER_INSPECTION` is the exception and the
+#: reason the split exists: there is nothing to point at, which is what makes it
+#: the weakest evidence of the three.
+FILE_EVIDENCE_TYPES = ("LEGEND_DECLARED", "TEXT_DECLARED")
+
 AUTO_IDENTITY_EVIDENCE = _kernel.FIG_AUTO_IDENTITY_EVIDENCE
 HUMAN_IDENTITY_EVIDENCE = _kernel.FIG_HUMAN_IDENTITY_EVIDENCE
 IDENTITY_EVIDENCE = _kernel.FIG_IDENTITY_EVIDENCE
@@ -996,11 +1002,20 @@ def check_identity_resolution(resolutions, panels, series, flag,
                 flag(line, "IDENTITY_EVIDENCE_UNEXPLAINED",
                      "Evidence_Type=REVIEWER_INSPECTION has no artifact to "
                      "re-examine, so the Note must say what was seen")
-        elif evidence in HUMAN_IDENTITY_EVIDENCE:
+        elif evidence in FILE_EVIDENCE_TYPES:
             if not artifact:
                 flag(line, "MISSING_REQUIRED", "Evidence_Artifact")
             if not want:
                 flag(line, "MISSING_REQUIRED", "Evidence_Artifact_SHA256")
+        if bool(artifact) != bool(want):
+            # Half a declaration, whatever the evidence type. A path with no
+            # hash is an unverifiable file and a hash with no path is a claim
+            # about nothing; either way the pair is checked as a pair, so
+            # neither half is silently skipped by the `artifact and want` guard
+            # below.
+            flag(line, "IDENTITY_EVIDENCE_HALF_DECLARED",
+                 "Evidence_Artifact=%r with Evidence_Artifact_SHA256=%r; give "
+                 "both or neither" % (artifact or "", want or ""))
         if artifact and want and check_files:
             # The same two rules the source rasters live under. Confined to
             # `file_root`, because a manifest names evidence inside the corpus
@@ -1044,9 +1059,17 @@ def check_identity_resolution(resolutions, panels, series, flag,
         when = str(r.get("Reviewed_At", "")).strip()
         if when:
             try:
-                datetime.date.fromisoformat(when)
+                parsed_when = datetime.date.fromisoformat(when)
             except ValueError:
                 flag(line, "BAD_REVIEWED_AT", "%r is not an ISO date" % when)
+            else:
+                # The same rule the registry and the final approval already
+                # live under. A reading that has not happened yet is not a
+                # reading, and an identity is the one input here with no
+                # measurement behind it.
+                if parsed_when > datetime.date.today():
+                    flag(line, "BAD_REVIEWED_AT",
+                         "Reviewed_At=%s is in the future" % when)
         key = (pid, group, slot)
         if key in index:
             flag(line, "IDENTITY_RESOLUTION_DUPLICATE",

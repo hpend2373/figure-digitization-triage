@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29)
+### A series the reader could not name (v7.29-7.30)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -2964,6 +2964,47 @@ cell and a mode that demanded the file from all of them would make it
 mandatory - which is how a confirmation column becomes one everybody types
 CONFIRMED into.
 
+**A monochrome value must CARRY its provenance, not merely agree with itself.**
+The gate's identity block only fires when one of the columns is filled - right
+for a file that cannot know what drew the panel, since a line panel's rows say
+nothing about fills, and wrong as the only defence. Delete the six columns and
+the mean and the SE are still fine, the gate says nothing, and the value is
+reviewable and poolable with no way to ask which bar it came from.
+`identity_provenance_problems(values, mark_by_panel)` is the mark-aware half: it
+requires a 64-hex `Geometry_Row_SHA256`, a `Resolved_Fill_Pattern` this reader
+distinguishes, and a source/evidence/resolution combination that holds together,
+for every value whose panel is BAR_MONO. It takes the two files a run writes, so
+it can be re-run from `figure_values_raw.csv` and `run_manifest.csv`, and its
+problems join the gate's - same `values:<row>` scope, same blame, same
+`QC_FAILED`. `IDENTITY_FILL_MISMATCH` is in there too: for an automatic identity
+`Auto_Fill_Pattern` and `Resolved_Fill_Pattern` are one fact, and nothing else in
+the chain compared them.
+
+**The evidence BYTES travel with the run.** Hashing the legend crop at
+validation time protects the hash STRING in the manifest and nothing else: edit
+or delete the file afterwards and `identity__<Panel_ID>.csv`, the ledger and
+`Review_Subject_SHA256` are all unchanged, so `Identity_Checked=CONFIRMED` could
+be given against evidence that no longer exists - and a run directory handed to
+somebody else did not contain the picture its own review mode says to open. So
+`LEGEND_DECLARED` and `TEXT_DECLARED` evidence is byte-copied into
+`geometry-review/evidence__<Resolution_ID>__<basename>`, re-hashed after the
+copy, and registered as `IDENTITY_EVIDENCE` - which the finalizer re-hashes with
+every other ledger artifact, so a later edit is `RUN_ARTIFACT_MODIFIED`. A copy
+that cannot be made or does not match refuses the whole review bundle
+(`GEOMETRY_REVIEW_FAILED`): a review whose evidence cannot be reproduced is not a
+review. `REVIEWER_INSPECTION` has no file to copy, which is what makes it the
+weakest of the three, and carries a mandatory Note instead.
+
+Three smaller ones closed with them. An auto identity and a human one naming the
+same series in one group breaks no rule alone - the human's target really was
+unnamed - and put two values in one cell, surfacing later as
+`FACTORIAL_CELL_DUPLICATE`: blaming the grid for what the identities did. It is
+now `IDENTITY_RESOLUTION_CONFLICTS_WITH_MEASUREMENT`, checked with the auto and
+human answers together. A `Reviewed_At` in the future is refused, as the registry
+and the final approval already do. And `Evidence_Artifact` without its hash, or
+the hash without the path, is `IDENTITY_EVIDENCE_HALF_DECLARED` - a path with no
+hash is an unverifiable file, a hash with no path is a claim about nothing.
+
 **Still open:** nothing in the identity chain. What remains for a pilot is
 publication 127's own manifests and a real reviewer identity.
 
@@ -2973,7 +3014,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 566 |
+| `test_run_batch.py` | 591 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -2984,7 +3025,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1836** |
+| **total** | **1861** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

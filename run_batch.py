@@ -72,6 +72,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -90,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.29"
+PIPELINE_VERSION = "7.30"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -612,6 +613,14 @@ GEOMETRY_ROW_ARTIFACT_TYPE = "GEOMETRY_ROW_CROP"
 #: to be read.
 IDENTITY_ARTIFACT_TYPE = "IDENTITY_RESOLUTION"
 
+#: The evidence bytes themselves, copied into the run. Registering the rows and
+#: not the thing they point at protects the hash STRING and not the evidence: a
+#: legend crop edited after the run leaves `identity__<Panel_ID>.csv`, the ledger
+#: and `Review_Subject_SHA256` all unchanged. And a run directory handed to
+#: somebody else did not contain the picture its own review mode asks them to
+#: look at.
+IDENTITY_EVIDENCE_ARTIFACT_TYPE = "IDENTITY_EVIDENCE"
+
 
 def write_geometry_review(out_dir, pairs, pad=24):
     """The BAR_MONO geometry artifacts for one run, written once.
@@ -692,12 +701,29 @@ def _write_geometry_review(out_dir, pairs, pad=24):
     return out
 
 
-def write_identity_resolutions(out_dir, rows_by_panel):
-    """{Panel_ID: [(IDENTITY_RESOLUTION, path)]} for the panels a person named.
+def write_identity_resolutions(out_dir, rows_by_panel, file_root="."):
+    """{Panel_ID: [(TYPE, path)]} for the panels a person named.
 
-    One CSV per panel, the manifest's own columns, verbatim. Not a summary and
+    One CSV per panel, the manifest's own columns, verbatim - not a summary and
     not a join: what a reviewer is asked to check is what was written, including
     the evidence and the row hash it was written against.
+
+    And the EVIDENCE ITSELF, copied in. `check_identity_resolution` hashes the
+    legend crop or the page image at validation time, which protects the hash
+    STRING in the manifest and nothing else: edit or delete the file afterwards
+    and `identity__<Panel_ID>.csv`, the ledger and `Review_Subject_SHA256` are
+    all unchanged, so `Identity_Checked=CONFIRMED` could be given against
+    evidence that no longer exists. Hand somebody only the run directory and the
+    evidence was not in it at all.
+
+    So the bytes travel with the run, are re-hashed after the copy, and are
+    registered as `IDENTITY_EVIDENCE` - which the finalizer re-hashes with every
+    other ledger artifact. A copy that does not match refuses the bundle rather
+    than being registered: a review whose evidence cannot be reproduced is not a
+    review.
+
+    `REVIEWER_INSPECTION` has no file to copy - that is what makes it the
+    weakest evidence there is - and carries a mandatory Note instead.
     """
     out = {}
     if not rows_by_panel:
@@ -715,7 +741,32 @@ def write_identity_resolutions(out_dir, rows_by_panel):
             writer.writeheader()
             for row in rows:
                 writer.writerow({c: _s(row.get(c)) for c in columns})
-        out[pid] = [(IDENTITY_ARTIFACT_TYPE, path)]
+        artifacts = [(IDENTITY_ARTIFACT_TYPE, path)]
+        for row in rows:
+            if _upper(row.get("Evidence_Type")) not in BM.FILE_EVIDENCE_TYPES:
+                continue
+            declared = _s(row.get("Evidence_Artifact"))
+            want = _s(row.get("Evidence_Artifact_SHA256")).lower()
+            source = (declared if os.path.isabs(declared)
+                      else os.path.join(file_root, declared))
+            rid = _s(row.get("Resolution_ID"))
+            base = "".join(c if (c.isalnum() or c in ".-_") else "_"
+                           for c in os.path.basename(declared))
+            dest = os.path.join(review_dir, "evidence__%s__%s" % (rid, base))
+            try:
+                shutil.copyfile(source, dest)
+            except OSError as exc:
+                raise GeometryReviewError(
+                    "the evidence for %s could not be copied into the run: "
+                    "%s (%s)" % (rid, declared, exc))
+            got = file_sha256(dest)
+            if want and got != want:
+                raise GeometryReviewError(
+                    "the evidence for %s copied as %s... and the resolution "
+                    "says %s...; a review whose evidence cannot be reproduced "
+                    "is not a review" % (rid, got[:16], want[:16]))
+            artifacts.append((IDENTITY_EVIDENCE_ARTIFACT_TYPE, dest))
+        out[pid] = artifacts
     return out
 
 
@@ -852,6 +903,13 @@ def apply_identity_resolutions(records, resolution_rows):
     * the measurement it was written against is the one in hand -
       `Geometry_Row_SHA256` on the resolution against the row's own stamp
 
+    And one that needs the auto identities and the human ones TOGETHER: a group
+    where the figure named slot 0 STIPPLED and a person named slot 1 STIPPLED
+    too. Neither row breaks a rule on its own - the human's target really was
+    unnamed - and the result is two marks for one series in one group, which
+    surfaces much later as a duplicate factorial cell: fail-closed, but blaming
+    the grid for something the identities did.
+
     Raises `IdentityResolutionError` for any of them.
     """
     by_slot = {(_s(r.get("group")), r.get("slot")): r for r in records
@@ -895,6 +953,26 @@ def apply_identity_resolutions(records, resolution_rows):
             pattern=_upper(row.get("Resolved_Fill_Pattern")),
             resolution=rid,
             evidence=_upper(row.get("Evidence_Type")))
+    # Auto and human together, per group, before any of it is read as a value.
+    auto_fill = {}
+    for record in records:
+        if record.get("slot") is None:
+            continue
+        pattern = _upper(record.get("resolved_fill_pattern"))
+        if pattern and MONO_GEOMETRY.measurement_usable(record):
+            auto_fill.setdefault(_s(record.get("group")), {})[pattern] = \
+                record.get("slot")
+    for (group, slot), identity in sorted(out.items(),
+                                          key=lambda kv: (kv[0][0], kv[0][1])):
+        clash = auto_fill.get(group, {}).get(identity["pattern"])
+        if clash is not None:
+            raise IdentityResolutionError(
+                "IDENTITY_RESOLUTION_CONFLICTS_WITH_MEASUREMENT: %s names "
+                "%s/slot %d as %s, and the figure already read slot %s of the "
+                "same group as %s. One group holds one bar per series, so this "
+                "would put two values in one cell"
+                % (identity["resolution"], group, slot, identity["pattern"],
+                   clash, identity["pattern"]))
     return out
 
 
@@ -1397,6 +1475,102 @@ def _calibration_points(panel, xcal, ycal):
 #: raster is not the raster that was read poisons every unit measured from it,
 #: however clean each unit looked on its own.
 QC_SCOPES = ("unit", "units", "values", "figures", "grids", "grid")
+
+
+#: A BAR_MONO value's identity provenance, and what each column may hold. The
+#: gate in `grid_engine` checks these against each other and cannot REQUIRE
+#: them: the values file carries no mark type, and a line panel's rows
+#: legitimately say nothing about fills. So the requirement lives here, where
+#: `Run_Panel_ID` and the panel manifest are both in hand.
+IDENTITY_PROVENANCE_COLUMNS = ("Geometry_Row_SHA256", "Resolved_Fill_Pattern",
+                               "Identity_Source", "Identity_Evidence_Type")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def identity_provenance_problems(values, mark_by_panel):
+    """[(where, check, detail)] for BAR_MONO values whose provenance is absent.
+
+    The gate's own identity block only fires when one of the columns is filled,
+    which is right for a file that cannot know what drew the panel and wrong as
+    the only defence. Delete the six columns from a monochrome value - a
+    regression in `IDENTITY_CARRIED`, a hand-edited file - and every remaining
+    check passes: the mean and the SE are fine, the gate says nothing, and the
+    value is reviewable and poolable with no way to ask which bar it came from
+    or who decided which series it was.
+
+    This is the mark-aware half. `values` needs `Run_Panel_ID`; `mark_by_panel`
+    is `{Panel_ID: Mark_Type}`. Both come out of files the run writes, so the
+    check can be re-run from `figure_values_raw.csv` and `run_manifest.csv`
+    without this process.
+    """
+    out = []
+    rows = (values.to_dict("records") if hasattr(values, "to_dict") else
+            list(values))
+    for i, row in enumerate(rows):
+        pid = _s(row.get("Run_Panel_ID"))
+        if _upper(mark_by_panel.get(pid, "")) != "BAR_MONO":
+            continue
+        where = "values:%d" % (i + 2)
+        absent = [c for c in IDENTITY_PROVENANCE_COLUMNS if not _s(row.get(c))]
+        if absent:
+            out.append((where, "IDENTITY_PROVENANCE_MISSING",
+                        "%s is a BAR_MONO value and carries no %s. A "
+                        "monochrome bar is identified BY ITS FILL, so which "
+                        "series this number belongs to is a claim of its own "
+                        "and has to travel with it" % (pid, ", ".join(absent))))
+            continue
+        digest = _s(row.get("Geometry_Row_SHA256"))
+        if not _HEX64.match(digest):
+            out.append((where, "IDENTITY_PROVENANCE_MISSING",
+                        "Geometry_Row_SHA256=%r is not a SHA-256; it is what "
+                        "binds this value to the anonymous row it was measured "
+                        "from" % digest))
+        resolved = _upper(row.get("Resolved_Fill_Pattern"))
+        if resolved not in MONO_GEOMETRY.FILL_VOCABULARY:
+            out.append((where, "IDENTITY_PROVENANCE_MISSING",
+                        "Resolved_Fill_Pattern=%r is not a fill this reader "
+                        "distinguishes (%s)"
+                        % (resolved, "/".join(MONO_GEOMETRY.FILL_VOCABULARY))))
+        source = _upper(row.get("Identity_Source"))
+        evidence = _upper(row.get("Identity_Evidence_Type"))
+        resolution = _s(row.get("Resolution_ID"))
+        auto = _upper(row.get("Auto_Fill_Pattern"))
+        if source == "AUTO":
+            if evidence not in BM.AUTO_IDENTITY_EVIDENCE:
+                out.append((where, "IDENTITY_SOURCE_INCONSISTENT",
+                            "Identity_Source=AUTO with "
+                            "Identity_Evidence_Type=%s" % (evidence or "blank")))
+            if resolution:
+                out.append((where, "IDENTITY_SOURCE_INCONSISTENT",
+                            "Identity_Source=AUTO carries Resolution_ID=%s"
+                            % resolution))
+            if auto != resolved:
+                # The reader measured one fill and the row was filed under
+                # another. Nothing else in the chain compares the two, so a
+                # mis-join between the geometry rows and the series manifest
+                # would arrive as a correct-looking value under the wrong
+                # series heading.
+                out.append((where, "IDENTITY_FILL_MISMATCH",
+                            "Auto_Fill_Pattern=%s but Resolved_Fill_Pattern=%s; "
+                            "for an automatic identity they are the same fact"
+                            % (auto or "blank", resolved)))
+        elif source == "HUMAN":
+            if evidence not in BM.HUMAN_IDENTITY_EVIDENCE:
+                out.append((where, "IDENTITY_SOURCE_INCONSISTENT",
+                            "Identity_Source=HUMAN with "
+                            "Identity_Evidence_Type=%s" % (evidence or "blank")))
+            if not resolution:
+                out.append((where, "IDENTITY_RESOLUTION_UNIDENTIFIED",
+                            "Identity_Source=HUMAN with no Resolution_ID"))
+            if auto:
+                out.append((where, "IDENTITY_OVERRODE_MEASUREMENT",
+                            "Auto_Fill_Pattern=%s beside a human identity"
+                            % auto))
+        else:
+            out.append((where, "IDENTITY_PROVENANCE_MISSING",
+                        "Identity_Source=%r (expected %s)"
+                        % (source, "/".join(K.FIG_IDENTITY_SOURCES))))
+    return out
 
 
 def _units_named_by(qc, values_df, units_df, figures_df=None, grids_df=None):
@@ -1964,6 +2138,19 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             # out from under that path.
             geometry_artifacts = write_geometry_review(output_dir,
                                                        geometry_pairs)
+            # Beside the geometry bundle, and only for the panels that have
+            # them. Written even if the join then refuses the panel: the ledger
+            # records what this run wrote, and a refused resolution is exactly
+            # the thing somebody needs to open. Inside this `try`, because the
+            # evidence copy can refuse too - and a review bundle whose evidence
+            # is not in it is not a reviewable bundle.
+            for pid_, artifacts_ in write_identity_resolutions(
+                    output_dir,
+                    {p: r for p, r in resolutions_by_panel.items()
+                     if p in geometry_artifacts},
+                    file_root=file_root).items():
+                geometry_artifacts[pid_] = (geometry_artifacts.get(pid_, [])
+                                            + artifacts_)
         except GeometryReviewError as exc:
             # Not a panel outcome: the bundle is written once for the run, so a
             # failure here is every BAR_MONO panel at once and there is nothing
@@ -1975,14 +2162,6 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             return dict(status="GEOMETRY_REVIEW_FAILED", detail="%s" % exc,
                         panels=0, values=0, machine_qc=0, accepted=0,
                         problems=0)
-        # Beside the geometry bundle, and only for the panels that have them.
-        # Written even if the join then refuses the panel: the ledger records
-        # what this run wrote, and a refused resolution is exactly the thing
-        # somebody needs to open.
-        for pid_, artifacts_ in write_identity_resolutions(
-                output_dir, {p: r for p, r in resolutions_by_panel.items()
-                             if p in geometry_artifacts}).items():
-            geometry_artifacts[pid_] = geometry_artifacts.get(pid_, []) + artifacts_
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -2156,6 +2335,26 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                                 # the gate needs to know where the run is.
                                 run_dir=output_dir,
                                 check_files=check_files)
+    # The mark-aware half of the identity contract, appended to the gate's own
+    # problems so it blames the same units, lands in `qc_problems.csv`, and
+    # flips the panel to QC_FAILED through the pass below. The gate cannot make
+    # this check: the values file carries no mark type, and a line panel's rows
+    # say nothing about fills quite legitimately.
+    # `values`, not `values_df`: the frame is projected onto
+    # `fig_values_columns()`, which does not include `Run_Panel_ID` - so the
+    # frame cannot say which panel a row came from and this check would find
+    # nothing on every row. The two are in the same order, so a `values:%d` from
+    # here names the same line the gate would.
+    _identity_problems = identity_provenance_problems(
+        values, {_s(r.get("Panel_ID")): _s(r.get("Mark_Type"))
+                 for _, r in m["panels"].iterrows()})
+    if _identity_problems:
+        qc = pd.concat(
+            [qc, pd.DataFrame([dict(where=w, check=c, detail=d)
+                               for w, c, d in _identity_problems])],
+            ignore_index=True) if len(qc) else pd.DataFrame(
+                [dict(where=w, check=c, detail=d)
+                 for w, c, d in _identity_problems])
 
     # A panel whose values the gate rejected did not pass, whatever the reader
     # thought of them. Re-state it here, so run_manifest.csv and qc_problems.csv

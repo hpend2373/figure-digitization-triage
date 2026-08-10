@@ -3117,6 +3117,232 @@ check("and the template ships every column any mode can ask for",
           encoding="utf-8").readline(),
       "%s" % FIN.value_review_columns())
 
+# A BAR_MONO value must CARRY its provenance, not merely be consistent about it.
+#
+# The gate's identity block only fires when one of the columns is filled, which
+# is right for a file that cannot know what drew the panel - a line panel's rows
+# say nothing about fills - and wrong as the only defence. With the six columns
+# gone the mean and the SE are still fine, the gate says nothing, and the value
+# is reviewable and poolable with no way to ask which bar it came from.
+#
+# REVERT: delete the `identity_provenance_problems` call from `run_batch`, or
+# the function. Every scenario above still passes, because the runner fills the
+# columns today; what is gone is the check that it still does.
+print()
+print("a monochrome value has to carry where it came from, not just agree with itself")
+_MONO_MARKS = {"P_SHORT": "BAR_MONO", "P_LINE": "LINE_COLOR"}
+
+
+def _prov(**kw):
+    base = dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+                Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
+                Geometry_Row_SHA256="a" * 64, Auto_Fill_Pattern="OPEN",
+                Resolved_Fill_Pattern="OPEN", Identity_Source="AUTO",
+                Identity_Evidence_Type="FILL_MEASURED", Resolution_ID="")
+    base.update(kw)
+    return [c for _w, c, _d in RB.identity_provenance_problems([base],
+                                                               _MONO_MARKS)]
+
+
+check("a complete automatic provenance passes", _prov() == [], "%s" % _prov())
+_blanked = {c: "" for c in ("Geometry_Row_SHA256", "Auto_Fill_Pattern",
+                            "Resolved_Fill_Pattern", "Identity_Source",
+                            "Identity_Evidence_Type", "Resolution_ID")}
+check("all six columns gone is IDENTITY_PROVENANCE_MISSING",
+      _prov(**_blanked) == ["IDENTITY_PROVENANCE_MISSING"], "%s" % _prov(**_blanked))
+check("and so is the row hash alone going missing",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Geometry_Row_SHA256=""),
+      "%s" % _prov(Geometry_Row_SHA256=""))
+check("a row hash that is not a hash is refused too",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Geometry_Row_SHA256="see the csv"),
+      "%s" % _prov(Geometry_Row_SHA256="see the csv"))
+check("a fill this reader does not distinguish is refused",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Resolved_Fill_Pattern="NONE",
+                                             Auto_Fill_Pattern="NONE"),
+      "%s" % _prov(Resolved_Fill_Pattern="NONE", Auto_Fill_Pattern="NONE"))
+check("an automatic identity whose two fills disagree is refused",
+      _prov(Auto_Fill_Pattern="SOLID") == ["IDENTITY_FILL_MISMATCH"],
+      "%s" % _prov(Auto_Fill_Pattern="SOLID"))
+check("AUTO carrying a resolution, or a human's evidence, is refused",
+      _prov(Resolution_ID="IR1") == ["IDENTITY_SOURCE_INCONSISTENT"]
+      and _prov(Identity_Evidence_Type="LEGEND_DECLARED")
+      == ["IDENTITY_SOURCE_INCONSISTENT"],
+      "%s %s" % (_prov(Resolution_ID="IR1"),
+                 _prov(Identity_Evidence_Type="LEGEND_DECLARED")))
+check("a human identity with no row signed, or a measured fill beside it",
+      _prov(Identity_Source="HUMAN", Identity_Evidence_Type="LEGEND_DECLARED",
+            Auto_Fill_Pattern="")
+      == ["IDENTITY_RESOLUTION_UNIDENTIFIED"]
+      and _prov(Identity_Source="HUMAN",
+                Identity_Evidence_Type="LEGEND_DECLARED",
+                Resolution_ID="IR1") == ["IDENTITY_OVERRODE_MEASUREMENT"],
+      "%s" % _prov(Identity_Source="HUMAN",
+                   Identity_Evidence_Type="LEGEND_DECLARED", Resolution_ID="IR1"))
+check("a source nobody declared is refused",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Identity_Source="MACHINE"),
+      "%s" % _prov(Identity_Source="MACHINE"))
+# And the same six blanks on a panel nothing drew fills for. This is the reason
+# the requirement cannot live in the gate: it is not a property of a values row,
+# it is a property of a values row FROM A MONOCHROME BAR PANEL.
+check("a colour panel's value says nothing about fills, quite legitimately",
+      not RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE", Mean="55")],
+          _MONO_MARKS),
+      "%s" % RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE", Mean="55")],
+          _MONO_MARKS))
+# Wired, not merely present: with the carrier removed the whole panel fails the
+# gate rather than passing with blank provenance.
+_real_carried = MR.IDENTITY_CARRIED
+try:
+    MR.IDENTITY_CARRIED = ()
+    _po = os.path.join(ROOT, "o_short_noprov")
+    _ps = RB.run_batch(_s2, _po, file_root=ROOT, run_date="2026-08-06")
+finally:
+    MR.IDENTITY_CARRIED = _real_carried
+_pqc = set(pd.read_csv(os.path.join(_po, "qc_problems.csv"),
+                       dtype=object).fillna("")["check"]) \
+    if os.path.exists(os.path.join(_po, "qc_problems.csv")) else set()
+_pr = pd.read_csv(os.path.join(_po, "run_manifest.csv"), dtype=object).fillna("")
+check("a run whose marks lost their provenance fails the gate",
+      "IDENTITY_PROVENANCE_MISSING" in _pqc, "%s" % sorted(_pqc))
+check("and both monochrome panels are QC_FAILED, not AUTO_PASS",
+      set(_pr[_pr["Panel_ID"].isin(["P_MONO", "P_SHORT"])]["Run_State"])
+      == {"QC_FAILED"},
+      "%s" % _pr[["Panel_ID", "Run_State"]].to_dict("records"))
+check("and the colour panels in the same batch are unaffected",
+      _pr[_pr["Panel_ID"] == "P_SCAT"].iloc[0]["Run_State"] == "AUTO_PASS",
+      "%s" % _pr[["Panel_ID", "Run_State"]].to_dict("records"))
+
+# The evidence BYTES travel with the run.
+#
+# `check_identity_resolution` hashes the legend crop at validation time, which
+# protects the hash STRING in the manifest and nothing else: edit or delete the
+# file afterwards and identity__<Panel_ID>.csv, the ledger and
+# Review_Subject_SHA256 are all unchanged, so Identity_Checked=CONFIRMED could
+# be given against evidence that no longer exists. And a run directory handed to
+# somebody else did not contain the picture its own review mode tells them to
+# open.
+#
+# REVERT: register the resolution rows and not the evidence. The two scenarios
+# below are the only place it shows.
+print()
+print("the evidence a person read the series off travels with the run")
+_ev = _art2[(_art2["Panel_ID"] == "P_SHORT")
+            & (_art2["Artifact_Type"] == "IDENTITY_EVIDENCE")]
+check("the legend crop is copied into the run and hashed into the ledger",
+      len(_ev) == 1 and len(_ev.iloc[0]["SHA256"]) == 64
+      and os.path.exists(os.path.join(_o2, _ev.iloc[0]["Artifact_Path"])),
+      "%s" % (_ev.to_dict("records") or "no ledger row"))
+check("byte for byte, and named after the resolution that cites it",
+      len(_ev)
+      and open(os.path.join(_o2, _ev.iloc[0]["Artifact_Path"]), "rb").read()
+      == open(LEGEND_IMG, "rb").read()
+      and "IR1" in os.path.basename(_ev.iloc[0]["Artifact_Path"]),
+      "%s" % (_ev.iloc[0]["Artifact_Path"] if len(_ev) else ""))
+# And the finalizer re-hashes it with everything else in the ledger, so editing
+# the copy after the review is RUN_ARTIFACT_MODIFIED rather than an approval of
+# something nobody saw.
+# Guarded on the ledger row existing, so removing the copy is two failed
+# scenarios rather than a traceback that stops the file here.
+_ev_path = os.path.join(_o2, _ev.iloc[0]["Artifact_Path"]) if len(_ev) else ""
+
+
+def _verify_run():
+    problems = []
+    ok = FIN.verify_run_outputs(
+        _o2, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                            encoding="utf-8")),
+        _s2, lambda w, c, d: problems.append(c))
+    return ok, problems
+
+
+_before, _probs = _verify_run()
+check("the run verifies as written", _before and not _probs, "%s" % _probs)
+if _ev_path:
+    _ev_bytes = open(_ev_path, "rb").read()
+    try:
+        with open(_ev_path, "wb") as _fh:
+            _fh.write(_ev_bytes + b"a different crop")
+        _after, _probs = _verify_run()
+    finally:
+        with open(_ev_path, "wb") as _fh:
+            _fh.write(_ev_bytes)
+else:
+    _after, _probs = True, []
+check("and evidence edited after the run is RUN_ARTIFACT_MODIFIED",
+      not _after and "RUN_ARTIFACT_MODIFIED" in _probs,
+      "%s" % (_probs if _ev_path else "no evidence artifact to tamper with"))
+
+# The copy is verified after it is made, so the two ways it can be wrong are
+# refusals of the review bundle rather than a ledger entry nobody can trust.
+# Both need --no-file-check, because with file checking on the manifest
+# validator catches them first - which is the point: this is the second line.
+for _label, _kw, _fix in (
+        ("evidence that is not there to copy",
+         dict(Evidence_Artifact="gone_before_the_copy.png"), "copied"),
+        ("evidence whose bytes do not match the resolution",
+         dict(Evidence_Artifact_SHA256="b" * 64), "reproduced")):
+    _bad = short_manifests(os.path.join(ROOT, "m_ev_%s" % _fix),
+                           resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_ev_%s" % _fix)
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06",
+                       check_files=False)
+    check("%s refuses the whole review bundle" % _label,
+          _bs["status"] == "GEOMETRY_REVIEW_FAILED"
+          and _fix in _bs.get("detail", ""),
+          "%s %r" % (_bs["status"], _bs.get("detail")))
+    check("  and leaves nothing to review or to pool",
+          sorted(os.listdir(_bo)) == ["run_stamp.json"],
+          "%s" % sorted(os.listdir(_bo)))
+check("only evidence that IS a file is copied; a reviewer's own reading is not",
+      BM.FILE_EVIDENCE_TYPES == ("LEGEND_DECLARED", "TEXT_DECLARED")
+      and "REVIEWER_INSPECTION" not in BM.FILE_EVIDENCE_TYPES
+      and set(BM.FILE_EVIDENCE_TYPES) < set(BM.HUMAN_IDENTITY_EVIDENCE),
+      "%s" % (BM.FILE_EVIDENCE_TYPES,))
+
+# Three more ways a resolution can be wrong, each found where it can be found.
+for _label, _kw, _code, _rows in (
+        # An auto identity and a human one naming the same series in one group.
+        # Neither row breaks a rule alone - the human's target really was
+        # unnamed - and the pair puts two values in one cell, which used to
+        # surface much later as a duplicate factorial cell: fail-closed, but
+        # blaming the grid for something the identities did.
+        ("a human identity that collides with a measured one",
+         dict(Resolved_Series_ID="S_SOLID", Resolved_Fill_Pattern="SOLID"),
+         "IDENTITY_RESOLUTION_CONFLICTS_WITH_MEASUREMENT", "run"),
+        # The registry and the final approval already refuse a future date. A
+        # reading that has not happened is not a reading.
+        ("a reading dated in the future",
+         dict(Reviewed_At="2099-01-01"), "BAD_REVIEWED_AT", "manifest"),
+        # Half a declaration: a path with no hash is an unverifiable file, a
+        # hash with no path is a claim about nothing.
+        ("evidence declared by half",
+         dict(Evidence_Type="REVIEWER_INSPECTION", Evidence_Artifact_SHA256="",
+              Note="the legend labels it Late post-flight"),
+         "IDENTITY_EVIDENCE_HALF_DECLARED", "manifest")):
+    _bad = short_manifests(os.path.join(ROOT, "m_x_%s" % _code.lower()),
+                           resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_x_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    if _rows == "manifest":
+        _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                                 dtype=object).fillna("")["check"]) \
+            if _bs["status"] == "MANIFEST_REJECTED" else set()
+        check("%s is refused before any raster is opened" % _label,
+              _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+              "%s %s" % (_bs["status"], sorted(_codes)))
+    else:
+        _br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"),
+                          dtype=object).fillna("")
+        _brow = _br[_br["Panel_ID"] == "P_SHORT"]
+        check("%s refuses the panel, naming the collision" % _label,
+              len(_brow)
+              and _brow.iloc[0]["Run_State"] == "SERIES_IDENTITY_UNRESOLVED"
+              and _code in _brow.iloc[0]["Detail"],
+              "%s" % (list(zip(_brow["Run_State"], _brow["Detail"]))
+                      if len(_brow) else "no row"))
+
 check("the identity vocabulary has one definition, in the layer both can see",
       BM.AUTO_IDENTITY_EVIDENCE is K.FIG_AUTO_IDENTITY_EVIDENCE
       and BM.HUMAN_IDENTITY_EVIDENCE is K.FIG_HUMAN_IDENTITY_EVIDENCE

@@ -36,7 +36,7 @@ run produced for this panel and therefore what to look at:
 | `OVERLAY` | `Overlay_File` | every cross sits on the mark a reader would give it, and none is missed |
 | `WPD_ONLY` | `WPD_Project_File`, in WebPlotDigitizer | the marks re-derive the values in the row |
 | `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
-| `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` | all of the above, **and** each resolution's evidence really names that series |
+| `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` and the `geometry-review/evidence__*` files it cites | all of the above, **and** each resolution's evidence really names that series |
 | anything else, or the named file is absent | — | **do not approve.** The finalizer refuses it anyway (`REVIEW_MODE_UNKNOWN` / `REVIEW_ARTIFACT_MISSING`) |
 
 `WPD_ONLY` is uncommon: it means the picture could not be drawn, which never

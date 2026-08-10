@@ -56,10 +56,14 @@ jobs:
           stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
           assert stamp["Status"] == "RAN", stamp["Status"]
           assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
-          assert stamp["Values_Read"] == 48, stamp["Values_Read"]
+          # 36 since BAR_MONO moved to the two-pass reader: three Figure 4
+          # panels now refuse with STROKE_SCALE_UNRESOLVED rather than
+          # producing numbers off a stroke the reader could not measure.
+          # test_compile_plan names them.
+          assert stamp["Values_Read"] == 36, stamp["Values_Read"]
           assert stamp["Values_Machine_QC_Passed"] == 0, stamp
           assert stamp["Values_Accepted"] == 0, stamp
-          assert stamp["QC_Problems"] == 108, stamp["QC_Problems"]
+          assert stamp["QC_Problems"] == 127, stamp["QC_Problems"]
           assert stamp["Environment"]["Libraries"]["cv2"], stamp
           print("plan -> run reproduces the pilot:", stamp["Status"],
                 stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")

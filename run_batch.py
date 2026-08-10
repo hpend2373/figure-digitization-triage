@@ -79,7 +79,7 @@ import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.26"
+PIPELINE_VERSION = "7.27"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -182,7 +182,29 @@ REVIEW_DECISIONS = ("APPROVED", "REJECTED")
 #: fail a panel that produced values - so a panel can legitimately reach the
 #: queue with a project and no overlay. What it may NOT do is reach the queue
 #: claiming a review nobody can perform.
-REVIEW_MODES = {"OVERLAY": "OVERLAY", "WPD_ONLY": "WPD_PROJECT"}
+#: Mode -> every `panel_artifacts.csv` Artifact_Type it requires. A TUPLE, not
+#: one type: a review that needs three artifacts to be performable - the
+#: numbers, the pictures and the index that ties them together - cannot declare
+#: one of them and hope. The finalizer refuses an approval for a mode whose
+#: artifacts are not all in the ledger.
+REVIEW_MODES = {"OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",)}
+
+#: Mode -> what the reviewer must SAY they checked, as columns of
+#: `value_review.csv`. `Decision=APPROVED` on its own is a signature on a
+#: filename: it does not distinguish a person who opened the overlay and
+#: compared every mark from a person who typed APPROVED down a column. Each
+#: named check is a separate assertion, and the finalizer requires every one
+#: its mode declares.
+#:
+#: Both modes here offer a picture of the marks and nothing else, so both ask
+#: the one question that picture can answer. A mode that also puts the AXIS in
+#: front of the reviewer will ask about the axis, and will do it when there is
+#: such a mode - a confirmation field nobody can act on is worse than none.
+REVIEW_CONFIRMATIONS = {"OVERLAY": ("Marks_Checked",),
+                        "WPD_ONLY": ("Marks_Checked",)}
+
+#: What a reviewer writes in a confirmation column. Blank is not CONFIRMED.
+REVIEW_CONFIRMED = "CONFIRMED"
 
 
 def sha256_of_text(text):

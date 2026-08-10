@@ -2443,7 +2443,8 @@ check("every queued panel declares its review mode",
       set(_rq["Review_Mode"]) <= set(RB.REVIEW_MODES) and len(set(_rq["Review_Mode"])),
       "%s" % sorted(set(_rq["Review_Mode"])))
 check("and the mode it declares is backed by a ledger artifact",
-      all(RB.REVIEW_MODES[r["Review_Mode"]] in _by_panel.get(r["Panel_ID"], set())
+      all(set(RB.REVIEW_MODES[r["Review_Mode"]])
+          <= _by_panel.get(r["Panel_ID"], set())
           for _, r in _rq.iterrows()),
       "%s" % [(r["Panel_ID"], r["Review_Mode"]) for _, r in _rq.iterrows()])
 
@@ -2508,6 +2509,7 @@ _fake_queue = pd.DataFrame([dict(Panel_ID="PX", Review_Mode="OVERLAY",
 _fake_reviews = pd.DataFrame([dict(Review_ID="R001", Panel_ID="PX",
                                    Review_Subject_SHA256="a" * 64,
                                    Reviewer_ID="RV_H", Decision="APPROVED",
+                                   Marks_Checked="CONFIRMED",
                                    Reviewed_At="2026-08-06T10:00:00Z", Note="")])
 _fake_reviewers = pd.DataFrame([dict(Reviewer_ID="RV_H",
                                      Reviewer_Record_Type="HUMAN")])

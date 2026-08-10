@@ -68,8 +68,14 @@ import run_batch as RB                                             # noqa: E402
 
 FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
 
+#: `Marks_Checked` is not decoration beside `Decision`. An approval says a
+#: person agreed; it does not say what they looked at, and the two are
+#: different claims - the whole point of queueing a panel with an artifact is
+#: that somebody opens it. `RB.REVIEW_CONFIRMATIONS` says which of these a mode
+#: requires, so a mode that shows more can ask for more.
 VALUE_REVIEW_COLUMNS = [
     "Review_ID", "Panel_ID", "Review_Subject_SHA256", "Reviewer_ID", "Decision",
+    "Marks_Checked",
     "Reviewed_At", "Note",
 ]
 
@@ -107,7 +113,8 @@ def write_review_template(path, review_queue):
         w.writerow(VALUE_REVIEW_COLUMNS)
         for i, (_, r) in enumerate(review_queue.iterrows(), 1):
             w.writerow(["R%03d" % i, r.get("Panel_ID", ""),
-                        r.get("Review_Subject_SHA256", ""), "", "", "", ""])
+                        r.get("Review_Subject_SHA256", "")]
+                       + [""] * (len(VALUE_REVIEW_COLUMNS) - 3))
     return path
 
 
@@ -225,11 +232,21 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
                  "the queue says Review_Mode=%r for %s; expected %s"
                  % (mode, pid, "/".join(sorted(RB.REVIEW_MODES))))
             continue
-        if RB.REVIEW_MODES[mode] not in artifact_types.get(pid, set()):
+        absent = [t for t in RB.REVIEW_MODES[mode]
+                  if t not in artifact_types.get(pid, set())]
+        if absent:
             flag(line, "REVIEW_ARTIFACT_MISSING",
                  "%s was queued for %s review, and the run's artifact ledger "
                  "carries no %s for it. There is nothing this approval can be "
-                 "an approval of" % (pid, mode, RB.REVIEW_MODES[mode]))
+                 "an approval of" % (pid, mode, "/".join(absent)))
+            continue
+        unconfirmed = [c for c in RB.REVIEW_CONFIRMATIONS.get(mode, ())
+                       if _s(r.get(c)).upper() != RB.REVIEW_CONFIRMED]
+        if unconfirmed:
+            flag(line, "REVIEW_CONFIRMATION_MISSING",
+                 "%s was queued for %s review and the decision does not say "
+                 "%s was checked. APPROVED alone is a signature on a filename"
+                 % (pid, mode, "/".join(unconfirmed)))
             continue
         got = _s(r.get("Review_Subject_SHA256"))
         if got != expected[pid]:

@@ -220,6 +220,7 @@ def review(rows, path=REVIEW):
 def row(**kw):
     base = dict(Review_ID="R001", Panel_ID="P1", Review_Subject_SHA256=FP,
                 Reviewer_ID="RV_H", Decision="APPROVED",
+                Marks_Checked="CONFIRMED",
                 Reviewed_At="2026-08-06T10:00:00Z", Note="")
     base.update(kw)
     return base
@@ -448,6 +449,7 @@ for _label, _target, _edit in (
     review([dict(Review_ID="R001", Panel_ID="P1",
                  Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                  Reviewer_ID="RV_H", Decision="APPROVED",
+                 Marks_Checked="CONFIRMED",
                  Reviewed_At="2026-08-06T10:00:00Z", Note="")], _rv)
     _clean = FIN.finalize(_tamper_out, review_path=_rv, run_date="2026-08-06",
                           today=datetime.date(2026, 8, 6))
@@ -482,6 +484,7 @@ for _label, _write in (
     _srv = review([dict(Review_ID="R001", Panel_ID="P1",
                         Review_Subject_SHA256=_sq.loc[0, "Review_Subject_SHA256"],
                         Reviewer_ID="RV_H", Decision="APPROVED",
+                        Marks_Checked="CONFIRMED",
                         Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                   os.path.join(_s_out, "value_review.csv"))
     _write(os.path.join(_s_out, "run_stamp.json"))
@@ -517,6 +520,7 @@ for _label, _value in (("a list", ["x"]), ("a string", "abcdef"),
     _nrv = review([dict(Review_ID="R001", Panel_ID="P1",
                         Review_Subject_SHA256=_nq.loc[0, "Review_Subject_SHA256"],
                         Reviewer_ID="RV_H", Decision="APPROVED",
+                        Marks_Checked="CONFIRMED",
                         Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                   os.path.join(_n_out, "value_review.csv"))
     _np = os.path.join(_n_out, "run_stamp.json")
@@ -558,6 +562,7 @@ for _target, _corrupt in (("figure_values_machine_qc.csv", True),
     _prv = review([dict(Review_ID="R001", Panel_ID="P1",
                         Review_Subject_SHA256=_pq.loc[0, "Review_Subject_SHA256"],
                         Reviewer_ID="RV_H", Decision="APPROVED",
+                        Marks_Checked="CONFIRMED",
                         Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                   os.path.join(_p_out, "value_review.csv"))
     with open(os.path.join(_p_out, _target), "a", encoding="utf-8") as _fh:
@@ -595,6 +600,7 @@ _q = pd.read_csv(os.path.join(_mv_src, "review_queue.csv"), dtype=object)
 review([dict(Review_ID="R001", Panel_ID="P1",
              Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
              Reviewer_ID="RV_H", Decision="APPROVED",
+             Marks_Checked="CONFIRMED",
              Reviewed_At="2026-08-06T10:00:00Z", Note="")],
        os.path.join(_mv_src, "value_review.csv"))
 _mv_dst = os.path.join(ROOT, "moved_elsewhere")
@@ -659,6 +665,7 @@ _bh_rv = review([dict(Review_ID="R001", Panel_ID="P1",
                           os.path.join(_bh_out, "review_queue.csv"),
                           dtype=object).loc[0, "Review_Subject_SHA256"],
                       Reviewer_ID="RV_H", Decision="APPROVED",
+                      Marks_Checked="CONFIRMED",
                       Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                 os.path.join(_bh_out, "value_review.csv"))
 with open(os.path.join(_bh_out, "run_manifest.csv"), "ab") as _fh:
@@ -696,6 +703,7 @@ for _label, _relative, _mutate in (
     _rv = review([dict(Review_ID="R001", Panel_ID="P1",
                        Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                        Reviewer_ID="RV_H", Decision="APPROVED",
+                       Marks_Checked="CONFIRMED",
                        Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                  os.path.join(_a_out, "value_review.csv"))
     _before = FIN.finalize(_a_out, review_path=_rv, run_date="2026-08-06",
@@ -729,6 +737,7 @@ _q = pd.read_csv(os.path.join(_led_out, "review_queue.csv"), dtype=object)
 _rv = review([dict(Review_ID="R001", Panel_ID="P1",
                    Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                    Reviewer_ID="RV_H", Decision="APPROVED",
+                   Marks_Checked="CONFIRMED",
                    Reviewed_At="2026-08-06T10:00:00Z", Note="")],
              os.path.join(_led_out, "value_review.csv"))
 _ledger = pd.read_csv(os.path.join(_led_out, "panel_artifacts.csv"), dtype=object)
@@ -767,6 +776,7 @@ _q = pd.read_csv(os.path.join(_swap_out, "review_queue.csv"), dtype=object)
 _rv = review([dict(Review_ID="R001", Panel_ID="P1",
                    Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                    Reviewer_ID="RV_EXTRA", Decision="APPROVED",
+                   Marks_Checked="CONFIRMED",
                    Reviewed_At="2026-08-06T10:00:00Z", Note="")],
               os.path.join(_swap_out, "value_review.csv"))
 _other = write_manifests(os.path.join(ROOT, "m_extra_reviewer"),
@@ -793,6 +803,7 @@ for _fault in (0, 1):
     _rv = review([dict(Review_ID="R001", Panel_ID="P1",
                        Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                        Reviewer_ID="RV_H", Decision="APPROVED",
+                       Marks_Checked="CONFIRMED",
                        Reviewed_At="2026-08-06T10:00:00Z", Note="")],
                  os.path.join(_f_out, "value_review.csv"))
     _r = FIN.finalize(_f_out, review_path=_rv, run_date="2026-08-06",
@@ -809,11 +820,80 @@ for _fault in (0, 1):
           json.load(open(os.path.join(_f_out, "finalize_stamp.json")))["Status"]
           == "COMMIT_FAILED")
 
+# An approval says a person agreed. It does not say what they LOOKED at, and
+# the two are different claims: the whole reason a panel is queued with an
+# artifact is that somebody opens it, and `Decision=APPROVED` down a column is
+# indistinguishable from a review.
+#
+# REVERT: drop REVIEW_CONFIRMATIONS from the finalizer. Every scenario above
+# still passes - they all fill the field now - and a run where nobody opened a
+# single overlay finalizes exactly like one where somebody opened all of them.
+print()
+print("an approval has to say what was checked, not only that it was approved")
+for _label, _value, _want in (("blank", "", False), ("no", "NO", False),
+                              ("confirmed", "CONFIRMED", True),
+                              ("lower case", "confirmed", True)):
+    _r = FIN.finalize(OUT, review_path=review([row(Marks_Checked=_value)]),
+                      run_date="2026-08-06",
+                      today=datetime.date(2026, 8, 6))
+    check("Marks_Checked=%s -> %s" % (_label or "blank",
+                                      "finalized" if _want else "refused"),
+          (_r["status"] == "FINALIZED") is _want
+          and (_want or any(p["check"] == "REVIEW_CONFIRMATION_MISSING"
+                            for p in _r["problems"])),
+          "%s %r" % (_r["status"], _r.get("problems")))
+check("the confirmation the mode asks for is the one it can answer",
+      RB.REVIEW_CONFIRMATIONS["OVERLAY"] == ("Marks_Checked",)
+      and set(RB.REVIEW_CONFIRMATIONS) == set(RB.REVIEW_MODES),
+      repr(RB.REVIEW_CONFIRMATIONS))
+check("and the template ships the column, so a reviewer has somewhere to say it",
+      "Marks_Checked" in FIN.value_review_columns()
+      and "Marks_Checked" in open(
+          os.path.join(HERE, "value_review_TEMPLATE.csv"),
+          encoding="utf-8").readline())
+
+# REVERT: `REVIEW_MODES[mode] not in artifact_types`. One artifact per mode is
+# a limit of the table, not of review: a mode that needs the numbers, the
+# pictures and the index tying them together can then declare one of the three
+# and be approved without the other two.
+print()
+print("a mode may require more than one artifact, and all of them must be there")
+_multi_out, _ = fresh_run("run_two_artifacts")
+_mq = pd.read_csv(os.path.join(_multi_out, "review_queue.csv"), dtype=object)
+_multi_rv = review(
+    [dict(Review_ID="R%03d" % (i + 1), Panel_ID=r["Panel_ID"],
+          Review_Subject_SHA256=r["Review_Subject_SHA256"],
+          Reviewer_ID="RV_H", Decision="APPROVED", Marks_Checked="CONFIRMED",
+          Reviewed_At="2026-08-06T10:00:00Z", Note="")
+     for i, (_, r) in enumerate(_mq.iterrows())],
+    os.path.join(_multi_out, "value_review.csv"))
+_multi = dict(RB.REVIEW_MODES)
+try:
+    # A type this run does not produce - the panels here carry both an
+    # overlay and a project, so requiring the project proves nothing.
+    RB.REVIEW_MODES["OVERLAY"] = ("OVERLAY", "CALIBRATION_PANEL")
+    _r = FIN.finalize(_multi_out, review_path=_multi_rv,
+                      run_date="2026-08-06",
+                      today=datetime.date(2026, 8, 6))
+    check("a second required artifact that is absent refuses the approval",
+          _r["status"] != "FINALIZED"
+          and any(p["check"] == "REVIEW_ARTIFACT_MISSING"
+                  for p in _r["problems"]),
+          "%s %r" % (_r["status"], _r.get("problems")))
+    check("and the refusal names the one that is missing",
+          any("CALIBRATION_PANEL" in p["detail"] for p in _r["problems"]
+              if p["check"] == "REVIEW_ARTIFACT_MISSING"),
+          repr(_r["problems"]))
+finally:
+    RB.REVIEW_MODES.clear()
+    RB.REVIEW_MODES.update(_multi)
+
 _clean_out, _ = fresh_run("run_commit_ok")
 _q = pd.read_csv(os.path.join(_clean_out, "review_queue.csv"), dtype=object)
 _rv = review([dict(Review_ID="R001", Panel_ID="P1",
                    Review_Subject_SHA256=_q.loc[0, "Review_Subject_SHA256"],
                    Reviewer_ID="RV_H", Decision="APPROVED",
+                   Marks_Checked="CONFIRMED",
                    Reviewed_At="2026-08-06T10:00:00Z", Note="")],
              os.path.join(_clean_out, "value_review.csv"))
 _ok2 = FIN.finalize(_clean_out, review_path=_rv, run_date="2026-08-06",

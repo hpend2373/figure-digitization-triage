@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.26 (full package)
+# figure-digitization-triage — v7.27 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -2733,6 +2733,31 @@ away the very thing it is for. `Axis_X_Region` and `Axis_Y_Region` are already
 columns of `panel_manifest`; wiring them into this argument belongs with the
 caller.
 
+## An approval that says what was looked at
+
+Two of the three things the BAR_MONO geometry review will need are contracts
+the review layer did not have, and both are reachable today through the modes
+that already exist - so they went in first, rather than being declared beside a
+mode nothing can reach.
+
+**A mode may require more than one artifact.** `REVIEW_MODES` mapped a mode to
+ONE `panel_artifacts.csv` type. That is a limit of the table and not of review:
+a mode that needs the numbers, the pictures and the index tying them together
+could declare one of the three and be approved without the other two. It maps
+to a tuple now and the finalizer refuses on any of them missing, naming which.
+
+**An approval has to say what was checked.** `Decision=APPROVED` says a person
+agreed. It does not say what they opened, and the whole reason a panel is
+queued with an artifact is that somebody opens it - a column of APPROVED is
+indistinguishable from a review. `value_review.csv` carries `Marks_Checked`,
+`RB.REVIEW_CONFIRMATIONS` says which confirmations a mode requires, and the
+finalizer refuses an approval that does not carry them
+(`REVIEW_CONFIRMATION_MISSING`). Both shipped modes offer a picture of the
+marks and nothing else, so both ask the one question that picture can answer;
+the axis and calibration confirmations arrive with the mode that shows an axis,
+because a confirmation field nobody can act on is worse than none.
+`MIGRATION.md` has the column change.
+
 **Still not done, and named as such:** the panel picture is a diagnostic
 artifact, not a required BAR_MONO review artifact. It is not in
 `panel_artifacts.csv`, not in `Review_Subject_SHA256`, its absence does not
@@ -2751,14 +2776,14 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
-| `test_finalize.py` | 168 |
+| `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 123 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1731** |
+| **total** | **1739** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

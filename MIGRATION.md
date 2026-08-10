@@ -149,3 +149,30 @@ publication 127's bars are 182-188 px wide.
 in order to make a group disappear, that group will now appear with a named
 refusal instead - which is the intended change, and the row can be resolved by a
 reviewer like any other.
+
+## `value_review.csv` gains `Marks_Checked` in v7.27
+
+An approval said a person agreed. It did not say what they LOOKED at, and the
+two are different claims: the whole reason a panel is queued with an artifact
+is that somebody opens it, and `Decision=APPROVED` typed down a column is
+indistinguishable from a review that happened.
+
+`value_review.csv` now carries `Marks_Checked`, and the finalizer refuses an
+approval that does not say `CONFIRMED` there - `REVIEW_CONFIRMATION_MISSING`.
+Which confirmations a panel needs comes from its `Review_Mode`, so a mode that
+puts more in front of a reviewer can ask about more.
+
+| | before | v7.27 |
+|---|---|---|
+| columns | `Review_ID, Panel_ID, Review_Subject_SHA256, Reviewer_ID, Decision, Reviewed_At, Note` | ... `Decision, Marks_Checked, Reviewed_At, Note` |
+| an APPROVED row with the column blank | finalized | `REVIEW_CONFIRMATION_MISSING` |
+
+**Existing review files need one column added.** The value is `CONFIRMED`
+(case-insensitive) for a panel whose marks were actually checked. There is no
+back-fill worth doing automatically: a script that writes `CONFIRMED` into every
+row of an old file reproduces exactly the ambiguity the column exists to remove.
+
+`REVIEW_MODES` also became mode -> a TUPLE of required artifact types rather
+than one. Nothing about the two shipped modes changes; a mode that needs the
+numbers, the pictures and the index tying them together now has somewhere to
+say so.

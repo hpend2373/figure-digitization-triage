@@ -24,6 +24,15 @@ Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        unit_manifest.csv, panel_manifest.csv,
                        series_manifest.csv, position_manifest.csv,
                        reader_config.csv
+
+                       identity_resolution.csv is OPTIONAL. It holds the series
+                       identities a person supplied for bars whose fill the
+                       reader could not sample - publication 127 prints two,
+                       fifteen pixels tall - and most batches need none. Absent
+                       means "nobody named anything", and such a cell is queued
+                       rather than guessed. It is hashed into the stamp either
+                       way, so adding one later changes the fingerprint every
+                       approval is bound to.
 Output (OUTPUT_DIR):   figure_values_machine_qc.csv <- passed the gate; NOT poolable
                        review_queue.csv            <- one row per panel a person
                                                       must now look at
@@ -81,7 +90,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.28"
+PIPELINE_VERSION = "7.29"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -158,6 +167,17 @@ MANIFEST_FILES = {
     "configs": "reader_config.csv",
 }
 
+#: Manifests a batch may legitimately not have. `identity_resolution.csv` is
+#: empty for every publication whose fills the reader could measure, and making
+#: it mandatory would put an empty file in 116 manifest directories - which is
+#: how a required file becomes a file nobody reads. Absent means "no cell was
+#: named by a person", which is a different claim from "this batch has nothing
+#: to say about identities", and the run manifest records which panels are still
+#: waiting for one either way.
+OPTIONAL_MANIFEST_FILES = {
+    "resolutions": "identity_resolution.csv",
+}
+
 RUN_MANIFEST_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Mark_Type", "Run_State",
     "Cells_Declared", "Cells_Read", "Cells_With_Dispersion",
@@ -205,6 +225,14 @@ REVIEW_MODES = {
     "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
                           "CALIBRATION_PANEL", "CALIBRATION_PANEL_META",
                           "GEOMETRY_ROW_CROP"),
+    # The same review, plus the rows a person signed. A separate mode rather
+    # than a sixth entry above, because the requirement is per PANEL: most
+    # BAR_MONO panels have no human-named cell, and a mode that demanded an
+    # identity file from all of them would make the file mandatory - which is
+    # how `Identity_Checked` becomes a column everybody types CONFIRMED into.
+    "BAR_MONO_GEOMETRY_RESOLVED": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
+                                   "CALIBRATION_PANEL", "CALIBRATION_PANEL_META",
+                                   "GEOMETRY_ROW_CROP", "IDENTITY_RESOLUTION"),
 }
 
 #: Mode -> what the reviewer must SAY they checked, as columns of
@@ -227,6 +255,14 @@ REVIEW_CONFIRMATIONS = {
     # checked the one thing this mode exists for.
     "BAR_MONO_GEOMETRY": ("Marks_Checked", "Axis_Labels_Checked",
                           "Calibration_Checked"),
+    # And, for a panel where a person named a series the reader could not, that
+    # the naming was checked. It is the one claim in this whole pipeline with no
+    # measurement behind it: the value is the reader's, the axis is the
+    # reader's, and WHICH SERIES the bar belongs to is somebody's reading of a
+    # legend. An approval that does not say so out loud is an approval of a
+    # number whose row heading came from nowhere in particular.
+    "BAR_MONO_GEOMETRY_RESOLVED": ("Marks_Checked", "Axis_Labels_Checked",
+                                   "Calibration_Checked", "Identity_Checked"),
 }
 
 #: What a reviewer writes in a confirmation column. Blank is not CONFIRMED.
@@ -413,6 +449,19 @@ def load_manifests(directory):
             out[key] = pd.read_csv(path, dtype=object).fillna("")
         except Exception as exc:                 # malformed CSV, encoding, perms
             broken.append("%s (%s: %s)" % (name, type(exc).__name__, exc))
+    for key, name in OPTIONAL_MANIFEST_FILES.items():
+        path = os.path.join(directory, name)
+        if not os.path.exists(path):
+            # An empty frame WITH the columns, so every reader downstream sees
+            # the same shape whether the file was there or not - a `KeyError` on
+            # `Resolution_ID` for the batches that need no resolutions is the
+            # bug an optional manifest invites.
+            out[key] = pd.DataFrame(columns=BM.identity_resolution_columns())
+            continue
+        try:
+            out[key] = pd.read_csv(path, dtype=object).fillna("")
+        except Exception as exc:
+            broken.append("%s (%s: %s)" % (name, type(exc).__name__, exc))
     if missing or broken:
         parts = []
         if missing:
@@ -555,6 +604,14 @@ GEOMETRY_ARTIFACT_TYPES = ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
 #: is a separate type rather than a fifth entry in the tuple above.
 GEOMETRY_ROW_ARTIFACT_TYPE = "GEOMETRY_ROW_CROP"
 
+#: The rows a person signed, copied into the run so the approval is bound to
+#: them. `identity_resolution.csv` lives in the manifest directory and is hashed
+#: with the other manifests, which is what makes it un-editable after the fact -
+#: but the reviewer of a PANEL is being asked about that panel's resolutions,
+#: and a ledger entry per panel is what lets the finalizer check they were there
+#: to be read.
+IDENTITY_ARTIFACT_TYPE = "IDENTITY_RESOLUTION"
+
 
 def write_geometry_review(out_dir, pairs, pad=24):
     """The BAR_MONO geometry artifacts for one run, written once.
@@ -632,6 +689,33 @@ def _write_geometry_review(out_dir, pairs, pad=24):
         out[pid] = (list(zip(GEOMETRY_ARTIFACT_TYPES,
                              (csv_path, index, stem, meta)))
                     + [(GEOMETRY_ROW_ARTIFACT_TYPE, p) for p in crops])
+    return out
+
+
+def write_identity_resolutions(out_dir, rows_by_panel):
+    """{Panel_ID: [(IDENTITY_RESOLUTION, path)]} for the panels a person named.
+
+    One CSV per panel, the manifest's own columns, verbatim. Not a summary and
+    not a join: what a reviewer is asked to check is what was written, including
+    the evidence and the row hash it was written against.
+    """
+    out = {}
+    if not rows_by_panel:
+        return out
+    review_dir = os.path.join(out_dir, "geometry-review")
+    os.makedirs(review_dir, exist_ok=True)
+    columns = BM.identity_resolution_columns()
+    for pid, rows in sorted(rows_by_panel.items()):
+        if not rows:
+            continue
+        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in pid)
+        path = os.path.join(review_dir, "identity__%s.csv" % safe)
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=columns)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({c: _s(row.get(c)) for c in columns})
+        out[pid] = [(IDENTITY_ARTIFACT_TYPE, path)]
     return out
 
 
@@ -743,32 +827,137 @@ def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
     return rows_by_panel, pairs, refusals
 
 
-def _geometry_marks(records, series_rows, positions):
+class IdentityResolutionError(Exception):
+    """A human-supplied identity that does not apply to this measurement.
+
+    Not a manifest problem, because detecting it needs the raster:
+    `check_identity_resolution` has already checked everything that can be
+    checked on paper. Not a per-cell skip either - it refuses the whole panel.
+    A resolution that names a bar this measurement does not have, or one the
+    reader named itself, means the person was reading a DIFFERENT measurement of
+    this panel, and their other rows for it are then equally unsafe.
+    """
+
+
+def apply_identity_resolutions(records, resolution_rows):
+    """{(group, slot): identity} for the cells a person named, or refuse.
+
+    The three things that cannot be checked before the panel is measured:
+
+    * the row exists - a resolution naming a bar the reader never found
+    * the reader had NOT already named it - `identity_resolution.csv` supplies
+      an identity that is missing, it does not overrule one that is present.
+      That is the whole difference between this file and an override channel,
+      and it is enforced here because only the measurement knows
+    * the measurement it was written against is the one in hand -
+      `Geometry_Row_SHA256` on the resolution against the row's own stamp
+
+    Raises `IdentityResolutionError` for any of them.
+    """
+    by_slot = {(_s(r.get("group")), r.get("slot")): r for r in records
+               if r.get("slot") is not None}
+    out = {}
+    for row in resolution_rows:
+        group = _s(row.get("Group_ID"))
+        slot = int(float(_s(row.get("Geometry_Slot"))))
+        rid = _s(row.get("Resolution_ID"))
+        record = by_slot.get((group, slot))
+        if record is None:
+            raise IdentityResolutionError(
+                "IDENTITY_RESOLUTION_NO_SUCH_ROW: %s names %s/slot %d and the "
+                "measurement has no such row (it has %s)"
+                % (rid, group, slot,
+                   ", ".join("%s/slot %s" % k for k in sorted(
+                       by_slot, key=lambda k: (k[0], k[1]))) or "none"))
+        if not MONO_GEOMETRY.measurement_usable(record):
+            raise IdentityResolutionError(
+                "IDENTITY_RESOLUTION_ON_A_REFUSAL: %s names %s/slot %d, whose "
+                "measurement was refused (%s). An identity cannot rescue a "
+                "number that was never read"
+                % (rid, group, slot, _s(record.get("error")) or "no value"))
+        if _s(record.get("resolved_fill_pattern")):
+            raise IdentityResolutionError(
+                "IDENTITY_RESOLUTION_OVERRIDES_MEASUREMENT: %s names %s/slot "
+                "%d, which the figure already resolved as %s. This file "
+                "supplies identities the reader could not measure; it does not "
+                "overrule ones it did"
+                % (rid, group, slot, _s(record.get("resolved_fill_pattern"))))
+        stamped = _s(record.get("geometry_row_sha256"))
+        want = _s(row.get("Geometry_Row_SHA256")).lower()
+        if stamped and want and stamped != want:
+            raise IdentityResolutionError(
+                "IDENTITY_RESOLUTION_STALE: %s was written against row %s... "
+                "and %s/slot %d now measures %s.... Re-read the bar in this "
+                "run's mono_bar_geometry.csv before naming it"
+                % (rid, want[:16], group, slot, stamped[:16]))
+        out[(group, slot)] = dict(
+            series=_s(row.get("Resolved_Series_ID")),
+            pattern=_upper(row.get("Resolved_Fill_Pattern")),
+            resolution=rid,
+            evidence=_upper(row.get("Evidence_Type")))
+    return out
+
+
+def _geometry_marks(records, series_rows, positions, resolved=None):
     """Resolved geometry rows, in the shape the panel loop already reads.
 
     The identity comes from `resolved_fill_pattern` - what the FIGURE said the
     bar's fill is - matched against the `Bar_Fill_Pattern` each series declares.
-    A bar the figure could not name yields no mark, so its cell goes missing
-    and is queued, which is the point: `identity_resolution.csv` is where a
-    person names it, not this function.
+    A bar the figure could not name goes to `resolved`, which is what a person
+    wrote in `identity_resolution.csv`; a bar in neither yields no mark, so its
+    cell goes missing and is queued.
+
+    Every mark carries where its identity came from. `Identity_Source` is AUTO
+    or HUMAN, `Identity_Evidence_Type` is what backs it, and `Resolution_ID`
+    points at the row a person signed - so a value in
+    `figure_values_accepted.csv` can be asked "who named this series", which
+    before this stopped at the raw marks and was answerable only by reading two
+    files side by side.
     """
     by_fill = {}
     for row in series_rows:
         by_fill.setdefault(_upper(row.get("Bar_Fill_Pattern")), []).append(
             _s(row.get("Series_ID")))
+    resolved = dict(resolved or {})
     out = []
     for record in records:
-        if record.get("error") or record.get("value") is None:
+        # `measurement_usable`, not "no error": BAR_TOO_SMALL_TO_SAMPLE is a
+        # complaint about the FILL, and the mean and dispersion of a bar with no
+        # interior are measured exactly as on any other bar. Filed as an error
+        # like every other code it dropped publication 127's two fifteen-pixel
+        # values for a reason that was never about the values.
+        if not MONO_GEOMETRY.measurement_usable(record):
             continue
         pattern = _upper(record.get("resolved_fill_pattern"))
-        named = by_fill.get(pattern, [])
-        if len(named) != 1:
-            # No series declares this fill, or two do. Either way the bar
-            # cannot be attributed, and a mark with a guessed series is the
-            # failure this whole design exists to prevent.
+        human = resolved.get((_s(record.get("group")), record.get("slot")))
+        if pattern:
+            named = by_fill.get(pattern, [])
+            if len(named) != 1:
+                # No series declares this fill, or two do. Either way the bar
+                # cannot be attributed, and a mark with a guessed series is the
+                # failure this whole design exists to prevent.
+                continue
+            series, identity = named[0], dict(
+                Identity_Source="AUTO",
+                Identity_Evidence_Type=BM.AUTO_IDENTITY_EVIDENCE[0],
+                Resolution_ID="", Auto_Fill_Pattern=pattern,
+                Resolved_Fill_Pattern=pattern)
+        elif human:
+            series, pattern = human["series"], human["pattern"]
+            identity = dict(
+                Identity_Source="HUMAN",
+                Identity_Evidence_Type=human["evidence"],
+                Resolution_ID=human["resolution"],
+                # Blank, and it must stay blank: the reader measured no fill for
+                # this bar. Filling it in with the person's answer is the audit
+                # trail saying the machine decided something a person did.
+                Auto_Fill_Pattern="",
+                Resolved_Fill_Pattern=pattern)
+        else:
             continue
         out.append(dict(
-            series=named[0], x_label=_s(record.get("group")),
+            identity,
+            series=series, x_label=_s(record.get("group")),
             mean=record.get("value"), dispersion=record.get("dispersion"),
             top_px=record.get("edge_px_image"),
             cap_px=record.get("cap_px_image"),
@@ -804,7 +993,7 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
               file_root=".", project_dir=None, review_dir=None, geometry=None,
-              geometry_refusal=None):
+              geometry_refusal=None, resolutions=()):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -969,7 +1158,19 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                     "PANEL_GEOMETRY_UNRESOLVED", declared=declared,
                     missing=all_cells,
                     detail="the geometry pass produced nothing for this panel")
-            rows = _geometry_marks(geometry, series_rows, position_rows)
+            try:
+                human_identities = apply_identity_resolutions(geometry,
+                                                             resolutions)
+            except IdentityResolutionError as exc:
+                # The whole panel. A resolution written against a different
+                # measurement of this panel makes every other resolution for it
+                # suspect, so nothing here is read on the strength of the rows
+                # that happened to still match.
+                return PanelOutcome(
+                    "SERIES_IDENTITY_UNRESOLVED", declared=declared,
+                    missing=all_cells, detail="%s" % exc)
+            rows = _geometry_marks(geometry, series_rows, position_rows,
+                                   resolved=human_identities)
             if not rows:
                 # Why, not just "nothing". Every row of this panel refused,
                 # and the reasons are on the rows - reported as "the reader
@@ -1672,6 +1873,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         units=m["units"], source_documents=m["source_documents"],
         source_figures=m["source_figures"],
         source_panels=m["source_panels"], reviewers=m["reviewers"],
+        resolutions=m.get("resolutions"),
         requested_run_mode=requested_run_mode,
         file_root=file_root,
         check_files=check_files)
@@ -1750,6 +1952,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         measure_bar_mono_figures(
             [row for _, row in m["panels"].iterrows()], positions_by_panel,
             series_by_panel, options_by_config, file_root=file_root))
+    resolutions_by_panel = {}
+    for _, row in m.get("resolutions", pd.DataFrame()).iterrows():
+        resolutions_by_panel.setdefault(_s(row.get("Panel_ID")), []).append(row)
     geometry_artifacts = {}
     if geometry_pairs:
         try:
@@ -1770,6 +1975,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             return dict(status="GEOMETRY_REVIEW_FAILED", detail="%s" % exc,
                         panels=0, values=0, machine_qc=0, accepted=0,
                         problems=0)
+        # Beside the geometry bundle, and only for the panels that have them.
+        # Written even if the join then refuses the panel: the ledger records
+        # what this run wrote, and a refused resolution is exactly the thing
+        # somebody needs to open.
+        for pid_, artifacts_ in write_identity_resolutions(
+                output_dir, {p: r for p, r in resolutions_by_panel.items()
+                             if p in geometry_artifacts}).items():
+            geometry_artifacts[pid_] = geometry_artifacts.get(pid_, []) + artifacts_
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -1781,7 +1994,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 raw_dir, file_root=file_root, project_dir=project_dir,
                 review_dir=review_dir,
                 geometry=geometry_rows_by_panel.get(pid),
-                geometry_refusal=geometry_refusals.get(pid))
+                geometry_refusal=geometry_refusals.get(pid),
+                resolutions=resolutions_by_panel.get(pid, ()))
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by
@@ -2107,7 +2321,10 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # blank mode here - it cannot, because a digitized value with no saved
         # project is already MISSING_PROVENANCE at the gate, but the finalizer
         # refuses a blank mode anyway rather than trusting that ordering.
-        mode = ("BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
+        mode = ("BAR_MONO_GEOMETRY_RESOLVED"
+                if row["Panel_ID"] in geometry_artifacts
+                and resolutions_by_panel.get(row["Panel_ID"])
+                else "BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
                 else "OVERLAY" if overlay_file
                 else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({

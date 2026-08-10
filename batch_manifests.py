@@ -40,6 +40,11 @@ import unicodedata
 
 import pandas as pd
 
+# At module level, not inside a function like the other `kernel` uses here: the
+# identity vocabularies below are module constants and cannot be resolved
+# lazily. `kernel` imports nothing from this package, so there is no cycle.
+import kernel as _kernel
+
 
 # --------------------------------------------------------------------------
 # vocabularies
@@ -685,17 +690,20 @@ def source_panel_inventory_columns():
 #: `identity_resolution.csv` would be entering an automatic measurement by hand
 #: for a cell where the reader explicitly could not make one. Only the human
 #: half is accepted in that file.
-AUTO_IDENTITY_EVIDENCE = ("FILL_MEASURED",)
-HUMAN_IDENTITY_EVIDENCE = ("LEGEND_DECLARED", "TEXT_DECLARED",
-                           "REVIEWER_INSPECTION")
-IDENTITY_EVIDENCE = AUTO_IDENTITY_EVIDENCE + HUMAN_IDENTITY_EVIDENCE
+#: One definition, in `kernel`, because the halves are enforced in two places:
+#: this module rejects FILL_MEASURED in `identity_resolution.csv`, and the figure
+#: gate refuses a VALUE whose `Identity_Source` and `Identity_Evidence_Type`
+#: disagree. Two copies of the tuple would be two chances for the enum a
+#: manifest is validated against to drift from the one values are judged by.
+AUTO_IDENTITY_EVIDENCE = _kernel.FIG_AUTO_IDENTITY_EVIDENCE
+HUMAN_IDENTITY_EVIDENCE = _kernel.FIG_HUMAN_IDENTITY_EVIDENCE
+IDENTITY_EVIDENCE = _kernel.FIG_IDENTITY_EVIDENCE
 
 #: Strongest first is not the tuple order, so the ranking is written out. The
 #: previous comment said "ordered least to most trusted" over a tuple whose last
 #: entry is the WEAKEST evidence there is - a reviewer's own reading, with no
 #: legend and no sentence behind it.
-IDENTITY_EVIDENCE_RANK = {"FILL_MEASURED": 4, "LEGEND_DECLARED": 3,
-                          "TEXT_DECLARED": 2, "REVIEWER_INSPECTION": 1}
+IDENTITY_EVIDENCE_RANK = _kernel.FIG_IDENTITY_EVIDENCE_RANK
 
 
 def identity_resolution_columns():
@@ -735,9 +743,18 @@ def identity_resolution_columns():
     One row per (Panel_ID, Group_ID, Geometry_Slot). The slot is the geometric
     position the reader found, which is how the row is joined to a measurement -
     it is NOT what names the series, and `Resolved_Series_ID` is.
+
+    And it names the measurement it was written against. `Geometry_Row_SHA256`
+    is copied from `mono_bar_geometry.csv` - the same file the person is reading
+    the bar off - and the join refuses when it does not match the row that
+    (Panel_ID, Group_ID, Geometry_Slot) now identifies. Without it the triple is
+    a POSITION: re-run after a threshold change, a re-scan, a corrected panel
+    box, and the resolution silently names whatever bar now sits in slot 2. That
+    is the same "identity by position" this file exists to avoid, one level up.
     """
     return [
         "Resolution_ID", "Panel_ID", "Group_ID", "Geometry_Slot",
+        "Geometry_Row_SHA256",
         "Resolved_Series_ID", "Resolved_Fill_Pattern", "Evidence_Type",
         "Evidence_Artifact", "Evidence_Artifact_SHA256", "Reviewer_ID",
         "Reviewed_At", "Note",
@@ -869,9 +886,190 @@ def load_reader_configs(config_df, mark_type_by_config, flag):
     return out
 
 
+def check_identity_resolution(resolutions, panels, series, flag,
+                              reviewer_index=None, file_root=".",
+                              check_files=True):
+    """Everything about a human-supplied identity that can be checked on paper.
+
+    What cannot be checked here is whether the row it names EXISTS and whether
+    the reader had already named it - both need the measurement, so both are
+    enforced at join time by `run_batch.apply_identity_resolutions`. This
+    function is the part that must not wait for a raster to be opened: a
+    misspelled `Resolved_Series_ID` or an unregistered reviewer is not worth
+    reading 116 publications to discover.
+
+    Returns {(Panel_ID, Group_ID, slot): row} for the rows that passed.
+    """
+    import datetime
+    index = {}
+    if resolutions is None or not len(resolutions):
+        return index
+    missing = [c for c in identity_resolution_columns()
+               if c not in getattr(resolutions, "columns", ())]
+    if missing:
+        flag("identity_resolution", "SCHEMA_INCOMPLETE",
+             "missing columns: " + ", ".join(missing))
+        return index
+    panel_mark, series_fill = {}, {}
+    for _, p in panels.iterrows():
+        panel_mark[str(p.get("Panel_ID", "")).strip()] = \
+            str(p.get("Mark_Type", "")).strip().upper()
+    for _, s in series.iterrows():
+        series_fill[(str(s.get("Panel_ID", "")).strip(),
+                     str(s.get("Series_ID", "")).strip())] = \
+            str(s.get("Bar_Fill_Pattern", "")).strip().upper()
+    seen_ids, by_group_series = set(), {}
+    for i, r in resolutions.iterrows():
+        line = "identity_resolution:%d" % (i + 2)
+        rid = str(r.get("Resolution_ID", "")).strip()
+        pid = str(r.get("Panel_ID", "")).strip()
+        group = str(r.get("Group_ID", "")).strip()
+        sid = str(r.get("Resolved_Series_ID", "")).strip()
+        for column in ("Resolution_ID", "Panel_ID", "Group_ID", "Geometry_Slot",
+                       "Geometry_Row_SHA256", "Resolved_Series_ID",
+                       "Resolved_Fill_Pattern", "Evidence_Type", "Reviewer_ID",
+                       "Reviewed_At"):
+            if blank(r.get(column)):
+                flag(line, "MISSING_REQUIRED", column)
+        if not rid or not pid or not group or blank(r.get("Geometry_Slot")):
+            continue
+        if not SAFE_ID.match(rid):
+            flag(line, "UNSAFE_ID",
+                 "Resolution_ID=%r is interpolated into an artifact filename" % rid)
+        if rid in seen_ids:
+            flag(line, "DUPLICATE_RESOLUTION_ID", rid)
+            continue
+        seen_ids.add(rid)
+        try:
+            slot = _as_int(r.get("Geometry_Slot"))
+            if slot < 0:
+                raise ValueError("must not be negative")
+        except (TypeError, ValueError) as exc:
+            flag(line, "BAD_GEOMETRY_SLOT", "%r: %s" % (r.get("Geometry_Slot"), exc))
+            continue
+        if pid not in panel_mark:
+            flag(line, "PANEL_NOT_FOUND", pid)
+            continue
+        # Only BAR_MONO identifies a series by its fill, so only BAR_MONO can
+        # have a cell whose fill could not be sampled. A resolution against a
+        # colour panel names a series the reader separated by colour and did not
+        # fail to separate - it is either a mistake or an override, and an
+        # override of a working reader is what this file must never become.
+        if panel_mark.get(pid) != "BAR_MONO":
+            flag(line, "IDENTITY_RESOLUTION_WRONG_MARK_TYPE",
+                 "%s is Mark_Type=%s; a fill identity is a BAR_MONO fact"
+                 % (pid, panel_mark.get(pid) or "(blank)"))
+        if (pid, sid) not in series_fill:
+            flag(line, "IDENTITY_RESOLUTION_UNKNOWN_SERIES",
+                 "Resolved_Series_ID=%s is not declared for %s" % (sid, pid))
+        else:
+            pattern = str(r.get("Resolved_Fill_Pattern", "")).strip().upper()
+            if pattern and pattern not in BAR_FILL_PATTERNS:
+                flag(line, "BAD_RESOLVED_FILL_PATTERN",
+                     "%s (expected %s)" % (pattern, "/".join(BAR_FILL_PATTERNS)))
+            elif pattern and pattern != series_fill[(pid, sid)]:
+                # Two declarations of the same fact, disagreeing. Taking either
+                # one silently would let a resolution re-label a series without
+                # touching the series manifest, which is where a series' fill is
+                # declared and reviewed.
+                flag(line, "IDENTITY_RESOLUTION_FILL_CONTRADICTS_SERIES",
+                     "this row names %s as %s; series_manifest declares %s=%s"
+                     % (sid, pattern, sid, series_fill[(pid, sid)] or "(blank)"))
+        evidence = str(r.get("Evidence_Type", "")).strip().upper()
+        if evidence in AUTO_IDENTITY_EVIDENCE:
+            flag(line, "IDENTITY_EVIDENCE_NOT_HUMAN",
+                 "Evidence_Type=%s is what the READER writes when it could "
+                 "measure the fill. This file is for the cells where it could "
+                 "not, so entering it here records a measurement nobody made. "
+                 "Expected %s" % (evidence, "/".join(HUMAN_IDENTITY_EVIDENCE)))
+        elif evidence and evidence not in HUMAN_IDENTITY_EVIDENCE:
+            flag(line, "BAD_IDENTITY_EVIDENCE_TYPE",
+                 "%s (expected %s)" % (evidence, "/".join(HUMAN_IDENTITY_EVIDENCE)))
+        artifact = str(r.get("Evidence_Artifact", "")).strip()
+        want = str(r.get("Evidence_Artifact_SHA256", "")).strip().lower()
+        if evidence == "REVIEWER_INSPECTION":
+            # The weakest evidence there is: no legend, no sentence, a person
+            # looking. There is no artifact to point at, so what is required
+            # instead is that they say what they saw - a blank Note here is an
+            # unexplained relabelling of a series.
+            if blank(r.get("Note")):
+                flag(line, "IDENTITY_EVIDENCE_UNEXPLAINED",
+                     "Evidence_Type=REVIEWER_INSPECTION has no artifact to "
+                     "re-examine, so the Note must say what was seen")
+        elif evidence in HUMAN_IDENTITY_EVIDENCE:
+            if not artifact:
+                flag(line, "MISSING_REQUIRED", "Evidence_Artifact")
+            if not want:
+                flag(line, "MISSING_REQUIRED", "Evidence_Artifact_SHA256")
+        if artifact and want and check_files:
+            # The same two rules the source rasters live under. Confined to
+            # `file_root`, because a manifest names evidence inside the corpus
+            # and an absolute path would let it point at any file on the machine
+            # that happens to hash correctly. And hashed, because a hash that is
+            # not checked is a hash that drifts: a legend crop edited after the
+            # resolution was written is a different piece of evidence.
+            root = os.path.realpath(file_root)
+            candidate = artifact if os.path.isabs(artifact) \
+                else os.path.join(root, artifact)
+            path = os.path.realpath(candidate)
+            if path != root and not path.startswith(root + os.sep):
+                flag(line, "IDENTITY_EVIDENCE_ARTIFACT_OUTSIDE_ROOT",
+                     "%s resolves outside %s" % (artifact, root))
+            elif not os.path.exists(path):
+                flag(line, "IDENTITY_EVIDENCE_ARTIFACT_MISSING", artifact)
+            else:
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                got = h.hexdigest()
+                if got != want:
+                    flag(line, "IDENTITY_EVIDENCE_ARTIFACT_HASH_MISMATCH",
+                         "%s hashes %s..., the row says %s..."
+                         % (artifact, got[:16], want[:16]))
+        who = str(r.get("Reviewer_ID", "")).strip()
+        if reviewer_index is not None and who and who not in reviewer_index:
+            flag(line, "REVIEWER_NOT_REGISTERED", who)
+        elif reviewer_index is not None and who:
+            kind = str(reviewer_index[who].get("Reviewer_Record_Type", "")) \
+                .strip().upper()
+            if kind != "HUMAN":
+                # A series named by a process is `FILL_MEASURED`, and that is
+                # the reader's word, written in the geometry file. A non-human
+                # registry entry signing a human resolution is the audit trail
+                # saying a person did what a program did.
+                flag(line, "IDENTITY_RESOLUTION_NOT_HUMAN",
+                     "%s is Reviewer_Record_Type=%s; a human resolution is "
+                     "made by a person" % (who, kind or "(blank)"))
+        when = str(r.get("Reviewed_At", "")).strip()
+        if when:
+            try:
+                datetime.date.fromisoformat(when)
+            except ValueError:
+                flag(line, "BAD_REVIEWED_AT", "%r is not an ISO date" % when)
+        key = (pid, group, slot)
+        if key in index:
+            flag(line, "IDENTITY_RESOLUTION_DUPLICATE",
+                 "%s/%s/slot %d is resolved twice" % (pid, group, slot))
+            continue
+        index[key] = r
+        # One bar per series per group. Two slots of one group named as the same
+        # series is a group with two of the same bar, which no figure draws and
+        # which would put two values in one cell.
+        if sid:
+            if (pid, group, sid) in by_group_series:
+                flag(line, "IDENTITY_RESOLUTION_SERIES_TWICE_IN_GROUP",
+                     "%s is named twice in %s/%s (slots %d and %d)"
+                     % (sid, pid, group, by_group_series[(pid, group, sid)], slot))
+            else:
+                by_group_series[(pid, group, sid)] = slot
+    return index
+
+
 def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
-                             reviewers=None, requested_run_mode=None,
+                             reviewers=None, resolutions=None,
+                             requested_run_mode=None,
                              file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
 
@@ -1585,6 +1783,14 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag("panels:%s" % pid, "POSITION_FACTOR_INCONSISTENT",
                  "the positions of one panel name %d different factors (%s)"
                  % (len(p_factors), ", ".join(sorted(p_factors))))
+
+    # ------------------------------------------------ human-named identities
+    # Checked last because it is the only manifest that may legitimately be
+    # absent: a batch where every fill was measurable needs no resolutions, and
+    # `check_identity_resolution` returns immediately for an empty frame.
+    check_identity_resolution(resolutions, panels, series, flag,
+                              reviewer_index=reviewer_index,
+                              file_root=file_root, check_files=check_files)
 
     # -------------------------------------------------------------- configs
     parsed = load_reader_configs(configs, mark_by_config, flag)

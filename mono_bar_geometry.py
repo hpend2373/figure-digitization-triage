@@ -1839,6 +1839,35 @@ UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
 #: something a person did.
 IDENTITY_SOURCES = ("AUTO", "HUMAN")
 
+#: Error codes that refuse the IDENTITY and not the MEASUREMENT.
+#:
+#: `BAR_TOO_SMALL_TO_SAMPLE` says the bar has no interior left to sample once
+#: its own outline is taken off. The mean and the dispersion are unaffected -
+#: they come from the top edge and the cap, measured exactly as on any other bar
+#: - and publication 127 prints two bars like this. Filed under `error` with
+#: every other code, the row was dropped by anything reading the panel, so the
+#: two values were lost for a reason that was never about the values. What is
+#: missing is the SERIES, which is what `identity_resolution.csv` supplies.
+#:
+#: A code goes in here only if the number would be publishable with a series
+#: name attached. Everything else - no seed support, an unresolved stroke scale,
+#: a bar narrower than `MIN_BAR_PX` - refuses the measurement itself and no
+#: human resolution can rescue it.
+FILL_ONLY_ERRORS = ("BAR_TOO_SMALL_TO_SAMPLE",)
+
+
+def measurement_usable(record):
+    """Whether this row's NUMBER stands, whatever happened to its identity.
+
+    True for a clean row, and for a row whose only complaint is in
+    `FILL_ONLY_ERRORS`. False for a refusal and for a row with no value: a
+    provisional value is printed for auditing and is not a reading.
+    """
+    if record.get("value") is None:
+        return False
+    error = str(record.get("error") or "").strip()
+    return not error or error in FILL_ONLY_ERRORS
+
 #: record field -> artifact column, for the fields that get a column of their
 #: own. Everything else in the record goes to `Diagnostics_JSON`.
 ARTIFACT_FIELD_COLUMNS = (

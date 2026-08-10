@@ -1279,6 +1279,36 @@ MARK_CARRIED = (
     ("slot_residual_px", "Slot_Assignment_Residual_Px"),
 )
 
+#: Carried exactly like `MARK_CARRIED` and listed apart from it, because these
+#: are not universal: only a monochrome bar HAS them. Every reader emits a bar
+#: top definition and a calibration residual; only BAR_MONO has a series whose
+#: identity is a separate claim from its number, so a line panel's value rows
+#: carry none of the six and must not be required to.
+#:
+#: What they carry is WHERE THE VALUE CAME FROM AND WHO NAMED ITS SERIES. A
+#: BAR_MONO value is a measurement of one anonymous row plus an identity
+#: established somewhere else, and until these six columns existed the join
+#: stopped at the raw marks: `figure_values_accepted.csv` held a mean under a
+#: series heading with nothing binding it to the row it was measured from, and
+#: no way to ask whether a person or the figure decided which series it was.
+IDENTITY_CARRIED = (
+    # `Geometry_Row_SHA256` is the anonymous measurement's own hash, taken
+    # before any identity touched the record - so it still answers "is this the
+    # same bar the reviewer approved" after a resolution is applied.
+    ("Geometry_Row_SHA256", "Geometry_Row_SHA256"),
+    # `Auto_Fill_Pattern` is what the READER measured and stays blank when it
+    # measured nothing; `Resolved_Fill_Pattern` is what the series was finally
+    # taken to be. Two columns, because collapsing them loses the distinction
+    # the geometry artifact is built around.
+    ("Auto_Fill_Pattern", "Auto_Fill_Pattern"),
+    ("Resolved_Fill_Pattern", "Resolved_Fill_Pattern"),
+    ("Identity_Source", "Identity_Source"),
+    ("Identity_Evidence_Type", "Identity_Evidence_Type"),
+    ("Resolution_ID", "Resolution_ID"),
+)
+
+
+
 ASSOCIATION_CARRIED = (
     "Association_Type", "Association_Value", "P_Value", "P_Value_Method",
     "N_Pairs", "P_Value_Extraction_Method", "Ties_Present",
@@ -1452,7 +1482,7 @@ def to_value_records(rows, statistic_type, unit_id, x_factor=None,
         if not levels:
             raise ValueError("at least one Cell_Key factor must be supplied")
         record = dict(Unit_ID=unit_id, Cell_Key=_cell_key(levels))
-        for source, column in MARK_CARRIED:
+        for source, column in MARK_CARRIED + IDENTITY_CARRIED:
             if row.get(source) is not None:
                 record[column] = row.get(source)
         if kind == "CONTINUOUS":

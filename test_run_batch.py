@@ -523,6 +523,13 @@ check("every mandatory manifest is named in the runner's usage text",
 check("the usage text says how many there are",
       "eleven" in _doc and len(RB.MANIFEST_FILES) == 11,
       "%d manifests" % len(RB.MANIFEST_FILES))
+# And the optional one, said to be optional. A file the runner reads and the
+# usage text does not mention is a file nobody writes; one mentioned without the
+# word OPTIONAL is eleven manifests turning into twelve mandatory ones in the
+# reader's head.
+_opt = sorted(n for n in RB.OPTIONAL_MANIFEST_FILES.values() if n not in _doc)
+check("the optional manifest is documented too, and as optional",
+      _opt == [] and "OPTIONAL" in _doc, "undocumented: %s" % _opt)
 
 check("an unverified visual inventory blocks the run",
       "SOURCE_INVENTORY_NOT_VERIFIED" in validate(
@@ -1953,8 +1960,20 @@ check("the stamp distinguishes pipeline revisions from reader revisions",
       "pipeline %r vs reader %r" % (stamp.get("Pipeline_Version"),
                                     stamp.get("Reader_Version")))
 check("the stamp hashes every input manifest",
-      set(stamp["Manifest_SHA256"]) == set(RB.MANIFEST_FILES),
+      set(stamp["Manifest_SHA256"])
+      == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
       "%s" % sorted(stamp["Manifest_SHA256"]))
+# The optional one included, and this batch has no identity_resolution.csv at
+# all. A file that may be absent still has to be hashed when it is there - a
+# resolution that can be edited after the values were approved silently
+# re-labels a series between the review and the pool - and the only way to hash
+# "it was absent" is to hash the empty frame the loader substitutes. So the
+# stamp records a digest for it either way, and an added file changes the
+# fingerprint that every approval is bound to.
+check("including the one that may be absent, so adding it later is visible",
+      "resolutions" in stamp["Manifest_SHA256"]
+      and len(stamp["Manifest_SHA256"]["resolutions"]) == 64,
+      "%r" % stamp["Manifest_SHA256"].get("resolutions"))
 
 # REVERT: drop "mono_bar_geometry.py" from PIPELINE_CODE_FILES. Every other
 # scenario in this file still passes, because the hash is still 64 hex
@@ -2658,6 +2677,462 @@ check("and nothing partial is left to review or to pool",
 # is the normal way a bundle fails, not an exotic one.
 check("the failure is named as the bundle's own, whatever raised it",
       "ValueError" in _gstamp.get("Detail", ""), "%r" % _gstamp.get("Detail"))
+
+
+# ---------------------------------------------------------------------------
+# A bar whose FILL could not be sampled, named by a person.
+#
+# Publication 127 prints two bars fifteen pixels tall. They have a mean, they
+# have an SE, and once the outline is taken off there is no interior left to
+# classify - so the reader has a geometry with no identity, and naming them from
+# the pixels would mean "first slot, therefore OPEN": identity by position.
+#
+# The fixture reproduces exactly that, by drawing one bar of the mono panel at 3
+# units instead of 27. The scenario is then the real two-phase workflow: run,
+# read the row out of `mono_bar_geometry.csv`, write `identity_resolution.csv`
+# against that row's hash, run again.
+# ---------------------------------------------------------------------------
+print()
+print("a bar with no interior to sample, named by a person instead")
+import make_mono_bar_fixture as MF                                  # noqa: E402
+
+SHORT_IMG = os.path.join(IMAGES, "mono_short.png")
+_short_truth = os.path.join(IMAGES, "mono_short_truth.json")
+MF.draw(SHORT_IMG, _short_truth, overrides={("OPEN", "T3"): 3.0})
+_st_truth = json.load(open(_short_truth, encoding="utf-8"))
+# The legend crop a reviewer read the fill off. It is evidence, so it is a real
+# file with a real hash: `check_identity_resolution` re-hashes it, which is what
+# stops a resolution from pointing at something that changed afterwards.
+LEGEND_IMG = os.path.join(IMAGES, "legend_crop.png")
+Image.open(SHORT_IMG).crop((90, 40, 400, 120)).save(LEGEND_IMG)
+_short_figure = dict(_mono_figure, Figure_ID="F_SHORT", Figure_Number="FIG6",
+                     Source_Image=SHORT_IMG,
+                     Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(SHORT_IMG))
+_short_source_figure = dict(_mono_source_figure, Source_Figure_ID="SF_SHORT",
+                            Figure_Number="FIG6", Source_Image=SHORT_IMG,
+                            Source_Image_SHA256=MR.sha256_of(SHORT_IMG))
+_short_source_panel = dict(_mono_source_panel, Source_Panel_ID="P_SHORT",
+                           Source_Figure_ID="SF_SHORT", Panel_Label="P_SHORT")
+# Total peripheral resistance, whose plausible range starts at 0.3: the short
+# bar is a real 3-unit reading and a 3-unit STROKE VOLUME is implausible, so
+# reusing the previous unit would have made this scenario about the plausibility
+# table instead of about the identity.
+_short_unit = dict(_mono_unit, Unit_ID="U_SHORT", Figure_ID="F_SHORT",
+                   Panel="U_SHORT",
+                   Outcome_Variable="Total peripheral resistance",
+                   Unit="mmHg/L/min")
+_short_panel = dict(_mono_panel, Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+                    Figure_ID="F_SHORT", Unit_ID="U_SHORT",
+                    Panel_Label="P_SHORT", Image_Path=SHORT_IMG)
+_short_series = [dict(r, Panel_ID="P_SHORT") for r in _mono_series]
+_short_positions = [dict(r, Panel_ID="P_SHORT") for r in _mono_positions]
+
+
+def short_manifests(directory, resolutions=None, **kw):
+    """Both monochrome panels in one batch, only one of them resolvable.
+
+    P_MONO's fills are all measurable and P_SHORT's are not, so this batch is
+    what says the identity channel is per PANEL: one review mode asks three
+    questions and the other four, from the same run.
+    """
+    fields = dict(
+        panels=PANELS + [_mono_panel, _short_panel],
+        series_rows=SERIES + _mono_series + _short_series,
+        positions=POSITION_ROWS + _mono_positions + _short_positions,
+        units=UNITS + [_mono_unit, _short_unit],
+        figures=FIGURES + [_mono_figure, _short_figure],
+        grids=_mono_grids,
+        source_figures=SOURCE_FIGURES + [_mono_source_figure,
+                                         _short_source_figure],
+        source_panels=SOURCE_PANELS + [_mono_source_panel, _short_source_panel],
+        source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=6)])
+    fields.update(kw)
+    out = write_manifests(directory, **fields)
+    if resolutions is not None:
+        with open(os.path.join(out, "identity_resolution.csv"), "w",
+                  newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=BM.identity_resolution_columns())
+            w.writeheader()
+            for row in resolutions:
+                w.writerow({c: row.get(c, "")
+                            for c in BM.identity_resolution_columns()})
+    return out
+
+
+# REVERT: `identity_resolution.csv` in MANIFEST_FILES rather than
+# OPTIONAL_MANIFEST_FILES. Every batch in this file, and every manifest
+# directory in the field, then fails to load - and the fix that suggests itself
+# is an empty file in each of them, which is how a required manifest becomes one
+# nobody reads.
+_s1 = short_manifests(os.path.join(ROOT, "m_short1"))
+_o1 = os.path.join(ROOT, "o_short1")
+_su1 = RB.run_batch(_s1, _o1, file_root=ROOT, run_date="2026-08-06")
+check("a batch with no identity_resolution.csv runs",
+      _su1["status"] == "RAN", "%s" % _su1)
+_r1 = pd.read_csv(os.path.join(_o1, "run_manifest.csv"), dtype=object).fillna("")
+_row1 = _r1[_r1["Panel_ID"] == "P_SHORT"].iloc[0]
+# REVERT: skip on `record["error"]` in `_geometry_marks` instead of
+# `measurement_usable`. BAR_TOO_SMALL_TO_SAMPLE is a complaint about the FILL -
+# the mean comes from the top edge and the dispersion from the cap, measured as
+# on any other bar - so filing it with the refusals drops a readable value for a
+# reason that was never about the value. Eleven of twelve becomes eleven either
+# way; what changes is that the twelfth can never be recovered.
+check("eleven of the twelve cells read; the short bar has no series",
+      (_row1["Cells_Declared"], _row1["Cells_Read"]) == ("12", "11"),
+      "%s" % dict(_row1))
+_geo1 = pd.read_csv(os.path.join(_o1, "mono_bar_geometry.csv"),
+                    dtype=object).fillna("")
+_short_row = _geo1[(_geo1["Panel_ID"] == "P_SHORT")
+                   & (_geo1["Group_ID"] == "T3")
+                   & (_geo1["Geometry_Slot"] == "2")]
+check("the geometry file records the bar, its number and why it has no fill",
+      len(_short_row) == 1
+      and _short_row.iloc[0]["Geometry_Error_Code"] == "BAR_TOO_SMALL_TO_SAMPLE"
+      and float(_short_row.iloc[0]["Mean"]) > 0
+      and _short_row.iloc[0]["Auto_Fill_Pattern"] == ""
+      and _short_row.iloc[0]["Auto_Identity_Status"] == "UNRESOLVED_NO_FILL",
+      "%s" % (_short_row.to_dict("records") or "no row"))
+_short_hash = _short_row.iloc[0]["Geometry_Row_SHA256"]
+
+
+def _ghash(group, slot):
+    """The hash a person copying a row out of mono_bar_geometry.csv would use."""
+    hit = _geo1[(_geo1["Panel_ID"] == "P_SHORT")
+                & (_geo1["Group_ID"] == group)
+                & (_geo1["Geometry_Slot"] == str(slot))]
+    return hit.iloc[0]["Geometry_Row_SHA256"] if len(hit) else ""
+_q1 = pd.read_csv(os.path.join(_o1, "manual_queue_cells.csv"),
+                  dtype=object).fillna("")
+check("and the cell it could not name is queued by name",
+      any(r["Panel_ID"] == "P_SHORT" and "LATE" in r["Cell_Key"]
+          for _, r in _q1.iterrows()),
+      "%s" % [r["Cell_Key"] for _, r in _q1.iterrows()
+              if r["Panel_ID"] == "P_SHORT"])
+
+
+def _resolution(**kw):
+    base = dict(Resolution_ID="IR1", Panel_ID="P_SHORT", Group_ID="T3",
+                Geometry_Slot="2", Geometry_Row_SHA256=_short_hash,
+                Resolved_Series_ID="S_OPEN", Resolved_Fill_Pattern="OPEN",
+                Evidence_Type="LEGEND_DECLARED",
+                Evidence_Artifact=os.path.relpath(LEGEND_IMG, ROOT),
+                Evidence_Artifact_SHA256=MR.sha256_of(LEGEND_IMG),
+                Reviewer_ID="RV_T1", Reviewed_At="2026-08-07",
+                Note="the legend labels the open bar Late post-flight")
+    base.update(kw)
+    return base
+
+
+_s2 = short_manifests(os.path.join(ROOT, "m_short2"), resolutions=[_resolution()])
+_o2 = os.path.join(ROOT, "o_short2")
+_su2 = RB.run_batch(_s2, _o2, file_root=ROOT, run_date="2026-08-06")
+check("with the resolution in place the batch still runs",
+      _su2["status"] == "RAN", "%s" % _su2)
+_r2 = pd.read_csv(os.path.join(_o2, "run_manifest.csv"), dtype=object).fillna("")
+_row2 = _r2[_r2["Panel_ID"] == "P_SHORT"].iloc[0]
+check("and all twelve cells are read",
+      (_row2["Cells_Declared"], _row2["Cells_Read"]) == ("12", "12"),
+      "%s: %s" % (dict(_row2)["Cells_Read"], _row2["Detail"]))
+_v2 = pd.read_csv(os.path.join(_o2, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_v2 = _v2[_v2["Unit_ID"] == "U_SHORT"]
+_named = _v2[_v2["Cell_Key"] == "ARM=LATE;TIMEPOINT=T3"]
+# REVERT: leave IDENTITY_CARRIED out of `to_value_records`, or the six columns
+# out of `fig_values_columns`. The value is still produced and still correct;
+# what is gone is any way to ask the pooled file which row it was measured from
+# and who decided it was this series.
+check("the value a person named says so, and points at the row they signed",
+      len(_named) == 1
+      and _named.iloc[0]["Identity_Source"] == "HUMAN"
+      and _named.iloc[0]["Identity_Evidence_Type"] == "LEGEND_DECLARED"
+      and _named.iloc[0]["Resolution_ID"] == "IR1"
+      and _named.iloc[0]["Resolved_Fill_Pattern"] == "OPEN",
+      "%s" % (_named.to_dict("records") or "no row"))
+check("and it is bound to the anonymous measurement it came from",
+      len(_named) and _named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
+      "%r vs %r" % (_named.iloc[0]["Geometry_Row_SHA256"] if len(_named) else None,
+                    _short_hash))
+# REVERT: write the person's answer into `Auto_Fill_Pattern` as well - the
+# obvious way to make the column "complete". It is the audit trail saying the
+# machine measured something a person read off a legend, and the gate then
+# cannot tell the two apart.
+check("and the reader is not credited with a fill it never measured",
+      len(_named) and _named.iloc[0]["Auto_Fill_Pattern"] == "",
+      "%r" % (_named.iloc[0]["Auto_Fill_Pattern"] if len(_named) else None))
+_auto = _v2[_v2["Cell_Key"] == "ARM=LATE;TIMEPOINT=T0"]
+check("a cell the FIGURE named still says AUTO, with the measured fill",
+      len(_auto) == 1 and _auto.iloc[0]["Identity_Source"] == "AUTO"
+      and _auto.iloc[0]["Identity_Evidence_Type"] == "FILL_MEASURED"
+      and _auto.iloc[0]["Auto_Fill_Pattern"] == "OPEN"
+      and not _auto.iloc[0]["Resolution_ID"],
+      "%s" % (_auto.to_dict("records") or "no row"))
+# The geometry artifact is what the FIGURE said and must not learn the answer.
+_geo2 = pd.read_csv(os.path.join(_o2, "mono_bar_geometry.csv"),
+                    dtype=object).fillna("")
+_grow2 = _geo2[(_geo2["Panel_ID"] == "P_SHORT") & (_geo2["Group_ID"] == "T3")
+               & (_geo2["Geometry_Slot"] == "2")].iloc[0]
+check("the geometry file is unchanged by the resolution, hash and all",
+      _grow2["Auto_Fill_Pattern"] == ""
+      and _grow2["Auto_Identity_Status"] == "UNRESOLVED_NO_FILL"
+      and _grow2["Geometry_Row_SHA256"] == _short_hash,
+      "%s" % dict(_grow2))
+
+# REVERT: keep one review mode for every BAR_MONO panel. The panel with a
+# human-named cell is then approved without anybody being asked about the one
+# claim in it that has no measurement behind it.
+_rq2 = pd.read_csv(os.path.join(_o2, "review_queue.csv"), dtype=object).fillna("")
+_qrow2 = _rq2[_rq2["Panel_ID"] == "P_SHORT"]
+check("the panel is queued under the mode that asks about the naming",
+      len(_qrow2) and _qrow2.iloc[0]["Review_Mode"] == "BAR_MONO_GEOMETRY_RESOLVED",
+      "%s" % (list(_qrow2["Review_Mode"]) if len(_qrow2) else "not queued"))
+check("and that mode requires the resolution rows as an artifact",
+      "IDENTITY_RESOLUTION" in RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"]
+      and "Identity_Checked"
+      in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"],
+      "%s / %s" % (RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"],
+                   RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]))
+_art2 = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_ident = _art2[(_art2["Panel_ID"] == "P_SHORT")
+               & (_art2["Artifact_Type"] == "IDENTITY_RESOLUTION")]
+check("which the run wrote, hashed, into the ledger",
+      len(_ident) == 1 and len(_ident.iloc[0]["SHA256"]) == 64
+      and os.path.exists(os.path.join(_o2, _ident.iloc[0]["Artifact_Path"])),
+      "%s" % (_ident.to_dict("records") or "no ledger row"))
+check("and the file a reviewer opens is the row that was signed",
+      len(_ident) and [r["Resolution_ID"] for r in csv.DictReader(
+          open(os.path.join(_o2, _ident.iloc[0]["Artifact_Path"]),
+               encoding="utf-8"))] == ["IR1"],
+      "%s" % (_ident.iloc[0]["Artifact_Path"] if len(_ident) else ""))
+check("a panel with nothing resolved keeps the plain geometry mode",
+      set(_rq2[_rq2["Panel_ID"] == "P_MONO"]["Review_Mode"]) <= {"BAR_MONO_GEOMETRY"},
+      "%s" % sorted(set(_rq2["Review_Mode"])))
+
+# The three things only the measurement can refuse, each of them the whole panel.
+for _label, _kw, _code in (
+        ("a row the measurement does not have",
+         dict(Group_ID="T9"), "IDENTITY_RESOLUTION_NO_SUCH_ROW"),
+        # REVERT: apply a resolution over `resolved_fill_pattern`. This file
+        # then becomes an override channel: a person can re-label any bar the
+        # reader read, and the geometry file's Auto_Fill_Pattern no longer means
+        # anything downstream.
+        ("a bar the figure named itself",
+         dict(Group_ID="T0", Geometry_Row_SHA256=_ghash("T0", 2)),
+         "IDENTITY_RESOLUTION_OVERRIDES_MEASUREMENT"),
+        # REVERT: join on (Panel_ID, Group_ID, Geometry_Slot) alone. The triple
+        # is a POSITION: re-run after a threshold change or a re-scan and the
+        # resolution silently names whatever bar now sits in slot 2, which is
+        # identity by position one level up.
+        ("a resolution written against a different measurement",
+         dict(Geometry_Row_SHA256="0" * 64), "IDENTITY_RESOLUTION_STALE")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_short_%s" % _code.lower()),
+        resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_short_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    check("%s refuses the panel, not just the cell" % _label,
+          _bs["status"] == "RAN", "%s" % _bs)
+    _br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"),
+                      dtype=object).fillna("")
+    _brow = _br[_br["Panel_ID"] == "P_SHORT"]
+    check("  and says %s" % _code,
+          len(_brow) and _brow.iloc[0]["Run_State"] == "SERIES_IDENTITY_UNRESOLVED"
+          and _code in _brow.iloc[0]["Detail"], "%s" % (
+              list(zip(_brow["Run_State"], _brow["Detail"])) if len(_brow)
+              else "no row"))
+    _bv = pd.read_csv(os.path.join(_bo, "figure_values_raw.csv"),
+                      dtype=object).fillna("")
+    check("  and contributes no values at all",
+          not len(_bv[_bv["Unit_ID"] == "U_SHORT"]),
+          "%d rows" % len(_bv[_bv["Unit_ID"] == "U_SHORT"]))
+
+# Everything that can be refused before a raster is opened. Each of these is a
+# manifest problem, which means the batch does not run at all: a resolution is
+# an INPUT, and an input that cannot be trusted is not a panel to queue.
+for _label, _kw, _code in (
+        ("FILL_MEASURED typed into the human channel",
+         dict(Evidence_Type="FILL_MEASURED"), "IDENTITY_EVIDENCE_NOT_HUMAN"),
+        ("an evidence type nobody declared",
+         dict(Evidence_Type="I_JUST_KNOW"), "BAD_IDENTITY_EVIDENCE_TYPE"),
+        ("a series this panel does not declare",
+         dict(Resolved_Series_ID="S_MISSING"),
+         "IDENTITY_RESOLUTION_UNKNOWN_SERIES"),
+        ("a fill that contradicts the series manifest",
+         dict(Resolved_Fill_Pattern="SOLID"),
+         "IDENTITY_RESOLUTION_FILL_CONTRADICTS_SERIES"),
+        ("evidence that is not on disk",
+         dict(Evidence_Artifact="no_such_legend.png"),
+         "IDENTITY_EVIDENCE_ARTIFACT_MISSING"),
+        ("evidence whose hash moved since it was signed",
+         dict(Evidence_Artifact_SHA256="0" * 64),
+         "IDENTITY_EVIDENCE_ARTIFACT_HASH_MISMATCH"),
+        ("a reviewer's own reading with nothing written down",
+         dict(Evidence_Type="REVIEWER_INSPECTION", Note="",
+              Evidence_Artifact="", Evidence_Artifact_SHA256=""),
+         "IDENTITY_EVIDENCE_UNEXPLAINED"),
+        ("a reviewer who is not in the registry",
+         dict(Reviewer_ID="RV_NOBODY"), "REVIEWER_NOT_REGISTERED"),
+        ("a date that is not a date",
+         dict(Reviewed_At="soon"), "BAD_REVIEWED_AT"),
+        ("a resolution against a panel that is not BAR_MONO",
+         dict(Panel_ID="P_SCAT", Resolved_Series_ID="S_BLUE",
+              Resolved_Fill_Pattern=""),
+         "IDENTITY_RESOLUTION_WRONG_MARK_TYPE"),
+        # A manifest names evidence inside the corpus. An absolute path would
+        # let it point at any file on the machine that happens to hash right -
+        # the same escape the source rasters are confined against.
+        ("evidence outside the corpus",
+         dict(Evidence_Artifact=os.path.join(tempfile.gettempdir(),
+                                             "outside_the_root.png"),
+              Evidence_Artifact_SHA256="0" * 64),
+         "IDENTITY_EVIDENCE_ARTIFACT_OUTSIDE_ROOT")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_ir_%s" % _code.lower()),
+        resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_ir_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                             dtype=object).fillna("")["check"]) \
+        if _bs["status"] == "MANIFEST_REJECTED" else set()
+    check("%s is a manifest problem, before any raster is opened" % _label,
+          _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+          "%s %s" % (_bs["status"], sorted(_codes)))
+
+# A resolution signed by something that is not a person. `FILL_MEASURED` is what
+# a program's answer is called and it lives in the geometry file; a registry row
+# that is not Reviewer_Record_Type=HUMAN signing this one is the audit trail
+# saying a person did what a program did.
+_demo_reg = REVIEWERS + [dict(
+    Reviewer_ID="RV_BOT", Reviewer_Name="Digitizer",
+    Reviewer_Record_Type="DEMO_IDENTITY", Contact_Type="EMAIL",
+    Reviewer_Contact="bot@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="DEMO_EXAMPLE",
+    Note="not a person")]
+_bad = short_manifests(os.path.join(ROOT, "m_ir_nothuman"),
+                       resolutions=[_resolution(Reviewer_ID="RV_BOT")],
+                       reviewers=_demo_reg)
+_bo = os.path.join(ROOT, "o_ir_nothuman")
+_bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+_codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                         dtype=object).fillna("")["check"]) \
+    if _bs["status"] == "MANIFEST_REJECTED" else set()
+check("a resolution signed by a non-person is refused",
+      _bs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_RESOLUTION_NOT_HUMAN" in _codes,
+      "%s %s" % (_bs["status"], sorted(_codes)))
+
+# Two rows for one bar, and two slots of one group named as the same series.
+for _label, _rows, _code in (
+        ("the same bar resolved twice",
+         [_resolution(), _resolution(Resolution_ID="IR2")],
+         "IDENTITY_RESOLUTION_DUPLICATE"),
+        ("the same Resolution_ID used twice",
+         [_resolution(), _resolution(Group_ID="T2",
+                                     Geometry_Row_SHA256=_ghash("T2", 2))],
+         "DUPLICATE_RESOLUTION_ID"),
+        ("one series named twice in one group",
+         [_resolution(), _resolution(Resolution_ID="IR2", Geometry_Slot="1",
+                                     Geometry_Row_SHA256=_ghash("T3", 1))],
+         "IDENTITY_RESOLUTION_SERIES_TWICE_IN_GROUP")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_irdup_%s" % _code.lower()), resolutions=_rows)
+    _bo = os.path.join(ROOT, "o_irdup_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                             dtype=object).fillna("")["check"]) \
+        if _bs["status"] == "MANIFEST_REJECTED" else set()
+    check("%s is refused" % _label,
+          _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+          "%s %s" % (_bs["status"], sorted(_codes)))
+
+# And an approval of that panel has to say the naming was checked. Driven
+# through `approved_panels` with the run's OWN queue and ledger, because the
+# requirement is per panel: P_MONO in the same batch is asked three questions
+# and P_SHORT four.
+#
+# REVERT: leave `Identity_Checked` out of REVIEW_CONFIRMATIONS for the resolved
+# mode. The approval below goes through with the identity column blank, and the
+# one claim in the panel with no measurement behind it is approved by silence.
+_fq2 = pd.read_csv(os.path.join(_o2, "review_queue.csv"), dtype=object).fillna("")
+_fa2 = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                   dtype=object).fillna("")
+_types2 = {}
+for _, _row_ in _fa2.iterrows():
+    _types2.setdefault(_row_["Panel_ID"], set()).add(_row_["Artifact_Type"])
+_reviewers2 = pd.read_csv(os.path.join(_s2, "reviewer_registry.csv"),
+                          dtype=object).fillna("")
+
+
+def _approve(panel, **extra):
+    """One filled review row for `panel`, against this run's own subject hash."""
+    hit = _fq2[_fq2["Panel_ID"] == panel]
+    base = dict(Review_ID="R_%s" % panel, Panel_ID=panel,
+                Review_Subject_SHA256=(hit.iloc[0]["Review_Subject_SHA256"]
+                                       if len(hit) else ""),
+                Reviewer_ID="RV_T1", Decision="APPROVED",
+                Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+                Calibration_Checked="CONFIRMED", Identity_Checked="",
+                Reviewed_At="2026-08-07T10:00:00Z", Note="")
+    base.update(extra)
+    return pd.DataFrame([base])
+
+
+for _label, _extra, _want in (
+        ("with the naming left blank", {}, False),
+        ("with the naming confirmed", dict(Identity_Checked="CONFIRMED"), True)):
+    _probs = []
+    _got = FIN.approved_panels(
+        _approve("P_SHORT", **_extra), _fq2, _reviewers2,
+        lambda w, c, d: _probs.append(c),
+        today=datetime.date(2026, 8, 8), artifact_types=_types2)
+    check("a resolved panel approved %s -> %s"
+          % (_label, "accepted" if _want else "refused"),
+          bool(_got) == _want
+          and (_want or "REVIEW_CONFIRMATION_MISSING" in _probs), "%s" % _probs)
+_probs = []
+FIN.approved_panels(_approve("P_MONO"), _fq2, _reviewers2,
+                    lambda w, c, d: _probs.append(c),
+                    today=datetime.date(2026, 8, 8), artifact_types=_types2)
+check("and a panel with nothing resolved is not asked about a naming",
+      not _probs, "%s" % _probs)
+# REVERT: drop IDENTITY_RESOLUTION from the resolved mode's artifact tuple. The
+# approval then stands with nothing in the ledger for the rows that were signed,
+# so "the naming was checked" points at no file.
+_probs = []
+_thin = {p: {t for t in ts if t != "IDENTITY_RESOLUTION"}
+         for p, ts in _types2.items()}
+FIN.approved_panels(_approve("P_SHORT", Identity_Checked="CONFIRMED"), _fq2,
+                    _reviewers2, lambda w, c, d: _probs.append(c),
+                    today=datetime.date(2026, 8, 8), artifact_types=_thin)
+check("and the resolution rows have to be in the ledger to be approved against",
+      "REVIEW_ARTIFACT_MISSING" in _probs, "%s" % _probs)
+check("every review mode declares the confirmations it asks for",
+      set(RB.REVIEW_CONFIRMATIONS) == set(RB.REVIEW_MODES),
+      "%s" % sorted(set(RB.REVIEW_CONFIRMATIONS) ^ set(RB.REVIEW_MODES)))
+check("and the template ships every column any mode can ask for",
+      all(c in FIN.value_review_columns()
+          for cols in RB.REVIEW_CONFIRMATIONS.values() for c in cols)
+      and "Identity_Checked" in open(
+          os.path.join(HERE, "value_review_TEMPLATE.csv"),
+          encoding="utf-8").readline(),
+      "%s" % FIN.value_review_columns())
+
+check("the identity vocabulary has one definition, in the layer both can see",
+      BM.AUTO_IDENTITY_EVIDENCE is K.FIG_AUTO_IDENTITY_EVIDENCE
+      and BM.HUMAN_IDENTITY_EVIDENCE is K.FIG_HUMAN_IDENTITY_EVIDENCE
+      and BM.IDENTITY_EVIDENCE_RANK is K.FIG_IDENTITY_EVIDENCE_RANK,
+      "%s" % (BM.IDENTITY_EVIDENCE,))
+check("and only BAR_MONO's own facts are in the identity half of MARK_CARRIED",
+      set(dict(MR.IDENTITY_CARRIED)) == {
+          "Geometry_Row_SHA256", "Auto_Fill_Pattern", "Resolved_Fill_Pattern",
+          "Identity_Source", "Identity_Evidence_Type", "Resolution_ID"}
+      and not set(dict(MR.MARK_CARRIED)) & set(dict(MR.IDENTITY_CARRIED)),
+      "%s" % sorted(dict(MR.IDENTITY_CARRIED)))
+check("and every one of them has a column in the values file",
+      all(c in GE.fig_values_columns()
+          for _src, c in MR.MARK_CARRIED + MR.IDENTITY_CARRIED),
+      "%s" % [c for _s_, c in MR.MARK_CARRIED + MR.IDENTITY_CARRIED
+              if c not in GE.fig_values_columns()])
 
 
 print("the option table is checked against the readers it configures")

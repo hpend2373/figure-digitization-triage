@@ -35,10 +35,34 @@ run produced for this panel and therefore what to look at:
 |---|---|---|
 | `OVERLAY` | `Overlay_File` | every cross sits on the mark a reader would give it, and none is missed |
 | `WPD_ONLY` | `WPD_Project_File`, in WebPlotDigitizer | the marks re-derive the values in the row |
+| `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
+| `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` | all of the above, **and** each resolution's evidence really names that series |
 | anything else, or the named file is absent | — | **do not approve.** The finalizer refuses it anyway (`REVIEW_MODE_UNKNOWN` / `REVIEW_ARTIFACT_MISSING`) |
 
 `WPD_ONLY` is uncommon: it means the picture could not be drawn, which never
 fails a panel that produced values but does change what a reviewer has to open.
+
+The confirmation columns are separate claims, and the finalizer requires the
+ones the mode declares: `Marks_Checked` always, plus `Axis_Labels_Checked` and
+`Calibration_Checked` for the two geometry modes, plus `Identity_Checked` for
+the resolved one. Write `CONFIRMED`; blank is not confirmed and `APPROVED`
+alone is a signature on a filename.
+
+The axis question is the one worth being slow about. If a tick VALUE was typed
+wrong — a printed 30 entered as 3 — every bar in the panel is ten times out
+TOGETHER, no arithmetic can see it, and the panel picture is the only place it
+shows.
+
+**A bar whose fill could not be sampled.** A monochrome series is identified by
+its FILL, and a bar too short to have an interior (fifteen pixels, say) has a
+mean, an SE and no measurable fill. Its cell is queued, not guessed. To supply
+the identity, read the row out of `OUT/mono_bar_geometry.csv` and add a line to
+`MANIFESTS/identity_resolution.csv` — copying its `Geometry_Row_SHA256`, naming
+the series, and recording the evidence (`LEGEND_DECLARED` for a legend crop,
+`TEXT_DECLARED` for a sentence, `REVIEWER_INSPECTION` for your own reading,
+which needs a Note saying what you saw) — then run again. The file is optional
+and most batches have none. It may only supply an identity the reader could not
+measure: naming a bar the reader named itself refuses the whole panel.
 
 Paths in the queue and in the values are recorded **relative to the run
 directory**, so a run can be moved or handed to somebody else with its
@@ -56,6 +80,7 @@ provenance intact. Resolve them against the run directory, not the working one.
 | run | `MANIFEST_REJECTED` | the manifests contradict each other or the files |
 | run | `INPUT_LOAD_FAILED` | a manifest could not be read at all |
 | run | `DEMO_OUTPUT_REFUSED` | the reviewer registry is a demo identity |
+| run | `GEOMETRY_REVIEW_FAILED` | a BAR_MONO review bundle could not be written; nothing is reviewable |
 | run | `INTERNAL_ERROR` | a reader has a defect; the whole batch stops |
 | run | `RAN` | finished — read `run_stamp.json` for the verdict |
 | finalize | `NOTHING_APPROVED` | no valid approval; the default |

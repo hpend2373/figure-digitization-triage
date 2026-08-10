@@ -295,6 +295,22 @@ for stale in ("Each passing panel also gets `review/",
               "open review/<Panel_ID>_overlay.png for every row"):
     assert stale not in skill_text, (
         "SKILL.md still says %r, which contradicts Review_Mode=WPD_ONLY" % stale)
+# Every review mode the runner can put in the queue, named in the table a
+# reviewer reads. The table ends with "anything else -> do not approve", so a
+# mode the skill has not heard of tells a reviewer to refuse a panel the run
+# produced correctly - which is what BAR_MONO panels got when the geometry mode
+# shipped without touching this file.
+import run_batch as _rb                                            # noqa: E402
+_unnamed = sorted(m for m in _rb.REVIEW_MODES if m not in skill_text)
+assert not _unnamed, (
+    "SKILL.md does not tell a reviewer what to open for %s" % ", ".join(_unnamed))
+_unasked = sorted({c for cols in _rb.REVIEW_CONFIRMATIONS.values() for c in cols}
+                  - set(skill_text.split()))
+_unasked = [c for c in _unasked if c not in skill_text]
+assert not _unasked, (
+    "SKILL.md never mentions the confirmation column(s) %s, so a reviewer "
+    "fills in a decision the finalizer then refuses" % ", ".join(_unasked))
+
 assert "sections to add" not in skill_text, (
     "SKILL.md is still written as an addendum to some other document")
 assert not os.path.exists(os.path.join(HERE, "SKILL_ADDENDUM.md")), (

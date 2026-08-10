@@ -22,6 +22,23 @@ FIG_EXTRACTION_METHODS = ("DIGITIZED", "TRANSCRIBED")
 # would read a filled-in answer as an empty cell.
 FIG_BAR_TOP_DEFS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
 FIG_PANEL_RECON = ("MATCHED", "UNLISTED_PANELS_FOUND", "WORKLIST_OVERCOUNTS", "PENDING")
+# WHO decided which series a value belongs to. A monochrome bar is identified by
+# its FILL, so the row heading of such a value is a claim of its own, separate
+# from the number: either the reader measured the fill (FILL_MEASURED) or a
+# person read it off the figure and wrote it in `identity_resolution.csv`.
+#
+# Declared here, in the layer both the gate and the manifest validator can see,
+# because the two halves are checked in different places and a second copy of an
+# enum is a second chance to disagree with it. `batch_manifests` re-exports these
+# under its own names; `test_run_batch` pins that they are the same objects.
+FIG_IDENTITY_SOURCES = ("AUTO", "HUMAN")
+FIG_AUTO_IDENTITY_EVIDENCE = ("FILL_MEASURED",)
+FIG_HUMAN_IDENTITY_EVIDENCE = ("LEGEND_DECLARED", "TEXT_DECLARED",
+                               "REVIEWER_INSPECTION")
+FIG_IDENTITY_EVIDENCE = FIG_AUTO_IDENTITY_EVIDENCE + FIG_HUMAN_IDENTITY_EVIDENCE
+#: Strongest first is not the tuple order, so the ranking is written out.
+FIG_IDENTITY_EVIDENCE_RANK = {"FILL_MEASURED": 4, "LEGEND_DECLARED": 3,
+                              "TEXT_DECLARED": 2, "REVIEWER_INSPECTION": 1}
 # Text that records a NON-ANSWER. Errorbar_Definition_Source exists to carry the
 # source's own wording; a placeholder there means the SD/SE question was never
 # settled, and getting it wrong scales the meta-analytic weight by sqrt(n). A

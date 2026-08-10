@@ -1,1 +1,1 @@
-Review_ID,Panel_ID,Review_Subject_SHA256,Reviewer_ID,Decision,Marks_Checked,Axis_Labels_Checked,Calibration_Checked,Reviewed_At,Note
+Review_ID,Panel_ID,Review_Subject_SHA256,Reviewer_ID,Decision,Marks_Checked,Axis_Labels_Checked,Calibration_Checked,Identity_Checked,Reviewed_At,Note

@@ -2907,15 +2907,65 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-**Still open:** `identity_resolution.csv` has a template, a schema and no
-runtime - a cell the figure could not name goes to the queue rather than
-through a human resolution join, and the `IDENTITY_RESOLUTION` artifact and
-`Identity_Checked` confirmation that go with it are not built. Publication 127
-needs both for its two 15 px bars. `_geometry_marks` already puts
-`Geometry_Row_SHA256` on every mark, and `MARK_CARRIED` does not carry it
-through to the value grain - so the key that would bind a final value to the
-anonymous row it came from stops at the raw marks. That column, and
-`Identity_Source`, have to reach `figure_values_*` with the identity runtime.
+### A series the reader could not name (v7.29)
+
+Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
+and once the outline is taken off there is no interior left to classify - so a
+BAR_MONO series, which is identified BY ITS FILL, has a geometry with no
+identity. Naming it from the pixels would mean "first slot, therefore OPEN":
+identity by position, the one inference this package refuses.
+
+`identity_resolution.csv` is where a person names it, and it is now wired up.
+
+**A complaint about the fill is not a complaint about the number.**
+`BAR_TOO_SMALL_TO_SAMPLE` was filed in `error` with every other code, so the row
+was dropped by everything downstream and 127's two values were lost for a reason
+that was never about the values - the mean comes from the top edge and the
+dispersion from the cap, measured exactly as on any other bar.
+`FILL_ONLY_ERRORS` and `measurement_usable()` name that distinction, and only
+codes in that tuple can be rescued by an identity.
+
+**A resolution supplies an identity; it never overrules one.** Three things can
+only be checked once the panel is measured, and each refuses the WHOLE panel
+rather than the cell - a person naming a bar this measurement does not have was
+reading a different measurement, and their other rows for it are then equally
+unsafe:
+
+| refusal | what it catches |
+|---|---|
+| `IDENTITY_RESOLUTION_NO_SUCH_ROW` | a bar the reader never found |
+| `IDENTITY_RESOLUTION_OVERRIDES_MEASUREMENT` | a bar the figure named itself |
+| `IDENTITY_RESOLUTION_STALE` | written against a different measurement |
+
+The last one is why the schema gained `Geometry_Row_SHA256`. Without it
+(Panel_ID, Group_ID, Geometry_Slot) is a POSITION: re-run after a threshold
+change or a re-scan and the resolution silently names whatever bar now sits in
+slot 2, which is identity by position one level up. Everything checkable on
+paper - evidence type, the series and its declared fill, the evidence artifact's
+hash and confinement to the corpus, a registered HUMAN reviewer, duplicates -
+is a manifest problem, so the batch does not run at all.
+
+**The provenance reaches the grain that gets pooled.** Six columns travel from
+the mark to `figure_values_*` via `IDENTITY_CARRIED`: `Geometry_Row_SHA256`,
+`Auto_Fill_Pattern`, `Resolved_Fill_Pattern`, `Identity_Source`,
+`Identity_Evidence_Type`, `Resolution_ID`. Listed apart from `MARK_CARRIED`
+because they are not universal - only a monochrome bar has them.
+`Auto_Fill_Pattern` stays BLANK for a human-named bar: filling it in is the
+audit trail saying the machine measured what a person read off a legend, and the
+gate refuses a row that does both (`IDENTITY_OVERRODE_MEASUREMENT`), as it
+refuses `Identity_Source`/`Identity_Evidence_Type` pairs that disagree. The
+geometry artifact is untouched by any of it - it is what the FIGURE said.
+
+**The review contract is per panel.** `BAR_MONO_GEOMETRY_RESOLVED` is the
+resolved mode: the five geometry artifacts plus `IDENTITY_RESOLUTION`, and a
+fourth confirmation, `Identity_Checked`. A separate mode rather than a sixth
+required artifact everywhere, because most BAR_MONO panels have no human-named
+cell and a mode that demanded the file from all of them would make it
+mandatory - which is how a confirmation column becomes one everybody types
+CONFIRMED into.
+
+**Still open:** nothing in the identity chain. What remains for a pilot is
+publication 127's own manifests and a real reviewer identity.
 
 ## Suites
 
@@ -2923,10 +2973,10 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 515 |
+| `test_run_batch.py` | 566 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
-| `test_grid_engine.py` | 171 |
+| `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 125 |
 | `test_mark_readers.py` | 96 |
@@ -2934,7 +2984,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1776** |
+| **total** | **1836** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

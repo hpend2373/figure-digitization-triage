@@ -75,7 +75,13 @@ FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
 #: requires, so a mode that shows more can ask for more.
 VALUE_REVIEW_COLUMNS = [
     "Review_ID", "Panel_ID", "Review_Subject_SHA256", "Reviewer_ID", "Decision",
+    # `Identity_Checked` is the last of the four and the only one about a claim
+    # with no measurement behind it: for a bar whose fill could not be sampled,
+    # WHICH SERIES it belongs to is somebody's reading of a legend, recorded in
+    # `identity_resolution.csv`. Required only by
+    # `BAR_MONO_GEOMETRY_RESOLVED` - the panels that actually have such a cell.
     "Marks_Checked", "Axis_Labels_Checked", "Calibration_Checked",
+    "Identity_Checked",
     "Reviewed_At", "Note",
 ]
 

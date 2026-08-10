@@ -349,6 +349,67 @@ check("the four empty templates raise no SCHEMA_INCOMPLETE",
       "SCHEMA_INCOMPLETE" not in set(_p["check"]) if len(_p) else True,
       "%s" % (sorted(set(_p["check"])) if len(_p) else ""))
 
+print("who named the series is a claim of its own, and it has to hold together")
+# A monochrome bar is identified BY ITS FILL, so a value's row heading is a
+# separate claim from its number: either the reader measured the fill, or a
+# person read it off the figure and signed a row in identity_resolution.csv. The
+# runner writes both columns together, so a disagreement in the FILE is a hand
+# edit or a join defect - and both look exactly like a correct row until somebody
+# asks which values a person named.
+#
+# REVERT: drop the identity block from the DIGITIZED checks. Every scenario
+# above still passes; what stops being noticed is a values file whose provenance
+# columns contradict each other.
+def _ident(**kw):
+    return run(vals=[dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "PRE"}),
+                          Mean=60, Dispersion_Value=3, **kw),
+                     dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "POST"}),
+                          Mean=62, Dispersion_Value=3)])
+
+
+check("a values file that says nothing about identity is not thereby wrong",
+      "BAD_IDENTITY_SOURCE" not in _ident()
+      and "IDENTITY_SOURCE_INCONSISTENT" not in _ident(), "%s" % _ident())
+check("a source nobody declared is refused",
+      "BAD_IDENTITY_SOURCE" in _ident(Identity_Source="MACHINE",
+                                      Identity_Evidence_Type="FILL_MEASURED"))
+check("AUTO with a human's evidence type is inconsistent",
+      "IDENTITY_SOURCE_INCONSISTENT" in _ident(
+          Identity_Source="AUTO", Identity_Evidence_Type="LEGEND_DECLARED"))
+check("AUTO carrying a Resolution_ID is inconsistent",
+      "IDENTITY_SOURCE_INCONSISTENT" in _ident(
+          Identity_Source="AUTO", Identity_Evidence_Type="FILL_MEASURED",
+          Resolution_ID="IR1"))
+check("HUMAN claiming the reader's own evidence is inconsistent",
+      "IDENTITY_SOURCE_INCONSISTENT" in _ident(
+          Identity_Source="HUMAN", Identity_Evidence_Type="FILL_MEASURED",
+          Resolution_ID="IR1"))
+check("HUMAN with no row to point at is refused",
+      "IDENTITY_RESOLUTION_UNIDENTIFIED" in _ident(
+          Identity_Source="HUMAN", Identity_Evidence_Type="LEGEND_DECLARED"))
+check("a human identity beside a measured fill is refused",
+      "IDENTITY_OVERRODE_MEASUREMENT" in _ident(
+          Identity_Source="HUMAN", Identity_Evidence_Type="LEGEND_DECLARED",
+          Resolution_ID="IR1", Auto_Fill_Pattern="OPEN"))
+check("and a consistent human identity passes",
+      not [c for c in _ident(Identity_Source="HUMAN",
+                             Identity_Evidence_Type="LEGEND_DECLARED",
+                             Resolution_ID="IR1", Resolved_Fill_Pattern="OPEN",
+                             Geometry_Row_SHA256="a" * 64)
+           if c.startswith("IDENTITY") or c.startswith("BAD_IDENTITY")],
+      "%s" % _ident(Identity_Source="HUMAN",
+                    Identity_Evidence_Type="LEGEND_DECLARED",
+                    Resolution_ID="IR1"))
+check("and a consistent automatic one does too",
+      not [c for c in _ident(Identity_Source="AUTO",
+                             Identity_Evidence_Type="FILL_MEASURED",
+                             Auto_Fill_Pattern="SOLID",
+                             Resolved_Fill_Pattern="SOLID")
+           if c.startswith("IDENTITY") or c.startswith("BAD_IDENTITY")],
+      "%s" % _ident(Identity_Source="AUTO",
+                    Identity_Evidence_Type="FILL_MEASURED"))
+
+
 print("provenance that cannot be followed is not provenance")
 for _c, _w in (("WPD_Project_File", "MISSING_PROVENANCE"),):
     check("blank %s on the figure -> %s" % (_c, _w), _w in run(fig={_c: ""}))

@@ -1,1 +1,1 @@
-Resolution_ID,Panel_ID,Group_ID,Geometry_Slot,Resolved_Series_ID,Resolved_Fill_Pattern,Evidence_Type,Evidence_Artifact,Evidence_Artifact_SHA256,Reviewer_ID,Reviewed_At,Note
+Resolution_ID,Panel_ID,Group_ID,Geometry_Slot,Geometry_Row_SHA256,Resolved_Series_ID,Resolved_Fill_Pattern,Evidence_Type,Evidence_Artifact,Evidence_Artifact_SHA256,Reviewer_ID,Reviewed_At,Note

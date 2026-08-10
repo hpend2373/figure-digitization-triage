@@ -68,8 +68,17 @@ def _hatch(im, box):
     im.paste(tile, (x0, y0))
 
 
-def draw(path, truth_path, collide_group=None):
-    """collide_group: draw that group's bars with one shared pattern."""
+def draw(path, truth_path, collide_group=None, overrides=None):
+    """collide_group: draw that group's bars with one shared pattern.
+
+    overrides: {(pattern, group): value}, drawn and recorded in place of the
+    table above. It exists for one case: a bar SHORT enough that there is no
+    interior left to sample, which is publication 127's two fifteen-pixel bars.
+    Such a bar has a mean and a dispersion and no measurable fill - the whole
+    reason `identity_resolution.csv` exists - and no group of the table above
+    produces one, so a scenario about a human-named series had nothing to name.
+    """
+    overrides = dict(overrides or {})
     im = Image.new("RGB", (WIDTH, HEIGHT), "white")
     d = ImageDraw.Draw(im)
     zero = int(round(to_pixel(0)))
@@ -81,7 +90,8 @@ def draw(path, truth_path, collide_group=None):
         left = gx - span // 2
         for k, pattern in enumerate(PATTERNS):
             drawn = pattern if group != collide_group else PATTERNS[0]
-            value = TRUTH[pattern][GROUPS.index(group)]
+            value = overrides.get((pattern, group),
+                                  TRUTH[pattern][GROUPS.index(group)])
             top = int(round(to_pixel(value)))
             x0 = left + k * (BAR_W + GAP)
             box = (x0, top, x0 + BAR_W, zero)
@@ -111,7 +121,10 @@ def draw(path, truth_path, collide_group=None):
     with open(truth_path, "w", encoding="utf-8") as fh:
         json.dump({"panel_box": list(PANEL), "y_ticks": Y_TICKS,
                    "groups": GROUPS, "group_x": GROUP_X, "patterns": PATTERNS,
-                   "collide_group": collide_group, "series": recorded},
+                   "collide_group": collide_group,
+                   "overrides": sorted("%s/%s=%s" % (p, g, v)
+                                       for (p, g), v in overrides.items()),
+                   "series": recorded},
                   fh, indent=1, sort_keys=True)
     return path
 

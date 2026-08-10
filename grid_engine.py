@@ -171,6 +171,14 @@ def fig_values_columns():
         "Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
         "Position_Assignment", "Calibration_Max_Residual",
         "Slot_Assignment_Residual_Px",
+        # The measurement this value was read off, and who named its series. A
+        # monochrome bar is identified BY ITS FILL, so a value's row heading is
+        # a separate claim from its number - sometimes the reader's, sometimes a
+        # person's reading of a legend recorded in `identity_resolution.csv`.
+        # These carry that claim to the grain that gets pooled, where before it
+        # stopped at the raw marks.
+        "Geometry_Row_SHA256", "Auto_Fill_Pattern", "Resolved_Fill_Pattern",
+        "Identity_Source", "Identity_Evidence_Type", "Resolution_ID",
         # The project that can re-derive THIS value. It used to be looked up on
         # the figure, where a run stored whichever panel finished first - so on
         # a six-panel figure five values named a project of somebody else's
@@ -408,6 +416,54 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
     """Value, range and dual-reading checks for one cell, by Statistic_Type."""
     blank, num, bad_num = kernel.fig_is_blank, kernel.fig_as_number, kernel.fig_is_bad_number
     st = str(unit.get("Statistic_Type", "")).strip().upper()
+
+    if str(unit.get("Extraction_Method", "")).strip().upper() == "DIGITIZED":
+        # WHO named this value's series, checked against WHAT backs it. The two
+        # columns are written together by the runner, so a disagreement here is
+        # either a hand-edited values file or a join defect - and both look
+        # exactly like a correct row until somebody asks the file which values a
+        # person named. The gate runs on the file, so it can answer.
+        source = str(row.get("Identity_Source", "")).strip().upper()
+        evidence = str(row.get("Identity_Evidence_Type", "")).strip().upper()
+        resolution = str(row.get("Resolution_ID", "")).strip()
+        auto_fill = str(row.get("Auto_Fill_Pattern", "")).strip().upper()
+        if source or evidence or resolution:
+            if source not in kernel.FIG_IDENTITY_SOURCES:
+                flag(line, "BAD_IDENTITY_SOURCE",
+                     "Identity_Source=%r (expected %s)"
+                     % (row.get("Identity_Source"),
+                        "/".join(kernel.FIG_IDENTITY_SOURCES)))
+            elif source == "AUTO":
+                if evidence not in kernel.FIG_AUTO_IDENTITY_EVIDENCE:
+                    flag(line, "IDENTITY_SOURCE_INCONSISTENT",
+                         "Identity_Source=AUTO with Identity_Evidence_Type=%r; "
+                         "what the reader measures is %s"
+                         % (evidence or "blank",
+                            "/".join(kernel.FIG_AUTO_IDENTITY_EVIDENCE)))
+                if resolution:
+                    flag(line, "IDENTITY_SOURCE_INCONSISTENT",
+                         "Identity_Source=AUTO carries Resolution_ID=%s; a row "
+                         "the reader named was not resolved by anybody"
+                         % resolution)
+            else:
+                if evidence not in kernel.FIG_HUMAN_IDENTITY_EVIDENCE:
+                    flag(line, "IDENTITY_SOURCE_INCONSISTENT",
+                         "Identity_Source=HUMAN with Identity_Evidence_Type=%r; "
+                         "expected %s" % (evidence or "blank",
+                                          "/".join(kernel.FIG_HUMAN_IDENTITY_EVIDENCE)))
+                if not resolution:
+                    flag(line, "IDENTITY_RESOLUTION_UNIDENTIFIED",
+                         "Identity_Source=HUMAN with no Resolution_ID; the row "
+                         "a person signed is what makes this checkable")
+                if auto_fill:
+                    # Both filled in means the reader DID measure a fill and a
+                    # person named the bar anyway. The join refuses that at the
+                    # source; a values file that says it is a values file to
+                    # stop trusting.
+                    flag(line, "IDENTITY_OVERRODE_MEASUREMENT",
+                         "Auto_Fill_Pattern=%s beside a human identity; a "
+                         "resolution supplies a fill the reader could not "
+                         "measure, it does not replace one it could" % auto_fill)
 
     if st == "CONTINUOUS":
         kernel.fig_check_numeric(row, ["Mean", "Dispersion_Value", "Errorbar_Lower",

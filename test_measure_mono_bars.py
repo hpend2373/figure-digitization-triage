@@ -241,6 +241,14 @@ def _text(value):
     return "" if value == "" or value is None else str(value)
 
 
+def _raises_value(call):
+    try:
+        call()
+    except ValueError:
+        return True
+    return False
+
+
 def _raises_type(call):
     try:
         call()
@@ -2070,7 +2078,7 @@ try:
                   G.canonical_json({"v": bad}))
     check("a non-string dictionary key is refused too",
           _raises_type(lambda: G.canonical_json({1: "numeric", "1": "string"})),
-          repr(G.canonical_json.__doc__ and ""))
+          "1 and \"1\" were folded into one key")
     for bad in ({1, 2}, object()):
         try:
             G.canonical_json({"v": bad})
@@ -2406,17 +2414,19 @@ try:
     # to land on the row the fixture drew 50 at. The fixture's own geometry
     # says where that is, so this is an independent statement about the
     # drawing rather than a restatement of the calibration.
+    # The DECLARED point, drawn solid. The fixture calibrates at 0 and 100, so
+    # 100 is a number a person typed and the line for it must land on the row
+    # the fixture drew 100 at.
     arr = np.asarray(panel_img)
-    want_row = int(round(g8.base - 50 * g8.ppu))
-    box = OVERLAY._crop_box(zoo[0], 24)
-    left = max(0, g8.x0 - int(0.22 * (g8.x1 - g8.x0)))
+    want_row = int(round(g8.base - 100 * g8.ppu))
     y = want_row - max(0, g8.y0 - 24)
-    band = arr[max(0, y - 1):y + 2]
-    orange = ((band[:, :, 0] == 200) & (band[:, :, 1] == 120)
-              & (band[:, :, 2] == 0))
-    check("the calibration's line for 50 lands on the row 50 was drawn at",
-          bool(orange.any()) and float(orange.sum()) > 0.5 * panel_img.width,
-          "%d orange pixels within a row of %d" % (int(orange.sum()), want_row))
+    band = arr[max(0, y - 2):y + 3]
+    solid = ((band[:, :, 0] == 200) & (band[:, :, 1] == 120)
+             & (band[:, :, 2] == 0))
+    check("the line for a declared point lands on the row it was declared at",
+          bool(solid.any()) and float(solid.sum()) > 0.5 * panel_img.width,
+          "%d solid-orange pixels within two rows of %d"
+          % (int(solid.sum()), want_row))
     # REVERT: check the caption by searching the PNG's bytes for the text.
     # Text drawn into an image is PIXELS - the string is not in the file - so
     # that check finds nothing on a correct picture and can only be made to
@@ -2425,20 +2435,36 @@ try:
     # unconditionally. What the picture DREW has to come back as data.
     meta = json.load(open(os.path.splitext(panel_png)[0] + ".json",
                           encoding="utf-8"))
+    # REVERT: draw round values only, and report them as `axis_ticks`. On a
+    # panel calibrated at 2.5 and 7.5 the picture then shows 3, 4, 5, 6, 7 -
+    # and neither number anybody entered. The declared points ARE the
+    # calibration; a guide line at a round value is a reading aid.
     check("the picture reports what it drew, as data rather than as pixels",
-          meta["axis_line_count"] == len(meta["axis_ticks"])
-          and meta["axis_line_count"] >= 2
-          and all(set(t) == {"value", "pixel"} for t in meta["axis_ticks"]),
-          repr(meta.get("axis_ticks")))
+          meta["declared_calibration_points"]
+          and all(set(t) == {"value", "pixel"}
+                  for t in meta["declared_calibration_points"]
+                  + meta["generated_reference_ticks"]),
+          repr(meta.get("declared_calibration_points")))
+    check("and the points it reports are the points somebody typed",
+          [(t["value"], t["pixel"]) for t in
+           meta["declared_calibration_points"]]
+          == [(0.0, float(g8.base)), (100.0, float(g8.base - 100 * g8.ppu))],
+          repr(meta["declared_calibration_points"]))
+    check("with the guide lines kept separate, and never duplicating one",
+          not ({t["value"] for t in meta["generated_reference_ticks"]}
+               & {t["value"] for t in meta["declared_calibration_points"]}),
+          repr([t["value"] for t in meta["generated_reference_ticks"]]))
     check("and each reported line is where the calibration puts that value",
           all(abs(t["pixel"] - (g8.base - t["value"] * g8.ppu)) < 0.51
-              for t in meta["axis_ticks"]),
+              for t in meta["declared_calibration_points"]
+              + meta["generated_reference_ticks"]),
           repr([(t["value"], t["pixel"], g8.base - t["value"] * g8.ppu)
-                for t in meta["axis_ticks"]]))
-    check("the contact sheet says it in words too",
-          all("%g" % t["value"] in sheet for t in meta["axis_ticks"])
-          and "axis lines at" in sheet,
-          sheet[sheet.find("axis lines at"):][:80])
+                for t in meta["generated_reference_ticks"]]))
+    check("the contact sheet names the typed points, not only the guides",
+          "Calibration points somebody typed" in sheet
+          and all("%g" % t["value"] in sheet
+                  for t in meta["declared_calibration_points"]),
+          sheet[sheet.find("Calibration points"):][:110])
     # REVERT: draw the panel picture without the calibration lines. Everything
     # above still passes - the bars are marked, the baseline is marked - and
     # the one thing a per-bar crop cannot show is still not shown.
@@ -2456,6 +2482,63 @@ try:
                    & (bare_arr[:, :, 2] == 0))
     check("a panel whose rows carry no calibration draws no axis lines",
           not bare_orange.any(), "%d orange pixels" % int(bare_orange.sum()))
+
+    # ------------------------------------------- 26v2. the axis says it fits
+    #
+    # `check_calibration` uses `slope` and `intercept` and nothing else, so a
+    # record could carry points nobody fitted, an `n_points` counting something
+    # else and a `max_residual` invented from nothing, and every value in the
+    # file would still follow from the mapping. Those three are the PROVENANCE
+    # of the mapping - what a person typed, how many ticks they read, how badly
+    # the line missed them - and provenance nobody checks is decoration.
+    #
+    # REVERT: drop `validate_calibration`. Every value check still passes, the
+    # artifact still verifies, and the points can say anything at all.
+    print("\nthe calibration has to fit the points it says it came from")
+    honest = dict(zoo[0]["calibration"])
+    G.validate_calibration(honest)                       # the real one is fine
+    for field, value in (("n_points", 4),
+                         ("max_residual", 0.001),
+                         ("slope", honest["slope"] * 1.001),
+                         ("intercept", honest["intercept"] + 1.0),
+                         ("scale", "LOOG"),
+                         ("points", [[0.0, 1.0], [1.0, 2.0]])):
+        broken = dict(honest)
+        broken[field] = value
+        check("a calibration whose %s is not true of its points is refused"
+              % field, _raises_value(lambda: G.validate_calibration(broken)),
+              "it validated")
+    check("and a row without one cannot enter a canonical geometry file",
+          _raises(lambda: G.canonical_artifact_rows(
+              [dict(r, calibration=None) for r in zoo[:1]]),
+              "CALIBRATION_MISSING"), "it wrote the row")
+    # End to end, not by reading the source: a row that is internally perfect
+    # in every other way - the hash covers the lie, the attestation covers the
+    # hash, `Mean` follows from the slope - and whose `n_points` is not true of
+    # its points.
+    lying = dict(zoo[0])
+    lying["calibration"] = dict(honest, n_points=4)
+    lying["geometry_row_sha256"] = G.geometry_row_sha256(lying)
+    lying["auto_identity_sha256"] = G.auto_identity_sha256(lying)
+    lying_row = {k: _text(v) for k, v in G.artifact_row(lying).items()}
+    check("the durable reader catches it on the way back in",
+          _raises(lambda: G.verify_artifact([lying_row],
+                                            recompute_identity=False),
+                  "CALIBRATION_POINT_COUNT"),
+          "the file verified")
+    # REVERT: leave `review_crop_box` out of the panel consistency tuple. The
+    # picture is drawn from the FIRST row's crop, so rows that disagree get a
+    # panel drawn against a review region that is not theirs.
+    mixed_crop = [dict(r) for r in zoo if r["figure"] == "zoo_plain"]
+    mixed_crop[1]["review_crop_box"] = [0, 10, 0, 10]
+    OVERLAY.reset_failures()
+    check("a panel whose rows disagree about the review crop is not drawn",
+          OVERLAY.draw_panel_geometry(
+              os.path.join(TMP, "disagree.png"),
+              os.path.join(TMP, "zoo_plain.png"), mixed_crop) is None
+          and any("review_crop_box" in f for f in OVERLAY.failures()),
+          repr(OVERLAY.failures()))
+    OVERLAY.reset_failures()
 
     # ------------------------------------------- 26w. the factor of ten
     #
@@ -2513,13 +2596,21 @@ try:
         os.path.join(ten_dir, "right.png"), lab_path, right)
     bad_meta = OVERLAY.draw_panel_geometry(
         os.path.join(ten_dir, "wrong.png"), lab_path, wrong)
-    check("the picture of the correct panel offers the printed numbers back",
-          {0.0, 50.0, 100.0} <= {t["value"] for t in good_meta["axis_ticks"]},
-          repr([t["value"] for t in good_meta["axis_ticks"]]))
-    check("and the picture of the misread one offers a tenth of them",
-          {0.0, 5.0, 10.0} <= {t["value"] for t in bad_meta["axis_ticks"]}
-          and 100.0 not in {t["value"] for t in bad_meta["axis_ticks"]},
-          repr([t["value"] for t in bad_meta["axis_ticks"]]))
+    check("the correct panel shows the number the person typed: 100",
+          [t["value"] for t in good_meta["declared_calibration_points"]]
+          == [0.0, 100.0],
+          repr(good_meta["declared_calibration_points"]))
+    check("and the misread one shows 10, on the row the page prints 100",
+          [t["value"] for t in bad_meta["declared_calibration_points"]]
+          == [0.0, 10.0]
+          and (bad_meta["declared_calibration_points"][1]["pixel"]
+               == good_meta["declared_calibration_points"][1]["pixel"]),
+          repr(bad_meta["declared_calibration_points"]))
+    check("which is the whole comparison: same row, different number",
+          100.0 not in {t["value"] for t in
+                        bad_meta["declared_calibration_points"]
+                        + bad_meta["generated_reference_ticks"]},
+          repr([t["value"] for t in bad_meta["generated_reference_ticks"]]))
     # Which is only useful if the printed numbers are still THERE to compare
     # with - in frame, and not painted over by the orange ones.
     # The comparison is only possible if the printed numbers are still THERE:
@@ -2554,7 +2645,7 @@ try:
                   & (rgb[:, :, 1] < 200) & (rgb[:, :, 2] < 120))
         x0c, y0c = meta["crop_box"][0], meta["crop_box"][1]
         drawn = []
-        for tick in meta["axis_ticks"]:
+        for tick in meta["declared_calibration_points"]:
             y = int(round(tick["pixel"])) - y0c
             band = orange[max(0, y - 12):max(0, y - 1)]
             drawn.append(int(band.sum()))

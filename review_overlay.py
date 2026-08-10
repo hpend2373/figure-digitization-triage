@@ -312,6 +312,35 @@ def _nice_step(span, want=6):
     return 10.0 * power                                        # pragma: no cover
 
 
+def _reference_values(calibration, lo, hi):
+    """Round values to hang a faint guide line on, between `lo` and `hi`.
+
+    A LOG axis is not a linear one with different numbers on it. A step of
+    `(hi - lo) / 6` on an axis printed 1, 10, 100, 1000 produces 200, 400, 600,
+    800 - none of which is a decade, and none of which is beside anything the
+    page prints. On LOG the guides are 1, 2 and 5 times each power of ten.
+    """
+    import math
+    if str(calibration.get("scale")) == "LOG":
+        out = []
+        if lo <= 0:
+            lo = min(v for v in (hi,) if v > 0) / 1000.0 if hi > 0 else 1.0
+        for power in range(int(math.floor(math.log10(lo))),
+                           int(math.ceil(math.log10(hi))) + 1):
+            for mult in (1.0, 2.0, 5.0):
+                value = mult * 10.0 ** power
+                if lo <= value <= hi:
+                    out.append(value)
+        return out
+    step = _nice_step(hi - lo)
+    first = math.ceil(lo / step) * step
+    out, value = [], first
+    while value <= hi + 1e-9:
+        out.append(round(value, 6))
+        value += step
+    return out
+
+
 def _value_at(calibration, pixel):
     import math
     raw = calibration["slope"] * float(pixel) + calibration["intercept"]
@@ -361,6 +390,19 @@ def draw_panel_geometry(path, image_path, records, pad=24):
         rows = [r for r in records if r.get("panel_box")]
         if not rows:
             raise ValueError("no record carries a panel_box")
+        # One panel, one axis. This function takes the calibration, the panel
+        # box and the review crop off the FIRST row it is handed and draws
+        # every other row's bar against them, so rows that disagree would be
+        # drawn against an axis that is not theirs - and a diagnostic call does
+        # not go through `verify_artifact`, which is where that is otherwise
+        # caught.
+        for field in ("calibration", "panel_box", "zero_px_image",
+                      "review_crop_box"):
+            distinct = {json.dumps(r.get(field), sort_keys=True) for r in rows}
+            if len(distinct) > 1:
+                raise ValueError(
+                    "the rows disagree about %s, so there is no one panel to "
+                    "draw: %d different values" % (field, len(distinct)))
         x0, x1, y0, y1 = (int(v) for v in rows[0]["panel_box"])
         page = _Image.open(image_path).convert("RGB")
         # Where a reviewer has to look. DECLARED when the caller said - the
@@ -393,35 +435,49 @@ def draw_panel_geometry(path, image_path, records, pad=24):
         #: the printed axis, and nothing is drawn there.
         plot_left = max(0, x0 - ox)
         cal = next((r["calibration"] for r in rows if r.get("calibration")), None)
-        drawn_ticks = []
-        if cal and cal.get("slope"):
-            lo = _value_at(cal, y1)
-            hi = _value_at(cal, y0)
-            lo, hi = min(lo, hi), max(lo, hi)
-            step = _nice_step(hi - lo)
-            import math
-            first = math.ceil(lo / step) * step
-            value = first
-            while value <= hi + 1e-9:
-                y = int(round(_pixel_at(cal, value))) - oy
+
+        def label_at(y, text, colour):
+            """On the RIGHT. The printed tick labels are on the LEFT - they are
+            the thing this picture exists to be compared against - and a label
+            drawn over them hides the one number the comparison needs."""
+            draw.text((crop.width - 8 - 6 * len(text), max(0, y - 11)), text,
+                      fill=colour, font=font)
+
+        # ---- the points a PERSON typed, drawn first and drawn solid.
+        #
+        # These are the calibration. Everything the panel is worth follows from
+        # them, and a printed 30 typed as 3 is a wrong number sitting HERE - so
+        # this is the pair a reviewer compares with the page. Guide lines at
+        # round values are a convenience and were, until now, the only thing
+        # drawn: on an axis calibrated at 2.5 and 7.5 the picture showed 3, 4,
+        # 5, 6, 7 and neither number anybody had entered.
+        declared, generated = [], []
+        if cal:
+            for value, pixel in cal.get("points") or []:
+                y = int(round(float(pixel))) - oy
                 if 0 <= y < crop.height:
-                    # From the PLOT AREA rightwards, never across the margin.
-                    # The printed tick labels live in that margin and they are
-                    # the thing this picture exists to be compared against; a
-                    # line drawn over them destroys the comparison.
                     draw.line((plot_left, y, crop.width - 1, y),
-                              fill=(200, 120, 0), width=1)
-                    # On the RIGHT. The printed tick labels are on the LEFT -
-                    # they are the thing this picture exists to be compared
-                    # against - and a label drawn over them hides the one
-                    # number the comparison needs.
-                    label = "%g" % round(value, 6)
-                    draw.text((crop.width - 8 - 6 * len(label),
-                               max(0, y - 11)), label, fill=(200, 120, 0),
-                              font=font)
-                    drawn_ticks.append(dict(value=float(round(value, 6)),
-                                            pixel=float(_pixel_at(cal, value))))
-                value += step
+                              fill=(200, 120, 0), width=3)
+                    label_at(y, "%g" % round(float(value), 6), (200, 120, 0))
+                declared.append(dict(value=float(value), pixel=float(pixel)))
+        if cal and cal.get("slope"):
+            lo, hi = _value_at(cal, y1), _value_at(cal, y0)
+            lo, hi = min(lo, hi), max(lo, hi)
+            spoken = {round(float(v), 6) for v, _px in cal.get("points") or []}
+            for value in _reference_values(cal, lo, hi):
+                if round(float(value), 6) in spoken:
+                    continue                 # already drawn, and drawn solid
+                pixel = _pixel_at(cal, value)
+                y = int(round(pixel)) - oy
+                if 0 <= y < crop.height:
+                    # Dashed and pale, because these are a reading aid and not
+                    # evidence: nobody typed them.
+                    for x in range(plot_left, crop.width - 1, 12):
+                        draw.line((x, y, min(x + 5, crop.width - 1), y),
+                                  fill=(240, 190, 130), width=1)
+                    label_at(y, "%g" % round(value, 6), (240, 190, 130))
+                generated.append(dict(value=float(round(value, 6)),
+                                      pixel=float(pixel)))
         # The baseline the measurement actually used, over the top of them.
         zero = rows[0].get("zero_px_image")
         if zero is not None:
@@ -451,29 +507,41 @@ def draw_panel_geometry(path, image_path, records, pad=24):
                 y = int(round(float(cap))) - oy
                 if 0 <= y < crop.height:
                     draw.line((a, y, b, y), fill=(31, 119, 180), width=1)
-        head = "%s   %d rows   %d axis lines from the calibration (%s crop)" % (
-            rows[0].get("figure"), len(rows), len(drawn_ticks), source)
-        tail = ("calibration %.6g px/unit, residual %.3g   figure %s"
+        head = ("%s   %d rows   %d declared calibration points, %d guide lines"
+                " (%s crop)" % (rows[0].get("figure"), len(rows),
+                                len(declared), len(generated), source))
+        # px per LOG-unit is not px per unit. On a log axis the slope maps
+        # pixels to the logarithm, so the reciprocal is a decade width in
+        # disguise and printing it as "px/unit" invites reading it as one.
+        unit = ("px/log-unit" if cal and cal.get("scale") == "LOG"
+                else "px/unit")
+        tail = ("calibration %.6g %s, residual %.3g, %d point(s)   figure %s"
                 % (1.0 / cal["slope"] if cal and cal.get("slope") else float("nan"),
-                   cal.get("max_residual", 0.0) if cal else float("nan"),
-                   rows[0].get("figure_id")))
+                   unit, cal.get("max_residual", 0.0) if cal else float("nan"),
+                   len(declared), rows[0].get("figure_id")))
         draw.text((6, crop.height + 6), head, fill=(0, 0, 0), font=font)
         draw.text((6, crop.height + 20), tail, fill=(70, 70, 70), font=font)
         draw.text((6, crop.height + 34),
-                  "orange = where the calibration puts each round value; "
-                  "grey = baseline; red = bar top; blue = error bar",
+                  "solid orange = a calibration point somebody typed; dashed "
+                  "= guide only; grey = baseline; red = bar top; blue = error bar",
                   fill=(70, 70, 70), font=font)
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         canvas.save(path)
-        meta = dict(path=path, axis_ticks=drawn_ticks,
+        meta = dict(path=path, file=os.path.basename(path),
+                    declared_calibration_points=declared,
+                    generated_reference_ticks=generated,
                     plot_left_in_crop=int(plot_left),
-                    axis_line_count=len(drawn_ticks),
                     crop_box=[int(v) for v in box], crop_source=source,
                     calibration=cal, panel_id=rows[0].get("figure"),
                     figure_id=rows[0].get("figure_id"), rows=len(rows))
+        # The sidecar records the BASENAME and not the path it was written to.
+        # A run bundle gets moved, and an absolute path baked into an artifact
+        # is a claim that stops being true the first time somebody copies the
+        # directory.
         with open(os.path.splitext(path)[0] + ".json", "w",
                   encoding="utf-8") as fh:
-            json.dump(meta, fh, sort_keys=True, indent=1)
+            json.dump({k: v for k, v in meta.items() if k != "path"}, fh,
+                      sort_keys=True, indent=1)
         return meta
     except Exception as exc:
         _FAILURES.append("%s: %s: %s" % (os.path.basename(path),
@@ -555,11 +623,16 @@ def write_row_crops(directory, pairs, pad=24):
                 # orange numbers with the printed ones should not have to read
                 # them off a rendering, and a test should not have to either.
                 fh.write("<figcaption>the whole panel, with the axis in frame"
-                         " &mdash; %s crop, %d axis lines at %s"
+                         " &mdash; %s crop. Calibration points somebody typed:"
+                         " <b>%s</b>. Guide lines: %s."
                          "</figcaption></figure>\n"
-                         % (meta["crop_source"], meta["axis_line_count"],
-                            ", ".join("%g" % t["value"]
-                                      for t in meta["axis_ticks"]) or "-"))
+                         % (meta["crop_source"],
+                            ", ".join("%g" % t["value"] for t in
+                                      meta["declared_calibration_points"])
+                            or "none",
+                            ", ".join("%g" % t["value"] for t in
+                                      meta["generated_reference_ticks"])
+                            or "none"))
             else:
                 fh.write("<p><em>no panel picture could be drawn</em></p>\n")
             for got, record in written:

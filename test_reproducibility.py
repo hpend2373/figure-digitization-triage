@@ -331,15 +331,40 @@ print("CI runs every forward test in the package (%d): PASS" % len(forwards))
 # A short-circuiting truth literal inside a scenario is always that mistake:
 # there is no reason to write `X or True` except to make X stop mattering.
 # Grepped rather than reasoned about, because the property is textual.
-import re                                                            # noqa: E402
+# Parsed, not grepped. A line-by-line search misses `condition or\n True`,
+# `condition or (True)` and `x or 1`, and a contract that only holds when the
+# mistake is written on one line is not the contract.
+import ast                                                          # noqa: E402
+
+def _short_circuits(tree):
+    """Truth literals that make the expression around them unfalsifiable."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BoolOp):
+            wants = isinstance(node.op, ast.Or)
+            for value in node.values:
+                if isinstance(value, ast.Constant) and bool(value.value) is wants:
+                    yield node.lineno
+
 
 vacuous = []
 for path in sorted(glob.glob(os.path.join(HERE, "test_*.py"))
                    + glob.glob(os.path.join(HERE, "forward_test_*.py"))):
-    for n, line in enumerate(open(path, encoding="utf-8"), 1):
-        code = line.split("#", 1)[0]
-        if re.search(r"\bor\s+True\b|\bor\s+1\s*[,)]|\band\s+False\b", code):
-            vacuous.append("%s:%d" % (os.path.basename(path), n))
+    tree = ast.parse(open(path, encoding="utf-8").read(), path)
+    for node in ast.walk(tree):
+        # The CONDITION of a scenario, and nothing else. `x or "fallback"` in
+        # the detail string, or `r.get("error") or "READING"` in ordinary code,
+        # is the normal Python idiom for a default and says nothing about
+        # whether a scenario can fail; flagging it would make this check
+        # something people route around.
+        tested = []
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "check" and len(node.args) >= 2):
+            tested = [node.args[1]]
+        elif isinstance(node, ast.Assert):
+            tested = [node.test]
+        for expression in tested:
+            for line in _short_circuits(expression):
+                vacuous.append("%s:%d" % (os.path.basename(path), line))
 assert not vacuous, ("a scenario that cannot fail is not a scenario: %s"
                      % ", ".join(vacuous))
 print("no scenario is written so that it cannot fail (%d files): PASS"

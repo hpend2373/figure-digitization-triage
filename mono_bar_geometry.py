@@ -2136,6 +2136,15 @@ def canonical_artifact_rows(records):
         read it back and verify
         identity_resolution.csv joined DOWNSTREAM, never back into this file
     """
+    for record in records:
+        # A batch row without a calibration is a value with no arithmetic
+        # behind it. `geometry_rows` puts one on every row it returns,
+        # refusals included, so there is no case to make an exception for.
+        if not record.get("calibration"):
+            raise ValueError(
+                "mono_bar_geometry: CALIBRATION_MISSING - a canonical geometry "
+                "row carries the axis mapping its value came from")
+        validate_calibration(record["calibration"])
     return artifact_rows(records, require_auto_identity=True)
 
 
@@ -2219,6 +2228,70 @@ def _apply(calibration, pixel):
     return math.exp(raw) if calibration.get("scale") == "LOG" else raw
 
 
+#: A re-fit of the same points must reproduce the same line. Floats survive the
+#: canonical JSON round trip exactly, so the only slack needed is the fit's own.
+CALIBRATION_TOLERANCE = 1e-9
+
+
+def validate_calibration(cal):
+    """Everything the calibration says about ITSELF has to be true.
+
+    `check_calibration` uses `slope` and `intercept` and nothing else, so a
+    record could carry points that were never fitted, an `n_points` that counts
+    something else, and a `max_residual` invented from nothing, and every value
+    in the file would still follow from the mapping. Those three fields are the
+    provenance of the mapping - what a person typed, how many ticks they read,
+    how badly the line missed them - and provenance nobody checks is decoration.
+
+    Raises on the first thing that does not hold.
+    """
+    import math
+    if not isinstance(cal, dict):
+        raise ValueError("mono_bar_geometry: CALIBRATION_MISSING")
+    for field in ("slope", "intercept", "scale", "max_residual", "points",
+                  "n_points"):
+        if field not in cal:
+            raise ValueError("mono_bar_geometry: CALIBRATION_INCOMPLETE - no "
+                             "%s" % field)
+    if cal["scale"] not in ("LINEAR", "LOG"):
+        raise ValueError("mono_bar_geometry: CALIBRATION_SCALE_UNKNOWN - %r"
+                         % (cal["scale"],))
+    for field in ("slope", "intercept", "max_residual"):
+        if not math.isfinite(float(cal[field])):
+            raise ValueError("mono_bar_geometry: CALIBRATION_NOT_FINITE - %s"
+                             % field)
+    points = [(float(v), float(px)) for v, px in cal["points"]]
+    if int(cal["n_points"]) != len(points):
+        raise ValueError(
+            "mono_bar_geometry: CALIBRATION_POINT_COUNT - n_points says %r and "
+            "there are %d" % (cal["n_points"], len(points)))
+    if len(points) < 2:
+        raise ValueError("mono_bar_geometry: CALIBRATION_TOO_FEW_POINTS - %d"
+                         % len(points))
+    if not all(math.isfinite(v) and math.isfinite(px) for v, px in points):
+        raise ValueError("mono_bar_geometry: CALIBRATION_NOT_FINITE - a point")
+    if len({px for _v, px in points}) < 2:
+        raise ValueError("mono_bar_geometry: CALIBRATION_ONE_PIXEL")
+    values = np.array([v for v, _px in points], dtype=float)
+    pixels = np.array([px for _v, px in points], dtype=float)
+    if cal["scale"] == "LOG":
+        if np.any(values <= 0):
+            raise ValueError("mono_bar_geometry: CALIBRATION_LOG_NON_POSITIVE")
+        values = np.log(values)
+    slope, intercept = np.polyfit(pixels, values, 1)
+    residual = float(np.abs(values - (slope * pixels + intercept)).max())
+    scale = max(1.0, abs(float(cal["slope"])), abs(float(cal["intercept"])))
+    for name, got, want in (("slope", float(cal["slope"]), float(slope)),
+                            ("intercept", float(cal["intercept"]),
+                             float(intercept)),
+                            ("max_residual", float(cal["max_residual"]),
+                             residual)):
+        if abs(got - want) > CALIBRATION_TOLERANCE * scale:
+            raise ValueError(
+                "mono_bar_geometry: CALIBRATION_DOES_NOT_FIT_ITS_POINTS - the "
+                "row says %s=%r and its own points give %r" % (name, got, want))
+
+
 def check_calibration(record):
     """`Mean` has to be what `Edge_Px_Image` MEANS.
 
@@ -2236,6 +2309,7 @@ def check_calibration(record):
     cal = record.get("calibration")
     if not cal or not cal.get("slope"):
         return
+    validate_calibration(cal)
     edge, value = record.get("edge_px_image"), record.get("value")
     if edge is not None and value is not None:
         want = _apply(cal, edge)
@@ -2289,7 +2363,8 @@ def verify_artifact(rows, recompute_identity=True):
     for row, record in zip(rows, records):
         by_panel.setdefault(row["Panel_ID"], []).append(record)
     for panel_id, group in by_panel.items():
-        for field in ("calibration", "panel_box", "zero_px_image"):
+        for field in ("calibration", "panel_box", "zero_px_image",
+                      "review_crop_box"):
             distinct = {canonical_json(r.get(field)) for r in group}
             if len(distinct) > 1:
                 raise ValueError(

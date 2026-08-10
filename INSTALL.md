@@ -2634,10 +2634,13 @@ because it is counted.
 The second was `all(fid in str(v.get("prototypes", v)) or True for ...)` in the
 figure-isolation check, which reduced to the clause beside it.
 
-Both are gone, and `test_reproducibility` now greps every scenario file for a
-short-circuiting truth literal - `or True`, `or 1`, `and False`. There is no
-reason to write `X or True` except to stop X mattering, so the property is
-textual and is checked textually.
+Both are gone, and `test_reproducibility` now PARSES every scenario file and
+looks for a short-circuiting truth literal inside the condition of a `check(...)`
+call or an `assert`. Parsed rather than grepped, because `condition or\n True`
+and `condition or (True)` are the same mistake on two lines; scoped to the
+condition, because `x or "fallback"` in a detail string is the ordinary Python
+idiom for a default and flagging it would make the check something people route
+around.
 
 **What the picture drew now comes back as data.** `draw_panel_geometry` returns
 a dict instead of a path and writes it beside the PNG as JSON:
@@ -2674,12 +2677,43 @@ scenario asserts the strip left of the plot area is reproduced pixel for pixel
 from the source page. A separate scenario counts orange pixels in the band above
 each line, so removing the labels while keeping the lines fails.
 
+**The overlay draws the points somebody TYPED.** The orange lines were round
+values invented by a nice-step rule and placed by the inverse calibration - so
+a panel calibrated at 2.5 and 7.5 got lines at 3, 4, 5, 6, 7, and neither number
+anybody had entered appeared anywhere. On a log axis it is worse: a linear step
+over an axis printed 1, 10, 100, 1000 draws 200, 400, 600, 800, beside nothing.
+
+The declared points are now the overlay - solid, three pixels, labelled - and
+the round values are pale dashed guides that skip any value a declared point
+already covers. The metadata separates them as
+`declared_calibration_points` and `generated_reference_ticks`, and `index.html`
+names the typed ones in bold. Guides on a LOG axis are 1, 2 and 5 times each
+power of ten, and the footer says `px/log-unit` there rather than `px/unit`,
+because the reciprocal of a log slope is a decade width in disguise.
+
+That matters because the typed points are the whole of the calibration and the
+only pair a reviewer can compare with the page. A printed 30 typed as 3 is a
+wrong number sitting exactly there.
+
+**And the calibration has to fit the points it says it came from.**
+`check_calibration` used `slope` and `intercept` and nothing else, so a record
+could carry points nobody fitted, an `n_points` counting something else and a
+`max_residual` invented from nothing, and every value in the file would still
+follow from the mapping. `validate_calibration` re-fits the points and refuses
+on a slope, intercept or residual that does not come out; it also refuses a
+scale that is not LINEAR or LOG, fewer than two points, one distinct pixel, a
+non-finite number, and a non-positive value on a LOG axis. A canonical geometry
+file may not contain a row without a calibration at all.
+
 **The row's arithmetic is checked too.** `verify_artifact` now recomputes
 `Mean` from the row's own `calibration` and `Edge_Px_Image`, and `Dispersion`
 from `Cap_Px_Image`, refusing on disagreement; and every row of one `Panel_ID`
-must carry the same `calibration`, `panel_box` and `zero_px_image`, because
-`draw_panel_geometry` takes the axis off the first row it is handed and draws
-every other row's bar against it. This does not check the calibration is RIGHT -
+must carry the same `calibration`, `panel_box`, `zero_px_image` and
+`review_crop_box`, because
+`draw_panel_geometry` takes the axis and the crop off the first row it is
+handed and draws every other row's bar against them - and it now refuses to
+draw a panel whose rows disagree, because a diagnostic call does not go through
+the reader. This does not check the calibration is RIGHT -
 a mapping read off the wrong gridline is perfectly self-consistent. It catches
 the other half: a value that does not follow from the mapping the row declares.
 
@@ -2715,7 +2749,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 282 |
+| `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2724,7 +2758,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1719** |
+| **total** | **1731** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

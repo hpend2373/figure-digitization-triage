@@ -2293,8 +2293,25 @@ RB.MONO_GEOMETRY.fill_identities_by_figure(_grows)
 _gart = RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
 check("every panel it covers gets all four artifact types",
       set(_gart) == {"P_GEO"}
-      and [t for t, _p in _gart["P_GEO"]] == list(RB.GEOMETRY_ARTIFACT_TYPES),
+      and [t for t, _p in _gart["P_GEO"]][:4]
+      == list(RB.GEOMETRY_ARTIFACT_TYPES),
       "%s" % {k: [t for t, _p in v] for k, v in _gart.items()})
+# REVERT: register the four and stop. The index links to a picture per ROW and
+# the finalizer re-hashes only what the ledger names, so a row crop left out of
+# it can be swapped for a picture of a different bar and the approval still
+# verifies. There is no count to declare - a panel has as many as it has rows -
+# which is why it is a type of its own rather than a fifth fixed entry.
+_crops = [p for t, p in _gart["P_GEO"]
+          if t == RB.GEOMETRY_ROW_ARTIFACT_TYPE]
+check("and one registered picture per geometry row, by name",
+      len(_crops) == len(_grows)
+      and sorted(os.path.basename(p) for p in _crops)
+      == sorted(RB.OVERLAY.row_crop_name(r) for r in _grows),
+      "%d crops for %d rows" % (len(_crops), len(_grows)))
+check("every row crop the ledger names links from the index",
+      all(os.path.basename(p) in open(
+          dict(_gart["P_GEO"])["GEOMETRY_REVIEW_INDEX"],
+          encoding="utf-8").read() for p in _crops))
 check("and every one of them is a file that exists",
       all(os.path.exists(p) for _t, p in _gart["P_GEO"]),
       "%s" % [(t, os.path.exists(p)) for t, p in _gart["P_GEO"]])
@@ -2330,6 +2347,57 @@ try:
               False, "it returned a bundle")
 finally:
     RB.OVERLAY.draw_panel_geometry = _real_panel_draw
+# REVERT: leave the bundle off CANONICAL_OUTPUTS/CANONICAL_DIRS. A second run
+# into the same directory then keeps the first run's panel pictures and row
+# crops, and the writer's existence check passes on them - so an approval can
+# be given against a picture of a different measurement.
+check("the geometry bundle is on the cleanup list, both halves",
+      "mono_bar_geometry.csv" in RB.CANONICAL_OUTPUTS
+      and "geometry-review" in RB.CANONICAL_DIRS,
+      "%r %r" % (RB.CANONICAL_OUTPUTS[-2:], RB.CANONICAL_DIRS))
+_stale = os.path.join(ROOT, "geo_stale")
+os.makedirs(os.path.join(_stale, "geometry-review"), exist_ok=True)
+with open(os.path.join(_stale, "geometry-review", "panel__P_GEO.png"), "w") as _fh:
+    _fh.write("a picture from a previous run")
+with open(os.path.join(_stale, "mono_bar_geometry.csv"), "w") as _fh:
+    _fh.write("numbers from a previous run")
+RB.clear_outputs(_stale)
+check("and a new run removes both before it starts",
+      not os.path.exists(os.path.join(_stale, "mono_bar_geometry.csv"))
+      and not os.path.isdir(os.path.join(_stale, "geometry-review")),
+      "%r" % sorted(os.listdir(_stale)))
+# REVERT: `OVERLAY.reset_failures()` inside write_geometry_review. The run's
+# overlay log is global, so a helper that clears it erases every panel overlay
+# failure that happened before it - and the run reports a clean drawing pass it
+# did not have.
+RB.OVERLAY.reset_failures()
+RB.OVERLAY._FAILURES.append("P_EARLIER: an overlay that could not be drawn")
+RB.write_geometry_review(os.path.join(ROOT, "geo_keep"),
+                         [(_gimg, r) for r in _grows])
+check("writing the bundle does not erase the run's earlier drawing failures",
+      any("P_EARLIER" in f for f in RB.OVERLAY.failures()),
+      "%r" % RB.OVERLAY.failures())
+RB.OVERLAY.reset_failures()
+# REVERT: drop review_crop_box from the successor's signature. A caller with
+# Axis_X_Region and Axis_Y_Region in hand then has to bypass the shared entry
+# point and call geometry_rows directly, which is most of why it exists.
+import inspect as _inspect                                          # noqa: E402
+check("the successor reader can be told where the axis is",
+      "review_crop_box" in _inspect.signature(
+          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters
+      and "review_crop_box" not in BM.READER_OPTIONS,
+      repr(sorted(_inspect.signature(
+          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters)))
+_boxed = MR.read_monochrome_bar_geometry(
+    Image.open(_gimg), tuple(_gt["panel_box"]),
+    dict(zip(_gt["groups"], _gt["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
+    _gt["patterns"], group_window=60, review_crop_box=[10, 20, 30, 40],
+    panel_id="P_GEO", figure_id="F_GEO")
+check("and it reaches the record, so the picture can use it",
+      all(r.get("review_crop_box") == [10, 20, 30, 40] for r in _boxed),
+      repr(_boxed[0].get("review_crop_box")))
+
 check("the artifact types are declared, not spelled at each call site",
       RB.GEOMETRY_ARTIFACT_TYPES
       == ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX", "CALIBRATION_PANEL",
@@ -3000,7 +3068,12 @@ check("  and it produced no WPD project at all, which is the trigger",
               and os.listdir(os.path.join(_am_out, "projects"))))
 _am_missing = [f for f in RB.CANONICAL_OUTPUTS
                if f not in ("figure_values_accepted.csv", "finalize_stamp.json",
-                            "figure_values.csv", "manifest_problems.csv")
+                            "figure_values.csv", "manifest_problems.csv",
+                            # Written only when the batch holds a BAR_MONO
+                            # panel, and on the cleanup list regardless: a
+                            # previous run's geometry file left beside this
+                            # run's numbers is the thing that must not survive.
+                            "mono_bar_geometry.csv")
                and not os.path.exists(os.path.join(_am_out, f))]
 check("  and every canonical output a completed run owns is on disk",
       not _am_missing, "%s" % _am_missing)

@@ -1143,7 +1143,7 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
                                  fills, group_window=70, baseline_value=0.0,
                                  threshold=128, stem_threshold=200,
                                  min_bar_px=MONO_GEOMETRY.MIN_BAR_PX,
-                                 *, panel_id, figure_id):
+                                 review_crop_box=None, *, panel_id, figure_id):
     """The bars of one panel, measured and NOT named.
 
     The production entry point to `mono_bar_geometry`. It exists beside
@@ -1185,6 +1185,14 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
     `min_bar_px` changed grain when it moved here; `MONO_GEOMETRY.MIN_BAR_PX`
     says how, and a manifest carrying the old number keeps working.
 
+    `review_crop_box` is NOT one of them, and is deliberately not a
+    `READER_OPTIONS` entry: it is caller-derived context - the plot area unioned
+    with the manifest's `Axis_X_Region` and `Axis_Y_Region` - rather than a
+    setting somebody tunes. It has to come through here all the same, or a
+    caller wanting a declared review crop has to bypass the shared entry point
+    and call `geometry_rows` directly, which is most of the reason the shared
+    entry point exists.
+
     `image` may be a PIL Image or an ndarray. An ndarray is taken as it is
     given: HxWx3 is treated as RGB and converted, HxW as greyscale already. The
     wrapper used to call `.convert("RGB")` unconditionally, so a caller holding
@@ -1208,7 +1216,8 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
         gray, panel_box, y_calibration, x_positions, list(fills), group_window,
         baseline=baseline_value, threshold=threshold,
         stem_threshold=stem_threshold, min_bar_px=min_bar_px,
-        panel_id=panel_id, figure_id=figure_id)
+        review_crop_box=review_crop_box, panel_id=panel_id,
+        figure_id=figure_id)
 
 
 MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",

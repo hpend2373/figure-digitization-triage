@@ -524,6 +524,13 @@ def resolve_artifact(run_dir, recorded):
 GEOMETRY_ARTIFACT_TYPES = ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
                            "CALIBRATION_PANEL", "CALIBRATION_PANEL_META")
 
+#: And one per geometry ROW. The index links to these; the finalizer re-hashes
+#: only what the ledger names, so a row crop left out of it can be replaced
+#: with a picture of a different bar and nothing downstream disagrees. There is
+#: no count to declare - a panel has as many as it has rows - which is why this
+#: is a separate type rather than a fifth entry in the tuple above.
+GEOMETRY_ROW_ARTIFACT_TYPE = "GEOMETRY_ROW_CROP"
+
 
 def write_geometry_review(out_dir, pairs):
     """The BAR_MONO geometry artifacts for one run, written once.
@@ -554,8 +561,15 @@ def write_geometry_review(out_dir, pairs):
     # geometry file that cannot be verified never reaches a queue.
     with open(csv_path, encoding="utf-8") as fh:
         MONO_GEOMETRY.verify_artifact(list(csv.DictReader(fh)))
-    OVERLAY.reset_failures()
+    # Only the failures THIS call produced. `_FAILURES` is the run's overlay
+    # log and resetting it here would erase every panel overlay failure that
+    # happened before - a helper that quietly depends on being called first.
+    before = len(OVERLAY.failures())
     OVERLAY.write_row_crops(review_dir, pairs)
+    mine = OVERLAY.failures()[before:]
+    if mine:
+        raise GeometryReviewError(
+            "the geometry review could not be drawn: %s" % "; ".join(mine))
     index = os.path.join(review_dir, "index.html")
     out = {}
     for record in records:
@@ -565,15 +579,22 @@ def write_geometry_review(out_dir, pairs):
         stem = os.path.join(review_dir, "panel__%s.png" % "".join(
             c if (c.isalnum() or c in "-_") else "_" for c in pid))
         meta = os.path.splitext(stem)[0] + ".json"
-        missing = [p for p in (csv_path, index, stem, meta)
+        # Every row of this panel, by name. A row whose picture is missing is
+        # a row nobody can check, and the index links to it either way.
+        crops = []
+        for row in records:
+            if _s(row.get("figure")) != pid:
+                continue
+            crops.append(os.path.join(review_dir, OVERLAY.row_crop_name(row)))
+        missing = [p for p in [csv_path, index, stem, meta] + crops
                    if not os.path.exists(p)]
         if missing:
             raise GeometryReviewError(
-                "panel %s cannot be reviewed: %s was not written (%s)"
-                % (pid, ", ".join(os.path.basename(p) for p in missing),
-                   "; ".join(OVERLAY.failures()) or "no drawing failure"))
-        out[pid] = list(zip(GEOMETRY_ARTIFACT_TYPES,
-                            (csv_path, index, stem, meta)))
+                "panel %s cannot be reviewed: %s was not written"
+                % (pid, ", ".join(os.path.basename(p) for p in missing)))
+        out[pid] = (list(zip(GEOMETRY_ARTIFACT_TYPES,
+                             (csv_path, index, stem, meta)))
+                    + [(GEOMETRY_ROW_ARTIFACT_TYPE, p) for p in crops])
     return out
 
 
@@ -1255,9 +1276,14 @@ CANONICAL_OUTPUTS = (
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
     "manual_queue_cells.csv", "panel_artifacts.csv",
+    # The BAR_MONO geometry bundle. Left behind, a previous run's panel
+    # picture sits beside this run's numbers and passes the writer's existence
+    # check, so an approval could be given against a picture of a different
+    # measurement.
+    "mono_bar_geometry.csv",
     "source_panel_coverage.csv",
 )
-CANONICAL_DIRS = ("raw", "projects", "review")
+CANONICAL_DIRS = ("raw", "projects", "review", "geometry-review")
 STAGING = ".staging"
 
 

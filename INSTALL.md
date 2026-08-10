@@ -2786,6 +2786,32 @@ queue. And it goes through `canonical_artifact_rows`, so a bundle written
 before `fill_identities_by_figure` has answered is refused rather than shipped
 with `NOT_CALIBRATED` on every row.
 
+**Every row crop is in the ledger too.** The four types above are fixed; the
+row pictures are one per geometry row, under `GEOMETRY_ROW_CROP`. They have to
+be registered because the finalizer re-hashes only what
+`panel_artifacts.csv` names - leave them out and a row crop can be swapped for
+a picture of a different bar while the index still links to it and the approval
+still verifies. A panel whose rows did not all get a picture is refused, and so
+is any drawing failure the bundle itself produced.
+
+Only the failures the bundle produced. `OVERLAY._FAILURES` is the run's overlay
+log, and resetting it inside the helper erases every panel overlay failure that
+happened before - a helper that quietly depends on being called first, and a run
+that reports a clean drawing pass it did not have.
+
+**The bundle is on the cleanup list.** `mono_bar_geometry.csv` and
+`geometry-review/` are removed before a run starts, like every other output. A
+previous run's panel picture left in place passes the writer's existence check,
+so an approval could be given against a picture of a different measurement.
+
+**And `review_crop_box` reaches the successor reader.** It is deliberately not
+a `READER_OPTIONS` entry - it is caller-derived context, the plot area unioned
+with the manifest's `Axis_X_Region` and `Axis_Y_Region`, rather than a setting
+somebody tunes - but it has to come through the shared entry point all the
+same, or a caller wanting a declared review crop has to bypass it and call
+`geometry_rows` directly, which is most of the reason the shared entry point
+exists.
+
 **Still not wired, and named as such:** nothing calls this yet.
 `run_batch` still dispatches BAR_MONO to `read_monochrome_bar_panel`, so there
 is no `Review_Mode=BAR_MONO_GEOMETRY`, the bundle is not in
@@ -2803,7 +2829,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 488 |
+| `test_run_batch.py` | 495 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
@@ -2814,7 +2840,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1747** |
+| **total** | **1754** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

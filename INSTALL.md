@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29-7.31)
+### A series the reader could not name (v7.29-7.32)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -3048,6 +3048,48 @@ choice, letting a path escape the corpus is not. The writer - the code that
 actually opens the file - re-derives it, so `--no-file-check` cannot copy an
 arbitrary absolute path into the run and register it as evidence.
 
+**A value moved between panels OF THE SAME UNIT.** Several panels may build one
+unit - the package says so in as many words - so a `Unit_ID` check cannot see a
+monochrome value re-stamped onto a line panel of that unit, and the panel it now
+names skips every identity rule. What gives it away is the provenance columns
+themselves: only a monochrome bar has them, so their presence on a row bound to
+any other mark type is `IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE`.
+`Source_Panel_ID` is checked against the panel's declaration at the same time.
+
+**The cell, not just the measurement.** Everything above ties a value to a bar;
+none of it says the value is filed under the right heading. Two bars of one
+panel, each citing its own row with its own mean and its own fill, and their
+`Cell_Key`s exchanged: every other check passes, the grid is complete because
+both timepoints are present, and the two numbers are swapped. This is the
+failure with no arithmetic signature at all. So `geometry_index` keeps
+`Group_ID`, and the check recomputes the cell a value must be filed under - the
+position level from the group the bar was measured in, the series level from the
+identity (for a human identity, from the series the RESOLUTION names) -
+`IDENTITY_GEOMETRY_CELL_MISMATCH`. A caller who supplies no mapping gets
+`IDENTITY_CELL_MAP_MISSING` rather than a pass.
+
+**`Resolution_ID` as a foreign key.** Checked only for being non-blank it is a
+label: exchange two of a panel's resolutions on their values and the numbers, the
+hash and the fill all still agree while the accepted file cites the wrong
+evidence, the wrong reviewer and the wrong reading. Both the runner and the
+finalizer now look the row up and compare `Geometry_Row_SHA256`,
+`Resolved_Fill_Pattern` and `Evidence_Type`
+(`IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH`,
+`REVIEW_IDENTITY_RESOLUTION_UNKNOWN` / `_MISMATCH`). The finalizer does it
+because nothing pins a minimum pipeline version: a run made by an older producer
+arrives with a complete-looking ledger.
+
+**The index comes from the file, not from memory.** `geometry_index_from_run`
+reads `mono_bar_geometry.csv` - written, read back and verified - rather than the
+records still in memory. Nothing today edits a record after the artifact is
+written; if anything ever does, an index built from memory compares the edited
+numbers with themselves and passes while the durable file says something else.
+
+**One reference, one file.** The finalizer keyed evidence by
+`Artifact_Reference` with an assignment, so a second entry for one
+`Resolution_ID` replaced the first and which file a panel was approved against
+depended on ledger order. Duplicates are refused instead.
+
 **Still open:** nothing in the identity chain. What remains for a pilot is
 publication 127's own manifests and a real reviewer identity.
 
@@ -3057,7 +3099,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 618 |
+| `test_run_batch.py` | 633 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -3068,7 +3110,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1888** |
+| **total** | **1903** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

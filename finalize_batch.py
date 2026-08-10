@@ -145,8 +145,12 @@ def load_reviews(path, flag):
     return df
 
 
-def identity_evidence_missing(run_dir, ledger_rows, flag):
-    """Panels whose file-backed resolutions have no evidence in this run.
+def identity_contract_failures(run_dir, ledger_rows, machine, flag):
+    """Panels whose human-named identities do not hold up against this run.
+
+    Two things, both re-derived here rather than taken from the producer's word,
+    because nothing pins a minimum pipeline version: a run made by an older or a
+    tampered producer arrives with a complete-looking ledger.
 
     `IDENTITY_RESOLUTION` says which resolutions a panel was read under, and
     `Evidence_Type` says whether each one rests on a FILE. If it does, the bytes
@@ -162,9 +166,19 @@ def identity_evidence_missing(run_dir, ledger_rows, flag):
 
     Returns the set of Panel_IDs to withhold. The hashes themselves are checked
     by `verify_run_outputs`, which has already run; what this adds is that the
-    right ones EXIST, and that each one matches what the resolution declared.
+    right ones EXIST, that each one matches what the resolution declared, and
+    that every value claiming a human identity cites a resolution this panel
+    actually has - with the same row hash, fill and evidence type. A
+    `Resolution_ID` that is only non-blank is a label: exchange two of a panel's
+    resolutions on their values and the numbers still agree while the accepted
+    file cites the wrong evidence and the wrong reading.
     """
     withheld = set()
+    rows_by_panel = {}
+    machine_rows = (machine.to_dict("records")
+                    if hasattr(machine, "to_dict") else list(machine or ()))
+    for row in machine_rows:
+        rows_by_panel.setdefault(_s(row.get("Run_Panel_ID")), []).append(row)
     by_panel = {}
     for _, art in ledger_rows.iterrows():
         by_panel.setdefault(_s(art.get("Panel_ID")), []).append(art)
@@ -175,8 +189,13 @@ def identity_evidence_missing(run_dir, ledger_rows, flag):
             continue
         evidence = {}
         for a in arts:
-            if _s(a.get("Artifact_Type")) == RB.IDENTITY_EVIDENCE_ARTIFACT_TYPE:
-                evidence[_s(a.get("Artifact_Reference"))] = a
+            if _s(a.get("Artifact_Type")) != RB.IDENTITY_EVIDENCE_ARTIFACT_TYPE:
+                continue
+            # A list, not an assignment. Keyed by reference and assigned, a
+            # second entry for one Resolution_ID silently replaced the first -
+            # so which of two files a panel was approved against depended on
+            # ledger ORDER. One reference, one file, checked below.
+            evidence.setdefault(_s(a.get("Artifact_Reference")), []).append(a)
         for art in resolutions:
             path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
             if path is None or not os.path.exists(path):
@@ -196,12 +215,55 @@ def identity_evidence_missing(run_dir, ledger_rows, flag):
                      % (pid, type(exc).__name__, exc))
                 withheld.add(pid)
                 continue
+            declared = {_s(row.get("Resolution_ID")): row for row in rows}
+            # Every value that says a person named its series has to cite one of
+            # THESE rows, and to agree with it.
+            for value in rows_by_panel.get(pid, []):
+                if _s(value.get("Identity_Source")).upper() != "HUMAN":
+                    continue
+                rid = _s(value.get("Resolution_ID"))
+                cited = declared.get(rid)
+                if cited is None:
+                    flag("panel:%s" % pid,
+                         "REVIEW_IDENTITY_RESOLUTION_UNKNOWN",
+                         "a value of %s cites Resolution_ID=%s, which is not a "
+                         "resolution this run recorded for it"
+                         % (pid, rid or "(blank)"))
+                    withheld.add(pid)
+                    continue
+                for column, got in (
+                        ("Geometry_Row_SHA256",
+                         _s(value.get("Geometry_Row_SHA256")).lower()),
+                        ("Resolved_Fill_Pattern",
+                         _s(value.get("Resolved_Fill_Pattern")).upper()),
+                        ("Evidence_Type",
+                         _s(value.get("Identity_Evidence_Type")).upper())):
+                    want = _s(cited.get(column))
+                    want = (want.lower() if column == "Geometry_Row_SHA256"
+                            else want.upper())
+                    if want and want != got:
+                        flag("panel:%s" % pid,
+                             "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
+                             "a value of %s cites resolution %s, which reads "
+                             "%s=%s while the value says %s"
+                             % (pid, rid, column, want or "blank",
+                                got or "blank"))
+                        withheld.add(pid)
             for row in rows:
                 if _s(row.get("Evidence_Type")).upper() \
                         not in BM.FILE_EVIDENCE_TYPES:
                     continue
                 rid = _s(row.get("Resolution_ID"))
-                got = evidence.get(rid)
+                copies = evidence.get(rid) or []
+                if len(copies) > 1:
+                    flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                         "resolution %s has %d IDENTITY_EVIDENCE artifacts in "
+                         "the ledger; one resolution rests on one file, and "
+                         "which of them was approved cannot be decided by "
+                         "ledger order" % (rid, len(copies)))
+                    withheld.add(pid)
+                    continue
+                got = copies[0] if copies else None
                 if got is None:
                     flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
                          "resolution %s rests on %s (%s) and this run carries "
@@ -632,7 +694,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # resolution rows say, and reading them is the only way to know. Without
     # this the finalizer accepted any run whose producer had not copied the
     # evidence in, including every run made before it started doing so.
-    for pid in sorted(identity_evidence_missing(run_dir, ledger_rows, flag)):
+    for pid in sorted(identity_contract_failures(run_dir, ledger_rows, machine,
+                                                flag)):
         artifact_types.pop(pid, None)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types)

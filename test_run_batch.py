@@ -3130,21 +3130,61 @@ check("and the template ships every column any mode can ask for",
 # columns today; what is gone is the check that it still does.
 print()
 print("a monochrome value has to carry where it came from, not just agree with itself")
-_MONO_PANELS = {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"},
-                "P_LINE": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_LINE"}}
+# What a cell of this panel is made of: the group the bar was measured in
+# decides the position level, the identity decides the series level.
+_SHORT_CELL_MAP = {
+    "position_factor": "TIMEPOINT",
+    "position_levels": {q: q for q in ("T0", "T1", "T2", "T3")},
+    "series_factor": "ARM",
+    "series_levels": {"S_SOLID": "PRE", "S_HATCHED": "EARLY",
+                      "S_OPEN": "LATE"},
+    "series_by_fill": {"SOLID": "S_SOLID", "HATCHED": "S_HATCHED",
+                       "OPEN": "S_OPEN"},
+}
+_MONO_PANELS = {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                            "Source_Panel_ID": "P_SHORT",
+                            "Cell_Map": _SHORT_CELL_MAP},
+                # The same unit, a different mark type. This package lets several
+                # panels build one unit, so the unit check cannot catch a value
+                # moved between them.
+                "P_TWIN": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_SHORT",
+                           "Cell_Map": _SHORT_CELL_MAP},
+                "P_LINE": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_LINE",
+                           "Cell_Map": _SHORT_CELL_MAP}}
+_MONO_RESOLUTIONS = {
+    ("P_SHORT", "IR1"): dict(Resolution_ID="IR1", Panel_ID="P_SHORT",
+                             Group_ID="T3", Geometry_Slot="2",
+                             Geometry_Row_SHA256="e" * 64,
+                             Resolved_Series_ID="S_OPEN",
+                             Resolved_Fill_Pattern="OPEN",
+                             Evidence_Type="LEGEND_DECLARED"),
+    ("P_SHORT", "IR2"): dict(Resolution_ID="IR2", Panel_ID="P_SHORT",
+                             Group_ID="T2", Geometry_Slot="2",
+                             Geometry_Row_SHA256="f" * 64,
+                             Resolved_Series_ID="S_OPEN",
+                             Resolved_Fill_Pattern="OPEN",
+                             Evidence_Type="LEGEND_DECLARED"),
+}
 # One measured bar, in the shape `mono_bar_geometry.csv` holds it, so the value
 # below has a row to be the value OF.
 _MONO_GEO = RB.geometry_index([
     dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="a" * 64, Mean="3.056",
-         Dispersion_Value="3.611", Auto_Fill_Pattern="OPEN"),
+         Dispersion_Value="3.611", Auto_Fill_Pattern="OPEN", Group_ID="T3",
+         Geometry_Slot="2"),
     dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="b" * 64, Mean="58.056",
-         Dispersion_Value="5.833", Auto_Fill_Pattern="SOLID"),
+         Dispersion_Value="5.833", Auto_Fill_Pattern="SOLID", Group_ID="T3",
+         Geometry_Slot="0"),
     dict(Panel_ID="P_MONO", Geometry_Row_SHA256="c" * 64, Mean="30.0",
-         Dispersion_Value="3.889", Auto_Fill_Pattern="OPEN"),
+         Dispersion_Value="3.889", Auto_Fill_Pattern="OPEN", Group_ID="T0",
+         Geometry_Slot="2"),
     # The same numbers as the first row and NO measured fill: the short bar,
     # which is the only kind of row a human identity may name.
     dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="e" * 64, Mean="3.056",
-         Dispersion_Value="3.611", Auto_Fill_Pattern="")])
+         Dispersion_Value="3.611", Auto_Fill_Pattern="", Group_ID="T3",
+         Geometry_Slot="2"),
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="f" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="", Group_ID="T2",
+         Geometry_Slot="2")])
 
 
 def _human(**kw):
@@ -3157,7 +3197,8 @@ def _human(**kw):
 
 
 def _prov(_rows=None, **kw):
-    base = dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+    base = dict(Run_Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+                Unit_ID="U_SHORT",
                 Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
                 Dispersion_Value="3.611",
                 Geometry_Row_SHA256="a" * 64, Auto_Fill_Pattern="OPEN",
@@ -3165,7 +3206,8 @@ def _prov(_rows=None, **kw):
                 Identity_Evidence_Type="FILL_MEASURED", Resolution_ID="")
     base.update(kw)
     return [c for _w, c, _d in RB.identity_provenance_problems(
-        _rows or [base], _MONO_PANELS, geometry=_MONO_GEO)]
+        _rows or [base], _MONO_PANELS, geometry=_MONO_GEO,
+        resolutions=_MONO_RESOLUTIONS)]
 
 
 check("a complete automatic provenance passes", _prov() == [], "%s" % _prov())
@@ -3195,7 +3237,10 @@ check("AUTO carrying a resolution, or a human's evidence, is refused",
                  _prov(Identity_Evidence_Type="LEGEND_DECLARED")))
 check("a complete human provenance passes", _human() == [], "%s" % _human())
 check("a human identity with no row signed is refused",
-      _human(Resolution_ID="") == ["IDENTITY_RESOLUTION_UNIDENTIFIED"],
+      # And a blank Resolution_ID is not a resolution of this panel either, so
+      # the foreign key says so too.
+      set(_human(Resolution_ID="")) == {"IDENTITY_RESOLUTION_UNIDENTIFIED",
+                                        "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"},
       "%s" % _human(Resolution_ID=""))
 check("and a measured fill beside a human identity is refused",
       _human(Auto_Fill_Pattern="OPEN") == ["IDENTITY_OVERRODE_MEASUREMENT"],
@@ -3261,31 +3306,119 @@ check("a mean edited away from the row it cites is refused",
 check("and so is a dispersion that is not the one measured",
       _prov(Dispersion_Value="1.0") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
       "%s" % _prov(Dispersion_Value="1.0"))
+_twice = dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+              Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
+              Dispersion_Value="3.611", Geometry_Row_SHA256="a" * 64,
+              Auto_Fill_Pattern="OPEN", Resolved_Fill_Pattern="OPEN",
+              Identity_Source="AUTO", Identity_Evidence_Type="FILL_MEASURED",
+              Resolution_ID="")
 check("two values claiming one bar is refused",
-      _prov(_rows=[dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
-                        Mean="3.056", Dispersion_Value="3.611",
-                        Geometry_Row_SHA256="a" * 64,
-                        Auto_Fill_Pattern="OPEN",
-                        Resolved_Fill_Pattern="OPEN", Identity_Source="AUTO",
-                        Identity_Evidence_Type="FILL_MEASURED",
-                        Resolution_ID="")] * 2)
-      == ["IDENTITY_GEOMETRY_ROW_REUSED"],
-      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
-                               Mean="3.056", Dispersion_Value="3.611",
-                               Geometry_Row_SHA256="a" * 64,
-                               Auto_Fill_Pattern="OPEN",
-                               Resolved_Fill_Pattern="OPEN",
-                               Identity_Source="AUTO",
-                               Identity_Evidence_Type="FILL_MEASURED",
-                               Resolution_ID="")] * 2))
+      _prov(_rows=[_twice, dict(_twice)]) == ["IDENTITY_GEOMETRY_ROW_REUSED"],
+      "%s" % _prov(_rows=[_twice, dict(_twice)]))
 # The blank `Auto_Fill_Pattern` says the reader measured no fill for this bar.
 # The MEASUREMENT is what decides whether that is true, and it says the fill was
 # read - so this is a bar that did not need naming by hand, caught even though
 # every column agrees with every other column.
 check("a human identity on a bar the measurement DID read is refused",
-      _human(Geometry_Row_SHA256="a" * 64)
-      == ["IDENTITY_OVERRODE_MEASUREMENT"],
+      "IDENTITY_OVERRODE_MEASUREMENT" in _human(Geometry_Row_SHA256="a" * 64),
       "%s" % _human(Geometry_Row_SHA256="a" * 64))
+# A value moved to another panel OF THE SAME UNIT. Several panels may build one
+# unit - the package says so in as many words - so the unit check cannot see this
+# one, and the panel it now names is a line panel, which skips every identity
+# rule. What gives it away is the provenance columns themselves: only a
+# monochrome bar has them.
+#
+# REVERT: `continue` on a non-BAR_MONO panel without looking at the row. The
+# scenario below is the only place it shows, because the fixture batch's colour
+# panels have their own units.
+check("a monochrome value moved to a line panel of the SAME unit is refused",
+      _prov(Run_Panel_ID="P_TWIN")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE"],
+      "%s" % _prov(Run_Panel_ID="P_TWIN"))
+check("and a line panel's own value is still none of its business",
+      not _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
+                            Mean="55")]),
+      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
+                               Mean="55")]))
+check("a value whose Source_Panel_ID is not the panel's own is refused",
+      _prov(Source_Panel_ID="P_ELSEWHERE")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Source_Panel_ID="P_ELSEWHERE"))
+
+# THE CELL. Everything above ties a value to a measurement; none of it says the
+# value is filed under the right heading. Two bars, each citing its own row with
+# its own mean and its own fill, and their Cell_Keys exchanged: every other check
+# passes, the grid is complete because both timepoints are present, and the two
+# numbers are swapped. This is the failure with no arithmetic signature at all.
+#
+# REVERT: drop the cell block, or stop keeping Group_ID in `geometry_index`.
+# Nothing else in this file notices.
+check("a value filed under another group's timepoint is refused",
+      _prov(Cell_Key="ARM=LATE;TIMEPOINT=T1")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _prov(Cell_Key="ARM=LATE;TIMEPOINT=T1"))
+check("and one filed under another series is refused",
+      _prov(Cell_Key="ARM=PRE;TIMEPOINT=T3")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _prov(Cell_Key="ARM=PRE;TIMEPOINT=T3"))
+check("a whole pair of exchanged cells is caught, both rows",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice, Geometry_Row_SHA256="a" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T0"),
+           dict(_twice, Geometry_Row_SHA256="c" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T3")],
+          _MONO_PANELS, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH",
+          "IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice, Cell_Key="ARM=LATE;TIMEPOINT=T0"),
+           dict(_twice, Geometry_Row_SHA256="c" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T3")],
+          _MONO_PANELS, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+check("and a caller who supplies no cell map gets no free pass",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_CELL_MAP_MISSING"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+check("a human value's cell comes from the series the RESOLUTION names",
+      _human(Cell_Key="ARM=PRE;TIMEPOINT=T3")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _human(Cell_Key="ARM=PRE;TIMEPOINT=T3"))
+
+# `Resolution_ID` as a FOREIGN KEY. Checked only for being non-blank it is a
+# label: swap two of a panel's resolutions on their values and the numbers, the
+# hash and the fill all still agree, while the accepted file cites the wrong
+# evidence, the wrong reviewer and the wrong reading.
+#
+# REVERT: keep the non-blank test and drop the lookup. The four below are the
+# whole difference.
+check("a resolution nobody wrote is refused",
+      _human(Resolution_ID="IR_NOBODY")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Resolution_ID="IR_NOBODY"))
+check("another resolution of the same panel is refused",
+      _human(Resolution_ID="IR2")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Resolution_ID="IR2"))
+check("and the refusal names the row hash the two disagree about",
+      any("Geometry_Row_SHA256" in _d for _w, _c, _d in
+          RB.identity_provenance_problems(
+              [dict(_twice, Identity_Source="HUMAN",
+                    Identity_Evidence_Type="LEGEND_DECLARED",
+                    Auto_Fill_Pattern="", Resolution_ID="IR2",
+                    Geometry_Row_SHA256="e" * 64)],
+              _MONO_PANELS, geometry=_MONO_GEO,
+              resolutions=_MONO_RESOLUTIONS)))
+check("an evidence type that is not the one the resolution declares is refused",
+      _human(Identity_Evidence_Type="TEXT_DECLARED")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Identity_Evidence_Type="TEXT_DECLARED"))
+
 check("the index reads a geometry RECORD as well as a CSV row",
       set(RB.geometry_index([dict(figure="P_X", geometry_row_sha256="e" * 64,
                                   value=1.0, dispersion=0.5,
@@ -3383,15 +3516,17 @@ check("and evidence edited after the run is RUN_ARTIFACT_MODIFIED",
 # that skipped it, presented a complete-looking ledger. The condition is in the
 # resolution rows, so the check reads them.
 #
-# REVERT: delete `identity_evidence_missing` from the finalizer, or its call.
+# REVERT: delete `identity_contract_failures` from the finalizer, or its call.
 # Every scenario above still passes, because this run's producer copied the
 # evidence in; what is gone is the finalizer's own reason to believe it.
 _led = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
                    dtype=object).fillna("")
+_machine2 = pd.read_csv(os.path.join(_o2, "figure_values_machine_qc.csv"),
+                        dtype=object).fillna("")
 _probs = []
 check("a run that copied its evidence in withholds nothing",
-      not FIN.identity_evidence_missing(_o2, _led,
-                                        lambda w, c, d: _probs.append(c))
+      not FIN.identity_contract_failures(_o2, _led, _machine2,
+                                         lambda w, c, d: _probs.append(c))
       and not _probs, "%s" % _probs)
 check("the ledger names which resolution each copy belongs to",
       "Artifact_Reference" in RB.PANEL_ARTIFACT_COLUMNS
@@ -3402,16 +3537,16 @@ check("the ledger names which resolution each copy belongs to",
 _probs = []
 _old_shape = _led[_led["Artifact_Type"] != "IDENTITY_EVIDENCE"]
 check("a run without the copy is withheld from approval, by panel",
-      FIN.identity_evidence_missing(_o2, _old_shape,
-                                    lambda w, c, d: _probs.append(c))
+      FIN.identity_contract_failures(_o2, _old_shape, _machine2,
+                                     lambda w, c, d: _probs.append(c))
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 # And a copy that is in the ledger under a hash the resolution never declared.
 _probs = []
 _wrong = _led.copy()
 _wrong.loc[_wrong["Artifact_Type"] == "IDENTITY_EVIDENCE", "SHA256"] = "0" * 64
 check("and so is a copy that is not the file that was signed",
-      FIN.identity_evidence_missing(_o2, _wrong,
-                                    lambda w, c, d: _probs.append(c))
+      FIN.identity_contract_failures(_o2, _wrong, _machine2,
+                                     lambda w, c, d: _probs.append(c))
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 # End to end through `finalize`, because the two checks above call the helper
 # directly and the wiring is the thing a revert removes. A full run, a real
@@ -3484,6 +3619,42 @@ check("a run whose evidence was never copied in does not finalize",
 check("and it writes no accepted file",
       not os.path.exists(os.path.join(_fin2, "figure_values_accepted.csv")))
 
+# And the value-to-resolution join, re-derived by the finalizer as well: a value
+# whose Resolution_ID was exchanged for the panel's other one keeps every number
+# and every hash while citing the wrong evidence and the wrong reading.
+#
+# REVERT: drop the machine-value loop from `identity_contract_failures`. The
+# runner still catches it at run time; what is gone is the durable finalizer's
+# own reason to believe a run it did not produce.
+_probs = []
+_swapped = _machine2.copy()
+_swapped.loc[_swapped["Identity_Source"] == "HUMAN", "Resolution_ID"] = "IR_OTHER"
+check("a value citing a resolution this run never recorded is withheld",
+      FIN.identity_contract_failures(_o2, _led, _swapped,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_RESOLUTION_UNKNOWN" in _probs, "%s" % _probs)
+_probs = []
+_wrongfill = _machine2.copy()
+_wrongfill.loc[_wrongfill["Identity_Source"] == "HUMAN",
+               "Resolved_Fill_Pattern"] = "SOLID"
+check("and one that disagrees with the resolution it cites is withheld",
+      FIN.identity_contract_failures(_o2, _led, _wrongfill,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# REVERT: key the evidence by reference with an assignment rather than a list.
+# A second entry for one Resolution_ID then replaces the first, so which of two
+# files a panel was approved against depends on the ledger's ORDER.
+_probs = []
+_dupe = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"]],
+                  ignore_index=True)
+check("two evidence copies for one resolution is refused, not resolved by order",
+      FIN.identity_contract_failures(
+          _o2, _dupe, _machine2, lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
 # A panel resolved only by a reviewer's own reading has no evidence file, and
 # must not be withheld for not having one - the whole reason this is a row-level
 # condition and not an artifact tuple.
@@ -3501,8 +3672,11 @@ _riled = pd.read_csv(os.path.join(_rio, "panel_artifacts.csv"),
 _probs = []
 check("a reviewer's own reading needs no evidence file and is not withheld",
       _ris["status"] == "RAN"
-      and not FIN.identity_evidence_missing(
-          _rio, _riled, lambda w, c, d: _probs.append(c))
+      and not FIN.identity_contract_failures(
+          _rio, _riled,
+          pd.read_csv(os.path.join(_rio, "figure_values_machine_qc.csv"),
+                      dtype=object).fillna(""),
+          lambda w, c, d: _probs.append(c))
       and "IDENTITY_EVIDENCE" not in set(_riled["Artifact_Type"]),
       "%s %s" % (_ris["status"], _probs))
 _riq = pd.read_csv(os.path.join(_rio, "review_queue.csv"),

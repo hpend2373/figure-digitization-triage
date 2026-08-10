@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.31"
+PIPELINE_VERSION = "7.32"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1506,15 +1506,23 @@ QC_SCOPES = ("unit", "units", "values", "figures", "grids", "grid")
 #: `Run_Panel_ID` and the panel manifest are both in hand.
 IDENTITY_PROVENANCE_COLUMNS = ("Geometry_Row_SHA256", "Resolved_Fill_Pattern",
                                "Identity_Source", "Identity_Evidence_Type")
+
+#: Every column only a monochrome bar's value can legitimately carry. Their
+#: presence on a row bound to any other mark type is a value that has been moved.
+MONO_PROVENANCE_COLUMNS = IDENTITY_PROVENANCE_COLUMNS + ("Auto_Fill_Pattern",
+                                                        "Resolution_ID")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def geometry_index(records):
-    """{(Panel_ID, Geometry_Row_SHA256): row} for the foreign-key check.
+    """{(Panel_ID, Geometry_Row_SHA256): [row]} for the foreign-key check.
 
     Takes geometry RECORDS or the rows of `mono_bar_geometry.csv` - the field
     names differ, so both spellings are read - which is what lets the check be
-    re-run from the files a run leaves behind.
+    re-run from the files a run leaves behind. `Group_ID` is kept as well as the
+    numbers: a value can cite the right measurement, carry its mean and its
+    dispersion, and still be filed under a different timepoint, and the group is
+    the only thing that says which one it belongs to.
     """
     out = {}
     for rec in (records or ()):
@@ -1529,9 +1537,48 @@ def geometry_index(records):
                 else rec.get("dispersion"))
         auto = (rec.get("Auto_Fill_Pattern") if "Auto_Fill_Pattern" in rec
                 else rec.get("resolved_fill_pattern"))
+        group = rec.get("Group_ID") if "Group_ID" in rec else rec.get("group")
+        slot = (rec.get("Geometry_Slot") if "Geometry_Slot" in rec
+                else rec.get("slot"))
         out.setdefault((pid, digest), []).append(
             dict(Mean=mean, Dispersion_Value=disp,
-                 Auto_Fill_Pattern=_upper(auto)))
+                 Auto_Fill_Pattern=_upper(auto), Group_ID=_s(group),
+                 Geometry_Slot=_s(slot)))
+    return out
+
+
+def geometry_index_from_run(output_dir):
+    """The index, built from the file the run wrote and read back to verify.
+
+    Not from the records still in memory. Nothing today edits a record after the
+    artifact is written, but if anything ever does, an index built from memory
+    compares the edited numbers with themselves and the check passes while
+    `mono_bar_geometry.csv` - the thing a reviewer opens and the finalizer
+    re-hashes - says something else. The durable file is the one the value has
+    to agree with.
+    """
+    path = os.path.join(output_dir, "mono_bar_geometry.csv")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return geometry_index(list(csv.DictReader(fh)))
+
+
+def resolution_index(rows_by_panel):
+    """{(Panel_ID, Resolution_ID): row} for the human half of the foreign key.
+
+    A `Resolution_ID` on a value that is only checked for being non-blank is a
+    label, not a reference: swap two of a panel's resolutions on their values and
+    every other check still passes - the numbers are right, the hash is right,
+    the fill is right - while the accepted file cites the wrong evidence, the
+    wrong reviewer and the wrong reading.
+    """
+    out = {}
+    for pid, rows in (rows_by_panel or {}).items():
+        for row in rows:
+            rid = _s(row.get("Resolution_ID"))
+            if rid:
+                out[(_s(pid), rid)] = row
     return out
 
 
@@ -1542,7 +1589,8 @@ def _as_number(value):
         return None
 
 
-def identity_provenance_problems(values, panel_index, geometry=None):
+def identity_provenance_problems(values, panel_index, geometry=None,
+                                resolutions=None):
     """[(where, check, detail)] for values whose provenance does not hold up.
 
     Two things the grid gate cannot do.
@@ -1601,7 +1649,30 @@ def identity_provenance_problems(values, panel_index, geometry=None):
                         "Unit_ID=%s; one of the two is somebody else's"
                         % (got_unit, pid, want_unit)))
             continue
-        if _upper(panel.get("Mark_Type")) != "BAR_MONO":
+        want_source = _s(panel.get("Source_Panel_ID"))
+        got_source = _s(row.get("Source_Panel_ID"))
+        if want_source and got_source and want_source != got_source:
+            out.append((where, "IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT",
+                        "this value is Source_Panel_ID=%s and Run_Panel_ID=%s "
+                        "was declared against %s"
+                        % (got_source, pid, want_source)))
+            continue
+        mark = _upper(panel.get("Mark_Type"))
+        if mark != "BAR_MONO":
+            # A monochrome value re-stamped onto a panel of the SAME UNIT - which
+            # this package allows several panels to build - passed the unit check
+            # and then skipped every identity rule because the panel it now names
+            # is a line panel. Nothing else looks at the combination, so the
+            # provenance columns themselves are the evidence: only a monochrome
+            # bar has them, so their presence on a colour panel's row is a value
+            # that has been moved.
+            moved = [c for c in MONO_PROVENANCE_COLUMNS if _s(row.get(c))]
+            if moved:
+                out.append((where,
+                            "IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE",
+                            "this value carries %s and Run_Panel_ID=%s is "
+                            "Mark_Type=%s; a fill identity is a BAR_MONO fact"
+                            % (", ".join(moved), pid, mark or "(blank)")))
             continue
         absent = [c for c in IDENTITY_PROVENANCE_COLUMNS if not _s(row.get(c))]
         if absent:
@@ -1715,6 +1786,73 @@ def identity_provenance_problems(values, panel_index, geometry=None):
                         "measurement %s... was read as %s, so this bar did not "
                         "need naming by hand"
                         % (digest[:16], measured_fill)))
+        # THE CELL. Everything above ties the value to a measurement; nothing
+        # above says the value is filed under the right heading. Two bars of one
+        # panel, each citing its own row with its own mean and its own fill, and
+        # their Cell_Keys exchanged: every check so far passes, the grid is
+        # complete because both timepoints exist, and the two numbers are
+        # swapped. The group the measurement came from is what decides the
+        # position level, and the identity decides the series level.
+        series_id = ""
+        if source == "HUMAN":
+            resolution_row = (resolutions or {}).get((pid, resolution))
+            if resolution_row is None:
+                # A `Resolution_ID` checked only for being non-blank is a label.
+                # Swap two of a panel's resolutions on their values and the
+                # numbers, the hash and the fill all still agree while the
+                # accepted file cites the wrong evidence and the wrong reading.
+                out.append((where, "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH",
+                            "Resolution_ID=%s is not a resolution of %s"
+                            % (resolution or "(blank)", pid)))
+                continue
+            for column, got_value in (("Geometry_Row_SHA256", digest.lower()),
+                                      ("Resolved_Fill_Pattern", resolved),
+                                      ("Evidence_Type", evidence)):
+                want_value = _s(resolution_row.get(column))
+                want_value = (want_value.lower()
+                              if column == "Geometry_Row_SHA256"
+                              else _upper(want_value))
+                if want_value and want_value != got_value:
+                    out.append(
+                        (where, "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH",
+                         "resolution %s reads %s=%s and this value says %s"
+                         % (resolution, column, want_value or "blank",
+                            got_value or "blank")))
+            series_id = _s(resolution_row.get("Resolved_Series_ID"))
+        cell_map = panel.get("Cell_Map")
+        if not cell_map:
+            # Fail closed. The mapping comes from the position and series
+            # manifests, which the runner has in hand; a caller that does not
+            # pass them is not entitled to a pass on the check they would make.
+            out.append((where, "IDENTITY_CELL_MAP_MISSING",
+                        "%s declares positions and series and none were "
+                        "supplied, so the cell this value is filed under cannot "
+                        "be checked against the bar it was measured from" % pid))
+            continue
+        levels = GE.fig_parse_cell_key(_s(row.get("Cell_Key"))) or {}
+        group = _s(measured.get("Group_ID"))
+        position_factor = _upper(cell_map.get("position_factor"))
+        want_level = _s(cell_map.get("position_levels", {}).get(group))
+        if position_factor and want_level:
+            got_level = _s(levels.get(position_factor))
+            if got_level.upper() != want_level.upper():
+                out.append((where, "IDENTITY_GEOMETRY_CELL_MISMATCH",
+                            "measurement %s... is group %s (%s=%s) and this "
+                            "value is filed under %s=%s"
+                            % (digest[:16], group, position_factor, want_level,
+                               position_factor, got_level or "nothing")))
+        series_factor = _upper(cell_map.get("series_factor"))
+        if not series_id:
+            series_id = _s(cell_map.get("series_by_fill", {}).get(resolved))
+        want_series = _s(cell_map.get("series_levels", {}).get(series_id))
+        if series_factor and want_series:
+            got_series = _s(levels.get(series_factor))
+            if got_series.upper() != want_series.upper():
+                out.append((where, "IDENTITY_GEOMETRY_CELL_MISMATCH",
+                            "this value's series is %s (%s=%s) and it is filed "
+                            "under %s=%s"
+                            % (series_id, series_factor, want_series,
+                               series_factor, got_series or "nothing")))
     return out
 
 
@@ -2494,13 +2632,43 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # frame cannot say which panel a row came from and this check would find
     # nothing on every row. The two are in the same order, so a `values:%d` from
     # here names the same line the gate would.
+    _panel_provenance = {}
+    for _, _panel_row in m["panels"].iterrows():
+        _pid = _s(_panel_row.get("Panel_ID"))
+        _series_rows = series_by_panel.get(_pid, [])
+        _position_rows = positions_by_panel.get(_pid, [])
+        _panel_provenance[_pid] = {
+            "Mark_Type": _s(_panel_row.get("Mark_Type")),
+            "Unit_ID": _s(_panel_row.get("Unit_ID")),
+            "Source_Panel_ID": _s(_panel_row.get("Source_Panel_ID")),
+            # What a cell of this panel is MADE of, so a value can be checked
+            # against the bar it was measured from and not only against itself.
+            "Cell_Map": {
+                "position_factor": next(
+                    (_upper(r.get("Factor_Name")) for r in _position_rows
+                     if not BM.blank(r.get("Factor_Name"))), ""),
+                "position_levels": {_s(r.get("Position_ID")):
+                                    _s(r.get("Factor_Level"))
+                                    for r in _position_rows},
+                "series_factor": next(
+                    (_upper(r.get("Factor_Name")) for r in _series_rows
+                     if not BM.blank(r.get("Factor_Name"))), ""),
+                "series_levels": {_s(r.get("Series_ID")):
+                                  _s(r.get("Factor_Level"))
+                                  for r in _series_rows},
+                "series_by_fill": {_upper(r.get("Bar_Fill_Pattern")):
+                                   _s(r.get("Series_ID"))
+                                   for r in _series_rows
+                                   if not BM.blank(r.get("Bar_Fill_Pattern"))},
+            },
+        }
     _identity_problems = identity_provenance_problems(
-        values,
-        {_s(r.get("Panel_ID")): {"Mark_Type": _s(r.get("Mark_Type")),
-                                 "Unit_ID": _s(r.get("Unit_ID"))}
-         for _, r in m["panels"].iterrows()},
-        geometry=geometry_index(
-            [r for rows_ in geometry_rows_by_panel.values() for r in rows_]))
+        values, _panel_provenance,
+        # From the FILE, which has been written and read back and verified - not
+        # from the records still in memory, which an edit after the write would
+        # let compare against themselves.
+        geometry=geometry_index_from_run(output_dir),
+        resolutions=resolution_index(resolutions_by_panel))
     if _identity_problems:
         qc = pd.concat(
             [qc, pd.DataFrame([dict(where=w, check=c, detail=d)

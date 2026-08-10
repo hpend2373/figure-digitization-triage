@@ -74,6 +74,13 @@ class AxisCalibration:
     #: rather than a shape nobody looked at. `bar_reader` computed exactly this
     #: and returned it under a different name, where nothing read it.
     max_residual: float = 0.0
+    #: The points the fit came from, `((value, pixel), ...)`. Kept because the
+    #: fit alone cannot say what a person typed: a slope and an intercept
+    #: reproduce the mapping and not the two numbers somebody read off the
+    #: printed axis, so nothing downstream could compare a DECLARED tick pixel
+    #: with a tick mark found on the page, or say which of four points was the
+    #: one that did not fit.
+    points: tuple = ()
 
     @classmethod
     def from_points(cls, points, scale="LINEAR"):
@@ -93,7 +100,8 @@ class AxisCalibration:
             raise GeometryResolutionError("scale must be LINEAR or LOG")
         slope, intercept = np.polyfit(pixels, values, 1)
         resid = float(np.abs(values - (slope * pixels + intercept)).max())
-        return cls(float(slope), float(intercept), scale, resid)
+        return cls(float(slope), float(intercept), scale, resid,
+                   tuple((float(p[0]), float(p[1])) for p in points))
 
     def pixel_to_value(self, pixel):
         raw = self.slope * float(pixel) + self.intercept

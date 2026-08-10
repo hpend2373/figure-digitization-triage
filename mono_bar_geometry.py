@@ -1124,8 +1124,8 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
 
 def geometry_rows(gray, panel_box, calibration, anchors, fills,
                   group_window, baseline=0.0, threshold=128,
-                  stem_threshold=200, min_bar_px=MIN_BAR_PX, *,
-                  panel_id, figure_id):
+                  stem_threshold=200, min_bar_px=MIN_BAR_PX,
+                  review_crop_box=None, *, panel_id, figure_id):
     """One record per declared bar of one panel, WITHOUT naming any series.
 
     The anonymous grain. Geometry is per panel and identity is per FIGURE, so a
@@ -1201,12 +1201,31 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                     # can check that `Mean` is what `Edge_Px_Image` means, and
                     # nobody drawing a picture of the panel can show where the
                     # calibration thinks the printed ticks are.
-                    calibration=dict(slope=float(getattr(cal, "slope", 0.0)),
-                                     intercept=float(getattr(cal, "intercept",
-                                                             0.0)),
-                                     scale=str(getattr(cal, "scale", "LINEAR")),
-                                     max_residual=float(
-                                         getattr(cal, "max_residual", 0.0))),
+                    calibration=dict(
+                        slope=float(getattr(cal, "slope", 0.0)),
+                        intercept=float(getattr(cal, "intercept", 0.0)),
+                        scale=str(getattr(cal, "scale", "LINEAR")),
+                        max_residual=float(getattr(cal, "max_residual", 0.0)),
+                        # The points, not only the fit. `max_residual` on a
+                        # TWO-point calibration is always about 1e-15, because
+                        # a line through two points is exact - so the one
+                        # number that looks like a calibration check cannot
+                        # detect anything until there are three. Keeping the
+                        # points is what lets a tick-finder compare a declared
+                        # pixel with a printed one, and lets a reviewer see
+                        # how many ticks the person actually read.
+                        points=[[float(v), float(px)] for v, px
+                                in getattr(cal, "points", ()) or []],
+                        n_points=len(getattr(cal, "points", ()) or [])),
+                    # Where a REVIEWER has to look to check the calibration:
+                    # the plot area plus whatever the manifest declares as the
+                    # axis regions. `draw_panel_geometry` falls back to a
+                    # fraction of the panel when this is absent, and a fraction
+                    # is a guess - an axis printed far from the plot box, or a
+                    # panel box drawn tightly around the bars, crops away the
+                    # numbers the picture exists to show.
+                    review_crop_box=(list(review_crop_box)
+                                     if review_crop_box else None),
                     # What the group is SUPPOSED to hold, on every record.
                     # Without it a group is only knowable from the records that
                     # came back, so a record lost to a defect takes its
@@ -2189,6 +2208,52 @@ def read_artifact_row(row):
     return record
 
 
+#: `value` and `dispersion` are rounded to three decimals, so a recomputation
+#: agrees to half of the last place plus float slop.
+VALUE_TOLERANCE = 5e-4 + 1e-9
+
+
+def _apply(calibration, pixel):
+    import math
+    raw = calibration["slope"] * float(pixel) + calibration["intercept"]
+    return math.exp(raw) if calibration.get("scale") == "LOG" else raw
+
+
+def check_calibration(record):
+    """`Mean` has to be what `Edge_Px_Image` MEANS.
+
+    The record carried the answer and, until the axis mapping went on it, not
+    the arithmetic - so a value could be anything at all and the file had no
+    way to disagree with it. Now it does: the mapping, the pixel and the value
+    are all on the row, and exactly one combination of them is consistent.
+
+    This does NOT check that the calibration is right - a mapping read off the
+    wrong gridline is perfectly self-consistent, and no arithmetic will ever
+    catch a printed 30 typed as 3. That is what the panel picture is for. This
+    catches the other half: a value that does not follow from the mapping the
+    row itself declares.
+    """
+    cal = record.get("calibration")
+    if not cal or not cal.get("slope"):
+        return
+    edge, value = record.get("edge_px_image"), record.get("value")
+    if edge is not None and value is not None:
+        want = _apply(cal, edge)
+        if abs(want - float(value)) > VALUE_TOLERANCE:
+            raise ValueError(
+                "mono_bar_geometry: VALUE_DOES_NOT_FOLLOW_FROM_CALIBRATION - "
+                "the row says %r at page row %r, and its own axis mapping "
+                "makes that %.6f" % (value, edge, want))
+    cap, dispersion = record.get("cap_px_image"), record.get("dispersion")
+    if cap is not None and dispersion is not None and value is not None:
+        want = abs(_apply(cal, cap) - float(value))
+        if abs(want - float(dispersion)) > VALUE_TOLERANCE:
+            raise ValueError(
+                "mono_bar_geometry: DISPERSION_DOES_NOT_FOLLOW_FROM_"
+                "CALIBRATION - the row says %r and its own axis mapping makes "
+                "that %.6f" % (dispersion, want))
+
+
 def verify_artifact(rows, recompute_identity=True):
     """Every row of a geometry file, and the things only the whole file says.
 
@@ -2207,6 +2272,7 @@ def verify_artifact(rows, recompute_identity=True):
     records, seen = [], {}
     for n, row in enumerate(rows):
         record = read_artifact_row(row)
+        check_calibration(record)
         records.append(record)
         key = (row["Panel_ID"], row["Group_ID"], row["Geometry_Slot"])
         if key[1] != "" or key[2] != "":
@@ -2215,6 +2281,21 @@ def verify_artifact(rows, recompute_identity=True):
                     "mono_bar_geometry: DUPLICATE_GEOMETRY_SLOT - rows %d and "
                     "%d both claim %r" % (seen[key], n, key))
             seen[key] = n
+    # One panel, one axis. `draw_panel_geometry` takes the calibration off the
+    # first row it is handed and draws every other row's bar against it, and
+    # `Mean` is only comparable across a panel if the mapping behind it is the
+    # same one. Two rows of a panel disagreeing about the axis is two panels.
+    by_panel = {}
+    for row, record in zip(rows, records):
+        by_panel.setdefault(row["Panel_ID"], []).append(record)
+    for panel_id, group in by_panel.items():
+        for field in ("calibration", "panel_box", "zero_px_image"):
+            distinct = {canonical_json(r.get(field)) for r in group}
+            if len(distinct) > 1:
+                raise ValueError(
+                    "mono_bar_geometry: PANEL_AXIS_INCONSISTENT - panel %r "
+                    "carries %d different values of %s"
+                    % (panel_id, len(distinct), field))
     by_figure = {}
     for row, record in zip(rows, records):
         by_figure.setdefault(row["Figure_ID"], []).append((row, record))

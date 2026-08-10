@@ -322,3 +322,25 @@ forwards = {os.path.basename(p)[:-3]
 unrun = sorted(s for s in forwards if s not in ci_text)
 assert not unrun, "CI does not run the forward tests: %s" % unrun
 print("CI runs every forward test in the package (%d): PASS" % len(forwards))
+
+# No scenario may be written so that it cannot fail. Two were: a caption check
+# ending `... or True`, which passed whatever the picture contained, and an
+# `all(... or True ...)` inside a figure-isolation check. Both looked like
+# assertions in the output - "ok" beside a sentence - and asserted nothing.
+#
+# A short-circuiting truth literal inside a scenario is always that mistake:
+# there is no reason to write `X or True` except to make X stop mattering.
+# Grepped rather than reasoned about, because the property is textual.
+import re                                                            # noqa: E402
+
+vacuous = []
+for path in sorted(glob.glob(os.path.join(HERE, "test_*.py"))
+                   + glob.glob(os.path.join(HERE, "forward_test_*.py"))):
+    for n, line in enumerate(open(path, encoding="utf-8"), 1):
+        code = line.split("#", 1)[0]
+        if re.search(r"\bor\s+True\b|\bor\s+1\s*[,)]|\band\s+False\b", code):
+            vacuous.append("%s:%d" % (os.path.basename(path), n))
+assert not vacuous, ("a scenario that cannot fail is not a scenario: %s"
+                     % ", ".join(vacuous))
+print("no scenario is written so that it cannot fail (%d files): PASS"
+      % len(glob.glob(os.path.join(HERE, "test_*.py"))))

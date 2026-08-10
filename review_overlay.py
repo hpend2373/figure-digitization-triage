@@ -17,6 +17,7 @@ derived from it, and its absence cannot change a value - it exists so that the
 approval in `value_review.csv` is a judgement about the extraction rather than a
 signature on a filename.
 """
+import json
 import os
 
 from PIL import Image, ImageDraw
@@ -340,6 +341,19 @@ def draw_panel_geometry(path, image_path, records, pad=24):
     Every bar's measured top and cap are drawn too, labelled with the value the
     row carries, so "the bar the reader called 5.31" can be read off the
     printed axis by eye.
+
+    Returns a dict - not a path - because what the picture DREW has to be
+    checkable without looking at it. Text rendered into a PNG is pixels, not a
+    string: a test that searches the file's bytes for a caption finds nothing
+    on a correct picture and would have to be written to pass anyway. The same
+    dict is written beside the PNG as `<name>.json` and printed into
+    `index.html` in words.
+
+        {"path": ..., "axis_ticks": [{"value": 0.0, "pixel": 1234.0}, ...],
+         "axis_line_count": 4, "crop_box": [...], "crop_source": "DECLARED",
+         "calibration": {...}}
+
+    Returns None if it could not be drawn.
     """
     try:
         from PIL import Image as _Image
@@ -348,14 +362,25 @@ def draw_panel_geometry(path, image_path, records, pad=24):
         if not rows:
             raise ValueError("no record carries a panel_box")
         x0, x1, y0, y1 = (int(v) for v in rows[0]["panel_box"])
-        # Room for the axis. The tick labels are LEFT of the panel box and the
-        # group labels BELOW it, and a picture of the panel box alone crops
-        # away the very thing this is for.
-        left = max(0, x0 - int(0.22 * (x1 - x0)))
-        bottom = y1 + int(0.12 * (y1 - y0))
-        top = max(0, y0 - pad)
         page = _Image.open(image_path).convert("RGB")
-        box = (left, top, min(page.width, x1 + pad), min(page.height, bottom))
+        # Where a reviewer has to look. DECLARED when the caller said - the
+        # plot area unioned with the manifest's axis regions - and ESTIMATED
+        # when it did not. The estimate is a fraction of the panel, which is a
+        # guess: an axis printed far from the plot box, a panel box drawn
+        # tightly around the bars, a long tick label or a unit printed beside
+        # the numbers, and the picture crops away the very thing it is for.
+        declared = rows[0].get("review_crop_box")
+        if declared:
+            rx0, rx1, ry0, ry1 = (int(v) for v in declared)
+            source = "DECLARED"
+        else:
+            rx0 = x0 - int(0.22 * (x1 - x0))
+            rx1 = x1
+            ry0, ry1 = y0, y1 + int(0.12 * (y1 - y0))
+            source = "ESTIMATED"
+        box = (max(0, min(rx0, x0) - pad), max(0, min(ry0, y0) - pad),
+               min(page.width, max(rx1, x1) + pad),
+               min(page.height, max(ry1, y1) + pad))
         crop = page.crop(box)
         canvas = _Image.new("RGB", (max(crop.width, 420), crop.height + FOOTER),
                             (255, 255, 255))
@@ -364,8 +389,11 @@ def draw_panel_geometry(path, image_path, records, pad=24):
         font = _font()
         ox, oy = box[0], box[1]
 
+        #: Where the plot area starts inside the crop. Everything left of it is
+        #: the printed axis, and nothing is drawn there.
+        plot_left = max(0, x0 - ox)
         cal = next((r["calibration"] for r in rows if r.get("calibration")), None)
-        drawn_ticks = 0
+        drawn_ticks = []
         if cal and cal.get("slope"):
             lo = _value_at(cal, y1)
             hi = _value_at(cal, y0)
@@ -377,19 +405,30 @@ def draw_panel_geometry(path, image_path, records, pad=24):
             while value <= hi + 1e-9:
                 y = int(round(_pixel_at(cal, value))) - oy
                 if 0 <= y < crop.height:
-                    draw.line((0, y, crop.width - 1, y), fill=(200, 120, 0),
-                              width=1)
-                    label = ("%g" % round(value, 6))
-                    draw.text((2, max(0, y - 11)), label, fill=(200, 120, 0),
+                    # From the PLOT AREA rightwards, never across the margin.
+                    # The printed tick labels live in that margin and they are
+                    # the thing this picture exists to be compared against; a
+                    # line drawn over them destroys the comparison.
+                    draw.line((plot_left, y, crop.width - 1, y),
+                              fill=(200, 120, 0), width=1)
+                    # On the RIGHT. The printed tick labels are on the LEFT -
+                    # they are the thing this picture exists to be compared
+                    # against - and a label drawn over them hides the one
+                    # number the comparison needs.
+                    label = "%g" % round(value, 6)
+                    draw.text((crop.width - 8 - 6 * len(label),
+                               max(0, y - 11)), label, fill=(200, 120, 0),
                               font=font)
-                    drawn_ticks += 1
+                    drawn_ticks.append(dict(value=float(round(value, 6)),
+                                            pixel=float(_pixel_at(cal, value))))
                 value += step
         # The baseline the measurement actually used, over the top of them.
         zero = rows[0].get("zero_px_image")
         if zero is not None:
             y = int(round(float(zero))) - oy
             if 0 <= y < crop.height:
-                draw.line((0, y, crop.width - 1, y), fill=(120, 120, 120), width=2)
+                draw.line((plot_left, y, crop.width - 1, y),
+                          fill=(120, 120, 120), width=2)
         for record in rows:
             fp = record.get("footprint_px_image")
             edge = record.get("edge_px_image")
@@ -412,8 +451,8 @@ def draw_panel_geometry(path, image_path, records, pad=24):
                 y = int(round(float(cap))) - oy
                 if 0 <= y < crop.height:
                     draw.line((a, y, b, y), fill=(31, 119, 180), width=1)
-        head = "%s   %d rows   %d axis lines from the calibration" % (
-            rows[0].get("figure"), len(rows), drawn_ticks)
+        head = "%s   %d rows   %d axis lines from the calibration (%s crop)" % (
+            rows[0].get("figure"), len(rows), len(drawn_ticks), source)
         tail = ("calibration %.6g px/unit, residual %.3g   figure %s"
                 % (1.0 / cal["slope"] if cal and cal.get("slope") else float("nan"),
                    cal.get("max_residual", 0.0) if cal else float("nan"),
@@ -426,7 +465,16 @@ def draw_panel_geometry(path, image_path, records, pad=24):
                   fill=(70, 70, 70), font=font)
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         canvas.save(path)
-        return path
+        meta = dict(path=path, axis_ticks=drawn_ticks,
+                    plot_left_in_crop=int(plot_left),
+                    axis_line_count=len(drawn_ticks),
+                    crop_box=[int(v) for v in box], crop_source=source,
+                    calibration=cal, panel_id=rows[0].get("figure"),
+                    figure_id=rows[0].get("figure_id"), rows=len(rows))
+        with open(os.path.splitext(path)[0] + ".json", "w",
+                  encoding="utf-8") as fh:
+            json.dump(meta, fh, sort_keys=True, indent=1)
+        return meta
     except Exception as exc:
         _FAILURES.append("%s: %s: %s" % (os.path.basename(path),
                                          type(exc).__name__, exc))
@@ -469,7 +517,7 @@ def write_row_crops(directory, pairs, pad=24):
         got = draw_panel_geometry(os.path.join(directory, name), image_path,
                                   records_here, pad=pad)
         if got:
-            panel_pictures[key] = os.path.basename(got)
+            panel_pictures[key] = got
     written = []
     for image_path, record in pairs:
         name = row_crop_name(record)
@@ -500,9 +548,18 @@ def write_row_crops(directory, pairs, pad=24):
         for key in order:
             fh.write("<h2>%s</h2>\n" % key)
             if key in panel_pictures:
-                fh.write("<figure><img src='%s'>"
-                         "<figcaption>the whole panel, with the axis in frame"
-                         "</figcaption></figure>\n" % panel_pictures[key])
+                meta = panel_pictures[key]
+                fh.write("<figure><img src='%s'>\n"
+                         % os.path.basename(meta["path"]))
+                # In WORDS, not only in the picture. A reviewer comparing the
+                # orange numbers with the printed ones should not have to read
+                # them off a rendering, and a test should not have to either.
+                fh.write("<figcaption>the whole panel, with the axis in frame"
+                         " &mdash; %s crop, %d axis lines at %s"
+                         "</figcaption></figure>\n"
+                         % (meta["crop_source"], meta["axis_line_count"],
+                            ", ".join("%g" % t["value"]
+                                      for t in meta["axis_ticks"]) or "-"))
             else:
                 fh.write("<p><em>no panel picture could be drawn</em></p>\n")
             for got, record in written:
@@ -522,6 +579,5 @@ def write_row_crops(directory, pairs, pad=24):
                              " &mdash; %s" % record["error"]
                              if record.get("error") else "",
                              record.get("geometry_row_sha256", "UNSTAMPED")))
-    return ([panel_pictures[k] and os.path.join(directory, panel_pictures[k])
-             for k in order if k in panel_pictures]
+    return ([panel_pictures[k]["path"] for k in order if k in panel_pictures]
             + [p for p, _r in written])

@@ -2616,6 +2616,97 @@ bar carries `zero_px_image` like every other row, and cropping to the baseline
 alone gives a 48 px strip of the axis. `STROKE_SCALE_UNRESOLVED` and
 `NO_SEED_SUPPORT` are shown their whole panel instead.
 
+## Two scenarios that could not fail
+
+One of them was mine, written in the round above:
+
+    check("and the caption says how many such lines it drew",
+          "axis lines from the calibration" in
+          open(panel_png, "rb").read().decode("latin-1", "ignore") or True)
+
+The `or True` makes it pass whatever the picture contains. Worse, the condition
+it was disabling could never have worked: text drawn into a PNG is PIXELS, and
+the string is not in the file - so the check would have failed on a CORRECT
+picture, which is presumably why it acquired an `or True`. A scenario that
+reports "ok" beside a sentence and asserts nothing is worse than no scenario,
+because it is counted.
+
+The second was `all(fid in str(v.get("prototypes", v)) or True for ...)` in the
+figure-isolation check, which reduced to the clause beside it.
+
+Both are gone, and `test_reproducibility` now greps every scenario file for a
+short-circuiting truth literal - `or True`, `or 1`, `and False`. There is no
+reason to write `X or True` except to stop X mattering, so the property is
+textual and is checked textually.
+
+**What the picture drew now comes back as data.** `draw_panel_geometry` returns
+a dict instead of a path and writes it beside the PNG as JSON:
+
+    {"path": ..., "axis_ticks": [{"value": 0.0, "pixel": 1234.0}, ...],
+     "axis_line_count": 4, "crop_box": [...], "crop_source": "DECLARED",
+     "plot_left_in_crop": 88, "calibration": {...}}
+
+`index.html` prints the same values in words. Nothing greps an image.
+
+## The factor of ten, and the fixture that can catch it
+
+The severe calibration failure is not a tick pixel a few rows out - that is 1.7%
+on publication 127 at ten pixels, below the digitization noise. It is a tick
+VALUE misread: a printed 30 typed as 3 makes every bar in the panel exactly ten
+times too small, all together, and every bar still looks like a bar. No
+arithmetic catches it: the mapping is self-consistent, and a third tick scales
+with the other two so `max_residual` stays at zero. The only thing that catches
+it is the number the calibration claims sitting beside the number the FIGURE
+prints.
+
+Which means the fixture has to print numbers, and until now none of them did -
+so a scenario could only confirm the orange line was in the right PLACE, and a
+line in the right place is exactly what a factor-of-ten error still produces.
+`print_axis_labels` draws `0`, `50`, `100` beside the axis of a synthetic panel,
+and the scenario reads it twice: once with the top tick declared 100 and once
+with it declared 10. The first picture offers 0, 50, 100 back; the second offers
+0, 5, 10 and never 100.
+
+For that comparison to be possible the printed numbers have to survive. Nothing
+is drawn left of the plot area now - the axis lines and the baseline start at
+`plot_left_in_crop` and the value labels are written on the RIGHT - and the
+scenario asserts the strip left of the plot area is reproduced pixel for pixel
+from the source page. A separate scenario counts orange pixels in the band above
+each line, so removing the labels while keeping the lines fails.
+
+**The row's arithmetic is checked too.** `verify_artifact` now recomputes
+`Mean` from the row's own `calibration` and `Edge_Px_Image`, and `Dispersion`
+from `Cap_Px_Image`, refusing on disagreement; and every row of one `Panel_ID`
+must carry the same `calibration`, `panel_box` and `zero_px_image`, because
+`draw_panel_geometry` takes the axis off the first row it is handed and draws
+every other row's bar against it. This does not check the calibration is RIGHT -
+a mapping read off the wrong gridline is perfectly self-consistent. It catches
+the other half: a value that does not follow from the mapping the row declares.
+
+**The calibration keeps its points.** `AxisCalibration` stores the
+`(value, pixel)` pairs it was fitted from, and the record carries them with
+`n_points`. A slope and an intercept reproduce the mapping and not the two
+numbers somebody read off the printed axis, so nothing could have compared a
+declared tick pixel with a tick mark found on the page, or said which of four
+points was the one that did not fit.
+
+**The crop is declared where the caller declares it.** `geometry_rows` takes
+`review_crop_box` and records it, and the picture reports `crop_source` as
+`DECLARED` or `ESTIMATED`. The fraction-of-the-panel fallback is a guess: an
+axis printed far from the plot box, a panel box drawn tightly around the bars,
+a long tick label or a unit printed beside the numbers, and the picture crops
+away the very thing it is for. `Axis_X_Region` and `Axis_Y_Region` are already
+columns of `panel_manifest`; wiring them into this argument belongs with the
+caller.
+
+**Still not done, and named as such:** the panel picture is a diagnostic
+artifact, not a required BAR_MONO review artifact. It is not in
+`panel_artifacts.csv`, not in `Review_Subject_SHA256`, its absence does not
+block finalization, and there is no reviewer field recording that the axis was
+checked. That wiring belongs with the `run_batch` two-pass integration, and
+until it lands the axis check is a thing a reviewer can do rather than a thing
+the pipeline requires.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2624,7 +2715,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 270 |
+| `test_measure_mono_bars.py` | 282 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2632,8 +2723,8 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
-| `test_reproducibility.py` | 19 |
-| **total** | **1706** |
+| `test_reproducibility.py` | 20 |
+| **total** | **1719** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

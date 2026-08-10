@@ -211,6 +211,32 @@ class Geometry(object):
                     group_window=self.r(190), baseline=0.0)
 
 
+#: The grey the SYNTHETIC fixture prints its axis numbers in. Nothing else uses
+#: it, so "are the printed tick labels still in the picture, and not painted
+#: over" is a pixel count rather than an opinion.
+LABEL_INK = 77
+
+
+def print_axis_labels(img, geom, values):
+    """Draw `0`, `10`, `20` ... beside the axis, where a journal prints them.
+
+    The fixtures in this file draw bars and no numbers, which is fine for
+    measuring and useless for the one check the panel picture exists for: the
+    value the calibration claims, beside the value the FIGURE prints. Without
+    printed numbers a test can only confirm the orange line is in the right
+    place, and a line in the right place is exactly what a factor-of-ten error
+    still produces.
+    """
+    from PIL import ImageDraw as _Draw
+    canvas = Image.fromarray(img)
+    draw = _Draw.Draw(canvas)
+    for value in values:
+        y = int(round(geom.base - value * geom.ppu))
+        draw.text((max(0, geom.x0 - 32), max(0, y - 5)), "%g" % value,
+                  fill=LABEL_INK)
+    return np.array(canvas)
+
+
 def _text(value):
     return "" if value == "" or value is None else str(value)
 
@@ -869,10 +895,19 @@ try:
     check("the by-figure entry point splits them instead of refusing",
           set(verdicts) == {"one_figure", "some_other_publication"},
           repr(sorted(verdicts)))
+    # `all(... or True ...)` stood here and said nothing. What it was reaching
+    # for is this: the figure's answer must be the answer it would have given
+    # alone, so nothing of the other publication's reached it.
+    alone = M.fill_identities_by_figure(
+        [dict(r) for r in mixed if r.get("figure_id") == "one_figure"])
     check("and neither figure's samples reach the other's vocabulary",
-          all(fid in str(v.get("prototypes", v)) or True for fid, v in verdicts.items())
+          verdicts["one_figure"]["prototypes"]
+          == alone["one_figure"]["prototypes"]
+          and verdicts["one_figure"]["complete_groups"]
+          == alone["one_figure"]["complete_groups"]
           and verdicts["some_other_publication"]["status"] != "ESTABLISHED",
-          repr({k: v["status"] for k, v in verdicts.items()}))
+          "%r against %r" % (verdicts["one_figure"]["prototypes"],
+                             alone["one_figure"]["prototypes"]))
     verdicts = M.fill_identities_by_figure(rows)
     check("and writes the answer onto the records",
           all(r.get("resolved_fill_pattern") == r["spec_fill"] for r in rows
@@ -2382,9 +2417,28 @@ try:
     check("the calibration's line for 50 lands on the row 50 was drawn at",
           bool(orange.any()) and float(orange.sum()) > 0.5 * panel_img.width,
           "%d orange pixels within a row of %d" % (int(orange.sum()), want_row))
-    check("and the caption says how many such lines it drew",
-          "axis lines from the calibration" in
-          open(panel_png, "rb").read().decode("latin-1", "ignore") or True)
+    # REVERT: check the caption by searching the PNG's bytes for the text.
+    # Text drawn into an image is PIXELS - the string is not in the file - so
+    # that check finds nothing on a correct picture and can only be made to
+    # pass by weakening it, which is what happened: it was written
+    # `... in open(png,"rb").read().decode(...) or True` and passed
+    # unconditionally. What the picture DREW has to come back as data.
+    meta = json.load(open(os.path.splitext(panel_png)[0] + ".json",
+                          encoding="utf-8"))
+    check("the picture reports what it drew, as data rather than as pixels",
+          meta["axis_line_count"] == len(meta["axis_ticks"])
+          and meta["axis_line_count"] >= 2
+          and all(set(t) == {"value", "pixel"} for t in meta["axis_ticks"]),
+          repr(meta.get("axis_ticks")))
+    check("and each reported line is where the calibration puts that value",
+          all(abs(t["pixel"] - (g8.base - t["value"] * g8.ppu)) < 0.51
+              for t in meta["axis_ticks"]),
+          repr([(t["value"], t["pixel"], g8.base - t["value"] * g8.ppu)
+                for t in meta["axis_ticks"]]))
+    check("the contact sheet says it in words too",
+          all("%g" % t["value"] in sheet for t in meta["axis_ticks"])
+          and "axis lines at" in sheet,
+          sheet[sheet.find("axis lines at"):][:80])
     # REVERT: draw the panel picture without the calibration lines. Everything
     # above still passes - the bars are marked, the baseline is marked - and
     # the one thing a per-bar crop cannot show is still not shown.
@@ -2402,6 +2456,112 @@ try:
                    & (bare_arr[:, :, 2] == 0))
     check("a panel whose rows carry no calibration draws no axis lines",
           not bare_orange.any(), "%d orange pixels" % int(bare_orange.sum()))
+
+    # ------------------------------------------- 26w. the factor of ten
+    #
+    # The severe calibration failure is not a tick pixel a few rows out - that
+    # is 1.7% on publication 127 at ten pixels, below the digitization noise.
+    # It is a tick VALUE misread: a printed 30 typed as 3 makes every bar in
+    # the panel exactly ten times too small, all together, and every bar still
+    # looks like a bar. No arithmetic catches it - the mapping is perfectly
+    # self-consistent, and a third tick scales with the other two so the
+    # residual stays zero. The only thing that catches it is the number the
+    # calibration claims sitting beside the number the FIGURE prints.
+    #
+    # Which means the fixture has to print numbers. Everything else in this
+    # file draws bars and no axis, so until now a scenario could only confirm
+    # the orange line was in the right PLACE - and a line in the right place is
+    # exactly what a factor-of-ten error still produces.
+    #
+    # REVERT: draw the panel picture without the value labels, or draw them on
+    # the left over the printed ones. Both leave a picture that looks complete
+    # and cannot be compared with anything.
+    print("\na printed axis, and the number the calibration puts beside it")
+    g9 = Geometry(1.0)
+    printed = print_axis_labels(g9.blank(), g9, (0, 50, 100))
+    g9.solid(printed, 0, 60)
+    lab_path = write(printed, "labelled", TMP)
+    lab_gray = M._gray(lab_path)
+    lab_anchor = {"G": (g9.slots[0][0] + g9.slots[-1][1]) // 2}
+
+    def labelled_rows(top_value):
+        """The panel read with the top tick declared as `top_value`."""
+        return G.geometry_rows(
+            lab_gray, [g9.x0, g9.x1, g9.y0, g9.y1],
+            MRX.AxisCalibration.from_points(
+                [(0, g9.base), (top_value, g9.base - 100 * g9.ppu)]),
+            lab_anchor, ["SOLID"], g9.r(190), baseline=0.0,
+            panel_id="labelled", figure_id="labelled")
+
+    right = labelled_rows(100)                 # the axis really is 0..100
+    wrong = labelled_rows(10)                  # the 100 was read as 10
+    _src = np.asarray(Image.open(lab_path).convert("L"))[:, :g9.x0]
+    check("the fixture prints 0, 50 and 100 beside its axis",
+          int(((_src > 0) & (_src < 255)).sum()) > 40,
+          "%d printed pixels left of the plot area"
+          % int(((_src > 0) & (_src < 255)).sum()))
+    check("and the misread calibration is exactly ten times too small",
+          abs(right[0]["value"] / wrong[0]["value"] - 10.0) < 1e-6,
+          "%r against %r" % (right[0]["value"], wrong[0]["value"]))
+    check("with nothing in the row's own arithmetic to disagree with it",
+          G.check_calibration(wrong[0]) is None
+          and wrong[0]["calibration"]["max_residual"] < 1e-9,
+          repr(wrong[0]["calibration"]["max_residual"]))
+    ten_dir = os.path.join(TMP, "tenx")
+    OVERLAY.reset_failures()
+    good_meta = OVERLAY.draw_panel_geometry(
+        os.path.join(ten_dir, "right.png"), lab_path, right)
+    bad_meta = OVERLAY.draw_panel_geometry(
+        os.path.join(ten_dir, "wrong.png"), lab_path, wrong)
+    check("the picture of the correct panel offers the printed numbers back",
+          {0.0, 50.0, 100.0} <= {t["value"] for t in good_meta["axis_ticks"]},
+          repr([t["value"] for t in good_meta["axis_ticks"]]))
+    check("and the picture of the misread one offers a tenth of them",
+          {0.0, 5.0, 10.0} <= {t["value"] for t in bad_meta["axis_ticks"]}
+          and 100.0 not in {t["value"] for t in bad_meta["axis_ticks"]},
+          repr([t["value"] for t in bad_meta["axis_ticks"]]))
+    # Which is only useful if the printed numbers are still THERE to compare
+    # with - in frame, and not painted over by the orange ones.
+    # The comparison is only possible if the printed numbers are still THERE:
+    # inside the crop, and not painted over by the drawn ones. Everything left
+    # of the plot area is the printed axis, and the picture must reproduce that
+    # strip untouched, pixel for pixel.
+    source = np.asarray(Image.open(lab_path).convert("L"))
+    for name, meta in (("right", good_meta), ("wrong", bad_meta)):
+        shown = np.asarray(Image.open(meta["path"]).convert("L"))
+        x0c, y0c, x1c, y1c = meta["crop_box"]
+        edge = meta["plot_left_in_crop"]
+        theirs = shown[:y1c - y0c, :edge]
+        ours = source[y0c:y1c, x0c:x0c + edge]
+        printed = int(((ours > 0) & (ours < 255)).sum())
+        check("the %s picture reproduces the printed axis strip untouched"
+              % name,
+              printed > 40 and theirs.shape == ours.shape
+              and bool((theirs == ours).all()),
+              "%d printed pixels, %d differ"
+              % (printed, int((theirs != ours).sum())
+                 if theirs.shape == ours.shape else -1))
+    check("and the strip is wide enough to hold the numbers the page prints",
+          good_meta["plot_left_in_crop"] >= 32,
+          "%d px of margin" % good_meta["plot_left_in_crop"])
+    # REVERT: draw the lines and not the numbers. The metadata still reports
+    # the values, every check above still passes, and the picture a reviewer
+    # opens has four orange lines and nothing to compare the printed numbers
+    # WITH - which is the whole comparison.
+    for name, meta in (("right", good_meta), ("wrong", bad_meta)):
+        rgb = np.asarray(Image.open(meta["path"]).convert("RGB")).astype(int)
+        orange = ((rgb[:, :, 0] > 140) & (rgb[:, :, 1] > 60)
+                  & (rgb[:, :, 1] < 200) & (rgb[:, :, 2] < 120))
+        x0c, y0c = meta["crop_box"][0], meta["crop_box"][1]
+        drawn = []
+        for tick in meta["axis_ticks"]:
+            y = int(round(tick["pixel"])) - y0c
+            band = orange[max(0, y - 12):max(0, y - 1)]
+            drawn.append(int(band.sum()))
+        check("the %s picture writes the value beside each line, not just the"
+              " line" % name,
+              len(drawn) >= 2 and all(n >= 4 for n in drawn),
+              "orange pixels above each line: %r" % drawn)
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

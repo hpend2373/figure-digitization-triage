@@ -2258,6 +2258,84 @@ check("NO_READER_AVAILABLE is in the declared state vocabulary",
       "NO_READER_AVAILABLE" in BM.RUN_STATES)
 
 
+# ---------------------------------------------------------------------------
+# The four artifacts a BAR_MONO geometry review needs, written as one bundle.
+#
+# An overlay is a review AID: a panel with values and no picture is still
+# reviewable through its WPD project, so `draw_panel_overlay` never raises.
+# These are the review ITSELF - the numbers, the pictures and the index tying
+# them together - and a panel missing one of them cannot be approved at all.
+#
+# REVERT: log a failure and carry on, the way the overlay does. The run then
+# queues a panel whose approval has nothing to be an approval of, and the
+# finalizer discovers it after a person has already typed APPROVED.
+print()
+print("a BAR_MONO geometry review is four artifacts or it is not a review")
+_gt = json.load(open(os.path.join(HERE, "mono_bar_fixture_truth.json"),
+                     encoding="utf-8"))
+_gimg = os.path.join(HERE, "mono_bar_fixture.png")
+_grows = MR.read_monochrome_bar_geometry(
+    Image.open(_gimg), tuple(_gt["panel_box"]),
+    dict(zip(_gt["groups"], _gt["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
+    _gt["patterns"], group_window=60, panel_id="P_GEO", figure_id="F_GEO")
+_gdir = os.path.join(ROOT, "geo_review")
+os.makedirs(_gdir, exist_ok=True)
+try:
+    RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
+except ValueError as _exc:
+    check("the bundle refuses rows the figure has not answered",
+          "AUTO_IDENTITY_MISSING" in str(_exc), str(_exc))
+else:
+    check("the bundle refuses rows the figure has not answered", False,
+          "it wrote a geometry file before the identities existed")
+RB.MONO_GEOMETRY.fill_identities_by_figure(_grows)
+_gart = RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
+check("every panel it covers gets all four artifact types",
+      set(_gart) == {"P_GEO"}
+      and [t for t, _p in _gart["P_GEO"]] == list(RB.GEOMETRY_ARTIFACT_TYPES),
+      "%s" % {k: [t for t, _p in v] for k, v in _gart.items()})
+check("and every one of them is a file that exists",
+      all(os.path.exists(p) for _t, p in _gart["P_GEO"]),
+      "%s" % [(t, os.path.exists(p)) for t, p in _gart["P_GEO"]])
+_gcsv = dict(_gart["P_GEO"])["MONO_BAR_GEOMETRY"]
+with open(_gcsv, encoding="utf-8") as _fh:
+    _gback = list(csv.DictReader(_fh))
+check("the numbers file is canonical and verifies on the way back in",
+      len(_gback) == len(_grows)
+      and len(RB.MONO_GEOMETRY.verify_artifact(_gback)["records"]) == len(_grows),
+      "%d rows" % len(_gback))
+check("the index names the panel picture beside the rows",
+      "panel__P_GEO.png" in open(dict(_gart["P_GEO"])["GEOMETRY_REVIEW_INDEX"],
+                                 encoding="utf-8").read())
+_gmeta = json.load(open(dict(_gart["P_GEO"])["CALIBRATION_PANEL_META"],
+                        encoding="utf-8"))
+check("and the panel metadata carries the points somebody typed",
+      [t["value"] for t in _gmeta["declared_calibration_points"]]
+      == [v for v, _p in _gt["y_ticks"]],
+      "%s" % _gmeta["declared_calibration_points"])
+# REVERT: return the artifacts that could be written. A panel whose picture
+# failed then reaches the queue declaring a review nobody can perform.
+_real_panel_draw = RB.OVERLAY.draw_panel_geometry
+try:
+    RB.OVERLAY.draw_panel_geometry = lambda *a, **k: None
+    _broke = os.path.join(ROOT, "geo_broken")
+    try:
+        RB.write_geometry_review(_broke, [(_gimg, r) for r in _grows])
+    except RB.GeometryReviewError as _exc:
+        check("a panel whose picture could not be drawn is refused, not queued",
+              "panel__P_GEO.png" in str(_exc), str(_exc))
+    else:
+        check("a panel whose picture could not be drawn is refused, not queued",
+              False, "it returned a bundle")
+finally:
+    RB.OVERLAY.draw_panel_geometry = _real_panel_draw
+check("the artifact types are declared, not spelled at each call site",
+      RB.GEOMETRY_ARTIFACT_TYPES
+      == ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX", "CALIBRATION_PANEL",
+          "CALIBRATION_PANEL_META"))
+
+
 print("the option table is checked against the readers it configures")
 # Declaring that an option "applies to" a mark type is a promise about a
 # function signature. `n_slots` was declared for BAR_MONO, whose reader has no

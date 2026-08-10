@@ -59,6 +59,7 @@ has actually hit:
    run over the same inputs is compared cell by cell, not trusted.
 """
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -77,6 +78,7 @@ import grid_engine as GE                                           # noqa: E402
 import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
+import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
 PIPELINE_VERSION = "7.27"
@@ -506,6 +508,85 @@ def resolve_artifact(run_dir, recorded):
     if candidate != root and not candidate.startswith(root + os.sep):
         return None
     return candidate
+
+
+#: The four things a BAR_MONO geometry review needs in front of it, and the
+#: `panel_artifacts.csv` types they are registered under.
+#:
+#:   MONO_BAR_GEOMETRY      the numbers, canonical and hash-verifiable
+#:   GEOMETRY_REVIEW_INDEX  the contact sheet that ties rows to pictures
+#:   CALIBRATION_PANEL      the panel with the axis in frame
+#:   CALIBRATION_PANEL_META what that picture drew, as data
+#:
+#: All four, per panel. The CSV and the index are written once for the run and
+#: registered against every panel they cover, because an approval is per panel
+#: and "the file existed somewhere in the run" is not the claim being made.
+GEOMETRY_ARTIFACT_TYPES = ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
+                           "CALIBRATION_PANEL", "CALIBRATION_PANEL_META")
+
+
+def write_geometry_review(out_dir, pairs):
+    """The BAR_MONO geometry artifacts for one run, written once.
+
+    `pairs` is [(image_path, record), ...] - every measured geometry row of the
+    run beside the page it came from - AFTER `fill_identities_by_figure`, which
+    `canonical_artifact_rows` enforces: a geometry file written before the
+    figure has answered says `Auto_Identity_Status: NOT_CALIBRATED` for every
+    row of a figure that was resolved in memory a moment later.
+
+    Returns {panel_id: [(TYPE, path), ...]}, ready for `panel_artifacts.csv`.
+    Raises rather than returning half a review: unlike an overlay, these are
+    what the approval is OF, so a run that cannot write them has not produced
+    a reviewable BAR_MONO panel and must say so.
+    """
+    records = [r for _i, r in pairs]
+    review_dir = os.path.join(out_dir, "geometry-review")
+    os.makedirs(out_dir, exist_ok=True)
+    csv_path = os.path.join(out_dir, "mono_bar_geometry.csv")
+    rows = MONO_GEOMETRY.canonical_artifact_rows(records)
+    with open(csv_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh, fieldnames=list(MONO_GEOMETRY.GEOMETRY_ARTIFACT_COLUMNS))
+        writer.writeheader()
+        writer.writerows(rows)
+    # Read it back before anyone is asked to approve it. The reader recomputes
+    # every row hash, the figure verdict and the calibration arithmetic, so a
+    # geometry file that cannot be verified never reaches a queue.
+    with open(csv_path, encoding="utf-8") as fh:
+        MONO_GEOMETRY.verify_artifact(list(csv.DictReader(fh)))
+    OVERLAY.reset_failures()
+    OVERLAY.write_row_crops(review_dir, pairs)
+    index = os.path.join(review_dir, "index.html")
+    out = {}
+    for record in records:
+        pid = _s(record.get("figure"))
+        if not pid or pid in out:
+            continue
+        stem = os.path.join(review_dir, "panel__%s.png" % "".join(
+            c if (c.isalnum() or c in "-_") else "_" for c in pid))
+        meta = os.path.splitext(stem)[0] + ".json"
+        missing = [p for p in (csv_path, index, stem, meta)
+                   if not os.path.exists(p)]
+        if missing:
+            raise GeometryReviewError(
+                "panel %s cannot be reviewed: %s was not written (%s)"
+                % (pid, ", ".join(os.path.basename(p) for p in missing),
+                   "; ".join(OVERLAY.failures()) or "no drawing failure"))
+        out[pid] = list(zip(GEOMETRY_ARTIFACT_TYPES,
+                            (csv_path, index, stem, meta)))
+    return out
+
+
+class GeometryReviewError(Exception):
+    """A BAR_MONO panel whose review artifacts could not be written.
+
+    Not a drawing failure to be logged and stepped over. An overlay is a review
+    AID - a panel with values and no picture is still reviewable through its
+    WPD project - and these are the review itself: the numbers, the pictures
+    and the index tying them together. A panel missing one of them cannot be
+    approved, so the run has to say that rather than queue it and let the
+    finalizer discover it later.
+    """
 
 
 def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):

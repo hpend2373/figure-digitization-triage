@@ -2758,13 +2758,44 @@ the axis and calibration confirmations arrive with the mode that shows an axis,
 because a confirmation field nobody can act on is worse than none.
 `MIGRATION.md` has the column change.
 
-**Still not done, and named as such:** the panel picture is a diagnostic
-artifact, not a required BAR_MONO review artifact. It is not in
-`panel_artifacts.csv`, not in `Review_Subject_SHA256`, its absence does not
-block finalization, and there is no reviewer field recording that the axis was
-checked. That wiring belongs with the `run_batch` two-pass integration, and
-until it lands the axis check is a thing a reviewer can do rather than a thing
-the pipeline requires.
+## Four artifacts or it is not a review
+
+`run_batch.write_geometry_review` writes the BAR_MONO geometry bundle once per
+run and returns it per panel, ready for `panel_artifacts.csv`:
+
+    MONO_BAR_GEOMETRY      the numbers, canonical and hash-verifiable
+    GEOMETRY_REVIEW_INDEX  the contact sheet tying rows to pictures
+    CALIBRATION_PANEL      the panel with the axis in frame
+    CALIBRATION_PANEL_META what that picture drew, as data
+
+All four, per panel. The CSV and the index are written once for the run and
+registered against every panel they cover, because an approval is per panel and
+"the file existed somewhere in the run" is not the claim being made.
+
+It **raises** rather than returning half a review. An overlay is a review AID -
+a panel with values and no picture is still reviewable through its WPD project,
+which is why `draw_panel_overlay` never raises - and these are the review
+itself. A panel missing one of them cannot be approved, so the run has to say
+so rather than queue it and let the finalizer discover it after somebody has
+typed APPROVED.
+
+It also reads the file back before anyone is asked to approve it:
+`verify_artifact` recomputes every row hash, the figure verdict and the
+calibration arithmetic, so a geometry file that does not verify never reaches a
+queue. And it goes through `canonical_artifact_rows`, so a bundle written
+before `fill_identities_by_figure` has answered is refused rather than shipped
+with `NOT_CALIBRATED` on every row.
+
+**Still not wired, and named as such:** nothing calls this yet.
+`run_batch` still dispatches BAR_MONO to `read_monochrome_bar_panel`, so there
+is no `Review_Mode=BAR_MONO_GEOMETRY`, the bundle is not in
+`Review_Subject_SHA256`, and there are no `Axis_Labels_Checked` /
+`Calibration_Checked` confirmations - those arrive with the mode that shows an
+axis. What remains is the two-pass itself: measure every BAR_MONO panel
+anonymously before the panel loop, resolve identity by `Figure_ID`, and have
+the panel loop read its values out of the resolved geometry instead of calling
+the old reader. That is a change to the runner's shape rather than to any
+measurement, and it is the next commit.
 
 ## Suites
 
@@ -2772,7 +2803,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 480 |
+| `test_run_batch.py` | 488 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
@@ -2783,7 +2814,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1739** |
+| **total** | **1747** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

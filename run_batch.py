@@ -556,7 +556,7 @@ GEOMETRY_ARTIFACT_TYPES = ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
 GEOMETRY_ROW_ARTIFACT_TYPE = "GEOMETRY_ROW_CROP"
 
 
-def write_geometry_review(out_dir, pairs):
+def write_geometry_review(out_dir, pairs, pad=24):
     """The BAR_MONO geometry artifacts for one run, written once.
 
     `pairs` is [(image_path, record), ...] - every measured geometry row of the
@@ -570,6 +570,19 @@ def write_geometry_review(out_dir, pairs):
     what the approval is OF, so a run that cannot write them has not produced
     a reviewable BAR_MONO panel and must say so.
     """
+    try:
+        return _write_geometry_review(out_dir, pairs, pad=pad)
+    except GeometryReviewError:
+        raise
+    except Exception as exc:
+        # `canonical_artifact_rows` and `verify_artifact` raise ValueError, and
+        # a caller that catches only GeometryReviewError let those past - so a
+        # geometry file that would not verify came out of the runner as a bare
+        # traceback instead of a run state.
+        raise GeometryReviewError("%s: %s" % (type(exc).__name__, exc)) from exc
+
+
+def _write_geometry_review(out_dir, pairs, pad=24):
     records = [r for _i, r in pairs]
     review_dir = os.path.join(out_dir, "geometry-review")
     os.makedirs(out_dir, exist_ok=True)
@@ -634,6 +647,34 @@ class GeometryReviewError(Exception):
     """
 
 
+def _review_crop(panel, box):
+    """The plot area unioned with whatever the manifest says the axes occupy.
+
+    `Axis_X_Region` and `Axis_Y_Region` exist so a person re-checking a
+    calibration knows where to look. That is the same rectangle the panel
+    picture has to include, and estimating it as a fraction of the panel - the
+    fallback - crops away long tick labels, units printed beside the numbers,
+    and any axis drawn away from the plot box. A field that is filled in and
+    not used is worse than one that is blank, so a region that does not parse
+    refuses the panel rather than being ignored.
+    """
+    x0, x1, y0, y1 = box
+    for column in ("Axis_X_Region", "Axis_Y_Region"):
+        text = _s(panel.get(column))
+        if not text:
+            continue
+        try:
+            rx0, rx1, ry0, ry1 = BM.parse_box(text)
+        except ValueError as exc:
+            raise ValueError(
+                "%s=%r is not x0,x1,y0,y1: %s" % (column, text, exc))
+        x0, x1 = min(x0, rx0), max(x1, rx1)
+        y0, y1 = min(y0, ry0), max(y1, ry1)
+    if (x0, x1, y0, y1) == tuple(box):
+        return None                       # nothing declared; the picture says so
+    return [x0, x1, y0, y1]
+
+
 def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
                              options_by_config, file_root="."):
     """Every BAR_MONO panel of the batch, measured anonymously and then named.
@@ -681,7 +722,8 @@ def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
             image = Image.open(resolved).convert("RGB")
             rows = MR.read_monochrome_bar_geometry(
                 image, box, _x_positions(positions_by_panel.get(pid, [])),
-                ycal, fills, panel_id=pid,
+                ycal, fills, review_crop_box=_review_crop(panel, box),
+                panel_id=pid,
                 figure_id=_s(panel.get("Figure_ID")) or pid, **kwargs)
         except MR.UnsupportedCapabilityError as exc:
             refusals[pid] = ("NO_READER_AVAILABLE", "%s" % exc)
@@ -761,7 +803,8 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
 
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
-              file_root=".", project_dir=None, review_dir=None, geometry=None):
+              file_root=".", project_dir=None, review_dir=None, geometry=None,
+              geometry_refusal=None):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -787,6 +830,14 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     position_factor = next((f for f, _ in position_level.values() if f), None)
     declared = max(1, len(series_level)) * max(1, len(position_level))
     all_cells = sorted(_all_cells(series_level, position_level))
+    if geometry_refusal:
+        # Applied HERE, after the panel's declaration is known. Returned from
+        # the loop instead, the outcome carried `Cells_Declared=0` and no
+        # missing cells - so a panel of eighteen cells whose raster vanished
+        # between validation and the geometry pass read as "0 / 0", which is
+        # the understatement the panel loop's own early returns were fixed for.
+        return PanelOutcome(geometry_refusal[0], declared=declared,
+                            missing=all_cells, detail=geometry_refusal[1])
 
     if mark in BM.UNRELEASED_MARK_TYPES:
         # Decided before the image is opened: there is nothing to try.
@@ -919,6 +970,18 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                     missing=all_cells,
                     detail="the geometry pass produced nothing for this panel")
             rows = _geometry_marks(geometry, series_rows, position_rows)
+            if not rows:
+                # Why, not just "nothing". Every row of this panel refused,
+                # and the reasons are on the rows - reported as "the reader
+                # resolved no marks" they were only findable by opening
+                # `mono_bar_geometry.csv`, so the run manifest and the manual
+                # queue lost the one thing a person would act on.
+                reasons = sorted({_s(r.get("error")) for r in geometry
+                                  if r.get("error")})
+                if reasons:
+                    return PanelOutcome(
+                        "PANEL_GEOMETRY_UNRESOLVED", declared=declared,
+                        missing=all_cells, detail="; ".join(reasons))
         elif mark in BM.UNRELEASED_MARK_TYPES:
             return PanelOutcome(
                 "NO_READER_AVAILABLE", declared=declared,
@@ -1516,7 +1579,8 @@ def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED"):
 #: Every verdict a run directory can carry. RAN is the only one under which
 #: `figure_values_accepted.csv` may exist.
 RUN_STATUSES = ("RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED",
-                "PROMOTE_FAILED", "DEMO_OUTPUT_REFUSED", "INTERNAL_ERROR")
+                "PROMOTE_FAILED", "DEMO_OUTPUT_REFUSED",
+                "GEOMETRY_REVIEW_FAILED", "INTERNAL_ERROR")
 
 
 def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
@@ -1711,16 +1775,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
         options = options_by_config.get(_s(panel.get("Config_ID")), {})
         try:
-            refused = geometry_refusals.get(pid)
-            if refused:
-                outcome = PanelOutcome(refused[0], detail=refused[1])
-            else:
-                outcome = run_panel(
-                    panel, series_by_panel.get(pid, []),
-                    positions_by_panel.get(pid, []), options, unit,
-                    raw_dir, file_root=file_root, project_dir=project_dir,
-                    review_dir=review_dir,
-                    geometry=geometry_rows_by_panel.get(pid))
+            outcome = run_panel(
+                panel, series_by_panel.get(pid, []),
+                positions_by_panel.get(pid, []), options, unit,
+                raw_dir, file_root=file_root, project_dir=project_dir,
+                review_dir=review_dir,
+                geometry=geometry_rows_by_panel.get(pid),
+                geometry_refusal=geometry_refusals.get(pid))
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by
@@ -2089,8 +2150,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # value rows have to name them. They are digitized data too - a point
         # cloud is the reading, not a note about it - so a refusal that left
         # them behind would refuse the summary and keep the measurements.
-        for leftover in ("raw", "projects", "review"):
-            shutil.rmtree(os.path.join(output_dir, leftover), ignore_errors=True)
+        # The whole cleanup contract, not a hand-kept list beside it. The
+        # geometry bundle is written at its final path like `raw/` and
+        # `projects/`, and it holds means, dispersions and auto identities -
+        # so a refusal that named only three directories returned zero
+        # accepted values and left the finer measurements on disk.
+        clear_outputs(output_dir)
         detail = ("%d values passed the gate under a DEMO_ONLY reviewer "
                   "registry. Register the person who actually inspected the "
                   "figures and re-run; a demonstration identity cannot stand "
@@ -2201,6 +2266,14 @@ def main(argv=None):
     if summary["status"] == "DEMO_OUTPUT_REFUSED":
         print("DEMO_OUTPUT_REFUSED: %s" % summary["detail"])
         return 4
+    if summary["status"] == "GEOMETRY_REVIEW_FAILED":
+        # Its own branch, because the summary it returns has no `states`,
+        # `qc_problems` or `manual_queue` - the run stopped before there were
+        # any. The print below assumed every non-rejected summary had all
+        # three, so this status reached a person as a KeyError traceback.
+        print("GEOMETRY_REVIEW_FAILED: %s" % summary["detail"])
+        print("no BAR_MONO panel can be reviewed, so nothing was written")
+        return 5
     if summary["status"] == "MANIFEST_REJECTED":
         print("manifests rejected: %d problems" % summary["problems"])
         for code in summary["detail"]:

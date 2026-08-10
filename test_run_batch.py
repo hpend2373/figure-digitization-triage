@@ -1113,7 +1113,8 @@ for _name, _break in (
 
 check("every status a stamp can carry is declared",
       {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED",
-       "DEMO_OUTPUT_REFUSED", "INTERNAL_ERROR"} == set(RB.RUN_STATUSES),
+       "DEMO_OUTPUT_REFUSED", "GEOMETRY_REVIEW_FAILED",
+       "INTERNAL_ERROR"} == set(RB.RUN_STATUSES),
       "%s" % sorted(RB.RUN_STATUSES))
 
 
@@ -2112,9 +2113,16 @@ _mono = write_manifests(
 _o = os.path.join(ROOT, "o_mono")
 RB.run_batch(_mono, _o, file_root=ROOT, run_date="2026-08-06")
 _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
-check("a bar reader pointed at a line panel finds nothing and queues it",
-      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "MANUAL_POINT_READ",
-      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+# PANEL_GEOMETRY_UNRESOLVED, with the geometry pass's own reason on it. It was
+# MANUAL_POINT_READ - "the reader resolved no marks in this panel" - which is
+# true and useless: the reasons were on the geometry rows and only findable by
+# opening mono_bar_geometry.csv.
+_lr = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("a bar reader pointed at a line panel says what it could not find",
+      _lr["P_LINE"] == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _lr)
+check("and names it, rather than reporting an empty panel",
+      "UNRESOLVED" in dict(zip(_r["Panel_ID"], _r["Detail"]))["P_LINE"],
+      "%s" % dict(zip(_r["Panel_ID"], _r["Detail"]))["P_LINE"])
 _v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
 check("and it invents no bars from the line markers",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
@@ -2160,7 +2168,7 @@ _st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
 # becomes NO_READER_AVAILABLE again, and publication 127 - three panels of
 # OPEN/STIPPLED/SOLID - goes back to being unreadable by this pipeline.
 check("a stipple is no longer a fill the pipeline refuses",
-      _st.get("P_LINE") == "MANUAL_POINT_READ", "%s" % _st)
+      _st.get("P_LINE") == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _st)
 check("and the other panels in the batch are unaffected",
       _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
 _v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
@@ -2301,12 +2309,21 @@ _gdir = os.path.join(ROOT, "geo_review")
 os.makedirs(_gdir, exist_ok=True)
 try:
     RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
-except ValueError as _exc:
-    check("the bundle refuses rows the figure has not answered",
-          "AUTO_IDENTITY_MISSING" in str(_exc), str(_exc))
-else:
-    check("the bundle refuses rows the figure has not answered", False,
-          "it wrote a geometry file before the identities existed")
+    _exc = None
+except Exception as _caught:                 # deliberately broad - see below
+    _exc = _caught
+check("the bundle refuses rows the figure has not answered",
+      _exc is not None and "AUTO_IDENTITY_MISSING" in str(_exc),
+      "it wrote a geometry file before the identities existed"
+      if _exc is None else str(_exc))
+# And refuses it under its OWN exception type. `canonical_artifact_rows` and
+# `verify_artifact` raise ValueError, `run_batch` catches GeometryReviewError,
+# so a bare ValueError from the writer leaves the runner as an unhandled
+# exception - the caller cannot tell "this bundle cannot be written" from a
+# defect. Caught as `Exception` above so this reads as a failed scenario rather
+# than a traceback that stops the file.
+check("and under its own exception type, so the runner can catch it",
+      isinstance(_exc, RB.GeometryReviewError), "%r" % (_exc,))
 RB.MONO_GEOMETRY.fill_identities_by_figure(_grows)
 _gart = RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
 check("every panel it covers gets all four artifact types",
@@ -2420,6 +2437,227 @@ check("the artifact types are declared, not spelled at each call site",
       RB.GEOMETRY_ARTIFACT_TYPES
       == ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX", "CALIBRATION_PANEL",
           "CALIBRATION_PANEL_META"))
+
+
+# ---------------------------------------------------------------------------
+# A BAR_MONO panel that actually reads, driven from manifests.
+#
+# Every BAR_MONO scenario above this point either calls the reader directly or
+# points it at a raster with no bars in it, so the whole runner path - the
+# pre-pass, the review bundle, the refusal branches, the cleanup - was only
+# ever exercised on a panel that returned nothing. The four checks that follow
+# are about what the runner does with a panel that returns TWELVE things, and
+# none of them can be written against a panel that returns none.
+# ---------------------------------------------------------------------------
+print()
+print("a monochrome bar panel read end to end from its manifests")
+MONO_IMG = os.path.join(IMAGES, "mono.png")
+shutil.copyfile(os.path.join(HERE, "mono_bar_fixture.png"), MONO_IMG)
+_MONO_BOX = tuple(_gt["panel_box"])
+# Where the printed axis lives, in the manifest's own words. The y labels sit
+# left of the plot box and the x labels below it; both are outside `_MONO_BOX`,
+# which is the point of declaring them.
+_MONO_YREG = "30,%d,%d,%d" % (_MONO_BOX[0], _MONO_BOX[2], _MONO_BOX[3])
+_MONO_XREG = "%d,%d,%d,470" % (_MONO_BOX[0], _MONO_BOX[1], _MONO_BOX[3])
+_MONO_FILLS = ("SOLID", "HATCHED", "OPEN")
+_MONO_ARMS = dict(zip(_MONO_FILLS, ("PRE", "EARLY", "LATE")))
+_mono_figure = dict(
+    Figure_ID="F_MONO", Publication_ID=1, Figure_Number="FIG5",
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=MONO_IMG,
+    Source_Caption_Verbatim="synthetic monochrome bar panel",
+    Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(MONO_IMG),
+    WPD_Project_File="", Observed_Panel_Count=1, Worklist_Panel_Count=1,
+    Unlisted_Panels="", Panel_Reconciliation_Status="MATCHED", Note="")
+_mono_source_figure = dict(
+    Source_Figure_ID="SF_MONO", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG5", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=MONO_IMG, Source_Image_SHA256=MR.sha256_of(MONO_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one monochrome axes region")
+_mono_source_panel = dict(
+    Source_Panel_ID="P_MONO", Source_Figure_ID="SF_MONO", Panel_Label="P_MONO",
+    Outcome_Label="Stroke volume", Target_Status="TARGET",
+    Panel_Disposition="AUTO_DIGITIZE",
+    Disposition_Reason="synthetic monochrome fixture", Note="")
+_mono_grids = GRIDS + (
+    [dict(Grid_ID="G_MONO", Factor_Name="ARM", Factor_Level=lv, Level_Order=i,
+          Note="") for i, lv in enumerate(("PRE", "EARLY", "LATE"))]
+    + [dict(Grid_ID="G_MONO", Factor_Name="TIMEPOINT", Factor_Level=lv,
+            Level_Order=i, Note="") for i, lv in enumerate(_gt["groups"])])
+# Stroke volume, not the heart rate every other unit in the fixture carries:
+# the fixture's shortest bar is 27, and 27 bpm is outside the plausibility
+# range for a heart rate - correctly. The gate is not the thing under test here.
+_mono_unit = unit("U_MONO", "G_MONO", "CONTINUOUS", Figure_ID="F_MONO",
+                  Panel="U_MONO", Bar_Top_Definition="OUTLINE_CENTER",
+                  Outcome_Variable="Stroke volume", Unit="ml",
+                  Axis_Calib_Y1_Value=_gt["y_ticks"][0][0],
+                  Axis_Calib_Y1_Pixel=_gt["y_ticks"][0][1],
+                  Axis_Calib_Y2_Value=_gt["y_ticks"][1][0],
+                  Axis_Calib_Y2_Pixel=_gt["y_ticks"][1][1])
+_mono_panel = panel("P_MONO", "U_MONO", "BAR_MONO", MONO_IMG, _MONO_BOX,
+                    Figure_ID="F_MONO", Config_ID="",
+                    Axis_X_Region=_MONO_XREG, Axis_Y_Region=_MONO_YREG,
+                    Axis_Y_Ticks=";".join("%g:%g" % (v, p)
+                                          for v, p in _gt["y_ticks"]))
+_mono_series = [series("P_MONO", "S_%s" % f, _MONO_ARMS[f], Bar_Fill_Pattern=f)
+                for f in _MONO_FILLS]
+_mono_positions = [
+    dict(Panel_ID="P_MONO", Position_ID=q, X_Pixel=x, Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+         Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+    for i, (q, x) in enumerate(zip(_gt["groups"], _gt["group_x"]))]
+
+
+def mono_manifests(directory, **kw):
+    """The four-panel fixture batch plus one readable monochrome bar panel."""
+    fields = dict(
+        panels=PANELS + [_mono_panel], series_rows=SERIES + _mono_series,
+        positions=POSITION_ROWS + _mono_positions,
+        units=UNITS + [_mono_unit], figures=FIGURES + [_mono_figure],
+        grids=_mono_grids, source_figures=SOURCE_FIGURES + [_mono_source_figure],
+        source_panels=SOURCE_PANELS + [_mono_source_panel],
+        source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+    fields.update(kw)
+    return write_manifests(directory, **fields)
+
+
+_mm = mono_manifests(os.path.join(ROOT, "m_monoreal"))
+_mo = os.path.join(ROOT, "o_monoreal")
+_ms = RB.run_batch(_mm, _mo, file_root=ROOT, run_date="2026-08-06")
+check("the batch runs", _ms["status"] == "RAN", "%s" % _ms)
+_mr = pd.read_csv(os.path.join(_mo, "run_manifest.csv"), dtype=object).fillna("")
+_mrow = _mr[_mr["Panel_ID"] == "P_MONO"]
+check("and the monochrome panel passes automatically",
+      len(_mrow) and _mrow.iloc[0]["Run_State"] == "AUTO_PASS",
+      "%s" % (list(_mrow["Run_State"]) + list(_mrow["Detail"]) if len(_mrow)
+              else "no row"))
+check("with all twelve declared cells read",
+      len(_mrow) and _mrow.iloc[0]["Cells_Declared"] == "12"
+      and _mrow.iloc[0]["Cells_Read"] == "12",
+      "%s" % (list(zip(_mrow["Cells_Declared"], _mrow["Cells_Read"]))
+              if len(_mrow) else "no row"))
+_mv = pd.read_csv(os.path.join(_mo, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_mv = _mv[_mv["Unit_ID"] == "U_MONO"]
+_worst = 0.0
+for _f in _MONO_FILLS:
+    for _q in _gt["groups"]:
+        _hit = _mv[_mv["Cell_Key"] == "ARM=%s;TIMEPOINT=%s" % (_MONO_ARMS[_f], _q)]
+        if not len(_hit):
+            _worst = float("inf")
+            continue
+        _worst = max(_worst, abs(float(_hit.iloc[0]["Mean"])
+                                 - _gt["series"][_f][_q]["mean"]))
+check("and every value lands on the bar the figure drew, not near it",
+      _worst < 0.6, "worst error %s units" % _worst)
+
+# REVERT: pass no `review_crop_box` from `measure_bar_mono_figures`. The crop
+# falls back to a fraction of the plot box, `crop_source` reads ESTIMATED, and
+# the picture a reviewer approves against no longer contains the printed
+# numbers the calibration was read off - which is the one error arithmetic
+# cannot catch, because a misread tick VALUE rescales every bar in the panel
+# self-consistently.
+_mmeta = json.load(open([
+    os.path.join(_mo, "geometry-review", f)
+    for f in sorted(os.listdir(os.path.join(_mo, "geometry-review")))
+    if f.startswith("panel__P_MONO") and f.endswith(".json")][0],
+    encoding="utf-8"))
+check("the panel picture is cropped to the axis the MANIFEST declared",
+      _mmeta["crop_source"] == "DECLARED", "%s" % _mmeta["crop_source"])
+# The exact rectangle, because the estimate is not far off - it is a fraction
+# of the plot box, and on THIS panel it happens to reach further left than the
+# declared y region does. "The crop is wide enough" therefore passes either
+# way; what distinguishes them is whose rectangle it is.
+_want_crop = [max(0, min(30, _MONO_BOX[0]) - 24),
+              max(0, min(_MONO_BOX[2], _MONO_BOX[2]) - 24),
+              min(Image.open(MONO_IMG).width, max(_MONO_BOX[1], _MONO_BOX[1]) + 24),
+              min(Image.open(MONO_IMG).height, max(470, _MONO_BOX[3]) + 24)]
+check("and the rectangle is the declared one, not a fraction of the plot box",
+      _mmeta["crop_box"] == _want_crop,
+      "%s, from y-region %s and x-region %s, wanted %s"
+      % (_mmeta["crop_box"], _MONO_YREG, _MONO_XREG, _want_crop))
+check("a panel with no regions declared says the crop was estimated",
+      RB._review_crop(dict(Axis_X_Region="", Axis_Y_Region=""),
+                      list(_MONO_BOX)) is None)
+# A declared region that does not parse refuses the panel. Ignored, the field a
+# person filled in is silently not the field the picture used.
+_bad_region = mono_manifests(
+    os.path.join(ROOT, "m_monobadregion"),
+    panels=PANELS + [dict(_mono_panel, Axis_Y_Region="left of the bars")])
+_bo = os.path.join(ROOT, "o_monobadregion")
+_bs = RB.run_batch(_bad_region, _bo, file_root=ROOT, run_date="2026-08-06")
+_br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"), dtype=object).fillna("")
+_brow = _br[_br["Panel_ID"] == "P_MONO"]
+check("an axis region that does not parse refuses the panel by name",
+      len(_brow) and _brow.iloc[0]["Run_State"] == "PANEL_GEOMETRY_UNRESOLVED"
+      and "Axis_Y_Region" in _brow.iloc[0]["Detail"],
+      "%s" % (list(zip(_brow["Run_State"], _brow["Detail"])) if len(_brow)
+              else "no row"))
+# REVERT: return the refusal from the panel LOOP instead of inside `run_panel`.
+# The outcome then carries Cells_Declared=0 and no missing cells, so twelve
+# unread cells are reported as "0 of 0" and nothing is queued for them.
+check("and still counts the cells it did not read",
+      len(_brow) and _brow.iloc[0]["Cells_Declared"] == "12"
+      and _brow.iloc[0]["Cells_Read"] == "0",
+      "%s" % (list(zip(_brow["Cells_Declared"], _brow["Cells_Read"]))
+              if len(_brow) else "no row"))
+_bq = pd.read_csv(os.path.join(_bo, "manual_queue.csv"), dtype=object).fillna("")
+_bq = _bq[_bq["Panel_ID"] == "P_MONO"]
+check("and queues all twelve of them for a person",
+      len(_bq) and _bq.iloc[0]["Missing_Cell_Count"] == "12",
+      "%s" % (list(_bq["Missing_Cell_Count"]) if len(_bq) else "no queue row"))
+
+# REVERT: remove three named directories in the DEMO branch instead of calling
+# `clear_outputs`. `mono_bar_geometry.csv` and `geometry-review/` are not among
+# them, so a run that refused to write a single value leaves twelve means,
+# twelve dispersions and their auto identities on disk under a demonstration
+# reviewer.
+_md = os.path.join(ROOT, "o_monodemo")
+_mds = RB.run_batch(_mm, _md, file_root=ROOT, run_date="2026-08-06",
+                    run_mode="DEMO_ONLY")
+check("a DEMO_ONLY run over a readable bar panel is refused",
+      _mds["status"] == "DEMO_OUTPUT_REFUSED" and _mds["would_accept"] > 0,
+      "%s" % _mds)
+check("and the measurements go with the values it refused to write",
+      sorted(os.listdir(_md)) == ["run_stamp.json"], "%s" % sorted(os.listdir(_md)))
+
+# REVERT: drop the GEOMETRY_REVIEW_FAILED branch from `main`. The status is
+# real - the run stops before there are any states, qc problems or queue rows -
+# and the summary print below it reads all three, so the run reaches a person
+# as a KeyError traceback instead of a sentence about the review bundle.
+_real_panel_draw2 = RB.OVERLAY.draw_panel_geometry
+
+
+def _draw_refuses(*a, **kw):
+    raise ValueError("the panel picture could not be drawn")
+
+
+_gf = os.path.join(ROOT, "o_monogeofail")
+RB.OVERLAY.draw_panel_geometry = _draw_refuses
+try:
+    _code, _crash = RB.main([_mm, _gf, "--file-root", ROOT,
+                             "--date", "2026-08-06"]), None
+except Exception as _caught:     # broad on purpose: a crash IS the failure
+    _code, _crash = None, _caught
+finally:
+    RB.OVERLAY.draw_panel_geometry = _real_panel_draw2
+check("a review bundle that cannot be written is a run status, not a traceback",
+      _code == 5, "exit %r%s" % (_code, "" if _crash is None
+                                 else ", raised %r" % (_crash,)))
+_gstamp = json.load(open(os.path.join(_gf, "run_stamp.json"), encoding="utf-8"))
+check("and the stamp says GEOMETRY_REVIEW_FAILED",
+      _gstamp.get("Status") == "GEOMETRY_REVIEW_FAILED", "%r" % _gstamp)
+check("and it is a declared status, so `verify_run` knows it",
+      "GEOMETRY_REVIEW_FAILED" in RB.RUN_STATUSES)
+check("and nothing partial is left to review or to pool",
+      sorted(os.listdir(_gf)) == ["run_stamp.json"], "%s" % sorted(os.listdir(_gf)))
+# The ValueError above is not a GeometryReviewError. Passed through, it leaves
+# `run_batch` as an unhandled exception - the writer's own validators
+# (`canonical_artifact_rows`, `verify_artifact`) raise ValueError too, so this
+# is the normal way a bundle fails, not an exotic one.
+check("the failure is named as the bundle's own, whatever raised it",
+      "ValueError" in _gstamp.get("Detail", ""), "%r" % _gstamp.get("Detail"))
 
 
 print("the option table is checked against the readers it configures")

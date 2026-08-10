@@ -134,8 +134,18 @@ check("and nothing accepted, because the paper still does not say SD or SEM",
 _states = _summary["states"]
 check("and the same three terminal states",
       _states == {"QC_FAILED": 9, "NO_READER_AVAILABLE": 4,
-                  "MANUAL_POINT_READ": 5},
+                  "PANEL_GEOMETRY_UNRESOLVED": 3, "MANUAL_POINT_READ": 2},
       "%s" % _states)
+# PANEL_GEOMETRY_UNRESOLVED, not MANUAL_POINT_READ: the reason is on the run
+# manifest now. Reported as "the reader resolved no marks in this panel" it was
+# only findable by opening mono_bar_geometry.csv, so the state a person acts on
+# lost the one thing they would act on.
+_detail = {r["Panel_ID"]: r["Detail"] for r in csv.DictReader(
+    open(os.path.join(_ODIR, "run_manifest.csv"), encoding="utf-8"))}
+check("and the run manifest says why, not just that nothing came back",
+      all("STROKE_SCALE_UNRESOLVED" in _detail.get(p, "")
+          for p in ("P4_SV_WOMEN", "P4_CO_MEN", "P4_CO_WOMEN")),
+      "%s" % {p: _detail.get(p) for p in ("P4_SV_WOMEN", "P4_CO_MEN")})
 check("the three panels that changed are the ones the stroke pass refused",
       sorted(r["Panel_ID"] for r in csv.DictReader(
           open(os.path.join(_ODIR, "mono_bar_geometry.csv"), encoding="utf-8"))

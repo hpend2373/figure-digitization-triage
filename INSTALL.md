@@ -2859,11 +2859,63 @@ The bundle is written into the run directory rather than staging, like `raw/`,
 `.staging/mono_bar_geometry.csv` and the promotion moves the file out from
 under that path.
 
+**Four things the switchover left half-done**, all closed in the commit after
+it.
+
+The declared axis region now reaches the measurement. `Axis_X_Region` and
+`Axis_Y_Region` exist so a person re-checking a calibration knows where to
+look, which is the same rectangle the panel picture must include - and the
+pre-pass was calling the reader without them, so every production panel got an
+ESTIMATED crop while `Axis_Labels_Checked` was being made mandatory. A region
+that does not parse refuses the panel: a field filled in and not used is worse
+than one left blank.
+
+`DEMO_OUTPUT_REFUSED` clears the geometry bundle. It removed three directories
+by name, and the bundle is written at its final path like `raw/` and
+`projects/` - so a refusal returned zero accepted values and left
+`mono_bar_geometry.csv`, with every mean, dispersion and auto identity in it,
+on disk. It calls `clear_outputs` now: the whole contract, not a list kept
+beside it.
+
+`GEOMETRY_REVIEW_FAILED` is a declared status with a CLI branch. It was neither:
+it was absent from `RUN_STATUSES`, and its summary has no `states`,
+`qc_problems` or `manual_queue` because the run stopped before there were any -
+so the status reached a person as a `KeyError` traceback. And
+`write_geometry_review` normalises what it can raise: `canonical_artifact_rows`
+and `verify_artifact` raise `ValueError`, which a runner catching only
+`GeometryReviewError` let straight past.
+
+A pre-pass refusal keeps the panel's declaration and its reason. Returned from
+the loop, the outcome carried `Cells_Declared=0` and no missing cells - the
+same understatement the panel loop's own early returns were fixed for - so it
+is applied inside `run_panel`, after the declaration is known. And a panel
+whose geometry rows ALL carry an error is `PANEL_GEOMETRY_UNRESOLVED` with the
+codes on it, not `MANUAL_POINT_READ` with "the reader resolved no marks": that
+is what makes publication 397's three `STROKE_SCALE_UNRESOLVED` panels legible
+from the run manifest instead of only from the geometry file.
+
+All four are held by a batch that reads a monochrome bar panel *through the
+manifests*, which the suite did not have: every earlier BAR_MONO scenario
+either called the reader directly or pointed it at a raster with no bars in it,
+so the runner path - pre-pass, review bundle, refusal branches, cleanup - was
+only ever exercised on a panel that returned nothing, and none of these four
+defects can be seen on such a panel. `P_MONO` reads twelve cells off the
+fixture (worst error 0.6 units on a 100-unit axis), and the four fixes are
+pinned by what happens to those twelve: the picture's crop rectangle is the
+declared one rather than a fraction of the plot box, a DEMO refusal leaves only
+`run_stamp.json`, a bundle that cannot be drawn exits 5 with the status on the
+stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
+reporting `Cells_Declared=12` and queueing twelve cells.
+
 **Still open:** `identity_resolution.csv` has a template, a schema and no
 runtime - a cell the figure could not name goes to the queue rather than
 through a human resolution join, and the `IDENTITY_RESOLUTION` artifact and
 `Identity_Checked` confirmation that go with it are not built. Publication 127
-needs both for its two 15 px bars.
+needs both for its two 15 px bars. `_geometry_marks` already puts
+`Geometry_Row_SHA256` on every mark, and `MARK_CARRIED` does not carry it
+through to the value grain - so the key that would bind a final value to the
+anonymous row it came from stops at the raw marks. That column, and
+`Identity_Source`, have to reach `figure_values_*` with the identity runtime.
 
 ## Suites
 
@@ -2871,18 +2923,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 497 |
+| `test_run_batch.py` | 515 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 176 |
-| `test_compile_plan.py` | 124 |
+| `test_compile_plan.py` | 125 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1756** |
+| **total** | **1776** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

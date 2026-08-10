@@ -34,6 +34,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import mark_readers as MRX                 # noqa: E402
+import review_overlay as OVERLAY           # noqa: E402
 import measure_mono_bars as M              # noqa: E402
 import mono_bar_geometry as G              # noqa: E402
 
@@ -2227,6 +2228,109 @@ try:
     check("and a file that has not been tampered with still verifies",
           len(G.verify_artifact(to_csv_and_back(written_rows))["records"])
           == len(zoo))
+
+    # ------------------------------------------- 26u. a picture per row
+    #
+    # The panel overlay answers "did it put the marks in the right places" for
+    # a PANEL. The geometry artifact is finer than that - one row per bar - and
+    # a reviewer checking eighteen rows against a 600 DPI page render is doing
+    # arithmetic on page coordinates by hand.
+    #
+    # REVERT: have `draw_row_crop` take the spec - the panel box and the group
+    # window - beside the record. The pictures look identical and a crop can
+    # then be drawn from a DIFFERENT panel's geometry and look perfectly
+    # reasonable. The record locating itself is what makes the picture evidence
+    # about the row rather than a picture that happens to be next to it.
+    print("\neach geometry row can be looked at, from the record alone")
+    check("every row says where on the page it was measured",
+          all(r.get("panel_box") and r.get("zero_px_image") is not None
+              for r in zoo),
+          repr([sorted(k for k in ("panel_box", "zero_px_image")
+                       if r.get(k) is None) for r in zoo][:3]))
+    check("and every row with a footprint says it in page columns too",
+          all(r.get("footprint_px_image") for r in zoo if r.get("footprint")),
+          repr([(r.get("figure"), r.get("footprint"),
+                 r.get("footprint_px_image")) for r in zoo
+                if r.get("footprint") and not r.get("footprint_px_image")]))
+    crop_dir = os.path.join(TMP, "rows")
+    OVERLAY.reset_failures()
+    made = []
+    for r in zoo:
+        made.append(OVERLAY.draw_row_crop(
+            os.path.join(crop_dir, OVERLAY.row_crop_name(r)),
+            os.path.join(TMP, "%s.png" % r["figure"]), r))
+    check("every row gets a picture, refusals included",
+          all(made) and len(made) == len(zoo),
+          "%d of %d, failures %r" % (len([m for m in made if m]), len(zoo),
+                                     OVERLAY.failures()))
+    # REVERT: name the file after the panel, group and slot only. Two runs that
+    # measured the same bar DIFFERENTLY then write to one filename, and the
+    # second silently replaces the first - so a reviewer comparing a picture
+    # with a row can be looking at a picture of a different measurement.
+    moved = dict(zoo[0])
+    moved["value"] = moved["value"] + 1.0
+    moved["geometry_row_sha256"] = G.geometry_row_sha256(moved)
+    check("the filename carries the measurement, not just the slot",
+          OVERLAY.row_crop_name(moved) != OVERLAY.row_crop_name(zoo[0])
+          and OVERLAY.row_crop_name(zoo[0]).startswith("zoo_plain__G__slot0__"),
+          "%r and %r" % (OVERLAY.row_crop_name(zoo[0]),
+                         OVERLAY.row_crop_name(moved)))
+    check("and an unstamped record says so rather than looking measured",
+          OVERLAY.row_crop_name(
+              {k: v for k, v in zoo[0].items()
+               if k != "geometry_row_sha256"}).endswith("unstamped.png"))
+    # The picture has to be OF the bar. A crop that is the right size and the
+    # wrong place passes every check above.
+    solid_row = next(r for r in zoo
+                     if r["figure"] == "zoo_plain" and r.get("slot") == 2)
+    shot = Image.open(os.path.join(
+        crop_dir, OVERLAY.row_crop_name(solid_row))).convert("L")
+    body = np.asarray(shot)[:shot.height - 58]
+    middle = body[body.shape[0] // 2, :]
+    width = solid_row["footprint_px_image"][1] - solid_row["footprint_px_image"][0] + 1
+    # The pad, then the bar, exactly. A crop of the right size in the wrong
+    # place passes every check above this one.
+    check("the crop really is this bar, at the offset the pad implies",
+          bool((middle[24:24 + width] < 128).all()),
+          "%d of the %d footprint columns are ink"
+          % (int((middle[24:24 + width] < 128).sum()), width))
+    check("and there is paper beside it, so it is not the neighbour",
+          middle[18] >= 128 and middle[24 + width + 4] >= 128,
+          "%r" % [int(middle[18]), int(middle[24 + width + 4])])
+    blank_row = next(r for r in zoo if r.get("error") == "STROKE_SCALE_UNRESOLVED")
+    tall = Image.open(os.path.join(crop_dir, OVERLAY.row_crop_name(blank_row)))
+    check("a row that never found a bar is shown its whole panel",
+          tall.height > shot.height, "%d against %d" % (tall.height, shot.height))
+    # REVERT: let a drawing failure raise. A picture that cannot be painted must
+    # not fail a row that produced a value - and it must not vanish silently
+    # either, which is what `failures()` is for.
+    OVERLAY.reset_failures()
+    check("a missing raster is a recorded failure, not an exception",
+          OVERLAY.draw_row_crop(os.path.join(crop_dir, "x.png"),
+                                os.path.join(TMP, "not_here.png"), zoo[0])
+          is None and len(OVERLAY.failures()) == 1, repr(OVERLAY.failures()))
+    OVERLAY.reset_failures()
+    folder = os.path.join(TMP, "rows2")
+    # REVERT: take one image path and a list of records. A figure is several
+    # panels, so a caller with three of them calls this three times - and each
+    # call rewrites index.html, leaving eighteen pictures beside a sheet
+    # listing the last six. A sheet that under-reports the folder it sits in is
+    # worse than no sheet, because it is the thing a reviewer counts against.
+    paths = OVERLAY.write_row_crops(
+        folder, [(os.path.join(TMP, "%s.png" % r["figure"]), r) for r in zoo
+                 if r["figure"] in ("zoo_plain", "zoo_cap")])
+    sheet = open(os.path.join(folder, "index.html"), encoding="utf-8").read()
+    check("the folder carries a contact sheet naming every picture in it",
+          len(paths) == 4
+          and all(os.path.basename(p) in sheet for p in paths),
+          repr(sorted(os.listdir(folder))))
+    check("across every panel of the figure, not just the last one",
+          "zoo_plain" in sheet and "zoo_cap" in sheet,
+          "panels named in the sheet: %r"
+          % sorted({n for n in ("zoo_plain", "zoo_cap") if n in sheet}))
+    check("and the sheet says how many rows there were, so a gap is visible",
+          "4 rows, 4 pictures" in sheet,
+          sheet[sheet.find("<h1>"):sheet.find("</h1>") + 5])
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

@@ -1167,6 +1167,10 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         if not str(value or "").strip():
             raise ValueError("geometry_rows: %s must not be blank" % name)
     fills = list(fills)
+    # Calibration first, because the stroke is the thickness of the rule at the
+    # BASELINE and the baseline is where the calibration says the zero is - and
+    # because every record carries the baseline's page row.
+    zero = int(round(cal.value_to_pixel(baseline))) - y0
 
     def row(**extra):
         """The fields EVERY record carries, success or refusal.
@@ -1182,6 +1186,15 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         from a row that never existed.
         """
         base = dict(figure=panel_id, figure_id=figure_id, group=None, slot=None,
+                    # Where this was measured, in PAGE coordinates, on every
+                    # row. A row that says the bar top is at page row 296 and
+                    # does not say which columns is not locatable: a reviewer
+                    # holding the artifact and the raster still needs the spec
+                    # to find the bar, and a crop cannot be drawn from the
+                    # record at all. `footprint` is window-relative and stays
+                    # that way, because every array in this file is.
+                    panel_box=[x0, x1, y0, y1],
+                    zero_px_image=y0 + zero,
                     # What the group is SUPPOSED to hold, on every record.
                     # Without it a group is only knowable from the records that
                     # came back, so a record lost to a defect takes its
@@ -1208,9 +1221,6 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         base.update(extra)
         return base
 
-    # Calibration first, because the stroke is the thickness of the rule at the
-    # BASELINE and the baseline is where the calibration says the zero is.
-    zero = int(round(cal.value_to_pixel(baseline))) - y0
     scale = stroke_scale(gray, box, threshold=threshold, baseline_row=zero)
     records = []
     if not scale.ok:
@@ -1303,6 +1313,8 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
             if min_bar_px and (fp[1] - fp[0] + 1) < min_bar_px:
                 rec.update(error="BAR_TOO_NARROW",
                            footprint=[int(fp[0]), int(fp[1])],
+                           footprint_px_image=[int(window[0] + fp[0]),
+                                               int(window[0] + fp[1])],
                            footprint_width=int(fp[1] - fp[0] + 1),
                            min_bar_px=int(min_bar_px))
                 records.append(rec)
@@ -1337,6 +1349,8 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                        contradiction_px=(min(r["distance_px"] for r in body)
                                          if body else 0),
                        footprint=[int(fp[0]), int(fp[1])],
+                       footprint_px_image=[int(window[0] + fp[0]),
+                                           int(window[0] + fp[1])],
                        footprint_width=int(fp[1] - fp[0] + 1),
                        seed_segments=len([s for s in segments
                                           if fp[0] <= s[0] <= fp[1]]))

@@ -145,6 +145,10 @@ def main(argv=None):
                     help="where the private rasters the geometry specs name live")
     ap.add_argument("--specs-dir", default=os.path.join(HERE, "geometry"),
                     help="directory of versioned *.geometry.json specs")
+    ap.add_argument("--crops", default="",
+                    help="write one PNG per row into this directory, with an "
+                         "index.html contact sheet, so the rows can be looked "
+                         "at rather than read")
     args = ap.parse_args(argv)
 
     specs = builtin_specs()
@@ -182,6 +186,22 @@ def main(argv=None):
                      "%s%s" % (r["support"],
                                "" if not r["contradiction_px"]
                                else " !%d" % r["contradiction_px"]), cells))
+    if args.crops:
+        # After the identities, so each picture's caption can say what the
+        # figure called the bar. The crops are a review aid and nothing is
+        # derived from them: `write_row_crops` never raises, and a picture that
+        # could not be painted is reported rather than silently absent.
+        import review_overlay as OVERLAY                          # noqa: E402
+        OVERLAY.reset_failures()
+        G.fill_identities_by_figure(everything)
+        raster_of = {spec["tag"]: spec["path"] for spec in specs}
+        paths = OVERLAY.write_row_crops(
+            args.crops, [(raster_of[rec["figure"]], rec) for rec in everything
+                         if rec["figure"] in raster_of])
+        print("\nwrote %d row pictures into %s (open index.html)"
+              % (len(paths), args.crops))
+        for problem in OVERLAY.failures():
+            print("  could not draw %s" % problem)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump(everything, fh, indent=1)

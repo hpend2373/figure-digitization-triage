@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.25 (full package)
+# figure-digitization-triage — v7.26 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -2549,6 +2549,48 @@ place, because the row-level attestation catches the edit first. The scenario
 builds it honestly, by resolving a subset of the figure and splicing one of its
 rows back in.
 
+## A picture per row
+
+The panel overlay answers "did it put the marks in the right places" for a
+PANEL. The geometry artifact is finer than that - one row per bar - and a
+reviewer checking eighteen rows of `mono_bar_geometry.csv` against a 600 DPI
+page render is doing arithmetic on page coordinates by hand.
+
+`review_overlay.write_row_crops` writes a folder: one PNG per geometry row, this
+bar cut from the page it was measured on, with the four numbers the row claims
+drawn on it - the baseline, the bar top, the error-bar cap and the footprint's
+own columns - and an `index.html` contact sheet. `measure_mono_bars --crops DIR`
+produces it for any panel the package can reach. It takes `(image_path,
+record)` pairs rather than one image and a list, because a figure is several
+panels and possibly several pages - the first version rewrote `index.html` per
+call, so a folder of eighteen pictures got a contact sheet listing the last
+six, and a sheet that under-reports the folder it sits in is worse than no
+sheet.
+
+Same contract as the overlay: a crop is a review aid, it is never read back,
+nothing is derived from it, and its absence cannot change a value. What it adds
+is BINDING. The filename and the caption both carry `Geometry_Row_SHA256`, so a
+picture cannot be quietly matched to the wrong row and a crop left over from an
+earlier run cannot pass for this one - two runs that measured the same bar
+differently write two files rather than one silently replacing the other.
+
+**The record had to learn where it was.** `footprint` is window-relative,
+because every array in `mono_bar_geometry` is, and `edge_px_image` is a page row
+with no page COLUMN beside it - so a row said the bar top was at page row 296
+without saying which columns, and no crop could be drawn from the record at all.
+Every row now carries `panel_box` and `zero_px_image`, and every row with a
+footprint carries `footprint_px_image`. That is not only for the picture: a row
+that cannot locate itself needs the spec to be found again, and the spec is not
+in the artifact.
+
+Drawing from the record ALONE is the point. A crop that also took the spec could
+be drawn from a different panel's geometry and look perfectly reasonable.
+
+A refusal gets a picture too, and gets the right one: a row that never found a
+bar carries `zero_px_image` like every other row, and cropping to the baseline
+alone gives a 48 px strip of the axis. `STROKE_SCALE_UNRESOLVED` and
+`NO_SEED_SUPPORT` are shown their whole panel instead.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2557,7 +2599,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 252 |
+| `test_measure_mono_bars.py` | 264 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2566,7 +2608,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1688** |
+| **total** | **1700** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

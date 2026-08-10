@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.30"
+PIPELINE_VERSION = "7.31"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -328,8 +328,10 @@ def review_subject_sha256(run_row, values, manifest_hashes, environment,
         #
         # Basenames, not full paths: the subject is what the person saw, and
         # moving the output directory does not change that.
-    ] + ["artifact:%s|%s|%s" % (kind, os.path.basename(_s(path)), digest)
-         for kind, path, digest in sorted(artifacts)]
+    ] + ["artifact:%s|%s|%s|%s" % (item[0], os.path.basename(_s(item[1])),
+                                   item[2],
+                                   _s(item[3]) if len(item) > 3 else "")
+         for item in sorted(artifacts)]
     for row in sorted(values, key=lambda r: _s(r.get("Cell_Key"))):
         material.append("value:" + "|".join(
             "%s=%s" % (k, row.get(k, "")) for k in sorted(row)
@@ -551,7 +553,14 @@ class PanelOutcome(object):
 #: picture a reviewer approved could be swapped for a different picture after
 #: they approved it and the finalizer had nothing to say.
 PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA")
-PANEL_ARTIFACT_COLUMNS = ["Panel_ID", "Artifact_Type", "Artifact_Path", "SHA256"]
+#: `Artifact_Reference` names the row an artifact belongs to when one artifact
+#: is not enough on its own. It exists for `IDENTITY_EVIDENCE`: the finalizer has
+#: to re-derive "every file-backed resolution has its evidence here", and the
+#: only honest join for that is the `Resolution_ID` the copy was made for.
+#: Matching on filename would work until two resolutions cite crops with the
+#: same basename.
+PANEL_ARTIFACT_COLUMNS = ["Panel_ID", "Artifact_Type", "Artifact_Path", "SHA256",
+                          "Artifact_Reference"]
 
 
 def _run_relative(path, run_dir):
@@ -747,9 +756,22 @@ def write_identity_resolutions(out_dir, rows_by_panel, file_root="."):
                 continue
             declared = _s(row.get("Evidence_Artifact"))
             want = _s(row.get("Evidence_Artifact_SHA256")).lower()
-            source = (declared if os.path.isabs(declared)
-                      else os.path.join(file_root, declared))
+            # Confined here as well as in the validator, because the validator's
+            # copy of this rule sits behind `check_files`. Skipping a CONTENT
+            # hash when file checking is off is a defensible choice; letting a
+            # path escape the corpus is not, and this is the code that actually
+            # opens the file - so an absolute path from anywhere on the machine
+            # could be copied into the run and registered as evidence.
+            root = os.path.realpath(file_root)
+            source = os.path.realpath(
+                declared if os.path.isabs(declared)
+                else os.path.join(root, declared))
             rid = _s(row.get("Resolution_ID"))
+            if source != root and not source.startswith(root + os.sep):
+                raise GeometryReviewError(
+                    "IDENTITY_EVIDENCE_OUTSIDE_ROOT: the evidence for %s (%s) "
+                    "resolves outside %s, so it is not evidence from this "
+                    "corpus" % (rid, declared, root))
             base = "".join(c if (c.isalnum() or c in ".-_") else "_"
                            for c in os.path.basename(declared))
             dest = os.path.join(review_dir, "evidence__%s__%s" % (rid, base))
@@ -765,7 +787,7 @@ def write_identity_resolutions(out_dir, rows_by_panel, file_root="."):
                     "the evidence for %s copied as %s... and the resolution "
                     "says %s...; a review whose evidence cannot be reproduced "
                     "is not a review" % (rid, got[:16], want[:16]))
-            artifacts.append((IDENTITY_EVIDENCE_ARTIFACT_TYPE, dest))
+            artifacts.append((IDENTITY_EVIDENCE_ARTIFACT_TYPE, dest, rid))
         out[pid] = artifacts
     return out
 
@@ -1487,30 +1509,100 @@ IDENTITY_PROVENANCE_COLUMNS = ("Geometry_Row_SHA256", "Resolved_Fill_Pattern",
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def identity_provenance_problems(values, mark_by_panel):
-    """[(where, check, detail)] for BAR_MONO values whose provenance is absent.
+def geometry_index(records):
+    """{(Panel_ID, Geometry_Row_SHA256): row} for the foreign-key check.
 
-    The gate's own identity block only fires when one of the columns is filled,
-    which is right for a file that cannot know what drew the panel and wrong as
-    the only defence. Delete the six columns from a monochrome value - a
-    regression in `IDENTITY_CARRIED`, a hand-edited file - and every remaining
-    check passes: the mean and the SE are fine, the gate says nothing, and the
-    value is reviewable and poolable with no way to ask which bar it came from
-    or who decided which series it was.
+    Takes geometry RECORDS or the rows of `mono_bar_geometry.csv` - the field
+    names differ, so both spellings are read - which is what lets the check be
+    re-run from the files a run leaves behind.
+    """
+    out = {}
+    for rec in (records or ()):
+        pid = _s(rec.get("Panel_ID") if rec.get("Panel_ID") is not None
+                 else rec.get("figure"))
+        digest = _s(rec.get("Geometry_Row_SHA256")
+                    or rec.get("geometry_row_sha256")).lower()
+        if not pid or not digest:
+            continue
+        mean = rec.get("Mean") if "Mean" in rec else rec.get("value")
+        disp = (rec.get("Dispersion_Value") if "Dispersion_Value" in rec
+                else rec.get("dispersion"))
+        auto = (rec.get("Auto_Fill_Pattern") if "Auto_Fill_Pattern" in rec
+                else rec.get("resolved_fill_pattern"))
+        out.setdefault((pid, digest), []).append(
+            dict(Mean=mean, Dispersion_Value=disp,
+                 Auto_Fill_Pattern=_upper(auto)))
+    return out
 
-    This is the mark-aware half. `values` needs `Run_Panel_ID`; `mark_by_panel`
-    is `{Panel_ID: Mark_Type}`. Both come out of files the run writes, so the
-    check can be re-run from `figure_values_raw.csv` and `run_manifest.csv`
-    without this process.
+
+def _as_number(value):
+    try:
+        return float(_s(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def identity_provenance_problems(values, panel_index, geometry=None):
+    """[(where, check, detail)] for values whose provenance does not hold up.
+
+    Two things the grid gate cannot do.
+
+    IT CANNOT REQUIRE the identity columns. Its own identity block only fires
+    when one of them is filled, which is right for a file that cannot know what
+    drew the panel - a line panel's rows say nothing about fills, quite
+    legitimately - and wrong as the only defence: delete the six columns from a
+    monochrome value and the mean and the SE are still fine, the gate says
+    nothing, and the value is reviewable and poolable with no way to ask which
+    bar it came from or who decided which series it was.
+
+    AND IT CANNOT FOLLOW `Geometry_Row_SHA256` anywhere. Checking that it looks
+    like a SHA-256 establishes that the value carries sixty-four hex characters,
+    not that it came from that measurement: a fabricated digest, or another
+    bar's real one, passes a format check exactly as well. With `geometry` -
+    `{(Panel_ID, hash): [row]}` from `geometry_index` - the column becomes a
+    foreign key, and the mean, the dispersion and the measured fill are compared
+    against the row it names.
+
+    The PANEL BINDING is checked first, for every value and not only the
+    monochrome ones, because it is what decides which rules apply. A row whose
+    `Run_Panel_ID` names a colour panel is skipped by the identity rules and is
+    then selected by the finalizer under that panel's approval - so a mis-stamped
+    row would be reviewed as somebody else's panel and pooled.
+
+    `panel_index` is `{Panel_ID: {"Mark_Type": ..., "Unit_ID": ...}}`. Every
+    input comes from a file the run writes, so this can be re-run from
+    `figure_values_raw.csv`, `run_manifest.csv` and `mono_bar_geometry.csv`.
     """
     out = []
     rows = (values.to_dict("records") if hasattr(values, "to_dict") else
             list(values))
+    geometry = dict(geometry or {})
+    claimed = {}
     for i, row in enumerate(rows):
         pid = _s(row.get("Run_Panel_ID"))
-        if _upper(mark_by_panel.get(pid, "")) != "BAR_MONO":
-            continue
         where = "values:%d" % (i + 2)
+        if not pid:
+            out.append((where, "IDENTITY_PANEL_BINDING_MISSING",
+                        "this value names no Run_Panel_ID, so nothing says "
+                        "which panel produced it - and the reader's rules, the "
+                        "review it is approved under and the raster it came "
+                        "from are all properties of that panel"))
+            continue
+        if pid not in panel_index:
+            out.append((where, "IDENTITY_PANEL_BINDING_UNKNOWN",
+                        "Run_Panel_ID=%s is not a declared panel" % pid))
+            continue
+        panel = panel_index[pid]
+        want_unit = _s(panel.get("Unit_ID"))
+        got_unit = _s(row.get("Unit_ID"))
+        if want_unit and got_unit and want_unit != got_unit:
+            out.append((where, "IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT",
+                        "this value is Unit_ID=%s and Run_Panel_ID=%s reads "
+                        "Unit_ID=%s; one of the two is somebody else's"
+                        % (got_unit, pid, want_unit)))
+            continue
+        if _upper(panel.get("Mark_Type")) != "BAR_MONO":
+            continue
         absent = [c for c in IDENTITY_PROVENANCE_COLUMNS if not _s(row.get(c))]
         if absent:
             out.append((where, "IDENTITY_PROVENANCE_MISSING",
@@ -1570,6 +1662,59 @@ def identity_provenance_problems(values, mark_by_panel):
             out.append((where, "IDENTITY_PROVENANCE_MISSING",
                         "Identity_Source=%r (expected %s)"
                         % (source, "/".join(K.FIG_IDENTITY_SOURCES))))
+        if not geometry:
+            continue
+        # The column as a FOREIGN KEY. Without this the chain guaranteed that
+        # the geometry file is internally valid and that the value carries
+        # something hash-shaped - not that this mean came out of that row.
+        found = geometry.get((pid, digest.lower()))
+        if not found:
+            out.append((where, "IDENTITY_GEOMETRY_ROW_UNKNOWN",
+                        "Geometry_Row_SHA256=%s... names no row of %s in "
+                        "mono_bar_geometry.csv" % (digest[:16], pid)))
+            continue
+        if len(found) > 1:
+            out.append((where, "IDENTITY_GEOMETRY_ROW_UNKNOWN",
+                        "Geometry_Row_SHA256=%s... matches %d rows of %s; a "
+                        "measurement hash names one bar"
+                        % (digest[:16], len(found), pid)))
+            continue
+        seen_at = claimed.setdefault((pid, digest.lower()), where)
+        if seen_at != where:
+            # Two values off one bar. The likeliest way to get here is a hash
+            # copied from another row whose numbers happen to agree, which the
+            # comparisons below cannot see.
+            out.append((where, "IDENTITY_GEOMETRY_ROW_REUSED",
+                        "%s already claims measurement %s... of %s; one bar is "
+                        "one value" % (seen_at, digest[:16], pid)))
+            continue
+        measured = found[0]
+        for column, label in (("Mean", "Mean"),
+                              ("Dispersion_Value", "Dispersion_Value")):
+            want_num = _as_number(measured.get(column))
+            got_num = _as_number(row.get(column))
+            if want_num is None and got_num is None:
+                continue
+            if (want_num is None) != (got_num is None) or \
+                    abs(want_num - got_num) > 5e-4:
+                out.append((where, "IDENTITY_GEOMETRY_ROW_MISMATCH",
+                            "%s=%s and measurement %s... reads %s. The hash "
+                            "says where this number came from; these are two "
+                            "different numbers"
+                            % (label, _s(row.get(column)) or "blank",
+                               digest[:16],
+                               _s(measured.get(column)) or "blank")))
+        measured_fill = _upper(measured.get("Auto_Fill_Pattern"))
+        if source == "AUTO" and measured_fill != resolved:
+            out.append((where, "IDENTITY_GEOMETRY_ROW_MISMATCH",
+                        "this value is filed under %s and measurement %s... "
+                        "was read as %s"
+                        % (resolved, digest[:16], measured_fill or "no fill")))
+        if source == "HUMAN" and measured_fill:
+            out.append((where, "IDENTITY_OVERRODE_MEASUREMENT",
+                        "measurement %s... was read as %s, so this bar did not "
+                        "need naming by hand"
+                        % (digest[:16], measured_fill)))
     return out
 
 
@@ -2198,10 +2343,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # which is the normal case for a scheduler or an agent. Either way the
         # finalizer reports RUN_ARTIFACT_MODIFIED for a file that is sitting
         # right there - safe, but a false refusal nobody can act on.
+        # Producers hand over (TYPE, path) or (TYPE, path, reference); the
+        # reference is blank for everything that stands on its own.
         artifacts_by_panel[pid] = [
-            (kind, _run_relative(path, output_dir), file_sha256_or_blank(path))
-            for kind, path in (list(outcome.artifacts)
-                               + geometry_artifacts.get(pid, []))]
+            (item[0], _run_relative(item[1], output_dir),
+             file_sha256_or_blank(item[1]),
+             _s(item[2]) if len(item) > 2 else "")
+            for item in (list(outcome.artifacts)
+                         + geometry_artifacts.get(pid, []))]
         # Stamp the panel onto every value it produced. A unit is normally one
         # panel, but nothing forbids two panels feeding one - and keying panel
         # state by Unit_ID meant the LAST panel's state won, so a unit whose
@@ -2346,8 +2495,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # nothing on every row. The two are in the same order, so a `values:%d` from
     # here names the same line the gate would.
     _identity_problems = identity_provenance_problems(
-        values, {_s(r.get("Panel_ID")): _s(r.get("Mark_Type"))
-                 for _, r in m["panels"].iterrows()})
+        values,
+        {_s(r.get("Panel_ID")): {"Mark_Type": _s(r.get("Mark_Type")),
+                                 "Unit_ID": _s(r.get("Unit_ID"))}
+         for _, r in m["panels"].iterrows()},
+        geometry=geometry_index(
+            [r for rows_ in geometry_rows_by_panel.values() for r in rows_]))
     if _identity_problems:
         qc = pd.concat(
             [qc, pd.DataFrame([dict(where=w, check=c, detail=d)
@@ -2549,9 +2702,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # wrote, not of what it wants approved.
     artifact_df = pd.DataFrame(
         [{"Panel_ID": pid, "Artifact_Type": kind, "Artifact_Path": path,
-          "SHA256": digest}
+          "SHA256": digest, "Artifact_Reference": reference}
          for pid in sorted(artifacts_by_panel)
-         for kind, path, digest in artifacts_by_panel[pid]],
+         for kind, path, digest, reference in artifacts_by_panel[pid]],
         columns=PANEL_ARTIFACT_COLUMNS)
     # An empty review directory beside twelve panels awaiting review would read
     # as "nothing to look at". Say which pictures could not be drawn.

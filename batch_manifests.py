@@ -1002,6 +1002,18 @@ def check_identity_resolution(resolutions, panels, series, flag,
                 flag(line, "IDENTITY_EVIDENCE_UNEXPLAINED",
                      "Evidence_Type=REVIEWER_INSPECTION has no artifact to "
                      "re-examine, so the Note must say what was seen")
+            if artifact or want:
+                # One contract, not two. Validation hashed an artifact given
+                # here and the writer - which copies only FILE_EVIDENCE_TYPES -
+                # left it out of the run, so the evidence was checked once and
+                # then not shipped, while the documentation said this type has
+                # no file at all. A row with a file to point at is
+                # LEGEND_DECLARED or TEXT_DECLARED and should say so.
+                flag(line, "IDENTITY_EVIDENCE_NOT_A_FILE",
+                     "Evidence_Type=REVIEWER_INSPECTION carries "
+                     "Evidence_Artifact=%r; a resolution backed by a file is "
+                     "%s, and only those are copied into the run"
+                     % (artifact or "", "/".join(FILE_EVIDENCE_TYPES)))
         elif evidence in FILE_EVIDENCE_TYPES:
             if not artifact:
                 flag(line, "MISSING_REQUIRED", "Evidence_Artifact")

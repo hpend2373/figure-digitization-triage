@@ -145,6 +145,83 @@ def load_reviews(path, flag):
     return df
 
 
+def identity_evidence_missing(run_dir, ledger_rows, flag):
+    """Panels whose file-backed resolutions have no evidence in this run.
+
+    `IDENTITY_RESOLUTION` says which resolutions a panel was read under, and
+    `Evidence_Type` says whether each one rests on a FILE. If it does, the bytes
+    of that file have to be in the run and in the ledger - otherwise
+    `Identity_Checked=CONFIRMED` is a confirmation of a hash string in a
+    manifest, and the reviewer who received the run directory never had the
+    picture to look at.
+
+    Deliberately not expressed as a required artifact type on the review mode: a
+    panel whose resolutions are all `REVIEWER_INSPECTION` has no evidence file,
+    so a static requirement would refuse a correct panel. The condition is in
+    the rows, so the check reads the rows.
+
+    Returns the set of Panel_IDs to withhold. The hashes themselves are checked
+    by `verify_run_outputs`, which has already run; what this adds is that the
+    right ones EXIST, and that each one matches what the resolution declared.
+    """
+    withheld = set()
+    by_panel = {}
+    for _, art in ledger_rows.iterrows():
+        by_panel.setdefault(_s(art.get("Panel_ID")), []).append(art)
+    for pid, arts in sorted(by_panel.items()):
+        resolutions = [a for a in arts
+                       if _s(a.get("Artifact_Type")) == RB.IDENTITY_ARTIFACT_TYPE]
+        if not resolutions:
+            continue
+        evidence = {}
+        for a in arts:
+            if _s(a.get("Artifact_Type")) == RB.IDENTITY_EVIDENCE_ARTIFACT_TYPE:
+                evidence[_s(a.get("Artifact_Reference"))] = a
+        for art in resolutions:
+            path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+            if path is None or not os.path.exists(path):
+                # `verify_run_outputs` has already refused the whole run for
+                # this; withholding the panel as well keeps the two independent.
+                flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                     "the resolution rows for %s are not readable, so the "
+                     "evidence behind them cannot be checked" % pid)
+                withheld.add(pid)
+                continue
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    rows = list(csv.DictReader(fh))
+            except Exception as exc:
+                flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                     "the resolution rows for %s could not be parsed (%s: %s)"
+                     % (pid, type(exc).__name__, exc))
+                withheld.add(pid)
+                continue
+            for row in rows:
+                if _s(row.get("Evidence_Type")).upper() \
+                        not in BM.FILE_EVIDENCE_TYPES:
+                    continue
+                rid = _s(row.get("Resolution_ID"))
+                got = evidence.get(rid)
+                if got is None:
+                    flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                         "resolution %s rests on %s (%s) and this run carries "
+                         "no IDENTITY_EVIDENCE for it. A run made before the "
+                         "evidence was copied in cannot be finalized"
+                         % (rid, _s(row.get("Evidence_Type")),
+                            _s(row.get("Evidence_Artifact"))))
+                    withheld.add(pid)
+                    continue
+                want = _s(row.get("Evidence_Artifact_SHA256")).lower()
+                if want and _s(got.get("SHA256")).lower() != want:
+                    flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                         "resolution %s declares evidence %s... and the run "
+                         "carries %s...; the copy is not the file that was "
+                         "signed" % (rid, want[:16],
+                                     _s(got.get("SHA256"))[:16] or "(nothing)"))
+                    withheld.add(pid)
+    return withheld
+
+
 def approved_panels(reviews, queue, reviewers, flag, today=None,
                     artifact_types=None):
     """Panel_ID -> the review row that approves it. Everything else is refused."""
@@ -548,6 +625,15 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     for _, art in ledger_rows.iterrows():
         artifact_types.setdefault(_s(art.get("Panel_ID")), set()).add(
             _s(art.get("Artifact_Type")))
+    # Re-derived here, not taken from the producer's promise. The review mode's
+    # artifact tuple cannot express "and the evidence for every file-backed
+    # resolution", because a panel resolved only by REVIEWER_INSPECTION has no
+    # evidence file at all - so the requirement is conditional on what the
+    # resolution rows say, and reading them is the only way to know. Without
+    # this the finalizer accepted any run whose producer had not copied the
+    # evidence in, including every run made before it started doing so.
+    for pid in sorted(identity_evidence_missing(run_dir, ledger_rows, flag)):
+        artifact_types.pop(pid, None)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types)
 

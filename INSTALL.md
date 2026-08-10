@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29-7.30)
+### A series the reader could not name (v7.29-7.31)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -3005,6 +3005,49 @@ and the final approval already do. And `Evidence_Artifact` without its hash, or
 the hash without the path, is `IDENTITY_EVIDENCE_HALF_DECLARED` - a path with no
 hash is an unverifiable file, a hash with no path is a claim about nothing.
 
+**The panel binding decides which rules apply, so it is checked first.** A value
+row whose `Run_Panel_ID` names a colour panel skips the identity rules entirely
+and is then selected by the finalizer under THAT panel's approval - reviewed as
+somebody else's panel and pooled. Every value, monochrome or not, must name a
+declared panel whose `Unit_ID` is its own: `IDENTITY_PANEL_BINDING_MISSING`,
+`_UNKNOWN`, `_CONTRADICTS_UNIT`.
+
+**`Geometry_Row_SHA256` is a foreign key, not a format.** Sixty-four hex
+characters establish that a value carries something hash-shaped; a fabricated
+digest and another bar's real one pass a format check exactly as well. With the
+geometry index in hand - `{(Panel_ID, hash): row}`, built from records or from
+`mono_bar_geometry.csv` - the mean, the dispersion and the measured fill are
+compared against the row the value names, and two values may not claim one bar
+(`IDENTITY_GEOMETRY_ROW_UNKNOWN` / `_MISMATCH` / `_REUSED`). This is what makes
+"this mean came out of that measurement" a checked statement rather than a
+convention.
+
+**The finalizer re-derives the evidence requirement.** A review mode's artifact
+tuple cannot express "and the evidence for every file-backed resolution",
+because a panel resolved only by `REVIEWER_INSPECTION` has no evidence file - so
+a static requirement would refuse a correct panel, and its absence let any run
+whose producer had not copied the evidence in be finalized, including every run
+made before it started doing so. `identity_evidence_missing` reads the
+`IDENTITY_RESOLUTION` rows, and for each `LEGEND_DECLARED`/`TEXT_DECLARED` row
+requires an `IDENTITY_EVIDENCE` artifact whose hash is the one the resolution
+declared. `panel_artifacts.csv` gained `Artifact_Reference` for the join -
+matching on basename would work until two resolutions cite crops with the same
+name. A panel that fails is withheld from approval (`REVIEW_EVIDENCE_MISSING`);
+the run is not condemned for it.
+
+**One contract for `REVIEWER_INSPECTION`.** Validation hashed an
+`Evidence_Artifact` given on such a row and the writer, which copies only
+`FILE_EVIDENCE_TYPES`, left it out of the run - checked once and then not
+shipped, while the documentation said this type has no file at all. A row with a
+file to point at is `LEGEND_DECLARED` or `TEXT_DECLARED`, and saying otherwise is
+`IDENTITY_EVIDENCE_NOT_A_FILE`.
+
+**Path confinement is not an option.** The validator's rule sits behind
+`check_files`; skipping a content hash when file checking is off is a defensible
+choice, letting a path escape the corpus is not. The writer - the code that
+actually opens the file - re-derives it, so `--no-file-check` cannot copy an
+arbitrary absolute path into the run and register it as evidence.
+
 **Still open:** nothing in the identity chain. What remains for a pilot is
 publication 127's own manifests and a real reviewer identity.
 
@@ -3014,7 +3057,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 591 |
+| `test_run_batch.py` | 618 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -3025,7 +3068,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1861** |
+| **total** | **1888** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

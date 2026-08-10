@@ -3130,18 +3130,42 @@ check("and the template ships every column any mode can ask for",
 # columns today; what is gone is the check that it still does.
 print()
 print("a monochrome value has to carry where it came from, not just agree with itself")
-_MONO_MARKS = {"P_SHORT": "BAR_MONO", "P_LINE": "LINE_COLOR"}
+_MONO_PANELS = {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"},
+                "P_LINE": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_LINE"}}
+# One measured bar, in the shape `mono_bar_geometry.csv` holds it, so the value
+# below has a row to be the value OF.
+_MONO_GEO = RB.geometry_index([
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="a" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="OPEN"),
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="b" * 64, Mean="58.056",
+         Dispersion_Value="5.833", Auto_Fill_Pattern="SOLID"),
+    dict(Panel_ID="P_MONO", Geometry_Row_SHA256="c" * 64, Mean="30.0",
+         Dispersion_Value="3.889", Auto_Fill_Pattern="OPEN"),
+    # The same numbers as the first row and NO measured fill: the short bar,
+    # which is the only kind of row a human identity may name.
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="e" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="")])
 
 
-def _prov(**kw):
+def _human(**kw):
+    """A value named by a person, citing the row whose fill was not measured."""
+    base = dict(Geometry_Row_SHA256="e" * 64, Auto_Fill_Pattern="",
+                Identity_Source="HUMAN",
+                Identity_Evidence_Type="LEGEND_DECLARED", Resolution_ID="IR1")
+    base.update(kw)
+    return _prov(**base)
+
+
+def _prov(_rows=None, **kw):
     base = dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
                 Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
+                Dispersion_Value="3.611",
                 Geometry_Row_SHA256="a" * 64, Auto_Fill_Pattern="OPEN",
                 Resolved_Fill_Pattern="OPEN", Identity_Source="AUTO",
                 Identity_Evidence_Type="FILL_MEASURED", Resolution_ID="")
     base.update(kw)
-    return [c for _w, c, _d in RB.identity_provenance_problems([base],
-                                                               _MONO_MARKS)]
+    return [c for _w, c, _d in RB.identity_provenance_problems(
+        _rows or [base], _MONO_PANELS, geometry=_MONO_GEO)]
 
 
 check("a complete automatic provenance passes", _prov() == [], "%s" % _prov())
@@ -3169,15 +3193,13 @@ check("AUTO carrying a resolution, or a human's evidence, is refused",
       == ["IDENTITY_SOURCE_INCONSISTENT"],
       "%s %s" % (_prov(Resolution_ID="IR1"),
                  _prov(Identity_Evidence_Type="LEGEND_DECLARED")))
-check("a human identity with no row signed, or a measured fill beside it",
-      _prov(Identity_Source="HUMAN", Identity_Evidence_Type="LEGEND_DECLARED",
-            Auto_Fill_Pattern="")
-      == ["IDENTITY_RESOLUTION_UNIDENTIFIED"]
-      and _prov(Identity_Source="HUMAN",
-                Identity_Evidence_Type="LEGEND_DECLARED",
-                Resolution_ID="IR1") == ["IDENTITY_OVERRODE_MEASUREMENT"],
-      "%s" % _prov(Identity_Source="HUMAN",
-                   Identity_Evidence_Type="LEGEND_DECLARED", Resolution_ID="IR1"))
+check("a complete human provenance passes", _human() == [], "%s" % _human())
+check("a human identity with no row signed is refused",
+      _human(Resolution_ID="") == ["IDENTITY_RESOLUTION_UNIDENTIFIED"],
+      "%s" % _human(Resolution_ID=""))
+check("and a measured fill beside a human identity is refused",
+      _human(Auto_Fill_Pattern="OPEN") == ["IDENTITY_OVERRODE_MEASUREMENT"],
+      "%s" % _human(Auto_Fill_Pattern="OPEN"))
 check("a source nobody declared is refused",
       "IDENTITY_PROVENANCE_MISSING" in _prov(Identity_Source="MACHINE"),
       "%s" % _prov(Identity_Source="MACHINE"))
@@ -3185,12 +3207,92 @@ check("a source nobody declared is refused",
 # the requirement cannot live in the gate: it is not a property of a values row,
 # it is a property of a values row FROM A MONOCHROME BAR PANEL.
 check("a colour panel's value says nothing about fills, quite legitimately",
-      not RB.identity_provenance_problems(
-          [dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE", Mean="55")],
-          _MONO_MARKS),
-      "%s" % RB.identity_provenance_problems(
-          [dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE", Mean="55")],
-          _MONO_MARKS))
+      not _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
+                            Mean="55")]),
+      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
+                               Mean="55")]))
+
+# The PANEL BINDING, checked for every value and not only the monochrome ones,
+# because it is what decides which rules apply. A row stamped with a colour
+# panel's ID skips the identity rules entirely and is then selected by the
+# finalizer under THAT panel's approval - reviewed as somebody else's panel and
+# pooled.
+#
+# REVERT: branch straight to `Mark_Type == BAR_MONO` and skip everything else.
+# The three scenarios below are the only place it shows; every other scenario in
+# this file passes, because the runner stamps the right panel today.
+check("a value that names no panel at all is refused",
+      _prov(Run_Panel_ID="") == ["IDENTITY_PANEL_BINDING_MISSING"],
+      "%s" % _prov(Run_Panel_ID=""))
+check("a value naming a panel nobody declared is refused",
+      _prov(Run_Panel_ID="P_GHOST") == ["IDENTITY_PANEL_BINDING_UNKNOWN"],
+      "%s" % _prov(Run_Panel_ID="P_GHOST"))
+check("a monochrome value re-stamped onto a colour panel is refused",
+      _prov(Run_Panel_ID="P_LINE")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Run_Panel_ID="P_LINE"))
+check("and so is a panel whose unit is not this value's unit",
+      _prov(Unit_ID="U_MONO") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Unit_ID="U_MONO"))
+
+# `Geometry_Row_SHA256` as a FOREIGN KEY, not a format. Sixty-four hex
+# characters establish that the value carries something hash-shaped; a
+# fabricated digest and another bar's real one pass a format check exactly as
+# well. What the column is for is "this mean came out of that measurement", and
+# only a join can say so.
+#
+# REVERT: drop the `geometry` argument, or the block that uses it. Every
+# scenario above still passes and the five below are the whole difference.
+check("a hash that names no row of this panel is refused",
+      _prov(Geometry_Row_SHA256="d" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % _prov(Geometry_Row_SHA256="d" * 64))
+check("and a real hash belonging to another panel is refused",
+      _prov(Geometry_Row_SHA256="c" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % _prov(Geometry_Row_SHA256="c" * 64))
+check("another bar's real hash is caught by the numbers it names",
+      _prov(Geometry_Row_SHA256="b" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_MISMATCH"] * 3,
+      "%s" % _prov(Geometry_Row_SHA256="b" * 64))
+check("a mean edited away from the row it cites is refused",
+      _prov(Mean="9.99") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _prov(Mean="9.99"))
+check("and so is a dispersion that is not the one measured",
+      _prov(Dispersion_Value="1.0") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _prov(Dispersion_Value="1.0"))
+check("two values claiming one bar is refused",
+      _prov(_rows=[dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+                        Mean="3.056", Dispersion_Value="3.611",
+                        Geometry_Row_SHA256="a" * 64,
+                        Auto_Fill_Pattern="OPEN",
+                        Resolved_Fill_Pattern="OPEN", Identity_Source="AUTO",
+                        Identity_Evidence_Type="FILL_MEASURED",
+                        Resolution_ID="")] * 2)
+      == ["IDENTITY_GEOMETRY_ROW_REUSED"],
+      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+                               Mean="3.056", Dispersion_Value="3.611",
+                               Geometry_Row_SHA256="a" * 64,
+                               Auto_Fill_Pattern="OPEN",
+                               Resolved_Fill_Pattern="OPEN",
+                               Identity_Source="AUTO",
+                               Identity_Evidence_Type="FILL_MEASURED",
+                               Resolution_ID="")] * 2))
+# The blank `Auto_Fill_Pattern` says the reader measured no fill for this bar.
+# The MEASUREMENT is what decides whether that is true, and it says the fill was
+# read - so this is a bar that did not need naming by hand, caught even though
+# every column agrees with every other column.
+check("a human identity on a bar the measurement DID read is refused",
+      _human(Geometry_Row_SHA256="a" * 64)
+      == ["IDENTITY_OVERRODE_MEASUREMENT"],
+      "%s" % _human(Geometry_Row_SHA256="a" * 64))
+check("the index reads a geometry RECORD as well as a CSV row",
+      set(RB.geometry_index([dict(figure="P_X", geometry_row_sha256="e" * 64,
+                                  value=1.0, dispersion=0.5,
+                                  resolved_fill_pattern="solid")]))
+      == {("P_X", "e" * 64)},
+      "%s" % RB.geometry_index([dict(figure="P_X",
+                                     geometry_row_sha256="e" * 64)]))
 # Wired, not merely present: with the carrier removed the whole panel fails the
 # gate rather than passing with blank provenance.
 _real_carried = MR.IDENTITY_CARRIED
@@ -3274,18 +3376,185 @@ check("and evidence edited after the run is RUN_ARTIFACT_MODIFIED",
       not _after and "RUN_ARTIFACT_MODIFIED" in _probs,
       "%s" % (_probs if _ev_path else "no evidence artifact to tamper with"))
 
+# And the FINALIZER re-derives the requirement rather than trusting the run.
+# The review mode's artifact tuple cannot express "and the evidence for every
+# file-backed resolution", because a panel resolved only by REVIEWER_INSPECTION
+# has no evidence file - so a run made before the copy existed, or by a producer
+# that skipped it, presented a complete-looking ledger. The condition is in the
+# resolution rows, so the check reads them.
+#
+# REVERT: delete `identity_evidence_missing` from the finalizer, or its call.
+# Every scenario above still passes, because this run's producer copied the
+# evidence in; what is gone is the finalizer's own reason to believe it.
+_led = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                   dtype=object).fillna("")
+_probs = []
+check("a run that copied its evidence in withholds nothing",
+      not FIN.identity_evidence_missing(_o2, _led,
+                                        lambda w, c, d: _probs.append(c))
+      and not _probs, "%s" % _probs)
+check("the ledger names which resolution each copy belongs to",
+      "Artifact_Reference" in RB.PANEL_ARTIFACT_COLUMNS
+      and set(_led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"]
+              ["Artifact_Reference"]) == {"IR1"},
+      "%s" % _led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"].to_dict("records"))
+# A 7.29-shaped run: the resolution rows are there, the evidence copy is not.
+_probs = []
+_old_shape = _led[_led["Artifact_Type"] != "IDENTITY_EVIDENCE"]
+check("a run without the copy is withheld from approval, by panel",
+      FIN.identity_evidence_missing(_o2, _old_shape,
+                                    lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+# And a copy that is in the ledger under a hash the resolution never declared.
+_probs = []
+_wrong = _led.copy()
+_wrong.loc[_wrong["Artifact_Type"] == "IDENTITY_EVIDENCE", "SHA256"] = "0" * 64
+check("and so is a copy that is not the file that was signed",
+      FIN.identity_evidence_missing(_o2, _wrong,
+                                    lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+# End to end through `finalize`, because the two checks above call the helper
+# directly and the wiring is the thing a revert removes. A full run, a real
+# approval with all four confirmations - and the same run with the evidence copy
+# taken out of the ledger, which must not finalize.
+_fin_dir = os.path.join(ROOT, "o_short_final")
+shutil.rmtree(_fin_dir, ignore_errors=True)
+shutil.copytree(_o2, _fin_dir)
+_fin_review = os.path.join(_fin_dir, "value_review.csv")
+
+
+def _write_review(path, panels):
+    rows = []
+    for i, panel in enumerate(panels):
+        hit = _fq2[_fq2["Panel_ID"] == panel]
+        rows.append(dict(
+            Review_ID="R%03d" % (i + 1), Panel_ID=panel,
+            Review_Subject_SHA256=(hit.iloc[0]["Review_Subject_SHA256"]
+                                   if len(hit) else ""),
+            Reviewer_ID="RV_T1", Decision="APPROVED",
+            Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+            Calibration_Checked="CONFIRMED", Identity_Checked="CONFIRMED",
+            Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIN.value_review_columns())
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
+_fr = FIN.finalize(_fin_dir, review_path=_write_review(_fin_review, ["P_SHORT"]),
+                   manifest_dir=_s2, run_date="2026-08-06",
+                   today=datetime.date(2026, 8, 8))
+check("a resolved panel with its evidence finalizes",
+      _fr["status"] == "FINALIZED" and _fr["accepted"] == 12,
+      "%s" % _fr)
+_acc = pd.read_csv(os.path.join(_fin_dir, "figure_values_accepted.csv"),
+                   dtype=object).fillna("")
+_acc_named = _acc[_acc["Cell_Key"] == "ARM=LATE;TIMEPOINT=T3"]
+check("and the pooled value still says a person named its series",
+      len(_acc_named) == 1
+      and _acc_named.iloc[0]["Identity_Source"] == "HUMAN"
+      and _acc_named.iloc[0]["Resolution_ID"] == "IR1"
+      and _acc_named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
+      "%s" % (_acc_named.to_dict("records") or "no row"))
+# The same run with the copy struck from the ledger - a 7.29-shaped run - and a
+# re-hashed stamp, so the only thing wrong with it is the missing evidence.
+_fin2 = os.path.join(ROOT, "o_short_final_noev")
+shutil.rmtree(_fin2, ignore_errors=True)
+shutil.copytree(_o2, _fin2)
+_led2 = pd.read_csv(os.path.join(_fin2, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_led2[_led2["Artifact_Type"] != "IDENTITY_EVIDENCE"].to_csv(
+    os.path.join(_fin2, "panel_artifacts.csv"), index=False)
+_stamp2 = json.load(open(os.path.join(_fin2, "run_stamp.json"), encoding="utf-8"))
+_stamp2["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(
+    os.path.join(_fin2, "panel_artifacts.csv"))
+with open(os.path.join(_fin2, "run_stamp.json"), "w", encoding="utf-8") as _fh:
+    json.dump(_stamp2, _fh, indent=1)
+_fr2 = FIN.finalize(_fin2,
+                    review_path=_write_review(
+                        os.path.join(_fin2, "value_review.csv"), ["P_SHORT"]),
+                    manifest_dir=_s2, run_date="2026-08-06",
+                    today=datetime.date(2026, 8, 8))
+check("a run whose evidence was never copied in does not finalize",
+      _fr2["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEW_EVIDENCE_MISSING"
+              for p in _fr2.get("problems", [])),
+      "%s %s" % (_fr2["status"], _fr2.get("problems")))
+check("and it writes no accepted file",
+      not os.path.exists(os.path.join(_fin2, "figure_values_accepted.csv")))
+
+# A panel resolved only by a reviewer's own reading has no evidence file, and
+# must not be withheld for not having one - the whole reason this is a row-level
+# condition and not an artifact tuple.
+_ri = short_manifests(
+    os.path.join(ROOT, "m_short_ri"),
+    resolutions=[_resolution(Evidence_Type="REVIEWER_INSPECTION",
+                             Evidence_Artifact="",
+                             Evidence_Artifact_SHA256="",
+                             Note="the printed legend labels the open bar "
+                                  "Late post-flight")])
+_rio = os.path.join(ROOT, "o_short_ri")
+_ris = RB.run_batch(_ri, _rio, file_root=ROOT, run_date="2026-08-06")
+_riled = pd.read_csv(os.path.join(_rio, "panel_artifacts.csv"),
+                     dtype=object).fillna("")
+_probs = []
+check("a reviewer's own reading needs no evidence file and is not withheld",
+      _ris["status"] == "RAN"
+      and not FIN.identity_evidence_missing(
+          _rio, _riled, lambda w, c, d: _probs.append(c))
+      and "IDENTITY_EVIDENCE" not in set(_riled["Artifact_Type"]),
+      "%s %s" % (_ris["status"], _probs))
+_riq = pd.read_csv(os.path.join(_rio, "review_queue.csv"),
+                   dtype=object).fillna("")
+check("and it is still the resolved review mode, still asked about the naming",
+      set(_riq[_riq["Panel_ID"] == "P_SHORT"]["Review_Mode"])
+      == {"BAR_MONO_GEOMETRY_RESOLVED"},
+      "%s" % _riq[["Panel_ID", "Review_Mode"]].to_dict("records"))
+# REVERT: allow an artifact on REVIEWER_INSPECTION. Validation hashed it and the
+# writer - which copies only FILE_EVIDENCE_TYPES - left it out of the run, so the
+# evidence was checked once and then not shipped.
+_ria = short_manifests(
+    os.path.join(ROOT, "m_short_ria"),
+    resolutions=[_resolution(Evidence_Type="REVIEWER_INSPECTION",
+                             Note="I read the legend")])
+_riao = os.path.join(ROOT, "o_short_ria")
+_rias = RB.run_batch(_ria, _riao, file_root=ROOT, run_date="2026-08-06")
+_riacodes = set(pd.read_csv(os.path.join(_riao, "manifest_problems.csv"),
+                            dtype=object).fillna("")["check"]) \
+    if _rias["status"] == "MANIFEST_REJECTED" else set()
+check("a reviewer's own reading may not carry a file it never ships",
+      _rias["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_EVIDENCE_NOT_A_FILE" in _riacodes,
+      "%s %s" % (_rias["status"], sorted(_riacodes)))
+
 # The copy is verified after it is made, so the two ways it can be wrong are
 # refusals of the review bundle rather than a ledger entry nobody can trust.
 # Both need --no-file-check, because with file checking on the manifest
 # validator catches them first - which is the point: this is the second line.
+# A real file outside the corpus, so the copy would otherwise succeed. The
+# validator's confinement rule sits behind `check_files`, and skipping a CONTENT
+# hash when file checking is off is a defensible choice while letting a path
+# escape the corpus is not - so the writer, which is the code that actually opens
+# the file, enforces it again.
+#
+# REVERT: drop the realpath confinement from `write_identity_resolutions`. With
+# --no-file-check any absolute path on the machine can be copied into the run and
+# registered as evidence.
+_OUTSIDE = os.path.join(tempfile.gettempdir(), "fdt_outside_evidence.png")
+Image.open(LEGEND_IMG).save(_OUTSIDE)
 for _label, _kw, _fix in (
         ("evidence that is not there to copy",
          dict(Evidence_Artifact="gone_before_the_copy.png"), "copied"),
         ("evidence whose bytes do not match the resolution",
-         dict(Evidence_Artifact_SHA256="b" * 64), "reproduced")):
-    _bad = short_manifests(os.path.join(ROOT, "m_ev_%s" % _fix),
+         dict(Evidence_Artifact_SHA256="b" * 64), "reproduced"),
+        ("evidence from outside the corpus, with file checks off",
+         dict(Evidence_Artifact=_OUTSIDE,
+              Evidence_Artifact_SHA256=MR.sha256_of(_OUTSIDE)),
+         "IDENTITY_EVIDENCE_OUTSIDE_ROOT")):
+    _bad = short_manifests(os.path.join(ROOT, "m_ev_%s" % _fix.lower()),
                            resolutions=[_resolution(**_kw)])
-    _bo = os.path.join(ROOT, "o_ev_%s" % _fix)
+    _bo = os.path.join(ROOT, "o_ev_%s" % _fix.lower())
     _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06",
                        check_files=False)
     check("%s refuses the whole review bundle" % _label,

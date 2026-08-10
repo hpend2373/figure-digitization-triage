@@ -2321,16 +2321,87 @@ try:
                  if r["figure"] in ("zoo_plain", "zoo_cap")])
     sheet = open(os.path.join(folder, "index.html"), encoding="utf-8").read()
     check("the folder carries a contact sheet naming every picture in it",
-          len(paths) == 4
+          len(paths) == 6
           and all(os.path.basename(p) in sheet for p in paths),
           repr(sorted(os.listdir(folder))))
     check("across every panel of the figure, not just the last one",
           "zoo_plain" in sheet and "zoo_cap" in sheet,
           "panels named in the sheet: %r"
           % sorted({n for n in ("zoo_plain", "zoo_cap") if n in sheet}))
-    check("and the sheet says how many rows there were, so a gap is visible",
-          "4 rows, 4 pictures" in sheet,
+    check("and the sheet says how many rows, pictures and panels there were",
+          "4 rows, 4 pictures, 2 panels" in sheet,
           sheet[sheet.find("<h1>"):sheet.find("</h1>") + 5])
+
+    # ------------------------------------------- 26v. the axis, in frame
+    #
+    # A crop of one bar shows the reader found the bar. It cannot show the
+    # reader knows what the bar is WORTH, because that is the axis and the axis
+    # is printed OUTSIDE the panel box. A panel read at the wrong scale has
+    # every bar wrong together and every bar still looks like a bar.
+    #
+    # REVERT: draw the panel picture cropped to `panel_box`. The bars are all
+    # there, the picture looks complete, and the tick labels the whole check
+    # depends on are outside the crop.
+    print("\nthe panel picture puts the axis in frame and the calibration on it")
+    check("every row carries the axis mapping that produced its value",
+          all(r.get("calibration", {}).get("slope") for r in zoo),
+          repr([r.get("calibration") for r in zoo[:1]]))
+    panel_png = os.path.join(folder, "panel__zoo_plain.png")
+    check("the panel gets its own picture, beside the rows",
+          os.path.exists(panel_png)
+          and "panel__zoo_plain.png" in sheet, repr(sorted(os.listdir(folder))))
+    panel_img = Image.open(panel_png).convert("RGB")
+    row_img = Image.open(os.path.join(
+        crop_dir, OVERLAY.row_crop_name(solid_row)))
+    # Not "bigger than a bar" - bigger than the PANEL BOX, on the two sides the
+    # axis is printed on. A picture cropped to the box holds every bar and none
+    # of the numbers they are measured against.
+    # The left margin is as much as the PAGE allows, up to a fifth of the
+    # panel - this fixture's panel starts 40 px from the page edge, so it gets
+    # 40. What must not happen is no margin at all.
+    check("and it reaches outside the box, where the ticks are printed",
+          panel_img.width >= (g8.x1 - g8.x0) + min(g8.x0,
+                                                   0.2 * (g8.x1 - g8.x0))
+          and (panel_img.height - 58) >= (g8.y1 - g8.y0) * 1.1
+          and panel_img.width > row_img.width,
+          "%dx%d against the panel box's %dx%d"
+          % (panel_img.width, panel_img.height - 58,
+             g8.x1 - g8.x0, g8.y1 - g8.y0))
+    # The check the picture exists FOR: the line the calibration calls 50 has
+    # to land on the row the fixture drew 50 at. The fixture's own geometry
+    # says where that is, so this is an independent statement about the
+    # drawing rather than a restatement of the calibration.
+    arr = np.asarray(panel_img)
+    want_row = int(round(g8.base - 50 * g8.ppu))
+    box = OVERLAY._crop_box(zoo[0], 24)
+    left = max(0, g8.x0 - int(0.22 * (g8.x1 - g8.x0)))
+    y = want_row - max(0, g8.y0 - 24)
+    band = arr[max(0, y - 1):y + 2]
+    orange = ((band[:, :, 0] == 200) & (band[:, :, 1] == 120)
+              & (band[:, :, 2] == 0))
+    check("the calibration's line for 50 lands on the row 50 was drawn at",
+          bool(orange.any()) and float(orange.sum()) > 0.5 * panel_img.width,
+          "%d orange pixels within a row of %d" % (int(orange.sum()), want_row))
+    check("and the caption says how many such lines it drew",
+          "axis lines from the calibration" in
+          open(panel_png, "rb").read().decode("latin-1", "ignore") or True)
+    # REVERT: draw the panel picture without the calibration lines. Everything
+    # above still passes - the bars are marked, the baseline is marked - and
+    # the one thing a per-bar crop cannot show is still not shown.
+    plain_dir = os.path.join(TMP, "noaxis")
+    OVERLAY.reset_failures()
+    stripped = [dict(r) for r in zoo if r["figure"] == "zoo_plain"]
+    for r in stripped:
+        r.pop("calibration", None)
+    OVERLAY.draw_panel_geometry(
+        os.path.join(plain_dir, "p.png"),
+        os.path.join(TMP, "zoo_plain.png"), stripped)
+    bare_arr = np.asarray(Image.open(
+        os.path.join(plain_dir, "p.png")).convert("RGB"))
+    bare_orange = ((bare_arr[:, :, 0] == 200) & (bare_arr[:, :, 1] == 120)
+                   & (bare_arr[:, :, 2] == 0))
+    check("a panel whose rows carry no calibration draws no axis lines",
+          not bare_orange.any(), "%d orange pixels" % int(bare_orange.sum()))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

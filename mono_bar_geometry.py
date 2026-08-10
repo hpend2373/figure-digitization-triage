@@ -1195,6 +1195,18 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
                     # that way, because every array in this file is.
                     panel_box=[x0, x1, y0, y1],
                     zero_px_image=y0 + zero,
+                    # The axis mapping that turned a pixel row into the value
+                    # on this record. Without it the artifact carries the
+                    # answer and not the arithmetic: nobody reading the file
+                    # can check that `Mean` is what `Edge_Px_Image` means, and
+                    # nobody drawing a picture of the panel can show where the
+                    # calibration thinks the printed ticks are.
+                    calibration=dict(slope=float(getattr(cal, "slope", 0.0)),
+                                     intercept=float(getattr(cal, "intercept",
+                                                             0.0)),
+                                     scale=str(getattr(cal, "scale", "LINEAR")),
+                                     max_residual=float(
+                                         getattr(cal, "max_residual", 0.0))),
                     # What the group is SUPPOSED to hold, on every record.
                     # Without it a group is only knowable from the records that
                     # came back, so a record lost to a defect takes its

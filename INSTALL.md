@@ -2586,6 +2586,31 @@ in the artifact.
 Drawing from the record ALONE is the point. A crop that also took the spec could
 be drawn from a different panel's geometry and look perfectly reasonable.
 
+**And the panel, with the axis in frame.** A crop of one bar shows that the
+reader found the bar. It cannot show that the reader knows what the bar is
+WORTH - that is the axis, and the axis is printed OUTSIDE the panel box. A panel
+read at the wrong scale has every bar wrong together and every bar still looks
+like a bar, so the failure is invisible in every per-bar crop in the folder.
+
+`draw_panel_geometry` crops wide enough to include the tick labels and then
+draws, from the calibration each row now carries, a line at every round value
+across the panel, labelled. If the line the calibration calls 30 does not sit on
+the printed 30, the reviewer sees it immediately. On publication 127's slow
+panel the four lines land exactly on the printed 0, 10, 20 and 30. Every bar's
+measured top and cap are drawn too, labelled with the value the row carries, so
+"the bar the reader called 5.31" can be read off the printed axis by eye.
+
+That needed one more field. The record carried the value and not the
+arithmetic - nobody reading the artifact could check that `Mean` is what
+`Edge_Px_Image` MEANS, and nobody drawing the panel could show where the
+calibration thinks the ticks are. Every row now carries `calibration`: slope,
+intercept, scale and the fit's own max residual.
+
+The scenario does not restate the calibration back to itself. The fixture draws
+its bars at a known pixels-per-unit, so it asserts that the line the calibration
+calls 50 lands on the row the FIXTURE drew 50 at, and that a panel whose rows
+carry no calibration draws no lines at all.
+
 A refusal gets a picture too, and gets the right one: a row that never found a
 bar carries `zero_px_image` like every other row, and cropping to the baseline
 alone gives a 48 px strip of the axis. `STROKE_SCALE_UNRESOLVED` and
@@ -2599,7 +2624,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 264 |
+| `test_measure_mono_bars.py` | 270 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2608,7 +2633,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1700** |
+| **total** | **1706** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

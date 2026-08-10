@@ -298,6 +298,141 @@ def row_crop_name(record):
         str(record.get("geometry_row_sha256", "unstamped"))[:12])
 
 
+def _nice_step(span, want=6):
+    """A round axis step: 1, 2 or 5 times a power of ten."""
+    if span <= 0:
+        return 1.0
+    import math
+    raw = span / float(max(1, want))
+    power = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    for mult in (1.0, 2.0, 5.0, 10.0):
+        if raw <= mult * power:
+            return mult * power
+    return 10.0 * power                                        # pragma: no cover
+
+
+def _value_at(calibration, pixel):
+    import math
+    raw = calibration["slope"] * float(pixel) + calibration["intercept"]
+    return math.exp(raw) if calibration.get("scale") == "LOG" else raw
+
+
+def _pixel_at(calibration, value):
+    import math
+    raw = math.log(float(value)) if calibration.get("scale") == "LOG" else float(value)
+    return (raw - calibration["intercept"]) / calibration["slope"]
+
+
+def draw_panel_geometry(path, image_path, records, pad=24):
+    """The whole panel, with the AXIS in frame and the calibration drawn on it.
+
+    A crop of one bar shows that the reader found the bar. It cannot show that
+    the reader knows what the bar is WORTH - that is the axis, and the axis is
+    printed outside the panel box. So this picture crops wide enough to include
+    the tick labels and then draws, from the calibration each row carries, a
+    line at every round value across the panel, labelled.
+
+    If the line the calibration calls 30 does not sit on the printed 30, the
+    values are wrong by a scale factor and every bar in the panel is wrong
+    together - which is invisible in a per-bar crop, because each bar still
+    looks like a bar. That is the failure this picture exists for.
+
+    Every bar's measured top and cap are drawn too, labelled with the value the
+    row carries, so "the bar the reader called 5.31" can be read off the
+    printed axis by eye.
+    """
+    try:
+        from PIL import Image as _Image
+        _Image.MAX_IMAGE_PIXELS = None
+        rows = [r for r in records if r.get("panel_box")]
+        if not rows:
+            raise ValueError("no record carries a panel_box")
+        x0, x1, y0, y1 = (int(v) for v in rows[0]["panel_box"])
+        # Room for the axis. The tick labels are LEFT of the panel box and the
+        # group labels BELOW it, and a picture of the panel box alone crops
+        # away the very thing this is for.
+        left = max(0, x0 - int(0.22 * (x1 - x0)))
+        bottom = y1 + int(0.12 * (y1 - y0))
+        top = max(0, y0 - pad)
+        page = _Image.open(image_path).convert("RGB")
+        box = (left, top, min(page.width, x1 + pad), min(page.height, bottom))
+        crop = page.crop(box)
+        canvas = _Image.new("RGB", (max(crop.width, 420), crop.height + FOOTER),
+                            (255, 255, 255))
+        canvas.paste(crop, (0, 0))
+        draw = ImageDraw.Draw(canvas)
+        font = _font()
+        ox, oy = box[0], box[1]
+
+        cal = next((r["calibration"] for r in rows if r.get("calibration")), None)
+        drawn_ticks = 0
+        if cal and cal.get("slope"):
+            lo = _value_at(cal, y1)
+            hi = _value_at(cal, y0)
+            lo, hi = min(lo, hi), max(lo, hi)
+            step = _nice_step(hi - lo)
+            import math
+            first = math.ceil(lo / step) * step
+            value = first
+            while value <= hi + 1e-9:
+                y = int(round(_pixel_at(cal, value))) - oy
+                if 0 <= y < crop.height:
+                    draw.line((0, y, crop.width - 1, y), fill=(200, 120, 0),
+                              width=1)
+                    label = ("%g" % round(value, 6))
+                    draw.text((2, max(0, y - 11)), label, fill=(200, 120, 0),
+                              font=font)
+                    drawn_ticks += 1
+                value += step
+        # The baseline the measurement actually used, over the top of them.
+        zero = rows[0].get("zero_px_image")
+        if zero is not None:
+            y = int(round(float(zero))) - oy
+            if 0 <= y < crop.height:
+                draw.line((0, y, crop.width - 1, y), fill=(120, 120, 120), width=2)
+        for record in rows:
+            fp = record.get("footprint_px_image")
+            edge = record.get("edge_px_image")
+            if fp and edge is not None:
+                a, b = int(fp[0]) - ox, int(fp[1]) - ox
+                y = int(round(float(edge))) - oy
+                if 0 <= y < crop.height:
+                    draw.line((a, y, b, y), fill=(214, 39, 40), width=2)
+                    draw.text((a, max(0, y - 12)),
+                              "-" if record.get("value") is None
+                              else "%.3g" % record["value"],
+                              fill=(214, 39, 40), font=font)
+                for column in (a, b):
+                    if 0 <= column < crop.width:
+                        draw.line((column, max(0, y), column, crop.height - 1),
+                                  fill=(44, 160, 44), width=1)
+            cap = record.get("cap_px_image")
+            if fp and cap is not None:
+                a, b = int(fp[0]) - ox, int(fp[1]) - ox
+                y = int(round(float(cap))) - oy
+                if 0 <= y < crop.height:
+                    draw.line((a, y, b, y), fill=(31, 119, 180), width=1)
+        head = "%s   %d rows   %d axis lines from the calibration" % (
+            rows[0].get("figure"), len(rows), drawn_ticks)
+        tail = ("calibration %.6g px/unit, residual %.3g   figure %s"
+                % (1.0 / cal["slope"] if cal and cal.get("slope") else float("nan"),
+                   cal.get("max_residual", 0.0) if cal else float("nan"),
+                   rows[0].get("figure_id")))
+        draw.text((6, crop.height + 6), head, fill=(0, 0, 0), font=font)
+        draw.text((6, crop.height + 20), tail, fill=(70, 70, 70), font=font)
+        draw.text((6, crop.height + 34),
+                  "orange = where the calibration puts each round value; "
+                  "grey = baseline; red = bar top; blue = error bar",
+                  fill=(70, 70, 70), font=font)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        canvas.save(path)
+        return path
+    except Exception as exc:
+        _FAILURES.append("%s: %s: %s" % (os.path.basename(path),
+                                         type(exc).__name__, exc))
+        return None
+
+
 def write_row_crops(directory, pairs, pad=24):
     """A folder of pictures, one per geometry row, plus a contact sheet.
 
@@ -316,6 +451,25 @@ def write_row_crops(directory, pairs, pad=24):
     rows there were.
     """
     os.makedirs(directory, exist_ok=True)
+    # Panels first, in the order they arrived. A row crop shows the bar; only
+    # the panel picture shows the AXIS, and a reviewer who cannot see the axis
+    # cannot tell a bar read correctly from a whole panel read at the wrong
+    # scale - every bar still looks like a bar.
+    panels, order = {}, []
+    for image_path, record in pairs:
+        key = record.get("figure")
+        if key not in panels:
+            panels[key], order = (image_path, []), order + [key]
+        panels[key][1].append(record)
+    panel_pictures = {}
+    for key in order:
+        image_path, records_here = panels[key]
+        name = "panel__%s.png" % "".join(
+            c if (c.isalnum() or c in "-_") else "_" for c in str(key))
+        got = draw_panel_geometry(os.path.join(directory, name), image_path,
+                                  records_here, pad=pad)
+        if got:
+            panel_pictures[key] = os.path.basename(got)
     written = []
     for image_path, record in pairs:
         name = row_crop_name(record)
@@ -332,24 +486,42 @@ def write_row_crops(directory, pairs, pad=24):
                  "figure{margin:0 0 28px}img{border:1px solid #ccc;max-width:100%}"
                  "figcaption{color:#444;margin-top:4px}code{color:#888}"
                  "</style>\n")
-        fh.write("<h1>%d rows, %d pictures</h1>\n"
-                 % (len(records), len(written)))
-        fh.write("<p>%s</p>\n" % " &nbsp; ".join(
-            "<span style='color:rgb(%d,%d,%d)'>&#9644; %s</span>"
-            % (c[0], c[1], c[2], name) for name, c in CROP_MARKS))
-        for got, record in written:
-            fh.write("<figure><img src='%s'>\n" % os.path.basename(got))
-            fh.write("<figcaption>%s / %s / slot %s &mdash; mean %s, "
-                     "dispersion %s, fill %s%s<br><code>%s</code></figcaption>"
-                     "</figure>\n" % (
-                         record.get("figure"), record.get("group"),
-                         record.get("slot"),
-                         "-" if record.get("value") is None
-                         else "%.3f" % record["value"],
-                         "-" if record.get("dispersion") is None
-                         else "%.3f" % record["dispersion"],
-                         record.get("resolved_fill_pattern") or "-",
-                         " &mdash; %s" % record["error"]
-                         if record.get("error") else "",
-                         record.get("geometry_row_sha256", "UNSTAMPED")))
-    return written and [p for p, _r in written] or []
+        fh.write("<h1>%d rows, %d pictures, %d panels</h1>\n"
+                 % (len(records), len(written), len(panel_pictures)))
+        fh.write("<p>%s &nbsp; <span style='color:rgb(200,120,0)'>&#9644; "
+                 "the calibration's own idea of each round value</span></p>\n"
+                 % " &nbsp; ".join(
+                     "<span style='color:rgb(%d,%d,%d)'>&#9644; %s</span>"
+                     % (c[0], c[1], c[2], name) for name, c in CROP_MARKS))
+        fh.write("<p>Check the panel picture first: if the orange line the "
+                 "calibration calls 10 does not sit on the printed 10, every "
+                 "bar in that panel is wrong together and no per-bar crop "
+                 "will show it.</p>\n")
+        for key in order:
+            fh.write("<h2>%s</h2>\n" % key)
+            if key in panel_pictures:
+                fh.write("<figure><img src='%s'>"
+                         "<figcaption>the whole panel, with the axis in frame"
+                         "</figcaption></figure>\n" % panel_pictures[key])
+            else:
+                fh.write("<p><em>no panel picture could be drawn</em></p>\n")
+            for got, record in written:
+                if record.get("figure") != key:
+                    continue
+                fh.write("<figure><img src='%s'>\n" % os.path.basename(got))
+                fh.write("<figcaption>%s / %s / slot %s &mdash; mean %s, "
+                         "dispersion %s, fill %s%s<br><code>%s</code>"
+                         "</figcaption></figure>\n" % (
+                             record.get("figure"), record.get("group"),
+                             record.get("slot"),
+                             "-" if record.get("value") is None
+                             else "%.3f" % record["value"],
+                             "-" if record.get("dispersion") is None
+                             else "%.3f" % record["dispersion"],
+                             record.get("resolved_fill_pattern") or "-",
+                             " &mdash; %s" % record["error"]
+                             if record.get("error") else "",
+                             record.get("geometry_row_sha256", "UNSTAMPED")))
+    return ([panel_pictures[k] and os.path.join(directory, panel_pictures[k])
+             for k in order if k in panel_pictures]
+            + [p for p, _r in written])

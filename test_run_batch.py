@@ -2119,7 +2119,7 @@ _v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna
 check("and it invents no bars from the line markers",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 
-print("a fill the manifest can declare and no reader can read yet")
+print("a fill the manifest declares and the reader can now read")
 # STIPPLED is in the manifest vocabulary because publication 127 prints it and
 # a manifest that cannot say so forces its author to declare the nearest lie.
 # The reader refuses it - and WHICH refusal it raises decides what the audit
@@ -2144,12 +2144,23 @@ _stip = write_manifests(
                             Value="150", Note="")])
 _o = os.path.join(ROOT, "o_stipple")
 _ss = RB.run_batch(_stip, _o, file_root=ROOT, run_date="2026-08-06")
-check("a batch declaring an unreadable fill still runs", _ss["status"] == "RAN",
+check("a batch declaring a stipple still runs", _ss["status"] == "RAN",
       "%s" % _ss)
 _r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 _st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
-check("the panel is NO_READER_AVAILABLE, not a geometry failure",
-      _st.get("P_LINE") == "NO_READER_AVAILABLE", "%s" % _st)
+# This scenario used to assert NO_READER_AVAILABLE, and it was right to: the
+# old reader classified fills by absolute density and STIPPLED had no band, so
+# a stippled bar would have been assigned to whichever band it fell in.
+# `read_monochrome_bar_geometry` reads stipples - "some rows of the interior
+# are blank" is a structural property, not a density - so the refusal is gone
+# and declaring STIPPLED is no longer declaring the unreadable. What is left
+# here is a bar reader pointed at a LINE panel, which finds no bars.
+#
+# REVERT: point BAR_MONO back at `read_monochrome_bar_panel`. The state below
+# becomes NO_READER_AVAILABLE again, and publication 127 - three panels of
+# OPEN/STIPPLED/SOLID - goes back to being unreadable by this pipeline.
+check("a stipple is no longer a fill the pipeline refuses",
+      _st.get("P_LINE") == "MANUAL_POINT_READ", "%s" % _st)
 check("and the other panels in the batch are unaffected",
       _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
 _v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
@@ -2157,6 +2168,13 @@ check("no values are invented for the unreadable fill",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 check("STIPPLED is declarable in the manifest vocabulary",
       "STIPPLED" in BM.BAR_FILL_PATTERNS, "%s" % (BM.BAR_FILL_PATTERNS,))
+# `UNIMPLEMENTED_FILL_PATTERNS` still says STIPPLED, and still should: it is
+# `read_monochrome_bar_panel`'s limitation and that reader still has it. What
+# changed is which reader BAR_MONO goes to.
+check("the old reader still refuses it, and is no longer the one BAR_MONO uses",
+      "STIPPLED" in MR.UNIMPLEMENTED_FILL_PATTERNS
+      and RB.reader_functions()["BAR_MONO"] is not MR.read_monochrome_bar_panel,
+      "%s" % (RB.reader_functions()["BAR_MONO"],))
 
 _wrong_grid = write_manifests(
     os.path.join(ROOT, "m_qc"),
@@ -2382,12 +2400,12 @@ RB.OVERLAY.reset_failures()
 # Axis_X_Region and Axis_Y_Region in hand then has to bypass the shared entry
 # point and call geometry_rows directly, which is most of why it exists.
 import inspect as _inspect                                          # noqa: E402
-check("the successor reader can be told where the axis is",
+check("the reader BAR_MONO now dispatches to can be told where the axis is",
       "review_crop_box" in _inspect.signature(
-          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters
+          RB.reader_functions()["BAR_MONO"]).parameters
       and "review_crop_box" not in BM.READER_OPTIONS,
       repr(sorted(_inspect.signature(
-          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters)))
+          RB.reader_functions()["BAR_MONO"]).parameters)))
 _boxed = MR.read_monochrome_bar_geometry(
     Image.open(_gimg), tuple(_gt["panel_box"]),
     dict(zip(_gt["groups"], _gt["group_x"])),
@@ -2445,13 +2463,18 @@ for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items
             _ahead.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
 check("and so does the reader that is going to replace it",
       not _ahead, "; ".join(_ahead))
-check("the successor is declared for BAR_MONO and takes all five of its options",
-      set(RB.SUCCESSOR_READERS) == {"BAR_MONO"}
+# SUCCESSOR_READERS is empty now: the reader it held IS the BAR_MONO reader.
+# It stays because the next reader built before it can be wired goes there and
+# gets its option contract checked several commits before the switchover
+# instead of at it.
+check("BAR_MONO dispatches to the geometry reader, and it takes all five options",
+      RB.reader_functions()["BAR_MONO"] is MR.read_monochrome_bar_geometry
+      and not RB.SUCCESSOR_READERS
       and {"threshold", "stem_threshold", "group_window", "min_bar_px",
            "baseline_value"} <= set(inspect.signature(
-               RB.SUCCESSOR_READERS["BAR_MONO"]).parameters),
+               RB.reader_functions()["BAR_MONO"]).parameters),
       repr(sorted(inspect.signature(
-          RB.SUCCESSOR_READERS["BAR_MONO"]).parameters)))
+          RB.reader_functions()["BAR_MONO"]).parameters)))
 # And it does not take them as decoration: the two ink thresholds have to reach
 # the measurement, or a manifest could set them and read the same numbers.
 with open(os.path.join(HERE, "mono_bar_fixture_truth.json"), encoding="utf-8") as _fh:

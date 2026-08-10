@@ -75,7 +75,7 @@ FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
 #: requires, so a mode that shows more can ask for more.
 VALUE_REVIEW_COLUMNS = [
     "Review_ID", "Panel_ID", "Review_Subject_SHA256", "Reviewer_ID", "Decision",
-    "Marks_Checked",
+    "Marks_Checked", "Axis_Labels_Checked", "Calibration_Checked",
     "Reviewed_At", "Note",
 ]
 

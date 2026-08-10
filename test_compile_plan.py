@@ -14,6 +14,7 @@ worth having that the compiler lost nothing on the way through.
 """
 import copy
 import json
+import csv
 import os
 import shutil
 import subprocess
@@ -114,13 +115,36 @@ _ODIR = os.path.join(ROOT, "o_plan")
 _summary = RB.run_batch(MDIR, _ODIR, file_root=HERE, run_date="2026-08-07")
 check("the compiled batch runs", _summary["status"] == "RAN", "%s" % _summary)
 check("with the pilot's panel count", _summary["panels"] == 18, "%s" % _summary)
-check("and the pilot's 48 read values", _summary["values"] == 48, "%s" % _summary)
+# 36, not the 48 the old BAR_MONO reader produced. Three panels of Figure 4 -
+# P4_SV_WOMEN, P4_CO_MEN, P4_CO_WOMEN - now refuse with
+# STROKE_SCALE_UNRESOLVED: the two-pass reader measures the figure's own line
+# weight off the rule at the calibrated baseline and every threshold it uses is
+# a multiple of that number, so a panel whose stroke it cannot measure has no
+# scale for anything and says so. The old reader needed no stroke and read them.
+#
+# Nothing poolable was lost: all 48 were QC_FAILED anyway, because publication
+# 397 does not say whether its error bars are SD or SEM. What this pin records
+# is the COST of the switch, in the open - three panels that used to produce
+# unvalidated numbers and now produce a named refusal, and a stroke measurement
+# on those three that is worth a round of its own.
+check("and the 36 values the two-pass reader stands behind",
+      _summary["values"] == 36, "%s" % _summary)
 check("and nothing accepted, because the paper still does not say SD or SEM",
       _summary["accepted"] == 0, "%s" % _summary)
 _states = _summary["states"]
 check("and the same three terminal states",
-      _states == {"QC_FAILED": 12, "NO_READER_AVAILABLE": 4, "MANUAL_POINT_READ": 2},
+      _states == {"QC_FAILED": 9, "NO_READER_AVAILABLE": 4,
+                  "MANUAL_POINT_READ": 5},
       "%s" % _states)
+check("the three panels that changed are the ones the stroke pass refused",
+      sorted(r["Panel_ID"] for r in csv.DictReader(
+          open(os.path.join(_ODIR, "mono_bar_geometry.csv"), encoding="utf-8"))
+          if r["Geometry_Error_Code"] == "STROKE_SCALE_UNRESOLVED")
+      == ["P4_CO_MEN", "P4_CO_WOMEN", "P4_SV_WOMEN"],
+      "%s" % sorted({r["Panel_ID"]: r["Geometry_Error_Code"] for r in
+                     csv.DictReader(open(os.path.join(
+                         _ODIR, "mono_bar_geometry.csv"), encoding="utf-8"))
+                     }.items()))
 _coverage = pd.read_csv(os.path.join(_ODIR, "source_panel_coverage.csv"))
 check("and all 36 physical panels still accounted for",
       len(_coverage) == 36, "%d" % len(_coverage))

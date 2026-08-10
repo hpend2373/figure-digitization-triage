@@ -81,7 +81,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.27"
+PIPELINE_VERSION = "7.28"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -111,7 +111,13 @@ def reader_functions():
     from bar_reader import read_bar_panel
     return {
         "BAR_COLOR": read_bar_panel,
-        "BAR_MONO": MR.read_monochrome_bar_panel,
+        # The two-pass geometry reader. It measures a panel and names no
+        # series; `measure_bar_mono_figures` calls it before the panel loop and
+        # the figure resolves the identities. `read_monochrome_bar_panel` is
+        # still here and still correct for what it does - one panel, one
+        # absolute fill density - which is why it is no longer what BAR_MONO
+        # dispatches to.
+        "BAR_MONO": MR.read_monochrome_bar_geometry,
         "LINE_COLOR": MR.read_line_marker_panel,
         "LINE_MONO": MR.read_monochrome_marker_panel,
         "SCATTER": MR.read_scatter_panel,
@@ -130,9 +136,12 @@ def reader_functions():
 #: five is either a TypeError on the first batch after the switch or, worse, a
 #: setting a person wrote in a manifest, validated, and silently ignored. The
 #: same introspection that guards `reader_functions()` guards this.
-SUCCESSOR_READERS = {
-    "BAR_MONO": MR.read_monochrome_bar_geometry,
-}
+#: Empty, and kept. It held `BAR_MONO` while the geometry reader was written
+#: and could not yet be dispatched to, so the option contract was checked
+#: against it several commits before the switchover instead of being discovered
+#: at it. The next reader that has to be built before it can be wired goes
+#: here, and the introspection that guards `reader_functions()` guards it too.
+SUCCESSOR_READERS = {}
 
 
 MANIFEST_FILES = {
@@ -189,7 +198,14 @@ REVIEW_DECISIONS = ("APPROVED", "REJECTED")
 #: numbers, the pictures and the index that ties them together - cannot declare
 #: one of them and hope. The finalizer refuses an approval for a mode whose
 #: artifacts are not all in the ledger.
-REVIEW_MODES = {"OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",)}
+REVIEW_MODES = {
+    "OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",),
+    # Four, and the row pictures the index links to. See
+    # `GEOMETRY_ARTIFACT_TYPES`.
+    "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
+                          "CALIBRATION_PANEL", "CALIBRATION_PANEL_META",
+                          "GEOMETRY_ROW_CROP"),
+}
 
 #: Mode -> what the reviewer must SAY they checked, as columns of
 #: `value_review.csv`. `Decision=APPROVED` on its own is a signature on a
@@ -202,8 +218,16 @@ REVIEW_MODES = {"OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",)}
 #: the one question that picture can answer. A mode that also puts the AXIS in
 #: front of the reviewer will ask about the axis, and will do it when there is
 #: such a mode - a confirmation field nobody can act on is worse than none.
-REVIEW_CONFIRMATIONS = {"OVERLAY": ("Marks_Checked",),
-                        "WPD_ONLY": ("Marks_Checked",)}
+REVIEW_CONFIRMATIONS = {
+    "OVERLAY": ("Marks_Checked",), "WPD_ONLY": ("Marks_Checked",),
+    # This mode puts the AXIS in front of the reviewer, so it asks about the
+    # axis. A printed 30 typed as 3 makes every bar in the panel ten times too
+    # small together and no arithmetic catches it; the panel picture is the
+    # only place it shows, and a reviewer who did not look at it has not
+    # checked the one thing this mode exists for.
+    "BAR_MONO_GEOMETRY": ("Marks_Checked", "Axis_Labels_Checked",
+                          "Calibration_Checked"),
+}
 
 #: What a reviewer writes in a confirmation column. Blank is not CONFIRMED.
 REVIEW_CONFIRMED = "CONFIRMED"
@@ -610,6 +634,116 @@ class GeometryReviewError(Exception):
     """
 
 
+def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
+                             options_by_config, file_root="."):
+    """Every BAR_MONO panel of the batch, measured anonymously and then named.
+
+    The two-pass shape, and it has to be two passes because identity is
+    figure-local and geometry is panel-local. A panel loop that reads a panel
+    and names its series in the same step can only name them from what one
+    panel holds - an absolute fill density against `_FILL_BANDS`, measured on
+    one figure and wrong on the second. So: measure every panel of the batch
+    with no series named, group the rows by `Figure_ID`, and let the FIGURE say
+    what its fills mean.
+
+    Returns (rows_by_panel, pairs, refusals):
+
+      rows_by_panel  {Panel_ID: [record, ...]} for the panel loop to read its
+                     values out of, identities already resolved
+      pairs          [(image_path, record), ...] for the review bundle
+      refusals       {Panel_ID: (state, detail)} for a panel this pass could
+                     not measure at all - the panel loop turns them into the
+                     outcome, because that is where a run state belongs
+    """
+    rows_by_panel, pairs, refusals = {}, [], {}
+    for panel in panels:
+        pid = _s(panel.get("Panel_ID"))
+        if _upper(panel.get("Mark_Type")) != "BAR_MONO":
+            continue
+        if (_upper(panel.get("Panel_Mode")) or "AUTO") != "AUTO":
+            continue
+        image_path = _s(panel.get("Image_Path"))
+        resolved = (image_path if os.path.exists(image_path)
+                    else os.path.join(file_root, image_path))
+        series_rows = series_by_panel.get(pid, [])
+        fills = [_upper(r.get("Bar_Fill_Pattern")) for r in series_rows]
+        options = options_by_config.get(_s(panel.get("Config_ID")), {})
+        kwargs = _reader_kwargs(options, "BAR_MONO")
+        if BM.blank(panel.get("Baseline_Value")):
+            kwargs.setdefault("baseline_value", 0.0)
+        else:
+            kwargs["baseline_value"] = float(panel.get("Baseline_Value"))
+        try:
+            box = BM.parse_box(",".join(
+                _s(panel.get(c)) for c in
+                ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")))
+            ycal = _calibration(panel, "Y")
+            image = Image.open(resolved).convert("RGB")
+            rows = MR.read_monochrome_bar_geometry(
+                image, box, _x_positions(positions_by_panel.get(pid, [])),
+                ycal, fills, panel_id=pid,
+                figure_id=_s(panel.get("Figure_ID")) or pid, **kwargs)
+        except MR.UnsupportedCapabilityError as exc:
+            refusals[pid] = ("NO_READER_AVAILABLE", "%s" % exc)
+            continue
+        except (MR.GeometryResolutionError, ValueError, OSError) as exc:
+            refusals[pid] = ("PANEL_GEOMETRY_UNRESOLVED",
+                             "%s: %s" % (type(exc).__name__, exc))
+            continue
+        except Exception as exc:
+            raise InternalReaderError(
+                "measuring BAR_MONO panel %s raised %s: %s"
+                % (pid, type(exc).__name__, exc)) from exc
+        rows_by_panel[pid] = rows
+        pairs.extend((resolved, r) for r in rows)
+    if pairs:
+        MONO_GEOMETRY.fill_identities_by_figure([r for _i, r in pairs])
+    return rows_by_panel, pairs, refusals
+
+
+def _geometry_marks(records, series_rows, positions):
+    """Resolved geometry rows, in the shape the panel loop already reads.
+
+    The identity comes from `resolved_fill_pattern` - what the FIGURE said the
+    bar's fill is - matched against the `Bar_Fill_Pattern` each series declares.
+    A bar the figure could not name yields no mark, so its cell goes missing
+    and is queued, which is the point: `identity_resolution.csv` is where a
+    person names it, not this function.
+    """
+    by_fill = {}
+    for row in series_rows:
+        by_fill.setdefault(_upper(row.get("Bar_Fill_Pattern")), []).append(
+            _s(row.get("Series_ID")))
+    out = []
+    for record in records:
+        if record.get("error") or record.get("value") is None:
+            continue
+        pattern = _upper(record.get("resolved_fill_pattern"))
+        named = by_fill.get(pattern, [])
+        if len(named) != 1:
+            # No series declares this fill, or two do. Either way the bar
+            # cannot be attributed, and a mark with a guessed series is the
+            # failure this whole design exists to prevent.
+            continue
+        out.append(dict(
+            series=named[0], x_label=_s(record.get("group")),
+            mean=record.get("value"), dispersion=record.get("dispersion"),
+            top_px=record.get("edge_px_image"),
+            cap_px=record.get("cap_px_image"),
+            fill_pattern=pattern,
+            fill_density=record.get("ink_mass"),
+            order=record.get("slot"),
+            x=(sum(record["footprint_px_image"]) / 2.0
+               if record.get("footprint_px_image") else None),
+            Bar_Direction=_upper(record.get("direction")),
+            Bar_Top_Definition="OUTLINE_CENTER",
+            Errorbar_Stem_Confirmed=("TRUE" if record.get("dispersion")
+                                     is not None else "FALSE"),
+            Geometry_Row_SHA256=_s(record.get("geometry_row_sha256")),
+        ))
+    return out
+
+
 def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
     """(TYPE, path) pairs for one panel, in a fixed order, skipping what is absent."""
     out = []
@@ -627,7 +761,7 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
 
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
-              file_root=".", project_dir=None, review_dir=None):
+              file_root=".", project_dir=None, review_dir=None, geometry=None):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -774,15 +908,17 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                     detail="%d bar(s) were positioned by sequence rather than "
                            "by a declared X_Pixel" % len(inferred))
         elif mark == "BAR_MONO":
-            if BM.blank(panel.get("Baseline_Value")):
-                kwargs.setdefault("baseline_value", 0.0)
-            else:
-                kwargs["baseline_value"] = float(panel.get("Baseline_Value"))
-            rows = MR.read_panel("BAR_MONO", image=image, panel_box=box,
-                                 x_positions=_x_positions(position_rows),
-                                 y_calibration=ycal,
-                                 series=_series_specs(series_rows, mark, options),
-                                 **kwargs)
+            # Measured before the panel loop started, and NAMED by its figure.
+            # This branch used to call `read_monochrome_bar_panel`, which
+            # decides identity inside one panel from an absolute fill density -
+            # measured on one figure and wrong on the second. What arrives here
+            # is a resolution the whole figure agreed on.
+            if geometry is None:
+                return PanelOutcome(
+                    "PANEL_GEOMETRY_UNRESOLVED", declared=declared,
+                    missing=all_cells,
+                    detail="the geometry pass produced nothing for this panel")
+            rows = _geometry_marks(geometry, series_rows, position_rows)
         elif mark in BM.UNRELEASED_MARK_TYPES:
             return PanelOutcome(
                 "NO_READER_AVAILABLE", declared=declared,
@@ -1538,15 +1674,53 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     projects_by_panel = {}
     overlays_by_panel = {}
     artifacts_by_panel = {}
+    # ---- the geometry pass, BEFORE the panel loop.
+    #
+    # Identity is figure-local and geometry is panel-local, so a loop that
+    # reads a panel and names its series in the same step can only name them
+    # from what one panel holds. Every BAR_MONO panel of the batch is measured
+    # here with no series named, the rows are grouped by Figure_ID, and the
+    # FIGURE says what its fills mean; the loop below reads its values out of
+    # the answer.
+    geometry_rows_by_panel, geometry_pairs, geometry_refusals = (
+        measure_bar_mono_figures(
+            [row for _, row in m["panels"].iterrows()], positions_by_panel,
+            series_by_panel, options_by_config, file_root=file_root))
+    geometry_artifacts = {}
+    if geometry_pairs:
+        try:
+            # Into the run directory, like `raw/`, `projects/` and `review/`.
+            # Written into staging instead, the ledger records
+            # `.staging/mono_bar_geometry.csv` and the promotion moves the file
+            # out from under that path.
+            geometry_artifacts = write_geometry_review(output_dir,
+                                                       geometry_pairs)
+        except GeometryReviewError as exc:
+            # Not a panel outcome: the bundle is written once for the run, so a
+            # failure here is every BAR_MONO panel at once and there is nothing
+            # partial to queue.
+            clear_outputs(output_dir)
+            write_stamp(os.path.join(output_dir, "run_stamp.json"),
+                        "GEOMETRY_REVIEW_FAILED", run_date, run_mode=run_mode,
+                        manifest_hashes=manifest_hashes, detail="%s" % exc)
+            return dict(status="GEOMETRY_REVIEW_FAILED", detail="%s" % exc,
+                        panels=0, values=0, machine_qc=0, accepted=0,
+                        problems=0)
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
         options = options_by_config.get(_s(panel.get("Config_ID")), {})
         try:
-            outcome = run_panel(panel, series_by_panel.get(pid, []),
-                                positions_by_panel.get(pid, []), options, unit,
-                                raw_dir, file_root=file_root,
-                                project_dir=project_dir, review_dir=review_dir)
+            refused = geometry_refusals.get(pid)
+            if refused:
+                outcome = PanelOutcome(refused[0], detail=refused[1])
+            else:
+                outcome = run_panel(
+                    panel, series_by_panel.get(pid, []),
+                    positions_by_panel.get(pid, []), options, unit,
+                    raw_dir, file_root=file_root, project_dir=project_dir,
+                    review_dir=review_dir,
+                    geometry=geometry_rows_by_panel.get(pid))
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by
@@ -1572,7 +1746,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # right there - safe, but a false refusal nobody can act on.
         artifacts_by_panel[pid] = [
             (kind, _run_relative(path, output_dir), file_sha256_or_blank(path))
-            for kind, path in outcome.artifacts]
+            for kind, path in (list(outcome.artifacts)
+                               + geometry_artifacts.get(pid, []))]
         # Stamp the panel onto every value it produced. A unit is normally one
         # panel, but nothing forbids two panels feeding one - and keying panel
         # state by Unit_ID meant the LAST panel's state won, so a unit whose
@@ -1871,7 +2046,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # blank mode here - it cannot, because a digitized value with no saved
         # project is already MISSING_PROVENANCE at the gate, but the finalizer
         # refuses a blank mode anyway rather than trusting that ordering.
-        mode = ("OVERLAY" if overlay_file
+        mode = ("BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
+                else "OVERLAY" if overlay_file
                 else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({
             "Panel_ID": row["Panel_ID"], "Source_Panel_ID": row["Source_Panel_ID"],

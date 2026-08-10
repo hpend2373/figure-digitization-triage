@@ -1,4 +1,4 @@
-# figure-digitization-triage — v7.27 (full package)
+# figure-digitization-triage — v7.28 (full package)
 
 The declarative execution layer, plus the monochrome bar reader, plus the
 point-file hardening. Full package, not a patch.
@@ -2812,16 +2812,58 @@ same, or a caller wanting a declared review crop has to bypass it and call
 `geometry_rows` directly, which is most of the reason the shared entry point
 exists.
 
-**Still not wired, and named as such:** nothing calls this yet.
-`run_batch` still dispatches BAR_MONO to `read_monochrome_bar_panel`, so there
-is no `Review_Mode=BAR_MONO_GEOMETRY`, the bundle is not in
-`Review_Subject_SHA256`, and there are no `Axis_Labels_Checked` /
-`Calibration_Checked` confirmations - those arrive with the mode that shows an
-axis. What remains is the two-pass itself: measure every BAR_MONO panel
-anonymously before the panel loop, resolve identity by `Figure_ID`, and have
-the panel loop read its values out of the resolved geometry instead of calling
-the old reader. That is a change to the runner's shape rather than to any
-measurement, and it is the next commit.
+## The two-pass runner
+
+`run_batch` measures every BAR_MONO panel of the batch BEFORE the panel loop,
+groups the rows by `Figure_ID`, and lets the figure name the fills. The loop
+then reads its values out of the answer. `reader_functions()["BAR_MONO"]` is
+`read_monochrome_bar_geometry`; `SUCCESSOR_READERS` is empty and kept, because
+the next reader built before it can be wired goes there and gets its option
+contract checked several commits before the switchover instead of at it.
+
+`_geometry_marks` turns resolved rows into the shape the loop already reads.
+The series comes from matching `resolved_fill_pattern` - what the FIGURE said -
+against the `Bar_Fill_Pattern` each series declares; a bar the figure could not
+name, or one whose fill two series claim, yields no mark. Its cell goes missing
+and is queued, which is the point: `identity_resolution.csv` is where a person
+names it.
+
+BAR_MONO panels are queued as `Review_Mode=BAR_MONO_GEOMETRY`, requiring all
+five artifact types and three confirmations - `Marks_Checked`,
+`Axis_Labels_Checked`, `Calibration_Checked`. This mode puts the axis in front
+of the reviewer, so it asks about the axis: a printed 30 typed as 3 makes every
+bar in the panel ten times too small together, no arithmetic catches it, and
+the panel picture is the only place it shows.
+
+**What it cost, in the open.** The 397 pilot read 48 values and now reads 36.
+Three panels of Figure 4 - `P4_SV_WOMEN`, `P4_CO_MEN`, `P4_CO_WOMEN` - refuse
+with `STROKE_SCALE_UNRESOLVED`: the two-pass reader measures the figure's own
+line weight off the rule at the calibrated baseline, every threshold it uses is
+a multiple of that number, and a panel whose stroke it cannot measure has no
+scale for anything. The old reader needed no stroke and read them.
+
+Nothing poolable was lost - all 48 were QC_FAILED anyway, because publication
+397 does not say whether its error bars are SD or SEM - and the pin in
+`test_compile_plan` records the three panel names so the number cannot drift
+back without somebody noticing. Why the stroke fails on exactly those three,
+whose declarations look like the ones that succeed, is worth a round of its own.
+
+And a stipple is no longer a fill the pipeline refuses. That scenario asserted
+`NO_READER_AVAILABLE` and was right to: the old reader classified fills by
+absolute density and STIPPLED had no band. `UNIMPLEMENTED_FILL_PATTERNS` still
+names it, and still should - it is that reader's limitation and that reader
+still has it. What changed is which reader BAR_MONO goes to.
+
+The bundle is written into the run directory rather than staging, like `raw/`,
+`projects/` and `review/`. Written into staging, the ledger records
+`.staging/mono_bar_geometry.csv` and the promotion moves the file out from
+under that path.
+
+**Still open:** `identity_resolution.csv` has a template, a schema and no
+runtime - a cell the figure could not name goes to the queue rather than
+through a human resolution join, and the `IDENTITY_RESOLUTION` artifact and
+`Identity_Checked` confirmation that go with it are not built. Publication 127
+needs both for its two 15 px bars.
 
 ## Suites
 
@@ -2829,18 +2871,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 495 |
+| `test_run_batch.py` | 497 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 176 |
-| `test_compile_plan.py` | 123 |
+| `test_compile_plan.py` | 124 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1754** |
+| **total** | **1756** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

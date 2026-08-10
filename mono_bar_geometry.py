@@ -1818,7 +1818,8 @@ GEOMETRY_ARTIFACT_COLUMNS = (
     "Dispersion_Value", "Edge_Px_Image", "Cap_Px_Image", "Footprint_X0",
     "Footprint_X1", "Fill_Sample_Status", "Auto_Identity_Status",
     "Auto_Fill_Pattern", "Geometry_Error_Code", "Figure_Identity_SHA256",
-    "Auto_Identity_SHA256", "Diagnostics_JSON", "Geometry_Row_SHA256",
+    "Auto_Identity_SHA256", "Diagnostics_JSON", "Anonymous_Record_JSON",
+    "Geometry_Row_SHA256",
 )
 
 
@@ -1870,6 +1871,26 @@ def canonical_json(obj):
                       ensure_ascii=False, allow_nan=False)
 
 
+def anonymous_record_json(record):
+    """The measurement, as the one text the hash is taken over.
+
+    This goes in a column of its own, and `Geometry_Row_SHA256` is the SHA-256
+    of exactly these bytes. That is what makes the artifact readable by
+    something that is not this process.
+
+    The alternative was a rule per field for what a blank cell means - key
+    absent, or key present and None - and what type to restore it to. A CSV
+    holds text: `cap_px_image` is written `1189` whether the record held the
+    integer 1189 or the float 1189.0, and the canonical JSON of those two is
+    not the same string, so a reader that guessed wrong recomputed a different
+    hash for a file it had just been handed. Measured on publication 127 that
+    is exactly what happened, on the first row. Six such rules, each with its
+    own row types to regression-test, against one column that cannot be wrong.
+    """
+    return canonical_json({k: v for k, v in record.items()
+                           if k not in UNHASHED_FIELDS})
+
+
 def geometry_row_sha256(record):
     """The hash of the ANONYMOUS measurement in one record.
 
@@ -1878,9 +1899,8 @@ def geometry_row_sha256(record):
     question "is this the same measurement the reviewer approved" still has an
     answer.
     """
-    return hashlib.sha256(canonical_json(
-        {k: v for k, v in record.items()
-         if k not in UNHASHED_FIELDS}).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        anonymous_record_json(record).encode("utf-8")).hexdigest()
 
 
 def auto_identity_sha256(record):
@@ -2034,9 +2054,14 @@ def artifact_row(record, allow_unstamped=False, require_auto_identity=False):
     # reads it back: recomputing it would hash what the CSV round-trip
     # produced, which is the thing it is there to check.
     out["Geometry_Row_SHA256"] = actual
+    # The nested half, denormalized for a person reading the file or filtering
+    # it in SQL. It is a SUBSET of the authoritative column beside it and is
+    # built from the same `_plain` pass, so the two cannot drift; a scenario
+    # checks the containment rather than trusting the construction.
     out["Diagnostics_JSON"] = canonical_json(
         {k: v for k, v in record.items()
          if k not in named and k not in UNHASHED_FIELDS})
+    out["Anonymous_Record_JSON"] = anonymous_record_json(record)
     return out
 
 
@@ -2067,3 +2092,123 @@ def canonical_artifact_rows(records):
         identity_resolution.csv joined DOWNSTREAM, never back into this file
     """
     return artifact_rows(records, require_auto_identity=True)
+
+
+# ----------------------------------------------------------------- the reader
+#
+# A writer nobody can read back is a writer nobody can check. Everything below
+# takes the rows as a CSV reader hands them over - every cell a string - and
+# refuses rather than repairing: a geometry file that does not verify is not a
+# file to be patched up, it is a run to be done again.
+
+def _text(value):
+    """A cell as a CSV writer would have written it."""
+    return "" if value == "" or value is None else str(value)
+
+
+def read_artifact_row(row):
+    """One artifact row back to the anonymous record it was written from.
+
+    Verifies as it goes, and every check is against the row's OWN contents:
+
+      the columns are the declared columns, in order
+      `Anonymous_Record_JSON` parses
+      its SHA-256 is `Geometry_Row_SHA256`
+      re-projecting the restored record reproduces every other column
+
+    The last one is what stops the denormalized columns drifting from the
+    authoritative one. `Mean` is a convenience for a person and for SQL; if it
+    disagrees with the record the hash covers, the file says two things.
+    """
+    if list(row) != list(GEOMETRY_ARTIFACT_COLUMNS):
+        raise ValueError(
+            "mono_bar_geometry: ARTIFACT_COLUMNS_UNEXPECTED - %r"
+            % (list(row),))
+    text = row["Anonymous_Record_JSON"]
+    try:
+        record = json.loads(text)
+    except ValueError as exc:
+        raise ValueError("mono_bar_geometry: ANONYMOUS_RECORD_UNPARSEABLE - %s"
+                         % exc)
+    if not isinstance(record, dict):
+        raise ValueError("mono_bar_geometry: ANONYMOUS_RECORD_UNPARSEABLE - "
+                         "the column holds a %s" % type(record).__name__)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if digest != row["Geometry_Row_SHA256"]:
+        raise ValueError(
+            "mono_bar_geometry: GEOMETRY_ROW_HASH_MISMATCH - the record in "
+            "this row hashes %s and the row says %s"
+            % (digest[:16], str(row["Geometry_Row_SHA256"])[:16]))
+    # Rebuild the row as the writer would have written it, from the restored
+    # record plus the identity the columns carry, and compare. This reuses
+    # `artifact_row` rather than reimplementing the projection, so the reader
+    # cannot agree with a writer that has changed.
+    full = dict(record)
+    full["geometry_row_sha256"] = row["Geometry_Row_SHA256"]
+    full["identity_status"] = row["Auto_Identity_Status"] or "NOT_CALIBRATED"
+    full["resolved_fill_pattern"] = row["Auto_Fill_Pattern"]
+    if row["Figure_Identity_SHA256"] or row["Auto_Identity_SHA256"]:
+        full["identity_source"] = "AUTO"
+        full["figure_identity_sha256"] = row["Figure_Identity_SHA256"]
+        full["auto_identity_sha256"] = row["Auto_Identity_SHA256"]
+    rebuilt = {k: _text(v) for k, v in artifact_row(full).items()}
+    disagree = sorted(c for c in GEOMETRY_ARTIFACT_COLUMNS
+                      if rebuilt[c] != _text(row[c]))
+    if disagree:
+        raise ValueError(
+            "mono_bar_geometry: COLUMN_DISAGREES_WITH_RECORD - %r; the file "
+            "says %r and the record it hashes says %r"
+            % (disagree, {c: _text(row[c]) for c in disagree},
+               {c: rebuilt[c] for c in disagree}))
+    return record
+
+
+def verify_artifact(rows, recompute_identity=True):
+    """Every row of a geometry file, and the things only the whole file says.
+
+    Row by row through `read_artifact_row`, and then:
+
+      no two rows claim the same (Panel_ID, Group_ID, Geometry_Slot)
+      every row of one Figure_ID carries the same Figure_Identity_SHA256
+      `fill_identity`, re-run on the restored records, reproduces it
+
+    That last step is what turns `Figure_Identity_SHA256` from a value that
+    exists into a value that is TRUE. Until the verdict is recomputed from the
+    rows in the file, the hash only says the writer wrote something down.
+
+    Returns {"records": [...], "figures": {figure_id: verdict}}.
+    """
+    records, seen = [], {}
+    for n, row in enumerate(rows):
+        record = read_artifact_row(row)
+        records.append(record)
+        key = (row["Panel_ID"], row["Group_ID"], row["Geometry_Slot"])
+        if key[1] != "" or key[2] != "":
+            if key in seen:
+                raise ValueError(
+                    "mono_bar_geometry: DUPLICATE_GEOMETRY_SLOT - rows %d and "
+                    "%d both claim %r" % (seen[key], n, key))
+            seen[key] = n
+    by_figure = {}
+    for row, record in zip(rows, records):
+        by_figure.setdefault(row["Figure_ID"], []).append((row, record))
+    figures = {}
+    for figure_id, pairs in by_figure.items():
+        claimed = {r["Figure_Identity_SHA256"] for r, _rec in pairs}
+        if len(claimed) != 1:
+            raise ValueError(
+                "mono_bar_geometry: FIGURE_IDENTITY_INCONSISTENT - figure %r "
+                "carries %d different verdict hashes" % (figure_id, len(claimed)))
+        claim = claimed.pop()
+        if not recompute_identity or not claim:
+            continue
+        _ident, verdict = fill_identity([dict(rec) for _r, rec in pairs])
+        digest = hashlib.sha256(
+            canonical_json(verdict).encode("utf-8")).hexdigest()
+        if digest != claim:
+            raise ValueError(
+                "mono_bar_geometry: FIGURE_VERDICT_NOT_REPRODUCED - figure %r "
+                "says %s and its own rows answer %s"
+                % (figure_id, claim[:16], digest[:16]))
+        figures[figure_id] = verdict
+    return dict(records=records, figures=figures)

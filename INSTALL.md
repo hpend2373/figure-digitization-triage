@@ -2504,6 +2504,51 @@ verdict itself - that needs the durable reader to recompute `fill_identity` from
 the rows in the file and get the same hash, which is part of the read-back
 contract the caller integration owes.
 
+## The file can be read back
+
+A writer nobody can read back is a writer nobody can check, and the eighteen
+denormalized columns could not carry the record on their own. A CSV holds text:
+`cap_px_image` is written `1189` whether the record held the integer 1189 or the
+float 1189.0, and the canonical JSON of those two is not the same string.
+Measured on publication 127 that is exactly what happened, on the first row of
+the file - a reader recomputed a different hash for a file it had just been
+handed.
+
+The alternative was a rule per field for what a blank cell means (key absent, or
+key present and None) and what type to restore, with row types to
+regression-test each rule against. Instead there is a nineteenth column,
+`Anonymous_Record_JSON`, holding the measurement as the one text the hash is
+taken over: `Geometry_Row_SHA256` is the SHA-256 of exactly those bytes.
+Restoring is parsing one string. `Diagnostics_JSON` stays as the readable half
+for a person or for SQL, and a scenario checks it is a strict subset of the
+authoritative column rather than trusting that it is.
+
+`read_artifact_row` verifies as it restores: the columns are the declared
+columns in order, the record parses, its hash is the row's hash, and
+re-projecting the restored record through `artifact_row` reproduces every other
+column. That last check is what stops the convenience columns drifting - `Mean`
+is there for a person, and a file whose `Mean` disagrees with the record its
+hash covers says two things.
+
+`verify_artifact` adds what only the whole file says: no two rows claim the same
+`(Panel_ID, Group_ID, Geometry_Slot)`; every row of one `Figure_ID` carries the
+same `Figure_Identity_SHA256`; and `fill_identity`, re-run on the restored
+records, reproduces it. That last step is what turns the verdict hash from a
+value that exists into a value that is TRUE - until it is recomputed from the
+rows in the file, it only says the writer wrote something down.
+
+The scenario's fixture holds every row type a real file does: a bar with a cap
+and one without, BAR_TOO_SMALL_TO_SAMPLE, a slot-level refusal
+(BAR_TOO_NARROW), a group-level refusal (NO_SEED_SUPPORT) and
+STROKE_SCALE_UNRESOLVED. Reverting to a rebuild from the denormalized columns
+fails on the first row with GEOMETRY_ROW_HASH_MISMATCH.
+
+Two rows attested under DIFFERENT verdicts - which is what merging two runs of
+one figure into a file produces - is a separate case from editing a hash in
+place, because the row-level attestation catches the edit first. The scenario
+builds it honestly, by resolving a subset of the figure and splicing one of its
+rows back in.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -2512,7 +2557,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 |---|---|
 | `test_run_batch.py` | 480 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 233 |
+| `test_measure_mono_bars.py` | 252 |
 | `test_grid_engine.py` | 171 |
 | `test_finalize.py` | 168 |
 | `test_compile_plan.py` | 123 |
@@ -2521,7 +2566,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 19 |
-| **total** | **1669** |
+| **total** | **1688** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

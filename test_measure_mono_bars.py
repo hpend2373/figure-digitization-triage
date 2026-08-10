@@ -21,6 +21,7 @@ down the page and paints the band above it solid black, because a coordinate
 mistake that only shows up on a real 600 DPI page render is a mistake a
 synthetic fixture with `y0 = 0` will never catch.
 """
+import csv
 import json
 import os
 import shutil
@@ -207,6 +208,10 @@ class Geometry(object):
                     ticks=[[0, self.base], [100, self.base - 100 * self.ppu]],
                     anchors=anchors or {"G": anchor}, fills=fills,
                     group_window=self.r(190), baseline=0.0)
+
+
+def _text(value):
+    return "" if value == "" or value is None else str(value)
 
 
 def _raises_type(call):
@@ -2039,6 +2044,189 @@ try:
         else:
             check("a %s is refused rather than stringified"
                   % type(bad).__name__, False, G.canonical_json({"v": bad}))
+
+    # ------------------------------------------- 26t. read it back
+    #
+    # A writer nobody can read back is a writer nobody can check. The eighteen
+    # denormalized columns cannot carry the record on their own: a CSV holds
+    # text, so `cap_px_image` is written `1189` whether the record held the
+    # integer 1189 or the float 1189.0, and the canonical JSON of those two is
+    # not the same string. Measured on publication 127 that is what happened,
+    # on the first row of the file - the reader recomputed a different hash for
+    # a file it had just been handed.
+    #
+    # REVERT: drop `Anonymous_Record_JSON` and rebuild the record from the
+    # eighteen columns. Every writer scenario above still passes, because none
+    # of them reads a file back.
+    print("\nthe file can be read back, and the hash recomputed from it")
+    g8 = Geometry(1.0)
+
+    def zoo_rows(panel_id, draw, fills, **kw):
+        img = g8.blank()
+        draw(img)
+        return G.geometry_rows(
+            M._gray(write(img, panel_id, TMP)),
+            [g8.x0, g8.x1, g8.y0, g8.y1],
+            MRX.AxisCalibration.from_points(
+                [(0, g8.base), (100, g8.base - 100 * g8.ppu)]),
+            kw.pop("anchors", {"G": (g8.slots[0][0] + g8.slots[-1][1]) // 2}),
+            fills, kw.pop("window", g8.r(190)), baseline=0.0,
+            panel_id=panel_id, figure_id="zoo", **kw)
+
+    def three(img):
+        g8.outline(img, 0, 30)
+        g8.stipple(img, 1, 45)
+        g8.solid(img, 2, 60)
+
+    def with_cap(img):
+        g8.solid(img, 0, 60)
+        errorbar(img, 0, 60, length=g8.r(30))
+
+    def one_short(img):
+        g8.outline(img, 0, 30)
+        g8.stipple(img, 1, 45)
+        g8.solid(img, 2, 4)                     # too small to sample a fill
+
+    zoo = []
+    zoo += zoo_rows("zoo_plain", three, ["OPEN", "STIPPLED", "SOLID"])
+    zoo += zoo_rows("zoo_cap", with_cap, ["SOLID"])
+    zoo += zoo_rows("zoo_short", one_short, ["OPEN", "STIPPLED", "SOLID"])
+    zoo += zoo_rows("zoo_narrow", three, ["OPEN", "STIPPLED", "SOLID"],
+                    min_bar_px=400)
+    zoo += zoo_rows("zoo_empty", lambda img: g8.solid(img, 0, 60),
+                    ["SOLID"], anchors={"G": g8.x1 - 20}, window=15)
+    bare = np.full(g8.shape, 255, np.uint8)
+    bare[g8.r(100):g8.r(350), :] = 0
+    zoo += G.geometry_rows(
+        M._gray(write(bare, "zoo_norule", TMP)), [g8.x0, g8.x1, g8.y0, g8.y1],
+        MRX.AxisCalibration.from_points([(0, g8.base),
+                                         (100, g8.base - 100 * g8.ppu)]),
+        {"G": (g8.slots[0][0] + g8.slots[-1][1]) // 2}, ["SOLID"], g8.r(190),
+        baseline=0.0, panel_id="zoo_norule", figure_id="zoo")
+    kinds_present = {r.get("error") or "READING" for r in zoo}
+    check("the fixture covers every row type a real file holds",
+          {"READING", "BAR_TOO_SMALL_TO_SAMPLE", "BAR_TOO_NARROW",
+           "NO_SEED_SUPPORT", "STROKE_SCALE_UNRESOLVED"} <= kinds_present,
+          repr(sorted(kinds_present)))
+    check("including one bar with a cap and one without",
+          any("dispersion" in r for r in zoo)
+          and any("value" in r and "dispersion" not in r for r in zoo))
+    M.fill_identities_by_figure(zoo)
+    written_rows = G.canonical_artifact_rows(zoo)
+
+    def to_csv_and_back(rowdicts):
+        path = os.path.join(TMP, "artifact.csv")
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(G.GEOMETRY_ARTIFACT_COLUMNS))
+            w.writeheader()
+            w.writerows(rowdicts)
+        with open(path, encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+
+    on_disk = to_csv_and_back(written_rows)
+    result = G.verify_artifact(on_disk)
+    check("every row comes back and every row hash recomputes",
+          len(result["records"]) == len(zoo), "%d of %d"
+          % (len(result["records"]), len(zoo)))
+    check("and the restored records are the records that were written",
+          [{k: v for k, v in r.items() if k not in G.UNHASHED_FIELDS}
+           for r in zoo] == result["records"])
+    # The exact defect, named: an integer survives as an integer.
+    caps = [r for r in zoo if r.get("cap_px_image") is not None]
+    check("an integer cell does not come back a float",
+          caps and all(isinstance(rec.get("cap_px_image"), int)
+                       for rec in result["records"]
+                       if rec.get("cap_px_image") is not None),
+          repr([type(rec.get("cap_px_image")).__name__
+                for rec in result["records"]
+                if rec.get("cap_px_image") is not None]))
+    check("the figure's verdict is recomputed from the file, not trusted",
+          result["figures"]["zoo"]["status"] in G.IDENTITY_STATES
+          or result["figures"]["zoo"]["status"] in
+          ("ESTABLISHED", "DIRECT_ONLY", "AMBIGUOUS",
+           "NOT_ENOUGH_COMPLETE_GROUPS"),
+          repr(result["figures"]["zoo"]["status"]))
+    check("the readable half is a subset of the authoritative half, exactly",
+          all(json.loads(r["Diagnostics_JSON"]).items()
+              <= json.loads(r["Anonymous_Record_JSON"]).items()
+              for r in on_disk))
+
+    # REVERT: return the record and skip the column comparison. `Mean` is a
+    # convenience for a person and for SQL, and a file whose convenience column
+    # disagrees with the record its hash covers says two things.
+    print("\nand refuses a file that says two things")
+    for column, value in (("Mean", "99.9"), ("Footprint_X0", "0"),
+                          ("Geometry_Error_Code", "NOTHING_WRONG"),
+                          ("Auto_Fill_Pattern", "SOLID")):
+        bad = [dict(r) for r in on_disk]
+        row0 = next(i for i, r in enumerate(bad) if r[column] != "")
+        bad[row0][column] = value
+        check("editing %s in the file is caught" % column,
+              _raises(lambda: G.verify_artifact(bad),
+                      "COLUMN_DISAGREES_WITH_RECORD")
+              or _raises(lambda: G.verify_artifact(bad),
+                         "AUTO_IDENTITY_MODIFIED"),
+              "it verified")
+    tampered = [dict(r) for r in on_disk]
+    rec0 = json.loads(tampered[0]["Anonymous_Record_JSON"])
+    rec0["value"] = 99.9
+    tampered[0]["Anonymous_Record_JSON"] = G.canonical_json(rec0)
+    check("editing the record itself is caught by its own hash",
+          _raises(lambda: G.verify_artifact(tampered),
+                  "GEOMETRY_ROW_HASH_MISMATCH"), "it verified")
+    broken = [dict(r) for r in on_disk]
+    broken[0]["Anonymous_Record_JSON"] = "{not json"
+    check("an unparseable record is a refusal, not a skipped row",
+          _raises(lambda: G.verify_artifact(broken),
+                  "ANONYMOUS_RECORD_UNPARSEABLE"), "it verified")
+    short = [{k: v for k, v in r.items() if k != "Diagnostics_JSON"}
+             for r in on_disk]
+    check("a file missing a column is refused before anything is parsed",
+          _raises(lambda: G.verify_artifact(short),
+                  "ARTIFACT_COLUMNS_UNEXPECTED"), "it verified")
+
+    # REVERT: verify each row and stop. The things only the WHOLE file says -
+    # one slot claimed twice, one figure answered two ways, a verdict hash
+    # nothing in the file produces - are invisible row by row.
+    print("\nand the things only the whole file says")
+    doubled = [dict(r) for r in on_disk]
+    doubled.append(dict(doubled[0]))
+    check("the same slot claimed twice is refused",
+          _raises(lambda: G.verify_artifact(doubled),
+                  "DUPLICATE_GEOMETRY_SLOT"), "it verified")
+    # Two rows that are each internally consistent and were attested under
+    # DIFFERENT verdicts - which is what merging two runs of the same figure
+    # into one file produces. Editing the hash in place does not reach this
+    # check, because the row-level attestation catches that first.
+    subset = [dict(r) for r in zoo[:4]]
+    M.fill_identities_by_figure(subset)
+    replacement = G.artifact_row(subset[0])
+    split_fig = [replacement if (r["Panel_ID"], r["Group_ID"],
+                                 r["Geometry_Slot"])
+                 == (replacement["Panel_ID"], _text(replacement["Group_ID"]),
+                     _text(replacement["Geometry_Slot"])) else dict(r)
+                 for r in on_disk]
+    check("the two verdicts really are different",
+          replacement["Figure_Identity_SHA256"]
+          != on_disk[0]["Figure_Identity_SHA256"],
+          "the subset answered the figure the same way")
+    check("one figure answered two ways is refused",
+          _raises(lambda: G.verify_artifact(split_fig),
+                  "FIGURE_IDENTITY_INCONSISTENT"), "it verified")
+    # REVERT: accept Figure_Identity_SHA256 because it is 64 hex characters.
+    # A hash that exists is not a verdict that is true: until it is recomputed
+    # from the rows in the file, it only says the writer wrote something down.
+    forged_fig = [dict(r) for r in on_disk]
+    for r in forged_fig:
+        r["Figure_Identity_SHA256"] = "2" * 64
+    check("a verdict hash the file's own rows do not produce is refused",
+          _raises(lambda: G.verify_artifact(forged_fig),
+                  "FIGURE_VERDICT_NOT_REPRODUCED")
+          or _raises(lambda: G.verify_artifact(forged_fig),
+                     "AUTO_IDENTITY_MODIFIED"), "it verified")
+    check("and a file that has not been tampered with still verifies",
+          len(G.verify_artifact(to_csv_and_back(written_rows))["records"])
+          == len(zoo))
 
     # -------------------------------------------------- 27. the contract
     print("\nthe fail-closed contract holds for every refusal in this file")

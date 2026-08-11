@@ -56,7 +56,9 @@ UNIT = dict(Unit_ID="U1", Figure_ID="F1", Grid_ID="G1", Panel="A",
             Statistic_Type="CONTINUOUS", Display_Hint="UNSPECIFIED", Grid_Rule="FULL",
             Sparse_Justification="", Dispersion_Type="SEM",
             Errorbar_Definition_Source="caption: mean +/- SEM", N_Outcome=10,
-            Value_Scale="RATIO", Extraction_Method="DIGITIZED",
+            Value_Scale="RATIO", Analysis_Transformation="UNTRANSFORMED",
+            Distribution_Shape="SYMMETRIC", Transformation_Source="",
+            Extraction_Method="DIGITIZED",
             Bar_Top_Definition="OUTLINE_CENTER", Errorbar_Stem_Confirmed="TRUE",
             Axis_X_Scale="LINEAR", Axis_Y_Scale="LINEAR",
             Axis_Calib_X1_Value=0, Axis_Calib_X1_Pixel=100,
@@ -294,6 +296,71 @@ ratio_zero = dict(unit={"Value_Scale": "RATIO"},
 check("a ratio-scale outcome still cannot",
       "SE_IMPLIES_HUGE_SD" in run(**ratio_zero), "%s" % run(**ratio_zero))
 check("an unknown scale is flagged", "BAD_VALUE_SCALE" in run(unit={"Value_Scale": "ORDINAL"}))
+
+print("what scale the numbers are on, and what shape the distribution is")
+# REVERT: judge "SD is bigger than the mean" without asking what the
+# distribution looks like. On a symmetric distribution over a ratio scale it is
+# impossible - most of the mass would sit below zero. On a right-skewed one it
+# is ordinary: spectral power in ms^2 routinely has a coefficient of variation
+# over 1.5, and the check fired on every correct row of it, which is how a
+# reader learns to ignore a check.
+_HUGE_UNIT = {"Value_Scale": "RATIO", "Dispersion_Type": "SEM", "N_Outcome": 10}
+_HUGE_VALS = [dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": lv}),
+                   Mean=100, Dispersion_Value=60) for lv in ("PRE", "POST")]
+
+
+def _huge(shape):
+    return run(unit=dict(_HUGE_UNIT, Distribution_Shape=shape), vals=_HUGE_VALS)
+
+
+_sym = _huge("SYMMETRIC")
+check("a symmetric ratio-scale outcome with an impossible SD is flagged",
+      "SE_IMPLIES_HUGE_SD" in _sym, "%s" % _sym)
+_skewed = _huge("RIGHT_SKEWED")
+check("the same numbers on a right-skewed one are not a problem",
+      "SE_IMPLIES_HUGE_SD" not in _skewed
+      and "DISPERSION_IMPLIES_SKEW" not in _skewed, "%s" % _skewed)
+_unknown = _huge("UNKNOWN")
+check("and undeclared, the flag asks for the shape rather than accusing "
+      "the numbers",
+      "DISPERSION_IMPLIES_SKEW" in _unknown
+      and "SE_IMPLIES_HUGE_SD" not in _unknown, "%s" % _unknown)
+
+# REVERT: let the transformation go undeclared. A mean of log10(power) and a
+# mean of power carry the same axis label and differ by more than any effect
+# this review is looking for, and nothing in a raster distinguishes them.
+check("an undeclared transformation is flagged",
+      "BAD_ANALYSIS_TRANSFORMATION"
+      in run(unit={"Analysis_Transformation": ""}))
+check("and so is one outside the vocabulary",
+      "BAD_ANALYSIS_TRANSFORMATION"
+      in run(unit={"Analysis_Transformation": "LOGARITHM"}))
+check("an undeclared distribution shape is flagged",
+      "BAD_DISTRIBUTION_SHAPE" in run(unit={"Distribution_Shape": ""}))
+# UNTRANSFORMED, not NONE: "NONE" is one of the spellings the blank check
+# treats as "not filled in", and "the authors did not transform this outcome"
+# is a positive claim that has to survive it.
+check("UNTRANSFORMED reads as a claim and not as a blank",
+      "BAD_ANALYSIS_TRANSFORMATION"
+      not in run(unit={"Analysis_Transformation": "UNTRANSFORMED"}))
+check("NONE would not have",
+      "BAD_ANALYSIS_TRANSFORMATION"
+      in run(unit={"Analysis_Transformation": "NONE"}))
+_log = run(unit={"Analysis_Transformation": "LOG10", "Transformation_Source": ""})
+check("a transformation with nothing quoted behind it is unsourced",
+      "TRANSFORMATION_UNSOURCED" in _log, "%s" % _log)
+_logq = run(unit={"Analysis_Transformation": "LOG10",
+                  "Transformation_Source": "Methods p.4: analysed on log10"})
+check("quoted, it is sourced - and still not poolable in native units",
+      "TRANSFORMATION_UNSOURCED" not in _logq
+      and "TRANSFORMED_SCALE_NOT_POOLABLE" in _logq, "%s" % _logq)
+check("a hedged source is refused the way a hedged errorbar source is",
+      "TRANSFORMATION_UNRESOLVED"
+      in run(unit={"Analysis_Transformation": "LOG10",
+                   "Transformation_Source": "probably log10, unclear"}))
+check("and UNKNOWN says nobody can pool these at all",
+      "TRANSFORMED_SCALE_UNRESOLVED"
+      in run(unit={"Analysis_Transformation": "UNKNOWN"}))
 
 print("sparse grids need a stated reason")
 hole = cells[:-1]

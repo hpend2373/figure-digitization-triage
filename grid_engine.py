@@ -97,6 +97,22 @@ FIG_COPIED_P_METHODS = ("SOURCE_REPORTED", "SOURCE_P_REQUIRED_TIES")
 # zero, so the ratio explodes and the check fires on correct data.
 FIG_VALUE_SCALES = ("RATIO", "CHANGE")
 
+# WHAT SCALE THE PLOTTED NUMBERS ARE ON. A mean of log10(power) and a mean of
+# power are different quantities with the same axis label, and nothing in a
+# raster distinguishes them - the sentence that does is in the methods text.
+# Left undeclared, a log-scale mean pools with native means and the answer is
+# wrong in a way no downstream check can see.
+FIG_TRANSFORMATIONS = ("UNTRANSFORMED", "LOG10", "LN", "LOG2", "SQRT", "RECIPROCAL",
+                       "RANK", "UNKNOWN")
+
+# AND WHAT SHAPE THE UNDERLYING DISTRIBUTION IS. This is what makes
+# SE_IMPLIES_HUGE_SD a defensible check instead of a nuisance: "SD is bigger
+# than the mean" is impossible for a symmetric distribution on a ratio scale
+# and ORDINARY for a right-skewed one. Spectral power in ms^2 routinely has a
+# coefficient of variation over 1.5 and the check fired on every correct row of
+# it, which trains a reader to ignore the check.
+FIG_DISTRIBUTION_SHAPES = ("SYMMETRIC", "RIGHT_SKEWED", "LEFT_SKEWED", "UNKNOWN")
+
 _PAIR = re.compile(r"^\s*([^=]+?)\s*=\s*(.+?)\s*$")
 
 
@@ -120,6 +136,7 @@ def fig_unit_columns():
         "Outcome_Variable", "Outcome_Domain", "Unit",
         "Statistic_Type", "Display_Hint", "Grid_Rule", "Sparse_Justification",
         "Dispersion_Type", "Errorbar_Definition_Source", "N_Outcome", "Value_Scale",
+        "Analysis_Transformation", "Distribution_Shape", "Transformation_Source",
         "Extraction_Method", "Bar_Top_Definition", "Errorbar_Stem_Confirmed",
         "Axis_X_Scale", "Axis_Y_Scale",
         "Axis_Calib_X1_Value", "Axis_Calib_X1_Pixel",
@@ -278,6 +295,34 @@ def validate_unit(row, kernel, flag, line, figure=None):
             flag(line, "BAD_VALUE_SCALE",
                  "Value_Scale=%s (expected %s) - it decides whether an SD may exceed "
                  "the mean" % (vs_ or "blank", "/".join(FIG_VALUE_SCALES)))
+        tf_ = str(row.get("Analysis_Transformation", "")).strip().upper()
+        if tf_ not in FIG_TRANSFORMATIONS:
+            flag(line, "BAD_ANALYSIS_TRANSFORMATION",
+                 "Analysis_Transformation=%s (expected %s) - a mean of "
+                 "log(x) and a mean of x carry the same axis label and are not "
+                 "the same number"
+                 % (tf_ or "blank", "/".join(FIG_TRANSFORMATIONS)))
+        shape_ = str(row.get("Distribution_Shape", "")).strip().upper()
+        if shape_ not in FIG_DISTRIBUTION_SHAPES:
+            flag(line, "BAD_DISTRIBUTION_SHAPE",
+                 "Distribution_Shape=%s (expected %s) - it decides whether an "
+                 "SD larger than the mean is impossible or ordinary"
+                 % (shape_ or "blank", "/".join(FIG_DISTRIBUTION_SHAPES)))
+        tsrc = row.get("Transformation_Source")
+        if tf_ not in ("UNTRANSFORMED", "UNKNOWN", "") and blank(tsrc):
+            # NONE needs no quote: an axis labelled mmHg says so itself. A
+            # transformation changes every number on the panel and is only ever
+            # readable in the text, so it is quoted or it is a guess.
+            flag(line, "TRANSFORMATION_UNSOURCED",
+                 "Analysis_Transformation=%s with no Transformation_Source - "
+                 "quote the wording that says the analysis was on that scale"
+                 % tf_)
+        elif not blank(tsrc) and unresolved(tsrc):
+            flag(line, "TRANSFORMATION_UNRESOLVED",
+                 "Transformation_Source contains %r - which scale the numbers "
+                 "are on is then a guess, and a log mean pooled with native "
+                 "means is wrong by a factor nobody can recover"
+                 % unresolved(tsrc))
         if st == "QUANTILE_SUMMARY" and dt not in ("IQR", "RANGE"):
             flag(line, "BAD_DISPERSION_TYPE",
                  "QUANTILE_SUMMARY requires IQR or RANGE, got %s" % (dt or "blank"))
@@ -504,11 +549,48 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                 flag(line, "MEAN_OUTSIDE_ERRORBAR", "mean %g outside [%g, %g]" % (m, lo, hi))
         n = num(unit.get("N_Outcome"))
         ratio_scale = str(unit.get("Value_Scale", "")).strip().upper() == "RATIO"
+        transform = str(unit.get("Analysis_Transformation", "")).strip().upper()
+        shape = str(unit.get("Distribution_Shape", "")).strip().upper()
+        if transform == "UNKNOWN":
+            flag(line, "TRANSFORMED_SCALE_UNRESOLVED",
+                 "nobody has said what scale these numbers are on, so they "
+                 "cannot be pooled with anything - a log10 mean and a native "
+                 "mean differ by more than any effect this review is looking "
+                 "for")
+        elif transform not in ("UNTRANSFORMED", ""):
+            # Not a defect in the extraction: the numbers may be perfectly
+            # read. They are on a different scale from the pool, and this
+            # package does not back-transform - doing that needs the
+            # distribution's shape and a decision about which mean is wanted,
+            # neither of which belongs in a QC gate.
+            flag(line, "TRANSFORMED_SCALE_NOT_POOLABLE",
+                 "the plotted values are on the %s scale; the pool is in "
+                 "native units and nothing here back-transforms. Record them, "
+                 "and pool them separately or not at all" % transform)
         if ratio_scale and dt in ("SE", "SEM") and sym is not None and m is not None and n and n > 0:
             sd = sym * (n ** 0.5)
             if sd > abs(m) * 1.5:
-                flag(line, "SE_IMPLIES_HUGE_SD",
-                     "SE=%s N=%g -> SD=%.1f vs mean %.1f" % (sym, n, sd, m))
+                # WHICH of these two it is depends on the DISTRIBUTION, and
+                # asking for the distribution is the whole fix. On a symmetric
+                # distribution over a ratio scale an SD half again the mean
+                # puts most of the mass below zero, which the outcome cannot
+                # reach - that is an impossible pair of numbers. On a
+                # right-skewed one it is Tuesday: spectral power in ms^2
+                # routinely has a coefficient of variation over 1.5, and this
+                # check used to fire on every correct row of it.
+                if shape in ("RIGHT_SKEWED", "LEFT_SKEWED"):
+                    pass
+                elif shape == "SYMMETRIC":
+                    flag(line, "SE_IMPLIES_HUGE_SD",
+                         "SE=%s N=%g -> SD=%.1f vs mean %.1f, on a symmetric "
+                         "distribution over a ratio scale: most of the mass "
+                         "would be below zero" % (sym, n, sd, m))
+                else:
+                    flag(line, "DISPERSION_IMPLIES_SKEW",
+                         "SE=%s N=%g -> SD=%.1f vs mean %.1f. Either the "
+                         "outcome is skewed, and Distribution_Shape should say "
+                         "so, or one of these numbers is wrong - undeclared, "
+                         "there is no way to tell which" % (sym, n, sd, m))
         if require_dual:
             _dual(kernel, row, flag, line, ("Mean_R1", "Mean_R2", "Mean"), dual_tolerance_pct, reconciled=_rec)
             if dt != "NO_ERRORBAR":

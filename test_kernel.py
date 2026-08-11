@@ -81,6 +81,11 @@ CONT_BASE = dict(
     Errorbar_Stem_Confirmed="TRUE",
     Observed_Panel_Count=1, Worklist_Panel_Count=1,
     Panel_Reconciliation_Status="MATCHED",
+    # Declared on the base row because the validator requires them: a mean of
+    # log10(x) and a mean of x wear the same axis label, and whether an SD
+    # bigger than the mean is impossible depends on the distribution.
+    Analysis_Transformation="UNTRANSFORMED", Distribution_Shape="SYMMETRIC",
+    Transformation_Source="",
 )
 
 
@@ -192,8 +197,61 @@ for dt in ("SD", "SE", "SEM", "CI95", "IQR", "RANGE"):
     if dt in k.FIG_ASYMMETRIC_TYPES:
         over.update(Dispersion_Value="", Errorbar_Lower=90, Errorbar_Upper=102)
     expect("N=1 with " + dt, B(**over), want=["N_ONE_NO_DISPERSION"])
-expect("SE implying an impossible SD", B(Dispersion_Type="SE", Dispersion_Value=80),
+# WHICH of the two codes depends on the distribution, and that is the point.
+# On a symmetric distribution over a ratio scale an SD half again the mean puts
+# most of the mass below zero, which the outcome cannot reach - the numbers are
+# impossible. On a right-skewed one it is ordinary: spectral power in ms^2
+# routinely has a coefficient of variation over 1.5, and this check used to
+# fire on every correct row of it, which teaches a reader to ignore it.
+expect("SE implying an impossible SD, on a symmetric distribution",
+       B(Dispersion_Type="SE", Dispersion_Value=80,
+         Distribution_Shape="SYMMETRIC"),
        want=["SE_IMPLIES_HUGE_SD"])
+expect("the same numbers with the shape UNKNOWN ask for the shape",
+       B(Dispersion_Type="SE", Dispersion_Value=80,
+         Distribution_Shape="UNKNOWN"),
+       want=["DISPERSION_IMPLIES_SKEW"], forbid=["SE_IMPLIES_HUGE_SD"])
+expect("and on a right-skewed outcome they are not a problem at all",
+       B(Dispersion_Type="SE", Dispersion_Value=80,
+         Distribution_Shape="RIGHT_SKEWED"),
+       forbid=["SE_IMPLIES_HUGE_SD", "DISPERSION_IMPLIES_SKEW"])
+
+# The standalone validator and the batch gate have to agree about the words a
+# person may type. A vocabulary the template accepts and the pipeline refuses
+# is a template nobody can fill.
+import grid_engine as _ge                                       # noqa: E402
+def _plain(name, ok, detail=""):
+    print(("  ok   " if ok else "  FAIL ") + name
+          + ("" if ok else "  <- " + detail))
+    if not ok:
+        FAILURES.append(name)
+
+
+_plain("the two validators use one transformation vocabulary",
+       k.FIG_TRANSFORMATIONS == _ge.FIG_TRANSFORMATIONS,
+       "%s vs %s" % (k.FIG_TRANSFORMATIONS, _ge.FIG_TRANSFORMATIONS))
+_plain("and one set of distribution shapes",
+       k.FIG_DISTRIBUTION_SHAPES == _ge.FIG_DISTRIBUTION_SHAPES,
+       "%s vs %s" % (k.FIG_DISTRIBUTION_SHAPES, _ge.FIG_DISTRIBUTION_SHAPES))
+# UNTRANSFORMED and not NONE, because NONE is one of the spellings the blank
+# check treats as "not filled in" - the first attempt used it and every
+# correctly filled row came back BAD_ANALYSIS_TRANSFORMATION.
+_plain("the no-transformation value survives the blank check",
+       not k.fig_is_blank("UNTRANSFORMED") and k.fig_is_blank("NONE"))
+expect("a transformation outside the vocabulary",
+       B(Analysis_Transformation="LOGARITHM"),
+       want=["BAD_ANALYSIS_TRANSFORMATION"])
+expect("a distribution shape outside it",
+       B(Distribution_Shape="LOG_NORMALISH"),
+       want=["BAD_DISTRIBUTION_SHAPE"])
+expect("and one left blank, which is what a template arrives as",
+       B(Distribution_Shape=""), want=["BAD_DISTRIBUTION_SHAPE"])
+expect("a transformation with nothing quoted behind it",
+       B(Analysis_Transformation="LOG10"), want=["TRANSFORMATION_UNSOURCED"])
+expect("and quoted, it is accepted here",
+       B(Analysis_Transformation="LOG10",
+         Transformation_Source="Methods p.4: analysed on log10"),
+       forbid=["TRANSFORMATION_UNSOURCED"])
 
 print("no error bar is a stated fact")
 NEB = dict(Dispersion_Type="NO_ERRORBAR", Dispersion_Value="", Dispersion_R1="",

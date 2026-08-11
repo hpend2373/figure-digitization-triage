@@ -3754,6 +3754,45 @@ render and nothing to crop however long anybody looks — and filed as
 - an HTML "access denied" page saved as `.pdf`, an empty file and a binary blob
   are still `INTAKE_FAILED` → `INVESTIGATE`
 
+## What scale the numbers are on, and what shape the distribution is
+
+Three new unit columns, all read out of the METHODS TEXT and none of them
+visible in any raster: `Analysis_Transformation`, `Distribution_Shape`,
+`Transformation_Source`.
+
+**`SE_IMPLIES_HUGE_SD` was firing on correct data.** "SD is half again the
+mean" is impossible for a symmetric distribution over a ratio scale — most of
+the mass would sit below zero, and the outcome cannot go there. For a
+right-skewed one it is Tuesday: spectral power in ms² routinely has a
+coefficient of variation over 1.5, and the check fired on every correct row of
+it. A check that fires on correct data teaches a reader to ignore it, which
+costs more than not having it. It now needs the distribution:
+
+- `SYMMETRIC` → `SE_IMPLIES_HUGE_SD`, and the message says why it is impossible
+- `RIGHT_SKEWED` / `LEFT_SKEWED` → nothing; this is what those look like
+- `UNKNOWN` → `DISPERSION_IMPLIES_SKEW`, which asks for the shape instead of
+  accusing the numbers: *either the outcome is skewed, and the unit should say
+  so, or one of these numbers is wrong — undeclared, there is no way to tell*
+
+**A mean of log10(x) is not a mean of x**, and the two carry the same axis
+label. `Analysis_Transformation=UNKNOWN` blocks with
+`TRANSFORMED_SCALE_UNRESOLVED`; a declared transformation blocks with
+`TRANSFORMED_SCALE_NOT_POOLABLE` — the values may be perfectly read, and this
+package does not back-transform, so they are recorded and pooled separately or
+not at all. A transformation other than `UNTRANSFORMED` must quote the wording
+that supports it (`TRANSFORMATION_UNSOURCED`), and a hedged quote is refused
+the way a hedged `Errorbar_Definition_Source` is.
+
+`UNTRANSFORMED`, not `NONE`. `NONE` is in `FIG_NULL_TOKENS` — one of the
+spellings a coder uses for "I did not fill this in" — and "the authors did not
+transform their outcome" is a positive claim that has to survive the blank
+check. The first attempt used `NONE` and every correctly filled row came back
+`BAD_ANALYSIS_TRANSFORMATION`.
+
+Both validators carry the vocabulary and `test_kernel` pins that they agree: a
+template the standalone validator accepts and the batch gate rejects is a
+template nobody can fill.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

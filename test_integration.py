@@ -96,6 +96,12 @@ def build_rows():
                 "Dispersion_Type": cfg["dispersion_type"],
                 "Errorbar_Definition_Source": cfg["errorbar_definition_source"],
                 "N_Outcome": cfg["n_outcome"],
+                # Read out of the paper, not off the figure: these are blood
+                # pressures in mmHg, plotted in their own units, and nothing
+                # in the text says what shape the distributions are.
+                "Analysis_Transformation": "UNTRANSFORMED",
+                "Distribution_Shape": "UNKNOWN",
+                "Transformation_Source": "",
                 "Extraction_Method": "DIGITIZED",
                 "Bar_Top_Definition": b["Bar_Top_Definition"],
                 "Errorbar_Stem_Confirmed": b["Errorbar_Stem_Confirmed"],
@@ -125,8 +131,17 @@ def run(rows, cols, drop=None):
 
 print("the shipped template is what gets filled")
 cols = emit_blank_template(os.path.join(HERE, "figure_extraction_template_v7.csv"))
-check("template emitted with %d columns" % len(cols), len(cols) == 52, "got %d" % len(cols))
+check("template emitted with %d columns" % len(cols), len(cols) == 55, "got %d" % len(cols))
 check("Extraction_Method is in the emitted header", "Extraction_Method" in cols)
+# Three of the 55 are read out of the METHODS TEXT and appear nowhere in a
+# raster: what scale the plotted numbers are on, what shape the distribution
+# is, and where the paper says so. A template that does not ask for them gets
+# a log-scale mean pooled with native means and nothing downstream notices.
+check("and so are the three columns no raster can supply",
+      all(c in cols for c in ("Analysis_Transformation", "Distribution_Shape",
+                              "Transformation_Source")),
+      "%s" % [c for c in ("Analysis_Transformation", "Distribution_Shape",
+                          "Transformation_Source") if c not in cols])
 
 cols, rows = build_rows()
 check("72 rows built from the real figure", len(rows) == 72, "got %d" % len(rows))
@@ -139,7 +154,7 @@ print("CSV round-trip through the validator")
 # carries SIX sessions, so the two-phase subset is the part that is really B.
 two_phase = [r for r in rows if r["Timepoint_Label"] in ("B-1", "R5")]
 got = run(two_phase, cols)
-check("a correctly filled 52-column template passes the gate", got == [],
+check("a correctly filled template passes the gate", got == [],
       "problems: %s" % got)
 check("the subset is the full condition grid", len(two_phase) == 24,
       "got %d rows" % len(two_phase))

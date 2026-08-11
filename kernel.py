@@ -13,6 +13,18 @@ FIG_PHASES = ("PRE", "DURING", "POST", "RECOVERY", "DELTA", "ASSOCIATION")
 FIG_FOLLOWUP_PHASES = ("DURING", "POST", "RECOVERY")
 FIG_DISPERSION_TYPES = ("SD", "SE", "SEM", "CI95", "IQR", "RANGE", "NO_ERRORBAR")
 FIG_ASYMMETRIC_TYPES = ("CI95", "IQR", "RANGE")
+#: Kept in step with `grid_engine.FIG_TRANSFORMATIONS` and
+#: `grid_engine.FIG_DISTRIBUTION_SHAPES`; test_kernel pins that they agree,
+#: because a template the standalone validator accepts and the batch gate
+#: rejects is a template nobody can fill.
+#: UNTRANSFORMED, not NONE. "NONE" is in `FIG_NULL_TOKENS` - it is one of the
+#: spellings a coder uses for "I did not fill this in" - and "the authors did
+#: not transform their outcome" is a POSITIVE claim that has to survive the
+#: blank check. The first attempt used NONE and every correctly filled row came
+#: back BAD_ANALYSIS_TRANSFORMATION.
+FIG_TRANSFORMATIONS = ("UNTRANSFORMED", "LOG10", "LN", "LOG2", "SQRT",
+                       "RECIPROCAL", "RANK", "UNKNOWN")
+FIG_DISTRIBUTION_SHAPES = ("SYMMETRIC", "RIGHT_SKEWED", "LEFT_SKEWED", "UNKNOWN")
 FIG_DUAL_OK = ("AGREED", "RECONCILED")
 FIG_EXTRACTION_METHODS = ("DIGITIZED", "TRANSCRIBED")
 # How the plotted value was located on a bar. A vector bar's data coordinate is
@@ -130,6 +142,11 @@ def fig_template_columns():
         "Mean_R1", "Dispersion_R1", "Mean_R2", "Dispersion_R2",
         "Mean", "Dispersion_Value", "Errorbar_Lower", "Errorbar_Upper", "Dispersion_Type",
         "Errorbar_Definition_Source", "N_Outcome",
+        # WHAT SCALE THE NUMBERS ARE ON, and what shape the distribution is.
+        # Both are read out of the methods text and neither is visible in a
+        # raster, and the second is what makes SE_IMPLIES_HUGE_SD a check
+        # instead of a nuisance - see the flag itself.
+        "Analysis_Transformation", "Distribution_Shape", "Transformation_Source",
         "WPD_Project_File", "Axis_X_Scale", "Axis_Y_Scale",
         "Axis_Calib_X1_Value", "Axis_Calib_X1_Pixel", "Axis_Calib_X2_Value", "Axis_Calib_X2_Pixel",
         "Axis_Calib_Y1_Value", "Axis_Calib_Y1_Pixel", "Axis_Calib_Y2_Value", "Axis_Calib_Y2_Pixel",
@@ -1129,12 +1146,41 @@ def fig_validate_extraction(df, ranges=None, se_sd_ratio=1.5, require_dual=False
                      "guess, and SD/SE confusion scales the weight by sqrt(n). Quote the "
                      "source, or record NO_ERRORBAR and leave the row out of the pooled "
                      "variance." % (_tok, dtyp or "blank"))
+        # WHAT SCALE, AND WHAT SHAPE. Neither is visible in a raster and both
+        # change what the number means: a mean of log10(power) is not a mean of
+        # power, and whether an SD larger than the mean is impossible or
+        # ordinary depends entirely on the distribution.
+        _tf = ("" if fig_is_blank(r.get("Analysis_Transformation"))
+               else str(r.get("Analysis_Transformation")).strip().upper())
+        if _tf not in FIG_TRANSFORMATIONS:
+            flag(line, "BAD_ANALYSIS_TRANSFORMATION",
+                 "Analysis_Transformation=%s (expected %s)"
+                 % (_tf or "blank", "/".join(FIG_TRANSFORMATIONS)))
+        _shape = ("" if fig_is_blank(r.get("Distribution_Shape"))
+                  else str(r.get("Distribution_Shape")).strip().upper())
+        if _shape not in FIG_DISTRIBUTION_SHAPES:
+            flag(line, "BAD_DISTRIBUTION_SHAPE",
+                 "Distribution_Shape=%s (expected %s)"
+                 % (_shape or "blank", "/".join(FIG_DISTRIBUTION_SHAPES)))
+        if _tf not in ("UNTRANSFORMED", "UNKNOWN", "") \
+                and fig_is_blank(r.get("Transformation_Source")):
+            flag(line, "TRANSFORMATION_UNSOURCED",
+                 "Analysis_Transformation=%s with nothing quoted to support it"
+                 % _tf)
         if dt in ("SE", "SEM") and sym is not None and m is not None:
             n = fig_as_number(r.get("N_Outcome"))
-            if n and n > 0:
+            # The same rule the grid engine applies, and the same reason: "SD
+            # is bigger than the mean" is impossible for a symmetric
+            # distribution on a ratio scale and ordinary for a right-skewed
+            # one, so the check has to know which it is looking at. Undeclared,
+            # it says so rather than accusing the numbers.
+            shape = _shape
+            if n and n > 0 and shape not in ("RIGHT_SKEWED", "LEFT_SKEWED"):
                 sd = sym * np.sqrt(n)
                 if sd > abs(m) * se_sd_ratio:
-                    flag(line, "SE_IMPLIES_HUGE_SD",
+                    flag(line,
+                         "SE_IMPLIES_HUGE_SD" if shape == "SYMMETRIC"
+                         else "DISPERSION_IMPLIES_SKEW",
                          "SE=%s N=%s -> SD=%.1f vs mean %.1f" % (sym, n, sd, m))
 
         fig_check_numeric(r, ["Observed_Panel_Count", "Worklist_Panel_Count"], flag, line)

@@ -101,6 +101,8 @@ PLAN_KEYS = {
              "dispersion_type", "n_outcome", "n_source", "bar_top_definition",
              "errorbar_stem_confirmed", "errorbar_source", "x_calibration",
              "grid_rule", "sparse_justification", "value_scale",
+             "analysis_transformation", "distribution_shape",
+             "transformation_source",
              "display_hint", "extraction_method", "extractor_1", "note"),
 }
 
@@ -798,6 +800,15 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             Sparse_Justification=_s(u.get("sparse_justification")),
             Display_Hint=_s(u.get("display_hint")).upper(),
             Value_Scale=_s(u.get("value_scale")).upper() or "RATIO",
+            # Defaulted, and both defaults are the modest claim: the
+            # numbers are on the axis's own scale, and nobody has said
+            # what shape the distribution is. A plan that knows better
+            # says so and quotes where it read it.
+            Analysis_Transformation=(_s(u.get("analysis_transformation")).upper()
+                                     or "UNTRANSFORMED"),
+            Distribution_Shape=(_s(u.get("distribution_shape")).upper()
+                                or "UNKNOWN"),
+            Transformation_Source=_s(u.get("transformation_source")),
             Dispersion_Type=_s(u.get("dispersion_type")).upper(),
             Errorbar_Definition_Source=_s(u.get("errorbar_source")),
             N_Outcome=u.get("n_outcome", ""), N_Source=_s(u.get("n_source")),

@@ -291,7 +291,14 @@ def unit(uid, fid, grid, panel_label, outcome, units, domain, **kw):
         Statistic_Type="CONTINUOUS", Display_Hint="UNSPECIFIED",
         Grid_Rule="FULL", Sparse_Justification="", Dispersion_Type="SD",
         Errorbar_Definition_Source="",
-        N_Outcome=10, Value_Scale="RATIO", Extraction_Method="DIGITIZED",
+        N_Outcome=10, Value_Scale="RATIO",
+        # The figures plot means in the outcome's own units, so the scale
+        # is the outcome's. UNKNOWN shape rather than SYMMETRIC because
+        # nothing in this paper says which, and the difference only bites
+        # where the dispersion is large - where it bites, it should ask.
+        Analysis_Transformation="UNTRANSFORMED", Distribution_Shape="UNKNOWN",
+        Transformation_Source="",
+        Extraction_Method="DIGITIZED",
         Bar_Top_Definition="OUTLINE_CENTER", Errorbar_Stem_Confirmed="TRUE",
         Axis_X_Scale="LINEAR", Axis_Y_Scale="LINEAR",
         Axis_Calib_X1_Value=0, Axis_Calib_X1_Pixel=100,

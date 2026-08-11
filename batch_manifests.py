@@ -595,6 +595,16 @@ PAIRED_OPTION_RULES = (
 def panel_manifest_columns():
     return [
         "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Panel_Label", "Mark_Type",
+        # WHICH PANELS SHARE A PRINTED LEGEND. `Figure_ID` was doing this job by
+        # accident: it is a provenance view - which unit belongs to which
+        # figure - and `fill_identities_by_figure` groups by it, so the two
+        # meanings were one field. On publication 127 the three sub-panels of
+        # Figure 4 share one legend, and giving each its own view left the
+        # middle panel with a single complete group where prototypes need two:
+        # a bar whose fill WAS measured came out unnamed. The reverse is worse -
+        # two panels with different legends under one view would calibrate each
+        # other's fills - and nothing said which meaning a person was choosing.
+        "Identity_Domain_ID",
         "Image_Path",
         # the plot area, in image pixels
         "Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1",
@@ -1818,6 +1828,50 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag("panels:%s" % pid, "POSITION_FACTOR_INCONSISTENT",
                  "the positions of one panel name %d different factors (%s)"
                  % (len(p_factors), ", ".join(sorted(p_factors))))
+
+    # ------------------------------------------------------ identity domains
+    # A domain is "these panels share a printed legend", which is what decides
+    # whose fills calibrate whose. Two things make it a lie: panels from
+    # different physical figures under one domain - their fills were printed by
+    # different plates and there is no reason a screen means the same thing in
+    # both - and one fill standing for two different factor levels inside one
+    # domain, which is the calibration set disagreeing with itself.
+    domain_raster, domain_fill = {}, {}
+    for pid, r in panel_index.items():
+        # Only the marks whose SERIES IS A FILL. A colour or marker panel is
+        # told apart by something printed on the mark itself, so nothing about
+        # it calibrates against a neighbouring panel and sharing a view across
+        # rasters is somebody else's question - the source-figure inventory's.
+        if panel_mark.get(pid) != "BAR_MONO":
+            continue
+        domain = str(r.get("Identity_Domain_ID", "")).strip()
+        if not domain:
+            if True:
+                flag("panels:%s" % pid, "IDENTITY_DOMAIN_MISSING",
+                     "a BAR_MONO panel is identified by its FILL, so it has to "
+                     "say which panels it shares a printed legend with. Use the "
+                     "Figure_ID if this figure has one legend")
+            continue
+        raster = str(r.get("Image_Path", "")).strip()
+        first = domain_raster.setdefault(domain, (pid, raster))
+        if first[1] != raster:
+            flag("panels:%s" % pid, "IDENTITY_DOMAIN_SPANS_RASTERS",
+                 "Identity_Domain_ID=%s also covers %s, which is read from %s. "
+                 "Fills calibrate each other inside a domain, and two rasters "
+                 "are two printings" % (domain, first[0], first[1]))
+        for _, srow in series.iterrows():
+            if str(srow.get("Panel_ID", "")).strip() != pid:
+                continue
+            fill = str(srow.get("Bar_Fill_Pattern", "")).strip().upper()
+            level = str(srow.get("Factor_Level", "")).strip().upper()
+            if not fill or not level:
+                continue
+            seen = domain_fill.setdefault(domain, {}).setdefault(fill, (pid, level))
+            if seen[1] != level:
+                flag("panels:%s" % pid, "IDENTITY_DOMAIN_FILL_CONFLICT",
+                     "inside Identity_Domain_ID=%s the %s fill means %s here "
+                     "and %s in %s; one domain is one legend"
+                     % (domain, fill, level, seen[1], seen[0]))
 
     # ------------------------------------------------ human-named identities
     # Checked last because it is the only manifest that may legitimately be

@@ -3164,6 +3164,32 @@ frames refuses the run rather than proceeding. A blank `Source_Panel_ID` in the
 panel DECLARATION is `IDENTITY_PANEL_DECLARATION_INCOMPLETE`, as `Unit_ID`
 already was.
 
+### The plan is a contract too (v7.36)
+
+Publication 127's pilot lost an hour to `axis_x_region`. The compiler reads
+`x_region`; nothing said so; the manifest's `Axis_X_Region` came out blank and
+every panel picture was cropped by guesswork, cutting away the axis labels the
+reviewer is asked to check. **A field somebody filled in and nothing read is as
+wrong as a field read wrongly**, and this is the layer where a hundred
+publications get authored. `PLAN_KEYS` lists what each plan object may carry,
+an unknown key is `PLAN_UNKNOWN_KEY` with a did-you-mean, and
+`axis_x_region`/`axis_y_region` are now canonical with the old spellings as
+aliases (`PLAN_ALIAS_CONFLICT` if both appear and disagree).
+
+**`Identity_Domain_ID` — which panels share a printed legend.** `Figure_ID` was
+doing this job by accident: it is a provenance view, and
+`fill_identities_by_figure` groups by it, so two meanings sat in one field. On
+127 the three sub-panels of Figure 4 share one legend; giving each its own view
+left the middle panel with one complete group where prototypes need two, and a
+bar whose fill WAS measured came out unnamed. The reverse is worse - two panels
+with different legends under one view would calibrate each other's fills. The
+domain is declared (defaulting to the view, so old plans behave as before),
+required for BAR_MONO, and validated: one raster per domain
+(`IDENTITY_DOMAIN_SPANS_RASTERS`) and one meaning per fill inside it
+(`IDENTITY_DOMAIN_FILL_CONFLICT`). The scenario that makes it real splits one
+raster into two panels with two views and one legend: the half that cannot
+calibrate alone reads 5 of 6 cells with the domain and 3 without.
+
 **Where this stands.** A run made by this pipeline has a closed identity chain:
 measurement, panel binding, geometry foreign key, cell, identity source,
 resolution, evidence, review, approval. Finalizing a run made by an OLDER or a
@@ -3179,18 +3205,18 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 670 |
+| `test_run_batch.py` | 684 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
-| `test_compile_plan.py` | 125 |
+| `test_compile_plan.py` | 132 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1940** |
+| **total** | **1961** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -240,7 +240,12 @@ UNITS = [
 
 
 def panel(pid, uid, mark, image, box, **kw):
-    base = dict(Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F1", Unit_ID=uid, Panel_Label=pid,
+    # `Identity_Domain_ID` defaults to the figure, which is what one legend over
+    # one figure means - and it is DECLARED rather than inferred, because the
+    # two are only the same question when a figure has one legend.
+    base = dict(Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F1",
+                Identity_Domain_ID=kw.get("Figure_ID", "F1"),
+                Unit_ID=uid, Panel_Label=pid,
                 Mark_Type=mark, Image_Path=image,
                 Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
                 Axis_X_Region="", Axis_Y_Region="",
@@ -2722,7 +2727,8 @@ _short_unit = dict(_mono_unit, Unit_ID="U_SHORT", Figure_ID="F_SHORT",
                    Outcome_Variable="Total peripheral resistance",
                    Unit="mmHg/L/min")
 _short_panel = dict(_mono_panel, Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
-                    Figure_ID="F_SHORT", Unit_ID="U_SHORT",
+                    Figure_ID="F_SHORT", Identity_Domain_ID="F_SHORT",
+                    Unit_ID="U_SHORT",
                     Panel_Label="P_SHORT", Image_Path=SHORT_IMG)
 _short_series = [dict(r, Panel_ID="P_SHORT") for r in _mono_series]
 _short_positions = [dict(r, Panel_ID="P_SHORT") for r in _mono_positions]
@@ -3596,7 +3602,8 @@ _FRAMES2 = RB.load_manifests(_s2)
 _probs = []
 check("a run that copied its evidence in withholds nothing",
       not FIN.identity_contract_failures(_o2, _led, _machine2,
-                                         lambda w, c, d: _probs.append(c))
+                                         lambda w, c, d: _probs.append(c),
+                                         frames=_FRAMES2)
       and not _probs, "%s" % _probs)
 check("the ledger names which resolution each copy belongs to",
       "Artifact_Reference" in RB.PANEL_ARTIFACT_COLUMNS
@@ -3608,7 +3615,8 @@ _probs = []
 _old_shape = _led[_led["Artifact_Type"] != "IDENTITY_EVIDENCE"]
 check("a run without the copy is withheld from approval, by panel",
       FIN.identity_contract_failures(_o2, _old_shape, _machine2,
-                                     lambda w, c, d: _probs.append(c))
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 # And a copy that is in the ledger under a hash the resolution never declared.
 _probs = []
@@ -3616,7 +3624,8 @@ _wrong = _led.copy()
 _wrong.loc[_wrong["Artifact_Type"] == "IDENTITY_EVIDENCE", "SHA256"] = "0" * 64
 check("and so is a copy that is not the file that was signed",
       FIN.identity_contract_failures(_o2, _wrong, _machine2,
-                                     lambda w, c, d: _probs.append(c))
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 # End to end through `finalize`, because the two checks above call the helper
 # directly and the wiring is the thing a revert removes. A full run, a real
@@ -3701,7 +3710,8 @@ _swapped = _machine2.copy()
 _swapped.loc[_swapped["Identity_Source"] == "HUMAN", "Resolution_ID"] = "IR_OTHER"
 check("a value citing a resolution this run never recorded is withheld",
       FIN.identity_contract_failures(_o2, _led, _swapped,
-                                     lambda w, c, d: _probs.append(c))
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
       == {"P_SHORT"}
       and "REVIEW_IDENTITY_RESOLUTION_UNKNOWN" in _probs, "%s" % _probs)
 _probs = []
@@ -3710,7 +3720,8 @@ _wrongfill.loc[_wrongfill["Identity_Source"] == "HUMAN",
                "Resolved_Fill_Pattern"] = "SOLID"
 check("and one that disagrees with the resolution it cites is withheld",
       FIN.identity_contract_failures(_o2, _led, _wrongfill,
-                                     lambda w, c, d: _probs.append(c))
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
       == {"P_SHORT"}
       and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
 
@@ -3901,7 +3912,8 @@ for _label, _rows, _extra in (
     _led3 = _with_resolution_rows(_rows)
     check("%s is withheld, not resolved by file order" % _label,
           FIN.identity_contract_failures(
-              _rescopy, _led3, _machine2, lambda w, c, d: _probs.append(c))
+              _rescopy, _led3, _machine2, lambda w, c, d: _probs.append(c),
+              frames=_FRAMES2)
           == {"P_SHORT"}
           and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
 # And the run's copy of the rows goes through the RUNNER's own checker, so the
@@ -3941,7 +3953,8 @@ _two = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_RESOLUTION"]],
                  ignore_index=True)
 check("two resolution artifacts for one panel is withheld",
       FIN.identity_contract_failures(_o2, _two, _machine2,
-                                     lambda w, c, d: _probs.append(c))
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 
 # `Resolution_ID` IS UNIQUE ACROSS THE RUN, NOT WITHIN A PANEL.
@@ -3962,6 +3975,45 @@ check("one Resolution_ID in two panels is refused",
                                    lambda w, c, d: _probs.append(c))
       >= {"P_SHORT", "P_MONO"}
       and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# A duplicate identifier is a property of BOTH panels. The shared checker
+# reports it on the second occurrence, so charging it to that row's panel let
+# the first one through - and neither panel can be said to own IR1.
+#
+# REVERT: drop the pre-scan and let the checker's own report decide. The
+# scenario below withholds one panel instead of two, and which one depends on
+# the order the panels are visited in.
+_probs = []
+_same_id = {"P_SHORT": [_signed],
+            "P_MONO": [dict(_signed, Panel_ID="P_MONO")]}
+_frames_two = dict(_FRAMES2)
+_frames_two["resolutions"] = pd.DataFrame(
+    [_signed, dict(_signed, Panel_ID="P_MONO")],
+    columns=BM.identity_resolution_columns())
+check("a duplicated Resolution_ID withholds every panel that uses it",
+      FIN.resolution_copy_failures(_same_id, _frames_two,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT", "P_MONO"}, "%s" % _probs)
+# And the same the other way round, so the verdict does not depend on which
+# panel the checker happens to reach first.
+_probs = []
+check("and the verdict does not depend on the order the panels come in",
+      FIN.resolution_copy_failures(dict(reversed(list(_same_id.items()))),
+                                   _frames_two,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT", "P_MONO"}, "%s" % _probs)
+# REVERT: compare the copy and the manifest as dicts keyed by Resolution_ID. A
+# repeated identifier then collapses to one entry on both sides and two rows
+# compare equal to one.
+_probs = []
+_frames_dup = dict(_FRAMES2)
+_frames_dup["resolutions"] = pd.DataFrame(
+    [_signed], columns=BM.identity_resolution_columns())
+check("a copy holding one row twice is not equal to a manifest holding it once",
+      FIN.resolution_copy_failures({"P_SHORT": [_signed, dict(_signed)]},
+                                   _frames_dup,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
 
 # THE COPY IS THE MANIFEST.
 #
@@ -3995,6 +4047,15 @@ check("and so is a panel whose resolutions were dropped from the copy",
                                    lambda w, c, d: _probs.append(c))
       == {"P_SHORT"}, "%s" % _probs)
 
+# REVERT: `if frames is not None: withheld |= resolution_copy_failures(...)`.
+# The helper refuses when it is handed no frames, and the caller then never
+# calls it - so the contract the helper states is not the contract that runs.
+_probs = []
+check("a copy check with no verified frames refuses rather than being skipped",
+      FIN.identity_contract_failures(_o2, _led, _machine2,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "RUN_NOT_FINALIZABLE" in _probs, "%s" % _probs)
+
 # THE REGISTRY'S OWN PROBLEMS ARE NOT SWALLOWED.
 #
 # The index was built with a callback that threw every problem away, and
@@ -4023,7 +4084,8 @@ _dupe = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"]],
                   ignore_index=True)
 check("two evidence copies for one resolution is refused, not resolved by order",
       FIN.identity_contract_failures(
-          _o2, _dupe, _machine2, lambda w, c, d: _probs.append(c))
+          _o2, _dupe, _machine2, lambda w, c, d: _probs.append(c),
+          frames=_FRAMES2)
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 
 # A panel resolved only by a reviewer's own reading has no evidence file, and
@@ -4047,7 +4109,7 @@ check("a reviewer's own reading needs no evidence file and is not withheld",
           _rio, _riled,
           pd.read_csv(os.path.join(_rio, "figure_values_machine_qc.csv"),
                       dtype=object).fillna(""),
-          lambda w, c, d: _probs.append(c))
+          lambda w, c, d: _probs.append(c), frames=RB.load_manifests(_ri))
       and "IDENTITY_EVIDENCE" not in set(_riled["Artifact_Type"]),
       "%s %s" % (_ris["status"], _probs))
 _riq = pd.read_csv(os.path.join(_rio, "review_queue.csv"),
@@ -4156,6 +4218,164 @@ for _label, _kw, _code, _rows in (
               and _code in _brow.iloc[0]["Detail"],
               "%s" % (list(zip(_brow["Run_State"], _brow["Detail"]))
                       if len(_brow) else "no row"))
+
+# WHICH PANELS SHARE A PRINTED LEGEND is its own declaration.
+#
+# `Figure_ID` was doing this job by accident - it is a provenance view, and
+# `fill_identities_by_figure` groups by it. On publication 127 the three
+# sub-panels of Figure 4 share one legend; giving each its own view left the
+# middle panel with one complete group where prototypes need two, and a bar
+# whose fill WAS measured came out unnamed. The reverse is worse: two panels
+# with different legends under one view would calibrate each other's fills.
+#
+# REVERT: read `Figure_ID` in `measure_bar_mono_figures` again. The first
+# scenario below still passes - the domain defaults to the view - and the
+# second stops separating panels that must not calibrate each other.
+print()
+print("a printed legend covers the panels that say it does")
+check("the domain reaches the reader, and defaults to the figure view",
+      "Identity_Domain_ID" in BM.panel_manifest_columns()
+      and pd.read_csv(os.path.join(_mm, "panel_manifest.csv"),
+                      dtype=object).fillna("")
+      .set_index("Panel_ID")["Identity_Domain_ID"]["P_MONO"] == "F_MONO",
+      "%s" % pd.read_csv(os.path.join(_mm, "panel_manifest.csv"),
+                         dtype=object).fillna("")[
+                             ["Panel_ID", "Figure_ID", "Identity_Domain_ID"]]
+      .to_dict("records"))
+_geo_rows = pd.read_csv(os.path.join(_mo, "mono_bar_geometry.csv"),
+                        dtype=object).fillna("")
+check("and the geometry rows are grouped by the domain, not by the panel",
+      set(_geo_rows["Figure_ID"]) == {"F_MONO"},
+      "%s" % sorted(set(_geo_rows["Figure_ID"])))
+# Two panels of one domain that print different things for one fill: the
+# calibration set disagreeing with itself.
+_conflict = short_manifests(
+    os.path.join(ROOT, "m_domainconflict"),
+    series_rows=SERIES + _mono_series + [
+        dict(r, Factor_Level=("EARLY" if _MONO_ARMS[f] == "PRE" else "PRE"))
+        for f, r in zip(_MONO_FILLS, _short_series)],
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO",
+                          Image_Path=MONO_IMG)])
+_co = os.path.join(ROOT, "o_domainconflict")
+_cs = RB.run_batch(_conflict, _co, file_root=ROOT, run_date="2026-08-06")
+_ccodes = set(pd.read_csv(os.path.join(_co, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _cs["status"] == "MANIFEST_REJECTED" else set()
+check("one fill meaning two things inside a domain is refused",
+      _cs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_FILL_CONFLICT" in _ccodes,
+      "%s %s" % (_cs["status"], sorted(_ccodes)))
+_spans = short_manifests(
+    os.path.join(ROOT, "m_domainspans"),
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO")])
+_so = os.path.join(ROOT, "o_domainspans")
+_ss2 = RB.run_batch(_spans, _so, file_root=ROOT, run_date="2026-08-06")
+_scodes = set(pd.read_csv(os.path.join(_so, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _ss2["status"] == "MANIFEST_REJECTED" else set()
+check("and a domain that spans two rasters is refused",
+      _ss2["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_SPANS_RASTERS" in _scodes,
+      "%s %s" % (_ss2["status"], sorted(_scodes)))
+_nodomain = short_manifests(
+    os.path.join(ROOT, "m_nodomain"),
+    panels=PANELS + [_mono_panel, dict(_short_panel, Identity_Domain_ID="")])
+_no = os.path.join(ROOT, "o_nodomain")
+_ns = RB.run_batch(_nodomain, _no, file_root=ROOT, run_date="2026-08-06")
+_ncodes = set(pd.read_csv(os.path.join(_no, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _ns["status"] == "MANIFEST_REJECTED" else set()
+check("a BAR_MONO panel that names no domain is refused",
+      _ns["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_MISSING" in _ncodes,
+      "%s %s" % (_ns["status"], sorted(_ncodes)))
+# And a colour panel is not asked for one: its series is told apart by
+# something printed on the mark itself, so nothing about it calibrates against
+# a neighbour.
+_colour_blank = short_manifests(
+    os.path.join(ROOT, "m_colournodomain"),
+    panels=[dict(p, Identity_Domain_ID="") if p["Mark_Type"] != "BAR_MONO"
+            else p for p in PANELS + [_mono_panel, _short_panel]])
+_cbs = RB.run_batch(_colour_blank, os.path.join(ROOT, "o_colournodomain"),
+                    file_root=ROOT, run_date="2026-08-06")
+check("and a colour panel is not asked - its series is not a fill",
+      _cbs["status"] == "RAN", "%s" % _cbs)
+
+# The scenario that makes the domain more than a rename: TWO views, ONE legend.
+#
+# The short raster's four groups are split into two panels with their own units
+# and their own figure views. The left panel holds two complete groups; the
+# right holds one complete group and the group with the two fifteen-pixel bars.
+# Prototypes need two complete groups, so the right panel ALONE cannot name the
+# one stippled bar it did sample - and with the two panels in one domain, the
+# figure can.
+#
+# REVERT: group by `Figure_ID` in `measure_bar_mono_figures`. The left panel is
+# unaffected and the right panel loses a cell.
+_HALF = {"LEFT": dict(box=[90, 400, 40, 430], groups=("T0", "T1")),
+         "RIGHT": dict(box=[400, 720, 40, 430], groups=("T2", "T3"))}
+_half_panels, _half_units, _half_series, _half_positions = [], [], [], []
+_half_figures, _half_source_figures, _half_source_panels = [], [], []
+for _side, _spec in _HALF.items():
+    _pid, _uid, _fid = "P_%s" % _side, "U_%s" % _side, "F_%s" % _side
+    _half_panels.append(panel(
+        _pid, _uid, "BAR_MONO", SHORT_IMG, _spec["box"], Figure_ID=_fid,
+        # One printed legend over both halves, and it is said out loud.
+        Identity_Domain_ID="F_SHORT_LEGEND", Source_Panel_ID=_pid,
+        Config_ID="", Axis_Y_Ticks=";".join("%g:%g" % (v, p)
+                                            for v, p in _gt["y_ticks"])))
+    _half_units.append(dict(_short_unit, Unit_ID=_uid, Figure_ID=_fid,
+                            Panel=_side, Grid_ID="G_%s" % _side))
+    _half_series += [series(_pid, "S_%s" % f, _MONO_ARMS[f], Bar_Fill_Pattern=f)
+                     for f in _MONO_FILLS]
+    _half_positions += [
+        dict(Panel_ID=_pid, Position_ID=q, X_Pixel=x, Slot_Index=i,
+             Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+             Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+        for i, (q, x) in enumerate(zip(_gt["groups"], _gt["group_x"]))
+        if q in _spec["groups"]]
+    _half_figures.append(dict(_short_figure, Figure_ID=_fid,
+                              Figure_Number="FIG6%s" % _side[0]))
+    _half_source_figures.append(dict(_short_source_figure,
+                                     Source_Figure_ID="SF_%s" % _side,
+                                     Figure_Number="FIG6%s" % _side[0]))
+    _half_source_panels.append(dict(_short_source_panel, Source_Panel_ID=_pid,
+                                    Source_Figure_ID="SF_%s" % _side,
+                                    Panel_Label=_pid))
+_half_grids = _mono_grids + [
+    dict(Grid_ID="G_%s" % side, Factor_Name=f, Factor_Level=lv, Level_Order=i,
+         Note="")
+    for side, spec in _HALF.items()
+    for f, levels in (("ARM", ("PRE", "EARLY", "LATE")),
+                      ("TIMEPOINT", spec["groups"]))
+    for i, lv in enumerate(levels)]
+_hm = write_manifests(
+    os.path.join(ROOT, "m_halves"), panels=PANELS + _half_panels,
+    series_rows=SERIES + _half_series, positions=POSITION_ROWS + _half_positions,
+    units=UNITS + _half_units, figures=FIGURES + _half_figures,
+    grids=_half_grids, source_figures=SOURCE_FIGURES + _half_source_figures,
+    source_panels=SOURCE_PANELS + _half_source_panels,
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=6)])
+_ho = os.path.join(ROOT, "o_halves")
+_hs = RB.run_batch(_hm, _ho, file_root=ROOT, run_date="2026-08-06")
+_hr = pd.read_csv(os.path.join(_ho, "run_manifest.csv"), dtype=object).fillna("")
+_hcells = dict(zip(_hr["Panel_ID"], _hr["Cells_Read"]))
+check("the batch of two half panels runs", _hs["status"] == "RAN", "%s" % _hs)
+check("the left half reads all six of its cells",
+      _hcells.get("P_LEFT") == "6", "%s" % _hcells)
+# Five of six: the short bar of T3 has no fill to sample and no resolution
+# here, and the other five are named - including the two of T3's partial group,
+# which only the left half's prototypes can name.
+check("and the right half is named by the OTHER half's prototypes",
+      _hcells.get("P_RIGHT") == "5", "%s" % _hcells)
+_hg = pd.read_csv(os.path.join(_ho, "mono_bar_geometry.csv"),
+                  dtype=object).fillna("")
+check("because both halves measured into one identity domain",
+      set(_hg[_hg["Panel_ID"].isin(["P_LEFT", "P_RIGHT"])]["Figure_ID"])
+      == {"F_SHORT_LEGEND"},
+      "%s" % sorted(set(_hg["Figure_ID"])))
 
 check("the identity vocabulary has one definition, in the layer both can see",
       BM.AUTO_IDENTITY_EVIDENCE is K.FIG_AUTO_IDENTITY_EVIDENCE

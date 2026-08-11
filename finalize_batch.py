@@ -310,6 +310,20 @@ def resolution_copy_failures(rows_by_panel, frames, flag):
         for code, detail in registry_problems:
             flag("run", "REVIEW_IDENTITY_REVIEWER_INVALID", "%s: %s" % (code, detail))
         withheld |= set(rows_by_panel)
+    # Pre-scanned, before the shared checker: it reports a duplicate on the
+    # SECOND occurrence, so charging the problem to that row's panel let the
+    # first panel through - and a duplicated identifier is a property of both
+    # panels, neither of which can be said to own IR001.
+    by_id = {}
+    for pid, rows in sorted(rows_by_panel.items()):
+        for row in rows:
+            by_id.setdefault(_s(row.get("Resolution_ID")), []).append(pid)
+    for rid, pids in sorted(by_id.items()):
+        if len(pids) > 1:
+            flag("run", "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
+                 "resolution %s is used by %s; one identifier names one "
+                 "decision" % (rid or "(blank)", ", ".join(sorted(set(pids)))))
+            withheld |= set(pids)
     every = [row for pid in sorted(rows_by_panel) for row in rows_by_panel[pid]]
     if every:
         BM.check_identity_resolution(
@@ -336,12 +350,16 @@ def resolution_copy_failures(rows_by_panel, frames, flag):
     frame = frames.get("resolutions")
     if frame is not None:
         for _, row in frame.iterrows():
-            declared.setdefault(_s(row.get("Panel_ID")), {})[
-                _s(row.get("Resolution_ID"))] = {c: _s(row.get(c)) for c in columns}
+            declared.setdefault(_s(row.get("Panel_ID")), []).append(
+                [_s(row.get(c)) for c in columns])
+    for pid in declared:
+        declared[pid].sort()
     for pid, rows in sorted(rows_by_panel.items()):
-        copied = {_s(r.get("Resolution_ID")): {c: _s(r.get(c)) for c in columns}
-                  for r in rows}
-        if copied != declared.get(pid, {}):
+        # Sorted LISTS, not dicts keyed by Resolution_ID: a dict drops a
+        # repeated identifier silently, which is the one thing this comparison
+        # must not do. Row ORDER still does not matter.
+        copied = sorted([[_s(r.get(c)) for c in columns] for r in rows])
+        if copied != declared.get(pid, []):
             flag("panel:%s" % pid, "IDENTITY_RESOLUTION_COPY_MISMATCH",
                  "the resolutions copied into the run for %s are not the ones "
                  "in the manifest the run validated" % pid)
@@ -548,8 +566,7 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
     # Once, over every panel's copy at the same time: uniqueness of
     # `Resolution_ID` is a property of the RUN, not of a panel, and so is the
     # comparison against the manifest the run validated.
-    if frames is not None:
-        withheld |= resolution_copy_failures(copied_rows, frames, flag)
+    withheld |= resolution_copy_failures(copied_rows, frames or {}, flag)
     return withheld
 
 
@@ -955,13 +972,28 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "a verified run output could not be parsed (%s: %s)"
                     % (type(exc).__name__, exc))
 
-    try:
-        reviewers = pd.read_csv(os.path.join(manifest_dir, "reviewer_registry.csv"),
-                                dtype=object).fillna("")
-    except Exception as exc:
+    # The frame `verify_manifest_inputs` hashed, not the path read again. The
+    # registry decides who may approve, so re-opening it after verifying it is
+    # the same window the manifests were just closed against.
+    reviewers = verified.get("reviewers")
+    if reviewers is None:
         return stop("RUN_NOT_FINALIZABLE",
-                    "reviewer_registry.csv could not be read from %s (%s)"
-                    % (manifest_dir, exc))
+                    "the verified manifests carry no reviewer_registry.csv, so "
+                    "no approver can be checked")
+    # And validated once, here, for every panel - not only for the panels that
+    # carry a human resolution. A legacy run's approver could otherwise pass on
+    # `Reviewer_Record_Type=HUMAN` alone while the registry row itself is
+    # malformed.
+    registry_problems = []
+    BM.check_reviewer_registry(
+        reviewers,
+        lambda where, code, detail: registry_problems.append((code, detail)))
+    for code, detail in registry_problems:
+        flag("run", "REVIEWER_REGISTRY_INVALID", "%s: %s" % (code, detail))
+    if registry_problems:
+        return stop("RUN_NOT_FINALIZABLE",
+                    "the reviewer registry this run was validated against does "
+                    "not pass the registry contract")
 
     reviews = load_reviews(review_path, flag)
     # Which artifacts the run says each panel has. Read after the verification

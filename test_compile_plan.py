@@ -436,6 +436,50 @@ check("and so is something that is not a plan at all",
 
 
 print()
+# A plan key nothing reads is as wrong as a key read wrongly, and it is the
+# mistake a hand-written or template-copied plan actually makes: `axis_x_region`
+# for `x_region`, `y_tick` for `y_ticks`. Publication 127's pilot lost its
+# declared axis regions exactly this way and every panel picture came out
+# cropped by guesswork.
+#
+# REVERT: drop `_unknown_key_problems` or its call. The plan below compiles
+# clean and the region it declares is silently dropped.
+print()
+print("a plan key nothing reads is refused, with a suggestion")
+_typo = copy.deepcopy(PLAN)
+_read = _typo["figures"][0]["panels"][0]["read"]
+_read["axis_x_regionn"] = "1,2,3,4"
+_probs = CP.validate_plan(_typo, file_root=HERE)
+check("a near-miss key is PLAN_UNKNOWN_KEY",
+      any(p["check"] == "PLAN_UNKNOWN_KEY" for p in _probs), "%s" % _probs[:2])
+check("and the message names the key it meant",
+      any("axis_x_region" in p["detail"] for p in _probs
+          if p["check"] == "PLAN_UNKNOWN_KEY"), "%s" % _probs[:2])
+for _where, _obj in (("a reviewer", lambda p: p["reviewers"][0]),
+                     ("a unit", lambda p: p["units"][0]),
+                     ("a series", lambda p: p["figures"][0]["panels"][0]
+                      ["read"]["series"][0])):
+    _bad = copy.deepcopy(PLAN)
+    _obj(_bad)["notes"] = "not a key"
+    check("%s with an unknown key is refused too" % _where,
+          any(p["check"] == "PLAN_UNKNOWN_KEY"
+              for p in CP.validate_plan(_bad, file_root=HERE)),
+          "%s" % CP.validate_plan(_bad, file_root=HERE)[:2])
+# The canonical spelling and its alias may both appear only if they agree.
+_alias = copy.deepcopy(PLAN)
+_alias["figures"][0]["panels"][0]["read"]["axis_x_region"] = "1,2,3,4"
+_alias["figures"][0]["panels"][0]["read"]["x_region"] = "9,9,9,9"
+check("two spellings of one field that disagree is PLAN_ALIAS_CONFLICT",
+      any(p["check"] == "PLAN_ALIAS_CONFLICT"
+          for p in CP.validate_plan(_alias, file_root=HERE)),
+      "%s" % CP.validate_plan(_alias, file_root=HERE)[:2])
+_canon = copy.deepcopy(PLAN)
+_canon["figures"][0]["panels"][0]["read"]["axis_x_region"] = "1,2,3,4"
+check("and the canonical spelling alone compiles",
+      not [p for p in CP.validate_plan(_canon, file_root=HERE)
+           if p["check"] in ("PLAN_UNKNOWN_KEY", "PLAN_ALIAS_CONFLICT")],
+      "%s" % [p for p in CP.validate_plan(_canon, file_root=HERE)][:2])
+
 print("%d scenarios run" % len(RAN))
 shutil.rmtree(ROOT, ignore_errors=True)
 if FAILURES:

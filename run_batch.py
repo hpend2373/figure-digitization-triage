@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.35"
+PIPELINE_VERSION = "7.36"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -881,7 +881,13 @@ def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
                 image, box, _x_positions(positions_by_panel.get(pid, [])),
                 ycal, fills, review_crop_box=_review_crop(panel, box),
                 panel_id=pid,
-                figure_id=_s(panel.get("Figure_ID")) or pid, **kwargs)
+                # The DOMAIN, not the view: which panels share a printed legend
+                # is what decides whose fills calibrate whose, and it is only
+                # the same question as "which figure is this" when a figure has
+                # one legend. `compile_plan` defaults the domain to the view, so
+                # a plan that does not distinguish them behaves as before.
+                figure_id=(_s(panel.get("Identity_Domain_ID"))
+                           or _s(panel.get("Figure_ID")) or pid), **kwargs)
         except MR.UnsupportedCapabilityError as exc:
             refusals[pid] = ("NO_READER_AVAILABLE", "%s" % exc)
             continue

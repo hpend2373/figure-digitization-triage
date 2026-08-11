@@ -53,9 +53,132 @@ PLAN_SECTIONS = ("schema", "publication_id", "reviewers", "documents",
 #: Panel-level `read` block keys, and whether the compiler requires them.
 READ_REQUIRED = ("mark_type", "unit_id", "figure_view", "box")
 
+#: Every key each kind of plan object may carry. A key outside its list is
+#: refused rather than ignored.
+#:
+#: This exists because of an hour spent on publication 127. The plan declared
+#: `axis_x_region`; the compiler reads `x_region`; the compiler said nothing,
+#: the manifest's `Axis_X_Region` came out blank, and every panel picture was
+#: cropped by guesswork - cutting away the axis labels the reviewer is asked to
+#: check. A field somebody filled in and nothing read is as wrong as a field
+#: read wrongly, and at a hundred publications nobody would have noticed.
+#:
+#: `factors` and `reader_config.options` are the exceptions: their keys ARE
+#: data (a factor name, an option name) and are checked against their own
+#: vocabularies elsewhere.
+PLAN_KEYS = {
+    "plan": ("schema", "publication_id", "reviewers", "documents", "grids",
+             "reader_configs", "figure_views", "figures", "units"),
+    "reviewer": ("reviewer_id", "name", "record_type", "contact_type",
+                 "contact", "registered_by", "registration_date",
+                 "human_attestation", "note"),
+    "document": ("document_id", "role", "source_file", "page_range",
+                 "observed_figure_count", "inventory_status",
+                 "figure_count_method", "reviewer_id", "inspection_date",
+                 "note"),
+    "grid": ("grid_id", "factors", "note"),
+    "reader_config": ("config_id", "options", "note"),
+    "figure_view": ("caption", "note"),
+    "figure": ("source_figure_id", "document_id", "figure_number",
+               "source_file", "source_page", "image", "image_sha256",
+               "observed_panel_count", "inventory_status",
+               "panel_count_method", "reviewer_id", "inspection_date", "note",
+               "panels"),
+    "panel": ("panel_id", "label", "outcome_label", "target_status",
+              "disposition", "reason", "note", "read"),
+    "read": ("mark_type", "unit_id", "figure_view", "identity_domain", "box",
+             "y_ticks", "x_ticks", "y_scale", "x_scale", "baseline",
+             "config_id", "panel_mode", "association_type",
+             "axis_x_region", "axis_y_region", "x_region", "y_region",
+             "note", "series", "positions"),
+    "series": ("series_id", "factor", "level", "bar_fill", "marker",
+               "marker_fill", "line_style", "colour", "colour_tolerance",
+               "mask_key", "note"),
+    "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
+                 "display_order", "timepoint_label", "timepoint_days", "note"),
+    "unit": ("unit_id", "figure_view", "grid_id", "panel", "outcome_name",
+             "domain", "unit", "statistic", "dispersion_type", "n_outcome",
+             "n_source", "bar_top_definition", "errorbar_stem_confirmed",
+             "errorbar_source", "x_calibration", "grid_rule",
+             "sparse_justification", "value_scale", "display_hint", "note"),
+}
+
+#: Keys that mean the same thing, canonical form first. One or the other, never
+#: both with different values.
+PLAN_ALIASES = {"read": {"x_region": "axis_x_region",
+                         "y_region": "axis_y_region"}}
+
 
 def _s(v):
     return "" if v is None else str(v).strip()
+
+
+def _unknown_key_problems(plan):
+    """Every key a plan carries that nothing reads, named where it sits.
+
+    With a suggestion, because the failure this catches is a near-miss:
+    `axis_x_region` for `x_region`, `y_tick` for `y_ticks`. A plan is written by
+    hand or by an agent from a template, and both make that mistake.
+    """
+    import difflib
+    out = []
+
+    def check(where, kind, obj):
+        if not isinstance(obj, dict):
+            return
+        allowed = PLAN_KEYS[kind]
+        aliases = PLAN_ALIASES.get(kind, {})
+        for key in obj:
+            if key in allowed:
+                continue
+            near = difflib.get_close_matches(str(key), allowed, 1, 0.6)
+            out.append(_problem(
+                "%s.%s" % (where, key), "PLAN_UNKNOWN_KEY",
+                "nothing reads %r%s" % (key, ("; did you mean %r?" % near[0])
+                                        if near else "")))
+        for spelling, canonical in aliases.items():
+            if spelling in obj and canonical in obj \
+                    and _s(obj[spelling]) != _s(obj[canonical]):
+                out.append(_problem(
+                    "%s.%s" % (where, canonical), "PLAN_ALIAS_CONFLICT",
+                    "%r and %r are the same field and say different things"
+                    % (canonical, spelling)))
+
+    def rows(obj):
+        """Whatever the plan put there, as a list this can walk safely.
+
+        Type-guarded throughout: a section that is a number or a string is
+        reported by `_nested_shape_problems`, and this pass must add its own
+        findings rather than raise on the way past.
+        """
+        return obj if isinstance(obj, list) else []
+
+    check("plan", "plan", plan)
+    for kind, section in (("reviewer", "reviewers"), ("document", "documents"),
+                          ("grid", "grids"), ("reader_config", "reader_configs"),
+                          ("unit", "units")):
+        for i, row in enumerate(rows(plan.get(section))):
+            check("%s[%d]" % (section, i), kind, row)
+    views = plan.get("figure_views")
+    for view, spec in (views.items() if isinstance(views, dict) else ()):
+        check("figure_views[%r]" % view, "figure_view", spec)
+    for fi, figure in enumerate(rows(plan.get("figures"))):
+        check("figures[%d]" % fi, "figure", figure)
+        if not isinstance(figure, dict):
+            continue
+        for pi, panel in enumerate(rows(figure.get("panels"))):
+            where = "figures[%d].panels[%d]" % (fi, pi)
+            check(where, "panel", panel)
+            if not isinstance(panel, dict):
+                continue
+            read = panel.get("read")
+            check("%s.read" % where, "read", read)
+            if not isinstance(read, dict):
+                continue
+            for kind, key in (("series", "series"), ("position", "positions")):
+                for si, row in enumerate(rows(read.get(key))):
+                    check("%s.read.%s[%d]" % (where, key, si), kind, row)
+    return out
 
 
 def _problem(where, code, detail):
@@ -285,6 +408,7 @@ def validate_plan(plan, file_root="."):
                                  "publication_id is %s"
                                  % type(plan.get("publication_id")).__name__))
     problems.extend(_nested_shape_problems(plan))
+    problems.extend(_unknown_key_problems(plan))
     if problems:
         return problems
 
@@ -518,12 +642,15 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             view_panels.setdefault(view, []).append((sfid, resolved, sha, figure))
             panels.append(dict(
                 Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=view,
+                Identity_Domain_ID=(_s(read.get("identity_domain")) or view),
                 Unit_ID=_s(read.get("unit_id")),
                 Panel_Label=_s(panel.get("label")) or pid,
                 Mark_Type=_s(read.get("mark_type")).upper(), Image_Path=resolved,
                 Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
-                Axis_X_Region=_s(read.get("x_region")),
-                Axis_Y_Region=_s(read.get("y_region")),
+                Axis_X_Region=_s(read.get("axis_x_region")
+                                 or read.get("x_region")),
+                Axis_Y_Region=_s(read.get("axis_y_region")
+                                 or read.get("y_region")),
                 Axis_X_Scale=_s(read.get("x_scale")).upper() or "LINEAR",
                 Axis_Y_Scale=_s(read.get("y_scale")).upper() or "LINEAR",
                 Axis_X_Ticks=x_ticks, Axis_Y_Ticks=y_ticks,

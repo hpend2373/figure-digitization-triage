@@ -260,7 +260,11 @@ for fid, image, outcome, units, domain, rows in BAR_FIGURES:
              Bar_Top_Definition="OUTLINE_CENTER",
              Errorbar_Definition_Source=BAR_ERRORBAR_SOURCE)
         PANELS.append(dict(
-            Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid, Unit_ID=uid, Panel_Label=sex,
+            Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid,
+            # One legend over one figure view, said out loud: BAR_MONO
+            # calibrates its fills inside the domain, not inside the view.
+            Identity_Domain_ID=fid,
+            Unit_ID=uid, Panel_Label=sex,
             Mark_Type="BAR_MONO", Image_Path=os.path.join(RASTERS, image),
             Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
             Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",
@@ -291,7 +295,11 @@ for fid, image, outcome, units, rows in LINE_FIGURES:
              Bar_Top_Definition="NOT_A_BAR", N_Outcome=10, Dispersion_Type="SEM",
              Errorbar_Definition_Source=LINE_ERRORBAR_SOURCE)
         PANELS.append(dict(
-            Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid, Unit_ID=uid, Panel_Label=sex,
+            Panel_ID=pid, Source_Panel_ID=pid, Figure_ID=fid,
+            # One legend over one figure view, said out loud: BAR_MONO
+            # calibrates its fills inside the domain, not inside the view.
+            Identity_Domain_ID=fid,
+            Unit_ID=uid, Panel_Label=sex,
             Mark_Type="LINE_MONO_STYLE", Image_Path=os.path.join(RASTERS, image),
             Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
             Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",
@@ -331,7 +339,8 @@ for pid, sex, box in (("P5_NOFLUID", "NO_FLUID_HDT", (84, 430, 60, 300)),
          N_Outcome=1,
          Note="single-subject trace - not a group summary")
     PANELS.append(dict(
-        Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F397_5", Unit_ID=uid, Panel_Label=sex,
+        Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F397_5",
+        Identity_Domain_ID="F397_5", Unit_ID=uid, Panel_Label=sex,
         Mark_Type="LINE_MONO", Image_Path=os.path.join(RASTERS, "397_fig5.jpeg"),
         Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
         Axis_X_Region="", Axis_Y_Region="", Axis_X_Scale="LINEAR",

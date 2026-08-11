@@ -3199,6 +3199,85 @@ to be re-derivable from the files a finished run leaves behind. What is left
 there is not a known hole but a standing obligation: a check added on one side
 belongs on the other.
 
+### The step before the plan (v7.37)
+
+`corpus_intake.py`. The corpus is 116 publications and roughly six hundred
+figures, and every one of them needs a `source_figure_manifest` row before any
+of it can be planned: publication 127 cost **forty source-panel rows to
+digitize three panels**. That rule is right - it is what stops a figure
+disappearing because nobody made a row for it - but it made the unit of work
+the article, and until now the article was typed by hand.
+
+So this reads the PDF's own text layer with coordinates, finds the blocks that
+open with a figure label, links each to the page region above it, and writes one
+draft row per candidate with where it came from, what it says, how it was found,
+and who has checked it - which is nobody:
+
+    python3 corpus_intake.py PDF [PDF ...] --out DRAFT_DIR
+
+**It proposes and never asserts.** `Human_Verification_Status` starts at
+`PENDING` and there is no path by which the module writes anything else.
+`inventory_rows` turns a draft into `source_figure_manifest` rows only when
+EVERY row says `CONFIRMED`, with a registered reviewer, a date and a panel
+count; a draft still holding one `PENDING` row produces no inventory at all,
+because "these seven figures are the article" is a claim about the whole
+article and a partial one is worse than none. `Panel_Count_Method` comes out
+`HUMAN_VISUAL` because that is what happened.
+
+**The panel count is deliberately not proposed.** Counting the axes in a
+printed figure is the single judgement the source inventory exists to record,
+and a proposed count is a number a tired person clicks past. The draft carries
+the figure's bounding box so the contact sheet can show the picture; the count
+comes from the person looking at it.
+
+**The confidence orders the sheet and says why in words.** Not a probability,
+and it never removes a row - it decides what a person reads first. A body too
+short to be a caption costs 0.4 and the reason counts the characters; a second
+block **anywhere in the document** opening with the same label costs 0.3 and
+the reason says how many; a label followed by a lower-case word costs 0.3 and
+the reason quotes it; nothing printed above costs 0.1. `contact_sheet` sorts
+lowest first, highlights everything under 0.6 and prints the sentence beside
+the score.
+
+Those last two rules are what the forward run on publication 127 bought. The
+first version proposed **nine** figures for an article with seven: page 4 opens
+a paragraph with "Figure 1 shows the pre- and post-flight recordings" and page 6
+opens one with "Figure 7 shows the relationship between mean RRI and spectral
+powers". The first scored 0.70 - the real Figure 1 caption is on the same page,
+so the duplicate-label rule caught it - and **the second scored 1.00**, because
+Figure 7's real caption is on page 9 and the count was per page. Counting per
+document catches the pair; the lower-case rule catches the kind. A caption names
+its subject ("Figure 5 Results from systolic arterial pressure"); a sentence
+about a figure continues in the third person. Now all seven real figures come
+out at 0.70-1.00 and both intruders at 0.40, under the threshold, each carrying
+the sentence that says why.
+
+Measured on fifteen publisher PDFs from the corpus: 62 candidate rows,
+**9 (15%) below 0.6** - which is the number of rows a person rejects rather than
+counts.
+
+**A document that proposes nothing is reported, not skipped.** `2016-2-11.pdf`
+read 357 text blocks and produced zero candidates, which on a walk of
+ninety-seven articles looks exactly like an article with no figures. It is a
+China Astronaut Research and Training Center review whose one figure is labelled
+`图 1.`, with `Fig. 1.` on the line below. `图` and `圖` are now labels, and
+`main` lists every document that read fine and proposed nothing under a line
+saying that this is not the same as having no figures.
+
+**The backend is optional, like `cv2`.** `pdfminer.six` if it is installed,
+`pdftotext -bbox-layout` if it is not, a refusal naming both if neither is - and
+`Extraction_Method` is recorded per row, because a caption box from one is not
+a caption box from the other. A PDF with no text layer is `NotReadable`, which
+is a different answer from `BackendUnavailable`: the first needs a page render
+and a person, the second needs an install. A corpus walk reports both and stops
+for neither. About 42% of this corpus is expected to land in the first bucket.
+
+**What this does not do yet.** It does not render pages, so `Page_Raster` is
+blank unless one is supplied; it does not read two-column layouts any better
+than the block extractor does; and `Data_Shape_Expected` is still unfilled -
+the caption text a screen would read is now available per figure, which is the
+input `kernel.fig_screen_caption` has been waiting for.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -3211,12 +3290,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 132 |
+| `test_corpus_intake.py` | 60 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1961** |
+| **total** | **2021** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

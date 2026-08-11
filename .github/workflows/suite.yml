@@ -28,7 +28,7 @@ jobs:
                    test_bar_reader test_mark_readers test_mono_bar \
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
-                   test_compile_plan; do
+                   test_compile_plan test_corpus_intake; do
             echo "--- $t"
             python "$t.py"
           done

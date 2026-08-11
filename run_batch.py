@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.33"
+PIPELINE_VERSION = "7.34"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1643,11 +1643,25 @@ def identity_provenance_problems(values, panel_index, geometry=None,
         panel = panel_index[pid]
         want_unit = _s(panel.get("Unit_ID"))
         got_unit = _s(row.get("Unit_ID"))
-        if want_unit and got_unit and want_unit != got_unit:
+        if not want_unit:
+            # A panel without a declared unit cannot bind anything, and the
+            # manifest layer requires one - so reaching here means the caller's
+            # index was built from something other than a validated manifest.
+            out.append((where, "IDENTITY_PANEL_DECLARATION_INCOMPLETE",
+                        "Run_Panel_ID=%s declares no Unit_ID, so there is "
+                        "nothing to bind this value to" % pid))
+            continue
+        if got_unit != want_unit:
+            # Blank counts, exactly as it does for Source_Panel_ID. The runner's
+            # grid gate stops a blank Unit_ID in a normal run, but this check
+            # exists for runs it did not make, where trusting an earlier gate is
+            # the assumption being tested - and the finalizer selects values by
+            # Run_Panel_ID alone, so a unit-less row under an approved panel
+            # would be accepted.
             out.append((where, "IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT",
                         "this value is Unit_ID=%s and Run_Panel_ID=%s reads "
                         "Unit_ID=%s; one of the two is somebody else's"
-                        % (got_unit, pid, want_unit)))
+                        % (got_unit or "blank", pid, want_unit)))
             continue
         want_source = _s(panel.get("Source_Panel_ID"))
         got_source = _s(row.get("Source_Panel_ID"))

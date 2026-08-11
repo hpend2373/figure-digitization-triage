@@ -3279,6 +3279,22 @@ check("a monochrome value re-stamped onto a colour panel is refused",
 check("and so is a panel whose unit is not this value's unit",
       _prov(Unit_ID="U_MONO") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
       "%s" % _prov(Unit_ID="U_MONO"))
+# REVERT: `if want_unit and got_unit and ...`. A DELETED Unit_ID then passes,
+# and the finalizer selects values by Run_Panel_ID alone - so a unit-less row
+# under an approved panel reaches the accepted file. The same shape as the
+# Source_Panel_ID case below it.
+check("a deleted Unit_ID is refused too",
+      _prov(Unit_ID="") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Unit_ID=""))
+_unbound = {"P_SHORT": {"Mark_Type": "BAR_MONO"}}
+check("and a panel that declares no unit cannot bind anything",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          _unbound, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_PANEL_DECLARATION_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          _unbound, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
 
 # `Geometry_Row_SHA256` as a FOREIGN KEY, not a format. Sixty-four hex
 # characters establish that the value carries something hash-shaped; a
@@ -3682,6 +3698,57 @@ check("and one that disagrees with the resolution it cites is withheld",
       == {"P_SHORT"}
       and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
 
+# THE MANIFESTS THE FINALIZER RE-DERIVES FROM HAVE TO BE THE ONES THE RUN USED.
+#
+# `Manifest_SHA256` has been in the run stamp since the beginning and this
+# module never read it - defensible while the finalizer only read the registry,
+# and not defensible now that it recomputes the value contract from the panel,
+# series and position manifests. Exchange two Factor_Levels in
+# `position_manifest.csv` after the run and the cell check is done against a
+# mapping nobody approved: it either refuses a correct run or blesses a wrong
+# one.
+#
+# REVERT: drop `verify_manifest_inputs` or its call. Nothing else notices.
+_tamper_m = os.path.join(ROOT, "m_short2_edited")
+shutil.rmtree(_tamper_m, ignore_errors=True)
+shutil.copytree(_s2, _tamper_m)
+_pos = pd.read_csv(os.path.join(_tamper_m, "position_manifest.csv"),
+                   dtype=object).fillna("")
+_i0 = _pos.index[(_pos["Panel_ID"] == "P_SHORT") & (_pos["Position_ID"] == "T0")][0]
+_i1 = _pos.index[(_pos["Panel_ID"] == "P_SHORT") & (_pos["Position_ID"] == "T1")][0]
+_pos.loc[_i0, "Factor_Level"], _pos.loc[_i1, "Factor_Level"] = "T1", "T0"
+_pos.to_csv(os.path.join(_tamper_m, "position_manifest.csv"), index=False)
+_probs = []
+check("a manifest edited after the run is caught before anything is re-derived",
+      not FIN.verify_manifest_inputs(
+          _tamper_m, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                                    encoding="utf-8")),
+          lambda w, c, d: _probs.append(c))
+      and _probs == ["RUN_MANIFEST_MODIFIED"], "%s" % _probs)
+_probs = []
+check("and the untouched set passes",
+      FIN.verify_manifest_inputs(
+          _s2, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                              encoding="utf-8")),
+          lambda w, c, d: _probs.append(c)) and not _probs, "%s" % _probs)
+_fr4 = FIN.finalize(_fin_dir, review_path=_fin_review, manifest_dir=_tamper_m,
+                    run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("and a finalization against edited manifests is refused",
+      _fr4["status"] == "RUN_ARTIFACT_MODIFIED", "%s" % _fr4["status"])
+# An added or removed manifest is a changed SET, not a silent extra: the
+# optional one is hashed as an empty frame when it is absent.
+_probs = []
+_no_ir = os.path.join(ROOT, "m_short2_nores")
+shutil.rmtree(_no_ir, ignore_errors=True)
+shutil.copytree(_s2, _no_ir)
+os.remove(os.path.join(_no_ir, "identity_resolution.csv"))
+check("and removing the resolutions after the run is caught as well",
+      not FIN.verify_manifest_inputs(
+          _no_ir, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                                 encoding="utf-8")),
+          lambda w, c, d: _probs.append(c))
+      and _probs == ["RUN_MANIFEST_MODIFIED"], "%s" % _probs)
+
 # THE RUNNER'S OWN CONTRACT, RE-RUN BY THE FINALIZER.
 #
 # A run this module did not produce is the case it exists for, and nothing pins
@@ -3799,6 +3866,36 @@ for _label, _rows, _extra in (
               _rescopy, _led3, _machine2, lambda w, c, d: _probs.append(c))
           == {"P_SHORT"}
           and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+# And the run's copy of the rows goes through the RUNNER's own checker, so the
+# durable side checks the same dozen fields the manifest side does rather than a
+# hand-picked six.
+#
+# REVERT: drop `resolution_row_failures`. Each of these passes the finalizer's
+# own field list and fails the manifest contract.
+for _label, _row in (
+        ("evidence with no hash to compare against",
+         dict(_signed, Evidence_Artifact_SHA256="")),
+        ("a resolution nobody signed", dict(_signed, Reviewer_ID="")),
+        ("a reviewer who is not in the registry",
+         dict(_signed, Reviewer_ID="RV_NOBODY")),
+        ("a reading dated in the future",
+         dict(_signed, Reviewed_At="2099-01-01")),
+        ("a slot that is not a slot", dict(_signed, Geometry_Slot="left one")),
+        ("a fill the series manifest does not declare",
+         dict(_signed, Resolved_Fill_Pattern="STIPPLED"))):
+    _probs = []
+    _led4 = _with_resolution_rows([_row])
+    check("%s is withheld by the durable contract" % _label,
+          FIN.identity_contract_failures(
+              _rescopy, _led4, _machine2, lambda w, c, d: _probs.append(c),
+              manifest_dir=_s2) == {"P_SHORT"}
+          and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+_probs = []
+check("and the rows this run actually wrote pass it",
+      not FIN.identity_contract_failures(
+          _o2, _led, _machine2, lambda w, c, d: _probs.append(c),
+          manifest_dir=_s2) and not _probs, "%s" % _probs)
+
 # REVERT: take the first IDENTITY_RESOLUTION artifact and carry on. A panel read
 # under two sets of resolutions has no single set to check a value against.
 _probs = []

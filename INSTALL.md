@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29-7.33)
+### A series the reader could not name (v7.29-7.34)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -3114,6 +3114,33 @@ the resolution rows themselves were read with a dict comprehension that let a
 repeated `Resolution_ID` win by file order and a blank key field act as a
 wildcard.
 
+**The manifests the finalizer re-derives from are verified first.**
+`Manifest_SHA256` has been in the run stamp since the beginning and this module
+never read it - defensible while the finalizer only read the reviewer registry,
+and not defensible once it recomputes the value contract from the panel, series
+and position manifests. Exchange two `Factor_Level`s in
+`position_manifest.csv` after the run and the cell check is done against a
+mapping nobody approved: it either refuses a correct run or blesses a wrong one.
+`verify_manifest_inputs` compares every frame, including the optional
+`identity_resolution.csv` - absent, it hashes as the empty frame
+`load_manifests` substitutes, so adding or removing it after the run is a
+changed set rather than a silent extra.
+
+**A deleted `Unit_ID` is refused, like a deleted `Source_Panel_ID`.** The
+comparison required both sides to be non-blank, and the finalizer selects values
+by `Run_Panel_ID` alone - so a unit-less row under an approved panel reached the
+accepted file. A panel that declares no unit at all is
+`IDENTITY_PANEL_DECLARATION_INCOMPLETE`.
+
+**One resolution parser, not two.** The finalizer checked six fields of a
+resolution row where the manifest validator checks a dozen, so a row with a
+blank `Evidence_Artifact_SHA256` (which makes the ledger comparison a no-op), no
+`Reviewer_ID`, an unregistered reviewer, a future date or a `Geometry_Slot` of
+"left one" passed the durable side and failed the runner. It calls
+`check_identity_resolution` - the runner's own checker - on the run's copy of
+the rows, with `check_files=False` because the evidence bytes are checked
+against the ledger copy instead.
+
 **Still open:** nothing in the identity chain. What remains for a pilot is
 publication 127's own manifests and a real reviewer identity.
 
@@ -3123,7 +3150,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 646 |
+| `test_run_batch.py` | 659 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -3134,7 +3161,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1916** |
+| **total** | **1929** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

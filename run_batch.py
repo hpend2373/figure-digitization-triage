@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.32"
+PIPELINE_VERSION = "7.33"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1253,7 +1253,7 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # decides identity inside one panel from an absolute fill density -
             # measured on one figure and wrong on the second. What arrives here
             # is a resolution the whole figure agreed on.
-            if geometry is None:
+            if not geometry:
                 return PanelOutcome(
                     "PANEL_GEOMETRY_UNRESOLVED", declared=declared,
                     missing=all_cells,
@@ -1651,11 +1651,16 @@ def identity_provenance_problems(values, panel_index, geometry=None,
             continue
         want_source = _s(panel.get("Source_Panel_ID"))
         got_source = _s(row.get("Source_Panel_ID"))
-        if want_source and got_source and want_source != got_source:
-            out.append((where, "IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT",
+        if want_source and got_source != want_source:
+            # Blank counts. `got_source and ...` let a DELETED Source_Panel_ID
+            # through, and that column is the physical panel in the publisher's
+            # figure - the link between a number and the thing a person can put
+            # a finger on. Its own code, too: "filed under the wrong physical
+            # panel" is not the unit disagreeing.
+            out.append((where, "IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE",
                         "this value is Source_Panel_ID=%s and Run_Panel_ID=%s "
                         "was declared against %s"
-                        % (got_source, pid, want_source)))
+                        % (got_source or "blank", pid, want_source)))
             continue
         mark = _upper(panel.get("Mark_Type"))
         if mark != "BAR_MONO":
@@ -1734,6 +1739,14 @@ def identity_provenance_problems(values, panel_index, geometry=None,
                         "Identity_Source=%r (expected %s)"
                         % (source, "/".join(K.FIG_IDENTITY_SOURCES))))
         if not geometry:
+            # The same strictness the cell map gets. A caller that does not hand
+            # over the measurements is not entitled to a pass on the checks they
+            # would make, and `geometry` quietly disabling the foreign key is
+            # exactly the refactor this would otherwise survive.
+            out.append((where, "IDENTITY_GEOMETRY_INDEX_MISSING",
+                        "%s is a BAR_MONO value and no geometry was supplied "
+                        "(an absent mono_bar_geometry.csv reads the same way), "
+                        "so the measurement it names cannot be looked up" % pid))
             continue
         # The column as a FOREIGN KEY. Without this the chain guaranteed that
         # the geometry file is internally valid and that the value carries
@@ -1833,6 +1846,13 @@ def identity_provenance_problems(values, panel_index, geometry=None,
         group = _s(measured.get("Group_ID"))
         position_factor = _upper(cell_map.get("position_factor"))
         want_level = _s(cell_map.get("position_levels", {}).get(group))
+        if position_factor and not want_level:
+            # A map that is present and does not cover this row. Skipping it
+            # silently is the same fail-open as having no map at all, one entry
+            # further down.
+            out.append((where, "IDENTITY_CELL_MAP_INCOMPLETE",
+                        "measurement %s... is group %s and %s declares no "
+                        "position with that ID" % (digest[:16], group, pid)))
         if position_factor and want_level:
             got_level = _s(levels.get(position_factor))
             if got_level.upper() != want_level.upper():
@@ -1845,6 +1865,10 @@ def identity_provenance_problems(values, panel_index, geometry=None,
         if not series_id:
             series_id = _s(cell_map.get("series_by_fill", {}).get(resolved))
         want_series = _s(cell_map.get("series_levels", {}).get(series_id))
+        if series_factor and not want_series:
+            out.append((where, "IDENTITY_CELL_MAP_INCOMPLETE",
+                        "this value's series is %s and %s declares no series "
+                        "with that ID" % (series_id or "unknown", pid)))
         if series_factor and want_series:
             got_series = _s(levels.get(series_factor))
             if got_series.upper() != want_series.upper():

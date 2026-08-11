@@ -145,6 +145,85 @@ def load_reviews(path, flag):
     return df
 
 
+def value_contract_failures(run_dir, manifest_dir, machine, flag):
+    """Panels whose values fail the runner's own BAR_MONO contract, re-derived.
+
+    The SAME function the runner uses - `identity_provenance_problems` - run
+    again here on the verified files, because a run this module did not produce
+    is the case it exists for. Nothing pins a minimum pipeline version, so a run
+    made before a given check existed arrives looking complete: v7.29-v7.31 runs
+    carry per-bar hashes and means that agree while their `Cell_Key`s could have
+    been exchanged, which is the one failure with no arithmetic signature. This
+    module is where that is caught for them.
+
+    Every input has already been through `verify_run_outputs`: the manifests are
+    hashed into the run stamp and `mono_bar_geometry.csv` is one of the run's
+    own outputs, so re-reading them here is re-reading what was approved.
+    """
+    withheld = set()
+    try:
+        panels = pd.read_csv(os.path.join(manifest_dir, "panel_manifest.csv"),
+                             dtype=object).fillna("")
+        series = pd.read_csv(os.path.join(manifest_dir, "series_manifest.csv"),
+                             dtype=object).fillna("")
+        positions = pd.read_csv(
+            os.path.join(manifest_dir, "position_manifest.csv"),
+            dtype=object).fillna("")
+    except Exception as exc:
+        flag("run", "RUN_NOT_FINALIZABLE",
+             "the manifests this run was produced from could not be read (%s: "
+             "%s), so its values cannot be re-checked" % (type(exc).__name__, exc))
+        return {"*"}
+    resolutions = {}
+    rpath = os.path.join(manifest_dir, "identity_resolution.csv")
+    if os.path.exists(rpath):
+        with open(rpath, encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                resolutions.setdefault(_s(row.get("Panel_ID")), []).append(row)
+    panel_index = {}
+    for _, panel in panels.iterrows():
+        pid = _s(panel.get("Panel_ID"))
+        prows = [r for _, r in series.iterrows()
+                 if _s(r.get("Panel_ID")) == pid]
+        qrows = [r for _, r in positions.iterrows()
+                 if _s(r.get("Panel_ID")) == pid]
+        panel_index[pid] = {
+            "Mark_Type": _s(panel.get("Mark_Type")),
+            "Unit_ID": _s(panel.get("Unit_ID")),
+            "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
+            "Cell_Map": {
+                "position_factor": next(
+                    (_s(r.get("Factor_Name")).upper() for r in qrows
+                     if _s(r.get("Factor_Name"))), ""),
+                "position_levels": {_s(r.get("Position_ID")):
+                                    _s(r.get("Factor_Level")) for r in qrows},
+                "series_factor": next(
+                    (_s(r.get("Factor_Name")).upper() for r in prows
+                     if _s(r.get("Factor_Name"))), ""),
+                "series_levels": {_s(r.get("Series_ID")):
+                                  _s(r.get("Factor_Level")) for r in prows},
+                "series_by_fill": {_s(r.get("Bar_Fill_Pattern")).upper():
+                                   _s(r.get("Series_ID")) for r in prows
+                                   if _s(r.get("Bar_Fill_Pattern"))},
+            },
+        }
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    problems = RB.identity_provenance_problems(
+        rows, panel_index,
+        geometry=RB.geometry_index_from_run(run_dir),
+        resolutions=RB.resolution_index(resolutions))
+    for where, code, detail in problems:
+        try:
+            index = int(where.split(":", 1)[1]) - 2
+        except (IndexError, ValueError):        # pragma: no cover - defensive
+            index = -1
+        pid = _s(rows[index].get("Run_Panel_ID")) if 0 <= index < len(rows) else ""
+        flag("panel:%s" % (pid or "?"), code, detail)
+        withheld.add(pid)
+    return withheld
+
+
 def identity_contract_failures(run_dir, ledger_rows, machine, flag):
     """Panels whose human-named identities do not hold up against this run.
 
@@ -182,10 +261,33 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag):
     by_panel = {}
     for _, art in ledger_rows.iterrows():
         by_panel.setdefault(_s(art.get("Panel_ID")), []).append(art)
+    # Panels whose VALUES say a person named a series. Driven from the values,
+    # not from the ledger: a panel with human-resolved values and no
+    # IDENTITY_RESOLUTION artifact at all used to fall out of the loop below at
+    # `if not resolutions: continue`, which is the fail-open case exactly.
+    human_panels = {pid for pid, rows in rows_by_panel.items()
+                    if any(_s(r.get("Identity_Source")).upper() == "HUMAN"
+                           for r in rows)}
+    for pid in sorted(human_panels - set(by_panel)):
+        flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+             "%s has values a person named and no artifacts at all" % pid)
+        withheld.add(pid)
     for pid, arts in sorted(by_panel.items()):
         resolutions = [a for a in arts
                        if _s(a.get("Artifact_Type")) == RB.IDENTITY_ARTIFACT_TYPE]
+        if len(resolutions) > 1:
+            flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                 "%s carries %d IDENTITY_RESOLUTION artifacts; a panel is read "
+                 "under one set of resolutions"
+                 % (pid, len(resolutions)))
+            withheld.add(pid)
+            continue
         if not resolutions:
+            if pid in human_panels:
+                flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
+                     "%s has values a person named and no IDENTITY_RESOLUTION "
+                     "artifact, so there is nothing to check them against" % pid)
+                withheld.add(pid)
             continue
         evidence = {}
         for a in arts:
@@ -215,7 +317,41 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag):
                      % (pid, type(exc).__name__, exc))
                 withheld.add(pid)
                 continue
-            declared = {_s(row.get("Resolution_ID")): row for row in rows}
+            declared, duplicated = {}, set()
+            for row in rows:
+                rid = _s(row.get("Resolution_ID"))
+                if rid in declared:
+                    duplicated.add(rid)
+                declared[rid] = row
+            # A CSV the producer wrote is still an input to THIS module, and a
+            # dict comprehension over it let the last row of a repeated
+            # Resolution_ID win. Which of two rows a value was checked against
+            # would then depend on file order.
+            for rid in sorted(duplicated):
+                flag("panel:%s" % pid, "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
+                     "resolution %s appears twice in %s's resolution rows"
+                     % (rid, pid))
+                withheld.add(pid)
+            # And a row with a blank key field is a wildcard: the comparisons
+            # below skip an empty `want`, so a resolution missing its row hash
+            # would match any value that cited it.
+            for row in rows:
+                blanks = [c for c in ("Resolution_ID", "Panel_ID",
+                                      "Geometry_Row_SHA256",
+                                      "Resolved_Series_ID",
+                                      "Resolved_Fill_Pattern", "Evidence_Type")
+                          if not _s(row.get(c))]
+                if blanks:
+                    flag("panel:%s" % pid, "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
+                         "a resolution row of %s leaves %s blank, which would "
+                         "match any value that cited it"
+                         % (pid, ", ".join(blanks)))
+                    withheld.add(pid)
+                elif _s(row.get("Panel_ID")) != pid:
+                    flag("panel:%s" % pid, "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
+                         "a resolution row filed under %s reads Panel_ID=%s"
+                         % (pid, _s(row.get("Panel_ID"))))
+                    withheld.add(pid)
             # Every value that says a person named its series has to cite one of
             # THESE rows, and to agree with it.
             for value in rows_by_panel.get(pid, []):
@@ -696,6 +832,17 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # evidence in, including every run made before it started doing so.
     for pid in sorted(identity_contract_failures(run_dir, ledger_rows, machine,
                                                 flag)):
+        artifact_types.pop(pid, None)
+    # And the runner's own value contract, re-run here on the verified files.
+    # A run this module did not produce is the case it exists for, and nothing
+    # pins a minimum pipeline version: a run made before a check existed arrives
+    # looking complete.
+    for pid in sorted(value_contract_failures(run_dir, manifest_dir, machine,
+                                              flag)):
+        if pid == "*":
+            return stop("RUN_NOT_FINALIZABLE",
+                        "this run's values could not be re-checked against the "
+                        "manifests it was produced from")
         artifact_types.pop(pid, None)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types)

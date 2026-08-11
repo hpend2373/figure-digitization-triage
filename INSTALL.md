@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29-7.32)
+### A series the reader could not name (v7.29-7.33)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -3090,6 +3090,30 @@ numbers with themselves and passes while the durable file says something else.
 `Resolution_ID` replaced the first and which file a panel was approved against
 depended on ledger order. Duplicates are refused instead.
 
+**The finalizer re-runs the runner's own contract.** A run this module did not
+produce is the case it exists for, and nothing pins a minimum pipeline version -
+so a run made before a check existed arrives looking complete. In particular a
+v7.29-v7.31 run carries per-bar hashes and means that all agree while its
+`Cell_Key`s could have been exchanged, which is the failure with no arithmetic
+signature. `value_contract_failures` calls the SAME
+`identity_provenance_problems` on the verified files (the manifests are hashed
+into the run stamp, `mono_bar_geometry.csv` is one of the run's own outputs), and
+withholds the panels that fail. One function, two callers, one contract.
+
+**The fail-open corners, closed.** A `Source_Panel_ID` deleted from a value
+passed because the comparison required both sides to be non-blank - and that
+column is the physical panel in the publisher's figure, so it has its own code
+now (`IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE`). A missing geometry index
+disabled the foreign key and the cell check silently, where a missing cell map
+already refused: both refuse now (`IDENTITY_GEOMETRY_INDEX_MISSING`). A cell map
+present but not covering the row was skipped rather than refused
+(`IDENTITY_CELL_MAP_INCOMPLETE`). And in the finalizer, a panel with
+human-named values and no `IDENTITY_RESOLUTION` artifact at all fell out of the
+loop that was driven from the ledger - it is driven from the VALUES now - while
+the resolution rows themselves were read with a dict comprehension that let a
+repeated `Resolution_ID` win by file order and a blank key field act as a
+wildcard.
+
 **Still open:** nothing in the identity chain. What remains for a pilot is
 publication 127's own manifests and a real reviewer identity.
 
@@ -3099,7 +3123,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 633 |
+| `test_run_batch.py` | 646 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -3110,7 +3134,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1903** |
+| **total** | **1916** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

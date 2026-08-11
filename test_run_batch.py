@@ -3306,7 +3306,8 @@ check("a mean edited away from the row it cites is refused",
 check("and so is a dispersion that is not the one measured",
       _prov(Dispersion_Value="1.0") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
       "%s" % _prov(Dispersion_Value="1.0"))
-_twice = dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT",
+_twice = dict(Run_Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+              Unit_ID="U_SHORT",
               Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
               Dispersion_Value="3.611", Geometry_Row_SHA256="a" * 64,
               Auto_Fill_Pattern="OPEN", Resolved_Fill_Pattern="OPEN",
@@ -3342,8 +3343,14 @@ check("and a line panel's own value is still none of its business",
                                Mean="55")]))
 check("a value whose Source_Panel_ID is not the panel's own is refused",
       _prov(Source_Panel_ID="P_ELSEWHERE")
-      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE"],
       "%s" % _prov(Source_Panel_ID="P_ELSEWHERE"))
+# REVERT: `if want_source and got_source and ...`. A DELETED Source_Panel_ID
+# then passes, and that column is the physical panel in the publisher's figure.
+check("and one whose Source_Panel_ID was deleted is refused too",
+      _prov(Source_Panel_ID="")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE"],
+      "%s" % _prov(Source_Panel_ID=""))
 
 # THE CELL. Everything above ties a value to a measurement; none of it says the
 # value is filed under the right heading. Two bars, each citing its own row with
@@ -3385,6 +3392,37 @@ check("and a caller who supplies no cell map gets no free pass",
           [dict(_twice)],
           {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
           geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+# REVERT: `if not geometry: continue`. A caller that hands over no measurements
+# then disables the foreign key AND the cell check silently - the strictness the
+# cell map already gets, applied to the other input.
+check("a BAR_MONO value with no measurements to check against is refused",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _MONO_PANELS, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_GEOMETRY_INDEX_MISSING"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _MONO_PANELS, resolutions=_MONO_RESOLUTIONS)])
+# REVERT: skip the position or series check when the map does not cover the row.
+# A map with a hole in it is then indistinguishable from a map that agrees.
+_holey = {"P_SHORT": dict(_MONO_PANELS["P_SHORT"],
+                          Cell_Map=dict(_SHORT_CELL_MAP,
+                                        position_levels={"T0": "T0"}))}
+check("a cell map that does not cover this row is refused, not skipped",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)] == ["IDENTITY_CELL_MAP_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)])
+_holey2 = {"P_SHORT": dict(_MONO_PANELS["P_SHORT"],
+                           Cell_Map=dict(_SHORT_CELL_MAP, series_levels={}))}
+check("and so is one that knows the group but not the series",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey2, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)] == ["IDENTITY_CELL_MAP_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey2, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)])
+
 check("a human value's cell comes from the series the RESOLUTION names",
       _human(Cell_Key="ARM=PRE;TIMEPOINT=T3")
       == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
@@ -3643,6 +3681,133 @@ check("and one that disagrees with the resolution it cites is withheld",
                                      lambda w, c, d: _probs.append(c))
       == {"P_SHORT"}
       and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# THE RUNNER'S OWN CONTRACT, RE-RUN BY THE FINALIZER.
+#
+# A run this module did not produce is the case it exists for, and nothing pins
+# a minimum pipeline version: a run made before a check existed arrives looking
+# complete. The exchanged-Cell_Key failure - per-bar hashes and means that all
+# agree, two headings swapped - is the one with no arithmetic signature, so if
+# the finalizer does not re-derive it, every earlier run keeps it.
+#
+# REVERT: delete `value_contract_failures` or its call. The runner still catches
+# this at run time; what is gone is the durable check on runs it did not make.
+_swap_dir = os.path.join(ROOT, "o_short_swapped")
+shutil.rmtree(_swap_dir, ignore_errors=True)
+shutil.copytree(_o2, _swap_dir)
+_sm = pd.read_csv(os.path.join(_swap_dir, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("")
+# P_SHORT's rows specifically: P_MONO carries the same Cell_Keys, and picking
+# the first match swapped the wrong panel's headings.
+_mine = _sm["Run_Panel_ID"] == "P_SHORT"
+_a = _sm.index[_mine & (_sm["Cell_Key"] == "ARM=PRE;TIMEPOINT=T0")][0]
+_b = _sm.index[_mine & (_sm["Cell_Key"] == "ARM=PRE;TIMEPOINT=T1")][0]
+_sm.loc[_a, "Cell_Key"], _sm.loc[_b, "Cell_Key"] = ("ARM=PRE;TIMEPOINT=T1",
+                                                    "ARM=PRE;TIMEPOINT=T0")
+_sm.to_csv(os.path.join(_swap_dir, "figure_values_machine_qc.csv"), index=False)
+_sstamp = json.load(open(os.path.join(_swap_dir, "run_stamp.json"),
+                         encoding="utf-8"))
+_sstamp["Output_SHA256"]["figure_values_machine_qc.csv"] = RB.file_sha256(
+    os.path.join(_swap_dir, "figure_values_machine_qc.csv"))
+with open(os.path.join(_swap_dir, "run_stamp.json"), "w", encoding="utf-8") as _fh:
+    json.dump(_sstamp, _fh, indent=1)
+_probs = []
+_swap_rows = _sm[_mine].to_dict("records")
+check("the swap really is invisible to everything except the cell check",
+      not [c for _w, c, _d in RB.identity_provenance_problems(
+          _swap_rows,
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT",
+                       "Cell_Map": _SHORT_CELL_MAP}},
+          geometry=RB.geometry_index_from_run(_swap_dir),
+          resolutions=RB.resolution_index({}))
+          if c != "IDENTITY_GEOMETRY_CELL_MISMATCH"
+          and c != "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          _swap_rows,
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT",
+                       "Cell_Map": _SHORT_CELL_MAP}},
+          geometry=RB.geometry_index_from_run(_swap_dir),
+          resolutions=RB.resolution_index({}))])
+_probs = []
+_withheld = FIN.value_contract_failures(_swap_dir, _s2, _sm,
+                                        lambda w, c, d: _probs.append(c))
+check("a run whose two headings were exchanged is withheld by the finalizer",
+      _withheld == {"P_SHORT"} and "IDENTITY_GEOMETRY_CELL_MISMATCH" in _probs,
+      "withheld=%s probs=%s" % (_withheld, _probs))
+_fr3 = FIN.finalize(_swap_dir,
+                    review_path=_write_review(
+                        os.path.join(_swap_dir, "value_review.csv"), ["P_SHORT"]),
+                    manifest_dir=_s2, run_date="2026-08-06",
+                    today=datetime.date(2026, 8, 8))
+check("and does not finalize",
+      _fr3["status"] != "FINALIZED"
+      and not os.path.exists(os.path.join(_swap_dir,
+                                          "figure_values_accepted.csv")),
+      "%s" % _fr3["status"])
+_probs = []
+check("an untouched run is not withheld by the same check",
+      not FIN.value_contract_failures(_o2, _s2, _machine2,
+                                      lambda w, c, d: _probs.append(c))
+      and not _probs, "%s" % _probs)
+# A panel with human-named values and no resolution artifact at all fell out of
+# the evidence loop entirely, because that loop was driven from the ledger.
+_probs = []
+_noart = _led[_led["Artifact_Type"] != "IDENTITY_RESOLUTION"]
+check("human-named values with no resolution artifact are withheld",
+      FIN.identity_contract_failures(_o2, _noart, _machine2,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
+# The resolution rows are an INPUT to the finalizer, so they are read like one.
+# A dict comprehension over them let the last row of a repeated Resolution_ID
+# win, and a blank key field made a row a wildcard - the comparisons skip an
+# empty `want`, so a resolution missing its row hash matched any value citing it.
+#
+# REVERT: build `declared` with a dict comprehension and drop the blank check.
+_rescopy = os.path.join(ROOT, "o_short_badrows")
+
+
+def _with_resolution_rows(rows):
+    """The run again, with `identity__P_SHORT.csv` replaced by `rows`."""
+    shutil.rmtree(_rescopy, ignore_errors=True)
+    shutil.copytree(_o2, _rescopy)
+    path = os.path.join(_rescopy, "geometry-review", "identity__P_SHORT.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BM.identity_resolution_columns())
+        w.writeheader()
+        w.writerows(rows)
+    led = pd.read_csv(os.path.join(_rescopy, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+    led.loc[led["Artifact_Type"] == "IDENTITY_RESOLUTION", "SHA256"] = \
+        RB.file_sha256(path)
+    return led
+
+
+_signed = _resolution()
+for _label, _rows, _extra in (
+        ("the same Resolution_ID twice", [_signed, dict(_signed)], None),
+        ("a row with no measurement hash on it",
+         [dict(_signed, Geometry_Row_SHA256="")], None),
+        ("a row filed under another panel",
+         [dict(_signed, Panel_ID="P_MONO")], None)):
+    _probs = []
+    _led3 = _with_resolution_rows(_rows)
+    check("%s is withheld, not resolved by file order" % _label,
+          FIN.identity_contract_failures(
+              _rescopy, _led3, _machine2, lambda w, c, d: _probs.append(c))
+          == {"P_SHORT"}
+          and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+# REVERT: take the first IDENTITY_RESOLUTION artifact and carry on. A panel read
+# under two sets of resolutions has no single set to check a value against.
+_probs = []
+_two = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_RESOLUTION"]],
+                 ignore_index=True)
+check("two resolution artifacts for one panel is withheld",
+      FIN.identity_contract_failures(_o2, _two, _machine2,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
 
 # REVERT: key the evidence by reference with an assignment rather than a list.
 # A second entry for one Resolution_ID then replaces the first, so which of two

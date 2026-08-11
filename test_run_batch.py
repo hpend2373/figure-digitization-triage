@@ -718,6 +718,19 @@ for _name, _kw, _want in (
          "LINE_STYLE_NOT_READ"),
         # An unreleased mark type is not a manifest error, but its series still
         # have to be separable by the discriminant that reader WILL use.
+        # REVERT: let `Marker_Shape=ANY` through on any panel. ANY says "there
+        # is nothing here to tell apart", which is a claim about the panel: two
+        # series both declaring it are two series the reader cannot separate,
+        # and it would return whichever candidate it found first.
+        ("two LINE_MONO series that both decline to be told apart",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="ANY",
+                                Marker_Fill="OPEN", Line_Style="")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES"),
         ("an unreleased mark type whose series share a line style",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
                             Mark_Type="LINE_MONO_STYLE", Config_ID=""),

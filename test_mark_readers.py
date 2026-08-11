@@ -9,7 +9,8 @@ import itertools
 from mark_readers import (AxisCalibration, SeriesSpec, read_line_marker_panel,
                           read_monochrome_marker_panel, read_scatter_panel,
                           summarize_association, read_box_violin_panel,
-                          read_panel, to_value_records, MARK_CARRIED)
+                          read_panel, to_value_records, MARK_CARRIED,
+                          _one_interior_per_marker)
 
 
 FAILURES = []
@@ -735,6 +736,166 @@ except ValueError:
     bad_mark_rejected = True
 check("unknown mark types fail closed", bad_mark_rejected)
 
+
+
+
+# ---------------------------------------------------------------------------
+# An error-bar stem is drawn THROUGH its own marker, which is what every SPSS
+# error-bar chart in this corpus looks like. The enclosed white of an open
+# square then arrives as two slivers either side of the stem: neither is a
+# square, and two candidates in one x cell is "keep neither". Publication
+# BF02919461 read two of its ten markers that way.
+#
+# REVERT: drop `_one_interior_per_marker`, or pass stem_px=0. The fixture below
+# loses every marker whose stem bisects it.
+print()
+print("a stem drawn through a marker does not make two markers")
+
+
+def stem_through_marker_fixture(stem_width):
+    im = Image.new("RGB", (600, 460), "white")
+    d = ImageDraw.Draw(im)
+    xs = [120, 240, 360, 480]
+    ycal = AxisCalibration.from_points([(0, 420), (100, 40)])
+    truth = [70.0, 55.0, 62.0, 48.0]
+    for x, v in zip(xs, truth):
+        y = ycal.value_to_pixel(v)
+        half = abs(ycal.value_to_pixel(12) - ycal.value_to_pixel(0))
+        # The stem FIRST and unbroken, so it crosses the marker interior.
+        d.line((x, y - half, x, y + half), fill="black", width=stem_width)
+        d.line((x - 9, y - half, x + 9, y - half), fill="black", width=2)
+        d.line((x - 9, y + half, x + 9, y + half), fill="black", width=2)
+        d.rectangle((x - 8, y - 8, x + 8, y + 8), outline="black", width=2)
+    return im, xs, ycal, truth
+
+
+_sim, _sxs, _sycal, _struth = stem_through_marker_fixture(3)
+_sargs = dict(panel_box=(80, 560, 30, 430),
+              x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+              y_calibration=_sycal,
+              series=[SeriesSpec("S", marker="SQUARE", fill="OPEN")],
+              whisker_search_px=140)
+_srows = read_monochrome_marker_panel(_sim, **_sargs)
+check("every marker its own stem passes through is still read",
+      len(_srows) == 4, "got %d of 4" % len(_srows))
+check("and its centre is the marker's, not a sliver's",
+      len(_srows) == 4 and max(abs(r["mean"] - v)
+                               for r, v in zip(_srows, _struth)) < 1.5,
+      "%s" % [round(r["mean"], 2) for r in _srows])
+_none = read_monochrome_marker_panel(_sim, stem_px=0, **_sargs)
+check("with the merge switched off the same figure loses them",
+      len(_none) < len(_srows), "%d vs %d" % (len(_none), len(_srows)))
+# REVERT: close a SINGLE interior anyway. That is not a merge, it is a
+# reshaping - it fills the region's concavities wherever ink lies behind them -
+# and publication 386's ambiguous overlapping blob went from UNKNOWN, which is
+# the correct answer, to a TRIANGLE 2.4 units from its own series and 0.6 from
+# somebody else's. The forward test on that raster is the other half of this.
+_solo = Image.new("RGB", (200, 200), "white")
+_sd = ImageDraw.Draw(_solo)
+_sd.polygon([(100, 70), (80, 110), (120, 110)], outline="black", width=2)
+_sd.line((60, 112, 140, 112), fill="black", width=3)
+_solo_np = np.asarray(_solo.convert("L"))
+_solo_dark = (_solo_np < 150).astype(np.uint8) * 255
+_solo_white = (_solo_dark == 0).astype(np.uint8)
+check("one interior on its own is returned untouched",
+      (_one_interior_per_marker(_solo_white, 4, _solo_dark)
+       == _solo_white).all())
+# REVERT: bridge across whatever lies between two interiors. On a dense
+# multi-series panel that is the white page between two neighbouring markers,
+# and the join invents a mark halfway between them.
+_pair = Image.new("RGB", (200, 200), "white")
+_pd = ImageDraw.Draw(_pair)
+_pd.rectangle((40, 90, 56, 110), outline="black", width=2)
+_pd.rectangle((62, 90, 78, 110), outline="black", width=2)
+_pair_np = np.asarray(_pair.convert("L"))
+_pair_dark = (_pair_np < 150).astype(np.uint8) * 255
+_pair_white = (_pair_dark == 0).astype(np.uint8)
+check("two neighbouring markers are not bridged into one",
+      (_one_interior_per_marker(_pair_white, 6, _pair_dark)
+       == _pair_white).all())
+
+check("and a stem wider than stem_px is still two interiors, not one merged",
+      len(read_monochrome_marker_panel(
+          stem_through_marker_fixture(11)[0], stem_px=2, **_sargs)) == 0,
+      "a 11px stem was bridged by a 2px allowance")
+
+# REVERT: hard-code the 28 px whisker search again. On a 300 DPI page a 95%
+# confidence interval reaches sixty to ninety pixels, every whisker comes back
+# absent, and the panel is NO_VARIANCE with its centres read correctly - which
+# is a refusal nobody can act on.
+check("a whisker further than the search allows is simply not found",
+      all(r["dispersion"] is None for r in read_monochrome_marker_panel(
+          _sim, whisker_search_px=20,
+          panel_box=(80, 560, 30, 430),
+          x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+          y_calibration=_sycal,
+          series=[SeriesSpec("S", marker="SQUARE", fill="OPEN")])),
+      "found a cap outside the declared search")
+check("and the declared search finds it, at the right half width",
+      all(r["dispersion"] is not None and abs(r["dispersion"] - 12.0) < 1.5
+          for r in _srows), "%s" % [r["dispersion"] for r in _srows])
+
+# REVERT: drop `Marker_Shape=ANY`. A twelve-pixel open square with rounded
+# corners classifies as CIRCLE about as often as SQUARE, and on a one-series
+# panel that verdict decides nothing except whether the figure can be read.
+_round = Image.new("RGB", (600, 460), "white")
+_rd = ImageDraw.Draw(_round)
+for x, v in zip(_sxs, _struth):
+    y = _sycal.value_to_pixel(v)
+    _rd.ellipse((x - 8, y - 8, x + 8, y + 8), outline="black", width=2)
+check("a panel that declares SQUARE does not accept a circle",
+      not read_monochrome_marker_panel(
+          _round, panel_box=(80, 560, 30, 430),
+          x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+          y_calibration=_sycal,
+          series=[SeriesSpec("S", marker="SQUARE", fill="OPEN")]))
+_any = read_monochrome_marker_panel(
+    _round, panel_box=(80, 560, 30, 430),
+    x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+    y_calibration=_sycal,
+    series=[SeriesSpec("S", marker="ANY", fill="OPEN")])
+check("a panel that declares ANY reads it", len(_any) == 4, "got %d" % len(_any))
+check("and records the shape it actually SAW, never the word ANY",
+      {r["Marker_Definition"] for r in _any} == {"CIRCLE"},
+      "%s" % {r["Marker_Definition"] for r in _any})
+_two = read_monochrome_marker_panel(
+    _round, panel_box=(80, 560, 30, 430),
+    x_positions={"T0": (_sxs[0] + _sxs[1]) // 2}, y_calibration=_sycal,
+    series=[SeriesSpec("S", marker="ANY", fill="OPEN")], x_window=100)
+# REVERT: let the ANY branch take `matches[0]`. Two markers in one declared
+# cell then produce a value, and which one it is depends on contour order.
+check("ANY still refuses two candidates in one cell",
+      len(_two) == 0, "two markers in one window produced %s"
+      % [round(r["mean"], 2) for r in _two])
+check("and the window really did hold two of them",
+      len(read_monochrome_marker_panel(
+          _round, panel_box=(80, 560, 30, 430),
+          x_positions={"A": _sxs[0], "B": _sxs[1]}, y_calibration=_sycal,
+          series=[SeriesSpec("S", marker="ANY", fill="OPEN")],
+          x_window=15)) == 2)
+
+# The ANY branch reads its own whiskers, and reads them at the DECLARED search
+# distance - it is a separate code path from the shape-matched branch above and
+# had its own copy of the call.
+_any_stem = read_monochrome_marker_panel(
+    _sim, panel_box=(80, 560, 30, 430),
+    x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+    y_calibration=_sycal, series=[SeriesSpec("S", marker="ANY", fill="OPEN")],
+    whisker_search_px=140)
+check("an ANY series recovers its error bars too",
+      len(_any_stem) == 4 and all(
+          r["dispersion"] is not None and abs(r["dispersion"] - 12.0) < 1.5
+          for r in _any_stem),
+      "%s" % [None if r["dispersion"] is None else round(r["dispersion"], 2)
+              for r in _any_stem])
+check("and stops finding them when the declared search is too short",
+      all(r["dispersion"] is None for r in read_monochrome_marker_panel(
+          _sim, panel_box=(80, 560, 30, 430),
+          x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+          y_calibration=_sycal,
+          series=[SeriesSpec("S", marker="ANY", fill="OPEN")],
+          whisker_search_px=20)),
+      "the ANY branch ignored whisker_search_px")
 
 print()
 print("%d scenarios run" % (PASSED + len(FAILURES)))

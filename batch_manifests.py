@@ -110,7 +110,13 @@ UNRELEASED_MARK_TYPES = {
                         "instead of dropping them. See wip/line_style_mono.py"),
 }
 
-MARKER_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "DIAMOND", "NONE")
+#: `ANY` is a DECLARATION, not a wildcard for a lazy author: it says "this
+#: panel has one series, so do not ask the shape to tell anything apart". A
+#: printed open square of twelve pixels with rounded corners classifies as a
+#: circle about as often as a square, and refusing it is refusing a marker whose
+#: identity was never in doubt. Two series may not both be ANY - then there IS
+#: something to tell apart - and the manifest check below says so.
+MARKER_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "DIAMOND", "ANY", "NONE")
 MARKER_FILLS = ("OPEN", "FILLED", "ANY")
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED", "NONE")
 #: STIPPLED is here and the reader does not implement it yet, on purpose. The
@@ -556,6 +562,14 @@ READER_OPTIONS = {
     "colour_tolerance": (_as_float, COLOUR_MARK_TYPES + ("SCATTER",), None,
                          _non_negative),
     "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO"), "x_window", _positive),
+    # How far above and below a marker its own error-bar caps may be. It was a
+    # hard 28 px, which is a distance in a rendering nobody declared: on a 300
+    # DPI page a 95% confidence interval reaches 60-90 px and every whisker
+    # came back NO_VARIANCE. The panel box already bounds the search, so this
+    # is the author saying how big the figure they measured is.
+    "whisker_search_px": (_as_int, ("LINE_MONO",), "whisker_search_px", _positive),
+    "marker_half_height": (_as_int, ("LINE_MONO",), "marker_half_height", _positive),
+    "stem_px":          (_as_int, ("LINE_MONO",), "stem_px", _non_negative),
     "half_window":      (_as_int, ("BOX_VIOLIN",), "half_window", _positive),
     "min_marker_area":  (_as_float, ("SCATTER",), "min_area", _positive),
     "max_marker_area":  (_as_float, ("SCATTER",), "max_area", _positive),
@@ -1692,6 +1706,26 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag(line, "MISSING_SERIES_DISCRIMINANT",
                  "a monochrome bar series is told apart by its fill pattern - "
                  "Bar_Fill_Pattern required")
+
+    # `Marker_Shape=ANY` says "there is nothing here to tell apart". That is
+    # true of a one-series panel and false of every other, and the difference
+    # is a property of the PANEL, not of the row - so it is checked once the
+    # panel's series are all in hand.
+    marker_shapes = {}
+    for _, r in series.iterrows():
+        pid = str(r.get("Panel_ID", "")).strip()
+        if panel_mark.get(pid) != "LINE_MONO":
+            continue
+        marker_shapes.setdefault(pid, []).append(
+            (str(r.get("Series_ID", "")).strip(),
+             str(r.get("Marker_Shape", "")).strip().upper()))
+    for pid, rows in sorted(marker_shapes.items()):
+        if any(shape == "ANY" for _sid, shape in rows) and len(rows) > 1:
+            flag("panels:%s" % pid, "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES",
+                 "%s declares %d series and one of them says Marker_Shape=ANY. "
+                 "ANY means the shape is not being asked to discriminate, which "
+                 "is only true when there is one series to find"
+                 % (pid, len(rows)))
 
     for pid, r in panel_index.items():
         if not any(p == pid for p, _ in seen_series):

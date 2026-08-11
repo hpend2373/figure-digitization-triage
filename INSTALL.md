@@ -3350,25 +3350,75 @@ the panel manifest, so a row that names another view or another domain is
 panel the verified manifest resolves and the run never copied had no key to
 compare and was compared against nothing. It walks the union.
 
+### A marker its own error bar runs through (v7.39)
+
+The first pilot with a PRINTED GROUND TRUTH. Beckers et al. 2007 (*Microgravity
+sci. technol.* XIX-5/6, 98-101) tabulate approximate entropy as mean and SEM for
+supine and standing at five sessions, and plot the same means with 95%
+confidence intervals in Figures 1 and 2. Ten cells, each with a number the paper
+prints. Three things in the released LINE_MONO reader stood between the figure
+and those ten cells, and none of them was about accuracy.
+
+**An error-bar stem is drawn THROUGH its own marker.** Every SPSS error-bar
+chart in this corpus looks like this, and the enclosed white of an open square
+then arrives as two slivers either side of the stem: neither is a square, and
+two candidates in one x cell is "keep neither". Two of ten markers read.
+`_one_interior_per_marker` joins them - but only across INK, only when the
+bridge actually connects two parts, and only up to a declared `stem_px`. The
+guard is what makes it safe: closing a lone interior is not a merge but a
+reshaping, and on publication 386's dense four-series panel it filled an
+ambiguous blob's concavities until it classified as a TRIANGLE 2.4 units from
+its own series and 0.6 from somebody else's. `forward_test_real_monochrome.py`
+caught that, which is what a forward test is for.
+
+**The whisker search was a hard 28 px.** That is a distance in a rendering
+nobody declared. At 300 DPI a 95% confidence interval reaches 60-90 px, so every
+whisker came back absent and both panels ended `NO_VARIANCE` with their centres
+read correctly - a refusal nobody can act on. `whisker_search_px`,
+`marker_half_height` and `stem_px` are declared reader options now; the panel
+box already bounds the search.
+
+**`Marker_Shape=ANY`.** A twelve-pixel open square with rounded corners
+classifies as CIRCLE about as often as SQUARE, and this panel has ONE series, so
+the verdict decides nothing except whether the figure can be read at all. ANY is
+a declaration - "there is nothing here to tell apart" - not a wildcard: two
+series may not both use it (`MARKER_SHAPE_ANY_NEEDS_ONE_SERIES`), it still
+refuses two candidates in one cell, and the artifact records the shape the
+reader actually SAW, never the word ANY.
+
+**What the ten cells came out as.** 10 read, 10 machine-QC passed, 0 QC
+problems, both panels `AUTO_PASS`, run mode `ATTESTED`.
+
+| | mean absolute error | worst |
+|---|---|---|
+| mean, against the printed table | **0.0028** | 0.0057 |
+| 95% CI half-width, against 2.776 x printed SEM | 0.0072 | 0.0133 |
+
+The y axis spans 1.1 units, so the worst mean is 0.5% of the axis out, and the
+table prints two decimals - +/-0.005 is its own resolution. The dispersion
+column is a second, independent check: the caption says 95% CI, the table says
+SEM, n = 5, and reconstructing one from the other to within 0.013 says the
+caption was telling the truth and the reader found the caps the caption meant.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 697 |
+| `test_run_batch.py` | 698 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 297 |
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 146 |
 | `test_corpus_intake.py` | 60 |
-| `test_mark_readers.py` | 96 |
+| `test_mark_readers.py` | 107 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2051** |
+| **total** | **2067** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

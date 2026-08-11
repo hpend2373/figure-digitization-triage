@@ -251,6 +251,18 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
     return out
 
 
+def _shape_wanted(shape, expected):
+    """Is this classified shape one some declared series is looking for?
+
+    `ANY` matches whatever came back, including a shape the classifier could
+    not name. That is the point of declaring it: a twelve-pixel open square
+    with rounded corners classifies as CIRCLE about as often as SQUARE, and on
+    a one-series panel the answer changes nothing about which series it is.
+    """
+    wanted = {s.marker.upper() for s in expected}
+    return "ANY" in wanted or shape in wanted
+
+
 def _contour_marker_shape(contour):
     perimeter = cv2.arcLength(contour, True)
     if perimeter <= 0:
@@ -275,8 +287,83 @@ def _contour_marker_shape(contour):
     return "CIRCLE" if vertices >= 5 and circularity >= 0.55 else "UNKNOWN"
 
 
+#: The smallest white region that can be half of a marker's interior. Below
+#: this it is antialiasing, and joining it to something is inventing a shape.
+_MIN_INTERIOR_PART_PX = 6
+
+
+def _one_interior_per_marker(white, stem_px, ink):
+    """The white a marker outline encloses, as ONE region per marker.
+
+    An error-bar stem is drawn THROUGH its own marker, so the enclosed white of
+    an open square arrives as two slivers either side of the stem. Each sliver
+    on its own is not a square, and two of them in one x cell is "two
+    candidates, keep neither" - so publication BF02919461's five open squares
+    read as two. The stem does not make two interiors.
+
+    Closed horizontally, but only over the interior: closing the raw white
+    would dilate the PAGE across the two-pixel outline and swallow the hole
+    into the background, which is what happens if you try it. Components
+    touching the crop border are the page and are removed first, exactly as the
+    caller already removes them; `stem_px` is how wide a stem may be, so a
+    genuine gap between two separate markers is not bridged.
+    """
+    if stem_px < 1:
+        return white
+    count, labels, stats_, _ = cv2.connectedComponentsWithStats(white, 8)
+    interior = np.zeros_like(white)
+    for lab in range(1, count):
+        bx, by, bw, bh, area = stats_[lab]
+        if bx == 0 or by == 0 or bx + bw == white.shape[1] \
+                or by + bh == white.shape[0]:
+            continue
+        # A stem splits an interior into two REAL halves. A speck of
+        # antialiasing beside an overlapping blob is not a half, and letting it
+        # take part turned publication 386's ambiguous C2 cell - which the
+        # reader is supposed to leave missing - into a triangle 2.4 units from
+        # its own series and 0.6 from somebody else's.
+        if area < _MIN_INTERIOR_PART_PX:
+            continue
+        interior[labels == lab] = 1
+    closed = cv2.morphologyEx(
+        interior, cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2 * int(stem_px) + 1, 1)))
+    # ONLY across ink. Closing on its own bridges whatever lies between two
+    # interiors, and on publication 386's dense four-series panel that is the
+    # white page between two neighbouring open triangles - which invents a
+    # marker halfway between them. What makes two halves one interior is that
+    # the thing separating them is a drawn stem, so the pixels the close adds
+    # have to be pixels somebody drew.
+    candidate = np.maximum(interior,
+                           np.where((closed > 0) & (ink > 0), 1, 0)
+                           .astype(np.uint8))
+    # And only where the bridge ACTUALLY joined two parts. This is the guard
+    # that matters, and it covers both ways of getting it wrong. Ink pixels
+    # beside a part that reach nobody are still ink, and adding them would grow
+    # the interior by the thickness of its own outline; and closing a SINGLE
+    # interior is not a merge at all but a reshaping - it fills the region's
+    # concavities wherever ink lies behind them, which turned publication 386's
+    # ambiguous overlapping blob from UNKNOWN, the correct answer, into a
+    # TRIANGLE 2.4 units from its own series and 0.6 from somebody else's.
+    n, merged_labels, _st, _c = cv2.connectedComponentsWithStats(candidate, 8)
+    joined = np.zeros_like(white)
+    for merged in range(1, n):
+        region = merged_labels == merged
+        if len(np.unique(labels[region & (interior > 0)])) >= 2:
+            joined[region] = 1
+        else:
+            joined[region & (interior > 0)] = 1
+    if not joined.any():
+        return white
+    # Put the page back exactly as it was, so a component that touched the
+    # border still touches it and is still skipped by the caller.
+    return np.maximum(white - interior, joined).astype(np.uint8)
+
+
 def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
-                                 series, x_window=18, threshold=150):
+                                 series, x_window=18, threshold=150,
+                                 stem_px=4, marker_half_height=8,
+                                 whisker_search_px=28):
     """Separate black multi-series plots by marker geometry.
 
     Thin connecting lines are removed with a small morphological opening.  The
@@ -298,6 +385,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
         # before morphology: a thin outline may otherwise be erased, while its
         # enclosed region remains an unambiguous OPEN-vs-FILLED signal.
         white = (crop == 0).astype(np.uint8)
+        white = _one_interior_per_marker(white, stem_px, crop)
         nlab, labels, stats_, cents = cv2.connectedComponentsWithStats(white, 8)
         for lab in range(1, nlab):
             bx, by, bw, bh, area = stats_[lab]
@@ -311,7 +399,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                 continue
             contour = max(holes, key=cv2.contourArea)
             shape = _contour_marker_shape(contour)
-            if shape not in {s.marker.upper() for s in expected}:
+            if not _shape_wanted(shape, expected):
                 continue
             cx, cy = cents[lab]
             candidates.append((shape, "OPEN", xa + cx, y0 + cy,
@@ -328,7 +416,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
             if area < 20 or min(bw, bh) < 6 or max(bw, bh) > 28:
                 continue
             shape = _contour_marker_shape(contour)
-            if shape not in {s.marker.upper() for s in expected}:
+            if not _shape_wanted(shape, expected):
                 continue
             moment = cv2.moments(contour)
             if moment["m00"] == 0:
@@ -345,6 +433,42 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
         # two candidates survive, keep neither: series identity is unresolved.
         for spec in expected:
             shape = spec.marker.upper()
+            if shape == "ANY":
+                # Declared as "one series, nothing to tell apart". Every
+                # candidate of the wanted fill belongs to it; two of them is
+                # still two, and still refused below.
+                matches = [c for c in candidates
+                           if spec.fill.upper() in ("ANY", c[1])]
+                if len(matches) != 1:
+                    continue
+                found_shape, fill_state, cx, cy, area, fill_ratio = matches[0]
+                whisker = _errorbar_around_marker(
+                    dark > 0, x, cy, y0, y1,
+                    marker_half_height=marker_half_height,
+                    search_radius=whisker_search_px)
+                lower = upper = dispersion = None
+                stem = False
+                if whisker is not None:
+                    top, bottom, stem = whisker
+                    upper = max(y_calibration.pixel_to_value(top),
+                                y_calibration.pixel_to_value(bottom))
+                    lower = min(y_calibration.pixel_to_value(top),
+                                y_calibration.pixel_to_value(bottom))
+                    dispersion = (upper - lower) / 2.0
+                out.append(dict(
+                    series=spec.name, order=order, x_label=label, x=float(cx),
+                    marker_center_px=float(cy),
+                    mean=y_calibration.pixel_to_value(cy),
+                    dispersion=dispersion, errorbar_lower=lower,
+                    errorbar_upper=upper,
+                    # What it actually LOOKED like, never "ANY": the artifact
+                    # records the measurement, and the declaration is in the
+                    # manifest where the author put it.
+                    Marker_Definition=found_shape,
+                    Marker_Fill=fill_state, marker_fill_ratio=fill_ratio,
+                    Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
+                    marker_area_px=float(area)))
+                continue
             wanted_fill = spec.fill.upper()
             if wanted_fill not in ("ANY", "OPEN", "FILLED"):
                 raise ValueError("SeriesSpec.fill must be ANY, OPEN or FILLED")
@@ -353,7 +477,10 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
             if len(matches) != 1:
                 continue
             _, fill_state, cx, cy, area, fill_ratio = matches[0]
-            whisker = _errorbar_around_marker(dark > 0, x, cy, y0, y1)
+            whisker = _errorbar_around_marker(
+                dark > 0, x, cy, y0, y1,
+                marker_half_height=marker_half_height,
+                search_radius=whisker_search_px)
             lower = upper = dispersion = None
             stem = False
             if whisker is not None:

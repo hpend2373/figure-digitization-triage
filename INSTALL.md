@@ -3456,6 +3456,59 @@ over fifteen corpus PDFs, 62 candidates:
 | by y alone | 127 px | 29 |
 | same column | **433 px** | 21 |
 
+### The measurement is proposed; the reading is not (v7.41)
+
+`geometry_proposer.py`. Per panel the plan needs a box, an axis region, two
+tick pairs, an x pixel per group and a series spec. The compiler checks every
+one and the runner refuses without them - and nothing proposed any of them.
+Publication 127 cost an hour on three panels; the worklist is 189 B-shape
+figures.
+
+The split is between what can be measured and what has to be read:
+
+```text
+proposed       plot frame, axis regions, tick PIXEL rows, tick spacing,
+               ladder coverage, group anchor x pixels
+never          what a tick is WORTH, what a series MEANS, how many panels
+               the figure has
+```
+
+**The tick values are the whole reason for the split.** A printed 30 read as 3
+rescales every value in the panel by ten, leaves the calibration residual at
+zero and makes the file self-consistent and wrong. So the module reports
+"twelve ticks, evenly spaced, at these rows" and a person types the first and
+last - **two numbers per panel** instead of a measurement session.
+`calibration_from` joins the two halves and returns nothing until both exist.
+
+**Nothing in the detection is a distance in pixels.** A tick is short relative
+to its axis, a group is separated from the next by a gutter that is a fraction
+of the plot, the plot area is inset from the frame by a fraction rather than by
+two pixels, and the reach of a tick is compared against the spine's own
+thickness. That is the defect the LINE_MONO marker limits still have - the same
+figure reads at 300 DPI and not at 500 - and the suite renders every fixture at
+1x and 4x to hold it.
+
+**`Y_Tick_Coverage`, because the failure it catches is silent.** Ticks drawn
+INSIDE a boxed frame put the corner tick and the frame line in the same ink, so
+the ladder loses its ends - and it is still perfectly evenly spaced. A person
+types the first and last value against the wrong two rows and every check
+passes. Regularity cannot see that; coverage can.
+
+**The release gate is the one figure whose answer is printed.**
+`forward_test_beckers_geometry.py` holds the proposal against the geometry this
+project measured by hand for BF02919461 - the geometry that read ten printed
+values to 0.0028:
+
+| | box delta | ticks | anchors | coverage |
+|---|---|---|---|---|
+| Fig 1 supine | 1.0 px | 12 of 12, ends within 0.5 px | 5 of 5, worst 0.5 px | 0.999 |
+| Fig 2 standing | 1.0 px | 12 of 12, ends within 0.5 px | 5 of 5, worst 0.2 px | 0.999 |
+
+And running the pipeline on the PROPOSED geometry, with the two typed numbers,
+reads the same ten cells: **0.0002 mean difference from the hand-authored plan,
+and the same 0.0028 against the printed table.** The hour of measuring is now
+two numbers and a look at an overlay.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -3469,12 +3522,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 146 |
 | `test_corpus_intake.py` | 91 |
+| `test_geometry_proposer.py` | 45 |
 | `test_mark_readers.py` | 107 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2098** |
+| **total** | **2143** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

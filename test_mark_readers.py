@@ -10,7 +10,7 @@ from mark_readers import (AxisCalibration, SeriesSpec, read_line_marker_panel,
                           read_monochrome_marker_panel, read_scatter_panel,
                           summarize_association, read_box_violin_panel,
                           read_panel, to_value_records, MARK_CARRIED,
-                          _one_interior_per_marker)
+                          _one_interior_per_marker, measure_marker_scale)
 
 
 FAILURES = []
@@ -896,6 +896,134 @@ check("and stops finding them when the declared search is too short",
           series=[SeriesSpec("S", marker="ANY", fill="OPEN")],
           whisker_search_px=20)),
       "the ANY branch ignored whisker_search_px")
+
+
+
+# REVERT: put the absolute limits back - area 12..300 px, no side over 24. That
+# is a marker at 300 DPI and half of one at 600, so the SAME PAGE reads ten
+# cells at one rendering and none at another. Publication BF02919461 did
+# exactly that: 300 DPI read all ten, 450 read two, 500 read none. The panel
+# has one marker size by construction, so it is measured rather than assumed.
+print()
+print("the marker limits are the panel's own, not a number of pixels")
+
+
+def marker_panel(scale=1, marker=13, distractor=False):
+    """One open-circle series with error bars, drawn at a chosen scale.
+
+    `distractor` prints a legend-sized open circle inside the plot beside the
+    first x position - three times the marker, which every real figure has
+    somewhere. It is what makes the size window do anything: without one, a net
+    that accepts almost anything reads the same panel just as well.
+    """
+    W, H = 420 * scale, 300 * scale
+    im = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(im)
+    cal = AxisCalibration.from_points([(0, 260 * scale), (100, 40 * scale)])
+    xs = [80 * scale, 160 * scale, 240 * scale, 320 * scale]
+    truth = [70.0, 55.0, 62.0, 48.0]
+    r = marker * scale // 2
+    w = max(1, scale)
+    for x, v in zip(xs, truth):
+        y = cal.value_to_pixel(v)
+        half = abs(cal.value_to_pixel(12) - cal.value_to_pixel(0))
+        d.line((x, y - half, x, y + half), fill="black", width=w)
+        d.line((x - r, y - half, x + r, y - half), fill="black", width=w)
+        d.line((x - r, y + half, x + r, y + half), fill="black", width=w)
+        d.ellipse((x - r, y - r, x + r, y + r), fill="white", outline="black",
+                  width=w)
+    if distractor:
+        # Near the first x so it lands in that cell's window, and high in the
+        # panel so it does not sit on the marker it is meant to distract from.
+        bx, by, br = xs[0], 34 * scale, int(2.3 * r)
+        # Drawn with a thick rule on purpose: a hairline ring is closed up by
+        # the stem merge and never becomes a candidate at all, so a fixture
+        # built from one would pass whatever the size window said.
+        d.ellipse((bx - br, by - br, bx + br, by + br), fill="white",
+                  outline="black", width=max(3, 4 * w))
+    return im, xs, cal, truth
+
+
+# The synthetic sweep is deliberately modest - a drawn circle stops being a
+# circle below about ten pixels and the fixture would be testing PIL. The real
+# claim is made on a publisher page by `forward_test_beckers_dpi.py`, which
+# reads the same ten printed values at 200, 300, 450, 600 and 720 DPI.
+_scales = {}
+for _k in (2, 3):
+    _im, _xs, _cal, _truth = marker_panel(scale=_k)
+    _rows = read_monochrome_marker_panel(
+        _im, panel_box=(40 * _k, 400 * _k, 20 * _k, 280 * _k),
+        x_positions={"T%d" % i: x for i, x in enumerate(_xs)},
+        y_calibration=_cal,
+        series=[SeriesSpec("S", marker="CIRCLE", fill="OPEN")],
+        whisker_search_px=120 * _k, stem_px=max(2, 2 * _k))
+    _scales[_k] = (len(_rows),
+                   max((abs(r["mean"] - v) for r, v in zip(_rows, _truth)),
+                       default=99))
+check("the same panel reads the same cells at 2x and 3x",
+      {v[0] for v in _scales.values()} == {4}, "%s" % _scales)
+check("and the same values",
+      max(v[1] for v in _scales.values()) < 2.0, "%s" % _scales)
+
+# The scale it measures is the marker, and it tracks the rendering.
+_measured = {}
+for _k in (2, 3):
+    _im, _xs, _cal, _t = marker_panel(scale=_k)
+    _gray = np.asarray(_im.convert("L"))
+    _dark = (_gray < 150).astype(np.uint8) * 255
+    _measured[_k] = measure_marker_scale(
+        _dark, (40 * _k, 400 * _k, 20 * _k, 280 * _k),
+        {"T%d" % i: x for i, x in enumerate(_xs)}, 18 * _k)
+check("the measured marker scale is the marker, and grows with it",
+      _measured[2] > 6
+      and abs(_measured[3] - 1.5 * _measured[2]) <= 3, "%s" % _measured)
+# REVERT: skip the measurement, or widen the window until it admits anything.
+# Every real figure has a legend key or a panel letter in it, and a net that
+# accepts a blob three times the marker turns one of them into a second
+# candidate - which is "two candidates, keep neither", so the cell is lost.
+_dim, _dxs, _dcal, _dtruth = marker_panel(scale=3, distractor=True)
+_dargs = dict(panel_box=(40 * 3, 400 * 3, 20 * 3, 280 * 3),
+              x_positions={"T%d" % i: x for i, x in enumerate(_dxs)},
+              y_calibration=_dcal,
+              series=[SeriesSpec("S", marker="CIRCLE", fill="OPEN")],
+              whisker_search_px=360, stem_px=6)
+_dread = read_monochrome_marker_panel(_dim, **_dargs)
+check("a legend-sized circle beside a marker is not a marker",
+      len(_dread) == 4, "%d of 4 cells" % len(_dread))
+check("and the panel still reads the right values",
+      len(_dread) == 4
+      and max(abs(r["mean"] - v) for r, v in zip(_dread, _dtruth)) < 2.0,
+      "%s" % [round(r["mean"], 1) for r in _dread])
+check("with the panel's scale handed in, the same thing holds",
+      len(read_monochrome_marker_panel(
+          _dim, marker_scale=_measured[3], **_dargs)) == 4)
+check("and a scale from the WRONG rendering loses cells, which is why it is "
+      "measured",
+      len(read_monochrome_marker_panel(
+          _dim, marker_scale=_measured[3] * 3, **_dargs)) < 4)
+
+check("a panel with nothing measurable in it reports no scale, not a guess",
+      measure_marker_scale(
+          np.zeros((80, 80), dtype=np.uint8), (0, 80, 0, 80), {"T": 40}, 18)
+      == 0.0)
+# REVERT: measure the median over every seed instead of the biggest per cell.
+# The dots inside a stippled fill and the specks of antialiasing are seeds too,
+# and how many of them there are depends on the rendering - which is the thing
+# being removed. At 450 DPI on BF02919461 that median came out 6 px against a
+# 16 px marker, and the panel read nothing.
+_noisy, _nxs, _ncal, _nt = marker_panel(scale=3)
+_nd = ImageDraw.Draw(_noisy)
+for _i in range(60):
+    _x = 80 * 3 + (_i % 10) * 2 - 9
+    _y = 120 + (_i // 10) * 3
+    _nd.point((_x, _y), fill="black")
+_ngray = (np.asarray(_noisy.convert("L")) < 150).astype(np.uint8) * 255
+check("a cell full of small specks does not shrink the measured marker",
+      measure_marker_scale(_ngray, (120, 1200, 60, 840),
+                           {"T%d" % i: x for i, x in enumerate(_nxs)}, 54)
+      >= _measured[2] * 0.9,
+      "%s" % measure_marker_scale(_ngray, (120, 1200, 60, 840),
+                                  {"T%d" % i: x for i, x in enumerate(_nxs)}, 54))
 
 print()
 print("%d scenarios run" % (PASSED + len(FAILURES)))

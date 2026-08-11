@@ -3567,6 +3567,52 @@ one's tail; the text layer is parsed ONCE and handed to `draft_rows`; and a
 crop with no page size behind it is refused rather than scaled to US Letter,
 which on this A4 corpus put it 9% out in y.
 
+### A marker is the size of the markers in its panel (v7.43)
+
+The last absolute pixel count in a released reader. `read_monochrome_marker_panel`
+accepted a blob by area 12-300 px with no side over 24, which is a marker at
+300 DPI and half of one at 600 - so the SAME PAGE read differently depending on
+how it had been rendered, and nothing said so. Measured on publication
+BF02919461 before the fix:
+
+| render | cells read |
+|---|---|
+| 300 DPI | 10 of 10 |
+| 450 DPI | 2 of 10 |
+| 500 DPI | 0 of 10 |
+
+A panel has ONE marker size by construction - it is drawn by one plotting
+program at one setting - so `measure_marker_scale` reads it off the panel in a
+first pass and the limits become ratios of it. That is what BAR_MONO has done
+with its stroke scale since it shipped.
+
+**The biggest seed per x cell, not the median of every seed.** A median over
+all of them is dragged down by antialiasing specks and by the dots inside a
+stippled fill, and how many of those exist depends on the rendering - the very
+thing being removed. At 450 DPI that median came out 6 px against a 16 px
+marker and the panel read nothing. A declared x holds one marker per series, so
+the largest seed at it is a marker, and the median across cells survives one
+odd cell.
+
+After, on the same page, against the printed Table 1:
+
+```text
+200 DPI  10 of 10   worst 0.0055
+300 DPI  10 of 10   worst 0.0057
+450 DPI  10 of 10   worst 0.0062
+600 DPI  10 of 10   worst 0.0055
+720 DPI  10 of 10   worst 0.0058
+```
+
+`forward_test_beckers_dpi.py` is that table, and it checks the values against
+the paper rather than against each other: a reader that agreed with itself at
+five renderings while being wrong at all of them would pass a self-consistency
+test and fail this one.
+
+An area floor was written alongside the side window and then removed - every
+blob it would have rejected is already outside the window or under the seed
+minimum, and a guard nothing can observe is decoration.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -3581,12 +3627,12 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_compile_plan.py` | 146 |
 | `test_corpus_intake.py` | 123 |
 | `test_geometry_proposer.py` | 45 |
-| `test_mark_readers.py` | 107 |
+| `test_mark_readers.py` | 116 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2175** |
+| **total** | **2184** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

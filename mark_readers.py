@@ -251,6 +251,96 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
     return out
 
 
+#: How far a candidate may be from the panel's own marker size, as a ratio of
+#: the side length. Wide enough for an open square beside a filled circle -
+#: they differ by a third - and narrow enough that a tick label or a whole bar
+#: is not a marker.
+_MARKER_SIDE_LO, _MARKER_SIDE_HI = 0.45, 2.2
+
+#: And the loose net the scale is measured through, expressed against the
+#: PANEL, because there is nothing else to express it against before a scale
+#: exists. A marker is a small thing in a plot.
+_MARKER_SEED_MIN_PX = 3
+_MARKER_SEED_MAX_FRACTION = 0.12
+
+
+def measure_marker_scale(dark, panel_box, x_positions, x_window):
+    """The typical marker side length in this panel, in pixels.
+
+    Two passes, and this is the first: collect every enclosed white region and
+    every thick ink core near a declared x, through a net whose only limits are
+    "bigger than three pixels" and "smaller than a tenth of the panel", and
+    take the MEDIAN side. A panel has one marker size by construction - it is
+    drawn by one plotting program at one setting - so the median is that size
+    however the page was rendered.
+
+    Returns 0.0 when there is nothing to measure, and the caller then falls
+    back to the loose net rather than to a number from another rendering.
+    """
+    x0, x1, y0, y1 = map(int, panel_box)
+    ceiling = max(8, int((x1 - x0) * _MARKER_SEED_MAX_FRACTION))
+    per_cell = []
+    for x in x_positions.values():
+        xa = max(x0, int(round(x)) - x_window)
+        xb = min(x1, int(round(x)) + x_window + 1)
+        crop = dark[max(0, y0):min(dark.shape[0], y1), xa:xb]
+        if crop.size == 0:
+            continue
+        sides = []
+        white = (crop == 0).astype(np.uint8)
+        count, labels, stats_, _ = cv2.connectedComponentsWithStats(white, 8)
+        for lab in range(1, count):
+            bx, by, bw, bh, _area = stats_[lab]
+            if bx == 0 or by == 0 or bx + bw == crop.shape[1] \
+                    or by + bh == crop.shape[0]:
+                continue
+            if min(bw, bh) < _MARKER_SEED_MIN_PX or max(bw, bh) > ceiling:
+                continue
+            sides.append(float(max(bw, bh)))
+        distance = cv2.distanceTransform((crop > 0).astype(np.uint8),
+                                         cv2.DIST_L2, 5)
+        cores = (distance >= 2.2).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(cores, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        for contour in contours:
+            _bx, _by, bw, bh = cv2.boundingRect(contour)
+            if min(bw, bh) < _MARKER_SEED_MIN_PX or max(bw, bh) > ceiling:
+                continue
+            sides.append(float(max(bw, bh)))
+        # THE BIGGEST marker-shaped thing at this x, not all of them. A median
+        # over every seed is dragged down by antialiasing specks and by the
+        # dots inside a stippled fill, and HOW MANY of those there are depends
+        # on the rendering - which is the whole thing being removed here. A
+        # declared x holds one marker per series, so the largest seed at it is
+        # a marker, and the median across cells survives one odd cell.
+        if sides:
+            per_cell.append(max(sides))
+    if not per_cell:
+        return 0.0
+    return float(np.median(per_cell))
+
+
+def _marker_sized(area, bw, bh, scale, filled=False):
+    """Is this blob the size of the markers in this panel?
+
+    With a measured `scale` the test is a ratio, so it says the same thing at
+    every rendering. Without one - a panel where nothing could be measured -
+    it falls back to the loose net rather than to the old absolute numbers,
+    because those numbers were a marker at exactly one DPI.
+    """
+    side = max(bw, bh)
+    if side <= 0 or min(bw, bh) < _MARKER_SEED_MIN_PX:
+        return False
+    floor = 20 if filled else 12
+    if not scale:
+        return area >= floor * 0.25
+    # The side against the panel's own marker, and nothing else. An area floor
+    # was here too and could not be made to fail: every blob it would have
+    # rejected is already outside the side window or under the seed minimum,
+    # and a guard nothing can observe is decoration.
+    return _MARKER_SIDE_LO * scale <= side <= _MARKER_SIDE_HI * scale
+
+
 def _shape_wanted(shape, expected):
     """Is this classified shape one some declared series is looking for?
 
@@ -363,7 +453,7 @@ def _one_interior_per_marker(white, stem_px, ink):
 def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                                  series, x_window=18, threshold=150,
                                  stem_px=4, marker_half_height=8,
-                                 whisker_search_px=28):
+                                 whisker_search_px=28, marker_scale=0.0):
     """Separate black multi-series plots by marker geometry.
 
     Thin connecting lines are removed with a small morphological opening.  The
@@ -377,6 +467,14 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
     x0, x1, y0, y1 = map(int, panel_box)
     out = []
     expected = list(series)
+    # THE PANEL'S OWN MARKER SIZE, measured before anything is classified.
+    # The limits used to be absolute - area 12..300 px, no side over 24 - which
+    # is a marker at 300 DPI and half of one at 600: publication BF02919461
+    # reads ten cells at 300 and NONE at 500, off the same page. BAR_MONO has
+    # measured its stroke scale from the panel since it shipped; this is the
+    # same idea for a marker.
+    scale = marker_scale if marker_scale else measure_marker_scale(
+        dark, panel_box, x_positions, x_window)
     for order, (label, x) in enumerate(x_positions.items()):
         xa, xb = max(x0, int(round(x)) - x_window), min(x1, int(round(x)) + x_window + 1)
         crop = dark[max(0, y0):min(dark.shape[0], y1), xa:xb]
@@ -391,7 +489,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
             bx, by, bw, bh, area = stats_[lab]
             if bx == 0 or by == 0 or bx + bw == crop.shape[1] or by + bh == crop.shape[0]:
                 continue
-            if not (12 <= area <= 300 and 4 <= min(bw, bh) and max(bw, bh) <= 24):
+            if not _marker_sized(area, bw, bh, scale):
                 continue
             component = (labels == lab).astype(np.uint8) * 255
             holes, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -413,7 +511,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
         for contour in contours:
             area = cv2.contourArea(contour)
             bx, by, bw, bh = cv2.boundingRect(contour)
-            if area < 20 or min(bw, bh) < 6 or max(bw, bh) > 28:
+            if not _marker_sized(area, bw, bh, scale, filled=True):
                 continue
             shape = _contour_marker_shape(contour)
             if not _shape_wanted(shape, expected):

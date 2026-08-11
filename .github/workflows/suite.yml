@@ -39,7 +39,8 @@ jobs:
           for s in crosscheck_id323 build_id323 forward_test_397_mono_bar \
                    forward_test_127_mono_bar forward_test_397_mono_geometry \
                    forward_test_real_monochrome \
-                   forward_test_beckers_geometry pilot_397; do
+                   forward_test_beckers_geometry forward_test_beckers_dpi \
+                   pilot_397; do
             echo "--- $s"
             python "$s.py"
           done

@@ -339,6 +339,16 @@ unrun = sorted(s for s in forwards if s not in ci_text)
 assert not unrun, "CI does not run the forward tests: %s" % unrun
 print("CI runs every forward test in the package (%d): PASS" % len(forwards))
 
+# And every worked example. These are the only things in the package that run
+# the whole ladder on a real publication, so one that nobody runs is the one
+# whose rot is least visible - a pilot that stopped finalizing would leave
+# every suite green.
+pilots = {os.path.basename(p)[:-3]
+          for p in glob.glob(os.path.join(HERE, "pilot_*.py"))}
+unrun = sorted(s for s in pilots if s not in ci_text)
+assert not unrun, "CI does not run the worked examples: %s" % unrun
+print("CI runs every worked example in the package (%d): PASS" % len(pilots))
+
 # No scenario may be written so that it cannot fail. Two were: a caption check
 # ending `... or True`, which passed whatever the picture contained, and an
 # `all(... or True ...)` inside a figure-isolation check. Both looked like

@@ -3793,6 +3793,46 @@ Both validators carry the vocabulary and `test_kernel` pins that they agree: a
 template the standalone validator accepts and the batch gate rejects is a
 template nobody can fill.
 
+## The last two rungs, on a real publication
+
+`pilot_397.py` is the biggest worked example here and it stops at `QC_FAILED`,
+because publication 397 never says whether its error bars are SD or SEM. That
+is the right answer, and it meant `HUMAN_APPROVED` and `POOLING_ELIGIBLE` had
+only ever been demonstrated against fixtures in `test_finalize.py`.
+
+`pilot_beckers.py` finishes the ladder. Beckers 2007 plots approximate entropy
+as mean and 95% CI at five sessions in two postures, the caption says exactly
+that, and **Table 1 of the same paper prints the same means** — so there is a
+reader-independent answer at the end, which is why it is worth doing here
+rather than on a fixture whose truth this package wrote itself.
+
+Attested, it runs `AUTO_EXTRACTED → MACHINE_QC_PASSED → HUMAN_APPROVED →
+POOLING_ELIGIBLE` and writes ten accepted values:
+
+    finalize: FINALIZED | panels approved 2 | values accepted 10
+    worst mean 0.0057, worst half-width 0.0133
+
+The half-width is the second, independent check. With n=5 a 95% interval is
+2.776 SEM either side, so reconstructing the printed SEM from the digitized
+whisker catches the failure a correct mean hides — a whisker measured off a
+significance glyph.
+
+Unattested it never gets that far, and the refusal is the runner's, not the
+finalizer's: a `DEMO_ONLY` run whose values pass the machine gate has produced
+exactly the artifact a demonstration must not leave behind, so `run_batch`
+deletes its own output and stamps `DEMO_OUTPUT_REFUSED`. There is nothing to
+review because there is nothing on disk to review.
+
+**The reference table has to be transcribed, not remembered.** The first
+version of `TABLE_1` in that file had the means right and half the SEM column
+invented, and the half-width check failed by 0.17 against a reading that was
+correct to 0.013. A fabricated reference does not merely fail — it accuses the
+measurement.
+
+The publisher PDF is not redistributable, so this SKIPs in CI like the two
+Beckers forward tests, and `test_reproducibility` now checks that CI runs every
+worked example as well as every test and forward test.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

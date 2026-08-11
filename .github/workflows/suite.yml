@@ -41,7 +41,7 @@ jobs:
                    forward_test_real_monochrome \
                    forward_test_beckers_geometry forward_test_beckers_dpi \
                    forward_test_397_line_style forward_test_397_line_geometry \
-                   pilot_397; do
+                   pilot_397 pilot_beckers; do
             echo "--- $s"
             python "$s.py"
           done

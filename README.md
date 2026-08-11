@@ -163,5 +163,14 @@ rasters by `forward_test_397_line_geometry.py`: every declared calibration row
 is a printed gridline and every declared x is the centre of its category
 interval.
 
+`pilot_beckers.py` finishes the ladder on a different paper. Beckers 2007 plots
+approximate entropy as mean and 95% CI, and Table 1 of the same paper prints
+the same means, so there is a reader-independent answer at the end. Attested it
+runs `AUTO_EXTRACTED → MACHINE_QC_PASSED → HUMAN_APPROVED → POOLING_ELIGIBLE`
+and writes ten accepted values, worst mean 0.0057 and worst CI half-width
+0.0133 against 2.776 × the printed SEM. Unattested, `run_batch` deletes its own
+output and stamps `DEMO_OUTPUT_REFUSED` — a demonstration identity cannot stand
+behind a poolable value.
+
 Open work: publication 386 Figures 3–4, and five cells of publication 323 that
 need a human reading.

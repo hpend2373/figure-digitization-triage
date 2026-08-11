@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.34"
+PIPELINE_VERSION = "7.35"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1665,7 +1665,16 @@ def identity_provenance_problems(values, panel_index, geometry=None,
             continue
         want_source = _s(panel.get("Source_Panel_ID"))
         got_source = _s(row.get("Source_Panel_ID"))
-        if want_source and got_source != want_source:
+        if not want_source:
+            # The declaration's own half, as for Unit_ID. The manifest layer
+            # requires it, so a panel index without one was not built from a
+            # validated manifest - and this check exists for runs whose
+            # manifest layer is the thing in question.
+            out.append((where, "IDENTITY_PANEL_DECLARATION_INCOMPLETE",
+                        "Run_Panel_ID=%s declares no Source_Panel_ID, so this "
+                        "value is not bound to a physical panel" % pid))
+            continue
+        if got_source != want_source:
             # Blank counts. `got_source and ...` let a DELETED Source_Panel_ID
             # through, and that column is the physical panel in the publisher's
             # figure - the link between a number and the thing a person can put

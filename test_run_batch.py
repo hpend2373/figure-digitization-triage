@@ -3148,8 +3148,10 @@ _MONO_PANELS = {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
                 # panels build one unit, so the unit check cannot catch a value
                 # moved between them.
                 "P_TWIN": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_SHORT",
+                           "Source_Panel_ID": "P_TWIN",
                            "Cell_Map": _SHORT_CELL_MAP},
                 "P_LINE": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_LINE",
+                           "Source_Panel_ID": "P_LINE",
                            "Cell_Map": _SHORT_CELL_MAP}}
 _MONO_RESOLUTIONS = {
     ("P_SHORT", "IR1"): dict(Resolution_ID="IR1", Panel_ID="P_SHORT",
@@ -3253,9 +3255,9 @@ check("a source nobody declared is refused",
 # it is a property of a values row FROM A MONOCHROME BAR PANEL.
 check("a colour panel's value says nothing about fills, quite legitimately",
       not _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
-                            Mean="55")]),
+                            Source_Panel_ID="P_LINE", Mean="55")]),
       "%s" % _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
-                               Mean="55")]))
+                               Source_Panel_ID="P_LINE", Mean="55")]))
 
 # The PANEL BINDING, checked for every value and not only the monochrome ones,
 # because it is what decides which rules apply. A row stamped with a colour
@@ -3287,6 +3289,16 @@ check("a deleted Unit_ID is refused too",
       _prov(Unit_ID="") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
       "%s" % _prov(Unit_ID=""))
 _unbound = {"P_SHORT": {"Mark_Type": "BAR_MONO"}}
+check("and a panel that declares no source panel cannot bind anything either",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_PANEL_DECLARATION_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
 check("and a panel that declares no unit cannot bind anything",
       [c for _w, c, _d in RB.identity_provenance_problems(
           [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
@@ -3349,14 +3361,14 @@ check("a human identity on a bar the measurement DID read is refused",
 # scenario below is the only place it shows, because the fixture batch's colour
 # panels have their own units.
 check("a monochrome value moved to a line panel of the SAME unit is refused",
-      _prov(Run_Panel_ID="P_TWIN")
+      _prov(Run_Panel_ID="P_TWIN", Source_Panel_ID="P_TWIN")
       == ["IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE"],
-      "%s" % _prov(Run_Panel_ID="P_TWIN"))
+      "%s" % _prov(Run_Panel_ID="P_TWIN", Source_Panel_ID="P_TWIN"))
 check("and a line panel's own value is still none of its business",
       not _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
-                            Mean="55")]),
+                            Source_Panel_ID="P_TWIN", Mean="55")]),
       "%s" % _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
-                               Mean="55")]))
+                               Source_Panel_ID="P_TWIN", Mean="55")]))
 check("a value whose Source_Panel_ID is not the panel's own is refused",
       _prov(Source_Panel_ID="P_ELSEWHERE")
       == ["IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE"],
@@ -3401,12 +3413,14 @@ check("a whole pair of exchanged cells is caught, both rows",
 check("and a caller who supplies no cell map gets no free pass",
       [c for _w, c, _d in RB.identity_provenance_problems(
           [dict(_twice)],
-          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT"}},
           geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
       == ["IDENTITY_CELL_MAP_MISSING"],
       "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
           [dict(_twice)],
-          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT"}},
           geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
 # REVERT: `if not geometry: continue`. A caller that hands over no measurements
 # then disables the foreign key AND the cell check silently - the strictness the
@@ -3577,6 +3591,8 @@ _led = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
                    dtype=object).fillna("")
 _machine2 = pd.read_csv(os.path.join(_o2, "figure_values_machine_qc.csv"),
                         dtype=object).fillna("")
+# The frames `verify_manifest_inputs` hands the checks, built the same way.
+_FRAMES2 = RB.load_manifests(_s2)
 _probs = []
 check("a run that copied its evidence in withholds nothing",
       not FIN.identity_contract_failures(_o2, _led, _machine2,
@@ -3749,6 +3765,28 @@ check("and removing the resolutions after the run is caught as well",
           lambda w, c, d: _probs.append(c))
       and _probs == ["RUN_MANIFEST_MODIFIED"], "%s" % _probs)
 
+# The verified frames TRAVEL. Between "these bytes hash correctly" and "open
+# them again and re-derive the contract from them" is a second read of the same
+# file - so the verification hands its frames to the checks instead of dropping
+# them, and a check handed no frames refuses rather than proceeding.
+#
+# REVERT: drop the `verified` out-parameter, or let the checks re-open the
+# manifest directory. The two below are what say the contract runs on what was
+# verified.
+_verified = {}
+_probs = []
+FIN.verify_run_outputs(
+    _o2, json.load(open(os.path.join(_o2, "run_stamp.json"), encoding="utf-8")),
+    _s2, lambda w, c, d: _probs.append(c), verified=_verified)
+check("verifying the manifests hands the frames on, all twelve of them",
+      set(_verified) == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
+      "%s" % sorted(_verified))
+_probs = []
+check("and a value check handed no verified frames refuses the run",
+      FIN.value_contract_failures(_o2, {}, _machine2,
+                                  lambda w, c, d: _probs.append(c)) == {"*"}
+      and "RUN_NOT_FINALIZABLE" in _probs, "%s" % _probs)
+
 # THE RUNNER'S OWN CONTRACT, RE-RUN BY THE FINALIZER.
 #
 # A run this module did not produce is the case it exists for, and nothing pins
@@ -3798,7 +3836,7 @@ check("the swap really is invisible to everything except the cell check",
           geometry=RB.geometry_index_from_run(_swap_dir),
           resolutions=RB.resolution_index({}))])
 _probs = []
-_withheld = FIN.value_contract_failures(_swap_dir, _s2, _sm,
+_withheld = FIN.value_contract_failures(_swap_dir, _FRAMES2, _sm,
                                         lambda w, c, d: _probs.append(c))
 check("a run whose two headings were exchanged is withheld by the finalizer",
       _withheld == {"P_SHORT"} and "IDENTITY_GEOMETRY_CELL_MISMATCH" in _probs,
@@ -3815,7 +3853,7 @@ check("and does not finalize",
       "%s" % _fr3["status"])
 _probs = []
 check("an untouched run is not withheld by the same check",
-      not FIN.value_contract_failures(_o2, _s2, _machine2,
+      not FIN.value_contract_failures(_o2, _FRAMES2, _machine2,
                                       lambda w, c, d: _probs.append(c))
       and not _probs, "%s" % _probs)
 # A panel with human-named values and no resolution artifact at all fell out of
@@ -3888,13 +3926,13 @@ for _label, _row in (
     check("%s is withheld by the durable contract" % _label,
           FIN.identity_contract_failures(
               _rescopy, _led4, _machine2, lambda w, c, d: _probs.append(c),
-              manifest_dir=_s2) == {"P_SHORT"}
+              frames=_FRAMES2) == {"P_SHORT"}
           and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
 _probs = []
 check("and the rows this run actually wrote pass it",
       not FIN.identity_contract_failures(
           _o2, _led, _machine2, lambda w, c, d: _probs.append(c),
-          manifest_dir=_s2) and not _probs, "%s" % _probs)
+          frames=_FRAMES2) and not _probs, "%s" % _probs)
 
 # REVERT: take the first IDENTITY_RESOLUTION artifact and carry on. A panel read
 # under two sets of resolutions has no single set to check a value against.
@@ -3905,6 +3943,77 @@ check("two resolution artifacts for one panel is withheld",
       FIN.identity_contract_failures(_o2, _two, _machine2,
                                      lambda w, c, d: _probs.append(c))
       == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
+# `Resolution_ID` IS UNIQUE ACROSS THE RUN, NOT WITHIN A PANEL.
+#
+# `check_identity_resolution` keeps the identifier unique across the frame it is
+# handed, so calling it per panel made it unique per panel and global nowhere:
+# two panels could both hold IR1, one identifier naming two different decisions,
+# and the evidence filenames are built from that identifier too.
+#
+# REVERT: call the shared checker once per panel. Each call sees one IR1 and is
+# happy.
+_probs = []
+_two_panels = {"P_SHORT": [_signed],
+               "P_MONO": [dict(_signed, Panel_ID="P_MONO", Group_ID="T3",
+                               Resolved_Series_ID="S_OPEN")]}
+check("one Resolution_ID in two panels is refused",
+      FIN.resolution_copy_failures(_two_panels, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      >= {"P_SHORT", "P_MONO"}
+      and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# THE COPY IS THE MANIFEST.
+#
+# identity_resolution.csv is verified against the run stamp and
+# identity__<Panel_ID>.csv against the artifact ledger, and nothing compared the
+# two - so the run copy could name a different reviewer, a different evidence
+# file or a different date, be internally valid, hash correctly, and leave
+# Resolution_ID pointing at two different rows.
+#
+# REVERT: drop the copy-versus-manifest comparison. The two below are the only
+# place it shows, because everything else about both files is valid.
+_probs = []
+check("the copy the reviewer reads is the manifest the run validated",
+      not FIN.resolution_copy_failures({"P_SHORT": [_signed]}, _FRAMES2,
+                                       lambda w, c, d: _probs.append(c))
+      and not _probs, "%s" % _probs)
+for _label, _edit in (("a different reviewer", dict(Reviewer_ID="RV_OTHER")),
+                      ("a different date", dict(Reviewed_At="2026-08-06")),
+                      ("a different note", dict(Note="something else")),
+                      ("a resolution the manifest does not have",
+                       dict(Resolution_ID="IR9"))):
+    _probs = []
+    check("a run copy with %s is refused" % _label,
+          FIN.resolution_copy_failures(
+              {"P_SHORT": [dict(_signed, **_edit)]}, _FRAMES2,
+              lambda w, c, d: _probs.append(c)) == {"P_SHORT"}
+          and "IDENTITY_RESOLUTION_COPY_MISMATCH" in _probs, "%s" % _probs)
+_probs = []
+check("and so is a panel whose resolutions were dropped from the copy",
+      FIN.resolution_copy_failures({"P_SHORT": []}, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
+
+# THE REGISTRY'S OWN PROBLEMS ARE NOT SWALLOWED.
+#
+# The index was built with a callback that threw every problem away, and
+# `check_reviewer_registry` indexes a row BEFORE it validates it - so an entry
+# with a malformed ORCID or a mismatched record type still counted as "a
+# registered HUMAN" for a resolution.
+#
+# REVERT: pass `lambda *a: None` again. The scenario below is the only place it
+# shows, because the resolution itself is valid and points at a row that exists.
+_probs = []
+_bad_reg = dict(_FRAMES2)
+_bad_reg["reviewers"] = _FRAMES2["reviewers"].copy()
+_bad_reg["reviewers"].loc[0, "Contact_Type"] = "ORCID"
+_bad_reg["reviewers"].loc[0, "Reviewer_Contact"] = "0000-0002-1825-0000"
+check("a registry the run's own checker rejects withholds the panels",
+      FIN.resolution_copy_failures({"P_SHORT": [_signed]}, _bad_reg,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_REVIEWER_INVALID" in _probs, "%s" % _probs)
 
 # REVERT: key the evidence by reference with an assignment rather than a list.
 # A second entry for one Resolution_ID then replaces the first, so which of two

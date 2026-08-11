@@ -157,20 +157,24 @@ def verify_manifest_inputs(manifest_dir, run_stamp, flag):
 
     Compared as FRAMES rather than as bytes, because that is how the run hashed
     them - a re-saved CSV with a different line ending is the same manifest.
+
+    Returns the verified frames, or None. They are RETURNED rather than dropped
+    so the checks that re-derive the value contract read the frames that were
+    verified instead of opening the same files again.
     """
     recorded = run_stamp.get("Manifest_SHA256")
     if not isinstance(recorded, dict) or not recorded:
         flag("run", "RUN_NOT_FINALIZABLE",
              "the run stamp carries no Manifest_SHA256, so there is nothing to "
              "check the manifests against")
-        return False
+        return None
     try:
         frames = RB.load_manifests(manifest_dir)
     except Exception as exc:
         flag("run", "RUN_NOT_FINALIZABLE",
              "the manifests this run was produced from could not be loaded "
              "(%s: %s)" % (type(exc).__name__, exc))
-        return False
+        return None
     if set(recorded) != set(frames):
         # Includes the optional one: `load_manifests` substitutes an empty frame
         # with the right columns when `identity_resolution.csv` is absent, so
@@ -179,7 +183,7 @@ def verify_manifest_inputs(manifest_dir, run_stamp, flag):
         flag("run", "RUN_MANIFEST_SET_CHANGED",
              "the run recorded %s and this directory holds %s"
              % (", ".join(sorted(recorded)), ", ".join(sorted(frames))))
-        return False
+        return None
     ok = True
     for name in sorted(frames):
         actual = RB.frame_sha256(frames[name])
@@ -189,10 +193,10 @@ def verify_manifest_inputs(manifest_dir, run_stamp, flag):
                  "and the run recorded %s..."
                  % (name, actual[:16], _s(recorded.get(name))[:16] or "(nothing)"))
             ok = False
-    return ok
+    return frames if ok else None
 
 
-def value_contract_failures(run_dir, manifest_dir, machine, flag):
+def value_contract_failures(run_dir, frames, machine, flag):
     """Panels whose values fail the runner's own BAR_MONO contract, re-derived.
 
     The SAME function the runner uses - `identity_provenance_problems` - run
@@ -208,25 +212,19 @@ def value_contract_failures(run_dir, manifest_dir, machine, flag):
     own outputs, so re-reading them here is re-reading what was approved.
     """
     withheld = set()
-    try:
-        panels = pd.read_csv(os.path.join(manifest_dir, "panel_manifest.csv"),
-                             dtype=object).fillna("")
-        series = pd.read_csv(os.path.join(manifest_dir, "series_manifest.csv"),
-                             dtype=object).fillna("")
-        positions = pd.read_csv(
-            os.path.join(manifest_dir, "position_manifest.csv"),
-            dtype=object).fillna("")
-    except Exception as exc:
+    missing = [k for k in ("panels", "series", "positions") if k not in (frames or {})]
+    if missing:
         flag("run", "RUN_NOT_FINALIZABLE",
-             "the manifests this run was produced from could not be read (%s: "
-             "%s), so its values cannot be re-checked" % (type(exc).__name__, exc))
+             "the verified manifests do not include %s, so this run's values "
+             "cannot be re-checked" % ", ".join(missing))
         return {"*"}
+    panels, series = frames["panels"], frames["series"]
+    positions = frames["positions"]
     resolutions = {}
-    rpath = os.path.join(manifest_dir, "identity_resolution.csv")
-    if os.path.exists(rpath):
-        with open(rpath, encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                resolutions.setdefault(_s(row.get("Panel_ID")), []).append(row)
+    for _, row in (frames.get("resolutions")
+                   if frames.get("resolutions") is not None
+                   else pd.DataFrame()).iterrows():
+        resolutions.setdefault(_s(row.get("Panel_ID")), []).append(row)
     panel_index = {}
     for _, panel in panels.iterrows():
         pid = _s(panel.get("Panel_ID"))
@@ -271,51 +269,88 @@ def value_contract_failures(run_dir, manifest_dir, machine, flag):
     return withheld
 
 
-def resolution_row_failures(rows, pid, manifest_dir, flag):
-    """The run's copy of a panel's resolutions, put through the RUNNER's checker.
+def resolution_copy_failures(rows_by_panel, frames, flag):
+    """The run's copies of the resolution rows, checked ONCE and against the run.
 
-    `check_identity_resolution` is the contract: evidence vocabulary, the series
-    and its declared fill, `Geometry_Slot`, duplicates, a registered HUMAN
-    reviewer, a date that is not in the future, and a file-backed evidence type
-    carrying both a path and a hash. Re-implementing a subset of it here was how
-    the durable side ended up checking six fields where the manifest side checks
-    a dozen - so a resolution with a blank `Evidence_Artifact_SHA256` (which
-    makes the ledger comparison a no-op), no `Reviewer_ID` or a `Geometry_Slot`
-    of "left one" would pass the finalizer and fail the runner.
+    Three things, and the first two are only visible when every panel's copy is
+    in hand at the same time.
 
-    `check_files=False`: the evidence BYTES are checked against the ledger copy
-    a few lines up, and the path in the manifest points at the corpus, which a
-    run directory handed to somebody else does not carry.
+    THE SHARED CHECKER IS CALLED ONCE. `check_identity_resolution` keeps
+    `Resolution_ID` unique across the frame it is given, so calling it per panel
+    - which is how this started - made the identifier unique per panel and
+    global nowhere: two panels could both hold IR001, one identifier naming two
+    different decisions, and the evidence filenames are built from that
+    identifier too.
+
+    THE COPY IS THE MANIFEST. `identity_resolution.csv` is verified against the
+    run stamp and `identity__<Panel_ID>.csv` against the artifact ledger, and
+    nothing compared the two - so a run copy could name a different reviewer, a
+    different evidence file or a different date, be internally valid, hash
+    correctly, and leave `Resolution_ID` pointing at two different rows.
+
+    AND THE REGISTRY'S OWN PROBLEMS ARE NOT SWALLOWED. The reviewer index was
+    built with a flag callback that threw everything away, and
+    `check_reviewer_registry` indexes a row before it validates it - so a
+    registry entry with a malformed ORCID or a mismatched record type still
+    counted as "a registered HUMAN" for a resolution.
     """
-    problems = []
-    try:
-        panels = pd.read_csv(os.path.join(manifest_dir, "panel_manifest.csv"),
-                             dtype=object).fillna("")
-        series = pd.read_csv(os.path.join(manifest_dir, "series_manifest.csv"),
-                             dtype=object).fillna("")
-        reviewers = pd.read_csv(
-            os.path.join(manifest_dir, "reviewer_registry.csv"),
-            dtype=object).fillna("")
-    except Exception as exc:
+    problems, withheld = [], set()
+    columns = BM.identity_resolution_columns()
+    reviewers = frames.get("reviewers") if frames else None
+    if reviewers is None:
+        flag("run", "RUN_NOT_FINALIZABLE",
+             "the verified manifests carry no reviewer registry, so the "
+             "resolutions cannot be checked against it")
+        return set(rows_by_panel)
+    registry_problems = []
+    index = BM.check_reviewer_registry(
+        reviewers,
+        lambda where, code, detail: registry_problems.append((code, detail)))
+    if registry_problems:
+        for code, detail in registry_problems:
+            flag("run", "REVIEW_IDENTITY_REVIEWER_INVALID", "%s: %s" % (code, detail))
+        withheld |= set(rows_by_panel)
+    every = [row for pid in sorted(rows_by_panel) for row in rows_by_panel[pid]]
+    if every:
+        BM.check_identity_resolution(
+            pd.DataFrame(every, columns=columns),
+            frames.get("panels", pd.DataFrame()),
+            frames.get("series", pd.DataFrame()),
+            lambda where, code, detail: problems.append((where, code, detail)),
+            reviewer_index=index, check_files=False)
+    for where, code, detail in problems:
+        # `identity_resolution:<row>` back to the panel it came from, so a
+        # problem is charged to the panel that is withheld for it.
+        try:
+            row = every[int(where.split(":", 1)[1]) - 2]
+        except (IndexError, ValueError):
+            row = {}
+        pid = _s(row.get("Panel_ID")) or "?"
         flag("panel:%s" % pid, "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
-             "the manifests %s was read against could not be loaded (%s: %s)"
-             % (pid, type(exc).__name__, exc))
-        return True
-    index = BM.check_reviewer_registry(reviewers, lambda *a: None)
-    BM.check_identity_resolution(
-        pd.DataFrame(rows, columns=BM.identity_resolution_columns()),
-        panels, series,
-        lambda where, code, detail: problems.append((code, detail)),
-        reviewer_index=index, check_files=False)
-    for code, detail in problems:
-        flag("panel:%s" % pid, "REVIEW_IDENTITY_RESOLUTION_MISMATCH",
-             "%s's resolution rows do not pass the manifest contract: %s - %s"
-             % (pid, code, detail))
-    return bool(problems)
+             "the run's resolution rows do not pass the manifest contract: "
+             "%s - %s" % (code, detail))
+        withheld |= ({pid} if pid in rows_by_panel else set(rows_by_panel))
+    # The copy against the manifest, keyed by Resolution_ID rather than by row
+    # order, so a re-ordered file is the same file and a changed field is not.
+    declared = {}
+    frame = frames.get("resolutions")
+    if frame is not None:
+        for _, row in frame.iterrows():
+            declared.setdefault(_s(row.get("Panel_ID")), {})[
+                _s(row.get("Resolution_ID"))] = {c: _s(row.get(c)) for c in columns}
+    for pid, rows in sorted(rows_by_panel.items()):
+        copied = {_s(r.get("Resolution_ID")): {c: _s(r.get(c)) for c in columns}
+                  for r in rows}
+        if copied != declared.get(pid, {}):
+            flag("panel:%s" % pid, "IDENTITY_RESOLUTION_COPY_MISMATCH",
+                 "the resolutions copied into the run for %s are not the ones "
+                 "in the manifest the run validated" % pid)
+            withheld.add(pid)
+    return withheld
 
 
 def identity_contract_failures(run_dir, ledger_rows, machine, flag,
-                               manifest_dir=None):
+                               frames=None):
     """Panels whose human-named identities do not hold up against this run.
 
     Two things, both re-derived here rather than taken from the producer's word,
@@ -344,6 +379,7 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
     file cites the wrong evidence and the wrong reading.
     """
     withheld = set()
+    copied_rows = {}
     rows_by_panel = {}
     machine_rows = (machine.to_dict("records")
                     if hasattr(machine, "to_dict") else list(machine or ()))
@@ -443,9 +479,7 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
                          "a resolution row filed under %s reads Panel_ID=%s"
                          % (pid, _s(row.get("Panel_ID"))))
                     withheld.add(pid)
-            if manifest_dir and resolution_row_failures(rows, pid,
-                                                        manifest_dir, flag):
-                withheld.add(pid)
+            copied_rows[pid] = rows
             # Every value that says a person named its series has to cite one of
             # THESE rows, and to agree with it.
             for value in rows_by_panel.get(pid, []):
@@ -511,6 +545,11 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
                          "signed" % (rid, want[:16],
                                      _s(got.get("SHA256"))[:16] or "(nothing)"))
                     withheld.add(pid)
+    # Once, over every panel's copy at the same time: uniqueness of
+    # `Resolution_ID` is a property of the RUN, not of a panel, and so is the
+    # comparison against the manifest the run validated.
+    if frames is not None:
+        withheld |= resolution_copy_failures(copied_rows, frames, flag)
     return withheld
 
 
@@ -646,7 +685,7 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
     return out
 
 
-def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
+def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
     """The run must be the run that was reviewed, byte for byte.
 
     The finalizer re-reads four files to decide whether a value is poolable, and
@@ -751,8 +790,16 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
     # from these files, an edited mapping would be the thing it checks against.
     # Exchange two Factor_Levels in `position_manifest.csv` after the run and
     # the cell check would either refuse a correct run or bless a wrong one.
-    if not verify_manifest_inputs(manifest_dir, run_stamp, flag):
+    frames = verify_manifest_inputs(manifest_dir, run_stamp, flag)
+    if frames is None:
         ok = False
+    elif verified is not None:
+        # Handed to the caller rather than re-read. The gap between "these
+        # bytes hash correctly" and "open them again and re-derive the value
+        # contract from them" is a gap: it is the same file twice, and the
+        # sentence this module makes is that the contract runs on the frames
+        # that were verified.
+        verified.update(frames)
 
     registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
     if os.path.exists(registry_path):
@@ -892,7 +939,9 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
         if not os.path.exists(path):
             return stop("RUN_NOT_FINALIZABLE", "%s is missing" % path)
 
-    if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag):
+    verified = {}
+    if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag,
+                              verified=verified):
         return stop("RUN_ARTIFACT_MODIFIED",
                     "the run this approval refers to is not the run on disk")
 
@@ -936,14 +985,13 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # this the finalizer accepted any run whose producer had not copied the
     # evidence in, including every run made before it started doing so.
     for pid in sorted(identity_contract_failures(run_dir, ledger_rows, machine,
-                                                flag,
-                                                manifest_dir=manifest_dir)):
+                                                flag, frames=verified)):
         artifact_types.pop(pid, None)
     # And the runner's own value contract, re-run here on the verified files.
     # A run this module did not produce is the case it exists for, and nothing
     # pins a minimum pipeline version: a run made before a check existed arrives
     # looking complete.
-    for pid in sorted(value_contract_failures(run_dir, manifest_dir, machine,
+    for pid in sorted(value_contract_failures(run_dir, verified, machine,
                                               flag)):
         if pid == "*":
             return stop("RUN_NOT_FINALIZABLE",

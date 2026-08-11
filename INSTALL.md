@@ -2907,7 +2907,7 @@ declared one rather than a fraction of the plot box, a DEMO refusal leaves only
 stamp, and an unparseable `Axis_Y_Region` refuses the panel while still
 reporting `Cells_Declared=12` and queueing twelve cells.
 
-### A series the reader could not name (v7.29-7.34)
+### A series the reader could not name (v7.29-7.35)
 
 Publication 127 prints two bars fifteen pixels tall. They have a mean and an SE,
 and once the outline is taken off there is no interior left to classify - so a
@@ -3141,8 +3141,37 @@ blank `Evidence_Artifact_SHA256` (which makes the ledger comparison a no-op), no
 the rows, with `check_files=False` because the evidence bytes are checked
 against the ledger copy instead.
 
-**Still open:** nothing in the identity chain. What remains for a pilot is
-publication 127's own manifests and a real reviewer identity.
+**One identifier, one decision, one copy.** `check_identity_resolution` keeps
+`Resolution_ID` unique across the frame it is handed, so calling it once per
+panel made the identifier unique per panel and global nowhere - two panels could
+both hold IR001, and the evidence filenames are built from that identifier. It
+is called once over every panel's copy now. And the copy is compared with the
+manifest: `identity_resolution.csv` is verified against the run stamp and
+`identity__<Panel_ID>.csv` against the ledger, and until now nothing compared
+the two, so the run copy could name a different reviewer, evidence file or date,
+be internally valid, hash correctly, and leave `Resolution_ID` pointing at two
+different rows (`IDENTITY_RESOLUTION_COPY_MISMATCH`).
+
+**The registry's own problems are not swallowed.** The reviewer index was built
+with a callback that discarded every problem, and `check_reviewer_registry`
+indexes a row before it validates it - so an entry with a malformed ORCID or a
+mismatched record type still counted as "a registered HUMAN" for a resolution.
+
+**The verified frames travel.** `verify_manifest_inputs` returns them and
+`verify_run_outputs` hands them out; the checks that re-derive the contract read
+those frames instead of opening the same files again, and a check handed no
+frames refuses the run rather than proceeding. A blank `Source_Panel_ID` in the
+panel DECLARATION is `IDENTITY_PANEL_DECLARATION_INCOMPLETE`, as `Unit_ID`
+already was.
+
+**Where this stands.** A run made by this pipeline has a closed identity chain:
+measurement, panel binding, geometry foreign key, cell, identity source,
+resolution, evidence, review, approval. Finalizing a run made by an OLDER or a
+different producer is held to the same contract by the finalizer's own re-run -
+that is the part that keeps growing, because every check added to the runner has
+to be re-derivable from the files a finished run leaves behind. What is left
+there is not a known hole but a standing obligation: a check added on one side
+belongs on the other.
 
 ## Suites
 
@@ -3150,7 +3179,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 659 |
+| `test_run_batch.py` | 670 |
 | `test_kernel.py` | 232 |
 | `test_measure_mono_bars.py` | 294 |
 | `test_grid_engine.py` | 180 |
@@ -3161,7 +3190,7 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **1929** |
+| **total** | **1940** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

@@ -64,10 +64,11 @@ for fid, image, outcome, unit, domain, rows in BAR_FIGURES:
             errorbar_stem_confirmed="TRUE", errorbar_source=BAR_SRC,
             x_calibration=[[0, 100], [1, 400]]))
 
-for fid, image, outcome, unit, rows in LINE_FIGURES:
+for fid, image, rows in LINE_FIGURES:
     VIEW_CAPTIONS[fid] = ("%s over head-down tilt, fluid versus non-fluid, by sex"
-                          % outcome)
-    for pid, sex, box, tick_text, x_pixels in rows:
+                          % ", ".join(sorted({o for _p, _s, o, _u, _b, _t, _x
+                                              in rows})))
+    for pid, sex, outcome, unit, box, tick_text, x_pixels in rows:
         uid = "U_" + pid
         READ[pid] = dict(
             mark_type="LINE_MONO_STYLE", unit_id=uid, figure_view=fid,

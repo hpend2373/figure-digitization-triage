@@ -181,8 +181,8 @@ BAR_FIGURES = [
 
 # The line figures. Panel boxes and calibrations are declared so the manifests
 # are ready the day the reader ships; the run will queue them regardless.
-# MEASURED, not sketched. These four panels were declared before LINE_MONO_STYLE
-# had a reader, and their geometry said so: one box copied to all four, and x
+# MEASURED, not sketched. These panels were declared before LINE_MONO_STYLE had
+# a reader, and their geometry said so: one box copied to all of them, and x
 # pixels SYNTHESISED by spreading twelve positions evenly between the box edges
 # with a 25 px inset. That was honest while nothing could read them - a position
 # without a pixel is not a position - and it is not geometry.
@@ -191,25 +191,70 @@ BAR_FIGURES = [
 # the twelve category intervals between the thirteen printed ticks, the y ticks
 # are the two outermost gridlines INSIDE THE BOX - a calibration tick above the
 # box top describes a different panel from the box, and the validator says so -
-# and the box runs from the first tick to the last. THE TOP OF THE BOX IS BELOW THE LEGEND on the three panels that carry
-# one inside the plot area - excluding printed furniture is what a panel box is
-# for. Figure 2's WOMEN panel has no legend and starts at its top gridline.
+# and the box runs from the first tick to the last.
+#
+# THE TOP OF THE BOX IS BELOW THE LEGEND on the four panels that carry one
+# inside the plot area, which is the top row of each figure; excluding printed
+# furniture is what a panel box is for. The other eight open at their top
+# gridline, and the gridline is removed by the reader before anything is
+# traced.
+#
+# The OUTCOME is per panel, not per figure. Each of these two publisher figures
+# is a four-by-two grid of different outcomes sharing one caption, and giving
+# the figure a single outcome name was only ever true while two of its eight
+# regions were the only ones with a reader.
 LINE_FIGURES = [
-    ("F397_1", "397_fig1.jpeg", "Mean arterial pressure", "mmHg", [
-        ("P1_MAP_MEN", "MEN", (83, 477, 110, 296), "110:120;70:296",
+    ("F397_1", "397_fig1.jpeg", [
+        ("P1_MAP_MEN", "MEN", "Mean arterial pressure", "mmHg",
+         (83, 477, 110, 296), "110:120;70:296",
          (99.5, 132.5, 165.0, 197.5, 230.5, 263.5,
           296.5, 329.0, 361.5, 394.5, 427.5, 460.0)),
-        ("P1_MAP_WOMEN", "WOMEN", (600, 1001, 113, 294), "110:122;70:294",
+        ("P1_MAP_WOMEN", "WOMEN", "Mean arterial pressure", "mmHg",
+         (600, 1001, 113, 294), "110:122;70:294",
          (616.5, 649.5, 683.0, 716.5, 749.5, 783.0,
           816.5, 850.0, 883.5, 916.5, 950.0, 983.5)),
+        ("P1_TPR_MEN", "MEN", "Total peripheral resistance", "Units",
+         (90, 495, 448, 642), "60:448;20:642",
+         (107.0, 140.5, 174.0, 207.8, 241.2, 275.0,
+          309.0, 342.5, 376.0, 409.8, 443.2, 477.0)),
+        ("P1_TPR_WOMEN", "WOMEN", "Total peripheral resistance", "Units",
+         (607, 1002, 446, 645), "60:446;20:645",
+         (623.5, 656.5, 689.5, 722.5, 755.2, 788.0,
+          820.8, 853.5, 886.5, 919.5, 952.2, 984.8)),
+        ("P1_FPV_MEN", "MEN", "Finger pulse volume", "Units",
+         (88, 495, 797, 970), "2600:797;200:970",
+         (104.5, 138.2, 172.0, 206.0, 240.0, 273.8,
+          307.5, 341.5, 375.5, 409.5, 443.2, 477.0)),
+        ("P1_FPV_WOMEN", "WOMEN", "Finger pulse volume", "Units",
+         (620, 1011, 801, 972), "2600:801;200:972",
+         (636.5, 669.0, 701.5, 734.0, 766.5, 799.0,
+          831.5, 864.0, 896.5, 929.0, 961.5, 994.0)),
     ]),
-    ("F397_2", "397_fig2.jpeg", "Heart rate", "bpm", [
-        ("P2_HR_MEN", "MEN", (79, 500, 125, 289), "70:152;50:289",
+    ("F397_2", "397_fig2.jpeg", [
+        ("P2_HR_MEN", "MEN", "Heart rate", "bpm",
+         (79, 500, 125, 289), "70:152;50:289",
          (96.5, 131.5, 166.5, 201.5, 236.5, 271.5,
           306.5, 341.5, 376.5, 411.5, 446.5, 481.5)),
-        ("P2_HR_WOMEN", "WOMEN", (603, 1000, 88, 293), "70:155;50:293",
+        ("P2_HR_WOMEN", "WOMEN", "Heart rate", "bpm",
+         (603, 1000, 88, 293), "70:155;50:293",
          (619.0, 652.0, 685.5, 718.5, 751.5, 784.5,
           817.5, 850.5, 883.5, 916.5, 949.5, 982.5)),
+        ("P2_TFV_MEN", "MEN", "Thoracic fluid volume", "ml",
+         (91, 499, 447, 640), "8000:447;5000:640",
+         (108.0, 142.0, 176.0, 210.0, 244.0, 278.0,
+          312.0, 346.0, 380.0, 414.0, 447.5, 481.0)),
+        ("P2_TFV_WOMEN", "WOMEN", "Thoracic fluid volume", "ml",
+         (610, 1019, 446, 646), "7000:446;4000:646",
+         (627.5, 661.5, 695.5, 729.5, 763.5, 797.5,
+          831.5, 865.2, 899.0, 933.0, 967.0, 1000.8)),
+        ("P2_CO_MEN", "MEN", "Cardiac output", "l/min",
+         (81, 500, 1149, 1387), "4.5:1149;2:1387",
+         (98.5, 133.5, 168.5, 203.0, 237.5, 272.5,
+          307.5, 342.5, 377.5, 412.5, 447.0, 481.5)),
+        ("P2_CO_WOMEN", "WOMEN", "Cardiac output", "l/min",
+         (601, 1010, 1148, 1386), "4.5:1148;2:1386",
+         (618.0, 652.0, 686.0, 720.0, 754.0, 788.0,
+          822.0, 856.0, 890.0, 924.0, 958.0, 992.0)),
     ]),
 ]
 
@@ -307,10 +352,11 @@ for fid, image, outcome, units, domain, rows in BAR_FIGURES:
                 Factor_Level=level, Timepoint_Label=printed, Timepoint_Days="",
                 Note=""))
 
-for fid, image, outcome, units, rows in LINE_FIGURES:
+for fid, image, rows in LINE_FIGURES:
     figure(fid, image, "%s over head-down tilt, fluid versus non-fluid, by sex"
-           % outcome, len(rows))
-    for pid, sex, box, ticks, x_pixels in rows:
+           % ", ".join(sorted({o for _p, _s, o, _u, _b, _t, _x in rows})),
+           len(rows))
+    for pid, sex, outcome, units, box, ticks, x_pixels in rows:
         uid = "U_" + pid
         unit(uid, fid, "G_HDT", sex, outcome, units, "CV_HEMO",
              Bar_Top_Definition="NOT_A_BAR", N_Outcome=10, Dispersion_Type="SEM",
@@ -395,32 +441,32 @@ CONFIGS = [
 # only 14 currently have reader rows.  The other 22 stay explicit as no-reader,
 # manual, non-target or no-summary dispositions instead of disappearing.
 # --------------------------------------------------------------------------
-# LINE_MONO_STYLE shipped, and twelve of these dispositions had to change with
-# it. Four panels have authored geometry and reader rows, so they are
-# AUTO_DIGITIZE. Eight more are the same two-black-curve figure type and have
-# no geometry authored yet: NO_READER_AVAILABLE was a claim about this package
-# and it stopped being true, so they are GEOMETRY_NOT_AUTHORED - open work,
-# named, rather than a closed state that quietly misdescribes it.
+# All twelve two-black-curve panels of Figures 1 and 2 are AUTO_DIGITIZE. They
+# were NO_READER_AVAILABLE until LINE_MONO_STYLE shipped, then
+# GEOMETRY_NOT_AUTHORED for the eight nobody had measured, and now each has its
+# box, its ladder and its twelve tick centres read off its own raster. The four
+# skin-temperature and skin-conductance panels stay NON_TARGET_OUTCOME: they
+# are not cardiovascular outcomes and no reader changes that.
 _SOURCE_SPECS = {
     1: [
         ("P1_MAP_MEN", "MAP men", "TARGET", "AUTO_DIGITIZE"),
         ("P1_MAP_WOMEN", "MAP women", "TARGET", "AUTO_DIGITIZE"),
-        ("S397_F1_TPR_MEN", "TPR men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
-        ("S397_F1_TPR_WOMEN", "TPR women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
-        ("S397_F1_FPV_MEN", "Finger pulse volume men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
-        ("S397_F1_FPV_WOMEN", "Finger pulse volume women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("P1_TPR_MEN", "TPR men", "TARGET", "AUTO_DIGITIZE"),
+        ("P1_TPR_WOMEN", "TPR women", "TARGET", "AUTO_DIGITIZE"),
+        ("P1_FPV_MEN", "Finger pulse volume men", "TARGET", "AUTO_DIGITIZE"),
+        ("P1_FPV_WOMEN", "Finger pulse volume women", "TARGET", "AUTO_DIGITIZE"),
         ("S397_F1_TEMP_MEN", "Skin temperature men", "NON_TARGET", "NON_TARGET_OUTCOME"),
         ("S397_F1_TEMP_WOMEN", "Skin temperature women", "NON_TARGET", "NON_TARGET_OUTCOME"),
     ],
     2: [
         ("P2_HR_MEN", "Heart rate men", "TARGET", "AUTO_DIGITIZE"),
         ("P2_HR_WOMEN", "Heart rate women", "TARGET", "AUTO_DIGITIZE"),
-        ("S397_F2_TFV_MEN", "Thoracic fluid volume men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
-        ("S397_F2_TFV_WOMEN", "Thoracic fluid volume women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("P2_TFV_MEN", "Thoracic fluid volume men", "TARGET", "AUTO_DIGITIZE"),
+        ("P2_TFV_WOMEN", "Thoracic fluid volume women", "TARGET", "AUTO_DIGITIZE"),
         ("S397_F2_SC_MEN", "Skin conductance men", "NON_TARGET", "NON_TARGET_OUTCOME"),
         ("S397_F2_SC_WOMEN", "Skin conductance women", "NON_TARGET", "NON_TARGET_OUTCOME"),
-        ("S397_F2_CO_MEN", "Cardiac output men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
-        ("S397_F2_CO_WOMEN", "Cardiac output women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("P2_CO_MEN", "Cardiac output men", "TARGET", "AUTO_DIGITIZE"),
+        ("P2_CO_WOMEN", "Cardiac output women", "TARGET", "AUTO_DIGITIZE"),
     ],
     3: [
         ("P3_MEN", "MAP men", "TARGET", "AUTO_DIGITIZE"),

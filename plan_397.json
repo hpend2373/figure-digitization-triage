@@ -78,10 +78,10 @@
  ],
  "figure_views": {
   "F397_1": {
-   "caption": "Mean arterial pressure over head-down tilt, fluid versus non-fluid, by sex"
+   "caption": "Finger pulse volume, Mean arterial pressure, Total peripheral resistance over head-down tilt, fluid versus non-fluid, by sex"
   },
   "F397_2": {
-   "caption": "Heart rate over head-down tilt, fluid versus non-fluid, by sex"
+   "caption": "Cardiac output, Heart rate, Thoracic fluid volume over head-down tilt, fluid versus non-fluid, by sex"
   },
   "F397_3": {
    "caption": "Mean arterial pressure, fluid versus non-fluid, by sex"
@@ -393,40 +393,548 @@
      }
     },
     {
-     "panel_id": "S397_F1_TPR_MEN",
+     "panel_id": "P1_TPR_MEN",
      "label": "P03",
      "outcome_label": "TPR men",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P1_TPR_MEN",
+      "figure_view": "F397_1",
+      "box": [
+       90,
+       495,
+       448,
+       642
+      ],
+      "y_ticks": [
+       [
+        60.0,
+        448.0
+       ],
+       [
+        20.0,
+        642.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 107.0
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 140.5
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 174.0
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 207.8
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 241.2
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 275.0
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 309.0
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 342.5
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 376.0
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 409.8
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 443.2
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 477.0
+       }
+      ]
+     }
     },
     {
-     "panel_id": "S397_F1_TPR_WOMEN",
+     "panel_id": "P1_TPR_WOMEN",
      "label": "P04",
      "outcome_label": "TPR women",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P1_TPR_WOMEN",
+      "figure_view": "F397_1",
+      "box": [
+       607,
+       1002,
+       446,
+       645
+      ],
+      "y_ticks": [
+       [
+        60.0,
+        446.0
+       ],
+       [
+        20.0,
+        645.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 623.5
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 656.5
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 689.5
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 722.5
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 755.2
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 788.0
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 820.8
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 853.5
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 886.5
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 919.5
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 952.2
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 984.8
+       }
+      ]
+     }
     },
     {
-     "panel_id": "S397_F1_FPV_MEN",
+     "panel_id": "P1_FPV_MEN",
      "label": "P05",
      "outcome_label": "Finger pulse volume men",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P1_FPV_MEN",
+      "figure_view": "F397_1",
+      "box": [
+       88,
+       495,
+       797,
+       970
+      ],
+      "y_ticks": [
+       [
+        2600.0,
+        797.0
+       ],
+       [
+        200.0,
+        970.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 104.5
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 138.2
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 172.0
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 206.0
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 240.0
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 273.8
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 307.5
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 341.5
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 375.5
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 409.5
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 443.2
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 477.0
+       }
+      ]
+     }
     },
     {
-     "panel_id": "S397_F1_FPV_WOMEN",
+     "panel_id": "P1_FPV_WOMEN",
      "label": "P06",
      "outcome_label": "Finger pulse volume women",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P1_FPV_WOMEN",
+      "figure_view": "F397_1",
+      "box": [
+       620,
+       1011,
+       801,
+       972
+      ],
+      "y_ticks": [
+       [
+        2600.0,
+        801.0
+       ],
+       [
+        200.0,
+        972.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 636.5
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 669.0
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 701.5
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 734.0
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 766.5
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 799.0
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 831.5
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 864.0
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 896.5
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 929.0
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 961.5
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 994.0
+       }
+      ]
+     }
     },
     {
      "panel_id": "S397_F1_TEMP_MEN",
@@ -735,22 +1243,276 @@
      }
     },
     {
-     "panel_id": "S397_F2_TFV_MEN",
+     "panel_id": "P2_TFV_MEN",
      "label": "P03",
      "outcome_label": "Thoracic fluid volume men",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P2_TFV_MEN",
+      "figure_view": "F397_2",
+      "box": [
+       91,
+       499,
+       447,
+       640
+      ],
+      "y_ticks": [
+       [
+        8000.0,
+        447.0
+       ],
+       [
+        5000.0,
+        640.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 108.0
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 142.0
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 176.0
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 210.0
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 244.0
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 278.0
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 312.0
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 346.0
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 380.0
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 414.0
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 447.5
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 481.0
+       }
+      ]
+     }
     },
     {
-     "panel_id": "S397_F2_TFV_WOMEN",
+     "panel_id": "P2_TFV_WOMEN",
      "label": "P04",
      "outcome_label": "Thoracic fluid volume women",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P2_TFV_WOMEN",
+      "figure_view": "F397_2",
+      "box": [
+       610,
+       1019,
+       446,
+       646
+      ],
+      "y_ticks": [
+       [
+        7000.0,
+        446.0
+       ],
+       [
+        4000.0,
+        646.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 627.5
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 661.5
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 695.5
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 729.5
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 763.5
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 797.5
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 831.5
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 865.2
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 899.0
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 933.0
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 967.0
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 1000.8
+       }
+      ]
+     }
     },
     {
      "panel_id": "S397_F2_SC_MEN",
@@ -771,22 +1533,276 @@
      "read": null
     },
     {
-     "panel_id": "S397_F2_CO_MEN",
+     "panel_id": "P2_CO_MEN",
      "label": "P07",
      "outcome_label": "Cardiac output men",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P2_CO_MEN",
+      "figure_view": "F397_2",
+      "box": [
+       81,
+       500,
+       1149,
+       1387
+      ],
+      "y_ticks": [
+       [
+        4.5,
+        1149.0
+       ],
+       [
+        2.0,
+        1387.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 98.5
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 133.5
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 168.5
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 203.0
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 237.5
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 272.5
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 307.5
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 342.5
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 377.5
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 412.5
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 447.0
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 481.5
+       }
+      ]
+     }
     },
     {
-     "panel_id": "S397_F2_CO_WOMEN",
+     "panel_id": "P2_CO_WOMEN",
      "label": "P08",
      "outcome_label": "Cardiac output women",
      "target_status": "TARGET",
-     "disposition": "GEOMETRY_NOT_AUTHORED",
-     "reason": "visible panel inventoried; reader not configured",
-     "read": null
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "reader/run manifest configured",
+     "read": {
+      "mark_type": "LINE_MONO_STYLE",
+      "unit_id": "U_P2_CO_WOMEN",
+      "figure_view": "F397_2",
+      "box": [
+       601,
+       1010,
+       1148,
+       1386
+      ],
+      "y_ticks": [
+       [
+        4.5,
+        1148.0
+       ],
+       [
+        2.0,
+        1386.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "FLUID",
+        "factor": "ARM",
+        "level": "FLUID",
+        "line_style": "SOLID",
+        "marker": "NONE",
+        "note": "legend: solid"
+       },
+       {
+        "series_id": "NON_FLUID",
+        "factor": "ARM",
+        "level": "NON_FLUID",
+        "line_style": "DASHED",
+        "marker": "NONE",
+        "note": "legend: dashed"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "0_30",
+        "factor": "TIMEPOINT",
+        "level": "0:30",
+        "timepoint_label": "0:30",
+        "x_pixel": 618.0
+       },
+       {
+        "position_id": "1_00",
+        "factor": "TIMEPOINT",
+        "level": "1:00",
+        "timepoint_label": "1:00",
+        "x_pixel": 652.0
+       },
+       {
+        "position_id": "1_30",
+        "factor": "TIMEPOINT",
+        "level": "1:30",
+        "timepoint_label": "1:30",
+        "x_pixel": 686.0
+       },
+       {
+        "position_id": "2_00",
+        "factor": "TIMEPOINT",
+        "level": "2:00",
+        "timepoint_label": "2:00",
+        "x_pixel": 720.0
+       },
+       {
+        "position_id": "2_30",
+        "factor": "TIMEPOINT",
+        "level": "2:30",
+        "timepoint_label": "2:30",
+        "x_pixel": 754.0
+       },
+       {
+        "position_id": "3_00",
+        "factor": "TIMEPOINT",
+        "level": "3:00",
+        "timepoint_label": "3:00",
+        "x_pixel": 788.0
+       },
+       {
+        "position_id": "3_30",
+        "factor": "TIMEPOINT",
+        "level": "3:30",
+        "timepoint_label": "3:30",
+        "x_pixel": 822.0
+       },
+       {
+        "position_id": "4_00",
+        "factor": "TIMEPOINT",
+        "level": "4:00",
+        "timepoint_label": "4:00",
+        "x_pixel": 856.0
+       },
+       {
+        "position_id": "4_30",
+        "factor": "TIMEPOINT",
+        "level": "4:30",
+        "timepoint_label": "4:30",
+        "x_pixel": 890.0
+       },
+       {
+        "position_id": "5_00",
+        "factor": "TIMEPOINT",
+        "level": "5:00",
+        "timepoint_label": "5:00",
+        "x_pixel": 924.0
+       },
+       {
+        "position_id": "5_30",
+        "factor": "TIMEPOINT",
+        "level": "5:30",
+        "timepoint_label": "5:30",
+        "x_pixel": 958.0
+       },
+       {
+        "position_id": "6_00",
+        "factor": "TIMEPOINT",
+        "level": "6:00",
+        "timepoint_label": "6:00",
+        "x_pixel": 992.0
+       }
+      ]
+     }
     }
    ]
   },
@@ -2385,6 +3401,110 @@
    ]
   },
   {
+   "unit_id": "U_P1_TPR_MEN",
+   "figure_view": "F397_1",
+   "grid_id": "G_HDT",
+   "panel": "MEN",
+   "outcome_name": "Total peripheral resistance",
+   "domain": "CV_HEMO",
+   "unit": "Units",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P1_TPR_WOMEN",
+   "figure_view": "F397_1",
+   "grid_id": "G_HDT",
+   "panel": "WOMEN",
+   "outcome_name": "Total peripheral resistance",
+   "domain": "CV_HEMO",
+   "unit": "Units",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P1_FPV_MEN",
+   "figure_view": "F397_1",
+   "grid_id": "G_HDT",
+   "panel": "MEN",
+   "outcome_name": "Finger pulse volume",
+   "domain": "CV_HEMO",
+   "unit": "Units",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P1_FPV_WOMEN",
+   "figure_view": "F397_1",
+   "grid_id": "G_HDT",
+   "panel": "WOMEN",
+   "outcome_name": "Finger pulse volume",
+   "domain": "CV_HEMO",
+   "unit": "Units",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
    "unit_id": "U_P2_HR_MEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
@@ -2418,6 +3538,110 @@
    "outcome_name": "Heart rate",
    "domain": "CV_HEMO",
    "unit": "bpm",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P2_TFV_MEN",
+   "figure_view": "F397_2",
+   "grid_id": "G_HDT",
+   "panel": "MEN",
+   "outcome_name": "Thoracic fluid volume",
+   "domain": "CV_HEMO",
+   "unit": "ml",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P2_TFV_WOMEN",
+   "figure_view": "F397_2",
+   "grid_id": "G_HDT",
+   "panel": "WOMEN",
+   "outcome_name": "Thoracic fluid volume",
+   "domain": "CV_HEMO",
+   "unit": "ml",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P2_CO_MEN",
+   "figure_view": "F397_2",
+   "grid_id": "G_HDT",
+   "panel": "MEN",
+   "outcome_name": "Cardiac output",
+   "domain": "CV_HEMO",
+   "unit": "l/min",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SEM",
+   "n_outcome": 10,
+   "n_source": "text p.90",
+   "bar_top_definition": "NOT_A_BAR",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "text p.90: 'physiological responses (30-min means and SEMs) of men (left) and women (right) during 6-h exposures to HDT'",
+   "x_calibration": [
+    [
+     0,
+     100
+    ],
+    [
+     1,
+     400
+    ]
+   ]
+  },
+  {
+   "unit_id": "U_P2_CO_WOMEN",
+   "figure_view": "F397_2",
+   "grid_id": "G_HDT",
+   "panel": "WOMEN",
+   "outcome_name": "Cardiac output",
+   "domain": "CV_HEMO",
+   "unit": "l/min",
    "statistic": "CONTINUOUS",
    "dispersion_type": "SEM",
    "n_outcome": 10,

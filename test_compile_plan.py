@@ -115,7 +115,7 @@ print("the compiled manifests are the pilot's, value for value")
 _ODIR = os.path.join(ROOT, "o_plan")
 _summary = RB.run_batch(MDIR, _ODIR, file_root=HERE, run_date="2026-08-07")
 check("the compiled batch runs", _summary["status"] == "RAN", "%s" % _summary)
-check("with the pilot's panel count", _summary["panels"] == 18, "%s" % _summary)
+check("with the pilot's panel count", _summary["panels"] == 26, "%s" % _summary)
 # 36, not the 48 the old BAR_MONO reader produced. Three panels of Figure 4 -
 # P4_SV_WOMEN, P4_CO_MEN, P4_CO_WOMEN - now refuse with
 # STROKE_SCALE_UNRESOLVED: the two-pass reader measures the figure's own line
@@ -128,12 +128,19 @@ check("with the pilot's panel count", _summary["panels"] == 18, "%s" % _summary)
 # is the COST of the switch, in the open - three panels that used to produce
 # unvalidated numbers and now produce a named refusal, and a stroke measurement
 # on those three that is worth a round of its own.
-# 72, not 36: LINE_MONO_STYLE shipped and the four line panels of Figures 1 and
-# 2 now read. Their geometry was measured at the same time - it had been one
-# box copied to four panels with twelve x pixels spread evenly between the
-# edges, which was honest while nothing could read them and is not geometry.
-check("and the 74 values the released readers stand behind",
-      _summary["values"] == 74, "%s" % _summary)
+# 76, not 36: LINE_MONO_STYLE shipped and all twelve two-black-curve panels of
+# Figures 1 and 2 now read. Their geometry was measured at the same time - it
+# had been one box copied to every panel with twelve x pixels spread evenly
+# between the edges, which was honest while nothing could read them and is not
+# geometry.
+#
+# Twelve panels and 76 values is a LOW yield and the right one. On this
+# publication the two curves run within a stroke of each other over most of
+# several panels - finger pulse volume men is two lines about fourteen pixels
+# apart for nine of its twelve positions - and a cell nobody can attribute is
+# a cell this reader does not emit.
+check("and the 76 values the released readers stand behind",
+      _summary["values"] == 76, "%s" % _summary)
 check("and nothing accepted, because the paper still does not say SD or SEM",
       _summary["accepted"] == 0, "%s" % _summary)
 _states = _summary["states"]
@@ -144,7 +151,7 @@ _states = _summary["states"]
 # not poolable, so the panel says so - which is the same answer it gave before,
 # reached by measurement instead of by absence.
 check("and the same four terminal states",
-      _states == {"QC_FAILED": 11, "NO_VARIANCE": 2,
+      _states == {"QC_FAILED": 12, "NO_VARIANCE": 9,
                   "PANEL_GEOMETRY_UNRESOLVED": 3, "MANUAL_POINT_READ": 2},
       "%s" % _states)
 # PANEL_GEOMETRY_UNRESOLVED, not MANUAL_POINT_READ: the reason is on the run

@@ -3702,11 +3702,26 @@ this reader turned eight of publication 397's panels from "we cannot read this"
 into "we have not measured this", and `NO_READER_AVAILABLE` is a claim about
 the package that stopped being true for them. It is a TARGET disposition, it is
 not closed, and it shows as `AWAITING_GEOMETRY` in the source-panel inventory.
+Those eight have since been measured, so nothing in this repository carries it
+today — the disposition stays because the next reader will create the state
+again.
 
-The four panels that DO have geometry were measured at the same time. They had
-been declared before any reader existed, with one box copied to all four and
+All twelve panels' geometry is measured off its own raster. They had been
+declared before any reader existed, with one box copied to every panel and
 twelve x pixels spread evenly between the box edges — honest while nothing
-could read them, and not geometry. Each is now measured off its own raster.
+could read them, and not geometry. Measuring twelve panels by hand trades one
+silent error for twelve chances at a transcription one, so
+`forward_test_397_line_geometry.py` checks every declared number against the
+pixels: each calibration row has to be a printed gridline, each x has to be the
+centre of its category interval (these are Excel category charts, so the point
+is between the ticks and not on one), and the twelve intervals have to be
+equal.
+
+The yield is low and it is the right answer. 76 of 384 declared cells: several
+of these panels run their two curves within a stroke of each other for most of
+their length, and finger pulse volume in men is two lines about fourteen pixels
+apart at nine of twelve positions. A cell nobody can attribute is a cell this
+reader does not emit. Each is now measured off its own raster.
 
 ## Intake: the picture on the sheet, and the papers that have no picture at all
 
@@ -3741,7 +3756,6 @@ render and nothing to crop however long anybody looks — and filed as
 
 ## Still open
 
-- eight two-curve panels on 397 Figures 1–2: `GEOMETRY_NOT_AUTHORED`
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
   exists to read, and it stays MANUAL
 - 397 Figure 4, 386 Figures 3–4

@@ -142,19 +142,26 @@ protocol as an extractor - or an agent - reads it, standalone and installable;
 
 ## Status
 
-Publication 397 runs end to end: 18 panels, 192 declared cells, 74 read,
+Publication 397 runs end to end: 26 panels, 384 declared cells, 76 read,
 **0 accepted**. That is the correct answer, not a failure — the running text
 gives "30-min means and SEMs" for the line figures, while the Figure 3/4
 captions say only "(3-min means)". Whether the bars are SD or SEM is not in the
 paper, so every read cell sits at `QC_FAILED` pending an author query.
 
-`LINE_MONO_STYLE` shipped, and the four line panels of Figures 1 and 2 are what
-took the count from 48 to 74. Against an independent eye reading of Figure 1's
-MEN panel it lands 16 of 24 cells within 1.65 mmHg on a 50 mmHg axis and
-refuses the other 8, at the four positions where the two curves run within two
-mmHg of each other.
+`LINE_MONO_STYLE` shipped and all twelve two-black-curve panels of Figures 1
+and 2 now read. Against an independent eye reading of Figure 1's MEN mean
+arterial pressure it lands 16 of 24 cells within 1.65 mmHg on a 50 mmHg axis
+and refuses the other 8, at the four positions where the two curves run within
+two mmHg of each other.
 
-Open work: eight more two-curve panels on 397 Figures 1–2 whose geometry nobody
-has measured yet (`GEOMETRY_NOT_AUTHORED` in the source inventory, so they are
-counted rather than absent), publication 386 Figures 3–4, and five cells of
-publication 323 that need a human reading.
+**76 of 384 declared cells is a low yield and the right one.** Several of these
+panels run their two curves within a stroke of each other for most of their
+length — finger pulse volume in men is two lines about fourteen pixels apart at
+nine of twelve positions — and a cell nobody can attribute is a cell this
+reader does not emit. The geometry behind all twelve is checked against the
+rasters by `forward_test_397_line_geometry.py`: every declared calibration row
+is a printed gridline and every declared x is the centre of its category
+interval.
+
+Open work: publication 386 Figures 3–4, and five cells of publication 323 that
+need a human reading.

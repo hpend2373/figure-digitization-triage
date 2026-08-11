@@ -40,7 +40,8 @@ jobs:
                    forward_test_127_mono_bar forward_test_397_mono_geometry \
                    forward_test_real_monochrome \
                    forward_test_beckers_geometry forward_test_beckers_dpi \
-                   forward_test_397_line_style pilot_397; do
+                   forward_test_397_line_style forward_test_397_line_geometry \
+                   pilot_397; do
             echo "--- $s"
             python "$s.py"
           done
@@ -59,15 +60,17 @@ jobs:
           stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
           assert stamp["Status"] == "RAN", stamp["Status"]
           assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
-          # 74 since LINE_MONO_STYLE shipped: the four line panels of Figures
-          # 1 and 2 read, on geometry measured at the same time. Still nothing
-          # accepted - publication 397 does not say whether its error bars are
-          # SD or SEM, which no reader can fix. test_compile_plan names the
-          # panels behind every one of these numbers.
-          assert stamp["Values_Read"] == 74, stamp["Values_Read"]
+          # 76 since LINE_MONO_STYLE shipped: all twelve two-black-curve
+          # panels of Figures 1 and 2 read, on geometry measured at the same
+          # time. A low yield on purpose - most of those panels run their two
+          # curves within a stroke of each other. Still nothing accepted:
+          # publication 397 does not say whether its error bars are SD or SEM,
+          # which no reader can fix. test_compile_plan names the panels behind
+          # every one of these numbers.
+          assert stamp["Values_Read"] == 76, stamp["Values_Read"]
           assert stamp["Values_Machine_QC_Passed"] == 0, stamp
           assert stamp["Values_Accepted"] == 0, stamp
-          assert stamp["QC_Problems"] == 131, stamp["QC_Problems"]
+          assert stamp["QC_Problems"] == 252, stamp["QC_Problems"]
           assert stamp["Environment"]["Libraries"]["cv2"], stamp
           print("plan -> run reproduces the pilot:", stamp["Status"],
                 stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")

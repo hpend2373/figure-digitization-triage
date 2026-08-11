@@ -3428,6 +3428,14 @@ was given, holds a document twice, files no candidates as a clean read, or
 leaves candidates waiting under an action that does not mention them; `main`
 exits non-zero when any of that is true.
 
+CI installs `requirements-lock.txt` and nothing else, so it may have no PDF
+backend at all - which is why the completeness half of this file is checked
+unconditionally and only the per-status half is gated. With no backend every
+document comes back `BACKEND_UNAVAILABLE` / `INSTALL_A_PDF_BACKEND`, and the
+ledger still accounts for all of them. That is the property, and the first
+version of these scenarios asserted `TEXT_LAYER_OK` on a runner that had
+neither pdfminer nor poppler.
+
 **`--render` renders.** It was in the docstring and wired to nothing. Every page
 becomes a PNG, the draft row carries the raster and its hash, and a figure crop
 is cut per candidate and shown on the sheet. Confirming a figure from
@@ -3460,13 +3468,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 146 |
-| `test_corpus_intake.py` | 89 |
+| `test_corpus_intake.py` | 91 |
 | `test_mark_readers.py` | 107 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2096** |
+| **total** | **2098** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

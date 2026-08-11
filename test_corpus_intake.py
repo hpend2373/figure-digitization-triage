@@ -284,10 +284,11 @@ def _rows(path="", pages=None, document="SD1"):
     return pdf, CI.draft_rows(pdf, document)
 
 
-_BACKEND = ""
+_BACKEND, _NO_BACKEND = "", ""
 try:
     _BACKEND = CI._default_backend()
 except CI.BackendUnavailable as _exc:
+    _NO_BACKEND = str(_exc)
     print("  SKIP the PDF adapter: %s" % _exc)
 
 if _BACKEND:
@@ -402,35 +403,51 @@ with contextlib.redirect_stdout(_lout):
 _ledger = list(csv.DictReader(
     open(os.path.join(_LDIR, "intake_document_status.csv"), encoding="utf-8")))
 _byfile = {r["Source_File"]: r for r in _ledger}
+# COMPLETENESS holds in every environment, and it is the property this file
+# exists for: CI installs only `requirements-lock.txt`, so there may be no PDF
+# backend at all there, and "no backend" is one of the five statuses precisely
+# so the walk still accounts for every file.
 check("every file handed in has exactly one row",
       len(_ledger) == 3 and len(_byfile) == 3, "%d rows" % len(_ledger))
-check("the one that worked says so",
-      _byfile["good.pdf"]["Text_Backend_Status"] == "TEXT_LAYER_OK"
-      and _byfile["good.pdf"]["Required_Action"] == "CONFIRM_ON_CONTACT_SHEET",
-      "%s" % _byfile["good.pdf"])
-check("the one with no captions is not filed as the one that worked",
-      _byfile["quiet2.pdf"]["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
-      _byfile["quiet2.pdf"]["Text_Backend_Status"])
-# REVERT: file a NotReadable as INTAKE_FAILED, or as a clean read. The three
-# outcomes need three different things done to them - a page render and a
-# person, an install, and somebody looking at a stack trace - and collapsing
-# them is what makes a ledger a list rather than a work queue.
-check("and the one that is not a PDF is a row, not an exception",
-      _byfile["notapdf.pdf"]["Text_Backend_Status"] == "NO_TEXT_LAYER",
-      _byfile["notapdf.pdf"]["Text_Backend_Status"])
-check("which asks for a render and a person, not for a reread",
-      _byfile["notapdf.pdf"]["Required_Action"] == "RENDER_AND_INVENTORY_BY_EYE",
-      _byfile["notapdf.pdf"]["Required_Action"])
-check("and says what the backend actually complained about",
-      "notapdf.pdf" in _byfile["notapdf.pdf"]["Detail"],
-      _byfile["notapdf.pdf"]["Detail"][:120])
 check("every row carries every ledger column",
       all(set(r) == set(CI.LEDGER_COLUMNS) for r in _ledger),
       "%s" % (set(_ledger[0]) ^ set(CI.LEDGER_COLUMNS)))
-check("a walk whose ledger accounts for every file it was given is clean",
-      not CI.ledger_problems(_ledger, expected_files=_pdfs)
-      and _lcode == 0,
+check("and every row's status, render state and action are declared ones",
+      not [p for p in CI.ledger_problems(_ledger, expected_files=_pdfs)],
       "%s" % CI.ledger_problems(_ledger, expected_files=_pdfs))
+
+if not _BACKEND:
+    print("  SKIP the per-status scenarios: %s" % _NO_BACKEND)
+    check("with no backend installed every document says so, and says to "
+          "install one",
+          all(r["Text_Backend_Status"] == "BACKEND_UNAVAILABLE"
+              and r["Required_Action"] == "INSTALL_A_PDF_BACKEND"
+              for r in _ledger),
+          "%s" % [(r["Text_Backend_Status"], r["Required_Action"])
+                  for r in _ledger])
+else:
+    check("the one that worked says so",
+        _byfile["good.pdf"]["Text_Backend_Status"] == "TEXT_LAYER_OK"
+        and _byfile["good.pdf"]["Required_Action"] == "CONFIRM_ON_CONTACT_SHEET",
+        "%s" % _byfile["good.pdf"])
+    check("the one with no captions is not filed as the one that worked",
+          _byfile["quiet2.pdf"]["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
+          _byfile["quiet2.pdf"]["Text_Backend_Status"])
+    # REVERT: file a NotReadable as INTAKE_FAILED, or as a clean read. The three
+    # outcomes need three different things done to them - a page render and a
+    # person, an install, and somebody looking at a stack trace - and collapsing
+    # them is what makes a ledger a list rather than a work queue.
+    check("and the one that is not a PDF is a row, not an exception",
+          _byfile["notapdf.pdf"]["Text_Backend_Status"] == "NO_TEXT_LAYER",
+          _byfile["notapdf.pdf"]["Text_Backend_Status"])
+    check("which asks for a render and a person, not for a reread",
+          _byfile["notapdf.pdf"]["Required_Action"] == "RENDER_AND_INVENTORY_BY_EYE",
+          _byfile["notapdf.pdf"]["Required_Action"])
+    check("and says what the backend actually complained about",
+          "notapdf.pdf" in _byfile["notapdf.pdf"]["Detail"],
+          _byfile["notapdf.pdf"]["Detail"][:120])
+check("a walk that accounts for every file it was given exits zero",
+      _lcode == 0, "%d" % _lcode)
 _clean = io.StringIO()
 with contextlib.redirect_stdout(_clean):
     _clean_code = CI.main([_pdfs[0], "--out", os.path.join(ROOT, "ok1")])
@@ -493,8 +510,16 @@ _rledger = list(csv.DictReader(
     open(os.path.join(_RDIR, "intake_document_status.csv"), encoding="utf-8")))[0]
 _rdraft = list(csv.DictReader(
     open(os.path.join(_RDIR, "figure_intake_draft.csv"), encoding="utf-8")))
+# The render is recorded whether or not the TEXT backend exists - they are two
+# different tools and two different columns, and a walk with a renderer and no
+# text layer is exactly the NO_TEXT_LAYER case this ledger is for.
+check("the render status is recorded even when nothing could read the text",
+      _rledger["Page_Render_Status"] in CI.PAGE_RENDER_STATUSES,
+      _rledger["Page_Render_Status"])
 if _rledger["Page_Render_Status"] == "RENDERER_UNAVAILABLE":
     print("  SKIP the renderer: pdftoppm is not installed")
+elif not _BACKEND:
+    print("  SKIP the crop scenarios: %s" % _NO_BACKEND)
 else:
     check("the ledger says the pages were rendered, and how many",
           _rledger["Page_Render_Status"] == "RENDERED"

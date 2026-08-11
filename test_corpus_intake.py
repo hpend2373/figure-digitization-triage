@@ -244,6 +244,28 @@ check("the figure box is the gap above the caption, not the caption",
 check("and its top edge is the NEAREST block above, not the highest one",
       _box[1] == max(b[4] for b in _BLOCKS if b[4] <= _candidates[0]["bbox"][1]),
       "%s" % (_box,))
+# REVERT: take the nearest block above by y alone. This literature is
+# two-column, so the block directly above a left-column caption is a paragraph
+# in the RIGHT column at almost the same height, and the figure region
+# collapses to a strip of body text. Across fifteen corpus PDFs the median crop
+# went from 127 px tall to 433.
+_TWOCOL = [
+    (4, 55.0, 100.0, 290.0, 130.0, "Left column text, well above the figure."),
+    (4, 310.0, 100.0, 545.0, 130.0, "Right column text at the same height."),
+    # The right column keeps talking all the way down past the left figure.
+    (4, 310.0, 140.0, 545.0, 600.0, "Right column body text continuing down "
+                                    "the page past where the figure is drawn."),
+    (4, 55.0, 620.0, 290.0, 660.0,
+     "Figure 2 Average heart rate response to standing before and after "
+     "spaceflight in five cosmonauts."),
+]
+_tc = CI.figure_bbox(CI.caption_candidates(_TWOCOL)[0], _TWOCOL)
+check("the figure region stops at the block above IN THE SAME COLUMN",
+      _tc is not None and _tc[1] == 130.0, "%s" % (_tc,))
+check("and does not reach across the gutter for its width",
+      _tc is not None and _tc[2] <= 290.0, "%s" % (_tc,))
+check("so the region is the height of a figure, not of a text strip",
+      _tc is not None and (_tc[3] - _tc[1]) > 400, "%s" % (_tc,))
 check("and a caption with nothing above it gets no box",
       CI.figure_bbox({"page": 6, "bbox": (70.0, 0.0, 300.0, 40.0)},
                      [(6, 70.0, 0.0, 300.0, 40.0, "x")]) is None)
@@ -317,13 +339,20 @@ if _BACKEND:
     _quiet = minimal_pdf(os.path.join(ROOT, "quiet.pdf"),
                          [[(72, 700, "A page of prose with no caption on it.")]])
     _out = io.StringIO()
+    _qdir = os.path.join(ROOT, "quiet")
     with contextlib.redirect_stdout(_out):
-        CI.main([_quiet, "--out", os.path.join(ROOT, "quiet")])
-    check("a document that read fine and proposed nothing is reported as such",
-          "proposed nothing" in _out.getvalue(), _out.getvalue()[-200:])
-    check("and is named, so a person can go and look at it",
-          os.path.basename(_quiet) in _out.getvalue().split("proposed nothing")[1],
-          _out.getvalue()[-200:])
+        CI.main([_quiet, "--out", _qdir])
+    _qledger = list(csv.DictReader(
+        open(os.path.join(_qdir, "intake_document_status.csv"), encoding="utf-8")))
+    check("a document that read fine and proposed nothing gets a ledger row",
+          len(_qledger) == 1
+          and _qledger[0]["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
+          "%s" % _qledger)
+    check("and the row says what to do about it",
+          _qledger[0]["Required_Action"] == "CHECK_CAPTION_STYLE",
+          _qledger[0]["Required_Action"])
+    check("and the walk names it on the way past",
+          os.path.basename(_quiet) in _out.getvalue(), _out.getvalue()[-200:])
     check("a draft the machine just wrote has no problems",
           not CI.draft_problems(_draft), "%s" % CI.draft_problems(_draft))
     _written = CI.write_draft(os.path.join(ROOT, "draft.csv"), _draft)
@@ -347,6 +376,146 @@ else:
                    Confidence_Reason="", Human_Verification_Status="PENDING",
                    Verified_By="", Verified_At="", Observed_Panel_Count="",
                    Note="")]
+
+
+
+print()
+print("no document leaves the walk without a row that says what happened to it")
+# REVERT: go back to printing the failures and extending only the draft. A
+# document with no text layer, one that read fine and proposed nothing, and one
+# that is not a PDF at all then contribute ZERO rows to every file the walk
+# writes - which on ninety-seven articles is indistinguishable from ninety-seven
+# articles that all worked.
+_LDIR = os.path.join(ROOT, "ledger")
+_pdfs = [minimal_pdf(os.path.join(ROOT, "good.pdf"),
+                     [[(72, 700, "Body text about the design."),
+                       (72, 300, "Figure 1 Mean arterial pressure before and "
+                                 "after spaceflight in five cosmonauts.")]]),
+         minimal_pdf(os.path.join(ROOT, "quiet2.pdf"),
+                     [[(72, 700, "A page of prose with no caption on it.")]])]
+_notpdf = os.path.join(ROOT, "notapdf.pdf")
+open(_notpdf, "wb").write(b"this is not a PDF at all\n" * 40)
+_pdfs.append(_notpdf)
+_lout = io.StringIO()
+with contextlib.redirect_stdout(_lout):
+    _lcode = CI.main(_pdfs + ["--out", _LDIR])
+_ledger = list(csv.DictReader(
+    open(os.path.join(_LDIR, "intake_document_status.csv"), encoding="utf-8")))
+_byfile = {r["Source_File"]: r for r in _ledger}
+check("every file handed in has exactly one row",
+      len(_ledger) == 3 and len(_byfile) == 3, "%d rows" % len(_ledger))
+check("the one that worked says so",
+      _byfile["good.pdf"]["Text_Backend_Status"] == "TEXT_LAYER_OK"
+      and _byfile["good.pdf"]["Required_Action"] == "CONFIRM_ON_CONTACT_SHEET",
+      "%s" % _byfile["good.pdf"])
+check("the one with no captions is not filed as the one that worked",
+      _byfile["quiet2.pdf"]["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
+      _byfile["quiet2.pdf"]["Text_Backend_Status"])
+# REVERT: file a NotReadable as INTAKE_FAILED, or as a clean read. The three
+# outcomes need three different things done to them - a page render and a
+# person, an install, and somebody looking at a stack trace - and collapsing
+# them is what makes a ledger a list rather than a work queue.
+check("and the one that is not a PDF is a row, not an exception",
+      _byfile["notapdf.pdf"]["Text_Backend_Status"] == "NO_TEXT_LAYER",
+      _byfile["notapdf.pdf"]["Text_Backend_Status"])
+check("which asks for a render and a person, not for a reread",
+      _byfile["notapdf.pdf"]["Required_Action"] == "RENDER_AND_INVENTORY_BY_EYE",
+      _byfile["notapdf.pdf"]["Required_Action"])
+check("and says what the backend actually complained about",
+      "notapdf.pdf" in _byfile["notapdf.pdf"]["Detail"],
+      _byfile["notapdf.pdf"]["Detail"][:120])
+check("every row carries every ledger column",
+      all(set(r) == set(CI.LEDGER_COLUMNS) for r in _ledger),
+      "%s" % (set(_ledger[0]) ^ set(CI.LEDGER_COLUMNS)))
+check("a walk whose ledger accounts for every file it was given is clean",
+      not CI.ledger_problems(_ledger, expected_files=_pdfs)
+      and _lcode == 0,
+      "%s" % CI.ledger_problems(_ledger, expected_files=_pdfs))
+_clean = io.StringIO()
+with contextlib.redirect_stdout(_clean):
+    _clean_code = CI.main([_pdfs[0], "--out", os.path.join(ROOT, "ok1")])
+check("so a clean walk exits zero", _clean_code == 0, "%d" % _clean_code)
+# The same file twice is the cheapest way to make the ledger disagree with the
+# walk, and the walk has to fail rather than report a tidy summary.
+_dupe = io.StringIO()
+with contextlib.redirect_stdout(_dupe):
+    _dupe_code = CI.main([_pdfs[0], _pdfs[0], "--out",
+                          os.path.join(ROOT, "dupe")])
+check("and a walk whose ledger does not add up exits non-zero",
+      _dupe_code != 0, "%d" % _dupe_code)
+check("saying which document it was",
+      "LEDGER_DOCUMENT_DUPLICATED" in _dupe.getvalue(),
+      _dupe.getvalue()[-200:])
+
+# REVERT: drop `expected_files` from `ledger_problems`. A walk can then write a
+# ledger that is internally perfect and silently short by one document, which
+# is the exact failure the file exists to make impossible.
+check("a ledger missing a file the walk was given is refused",
+      any(c == "LEDGER_DOCUMENT_MISSING" for _n, c, _d in CI.ledger_problems(
+          _ledger[:2], expected_files=_pdfs)),
+      "%s" % CI.ledger_problems(_ledger[:2], expected_files=_pdfs))
+check("and one holding a document twice is too",
+      any(c == "LEDGER_DOCUMENT_DUPLICATED" for _n, c, _d in
+          CI.ledger_problems(_ledger + [dict(_ledger[0])],
+                             expected_files=_pdfs)))
+for _label, _edit, _code in (
+        ("a status nobody declared", dict(Text_Backend_Status="FINE"),
+         "LEDGER_STATUS_UNKNOWN"),
+        ("a render status nobody declared", dict(Page_Render_Status="MAYBE"),
+         "LEDGER_RENDER_STATUS_UNKNOWN"),
+        ("an action nobody declared", dict(Required_Action="ASK_SOMEBODY"),
+         "LEDGER_ACTION_UNKNOWN"),
+        ("no candidates filed as a clean read",
+         dict(Caption_Candidate_Count="0", Text_Backend_Status="TEXT_LAYER_OK"),
+         "LEDGER_STATUS_CONTRADICTS_COUNT"),
+        ("candidates waiting under an action that does not mention them",
+         dict(Caption_Candidate_Count="4",
+              Required_Action="RENDER_AND_INVENTORY_BY_EYE"),
+         "LEDGER_ACTION_CONTRADICTS_COUNT"),
+        ("a row with no document behind it", dict(Source_Document_ID=""),
+         "LEDGER_ROW_INCOMPLETE")):
+    _bad = [dict(_byfile["good.pdf"], **_edit)]
+    check("%s is refused" % _label,
+          any(c == _code for _n, c, _d in CI.ledger_problems(_bad)),
+          "%s" % CI.ledger_problems(_bad))
+
+print()
+print("the contact sheet shows the picture, when there is one")
+# REVERT: leave `--render` in the docstring and unwired. The sheet then asks a
+# person to confirm a figure from a bounding-box string, which is agreeing with
+# a number rather than looking at a figure - and publication 127 needed forty
+# such confirmations for three digitized panels.
+_RDIR = os.path.join(ROOT, "rendered")
+_rout = io.StringIO()
+with contextlib.redirect_stdout(_rout):
+    CI.main([_pdfs[0], "--out", _RDIR, "--render", "80"])
+_rledger = list(csv.DictReader(
+    open(os.path.join(_RDIR, "intake_document_status.csv"), encoding="utf-8")))[0]
+_rdraft = list(csv.DictReader(
+    open(os.path.join(_RDIR, "figure_intake_draft.csv"), encoding="utf-8")))
+if _rledger["Page_Render_Status"] == "RENDERER_UNAVAILABLE":
+    print("  SKIP the renderer: pdftoppm is not installed")
+else:
+    check("the ledger says the pages were rendered, and how many",
+          _rledger["Page_Render_Status"] == "RENDERED"
+          and _rledger["Page_Render_Count"] == "1", "%s" % _rledger)
+    check("every draft row names the raster it was written from",
+          all(r["Page_Raster"] and len(r["Page_Raster_SHA256"]) == 64
+              for r in _rdraft), "%s" % [r["Page_Raster"] for r in _rdraft])
+    check("and the raster on disk is the one the row hashes",
+          all(CI.file_sha256(r["Page_Raster"]) == r["Page_Raster_SHA256"]
+              for r in _rdraft))
+    check("a figure crop is cut for each candidate",
+          all(r["Figure_Crop"] and os.path.exists(
+              os.path.join(_RDIR, r["Figure_Crop"])) for r in _rdraft),
+          "%s" % [r["Figure_Crop"] for r in _rdraft])
+    _rhtml = open(os.path.join(_RDIR, "index.html"), encoding="utf-8").read()
+    check("and the sheet shows it rather than describing it",
+          all("<img src='%s'" % r["Figure_Crop"] in _rhtml for r in _rdraft),
+          _rhtml[:200])
+    check("a walk with no --render says NOT_REQUESTED, not RENDER_FAILED",
+          _byfile["good.pdf"]["Page_Render_Status"] == "NOT_REQUESTED",
+          _byfile["good.pdf"]["Page_Render_Status"])
 
 print()
 print("a draft becomes an inventory only when a person says so")

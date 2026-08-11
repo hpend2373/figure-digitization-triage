@@ -25,6 +25,23 @@ this module writes anything else: `draft_rows` sets the word literally, and
 unless every row in it says `CONFIRMED` with a registered person and a panel
 count beside it. The machine's job ends at "here is what I think is on page 6".
 
+**Every document leaves a row, whatever happened to it.** The draft is a row
+per CAPTION, so a document that read fine and proposed nothing, or that has no
+text layer, or that nothing could open, contributed nothing to any file the walk
+wrote - and on ninety-seven articles that is indistinguishable from ninety-seven
+that worked. `intake_document_status.csv` is one row per PDF with what the
+backend did, how many pages and candidates there were, whether the pages were
+rendered, and WHAT HAS TO HAPPEN NEXT. `ledger_problems` refuses a walk whose
+ledger does not account for every file it was handed, and `main` exits non-zero
+when it does not.
+
+**`--render` renders.** Every page to PNG, hashed into the draft row, and a
+figure crop per candidate cut from the page and shown on the contact sheet - so
+a person confirming a figure is looking at the figure rather than agreeing with
+a bounding-box string. It is a LOOK-AT raster: the geometry a reader uses is
+measured against a versioned spec at its own resolution, and mixing the two is
+how a plan ends up pointing at a rendering it was not written against.
+
 **The panel count is deliberately not proposed.** Counting the axes regions in a
 printed figure is the one judgement the source inventory exists to record, its
 method column says `HUMAN_VISUAL`, and a proposed count is a number a tired
@@ -53,7 +70,7 @@ if HERE not in sys.path:
 #: there is no column for a conclusion this module is allowed to reach.
 DRAFT_COLUMNS = (
     "Draft_ID", "Source_Document_ID", "Source_File", "Source_File_SHA256",
-    "Page", "Page_Raster", "Page_Raster_SHA256",
+    "Page", "Page_Raster", "Page_Raster_SHA256", "Figure_Crop",
     "Figure_Number", "Caption_Text", "Caption_BBox", "Figure_BBox",
     "Extraction_Method", "Confidence", "Confidence_Reason",
     "Human_Verification_Status", "Verified_By", "Verified_At",
@@ -63,6 +80,50 @@ DRAFT_COLUMNS = (
 #: The only status a machine may write, and the two a person may.
 DRAFT_PENDING = "PENDING"
 DRAFT_STATUSES = (DRAFT_PENDING, "CONFIRMED", "REJECTED")
+
+#: One row per PDF the walk was given, whatever happened to it. The draft is a
+#: row per CAPTION, so a document that read fine and proposed nothing leaves no
+#: row at all - and on a walk of ninety-seven articles that is indistinguishable
+#: from an article with no figures. The console said so; a console line is not
+#: a record. This file is the record, and `ledger_problems` refuses a walk whose
+#: ledger does not account for every file it was handed.
+LEDGER_COLUMNS = (
+    "Source_Document_ID", "Source_File", "Source_File_SHA256",
+    "Text_Backend", "Text_Backend_Status", "Page_Count", "Text_Block_Count",
+    "Caption_Candidate_Count", "Low_Confidence_Count",
+    "Page_Render_Status", "Page_Render_Count", "Page_Raster_Dir",
+    "Required_Action", "Detail",
+)
+
+#: What the text layer did. Four of these are the reasons a document reaches a
+#: person, and each needs a different thing done to it.
+TEXT_BACKEND_STATUSES = (
+    # the ordinary case: text came off the page and captions were proposed
+    "TEXT_LAYER_OK",
+    # text came off and no block opens with a figure label. NOT the same as
+    # having no figures, and the pattern is what to check.
+    "ZERO_CAPTION_CANDIDATES",
+    # a scan, or not a PDF. Needs a page render and a person.
+    "NO_TEXT_LAYER",
+    # nothing is installed that can read a PDF. Needs an install, not a person.
+    "BACKEND_UNAVAILABLE",
+    # anything else, recorded rather than raised, because a corpus walk that
+    # stops on file 41 has told you nothing about files 42 to 97.
+    "INTAKE_FAILED",
+)
+
+#: Whether the pages were turned into pictures, and why not when they were not.
+PAGE_RENDER_STATUSES = ("NOT_REQUESTED", "RENDERED", "RENDERER_UNAVAILABLE",
+                        "RENDER_FAILED")
+
+#: What has to happen next, per document. This is the column a person sorts on.
+REQUIRED_ACTIONS = (
+    "CONFIRM_ON_CONTACT_SHEET",   # the normal path: rows exist, check them
+    "CHECK_CAPTION_STYLE",        # read fine, proposed nothing
+    "RENDER_AND_INVENTORY_BY_EYE",  # no text layer
+    "INSTALL_A_PDF_BACKEND",      # nothing to read with
+    "INVESTIGATE",                # it broke
+)
 
 #: How the text came off the page. Recorded per row: a caption box from
 #: pdfminer and one from poppler are not the same measurement, and a draft that
@@ -260,10 +321,26 @@ def figure_bbox(candidate, blocks, page_size=None):
     the geometry a reader uses comes from the plan, measured on a raster.
     """
     page, top = candidate["page"], candidate["bbox"][1]
-    above = [b for b in blocks if b[0] == page and b[4] <= top]
+    cx0, cx1 = candidate["bbox"][0], candidate["bbox"][2]
+    # IN THE SAME COLUMN. This literature is two-column, and taking the nearest
+    # block above by y alone reaches across the gutter: the block directly
+    # above a left-column caption is usually a paragraph in the RIGHT column at
+    # almost the same height, so the region collapses to a sliver. Measured on
+    # fifteen corpus PDFs, that is the difference between a crop a person can
+    # confirm a figure from and a 848x33 strip of body text.
+    #
+    # "Same column" is horizontal overlap with the caption, which needs no
+    # column detection and degrades to the old behaviour on a single-column
+    # page, where everything overlaps everything.
+    def overlaps(block):
+        return min(cx1, block[3]) - max(cx0, block[1]) > 0
+
+    same_page = [b for b in blocks if b[0] == page]
+    column = [b for b in same_page if overlaps(b)] or same_page
+    above = [b for b in column if b[4] <= top]
     lower_edge = max((b[4] for b in above), default=0.0)
-    left = min([b[1] for b in blocks if b[0] == page] or [0.0])
-    right = max([b[3] for b in blocks if b[0] == page]
+    left = min([b[1] for b in column] or [0.0])
+    right = max([b[3] for b in column]
                 or [page_size[0] if page_size else 0.0])
     if lower_edge >= top:
         return None
@@ -300,6 +377,7 @@ def draft_rows(path, document_id, backend=None, page_rasters=None):
             "Page": candidate["page"],
             "Page_Raster": raster,
             "Page_Raster_SHA256": file_sha256(raster) if raster else "",
+            "Figure_Crop": "",
             "Figure_Number": "FIG%s" % candidate["number"],
             "Caption_Text": candidate["text"],
             "Caption_BBox": _bbox_text(candidate["bbox"]),
@@ -314,6 +392,161 @@ def draft_rows(path, document_id, backend=None, page_rasters=None):
             "Note": "",
         })
     return rows
+
+
+def render_pages(path, out_dir, dpi=150, first=None, last=None):
+    """Every page of a PDF as a PNG, or a refusal naming the renderer.
+
+    Returns ({page: png_path}, status). `pdftoppm` because it is what the rest
+    of this project already renders publisher pages with, and because the page
+    a person confirms on the contact sheet has to be reproducible from the file
+    plus a command - not from whatever a library happened to do.
+
+    The DPI is deliberately low. This raster is a PICTURE TO LOOK AT, not a
+    raster anybody measures on: the geometry a reader uses is measured against
+    a versioned spec at its own resolution, and mixing the two is how a plan
+    ends up pointing at a rendering it was not written against.
+    """
+    from shutil import which
+    if not which("pdftoppm"):
+        return {}, "RENDERER_UNAVAILABLE"
+    os.makedirs(out_dir, exist_ok=True)
+    stem = os.path.join(out_dir, "page")
+    cmd = ["pdftoppm", "-r", str(int(dpi)), "-png"]
+    if first:
+        cmd += ["-f", str(int(first))]
+    if last:
+        cmd += ["-l", str(int(last))]
+    try:
+        subprocess.run(cmd + [path, stem], capture_output=True, check=True)
+    except Exception:
+        return {}, "RENDER_FAILED"
+    out = {}
+    for name in sorted(os.listdir(out_dir)):
+        if not name.startswith("page-") or not name.endswith(".png"):
+            continue
+        try:
+            number = int(name[len("page-"):-len(".png")])
+        except ValueError:
+            continue
+        out[number] = os.path.join(out_dir, name)
+    return out, ("RENDERED" if out else "RENDER_FAILED")
+
+
+def crop_figure(row, page_raster, out_path, pdf_page_size=None, pad=8):
+    """The figure region of a page raster, as its own PNG, or None.
+
+    `Figure_BBox` is in PDF points and the raster is in pixels, so the scale
+    comes from the two heights rather than from the DPI the caller thinks it
+    asked for - a renderer that rounded the page to an even pixel count would
+    otherwise shift every crop by a hair, and the crop is the thing a person
+    decides "yes, that is a figure" from.
+    """
+    box = str(row.get("Figure_BBox", "")).strip()
+    if not box or not page_raster or not os.path.exists(page_raster):
+        return None
+    try:
+        from PIL import Image
+    except Exception:                                   # pragma: no cover
+        return None
+    try:
+        x0, y0, x1, y1 = [float(v) for v in box.split(",")]
+    except ValueError:
+        return None
+    image = Image.open(page_raster)
+    if pdf_page_size:
+        sx = image.width / float(pdf_page_size[0])
+        sy = image.height / float(pdf_page_size[1])
+    else:
+        sx = sy = image.width / 612.0
+    left = max(0, int(x0 * sx) - pad)
+    top = max(0, int(y0 * sy) - pad)
+    right = min(image.width, int(x1 * sx) + pad)
+    bottom = min(image.height, int(y1 * sy) + pad)
+    if right - left < 8 or bottom - top < 8:
+        return None
+    image.crop((left, top, right, bottom)).save(out_path)
+    return out_path
+
+
+def ledger_row(path, document_id, **kw):
+    """One row about one document, with every column present."""
+    row = {c: "" for c in LEDGER_COLUMNS}
+    row.update(Source_Document_ID=document_id,
+               Source_File=os.path.basename(path),
+               Page_Render_Status="NOT_REQUESTED")
+    row.update(kw)
+    return row
+
+
+def write_ledger(path, rows):
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(LEDGER_COLUMNS))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in LEDGER_COLUMNS})
+    return path
+
+
+def ledger_problems(rows, expected_files=()):
+    """[(Source_File, code, detail)] for a ledger that cannot be what it says.
+
+    The point of the file is COMPLETENESS, so the checks are about the walk and
+    not about any one document: every file handed in has a row, no file has
+    two, and every row's status and action are ones this module defines. A
+    ledger that quietly omits the file that failed is worse than no ledger,
+    because it reads as a clean run.
+    """
+    out = []
+    seen = {}
+    for row in rows:
+        name = str(row.get("Source_File", "")).strip()
+        did = str(row.get("Source_Document_ID", "")).strip()
+        if not name or not did:
+            out.append((name, "LEDGER_ROW_INCOMPLETE",
+                        "a ledger row with no Source_File or no "
+                        "Source_Document_ID"))
+            continue
+        seen.setdefault(name, []).append(did)
+        status = str(row.get("Text_Backend_Status", "")).strip()
+        if status not in TEXT_BACKEND_STATUSES:
+            out.append((name, "LEDGER_STATUS_UNKNOWN",
+                        "%r is not %s" % (status,
+                                          "/".join(TEXT_BACKEND_STATUSES))))
+        render = str(row.get("Page_Render_Status", "")).strip()
+        if render not in PAGE_RENDER_STATUSES:
+            out.append((name, "LEDGER_RENDER_STATUS_UNKNOWN",
+                        "%r is not %s" % (render,
+                                          "/".join(PAGE_RENDER_STATUSES))))
+        action = str(row.get("Required_Action", "")).strip()
+        if action not in REQUIRED_ACTIONS:
+            out.append((name, "LEDGER_ACTION_UNKNOWN",
+                        "%r is not %s" % (action, "/".join(REQUIRED_ACTIONS))))
+        # A document that read fine and proposed nothing is the row this file
+        # exists for. It must not be filed as the ordinary case.
+        try:
+            count = int(str(row.get("Caption_Candidate_Count", "")).strip() or 0)
+        except ValueError:
+            count = -1
+        if count == 0 and status == "TEXT_LAYER_OK":
+            out.append((name, "LEDGER_STATUS_CONTRADICTS_COUNT",
+                        "no caption candidates were proposed and the status "
+                        "says the text layer was fine; that is "
+                        "ZERO_CAPTION_CANDIDATES"))
+        if count > 0 and action != "CONFIRM_ON_CONTACT_SHEET":
+            out.append((name, "LEDGER_ACTION_CONTRADICTS_COUNT",
+                        "%d candidate(s) are waiting on the contact sheet and "
+                        "the action says %s" % (count, action or "(blank)")))
+    for name, ids in sorted(seen.items()):
+        if len(ids) > 1:
+            out.append((name, "LEDGER_DOCUMENT_DUPLICATED",
+                        "%s appears %d times" % (name, len(ids))))
+    for path in expected_files:
+        if os.path.basename(path) not in seen:
+            out.append((os.path.basename(path), "LEDGER_DOCUMENT_MISSING",
+                        "%s was walked and the ledger does not account for it"
+                        % path))
+    return out
 
 
 def write_draft(path, rows):
@@ -431,7 +664,7 @@ def inventory_rows(rows, reviewer_ids=(), publication_id=""):
     return out, []
 
 
-def contact_sheet(path, rows, title=""):
+def contact_sheet(path, rows, title="", root=None):
     """One page listing every draft row, lowest confidence first.
 
     The point of the sheet is that a person answers three questions per row -
@@ -449,22 +682,32 @@ def contact_sheet(path, rows, title=""):
              "<style>body{font:14px/1.5 system-ui,sans-serif;margin:2rem;max-width:60rem}"
              "tr.low td{background:#fff6e5}td,th{border-bottom:1px solid #ddd;"
              "padding:.4rem .6rem;vertical-align:top;text-align:left}"
-             "code{font:12px ui-monospace,monospace;color:#555}</style>",
+             "code{font:12px ui-monospace,monospace;color:#555}"
+             "img{max-width:16rem;max-height:12rem;border:1px solid #ccc}"
+             "</style>",
              "<h1>%s</h1>" % esc(title or "figure intake draft"),
              "<p>Every row is a <b>proposal</b>. Nothing here is an inventory "
              "until a person sets <code>Human_Verification_Status</code> to "
              "CONFIRMED or REJECTED, writes their <code>Reviewer_ID</code> and "
              "the date, and - for a confirmed row - counts the panels. "
              "Lowest confidence first.</p>",
-             "<table><tr><th>draft<th>page<th>figure<th>caption<th>confidence"
-             "<th>panels</th></tr>"]
+             "<table><tr><th>draft<th>picture<th>page<th>figure<th>caption"
+             "<th>confidence<th>panels</th></tr>"]
     for row in ordered:
         low = float(row.get("Confidence") or 0) < LOW_CONFIDENCE
+        # The PICTURE, when the pages were rendered. A person confirming a
+        # figure from a bounding-box string is not confirming a figure; they
+        # are agreeing with a number. The crop is the whole reason `--render`
+        # exists, and the row records which raster it was cut from.
+        crop = str(row.get("Figure_Crop", "")).strip()
+        picture = ("<a href='%s'><img src='%s' loading='lazy'></a>"
+                   % (esc(crop), esc(crop))) if crop else "&mdash;"
         parts.append(
-            "<tr class='%s'><td><code>%s</code><td>%s<td>%s<td>%s<br>"
+            "<tr class='%s'><td><code>%s</code><td>%s<td>%s<td>%s<td>%s<br>"
             "<code>caption %s | figure %s | %s</code><td>%s<br><code>%s</code>"
             "<td>%s</tr>"
-            % ("low" if low else "", esc(row.get("Draft_ID")), esc(row.get("Page")),
+            % ("low" if low else "", esc(row.get("Draft_ID")), picture,
+               esc(row.get("Page")),
                esc(row.get("Figure_Number")), esc(row.get("Caption_Text"))[:300],
                esc(row.get("Caption_BBox")), esc(row.get("Figure_BBox")),
                esc(row.get("Extraction_Method")), esc(row.get("Confidence")),
@@ -476,6 +719,89 @@ def contact_sheet(path, rows, title=""):
     return path
 
 
+def intake_document(path, document_id, out_dir, backend=None, render_dpi=0):
+    """One document in; (draft rows, ledger row) out. Never raises.
+
+    The whole point of the pair is that the SECOND value always exists. A walk
+    of ninety-seven articles has to say something about all ninety-seven, and
+    the failures are the ones worth saying something about.
+    """
+    rasters, render_status = {}, "NOT_REQUESTED"
+    if render_dpi:
+        rasters, render_status = render_pages(
+            path, os.path.join(out_dir, "pages", document_id), dpi=render_dpi)
+    base = dict(Page_Render_Status=render_status,
+                Page_Render_Count=len(rasters) or "",
+                Page_Raster_Dir=(os.path.join("pages", document_id)
+                                 if rasters else ""))
+    try:
+        digest = file_sha256(path)
+    except OSError as exc:
+        return [], ledger_row(path, document_id, Text_Backend_Status="INTAKE_FAILED",
+                              Required_Action="INVESTIGATE",
+                              Detail="%s: %s" % (type(exc).__name__, exc), **base)
+    base["Source_File_SHA256"] = digest
+    method = backend
+    try:
+        method = method or _default_backend()
+    except BackendUnavailable as exc:
+        return [], ledger_row(path, document_id,
+                              Text_Backend_Status="BACKEND_UNAVAILABLE",
+                              Required_Action="INSTALL_A_PDF_BACKEND",
+                              Detail=str(exc), **base)
+    base["Text_Backend"] = method
+    try:
+        blocks = text_blocks(path, backend=method)
+    except NotReadable as exc:
+        return [], ledger_row(path, document_id,
+                              Text_Backend_Status="NO_TEXT_LAYER",
+                              Required_Action="RENDER_AND_INVENTORY_BY_EYE",
+                              Text_Block_Count=0, Caption_Candidate_Count=0,
+                              Detail=str(exc), **base)
+    except Exception as exc:                            # pragma: no cover
+        return [], ledger_row(path, document_id,
+                              Text_Backend_Status="INTAKE_FAILED",
+                              Required_Action="INVESTIGATE",
+                              Detail="%s: %s" % (type(exc).__name__, exc), **base)
+    rows = draft_rows(path, document_id, backend=method, page_rasters=rasters)
+    pages = max([b[0] for b in blocks] or [0])
+    low = sum(1 for r in rows if float(r["Confidence"]) < LOW_CONFIDENCE)
+    base.update(Page_Count=pages, Text_Block_Count=len(blocks),
+                Caption_Candidate_Count=len(rows), Low_Confidence_Count=low)
+    if not rows:
+        return [], ledger_row(path, document_id,
+                              Text_Backend_Status="ZERO_CAPTION_CANDIDATES",
+                              Required_Action="CHECK_CAPTION_STYLE",
+                              Detail="%d text blocks and no block opens with a "
+                                     "figure label" % len(blocks), **base)
+    if rasters:
+        crops = os.path.join(out_dir, "crops")
+        os.makedirs(crops, exist_ok=True)
+        sizes = page_sizes(path)
+        for row in rows:
+            made = crop_figure(
+                row, rasters.get(row["Page"], ""),
+                os.path.join(crops, "%s.png" % row["Draft_ID"]),
+                pdf_page_size=sizes.get(row["Page"]))
+            row["Figure_Crop"] = (os.path.relpath(made, out_dir) if made else "")
+    return rows, ledger_row(path, document_id,
+                            Text_Backend_Status="TEXT_LAYER_OK",
+                            Required_Action="CONFIRM_ON_CONTACT_SHEET", **base)
+
+
+def page_sizes(path):
+    """{page: (width_pt, height_pt)} so a crop can be scaled to its raster."""
+    try:
+        from pdfminer.high_level import extract_pages
+    except Exception:
+        return {}
+    try:
+        return {n: (float(layout.width), float(layout.height))
+                for n, layout in enumerate(extract_pages(path), start=1)}
+    except Exception:                                   # pragma: no cover
+        return {}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pdfs", nargs="+")
@@ -484,50 +810,52 @@ def main(argv=None):
                     help="Source_Document_ID for a single PDF; defaults to the "
                          "file stem, upper-cased")
     ap.add_argument("--backend", default="", choices=("",) + EXTRACTION_METHODS[:2])
+    ap.add_argument("--render", nargs="?", type=int, const=150, default=0,
+                    metavar="DPI",
+                    help="render every page to PNG at this DPI (default 150) "
+                         "so the contact sheet shows the picture. A LOOK-AT "
+                         "raster, never one to measure on")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
-    every, unreadable, silent = [], [], []
+    every, ledger = [], []
     for path in args.pdfs:
         stem = os.path.splitext(os.path.basename(path))[0]
         did = args.document_id or re.sub(r"[^A-Za-z0-9]+", "_", stem).upper()[:64]
-        try:
-            rows = draft_rows(path, did, backend=args.backend or None)
-        except BackendUnavailable as exc:
-            print("SKIP %s: %s" % (path, exc))
-            continue
-        except NotReadable as exc:
-            # A corpus walk stops for nothing: this is the row that needs a
-            # page render and a person, and saying so is the answer.
-            print("NO TEXT LAYER %s: %s" % (path, exc))
-            unreadable.append(path)
-            continue
+        rows, status = intake_document(path, did, args.out,
+                                       backend=args.backend or None,
+                                       render_dpi=args.render)
         every.extend(rows)
-        if not rows:
-            # A document that read fine and proposed nothing is the one nobody
-            # notices: it leaves no row on the contact sheet, so it looks like
-            # an article with no figures rather than a pattern that missed
-            # them. `2016-2-11.pdf` was that document until `图` went in.
-            silent.append(path)
-        print("%-40s %d caption candidate(s)" % (os.path.basename(path), len(rows)))
+        ledger.append(status)
+        print("%-44s %-24s %s" % (os.path.basename(path)[:44],
+                                  status["Text_Backend_Status"],
+                                  status["Required_Action"]))
     draft = write_draft(os.path.join(args.out, "figure_intake_draft.csv"), every)
+    book = write_ledger(os.path.join(args.out, "intake_document_status.csv"),
+                        ledger)
     sheet = contact_sheet(os.path.join(args.out, "index.html"), every,
-                          title="figure intake draft (%d row(s))" % len(every))
+                          title="figure intake draft (%d row(s))" % len(every),
+                          root=args.out)
     low = [r for r in every if float(r["Confidence"]) < LOW_CONFIDENCE]
-    print("wrote %s and %s" % (draft, sheet))
+    print("wrote %s, %s and %s" % (draft, book, sheet))
     print("%d row(s), %d below confidence %.1f - all PENDING until somebody "
           "says otherwise" % (len(every), len(low), LOW_CONFIDENCE))
-    if unreadable:
-        print("%d file(s) have no text layer this backend can read; they need "
-              "a page render and a human pass:" % len(unreadable))
-        for path in unreadable:
-            print("  %s" % path)
-    if silent:
-        print("%d file(s) read but proposed nothing, which is not the same as "
-              "having no figures - check the caption style by hand:"
-              % len(silent))
-        for path in silent:
-            print("  %s" % path)
-    return 0
+    # The ledger is the answer to "did anything disappear", so it is checked
+    # against the list of files this walk was actually given.
+    problems = ledger_problems(ledger, expected_files=args.pdfs)
+    for name, code, detail in problems:
+        print("LEDGER %-34s %s: %s" % (name[:34], code, detail))
+    by_action = {}
+    for row in ledger:
+        by_action.setdefault(row["Required_Action"], []).append(row["Source_File"])
+    for action in REQUIRED_ACTIONS:
+        names = by_action.get(action, [])
+        if not names:
+            continue
+        print("%-28s %3d document(s)" % (action, len(names)))
+        if action != "CONFIRM_ON_CONTACT_SHEET":
+            for name in names:
+                print("    %s" % name)
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

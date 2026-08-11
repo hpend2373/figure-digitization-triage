@@ -3400,6 +3400,54 @@ column is a second, independent check: the caption says 95% CI, the table says
 SEM, n = 5, and reconstructing one from the other to within 0.013 says the
 caption was telling the truth and the reader found the caps the caption meant.
 
+### Nothing leaves the walk unaccounted for (v7.40)
+
+Intake proposed a row per CAPTION, so the documents worth knowing about
+contributed nothing to any file it wrote. A PDF that read fine and produced no
+candidates, one with no text layer, one that is not a PDF at all - each printed
+a console line and then vanished. On a walk of ninety-seven articles that reads
+exactly like ninety-seven that worked.
+
+`intake_document_status.csv` is one row per PDF, always:
+
+```text
+Source_Document_ID  Source_File  Source_File_SHA256
+Text_Backend  Text_Backend_Status  Page_Count  Text_Block_Count
+Caption_Candidate_Count  Low_Confidence_Count
+Page_Render_Status  Page_Render_Count  Page_Raster_Dir
+Required_Action  Detail
+```
+
+The status is one of `TEXT_LAYER_OK`, `ZERO_CAPTION_CANDIDATES`,
+`NO_TEXT_LAYER`, `BACKEND_UNAVAILABLE`, `INTAKE_FAILED`, and the point of
+keeping them apart is that each needs a different thing done to it - a person on
+a contact sheet, a look at the caption style, a page render and an eye, an
+install, or a stack trace. `Required_Action` is the column to sort on.
+`ledger_problems` refuses a ledger that does not account for every file the walk
+was given, holds a document twice, files no candidates as a clean read, or
+leaves candidates waiting under an action that does not mention them; `main`
+exits non-zero when any of that is true.
+
+**`--render` renders.** It was in the docstring and wired to nothing. Every page
+becomes a PNG, the draft row carries the raster and its hash, and a figure crop
+is cut per candidate and shown on the sheet. Confirming a figure from
+`Figure_BBox` is agreeing with a number; the crop is the thing a person can
+actually answer "yes, that is Figure 2, and it has three panels" from - which is
+the 1,500-2,000 inventory rows the corpus needs.
+
+**And the crops found the next defect.** `figure_bbox` took the nearest block
+above the caption by y alone. This literature is two-column, so the block above
+a left-column caption is usually a paragraph in the RIGHT column at almost the
+same height, and the region collapsed to a strip of body text. Bounding the
+search to blocks that horizontally overlap the caption needs no column
+detection and degrades to the old behaviour on a single-column page. Measured
+over fifteen corpus PDFs, 62 candidates:
+
+| | median crop height | crops under 80 px |
+|---|---|---|
+| by y alone | 127 px | 29 |
+| same column | **433 px** | 21 |
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -3412,13 +3460,13 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 146 |
-| `test_corpus_intake.py` | 60 |
+| `test_corpus_intake.py` | 89 |
 | `test_mark_readers.py` | 107 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2067** |
+| **total** | **2096** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

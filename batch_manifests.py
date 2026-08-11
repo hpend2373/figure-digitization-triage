@@ -53,18 +53,18 @@ import kernel as _kernel
 #: Mark types the batch layer can dispatch. A superset of `MARK_TYPES` would be
 #: a lie; a subset means a manifest can name a reader the runner cannot call.
 BATCH_MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO",
-                    "SCATTER", "BOX_VIOLIN")
+                    "LINE_MONO_STYLE", "SCATTER", "BOX_VIOLIN")
 
 #: Which mark types locate marks at declared x positions, and therefore require
 #: rows in `position_manifest.csv`. SCATTER does not: its x IS data.
 POSITIONAL_MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO",
-                         "BOX_VIOLIN")
+                         "LINE_MONO_STYLE", "BOX_VIOLIN")
 
 #: Which mark types separate series by colour and therefore need one.
 COLOUR_MARK_TYPES = ("BAR_COLOR", "LINE_COLOR")
 
 #: Which mark types separate series by drawn form rather than by colour.
-MONO_MARK_TYPES = ("BAR_MONO", "LINE_MONO")
+MONO_MARK_TYPES = ("BAR_MONO", "LINE_MONO", "LINE_MONO_STYLE")
 
 #: What the batch layer can actually EXECUTE, per statistic type, and how.
 #:
@@ -103,12 +103,11 @@ VALIDATOR_ONLY_STATISTICS = tuple(
 #: Naming them is better than silence: a manifest that declares one gets told
 #: why it cannot run and where the work stands, instead of being quietly
 #: routed to a reader that ignores half its declaration.
-UNRELEASED_MARK_TYPES = {
-    "LINE_MONO_STYLE": ("monochrome lines separated by SOLID/DASHED line style "
-                        "rather than by marker. Built and measured but not "
-                        "released - it emits cells where two curves cross "
-                        "instead of dropping them. See wip/line_style_mono.py"),
-}
+#: Empty today, and kept because the next reader will need it. LINE_MONO_STYLE
+#: was the last entry: released once it refused at a crossing instead of
+#: guessing, and once it had been measured against a real figure rather than
+#: only against the fixture its own author drew.
+UNRELEASED_MARK_TYPES = {}
 
 #: `ANY` is a DECLARATION, not a wildcard for a lazy author: it says "this
 #: panel has one series, so do not ask the shape to tell anything apart". A
@@ -472,6 +471,15 @@ SOURCE_PANEL_DISPOSITIONS = (
     "AUTO_DIGITIZE",
     "MANUAL_DIGITIZE",
     "NO_READER_AVAILABLE",
+    # A READER EXISTS AND NOBODY HAS MEASURED THE PANEL YET. Distinct from
+    # NO_READER_AVAILABLE, which is a statement about this package, and from
+    # AUTO_DIGITIZE, which promises a panel_manifest row that does not exist.
+    # Publication 397 made the distinction necessary: releasing
+    # LINE_MONO_STYLE turned eight of its panels from "we cannot read this" to
+    # "we have not authored the geometry", and leaving them as NO_READER
+    # would have been a claim about the package that stopped being true. It is
+    # a TARGET disposition and it is not closed - it is the open work.
+    "GEOMETRY_NOT_AUTHORED",
     "ASSOCIATION_EXTRACT",
     "BINARY_EXTRACT",
     "NO_SUMMARY_STATISTIC",
@@ -483,6 +491,7 @@ SOURCE_PANEL_DISPOSITIONS = (
 
 _TARGET_DISPOSITIONS = {
     "AUTO_DIGITIZE", "MANUAL_DIGITIZE", "NO_READER_AVAILABLE",
+    "GEOMETRY_NOT_AUTHORED",
     "ASSOCIATION_EXTRACT", "BINARY_EXTRACT", "NO_SUMMARY_STATISTIC",
 }
 _RUN_LINK_REQUIRED = {"AUTO_DIGITIZE", "ASSOCIATION_EXTRACT", "BINARY_EXTRACT"}
@@ -551,8 +560,8 @@ def _anything(v):
 #: selects no contours, and both of those used to pass validation and then
 #: produce an empty panel that looked like an unreadable figure.
 READER_OPTIONS = {
-    "threshold":        (_as_int, ("BAR_MONO", "LINE_MONO", "BOX_VIOLIN"),
-                         "threshold", _grey),
+    "threshold":        (_as_int, ("BAR_MONO", "LINE_MONO", "LINE_MONO_STYLE",
+                                   "BOX_VIOLIN"), "threshold", _grey),
     "stem_threshold":   (_as_int, ("BAR_MONO",), "stem_threshold", _grey),
     "group_window":     (_as_int, ("BAR_MONO",), "group_window", _positive),
     # Consumed by the RUNNER, not passed to a reader: LINE_COLOR and SCATTER
@@ -561,7 +570,21 @@ READER_OPTIONS = {
     # BAR_COLOR - declared, validated, and changing nothing.
     "colour_tolerance": (_as_float, COLOUR_MARK_TYPES + ("SCATTER",), None,
                          _non_negative),
-    "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO"), "x_window", _positive),
+    "x_window":         (_as_int, ("LINE_COLOR", "LINE_MONO", "LINE_MONO_STYLE"),
+                         "x_window", _positive),
+    # LINE_MONO_STYLE only. How wide a window the style is measured through, in
+    # columns: it has to span more than one dash period or a dashed curve looks
+    # solid, and less than the distance over which the curve turns or the fit
+    # cannot follow it. The dash period is a property of the rendering, so this
+    # is the author saying how big the figure they measured is - the same thing
+    # `whisker_search_px` says for LINE_MONO.
+    "fit_half":         (_as_int, ("LINE_MONO_STYLE",), "fit_half", _positive),
+    # How far off the fitted centre line ink still belongs to this curve. Wide
+    # enough to hold a curve that climbs through the window, narrow enough not
+    # to swallow the neighbouring curve.
+    "fit_band":         (_as_int, ("LINE_MONO_STYLE",), "fit_band", _positive),
+    "probe":            (_as_int, ("LINE_MONO_STYLE",), "probe", _positive),
+    "search_radius":    (_as_int, ("LINE_MONO_STYLE",), "search_radius", _positive),
     # How far above and below a marker its own error-bar caps may be. It was a
     # hard 28 px, which is a distance in a rendering nobody declared: on a 300
     # DPI page a 95% confidence interval reaches 60-90 px and every whisker
@@ -1673,9 +1696,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 parse_colour(r.get("Colour_Hex"))
             except ValueError as exc:
                 flag(line, "BAD_SERIES_COLOUR", str(exc))
-        if mark in UNRELEASED_MARK_TYPES:
-            # Still checked, on the rules the reader WOULD use, so the manifest
-            # is ready the day the reader ships rather than wrong and unnoticed.
+        if mark == "LINE_MONO_STYLE":
             style = str(r.get("Line_Style", "")).strip().upper()
             if style in ("", "NONE"):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
@@ -1693,8 +1714,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
                      "the released LINE_MONO reader separates series by marker "
                      "shape and fill - declare Marker_Shape. Series told apart "
-                     "only by SOLID/DASHED need %s, which has no released reader"
-                     % "/".join(sorted(UNRELEASED_MARK_TYPES)))
+                     "only by SOLID/DASHED belong to LINE_MONO_STYLE")
             elif str(r.get("Line_Style", "")).strip().upper() not in ("", "NONE"):
                 flag(line, "LINE_STYLE_NOT_READ",
                      "Line_Style is recorded but the released LINE_MONO reader "
@@ -1747,7 +1767,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         mark = panel_mark.get(pid, "")
         rows = [r for _, r in series.iterrows()
                 if str(r.get("Panel_ID", "")).strip() == pid]
-        if mark in UNRELEASED_MARK_TYPES:
+        if mark == "LINE_MONO_STYLE":
+            # LINE_MONO_STYLE is in MONO_MARK_TYPES too, and the tuple below
+            # would let two series that share a line style through on any
+            # difference of marker shape - which this reader never looks at.
             keys = [str(r.get("Line_Style", "")).strip().upper() for r in rows]
         elif mark in MONO_MARK_TYPES:
             keys = [(str(r.get("Marker_Shape", "")).strip().upper(),
@@ -1831,10 +1854,6 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "or the reader will be given a grid it does not use")
 
     for pid, mark in panel_mark.items():
-        if mark in UNRELEASED_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
-            flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
-                 "%s will read at declared x positions and none are declared"
-                 % mark)
         if mark in POSITIONAL_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
             flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
                  "%s reads at declared x positions and none are declared" % mark)

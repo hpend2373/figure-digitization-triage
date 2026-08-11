@@ -67,7 +67,7 @@ for fid, image, outcome, unit, domain, rows in BAR_FIGURES:
 for fid, image, outcome, unit, rows in LINE_FIGURES:
     VIEW_CAPTIONS[fid] = ("%s over head-down tilt, fluid versus non-fluid, by sex"
                           % outcome)
-    for pid, sex, box, tick_text in rows:
+    for pid, sex, box, tick_text, x_pixels in rows:
         uid = "U_" + pid
         READ[pid] = dict(
             mark_type="LINE_MONO_STYLE", unit_id=uid, figure_view=fid,
@@ -76,13 +76,9 @@ for fid, image, outcome, unit, rows in LINE_FIGURES:
             series=[dict(series_id=s, factor="ARM", level=s, line_style=style,
                          marker="NONE", note="legend: %s" % style.lower())
                     for s, style in (("FLUID", "SOLID"), ("NON_FLUID", "DASHED"))],
-            # The x pixels are declared even though no released reader can use
-            # this panel yet: a position without a pixel is not a position, and
-            # the manifests have to be valid the day the reader ships.
             positions=[dict(position_id=t.replace(":", "_"),
                             factor="TIMEPOINT", level=t, timepoint_label=t,
-                            x_pixel=box[0] + 25
-                            + round(o * (box[1] - box[0] - 40) / (len(HDT) - 1)))
+                            x_pixel=x_pixels[o])
                        for o, t in enumerate(HDT)])
         UNITS.append(dict(
             unit_id=uid, figure_view=fid, grid_id="G_HDT", panel=sex,

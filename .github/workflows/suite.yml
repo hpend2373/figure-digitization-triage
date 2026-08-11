@@ -29,7 +29,7 @@ jobs:
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake \
-                   test_geometry_proposer; do
+                   test_geometry_proposer test_line_style_mono; do
             echo "--- $t"
             python "$t.py"
           done
@@ -40,11 +40,11 @@ jobs:
                    forward_test_127_mono_bar forward_test_397_mono_geometry \
                    forward_test_real_monochrome \
                    forward_test_beckers_geometry forward_test_beckers_dpi \
-                   pilot_397; do
+                   forward_test_397_line_style pilot_397; do
             echo "--- $s"
             python "$s.py"
           done
-      # Publication 397 ships with 108 QC problems on purpose: its dispersion
+      # Publication 397 ships with its QC problems on purpose: its dispersion
       # definition is unresolved. A run that reproduces them exactly has done
       # its job, so this step asserts the expected verdict rather than a bare
       # exit code - a green here that did not read 48 values would be worse
@@ -59,14 +59,15 @@ jobs:
           stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
           assert stamp["Status"] == "RAN", stamp["Status"]
           assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
-          # 36 since BAR_MONO moved to the two-pass reader: three Figure 4
-          # panels now refuse with STROKE_SCALE_UNRESOLVED rather than
-          # producing numbers off a stroke the reader could not measure.
-          # test_compile_plan names them.
-          assert stamp["Values_Read"] == 36, stamp["Values_Read"]
+          # 74 since LINE_MONO_STYLE shipped: the four line panels of Figures
+          # 1 and 2 read, on geometry measured at the same time. Still nothing
+          # accepted - publication 397 does not say whether its error bars are
+          # SD or SEM, which no reader can fix. test_compile_plan names the
+          # panels behind every one of these numbers.
+          assert stamp["Values_Read"] == 74, stamp["Values_Read"]
           assert stamp["Values_Machine_QC_Passed"] == 0, stamp
           assert stamp["Values_Accepted"] == 0, stamp
-          assert stamp["QC_Problems"] == 127, stamp["QC_Problems"]
+          assert stamp["QC_Problems"] == 131, stamp["QC_Problems"]
           assert stamp["Environment"]["Libraries"]["cv2"], stamp
           print("plan -> run reproduces the pilot:", stamp["Status"],
                 stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")

@@ -125,22 +125,22 @@
      "label": "P01",
      "outcome_label": "MAP men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "AUTO_DIGITIZE",
      "reason": "reader/run manifest configured",
      "read": {
       "mark_type": "LINE_MONO_STYLE",
       "unit_id": "U_P1_MAP_MEN",
       "figure_view": "F397_1",
       "box": [
-       84,
-       430,
-       70,
-       300
+       83,
+       477,
+       110,
+       296
       ],
       "y_ticks": [
        [
-        120.0,
-        76.0
+        110.0,
+        120.0
        ],
        [
         70.0,
@@ -174,84 +174,84 @@
         "factor": "TIMEPOINT",
         "level": "0:30",
         "timepoint_label": "0:30",
-        "x_pixel": 109
+        "x_pixel": 99.5
        },
        {
         "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
         "timepoint_label": "1:00",
-        "x_pixel": 137
+        "x_pixel": 132.5
        },
        {
         "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
         "timepoint_label": "1:30",
-        "x_pixel": 165
+        "x_pixel": 165.0
        },
        {
         "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
         "timepoint_label": "2:00",
-        "x_pixel": 192
+        "x_pixel": 197.5
        },
        {
         "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
         "timepoint_label": "2:30",
-        "x_pixel": 220
+        "x_pixel": 230.5
        },
        {
         "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
         "timepoint_label": "3:00",
-        "x_pixel": 248
+        "x_pixel": 263.5
        },
        {
         "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
         "timepoint_label": "3:30",
-        "x_pixel": 276
+        "x_pixel": 296.5
        },
        {
         "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
         "timepoint_label": "4:00",
-        "x_pixel": 304
+        "x_pixel": 329.0
        },
        {
         "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
         "timepoint_label": "4:30",
-        "x_pixel": 332
+        "x_pixel": 361.5
        },
        {
         "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
         "timepoint_label": "5:00",
-        "x_pixel": 359
+        "x_pixel": 394.5
        },
        {
         "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
         "timepoint_label": "5:30",
-        "x_pixel": 387
+        "x_pixel": 427.5
        },
        {
         "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
         "timepoint_label": "6:00",
-        "x_pixel": 415
+        "x_pixel": 460.0
        }
       ]
      }
@@ -261,26 +261,26 @@
      "label": "P02",
      "outcome_label": "MAP women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "AUTO_DIGITIZE",
      "reason": "reader/run manifest configured",
      "read": {
       "mark_type": "LINE_MONO_STYLE",
       "unit_id": "U_P1_MAP_WOMEN",
       "figure_view": "F397_1",
       "box": [
-       520,
-       870,
-       70,
-       300
+       600,
+       1001,
+       113,
+       294
       ],
       "y_ticks": [
        [
-        120.0,
-        76.0
+        110.0,
+        122.0
        ],
        [
         70.0,
-        296.0
+        294.0
        ]
       ],
       "y_scale": "LINEAR",
@@ -310,84 +310,84 @@
         "factor": "TIMEPOINT",
         "level": "0:30",
         "timepoint_label": "0:30",
-        "x_pixel": 545
+        "x_pixel": 616.5
        },
        {
         "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
         "timepoint_label": "1:00",
-        "x_pixel": 573
+        "x_pixel": 649.5
        },
        {
         "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
         "timepoint_label": "1:30",
-        "x_pixel": 601
+        "x_pixel": 683.0
        },
        {
         "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
         "timepoint_label": "2:00",
-        "x_pixel": 630
+        "x_pixel": 716.5
        },
        {
         "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
         "timepoint_label": "2:30",
-        "x_pixel": 658
+        "x_pixel": 749.5
        },
        {
         "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
         "timepoint_label": "3:00",
-        "x_pixel": 686
+        "x_pixel": 783.0
        },
        {
         "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
         "timepoint_label": "3:30",
-        "x_pixel": 714
+        "x_pixel": 816.5
        },
        {
         "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
         "timepoint_label": "4:00",
-        "x_pixel": 742
+        "x_pixel": 850.0
        },
        {
         "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
         "timepoint_label": "4:30",
-        "x_pixel": 770
+        "x_pixel": 883.5
        },
        {
         "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
         "timepoint_label": "5:00",
-        "x_pixel": 799
+        "x_pixel": 916.5
        },
        {
         "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
         "timepoint_label": "5:30",
-        "x_pixel": 827
+        "x_pixel": 950.0
        },
        {
         "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
         "timepoint_label": "6:00",
-        "x_pixel": 855
+        "x_pixel": 983.5
        }
       ]
      }
@@ -397,7 +397,7 @@
      "label": "P03",
      "outcome_label": "TPR men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -406,7 +406,7 @@
      "label": "P04",
      "outcome_label": "TPR women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -415,7 +415,7 @@
      "label": "P05",
      "outcome_label": "Finger pulse volume men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -424,7 +424,7 @@
      "label": "P06",
      "outcome_label": "Finger pulse volume women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -467,26 +467,26 @@
      "label": "P01",
      "outcome_label": "Heart rate men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "AUTO_DIGITIZE",
      "reason": "reader/run manifest configured",
      "read": {
       "mark_type": "LINE_MONO_STYLE",
       "unit_id": "U_P2_HR_MEN",
       "figure_view": "F397_2",
       "box": [
-       84,
-       430,
-       70,
-       300
+       79,
+       500,
+       125,
+       289
       ],
       "y_ticks": [
        [
-        80.0,
-        72.0
+        70.0,
+        152.0
        ],
        [
         50.0,
-        290.0
+        289.0
        ]
       ],
       "y_scale": "LINEAR",
@@ -516,84 +516,84 @@
         "factor": "TIMEPOINT",
         "level": "0:30",
         "timepoint_label": "0:30",
-        "x_pixel": 109
+        "x_pixel": 96.5
        },
        {
         "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
         "timepoint_label": "1:00",
-        "x_pixel": 137
+        "x_pixel": 131.5
        },
        {
         "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
         "timepoint_label": "1:30",
-        "x_pixel": 165
+        "x_pixel": 166.5
        },
        {
         "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
         "timepoint_label": "2:00",
-        "x_pixel": 192
+        "x_pixel": 201.5
        },
        {
         "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
         "timepoint_label": "2:30",
-        "x_pixel": 220
+        "x_pixel": 236.5
        },
        {
         "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
         "timepoint_label": "3:00",
-        "x_pixel": 248
+        "x_pixel": 271.5
        },
        {
         "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
         "timepoint_label": "3:30",
-        "x_pixel": 276
+        "x_pixel": 306.5
        },
        {
         "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
         "timepoint_label": "4:00",
-        "x_pixel": 304
+        "x_pixel": 341.5
        },
        {
         "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
         "timepoint_label": "4:30",
-        "x_pixel": 332
+        "x_pixel": 376.5
        },
        {
         "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
         "timepoint_label": "5:00",
-        "x_pixel": 359
+        "x_pixel": 411.5
        },
        {
         "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
         "timepoint_label": "5:30",
-        "x_pixel": 387
+        "x_pixel": 446.5
        },
        {
         "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
         "timepoint_label": "6:00",
-        "x_pixel": 415
+        "x_pixel": 481.5
        }
       ]
      }
@@ -603,26 +603,26 @@
      "label": "P02",
      "outcome_label": "Heart rate women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "AUTO_DIGITIZE",
      "reason": "reader/run manifest configured",
      "read": {
       "mark_type": "LINE_MONO_STYLE",
       "unit_id": "U_P2_HR_WOMEN",
       "figure_view": "F397_2",
       "box": [
-       520,
-       870,
-       70,
-       300
+       603,
+       1000,
+       88,
+       293
       ],
       "y_ticks": [
        [
-        80.0,
-        72.0
+        70.0,
+        155.0
        ],
        [
         50.0,
-        290.0
+        293.0
        ]
       ],
       "y_scale": "LINEAR",
@@ -652,84 +652,84 @@
         "factor": "TIMEPOINT",
         "level": "0:30",
         "timepoint_label": "0:30",
-        "x_pixel": 545
+        "x_pixel": 619.0
        },
        {
         "position_id": "1_00",
         "factor": "TIMEPOINT",
         "level": "1:00",
         "timepoint_label": "1:00",
-        "x_pixel": 573
+        "x_pixel": 652.0
        },
        {
         "position_id": "1_30",
         "factor": "TIMEPOINT",
         "level": "1:30",
         "timepoint_label": "1:30",
-        "x_pixel": 601
+        "x_pixel": 685.5
        },
        {
         "position_id": "2_00",
         "factor": "TIMEPOINT",
         "level": "2:00",
         "timepoint_label": "2:00",
-        "x_pixel": 630
+        "x_pixel": 718.5
        },
        {
         "position_id": "2_30",
         "factor": "TIMEPOINT",
         "level": "2:30",
         "timepoint_label": "2:30",
-        "x_pixel": 658
+        "x_pixel": 751.5
        },
        {
         "position_id": "3_00",
         "factor": "TIMEPOINT",
         "level": "3:00",
         "timepoint_label": "3:00",
-        "x_pixel": 686
+        "x_pixel": 784.5
        },
        {
         "position_id": "3_30",
         "factor": "TIMEPOINT",
         "level": "3:30",
         "timepoint_label": "3:30",
-        "x_pixel": 714
+        "x_pixel": 817.5
        },
        {
         "position_id": "4_00",
         "factor": "TIMEPOINT",
         "level": "4:00",
         "timepoint_label": "4:00",
-        "x_pixel": 742
+        "x_pixel": 850.5
        },
        {
         "position_id": "4_30",
         "factor": "TIMEPOINT",
         "level": "4:30",
         "timepoint_label": "4:30",
-        "x_pixel": 770
+        "x_pixel": 883.5
        },
        {
         "position_id": "5_00",
         "factor": "TIMEPOINT",
         "level": "5:00",
         "timepoint_label": "5:00",
-        "x_pixel": 799
+        "x_pixel": 916.5
        },
        {
         "position_id": "5_30",
         "factor": "TIMEPOINT",
         "level": "5:30",
         "timepoint_label": "5:30",
-        "x_pixel": 827
+        "x_pixel": 949.5
        },
        {
         "position_id": "6_00",
         "factor": "TIMEPOINT",
         "level": "6:00",
         "timepoint_label": "6:00",
-        "x_pixel": 855
+        "x_pixel": 982.5
        }
       ]
      }
@@ -739,7 +739,7 @@
      "label": "P03",
      "outcome_label": "Thoracic fluid volume men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -748,7 +748,7 @@
      "label": "P04",
      "outcome_label": "Thoracic fluid volume women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -775,7 +775,7 @@
      "label": "P07",
      "outcome_label": "Cardiac output men",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     },
@@ -784,7 +784,7 @@
      "label": "P08",
      "outcome_label": "Cardiac output women",
      "target_status": "TARGET",
-     "disposition": "NO_READER_AVAILABLE",
+     "disposition": "GEOMETRY_NOT_AUTHORED",
      "reason": "visible panel inventoried; reader not configured",
      "read": null
     }

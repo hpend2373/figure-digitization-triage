@@ -181,14 +181,35 @@ BAR_FIGURES = [
 
 # The line figures. Panel boxes and calibrations are declared so the manifests
 # are ready the day the reader ships; the run will queue them regardless.
+# MEASURED, not sketched. These four panels were declared before LINE_MONO_STYLE
+# had a reader, and their geometry said so: one box copied to all four, and x
+# pixels SYNTHESISED by spreading twelve positions evenly between the box edges
+# with a 25 px inset. That was honest while nothing could read them - a position
+# without a pixel is not a position - and it is not geometry.
+#
+# Each panel is now measured from its own raster: `x_pixels` are the centres of
+# the twelve category intervals between the thirteen printed ticks, the y ticks
+# are the two outermost gridlines INSIDE THE BOX - a calibration tick above the
+# box top describes a different panel from the box, and the validator says so -
+# and the box runs from the first tick to the last. THE TOP OF THE BOX IS BELOW THE LEGEND on the three panels that carry
+# one inside the plot area - excluding printed furniture is what a panel box is
+# for. Figure 2's WOMEN panel has no legend and starts at its top gridline.
 LINE_FIGURES = [
     ("F397_1", "397_fig1.jpeg", "Mean arterial pressure", "mmHg", [
-        ("P1_MAP_MEN", "MEN", (84, 430, 70, 300), "120:76;70:296"),
-        ("P1_MAP_WOMEN", "WOMEN", (520, 870, 70, 300), "120:76;70:296"),
+        ("P1_MAP_MEN", "MEN", (83, 477, 110, 296), "110:120;70:296",
+         (99.5, 132.5, 165.0, 197.5, 230.5, 263.5,
+          296.5, 329.0, 361.5, 394.5, 427.5, 460.0)),
+        ("P1_MAP_WOMEN", "WOMEN", (600, 1001, 113, 294), "110:122;70:294",
+         (616.5, 649.5, 683.0, 716.5, 749.5, 783.0,
+          816.5, 850.0, 883.5, 916.5, 950.0, 983.5)),
     ]),
     ("F397_2", "397_fig2.jpeg", "Heart rate", "bpm", [
-        ("P2_HR_MEN", "MEN", (84, 430, 70, 300), "80:72;50:290"),
-        ("P2_HR_WOMEN", "WOMEN", (520, 870, 70, 300), "80:72;50:290"),
+        ("P2_HR_MEN", "MEN", (79, 500, 125, 289), "70:152;50:289",
+         (96.5, 131.5, 166.5, 201.5, 236.5, 271.5,
+          306.5, 341.5, 376.5, 411.5, 446.5, 481.5)),
+        ("P2_HR_WOMEN", "WOMEN", (603, 1000, 88, 293), "70:155;50:293",
+         (619.0, 652.0, 685.5, 718.5, 751.5, 784.5,
+          817.5, 850.5, 883.5, 916.5, 949.5, 982.5)),
     ]),
 ]
 
@@ -289,7 +310,7 @@ for fid, image, outcome, units, domain, rows in BAR_FIGURES:
 for fid, image, outcome, units, rows in LINE_FIGURES:
     figure(fid, image, "%s over head-down tilt, fluid versus non-fluid, by sex"
            % outcome, len(rows))
-    for pid, sex, box, ticks in rows:
+    for pid, sex, box, ticks, x_pixels in rows:
         uid = "U_" + pid
         unit(uid, fid, "G_HDT", sex, outcome, units, "CV_HEMO",
              Bar_Top_Definition="NOT_A_BAR", N_Outcome=10, Dispersion_Type="SEM",
@@ -314,11 +335,10 @@ for fid, image, outcome, units, rows in LINE_FIGURES:
                 Marker_Fill="", Line_Style=style, Bar_Fill_Pattern="",
                 Factor_Name="ARM", Factor_Level=series_id,
                 Note="legend: %s = %s" % (style.lower(), series_id)))
-        span = box[1] - box[0] - 40
         for order, label in enumerate(HDT):
             POSITIONS.append(dict(
                 Panel_ID=pid, Position_ID=label.replace(":", "_"),
-                X_Pixel=box[0] + 25 + round(order * span / (len(HDT) - 1)),
+                X_Pixel=x_pixels[order],
                 Slot_Index=order, Display_Order=order, Factor_Name="TIMEPOINT",
                 Factor_Level=label, Timepoint_Label=label, Timepoint_Days="",
                 Note=""))
@@ -375,26 +395,32 @@ CONFIGS = [
 # only 14 currently have reader rows.  The other 22 stay explicit as no-reader,
 # manual, non-target or no-summary dispositions instead of disappearing.
 # --------------------------------------------------------------------------
+# LINE_MONO_STYLE shipped, and twelve of these dispositions had to change with
+# it. Four panels have authored geometry and reader rows, so they are
+# AUTO_DIGITIZE. Eight more are the same two-black-curve figure type and have
+# no geometry authored yet: NO_READER_AVAILABLE was a claim about this package
+# and it stopped being true, so they are GEOMETRY_NOT_AUTHORED - open work,
+# named, rather than a closed state that quietly misdescribes it.
 _SOURCE_SPECS = {
     1: [
-        ("P1_MAP_MEN", "MAP men", "TARGET", "NO_READER_AVAILABLE"),
-        ("P1_MAP_WOMEN", "MAP women", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F1_TPR_MEN", "TPR men", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F1_TPR_WOMEN", "TPR women", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F1_FPV_MEN", "Finger pulse volume men", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F1_FPV_WOMEN", "Finger pulse volume women", "TARGET", "NO_READER_AVAILABLE"),
+        ("P1_MAP_MEN", "MAP men", "TARGET", "AUTO_DIGITIZE"),
+        ("P1_MAP_WOMEN", "MAP women", "TARGET", "AUTO_DIGITIZE"),
+        ("S397_F1_TPR_MEN", "TPR men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("S397_F1_TPR_WOMEN", "TPR women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("S397_F1_FPV_MEN", "Finger pulse volume men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("S397_F1_FPV_WOMEN", "Finger pulse volume women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
         ("S397_F1_TEMP_MEN", "Skin temperature men", "NON_TARGET", "NON_TARGET_OUTCOME"),
         ("S397_F1_TEMP_WOMEN", "Skin temperature women", "NON_TARGET", "NON_TARGET_OUTCOME"),
     ],
     2: [
-        ("P2_HR_MEN", "Heart rate men", "TARGET", "NO_READER_AVAILABLE"),
-        ("P2_HR_WOMEN", "Heart rate women", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F2_TFV_MEN", "Thoracic fluid volume men", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F2_TFV_WOMEN", "Thoracic fluid volume women", "TARGET", "NO_READER_AVAILABLE"),
+        ("P2_HR_MEN", "Heart rate men", "TARGET", "AUTO_DIGITIZE"),
+        ("P2_HR_WOMEN", "Heart rate women", "TARGET", "AUTO_DIGITIZE"),
+        ("S397_F2_TFV_MEN", "Thoracic fluid volume men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("S397_F2_TFV_WOMEN", "Thoracic fluid volume women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
         ("S397_F2_SC_MEN", "Skin conductance men", "NON_TARGET", "NON_TARGET_OUTCOME"),
         ("S397_F2_SC_WOMEN", "Skin conductance women", "NON_TARGET", "NON_TARGET_OUTCOME"),
-        ("S397_F2_CO_MEN", "Cardiac output men", "TARGET", "NO_READER_AVAILABLE"),
-        ("S397_F2_CO_WOMEN", "Cardiac output women", "TARGET", "NO_READER_AVAILABLE"),
+        ("S397_F2_CO_MEN", "Cardiac output men", "TARGET", "GEOMETRY_NOT_AUTHORED"),
+        ("S397_F2_CO_WOMEN", "Cardiac output women", "TARGET", "GEOMETRY_NOT_AUTHORED"),
     ],
     3: [
         ("P3_MEN", "MAP men", "TARGET", "AUTO_DIGITIZE"),

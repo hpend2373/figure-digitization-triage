@@ -1361,7 +1361,6 @@ On publication 397 `figure_values_accepted.csv` is **0 rows**, and
     python3 -m pip install -r requirements.txt
     cp *.py *.md *.csv *.png *.jpeg *.json *.tar "$SKILL"/
     mkdir -p "$SKILL"/fixtures && cp fixtures/* "$SKILL"/fixtures/
-    mkdir -p "$SKILL"/wip && cp wip/* "$SKILL"/wip/
     cd "$SKILL" && for t in test_reproducibility test_kernel test_grid_engine \
         test_bar_reader test_mark_readers test_mono_bar test_integration \
         test_run_batch crosscheck_id323 forward_test_397_mono_bar; \
@@ -1477,10 +1476,10 @@ Both halves fixed:
 - a LINE_MONO series that also sets `Line_Style` gets `LINE_STYLE_NOT_READ` —
   recording a discriminant the run will not apply is a promise the file cannot
   keep
-- `LINE_MONO_STYLE` is a named `UNRELEASED_MARK_TYPE`. Declaring it yields
-  `MARK_TYPE_NOT_RELEASED` with what it is, why it is held back, and where the
-  work sits. Naming it beats silence: the alternative is `BAD_MARK_TYPE`, which
-  reads as "you made that up".
+- `LINE_MONO_STYLE` was a named `UNRELEASED_MARK_TYPE` here and has since
+  shipped; the mechanism stays, and `UNRELEASED_MARK_TYPES` is empty. Naming an
+  unbuilt reader beats silence: the alternative is `BAD_MARK_TYPE`, which reads
+  as "you made that up".
 
 ## MEDIUM 3 (v7.2) — options were type-checked but never range-checked
 
@@ -3652,34 +3651,68 @@ redistributable), and two worked examples:
   `pilot_397.py` or it had to go. `pilot_397.py` does everything it did.
 
 
-## Not shipped: solid/dashed LINE_MONO
+## Shipped: LINE_MONO_STYLE, solid versus dashed
 
-It is built, it is measured, and it is in `wip/` rather than in the reader set.
+`line_style_mono.py`, dispatched as `LINE_MONO_STYLE`, out of `wip/` and into
+the reader set. It is the figure type 121 of the worklist's 353 figures are:
+two black curves, no markers at all, and a legend that says which is which.
+`wip/` is gone.
 
-On a synthetic fixture it reads 16 of 18 separable cells, assigns both styles
-correctly and recovers means within 1.5 units on a 50-unit axis. That is close
-to working and not the same as working:
+**The discriminant is not the duty cycle.** That was the obvious answer and it
+does not survive measurement — the fraction of columns a dash pattern inks
+depends on where in its phase the fitting window opens, and on the fixture the
+same dashed stroke measures 0.605 to 0.81, straight through the bottom of the
+band a solid line occupies. The **longest run of skipped columns** does not
+move: a solid stroke never has one, a dash pattern has one every period. Duty is
+kept for the one thing it can do, which is separate DOTTED from DASHED.
 
-- at a deliberate **crossing**, where the two curves land on the same value, it
-  emits both cells instead of dropping them. The whole design of this system is
-  that an unresolvable mark produces no row; this one produces two
-- 2 of 18 separable cells go missing and the reason is not characterised
-- it has not been run against publication 397 at all
+**Four defects the drawn fixture could not show, all found on 397 Figure 1.**
+This is why the release gate is `forward_test_397_line_style.py` and not the
+fixture:
 
-Shipping it would put numbers in a values file nobody can defend — the same
-reason BAR_MONO was held back last time, and the standard BAR_MONO has now met.
-`wip/line_style_mono.py` records what was learned so the next attempt does not
-restart: a whole-panel sequential tracer does not work (a dash *tip* biases the
-run centre enough to lose a steep curve, and one miss fragments the series); a
-short windowed fit does, provided it is quadratic, counts only the span the ink
-covers, and lets the collection band follow the first fit.
+- **gridlines** measure duty 1.000 and gap 0. Four of them made five SOLID
+  candidates at every x, the count was never one, and the reader emitted no
+  solid cells anywhere on the figure while reporting no problem at all
+- **error-bar stems** are removed before tracing, which takes the curve's own
+  pixels with them; scored as misses that gave every solid curve a gap of 3,
+  one over the limit. A column we cannot see through is not a column where the
+  curve is absent, so it is skipped in both halves of the fraction
+- **whisker caps** sit exactly where a curve turning down would have continued.
+  A cap is a short horizontal stroke and so is a steep curve, so length cannot
+  separate them: a cap has a stem under it, and it ends
+- the value was read off the **fitted quadratic**, which rounds a corner. The
+  fit now says where to look and the ink says how high
 
-`wip/test_line_style_mono.py` runs and reports 6 failures. It is deliberately
-not in the release gate.
+**Where it refuses.** 8 of 24 cells on the gate panel, at the four positions
+where the two curves run within about two mmHg — at 6:00 they touch. A style
+found somewhere on the panel is expected everywhere on it, and a position where
+an expected style is missing while another was found is a position where they
+merged: no cell for either series. The 16 it emits are all within 1.65 mmHg of
+an independent eye reading on a 50 mmHg axis.
+
+**A dispersion is the connected column of ink through the mark**, not the
+nearest wide stroke either side. On a two-curve time course the neighbour's cap
+is a wide stroke a few pixels away, and taking it gave a dispersion 1.99 units
+short of the truth — a plausible number that is simply wrong. Where the two
+bars touch, the run holds both marks, and the cell keeps its mean and reports
+no dispersion.
+
+**`GEOMETRY_NOT_AUTHORED`** is new in `SOURCE_PANEL_DISPOSITIONS`. Releasing
+this reader turned eight of publication 397's panels from "we cannot read this"
+into "we have not measured this", and `NO_READER_AVAILABLE` is a claim about
+the package that stopped being true for them. It is a TARGET disposition, it is
+not closed, and it shows as `AWAITING_GEOMETRY` in the source-panel inventory.
+
+The four panels that DO have geometry were measured at the same time. They had
+been declared before any reader existed, with one box copied to all four and
+twelve x pixels spread evenly between the box edges — honest while nothing
+could read them, and not geometry. Each is now measured off its own raster.
 
 ## Still open
 
-- 397 Figures 1, 2, 5 — solid/dashed, blocked on the above
+- eight two-curve panels on 397 Figures 1–2: `GEOMETRY_NOT_AUTHORED`
+- 397 Figure 5 is two named individuals beat by beat — no summary statistic
+  exists to read, and it stays MANUAL
 - 397 Figure 4, 386 Figures 3–4
 - ID 323 FIG2 DAP DI19 (1 cell) and 4 unpaired cells need a human reading
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text

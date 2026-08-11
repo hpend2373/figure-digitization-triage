@@ -716,8 +716,8 @@ for _name, _kw, _want in (
               configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
                                       Value="150", Note="")]),
          "LINE_STYLE_NOT_READ"),
-        # An unreleased mark type is not a manifest error, but its series still
-        # have to be separable by the discriminant that reader WILL use.
+        # LINE_MONO_STYLE separates series by SOLID/DASHED and looks at
+        # nothing else, so a marker shape does not make two of them separable.
         # REVERT: let `Marker_Shape=ANY` through on any panel. ANY says "there
         # is nothing here to tell apart", which is a claim about the panel: two
         # series both declaring it are two series the reader cannot separate,
@@ -731,14 +731,14 @@ for _name, _kw, _want in (
               configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
                                       Value="150", Note="")]),
          "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES"),
-        ("an unreleased mark type whose series share a line style",
+        ("two LINE_MONO_STYLE series that share a line style",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
                             Mark_Type="LINE_MONO_STYLE", Config_ID=""),
               series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
                                 Line_Style="SOLID")
                            if r["Panel_ID"] == "P_LINE" else r for r in SERIES]),
          "SERIES_NOT_SEPARABLE"),
-        ("an unreleased mark type whose series declare no line style",
+        ("a LINE_MONO_STYLE series that declares no line style",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
                             Mark_Type="LINE_MONO_STYLE", Config_ID=""),
               series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
@@ -2287,13 +2287,25 @@ print("a mark type with no reader is queued, not treated as a bad manifest")
 # One panel nobody can read yet must not stop every panel that can be. On
 # publication 397 that was two line figures against twenty-four readable bar
 # cells - rejecting the batch would have cost the twenty-four.
+#
+# `UNRELEASED_MARK_TYPES` IS EMPTY TODAY: LINE_MONO_STYLE was its last entry and
+# shipped, and there is no honest second name to put in it - that table is a
+# public statement to manifest authors about what this package can do, and a
+# placeholder in it would be a false one. So the machinery is driven from a
+# name installed here for the length of this section. What is under test is the
+# routing, not the name: a declared mark type the runner has no reader for must
+# reach the manual queue with a reason, and must not take the batch with it.
+_FAKE_UNRELEASED = "HEATMAP_CELL"
+BM.UNRELEASED_MARK_TYPES[_FAKE_UNRELEASED] = (
+    "a fixture for the no-reader route, installed by test_run_batch. See "
+    "wip/ for where a real one would live")
 _unreleased_series = [
     dict(r, Colour_Hex="", Marker_Shape="NONE",
          Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE" else "DASHED"))
     if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
 _ur = write_manifests(
     os.path.join(ROOT, "m_unreleased"),
-    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO_STYLE",
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type=_FAKE_UNRELEASED,
                   Config_ID=""),
     series_rows=_unreleased_series)
 _o = os.path.join(ROOT, "o_unreleased")
@@ -2319,6 +2331,10 @@ check("it contributes no values at all",
       not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
 check("NO_READER_AVAILABLE is in the declared state vocabulary",
       "NO_READER_AVAILABLE" in BM.RUN_STATES)
+del BM.UNRELEASED_MARK_TYPES[_FAKE_UNRELEASED]
+check("and a released mark type takes the reader route, not that one",
+      not (set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)),
+      "%s" % sorted(set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)))
 
 
 # ---------------------------------------------------------------------------
@@ -4649,9 +4665,15 @@ check("every positional reader takes the declared x pixels",
               if "x_positions" not in inspect.signature(_readers[m]).parameters])
 check("every option has a range check, not just a parser",
       all(callable(v[3]) for v in BM.READER_OPTIONS.values()))
-check("an unreleased mark type is named rather than silently unknown",
-      "LINE_MONO_STYLE" in BM.UNRELEASED_MARK_TYPES
-      and "LINE_MONO_STYLE" not in BM.BATCH_MARK_TYPES)
+# The two tables must never both claim a mark type: one says "this runs" and
+# the other says "this does not", and a name in both means the answer depends
+# on which check the code reaches first.
+check("no mark type is both released and unreleased",
+      not (set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)),
+      "%s" % sorted(set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)))
+check("and the two modules agree on what is released",
+      set(BM.BATCH_MARK_TYPES) == set(MR.MARK_TYPES),
+      "%s" % sorted(set(BM.BATCH_MARK_TYPES) ^ set(MR.MARK_TYPES)))
 
 
 print("a scatter whose marks do not add up to the declared sample is not computed")

@@ -128,13 +128,23 @@ check("with the pilot's panel count", _summary["panels"] == 18, "%s" % _summary)
 # is the COST of the switch, in the open - three panels that used to produce
 # unvalidated numbers and now produce a named refusal, and a stroke measurement
 # on those three that is worth a round of its own.
-check("and the 36 values the two-pass reader stands behind",
-      _summary["values"] == 36, "%s" % _summary)
+# 72, not 36: LINE_MONO_STYLE shipped and the four line panels of Figures 1 and
+# 2 now read. Their geometry was measured at the same time - it had been one
+# box copied to four panels with twelve x pixels spread evenly between the
+# edges, which was honest while nothing could read them and is not geometry.
+check("and the 74 values the released readers stand behind",
+      _summary["values"] == 74, "%s" % _summary)
 check("and nothing accepted, because the paper still does not say SD or SEM",
       _summary["accepted"] == 0, "%s" % _summary)
 _states = _summary["states"]
-check("and the same three terminal states",
-      _states == {"QC_FAILED": 9, "NO_READER_AVAILABLE": 4,
+# NO_VARIANCE, where NO_READER_AVAILABLE used to be. The two heart-rate panels
+# read their centres and no dispersion: publication 397 draws the two series'
+# error bars at the same x, and where the bars touch, the column of ink holds
+# both marks and neither cap can be attributed. A centre with no dispersion is
+# not poolable, so the panel says so - which is the same answer it gave before,
+# reached by measurement instead of by absence.
+check("and the same four terminal states",
+      _states == {"QC_FAILED": 11, "NO_VARIANCE": 2,
                   "PANEL_GEOMETRY_UNRESOLVED": 3, "MANUAL_POINT_READ": 2},
       "%s" % _states)
 # PANEL_GEOMETRY_UNRESOLVED, not MANUAL_POINT_READ: the reason is on the run

@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.43"
+PIPELINE_VERSION = "7.44"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -119,6 +119,7 @@ PIPELINE_CODE_FILES = (
 #: about the figure for a defect in this table.
 def reader_functions():
     from bar_reader import read_bar_panel
+    from line_style_mono import read_monochrome_line_panel
     return {
         "BAR_COLOR": read_bar_panel,
         # The two-pass geometry reader. It measures a panel and names no
@@ -130,6 +131,7 @@ def reader_functions():
         "BAR_MONO": MR.read_monochrome_bar_geometry,
         "LINE_COLOR": MR.read_line_marker_panel,
         "LINE_MONO": MR.read_monochrome_marker_panel,
+        "LINE_MONO_STYLE": read_monochrome_line_panel,
         "SCATTER": MR.read_scatter_panel,
         "BOX_VIOLIN": MR.read_box_violin_panel,
     }
@@ -1205,8 +1207,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                                  y_calibration=ycal,
                                  series=_series_specs(series_rows, mark, options),
                                  **kwargs)
-        elif mark == "LINE_MONO":
-            rows = MR.read_panel("LINE_MONO", image=image, panel_box=box,
+        elif mark in ("LINE_MONO", "LINE_MONO_STYLE"):
+            # Same call for both. They differ in what the reader looks at -
+            # marker geometry against stroke pattern - and the manifest has
+            # already been checked against the right discriminant for each.
+            rows = MR.read_panel(mark, image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
                                  y_calibration=ycal,
                                  series=_series_specs(series_rows, mark, options),
@@ -2893,6 +2898,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                                else "QUEUED_OR_FAILED")
         elif disposition in ("MANUAL_DIGITIZE", "NO_READER_AVAILABLE"):
             coverage_status = "QUEUED_SOURCE_ONLY"
+        elif disposition == "GEOMETRY_NOT_AUTHORED":
+            # Not queued and not closed. Nothing in this run will touch it and
+            # nothing has decided it cannot be touched: it is waiting on a
+            # person to measure it, and the inventory says which panels those
+            # are rather than burying them in the UNRESOLVED bucket.
+            coverage_status = "AWAITING_GEOMETRY"
         elif disposition in BM._CLOSED_WITHOUT_READER:
             coverage_status = "CLOSED_%s" % disposition
         else:

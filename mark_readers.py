@@ -1446,13 +1446,13 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
         identity_domain_id=identity_domain_id, figure_id=figure_id)
 
 
-MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",
-              "BOX_VIOLIN")
+MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO",
+              "LINE_MONO_STYLE", "SCATTER", "BOX_VIOLIN")
 
 #: Bumped whenever a reader's numerical output can change. A batch run records
 #: it beside the image hash and the config hash, so "the numbers moved" can be
 #: attributed instead of argued about.
-READER_VERSION = "7.2"
+READER_VERSION = "7.3"
 
 
 def read_panel(mark_type, **kwargs):
@@ -1466,6 +1466,11 @@ def read_panel(mark_type, **kwargs):
         return read_line_marker_panel(**kwargs)
     if kind == "LINE_MONO":
         return read_monochrome_marker_panel(**kwargs)
+    if kind == "LINE_MONO_STYLE":
+        # Imported here rather than at module scope: `line_style_mono` imports
+        # from this module, and a top-level import would be a cycle.
+        from line_style_mono import read_monochrome_line_panel
+        return read_monochrome_line_panel(**kwargs)
     if kind == "BAR_MONO":
         return read_monochrome_bar_panel(**kwargs)
     if kind == "SCATTER":

@@ -25,6 +25,8 @@ import os
 import sys
 import tempfile
 
+from PIL import Image
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import corpus_intake as CI                                      # noqa: E402
@@ -397,9 +399,18 @@ _pdfs = [minimal_pdf(os.path.join(ROOT, "good.pdf"),
 _notpdf = os.path.join(ROOT, "notapdf.pdf")
 open(_notpdf, "wb").write(b"this is not a PDF at all\n" * 40)
 _pdfs.append(_notpdf)
+# A VALID PDF WITH NO TEXT ON IT. This is the scanned paper - about 42% of the
+# corpus is expected to be one - and it is a different job from a file that is
+# not a PDF: one needs a render and an eye, the other needs somebody to look at
+# what was downloaded. The backend does not raise on it; it returns nothing.
+_scanned = minimal_pdf(os.path.join(ROOT, "scanned.pdf"), [[], []])
+_pdfs.append(_scanned)
 _lout = io.StringIO()
 with contextlib.redirect_stdout(_lout):
     _lcode = CI.main(_pdfs + ["--out", _LDIR])
+check("the walk writes a document sheet as well as a candidate sheet",
+      os.path.exists(os.path.join(_LDIR, "documents.html"))
+      and os.path.exists(os.path.join(_LDIR, "index.html")))
 _ledger = list(csv.DictReader(
     open(os.path.join(_LDIR, "intake_document_status.csv"), encoding="utf-8")))
 _byfile = {r["Source_File"]: r for r in _ledger}
@@ -408,7 +419,7 @@ _byfile = {r["Source_File"]: r for r in _ledger}
 # backend at all there, and "no backend" is one of the five statuses precisely
 # so the walk still accounts for every file.
 check("every file handed in has exactly one row",
-      len(_ledger) == 3 and len(_byfile) == 3, "%d rows" % len(_ledger))
+      len(_ledger) == 4 and len(_byfile) == 4, "%d rows" % len(_ledger))
 check("every row carries every ledger column",
       all(set(r) == set(CI.LEDGER_COLUMNS) for r in _ledger),
       "%s" % (set(_ledger[0]) ^ set(CI.LEDGER_COLUMNS)))
@@ -418,36 +429,199 @@ check("and every row's status, render state and action are declared ones",
 
 if not _BACKEND:
     print("  SKIP the per-status scenarios: %s" % _NO_BACKEND)
-    check("with no backend installed every document says so, and says to "
+    check("with no backend installed every real PDF says so, and says to "
           "install one",
           all(r["Text_Backend_Status"] == "BACKEND_UNAVAILABLE"
               and r["Required_Action"] == "INSTALL_A_PDF_BACKEND"
-              for r in _ledger),
-          "%s" % [(r["Text_Backend_Status"], r["Required_Action"])
-                  for r in _ledger])
+              for r in _ledger if r["Source_File"] != "notapdf.pdf"),
+          "%s" % [(r["Source_File"], r["Text_Backend_Status"]) for r in _ledger])
+    # And the file that is not a PDF is still not a PDF. That answer needs no
+    # backend, so an environment with nothing installed still routes it to the
+    # person who can look at what was downloaded rather than to the one who
+    # installs software.
+    check("and the file that is not a PDF is still INTAKE_FAILED",
+          _byfile["notapdf.pdf"]["Text_Backend_Status"] == "INTAKE_FAILED",
+          _byfile["notapdf.pdf"]["Text_Backend_Status"])
 else:
+    # REVERT: send a document with candidates to the contact sheet whether or
+    # not there is a picture on it. Confirming a figure from a Figure_BBox
+    # string is agreeing with a number, which is the thing rendering exists to
+    # stop - and `--render` is optional, so the DEFAULT walk is that case.
     check("the one that worked says so",
-        _byfile["good.pdf"]["Text_Backend_Status"] == "TEXT_LAYER_OK"
-        and _byfile["good.pdf"]["Required_Action"] == "CONFIRM_ON_CONTACT_SHEET",
-        "%s" % _byfile["good.pdf"])
+          _byfile["good.pdf"]["Text_Backend_Status"] == "TEXT_LAYER_OK",
+          "%s" % _byfile["good.pdf"])
+    check("but with no pages rendered it is not ready to be confirmed",
+          _byfile["good.pdf"]["Required_Action"] == "RENDER_CONTACT_SHEET",
+          _byfile["good.pdf"]["Required_Action"])
     check("the one with no captions is not filed as the one that worked",
           _byfile["quiet2.pdf"]["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
           _byfile["quiet2.pdf"]["Text_Backend_Status"])
-    # REVERT: file a NotReadable as INTAKE_FAILED, or as a clean read. The three
-    # outcomes need three different things done to them - a page render and a
-    # person, an install, and somebody looking at a stack trace - and collapsing
-    # them is what makes a ledger a list rather than a work queue.
-    check("and the one that is not a PDF is a row, not an exception",
-          _byfile["notapdf.pdf"]["Text_Backend_Status"] == "NO_TEXT_LAYER",
+    # REVERT: file a valid image-only PDF and a file that is not a PDF under
+    # one status. They need opposite things done to them - a page render and an
+    # eye, against somebody looking at what was downloaded - and about 42% of
+    # this corpus is expected to be the first. The parser tells them apart for
+    # neither: it raises on neither and returns nothing for both.
+    check("a valid PDF with no text on it is NO_TEXT_LAYER",
+          _byfile["scanned.pdf"]["Text_Backend_Status"] == "NO_TEXT_LAYER",
+          _byfile["scanned.pdf"]["Text_Backend_Status"])
+    check("and is sent to a render and an eye",
+          _byfile["scanned.pdf"]["Required_Action"]
+          == "RENDER_AND_INVENTORY_BY_EYE",
+          _byfile["scanned.pdf"]["Required_Action"])
+    # REVERT: take the page count from `max(block page number)`. A paper whose
+    # last pages are scanned figures then reports a shorter document, and a
+    # wholly scanned one reports zero pages - which reads like a file that is
+    # not a PDF at all.
+    check("and its page count is the file's, not the text layer's",
+          _byfile["scanned.pdf"]["Page_Count"] == "2"
+          or CI.page_count(_scanned) == 0,
+          "%s (page_count says %s)" % (_byfile["scanned.pdf"]["Page_Count"],
+                                       CI.page_count(_scanned)))
+    # REVERT: parse the text layer again inside `draft_rows`. The ledger's
+    # block count and the draft's candidates then come from two parses, and the
+    # second is free to fail after the first succeeded - which breaks the one
+    # promise `intake_document` makes.
+    _parses = []
+    _real_blocks = CI.text_blocks
+
+    def _counted(path, backend=None):
+        _parses.append(path)
+        return _real_blocks(path, backend=backend)
+
+    CI.text_blocks = _counted
+    try:
+        CI.intake_document(_pdfs[0], "ONCE", os.path.join(ROOT, "once"))
+    finally:
+        CI.text_blocks = _real_blocks
+    check("a document's text layer is read exactly once",
+          _parses.count(_pdfs[0]) == 1, "%d parses" % _parses.count(_pdfs[0]))
+    # And the count in the ledger is the one `page_count` gives, whatever that
+    # is on this machine - checked by making it say something no text layer
+    # could.
+    _real_pc = CI.page_count
+    CI.page_count = lambda p: 77
+    try:
+        _, _pcrow = CI.intake_document(_scanned, "PC", os.path.join(ROOT, "pc"))
+    finally:
+        CI.page_count = _real_pc
+    check("and the page count in the ledger is the FILE's, not the parser's",
+          str(_pcrow["Page_Count"]) == "77", "%s" % _pcrow["Page_Count"])
+
+    check("a file that is not a PDF is INTAKE_FAILED, not a scanned paper",
+          _byfile["notapdf.pdf"]["Text_Backend_Status"] == "INTAKE_FAILED",
           _byfile["notapdf.pdf"]["Text_Backend_Status"])
-    check("which asks for a render and a person, not for a reread",
-          _byfile["notapdf.pdf"]["Required_Action"] == "RENDER_AND_INVENTORY_BY_EYE",
+    check("and is sent to somebody who can look at it",
+          _byfile["notapdf.pdf"]["Required_Action"] == "INVESTIGATE",
           _byfile["notapdf.pdf"]["Required_Action"])
-    check("and says what the backend actually complained about",
-          "notapdf.pdf" in _byfile["notapdf.pdf"]["Detail"],
+    check("and says why it was refused",
+          "PDF header" in _byfile["notapdf.pdf"]["Detail"],
           _byfile["notapdf.pdf"]["Detail"][:120])
 check("a walk that accounts for every file it was given exits zero",
       _lcode == 0, "%d" % _lcode)
+
+# REVERT: check the status and the action against a vocabulary and stop. Each
+# of the five exists because it needs a different thing done to it, and a
+# vocabulary does not say which - so NO_TEXT_LAYER / INSTALL_A_PDF_BACKEND
+# passes and a scanned page goes to whoever installs software.
+_TEMPLATE = {c: "" for c in CI.LEDGER_COLUMNS}
+_TEMPLATE.update(Source_Document_ID="D1", Source_File="d1.pdf",
+                 Input_Path="/c/d1.pdf", Text_Backend_Status="TEXT_LAYER_OK",
+                 Required_Action="CONFIRM_ON_CONTACT_SHEET",
+                 Page_Render_Status="RENDERED", Text_Block_Count="9",
+                 Caption_Candidate_Count="3", Text_Backend="X",
+                 Document_Inventory_Status="PENDING")
+check("the template this section edits is itself clean",
+      not CI.ledger_problems([_TEMPLATE]), "%s" % CI.ledger_problems([_TEMPLATE]))
+for _status, _wrong in (("NO_TEXT_LAYER", "INSTALL_A_PDF_BACKEND"),
+                        ("BACKEND_UNAVAILABLE", "INVESTIGATE"),
+                        ("INTAKE_FAILED", "CHECK_CAPTION_STYLE"),
+                        ("ZERO_CAPTION_CANDIDATES", "CONFIRM_ON_CONTACT_SHEET")):
+    _row = dict(_TEMPLATE, Text_Backend_Status=_status, Required_Action=_wrong,
+                Detail="x", Text_Backend="", Caption_Candidate_Count="0",
+                Text_Block_Count="0")
+    check("%s may not ask for %s" % (_status, _wrong),
+          any(c == "LEDGER_ACTION_CONTRADICTS_STATUS"
+              for _n, c, _d in CI.ledger_problems([_row])),
+          "%s" % CI.ledger_problems([_row]))
+# REVERT: leave the action free of the render state. `--render` is optional, so
+# the DEFAULT walk then tells a person to confirm figures on a sheet with no
+# pictures on it - which is agreeing with a bounding box.
+check("a rendered document may not still be waiting for a render",
+      any(c == "LEDGER_ACTION_CONTRADICTS_RENDER" for _n, c, _d in
+          CI.ledger_problems([dict(_TEMPLATE,
+                                   Required_Action="RENDER_CONTACT_SHEET")])),
+      "%s" % CI.ledger_problems([dict(_TEMPLATE,
+                                      Required_Action="RENDER_CONTACT_SHEET")]))
+check("and an unrendered one may not be sent to be confirmed",
+      any(c == "LEDGER_ACTION_CONTRADICTS_RENDER" for _n, c, _d in
+          CI.ledger_problems([dict(_TEMPLATE,
+                                   Page_Render_Status="NOT_REQUESTED")])))
+for _label, _edit, _code in (
+        ("text blocks under NO_TEXT_LAYER",
+         dict(Text_Backend_Status="NO_TEXT_LAYER",
+              Required_Action="RENDER_AND_INVENTORY_BY_EYE",
+              Text_Block_Count="9", Caption_Candidate_Count="0"),
+         "LEDGER_STATUS_CONTRADICTS_COUNT"),
+        ("candidates under ZERO_CAPTION_CANDIDATES",
+         dict(Text_Backend_Status="ZERO_CAPTION_CANDIDATES",
+              Required_Action="CHECK_CAPTION_STYLE",
+              Caption_Candidate_Count="3"),
+         "LEDGER_STATUS_CONTRADICTS_COUNT"),
+        ("a named backend under BACKEND_UNAVAILABLE",
+         dict(Text_Backend_Status="BACKEND_UNAVAILABLE",
+              Required_Action="INSTALL_A_PDF_BACKEND",
+              Caption_Candidate_Count="0", Text_Block_Count="0"),
+         "LEDGER_STATUS_CONTRADICTS_COUNT"),
+        ("a failure with nothing said about it",
+         dict(Text_Backend_Status="INTAKE_FAILED", Required_Action="INVESTIGATE",
+              Detail="", Text_Backend="", Caption_Candidate_Count="0",
+              Text_Block_Count="0"),
+         "LEDGER_FAILURE_UNEXPLAINED"),
+        # REVERT: let an unparsable count become -1 and pass. A ledger whose
+        # counts are text says nothing about the walk and reports clean.
+        ("a candidate count that is not a number",
+         dict(Caption_Candidate_Count="abc"), "LEDGER_COUNT_NOT_A_NUMBER"),
+        ("a block count that is not a number",
+         dict(Text_Block_Count="lots"), "LEDGER_COUNT_NOT_A_NUMBER")):
+    _bad = [dict(_TEMPLATE, **_edit)]
+    check("%s is refused" % _label,
+          any(c == _code for _n, c, _d in CI.ledger_problems(_bad)),
+          "%s" % CI.ledger_problems(_bad))
+
+# REVERT: key completeness on the basename. A corpus keeps pub127/fulltext.pdf
+# next to pub386/fulltext.pdf, and on basenames those are one document twice -
+# which also hides a genuinely missing paper behind the other one's row.
+_a = dict(_TEMPLATE, Input_Path="/corpus/pub127/fulltext.pdf",
+          Source_File="fulltext.pdf", Source_Document_ID="PUB127")
+_b = dict(_TEMPLATE, Input_Path="/corpus/pub386/fulltext.pdf",
+          Source_File="fulltext.pdf", Source_Document_ID="PUB386")
+_both = ["/corpus/pub127/fulltext.pdf", "/corpus/pub386/fulltext.pdf"]
+check("two documents with the same basename are two documents",
+      not CI.ledger_problems([_a, _b], expected_files=_both),
+      "%s" % CI.ledger_problems([_a, _b], expected_files=_both))
+check("and one of them going missing is still noticed",
+      any(c == "LEDGER_DOCUMENT_MISSING" for _n, c, _d in
+          CI.ledger_problems([_a], expected_files=_both)),
+      "%s" % CI.ledger_problems([_a], expected_files=_both))
+# REVERT: drop the identifier check. Source_Document_ID names the page
+# directory and prefixes every Draft_ID, so two inputs sharing one write over
+# each other's pages and their draft rows collide.
+check("two files sharing one Source_Document_ID are refused",
+      any(c == "LEDGER_DOCUMENT_ID_COLLIDES" for _n, c, _d in
+          CI.ledger_problems([_a, dict(_b, Source_Document_ID="PUB127")])),
+      "%s" % CI.ledger_problems([_a, dict(_b, Source_Document_ID="PUB127")]))
+# REVERT: let `--document-id` take several files. They then share a page
+# directory and a Draft_ID prefix, and overwrite each other silently.
+_argerr = io.StringIO()
+try:
+    with contextlib.redirect_stderr(_argerr):
+        CI.main([_pdfs[0], _pdfs[1], "--out", os.path.join(ROOT, "twoid"),
+                 "--document-id", "ONE"])
+    _refused = False
+except SystemExit:
+    _refused = True
+check("--document-id refuses to name two documents at once", _refused,
+      _argerr.getvalue()[-160:])
 _clean = io.StringIO()
 with contextlib.redirect_stdout(_clean):
     _clean_code = CI.main([_pdfs[0], "--out", os.path.join(ROOT, "ok1")])
@@ -488,7 +662,7 @@ for _label, _edit, _code in (
         ("candidates waiting under an action that does not mention them",
          dict(Caption_Candidate_Count="4",
               Required_Action="RENDER_AND_INVENTORY_BY_EYE"),
-         "LEDGER_ACTION_CONTRADICTS_COUNT"),
+         "LEDGER_ACTION_CONTRADICTS_STATUS"),
         ("a row with no document behind it", dict(Source_Document_ID=""),
          "LEDGER_ROW_INCOMPLETE")):
     _bad = [dict(_byfile["good.pdf"], **_edit)]
@@ -541,6 +715,63 @@ else:
     check("a walk with no --render says NOT_REQUESTED, not RENDER_FAILED",
           _byfile["good.pdf"]["Page_Render_Status"] == "NOT_REQUESTED",
           _byfile["good.pdf"]["Page_Render_Status"])
+    # REVERT: leave the page directory alone between runs. `pdftoppm` writes
+    # page-1..page-N and the collector takes every `page-*.png` it finds, so a
+    # second run over a shorter document of the same ID inherits the first
+    # one's tail as though those pages were its own.
+    _long = minimal_pdf(os.path.join(ROOT, "long.pdf"),
+                        [[(72, 300, "Figure %d A caption about the design of "
+                                    "the study." % (i + 1))] for i in range(4)])
+    _short = minimal_pdf(os.path.join(ROOT, "short.pdf"),
+                         [[(72, 300, "Figure 1 A caption about the design of "
+                                     "the study.")]])
+    _SDIR = os.path.join(ROOT, "stale")
+    _q = io.StringIO()
+    with contextlib.redirect_stdout(_q):
+        CI.intake_document(_long, "SAMEID", _SDIR, render_dpi=60)
+        _, _stale_row = CI.intake_document(_short, "SAMEID", _SDIR, render_dpi=60)
+    check("a re-run over a shorter document does not inherit stale pages",
+          str(_stale_row["Page_Render_Count"]) == "1",
+          "%s" % _stale_row["Page_Render_Count"])
+    check("and a rendered document IS ready to be confirmed",
+          _rledger["Required_Action"] == "CONFIRM_ON_CONTACT_SHEET",
+          _rledger["Required_Action"])
+
+    # REVERT: show the candidates and stop. Six confirmed candidates in a
+    # seven-figure paper is six correct rows and a wrong inventory, and
+    # `inventory_rows` cannot see it - it checks the rows that exist. The pages
+    # are how a person sees the figure nothing pointed at.
+    _dsheet = open(os.path.join(_RDIR, "documents.html"),
+                   encoding="utf-8").read()
+    _rpages = sorted(os.listdir(os.path.join(_RDIR,
+                                             _rledger["Page_Raster_Dir"])))
+    check("the document sheet shows every rendered page, not only the crops",
+          all(name in _dsheet for name in _rpages), "%s" % _rpages)
+    check("and asks for the count only a person who saw them can give",
+          "Observed_Figure_Count" in _dsheet)
+    check("and the ledger has somewhere to put it",
+          {"Pages_Checked", "Observed_Figure_Count",
+           "Document_Inventory_Status"} <= set(CI.LEDGER_COLUMNS))
+    check("a document with no candidate at all still gets a section",
+          "nothing here points at it" in open(
+              os.path.join(_LDIR, "documents.html"), encoding="utf-8").read())
+
+# REVERT: fall back to US Letter when the page size is unknown. This corpus is
+# largely A4 (595 x 842 pt), so the guess puts a crop 3% out in x and 9% out in
+# y - most of a caption's height at the bottom of a page - and the person
+# confirms the wrong rectangle rather than being told there is none.
+_crop_row = {"Figure_BBox": "10,10,200,200"}
+_page_png = os.path.join(ROOT, "page.png")
+Image.new("RGB", (1240, 1754), "white").save(_page_png)
+check("a crop with no page size behind it is refused, not guessed",
+      CI.crop_figure(_crop_row, _page_png, os.path.join(ROOT, "c1.png"),
+                     pdf_page_size=None) is None)
+_made = CI.crop_figure(_crop_row, _page_png, os.path.join(ROOT, "c2.png"),
+                       pdf_page_size=(595.0, 842.0))
+check("and one with A4 behind it is scaled to A4, not to Letter",
+      _made is not None
+      and abs(Image.open(_made).height - (190 * 1754 / 842.0 + 16)) < 3,
+      "%s" % ((Image.open(_made).size,) if _made else None,))
 
 print()
 print("a draft becomes an inventory only when a person says so")

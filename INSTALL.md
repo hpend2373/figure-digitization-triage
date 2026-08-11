@@ -3509,6 +3509,64 @@ reads the same ten cells: **0.0002 mean difference from the hand-authored plan,
 and the same 0.0028 against the printed table.** The hour of measuring is now
 two numbers and a look at an overlay.
 
+### The ledger is a work queue, not a list (v7.42)
+
+The ledger accounted for every file and then filed several of them under the
+wrong job. Five things, all of them the same shape: a column that exists and
+does not mean what it says.
+
+**A scanned paper is not a corrupt file.** `NO_TEXT_LAYER` was written only when
+the parser RAISED, and pdfminer does not raise on an image-only page - it walks
+it and returns nothing. So a real scanned PDF came back
+`ZERO_CAPTION_CANDIDATES / CHECK_CAPTION_STYLE`, which asks somebody to look at
+a caption pattern for a document that has no text at all; and a truncated
+download came back `NO_TEXT_LAYER / RENDER_AND_INVENTORY_BY_EYE`, which asks
+somebody to inventory figures in a file that is not a PDF. About 42% of this
+corpus is expected to be the first. The two are separated by `is_a_pdf` - the
+file's own header - and by whether the parse produced any blocks at all, not by
+whether it threw.
+
+**The page count is the file's.** It was `max(block page number)`, so a paper
+whose last pages are scanned reported a shorter document and a wholly scanned
+one reported zero pages - which reads exactly like a file that is not a PDF.
+`page_count` reads the structure, via pypdf, pdfminer or `pdfinfo`.
+
+**One status, one action.** Checking both against a vocabulary does not say
+that each status needs a different thing done to it: `NO_TEXT_LAYER /
+INSTALL_A_PDF_BACKEND` passed every check and sent a scanned page to whoever
+installs software. `STATUS_ACTION` is the transition table, the counts have to
+agree with the status they were filed under (`Text_Block_Count`,
+`Caption_Candidate_Count`, a named backend under `BACKEND_UNAVAILABLE`, a
+`Detail` under `INTAKE_FAILED`), and a count that is not a number is
+`LEDGER_COUNT_NOT_A_NUMBER` instead of quietly becoming -1.
+
+**A contact sheet with no picture on it is not ready to be confirmed.**
+`--render` is optional, so the default walk told a person to confirm figures
+from `Figure_BBox` strings - the thing rendering exists to stop. `TEXT_LAYER_OK`
+now maps to `CONFIRM_ON_CONTACT_SHEET` only when the pages were rendered, to
+`RENDER_CONTACT_SHEET` when they were not, and to `INSTALL_A_PAGE_RENDERER`
+when a render was asked for and none came. The renderer and the text backend
+are different tools and fail independently.
+
+**And `documents.html`, because the candidate sheet cannot answer the question
+the inventory asks.** Six confirmed candidates in a seven-figure paper is six
+correct rows and a wrong inventory; `inventory_rows` checks the rows that
+exist, and the missing figure never made one. The document sheet shows EVERY
+rendered page, with each document's candidates listed beside them, and asks for
+`Observed_Figure_Count` and `Pages_Checked` - a figure nothing pointed at is
+visible precisely because the page is on the screen and nothing is on it.
+
+Four smaller ones from the same review: completeness is keyed on the input PATH
+(a corpus keeps `pub127/fulltext.pdf` beside `pub386/fulltext.pdf`, and on
+basenames those are one document twice - which also hides a genuinely missing
+paper behind the other's row); `Source_Document_ID` must be unique across the
+walk, because it names the page directory and prefixes every `Draft_ID`;
+`--document-id` refuses to name two files at once; the page directory is
+cleared before a re-run, so a shorter document does not inherit the previous
+one's tail; the text layer is parsed ONCE and handed to `draft_rows`; and a
+crop with no page size behind it is refused rather than scaled to US Letter,
+which on this A4 corpus put it 9% out in y.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
@@ -3521,14 +3579,14 @@ All run with scipy hard-blocked by a `sys.meta_path` finder.
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
 | `test_compile_plan.py` | 146 |
-| `test_corpus_intake.py` | 91 |
+| `test_corpus_intake.py` | 123 |
 | `test_geometry_proposer.py` | 45 |
 | `test_mark_readers.py` | 107 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2143** |
+| **total** | **2175** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

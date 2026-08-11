@@ -82,7 +82,7 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-2143 scenarios on main after v7.41, verified in a clean room with scipy blocked — the
+2175 scenarios on main after v7.42, verified in a clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because

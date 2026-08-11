@@ -72,6 +72,7 @@ if HERE not in sys.path:
 DRAFT_COLUMNS = (
     "Draft_ID", "Source_Document_ID", "Source_File", "Source_File_SHA256",
     "Page", "Page_Raster", "Page_Raster_SHA256", "Figure_Crop",
+    "Crop_Quality_Status",
     "Figure_Number", "Caption_Text", "Caption_BBox", "Figure_BBox",
     "Extraction_Method", "Confidence", "Confidence_Reason",
     "Human_Verification_Status", "Verified_By", "Verified_At",
@@ -81,6 +82,23 @@ DRAFT_COLUMNS = (
 #: The only status a machine may write, and the two a person may.
 DRAFT_PENDING = "PENDING"
 DRAFT_STATUSES = (DRAFT_PENDING, "CONFIRMED", "REJECTED")
+
+#: WHETHER THE PICTURE ON THE SHEET IS WORTH LOOKING AT. `Figure_BBox` is the
+#: gap between the caption and whatever is printed above it in the same column,
+#: and on a real corpus that gap is sometimes a centimetre of white: a caption
+#: that runs on from the previous paragraph, a figure that sits on the facing
+#: page, a two-column spread the block walk cannot see across. Measured over
+#: fifteen staged articles, 21 of 62 crops came out under a tenth of the page.
+#:
+#: A thin crop is not a rejection - the row may be perfectly good and the
+#: bounding box wrong. It is a ROUTING fact: show the whole page instead, so
+#: the person confirming sees the figure rather than a strip of white with the
+#: figure just outside it.
+CROP_QUALITY_STATUSES = ("ACCEPTABLE", "THIN_CROP", "NO_CROP")
+
+#: As a fraction of the PAGE, so it means the same thing at any DPI and on any
+#: paper size.
+_THIN_CROP_FRACTION = 0.12
 
 #: One row per PDF the walk was given, whatever happened to it. The draft is a
 #: row per CAPTION, so a document that read fine and proposed nothing leaves no
@@ -120,6 +138,12 @@ TEXT_BACKEND_STATUSES = (
     "NO_TEXT_LAYER",
     # nothing is installed that can read a PDF. Needs an install, not a person.
     "BACKEND_UNAVAILABLE",
+    # a full text that is not a page image at all: JATS XML or plain text.
+    # Twelve of this corpus's publications arrive this way, carrying 37
+    # figures. The captions are IN the file and the pictures are not, so there
+    # is nothing to render and nothing to crop - the figure has to come from
+    # the publisher. Filed as INTAKE_FAILED it read as a broken download.
+    "NO_RASTER_SOURCE",
     # anything else, recorded rather than raised, because a corpus walk that
     # stops on file 41 has told you nothing about files 42 to 97.
     "INTAKE_FAILED",
@@ -137,7 +161,8 @@ REQUIRED_ACTIONS = (
     "CHECK_CAPTION_STYLE",        # read fine, proposed nothing
     "RENDER_AND_INVENTORY_BY_EYE",  # a real PDF with no text layer
     "INSTALL_A_PDF_BACKEND",      # nothing to read with
-    "INVESTIGATE",                # it is not a PDF, or it broke
+    "OBTAIN_PUBLISHER_FIGURE",    # the captions are here and the pictures are not
+    "INVESTIGATE",                # it is not a document, or it broke
 )
 
 #: Status to action, ONE to one. The five statuses exist because each needs a
@@ -152,6 +177,7 @@ STATUS_ACTION = {
     "ZERO_CAPTION_CANDIDATES": ("CHECK_CAPTION_STYLE",),
     "NO_TEXT_LAYER": ("RENDER_AND_INVENTORY_BY_EYE",),
     "BACKEND_UNAVAILABLE": ("INSTALL_A_PDF_BACKEND",),
+    "NO_RASTER_SOURCE": ("OBTAIN_PUBLISHER_FIGURE",),
     "INTAKE_FAILED": ("INVESTIGATE",),
     "TEXT_LAYER_OK": ("CONFIRM_ON_CONTACT_SHEET", "RENDER_CONTACT_SHEET",
                       "INSTALL_A_PAGE_RENDERER"),
@@ -171,6 +197,11 @@ RENDER_ACTION = {
 #: pdfminer and one from poppler are not the same measurement, and a draft that
 #: mixes them without saying so cannot be re-derived.
 EXTRACTION_METHODS = ("PDFMINER_TEXT_BLOCKS", "POPPLER_BBOX_LAYOUT",
+                      # A JATS full text names its figures in <fig> elements
+                      # with their captions attached, which is a better
+                      # inventory than any caption regex - and no coordinates
+                      # at all, because there is no page.
+                      "JATS_FIGURE_ELEMENTS",
                       "PAGE_RENDER_PENDING_HUMAN")
 
 #: A caption is a line that opens with a figure label. Deliberately narrow: the
@@ -251,19 +282,72 @@ def page_count(path):
 
 
 def is_a_pdf(path):
-    """Does this file begin with a PDF header?
+    """Does this file begin with a PDF header? See `source_kind` for the rest."""
+    return source_kind(path) == "PDF"
 
-    The cheapest true statement available, and the one that separates the two
-    failures a walk must not confuse: a SCANNED paper is a valid PDF whose
-    pages are pictures, and needs a render and an eye; a truncated download or
-    an HTML error page saved as `.pdf` needs somebody to look at a stack trace.
-    Filed together, 42% of this corpus goes to the wrong queue.
+
+#: A JATS full text opens with one of these. Checked rather than trusting the
+#: extension, because this corpus has `.xml` files that are HTML error pages
+#: and `.txt` files that are real full texts.
+_XML_HEADS = (b"<?xml", b"<!DOCTYPE article", b"<article")
+
+
+def source_kind(path):
+    """PDF / JATS_XML / PLAIN_TEXT / UNREADABLE, from the bytes.
+
+    Three answers where there used to be two, and the third is the one this
+    corpus needed. A scanned paper is a valid PDF whose pages are pictures and
+    needs a render and an eye; a JATS full text has the captions and none of
+    the pictures and needs the figure fetched from the publisher; a truncated
+    download or an HTML error page saved as `.pdf` needs somebody to look at a
+    stack trace. Filed together, 42% of this corpus goes to the wrong queue.
     """
     try:
         with open(path, "rb") as fh:
-            return fh.read(5) == b"%PDF-"
+            head = fh.read(2048)
     except OSError:
-        return False
+        return "UNREADABLE"
+    if head.startswith(b"%PDF-"):
+        return "PDF"
+    stripped = head.lstrip()
+    if any(stripped.startswith(h) for h in _XML_HEADS):
+        return "JATS_XML"
+    if not stripped:
+        return "UNREADABLE"
+    try:
+        text = head.decode("utf-8")
+    except UnicodeDecodeError:
+        return "UNREADABLE"
+    # Printable enough to be prose. A binary blob with a lucky UTF-8 prefix is
+    # not a full text, and neither is an HTML error page.
+    printable = sum(1 for c in text if c.isprintable() or c in "\n\r\t")
+    if stripped.lower().startswith(b"<html") or printable < 0.9 * len(text):
+        return "UNREADABLE"
+    return "PLAIN_TEXT"
+
+
+def jats_figures(path):
+    """[(label, caption)] from a JATS full text's <fig> elements.
+
+    The document's own figure list, which beats any caption regex: the labels
+    are marked up as labels and the captions as captions, so there is nothing
+    to guess and nothing to score. What there is not, is a picture - a <fig>
+    carries an href to an image file the full text does not contain.
+    """
+    root = ET.parse(path).getroot()
+    out = []
+    for fig in root.iter():
+        if not str(fig.tag).rsplit("}", 1)[-1] == "fig":
+            continue
+        label, caption = "", ""
+        for child in fig.iter():
+            tag = str(child.tag).rsplit("}", 1)[-1]
+            if tag == "label" and not label:
+                label = "".join(child.itertext()).strip()
+            elif tag == "caption" and not caption:
+                caption = " ".join("".join(child.itertext()).split())
+        out.append((label, caption))
+    return out
 
 
 def text_blocks(path, backend=None):
@@ -477,6 +561,10 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             "Page_Raster": raster,
             "Page_Raster_SHA256": file_sha256(raster) if raster else "",
             "Figure_Crop": "",
+            # NO_CROP until one is cut. A row that never had a picture and a
+            # row whose picture is a strip of white are different problems and
+            # the sheet shows them differently.
+            "Crop_Quality_Status": "NO_CROP",
             "Figure_Number": "FIG%s" % candidate["number"],
             "Caption_Text": candidate["text"],
             "Caption_BBox": _bbox_text(candidate["bbox"]),
@@ -569,6 +657,29 @@ def crop_figure(row, page_raster, out_path, pdf_page_size=None, pad=8):
         return None
     image.crop((left, top, right, bottom)).save(out_path)
     return out_path
+
+
+def crop_quality(crop_path, page_raster, fraction=_THIN_CROP_FRACTION):
+    """ACCEPTABLE / THIN_CROP / NO_CROP for one draft row's picture.
+
+    Against the PAGE, not against a pixel count: the same figure rendered at
+    150 and at 300 DPI is the same figure, and a threshold in pixels would call
+    one of them thin. A crop shorter than `fraction` of its page is the gap
+    between a caption and the paragraph above it, not a figure.
+    """
+    if not crop_path or not os.path.exists(crop_path):
+        return "NO_CROP"
+    if not page_raster or not os.path.exists(page_raster):
+        return "NO_CROP"
+    try:
+        from PIL import Image
+        crop_h = Image.open(crop_path).height
+        page_h = Image.open(page_raster).height
+    except Exception:                                   # pragma: no cover
+        return "NO_CROP"
+    if not page_h:
+        return "NO_CROP"
+    return "ACCEPTABLE" if crop_h >= fraction * page_h else "THIN_CROP"
 
 
 def ledger_row(path, document_id, **kw):
@@ -741,6 +852,11 @@ def draft_problems(rows):
         if did in seen:
             out.append((did, "DRAFT_ID_DUPLICATE", did))
         seen.add(did)
+        quality = str(row.get("Crop_Quality_Status", "")).strip().upper()
+        if quality and quality not in CROP_QUALITY_STATUSES:
+            out.append((did, "CROP_QUALITY_UNKNOWN",
+                        "%r is not %s" % (quality,
+                                          "/".join(CROP_QUALITY_STATUSES))))
         status = str(row.get("Human_Verification_Status", "")).strip().upper()
         if status not in DRAFT_STATUSES:
             out.append((did, "DRAFT_STATUS_UNKNOWN",
@@ -863,9 +979,24 @@ def contact_sheet(path, rows, title="", root=None):
         # figure from a bounding-box string is not confirming a figure; they
         # are agreeing with a number. The crop is the whole reason `--render`
         # exists, and the row records which raster it was cut from.
+        # AND WHEN THE CROP IS A STRIP OF WHITE, the whole page instead.
+        # `Figure_BBox` is the gap above the caption, and a fifth of the crops
+        # on a real corpus come out under a tenth of the page - a person shown
+        # that strip either confirms a figure they cannot see or rejects a
+        # figure that is there, an inch further up. The page is always the
+        # honest fallback, and the row says which it is looking at.
         crop = str(row.get("Figure_Crop", "")).strip()
-        picture = ("<a href='%s'><img src='%s' loading='lazy'></a>"
-                   % (esc(crop), esc(crop))) if crop else "&mdash;"
+        quality = str(row.get("Crop_Quality_Status", "")).strip() or "NO_CROP"
+        page_png = str(row.get("Page_Raster", "")).strip()
+        shown = crop if quality == "ACCEPTABLE" else page_png
+        if shown:
+            picture = ("<a href='%s'><img src='%s' loading='lazy'></a>%s"
+                       % (esc(shown), esc(shown),
+                          "" if quality == "ACCEPTABLE"
+                          else "<br><code>%s - whole page shown</code>"
+                               % esc(quality)))
+        else:
+            picture = "&mdash;"
         parts.append(
             "<tr class='%s'><td><code>%s</code><td>%s<td>%s<td>%s<td>%s<br>"
             "<code>caption %s | figure %s | %s</code><td>%s<br><code>%s</code>"
@@ -881,6 +1012,40 @@ def contact_sheet(path, rows, title="", root=None):
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(parts))
     return path
+
+
+def _sourceless_rows(path, document_id, digest, figures):
+    """Draft rows for a full text that has no page image.
+
+    Confidence is 1.0 for a JATS `<fig>` and there is no reason to score it:
+    the label is marked up as a label, so there is nothing being guessed. What
+    is missing is not certainty about the caption, it is the picture - and the
+    row says that in `Crop_Quality_Status`, where every other row says it too.
+    """
+    rows = []
+    for i, (label, caption) in enumerate(figures, start=1):
+        match = CAPTION_RE.match(label or caption or "")
+        number = match.group(1) if match else str(i)
+        rows.append({
+            "Draft_ID": "%s_D%03d" % (document_id, i),
+            "Source_Document_ID": document_id,
+            "Source_File": os.path.basename(path),
+            "Source_File_SHA256": digest,
+            "Page": "", "Page_Raster": "", "Page_Raster_SHA256": "",
+            "Figure_Crop": "", "Crop_Quality_Status": "NO_CROP",
+            "Figure_Number": "FIG%s" % number,
+            "Caption_Text": caption,
+            "Caption_BBox": "", "Figure_BBox": "",
+            "Extraction_Method": "JATS_FIGURE_ELEMENTS",
+            "Confidence": "1.00",
+            "Confidence_Reason": "the document marks this up as a figure",
+            "Human_Verification_Status": DRAFT_PENDING,
+            "Verified_By": "", "Verified_At": "",
+            "Observed_Panel_Count": "",
+            "Note": "no page image in the source; obtain the figure from the "
+                    "publisher before any geometry is authored",
+        })
+    return rows
 
 
 def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
@@ -921,9 +1086,31 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
     # A FILE THAT IS NOT A PDF is not a scanned paper. One needs a render and
     # an eye, the other needs somebody to look at what was downloaded, and
     # filing them together sends whichever is more common to the wrong queue.
-    if not is_a_pdf(path):
+    kind = source_kind(path)
+    if kind in ("JATS_XML", "PLAIN_TEXT"):
+        # A full text with no pages. Everything downstream needs a raster and
+        # there is not one, so this document's figures cannot be inventoried
+        # from what was downloaded however long anybody looks at it - the
+        # picture has to come from the publisher. What CAN be established is
+        # which figures the paper has, and a JATS file says so itself.
+        figures = []
+        if kind == "JATS_XML":
+            try:
+                figures = jats_figures(path)
+            except Exception as exc:
+                return refuse("INTAKE_FAILED",
+                              "%s: %s" % (type(exc).__name__, exc))
+        rows = _sourceless_rows(path, document_id, digest, figures)
+        return rows, ledger_row(
+            path, document_id, Text_Backend_Status="NO_RASTER_SOURCE",
+            Required_Action="OBTAIN_PUBLISHER_FIGURE",
+            Text_Backend=kind, Caption_Candidate_Count=len(rows),
+            Detail=("%s full text: %d figure(s) named, no page image to crop"
+                    % (kind, len(rows))),
+            **base)
+    if kind != "PDF":
         return refuse("INTAKE_FAILED",
-                      "the file does not begin with a PDF header")
+                      "the file is not a PDF, a JATS full text or plain text")
     pages = page_count(path)
     base["Page_Count"] = pages or ""
     method = backend
@@ -964,11 +1151,13 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
         os.makedirs(crop_dir, exist_ok=True)
         sizes = page_sizes(path, rasters=rasters)
         for row in rows:
+            raster = rasters.get(row["Page"], "")
             made = crop_figure(
-                row, rasters.get(row["Page"], ""),
+                row, raster,
                 os.path.join(crop_dir, "%s.png" % row["Draft_ID"]),
                 pdf_page_size=sizes.get(row["Page"]))
             row["Figure_Crop"] = (os.path.relpath(made, out_dir) if made else "")
+            row["Crop_Quality_Status"] = crop_quality(made, raster)
     # And the action depends on whether there is a PICTURE to confirm against.
     # A contact sheet with no image on it asks a person to agree with a
     # bounding box, which is the thing rendering exists to stop.

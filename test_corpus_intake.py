@@ -396,9 +396,39 @@ _pdfs = [minimal_pdf(os.path.join(ROOT, "good.pdf"),
                                  "after spaceflight in five cosmonauts.")]]),
          minimal_pdf(os.path.join(ROOT, "quiet2.pdf"),
                      [[(72, 700, "A page of prose with no caption on it.")]])]
+# A DOWNLOAD THAT WENT WRONG: the publisher's "access denied" page, saved
+# under the name the fetcher asked for. It is not a PDF, it is not a full text,
+# and nobody can do anything with it but look at what came back.
 _notpdf = os.path.join(ROOT, "notapdf.pdf")
-open(_notpdf, "wb").write(b"this is not a PDF at all\n" * 40)
+open(_notpdf, "wb").write(
+    b"<html><head><title>Access denied</title></head><body>"
+    b"<p>Your institution does not subscribe.</p></body></html>\n")
 _pdfs.append(_notpdf)
+# A FULL TEXT WITH NO PAGES. Twelve of the 116 publications on the worklist
+# arrive as JATS XML or plain text, carrying 37 figures between them. The
+# captions are in the file and the pictures are not, so there is nothing to
+# render and nothing to crop however long anybody stares at it - and filed as
+# INTAKE_FAILED, all twelve went to whoever investigates broken downloads.
+_jats = os.path.join(ROOT, "jats_fulltext.xml")
+open(_jats, "w", encoding="utf-8").write(
+    "<?xml version='1.0'?><article><body>"
+    # NOT numbered 1 and 2. A JATS body lists the figures it contains, which
+    # on a paper with supplementary material or a figure in the abstract does
+    # not start at one - and reading the position instead of the label is a
+    # renumbering nobody asked for.
+    "<fig id='f1'><label>Figure 2.</label><caption><p>Mean arterial pressure "
+    "before and after spaceflight.</p></caption>"
+    "<graphic xlink:href='f2.tif' xmlns:xlink='http://www.w3.org/1999/xlink'/>"
+    "</fig>"
+    "<fig id='f2'><label>Fig. 10</label><caption><p>Heart rate during "
+    "head-down bed rest.</p></caption></fig>"
+    "</body></article>")
+_pdfs.append(_jats)
+_plain = os.path.join(ROOT, "plain_fulltext.txt")
+open(_plain, "w", encoding="utf-8").write(
+    "Cardiovascular deconditioning in spaceflight\n\nAbstract. "
+    "A plain-text full text with no markup and no page images.\n")
+_pdfs.append(_plain)
 # A VALID PDF WITH NO TEXT ON IT. This is the scanned paper - about 42% of the
 # corpus is expected to be one - and it is a different job from a file that is
 # not a PDF: one needs a render and an eye, the other needs somebody to look at
@@ -419,7 +449,8 @@ _byfile = {r["Source_File"]: r for r in _ledger}
 # backend at all there, and "no backend" is one of the five statuses precisely
 # so the walk still accounts for every file.
 check("every file handed in has exactly one row",
-      len(_ledger) == 4 and len(_byfile) == 4, "%d rows" % len(_ledger))
+      len(_ledger) == len(_pdfs) and len(_byfile) == len(_pdfs),
+      "%d rows for %d files" % (len(_ledger), len(_pdfs)))
 check("every row carries every ledger column",
       all(set(r) == set(CI.LEDGER_COLUMNS) for r in _ledger),
       "%s" % (set(_ledger[0]) ^ set(CI.LEDGER_COLUMNS)))
@@ -433,7 +464,9 @@ if not _BACKEND:
           "install one",
           all(r["Text_Backend_Status"] == "BACKEND_UNAVAILABLE"
               and r["Required_Action"] == "INSTALL_A_PDF_BACKEND"
-              for r in _ledger if r["Source_File"] != "notapdf.pdf"),
+              for r in _ledger
+              if r["Source_File"] not in ("notapdf.pdf", "jats_fulltext.xml",
+                                          "plain_fulltext.txt")),
           "%s" % [(r["Source_File"], r["Text_Backend_Status"]) for r in _ledger])
     # And the file that is not a PDF is still not a PDF. That answer needs no
     # backend, so an environment with nothing installed still routes it to the
@@ -514,7 +547,7 @@ else:
           _byfile["notapdf.pdf"]["Required_Action"] == "INVESTIGATE",
           _byfile["notapdf.pdf"]["Required_Action"])
     check("and says why it was refused",
-          "PDF header" in _byfile["notapdf.pdf"]["Detail"],
+          "not a PDF" in _byfile["notapdf.pdf"]["Detail"],
           _byfile["notapdf.pdf"]["Detail"][:120])
 check("a walk that accounts for every file it was given exits zero",
       _lcode == 0, "%d" % _lcode)
@@ -772,6 +805,152 @@ check("and one with A4 behind it is scaled to A4, not to Letter",
       _made is not None
       and abs(Image.open(_made).height - (190 * 1754 / 842.0 + 16)) < 3,
       "%s" % ((Image.open(_made).size,) if _made else None,))
+
+print()
+print("a crop is worth looking at, or the whole page is shown instead")
+# REVERT: show `Figure_Crop` whatever it contains. `Figure_BBox` is the gap
+# between a caption and whatever is printed above it, and on fifteen staged
+# articles 21 of 62 crops came out under a tenth of the page - a strip of white
+# with the figure an inch above it. A person shown that either confirms a
+# figure they cannot see or rejects one that is there.
+_CQ = os.path.join(ROOT, "cq")
+os.makedirs(_CQ, exist_ok=True)
+_page_png = os.path.join(_CQ, "page.png")
+Image.new("RGB", (800, 1000), "white").save(_page_png)
+_fat = os.path.join(_CQ, "fat.png")
+Image.new("RGB", (600, 400), "white").save(_fat)
+_thin = os.path.join(_CQ, "thin.png")
+Image.new("RGB", (600, 40), "white").save(_thin)
+check("a crop that is most of the page is ACCEPTABLE",
+      CI.crop_quality(_fat, _page_png) == "ACCEPTABLE",
+      CI.crop_quality(_fat, _page_png))
+check("a crop under a tenth of it is THIN_CROP",
+      CI.crop_quality(_thin, _page_png) == "THIN_CROP",
+      CI.crop_quality(_thin, _page_png))
+check("and no crop at all is NO_CROP, which is a different thing",
+      CI.crop_quality("", _page_png) == "NO_CROP"
+      and CI.crop_quality(_fat, "") == "NO_CROP")
+# Against the PAGE, so the same figure rendered twice gives the same answer.
+# A pixel threshold would call the 150 DPI render thin and the 300 DPI one fine.
+_page2 = os.path.join(_CQ, "page2x.png")
+Image.new("RGB", (1600, 2000), "white").save(_page2)
+_thin2 = os.path.join(_CQ, "thin2x.png")
+Image.new("RGB", (1200, 80), "white").save(_thin2)
+check("the answer does not change with the rendering DPI",
+      CI.crop_quality(_thin2, _page2) == CI.crop_quality(_thin, _page_png)
+      == "THIN_CROP",
+      "%s vs %s" % (CI.crop_quality(_thin2, _page2),
+                    CI.crop_quality(_thin, _page_png)))
+_sheet_rows = [
+    dict(Draft_ID="D1", Confidence="0.90", Figure_Crop="crops/fat.png",
+         Page_Raster="pages/page.png", Crop_Quality_Status="ACCEPTABLE"),
+    dict(Draft_ID="D2", Confidence="0.90", Figure_Crop="crops/thin.png",
+         Page_Raster="pages/page.png", Crop_Quality_Status="THIN_CROP"),
+    dict(Draft_ID="D3", Confidence="0.90", Figure_Crop="",
+         Page_Raster="pages/page.png", Crop_Quality_Status="NO_CROP"),
+]
+_cq_html = open(CI.contact_sheet(os.path.join(_CQ, "sheet.html"), _sheet_rows),
+                encoding="utf-8").read()
+check("the sheet shows an acceptable crop",
+      "<img src='crops/fat.png'" in _cq_html)
+check("and the whole page where the crop is thin",
+      "<img src='crops/thin.png'" not in _cq_html
+      and _cq_html.count("<img src='pages/page.png'") == 2,
+      "%d page images" % _cq_html.count("<img src='pages/page.png'"))
+check("and says which it is looking at, so the reader is not misled",
+      "THIN_CROP - whole page shown" in _cq_html
+      and "NO_CROP - whole page shown" in _cq_html)
+check("an undeclared crop quality is a draft problem",
+      [c for _d, c, _x in CI.draft_problems(
+          [dict(Draft_ID="D9", Crop_Quality_Status="FINE",
+                Human_Verification_Status="PENDING")])] == ["CROP_QUALITY_UNKNOWN"],
+      "%s" % CI.draft_problems([dict(Draft_ID="D9", Crop_Quality_Status="FINE",
+                                     Human_Verification_Status="PENDING")]))
+
+
+print()
+print("a full text with no pages is not a broken download")
+# REVERT: decide on `is_a_pdf` alone. Twelve of the worklist's 116 publications
+# arrive as JATS XML or plain text and carry 37 figures between them; filed as
+# INTAKE_FAILED they all went to whoever investigates broken downloads, and
+# what they actually need is somebody to fetch the figure from the publisher.
+for _name, _kind in (("good.pdf", "PDF"), ("jats_fulltext.xml", "JATS_XML"),
+                     ("plain_fulltext.txt", "PLAIN_TEXT"),
+                     ("notapdf.pdf", "UNREADABLE")):
+    _path = next(p for p in _pdfs if os.path.basename(p) == _name)
+    check("%-20s is %s" % (_name, _kind), CI.source_kind(_path) == _kind,
+          CI.source_kind(_path))
+# END TO END, through the real crop: a caption printed hard against the top of
+# a page has almost nothing above it, so the box is a strip and the crop cut
+# from it is not a figure. This is the case the fifteen-article walk found 21
+# times, and without it the whole measurement could be replaced by the constant
+# ACCEPTABLE and every scenario above would still pass.
+_squeezed = minimal_pdf(os.path.join(ROOT, "squeezed.pdf"),
+                        [[(72, 760, "A running head above the caption."),
+                          (72, 740, "Figure 1 Mean arterial pressure before "
+                                    "and after spaceflight in five men.")]])
+_TDIR = os.path.join(ROOT, "thincrop")
+_tq = io.StringIO()
+with contextlib.redirect_stdout(_tq):
+    _trows, _tledger = CI.intake_document(_squeezed, "SQ", _TDIR, render_dpi=80)
+if _tledger["Page_Render_Status"] != "RENDERED" or not _trows:
+    print("  SKIP the end-to-end thin crop: %s"
+          % _tledger["Page_Render_Status"])
+else:
+    check("a caption with a strip above it yields a THIN_CROP, measured",
+          [r["Crop_Quality_Status"] for r in _trows] == ["THIN_CROP"],
+          "%s" % [(r["Crop_Quality_Status"], r["Figure_BBox"]) for r in _trows])
+    _thtml = open(os.path.join(_TDIR, "index.html"), encoding="utf-8").read() \
+        if os.path.exists(os.path.join(_TDIR, "index.html")) else \
+        open(CI.contact_sheet(os.path.join(_TDIR, "s.html"), _trows),
+             encoding="utf-8").read()
+    check("and the sheet shows that document's page, not its strip",
+          "THIN_CROP - whole page shown" in _thtml)
+
+_empty = os.path.join(ROOT, "empty.bin")
+open(_empty, "wb").write(b"")
+check("an empty file is UNREADABLE, not a plain-text full text",
+      CI.source_kind(_empty) == "UNREADABLE", CI.source_kind(_empty))
+check("and so is a binary blob",
+      CI.source_kind(_page_png) == "UNREADABLE", CI.source_kind(_page_png))
+
+_jrow = _byfile["jats_fulltext.xml"]
+_prow = _byfile["plain_fulltext.txt"]
+check("a JATS full text is NO_RASTER_SOURCE",
+      _jrow["Text_Backend_Status"] == "NO_RASTER_SOURCE",
+      _jrow["Text_Backend_Status"])
+check("and is sent to whoever can fetch the figure",
+      _jrow["Required_Action"] == "OBTAIN_PUBLISHER_FIGURE",
+      _jrow["Required_Action"])
+check("a plain-text full text goes the same way",
+      (_prow["Text_Backend_Status"], _prow["Required_Action"])
+      == ("NO_RASTER_SOURCE", "OBTAIN_PUBLISHER_FIGURE"), "%s" % _prow)
+check("and the broken download still does not",
+      _byfile["notapdf.pdf"]["Text_Backend_Status"] == "INTAKE_FAILED",
+      _byfile["notapdf.pdf"]["Text_Backend_Status"])
+_jdraft = [r for r in list(csv.DictReader(
+    open(os.path.join(_LDIR, "figure_intake_draft.csv"), encoding="utf-8")))
+    if r["Source_File"] == "jats_fulltext.xml"]
+check("its two <fig> elements are two draft rows",
+      len(_jdraft) == 2, "%d rows" % len(_jdraft))
+check("with the figure numbers the document itself marked up",
+      [r["Figure_Number"] for r in _jdraft] == ["FIG2", "FIG10"],
+      "%s" % [r["Figure_Number"] for r in _jdraft])
+check("and the captions attached to them",
+      all("pressure" in _jdraft[0]["Caption_Text"]
+          for _ in (0,)) and "Heart rate" in _jdraft[1]["Caption_Text"],
+      "%s" % [r["Caption_Text"][:40] for r in _jdraft])
+check("every one of them says there is no picture",
+      all(r["Crop_Quality_Status"] == "NO_CROP"
+          and r["Extraction_Method"] == "JATS_FIGURE_ELEMENTS"
+          for r in _jdraft), "%s" % [r["Crop_Quality_Status"] for r in _jdraft])
+check("and every one is still PENDING, like every other proposal",
+      all(r["Human_Verification_Status"] == CI.DRAFT_PENDING for r in _jdraft))
+check("the plain text names no figures rather than inventing one",
+      not [r for r in list(csv.DictReader(
+          open(os.path.join(_LDIR, "figure_intake_draft.csv"), encoding="utf-8")))
+          if r["Source_File"] == "plain_fulltext.txt"])
+
 
 print()
 print("a draft becomes an inventory only when a person says so")

@@ -3708,6 +3708,37 @@ been declared before any reader existed, with one box copied to all four and
 twelve x pixels spread evenly between the box edges — honest while nothing
 could read them, and not geometry. Each is now measured off its own raster.
 
+## Intake: the picture on the sheet, and the papers that have no picture at all
+
+`Crop_Quality_Status` — ACCEPTABLE / THIN_CROP / NO_CROP — on every draft row,
+and the contact sheet shows **the whole page** for anything that is not
+ACCEPTABLE, saying so. `Figure_BBox` is the gap between a caption and whatever
+is printed above it in the same column, and on fifteen staged articles 21 of 62
+crops came out under a tenth of the page: a strip of white with the figure an
+inch further up. A person shown that strip either confirms a figure they cannot
+see or rejects one that is there. The threshold is a fraction of the page, not
+a pixel count, so the same figure rendered at 150 and 300 DPI gets the same
+answer.
+
+`source_kind` replaces `is_a_pdf` with four answers instead of two, and the new
+one is the one this corpus needed. Twelve of the 116 publications on the
+worklist arrive as **JATS XML or plain text**, carrying 37 figures between them.
+The captions are in the file and the pictures are not, so there is nothing to
+render and nothing to crop however long anybody looks — and filed as
+`INTAKE_FAILED`, all twelve went to whoever investigates broken downloads.
+
+- `NO_RASTER_SOURCE` → `OBTAIN_PUBLISHER_FIGURE`
+- a JATS `<fig>` is a better inventory than any caption regex: the label is
+  marked up as a label and the caption as a caption, so nothing is guessed and
+  the confidence is 1.00. The figure NUMBER comes from the document's own
+  label, not from the position in the list — a paper whose body starts at
+  Figure 2 is not a paper whose first figure is Figure 1
+- what is missing is recorded where every other row records it,
+  `Crop_Quality_Status=NO_CROP`, and the rows are `PENDING` like every other
+  proposal
+- an HTML "access denied" page saved as `.pdf`, an empty file and a binary blob
+  are still `INTAKE_FAILED` → `INVESTIGATE`
+
 ## Still open
 
 - eight two-curve panels on 397 Figures 1–2: `GEOMETRY_NOT_AUTHORED`

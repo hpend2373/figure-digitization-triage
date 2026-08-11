@@ -1125,7 +1125,8 @@ def texture(gray, box, window, footprint, edge_row, zero_row, stroke,
 def geometry_rows(gray, panel_box, calibration, anchors, fills,
                   group_window, baseline=0.0, threshold=128,
                   stem_threshold=200, min_bar_px=MIN_BAR_PX,
-                  review_crop_box=None, *, panel_id, figure_id):
+                  review_crop_box=None, *, panel_id, identity_domain_id,
+                  figure_id=""):
     """One record per declared bar of one panel, WITHOUT naming any series.
 
     The anonymous grain. Geometry is per panel and identity is per FIGURE, so a
@@ -1154,16 +1155,25 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
     one measurement. `min_bar_px` is the narrowest a single bar's footprint may
     be - see `MIN_BAR_PX` for what changed about it.
 
-    `panel_id` and `figure_id` are required and keyword-only, for the reason
-    given on `mark_readers.read_monochrome_bar_geometry`: `figure_id` decides
-    which panels share a fill vocabulary, and a default of `""` pools every
-    figure a caller has measured into one.
+    `panel_id` and `identity_domain_id` are required and keyword-only, for the
+    reason given on `mark_readers.read_monochrome_bar_geometry`:
+    `identity_domain_id` decides which panels share a fill vocabulary, and a
+    default of `""` pools every figure a caller has measured into one.
+
+    `figure_id` is carried and never used. It is the panel's PROVENANCE view -
+    which physical figure this is a view of - and it rides along so the durable
+    artifact can state both. The two used to be one field called `figure_id`,
+    which meant the artifact's `Figure_ID` column silently held the domain the
+    moment two views shared one legend, and `Figure_Identity_SHA256` was a
+    domain verdict wearing a figure's name. It is optional and blank when the
+    caller does not know it: a blank column is a caller that did not say, and a
+    copy of the domain would be a caller that said the wrong thing.
     """
     cal = calibration
 
     box = panel_box
     x0, x1, y0, y1 = map(int, box)
-    for name, value in (("panel_id", panel_id), ("figure_id", figure_id)):
+    for name, value in (("panel_id", panel_id), ("identity_domain_id", identity_domain_id)):
         if not str(value or "").strip():
             raise ValueError("geometry_rows: %s must not be blank" % name)
     fills = list(fills)
@@ -1175,9 +1185,9 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
     def row(**extra):
         """The fields EVERY record carries, success or refusal.
 
-        A refusal used to be a different shape from a reading: no `figure_id`,
+        A refusal used to be a different shape from a reading: no `identity_domain_id`,
         no identity fields, sometimes no `group`. That is not a cosmetic
-        difference. `fill_identities_by_figure` buckets on `figure_id` and falls
+        difference. `fill_identities_by_figure` buckets on `identity_domain_id` and falls
         back to `figure`, so a STROKE_SCALE_UNRESOLVED row from one panel of a
         two-panel figure landed in a bucket of its own and the figure came back
         with TWO verdicts - one of them computed from a single panel that had
@@ -1185,7 +1195,8 @@ def geometry_rows(gray, panel_box, calibration, anchors, fills,
         saw a shorter list than the panel declared and could not tell a refusal
         from a row that never existed.
         """
-        base = dict(figure=panel_id, figure_id=figure_id, group=None, slot=None,
+        base = dict(figure=panel_id, identity_domain_id=identity_domain_id,
+                    figure_id=str(figure_id or "").strip(), group=None, slot=None,
                     # Where this was measured, in PAGE coordinates, on every
                     # row. A row that says the bar top is at page row 296 and
                     # does not say which columns is not locatable: a reviewer
@@ -1532,7 +1543,7 @@ def fill_identity(records):
     noise, and nothing can be matched against a prototype of zero width. Pooled
     across the figure the same patterns have a spread of 0.00-0.02 against gaps
     of 0.58, and the three cells that panel could not calibrate on its own are
-    matched immediately. `figure_id` is what says which panels are one figure;
+    matched immediately. `identity_domain_id` is what says which panels are one figure;
     it defaults to the panel tag, which makes a lone panel its own figure.
 
     Two stages, because a bar too short to sample a fill would otherwise take
@@ -1573,10 +1584,10 @@ def fill_identity(records):
     with MULTIPLE_FIGURES rather than pooling two publications into one
     vocabulary. `fill_identities_by_figure` does the splitting.
     """
-    figure_ids = {r.get("figure_id", r.get("figure")) for r in records}
-    if len(figure_ids) > 1:
+    identity_domain_ids = {r.get("identity_domain_id", r.get("figure")) for r in records}
+    if len(identity_domain_ids) > 1:
         return {}, dict(status="MULTIPLE_FIGURES",
-                        figure_ids=sorted(str(f) for f in figure_ids))
+                        identity_domain_ids=sorted(str(f) for f in identity_domain_ids))
     groups, claims, arrivals = {}, {}, {}
     for rec in records:
         if rec.get("group") is None or rec.get("slot") is None:
@@ -1765,15 +1776,15 @@ def fill_identities_by_figure(records):
       resolved_fill_pattern the pattern, or "" - and this, not `declared`, is
                             what names the series
 
-    Returns {figure_id: verdict}.
+    Returns {identity_domain_id: verdict}.
     """
     by_figure = {}
     for rec in records:
-        by_figure.setdefault(rec.get("figure_id", rec.get("figure")), []).append(rec)
+        by_figure.setdefault(rec.get("identity_domain_id", rec.get("figure")), []).append(rec)
     verdicts = {}
-    for figure_id, rows in by_figure.items():
+    for identity_domain_id, rows in by_figure.items():
         identities, verdict = fill_identity(rows)
-        verdicts[figure_id] = verdict
+        verdicts[identity_domain_id] = verdict
         # The verdict the whole figure was answered with, hashed once. An
         # identity attests to this as well as to its own row, so a pattern
         # cannot be carried over from a figure that reached it differently.
@@ -1784,7 +1795,7 @@ def fill_identities_by_figure(records):
             # row with an attestation is a row an artifact writer can check;
             # one without is a row it has to take on trust.
             rec["identity_source"] = "AUTO"
-            rec["figure_identity_sha256"] = bundle
+            rec["domain_identity_sha256"] = bundle
             if rec.get("group") is not None and rec.get("slot") is not None:
                 pattern = identities.get(((rec["figure"], rec["group"]),
                                           rec["slot"]))
@@ -1827,7 +1838,7 @@ def fill_identities_by_figure(records):
 #: `spec_fill` is the diagnostic driver's fixture truth and is not part of the
 #: measurement either.
 UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
-                   "identity_source", "figure_identity_sha256",
+                   "identity_source", "domain_identity_sha256",
                    "auto_identity_sha256", "geometry_row_sha256", "spec_fill")
 
 #: Where an identity came from. This artifact carries AUTO only: the geometry
@@ -1873,6 +1884,7 @@ def measurement_usable(record):
 ARTIFACT_FIELD_COLUMNS = (
     ("figure", "Panel_ID"),
     ("figure_id", "Figure_ID"),
+    ("identity_domain_id", "Identity_Domain_ID"),
     ("group", "Group_ID"),
     ("slot", "Geometry_Slot"),
     ("value", "Mean"),
@@ -1883,15 +1895,16 @@ ARTIFACT_FIELD_COLUMNS = (
     ("identity_status", "Auto_Identity_Status"),
     ("resolved_fill_pattern", "Auto_Fill_Pattern"),
     ("error", "Geometry_Error_Code"),
-    ("figure_identity_sha256", "Figure_Identity_SHA256"),
+    ("domain_identity_sha256", "Domain_Identity_SHA256"),
     ("auto_identity_sha256", "Auto_Identity_SHA256"),
 )
 
 GEOMETRY_ARTIFACT_COLUMNS = (
-    "Panel_ID", "Figure_ID", "Group_ID", "Geometry_Slot", "Mean",
+    "Panel_ID", "Figure_ID", "Identity_Domain_ID", "Group_ID", "Geometry_Slot",
+    "Mean",
     "Dispersion_Value", "Edge_Px_Image", "Cap_Px_Image", "Footprint_X0",
     "Footprint_X1", "Fill_Sample_Status", "Auto_Identity_Status",
-    "Auto_Fill_Pattern", "Geometry_Error_Code", "Figure_Identity_SHA256",
+    "Auto_Fill_Pattern", "Geometry_Error_Code", "Domain_Identity_SHA256",
     "Auto_Identity_SHA256", "Diagnostics_JSON", "Anonymous_Record_JSON",
     "Geometry_Row_SHA256",
 )
@@ -1996,13 +2009,13 @@ def auto_identity_sha256(record):
     return hashlib.sha256(canonical_json({
         "Auto_Fill_Pattern": record.get("resolved_fill_pattern", ""),
         "Auto_Identity_Status": record.get("identity_status", ""),
-        "Figure_Identity_SHA256": record.get("figure_identity_sha256", ""),
+        "Domain_Identity_SHA256": record.get("domain_identity_sha256", ""),
         "Geometry_Row_SHA256": record.get("geometry_row_sha256", ""),
     }).encode("utf-8")).hexdigest()
 
 
 #: The fields `fill_identities_by_figure` writes and nothing else may.
-AUTO_IDENTITY_FIELDS = ("identity_source", "figure_identity_sha256",
+AUTO_IDENTITY_FIELDS = ("identity_source", "domain_identity_sha256",
                         "auto_identity_sha256")
 
 
@@ -2099,7 +2112,7 @@ def artifact_row(record, allow_unstamped=False, require_auto_identity=False):
                 "named %r by the figure and now says %r"
                 % (record["auto_identity_sha256"][:16],
                    auto_identity_sha256(record)[:16]))
-        if len(str(record.get("figure_identity_sha256", ""))) != 64:
+        if len(str(record.get("domain_identity_sha256", ""))) != 64:
             raise ValueError(
                 "mono_bar_geometry: AUTO_IDENTITY_PARTIAL - an attested row "
                 "with no figure verdict behind it")
@@ -2151,7 +2164,7 @@ def canonical_artifact_rows(records):
     `mono_bar_geometry.csv` is written ONCE, after `fill_identities_by_figure`
     has answered every figure in it. Writing it before - which is the order the
     stages are naturally listed in - produces a perfectly valid file in which
-    `Figure_Identity_SHA256` and `Auto_Identity_SHA256` are blank and every
+    `Domain_Identity_SHA256` and `Auto_Identity_SHA256` are blank and every
     `Auto_Identity_Status` says NOT_CALIBRATED, for a batch that resolved the
     identities in memory a moment later and then wrote them nowhere. The
     durable artifact would say the figure was never asked.
@@ -2230,9 +2243,9 @@ def read_artifact_row(row):
     full["geometry_row_sha256"] = row["Geometry_Row_SHA256"]
     full["identity_status"] = row["Auto_Identity_Status"] or "NOT_CALIBRATED"
     full["resolved_fill_pattern"] = row["Auto_Fill_Pattern"]
-    if row["Figure_Identity_SHA256"] or row["Auto_Identity_SHA256"]:
+    if row["Domain_Identity_SHA256"] or row["Auto_Identity_SHA256"]:
         full["identity_source"] = "AUTO"
-        full["figure_identity_sha256"] = row["Figure_Identity_SHA256"]
+        full["domain_identity_sha256"] = row["Domain_Identity_SHA256"]
         full["auto_identity_sha256"] = row["Auto_Identity_SHA256"]
     rebuilt = {k: _text(v) for k, v in artifact_row(full).items()}
     disagree = sorted(c for c in GEOMETRY_ARTIFACT_COLUMNS
@@ -2363,14 +2376,14 @@ def verify_artifact(rows, recompute_identity=True):
     Row by row through `read_artifact_row`, and then:
 
       no two rows claim the same (Panel_ID, Group_ID, Geometry_Slot)
-      every row of one Figure_ID carries the same Figure_Identity_SHA256
+      every row of one Figure_ID carries the same Domain_Identity_SHA256
       `fill_identity`, re-run on the restored records, reproduces it
 
-    That last step is what turns `Figure_Identity_SHA256` from a value that
+    That last step is what turns `Domain_Identity_SHA256` from a value that
     exists into a value that is TRUE. Until the verdict is recomputed from the
     rows in the file, the hash only says the writer wrote something down.
 
-    Returns {"records": [...], "figures": {figure_id: verdict}}.
+    Returns {"records": [...], "figures": {identity_domain_id: verdict}}.
     """
     records, seen = [], {}
     for n, row in enumerate(rows):
@@ -2400,16 +2413,32 @@ def verify_artifact(rows, recompute_identity=True):
                     "mono_bar_geometry: PANEL_AXIS_INCONSISTENT - panel %r "
                     "carries %d different values of %s"
                     % (panel_id, len(distinct), field))
-    by_figure = {}
+    # Grouped by the DOMAIN, because that is what the verdict is a verdict of.
+    # This read `row["Figure_ID"]` while the writer was putting the domain in
+    # that column, so it agreed with itself and would have stopped agreeing the
+    # moment the two columns differed.
+    by_domain = {}
     for row, record in zip(rows, records):
-        by_figure.setdefault(row["Figure_ID"], []).append((row, record))
+        by_domain.setdefault(row["Identity_Domain_ID"], []).append((row, record))
+    # One panel belongs to ONE figure view and ONE domain. A file that gives a
+    # panel two of either is a file two producers wrote over each other.
+    panel_keys = {}
+    for row in rows:
+        keys = panel_keys.setdefault(row["Panel_ID"], set())
+        keys.add((row["Figure_ID"], row["Identity_Domain_ID"]))
+    for panel_id, keys in sorted(panel_keys.items()):
+        if len(keys) > 1:
+            raise ValueError(
+                "mono_bar_geometry: PANEL_IDENTITY_INCONSISTENT - panel %r "
+                "claims %d different (Figure_ID, Identity_Domain_ID) pairs: %s"
+                % (panel_id, len(keys), sorted(keys)))
     figures = {}
-    for figure_id, pairs in by_figure.items():
-        claimed = {r["Figure_Identity_SHA256"] for r, _rec in pairs}
+    for identity_domain_id, pairs in by_domain.items():
+        claimed = {r["Domain_Identity_SHA256"] for r, _rec in pairs}
         if len(claimed) != 1:
             raise ValueError(
-                "mono_bar_geometry: FIGURE_IDENTITY_INCONSISTENT - figure %r "
-                "carries %d different verdict hashes" % (figure_id, len(claimed)))
+                "mono_bar_geometry: DOMAIN_IDENTITY_INCONSISTENT - domain %r "
+                "carries %d different verdict hashes" % (identity_domain_id, len(claimed)))
         claim = claimed.pop()
         if not recompute_identity or not claim:
             continue
@@ -2418,8 +2447,8 @@ def verify_artifact(rows, recompute_identity=True):
             canonical_json(verdict).encode("utf-8")).hexdigest()
         if digest != claim:
             raise ValueError(
-                "mono_bar_geometry: FIGURE_VERDICT_NOT_REPRODUCED - figure %r "
+                "mono_bar_geometry: DOMAIN_VERDICT_NOT_REPRODUCED - domain %r "
                 "says %s and its own rows answer %s"
-                % (figure_id, claim[:16], digest[:16]))
-        figures[figure_id] = verdict
+                % (identity_domain_id, claim[:16], digest[:16]))
+        figures[identity_domain_id] = verdict
     return dict(records=records, figures=figures)

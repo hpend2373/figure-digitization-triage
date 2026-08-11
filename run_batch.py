@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.37"
+PIPELINE_VERSION = "7.38"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -886,8 +886,12 @@ def measure_bar_mono_figures(panels, positions_by_panel, series_by_panel,
                 # the same question as "which figure is this" when a figure has
                 # one legend. `compile_plan` defaults the domain to the view, so
                 # a plan that does not distinguish them behaves as before.
-                figure_id=(_s(panel.get("Identity_Domain_ID"))
-                           or _s(panel.get("Figure_ID")) or pid), **kwargs)
+                identity_domain_id=(_s(panel.get("Identity_Domain_ID"))
+                                    or _s(panel.get("Figure_ID")) or pid),
+                # And the provenance view alongside it, never instead of it.
+                # The artifact states both; a reader that was handed only one
+                # of them wrote the domain into a column called `Figure_ID`.
+                figure_id=_s(panel.get("Figure_ID")), **kwargs)
         except MR.UnsupportedCapabilityError as exc:
             refusals[pid] = ("NO_READER_AVAILABLE", "%s" % exc)
             continue
@@ -1546,10 +1550,20 @@ def geometry_index(records):
         group = rec.get("Group_ID") if "Group_ID" in rec else rec.get("group")
         slot = (rec.get("Geometry_Slot") if "Geometry_Slot" in rec
                 else rec.get("slot"))
+        # Both identifiers, so the caller can hold the artifact to the panel
+        # manifest. They were ONE field until the domain was split out, so the
+        # `Figure_ID` column carried whichever of the two the reader had been
+        # handed and nothing could tell.
         out.setdefault((pid, digest), []).append(
             dict(Mean=mean, Dispersion_Value=disp,
                  Auto_Fill_Pattern=_upper(auto), Group_ID=_s(group),
-                 Geometry_Slot=_s(slot)))
+                 Geometry_Slot=_s(slot),
+                 Figure_ID=_s(rec.get("Figure_ID")
+                              if "Figure_ID" in rec else rec.get("figure_id")),
+                 Identity_Domain_ID=_s(
+                     rec.get("Identity_Domain_ID")
+                     if "Identity_Domain_ID" in rec
+                     else rec.get("identity_domain_id"))))
     return out
 
 
@@ -1802,6 +1816,22 @@ def identity_provenance_problems(values, panel_index, geometry=None,
                         "one value" % (seen_at, digest[:16], pid)))
             continue
         measured = found[0]
+        # The artifact's own identifiers, held to the panel manifest. The
+        # geometry file is where a reviewer and the finalizer look up which
+        # figure a measurement belongs to and which panels calibrated each
+        # other's fills; a `Figure_ID` column that quietly holds the domain -
+        # which is what it held while the reader took one identifier - makes
+        # both of those answers wrong while every hash still recomputes.
+        declared_panel = panel_index.get(pid) or {}
+        for column, label in (("Figure_ID", "figure view"),
+                              ("Identity_Domain_ID", "identity domain")):
+            want = _s(declared_panel.get(column))
+            got = _s(measured.get(column))
+            if want and got and want != got:
+                out.append((where, "IDENTITY_GEOMETRY_ROW_MISMATCH",
+                            "measurement %s... says its %s is %s and panel %s "
+                            "is declared as %s"
+                            % (digest[:16], label, got, pid, want)))
         for column, label in (("Mean", "Mean"),
                               ("Dispersion_Value", "Dispersion_Value")):
             want_num = _as_number(measured.get(column))
@@ -2694,6 +2724,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Mark_Type": _s(_panel_row.get("Mark_Type")),
             "Unit_ID": _s(_panel_row.get("Unit_ID")),
             "Source_Panel_ID": _s(_panel_row.get("Source_Panel_ID")),
+            "Figure_ID": _s(_panel_row.get("Figure_ID")),
+            "Identity_Domain_ID": _s(_panel_row.get("Identity_Domain_ID")),
             # What a cell of this panel is MADE of, so a value can be checked
             # against the bar it was measured from and not only against itself.
             "Cell_Map": {

@@ -66,7 +66,7 @@ def measure_panel(spec):
         MR.AxisCalibration.from_points([tuple(t) for t in spec["ticks"]]),
         spec["anchors"], spec["fills"], spec["group_window"],
         baseline=spec.get("baseline", 0.0), panel_id=spec["tag"],
-        figure_id=spec.get("figure_id", spec["tag"]))
+        identity_domain_id=spec.get("identity_domain_id", spec["tag"]))
     for rec in rows:
         if rec.get("slot") is not None and rec["slot"] < len(spec["fills"]):
             rec["spec_fill"] = spec["fills"][rec["slot"]]
@@ -79,7 +79,7 @@ def builtin_specs():
         dict(tag="397_fig3_P3_MEN", path=os.path.join(HERE, "397_fig3.jpeg"),
              box=[118, 480, 90, 470], ticks=[[150.0, 101.0], [50.0, 465.0]],
              anchors={"PRE": 187, "POST": 390}, fills=["SOLID", "HATCHED"],
-             group_window=75, baseline=50.0, figure_id="397_fig3"),
+             group_window=75, baseline=50.0, identity_domain_id="397_fig3"),
         # The second panel of the SAME figure, four pixels of axis apart from
         # the first. Sharing one calibration between them put this one's
         # baseline below its own bars and returned nothing for all four of its
@@ -89,7 +89,7 @@ def builtin_specs():
         dict(tag="397_fig3_P3_WOMEN", path=os.path.join(HERE, "397_fig3.jpeg"),
              box=[620, 1010, 88, 466], ticks=[[150.0, 95.0], [50.0, 460.0]],
              anchors={"PRE": 720, "POST": 920}, fills=["SOLID", "HATCHED"],
-             group_window=75, baseline=50.0, figure_id="397_fig3"),
+             group_window=75, baseline=50.0, identity_domain_id="397_fig3"),
     ]
     truth = os.path.join(HERE, "mono_bar_fixture_truth.json")
     if os.path.exists(truth):

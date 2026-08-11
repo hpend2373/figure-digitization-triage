@@ -2328,7 +2328,7 @@ _grows = MR.read_monochrome_bar_geometry(
     Image.open(_gimg), tuple(_gt["panel_box"]),
     dict(zip(_gt["groups"], _gt["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
-    _gt["patterns"], group_window=60, panel_id="P_GEO", figure_id="F_GEO")
+    _gt["patterns"], group_window=60, panel_id="P_GEO", identity_domain_id="F_GEO")
 _gdir = os.path.join(ROOT, "geo_review")
 os.makedirs(_gdir, exist_ok=True)
 try:
@@ -2452,7 +2452,7 @@ _boxed = MR.read_monochrome_bar_geometry(
     dict(zip(_gt["groups"], _gt["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
     _gt["patterns"], group_window=60, review_crop_box=[10, 20, 30, 40],
-    panel_id="P_GEO", figure_id="F_GEO")
+    panel_id="P_GEO", identity_domain_id="F_GEO")
 check("and it reaches the record, so the picture can use it",
       all(r.get("review_crop_box") == [10, 20, 30, 40] for r in _boxed),
       repr(_boxed[0].get("review_crop_box")))
@@ -4046,6 +4046,19 @@ check("and so is a panel whose resolutions were dropped from the copy",
       FIN.resolution_copy_failures({"P_SHORT": []}, _FRAMES2,
                                    lambda w, c, d: _probs.append(c))
       == {"P_SHORT"}, "%s" % _probs)
+# REVERT: walk `rows_by_panel` instead of the union. The panel above keeps an
+# empty list, so it still has a KEY and is still compared; this one has no key
+# at all, which is what a run made by a producer that never wrote the file
+# looks like - and it was compared against nothing.
+_probs = []
+check("a panel the manifest resolves and the run never copied is refused too",
+      FIN.resolution_copy_failures({}, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
+_probs = []
+FIN.resolution_copy_failures({}, _FRAMES2, lambda w, c, d: _probs.append(d))
+check("and the message says the run copied none of them",
+      any("copied none of them" in d for d in _probs), "%s" % _probs)
 
 # REVERT: `if frames is not None: withheld |= resolution_copy_failures(...)`.
 # The helper refuses when it is handed no frames, and the caller then never
@@ -4338,12 +4351,17 @@ for _side, _spec in _HALF.items():
         if q in _spec["groups"]]
     _half_figures.append(dict(_short_figure, Figure_ID=_fid,
                               Figure_Number="FIG6%s" % _side[0]))
-    _half_source_figures.append(dict(_short_source_figure,
-                                     Source_Figure_ID="SF_%s" % _side,
-                                     Figure_Number="FIG6%s" % _side[0]))
+    # ONE source figure for both halves, because that is what "one printed
+    # legend" means physically: two views and two panels of a single printed
+    # figure. The domain is bound to the source figure, so declaring two here
+    # would be declaring two legends - a scenario below does exactly that and
+    # is refused.
     _half_source_panels.append(dict(_short_source_panel, Source_Panel_ID=_pid,
-                                    Source_Figure_ID="SF_%s" % _side,
+                                    Source_Figure_ID="SF_HALF",
                                     Panel_Label=_pid))
+_half_source_figures.append(dict(_short_source_figure,
+                                 Source_Figure_ID="SF_HALF",
+                                 Figure_Number="FIG6", Observed_Panel_Count=2))
 _half_grids = _mono_grids + [
     dict(Grid_ID="G_%s" % side, Factor_Name=f, Factor_Level=lv, Level_Order=i,
          Note="")
@@ -4357,7 +4375,62 @@ _hm = write_manifests(
     units=UNITS + _half_units, figures=FIGURES + _half_figures,
     grids=_half_grids, source_figures=SOURCE_FIGURES + _half_source_figures,
     source_panels=SOURCE_PANELS + _half_source_panels,
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+# REVERT: bound the domain by `Image_Path` again. The corpus renders a whole
+# page at 600 DPI, so figure 3 and figure 4 arrive as one PNG: two printed
+# legends under one domain then calibrate each other's fills and the raster
+# comparison has nothing to say, because there is only one raster.
+_twofig = write_manifests(
+    os.path.join(ROOT, "m_twofigures"), panels=PANELS + _half_panels,
+    series_rows=SERIES + _half_series, positions=POSITION_ROWS + _half_positions,
+    units=UNITS + _half_units, figures=FIGURES + _half_figures,
+    grids=_half_grids,
+    source_figures=SOURCE_FIGURES + [
+        dict(_short_source_figure, Source_Figure_ID="SF_%s" % side,
+             Figure_Number="FIG6%s" % side[0], Observed_Panel_Count=1)
+        for side in _HALF],
+    source_panels=SOURCE_PANELS + [
+        dict(_short_source_panel, Source_Panel_ID="P_%s" % side,
+             Source_Figure_ID="SF_%s" % side, Panel_Label="P_%s" % side)
+        for side in _HALF],
     source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=6)])
+_tfs = RB.run_batch(_twofig, os.path.join(ROOT, "o_twofigures"),
+                    file_root=ROOT, run_date="2026-08-06")
+_tfcodes = set(pd.read_csv(os.path.join(ROOT, "o_twofigures",
+                                        "manifest_problems.csv"),
+                           dtype=object).fillna("")["check"]) \
+    if _tfs["status"] == "MANIFEST_REJECTED" else set()
+check("one domain over two SOURCE FIGURES is refused, one raster or not",
+      _tfs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_SPANS_SOURCE_FIGURES" in _tfcodes,
+      "%s %s" % (_tfs["status"], sorted(_tfcodes)))
+check("and it is not the raster rule doing it - both halves read one PNG",
+      "IDENTITY_DOMAIN_SPANS_RASTERS" not in _tfcodes, "%s" % sorted(_tfcodes))
+
+# REVERT: compare `Factor_Level` alone in the domain's fill map. Two panels can
+# then give one fill two different CELLS - TIMEPOINT:PRE here, ARM:PRE there -
+# and pass, because both level strings read "PRE".
+_samelevel = short_manifests(
+    os.path.join(ROOT, "m_domainfactor"),
+    series_rows=SERIES + _mono_series + [
+        dict(r, Factor_Name="PHASE") for r in _short_series],
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO",
+                          Image_Path=MONO_IMG)])
+_slo = os.path.join(ROOT, "o_domainfactor")
+_sls = RB.run_batch(_samelevel, _slo, file_root=ROOT, run_date="2026-08-06")
+_slcodes = set(pd.read_csv(os.path.join(_slo, "manifest_problems.csv"),
+                           dtype=object).fillna("")["check"]) \
+    if _sls["status"] == "MANIFEST_REJECTED" else set()
+_sldetail = " ".join(
+    pd.read_csv(os.path.join(_slo, "manifest_problems.csv"),
+                dtype=object).fillna("")["detail"]) \
+    if _sls["status"] == "MANIFEST_REJECTED" else ""
+check("one fill standing for two FACTORS at the same level is refused",
+      "IDENTITY_DOMAIN_FILL_CONFLICT" in _slcodes, "%s" % sorted(_slcodes))
+check("and the message names the factor, not only the level",
+      "PHASE=" in _sldetail and "ARM=" in _sldetail, _sldetail[:200])
+
 _ho = os.path.join(ROOT, "o_halves")
 _hs = RB.run_batch(_hm, _ho, file_root=ROOT, run_date="2026-08-06")
 _hr = pd.read_csv(os.path.join(_ho, "run_manifest.csv"), dtype=object).fillna("")
@@ -4372,10 +4445,74 @@ check("and the right half is named by the OTHER half's prototypes",
       _hcells.get("P_RIGHT") == "5", "%s" % _hcells)
 _hg = pd.read_csv(os.path.join(_ho, "mono_bar_geometry.csv"),
                   dtype=object).fillna("")
+_hpm = pd.read_csv(os.path.join(_hm, "panel_manifest.csv"),
+                   dtype=object).fillna("")
+_hgh = _hg[_hg["Panel_ID"].isin(["P_LEFT", "P_RIGHT"])]
 check("because both halves measured into one identity domain",
-      set(_hg[_hg["Panel_ID"].isin(["P_LEFT", "P_RIGHT"])]["Figure_ID"])
-      == {"F_SHORT_LEGEND"},
-      "%s" % sorted(set(_hg["Figure_ID"])))
+      set(_hgh["Identity_Domain_ID"]) == {"F_SHORT_LEGEND"},
+      "%s" % sorted(set(_hgh["Identity_Domain_ID"])))
+# REVERT: hand the reader one identifier again. `Figure_ID` in the durable
+# artifact then holds the DOMAIN the moment two views share a legend - which is
+# this row exactly - so the geometry file loses the provenance view, disagrees
+# with the panel manifest under a column of the same name, and
+# `Domain_Identity_SHA256` is a domain verdict wearing a figure's name.
+check("and the artifact still says which VIEW each panel is of",
+      set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"]))
+      == {("P_LEFT", "F_LEFT"), ("P_RIGHT", "F_RIGHT")},
+      "%s" % sorted(set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"]))))
+check("so the two columns are not the same column",
+      set(_hgh["Figure_ID"]) != set(_hgh["Identity_Domain_ID"]),
+      "%s" % sorted(set(_hgh["Figure_ID"])))
+check("and both agree with the panel manifest they came from",
+      all((r["Figure_ID"], r["Identity_Domain_ID"])
+          == tuple(_hpm.loc[_hpm["Panel_ID"] == r["Panel_ID"],
+                            ["Figure_ID", "Identity_Domain_ID"]].iloc[0])
+          for _, r in _hgh.iterrows()),
+      "%s" % sorted(set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"],
+                            _hgh["Identity_Domain_ID"]))))
+
+# REVERT: drop the two identifier comparisons from the geometry foreign key.
+# The artifact is where a reviewer and the finalizer look up which figure a
+# measurement belongs to and which panels calibrated each other's fills; a
+# geometry row that names a different view or a different domain from the panel
+# manifest answers both questions wrongly while every hash still recomputes.
+_fk_geo = RB.geometry_index_from_run(_ho)
+_fk_key = next(k for k in _fk_geo if k[0] == "P_LEFT")
+check("the geometry index carries both identifiers, not one",
+      (_fk_geo[_fk_key][0]["Figure_ID"],
+       _fk_geo[_fk_key][0]["Identity_Domain_ID"])
+      == ("F_LEFT", "F_SHORT_LEGEND"), "%s" % _fk_geo[_fk_key][0])
+for _field, _wrong, _label in (("Figure_ID", "F_RIGHT", "figure view"),
+                               ("Identity_Domain_ID", "F_OTHER_LEGEND",
+                                "identity domain")):
+    _bent = {k: [dict(r, **{_field: _wrong}) if k == _fk_key else dict(r)
+                 for r in v] for k, v in _fk_geo.items()}
+    _vrows = [r for r in pd.read_csv(
+        os.path.join(_ho, "figure_values_raw.csv"), dtype=object).fillna("")
+        .to_dict("records") if str(r.get("Run_Panel_ID", "")).strip() == "P_LEFT"]
+    _fkp = RB.identity_provenance_problems(
+        _vrows, {p["Panel_ID"]: dict(Mark_Type=p["Mark_Type"],
+                                     Unit_ID=p["Unit_ID"],
+                                     Source_Panel_ID=p["Source_Panel_ID"],
+                                     Figure_ID=p["Figure_ID"],
+                                     Identity_Domain_ID=p["Identity_Domain_ID"])
+                for p in _hpm.to_dict("records")},
+        geometry=_bent)
+    check("a geometry row whose %s is not the panel's is refused" % _label,
+          any(c == "IDENTITY_GEOMETRY_ROW_MISMATCH" and _label in d
+              for _w, c, d in _fkp), "%s" % _fkp[:2])
+_clean = RB.identity_provenance_problems(
+    [r for r in pd.read_csv(os.path.join(_ho, "figure_values_raw.csv"),
+                            dtype=object).fillna("").to_dict("records")
+     if str(r.get("Run_Panel_ID", "")).strip() == "P_LEFT"],
+    {p["Panel_ID"]: dict(Mark_Type=p["Mark_Type"], Unit_ID=p["Unit_ID"],
+                         Source_Panel_ID=p["Source_Panel_ID"],
+                         Figure_ID=p["Figure_ID"],
+                         Identity_Domain_ID=p["Identity_Domain_ID"])
+     for p in _hpm.to_dict("records")}, geometry=_fk_geo)
+check("and the run's own rows pass the same comparison",
+      not [p for p in _clean if p[1] == "IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _clean[:2])
 
 check("the identity vocabulary has one definition, in the layer both can see",
       BM.AUTO_IDENTITY_EVIDENCE is K.FIG_AUTO_IDENTITY_EVIDENCE
@@ -4459,7 +4596,7 @@ _probe_kw = dict(image=Image.open(os.path.join(HERE, "mono_bar_fixture.png")),
                  y_calibration=MR.AxisCalibration.from_points(
                      [(v, p) for v, p in _MONO_TRUTH["y_ticks"]]),
                  fills=_MONO_TRUTH["patterns"], group_window=60,
-                 panel_id="P", figure_id="F")
+                 panel_id="P", identity_domain_id="F")
 _at_128 = MR.read_monochrome_bar_geometry(**_probe_kw)
 _at_0 = MR.read_monochrome_bar_geometry(threshold=0, **_probe_kw)
 check("threshold reaches the measurement rather than sitting in the signature",

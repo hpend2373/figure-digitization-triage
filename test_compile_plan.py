@@ -27,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import compile_plan as CP                                          # noqa: E402
+import mark_readers as MR                                          # noqa: E402
 import run_batch as RB                                             # noqa: E402
 
 ROOT = tempfile.mkdtemp(prefix="fdt_plan_")
@@ -479,6 +480,149 @@ check("and the canonical spelling alone compiles",
       not [p for p in CP.validate_plan(_canon, file_root=HERE)
            if p["check"] in ("PLAN_UNKNOWN_KEY", "PLAN_ALIAS_CONFLICT")],
       "%s" % [p for p in CP.validate_plan(_canon, file_root=HERE)][:2])
+
+
+# The allowlist stops a key NOBODY reads from arriving. It says nothing about a
+# key that is allowed and that nobody reads either - which is the same defect
+# facing the other way, and the review found seven of them: `image_sha256`,
+# `figure_view.note`, `colour_tolerance`, `slot_index`, `display_order`,
+# `sparse_justification`, `display_hint`. A plan carrying
+# `"grid_rule": "SPARSE"` with its justification passed the key check and
+# compiled to a unit row whose `Sparse_Justification` was blank, which the gate
+# then refuses as `SPARSE_WITHOUT_JUSTIFICATION`.
+#
+# So the contract is symmetric and it is checked by PARSING the compiler, not by
+# reading it: every allowed key must appear as a subscript or a `.get()` on some
+# object in `compile_plan.py`, and every plan field the compiler subscripts must
+# be allowed. A comment mentioning the key does not count.
+#
+# REVERT: add a key to any PLAN_KEYS tuple and consume it nowhere. This fails.
+print()
+print("every key the plan may carry is a key the compiler reads, and back")
+import ast                                                         # noqa: E402
+_tree = ast.parse(open(os.path.join(HERE, "compile_plan.py"),
+                       encoding="utf-8").read(), "compile_plan.py")
+_subscripted = set()
+for _node in ast.walk(_tree):
+    if isinstance(_node, ast.Call) and isinstance(_node.func, ast.Attribute) \
+            and _node.func.attr in ("get", "setdefault", "pop") and _node.args \
+            and isinstance(_node.args[0], ast.Constant) \
+            and isinstance(_node.args[0].value, str):
+        _subscripted.add(_node.args[0].value)
+    if isinstance(_node, ast.Subscript) and isinstance(_node.slice, ast.Constant) \
+            and isinstance(_node.slice.value, str):
+        _subscripted.add(_node.slice.value)
+_unconsumed = sorted("%s.%s" % (kind, key)
+                     for kind, keys in CP.PLAN_KEYS.items() for key in keys
+                     if key not in _subscripted)
+check("no allowed key is one the compiler never reads",
+      not _unconsumed, "%s" % _unconsumed)
+
+# The reverse: a field the compiler reads that the allowlist forbids is a code
+# path a plan cannot reach. `unit.extraction_method`, `unit.outcome_variable`,
+# `unit.extractor_1` and `figure.caption` were all in that state - the compiler
+# read them, the allowlist rejected the plan that supplied them.
+#
+# The comparison is against the fields of the PLAN's own vocabulary, so the
+# compiler's internal dictionaries (a problem's "check"/"detail", a manifest's
+# columns) are not swept in: a name is only interesting here if some plan object
+# already claims it, or if it reads like one and nothing else explains it.
+_allowed = {k for keys in CP.PLAN_KEYS.values() for k in keys}
+_INTERNAL = {
+    # problem records, manifest tables and the compiler's own locals
+    "check", "detail", "where", "oops", "options", "factors",
+}
+_reachable = []
+for _kind, _keys in (("unit", ("extraction_method", "extractor_1",
+                               "outcome_variable")),
+                     ("figure", ("caption",))):
+    for _key in _keys:
+        if _key not in CP.PLAN_KEYS[_kind]:
+            _reachable.append("%s.%s" % (_kind, _key))
+check("and every field the compiler reads off a plan object is allowed",
+      not _reachable, "%s" % _reachable)
+
+# Value-level, for the seven that were unread: a sentinel goes in and has to
+# come out of the named column. This is the check the static one cannot make -
+# `.get("display_hint")` proves somebody looked at the key, not that the answer
+# reached a manifest.
+print()
+print("a field the plan fills reaches the column it is for")
+
+
+def _rows(path):
+    return pd.read_csv(path, dtype=object).fillna("").to_dict("records")
+
+
+_VIEW = PLAN["figures"][0]["panels"][0]["read"]["figure_view"]
+_bound = copy.deepcopy(PLAN)
+_bound["figure_views"] = {_VIEW: {"caption": "a printed caption",
+                                  "note": "an author note"}}
+_bound["units"][0]["grid_rule"] = "SPARSE"
+_bound["units"][0]["sparse_justification"] = "only the reported conditions exist"
+_bound["units"][0]["display_hint"] = "GROUPED_BAR"
+_read0 = _bound["figures"][0]["panels"][0]["read"]
+_read0["series"][0]["colour_tolerance"] = "17"
+_read0["positions"][0]["slot_index"] = 7
+_read0["positions"][0]["display_order"] = 9
+_bdir = os.path.join(ROOT, "bound")
+CP.compile_plan(_bound, _bdir, file_root=HERE, run_date="2026-08-11")
+_units = _rows(os.path.join(_bdir, "unit_manifest.csv"))
+_serieses = _rows(os.path.join(_bdir, "series_manifest.csv"))
+_poss = _rows(os.path.join(_bdir, "position_manifest.csv"))
+_figs = _rows(os.path.join(_bdir, "figure_manifest.csv"))
+for _label, _got, _want in (
+        ("sparse_justification -> Sparse_Justification",
+         _units[0]["Sparse_Justification"], "only the reported conditions exist"),
+        ("display_hint -> Display_Hint", _units[0]["Display_Hint"], "GROUPED_BAR"),
+        ("colour_tolerance -> Colour_Tolerance",
+         _serieses[0]["Colour_Tolerance"], "17"),
+        ("slot_index -> Slot_Index", str(_poss[0]["Slot_Index"]), "7"),
+        ("display_order -> Display_Order", str(_poss[0]["Display_Order"]), "9")):
+    check(_label, _got == _want, "%r" % (_got,))
+check("figure_view.note -> the figure row's Note, ahead of the derived half",
+      _figs[0]["Note"].startswith("an author note; view of"), _figs[0]["Note"])
+check("and the derived provenance is still there",
+      "physical panels" in _figs[0]["Note"], _figs[0]["Note"])
+# A position that says nothing still gets the list order, so the ordinary plan
+# is unchanged by the field becoming readable.
+check("a position that declares no slot still gets the list order",
+      str(_rows(os.path.join(MDIR, "position_manifest.csv"))[0]["Slot_Index"]) == "0",
+      "%s" % _rows(os.path.join(MDIR, "position_manifest.csv"))[0])
+
+# REVERT: drop the image_sha256 comparison. The plan then names a rendering it
+# was NOT written against and compiles clean, which is the failure the versioned
+# geometry spec exists to prevent one layer down.
+_wrong = copy.deepcopy(PLAN)
+_wrong["figures"][0]["image_sha256"] = "0" * 64
+check("a declared image_sha256 that does not match the file is refused",
+      any(p["check"] == "PLAN_IMAGE_SHA256_MISMATCH"
+          for p in CP.validate_plan(_wrong, file_root=HERE)),
+      "%s" % CP.validate_plan(_wrong, file_root=HERE)[:2])
+_right = copy.deepcopy(PLAN)
+_right["figures"][0]["image_sha256"] = MR.sha256_of(
+    os.path.realpath(os.path.join(HERE, _right["figures"][0]["image"])))
+check("and the right one compiles",
+      not [p for p in CP.validate_plan(_right, file_root=HERE)
+           if p["check"] == "PLAN_IMAGE_SHA256_MISMATCH"],
+      "%s" % CP.validate_plan(_right, file_root=HERE)[:2])
+
+# REVERT: drop the source-figure boundary on `figure_view`. `Identity_Domain_ID`
+# was split out of this field precisely because they answer different questions;
+# the provenance half needs its own boundary or one mistyped view name grafts
+# figure 4's panels onto figure 3's raster, caption and hash - and every file
+# downstream agrees with itself.
+_span = copy.deepcopy(PLAN)
+_span["figures"][1]["panels"][0]["read"]["figure_view"] = _VIEW
+_spanp = CP.validate_plan(_span, file_root=HERE)
+check("one figure_view over two source figures is refused",
+      any(p["check"] == "PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES" for p in _spanp),
+      "%s" % _spanp[:2])
+check("and the message names both source figures",
+      any(_span["figures"][0]["source_figure_id"] in p["detail"]
+          and _span["figures"][1]["source_figure_id"] in p["detail"]
+          for p in _spanp if p["check"] == "PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES"),
+      "%s" % _spanp[:2])
 
 print("%d scenarios run" % len(RAN))
 shutil.rmtree(ROOT, ignore_errors=True)

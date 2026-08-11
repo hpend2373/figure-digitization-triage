@@ -804,7 +804,7 @@ try:
         r["figure"] = "second_group"
     both = rows_a + rows_b
     for r in both:
-        r["figure_id"] = "one_figure"
+        r["identity_domain_id"] = "one_figure"
     ink = sorted(round(r.get("ink_mass", -1), 4) for r in both)
     ident, verdict = M.fill_identity(both)
     check("the two patterns are closer than one of them varies",
@@ -842,7 +842,7 @@ try:
         got = M.measure_panel(g.spec(write(img, name, TMP),
                                      ["OPEN", "STIPPLED", "SOLID"]))
         for r in got:
-            r["figure"], r["figure_id"] = name, "one_figure"
+            r["figure"], r["identity_domain_id"] = name, "one_figure"
         rows.extend(got)
     ident, verdict = M.fill_identity(rows)
     check("two complete groups make the prototypes reusable",
@@ -894,7 +894,7 @@ try:
     print("\ntwo publications are not one figure-local vocabulary")
     mixed = [dict(r) for r in rows]
     for r in mixed[:3]:
-        r["figure_id"] = "some_other_publication"
+        r["identity_domain_id"] = "some_other_publication"
     ident_m, verdict_m = M.fill_identity(mixed)
     check("mixed figures are refused rather than pooled",
           verdict_m["status"] == "MULTIPLE_FIGURES", repr(verdict_m["status"]))
@@ -907,7 +907,7 @@ try:
     # for is this: the figure's answer must be the answer it would have given
     # alone, so nothing of the other publication's reached it.
     alone = M.fill_identities_by_figure(
-        [dict(r) for r in mixed if r.get("figure_id") == "one_figure"])
+        [dict(r) for r in mixed if r.get("identity_domain_id") == "one_figure"])
     check("and neither figure's samples reach the other's vocabulary",
           verdicts["one_figure"]["prototypes"]
           == alone["one_figure"]["prototypes"]
@@ -986,14 +986,14 @@ try:
         g.stipple(img, 1, height, pitch=(5, 5), dot=3)  # dense: about 0.36
         got = M.measure_panel(g.spec(write(img, name, TMP), ["HATCHED", "STIPPLED"]))
         for r in got:
-            r["figure"], r["figure_id"] = name, "hb"
+            r["figure"], r["identity_domain_id"] = name, "hb"
         rows2.extend(got)
     img = g.blank()
     g.hatch(img, 0, 60, pitch=14)          # 0.357 - inside the STIPPLED range
     g.stipple(img, 1, 4, pitch=(5, 5), dot=3)          # and a partner too short
     drift = M.measure_panel(g.spec(write(img, "hb_c", TMP), ["HATCHED", "STIPPLED"]))
     for r in drift:
-        r["figure"], r["figure_id"] = "hb_c", "hb"
+        r["figure"], r["identity_domain_id"] = "hb_c", "hb"
     ident2, verdict2 = M.fill_identity(rows2 + drift)
     hatch_ink = next(r["ink_mass"] for r in drift if r.get("slot") == 0)
     protos = verdict2["prototypes"]
@@ -1310,7 +1310,7 @@ try:
         return G.geometry_rows(
             grey_gray, [g4.x0, g4.x1, g4.y0, g4.y1], grey_cal,
             {"G": (g4.slots[0][0] + g4.slots[-1][1]) // 2}, ["SOLID"],
-            g4.r(190), baseline=0.0, panel_id="P", figure_id="F", **kw)
+            g4.r(190), baseline=0.0, panel_id="P", identity_domain_id="F", **kw)
 
     check("at the default threshold this figure is not ink at all",
           [r.get("error") for r in grey_rows()] == ["STROKE_SCALE_UNRESOLVED"],
@@ -1357,7 +1357,7 @@ try:
             three_gray, [g5.x0, g5.x1, g5.y0, g5.y1], three_cal,
             {"G": (g5.slots[0][0] + g5.slots[-1][1]) // 2},
             ["OPEN", "STIPPLED", "SOLID"], g5.r(190), baseline=0.0,
-            panel_id="P", figure_id="F", **kw)
+            panel_id="P", identity_domain_id="F", **kw)
 
     check("nothing in the fixture is near the default gate",
           all(r.get("error") != "BAR_TOO_NARROW" for r in three_rows()),
@@ -1492,7 +1492,7 @@ try:
         return G.geometry_rows(perm_gray, [g.x0, g.x1, g.y0, g.y1], perm_cal,
                                {"G": (g.slots[0][0] + g.slots[-1][1]) // 2},
                                list(order), g.r(190), baseline=0.0,
-                               panel_id="P", figure_id="F")
+                               panel_id="P", identity_domain_id="F")
 
     orders = (["OPEN", "STIPPLED", "SOLID"], ["SOLID", "OPEN", "STIPPLED"],
               ["STIPPLED", "SOLID", "OPEN"])
@@ -1569,7 +1569,7 @@ try:
     # REVERT: build each refusal with its own `dict(...)` again. Every scenario
     # that reads a refusal still passes, because each reads the one field it
     # cares about. What breaks is the consumer: `fill_identities_by_figure`
-    # buckets on `figure_id`, and a refusal that carried none fell back to the
+    # buckets on `identity_domain_id`, and a refusal that carried none fell back to the
     # PANEL id - so one two-panel figure with one bad panel produced TWO
     # verdicts, the second computed from the panel that had already refused.
     print("\nevery row has the same shape, refusal or reading")
@@ -1593,7 +1593,7 @@ try:
     shapes = dict(STROKE_SCALE_UNRESOLVED=no_rule,
                   BAR_DIRECTION_UNRESOLVED=both_ways,
                   NO_SEED_SUPPORT=empty, GROUP_WINDOW_CLIPPED=clip)
-    BASE_FIELDS = ("figure", "figure_id", "group", "slot",
+    BASE_FIELDS = ("figure", "identity_domain_id", "group", "slot",
                    "declared_group_size", "declared_group_patterns",
                    "fill_sample_status", "identity_status",
                    "resolved_fill_pattern")
@@ -1606,8 +1606,8 @@ try:
               not missing, "missing %r" % missing)
         check("%s belongs to a named figure, so it buckets with its siblings"
               % want,
-              bool(rows_) and rows_[0].get("figure_id") == rows_[0].get("figure"),
-              repr((rows_[0].get("figure"), rows_[0].get("figure_id"))
+              bool(rows_) and rows_[0].get("identity_domain_id") == rows_[0].get("figure"),
+              repr((rows_[0].get("figure"), rows_[0].get("identity_domain_id"))
                    if rows_ else None))
     good = M.measure_panel(g.spec(perm_path, ["OPEN", "STIPPLED", "SOLID"]))
     check("and a reading carries nothing a refusal does not",
@@ -1616,19 +1616,19 @@ try:
     # The defect itself, end to end: ONE figure of two panels measured through
     # the shared entry point with the figure named, one panel refusing outright.
     # Nothing here re-labels a record afterwards, because re-labelling is what
-    # hid the defect - the caller supplies `figure_id` and the refusal has to
+    # hid the defect - the caller supplies `identity_domain_id` and the refusal has to
     # keep it on its own.
     two = G.geometry_rows(M._gray(write(naked, "norule2", TMP)),
                           [X0, X1, Y0, Y1],
                           MRX.AxisCalibration.from_points(
                               [tuple(t) for t in TICKS]),
                           {"G": ANCHOR}, ["SOLID"], 190, baseline=0.0,
-                          panel_id="panel_bad", figure_id="one_figure")
+                          panel_id="panel_bad", identity_domain_id="one_figure")
     ok_rows = G.geometry_rows(perm_gray, [g.x0, g.x1, g.y0, g.y1], perm_cal,
                               {"G": (g.slots[0][0] + g.slots[-1][1]) // 2},
                               ["OPEN", "STIPPLED", "SOLID"], g.r(190),
                               baseline=0.0, panel_id="panel_ok",
-                              figure_id="one_figure")
+                              identity_domain_id="one_figure")
     verdicts_two = M.fill_identities_by_figure(two + ok_rows)
     check("a panel that refused does not become a figure of its own",
           set(verdicts_two) == {"one_figure"}, repr(sorted(verdicts_two)))
@@ -1681,7 +1681,7 @@ try:
             MRX.AxisCalibration.from_points(
                 [tuple(t) for t in grey_spec["ticks"]]),
             grey_spec["anchors"], grey_spec["fills"], grey_spec["group_window"],
-            baseline=0.0, threshold=threshold, panel_id="grey", figure_id="grey")
+            baseline=0.0, threshold=threshold, panel_id="grey", identity_domain_id="grey")
         verdicts = M.fill_identities_by_figure(rows_)
         return rows_, verdicts["grey"]
 
@@ -1722,7 +1722,7 @@ try:
                                              (100, g7.base - 100 * g7.ppu)]),
             {"G": (g7.slots[0][0] + g7.slots[-1][1]) // 2},
             ["OPEN", "HATCHED", "STIPPLED"], g7.r(190), baseline=0.0,
-            threshold=190, panel_id=name, figure_id="mixed")
+            threshold=190, panel_id=name, identity_domain_id="mixed")
         proto.extend(got)
     partial = G.geometry_rows(
         # pitch 18 at grey 170 puts this hatch's INK inside the black
@@ -1735,7 +1735,7 @@ try:
                                          (100, g7.base - 100 * g7.ppu)]),
         {"G": (g7.slots[0][0] + g7.slots[-1][1]) // 2},
         ["OPEN", "HATCHED", "STIPPLED"], g7.r(190), baseline=0.0,
-        threshold=190, panel_id="grey_partial", figure_id="mixed")
+        threshold=190, panel_id="grey_partial", identity_domain_id="mixed")
     mixed_rows = proto + partial
     v_mixed = M.fill_identities_by_figure(mixed_rows)["mixed"]
     check("the two black groups establish a reusable vocabulary",
@@ -1780,7 +1780,7 @@ try:
         g6.solid(img, 1, 40)                 # identical in both groups
         got = M.measure_panel(g6.spec(write(img, name, TMP), ["OPEN", "SOLID"]))
         for r in got:
-            r["figure"], r["figure_id"] = name, "flat_figure"
+            r["figure"], r["identity_domain_id"] = name, "flat_figure"
         flat_rows.extend(got)
     _i6, verdict6 = M.fill_identity(flat_rows)
     check("the two groups really are identical to the last decimal",
@@ -1955,10 +1955,10 @@ try:
     M.fill_identities_by_figure(unresolved)
     resolved_rows = G.canonical_artifact_rows(unresolved)
     check("and after the figure has answered, every row carries both hashes",
-          all(len(r["Figure_Identity_SHA256"]) == 64
+          all(len(r["Domain_Identity_SHA256"]) == 64
               and len(r["Auto_Identity_SHA256"]) == 64
               for r in resolved_rows),
-          repr([(r["Figure_Identity_SHA256"][:8],
+          repr([(r["Domain_Identity_SHA256"][:8],
                  r["Auto_Identity_SHA256"][:8]) for r in resolved_rows]))
     check("including the rows the figure could not name",
           all(r["Auto_Identity_SHA256"] for r in G.canonical_artifact_rows(
@@ -2053,13 +2053,13 @@ try:
     check("nor can one bar's name be moved onto another",
           _raises(lambda: G.artifact_row(swapped), "AUTO_IDENTITY_MODIFIED"),
           "a transplanted identity was written")
-    other_figure = dict(written[0], figure_identity_sha256="0" * 64)
+    other_figure = dict(written[0], domain_identity_sha256="0" * 64)
     check("nor can it be carried over from another figure's verdict",
           _raises(lambda: G.artifact_row(other_figure),
                   "AUTO_IDENTITY_MODIFIED"),
           "a transplanted verdict was written")
     check("and both hashes are columns, so a reader can recompute them",
-          {"Figure_Identity_SHA256", "Auto_Identity_SHA256"}
+          {"Domain_Identity_SHA256", "Auto_Identity_SHA256"}
           <= set(G.GEOMETRY_ARTIFACT_COLUMNS), repr(G.GEOMETRY_ARTIFACT_COLUMNS))
 
     # REVERT: json.dumps without allow_nan=False, and `return str(obj)` at the
@@ -2115,7 +2115,7 @@ try:
                 [(0, g8.base), (100, g8.base - 100 * g8.ppu)]),
             kw.pop("anchors", {"G": (g8.slots[0][0] + g8.slots[-1][1]) // 2}),
             fills, kw.pop("window", g8.r(190)), baseline=0.0,
-            panel_id=panel_id, figure_id="zoo", **kw)
+            panel_id=panel_id, identity_domain_id="zoo", **kw)
 
     def three(img):
         g8.outline(img, 0, 30)
@@ -2146,7 +2146,7 @@ try:
         MRX.AxisCalibration.from_points([(0, g8.base),
                                          (100, g8.base - 100 * g8.ppu)]),
         {"G": (g8.slots[0][0] + g8.slots[-1][1]) // 2}, ["SOLID"], g8.r(190),
-        baseline=0.0, panel_id="zoo_norule", figure_id="zoo")
+        baseline=0.0, panel_id="zoo_norule", identity_domain_id="zoo")
     kinds_present = {r.get("error") or "READING" for r in zoo}
     check("the fixture covers every row type a real file holds",
           {"READING", "BAR_TOO_SMALL_TO_SAMPLE", "BAR_TOO_NARROW",
@@ -2251,21 +2251,45 @@ try:
                      _text(replacement["Geometry_Slot"])) else dict(r)
                  for r in on_disk]
     check("the two verdicts really are different",
-          replacement["Figure_Identity_SHA256"]
-          != on_disk[0]["Figure_Identity_SHA256"],
+          replacement["Domain_Identity_SHA256"]
+          != on_disk[0]["Domain_Identity_SHA256"],
           "the subset answered the figure the same way")
-    check("one figure answered two ways is refused",
+    check("one domain answered two ways is refused",
           _raises(lambda: G.verify_artifact(split_fig),
-                  "FIGURE_IDENTITY_INCONSISTENT"), "it verified")
-    # REVERT: accept Figure_Identity_SHA256 because it is 64 hex characters.
+                  "DOMAIN_IDENTITY_INCONSISTENT"), "it verified")
+    # REVERT: drop the per-panel (Figure_ID, Identity_Domain_ID) check. One
+    # panel belongs to ONE view and ONE domain; a file that gives it two is two
+    # producers written over each other, and every row of it hashes correctly
+    # because each half was measured honestly.
+    _tv = (zoo_rows("zoo_twoview", three, ["OPEN", "STIPPLED", "SOLID"],
+                    figure_id="VIEW_A")
+           + zoo_rows("zoo_twoview", with_cap, ["SOLID"], figure_id="VIEW_B",
+                      anchors={"H": (g8.slots[0][0] + g8.slots[-1][1]) // 2 + 1}))
+    M.fill_identities_by_figure(_tv)
+    _two_views = G.canonical_artifact_rows(_tv)
+    check("the two halves really are one panel with two views",
+          {(r["Panel_ID"], r["Figure_ID"]) for r in _two_views}
+          == {("zoo_twoview", "VIEW_A"), ("zoo_twoview", "VIEW_B")},
+          "%s" % sorted({(r["Panel_ID"], r["Figure_ID"]) for r in _two_views}))
+    check("one panel claiming two view/domain pairs is refused",
+          _raises(lambda: G.verify_artifact(to_csv_and_back(_two_views)),
+                  "PANEL_IDENTITY_INCONSISTENT"), "it verified")
+    _ov = zoo_rows("zoo_oneview", three, ["OPEN", "STIPPLED", "SOLID"],
+                   figure_id="VIEW_A")
+    M.fill_identities_by_figure(_ov)
+    check("and one panel with one pair verifies",
+          len(G.verify_artifact(to_csv_and_back(
+              G.canonical_artifact_rows(_ov)))["records"]) == 3)
+
+    # REVERT: accept Domain_Identity_SHA256 because it is 64 hex characters.
     # A hash that exists is not a verdict that is true: until it is recomputed
     # from the rows in the file, it only says the writer wrote something down.
     forged_fig = [dict(r) for r in on_disk]
     for r in forged_fig:
-        r["Figure_Identity_SHA256"] = "2" * 64
+        r["Domain_Identity_SHA256"] = "2" * 64
     check("a verdict hash the file's own rows do not produce is refused",
           _raises(lambda: G.verify_artifact(forged_fig),
-                  "FIGURE_VERDICT_NOT_REPRODUCED")
+                  "DOMAIN_VERDICT_NOT_REPRODUCED")
           or _raises(lambda: G.verify_artifact(forged_fig),
                      "AUTO_IDENTITY_MODIFIED"), "it verified")
     check("and a file that has not been tampered with still verifies",
@@ -2574,7 +2598,7 @@ try:
             MRX.AxisCalibration.from_points(
                 [(0, g9.base), (top_value, g9.base - 100 * g9.ppu)]),
             lab_anchor, ["SOLID"], g9.r(190), baseline=0.0,
-            panel_id="labelled", figure_id="labelled")
+            panel_id="labelled", identity_domain_id="labelled")
 
     right = labelled_rows(100)                 # the axis really is 0..100
     wrong = labelled_rows(10)                  # the 100 was read as 10

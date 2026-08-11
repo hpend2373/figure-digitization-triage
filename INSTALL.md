@@ -2447,7 +2447,7 @@ from a different figure's verdict. A row measured and not yet named carries no
 attestation and needs none - its identity fields are still at their
 measurement-time defaults, and that is what the check requires of them.
 
-`Figure_Identity_SHA256` and `Auto_Identity_SHA256` are both columns, so a
+`Domain_Identity_SHA256` and `Auto_Identity_SHA256` are both columns, so a
 reader can recompute the attestation from the file rather than trusting it.
 
 **Canonical JSON was strict about values and not about keys.** `str(k)` folds
@@ -2459,7 +2459,7 @@ removed, back on the other side. Non-string keys raise.
 
 The obvious way to list the caller is: measure the panels, write
 `mono_bar_geometry.csv`, resolve the identities. That order produces a
-perfectly valid file in which `Figure_Identity_SHA256` and
+perfectly valid file in which `Domain_Identity_SHA256` and
 `Auto_Identity_SHA256` are blank and every `Auto_Identity_Status` says
 `NOT_CALIBRATED` - for a batch that resolved the identities in memory a moment
 later and wrote them nowhere. The durable artifact would say the figure was
@@ -2497,7 +2497,7 @@ attestation from the eighteen columns would reject the file. So an unstamped row
 carrying an attestation is refused outright: re-stamp the measurement and
 resolve its figure again.
 
-Note what `Figure_Identity_SHA256` does and does not prove today. It binds a
+Note what `Domain_Identity_SHA256` does and does not prove today. It binds a
 row's identity to the verdict the figure was answered with, so an answer cannot
 be carried over from a figure that reached it differently. It does not prove the
 verdict itself - that needs the durable reader to recompute `fill_identity` from
@@ -2532,7 +2532,7 @@ hash covers says two things.
 
 `verify_artifact` adds what only the whole file says: no two rows claim the same
 `(Panel_ID, Group_ID, Geometry_Slot)`; every row of one `Figure_ID` carries the
-same `Figure_Identity_SHA256`; and `fill_identity`, re-run on the restored
+same `Domain_Identity_SHA256`; and `fill_identity`, re-run on the restored
 records, reproduces it. That last step is what turns the verdict hash from a
 value that exists into a value that is TRUE - until it is recomputed from the
 rows in the file, it only says the writer wrote something down.
@@ -3278,25 +3278,97 @@ than the block extractor does; and `Data_Shape_Expected` is still unfilled -
 the caption text a screen would read is now available per figure, which is the
 input `kernel.fig_screen_caption` has been waiting for.
 
+### The plan key that nobody reads, and two identifiers in one column (v7.38)
+
+Four boundaries, all of them the same mistake at different layers: **a field
+that is allowed to exist and is not the thing it appears to be.**
+
+**A key allowlist is not a binding contract.** `PLAN_KEYS` refuses a key nothing
+reads. It said nothing about a key that IS allowed and that nothing reads
+either, and there were seven: `figure.image_sha256`, `figure_view.note`,
+`series.colour_tolerance`, `position.slot_index`, `position.display_order`,
+`unit.sparse_justification`, `unit.display_hint`. The last of those is the one
+that bites - a plan writing `"grid_rule": "SPARSE"` with its justification
+passed every plan check and compiled to a unit row whose `Sparse_Justification`
+was blank, which the gate then refuses as `SPARSE_WITHOUT_JUSTIFICATION`. The
+mirror image was also true: the compiler READ `figure.caption`,
+`unit.outcome_variable`, `unit.extraction_method` and `unit.extractor_1`, and
+the allowlist rejected any plan that supplied them, so those code paths could
+not be reached from a plan at all.
+
+All eleven are closed, and the contract is now checked by PARSING the compiler
+rather than by reading it: every allowed key must appear as a subscript or a
+`.get()` on some object in `compile_plan.py`, and a comment mentioning it does
+not count. Five of the seven are checked at value level as well - a sentinel in,
+the named column out - because `.get("display_hint")` proves somebody looked at
+the key, not that the answer reached a manifest. `image_sha256` never becomes
+the manifest hash (that is read off the bytes, which is the point); it is the
+author saying which rendering they measured against, and a mismatch is
+`PLAN_IMAGE_SHA256_MISMATCH`.
+
+**`figure_view` needed the boundary that `Identity_Domain_ID` got.** The
+compiler builds a figure row from `members[0]` - source figure, raster, caption,
+hash - and counts all the members as its worklist. One mistyped view name
+grafted figure 4's panels onto figure 3's provenance and every downstream file
+agreed with itself. `PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES`.
+
+**And the domain was bounded by `Image_Path`, which this corpus makes
+meaningless.** Pages are rendered whole at 600 DPI, so figure 3 and figure 4
+routinely share one PNG: two printed legends under one domain passed, because
+there was only one raster. The boundary is the join
+`Panel_ID → Source_Panel_ID → Source_Figure_ID`
+(`IDENTITY_DOMAIN_SPANS_SOURCE_FIGURES`); the raster comparison stays underneath
+it, because one figure spread over two renderings is a different mistake.
+
+**A fill means a CELL, not a level.** `IDENTITY_DOMAIN_FILL_CONFLICT` compared
+`Factor_Level` alone, so `OPEN → TIMEPOINT:PRE` in one panel and
+`OPEN → PHASE:PRE` in another sat in one domain without a word - two different
+cells calibrating each other off one screen. The meaning is
+`(Factor_Name, Factor_Level)` and the message names both.
+
+**The geometry artifact had put the domain in a column called `Figure_ID`.**
+Splitting the two concepts at runtime was only half of it: the reader took ONE
+identifier, and `ARTIFACT_FIELD_COLUMNS` mapped it to `Figure_ID`. The moment
+two views shared a legend - the scenario the whole feature exists for -
+`mono_bar_geometry.csv` lost the provenance view, disagreed with the panel
+manifest under a column of the same name, and `Figure_Identity_SHA256` was a
+domain verdict wearing a figure's name. So:
+
+```text
+Panel_ID  Figure_ID  Identity_Domain_ID  Domain_Identity_SHA256  Auto_Identity_SHA256
+```
+
+The record carries `figure_id` and `identity_domain_id` separately, blank rather
+than duplicated when a caller does not know the view; `verify_artifact` groups
+the verdict by the DOMAIN (it was reading `Figure_ID` and agreeing with itself)
+and refuses a panel that claims two `(Figure_ID, Identity_Domain_ID)` pairs; and
+the value-side foreign key compares BOTH identifiers on the geometry row against
+the panel manifest, so a row that names another view or another domain is
+`IDENTITY_GEOMETRY_ROW_MISMATCH` even though every hash recomputes.
+
+**Finalizer.** The copy-versus-manifest comparison walked the run's copies, so a
+panel the verified manifest resolves and the run never copied had no key to
+compare and was compared against nothing. It walks the union.
+
 ## Suites
 
 All run with scipy hard-blocked by a `sys.meta_path` finder.
 
 | suite | scenarios |
 |---|---|
-| `test_run_batch.py` | 684 |
+| `test_run_batch.py` | 697 |
 | `test_kernel.py` | 232 |
-| `test_measure_mono_bars.py` | 294 |
+| `test_measure_mono_bars.py` | 297 |
 | `test_grid_engine.py` | 180 |
 | `test_finalize.py` | 176 |
-| `test_compile_plan.py` | 132 |
+| `test_compile_plan.py` | 146 |
 | `test_corpus_intake.py` | 60 |
 | `test_mark_readers.py` | 96 |
 | `test_bar_reader.py` | 73 |
 | `test_mono_bar.py` | 55 |
 | `test_integration.py` | 19 |
 | `test_reproducibility.py` | 20 |
-| **total** | **2021** |
+| **total** | **2051** |
 
 Counted, not carried forward: `test_mark_readers.py` was listed at 92 and has
 been 96 since the point-count audit scenarios went in.

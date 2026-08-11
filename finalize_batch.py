@@ -236,6 +236,8 @@ def value_contract_failures(run_dir, frames, machine, flag):
             "Mark_Type": _s(panel.get("Mark_Type")),
             "Unit_ID": _s(panel.get("Unit_ID")),
             "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
+            "Figure_ID": _s(panel.get("Figure_ID")),
+            "Identity_Domain_ID": _s(panel.get("Identity_Domain_ID")),
             "Cell_Map": {
                 "position_factor": next(
                     (_s(r.get("Factor_Name")).upper() for r in qrows
@@ -354,15 +356,25 @@ def resolution_copy_failures(rows_by_panel, frames, flag):
                 [_s(row.get(c)) for c in columns])
     for pid in declared:
         declared[pid].sort()
-    for pid, rows in sorted(rows_by_panel.items()):
+    # The UNION of the two sides. Walking the run's copies alone answers "is
+    # each copy right" and never asks "is each manifest row copied": a panel the
+    # verified manifest resolves and the run never copied has no key in
+    # `rows_by_panel`, so it was compared against nothing. On a run this
+    # producer just made, the missing copy trips the evidence checks first - but
+    # the contract here is that a run made by SOMEBODY ELSE is held to the same
+    # rules, and the other producer is exactly the one that omits a file.
+    for pid in sorted(set(declared) | set(rows_by_panel)):
         # Sorted LISTS, not dicts keyed by Resolution_ID: a dict drops a
         # repeated identifier silently, which is the one thing this comparison
         # must not do. Row ORDER still does not matter.
-        copied = sorted([[_s(r.get(c)) for c in columns] for r in rows])
+        copied = sorted([[_s(r.get(c)) for c in columns]
+                         for r in rows_by_panel.get(pid, [])])
         if copied != declared.get(pid, []):
             flag("panel:%s" % pid, "IDENTITY_RESOLUTION_COPY_MISMATCH",
                  "the resolutions copied into the run for %s are not the ones "
-                 "in the manifest the run validated" % pid)
+                 "in the manifest the run validated%s"
+                 % (pid, "" if pid in rows_by_panel
+                    else " - the run copied none of them"))
             withheld.add(pid)
     return withheld
 

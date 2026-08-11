@@ -1143,7 +1143,8 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
                                  fills, group_window=70, baseline_value=0.0,
                                  threshold=128, stem_threshold=200,
                                  min_bar_px=MONO_GEOMETRY.MIN_BAR_PX,
-                                 review_crop_box=None, *, panel_id, figure_id):
+                                 review_crop_box=None, *, panel_id,
+                                 identity_domain_id, figure_id=""):
     """The bars of one panel, measured and NOT named.
 
     The production entry point to `mono_bar_geometry`. It exists beside
@@ -1169,10 +1170,10 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
     per-slot identification and the order it is written in does not reach the
     records: pass the same patterns in any order and the rows are identical.
 
-    **`panel_id` and `figure_id` are required, and keyword-only.** They were
+    **`panel_id` and `identity_domain_id` are required, and keyword-only.** They were
     keyword arguments defaulting to `""`, which is the shape that made the
     defect they exist to prevent invisible. `fill_identities_by_figure` buckets
-    on `figure_id`, so a caller that forgot it got one bucket named `""` holding
+    on `identity_domain_id`, so a caller that forgot it got one bucket named `""` holding
     every panel of every figure it had measured - and those panels calibrate a
     shared fill vocabulary. Two publications pooled into one vocabulary is not a
     crash; it is a plausible answer, computed from the wrong figure. Blank is
@@ -1199,7 +1200,7 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
     the array this package works in internally had to wrap it in an Image to
     hand it back.
     """
-    for name, value in (("panel_id", panel_id), ("figure_id", figure_id)):
+    for name, value in (("panel_id", panel_id), ("identity_domain_id", identity_domain_id)):
         if not str(value or "").strip():
             raise ValueError(
                 "read_monochrome_bar_geometry: %s must name the %s these rows "
@@ -1217,7 +1218,7 @@ def read_monochrome_bar_geometry(image, panel_box, x_positions, y_calibration,
         baseline=baseline_value, threshold=threshold,
         stem_threshold=stem_threshold, min_bar_px=min_bar_px,
         review_crop_box=review_crop_box, panel_id=panel_id,
-        figure_id=figure_id)
+        identity_domain_id=identity_domain_id, figure_id=figure_id)
 
 
 MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO", "SCATTER",

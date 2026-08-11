@@ -266,7 +266,7 @@ _geo = MR.read_monochrome_bar_geometry(
     Image.open(IMG), tuple(_t["panel_box"]),
     dict(zip(_t["groups"], _t["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
-    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+    _t["patterns"], group_window=60, panel_id="P_MONO", identity_domain_id="F_MONO")
 _cells = [r for r in _geo if r.get("slot") is not None]
 check("it reads every bar the fixture draws", len(_cells) == 12,
       "%d" % len(_cells))
@@ -279,7 +279,7 @@ check("every row says its identity is not calibrated yet",
       all(r.get("identity_status") == "NOT_CALIBRATED" for r in _cells),
       "%s" % {r.get("identity_status") for r in _cells})
 check("the panel and figure it belongs to travel with each row",
-      all(r.get("figure") == "P_MONO" and r.get("figure_id") == "F_MONO"
+      all(r.get("figure") == "P_MONO" and r.get("identity_domain_id") == "F_MONO"
           for r in _cells))
 _v = MR.MONO_GEOMETRY.fill_identities_by_figure(_geo)
 check("and the figure names them once every panel has been measured",
@@ -298,7 +298,7 @@ check("the reader measures with the shared geometry, not a copy of it",
 # width. Two panels of the same figure have a spread, and only then are the
 # ranges reusable.
 #
-# REVERT: pool by panel instead of by figure_id (drop the figure_id bucketing in
+# REVERT: pool by panel instead of by identity_domain_id (drop the identity_domain_id bucketing in
 # fill_identities_by_figure). Each panel then answers alone, all three come back
 # DIRECT_ONLY, and publication 127's two unnameable bars stay unnameable - the
 # figure never gets the chance to be more than the sum of its panels. REVERT the
@@ -309,12 +309,12 @@ print("geometry is per panel, identity is per figure, and the two do not mix")
 _cal_f = MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]])
 
 
-def _one_group(group, panel_id, figure_id):
+def _one_group(group, panel_id, identity_domain_id):
     return MR.read_monochrome_bar_geometry(
         Image.open(IMG), tuple(_t["panel_box"]),
         {group: dict(zip(_t["groups"], _t["group_x"]))[group]},
         _cal_f, _t["patterns"], group_window=60,
-        panel_id=panel_id, figure_id=figure_id)
+        panel_id=panel_id, identity_domain_id=identity_domain_id)
 
 
 _pA = _one_group("T0", "P_A", "FIG_ONE")
@@ -350,7 +350,7 @@ check("nor does mixing them change what the first figure says",
       "%r against %r" % (_split["FIG_ONE"]["prototypes"],
                          _both["FIG_ONE"]["prototypes"]))
 
-# REVERT: give panel_id and figure_id a default of "". The suite still passes -
+# REVERT: give panel_id and identity_domain_id a default of "". The suite still passes -
 # every scenario above supplies them - and a caller that forgets gets one
 # figure bucket named "" holding every panel it has measured. Those panels then
 # calibrate a SHARED fill vocabulary, so two publications pool into one. That is
@@ -367,10 +367,10 @@ _sig = inspect.signature(MR.read_monochrome_bar_geometry)
 check("both are keyword-only and neither has a default",
       all(_sig.parameters[n].kind is inspect.Parameter.KEYWORD_ONLY
           and _sig.parameters[n].default is inspect.Parameter.empty
-          for n in ("panel_id", "figure_id")),
-      repr([(n, str(_sig.parameters[n])) for n in ("panel_id", "figure_id")]))
-for _missing in ("panel_id", "figure_id"):
-    _args = dict(_kw, panel_id="P", figure_id="F")
+          for n in ("panel_id", "identity_domain_id")),
+      repr([(n, str(_sig.parameters[n])) for n in ("panel_id", "identity_domain_id")]))
+for _missing in ("panel_id", "identity_domain_id"):
+    _args = dict(_kw, panel_id="P", identity_domain_id="F")
     _args.pop(_missing)
     try:
         MR.read_monochrome_bar_geometry(**_args)
@@ -381,8 +381,8 @@ for _missing in ("panel_id", "figure_id"):
         check("omitting %s is a TypeError, not a nameless figure" % _missing,
               False, "it returned rows")
 for _blank in ("", "   "):
-    for _which in ("panel_id", "figure_id"):
-        _args = dict(_kw, panel_id="P", figure_id="F")
+    for _which in ("panel_id", "identity_domain_id"):
+        _args = dict(_kw, panel_id="P", identity_domain_id="F")
         _args[_which] = _blank
         try:
             MR.read_monochrome_bar_geometry(**_args)
@@ -405,11 +405,11 @@ _from_image = MR.read_monochrome_bar_geometry(
     Image.open(IMG), tuple(_t["panel_box"]),
     dict(zip(_t["groups"], _t["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
-    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+    _t["patterns"], group_window=60, panel_id="P_MONO", identity_domain_id="F_MONO")
 _from_array = MR.read_monochrome_bar_geometry(
     _rgb, tuple(_t["panel_box"]), dict(zip(_t["groups"], _t["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
-    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+    _t["patterns"], group_window=60, panel_id="P_MONO", identity_domain_id="F_MONO")
 check("an RGB ndarray reads exactly what the Image reads",
       _from_array == _from_image,
       "%d rows against %d" % (len(_from_array), len(_from_image)))
@@ -417,7 +417,7 @@ _from_gray = MR.read_monochrome_bar_geometry(
     MR.MONO_GEOMETRY._gray_from_rgb(_rgb), tuple(_t["panel_box"]),
     dict(zip(_t["groups"], _t["group_x"])),
     MR.AxisCalibration.from_points([(v, p) for v, p in _t["y_ticks"]]),
-    _t["patterns"], group_window=60, panel_id="P_MONO", figure_id="F_MONO")
+    _t["patterns"], group_window=60, panel_id="P_MONO", identity_domain_id="F_MONO")
 check("and a 2-D greyscale array is taken as greyscale, not re-converted",
       _from_gray == _from_image,
       "%d rows against %d" % (len(_from_gray), len(_from_image)))

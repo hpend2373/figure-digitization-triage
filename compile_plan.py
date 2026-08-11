@@ -82,8 +82,8 @@ PLAN_KEYS = {
     "figure": ("source_figure_id", "document_id", "figure_number",
                "source_file", "source_page", "image", "image_sha256",
                "observed_panel_count", "inventory_status",
-               "panel_count_method", "reviewer_id", "inspection_date", "note",
-               "panels"),
+               "panel_count_method", "reviewer_id", "inspection_date",
+               "caption", "note", "panels"),
     "panel": ("panel_id", "label", "outcome_label", "target_status",
               "disposition", "reason", "note", "read"),
     "read": ("mark_type", "unit_id", "figure_view", "identity_domain", "box",
@@ -97,10 +97,11 @@ PLAN_KEYS = {
     "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
                  "display_order", "timepoint_label", "timepoint_days", "note"),
     "unit": ("unit_id", "figure_view", "grid_id", "panel", "outcome_name",
-             "domain", "unit", "statistic", "dispersion_type", "n_outcome",
-             "n_source", "bar_top_definition", "errorbar_stem_confirmed",
-             "errorbar_source", "x_calibration", "grid_rule",
-             "sparse_justification", "value_scale", "display_hint", "note"),
+             "outcome_variable", "domain", "unit", "statistic",
+             "dispersion_type", "n_outcome", "n_source", "bar_top_definition",
+             "errorbar_stem_confirmed", "errorbar_source", "x_calibration",
+             "grid_rule", "sparse_justification", "value_scale",
+             "display_hint", "extraction_method", "extractor_1", "note"),
 }
 
 #: Keys that mean the same thing, canonical form first. One or the other, never
@@ -458,6 +459,21 @@ def validate_plan(plan, file_root="."):
             problems.append(_problem(where, "SOURCE_FILE_NOT_FOUND",
                                      "image=%r is not on disk under %s"
                                      % (image, os.path.realpath(file_root))))
+        # `image_sha256` is OPTIONAL and never becomes the manifest's hash - the
+        # compiler reads that off the bytes, which is the whole point. What it
+        # is for is the author saying which raster they measured against, so a
+        # geometry spec measured on last week's render and a plan pointing at
+        # this week's cannot compile in silence. It was allowed and unread until
+        # now, which made it worse than absent.
+        declared_sha = _s(figure.get("image_sha256")).lower()
+        if declared_sha and resolved is not None:
+            actual = MR.sha256_of(resolved)
+            if actual != declared_sha:
+                problems.append(_problem(
+                    where, "PLAN_IMAGE_SHA256_MISMATCH",
+                    "image_sha256 says %s..., %s hashes to %s.... The plan was "
+                    "written against a different rendering of this figure"
+                    % (declared_sha[:16], image, actual[:16])))
         panels = figure.get("panels") or []
         declared_count = figure.get("observed_panel_count")
         # The one number no software can check, and the compiler will not
@@ -519,6 +535,24 @@ def validate_plan(plan, file_root="."):
                         pwhere, "PLAN_BAD_FIELD_TYPE",
                         "%s must be [[value, pixel], ...] of finite numbers"
                         % axis))
+
+    # A view is a view OF ONE PHYSICAL FIGURE. `Identity_Domain_ID` was split
+    # out of this field because the two answer different questions, and the
+    # provenance half needs its own boundary: the compiler builds the figure row
+    # from `members[0]` - source figure, raster, caption, hash - and counts ALL
+    # the members as its worklist, so one mistyped view name grafts Figure 4's
+    # panels onto Figure 3's provenance and every downstream file agrees with
+    # itself. Both fields are bound to a source figure; neither one covers the
+    # other.
+    for view, members in sorted(views.items()):
+        owners = sorted({sfid for sfid, _ in members})
+        if len(owners) > 1:
+            problems.append(_problem(
+                "figure_views[%r]" % view, "PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES",
+                "the view %r covers panels of %s. A figure view is a view of one "
+                "physical figure - its raster, caption and hash are taken from "
+                "the first member and would be attributed to all of them"
+                % (view, ", ".join(owners))))
 
     for ui, u in enumerate(plan["units"]):
         where = "units[%d]" % ui
@@ -662,7 +696,8 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             for sp in read.get("series") or []:
                 series.append(dict(
                     Panel_ID=pid, Series_ID=_s(sp.get("series_id")),
-                    Colour_Hex=_s(sp.get("colour")), Colour_Tolerance="",
+                    Colour_Hex=_s(sp.get("colour")),
+                    Colour_Tolerance=_s(sp.get("colour_tolerance")),
                     Mask_Key=_s(sp.get("mask_key")),
                     Marker_Shape=_s(sp.get("marker")).upper(),
                     Marker_Fill=_s(sp.get("marker_fill")).upper(),
@@ -673,8 +708,18 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             for order, pp in enumerate(read.get("positions") or []):
                 positions.append(dict(
                     Panel_ID=pid, Position_ID=_s(pp.get("position_id")),
-                    X_Pixel=pp.get("x_pixel", ""), Slot_Index=order,
-                    Display_Order=order, Factor_Name=_s(pp.get("factor")).upper(),
+                    X_Pixel=pp.get("x_pixel", ""),
+                    # Declared when the plan says so. The enumeration is a
+                    # fallback for the ordinary case where list order IS the
+                    # order; overwriting a declared slot with it made
+                    # `slot_index` a field the author could fill and nobody
+                    # read - which is the defect the key allowlist exists for,
+                    # one level in.
+                    Slot_Index=(order if pp.get("slot_index") is None
+                                else pp.get("slot_index")),
+                    Display_Order=(order if pp.get("display_order") is None
+                                   else pp.get("display_order")),
+                    Factor_Name=_s(pp.get("factor")).upper(),
                     Factor_Level=_s(pp.get("level")),
                     Timepoint_Label=_s(pp.get("timepoint_label")),
                     Timepoint_Days=pp.get("timepoint_days", ""),
@@ -708,8 +753,15 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             Image_Resolution_Or_Hash="sha256:" + sha[:24], WPD_Project_File="",
             Observed_Panel_Count=worklist, Worklist_Panel_Count=worklist,
             Unlisted_Panels="", Panel_Reconciliation_Status="MATCHED",
-            Note="view of %s (%d of %s physical panels)"
-                 % (sfid, worklist, physical)))
+            # The author's note FIRST, then the derived provenance. The derived
+            # half cannot be dropped - it is how a reader knows which physical
+            # figure this view is of - and the author's half cannot be dropped
+            # either, which is what happened while `figure_view.note` was an
+            # allowed key nothing read.
+            Note="; ".join(x for x in (
+                _s((plan.get("figure_views") or {}).get(view, {}).get("note")),
+                "view of %s (%d of %s physical panels)"
+                % (sfid, worklist, physical)) if x)))
 
     # ------------------------------------------------------------------ units
     unit_rows = []
@@ -743,6 +795,8 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             Outcome_Domain=_s(u.get("domain")), Unit=_s(u.get("unit")),
             Units=_s(u.get("unit")), Statistic_Type=_s(u.get("statistic")).upper(),
             Grid_Rule=_s(u.get("grid_rule")).upper() or "FULL",
+            Sparse_Justification=_s(u.get("sparse_justification")),
+            Display_Hint=_s(u.get("display_hint")).upper(),
             Value_Scale=_s(u.get("value_scale")).upper() or "RATIO",
             Dispersion_Type=_s(u.get("dispersion_type")).upper(),
             Errorbar_Definition_Source=_s(u.get("errorbar_source")),

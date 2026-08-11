@@ -1836,7 +1836,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     # different plates and there is no reason a screen means the same thing in
     # both - and one fill standing for two different factor levels inside one
     # domain, which is the calibration set disagreeing with itself.
-    domain_raster, domain_fill = {}, {}
+    domain_raster, domain_fill, domain_figure = {}, {}, {}
     for pid, r in panel_index.items():
         # Only the marks whose SERIES IS A FILL. A colour or marker panel is
         # told apart by something printed on the mark itself, so nothing about
@@ -1846,12 +1846,29 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         domain = str(r.get("Identity_Domain_ID", "")).strip()
         if not domain:
-            if True:
-                flag("panels:%s" % pid, "IDENTITY_DOMAIN_MISSING",
-                     "a BAR_MONO panel is identified by its FILL, so it has to "
-                     "say which panels it shares a printed legend with. Use the "
-                     "Figure_ID if this figure has one legend")
+            flag("panels:%s" % pid, "IDENTITY_DOMAIN_MISSING",
+                 "a BAR_MONO panel is identified by its FILL, so it has to "
+                 "say which panels it shares a printed legend with. Use the "
+                 "Figure_ID if this figure has one legend")
             continue
+        # The boundary is the PHYSICAL FIGURE, joined through the panel's own
+        # source row, not the raster path. The corpus renders a whole page at
+        # 600 DPI, so figure 3 and figure 4 routinely share one PNG: comparing
+        # `Image_Path` lets a domain cross two printed legends and never says
+        # so. The raster check stays underneath it - one figure spread over two
+        # renderings is a different mistake and still worth naming.
+        spid = str(r.get("Source_Panel_ID", "")).strip()
+        owning = str(source_panel_index.get(spid, {}).get(
+            "Source_Figure_ID", "")).strip() if spid else ""
+        if owning:
+            first = domain_figure.setdefault(domain, (pid, owning))
+            if first[1] != owning:
+                flag("panels:%s" % pid, "IDENTITY_DOMAIN_SPANS_SOURCE_FIGURES",
+                     "Identity_Domain_ID=%s also covers %s, which belongs to "
+                     "source figure %s and not %s. A domain is one printed "
+                     "legend, and two figures are two legends even when they "
+                     "are rendered on one page"
+                     % (domain, first[0], first[1], owning))
         raster = str(r.get("Image_Path", "")).strip()
         first = domain_raster.setdefault(domain, (pid, raster))
         if first[1] != raster:
@@ -1864,14 +1881,23 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 continue
             fill = str(srow.get("Bar_Fill_Pattern", "")).strip().upper()
             level = str(srow.get("Factor_Level", "")).strip().upper()
+            # A fill means a CELL, and a cell is a factor and a level. Comparing
+            # levels alone let OPEN=TIMEPOINT:PRE in one panel and
+            # OPEN=PHASE:PRE in another sit in one domain without a word,
+            # because both levels read "PRE" - two different cells calibrating
+            # each other off one screen.
+            factor = str(srow.get("Factor_Name", "")).strip().upper()
             if not fill or not level:
                 continue
-            seen = domain_fill.setdefault(domain, {}).setdefault(fill, (pid, level))
-            if seen[1] != level:
+            meaning = (factor, level)
+            seen = domain_fill.setdefault(domain, {}).setdefault(fill,
+                                                                 (pid, meaning))
+            if seen[1] != meaning:
                 flag("panels:%s" % pid, "IDENTITY_DOMAIN_FILL_CONFLICT",
-                     "inside Identity_Domain_ID=%s the %s fill means %s here "
-                     "and %s in %s; one domain is one legend"
-                     % (domain, fill, level, seen[1], seen[0]))
+                     "inside Identity_Domain_ID=%s the %s fill means %s=%s here "
+                     "and %s=%s in %s; one domain is one legend"
+                     % (domain, fill, factor or "?", level,
+                        seen[1][0] or "?", seen[1][1], seen[0]))
 
     # ------------------------------------------------ human-named identities
     # Checked last because it is the only manifest that may legitimately be

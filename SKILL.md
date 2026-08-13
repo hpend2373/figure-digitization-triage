@@ -34,6 +34,7 @@ run produced for this panel and therefore what to look at:
 | `Review_Mode` | open | approve only if |
 |---|---|---|
 | `OVERLAY` | `Overlay_File` | every cross sits on the mark a reader would give it, and none is missed |
+| `OVERLAY_INFERRED` | the same `Overlay_File` — its starred (`*`) marks and the footer that counts them | all of the above, **and** every starred mark really belongs to the series its label names: that series was reasoned to, not measured |
 | `WPD_ONLY` | `WPD_Project_File`, in WebPlotDigitizer | the marks re-derive the values in the row |
 | `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
 | `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` and the `geometry-review/evidence__*` files it cites | all of the above, **and** each resolution's evidence really names that series |
@@ -45,8 +46,17 @@ fails a panel that produced values but does change what a reviewer has to open.
 The confirmation columns are separate claims, and the finalizer requires the
 ones the mode declares: `Marks_Checked` always, plus `Axis_Labels_Checked` and
 `Calibration_Checked` for the two geometry modes, plus `Identity_Checked` for
-the resolved one. Write `CONFIRMED`; blank is not confirmed and `APPROVED`
-alone is a signature on a filename.
+the resolved one, plus `Inference_Checked` for `OVERLAY_INFERRED`. Write
+`CONFIRMED`; blank is not confirmed and `APPROVED` alone is a signature on a
+filename.
+
+`Inference_Checked` is the only one about how the evidence was got rather than
+about what the picture shows. `OVERLAY_INFERRED` is chosen when a cell in the
+panel had its NUMBER read off the ink but its SERIES reasoned to — named by
+elimination, or matched against a fill prototype formed elsewhere in the figure.
+The number is measured; the row heading is not, and the row heading decides
+which column of the analysis the number lands in. `Marks_Checked` says the marks
+are in the right places, which is a different sentence.
 
 The axis question is the one worth being slow about. If a tick VALUE was typed
 wrong — a printed 30 entered as 3 — every bar in the panel is ten times out

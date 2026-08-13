@@ -223,6 +223,17 @@ check("a panel-level confirmation is asked for R2 and R3",
 check("a cell-level one only where the NUMBER was reconstructed",
       set(P.CELL_CONFIRMATION_TIERS) == {"R3"},
       "%r" % (P.CELL_CONFIRMATION_TIERS,))
+# R4 IS NOT A TIER THAT ASKS, IT IS THE TIER THAT REFUSES. `run_batch` prices
+# every panel's values to decide whether to put the inference question on it, and
+# a blank pair prices at R4 - so if R4 were also a confirmation tier, every panel
+# read by a reader that does not answer these questions would carry a question
+# nobody could act on. Which is the thing this file's own comments say a
+# confirmation column must never be.
+check("R4 asks for no confirmation, because it grants no finalization",
+      "R4" not in P.PANEL_CONFIRMATION_TIERS
+      and "R4" not in P.CELL_CONFIRMATION_TIERS
+      and "R4" not in P.FINALIZABLE_TIERS,
+      "%r / %r" % (P.PANEL_CONFIRMATION_TIERS, P.CELL_CONFIRMATION_TIERS))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

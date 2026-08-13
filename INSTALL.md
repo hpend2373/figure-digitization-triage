@@ -4448,6 +4448,63 @@ exact-set contract against an `inference_manifest.csv`. On 397 that is 2 cells
 wanting a panel confirmation and 5 wanting one each — the numbers the split in
 v7.57 made small enough to be worth asking for.
 
+## v7.62 — the reviewer is asked about the row heading, not only the marks
+
+R2, the second of the three gates. A cell whose NUMBER came off the ink and whose
+SERIES was reasoned to now puts a question in front of the person who signs for
+the panel, and the finalizer will not take an approval that does not answer it.
+
+`OVERLAY_INFERRED` is a new `Review_Mode`, chosen when any machine-QC value on
+the panel prices at `R2` or `R3`. It needs **no new artifact** — the overlay has
+starred those marks and counted them in its footer since v7.51, so the extra
+question is one the reviewer can already act on — and it asks for one more
+confirmation, `Inference_Checked`, beside `Marks_Checked`.
+
+    Marks_Checked      the crosses sit on the marks a reader would give them
+    Inference_Checked  and the starred marks belong to the series their labels
+                       name — that series was reasoned to, not measured
+
+Those are different sentences, and only the second one is about how the evidence
+was got. The value is measured; the row heading is not, and it is the row heading
+that decides which column of the analysis the number lands in.
+
+**A mode, not a fifth question on `OVERLAY`.** The same reason
+`BAR_MONO_GEOMETRY_RESOLVED` exists: a confirmation column every panel carries is
+a column everybody types `CONFIRMED` into. Panels with nothing inferred are
+queued `OVERLAY` and finalize without it, which two scenarios assert.
+
+**Priced from the values, declared nowhere.** The mode is computed from the two
+provenance fields the panel's values carry, so a panel cannot opt out of the
+question by leaving a column blank. A statedness guard was written for that case
+and then removed as decoration: a blank pair prices at `R4`, and `R4` is not a
+tier that asks for a confirmation — it is the tier `finalize` refuses outright.
+The reason is now pinned by a scenario in `test_provenance` rather than by a
+branch nothing can reach.
+
+On publication 397 that is **2 cells in 2 panels** — `P1_FPV_WOMEN` and
+`P2_CO_WOMEN` at 0:30, both `COMPLEMENT_OF_DECLARED_STYLES` over
+`RESTORED_MASKED_FURNITURE`. Neither panel reaches the queue today, because 397's
+dispersion definition is unresolved and no value of its 123 passes machine QC; the
+mode is exercised end to end by `test_finalize` instead, over a fixture whose
+reader answers the two questions.
+
+`SKILL.md` gains the mode in the table a reviewer reads and the column in the
+confirmation paragraph — `test_reproducibility` refuses a mode the skill has not
+heard of, because its table ends with "anything else → do not approve".
+`value_review_TEMPLATE.csv` is regenerated from `VALUE_REVIEW_COLUMNS`.
+
+    reverted                                          scenarios that fail
+    the mode never chosen                              3
+    the mode asks nothing extra                        2
+    Inference_Checked not an accepted column           1 + 1, in two suites
+    R2 not a panel-confirmation tier                   3 + 1, in two suites
+    the mode chosen for every overlay panel            1
+
+Still open of the review's list: **R3**, the per-cell confirmation — an
+`inference_manifest.csv` derived from the values, an `inference_review.csv`, and
+an exact-set contract in `finalize` so every R3 cell carries its own decision.
+On 397 that is 2 cells.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4457,11 +4514,12 @@ v7.57 made small enough to be worth asking for.
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
 - 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
   stroke and its edges are the two curves, unread
-- `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
-  tier, the overlay still reads `line_style_source`, and the values file
-  carries neither
-- R2 and R3 are unenforced: no `Inference_Checked` on the panel review, no
-  per-cell `inference_review.csv`, no exact-set contract against a manifest
+- the overlay still marks inference from `line_style_source` rather than from
+  `Identity_Method`, so a reader that answers the new question without setting
+  the old field would star nothing
+- R3 is unenforced: no per-cell `inference_review.csv`, no `inference_manifest.csv`
+  and no exact-set contract between them, so a cell whose value was interpolated
+  is confirmed only at the grain of its panel
 - five of the six readers still answer neither provenance question, so their
   values are counted as `VALUE_METHOD_UNSTATED` rather than gated
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`

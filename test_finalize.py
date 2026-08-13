@@ -337,6 +337,73 @@ check("and the gap is a flag on the run, not a silence",
       "%s" % [p["check"] for p in _stamp_plain["Problems"]])
 
 print()
+print("a cell whose series was reasoned to asks the reviewer one more question")
+# R2 IS THE TIER WHERE THE NUMBER IS MEASURED AND THE ROW HEADING IS NOT - named
+# by elimination, or matched against a fill prototype formed in another group.
+# `Marks_Checked` says the marks are in the right places, which is a different
+# sentence: the row heading decides WHICH COLUMN OF THE ANALYSIS this number
+# lands in, and it came from reasoning rather than from ink.
+#
+# The mode is priced from the values, not declared anywhere, so a panel cannot
+# opt out of the question by leaving a column blank.
+def _inferred_identity(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r["Identity_Method"] = "COMPLEMENT_OF_DECLARED_STYLES"
+        r["Value_Method"] = "DIRECT_CURVE_INK"
+    return rows
+
+
+try:
+    MR.read_panel = _inferred_identity
+    _R2_DIR, _ = fresh_run("run_inferred")
+finally:
+    MR.read_panel = _real_read_panel
+_q2 = pd.read_csv(os.path.join(_R2_DIR, "review_queue.csv"),
+                  dtype=object).fillna("")
+check("the panel is queued in the mode that asks about the inference",
+      list(_q2["Review_Mode"]) == ["OVERLAY_INFERRED"],
+      "%r" % list(_q2["Review_Mode"]))
+check("and that mode needs no artifact the ordinary one does not",
+      RB.REVIEW_MODES["OVERLAY_INFERRED"] == RB.REVIEW_MODES["OVERLAY"],
+      "%r" % (RB.REVIEW_MODES["OVERLAY_INFERRED"],))
+_fp2 = _q2.loc[0, "Review_Subject_SHA256"]
+_r2_path = os.path.join(_R2_DIR, "value_review.csv")
+_no_inf = FIN.finalize(_R2_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fp2)], path=_r2_path),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("an approval that does not mention the inference is not an approval",
+      _no_inf["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "REVIEW_CONFIRMATION_MISSING"
+              for p in _no_inf["problems"]),
+      "%s" % _no_inf)
+check("and no accepted file was written",
+      not os.path.exists(os.path.join(_R2_DIR, "figure_values_accepted.csv")))
+_with_inf = FIN.finalize(_R2_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fp2, Inference_Checked="CONFIRMED")],
+    path=_r2_path), run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("with it, the same panel finalizes",
+      _with_inf["status"] == "FINALIZED" and _with_inf["accepted"] > 0,
+      "%s" % _with_inf)
+# AND IT IS NOT ASKED OF EVERY PANEL. A confirmation column every panel carries
+# is a column everybody types CONFIRMED into - which is why this is a MODE and
+# not a fifth question on OVERLAY. The plain run above is queued as OVERLAY and
+# finalizes without it.
+_plain_q = pd.read_csv(os.path.join(OUT, "review_queue.csv"),
+                       dtype=object).fillna("")
+check("a panel with nothing inferred is not asked about inference",
+      list(_plain_q["Review_Mode"]) == ["OVERLAY"]
+      and "Inference_Checked" not in RB.REVIEW_CONFIRMATIONS["OVERLAY"],
+      "%r / %r" % (list(_plain_q["Review_Mode"]),
+                   RB.REVIEW_CONFIRMATIONS["OVERLAY"]))
+# A blank pair asks nothing either: the readers that do not answer yet cannot be
+# gated, and pricing their silence as an inference would put the question on
+# every panel in the package.
+check("nor is a panel whose reader does not answer the question at all",
+      list(pd.read_csv(os.path.join(_BLANK_DIR, "review_queue.csv"),
+                       dtype=object).fillna("")["Review_Mode"]) == ["OVERLAY"])
+
+print()
 print("an approval is a person, looking at this extraction, saying so")
 _ok = FIN.finalize(OUT, review_path=review([row()]), run_date="2026-08-06",
                    today=datetime.date(2026, 8, 6))

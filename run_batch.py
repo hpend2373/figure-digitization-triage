@@ -89,9 +89,10 @@ import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
+import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.61"
+PIPELINE_VERSION = "7.62"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -239,6 +240,14 @@ REVIEW_DECISIONS = ("APPROVED", "REJECTED")
 #: artifacts are not all in the ledger.
 REVIEW_MODES = {
     "OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",),
+    # THE SAME PICTURE, FOR A PANEL THAT HOLDS AN INFERRED CELL. No new
+    # artifact: the overlay has starred those marks since v7.51 and counted them
+    # in its footer, so the reviewer already has what the extra question asks
+    # about. A separate MODE rather than a sixth confirmation on OVERLAY, for the
+    # reason `BAR_MONO_GEOMETRY_RESOLVED` exists - the requirement is per PANEL,
+    # and a column every panel carries is a column everybody types CONFIRMED
+    # into.
+    "OVERLAY_INFERRED": ("OVERLAY",),
     # Four, and the row pictures the index links to. See
     # `GEOMETRY_ARTIFACT_TYPES`.
     "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
@@ -267,6 +276,14 @@ REVIEW_MODES = {
 #: such a mode - a confirmation field nobody can act on is worse than none.
 REVIEW_CONFIRMATIONS = {
     "OVERLAY": ("Marks_Checked",), "WPD_ONLY": ("Marks_Checked",),
+    # And that the inferred cells were looked at as inferred. R2 is the tier for
+    # a cell whose NUMBER came off the ink and whose SERIES was reasoned to -
+    # named by elimination, or matched against a fill prototype formed in
+    # another group. The value is measured; the row heading is not, and it is
+    # the row heading that decides which column of the analysis this number
+    # lands in. `Marks_Checked` says the marks are in the right places, which is
+    # a different sentence.
+    "OVERLAY_INFERRED": ("Marks_Checked", "Inference_Checked"),
     # This mode puts the AXIS in front of the reviewer, so it asks about the
     # axis. A printed 30 typed as 3 makes every bar in the panel ten times too
     # small together and no arithmetic catches it; the panel picture is the
@@ -2953,11 +2970,27 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # blank mode here - it cannot, because a digitized value with no saved
         # project is already MISSING_PROVENANCE at the gate, but the finalizer
         # refuses a blank mode anyway rather than trusting that ordering.
+        # Does this panel hold a cell whose evidence asks a person a question
+        # beyond "are the marks in the right places"? Priced from the two
+        # provenance fields the values carry, not declared anywhere: a panel
+        # cannot opt out of the question by leaving a column blank.
+        # No statedness test needed, and one was written and removed: a blank
+        # pair prices at R4, and R4 is not a tier that ASKS for a confirmation -
+        # it is the tier that refuses the value outright, in `finalize`. So a
+        # reader that does not answer these questions cannot put the question on
+        # its panel, and nothing here has to say so twice.
+        inferred_here = any(
+            PROV.review_tier(_s(v.get("Identity_Method")),
+                             _s(v.get("Value_Method")))
+            in PROV.PANEL_CONFIRMATION_TIERS
+            for v in machine_qc_df.to_dict("records")
+            if _s(v.get("Run_Panel_ID")) == row["Panel_ID"])
         mode = ("BAR_MONO_GEOMETRY_RESOLVED"
                 if row["Panel_ID"] in geometry_artifacts
                 and resolutions_by_panel.get(row["Panel_ID"])
                 else "BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
-                else "OVERLAY" if overlay_file
+                else ("OVERLAY_INFERRED" if inferred_here else "OVERLAY")
+                if overlay_file
                 else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({
             "Panel_ID": row["Panel_ID"], "Source_Panel_ID": row["Source_Panel_ID"],

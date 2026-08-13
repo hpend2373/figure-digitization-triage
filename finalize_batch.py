@@ -83,6 +83,12 @@ VALUE_REVIEW_COLUMNS = [
     # `BAR_MONO_GEOMETRY_RESOLVED` - the panels that actually have such a cell.
     "Marks_Checked", "Axis_Labels_Checked", "Calibration_Checked",
     "Identity_Checked",
+    # The fifth, and the only one about how the EVIDENCE was got rather than
+    # about what the picture shows. Required by `OVERLAY_INFERRED` - the panels
+    # that actually hold a cell whose series was reasoned to rather than
+    # measured. The overlay stars those marks and counts them in its footer, so
+    # the question is one the reviewer can act on.
+    "Inference_Checked",
     "Reviewed_At", "Note",
 ]
 

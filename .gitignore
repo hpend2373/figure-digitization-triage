@@ -8,3 +8,8 @@ out_pilot_397/
 # Written by the CI suite loop and read by verify_documented_status.py.
 # A run artifact, not a record: the record is the number in README.
 scenario-counts.tsv
+
+# Drawn by test_line_style_mono.py at import and removed again when it ends.
+# It slipped into v7.50 because the suite happened to be mid-run at `git add`;
+# tracked, every clean run of the suite leaves the tree dirty with a deletion.
+mono_line_fixture.png

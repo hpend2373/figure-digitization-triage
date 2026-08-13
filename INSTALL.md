@@ -4392,6 +4392,62 @@ Next, and last: the gates. R2 wants a panel confirmation, R3 wants one per cell,
 R4 wants refusing outright - and on 397 that last one is 62 rows whose numbers a
 model made.
 
+## v7.61 — an approval cannot buy a number a model made
+
+Step 8, and the first gate that reads a tier. R4 only; R2 and R3 need a review
+channel that does not exist yet.
+
+`finalize` now prices every approved value with
+`provenance.review_tier(Identity_Method, Value_Method)` and **refuses the ones no
+signature can finalize**: the fitted curve produced the number, or the nearest
+observation was carried sideways with nothing bracketing it. A reviewer looking at
+an overlay cannot tell a fitted y from a read one — that is exactly what the
+picture cannot show — so an APPROVED decision over such a value is a signature on
+something nobody could have checked.
+
+**It refuses values, not approvals.** The panel still finalizes; the blocked cells
+do not reach `figure_values_accepted.csv`, and the stamp says how many:
+
+    Values_Method_Blocked     refused because the number was not read off the ink
+    Values_Method_Unstated    could not be asked, because their reader does not
+                              answer these two questions yet
+
+A run that accepted forty of forty is a different artifact from one that accepted
+forty of a hundred, and the stamp said the same thing for both. `NOTHING_FINALIZABLE`
+is a new status, distinct from `NOTHING_APPROVED`: the second is about the
+decisions, the first about the evidence, and whoever reads the stamp needs
+different answers to the two.
+
+**A blank pair is not treated as R4 here, and that decision cost a build to
+learn.** `review_tier("", "")` is R4, which is right where it is — an unregistered
+method must not look safer than a registered bad one. Wired straight into this
+gate it refused every value in the package: five of the six readers do not answer
+yet, `test_finalize` went entirely dark and `pilot_beckers` would have stopped
+reaching POOLING_ELIGIBLE. That is not a safety improvement, it is a shutdown. So
+the gate refuses what it KNOWS — a pair that is stated and prices at R4 — and an
+absence is counted and flagged (`VALUE_METHOD_UNSTATED`) rather than guessed at in
+either direction. When the other readers can answer, the blank case becomes a
+block and the count goes to zero on its own.
+
+**The scenarios had to get the methods in legitimately.** Written onto
+`figure_values_machine_qc.csv` after the run they trip `RUN_ARTIFACT_MODIFIED` —
+the ledger hashes that file, and the first version of the scenario tripped it,
+which is the tamper guard working. So the reader is wrapped for the length of one
+run and answers the two questions the way a taught reader will.
+
+    reverted                                          scenarios that fail
+    the R4 block removed                               2
+    blank treated as R4 and blocked too                2
+    NOTHING_FINALIZABLE folded into NOTHING_APPROVED   2
+    the counts dropped from the stamp                  2
+    the unstated gap not flagged                       1
+
+Still open, and now the only thing left of the review's list: **R2 and R3.** A
+panel-level `Inference_Checked` and a per-cell `inference_review.csv` with an
+exact-set contract against an `inference_manifest.csv`. On 397 that is 2 cells
+wanting a panel confirmation and 5 wanting one each — the numbers the split in
+v7.57 made small enough to be worth asking for.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4404,7 +4460,9 @@ model made.
 - `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
   tier, the overlay still reads `line_style_source`, and the values file
   carries neither
-- no gate reads `Review_Tier`: the R2 panel confirmation, the R3 cell
-  confirmation and the R4 finalization block are all still unenforced
+- R2 and R3 are unenforced: no `Inference_Checked` on the panel review, no
+  per-cell `inference_review.csv`, no exact-set contract against a manifest
+- five of the six readers still answer neither provenance question, so their
+  values are counted as `VALUE_METHOD_UNSTATED` rather than gated
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
   single-series assignment: no `Identity_Method` emitted yet

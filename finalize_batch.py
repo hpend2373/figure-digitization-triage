@@ -65,6 +65,7 @@ if HERE not in sys.path:
 
 import batch_manifests as BM                                       # noqa: E402
 import run_batch as RB                                             # noqa: E402
+import provenance as PROV                                          # noqa: E402
 
 FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
 
@@ -100,7 +101,13 @@ FINALIZE_STAGING = ".finalize-staging"
 FINALIZE_MARKER = "figure_values_accepted.csv"
 
 FINALIZE_STATUSES = ("FINALIZED", "NOTHING_APPROVED", "RUN_NOT_FINALIZABLE",
-                     "RUN_ARTIFACT_MODIFIED", "COMMIT_FAILED")
+                     "RUN_ARTIFACT_MODIFIED", "COMMIT_FAILED",
+                     # Panels were approved and every value under them was read
+                     # at a tier no signature can finalize. Distinct from
+                     # NOTHING_APPROVED, which is about the decisions; this is
+                     # about the evidence, and the two need different answers
+                     # from whoever reads the stamp.
+                     "NOTHING_FINALIZABLE")
 
 
 def value_review_columns():
@@ -888,10 +895,18 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     shutil.rmtree(staging, ignore_errors=True)
 
     def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
-              directory=None):
+              directory=None, blocked=0, unstated=0):
         payload = {"schema": FINALIZE_SCHEMA, "Status": status,
                    "Run_Date": run_date, "Panels_Approved": approved,
                    "Values_Accepted": accepted,
+                   # How many approved values this finalization REFUSED because
+                   # the number was not read off the ink, and how many could not
+                   # be asked because their reader does not answer yet. A run
+                   # that accepted forty values out of forty is a different
+                   # artifact from one that accepted forty out of a hundred, and
+                   # the stamp said the same thing for both.
+                   "Values_Method_Blocked": blocked,
+                   "Values_Method_Unstated": unstated,
                    "Accepted_SHA256": accepted_sha,
                    "Run_Stamp_SHA256": run_stamp_sha,
                    "Pipeline_Version": RB.PIPELINE_VERSION,
@@ -1057,6 +1072,70 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "the approved panels produced no machine-QC-passed values",
                     approved=len(approved))
 
+    # AN APPROVAL CANNOT BUY A NUMBER A MODEL MADE.
+    #
+    # `Identity_Method` and `Value_Method` say how the series was named and how
+    # the number was got, and `provenance.review_tier` prices the pair. R4 is the
+    # tier for a value that was not read off the ink at all - the fitted curve
+    # produced it, or the nearest observation was carried sideways with nothing
+    # bracketing it - and a reviewer looking at an overlay CANNOT TELL A FITTED y
+    # FROM A READ ONE. That is exactly what the picture cannot show, so an
+    # APPROVED decision over such a value is a signature on something nobody
+    # could have checked.
+    #
+    # ## Why this gate asks whether the methods are STATED, and does not treat a
+    # ## blank as R4
+    #
+    # `review_tier("", "")` is R4, and that is right where it is: an unregistered
+    # method must not look safer than a registered bad one. Applied here as a
+    # block it would refuse every value in the package, because five of the six
+    # readers do not answer these two questions yet - `pilot_beckers` would stop
+    # reaching POOLING_ELIGIBLE and every scenario in `test_finalize` would go
+    # dark. That is not a safety improvement, it is a shutdown, and shipping it
+    # as one would have been the most expensive way possible to discover that
+    # blank is not the same claim as "measured, and unsafe".
+    #
+    # So this gate refuses what it KNOWS: a pair that is stated and prices at a
+    # tier no signature can finalize. A blank pair is an absence of evidence, and
+    # the answer to an absence is to count it and say so - `Values_Unstated` on
+    # the stamp, and one flag per run - rather than to pretend either way. When
+    # the other readers can answer, the blank case becomes a block and the count
+    # goes to zero on its own.
+    blocked_count = unstated = 0
+    if len(keep):
+        stated, tiers = [], []
+        for _, row in keep.iterrows():
+            identity = _s(row.get("Identity_Method"))
+            value = _s(row.get("Value_Method"))
+            stated.append(bool(identity and value))
+            tiers.append(PROV.review_tier(identity, value))
+        blocked = [is_stated and tier not in PROV.FINALIZABLE_TIERS
+                   for is_stated, tier in zip(stated, tiers)]
+        unstated = sum(1 for is_stated in stated if not is_stated)
+        blocked_count = sum(1 for b in blocked if b)
+        if unstated:
+            flag("run", "VALUE_METHOD_UNSTATED",
+                 "%d of %d approved values do not say how they were got. The "
+                 "readers that answer are gated on it; the rest are not gated "
+                 "at all, which is a gap in this run and not a property of the "
+                 "values" % (unstated, len(keep)))
+        if any(blocked):
+            for (_, row), is_blocked, tier in zip(keep.iterrows(), blocked, tiers):
+                if not is_blocked:
+                    continue
+                flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                     "VALUE_METHOD_NOT_FINALIZABLE",
+                     "Identity_Method=%s Value_Method=%s is %s: the number was "
+                     "not read off the ink, and an overlay cannot show a "
+                     "reviewer the difference"
+                     % (_s(row.get("Identity_Method")) or "(blank)",
+                        _s(row.get("Value_Method")) or "(blank)", tier))
+            keep = keep[[not b for b in blocked]].copy()
+        if not len(keep):
+            return stop("NOTHING_FINALIZABLE",
+                        "every approved value was read at a tier no signature "
+                        "can finalize", approved=len(approved))
+
     keep["Value_Status"] = "HUMAN_APPROVED"
     keep["Pooling_Eligible"] = "TRUE"
     keep["Review_ID"] = [_s(approved[p].get("Review_ID")) for p in keep["Run_Panel_ID"]]
@@ -1073,7 +1152,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     keep.to_csv(staged_accepted, index=False)
     accepted_sha = RB.file_sha256(staged_accepted)
     stamp("FINALIZED", "", approved=len(approved), accepted=len(keep),
-          accepted_sha=accepted_sha, directory=staging)
+          accepted_sha=accepted_sha, directory=staging,
+          blocked=blocked_count, unstated=unstated)
     try:
         _promote(staging, run_dir, fault_after=fault_after)
     except Exception as exc:

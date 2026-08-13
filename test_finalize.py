@@ -228,6 +228,115 @@ def row(**kw):
 
 
 print()
+print("an approval cannot buy a number a model made")
+# R4 IS THE TIER FOR A VALUE THAT WAS NOT READ OFF THE INK - the fitted curve
+# produced it, or the nearest observation was carried sideways with nothing
+# bracketing it. A reviewer looking at an overlay cannot tell a fitted y from a
+# read one; that is exactly what the picture cannot show, so an APPROVED decision
+# over such a value is a signature on something nobody could have checked.
+#
+# THE METHODS HAVE TO ARRIVE LEGITIMATELY. Written onto
+# `figure_values_machine_qc.csv` after the run, they are caught by
+# RUN_ARTIFACT_MODIFIED - the ledger hashes that file, and the first version of
+# this scenario tripped it. So the READER answers them, the way a reader that has
+# been taught to will: this fixture's panel is LINE_COLOR, which does not, so it
+# is wrapped for the length of one run.
+def _with_methods(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for i, r in enumerate(rows):
+        r["Identity_Method"] = "MEASURED_LINE_STYLE"
+        r["Value_Method"] = "FIT_FALLBACK" if i == 0 else "DIRECT_CURVE_INK"
+    return rows
+
+
+_real_read_panel = MR.read_panel
+try:
+    MR.read_panel = _with_methods
+    _R4_DIR, _ = fresh_run("run_tier")
+finally:
+    MR.read_panel = _real_read_panel
+_qc = pd.read_csv(os.path.join(_R4_DIR, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("")
+check("the run itself carried the methods into its values",
+      set(_qc["Value_Method"]) == {"FIT_FALLBACK", "DIRECT_CURVE_INK"},
+      "%r" % sorted(set(_qc["Value_Method"])))
+_fp4 = pd.read_csv(os.path.join(_R4_DIR, "review_queue.csv"),
+                   dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_r4 = FIN.finalize(_R4_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fp4)],
+    path=os.path.join(_R4_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("the panel still finalizes - this refuses values, not approvals",
+      _r4["status"] == "FINALIZED", "%s" % _r4)
+_acc4 = pd.read_csv(os.path.join(_R4_DIR, "figure_values_accepted.csv"),
+                    dtype=object).fillna("")
+check("and the value the fit produced is not in the accepted file",
+      "FIT_FALLBACK" not in set(_acc4["Value_Method"]),
+      "%r" % sorted(set(_acc4["Value_Method"])))
+check("while the ones read off the ink are",
+      len(_acc4) == len(_qc) - 1 and set(_acc4["Value_Method"]) == {"DIRECT_CURVE_INK"},
+      "%d of %d, %r" % (len(_acc4), len(_qc), sorted(set(_acc4["Value_Method"]))))
+_stamp4 = json.load(open(os.path.join(_R4_DIR, "finalize_stamp.json"),
+                         encoding="utf-8"))
+check("the stamp counts what it refused, so the yield is not a mystery",
+      _stamp4["Values_Method_Blocked"] == 1
+      and _stamp4["Values_Accepted"] == len(_qc) - 1, "%s" % _stamp4)
+check("and names the cell and the reason",
+      any(p["check"] == "VALUE_METHOD_NOT_FINALIZABLE"
+          and "FIT_FALLBACK" in p["detail"] for p in _stamp4["Problems"]),
+      "%s" % [p["check"] for p in _stamp4["Problems"]])
+
+# ALL of them, and there is nothing to finalize. Distinct from NOTHING_APPROVED,
+# which is about the decisions; this is about the evidence, and whoever reads the
+# stamp needs different answers to the two.
+def _all_extrapolated(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r["Identity_Method"] = "MEASURED_LINE_STYLE"
+        r["Value_Method"] = "EXTRAPOLATED_CURVE_INK"
+    return rows
+
+
+try:
+    MR.read_panel = _all_extrapolated
+    _ALL_DIR, _ = fresh_run("run_tier_all")
+finally:
+    MR.read_panel = _real_read_panel
+_fpall = pd.read_csv(os.path.join(_ALL_DIR, "review_queue.csv"),
+                     dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_rall = FIN.finalize(_ALL_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fpall)],
+    path=os.path.join(_ALL_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a panel of nothing but model estimates finalizes nothing",
+      _rall["status"] == "NOTHING_FINALIZABLE", "%s" % _rall)
+check("and it is not reported as nobody having looked",
+      _rall["status"] != "NOTHING_APPROVED" and not os.path.exists(
+          os.path.join(_ALL_DIR, "figure_values_accepted.csv")))
+
+# A BLANK PAIR IS AN ABSENCE OF EVIDENCE, NOT A MEASUREMENT OF UNSAFETY. Five of
+# the six readers do not answer these two questions yet. Gating on blank would
+# refuse every value in the package - pilot_beckers would stop reaching
+# POOLING_ELIGIBLE and every scenario above would go dark - so the answer to an
+# absence is to count it and say so.
+_BLANK_DIR, _ = fresh_run("run_blank")
+_fpb = pd.read_csv(os.path.join(_BLANK_DIR, "review_queue.csv"),
+                   dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_rb = FIN.finalize(_BLANK_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fpb)],
+    path=os.path.join(_BLANK_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+_stamp_plain = json.load(open(os.path.join(_BLANK_DIR, "finalize_stamp.json"),
+                              encoding="utf-8"))
+check("a reader that does not answer yet is counted, not refused",
+      _rb["status"] == "FINALIZED"
+      and _stamp_plain["Values_Method_Unstated"] == _stamp_plain["Values_Accepted"]
+      and _stamp_plain["Values_Method_Blocked"] == 0, "%s" % _stamp_plain)
+check("and the gap is a flag on the run, not a silence",
+      any(p["check"] == "VALUE_METHOD_UNSTATED" for p in _stamp_plain["Problems"]),
+      "%s" % [p["check"] for p in _stamp_plain["Problems"]])
+
+print()
 print("an approval is a person, looking at this extraction, saying so")
 _ok = FIN.finalize(OUT, review_path=review([row()]), run_date="2026-08-06",
                    today=datetime.date(2026, 8, 6))

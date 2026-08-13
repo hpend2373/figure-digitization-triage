@@ -83,14 +83,18 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 7.49 -->
-<!-- CURRENT_SCENARIO_COUNT: 2282 -->
+<!-- CURRENT_SCENARIO_COUNT: 2244 -->
 
-2282 scenarios on main after v7.49, verified in a clean room with scipy blocked — the
+2244 scenarios on main after v7.49 under `requirements-lock.txt`, verified in a
+clean room with scipy blocked — the
 statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
 p-value. Every run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
 a bar top found at row 312 by one OpenCV and row 313 by the next is a different
-number in the accepted file.
+number in the accepted file. The scenario count is a property of the tree AND
+the environment: `test_corpus_intake` skips its PDF sections where no backend
+is installed, so a workstation with pdfminer and poppler runs 2282. CI checks
+the locked number, because that is the one a reader can reproduce.
 
 ## Attestation
 

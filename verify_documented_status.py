@@ -36,6 +36,19 @@ reads as "the total went down, update the marker", and the guard helps you
 lower it. A suite that reports zero is refused for the same reason: a suite
 that runs nothing passes.
 
+## The count is a property of the tree AND the environment
+
+`test_corpus_intake` SKIPs its PDF-adapter, per-status, renderer and crop
+sections when no PDF backend is installed, so the same tree runs 149 of those
+scenarios on a workstation with pdfminer and poppler and 111 under
+`requirements-lock.txt`. 2282 against 2244 for the whole package.
+
+The documented number is **the locked environment's**, because that is the one
+a reader can reproduce: `requirements-lock.txt` is what the shipped results
+were produced on. Running this verifier on a box with the optional backends
+installed will report MORE than the marker, and that is not a defect in either
+- it is why the failure message says so.
+
 ## Why the version is read by AST
 
 The same way `test_compile_plan` reads the plan contract. A number in a
@@ -125,8 +138,20 @@ def problems_with(counts, readme, version, package_dir):
             found[name] = hits[0]
 
     if "count" in found and int(found["count"]) != total:
+        # Which direction it missed by is the diagnosis. More than documented
+        # is almost always optional backends installed locally; fewer is a
+        # suite that lost scenarios.
+        why = ("" if total >= int(found["count"]) else
+               " - a suite has lost scenarios, or ran in an environment that "
+               "SKIPs more than the locked one")
+        if total > int(found["count"]):
+            why = (" - this environment runs MORE than the locked one. "
+                   "test_corpus_intake SKIPs its PDF sections without a "
+                   "backend, so a workstation with pdfminer and poppler "
+                   "installed is expected to exceed the documented number; "
+                   "the marker records what requirements-lock.txt runs")
         out.append("README says CURRENT_SCENARIO_COUNT: %s and the suites "
-                   "reported %d" % (found["count"], total))
+                   "reported %d%s" % (found["count"], total, why))
     if "version" in found and found["version"] != version:
         out.append("README says CURRENT_PIPELINE_VERSION: %s and the runner "
                    "says %s" % (found["version"], version))

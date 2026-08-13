@@ -28,6 +28,8 @@ SERIES_COLOURS = ((214, 39, 40), (31, 119, 180), (44, 160, 44), (148, 103, 189),
 MISSING_COLOUR = (120, 120, 120)
 PAD = 12
 FOOTER = 58
+#: One more line of footer, for the key to the star on an inferred label.
+INFERRED_NOTE_HEIGHT = 16
 #: Room to the right for labels, so a value is never clipped by the panel edge.
 LABEL_MARGIN = 150
 
@@ -76,6 +78,54 @@ def _mark_y(mark):
     return None
 
 
+#: Reader fields that say HOW a mark's series was decided, and the one value in
+#: each that means "off the ink". Anything else is an inference, and the
+#: overlay says so. A list rather than a rule, because a reader that grows a
+#: new way of naming a series must add it here on purpose - a provenance field
+#: this file has never heard of would otherwise pass as a measurement.
+IDENTITY_SOURCE_FIELDS = (("line_style_source", "MEASURED"),)
+
+
+#: What an inferred mark's label carries, and the key that explains it. A star,
+#: not a phrase: a label has 150 pixels and a sentence in each would cover the
+#: panel it points at.
+INFERRED_MARK_SUFFIX = " *"
+
+
+def inferred_note(marks):
+    """The footer key for inferred marks, or "" when there are none."""
+    count = sum(1 for m in marks if _inferred_identity(m))
+    if not count:
+        return ""
+    return ("* %d mark(s): SERIES named by elimination, not read off the ink "
+            "- check these first" % count)
+
+
+def mark_label(mark):
+    """What one mark says about itself on the picture."""
+    label = "%s/%s" % (mark.get("series", "?"), mark.get("x_label", "?"))
+    value = mark.get("mean", mark.get("median"))
+    if value is not None:
+        label += " %.4g" % float(value)
+    # WHICH SERIES A MARK BELONGS TO IS NOT ALWAYS MEASURED. A monochrome line
+    # reader whose window was too blinded to measure a stroke pattern names the
+    # last curve by elimination, and that cell is the one a reviewer should
+    # look at hardest - it is the whole question this picture exists to answer.
+    # Unmarked, it looked exactly like a cell read off the ink.
+    if _inferred_identity(mark):
+        label += INFERRED_MARK_SUFFIX
+    return label
+
+
+def _inferred_identity(mark):
+    """True when this mark's SERIES was reasoned to rather than measured."""
+    for field, measured in IDENTITY_SOURCE_FIELDS:
+        value = str(mark.get(field, "") or "")
+        if value and value != measured:
+            return True
+    return False
+
+
 def draw_panel_overlay(path, image_path, panel_box, marks, title="",
                        subtitle="", series_order=(), label_marks=True):
     """Write one review PNG. Returns the path, or None if it could not be drawn.
@@ -95,8 +145,13 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
                             min(source.height, y1 + PAD)))
         ox, oy = max(0, x0 - PAD), max(0, y0 - PAD)
 
+        # A STAR ON A LABEL NEEDS A KEY, and the key needs a line of its own:
+        # appended to the subtitle it ran off the right edge of a 570-pixel
+        # canvas and read "* 4 of them: the SERIE".
+        note = inferred_note(marks)
+        footer = FOOTER + (INFERRED_NOTE_HEIGHT if note else 0)
         canvas = Image.new("RGB", (crop.width + LABEL_MARGIN,
-                                   crop.height + FOOTER), "white")
+                                   crop.height + footer), "white")
         canvas.paste(crop, (0, 0))
         draw = ImageDraw.Draw(canvas)
         font = _font()
@@ -128,10 +183,7 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
                 draw.line((mx - 5, cy, mx + 5, cy), fill=colour, width=1)
             if not label_marks:
                 continue
-            label = "%s/%s" % (mark.get("series", "?"), mark.get("x_label", "?"))
-            value = mark.get("mean", mark.get("median"))
-            if value is not None:
-                label += " %.4g" % float(value)
+            label = mark_label(mark)
             ly = min(max(4, my - 5 + (slot % 4 - 1.5) * 13),
                      crop.height - 14)
             draw.line((mx + 10, my, mx + 16, ly + 5), fill=colour, width=1)
@@ -140,6 +192,8 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
         draw.text((6, crop.height + 6), title or os.path.basename(image_path),
                   fill=(0, 0, 0), font=font)
         draw.text((6, crop.height + 20), subtitle, fill=(70, 70, 70), font=font)
+        if note:
+            draw.text((6, crop.height + 50), note, fill=(150, 80, 0), font=font)
         x = 6
         draw.text((x, crop.height + 36), "series:", fill=(70, 70, 70), font=font)
         x += 46

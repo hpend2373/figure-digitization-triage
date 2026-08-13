@@ -4765,6 +4765,56 @@ check("and the mode it declares is backed by a ledger artifact",
       "%s" % [(r["Panel_ID"], r["Review_Mode"]) for _, r in _rq.iterrows()])
 
 
+print("the picture says which marks had their series reasoned to, not measured")
+# THE OVERLAY IS THE ARTIFACT A REVIEWER APPROVES. Its whole question is "did
+# it put the marks in the right places", and after v7.50 some marks are in a
+# place the ink did not name: a monochrome line reader whose window was too
+# blinded to measure a stroke pattern names the last curve by elimination.
+# Unmarked, such a cell looked exactly like one read off the ink, and the
+# reviewer who most needed to look twice had no reason to.
+_MEASURED = dict(series="S_A", x_label="T1", mean=9.5, x=120.0,
+                 marker_center_px=80.0, line_style_source="MEASURED")
+_NAMED = dict(_MEASURED, series="S_B", marker_center_px=95.0,
+              line_style_source="COMPLEMENT_OF_DECLARED_STYLES")
+check("a measured mark's label is the label it always was",
+      RB.OVERLAY.mark_label(_MEASURED) == "S_A/T1 9.5",
+      "%r" % RB.OVERLAY.mark_label(_MEASURED))
+check("and an inferred one is starred",
+      RB.OVERLAY.mark_label(_NAMED) == "S_B/T1 9.5 *",
+      "%r" % RB.OVERLAY.mark_label(_NAMED))
+check("a mark with no provenance at all is not accused of being inferred",
+      RB.OVERLAY.mark_label(dict(series="S_A", x_label="T1")) == "S_A/T1")
+check("no star, no key",
+      RB.OVERLAY.inferred_note([_MEASURED, _MEASURED]) == "",
+      "%r" % RB.OVERLAY.inferred_note([_MEASURED, _MEASURED]))
+check("a star, and the key counts them",
+      RB.OVERLAY.inferred_note([_MEASURED, _NAMED]).startswith("* 1 mark(s)"),
+      "%r" % RB.OVERLAY.inferred_note([_MEASURED, _NAMED]))
+# A provenance token this file has never heard of must read as an inference,
+# not as a measurement: a reader that grows a new way of naming a series is
+# added to IDENTITY_SOURCE_FIELDS on purpose, and until it is, the picture errs
+# towards asking the reviewer to look.
+check("an unfamiliar provenance token counts as an inference",
+      RB.OVERLAY.inferred_note([dict(_MEASURED, line_style_source="SOMETHING_NEW")])
+      != "")
+# And the key reaches the drawn picture: appended to the subtitle it ran off
+# the right edge and read "* 4 of them: the SERIE", so it has a line of its own
+# and the canvas grows to hold it.
+_ov_dir = os.path.join(ROOT, "overlay_note")
+os.makedirs(_ov_dir, exist_ok=True)
+_ov_src = os.path.join(_ov_dir, "panel.png")
+Image.new("RGB", (240, 200), "white").save(_ov_src)
+_plain = RB.OVERLAY.draw_panel_overlay(
+    os.path.join(_ov_dir, "plain.png"), _ov_src, (10, 200, 10, 160), [_MEASURED])
+_starred = RB.OVERLAY.draw_panel_overlay(
+    os.path.join(_ov_dir, "starred.png"), _ov_src, (10, 200, 10, 160),
+    [_MEASURED, _NAMED])
+_hp = Image.open(_plain).height if _plain else 0
+_hs = Image.open(_starred).height if _starred else 0
+check("the picture with an inferred mark carries the extra line that explains it",
+      _hs - _hp == RB.OVERLAY.INFERRED_NOTE_HEIGHT, "%d against %d" % (_hs, _hp))
+
+
 # `draw_panel_overlay` never raises: a picture that cannot be painted must not
 # fail a panel that produced values. That is right, and it means any panel can
 # reach the queue with no overlay - so the contract has to be enforced rather

@@ -3903,6 +3903,31 @@ carries it and the forward test pins it; the values file has `Identity_Source`
 for exactly this purpose and only BAR_MONO fills it. A reviewer approving a
 line cell cannot currently see that its series was named by elimination.
 
+## v7.51 — the picture a reviewer approves has to say what it does not know
+
+v7.50 taught the reader to name a curve by elimination where the window was too
+blinded to measure its stroke pattern, and recorded that in `line_style_source`
+on the reader row. It stopped there. **The overlay is the artifact a reviewer
+approves** — its whole question is "did it put the marks in the right places" —
+and a mark whose SERIES was reasoned to rather than read looked exactly like
+one read off the ink. The reviewer with the most reason to look twice had none.
+
+Inferred marks are now starred on the label and counted in a footer key of
+their own. On its own line, because appended to the subtitle it ran off the
+right edge of a 570-pixel canvas and read `* 4 of them: the SERIE`.
+
+A provenance token `review_overlay` has never heard of counts as an inference,
+not as a measurement: a reader that grows a new way of naming a series is added
+to `IDENTITY_SOURCE_FIELDS` on purpose, and until it is, the picture errs
+towards asking.
+
+**Three numbers in README were still the v7.49 numbers.** `76 read`,
+`16 of 24 cells`, `refuses the other 8` — and `verify_documented_status.py`
+passed the whole time, because it guards the scenario counts, the version and
+the one status sentence, and these were three other sentences. The guard was
+right about its own scope and the file was wrong; both are worth writing down,
+because "CI is green" was not the same as "the README is true".
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -3912,4 +3937,5 @@ line cell cannot currently see that its series was named by elimination.
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
 - 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
   stroke and its edges are the two curves, unread
-- `line_style_source` stops at the reader and does not reach the values file
+- `line_style_source` reaches the review overlay but not the values file;
+  `Identity_Source` exists for exactly this and only BAR_MONO fills it

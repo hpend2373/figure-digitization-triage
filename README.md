@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.50 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2284 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2322 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.51 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2291 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2329 -->
 
-2284 scenarios on main after v7.50 under `requirements-lock.txt`, and 2322 with
+2291 scenarios on main after v7.51 under `requirements-lock.txt`, and 2329 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -155,7 +155,7 @@ protocol as an extractor - or an agent - reads it, standalone and installable;
 
 ## Status
 
-Publication 397 runs end to end: 26 panels, 384 declared cells, 76 read,
+Publication 397 runs end to end: 26 panels, 384 declared cells, 123 read,
 **0 accepted**. That is the correct answer, not a failure — the running text
 gives "30-min means and SEMs" for the line figures, while the Figure 3/4
 captions say only "(3-min means)". Whether the bars are SD or SEM is not in the
@@ -163,18 +163,24 @@ paper, so every read cell sits at `QC_FAILED` pending an author query.
 
 `LINE_MONO_STYLE` shipped and all twelve two-black-curve panels of Figures 1
 and 2 now read. Against an independent eye reading of Figure 1's MEN mean
-arterial pressure it lands 16 of 24 cells within 1.65 mmHg on a 50 mmHg axis
-and refuses the other 8, at the four positions where the two curves run within
-two mmHg of each other.
+arterial pressure it lands 18 of 24 cells within 1.65 mmHg on a 50 mmHg axis
+and refuses the other 6, at the three positions where the two curves are one
+run of ink — nine to ten pixels thick where a stroke is three.
 
-**76 of 384 declared cells is a low yield and the right one.** Several of these
-panels run their two curves within a stroke of each other for most of their
-length — finger pulse volume in men is two lines about fourteen pixels apart at
-nine of twelve positions — and a cell nobody can attribute is a cell this
-reader does not emit. The geometry behind all twelve is checked against the
-rasters by `forward_test_397_line_geometry.py`: every declared calibration row
-is a printed gridline and every declared x is the centre of its category
-interval.
+**Four of those eighteen have their series named by elimination, and say so.**
+Furniture is dropped from the duty accounting, which hides a dashed curve's
+gaps and cannot invent them, so a curve running along a gridline measures a
+perfect solid line. A SOLID call made through a window that could not see half
+of itself is withheld; where the panel declares two styles and the reader found
+two curves, naming one names the other. Every such cell carries
+`line_style_source`, and the review overlay stars it.
+
+**123 of 384 declared cells is a low yield and the right one.** Several of
+these panels run their two curves within a stroke of each other for much of
+their length, and a cell nobody can attribute is a cell this reader does not
+emit. The geometry behind all twelve is checked against the rasters by
+`forward_test_397_line_geometry.py`: every declared calibration row is a
+printed gridline and every declared x is the centre of its category interval.
 
 `pilot_beckers.py` finishes the ladder on a different paper. Beckers 2007 plots
 approximate entropy as mean and 95% CI, and Table 1 of the same paper prints

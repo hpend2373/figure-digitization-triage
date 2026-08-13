@@ -68,6 +68,58 @@ IDENTITY_METHODS = {
     "HUMAN_RESOLUTION": "R0",
 }
 
+#: A gap between two supports that no blind mask covers: a dash gap, a dotted
+#: gap, or a stroke that fell under the threshold. All three are the FIGURE's
+#: doing rather than the reader's, which is the distinction that matters.
+NO_OCCLUSION = "NONE"
+#: More than one kind of furniture over one gap, or furniture over only part of
+#: it. Not "furniture", because the claim is that the WHOLE gap is explained.
+MIXED_OCCLUSION = "MIXED"
+
+
+def interpolation_method(span, stroke, dash_gap, occlusion):
+    """Which of the four bracketed interpolations this one is.
+
+    `INTERPOLATED_CURVE_INK` was one name over three different things, and on
+    publication 397 it covered 160 of 180 cells - which made it useless as a
+    review tier: R3 with a cell-level confirmation would have put 160 signatures
+    in front of a reviewer, 121 of them for the reader stepping over its own
+    three-pixel error-bar stem. A confirmation that fires on almost everything
+    is the checkbox people learn to click.
+
+    TWO INDEPENDENT QUESTIONS, and the measurements for both are on the row:
+
+      WAS THE GAP OURS?   `occlusion` names the furniture this reader removed
+                          over every column of the gap, or says NONE (the
+                          figure drew no ink there) or MIXED (only partly
+                          explained, which is not explained).
+
+      WAS IT LOCAL?       the span against THE FIGURE'S OWN DRAWING SCALE -
+                          the stroke that draws this curve and the dash gap
+                          this style uses on this panel.
+
+    LOCALITY IS NOT A FRACTION OF ANYTHING. Two candidate rules were measured
+    and thrown away first. `span <= stroke + occlusion_width` passes 160 of 160,
+    because the span between two supports IS the occluded columns plus one -
+    arithmetic, not evidence. A fraction of the position spacing is blunt:
+    `span < 0.25 * spacing` admits 144 including 23 of the 31 MIXED. Against the
+    drawing scale, `span <= max(stroke, dash_gap)` admits all 121 stem
+    restorations, NONE of the 8 gridline gaps, and 5 of the 31 MIXED - and it
+    says the same thing at any rendering, because both references are measured
+    on the figure rather than chosen in pixels.
+    """
+    reach = max(float(stroke or 0), float(dash_gap or 0))
+    if float(span or 0) > reach:
+        # Wider than anything the figure draws at this scale. Whatever covered
+        # it, the ink between the supports was not this curve's own width.
+        return "NONLOCAL_INTERPOLATION"
+    if occlusion == NO_OCCLUSION:
+        return "RESTORED_LINE_PATTERN_GAP"
+    if occlusion == MIXED_OCCLUSION:
+        return "LOCAL_BRACKETED_INTERPOLATION"
+    return "RESTORED_MASKED_FURNITURE"
+
+
 #: HOW the number was arrived at.
 VALUE_METHODS = {
     "BAR_OUTLINE_CENTER": "R0",
@@ -75,9 +127,28 @@ VALUE_METHODS = {
     "BOX_GEOMETRY": "R0",
     "DIRECT_CURVE_INK": "R0",
     "MANUAL_DIGITIZED": "R0",
-    # the same curve's own ink on BOTH sides of x, with the gap between them
-    # filled. Poolable only after a cell-level confirmation, and only if the
-    # span is local - which is a separate check, on numbers this does not hold.
+    # A GAP THIS READER MADE, no wider than the figure's own drawing scale. The
+    # stem, rule or cap covering every column of it was removed so a tall glyph
+    # could not be traced as a curve, and that removal takes the curve's own two
+    # or three pixels with it. Stepping back over it restores a printed stroke;
+    # it does not reconstruct anything the figure did not draw. R1, and no
+    # signature: 121 of 397's 180 cells are this, and a confirmation that fires
+    # on two thirds of every panel is one people learn to click.
+    "RESTORED_MASKED_FURNITURE": "R1",
+    # A gap the FIGURE drew - a dash or dotted gap - no wider than the dash
+    # period measured on this panel. Also a printed stroke, restored.
+    "RESTORED_LINE_PATTERN_GAP": "R1",
+    # Local and bracketed, but the gap is not fully explained: two kinds of
+    # furniture over it, or furniture over part of it. The number is still
+    # measured between two real supports, and which of the two explanations
+    # applies is what a person has to look at. Cell-level confirmation.
+    "LOCAL_BRACKETED_INTERPOLATION": "R3",
+    # Wider than anything this figure draws at this scale. A guess about a curve
+    # nobody sampled, and not rescuable by a signature.
+    "NONLOCAL_INTERPOLATION": "R4",
+    # Kept for the readers that have not been taught the four above. Anything
+    # still emitting it has not measured its own locality, and until it does the
+    # honest tier is the one that asks for the most.
     "INTERPOLATED_CURVE_INK": "R3",
     # the top or bottom edge of a run of ink too thick to be one stroke
     "MERGED_RUN_EDGE": "R3",

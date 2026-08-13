@@ -4173,6 +4173,76 @@ methods.
 Next: `INTERPOLATED_CURVE_INK` split into restored-furniture, local-
 interpolation and nonlocal-interpolation, with a fixed tier each.
 
+## v7.57 — one interpolation was three different claims, and 160 signatures became 5
+
+Step 4, and the first release in which a tier moves.
+
+`INTERPOLATED_CURVE_INK` covered 160 of publication 397's 180 cells at R3. As a
+review tier that is useless: cell-level confirmation would have asked a reviewer
+for **160 signatures, 121 of them for the reader stepping over its own
+three-pixel error-bar stem.** A confirmation that fires on almost everything is
+the checkbox people learn to click — the same failure the review warned about for
+`Inference_Checked` on every panel, one level down.
+
+Two independent questions, both measured on the row since v7.55/56:
+
+    was the gap OURS?   the furniture this reader removed over EVERY column of
+                        it, or NONE (the figure drew nothing there) or MIXED
+                        (partly explained, which is not explained)
+    was it LOCAL?       the span against THE FIGURE'S OWN DRAWING SCALE
+
+    Value_Method                      tier   397 cells
+    DIRECT_CURVE_INK                  R0             6
+    RESTORED_MASKED_FURNITURE         R1           121
+    RESTORED_LINE_PATTERN_GAP         R1             0
+    LOCAL_BRACKETED_INTERPOLATION     R3             5
+    NONLOCAL_INTERPOLATION            R4            34
+    EXTRAPOLATED_CURVE_INK            R4            14
+
+    tiers   R0 6 | R1 119 | R2 2 | R3 5 | R4 48   of 180
+    cell-level signatures   160 -> 5
+    finalizable             132 of 180
+
+**Locality is `span <= max(stroke, dash_gap)`, and it is the third rule tried.**
+The first two were measured and thrown away:
+
+* `span <= stroke + occlusion_width` passes **160 of 160**, MIXED included,
+  because the span between two supports IS the occluded columns plus one.
+  Arithmetic, not evidence.
+* a fraction of the position spacing is blunt: `< 0.25 * spacing` admits 144 and
+  `< 0.5 * spacing` admits 147, including 23 and 24 of the 31 unattributable
+  ones.
+
+Against the drawing scale it admits all 121 stem restorations, **none of the 8
+gridline gaps**, and 5 of the 31 MIXED. Both references are measured on the
+figure, so it says the same thing at any rendering — a pixel constant would have
+made the answer depend on the DPI somebody rendered at.
+
+**Locality beats provenance.** A gridline is furniture this reader removed, and a
+22-pixel gridline gap is still a guess about a curve nobody sampled. Six of the
+eight gridline gaps reach past half the distance to the next datum; not one stem
+gap does.
+
+**48 cells are now R4 and cannot be finalized at any signature.** That is the
+honest cost of the split, and on 397 it changes no outcome — the paper never says
+whether its error bars are SD or SEM, so nothing was poolable anyway. On a paper
+that does say, those 48 would have pooled silently before this release.
+
+Two scenarios were written too strongly and corrected: "every stem gap is
+restored furniture" failed on the fixture's own widest stem gap, correctly — a
+stem that hides more than the curve's own width is not a stroke you can put back
+either. Conditioning on the reach tests the rule instead of the fixture's
+accidents.
+
+    reverted                                        scenarios that fail
+    the split not being applied                      5
+    locality not beating provenance                 10
+    a partly explained gap counting as furniture     1
+    restored furniture priced as a cell review       2
+    a nonlocal interpolation being finalizable       3
+
+Still no gate reads a tier, and the value file still carries none of this.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4185,8 +4255,7 @@ interpolation and nonlocal-interpolation, with a fixed tier each.
 - `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
   tier, the overlay still reads `line_style_source`, and the values file
   carries neither
-- `INTERPOLATED_CURVE_INK` is still one method covering restored furniture,
-  local interpolation and nonlocal interpolation; the cause (v7.55) and the
-  reference widths (v7.56) are recorded, the split is not made
+- no gate reads `Review_Tier`: the R2 panel confirmation, the R3 cell
+  confirmation and the R4 finalization block are all still unenforced
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
   single-series assignment: no `Identity_Method` emitted yet

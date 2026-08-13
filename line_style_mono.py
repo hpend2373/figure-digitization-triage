@@ -261,15 +261,9 @@ def _column_runs(mask, x, max_thickness=7):
 #: span: they are the same width.
 BLIND_CAUSES = ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP")
 
-#: What a gap between two supports is recorded as when no blind mask covers it.
-#: A dash gap, a dotted gap, or a stroke that fell under the threshold - all
-#: three are the FIGURE's doing rather than the reader's, which is the
-#: distinction that matters here.
-NO_OCCLUSION = "NONE"
-#: More than one kind of furniture over one gap, or furniture over only part of
-#: it. Not "furniture", because the claim being made is that the whole gap is
-#: explained, and a partly explained gap is not.
-MIXED_OCCLUSION = "MIXED"
+#: The two sentinels live in `provenance`, with the vocabulary that reads them.
+NO_OCCLUSION = PROV.NO_OCCLUSION
+MIXED_OCCLUSION = PROV.MIXED_OCCLUSION
 
 
 def _occlusion_cause(causes, curve, tol, left, right, height):
@@ -666,6 +660,23 @@ def _complement_fill(found_at, declared):
             blank[0]["style_source"] = "COMPLEMENT_OF_DECLARED_STYLES"
 
 
+def _resolved_value_method(candidate, dash_gap, style):
+    """The value method, with a bracketed interpolation resolved into which one.
+
+    The window measures the span, the stroke and the cause; the panel measures
+    the dash period. Both are needed to say whether a gap was local, so the
+    refinement happens here rather than in the window - and the decision itself
+    lives in `provenance`, with the tier it implies.
+    """
+    method = candidate.get("value_method") or "FIT_FALLBACK"
+    if method != "INTERPOLATED_CURVE_INK":
+        return method
+    return PROV.interpolation_method(
+        candidate.get("value_span"), candidate.get("stroke"),
+        dash_gap.get(style, 0.0),
+        candidate.get("occlusion_cause") or NO_OCCLUSION)
+
+
 def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                                series, threshold=150, x_window=10,
                                fit_half=22, fit_band=5, probe=8,
@@ -869,7 +880,7 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 Identity_Method=("MEASURED_LINE_STYLE"
                                  if (candidate.get("style_source") or "MEASURED")
                                  == "MEASURED" else "COMPLEMENT_OF_DECLARED_STYLES"),
-                Value_Method=candidate.get("value_method") or "FIT_FALLBACK",
+                Value_Method=_resolved_value_method(candidate, dash_gap, style),
                 Value_Span_Px=candidate.get("value_span") or 0,
                 # The two columns the answer was measured between, and WHY the
                 # ones in between carried nothing. A span of three pixels over

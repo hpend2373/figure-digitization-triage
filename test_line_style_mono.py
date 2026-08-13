@@ -548,7 +548,12 @@ check("and the causes are the three kinds of furniture this reader removes",
 print("the same span, two different answers, on figures this file draws")
 # THE SOLID CURVE HAS NO GAPS OF ITS OWN, so with error bars every gap in it is
 # the stem, and every one is found to be.
-_int = [r for r in read() if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+#: A bracketed interpolation, whichever of the four it resolved to. Filtering on
+#: the method name is what these scenarios did until v7.57 split it, and the
+#: filter silently matched nothing.
+BRACKETED = ("RESTORED_MASKED_FURNITURE", "RESTORED_LINE_PATTERN_GAP",
+             "LOCAL_BRACKETED_INTERPOLATION", "NONLOCAL_INTERPOLATION")
+_int = [r for r in read() if r["Value_Method"] in BRACKETED]
 _solid_int = [r for r in _int if r["line_style"] == "SOLID"]
 check("an unbroken curve's only gaps are the stems, and it says so",
       _solid_int and all(r["Occlusion_Cause"] == "ERRORBAR_STEM"
@@ -567,7 +572,7 @@ check("a dash gap widened by a stem is explained by neither, so MIXED",
 # THE SAME FIGURE WITHOUT ERROR BARS. The solid curve now needs no interpolation
 # at all, and the dashed curve's gaps are the FIGURE's - at widths the with-bars
 # run also produced. Nothing in the span separates the two sets.
-_bare_int = [r for r in read(_bare) if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+_bare_int = [r for r in read(_bare) if r["Value_Method"] in BRACKETED]
 check("take the bars away and the unbroken curve needs no interpolation",
       not [r for r in _bare_int if r["line_style"] == "SOLID"],
       "%r" % [(r["x_label"], r["Value_Span_Px"])
@@ -590,8 +595,7 @@ check("and the two sets share widths, so the width cannot be the test",
 # a 35-column gap the GRIDLINE explains, which a reader that cannot tell its
 # furniture apart would file under the stem - and "a stroke the error bar hid"
 # and "a stroke a gridline hid" are different claims about different widths.
-_ruled_int = [r for r in read(_ruled)
-              if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+_ruled_int = [r for r in read(_ruled) if r["Value_Method"] in BRACKETED]
 _by_rule = [r for r in _ruled_int if r["Occlusion_Cause"] == "HORIZONTAL_RULE"]
 check("a gap a gridline explains is the gridline's, not the stem's",
       len(_by_rule) == 1 and _by_rule[0]["x_label"] == "T7",
@@ -642,6 +646,76 @@ check("the window reports every run of empty columns it crossed",
       "%r" % (_w["gaps"],))
 check("and the longest gap is still the separate thing it always was",
       _w["gap"] == 2, "%r" % _w["gap"])
+
+print("and now the reference widths decide which interpolation this was")
+# THE FIRST RELEASE IN WHICH A TIER MOVES. Before it, every bracketed
+# interpolation was `INTERPOLATED_CURVE_INK` at R3 - 160 of publication 397's 180
+# cells, which asked for 160 cell-level signatures, 121 of them for the reader
+# stepping over its own three-pixel error-bar stem. Split by cause and locality
+# the same publication asks for FIVE.
+_res = read()
+check("no cell leaves as the unrefined interpolation any more",
+      not [r for r in _res if r["Value_Method"] == "INTERPOLATED_CURVE_INK"],
+      "%r" % sorted({r["Value_Method"] for r in _res}))
+check("every method a cell leaves with is in the shared vocabulary",
+      {r["Value_Method"] for r in _res} <= set(PROV.VALUE_METHODS),
+      "%r" % sorted({r["Value_Method"] for r in _res}))
+# CONDITIONED ON THE REACH, not on the cause alone. The first version of this
+# asserted that every stem gap is restored furniture and failed on the fixture's
+# own widest one - correctly: a stem that hides more than the curve's own width
+# is not a stroke you can put back either. Testing the rule instead of the
+# fixture's accidents is the difference.
+def _reach(row):
+    return max(row["Local_Stroke_Px"], row["Expected_Dash_Gap_Px"])
+
+
+_stem_local = [r for r in _res if r["Occlusion_Cause"] == "ERRORBAR_STEM"
+               and r["Value_Span_Px"] <= _reach(r)]
+_stem_wide = [r for r in _res if r["Occlusion_Cause"] == "ERRORBAR_STEM"
+              and r["Value_Span_Px"] > _reach(r)]
+check("a stem gap inside the drawing scale is restored furniture at R1",
+      _stem_local and all(r["Value_Method"] == "RESTORED_MASKED_FURNITURE"
+                          and r["Review_Tier"] == "R1" for r in _stem_local),
+      "%r" % sorted({(r["Value_Method"], r["Review_Tier"])
+                     for r in _stem_local}))
+check("and a stem gap wider than it is not, however well explained",
+      all(r["Value_Method"] == "NONLOCAL_INTERPOLATION" for r in _stem_wide),
+      "%r" % [(r["Value_Span_Px"], _reach(r), r["Value_Method"])
+              for r in _stem_wide])
+# The gridline gap at T7 is 35 columns of furniture THIS READER REMOVED, and it
+# is still a guess about a curve nobody sampled. Locality beats provenance.
+_ruled_wide = [r for r in read(_ruled)
+               if r["Occlusion_Cause"] == "HORIZONTAL_RULE"]
+check("a 35-column gap the gridline explains is still not local",
+      _ruled_wide and all(r["Value_Method"] == "NONLOCAL_INTERPOLATION"
+                          and r["Review_Tier"] == "R4" for r in _ruled_wide),
+      "%r" % [(r["Value_Span_Px"], r["Value_Method"], r["Review_Tier"])
+              for r in _ruled_wide])
+check("and R4 is not finalizable, whatever a reviewer signs",
+      not any(PROV.finalizable(r["Identity_Method"], r["Value_Method"])
+              for r in _ruled_wide))
+# Take the error bars away and the dashed curve's own gaps are the figure's, at
+# widths inside its measured dash period: the same R1, reached the other way.
+_bare_gaps = [r for r in read(_bare)
+              if r["Occlusion_Cause"] == LSM.NO_OCCLUSION
+              and r["Value_Method"] not in ("DIRECT_CURVE_INK",
+                                            "EXTRAPOLATED_CURVE_INK")]
+check("a dash gap inside the measured dash period is restored pattern at R1",
+      [r for r in _bare_gaps if r["Value_Span_Px"] <= _reach(r)]
+      and all(r["Value_Method"] == "RESTORED_LINE_PATTERN_GAP"
+              and r["Review_Tier"] == "R1"
+              for r in _bare_gaps if r["Value_Span_Px"] <= _reach(r)),
+      "%r" % sorted({(r["Value_Span_Px"], r["Expected_Dash_Gap_Px"],
+                      r["Value_Method"]) for r in _bare_gaps}))
+check("and one wider than the period the figure actually uses is not",
+      all(r["Value_Method"] == "NONLOCAL_INTERPOLATION"
+          for r in _bare_gaps if r["Value_Span_Px"] > _reach(r)),
+      "%r" % [(r["Value_Span_Px"], _reach(r), r["Value_Method"])
+              for r in _bare_gaps if r["Value_Span_Px"] > _reach(r)])
+check("the tier is still the one the registry derives, never one written down",
+      all(r["Review_Tier"] == PROV.review_tier(r["Identity_Method"],
+                                               r["Value_Method"])
+          for r in _res + read(_bare) + read(_ruled)))
 
 print("the reference widths reach the row, measured per panel and per style")
 _ref = read()

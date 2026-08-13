@@ -75,6 +75,67 @@ check("R4 is exactly the tier that is not finalizable",
       "%r" % (P.FINALIZABLE_TIERS,))
 
 print()
+print("one interpolation is three different claims")
+# `INTERPOLATED_CURVE_INK` covered 160 of publication 397's 180 cells, which
+# made it useless AS A TIER: R3 with a cell-level confirmation would have put 160
+# signatures in front of a reviewer, 121 of them for the reader stepping over its
+# own three-pixel error-bar stem. Split, the same publication asks for FIVE.
+_STEM, _NONE, _MIXED = "ERRORBAR_STEM", P.NO_OCCLUSION, P.MIXED_OCCLUSION
+check("a gap the reader made, no wider than the stroke, is restored furniture",
+      P.interpolation_method(3, 6, 1, _STEM) == "RESTORED_MASKED_FURNITURE",
+      P.interpolation_method(3, 6, 1, _STEM))
+check("and costs no signature - it puts back a stroke the figure printed",
+      P.value_tier("RESTORED_MASKED_FURNITURE") == "R1")
+check("a gap the FIGURE drew, within its own dash period, is the same kind",
+      P.interpolation_method(3, 6, 1, _NONE) == "RESTORED_LINE_PATTERN_GAP"
+      and P.value_tier("RESTORED_LINE_PATTERN_GAP") == "R1")
+# Local and bracketed but not fully explained - two kinds of furniture over one
+# gap, or furniture over part of it. The number is measured between two real
+# supports; which explanation applies is what a person has to look at.
+check("a local gap nobody can attribute needs looking at, cell by cell",
+      P.interpolation_method(3, 6, 1, _MIXED) == "LOCAL_BRACKETED_INTERPOLATION"
+      and P.value_tier("LOCAL_BRACKETED_INTERPOLATION") == "R3")
+check("and a gap wider than anything the figure draws is not rescuable",
+      P.interpolation_method(22, 5, 1, _STEM) == "NONLOCAL_INTERPOLATION"
+      and not P.finalizable("MEASURED_LINE_STYLE", "NONLOCAL_INTERPOLATION"))
+# LOCALITY BEATS PROVENANCE. A gridline is furniture this reader removed, and a
+# 22-pixel gridline gap is still a guess about a curve nobody sampled.
+check("furniture we removed does not make a wide gap local",
+      P.interpolation_method(22, 5, 1, "HORIZONTAL_RULE")
+      == "NONLOCAL_INTERPOLATION")
+
+print()
+print("what locality is measured against, and two rules that were thrown away")
+# THE REACH IS THE FIGURE'S OWN DRAWING SCALE - the thicker of the stroke that
+# draws this curve and the dash gap this style uses on this panel. Both are
+# measured on the figure, so the answer is the same at any rendering; a pixel
+# constant would make it depend on the DPI somebody rendered at.
+check("a gap wider than the stroke but inside the dash period is still local",
+      P.interpolation_method(4, 2, 5, _STEM) == "RESTORED_MASKED_FURNITURE",
+      P.interpolation_method(4, 2, 5, _STEM))
+check("and one wider than both is not",
+      P.interpolation_method(6, 2, 5, _STEM) == "NONLOCAL_INTERPOLATION")
+check("a curve with no measured scale at all admits nothing",
+      P.interpolation_method(1, 0, 0, _STEM) == "NONLOCAL_INTERPOLATION",
+      P.interpolation_method(1, 0, 0, _STEM))
+# REJECTED RULE 1: `span <= stroke + occlusion_width`. It passes 160 of 160,
+# because the span between two supports IS the occluded columns plus one -
+# arithmetic, not evidence. The 22-pixel gridline gap is where the two rules
+# disagree, and this one has to refuse it.
+check("the span-under-stroke-plus-occlusion rule would have passed this; this "
+      "one refuses it",
+      P.interpolation_method(22, 5, 1, "HORIZONTAL_RULE")
+      == "NONLOCAL_INTERPOLATION" and 22 <= 5 + 21)
+# REJECTED RULE 2: a fraction of the position spacing. Measured on 397,
+# `span < 0.25 * spacing` admits 144 of the 160 and `span < 0.5 * spacing` admits
+# 147 - including 23 and 24 of the 31 unattributable ones. A nine-pixel gap on a
+# 33-pixel spacing passes both and fails this.
+check("a fraction of the position spacing would have passed this; this one "
+      "refuses it",
+      P.interpolation_method(9, 4, 0, "HORIZONTAL_RULE")
+      == "NONLOCAL_INTERPOLATION" and 9 < 0.5 * 33.0)
+
+print()
 print("the vocabularies are vocabularies")
 check("every registered identity method has a tier this module knows",
       set(P.IDENTITY_METHODS.values()) <= set(P.TIERS),

@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.51 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2291 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2329 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.52 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2297 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2335 -->
 
-2291 scenarios on main after v7.51 under `requirements-lock.txt`, and 2329 with
+2297 scenarios on main after v7.52 under `requirements-lock.txt`, and 2335 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the

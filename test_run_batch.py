@@ -4797,6 +4797,31 @@ check("a star, and the key counts them",
 check("an unfamiliar provenance token counts as an inference",
       RB.OVERLAY.inferred_note([dict(_MEASURED, line_style_source="SOMETHING_NEW")])
       != "")
+# AND A FIELD IT HAS NEVER HEARD OF, which the whitelist above cannot see. The
+# comment beside IDENTITY_SOURCE_FIELDS used to claim it could - "a provenance
+# field this file has never heard of would otherwise pass as a measurement" -
+# which is exactly backwards, and a guarantee written down and not implemented
+# is worse than the gap it describes. A future reader emitting
+# `marker_identity_source` and forgetting to register it drew a plain mark.
+_STRANGE = dict(_MEASURED, marker_identity_source="ELIMINATION")
+check("a provenance FIELD the overlay does not know makes the mark unreadable",
+      RB.OVERLAY.unreadable_provenance(_STRANGE) == ["marker_identity_source"],
+      "%r" % (RB.OVERLAY.unreadable_provenance(_STRANGE),))
+check("and the mark is questioned on the picture rather than drawn as measured",
+      RB.OVERLAY.mark_label(_STRANGE).endswith("?"),
+      "%r" % RB.OVERLAY.mark_label(_STRANGE))
+check("the key names the field, because registering it is the fix",
+      "marker_identity_source" in RB.OVERLAY.inferred_note([_STRANGE]),
+      "%r" % RB.OVERLAY.inferred_note([_STRANGE]))
+check("a registered field is not questioned",
+      RB.OVERLAY.unreadable_provenance(_NAMED) == [],
+      "%r" % (RB.OVERLAY.unreadable_provenance(_NAMED),))
+check("nor is an ordinary reader field that is not provenance",
+      RB.OVERLAY.unreadable_provenance(dict(_MEASURED, top_px=3.0)) == [])
+# Two keys, two footer lines, and the canvas grows for both.
+_two = RB.OVERLAY.inferred_note([_NAMED, _STRANGE])
+check("a picture with both kinds of doubt says both",
+      len(_two.splitlines()) == 2, "%r" % _two)
 # And the key reaches the drawn picture: appended to the subtitle it ran off
 # the right edge and read "* 4 of them: the SERIE", so it has a line of its own
 # and the canvas grows to hold it.

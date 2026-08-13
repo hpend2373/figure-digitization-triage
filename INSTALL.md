@@ -3928,6 +3928,27 @@ the one status sentence, and these were three other sentences. The guard was
 right about its own scope and the file was wrong; both are worth writing down,
 because "CI is green" was not the same as "the README is true".
 
+## v7.52 — the guard v7.51 documented was not the guard it had
+
+v7.51 said this about the overlay's provenance registry:
+
+> a provenance field this file has never heard of would otherwise pass as a
+> measurement
+
+**Backwards.** A whitelist of FIELD NAMES protects against an unknown TOKEN in
+a field it knows and is blind to a field it does not. A future reader emitting
+`marker_identity_source = "ELIMINATION"` and forgetting to register it would
+have drawn a plain, unstarred mark — and the comment beside the list would have
+said that could not happen. A guarantee written down and not implemented is
+worse than the gap it describes, because it stops the next person looking.
+
+The real guard is a naming convention, not the list: a key ending `_source` or
+`_method` that `review_overlay` cannot interpret marks the label `?` and adds a
+footer line naming the field, because registering it is the fix and the person
+reading the picture is the one who can say so. A field named nothing like
+either still slips through; that is now written down as a limit rather than as
+a covered case.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

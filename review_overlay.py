@@ -79,11 +79,32 @@ def _mark_y(mark):
 
 
 #: Reader fields that say HOW a mark's series was decided, and the one value in
-#: each that means "off the ink". Anything else is an inference, and the
-#: overlay says so. A list rather than a rule, because a reader that grows a
-#: new way of naming a series must add it here on purpose - a provenance field
-#: this file has never heard of would otherwise pass as a measurement.
+#: each that means "off the ink". Anything else in one of these fields is an
+#: inference and the overlay stars it.
+#:
+#: THIS LIST IS NOT THE GUARD IT WAS FIRST DOCUMENTED AS. The comment here used
+#: to claim that "a provenance field this file has never heard of would
+#: otherwise pass as a measurement", which is exactly backwards: a whitelist of
+#: FIELD NAMES protects against an unknown TOKEN in a field it knows, and is
+#: blind to a field it does not. A future reader emitting
+#: `marker_identity_source = "ELIMINATION"` and forgetting to register it here
+#: would have drawn a plain, unstarred mark, and the docstring would have said
+#: it could not happen. A guarantee written down and not implemented is worse
+#: than the gap it describes.
+#:
+#: So the real guard is the SUFFIX below, not this list. A key that looks like
+#: provenance and is not understood makes the mark UNKNOWN rather than
+#: measured: the picture asks the reviewer to look instead of quietly claiming
+#: the ink named it.
 IDENTITY_SOURCE_FIELDS = (("line_style_source", "MEASURED"),)
+
+#: How a reader names a provenance field. Everything matching this and not in
+#: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
+#: A convention can still be side-stepped by a field named nothing like this,
+#: and that is a real limit rather than a covered case - `test_mark_readers`
+#: pins the convention against what the readers actually emit, which is the
+#: only place it can be checked mechanically.
+PROVENANCE_SUFFIXES = ("_source", "_method")
 
 
 #: What an inferred mark's label carries, and the key that explains it. A star,
@@ -92,13 +113,26 @@ IDENTITY_SOURCE_FIELDS = (("line_style_source", "MEASURED"),)
 INFERRED_MARK_SUFFIX = " *"
 
 
+#: What a mark carrying provenance this file cannot interpret is labelled with.
+UNKNOWN_MARK_SUFFIX = " ?"
+
+
 def inferred_note(marks):
-    """The footer key for inferred marks, or "" when there are none."""
-    count = sum(1 for m in marks if _inferred_identity(m))
-    if not count:
-        return ""
-    return ("* %d mark(s): SERIES named by elimination, not read off the ink "
-            "- check these first" % count)
+    """The footer key for starred and questioned marks, or "" if none."""
+    lines = []
+    starred = sum(1 for m in marks if _inferred_identity(m))
+    if starred:
+        lines.append("* %d mark(s): SERIES named by elimination, not read off "
+                     "the ink - check these first" % starred)
+    unknown = sorted({key for m in marks for key in unreadable_provenance(m)})
+    if unknown:
+        # Named, not just counted: the fix is to register the field, and the
+        # person reading this picture is the person who can say so.
+        lines.append("? %d mark(s) carry provenance this overlay cannot read "
+                     "(%s) - treat as unverified" % (
+                         sum(1 for m in marks if unreadable_provenance(m)),
+                         ", ".join(unknown)))
+    return "\n".join(lines)
 
 
 def mark_label(mark):
@@ -114,6 +148,8 @@ def mark_label(mark):
     # Unmarked, it looked exactly like a cell read off the ink.
     if _inferred_identity(mark):
         label += INFERRED_MARK_SUFFIX
+    if unreadable_provenance(mark):
+        label += UNKNOWN_MARK_SUFFIX
     return label
 
 
@@ -124,6 +160,20 @@ def _inferred_identity(mark):
         if value and value != measured:
             return True
     return False
+
+
+def unreadable_provenance(mark):
+    """Provenance keys on this mark that the overlay cannot interpret.
+
+    A mark is only as trustworthy as the picture's ability to say how it was
+    decided. A key this file does not understand is not a measurement and must
+    not be drawn as one.
+    """
+    known = {field for field, _measured in IDENTITY_SOURCE_FIELDS}
+    return sorted(key for key in mark
+                  if key not in known
+                  and any(key.endswith(s) for s in PROVENANCE_SUFFIXES)
+                  and str(mark.get(key) or ""))
 
 
 def draw_panel_overlay(path, image_path, panel_box, marks, title="",
@@ -149,7 +199,7 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
         # appended to the subtitle it ran off the right edge of a 570-pixel
         # canvas and read "* 4 of them: the SERIE".
         note = inferred_note(marks)
-        footer = FOOTER + (INFERRED_NOTE_HEIGHT if note else 0)
+        footer = FOOTER + INFERRED_NOTE_HEIGHT * len(note.splitlines())
         canvas = Image.new("RGB", (crop.width + LABEL_MARGIN,
                                    crop.height + footer), "white")
         canvas.paste(crop, (0, 0))
@@ -192,8 +242,9 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
         draw.text((6, crop.height + 6), title or os.path.basename(image_path),
                   fill=(0, 0, 0), font=font)
         draw.text((6, crop.height + 20), subtitle, fill=(70, 70, 70), font=font)
-        if note:
-            draw.text((6, crop.height + 50), note, fill=(150, 80, 0), font=font)
+        for i, line in enumerate(note.splitlines()):
+            draw.text((6, crop.height + 50 + i * INFERRED_NOTE_HEIGHT), line,
+                      fill=(150, 80, 0), font=font)
         x = 6
         draw.text((x, crop.height + 36), "series:", fill=(70, 70, 70), font=font)
         x += 46

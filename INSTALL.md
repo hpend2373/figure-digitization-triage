@@ -4308,6 +4308,44 @@ Two of the five reverts were silent at first and are worth recording:
     the sweep-disagreement refusal                  1
     the direction left on the answer                1
 
+## v7.59 — a tier is derived by whoever needs it and written down nowhere
+
+Step 6, and the smallest release of the six.
+
+`line_style_mono` wrote `Review_Tier` onto every row it emitted. The comment
+beside that line said the tier is derived **so that nothing in a file can declare
+its way to a weaker check** — while writing it into the row that becomes the file.
+Nothing read it, so nothing was wrong yet; the moment it reached
+`figure_values_*.csv` and a finalizer trusted it, the principle would have been
+gone and the code would still have claimed it.
+
+`provenance.review_tier(Identity_Method, Value_Method)` is one call. The overlay,
+the gate and the finalizer each make it themselves. **A derived value that is also
+stored is two answers to one question, and the stored one is the one somebody can
+edit.**
+
+**The guard is a source scan, not a check on one reader's output**, because the
+readers that have not been written yet are the ones it has to hold for. Every
+non-test module in the package is parsed and searched for a tier put INTO a
+record — as a keyword argument, as a dict key, or as a subscript assignment. Three
+synthetic modules prove the scan can see each of those three forms, and a fourth
+that derives a tier instead proves it does not flag the correct pattern. A guard
+that cannot fire is the shape this package has caught itself in twice now
+(v7.51's field whitelist, v7.55's aliased blind mask).
+
+Scenarios that read the tier off the row now derive it. `pilot_397` is unchanged.
+
+    reverted                                       scenarios that fail
+    the tier written back onto the row              2, in two suites
+    the scan not looking at keyword arguments       1
+
+That closes the six steps of the provenance programme as it was proposed. What is
+still not done, and is the whole point of the next round: **no gate reads a tier.**
+`Identity_Method` and `Value_Method` stop at the reader row, the R2 panel
+confirmation and R3 cell confirmation do not exist, and an R4 value is refused by
+nothing but arithmetic in a docstring. On 397 that is 48 cells whose numbers a
+model made, which the pipeline would pool today if the paper had said SD or SEM.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

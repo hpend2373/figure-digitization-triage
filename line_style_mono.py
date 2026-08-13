@@ -979,8 +979,9 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 # should read. `line_style_source` above is this reader's own
                 # detail and stays for its own scenarios; `Identity_Method` and
                 # `Value_Method` are the two questions every reader answers,
-                # and `Review_Tier` is DERIVED from them so nothing in a file
-                # can declare its way to a weaker check.
+                # The tier they imply is derived by whoever needs it and
+                # written down nowhere, so nothing in a file can declare its
+                # way to a weaker check.
                 Identity_Method=("MEASURED_LINE_STYLE"
                                  if (candidate.get("style_source") or "MEASURED")
                                  == "MEASURED" else "COMPLEMENT_OF_DECLARED_STYLES"),
@@ -1014,9 +1015,16 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 # an unrecovered one has no dispersion to confirm.
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
             ))
-    for row in out:
-        row["Review_Tier"] = PROV.review_tier(row["Identity_Method"],
-                                              row["Value_Method"])
+    # NO REVIEW TIER ON THE ROW. It was written here until v7.59, and the
+    # docstring beside it said the tier is derived so that nothing in a file can
+    # declare its way to a weaker check - while writing it into the row that
+    # would become the file. Nothing read it yet, so nothing was wrong yet; the
+    # moment it reached `figure_values_*.csv` and a finalizer trusted it, the
+    # principle would have been gone and the code would still have claimed it.
+    #
+    # `provenance.review_tier(Identity_Method, Value_Method)` is one call, and
+    # every consumer - the overlay, the gate, the finalizer - makes it itself.
+    # A derived value that is also stored is two answers to one question.
     out.sort(key=lambda row: (row["series"], row["order"]))
     return out
 

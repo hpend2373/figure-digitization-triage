@@ -774,15 +774,24 @@ def _reach(row):
     return max(row["Local_Stroke_Px"], row["Expected_Dash_Gap_Px"])
 
 
+def _tier(row):
+    """The tier this row implies, derived the way every consumer must derive it.
+
+    Not read off the row: v7.59 took `Review_Tier` off it. A derived value that
+    is also stored is two answers to one question, and the stored one is the one
+    somebody can edit.
+    """
+    return PROV.review_tier(row["Identity_Method"], row["Value_Method"])
+
+
 _stem_local = [r for r in _res if r["Occlusion_Cause"] == "ERRORBAR_STEM"
                and r["Value_Span_Px"] <= _reach(r)]
 _stem_wide = [r for r in _res if r["Occlusion_Cause"] == "ERRORBAR_STEM"
               and r["Value_Span_Px"] > _reach(r)]
 check("a stem gap inside the drawing scale is restored furniture at R1",
       _stem_local and all(r["Value_Method"] == "RESTORED_MASKED_FURNITURE"
-                          and r["Review_Tier"] == "R1" for r in _stem_local),
-      "%r" % sorted({(r["Value_Method"], r["Review_Tier"])
-                     for r in _stem_local}))
+                          and _tier(r) == "R1" for r in _stem_local),
+      "%r" % sorted({(r["Value_Method"], _tier(r)) for r in _stem_local}))
 check("and a stem gap wider than it is not, however well explained",
       all(r["Value_Method"] == "NONLOCAL_INTERPOLATION" for r in _stem_wide),
       "%r" % [(r["Value_Span_Px"], _reach(r), r["Value_Method"])
@@ -793,8 +802,8 @@ _ruled_wide = [r for r in read(_ruled)
                if r["Occlusion_Cause"] == "HORIZONTAL_RULE"]
 check("a 35-column gap the gridline explains is still not local",
       _ruled_wide and all(r["Value_Method"] == "NONLOCAL_INTERPOLATION"
-                          and r["Review_Tier"] == "R4" for r in _ruled_wide),
-      "%r" % [(r["Value_Span_Px"], r["Value_Method"], r["Review_Tier"])
+                          and _tier(r) == "R4" for r in _ruled_wide),
+      "%r" % [(r["Value_Span_Px"], r["Value_Method"], _tier(r))
               for r in _ruled_wide])
 check("and R4 is not finalizable, whatever a reviewer signs",
       not any(PROV.finalizable(r["Identity_Method"], r["Value_Method"])
@@ -808,7 +817,7 @@ _bare_gaps = [r for r in read(_bare)
 check("a dash gap inside the measured dash period is restored pattern at R1",
       [r for r in _bare_gaps if r["Value_Span_Px"] <= _reach(r)]
       and all(r["Value_Method"] == "RESTORED_LINE_PATTERN_GAP"
-              and r["Review_Tier"] == "R1"
+              and _tier(r) == "R1"
               for r in _bare_gaps if r["Value_Span_Px"] <= _reach(r)),
       "%r" % sorted({(r["Value_Span_Px"], r["Expected_Dash_Gap_Px"],
                       r["Value_Method"]) for r in _bare_gaps}))
@@ -817,10 +826,14 @@ check("and one wider than the period the figure actually uses is not",
           for r in _bare_gaps if r["Value_Span_Px"] > _reach(r)),
       "%r" % [(r["Value_Span_Px"], _reach(r), r["Value_Method"])
               for r in _bare_gaps if r["Value_Span_Px"] > _reach(r)])
-check("the tier is still the one the registry derives, never one written down",
-      all(r["Review_Tier"] == PROV.review_tier(r["Identity_Method"],
-                                               r["Value_Method"])
-          for r in _res + read(_bare) + read(_ruled)))
+# NOT "the row's tier matches the registry" any more - THE ROW HAS NO TIER.
+# v7.59 took it off: a derived value that is also stored is two answers to one
+# question, and the stored one is the one somebody can edit.
+check("no cell carries a tier of its own for anything downstream to trust",
+      not [k for r in _res for k in r if "tier" in k.lower()],
+      "%r" % sorted({k for r in _res for k in r if "tier" in k.lower()}))
+check("and the two methods it does carry are enough to derive one",
+      all(_tier(r) in PROV.TIERS for r in _res + read(_bare) + read(_ruled)))
 
 print("the reference widths reach the row, measured per panel and per style")
 _ref = read()
@@ -841,10 +854,8 @@ check("every cell carries a stroke thickness it was measured against",
 # the widest interpolation spans 22 - two thirds of the way to the next datum,
 # on a figure whose own dash gaps are 4 px. Nothing here judges that yet; the
 # numbers are on the row so that it can be judged.
-check("nothing has been judged: no tier moved on any of this",
-      {r["Review_Tier"] for r in _ref}
-      == {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
-          for r in _ref})
+check("nothing has been judged: the tier is still whatever the methods imply",
+      {_tier(r) for r in _ref} <= set(PROV.TIERS))
 
 
 print("a number read off the ink and a number the fit made are not the same claim")
@@ -878,10 +889,11 @@ check("and in the shared vocabulary, not this reader's private one",
       and {r["Value_Method"] for r in _prov} <= set(PROV.VALUE_METHODS),
       "%r / %r" % (sorted({r["Identity_Method"] for r in _prov}),
                    sorted({r["Value_Method"] for r in _prov})))
-# DERIVED, never declared. A tier a reader writes is a tier a reader can lower.
-check("the tier on every row is the one the registry derives",
-      all(r["Review_Tier"] == PROV.review_tier(r["Identity_Method"],
-                                               r["Value_Method"])
+# DERIVED, NEVER DECLARED - which as of v7.59 means the row does not carry it at
+# all. A tier a reader writes is a tier a reader can lower, and the docstring
+# beside the line that wrote it said so while writing it.
+check("the two methods are all a consumer needs to derive the tier",
+      all(PROV.review_tier(r["Identity_Method"], r["Value_Method"]) in PROV.TIERS
           for r in _prov))
 check("a measured style is MEASURED_LINE_STYLE, an eliminated one is not",
       {r["Identity_Method"] for r in _prov if r["line_style_source"] == "MEASURED"}

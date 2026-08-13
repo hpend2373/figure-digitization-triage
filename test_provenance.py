@@ -7,8 +7,11 @@ derivation is the whole point: a tier READ from a file is a tier somebody can
 lower, and the first thing a pipeline that pools numbers must refuse is a value
 that talks its own evidence up.
 """
+import ast
 import os
+import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -134,6 +137,66 @@ check("a fraction of the position spacing would have passed this; this one "
       "refuses it",
       P.interpolation_method(9, 4, 0, "HORIZONTAL_RULE")
       == "NONLOCAL_INTERPOLATION" and 9 < 0.5 * 33.0)
+
+print()
+print("a tier is derived by whoever needs it and written down nowhere")
+# IT WAS WRITTEN ON THE ROW UNTIL v7.59, by the line whose own comment said the
+# tier is derived so that nothing in a file can declare its way to a weaker
+# check. Nothing read it, so nothing was wrong - but the moment it reached
+# `figure_values_*.csv` and a finalizer trusted it, the principle would have been
+# gone and the code would still have claimed it. A derived value that is also
+# stored is two answers to one question, and the stored one is the one somebody
+# can edit.
+#
+# Scanned out of the SOURCE, not out of one reader's output, because the readers
+# that have not been written yet are the ones this has to hold for.
+TIER_FIELDS = ("Review_Tier", "Value_Tier", "Identity_Tier")
+
+
+def tier_writers(path):
+    """Places in one file that put a tier INTO a record."""
+    found = []
+    tree = ast.parse(open(path, encoding="utf-8").read(), path)
+    for node in ast.walk(tree):
+        # dict(Review_Tier=...) or f(Review_Tier=...)
+        if isinstance(node, ast.Call):
+            found += [kw.arg for kw in node.keywords if kw.arg in TIER_FIELDS]
+        # {"Review_Tier": ...}
+        elif isinstance(node, ast.Dict):
+            found += [k.value for k in node.keys
+                      if isinstance(k, ast.Constant) and k.value in TIER_FIELDS]
+        # row["Review_Tier"] = ...
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+            index = node.slice
+            if isinstance(index, ast.Constant) and index.value in TIER_FIELDS:
+                found.append(index.value)
+    return found
+
+
+_PACKAGE = sorted(name for name in os.listdir(HERE)
+                  if name.endswith(".py") and not name.startswith("test_"))
+_writers = {name: tier_writers(os.path.join(HERE, name)) for name in _PACKAGE}
+_writers = {name: hits for name, hits in _writers.items() if hits}
+check("no module in the package writes a tier into a record",
+      not _writers, "%r" % _writers)
+# And the scan has to be able to see one, or it is a guard that cannot fire.
+_probe = tempfile.mkdtemp(prefix="tierprobe_")
+for _i, _src in enumerate((
+        'row = dict(Value_Method="X", Review_Tier="R0")\n',
+        'row = {"Review_Tier": "R0"}\n',
+        'row["Review_Tier"] = "R0"\n')):
+    _path = os.path.join(_probe, "wrote%d.py" % _i)
+    open(_path, "w", encoding="utf-8").write(_src)
+    check("the scan sees a tier written as %s"
+          % ("a keyword", "a dict key", "a subscript")[_i],
+          tier_writers(_path) == ["Review_Tier"], "%r" % tier_writers(_path))
+_clean = os.path.join(_probe, "clean.py")
+open(_clean, "w", encoding="utf-8").write(
+    'import provenance\nrow = dict(Value_Method="X")\n'
+    'tier = provenance.review_tier("A", "B")\n')
+check("and does not flag a module that derives one instead",
+      tier_writers(_clean) == [], "%r" % tier_writers(_clean))
+shutil.rmtree(_probe, ignore_errors=True)
 
 print()
 print("the vocabularies are vocabularies")

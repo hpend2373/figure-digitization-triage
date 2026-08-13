@@ -245,6 +245,20 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
                 errorbar_lower=lower, errorbar_upper=upper,
                 dispersion=(upper - lower) / 2.0,
                 Marker_Definition="MARKER_CENTER",
+                # HOW THIS SERIES WAS NAMED AND HOW THE NUMBER WAS GOT. The mask
+                # this marker was found in was built from the colour the manifest
+                # declares for this series, and the pixels at the mark matched it
+                # - so the identity rests on measured colour, not on a
+                # declaration alone. `MISSING_SERIES_DISCRIMINANT` is what makes
+                # that true of every LINE_COLOR series: the manifest cannot
+                # decline to say what colour a series is.
+                #
+                # What this does NOT claim is that two declared colours are far
+                # enough apart to be told apart at their tolerances. That is a
+                # separate question, and one no tier can answer - which is why
+                # it stays on the open list rather than being priced here.
+                Identity_Method="MEASURED_COLOUR",
+                Value_Method="MARKER_CENTER",
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
             ))
     out.sort(key=lambda row: (row["series"], row["order"]))
@@ -564,6 +578,17 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                     # manifest where the author put it.
                     Marker_Definition=found_shape,
                     Marker_Fill=fill_state, marker_fill_ratio=fill_ratio,
+                    # SHAPE=ANY MEANS THE SHAPE WAS NOT A DISCRIMINANT. What
+                    # remains depends on the FILL: declared OPEN or FILLED, the
+                    # candidates were filtered on a fill this reader measured, so
+                    # the identity is measured. Declared ANY as well, nothing
+                    # about the mark was compared with anything - the identity is
+                    # "one series was declared, so this is it", which is R1 and
+                    # not R0. The number is measured either way.
+                    Identity_Method=("DECLARED_SINGLE_SERIES"
+                                     if spec.fill.upper() == "ANY"
+                                     else "MEASURED_MARKER_FILL"),
+                    Value_Method="MARKER_CENTER",
                     Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
                     marker_area_px=float(area)))
                 continue
@@ -594,6 +619,14 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                 dispersion=dispersion, errorbar_lower=lower, errorbar_upper=upper,
                 Marker_Definition=shape,
                 Marker_Fill=fill_state, marker_fill_ratio=fill_ratio,
+                # The shape WAS the discriminant here: every candidate whose
+                # measured shape is not this series' was dropped above. Named
+                # after the shape rather than the fill even when both were
+                # filtered on, because the shape is what `MISSING_SERIES_
+                # DISCRIMINANT` requires of a LINE_MONO series and the fill is
+                # optional beside it.
+                Identity_Method="MEASURED_MARKER_SHAPE",
+                Value_Method="MARKER_CENTER",
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
                 marker_area_px=float(area),
             ))
@@ -730,6 +763,20 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
                 y_value=y_calibration.pixel_to_value(py),
                 Marker_Definition=spec.marker.upper(), marker_area_px=float(area),
                 mask_overlap=int(_pixel_claimed_by(others, px, py)),
+                # A COLOURED SERIES IS FOUND IN ITS OWN COLOUR'S MASK; a single
+                # monochrome series is found in a grey threshold that says
+                # nothing about which series a mark belongs to - there is only
+                # one, by declaration, which is the branch above that refuses
+                # more. The distinction survives into the value row because
+                # `_scatter_outcome` reads it off the points it summarized.
+                Identity_Method=("MEASURED_COLOUR" if spec.rgb is not None
+                                 else "DECLARED_SINGLE_SERIES"),
+                # AND NO `Value_Method` HERE. A point is not a value row: the
+                # cell this panel produces is an association over the whole set,
+                # and its method is `POINT_CLOUD_ASSOCIATION`, set where the
+                # summary is built. A per-point "MARKER_CENTER" would be true,
+                # carried nowhere and consumed by nothing - a field that looks
+                # like provenance and is decoration.
             ))
         points.sort(key=lambda row: (row["x_value"], row["y_value"]))
         for order, row in enumerate(points):
@@ -1050,6 +1097,17 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             whisker_lower=values[0], q1=qvalues[0], median=qvalues[1],
             q3=qvalues[2], whisker_upper=values[-1],
             Summary_Type="MEDIAN_IQR_RANGE", Marker_Definition="BOX_OVERLAY",
+            # NOTHING ABOUT THE BOX SAYS WHICH SERIES IT IS. This reader takes no
+            # series at all: it reads one five-number summary per declared x
+            # position, and whichever series the cell belongs to was declared by
+            # the manifest for the whole panel. That is R1 - a declaration, with
+            # no competing identity to get wrong - and not R0, however carefully
+            # the quartiles were measured.
+            Identity_Method="DECLARED_SINGLE_SERIES",
+            # The five numbers are the box's own lines: three wide ones for the
+            # quartiles and two caps, each required to be present before a row is
+            # emitted at all.
+            Value_Method="BOX_GEOMETRY",
         ))
     return out
 

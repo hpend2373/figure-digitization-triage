@@ -27,6 +27,7 @@ import batch_manifests as BM                                       # noqa: E402
 import finalize_batch as FIN                                       # noqa: E402
 import grid_engine as GE                                           # noqa: E402
 import mark_readers as MR                                          # noqa: E402
+import provenance as PROV                                          # noqa: E402
 import run_batch as RB                                             # noqa: E402
 
 ROOT = tempfile.mkdtemp(prefix="fdt_finalize_")
@@ -314,12 +315,30 @@ check("and it is not reported as nobody having looked",
       _rall["status"] != "NOTHING_APPROVED" and not os.path.exists(
           os.path.join(_ALL_DIR, "figure_values_accepted.csv")))
 
-# A BLANK PAIR IS AN ABSENCE OF EVIDENCE, NOT A MEASUREMENT OF UNSAFETY. Five of
-# the six readers do not answer these two questions yet. Gating on blank would
-# refuse every value in the package - pilot_beckers would stop reaching
+# A BLANK PAIR IS AN ABSENCE OF EVIDENCE, NOT A MEASUREMENT OF UNSAFETY. Readers
+# that do not answer these two questions yet are still the majority. Gating on
+# blank would refuse their values outright - pilot_beckers would stop reaching
 # POOLING_ELIGIBLE and every scenario above would go dark - so the answer to an
 # absence is to count it and say so.
-_BLANK_DIR, _ = fresh_run("run_blank")
+#
+# THE BLANKNESS IS PRODUCED, not inherited. This fixture's panel is LINE_COLOR,
+# which has answered both questions since v7.64 - so the scenario that simply ran
+# the fixture stopped testing the blank case the moment a reader was taught, and
+# said so by failing. An untaught reader is one that returns rows without the two
+# keys, which is exactly what this wrapper does.
+def _no_methods(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r.pop("Identity_Method", None)
+        r.pop("Value_Method", None)
+    return rows
+
+
+try:
+    MR.read_panel = _no_methods
+    _BLANK_DIR, _ = fresh_run("run_blank")
+finally:
+    MR.read_panel = _real_read_panel
 _fpb = pd.read_csv(os.path.join(_BLANK_DIR, "review_queue.csv"),
                    dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
 _rb = FIN.finalize(_BLANK_DIR, review_path=review(
@@ -335,6 +354,34 @@ check("a reader that does not answer yet is counted, not refused",
 check("and the gap is a flag on the run, not a silence",
       any(p["check"] == "VALUE_METHOD_UNSTATED" for p in _stamp_plain["Problems"]),
       "%s" % [p["check"] for p in _stamp_plain["Problems"]])
+# AND A READER THAT DOES ANSWER CLOSES THE GAP. Same fixture, same panel, the real
+# reader: v7.64 taught LINE_COLOR, so this run's values say how the series was
+# named and how the number was got, the flag does not fire, and the count is zero.
+# This is what the two columns were added for - a run whose evidence a gate can
+# actually price.
+_taught = fresh_run("run_taught")[0]
+_fpt = pd.read_csv(os.path.join(_taught, "review_queue.csv"),
+                   dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_rt = FIN.finalize(_taught, review_path=review(
+    [row(Review_Subject_SHA256=_fpt)],
+    path=os.path.join(_taught, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+_stamp_taught = json.load(open(os.path.join(_taught, "finalize_stamp.json"),
+                               encoding="utf-8"))
+check("while a reader that answers leaves no gap to count",
+      _rt["status"] == "FINALIZED" and _rt["accepted"] > 0
+      and _stamp_taught["Values_Method_Unstated"] == 0
+      and _stamp_taught["Values_Method_Blocked"] == 0
+      and not any(p["check"] == "VALUE_METHOD_UNSTATED"
+                  for p in _stamp_taught["Problems"]), "%s" % _stamp_taught)
+_acct = pd.read_csv(os.path.join(_taught, "figure_values_accepted.csv"),
+                    dtype=object).fillna("")
+check("and every accepted value is priced, in the registry's own vocabulary",
+      len(_acct) > 0
+      and {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
+           for _, r in _acct.iterrows()} == {"R0"},
+      "%s" % sorted({(r["Identity_Method"], r["Value_Method"])
+                     for _, r in _acct.iterrows()}))
 
 print()
 print("a cell whose series was reasoned to asks the reviewer one more question")

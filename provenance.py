@@ -125,6 +125,13 @@ VALUE_METHODS = {
     "BAR_OUTLINE_CENTER": "R0",
     "MARKER_CENTER": "R0",
     "BOX_GEOMETRY": "R0",
+    # An r, a rho or a tau, computed from measured marker centres. R0 because
+    # every coordinate in it was read off the ink and the point file ships beside
+    # the value; whether the reader found ALL the study's points is a different
+    # question, and one no tier can answer - `Point_Count_Agreement` and
+    # `Overplotting_Possible` gate it, and a panel that fails them produces no
+    # association at all rather than one at a worse tier.
+    "POINT_CLOUD_ASSOCIATION": "R0",
     "DIRECT_CURVE_INK": "R0",
     "MANUAL_DIGITIZED": "R0",
     # A GAP THIS READER MADE, no wider than the figure's own drawing scale. The

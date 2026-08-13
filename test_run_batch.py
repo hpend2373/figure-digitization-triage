@@ -1557,9 +1557,49 @@ for _col in ("Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
 # priced at the tier that asks the most. So adding these columns can only ever
 # make a value harder to pool, never easier - which is what makes it safe to put
 # them on every mark type before every reader can fill them.
-check("a reader that does not name its methods leaves them blank",
-      all(not str(r["Value_Method"]).strip() for _, r in _prov.iterrows()),
-      "%r" % sorted({str(r["Value_Method"]) for _, r in _prov.iterrows()}))
+#
+# Asserted PER MARK TYPE, and it used to assert that every row in this run was
+# blank. v7.64 taught the two marker readers, so that assertion became a claim
+# about which readers happen to be untaught rather than about the schema - and it
+# would have gone red on every release that teaches one. What has to hold is that
+# a reader answers for every mark it reads or for none of them: a half-answering
+# reader puts blanks beside methods in one panel, and blank is the tier that asks
+# the most, so the panel would price at R4 for a reason nobody could see.
+_mark_of_panel = {str(r["Panel_ID"]): str(r["Mark_Type"]) for _, r in run.iterrows()}
+_by_mark = {}
+for _, _r in _prov.iterrows():
+    _by_mark.setdefault(_mark_of_panel.get(str(_r["Run_Panel_ID"]), "?"), []).append(
+        (str(_r["Identity_Method"]).strip(), str(_r["Value_Method"]).strip()))
+_split = {m: pairs for m, pairs in _by_mark.items()
+          if len({bool(i and v) for i, v in pairs}) != 1}
+check("a reader answers for every mark it reads, or for none of them",
+      not _split, "%s" % {m: sorted(set(p)) for m, p in _split.items()})
+for _mark, _want in (("LINE_COLOR", ("MEASURED_COLOUR", "MARKER_CENTER")),
+                     # And the one whose VALUE is not a mark at all: an r over a
+                     # set of measured marker centres. The points each carry how
+                     # their series was named; the association carries how the
+                     # NUMBER was got, and the two are different claims.
+                     ("SCATTER", ("MEASURED_COLOUR",
+                                  "POINT_CLOUD_ASSOCIATION"))):
+    check("  and %s answers with %s / %s" % ((_mark,) + _want),
+          set(_by_mark.get(_mark, ())) == {_want},
+          "%s" % sorted(set(_by_mark.get(_mark, ()))))
+# And a reader with nothing to say says nothing, rather than being given a
+# default on the way through the adapter. Asserted on the adapter rather than by
+# finding an untaught reader in this run: every mark type this fixture holds now
+# answers, so a scenario that looked for a blank row would keep passing for
+# whichever reader happened to be last.
+_blank_carry = MR.to_value_records(
+    [dict(x_label=POSITIONS[0], mean=1.0, dispersion=0.1)], "CONTINUOUS", "U_X",
+    x_factor="TIMEPOINT")
+check("  while a reader with nothing to say gets no default put in its mouth",
+      not str(_blank_carry[0].get("Identity_Method") or "").strip()
+      and not str(_blank_carry[0].get("Value_Method") or "").strip(),
+      "%s" % _blank_carry[0])
+check("and no reader can invent a method the registry has not heard of",
+      all(i in PROV.IDENTITY_METHODS and v in PROV.VALUE_METHODS
+          for pairs in _by_mark.values() for i, v in pairs if i or v),
+      "%s" % sorted({p for pairs in _by_mark.values() for p in pairs}))
 check("and blank is priced at R4, not R0",
       PROV.review_tier("", "") == "R4"
       and "R4" not in PROV.FINALIZABLE_TIERS)

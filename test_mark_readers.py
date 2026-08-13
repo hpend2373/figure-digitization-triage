@@ -1087,6 +1087,81 @@ check("and the position-assignment marker travels with the cell",
 
 
 print()
+print("each reader says how it named the series and how it got the number")
+# v7.64. Until this release only LINE_MONO_STYLE answered the two questions, so
+# every value the other readers produced was `VALUE_METHOD_UNSTATED` at the gate -
+# counted, flagged and priced at no tier at all. What each reader may claim is
+# fixed by what it actually compared: a mask built from a declared colour and
+# matched at the mark is MEASURED, a series nothing was compared against is
+# DECLARED, and no reader may name a method the registry has not heard of.
+_MARKER_METHODS = [
+    ("LINE_COLOR, found in its own declared colour", rows,
+     "MEASURED_COLOUR", "MARKER_CENTER"),
+    ("LINE_MONO, told apart by marker shape", mrows,
+     "MEASURED_MARKER_SHAPE", "MARKER_CENTER"),
+    ("LINE_MONO declared ANY shape and an OPEN fill", _any,
+     "MEASURED_MARKER_FILL", "MARKER_CENTER"),
+    ("BOX_VIOLIN, whose reader is given no series at all", brows,
+     "DECLARED_SINGLE_SERIES", "BOX_GEOMETRY"),
+]
+# SCATTER answers ONE of the two at the point grain, and that is the honest
+# shape: a point is not a value row. The cell this panel produces is an
+# association over the whole set, so `POINT_CLOUD_ASSOCIATION` is set where the
+# summary is built and a per-point value method would be carried nowhere.
+_SCATTER_IDENTITY = [("in colour, mask built from its own hex", spoints,
+                      "MEASURED_COLOUR"),
+                     ("in black, one series by declaration", bpoints,
+                      "DECLARED_SINGLE_SERIES")]
+for _label, _got, _identity, _value in _MARKER_METHODS:
+    check("  %s: %s / %s" % (_label, _identity, _value),
+          bool(_got) and {(r.get("Identity_Method"), r.get("Value_Method"))
+                          for r in _got} == {(_identity, _value)},
+          "%d rows, %s" % (len(_got),
+                           sorted({(r.get("Identity_Method"),
+                                    r.get("Value_Method")) for r in _got})))
+for _label, _got, _identity in _SCATTER_IDENTITY:
+    check("  SCATTER %s: %s, and no value method per point"
+          % (_label, _identity),
+          bool(_got)
+          and {r.get("Identity_Method") for r in _got} == {_identity}
+          and not any("Value_Method" in r for r in _got),
+          "%d points, %s" % (len(_got),
+                             sorted({(r.get("Identity_Method"),
+                                      r.get("Value_Method")) for r in _got})))
+# SHAPE=ANY WITH FILL=ANY IS THE ONLY PURE DECLARATION IN THE MARKER READER, and
+# it is R1 while the one above it is R0 - the difference is whether anything about
+# the mark was compared with anything. Read off the same fixture as `_any`, with
+# the fill requirement dropped.
+_any_any = read_monochrome_marker_panel(
+    _round, panel_box=(80, 560, 30, 430),
+    x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+    y_calibration=_sycal, series=[SeriesSpec("S", marker="ANY", fill="ANY")])
+check("  nothing compared with anything is a declaration, and costs a tier",
+      bool(_any_any)
+      and {r.get("Identity_Method") for r in _any_any} == {"DECLARED_SINGLE_SERIES"}
+      and _prov.review_tier("DECLARED_SINGLE_SERIES", "MARKER_CENTER") == "R1"
+      and _prov.review_tier("MEASURED_MARKER_FILL", "MARKER_CENTER") == "R0",
+      "%s" % sorted({r.get("Identity_Method") for r in _any_any}))
+# AND EVERY METHOD A READER EMITS IS ONE THE REGISTRY PRICES. An unregistered
+# token is R4 by construction, which is safe - and silently unpoolable, which is
+# the failure mode a typo would produce and nothing else would report.
+_all_emitted = {(r.get("Identity_Method"), r.get("Value_Method"))
+                for _l, got, _i, _v in _MARKER_METHODS for r in got}
+# The two BAR readers and the scatter's association cell, whose rows are built
+# elsewhere: BAR_COLOR in `bar_reader`, the association in `run_batch`, and
+# BAR_MONO not yet taught at all.
+_all_emitted |= {("MEASURED_COLOUR", "POINT_CLOUD_ASSOCIATION"),
+                 ("DECLARED_SINGLE_SERIES", "POINT_CLOUD_ASSOCIATION"),
+                 ("MEASURED_COLOUR", "BAR_OUTLINE_CENTER")}
+check("  and every method they emit is one the registry prices",
+      all(i in _prov.IDENTITY_METHODS and v in _prov.VALUE_METHODS
+          for i, v in _all_emitted)
+      and all(_prov.review_tier(i, v) in _prov.FINALIZABLE_TIERS
+              for i, v in _all_emitted),
+      "%s" % sorted(_all_emitted))
+
+
+print()
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

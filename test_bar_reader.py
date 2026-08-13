@@ -91,6 +91,28 @@ check("every whisker is stem-confirmed",
       all(b["Errorbar_Stem_Confirmed"] == "TRUE" for b in bars))
 check("Bar_Top_Definition is reported for every bar",
       all(b["Bar_Top_Definition"] == "OUTLINE_CENTER" for b in bars))
+# v7.64. HOW THE SERIES WAS NAMED AND HOW THE NUMBER WAS GOT, on every bar. The
+# bar was found in a mask built from the colour its series declares, so the
+# identity rests on measured colour; the number is the outline centre of the top
+# this reader walked to. Both are R0, and until this release every BAR_COLOR value
+# reached the gate as VALUE_METHOD_UNSTATED - counted and priced at no tier.
+import provenance as _PROV
+check("and each bar says how its series was named and how the number was got",
+      {(b.get("Identity_Method"), b.get("Value_Method")) for b in bars}
+      == {("MEASURED_COLOUR", "BAR_OUTLINE_CENTER")},
+      "%s" % sorted({(b.get("Identity_Method"), b.get("Value_Method"))
+                     for b in bars}))
+check("  in the registry's own vocabulary, at a tier a signature can finalize",
+      _PROV.review_tier("MEASURED_COLOUR", "BAR_OUTLINE_CENTER") == "R0",
+      _PROV.review_tier("MEASURED_COLOUR", "BAR_OUTLINE_CENTER"))
+# WHICH x IT SITS AT IS A DIFFERENT QUESTION, and the method does not speak for
+# it: a bar counted off left to right carries the same MEASURED_COLOUR as one at a
+# declared anchor, because the colour was measured either way. `run_batch` refuses
+# SEQUENTIAL outright rather than pricing it, which is why this is not a tier.
+check("  and the method says nothing about which slot the bar was put in",
+      len({b.get("Identity_Method") for b in bars}) == 1,
+      "%s" % sorted({(b.get("Position_Assignment"), b.get("Identity_Method"))
+                     for b in bars}))
 
 print("significance glyphs must not be read as error-bar caps")
 clean, ctruth = read_fixture("bar_fixture_noglyph.png", "bar_fixture_noglyph_truth.json")

@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.63"
+PIPELINE_VERSION = "7.64"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -2251,6 +2251,15 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                    len(mine)))
             continue
         summary = dict(MR.summarize_association(mine, association), **audit)
+        # HOW THE SERIES WAS NAMED, off the points themselves - the reader put it
+        # on each one, and every point here belongs to this series. Read rather
+        # than re-decided, so the value row and its point file cannot disagree
+        # about what identified them.
+        summary["Identity_Method"] = _s(mine[0].get("Identity_Method"))
+        # And how the NUMBER was got, which is not how the points were got: each
+        # point is a measured marker centre, and the association is a statistic
+        # over the set of them.
+        summary["Value_Method"] = "POINT_CLOUD_ASSOCIATION"
         planned.append((sid, factor, level, mine, summary))
 
     # ---- every refusal, BEFORE a single file is written --------------------

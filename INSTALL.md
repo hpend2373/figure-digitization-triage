@@ -4582,6 +4582,80 @@ The review's eight-step order is done. What is left is not the ladder but the
 readers: five of the six still answer neither provenance question, so their values
 are counted as `VALUE_METHOD_UNSTATED` and no gate can price them.
 
+## v7.64 — five of the six readers now say how they know
+
+The ladder was finished in v7.63 and almost nothing could climb it: only
+`LINE_MONO_STYLE` answered the two provenance questions, so every value the other
+readers produced arrived at the gate as `VALUE_METHOD_UNSTATED` — counted,
+flagged, and priced at no tier at all. This release teaches five of the six.
+
+    reader        Identity_Method                       Value_Method
+    LINE_COLOR    MEASURED_COLOUR                  R0   MARKER_CENTER        R0
+    LINE_MONO     MEASURED_MARKER_SHAPE            R0   MARKER_CENTER        R0
+      shape=ANY,  MEASURED_MARKER_FILL             R0   MARKER_CENTER        R0
+      fill=OPEN
+      shape=ANY,  DECLARED_SINGLE_SERIES           R1   MARKER_CENTER        R0
+      fill=ANY
+    BAR_COLOR     MEASURED_COLOUR                  R0   BAR_OUTLINE_CENTER   R0
+    BOX_VIOLIN    DECLARED_SINGLE_SERIES           R1   BOX_GEOMETRY         R0
+    SCATTER       MEASURED_COLOUR / DECLARED_       R0   POINT_CLOUD_         R0
+                    SINGLE_SERIES, per point       R1     ASSOCIATION
+    BAR_MONO      — not yet —
+
+**What each reader may claim is fixed by what it actually compared.** A mask built
+from a colour the manifest declares, matched at the mark, is `MEASURED_COLOUR` —
+`MISSING_SERIES_DISCRIMINANT` is what makes that true of every `LINE_COLOR` and
+`BAR_COLOR` series, because the manifest cannot decline to say what colour a
+series is. `LINE_MONO` with `Marker_Shape=ANY` is the interesting one: the shape
+was NOT a discriminant, so what remains depends on the fill. Declared `OPEN` or
+`FILLED`, the candidates were filtered on a fill this reader measured, and the
+identity is measured. Declared `ANY` as well, nothing about the mark was compared
+with anything — `DECLARED_SINGLE_SERIES`, which is R1 and not R0.
+
+`BOX_VIOLIN` is R1 for its identity however carefully its quartiles are measured:
+the reader takes no series at all, reads one five-number summary per declared x
+position, and whichever series the cell belongs to was declared for the whole
+panel.
+
+**`POINT_CLOUD_ASSOCIATION` is a new value method**, R0, and it exists because a
+scatter's cell is not a mark. Each point is a measured marker centre; the value is
+an r, a rho or a tau over the set of them. The points carry how their series was
+named — `_scatter_outcome` reads it off them rather than re-deciding, so the value
+row and its point file cannot disagree — and no per-point value method is emitted:
+it would be true, carried nowhere, and consumed by nothing. Whether the reader
+found ALL the study's points is a different question, gated by
+`Point_Count_Agreement` and `Overplotting_Possible`, and a panel that fails them
+produces no association rather than one at a worse tier.
+
+Measured on the real monochrome figure the package ships: ID 386's HR panel reads
+**13 of 13 cells as `MEASURED_MARKER_SHAPE` / `MARKER_CENTER`, all R0**, where
+before every one of them was unstated. Publication 397 is unchanged at 87 stated
+of 123 — its other 36 rows are `BAR_MONO`, the one reader still to be taught.
+
+**Two scenarios had to be rewritten rather than satisfied**, both for the same
+reason and both worth keeping as a pattern. `test_run_batch` asserted that every
+value row in its fixture leaves the two columns blank, and `test_finalize` got its
+blank case by simply running a fixture whose reader answered nothing. Both were
+claims about WHICH READERS HAPPEN TO BE UNTAUGHT, so both went red the moment one
+was taught — and would go red again on every future release that teaches another.
+What replaces them is what has to hold regardless: a reader answers for every mark
+it reads or for none of them (a half-answering reader would put blanks beside
+methods and price its panel at R4 for a reason nobody could see), no reader may
+emit a method the registry has not heard of, and the blank case is now PRODUCED by
+a wrapper that strips the two keys rather than inherited from whichever reader is
+behind.
+
+    reverted                                          scenarios that fail
+    LINE_COLOR silent again                            1 + 2 + 1, in three suites
+    the ANY branch claiming the shape was measured      2
+    a pure declaration priced as a measurement          1
+    BOX_VIOLIN claiming a measured identity             1
+    a black scatter claiming measured colour            1
+    the association priced as one marker centre         1, end to end
+    the per-point value method back                     2
+    BAR_COLOR silent again                              1
+    POINT_CLOUD_ASSOCIATION out of the registry         1 + 1, in two suites
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4597,7 +4671,13 @@ are counted as `VALUE_METHOD_UNSTATED` and no gate can price them.
 - `Dispersion_Method` does not exist: the two provenance fields are about the
   MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
   priced as whatever its mean was priced at
-- five of the six readers still answer neither provenance question, so their
-  values are counted as `VALUE_METHOD_UNSTATED` rather than gated
-- `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
-  single-series assignment: no `Identity_Method` emitted yet
+- `BAR_MONO` is the last reader that answers neither question, and it is the one
+  with the most to say: a fill measured at the bar and matched against a
+  prototype formed in ANOTHER panel of the figure is `FIGURE_PROTOTYPE_MATCH`
+  (R2), the same fill matched against what its own panel declares is
+  `MEASURED_FILL_RELATION` (R0), and a bar named by a person is
+  `HUMAN_RESOLUTION`. Its 36 rows on 397 are `VALUE_METHOD_UNSTATED`
+- the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
+  methods either: they come from two raster readings reconciled to a midpoint,
+  which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel
+  yet for saying so

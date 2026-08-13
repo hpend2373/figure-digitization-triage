@@ -236,6 +236,18 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                                    else y2v(cap_c) - y2v(top_c)),
                 Bar_Direction="DOWN" if down else "UP",
                 Bar_Top_Definition="OUTLINE_CENTER",
+                # WHICH SERIES this bar is, and how its number was got. The bar
+                # was found in a mask built from the colour this series declares,
+                # so the identity rests on measured colour - the same claim
+                # LINE_COLOR makes, for the same reason.
+                #
+                # WHICH x IT SITS AT is a different question with its own field:
+                # `Position_Assignment` below says whether the label came from a
+                # declared anchor or from counting left to right. A provenance
+                # method for the series identity does not speak for that, and
+                # `run_batch` refuses SEQUENTIAL outright rather than pricing it.
+                Identity_Method="MEASURED_COLOUR",
+                Value_Method="BAR_OUTLINE_CENTER",
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,
             ))

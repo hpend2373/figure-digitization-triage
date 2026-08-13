@@ -356,7 +356,7 @@ print("a window with nothing observable in it has no duty cycle")
 _all_ink = np.ones((60, 80), dtype=bool)
 check("a fit whose every column is furniture returns nothing",
       LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink)
-      == (None,) * 7,
+      == (None,) * 11,
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink),))
 check("and the same window with nothing blinding it does report one",
       LSM._line_fit_window(_all_ink, 40, 30)[0] == 1.0,
@@ -471,6 +471,9 @@ check("it never hands out a style another curve at that x already carries",
 # as a clean solid line. Without the guard there are two SOLID candidates at
 # T7 and both cells go; with the guard and without this fill the dashed cell
 # has no style and both cells go anyway. Only both together read it.
+# One figure, drawn once and used by two sections: the gridline laid along the
+# dashed curve at T7 blinds 87% of that window (here) and explains a 35-column
+# gap in the ink (the occlusion-cause scenarios further down).
 _ruled = image.copy()
 ImageDraw.Draw(_ruled).line(
     [(BOX[0] + 1, CAL.value_to_pixel(84.0)), (BOX[1] - 1, CAL.value_to_pixel(84.0))],
@@ -491,6 +494,112 @@ check("and it carries the blindness that justifies naming it that way",
       _t7["line_window_blindness"] > 0.5, "%r" % _t7["line_window_blindness"])
 
 
+print("why a gap carried no ink, which is not the same question as how wide it is")
+# THE MEASUREMENT THAT MADE THIS NECESSARY. On 397, 160 of 180 cells interpolate
+# and 122 of those span three pixels or fewer - the width of the error-bar stem
+# standing at every datum. A boolean union of stem, rule and cap cannot say
+# whether such a gap is a stroke THIS READER ERASED or a three-pixel dash gap
+# the figure drew, and neither can the span: they are the same width. Separated
+# by cause, 120 of the 122 are the stem and TWO ARE NOT - which is exactly the
+# two that a width rule would have called restored furniture.
+_flat = np.poly1d([0.0, 20.0])                      # a curve at row 20
+_empty = np.zeros((40, 60), dtype=bool)
+_stem = _empty.copy(); _stem[15:25, 31:34] = True   # three columns, fully covered
+_rule = _empty.copy(); _rule[19:21, :] = True
+check("a gap every column of which is one mask is that mask's doing",
+      LSM._occlusion_cause({"ERRORBAR_STEM": _stem}, _flat, 2.5, 30, 34, 40)
+      == ("ERRORBAR_STEM", 3),
+      "%r" % (LSM._occlusion_cause({"ERRORBAR_STEM": _stem}, _flat, 2.5, 30, 34, 40),))
+# PARTLY explained is not explained. A gap covered for two of its three columns
+# would be called restored furniture by any rule that asks "is there furniture
+# in here", and the claim being made is about the WHOLE gap.
+_part = _empty.copy(); _part[15:25, 31:33] = True
+check("a gap only partly covered is MIXED, not the mask's doing",
+      LSM._occlusion_cause({"ERRORBAR_STEM": _part}, _flat, 2.5, 30, 34, 40)
+      == (LSM.MIXED_OCCLUSION, 3),
+      "%r" % (LSM._occlusion_cause({"ERRORBAR_STEM": _part}, _flat, 2.5, 30, 34, 40),))
+check("a gap no mask covers is the figure's own, not the reader's",
+      LSM._occlusion_cause({"ERRORBAR_STEM": _empty}, _flat, 2.5, 30, 34, 40)
+      == (LSM.NO_OCCLUSION, 3),
+      "%r" % (LSM._occlusion_cause({"ERRORBAR_STEM": _empty}, _flat, 2.5, 30, 34, 40),))
+check("two kinds of furniture over one gap is MIXED - one cause or none",
+      LSM._occlusion_cause({"ERRORBAR_STEM": _stem, "HORIZONTAL_RULE": _rule},
+                           _flat, 2.5, 30, 34, 40)[0] == LSM.MIXED_OCCLUSION,
+      "%r" % (LSM._occlusion_cause({"ERRORBAR_STEM": _stem,
+                                    "HORIZONTAL_RULE": _rule},
+                                   _flat, 2.5, 30, 34, 40),))
+check("adjacent supports have no gap to explain",
+      LSM._occlusion_cause({"ERRORBAR_STEM": _stem}, _flat, 2.5, 30, 31, 40)
+      == (LSM.NO_OCCLUSION, 0))
+check("and the causes are the three kinds of furniture this reader removes",
+      LSM.BLIND_CAUSES == ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP"),
+      "%r" % (LSM.BLIND_CAUSES,))
+
+print("the same span, two different answers, on figures this file draws")
+# THE SOLID CURVE HAS NO GAPS OF ITS OWN, so with error bars every gap in it is
+# the stem, and every one is found to be.
+_int = [r for r in read() if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+_solid_int = [r for r in _int if r["line_style"] == "SOLID"]
+check("an unbroken curve's only gaps are the stems, and it says so",
+      _solid_int and all(r["Occlusion_Cause"] == "ERRORBAR_STEM"
+                         for r in _solid_int),
+      "%r" % sorted({(r["Occlusion_Cause"], r["Value_Span_Px"])
+                     for r in _solid_int}))
+# The dashed curve's gaps at the same positions are its OWN dash gaps widened by
+# the stem, so neither explains the whole gap: MIXED, refused as furniture.
+_dashed_wide = [r for r in _int
+                if r["line_style"] == "DASHED" and r["Value_Span_Px"] > 3]
+check("a dash gap widened by a stem is explained by neither, so MIXED",
+      _dashed_wide and all(r["Occlusion_Cause"] == LSM.MIXED_OCCLUSION
+                           for r in _dashed_wide),
+      "%r" % sorted({(r["Occlusion_Cause"], r["Value_Span_Px"])
+                     for r in _dashed_wide}))
+# THE SAME FIGURE WITHOUT ERROR BARS. The solid curve now needs no interpolation
+# at all, and the dashed curve's gaps are the FIGURE's - at widths the with-bars
+# run also produced. Nothing in the span separates the two sets.
+_bare_int = [r for r in read(_bare) if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+check("take the bars away and the unbroken curve needs no interpolation",
+      not [r for r in _bare_int if r["line_style"] == "SOLID"],
+      "%r" % [(r["x_label"], r["Value_Span_Px"])
+              for r in _bare_int if r["line_style"] == "SOLID"])
+check("while the dashed curve's own gaps are the figure's, not the reader's",
+      _bare_int and all(r["Occlusion_Cause"] == LSM.NO_OCCLUSION
+                        for r in _bare_int),
+      "%r" % sorted({(r["Occlusion_Cause"], r["Value_Span_Px"])
+                     for r in _bare_int}))
+_shared = ({r["Value_Span_Px"] for r in _dashed_wide}
+           & {r["Value_Span_Px"] for r in _bare_int})
+check("and the two sets share widths, so the width cannot be the test",
+      bool(_shared), "with bars %r / without %r"
+      % (sorted({r["Value_Span_Px"] for r in _dashed_wide}),
+         sorted({r["Value_Span_Px"] for r in _bare_int})))
+# AND THE CAUSES HAVE TO BE DISTINCT, not three names for one union. The first
+# version of this passed with `ERRORBAR_STEM` aliased to stem|rule|cap, because
+# on a figure whose only furniture at the data IS the stem, a union and a part
+# answer alike. The rule laid along the dashed curve at T7 is where they differ:
+# a 35-column gap the GRIDLINE explains, which a reader that cannot tell its
+# furniture apart would file under the stem - and "a stroke the error bar hid"
+# and "a stroke a gridline hid" are different claims about different widths.
+_ruled_int = [r for r in read(_ruled)
+              if r["Value_Method"] == "INTERPOLATED_CURVE_INK"]
+_by_rule = [r for r in _ruled_int if r["Occlusion_Cause"] == "HORIZONTAL_RULE"]
+check("a gap a gridline explains is the gridline's, not the stem's",
+      len(_by_rule) == 1 and _by_rule[0]["x_label"] == "T7",
+      "%r" % sorted({(r["series"], r["x_label"], r["Occlusion_Cause"],
+                      r["Value_Span_Px"]) for r in _ruled_int}))
+check("and it is far wider than any stem gap on the same figure",
+      _by_rule[0]["Value_Span_Px"]
+      > max(r["Value_Span_Px"] for r in _ruled_int
+            if r["Occlusion_Cause"] == "ERRORBAR_STEM"),
+      "%d against %d" % (_by_rule[0]["Value_Span_Px"],
+                         max(r["Value_Span_Px"] for r in _ruled_int
+                             if r["Occlusion_Cause"] == "ERRORBAR_STEM")))
+check("every cell says which two columns its number was measured between",
+      all(r["Value_Support_Left_Px"] is not None
+          and r["Value_Support_Right_Px"] is not None
+          for r in read() if r["Value_Method"] != "FIT_FALLBACK"))
+
+
 print("a number read off the ink and a number the fit made are not the same claim")
 # `_ink_at` HAS FOUR PATHS AND USED TO RETURN ONE THING. Measured on 397's
 # twelve line panels the day this was written: 180 cells, of which SIX were
@@ -500,18 +609,18 @@ print("a number read off the ink and a number the fit made are not the same clai
 # removed - and 14 had ink on one side only. All 180 left by the same door.
 _DIRECT = LSM._ink_at({40: 10.0}, 40, np.poly1d([0.0, 99.0]))
 check("ink in the column at x is a direct reading",
-      _DIRECT == (10.0, "DIRECT_CURVE_INK", 0), "%r" % (_DIRECT,))
+      _DIRECT == (10.0, "DIRECT_CURVE_INK", 0, 40, 40), "%r" % (_DIRECT,))
 _BOTH = LSM._ink_at({38: 10.0, 42: 14.0}, 40, np.poly1d([0.0, 99.0]))
 check("ink on both sides is interpolated, and reports the span it crossed",
-      _BOTH == (12.0, "INTERPOLATED_CURVE_INK", 4), "%r" % (_BOTH,))
+      _BOTH == (12.0, "INTERPOLATED_CURVE_INK", 4, 38, 42), "%r" % (_BOTH,))
 # Not interpolation: nothing brackets the answer. Called INTERPOLATED it would
 # have been reviewable as a restored stroke, which is what it is not.
 _ONE = LSM._ink_at({30: 10.0}, 40, np.poly1d([0.0, 99.0]))
 check("ink on one side only is extrapolation, not interpolation",
-      _ONE == (10.0, "EXTRAPOLATED_CURVE_INK", 10), "%r" % (_ONE,))
+      _ONE == (10.0, "EXTRAPOLATED_CURVE_INK", 10, 30, 30), "%r" % (_ONE,))
 _NONE = LSM._ink_at({}, 40, np.poly1d([0.0, 99.0]))
 check("and no ink at all is the fit's answer, which is a model estimate",
-      _NONE == (99.0, "FIT_FALLBACK", 0), "%r" % (_NONE,))
+      _NONE == (99.0, "FIT_FALLBACK", 0, None, None), "%r" % (_NONE,))
 
 print("every cell says how it was named and how its number was got")
 _prov = read()

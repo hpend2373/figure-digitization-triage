@@ -249,7 +249,62 @@ def _column_runs(mask, x, max_thickness=7):
     return [g for g in _runs(idx.tolist(), gap=1) if len(g) <= max_thickness]
 
 
-def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
+#: The furniture a line panel is blinded to, in the order it is looked for. The
+#: UNION is what blinds the accounting; the PARTS are what say why a column was
+#: unreadable, and the two were the same object until v7.55.
+#:
+#: On 397 the reader interpolates at 160 of 180 cells, and 122 of those span
+#: three pixels or fewer - which is the width of the error-bar stem standing at
+#: every datum. Whether that gap is furniture THIS READER REMOVED or a real
+#: three-pixel dash gap is the difference between restoring a printed stroke and
+#: guessing at one, and a boolean union cannot tell them apart. Neither can the
+#: span: they are the same width.
+BLIND_CAUSES = ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP")
+
+#: What a gap between two supports is recorded as when no blind mask covers it.
+#: A dash gap, a dotted gap, or a stroke that fell under the threshold - all
+#: three are the FIGURE's doing rather than the reader's, which is the
+#: distinction that matters here.
+NO_OCCLUSION = "NONE"
+#: More than one kind of furniture over one gap, or furniture over only part of
+#: it. Not "furniture", because the claim being made is that the whole gap is
+#: explained, and a partly explained gap is not.
+MIXED_OCCLUSION = "MIXED"
+
+
+def _occlusion_cause(causes, curve, tol, left, right, height):
+    """Why the columns between two supports carried no attributable ink.
+
+    Returns one of `BLIND_CAUSES`, `NO_OCCLUSION`, or `MIXED_OCCLUSION`, and the
+    width in columns. A cause is only claimed when EVERY intervening column is
+    covered by the SAME mask: a gap explained for two of its three columns is
+    not an explained gap, and calling it one is how a real dash gap would come
+    to be treated as a stroke the reader had erased.
+    """
+    if not causes or left is None or right is None or right - left <= 1:
+        return NO_OCCLUSION, 0
+    columns = range(int(left) + 1, int(right))
+    per_column = []
+    for xi in columns:
+        predicted = float(curve(xi))
+        lo_y = max(0, int(predicted - tol))
+        hi_y = min(height, int(predicted + tol) + 1)
+        here = {name for name, mask in causes.items()
+                if hi_y > lo_y and mask[lo_y:hi_y, xi].any()}
+        per_column.append(here)
+    width = len(per_column)
+    if any(not here for here in per_column):
+        # At least one column is simply empty: the figure did not draw there.
+        return (NO_OCCLUSION if all(not here for here in per_column)
+                else MIXED_OCCLUSION), width
+    shared = set.intersection(*per_column)
+    if len(shared) == 1:
+        return shared.pop(), width
+    return MIXED_OCCLUSION, width
+
+
+def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
+                     causes=None):
     """Duty cycle and refined y for the curve passing near (x, y).
 
     A whole-panel sequential tracer was the obvious way to do this and the wrong
@@ -268,7 +323,8 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     on their own rather than needing to be recognised.
 
     Returns (duty, y_at_x, slope, longest_gap, blinded_fraction, value_method,
-    value_span) or Nones.
+    value_span, support_left, support_right, occlusion_cause, occlusion_width)
+    or Nones.
     """
     height, width = mask.shape
     lo_x, hi_x = max(0, x - half), min(width, x + half + 1)
@@ -297,7 +353,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
                                      np.asarray(ys, dtype=float), 1))
         xs, ys = collect(lambda xi: float(first(xi)))
     if len(xs) < 5 or len(set(xs)) < 2:
-        return None, None, None, None, None, None, None
+        return (None,) * 11
     # Quadratic, not linear. A time course turns over, and a straight fit
     # through a peak leaves most of the window outside `tol` - the solid curve
     # at its own maximum measured a duty of 0.47 and was classified as dashed.
@@ -310,7 +366,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     # columns as misses halved the duty of a perfectly solid line.
     lo_x, hi_x = min(xs), max(xs) + 1
     if hi_x - lo_x < 12:
-        return None, None, None, None, None, None, None
+        return (None,) * 11
     # A COLUMN WHERE THE CURVE IS COVERED IS NOT A COLUMN WHERE THE CURVE IS
     # ABSENT. The stems have been taken out of `mask` so that a tall glyph
     # cannot be traced as a curve, and that removal takes the curve's own two or
@@ -342,11 +398,13 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
         # `run_batch` reports as an InternalReaderError and which aborts the
         # whole batch - one panel's blind spot taking seventeen readable panels
         # with it.
-        return None, None, None, None, None, None, None
+        return (None,) * 11
     slope = float(curve.deriv()(x)) if order == 2 else float(fit[0])
-    value, method, span = _ink_at(seen, x, curve)
+    value, method, span, left, right = _ink_at(seen, x, curve)
+    cause, cause_width = _occlusion_cause(causes, curve, tol, left, right, height)
     return (hits / float(observed), value, slope, longest,
-            blinded / float(observed + blinded), method, span)
+            blinded / float(observed + blinded), method, span,
+            left, right, cause, cause_width)
 
 
 def _ink_at(seen, x, curve):
@@ -367,27 +425,29 @@ def _ink_at(seen, x, curve):
         # No ink this window could attribute at all. The number is the fitted
         # curve's, which is a MODEL ESTIMATE and not a reading - and until this
         # function said so it left by the same door as a directly observed one.
-        return float(curve(x)), "FIT_FALLBACK", 0
+        return float(curve(x)), "FIT_FALLBACK", 0, None, None
     left = max((xi for xi in seen if xi <= x), default=None)
     right = min((xi for xi in seen if xi >= x), default=None)
     if left is None or right is None:
         # Ink on ONE side only. Not interpolation: nothing brackets the answer,
         # so this is the nearest observation carried sideways.
         near = left if left is not None else right
-        return float(seen[near]), "EXTRAPOLATED_CURVE_INK", abs(int(near) - int(x))
+        return (float(seen[near]), "EXTRAPOLATED_CURVE_INK",
+                abs(int(near) - int(x)), int(near), int(near))
     if left == right:
-        return float(seen[left]), "DIRECT_CURVE_INK", 0
+        return float(seen[left]), "DIRECT_CURVE_INK", 0, int(left), int(left)
     weight = (float(x) - left) / float(right - left)
-    # The span matters as much as the method: a gap the width of a dash is a
-    # restored stroke, and a gap the width of the spacing between two plotted
-    # points is a guess about a curve nobody sampled. Reported, not judged -
-    # what counts as local is a property of the figure, not of this function.
+    # The span matters as much as the method, and so do the two columns it was
+    # measured between: whether the gap is a dash gap or ink this reader
+    # removed itself cannot be decided from the width, and the columns are
+    # where the answer is. Reported, not judged.
     return (float(seen[left] * (1.0 - weight) + seen[right] * weight),
-            "INTERPOLATED_CURVE_INK", int(right) - int(left))
+            "INTERPOLATED_CURVE_INK", int(right) - int(left),
+            int(left), int(right))
 
 
 def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
-                      extra_seeds=(), blind=None):
+                      extra_seeds=(), blind=None, causes=None):
     """Every distinct curve passing near column x, with its style duty cycle.
 
     Seeds come from columns either side of x rather than from x itself: at x the
@@ -423,16 +483,20 @@ def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
     found = []
     for seed in seeds:
         first = _line_fit_window(mask, int(round(x)), seed, half=half,
-                                 band=band, blind=blind)
+                                 band=band, blind=blind, causes=causes)
         if first[1] is None:
             continue
-        duty, y_at_x, slope, gap, blindness, method, span = _line_fit_window(
-            mask, int(round(x)), first[1], half=half, band=band, blind=blind)
+        (duty, y_at_x, slope, gap, blindness, method, span,
+         left, right, cause, cause_width) = _line_fit_window(
+            mask, int(round(x)), first[1], half=half, band=band, blind=blind,
+            causes=causes)
         if y_at_x is None or not (y0 <= y_at_x <= y1):
             continue
         found.append(dict(y=y_at_x, duty=duty, slope=slope, gap=gap,
                           blindness=blindness, value_method=method,
-                          value_span=span))
+                          value_span=span, support_left=left,
+                          support_right=right, occlusion_cause=cause,
+                          occlusion_width=cause_width))
     return found
 
 
@@ -612,8 +676,13 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     # crosses them, so both are taken out of the traceable ink AND used to
     # blind the duty accounting.
     stems = _vertical_strokes(mask)
-    blind = (stems | _horizontal_rules(mask, x0, x1)
-             | _cap_ink(mask, stems, x_window))
+    # NAMED, not unioned away. The union is what blinds the duty accounting;
+    # the parts are the only thing that can say whether a gap in the ink is
+    # furniture this reader removed or a gap the figure drew.
+    causes = {"ERRORBAR_STEM": stems,
+              "HORIZONTAL_RULE": _horizontal_rules(mask, x0, x1),
+              "WHISKER_CAP": _cap_ink(mask, stems, x_window)}
+    blind = causes["ERRORBAR_STEM"] | causes["HORIZONTAL_RULE"] | causes["WHISKER_CAP"]
     curve_mask = mask & ~blind
     want = []
     for spec in series:
@@ -649,7 +718,7 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
             xi = int(round(x))
             found = _curve_candidates(curve_mask, xi, y0, y1, probe=probe,
                                       half=fit_half, band=fit_band,
-                                      blind=blind,
+                                      blind=blind, causes=causes,
                                       extra_seeds=[y + slope * (xi - x_at)
                                                    for y, slope, x_at in carried])
             seen[label] = found
@@ -750,6 +819,15 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                                  == "MEASURED" else "COMPLEMENT_OF_DECLARED_STYLES"),
                 Value_Method=candidate.get("value_method") or "FIT_FALLBACK",
                 Value_Span_Px=candidate.get("value_span") or 0,
+                # The two columns the answer was measured between, and WHY the
+                # ones in between carried nothing. A span of three pixels over
+                # an ERRORBAR_STEM is a stroke this reader erased and put back;
+                # a span of three pixels over NONE is a dash gap the figure
+                # drew, and the two are the same width.
+                Value_Support_Left_Px=candidate.get("support_left"),
+                Value_Support_Right_Px=candidate.get("support_right"),
+                Occlusion_Cause=candidate.get("occlusion_cause") or NO_OCCLUSION,
+                Occlusion_Width_Px=candidate.get("occlusion_width") or 0,
                 Marker_Definition="LINE_CENTER",
                 # Connected by construction: the bar IS the run of ink through
                 # the mark, so a recovered dispersion has a confirmed stem and

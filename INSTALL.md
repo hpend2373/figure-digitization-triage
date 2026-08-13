@@ -4058,6 +4058,65 @@ not import, so the AST walk already reaches it. Decoration, deleted.
     both files dropped from the hash             4
     the walk not following declared imports      1
 
+## v7.55 — why a gap carried no ink is not the same question as how wide it is
+
+Step 2 of the provenance programme. v7.53 measured that 160 of 180
+`LINE_MONO_STYLE` cells on publication 397 interpolate, and that 122 of those
+span three pixels or fewer — the width of the error-bar stem standing at every
+datum. **A boolean union of stem, rule and cap cannot say whether such a gap is
+a stroke this reader erased or a three-pixel dash gap the figure drew, and
+neither can the span: they are the same width.** So the union is still what
+blinds the accounting, and the PARTS are now kept.
+
+    BLIND_CAUSES = ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP")
+
+`_ink_at` also reports the two columns its answer was measured between, and
+`_occlusion_cause` says what covered the ones in between. **A cause is only
+claimed when EVERY intervening column is covered by the SAME mask.** A gap
+explained for two of its three columns is not an explained gap, and calling it
+one is how a real dash gap would come to be treated as a stroke the reader had
+erased. Partly covered, or covered by two kinds at once, is `MIXED`; covered by
+nothing is `NONE` — the figure's own doing rather than the reader's.
+
+Every cell now carries `Value_Support_Left_Px`, `Value_Support_Right_Px`,
+`Occlusion_Cause` and `Occlusion_Width_Px`. Nothing consumes them yet: no tier
+moved, no gate changed, and `pilot_397` reads the same 18/22/10/18/6/20/9/12/
+24/8/12/21 cells it read at v7.54.
+
+**What the separation shows on 397**, across all twelve line panels:
+
+    cause              span<=3   4-9   10+    all
+    ERRORBAR_STEM          120     1     0    121
+    HORIZONTAL_RULE          0     1     7      8
+    WHISKER_CAP              0     0     0      0
+    MIXED                    2    21     8     31
+    NONE                     0     0     0      0
+
+121 of the 160 interpolations are fully explained by the stem. Eight by the
+gridline — and seven of those span ten pixels or more, so furniture and LOCALITY
+are genuinely independent axes rather than one axis measured twice. Thirty-one
+are only partly explained and stay refused as furniture. And **two of the
+span<=3 cells are MIXED, not stem**: a width rule would have called those two
+restored furniture, which is the whole reason this is not a width rule.
+
+**A scenario that passed and should not have.** The first version of the
+cause-separation scenarios stayed green with `ERRORBAR_STEM` aliased to
+`stem|rule|cap`, because on a figure whose only furniture at the data IS the
+stem, a union and a part answer alike. The revert harness caught it: nothing
+observed that the causes were DISTINCT rather than three names for one mask. The
+gridline laid along the dashed curve at T7 is where they differ — a 35-column gap
+the rule explains, which an aliased reader files under the stem — and that is now
+a scenario.
+
+    reverted                                      scenarios that fail
+    the causes unioned back into one mask         1
+    a partly covered gap counting as covered      2
+    the supports not being reported               1
+
+Next, in order: the reference widths (stroke, dash period, position spacing) on
+the row, then `INTERPOLATED_CURVE_INK` split into restored-furniture,
+local-interpolation and nonlocal-interpolation with fixed tiers.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4070,7 +4129,8 @@ not import, so the AST walk already reaches it. Decoration, deleted.
 - `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
   tier, the overlay still reads `line_style_source`, and the values file
   carries neither
-- the interpolated span needs a figure-derived reference (furniture width,
-  dash period) before R3 can be assigned without firing on everything
+- the interpolated span needs a figure-derived reference (stroke width, dash
+  period, position spacing) before `INTERPOLATED_CURVE_INK` can be split;
+  the occlusion CAUSE is recorded as of v7.55, the reference widths are not
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
   single-series assignment: no `Identity_Method` emitted yet

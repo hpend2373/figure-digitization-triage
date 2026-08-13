@@ -83,18 +83,24 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 7.49 -->
-<!-- CURRENT_SCENARIO_COUNT: 2244 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2268 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2306 -->
 
-2244 scenarios on main after v7.49 under `requirements-lock.txt`, verified in a
-clean room with scipy blocked — the
-statistics are hand-rolled in NumPy so a missing scipy cannot silently change a
-p-value. Every run records the Python, platform and library versions it used;
+2268 scenarios on main after v7.49 under `requirements-lock.txt`, and 2306 with
+the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
+renderer and crop sections where none is installed. **CI runs both**, in two
+jobs that install what their profile names rather than inheriting it from the
+runner image: `core` removes poppler-utils and the Python backends before it
+starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
+count that depends on what `ubuntu-latest` happens to ship is not a property of
+this repository.
+
+Both are verified in a clean room with scipy blocked — the statistics are
+hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every
+run records the Python, platform and library versions it used;
 `requirements-lock.txt` pins what the shipped results were produced on, because
 a bar top found at row 312 by one OpenCV and row 313 by the next is a different
-number in the accepted file. The scenario count is a property of the tree AND
-the environment: `test_corpus_intake` skips its PDF sections where no backend
-is installed, so a workstation with pdfminer and poppler runs 2282. CI checks
-the locked number, because that is the one a reader can reproduce.
+number in the accepted file.
 
 ## Attestation
 

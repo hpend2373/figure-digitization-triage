@@ -36,18 +36,27 @@ reads as "the total went down, update the marker", and the guard helps you
 lower it. A suite that reports zero is refused for the same reason: a suite
 that runs nothing passes.
 
-## The count is a property of the tree AND the environment
+## The count is a property of the tree AND the environment, so there are two
 
 `test_corpus_intake` SKIPs its PDF-adapter, per-status, renderer and crop
-sections when no PDF backend is installed, so the same tree runs 149 of those
-scenarios on a workstation with pdfminer and poppler and 111 under
-`requirements-lock.txt`. 2282 against 2244 for the whole package.
+sections when no PDF backend is installed: 111 scenarios without, 149 with.
+2244 against 2282 for the package.
 
-The documented number is **the locked environment's**, because that is the one
-a reader can reproduce: `requirements-lock.txt` is what the shipped results
-were produced on. Running this verifier on a box with the optional backends
-installed will report MORE than the marker, and that is not a defect in either
-- it is why the failure message says so.
+The first version of this file documented one number and explained the other in
+prose, which left a real contradiction: a correct run in a full environment
+printed "this is not a defect" and then exited 1. A guard that calls a healthy
+tree broken is a guard people learn to run with `|| true`.
+
+So the environment is an ARGUMENT, and each profile has its own marker:
+
+    --profile core   <!-- CURRENT_SCENARIO_COUNT_CORE: N -->   lock file only
+    --profile full   <!-- CURRENT_SCENARIO_COUNT_FULL: N -->   + intake backends
+
+CI runs both, in two jobs that install what their profile names rather than
+inheriting it. `core` REMOVES poppler-utils and the two Python backends before
+it starts: a count that depends on what the runner image happens to ship is not
+a property of this repository, and `ubuntu-latest` adding poppler would
+otherwise turn main red with no commit behind it.
 
 ## Why the version is read by AST
 
@@ -61,15 +70,25 @@ import os
 import re
 import sys
 
-MARKERS = {
-    "count": re.compile(r"<!--\s*CURRENT_SCENARIO_COUNT:\s*([0-9]+)\s*-->"),
-    "version": re.compile(r"<!--\s*CURRENT_PIPELINE_VERSION:\s*([0-9][0-9.]*)\s*-->"),
+PROFILES = ("core", "full")
+
+VERSION_MARKER = re.compile(
+    r"<!--\s*CURRENT_PIPELINE_VERSION:\s*([0-9][0-9.]*)\s*-->")
+
+
+def count_marker(profile):
+    return re.compile(r"<!--\s*CURRENT_SCENARIO_COUNT_%s:\s*([0-9]+)\s*-->"
+                      % profile.upper())
+
+
+#: The line a person reads, one per profile. Both numbers have to be in it, so
+#: a marker cannot be updated on its own and leave the prose behind - which is
+#: the same defect this file exists to catch, one level down.
+STATUS_LINE = {
+    "core": re.compile(r"([0-9]{3,6})\s+scenarios\s+on\s+main\s+after\s+"
+                       r"v([0-9][0-9.]*)\s+under\s+`requirements-lock\.txt`"),
+    "full": re.compile(r"([0-9]{3,6})\s+with\s+the\s+intake\s+backends"),
 }
-#: The line a person reads. Both numbers have to be in it, so the marker cannot
-#: be updated on its own and leave the prose behind - which is the same defect
-#: this file exists to catch, one level down.
-STATUS_LINE = re.compile(
-    r"([0-9]{3,6})\s+scenarios\s+on\s+main\s+after\s+v([0-9][0-9.]*)")
 
 
 def read_counts(path):
@@ -106,7 +125,7 @@ def pipeline_version(path):
     raise SystemExit("%s: no PIPELINE_VERSION assignment at module level" % path)
 
 
-def problems_with(counts, readme, version, package_dir):
+def problems_with(counts, readme, version, package_dir, profile):
     """Everything wrong, as sentences. Empty means the documentation is true."""
     out = []
     total = sum(counts.values())
@@ -128,53 +147,54 @@ def problems_with(counts, readme, version, package_dir):
         out.append("%s reported 0 scenarios. A suite that runs nothing passes; "
                    "that is what this catches" % ", ".join(zero))
 
-    found = {}
-    for name, pattern in MARKERS.items():
-        hits = pattern.findall(readme)
-        if len(hits) != 1:
-            out.append("README carries %d CURRENT_%s marker(s); it needs "
-                       "exactly one" % (len(hits), name.upper()))
-        else:
-            found[name] = hits[0]
+    hits = count_marker(profile).findall(readme)
+    if len(hits) != 1:
+        out.append("README carries %d CURRENT_SCENARIO_COUNT_%s marker(s); it "
+                   "needs exactly one" % (len(hits), profile.upper()))
+    elif int(hits[0]) != total:
+        # WHICH DIRECTION it missed by is the diagnosis, and the wrong one
+        # sends the next person to edit the marker.
+        out.append("README says CURRENT_SCENARIO_COUNT_%s: %s and the %s suites "
+                   "reported %d. %s"
+                   % (profile.upper(), hits[0], profile, total,
+                      "A suite has lost scenarios" if total < int(hits[0]) else
+                      "A suite has gained scenarios, or this environment runs "
+                      "more than the %s profile installs" % profile))
 
-    if "count" in found and int(found["count"]) != total:
-        # Which direction it missed by is the diagnosis. More than documented
-        # is almost always optional backends installed locally; fewer is a
-        # suite that lost scenarios.
-        why = ("" if total >= int(found["count"]) else
-               " - a suite has lost scenarios, or ran in an environment that "
-               "SKIPs more than the locked one")
-        if total > int(found["count"]):
-            why = (" - this environment runs MORE than the locked one. "
-                   "test_corpus_intake SKIPs its PDF sections without a "
-                   "backend, so a workstation with pdfminer and poppler "
-                   "installed is expected to exceed the documented number; "
-                   "the marker records what requirements-lock.txt runs")
-        out.append("README says CURRENT_SCENARIO_COUNT: %s and the suites "
-                   "reported %d%s" % (found["count"], total, why))
-    if "version" in found and found["version"] != version:
+    versions = VERSION_MARKER.findall(readme)
+    if len(versions) != 1:
+        out.append("README carries %d CURRENT_PIPELINE_VERSION marker(s); it "
+                   "needs exactly one" % len(versions))
+    elif versions[0] != version:
         out.append("README says CURRENT_PIPELINE_VERSION: %s and the runner "
-                   "says %s" % (found["version"], version))
+                   "says %s" % (versions[0], version))
 
-    sentences = STATUS_LINE.findall(readme)
+    sentences = STATUS_LINE[profile].findall(readme)
     if len(sentences) != 1:
-        out.append("README carries %d current-status sentence(s) matching "
-                   "'<N> scenarios on main after v<X>'; it needs exactly one"
-                   % len(sentences))
+        out.append("README carries %d %s status sentence(s); it needs exactly "
+                   "one" % (len(sentences), profile))
     else:
-        said_count, said_version = sentences[0]
-        if int(said_count) != total or said_version != version:
-            out.append("the status sentence reads %s scenarios / v%s and the "
-                       "tree is %d / v%s. Updating the marker and leaving the "
-                       "prose behind is the same defect one level down"
-                       % (said_count, said_version, total, version))
+        said = sentences[0]
+        said_count = said[0] if isinstance(said, tuple) else said
+        if int(said_count) != total:
+            out.append("the %s status sentence reads %s scenarios and the tree "
+                       "is %d. Updating the marker and leaving the prose behind "
+                       "is the same defect one level down"
+                       % (profile, said_count, total))
+        if isinstance(said, tuple) and said[1] != version:
+            out.append("the %s status sentence reads v%s and the runner says %s"
+                       % (profile, said[1], version))
     return out
 
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if len(argv) != 3:
-        print("usage: verify_documented_status.py COUNTS.tsv README.md run_batch.py")
+    profile = "core"
+    if argv[:1] == ["--profile"] and len(argv) > 1:
+        profile, argv = argv[1], argv[2:]
+    if profile not in PROFILES or len(argv) != 3:
+        print("usage: verify_documented_status.py [--profile core|full] "
+              "COUNTS.tsv README.md run_batch.py")
         return 2
     counts_path, readme_path, source_path = argv
     package_dir = os.path.dirname(os.path.abspath(readme_path)) or "."
@@ -183,25 +203,24 @@ def main(argv=None):
     readme = open(readme_path, encoding="utf-8").read()
     version = pipeline_version(source_path)
     total = sum(counts.values())
-    problems = problems_with(counts, readme, version, package_dir)
+    problems = problems_with(counts, readme, version, package_dir, profile)
 
     if problems:
-        print("DOCUMENTED STATUS DOES NOT MATCH THE TREE")
+        print("DOCUMENTED STATUS DOES NOT MATCH THE TREE (profile: %s)" % profile)
         for problem in problems:
             print("  - %s" % problem)
         print()
-        print("what README should carry:")
+        print("what README should carry for this profile:")
         print("    <!-- CURRENT_PIPELINE_VERSION: %s -->" % version)
-        print("    <!-- CURRENT_SCENARIO_COUNT: %d -->" % total)
-        print("    ... %d scenarios on main after v%s ..." % (total, version))
+        print("    <!-- CURRENT_SCENARIO_COUNT_%s: %d -->" % (profile.upper(), total))
         print()
         print("what each suite reported:")
         for suite in sorted(counts):
             print("    %-30s %5d" % (suite, counts[suite]))
         return 1
 
-    print("documented status matches the tree: %d scenarios across %d suites, "
-          "pipeline v%s" % (total, len(counts), version))
+    print("documented status matches the tree (%s): %d scenarios across %d "
+          "suites, pipeline v%s" % (profile, total, len(counts), version))
     return 0
 
 

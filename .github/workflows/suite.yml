@@ -19,6 +19,27 @@ jobs:
           python-version: "3.11"
       - name: install the pinned environment
         run: python -m pip install -r requirements-lock.txt
+      # AND TAKE AWAY WHAT THE IMAGE HAPPENED TO SHIP. `test_corpus_intake`
+      # SKIPs its PDF sections where no backend is installed, so this job's
+      # scenario count depends on poppler and pdfminer being ABSENT - and
+      # `ubuntu-latest` is a moving image. Inherited, the core count is a
+      # property of GitHub's runner rather than of this repository, and main
+      # would go red one morning with no commit behind it.
+      - name: take away what the core profile does not install
+        run: |
+          sudo apt-get remove -y poppler-utils >/dev/null 2>&1 || true
+          python -m pip uninstall -y pdfminer.six pypdf >/dev/null 2>&1 || true
+          for b in pdftotext pdftoppm pdfinfo; do
+            ! command -v "$b" || { echo "$b is still on PATH"; exit 1; }
+          done
+          python - <<'PY'
+          import importlib.util, sys
+          present = [m for m in ("pdfminer", "pypdf")
+                     if importlib.util.find_spec(m)]
+          if present:
+              sys.exit("%s is still importable" % ", ".join(present))
+          print("core profile: no PDF backend, as declared")
+          PY
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: suite
@@ -30,17 +51,31 @@ jobs:
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake \
-                   test_geometry_proposer test_line_style_mono; do
+                   test_geometry_proposer test_line_style_mono \
+                   test_documented_status; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
             # is to be the thing that cannot go green when a suite fails.
-            out="$(python "$t.py")"
+            # Printed on the way out either way. Under `set -e` a failing
+            # suite ends the job here, and a diagnosis that only reached
+            # stdout would be lost with it.
+            if ! out="$(python "$t.py" 2>&1)"; then
+              printf '%s\n' "$out"
+              exit 1
+            fi
             printf '%s\n' "$out"
-            count="$(printf '%s\n' "$out" \
-              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p' | tail -1)"
-            test -n "$count"
-            printf '%s.py\t%s\n' "$t" "$count" >> scenario-counts.tsv
+            # EXACTLY ONE marker. `tail -1` would take the last of two, and a
+            # suite printing its verdict twice is the defect that turned up in
+            # test_mark_readers - its verdict sat in the middle of the file
+            # with four scenarios running after it.
+            markers="$(printf '%s\n' "$out" \
+              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p')"
+            if [ "$(printf '%s\n' "$markers" | grep -c .)" -ne 1 ]; then
+              echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
+              exit 1
+            fi
+            printf '%s.py\t%s\n' "$t" "$markers" >> scenario-counts.tsv
           done
 
       # The number in README is a claim about this package, and it followed the
@@ -48,7 +83,7 @@ jobs:
       # tree ran 2282. A status line nobody can trust is worse than none.
       - name: the documented status is the measured status
         run: |
-          python verify_documented_status.py \
+          python verify_documented_status.py --profile core \
             scenario-counts.tsv README.md run_batch.py
       - name: forward tests and worked examples
         run: |
@@ -92,3 +127,74 @@ jobs:
           print("plan -> run reproduces the pilot:", stamp["Status"],
                 stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")
           PY
+
+  # THE 38 SCENARIOS THE CORE JOB CANNOT RUN. `test_corpus_intake` SKIPs its PDF
+  # adapter, per-status, renderer and crop sections without a backend, and that
+  # is the path where the last three rounds of real defects were found - a
+  # release gate that never opens a PDF does not gate it. This job installs the
+  # backends explicitly, so the full count is a property of this repository and
+  # not of whatever `ubuntu-latest` ships.
+  intake-full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install the pinned environment and the intake backends
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          python -m pip install -r requirements-lock.txt -r requirements-intake.txt
+      # poppler is not a Python package and cannot be pinned in a requirements
+      # file. Recorded, so a runner image that changes it is visible in the log
+      # rather than mysterious in a diff.
+      - name: record the backends this count belongs to
+        run: |
+          pdftotext -v 2>&1 | head -1
+          python -c "import importlib.metadata as m; print('pdfminer.six', m.version('pdfminer.six')); print('pypdf', m.version('pypdf'))"
+      - name: suite
+        run: |
+          set -e
+          : > scenario-counts.tsv
+          for t in test_reproducibility test_kernel test_grid_engine \
+                   test_bar_reader test_mark_readers test_mono_bar \
+                   test_measure_mono_bars \
+                   test_integration test_run_batch test_finalize \
+                   test_compile_plan test_corpus_intake \
+                   test_geometry_proposer test_line_style_mono \
+                   test_documented_status; do
+            echo "--- $t"
+            if ! out="$(python "$t.py" 2>&1)"; then
+              printf '%s\n' "$out"
+              exit 1
+            fi
+            printf '%s\n' "$out"
+            markers="$(printf '%s\n' "$out" \
+              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p')"
+            if [ "$(printf '%s\n' "$markers" | grep -c .)" -ne 1 ]; then
+              echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
+              exit 1
+            fi
+            printf '%s.py\t%s\n' "$t" "$markers" >> scenario-counts.tsv
+          done
+
+      # And the intake suite specifically, so a regression that removes the PDF
+      # sections cannot be absorbed by a change elsewhere in the total.
+      - name: the intake suite ran its PDF sections
+        run: |
+          set -e
+          got="$(awk -F'\t' '$1 == "test_corpus_intake.py" {print $2}' scenario-counts.tsv)"
+          test "$got" = "149" || {
+            echo "test_corpus_intake reported $got with the backends installed, expected 149"
+            exit 1
+          }
+          ! grep -q "SKIP the PDF adapter" <(python test_corpus_intake.py) || {
+            echo "the PDF adapter still skipped in a job that installed the backend"
+            exit 1
+          }
+
+      - name: the documented status is the measured status
+        run: |
+          python verify_documented_status.py --profile full \
+            scenario-counts.tsv README.md run_batch.py

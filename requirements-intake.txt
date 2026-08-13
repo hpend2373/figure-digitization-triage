@@ -1,0 +1,23 @@
+# The PDF backends the CORPUS INTAKE path needs, and nothing else needs.
+#
+#     python3 -m pip install -r requirements-lock.txt -r requirements-intake.txt
+#     sudo apt-get install -y poppler-utils
+#
+# Kept apart from `requirements-lock.txt` on purpose. The readers, the grid
+# engine and the finalizer never open a PDF - they are given rasters - so a
+# machine that only digitizes figures does not need any of this, and a lock
+# file that demanded it would make the core install larger than the core work.
+#
+# THE SPLIT IS ALSO WHY THE SCENARIO COUNT HAS TWO VALUES. `test_corpus_intake`
+# SKIPs its adapter, per-status, renderer and crop sections where no backend is
+# installed: 111 scenarios without, 149 with. The package runs 2244 under the
+# lock file alone and 2282 with this file and poppler-utils, and CI checks both
+# rather than documenting one and hoping.
+#
+# poppler-utils is not a Python package and cannot be pinned here. The
+# `intake-full` job records `pdftotext -v` in its log, so a runner image that
+# changes it is visible rather than mysterious - and the count is gated on
+# poppler being PRESENT, which the job installs explicitly rather than
+# inheriting from whatever `ubuntu-latest` happens to ship.
+pdfminer.six==20251230
+pypdf==3.17.4

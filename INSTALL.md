@@ -1359,6 +1359,9 @@ On publication 397 `figure_values_accepted.csv` is **0 rows**, and
 
     SKILL=~/.claude-science/orgs/dd143201-4dc0-4233-9a3f-240a058d710f/skills/figure-digitization-triage
     python3 -m pip install -r requirements.txt
+    # and, only if you will run the corpus walk over PDFs:
+    #   python3 -m pip install -r requirements-intake.txt
+    #   apt-get install poppler-utils   /   brew install poppler
     cp *.py *.md *.csv *.png *.jpeg *.json *.tar "$SKILL"/
     mkdir -p "$SKILL"/fixtures && cp fixtures/* "$SKILL"/fixtures/
     cd "$SKILL" && for t in test_reproducibility test_kernel test_grid_engine \

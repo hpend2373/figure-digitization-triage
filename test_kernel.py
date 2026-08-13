@@ -27,6 +27,22 @@ def load():
 k = load()
 TMP = os.path.join(tempfile.gettempdir(), "fdt_regression_tmp.csv")
 FAILURES = []
+#: Scenarios PRINTED. This file reported only failures, so it printed no count
+#: at all and the CI guard that adds the suites up had nothing to read from it -
+#: the total it was checking against was a number somebody had typed into
+#: README.
+#:
+#: Counted at the one place every scenario line passes through rather than at
+#: the reporters, because there are nineteen of those: two helpers and
+#: seventeen inline sites that print the same prefix and append to FAILURES
+#: themselves. A counter added to the helpers would have reported 175 of 242.
+PASSED = [0]
+
+
+def _scenario(ok):
+    """The prefix of a scenario line, counted on its way out."""
+    PASSED[0] += 1
+    return "  ok   " if ok else "  FAIL "
 
 
 def run(df, **kw):
@@ -62,7 +78,7 @@ def expect(name, rows, want=None, forbid=None, clean=False, **kw):
         if want is None and forbid is None:
             ok = bool(got)
             detail = "expected some problem, got none"
-    print(("  ok   " if ok else "  FAIL ") + name + ("" if ok else "  <- " + detail))
+    print(_scenario(ok) + name + ("" if ok else "  <- " + detail))
     if not ok:
         FAILURES.append(name)
 
@@ -221,7 +237,7 @@ expect("and on a right-skewed outcome they are not a problem at all",
 # is a template nobody can fill.
 import grid_engine as _ge                                       # noqa: E402
 def _plain(name, ok, detail=""):
-    print(("  ok   " if ok else "  FAIL ") + name
+    print(_scenario(ok) + name
           + ("" if ok else "  <- " + detail))
     if not ok:
         FAILURES.append(name)
@@ -479,7 +495,7 @@ TARGET = [r"heart rate", r"\bHR\b", r"blood pressure", r"\bMAP\b",
 for cap, want_route in CASES:
     got = k.fig_screen_caption(cap, target_terms=TARGET)[0]
     ok = got == want_route
-    print(("  ok   " if ok else "  FAIL ") + cap[:58]
+    print(_scenario(ok) + cap[:58]
           + ("" if ok else "  <- got %s want %s" % (got, want_route)))
     if not ok:
         FAILURES.append("screen: " + cap[:40])
@@ -495,26 +511,26 @@ TOKENS = [
 for tok, cap, want_true in TOKENS:
     got = k.fig_token_denotes_outcome(tok, cap)
     ok = got == want_true
-    print(("  ok   " if ok else "  FAIL ") + "%s in %s" % (tok, cap[:44])
+    print(_scenario(ok) + "%s in %s" % (tok, cap[:44])
           + ("" if ok else "  <- got %s" % got))
     if not ok:
         FAILURES.append("token: %s %s" % (tok, cap[:30]))
 
 conf, _ = k.fig_panel_confidence("Mean heart rate before and after bed rest")
 ok = conf == "NO_KEY"
-print(("  ok   " if ok else "  FAIL ") + "prose without a panel key says nothing about panels"
+print(_scenario(ok) + "prose without a panel key says nothing about panels"
       + ("" if ok else "  <- got %s" % conf))
 if not ok:
     FAILURES.append("panel confidence no key")
 conf, _ = k.fig_panel_confidence("Mean HR before and after bed rest")
 ok = conf == "SINGLE_KEY_ONLY"
-print(("  ok   " if ok else "  FAIL ") + "one panel key is not proof of one panel"
+print(_scenario(ok) + "one panel key is not proof of one panel"
       + ("" if ok else "  <- got %s" % conf))
 if not ok:
     FAILURES.append("panel confidence single")
 conf, _ = k.fig_panel_confidence("Responses of HR, SBP and DBP to the cold pressor test")
 ok = conf == "CAPTION_ENUMERATES"
-print(("  ok   " if ok else "  FAIL ") + "several panel keys are enumerated"
+print(_scenario(ok) + "several panel keys are enumerated"
       + ("" if ok else "  <- got %s" % conf))
 if not ok:
     FAILURES.append("panel confidence enumerated")
@@ -525,13 +541,13 @@ for name, cols, n in (("continuous", k.fig_template_columns(), None),
                       ("binary", k.fig_binary_event_columns(), None)):
     dup = [c for c in set(cols) if list(cols).count(c) > 1]
     ok = not dup
-    print(("  ok   " if ok else "  FAIL ") + "%s schema has no duplicate columns" % name
+    print(_scenario(ok) + "%s schema has no duplicate columns" % name
           + ("" if ok else "  <- %s" % dup))
     if not ok:
         FAILURES.append("dup cols " + name)
 spec = k.fig_extraction_spec()
 ok = set(spec["Data_Shape"]) == set(k.FIG_SHAPES)
-print(("  ok   " if ok else "  FAIL ") + "spec covers every shape in FIG_SHAPES"
+print(_scenario(ok) + "spec covers every shape in FIG_SHAPES"
       + ("" if ok else "  <- %s" % sorted(set(k.FIG_SHAPES) ^ set(spec["Data_Shape"]))))
 if not ok:
     FAILURES.append("spec shape coverage")
@@ -574,7 +590,7 @@ for tok in NULLS:
     df = pd.DataFrame([dict(Timepoints="PRE_POST", Challenge_Test=tok)])
     got = k.fig_classify_shape(df)["Data_Shape_Expected"].iloc[0]
     ok = got == "D_SIMPLE_PREPOST"
-    print(("  ok   " if ok else "  FAIL ")
+    print(_scenario(ok)
           + "no challenge when Challenge_Test=%r" % tok
           + ("" if ok else "  <- got %s" % got))
     if not ok:
@@ -583,14 +599,14 @@ for tok, want_shape in (("HUT70", "B_CHALLENGE_2POINT"), ("LBNP", "B_CHALLENGE_2
     df = pd.DataFrame([dict(Timepoints="PRE_POST", Challenge_Test=tok)])
     got = k.fig_classify_shape(df)["Data_Shape_Expected"].iloc[0]
     ok = got == want_shape
-    print(("  ok   " if ok else "  FAIL ") + "a real challenge %r still classifies as B" % tok
+    print(_scenario(ok) + "a real challenge %r still classifies as B" % tok
           + ("" if ok else "  <- got %s" % got))
     if not ok:
         FAILURES.append("real challenge %r" % tok)
 df = pd.DataFrame([dict(Timepoints="SERIAL", Challenge_Test="\uc5c6\uc74c")])
 got = k.fig_classify_shape(df)["Data_Shape_Expected"].iloc[0]
 ok = got == "C_LONGITUDINAL_SERIAL"
-print(("  ok   " if ok else "  FAIL ") + "serial with a Korean null is C, not A"
+print(_scenario(ok) + "serial with a Korean null is C, not A"
       + ("" if ok else "  <- got %s" % got))
 if not ok:
     FAILURES.append("serial korean null")
@@ -614,7 +630,7 @@ PRED_TARGET = TARGET + [r"orthostatic intoleran"]
 for cap, want in PRED:
     got = k.fig_screen_caption(cap, target_terms=PRED_TARGET)[0]
     ok = got == want
-    print(("  ok   " if ok else "  FAIL ") + cap[:58]
+    print(_scenario(ok) + cap[:58]
           + ("" if ok else "  <- got %s, want %s" % (got, want)))
     if not ok:
         FAILURES.append("predict wording: " + cap[:40])
@@ -629,7 +645,7 @@ DRAW = [
 for cap, want in DRAW:
     got = k.fig_screen_caption(cap, target_terms=TARGET)[0]
     ok = got == want
-    print(("  ok   " if ok else "  FAIL ") + cap[:58]
+    print(_scenario(ok) + cap[:58]
           + ("" if ok else "  <- got %s, want %s" % (got, want)))
     if not ok:
         FAILURES.append("drawing wording: " + cap[:40])
@@ -647,7 +663,7 @@ MATH_MODEL = [
 for cap in MATH_MODEL:
     got = k.fig_screen_caption(cap, target_terms=TARGET)[0]
     ok = got != "NOT_DATA"
-    print(("  ok   " if ok else "  FAIL ") + "mathematical model survives: " + cap[:40]
+    print(_scenario(ok) + "mathematical model survives: " + cap[:40]
           + ("" if ok else "  <- got NOT_DATA"))
     if not ok:
         FAILURES.append("math model excluded: " + cap[:40])
@@ -723,7 +739,7 @@ for vname in ("FIG_BAR_TOP_DEFS", "FIG_PANEL_RECON", "FIG_DISPERSION_TYPES", "FI
               "FIG_BOOL_FALSE"):
     bad = [v for v in getattr(k, vname) if k.fig_is_blank(v)]
     ok = not bad
-    print(("  ok   " if ok else "  FAIL ") + "%s has no null-token value" % vname
+    print(_scenario(ok) + "%s has no null-token value" % vname
           + ("" if ok else "  <- %s" % bad))
     if not ok:
         FAILURES.append("vocab collision " + vname)
@@ -734,7 +750,7 @@ for _c in ("Extraction_Method", "Bar_Top_Definition", "Errorbar_Stem_Confirmed",
            "Observed_Panel_Count", "Worklist_Panel_Count", "Unlisted_Panels",
            "Panel_Reconciliation_Status"):
     ok = _c in _cols
-    print(("  ok   " if ok else "  FAIL ") + "%s ships in fig_template_columns()" % _c)
+    print(_scenario(ok) + "%s ships in fig_template_columns()" % _c)
     if not ok:
         FAILURES.append("template missing " + _c)
 # A gate that only fires when an out-of-template column happens to be present is
@@ -825,7 +841,11 @@ expect("one figure naming one set is clean", _a,
 if os.path.exists(TMP):
     os.remove(TMP)
 print()
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one.
+print("FDT_SCENARIOS_RUN=%d" % PASSED[0])
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))
     sys.exit(1)
+print("%d scenarios run" % PASSED[0])
 print("all scenarios passed")

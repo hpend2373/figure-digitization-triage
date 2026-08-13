@@ -497,6 +497,12 @@ check("but case-folding turns the ones that name a real mask into it",
       all(_k.strip().casefold() in BR.BUILTIN_MASK_KEYS
           for _k in ("BLUE", "Dark ", "Red")))
 
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % (len(FAILURES) + _PASSED[0]))
 print("%d scenarios run" % (len(FAILURES) + _PASSED[0]))
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))

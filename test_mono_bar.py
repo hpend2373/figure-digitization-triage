@@ -423,6 +423,12 @@ check("and a 2-D greyscale array is taken as greyscale, not re-converted",
       "%d rows against %d" % (len(_from_gray), len(_from_image)))
 
 print()
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))

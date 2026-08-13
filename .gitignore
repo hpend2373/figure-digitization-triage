@@ -4,3 +4,7 @@ __pycache__/
 out/
 out_pilot_397/
 .DS_Store
+
+# Written by the CI suite loop and read by verify_documented_status.py.
+# A run artifact, not a record: the record is the number in README.
+scenario-counts.tsv

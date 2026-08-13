@@ -9,6 +9,17 @@ import sys
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+#: Scenarios PRINTED. This file uses neither `check` nor `expect` - it asserts
+#: and prints a PASS line - so it reported no total, and the CI guard that sums
+#: the suites had nothing to read from it.
+_PASSES = [0]
+
+
+def passed(message):
+    """A scenario that held, counted on its way out."""
+    _PASSES[0] += 1
+    print("%s: PASS" % message)
 real_import = builtins.__import__
 
 
@@ -35,7 +46,7 @@ for kind in ("PEARSON_R", "SPEARMAN_RHO", "KENDALL_TAU", "R_SQUARED", "SLOPE"):
     assert result["N_Pairs"] == 6
     assert result["Association_Value"] == result["Association_Value"]
 
-print("clean-room import without scipy: PASS")
+passed("clean-room import without scipy")
 
 # A script that cannot find its input has two honest answers and one dishonest
 # one. It can say so and stop, or it can be told the input is genuinely optional
@@ -63,7 +74,7 @@ for label, argv in (
     assert "BLOCKED" in (missing.stdout + missing.stderr), (
         "%s exited 2 without saying which raster is missing\n%s%s"
         % (label, missing.stdout, missing.stderr))
-    print("missing raster BLOCKS %s: PASS" % label)
+    passed("missing raster BLOCKS %s" % label)
 
 
 # --------------------------------------------------------------------------
@@ -103,7 +114,7 @@ for label, partial in (
         "a partial attestation (%s) must be BLOCKED (exit 2), got %d\n%s%s"
         % (label, r.returncode, r.stdout, r.stderr))
     assert "partial attestation" in r.stderr, r.stderr
-    print("partial attestation BLOCKS the pilot (%s): PASS" % label)
+    passed("partial attestation BLOCKS the pilot (%s)" % label)
 
 full = run_pilot(FULL, "fdt_attested")
 assert full.returncode == 0, "a full attestation must run\n%s%s" % (full.stdout, full.stderr)
@@ -123,7 +134,7 @@ figures = list(csv.DictReader(open(os.path.join(
     tempfile.gettempdir(), "fdt_attested", "manifests",
     "source_figure_manifest.csv"), encoding="utf-8")))
 assert {r["Inspection_Date"] for r in figures} == {FULL["FDT_INSPECTION_DATE"]}, figures
-print("a full attestation runs as ATTESTED with the given dates: PASS")
+passed("a full attestation runs as ATTESTED with the given dates")
 
 demo = run_pilot({}, "fdt_demo")
 assert demo.returncode == 0, "%s%s" % (demo.stdout, demo.stderr)
@@ -135,7 +146,7 @@ assert demo_stamp["Values_Accepted"] == 0, demo_stamp
 demo_dir = os.path.join(tempfile.gettempdir(), "fdt_demo")
 assert not os.path.exists(os.path.join(demo_dir, "figure_values_accepted.csv")), (
     "a DEMO_ONLY run left an accepted file")
-print("no attestation runs as DEMO_ONLY with zero accepted: PASS")
+passed("no attestation runs as DEMO_ONLY with zero accepted")
 
 # --------------------------------------------------------------------------
 # the approval gate, end to end
@@ -158,12 +169,12 @@ assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv")), 
     "run_batch wrote an accepted file; only finalize_batch may")
 assert os.path.exists(os.path.join(att_dir, "figure_values_machine_qc.csv"))
 assert os.path.exists(os.path.join(att_dir, "review_queue.csv"))
-print("run_batch stops at machine QC and writes a review queue: PASS")
+passed("run_batch stops at machine QC and writes a review queue")
 
 empty = sh(FIN, att_dir)
 assert empty.returncode == 1 and "NOTHING_APPROVED" in empty.stdout, empty.stdout
 assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv"))
-print("an unreviewed run finalizes to nothing: PASS")
+passed("an unreviewed run finalizes to nothing")
 
 
 # --------------------------------------------------------------------------
@@ -184,12 +195,12 @@ env = RB_ENV.environment_record()
 assert env["Python"] and env["Platform"], env
 assert set(env["Libraries"]) == {"numpy", "pandas", "PIL", "cv2"}, env
 assert all(v and v != "unknown" for v in env["Libraries"].values()), env
-print("the runner can describe its own environment: PASS")
+passed("the runner can describe its own environment")
 
 stamp = json.load(open(os.path.join(att_dir, "run_stamp.json")))
 assert stamp.get("Environment", {}).get("Python"), stamp
 assert stamp["Environment"]["Libraries"]["numpy"] == env["Libraries"]["numpy"], stamp
-print("and every run stamp carries it: PASS")
+passed("and every run stamp carries it")
 
 LOCK = os.path.join(HERE, "requirements-lock.txt")
 assert os.path.exists(LOCK), "requirements-lock.txt is not in the package"
@@ -203,7 +214,7 @@ assert lower <= {k.lower() for k in locked}, (
 assert "opencv-python==" not in open(LOCK, encoding="utf-8").read(), (
     "opencv-python and opencv-python-headless both provide cv2; pinning both "
     "leaves which one answers an import to resolution order")
-print("every requirement is pinned in the lock file, exactly once: PASS")
+passed("every requirement is pinned in the lock file, exactly once")
 
 # --------------------------------------------------------------------------
 # the templates the package ships
@@ -264,7 +275,7 @@ assert not drifted, "shipped templates disagree with the code: %s" % drifted
 assert len(shipped) == len(TEMPLATE_COLUMNS), (
     "%d column functions but %d templates on disk"
     % (len(TEMPLATE_COLUMNS), len(shipped)))
-print("every shipped template matches its column function (%d): PASS" % len(shipped))
+passed("every shipped template matches its column function (%d)" % len(shipped))
 
 # The skill the package ships is the skill an agent installs. It was an
 # addendum - "sections to add", to be pasted into a SKILL.md that lived
@@ -316,7 +327,7 @@ assert "sections to add" not in skill_text, (
 assert not os.path.exists(os.path.join(HERE, "SKILL_ADDENDUM.md")), (
     "both SKILL.md and SKILL_ADDENDUM.md ship; one of them is stale by "
     "construction")
-print("SKILL.md is standalone and states the run contract: PASS")
+passed("SKILL.md is standalone and states the run contract")
 
 # CI must run every suite in the package. A test file nobody runs is a test
 # file that will be broken the next time somebody looks.
@@ -326,7 +337,7 @@ ci_text = open(CI, encoding="utf-8").read()
 suites = {os.path.basename(p)[:-3] for p in glob.glob(os.path.join(HERE, "test_*.py"))}
 unrun = sorted(s for s in suites if s not in ci_text)
 assert not unrun, "CI does not run: %s" % unrun
-print("CI runs every test file in the package (%d): PASS" % len(suites))
+passed("CI runs every test file in the package (%d)" % len(suites))
 
 # And every forward test, which the pattern above does not match. A forward test
 # is the only thing in the package that opens a publisher figure, so one that
@@ -337,7 +348,7 @@ forwards = {os.path.basename(p)[:-3]
             for p in glob.glob(os.path.join(HERE, "forward_test_*.py"))}
 unrun = sorted(s for s in forwards if s not in ci_text)
 assert not unrun, "CI does not run the forward tests: %s" % unrun
-print("CI runs every forward test in the package (%d): PASS" % len(forwards))
+passed("CI runs every forward test in the package (%d)" % len(forwards))
 
 # And every worked example. These are the only things in the package that run
 # the whole ladder on a real publication, so one that nobody runs is the one
@@ -347,7 +358,7 @@ pilots = {os.path.basename(p)[:-3]
           for p in glob.glob(os.path.join(HERE, "pilot_*.py"))}
 unrun = sorted(s for s in pilots if s not in ci_text)
 assert not unrun, "CI does not run the worked examples: %s" % unrun
-print("CI runs every worked example in the package (%d): PASS" % len(pilots))
+passed("CI runs every worked example in the package (%d)" % len(pilots))
 
 # No scenario may be written so that it cannot fail. Two were: a caption check
 # ending `... or True`, which passed whatever the picture contained, and an
@@ -393,5 +404,9 @@ for path in sorted(glob.glob(os.path.join(HERE, "test_*.py"))
                 vacuous.append("%s:%d" % (os.path.basename(path), line))
 assert not vacuous, ("a scenario that cannot fail is not a scenario: %s"
                      % ", ".join(vacuous))
-print("no scenario is written so that it cannot fail (%d files): PASS"
+passed("no scenario is written so that it cannot fail (%d files)"
       % len(glob.glob(os.path.join(HERE, "test_*.py"))))
+
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one.
+print("FDT_SCENARIOS_RUN=%d" % _PASSES[0])

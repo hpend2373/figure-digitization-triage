@@ -298,6 +298,12 @@ check("and it is drawn on the raster, not on a blank",
                                 for y in range(0, _ov.size[1], 7)))
 
 print()
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 import shutil                                                    # noqa: E402
 shutil.rmtree(ROOT, ignore_errors=True)

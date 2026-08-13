@@ -5331,6 +5331,12 @@ for _p in RB.emit_templates(_tdir):
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print()
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:
     print("%d FAILED: %s" % (len(FAILURES), FAILURES))

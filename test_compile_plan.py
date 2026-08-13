@@ -641,6 +641,12 @@ check("and the message names both source figures",
           for p in _spanp if p["check"] == "PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES"),
       "%s" % _spanp[:2])
 
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))
 shutil.rmtree(ROOT, ignore_errors=True)
 if FAILURES:

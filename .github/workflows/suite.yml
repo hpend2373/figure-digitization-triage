@@ -24,6 +24,7 @@ jobs:
       - name: suite
         run: |
           set -e
+          : > scenario-counts.tsv
           for t in test_reproducibility test_kernel test_grid_engine \
                    test_bar_reader test_mark_readers test_mono_bar \
                    test_measure_mono_bars \
@@ -31,8 +32,24 @@ jobs:
                    test_compile_plan test_corpus_intake \
                    test_geometry_proposer test_line_style_mono; do
             echo "--- $t"
-            python "$t.py"
+            # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
+            # status, so a failing suite goes green - and this loop's whole job
+            # is to be the thing that cannot go green when a suite fails.
+            out="$(python "$t.py")"
+            printf '%s\n' "$out"
+            count="$(printf '%s\n' "$out" \
+              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p' | tail -1)"
+            test -n "$count"
+            printf '%s.py\t%s\n' "$t" "$count" >> scenario-counts.tsv
           done
+
+      # The number in README is a claim about this package, and it followed the
+      # tree by hand until it did not: the file said 2184 after v7.43 while the
+      # tree ran 2282. A status line nobody can trust is worse than none.
+      - name: the documented status is the measured status
+        run: |
+          python verify_documented_status.py \
+            scenario-counts.tsv README.md run_batch.py
       - name: forward tests and worked examples
         run: |
           set -e

@@ -956,6 +956,12 @@ check("a directory that is not a run cannot be finalized",
       == "RUN_NOT_FINALIZABLE")
 
 print()
+# One line, one format, for the CI guard that checks the documented
+# scenario count against the measured one. The sentence above it is
+# for a person; this is for `verify_documented_status.py`, and a
+# regex over prose is what it replaces - two suites in this package
+# print no count sentence at all.
+print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))
 shutil.rmtree(ROOT, ignore_errors=True)
 if FAILURES:

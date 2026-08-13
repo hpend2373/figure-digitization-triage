@@ -3836,6 +3836,73 @@ The publisher PDF is not redistributable, so this SKIPs in CI like the two
 Beckers forward tests, and `test_reproducibility` now checks that CI runs every
 worked example as well as every test and forward test.
 
+## v7.50 — a blinded window does not get to call a curve solid
+
+`LINE_MONO_STYLE` classified the ink again at every position and believed the
+answer. It should not have, and publication 397 Figure 1 said so at 0:30, where
+the reader refused both cells and the release note called it a merge. It was
+not a merge: **the two curves are four mmHg apart there and both plainly
+traceable.** Two defects, neither of them about this paper.
+
+**The panel box says where the panel is; the declared positions say where the
+data is.** At the first plotted point half the fit window hangs over the axis,
+and one stray pixel of axis furniture — sixteen columns from the nearest curve,
+four pixels of ink — was collected as a sample of the curve. It stretched the
+fitted span from column 95 back to 84, dragged the quadratic six pixels, and
+the dashed curve came back at 90.7 where the eye reads 89.0: **inside the
+forward test's tolerance, and wrong.** Clipped to the declared span ± one
+`x_window`, it reads 89.4. On the drawn fixture the same four pixels used to
+cost that position both its cells.
+
+**Blinding hides gaps and cannot invent them.** Every column carrying furniture
+is dropped from the duty accounting — it has to be, or the stems alone would
+give every solid curve on this figure a gap of 3 — so the removal is not
+symmetric. The dashed curve runs along the 90 mmHg gridline through 0:30; 68%
+of that window is blinded, every dash gap with it, and it measured duty 1.000
+gap 0. A perfect solid line. Two SOLID candidates at one x meant neither was
+unique, and a correctly traced curve whose value was right to 0.4 mmHg was
+thrown away.
+
+A SOLID call made through a window that could not see half of itself is now
+withheld. DASHED and DOTTED need no such guard: a gap that was SEEN is a gap.
+
+What replaces the withheld call is **elimination, not continuity**. Where the
+panel declares N series, the reader found N curves at that x, and N-1 measured
+their own style, the last one has no choice left. Every emitted cell says which
+way it was named, in `line_style_source`, and carries the blindness that
+justifies it.
+
+A track-voting version was written first, measured, and thrown away. It
+recovered nothing on 397 that elimination does not, and it had a failure mode
+elimination cannot have: where its fill assigned a style a candidate at that x
+already carried, the count became two — the reader's own signal that it cannot
+tell two curves apart — and six cells on the WOMEN finger-pulse-volume panel
+that were about to be emitted were destroyed instead. An unobservable mechanism
+with a way to go wrong is worse than no mechanism.
+
+On the whole publication: **76 → 123 values**, 0:30 among them, and two panels
+that reported `NO_VARIANCE` because they read too few cells to carry a
+dispersion now report `QC_FAILED` with the rest of the paper. Nothing is
+accepted either way — 397 still never says SD or SEM.
+
+    reverted                                    scenarios that fail
+    the data span clip                          2 + the forward test
+    the blinded-window guard on SOLID           3 + the forward test
+    naming the last curve by elimination        4 + the forward test
+
+**Not fixed, and named in the reader.** At 4:30, 5:00 and 6:00 the two curves
+are one run of ink. It is nine to ten pixels thick where a stroke is three, and
+at 4:30 and 5:00 it separates again a few columns later — so its top and bottom
+edges are the two curves, and which edge is which is exactly what continuity
+would say. Six of twenty-four cells stay refused there. 6:00 is a genuine
+touch: the eye reads both series at 98.0, and two different numbers out of one
+seven-pixel stroke would be invention.
+
+**`line_style_source` does not reach `figure_values_*.csv` yet.** The reader row
+carries it and the forward test pins it; the values file has `Identity_Source`
+for exactly this purpose and only BAR_MONO fills it. A reviewer approving a
+line cell cannot currently see that its series was named by elimination.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -3843,3 +3910,6 @@ worked example as well as every test and forward test.
 - 397 Figure 4, 386 Figures 3–4
 - ID 323 FIG2 DAP DI19 (1 cell) and 4 unpaired cells need a human reading
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
+- 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
+  stroke and its edges are the two curves, unread
+- `line_style_source` stops at the reader and does not reach the values file

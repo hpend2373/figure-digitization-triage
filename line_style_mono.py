@@ -57,6 +57,34 @@ round:
 * READ THE VALUE OFF THE INK, not off the fit. The fit is a smoothing device
   and a quadratic rounds a corner; on 397 that put the solid curve 3.3 mmHg
   above where the eye reads it at the one position where it turns.
+* the window is clipped to THE DECLARED DATA SPAN, not to the panel box. The
+  box says where the panel is and the positions say where the data is; between
+  the two lies furniture, and at the first plotted point half the window is
+  over it. One stray axis pixel on 397 Figure 1, sixteen columns from the
+  nearest curve, was collected as a sample of it and moved the answer 1.7 mmHg.
+
+## What a blinded window may and may not say
+
+Furniture is dropped from the duty accounting - it has to be, or the stems
+alone would give every solid curve on 397 a gap of 3 - and that removal is not
+symmetric. IT HIDES GAPS AND CANNOT INVENT THEM. A dashed curve whose gaps all
+fall on a gridline measures duty 1.000, gap 0: a perfect solid line. On 397
+Figure 1 the dashed curve runs along the 90 mmHg rule through 0:30, 68% of that
+window is blinded, and the reader called it SOLID - two SOLID candidates at one
+x, neither unique, and a correctly traced curve whose value was right to 0.4
+mmHg thrown away.
+
+So a SOLID call made through a window that could not see half of itself is
+withheld: not a measurement, and recorded as such. A DASHED or DOTTED call
+needs no guard, because a gap that was SEEN is a gap.
+
+What replaces the withheld call is elimination, not continuity. Where the panel
+declares N series, the reader found N curves at that x, and N-1 measured their
+own style, the last one has no choice left. A track-voting version was written
+first and thrown away: it recovered nothing on 397 that this does not, and
+where its fill duplicated a style already present it made the count two and
+destroyed six cells that were about to be emitted. Every cell says which way it
+was named, in `line_style_source`.
 
 ## Where it refuses
 
@@ -67,6 +95,12 @@ while another was found is a position where they merged: no cell for either
 series. Likewise a dispersion is the connected column of ink through the mark -
 where two error bars touch, the run holds both marks, and the cell keeps its
 mean and reports no dispersion rather than the neighbour's cap.
+
+STILL OPEN. Where two curves merge, the run of ink is often visibly thicker
+than one stroke - nine to ten pixels against three at 397 Figure 1's 4:30 and
+5:00, and it separates again a few columns later. Its top and bottom edges are
+the two curves, and which edge is which is exactly what continuity would say.
+That is the next thing to read here, and it is not read yet.
 """
 import numpy as np
 import cv2
@@ -261,7 +295,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
                                      np.asarray(ys, dtype=float), 1))
         xs, ys = collect(lambda xi: float(first(xi)))
     if len(xs) < 5 or len(set(xs)) < 2:
-        return None, None, None, None
+        return None, None, None, None, None
     # Quadratic, not linear. A time course turns over, and a straight fit
     # through a peak leaves most of the window outside `tol` - the solid curve
     # at its own maximum measured a duty of 0.47 and was classified as dashed.
@@ -274,7 +308,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     # columns as misses halved the duty of a perfectly solid line.
     lo_x, hi_x = min(xs), max(xs) + 1
     if hi_x - lo_x < 12:
-        return None, None, None, None
+        return None, None, None, None, None
     # A COLUMN WHERE THE CURVE IS COVERED IS NOT A COLUMN WHERE THE CURVE IS
     # ABSENT. The stems have been taken out of `mask` so that a tall glyph
     # cannot be traced as a curve, and that removal takes the curve's own two or
@@ -283,12 +317,13 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     # every 33 columns, so every window over the SOLID curve showed a gap of 3
     # and the reader found no solid line anywhere on the figure. Skipped in both
     # the numerator and the denominator, the gap measures the line style.
-    hits, observed, gap, longest = 0, 0, 0, 0
+    hits, observed, gap, longest, blinded = 0, 0, 0, 0, 0
     seen = {}
     for xi in range(lo_x, hi_x):
         predicted = float(curve(xi))
         lo_y, hi_y = max(0, int(predicted - tol)), min(height, int(predicted + tol) + 1)
         if blind is not None and hi_y > lo_y and blind[lo_y:hi_y, xi].any():
+            blinded += 1
             continue
         observed += 1
         idx = np.where(mask[lo_y:hi_y, xi])[0] if hi_y > lo_y else []
@@ -305,9 +340,10 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
         # `run_batch` reports as an InternalReaderError and which aborts the
         # whole batch - one panel's blind spot taking seventeen readable panels
         # with it.
-        return None, None, None, None
+        return None, None, None, None, None
     slope = float(curve.deriv()(x)) if order == 2 else float(fit[0])
-    return (hits / float(observed), _ink_at(seen, x, curve), slope, longest)
+    return (hits / float(observed), _ink_at(seen, x, curve), slope, longest,
+            blinded / float(observed + blinded))
 
 
 def _ink_at(seen, x, curve):
@@ -372,17 +408,17 @@ def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
     # anyway. Doing it twice was two names for one rule.
     found = []
     for seed in seeds:
-        duty, y_at_x, slope, gap = _line_fit_window(mask, int(round(x)), seed,
-                                                    half=half, band=band,
-                                                    blind=blind)
+        duty, y_at_x, slope, gap, _b = _line_fit_window(mask, int(round(x)), seed,
+                                                       half=half, band=band,
+                                                       blind=blind)
         if y_at_x is None:
             continue
-        duty, y_at_x, slope, gap = _line_fit_window(mask, int(round(x)), y_at_x,
-                                                    half=half, band=band,
-                                                    blind=blind)
+        duty, y_at_x, slope, gap, blindness = _line_fit_window(
+            mask, int(round(x)), y_at_x, half=half, band=band, blind=blind)
         if y_at_x is None or not (y0 <= y_at_x <= y1):
             continue
-        found.append(dict(y=y_at_x, duty=duty, slope=slope, gap=gap))
+        found.append(dict(y=y_at_x, duty=duty, slope=slope, gap=gap,
+                          blindness=blindness))
     return found
 
 
@@ -453,6 +489,70 @@ def _bar_extent(mask, x, cy, other_centres, half_window, marker_half_height,
     return float(top), float(bottom)
 
 
+#: A window this far blinded cannot say a curve is SOLID. Half, because a call
+#: made on less than half of what it claims to have looked at is not a
+#: measurement.
+_BLIND_MAX_FOR_SOLID = 0.5
+
+
+def _local_style(candidate):
+    """The style this window can testify to, which is not always a style.
+
+    BLINDING HIDES GAPS AND CANNOT INVENT THEM, so it biases one way and one
+    way only. Every column we could not see through is dropped from the duty
+    accounting - it has to be, or the stems alone would give every solid curve
+    on 397 a gap of 3 - and a curve whose gaps all happen to fall on furniture
+    then measures duty 1.000, gap 0: a perfect solid line.
+
+    That is not a rare coincidence. On 397 Figure 1 the dashed curve runs along
+    the 90 mmHg gridline through 0:30, 68% of that window is blinded, and the
+    curve reads SOLID. Two SOLID candidates at one x meant neither was unique
+    and the position lost both cells - a dashed curve, correctly traced, whose
+    value was right to 0.4 mmHg, thrown away because the reader believed a
+    classification it had no business making.
+
+    A DASHED or DOTTED call needs no such guard: a gap that was SEEN is a gap.
+    """
+    style = classify_line_style(candidate["duty"], candidate["gap"])
+    if style == "SOLID" and (candidate.get("blindness") or 0.0) > _BLIND_MAX_FOR_SOLID:
+        return None
+    return style
+
+
+def _complement_fill(found_at, declared):
+    """Two curves and two styles: naming one names the other.
+
+    Where a panel declares N series, the reader found exactly N curves at this
+    x, and N-1 of them measured their own style, the last one has no choice
+    left. This is the weakest inference in the file and the one that needs the
+    least: it does not assume continuity, only that the panel contains what it
+    was declared to contain and that the reader found that many curves here.
+
+    It is also strictly safe in the one way a continuity rule is not. A
+    track-voting version of this was written first and thrown away: it filled
+    the same blanks on 397 that this fills, and where the fill duplicated a
+    style already present at that x it made the count two and DESTROYED six
+    cells on the WOMEN finger-pulse-volume panel that were about to be
+    emitted. This can never do that, because it only ever assigns the style
+    nobody has - and on the whole publication it recovered every cell the
+    voting version did, so the voting version was decoration with a failure
+    mode.
+    """
+    for candidates in found_at.values():
+        if len(candidates) != len(declared):
+            continue
+        blank = [c for c in candidates if c["style"] is None]
+        named = {c["style"] for c in candidates if c["style"] is not None}
+        missing = [style for style in declared if style not in named]
+        if len(blank) == 1 and len(missing) == 1 and len(named) == len(declared) - 1:
+            blank[0]["style"] = missing[0]
+            # WHICH CELLS WERE NAMED BY ELIMINATION rather than read off the
+            # ink. These are the ones a reviewer should look at first, and a
+            # cell that cannot say how its series was decided is a cell nobody
+            # can weigh.
+            blank[0]["style_source"] = "COMPLEMENT_OF_DECLARED_STYLES"
+
+
 def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                                series, threshold=150, x_window=10,
                                fit_half=22, fit_band=5, probe=8,
@@ -478,8 +578,22 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
     gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
     x0, x1, y0, y1 = map(int, panel_box)
+    # THE PANEL BOX SAYS WHERE THE PANEL IS; THE DECLARED POSITIONS SAY WHERE
+    # THE DATA IS, and between the two lies furniture. At the first plotted
+    # point half the fit window hangs over the axis, and on 397 Figure 1 a
+    # SINGLE STRAY PIXEL of the y-axis, sixteen columns from the nearest curve,
+    # was collected as a sample of it: it extended the fitted span from column
+    # 95 back to 84, dragged the quadratic six pixels, and the dashed curve at
+    # 0:30 came back 90.7 where the eye reads 89.0 - inside the forward test's
+    # tolerance, and wrong. A curve exists between its own end points. One
+    # `x_window` of margin either side is the room a stroke's round end needs
+    # and no more.
+    span_lo = int(min(x_positions.values())) - int(x_window)
+    span_hi = int(max(x_positions.values())) + int(x_window)
+    xa, xb = max(x0, span_lo), min(x1, span_hi + 1)
     mask = np.zeros(gray.shape, dtype=bool)
-    mask[y0:y1, x0:x1] = gray[y0:y1, x0:x1] < int(threshold)
+    if xb > xa:
+        mask[y0:y1, xa:xb] = gray[y0:y1, xa:xb] < int(threshold)
     # Both are ink that is not a datum, and both hide the curve where it
     # crosses them, so both are taken out of the traceable ink AND used to
     # blind the duty accounting.
@@ -530,16 +644,22 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
         return seen
 
     forward, backward = sweep(ordered), sweep(list(reversed(ordered)))
+    found_at = {}
+    for label, _x in ordered:
+        seen = []
+        for candidate in forward[label] + backward[label]:
+            if any(abs(candidate["y"] - s["y"]) <= _SAME_CURVE_PX for s in seen):
+                continue      # the same curve, reached from either direction
+            style = _local_style(candidate)
+            seen.append(dict(candidate, style=style,
+                             style_source="MEASURED" if style else ""))
+        seen.sort(key=lambda c: c["y"])
+        found_at[label] = seen
+    _complement_fill(found_at, [str(spec.line_style).strip().upper()
+                                for spec in series])
     per_x = {}
     for label, _x in ordered:
-        styled = []
-        for candidate in forward[label] + backward[label]:
-            style = classify_line_style(candidate["duty"], candidate["gap"])
-            if style is None:
-                continue
-            if any(abs(candidate["y"] - s["y"]) <= _SAME_CURVE_PX for s in styled):
-                continue      # the same curve, reached from either direction
-            styled.append(dict(candidate, style=style))
+        styled = [c for c in found_at[label] if c["style"] is not None]
         counts = {}
         for candidate in styled:
             counts[candidate["style"]] = counts.get(candidate["style"], 0) + 1
@@ -600,6 +720,11 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 # beside the duty so a reviewer can check the call that was
                 # actually made rather than the one the number suggests.
                 line_gap=candidate["gap"],
+                # MEASURED, or named by elimination because the window was too
+                # blinded to measure. Not the same claim, and the difference
+                # must not be invisible to the person approving the cell.
+                line_style_source=candidate.get("style_source") or "MEASURED",
+                line_window_blindness=round(candidate.get("blindness") or 0.0, 3),
                 Marker_Definition="LINE_CENTER",
                 # Connected by construction: the bar IS the run of ink through
                 # the mark, so a recovered dispersion has a confirmed stem and

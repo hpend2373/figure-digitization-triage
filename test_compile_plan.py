@@ -134,13 +134,21 @@ check("with the pilot's panel count", _summary["panels"] == 26, "%s" % _summary)
 # between the edges, which was honest while nothing could read them and is not
 # geometry.
 #
-# Twelve panels and 76 values is a LOW yield and the right one. On this
-# publication the two curves run within a stroke of each other over most of
-# several panels - finger pulse volume men is two lines about fourteen pixels
-# apart for nine of its twelve positions - and a cell nobody can attribute is
-# a cell this reader does not emit.
-check("and the 76 values the released readers stand behind",
-      _summary["values"] == 76, "%s" % _summary)
+# 123, not 76: v7.50. The reader used to classify the ink again at every
+# position and believe the answer. Blinding drops furniture columns from the
+# duty accounting - it must, or the stems alone would give every solid curve a
+# gap of 3 - and it therefore HIDES GAPS AND CANNOT INVENT THEM, so a dashed
+# curve running along a gridline measured a perfect solid line. A SOLID call
+# made through a window that could not see half of itself is now withheld, and
+# where the panel declares two styles and the reader found two curves, naming
+# one names the other.
+#
+# Nothing here is accepted either way - see the next check - so what this pin
+# records is not a yield but a COST AND A GAIN IN THE OPEN: 47 more cells
+# attributed, and two panels that used to report NO_VARIANCE now reporting
+# QC_FAILED because a dispersion they had been silent about is now measured.
+check("and the 123 values the released readers stand behind",
+      _summary["values"] == 123, "%s" % _summary)
 check("and nothing accepted, because the paper still does not say SD or SEM",
       _summary["accepted"] == 0, "%s" % _summary)
 _states = _summary["states"]
@@ -150,8 +158,13 @@ _states = _summary["states"]
 # both marks and neither cap can be attributed. A centre with no dispersion is
 # not poolable, so the panel says so - which is the same answer it gave before,
 # reached by measurement instead of by absence.
+# The four states do not change; two panels move between them. Finger pulse
+# volume (both sexes) and cardiac output women reached NO_VARIANCE by reading
+# too few cells to carry a dispersion; with the withheld SOLID calls named by
+# elimination they read enough, and land where the rest of this publication
+# lands - QC_FAILED, waiting on an author who can say SD or SEM.
 check("and the same four terminal states",
-      _states == {"QC_FAILED": 12, "NO_VARIANCE": 9,
+      _states == {"QC_FAILED": 14, "NO_VARIANCE": 7,
                   "PANEL_GEOMETRY_UNRESOLVED": 3, "MANUAL_POINT_READ": 2},
       "%s" % _states)
 # PANEL_GEOMETRY_UNRESOLVED, not MANUAL_POINT_READ: the reason is on the run

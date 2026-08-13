@@ -355,11 +355,139 @@ print("a window with nothing observable in it has no duty cycle")
 _all_ink = np.ones((60, 80), dtype=bool)
 check("a fit whose every column is furniture returns nothing",
       LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink)
-      == (None, None, None, None),
+      == (None, None, None, None, None),
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink),))
 check("and the same window with nothing blinding it does report one",
       LSM._line_fit_window(_all_ink, 40, 30)[0] == 1.0,
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30),))
+# The window also has to say HOW MUCH of itself it could not see, because a
+# duty measured through furniture is not the same claim as one measured
+# through air, and nothing downstream can tell them apart without this.
+check("and it reports how blinded it was, both ways",
+      LSM._line_fit_window(_all_ink, 40, 30)[4] == 0.0,
+      "%r" % (LSM._line_fit_window(_all_ink, 40, 30)[4],))
+
+
+print("the panel box says where the panel is; the positions say where the data is")
+# A REAL DEFECT, FOUND ON 397 FIGURE 1 AND REPRODUCED HERE. At the first
+# plotted point half the fit window hangs over the axis, and a single stray
+# pixel of axis furniture inside the panel box was collected as a sample of the
+# curve: it stretched the fitted span sixteen columns to the left, dragged the
+# quadratic, and the dashed curve came back 1.7 units off - inside the forward
+# test's tolerance and wrong. Four pixels of ink, and BOTH cells at that
+# position were lost.
+_speck_y = CAL.value_to_pixel(TRUTH["SOLID"][0])
+
+
+def with_speck(x):
+    marked = image.copy()
+    ImageDraw.Draw(marked).rectangle([x, _speck_y + 5, x + 3, _speck_y + 7],
+                                     fill="black")
+    return marked
+
+
+_clean = {(r["series"], r["x_label"]): r["mean"] for r in read()}
+_outside = {(r["series"], r["x_label"]): r["mean"]
+            for r in read(with_speck(XS[0] - 18))}
+check("a speck between the axis and the first plotted point changes nothing",
+      _outside == _clean,
+      "%d cells against %d" % (len(_outside), len(_clean)))
+# The other half of the same statement, and the reason this is a span rather
+# than a blanket: ink one window inside the first position is DATA. The reader
+# does not get to decide that a stroke near the end of the curve is furniture.
+_inside = {(r["series"], r["x_label"]): r["mean"]
+           for r in read(with_speck(XS[0] - 8))}
+check("and ink inside that span is still the panel's ink",
+      ("S_FLUID", "T0") not in _inside,
+      "%r" % sorted(k for k in _inside if k[1] == "T0"))
+
+
+print("a window that could not see itself does not get to call a curve solid")
+# BLINDING HIDES GAPS AND CANNOT INVENT THEM. Every column carrying furniture
+# is dropped from the duty accounting - it has to be, or the stems alone would
+# give every solid curve on 397 a gap of 3 - so a dashed curve whose gaps all
+# fall on a gridline measures duty 1.000, gap 0. That is what happens at 0:30
+# on 397 Figure 1, where the dashed curve runs along the 90 mmHg rule: 68% of
+# the window blinded, a perfect SOLID reading, two SOLID candidates at one x,
+# and both cells thrown away.
+_solid_reading = dict(duty=1.0, gap=0)
+check("a solid reading taken through a mostly blinded window is withheld",
+      LSM._local_style(dict(_solid_reading, blindness=0.68)) is None,
+      "%r" % LSM._local_style(dict(_solid_reading, blindness=0.68)))
+check("the same reading through a window in view is solid",
+      LSM._local_style(dict(_solid_reading, blindness=0.31)) == "SOLID",
+      "%r" % LSM._local_style(dict(_solid_reading, blindness=0.31)))
+# One-way, on purpose. Furniture can hide a gap; it cannot draw one.
+check("a dashed reading is not withheld however blinded the window was",
+      LSM._local_style(dict(duty=0.6, gap=5, blindness=0.95)) == "DASHED",
+      "%r" % LSM._local_style(dict(duty=0.6, gap=5, blindness=0.95)))
+check("and a window with no blindness recorded is read as unblinded",
+      LSM._local_style(dict(_solid_reading, blindness=None)) == "SOLID")
+
+
+print("two curves and two styles: naming one names the other")
+# What the withheld reading is replaced by. This is the weakest inference in
+# the reader and it needs the least: not continuity, only that the panel holds
+# what it was declared to hold and that the reader found that many curves here.
+# On 397 Figure 1 it recovers four of the eighteen cells, 0:30 among them.
+_DECLARED = ["SOLID", "DASHED"]
+
+
+def _fill(styles):
+    found = {"x": [dict(y=float(i), style=s) for i, s in enumerate(styles)]}
+    LSM._complement_fill(found, _DECLARED)
+    return [(c["style"], c.get("style_source", "")) for c in found["x"]]
+
+
+check("the one blank among as many curves as series takes the missing style",
+      _fill(["SOLID", None]) == [("SOLID", ""),
+                                 ("DASHED", "COMPLEMENT_OF_DECLARED_STYLES")],
+      "%r" % (_fill(["SOLID", None]),))
+check("and says so, because an inference that reports itself as a measurement "
+      "is worse than no inference",
+      _fill([None, "DASHED"])[0][1] == "COMPLEMENT_OF_DECLARED_STYLES")
+check("two blanks leave two blanks - there is nothing to eliminate",
+      _fill([None, None]) == [(None, ""), (None, "")],
+      "%r" % (_fill([None, None]),))
+check("a count that is not the declared count fills nothing",
+      _fill(["SOLID", None, None]) == [("SOLID", ""), (None, ""), (None, "")],
+      "%r" % (_fill(["SOLID", None, None]),))
+# THE FAILURE MODE OF THE VERSION THAT WAS THROWN AWAY. A continuity-voting
+# fill assigned a style a candidate at that x already carried, which made the
+# count two - the reader's own signal that it cannot tell two curves apart -
+# and DESTROYED six cells on 397's WOMEN finger-pulse-volume panel that were
+# about to be emitted. Elimination cannot do it: it only ever assigns the style
+# nobody has.
+check("it never hands out a style another curve at that x already carries",
+      _fill(["SOLID", "SOLID", None]) == [("SOLID", ""), ("SOLID", ""),
+                                          (None, "")],
+      "%r" % (_fill(["SOLID", "SOLID", None]),))
+
+# AND IT IS WIRED IN, which the scenarios above cannot see: they call the
+# function. A gridline laid along the dashed curve at T7 reproduces 397's 0:30
+# on a figure this file drew - the rule is removed as furniture, the removal
+# blinds 87% of that window, every dash gap goes with it, and the curve reads
+# as a clean solid line. Without the guard there are two SOLID candidates at
+# T7 and both cells go; with the guard and without this fill the dashed cell
+# has no style and both cells go anyway. Only both together read it.
+_ruled = image.copy()
+ImageDraw.Draw(_ruled).line(
+    [(BOX[0] + 1, CAL.value_to_pixel(84.0)), (BOX[1] - 1, CAL.value_to_pixel(84.0))],
+    fill="black", width=1)
+_ruled_rows = read(_ruled)
+_named = [(r["series"], r["x_label"]) for r in _ruled_rows
+          if r["line_style_source"] != "MEASURED"]
+check("a rule laid along a dashed curve costs that position nothing",
+      len(_ruled_rows) == _readable, "got %d of %d" % (len(_ruled_rows), _readable))
+check("the curve it blinded is named by elimination, and only that one",
+      _named == [("S_NOFLUID", "T7")], "%r" % (_named,))
+_t7 = next(r for r in _ruled_rows
+           if (r["series"], r["x_label"]) == ("S_NOFLUID", "T7"))
+check("named, and still measured: the value is the ink's, not the inference's",
+      abs(_t7["mean"] - TRUTH["DASHED"][LABELS.index("T7")]) < 1.5,
+      "%.3f against %.1f" % (_t7["mean"], TRUTH["DASHED"][LABELS.index("T7")]))
+check("and it carries the blindness that justifies naming it that way",
+      _t7["line_window_blindness"] > 0.5, "%r" % _t7["line_window_blindness"])
 
 
 print("the duty-cycle bands leave a gap rather than meeting")

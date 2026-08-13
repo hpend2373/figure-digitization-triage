@@ -3949,6 +3949,71 @@ reading the picture is the one who can say so. A field named nothing like
 either still slips through; that is now written down as a limit rather than as
 a covered case.
 
+## v7.53 — six of a hundred and eighty numbers were read off the ink
+
+The review found that the reader's inferences do not move between the raw
+marks, the overlay and the value file, and that this is not a
+`LINE_MONO_STYLE` problem: `BAR_MONO` writes `AUTO / FILL_MEASURED` for a fill
+it matched against a prototype formed in another group, `BOX_VIOLIN` and
+single-series `SCATTER` and marker `ANY` name a series from a declaration
+rather than from ink, and `Identity_Source` is a BAR_MONO field whose presence
+on any other row is refused with `IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE`.
+All of that checks out against the code.
+
+This release is the foundation the rest hangs off, and one measurement that
+changes what the gates should be.
+
+**Two questions, two fields, one derived tier.** `provenance.py` holds
+`IDENTITY_METHODS` (HOW a series was named) and `VALUE_METHODS` (HOW the number
+was arrived at), each mapped to a review tier R0-R4, and `review_tier()` is the
+WORSE of the two. Derived, never read from a file: a tier a reader writes is a
+tier a reader can lower. An unregistered method costs R4, not R0 - the fail-open
+that v7.51's overlay whitelist had, refused here by construction. R4 is not
+finalizable at any signature, because a reviewer looking at an overlay cannot
+tell a fitted y from a read one; that is exactly what the picture cannot show.
+
+**`_ink_at` had four paths and returned one thing.** Direct ink in the column,
+interpolation between ink on both sides, the nearest ink when only one side has
+any, and the fitted curve when there is none. All four left by the same door as
+a measurement. They are now named, and the interpolated span is reported.
+
+**Then the number.** Every `LINE_MONO_STYLE` cell on publication 397, twelve
+panels:
+
+    DIRECT_CURVE_INK          R0     6 cells
+    INTERPOLATED_CURVE_INK    R3   160 cells    worst span 38 px
+    EXTRAPOLATED_CURVE_INK    R4    14 cells
+
+**Six of a hundred and eighty are direct observations.** And the span
+distribution is not one population: 122 of the 160 interpolate across three
+pixels or fewer, which is the error-bar stem this reader BLINDS AT EVERY DATUM -
+the curve is occluded by furniture the reader removed itself, and stepping over
+it restores a printed stroke. A tail of fifteen cells spans 14 to 38 px, and 38
+px is wider than the 32.5 px between two plotted points: that is a guess about a
+curve nobody sampled.
+
+So the tier table cannot be applied as written yet. `INTERPOLATED_CURVE_INK` at
+R3 with cell-level confirmation would put 160 of 180 cells into signature-by-
+signature review, 122 of them for "the reader stepped over its own three-pixel
+stem" - and a confirmation that fires on almost everything is the checkbox
+people learn to click, which is the same failure the review warns about for
+`Inference_Checked` on every panel, one level down. The span has to be compared
+against a figure-derived reference - the width of the furniture removed at that
+x, and the dash period - before the tier is assigned. That reference is the next
+piece of work and it is not in this release.
+
+Not in this release either, and named so it is not mistaken for done: the common
+fields do not reach `figure_values_*.csv`, no gate consumes a tier, the overlay
+still reads `line_style_source` rather than `Identity_Method`, and `BAR_MONO`,
+`BOX_VIOLIN`, `SCATTER` and `LINE_MONO` emit no method at all.
+
+    reverted                                        scenarios that fail
+    the tier being the WORSE of the two             2
+    an unknown method costing the highest tier      3
+    R4 being unfinalizable                          3
+    one-sided ink told apart from interpolation     1
+    the fit admitting it made the number            1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -3958,5 +4023,10 @@ a covered case.
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
 - 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
   stroke and its edges are the two curves, unread
-- `line_style_source` reaches the review overlay but not the values file;
-  `Identity_Source` exists for exactly this and only BAR_MONO fills it
+- `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
+  tier, the overlay still reads `line_style_source`, and the values file
+  carries neither
+- the interpolated span needs a figure-derived reference (furniture width,
+  dash period) before R3 can be assigned without firing on everything
+- `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
+  single-series assignment: no `Identity_Method` emitted yet

@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import mark_readers as MR                                        # noqa: E402
 import line_style_mono as LSM                                    # noqa: E402
+import provenance as PROV                                        # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -355,7 +356,7 @@ print("a window with nothing observable in it has no duty cycle")
 _all_ink = np.ones((60, 80), dtype=bool)
 check("a fit whose every column is furniture returns nothing",
       LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink)
-      == (None, None, None, None, None),
+      == (None,) * 7,
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink),))
 check("and the same window with nothing blinding it does report one",
       LSM._line_fit_window(_all_ink, 40, 30)[0] == 1.0,
@@ -488,6 +489,49 @@ check("named, and still measured: the value is the ink's, not the inference's",
       "%.3f against %.1f" % (_t7["mean"], TRUTH["DASHED"][LABELS.index("T7")]))
 check("and it carries the blindness that justifies naming it that way",
       _t7["line_window_blindness"] > 0.5, "%r" % _t7["line_window_blindness"])
+
+
+print("a number read off the ink and a number the fit made are not the same claim")
+# `_ink_at` HAS FOUR PATHS AND USED TO RETURN ONE THING. Measured on 397's
+# twelve line panels the day this was written: 180 cells, of which SIX were
+# direct observations. 160 were interpolated - 122 of those across a span of
+# three pixels or less, which is the error-bar stem the reader blinds at every
+# datum, so most "interpolation" here is the reader stepping over ink IT
+# removed - and 14 had ink on one side only. All 180 left by the same door.
+_DIRECT = LSM._ink_at({40: 10.0}, 40, np.poly1d([0.0, 99.0]))
+check("ink in the column at x is a direct reading",
+      _DIRECT == (10.0, "DIRECT_CURVE_INK", 0), "%r" % (_DIRECT,))
+_BOTH = LSM._ink_at({38: 10.0, 42: 14.0}, 40, np.poly1d([0.0, 99.0]))
+check("ink on both sides is interpolated, and reports the span it crossed",
+      _BOTH == (12.0, "INTERPOLATED_CURVE_INK", 4), "%r" % (_BOTH,))
+# Not interpolation: nothing brackets the answer. Called INTERPOLATED it would
+# have been reviewable as a restored stroke, which is what it is not.
+_ONE = LSM._ink_at({30: 10.0}, 40, np.poly1d([0.0, 99.0]))
+check("ink on one side only is extrapolation, not interpolation",
+      _ONE == (10.0, "EXTRAPOLATED_CURVE_INK", 10), "%r" % (_ONE,))
+_NONE = LSM._ink_at({}, 40, np.poly1d([0.0, 99.0]))
+check("and no ink at all is the fit's answer, which is a model estimate",
+      _NONE == (99.0, "FIT_FALLBACK", 0), "%r" % (_NONE,))
+
+print("every cell says how it was named and how its number was got")
+_prov = read()
+check("both questions are answered on every row",
+      all(r["Identity_Method"] and r["Value_Method"] for r in _prov))
+check("and in the shared vocabulary, not this reader's private one",
+      {r["Identity_Method"] for r in _prov} <= set(PROV.IDENTITY_METHODS)
+      and {r["Value_Method"] for r in _prov} <= set(PROV.VALUE_METHODS),
+      "%r / %r" % (sorted({r["Identity_Method"] for r in _prov}),
+                   sorted({r["Value_Method"] for r in _prov})))
+# DERIVED, never declared. A tier a reader writes is a tier a reader can lower.
+check("the tier on every row is the one the registry derives",
+      all(r["Review_Tier"] == PROV.review_tier(r["Identity_Method"],
+                                               r["Value_Method"])
+          for r in _prov))
+check("a measured style is MEASURED_LINE_STYLE, an eliminated one is not",
+      {r["Identity_Method"] for r in _prov if r["line_style_source"] == "MEASURED"}
+      == {"MEASURED_LINE_STYLE"},
+      "%r" % sorted({(r["line_style_source"], r["Identity_Method"])
+                     for r in _prov}))
 
 
 print("the duty-cycle bands leave a gap rather than meeting")

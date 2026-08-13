@@ -108,6 +108,7 @@ from PIL import Image
 
 from mark_readers import (AxisCalibration, SeriesSpec, _runs,  # noqa: F401
                           _errorbar_around_marker)
+import provenance as PROV
 
 
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED")
@@ -266,7 +267,8 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     is 14 px of horizontal stroke in a 45 px window - near 0.3, so caps fall out
     on their own rather than needing to be recognised.
 
-    Returns (duty, y_at_x, slope, longest_gap) or four Nones.
+    Returns (duty, y_at_x, slope, longest_gap, blinded_fraction, value_method,
+    value_span) or Nones.
     """
     height, width = mask.shape
     lo_x, hi_x = max(0, x - half), min(width, x + half + 1)
@@ -295,7 +297,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
                                      np.asarray(ys, dtype=float), 1))
         xs, ys = collect(lambda xi: float(first(xi)))
     if len(xs) < 5 or len(set(xs)) < 2:
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
     # Quadratic, not linear. A time course turns over, and a straight fit
     # through a peak leaves most of the window outside `tol` - the solid curve
     # at its own maximum measured a duty of 0.47 and was classified as dashed.
@@ -308,7 +310,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
     # columns as misses halved the duty of a perfectly solid line.
     lo_x, hi_x = min(xs), max(xs) + 1
     if hi_x - lo_x < 12:
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
     # A COLUMN WHERE THE CURVE IS COVERED IS NOT A COLUMN WHERE THE CURVE IS
     # ABSENT. The stems have been taken out of `mask` so that a tall glyph
     # cannot be traced as a curve, and that removal takes the curve's own two or
@@ -340,10 +342,11 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None):
         # `run_batch` reports as an InternalReaderError and which aborts the
         # whole batch - one panel's blind spot taking seventeen readable panels
         # with it.
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
     slope = float(curve.deriv()(x)) if order == 2 else float(fit[0])
-    return (hits / float(observed), _ink_at(seen, x, curve), slope, longest,
-            blinded / float(observed + blinded))
+    value, method, span = _ink_at(seen, x, curve)
+    return (hits / float(observed), value, slope, longest,
+            blinded / float(observed + blinded), method, span)
 
 
 def _ink_at(seen, x, curve):
@@ -361,15 +364,26 @@ def _ink_at(seen, x, curve):
     only a curve with no ink on one side at all falls back to the fit.
     """
     if not seen:
-        return float(curve(x))
+        # No ink this window could attribute at all. The number is the fitted
+        # curve's, which is a MODEL ESTIMATE and not a reading - and until this
+        # function said so it left by the same door as a directly observed one.
+        return float(curve(x)), "FIT_FALLBACK", 0
     left = max((xi for xi in seen if xi <= x), default=None)
     right = min((xi for xi in seen if xi >= x), default=None)
     if left is None or right is None:
-        return float(seen[left if left is not None else right])
+        # Ink on ONE side only. Not interpolation: nothing brackets the answer,
+        # so this is the nearest observation carried sideways.
+        near = left if left is not None else right
+        return float(seen[near]), "EXTRAPOLATED_CURVE_INK", abs(int(near) - int(x))
     if left == right:
-        return float(seen[left])
+        return float(seen[left]), "DIRECT_CURVE_INK", 0
     weight = (float(x) - left) / float(right - left)
-    return float(seen[left] * (1.0 - weight) + seen[right] * weight)
+    # The span matters as much as the method: a gap the width of a dash is a
+    # restored stroke, and a gap the width of the spacing between two plotted
+    # points is a guess about a curve nobody sampled. Reported, not judged -
+    # what counts as local is a property of the figure, not of this function.
+    return (float(seen[left] * (1.0 - weight) + seen[right] * weight),
+            "INTERPOLATED_CURVE_INK", int(right) - int(left))
 
 
 def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
@@ -408,17 +422,17 @@ def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
     # anyway. Doing it twice was two names for one rule.
     found = []
     for seed in seeds:
-        duty, y_at_x, slope, gap, _b = _line_fit_window(mask, int(round(x)), seed,
-                                                       half=half, band=band,
-                                                       blind=blind)
-        if y_at_x is None:
+        first = _line_fit_window(mask, int(round(x)), seed, half=half,
+                                 band=band, blind=blind)
+        if first[1] is None:
             continue
-        duty, y_at_x, slope, gap, blindness = _line_fit_window(
-            mask, int(round(x)), y_at_x, half=half, band=band, blind=blind)
+        duty, y_at_x, slope, gap, blindness, method, span = _line_fit_window(
+            mask, int(round(x)), first[1], half=half, band=band, blind=blind)
         if y_at_x is None or not (y0 <= y_at_x <= y1):
             continue
         found.append(dict(y=y_at_x, duty=duty, slope=slope, gap=gap,
-                          blindness=blindness))
+                          blindness=blindness, value_method=method,
+                          value_span=span))
     return found
 
 
@@ -725,12 +739,26 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 # must not be invisible to the person approving the cell.
                 line_style_source=candidate.get("style_source") or "MEASURED",
                 line_window_blindness=round(candidate.get("blindness") or 0.0, 3),
+                # THE COMMON VOCABULARY, which is what everything downstream
+                # should read. `line_style_source` above is this reader's own
+                # detail and stays for its own scenarios; `Identity_Method` and
+                # `Value_Method` are the two questions every reader answers,
+                # and `Review_Tier` is DERIVED from them so nothing in a file
+                # can declare its way to a weaker check.
+                Identity_Method=("MEASURED_LINE_STYLE"
+                                 if (candidate.get("style_source") or "MEASURED")
+                                 == "MEASURED" else "COMPLEMENT_OF_DECLARED_STYLES"),
+                Value_Method=candidate.get("value_method") or "FIT_FALLBACK",
+                Value_Span_Px=candidate.get("value_span") or 0,
                 Marker_Definition="LINE_CENTER",
                 # Connected by construction: the bar IS the run of ink through
                 # the mark, so a recovered dispersion has a confirmed stem and
                 # an unrecovered one has no dispersion to confirm.
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
             ))
+    for row in out:
+        row["Review_Tier"] = PROV.review_tier(row["Identity_Method"],
+                                              row["Value_Method"])
     out.sort(key=lambda row: (row["series"], row["order"]))
     return out
 

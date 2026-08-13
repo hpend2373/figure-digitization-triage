@@ -91,7 +91,7 @@ import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.53"
+PIPELINE_VERSION = "7.54"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -108,6 +108,22 @@ PIPELINE_CODE_FILES = (
     "mark_readers.py", "mono_bar_geometry.py", "bar_reader.py",
     "make_wpd_project.py", "review_overlay.py", "finalize_batch.py",
     "compile_plan.py",
+    # BOTH ADDED IN v7.54, BOTH PRODUCTION SINCE v7.44 AND v7.53. The reader
+    # `reader_functions()` dispatches LINE_MONO_STYLE to lives in
+    # `line_style_mono`, and its `_ink_at` decides the MEAN of 174 of the 180
+    # cells publication 397's line panels produce; `provenance` decides the
+    # method and review tier every one of them carries. Neither was hashed, so
+    # `_ink_at` could be rewritten between two batches and the stamp would say
+    # the two runs were produced by identical code.
+    #
+    # The reachability guard in `test_run_batch` was supposed to make this
+    # impossible and did not, because it walked the MODULE OBJECTS bound as
+    # attributes of each module: `line_style_mono` is imported inside
+    # `reader_functions()`, so what run_batch binds is the function, and the
+    # module never appears in `vars(run_batch)`. The guard now follows the
+    # imports each file DECLARES, which is a property of the source rather than
+    # of where an import statement happens to sit.
+    "line_style_mono.py", "provenance.py",
 )
 
 

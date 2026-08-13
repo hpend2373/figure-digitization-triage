@@ -23,6 +23,7 @@ import os
 import shutil
 import sys
 import types
+import ast
 import tarfile
 import tempfile
 
@@ -2005,29 +2006,69 @@ check("including the one that may be absent, so adding it later is visible",
 #
 # The list is derived here rather than typed out again: a hand-written second
 # copy of the same names agrees with the first by construction and catches
-# nothing. What this walks is what run_batch actually IMPORTS.
+# nothing.
+#
+# WHAT IT WALKS CHANGED IN v7.54, BECAUSE THE FIRST VERSION HAD A BLIND SPOT
+# THE SIZE OF A READER. It followed the module OBJECTS bound as attributes of
+# each module, and `run_batch.reader_functions()` does
+# `from line_style_mono import read_monochrome_line_panel` INSIDE the function -
+# so what run_batch binds is the function, `line_style_mono` never appears in
+# `vars(run_batch)`, and the whole LINE_MONO_STYLE reader plus `provenance`
+# went unhashed from v7.44 to v7.53 while this scenario passed.
+#
+# So it follows the imports each file DECLARES instead. Where an import
+# statement sits - module level, inside a function, inside a try - is a
+# property of the code that has nothing to do with whether the module decides a
+# number, and a guard that depends on it is a guard that fails the moment
+# somebody moves an import to break a cycle. Which is exactly why that import
+# is where it is.
+def _declared_imports(path):
+    """Local package modules this FILE imports, wherever the import sits."""
+    out = set()
+    for node in ast.walk(ast.parse(open(path, encoding="utf-8").read(), path)):
+        if isinstance(node, ast.Import):
+            out.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.add(node.module.split(".")[0])
+    return {name for name in out
+            if os.path.exists(os.path.join(HERE, name + ".py"))}
+
+
 _seen, _reachable = set(), []
+# Seeded with run_batch alone. Seeding it with `reader_functions()`'s modules as
+# well was written first and removed: the AST walk already finds them, because a
+# dispatch table cannot name a reader it does not import, and a revert of the
+# seeding failed nothing. An unobservable belt beside a working brace is
+# decoration.
 _stack = ["run_batch"]
 while _stack:
     _name = _stack.pop()
     if _name in _seen:
         continue
     _seen.add(_name)
-    _mod = sys.modules.get(_name)
-    if _mod is None or not getattr(_mod, "__file__", None):
-        continue
-    if os.path.dirname(os.path.abspath(_mod.__file__)) != HERE:
+    _path = os.path.join(HERE, _name + ".py")
+    if not os.path.exists(_path):
         continue                       # numpy, pandas, the standard library
-    _reachable.append(os.path.basename(_mod.__file__))
-    for _obj in vars(_mod).values():
-        if isinstance(_obj, types.ModuleType):
-            _stack.append(_obj.__name__)
+    _reachable.append(_name + ".py")
+    _stack.extend(_declared_imports(_path))
 _unhashed = sorted(set(_reachable) - set(RB.PIPELINE_CODE_FILES))
 check("every module of this package that run_batch reaches is in the hash",
       not _unhashed, "not hashed: %r" % _unhashed)
 check("and mono_bar_geometry - the whole monochrome bar measurement - is one",
       "mono_bar_geometry.py" in RB.PIPELINE_CODE_FILES,
       repr(RB.PIPELINE_CODE_FILES))
+# The two the old walk could not see. Named as well as derived, because the
+# derivation is the thing that was wrong and a scenario that only checks the
+# derived set cannot say which module the walk lost.
+check("so is line_style_mono, which decides the mean of a line panel's cells",
+      "line_style_mono.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+check("and provenance, which decides what evidence every cell claims to have",
+      "provenance.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+check("the walk reaches a reader imported inside a function, and what it imports",
+      "line_style_mono.py" in _reachable and "provenance.py" in _reachable,
+      "%r" % sorted(_reachable))
 # Not "the hash is 64 characters" but "editing this file moves it". One byte,
 # in a comment, in the module that was missing.
 _geo_path = os.path.join(HERE, "mono_bar_geometry.py")
@@ -2045,6 +2086,26 @@ check("changing one byte of the bar measurement changes the pipeline hash",
       _after != _before, "%s ... %s" % (_before[:16], _after[:16]))
 check("and putting it back puts the hash back",
       RB.pipeline_code_sha256() == _before)
+# THE SAME TEST FOR THE TWO FILES THE WALK COULD NOT SEE. Named per file rather
+# than looped over PIPELINE_CODE_FILES: the loop passes for every file in the
+# tuple by construction, which is exactly what it was doing while these two
+# were absent from it.
+for _name, _why in (("line_style_mono.py", "the mean of a line panel's cells"),
+                    ("provenance.py", "what evidence a cell claims to have")):
+    _p = os.path.join(HERE, _name)
+    _was = open(_p, "rb").read()
+    _b4 = RB.pipeline_code_sha256()
+    try:
+        with open(_p, "wb") as _fh:
+            _fh.write(_was + b"\n# one byte\n")
+        _aft = RB.pipeline_code_sha256()
+    finally:
+        with open(_p, "wb") as _fh:
+            _fh.write(_was)
+    check("changing one byte of %s - %s - changes the pipeline hash"
+          % (_name, _why), _aft != _b4, "%s ... %s" % (_b4[:16], _aft[:16]))
+    check("and %s restored puts it back" % _name,
+          RB.pipeline_code_sha256() == _b4)
 check("each run row carries the image hash it read",
       all(len(h) == 64 for h in run["Image_SHA256"] if h), "%s" % list(run["Image_SHA256"]))
 

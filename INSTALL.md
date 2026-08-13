@@ -4014,6 +4014,50 @@ still reads `line_style_source` rather than `Identity_Method`, and `BAR_MONO`,
     one-sided ink told apart from interpolation     1
     the fit admitting it made the number            1
 
+## v7.54 — the reader that decides the number was not in the code hash
+
+**P0.** `PIPELINE_CODE_FILES` did not contain `line_style_mono.py` or
+`provenance.py`. `reader_functions()` dispatches `LINE_MONO_STYLE` to
+`read_monochrome_line_panel`, whose `_ink_at` decides the mean of 174 of the 180
+cells publication 397's line panels produce, and `provenance` decides the method
+and tier every one of them carries. **Either could have been rewritten between
+two batches and `Pipeline_Code_SHA256` would have said the runs were produced by
+identical code** — from v7.44, when the reader shipped, to v7.53.
+
+The same shape as `mono_bar_geometry.py`, which is what the reachability guard
+in `test_run_batch` was written for after that one. It did not catch this one,
+and the reason is worth more than the fix: it walked the module OBJECTS bound as
+attributes of each module, and
+
+    def reader_functions():
+        from line_style_mono import read_monochrome_line_panel
+
+imports inside the function — to break a cycle, deliberately — so what
+`run_batch` binds is the FUNCTION. `line_style_mono` never appears in
+`vars(run_batch)`, the walk never reached it, and the scenario reported that
+every module run_batch reaches was hashed. It was telling the truth about a
+question that was not the question.
+
+The guard now follows the imports each file DECLARES, read out of the source
+with `ast`. Where an import statement sits — module level, inside a function,
+inside a `try` — is a property of the code that has nothing to do with whether
+the module decides a number, and a guard that depends on it fails the moment
+somebody moves an import to break a cycle. Which is exactly why that import is
+where it is.
+
+Two mutation scenarios per file, named rather than looped: a loop over
+`PIPELINE_CODE_FILES` passes for every file in the tuple by construction, which
+is what it would have been doing while these two were absent from it.
+
+A third change was written and removed. Seeding the walk with
+`reader_functions()`'s modules as well looked like a belt beside the brace, and
+a revert of it failed nothing — a dispatch table cannot name a reader it does
+not import, so the AST walk already reaches it. Decoration, deleted.
+
+    reverted                                     scenarios that fail
+    both files dropped from the hash             4
+    the walk not following declared imports      1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

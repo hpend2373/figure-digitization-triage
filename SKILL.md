@@ -35,6 +35,7 @@ run produced for this panel and therefore what to look at:
 |---|---|---|
 | `OVERLAY` | `Overlay_File` | every cross sits on the mark a reader would give it, and none is missed |
 | `OVERLAY_INFERRED` | the same `Overlay_File` — its starred (`*`) marks and the footer that counts them | all of the above, **and** every starred mark really belongs to the series its label names: that series was reasoned to, not measured |
+| `OVERLAY_INFERRED_CELLS` | the same, plus `inference-review/inference__<Panel_ID>.csv` — one row per cell whose NUMBER was reconstructed | all of the above, **and** one `CONFIRMED` (or `REJECTED`) row per listed cell in `inference_review.csv`. Every cell, answered: a missing answer holds the panel |
 | `WPD_ONLY` | `WPD_Project_File`, in WebPlotDigitizer | the marks re-derive the values in the row |
 | `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
 | `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` and the `geometry-review/evidence__*` files it cites | all of the above, **and** each resolution's evidence really names that series |
@@ -57,6 +58,22 @@ elimination, or matched against a fill prototype formed elsewhere in the figure.
 The number is measured; the row heading is not, and the row heading decides
 which column of the analysis the number lands in. `Marks_Checked` says the marks
 are in the right places, which is a different sentence.
+
+`OVERLAY_INFERRED_CELLS` goes one grain finer, because the NUMBER itself was
+reconstructed — interpolated across a stretch the ink does not cross, or taken
+from the edge of a run too thick to be one stroke. One wrong cell in twenty does
+not show up in a panel-level answer, so each one is asked about by name:
+
+    python3 finalize_batch.py OUT/ --template     # writes both review files
+    # fill Reviewer_ID / Inference_Confirmed / Reviewed_At for EVERY row of
+    # inference_review.csv - CONFIRMED or REJECTED
+    python3 finalize_batch.py OUT/ --review value_review.csv
+
+`--template` pre-fills `Inference_ID` from the run, so nobody types a hash. The
+contract is an exact set: a missing answer, two answers for one cell, or an
+answer for a cell this run did not produce holds the whole panel. `REJECTED` is
+an answer — it drops that one value and keeps the rest, and the finalize stamp
+counts them in `Values_Inference_Rejected`.
 
 The axis question is the one worth being slow about. If a tick VALUE was typed
 wrong — a printed 30 entered as 3 — every bar in the panel is ten times out

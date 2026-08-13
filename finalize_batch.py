@@ -116,8 +116,31 @@ FINALIZE_STATUSES = ("FINALIZED", "NOTHING_APPROVED", "RUN_NOT_FINALIZABLE",
                      "NOTHING_FINALIZABLE")
 
 
+#: One row per cell whose NUMBER was reconstructed, answered one at a time.
+#:
+#: A separate FILE rather than more columns on the panel's decision, because the
+#: grain is different: a panel has one decision row and as many reconstructed
+#: cells as it has. `Inference_ID` is content-derived by the run
+#: (`RB.inference_id`) and pre-filled into this file, so a reviewer never types a
+#: hash - and a confirmation cannot be moved onto a different cell by editing a
+#: row number.
+INFERENCE_REVIEW_COLUMNS = [
+    "Inference_ID", "Panel_ID", "Unit_ID", "Cell_Key", "Reviewer_ID",
+    # CONFIRMED or REJECTED, and the difference is what keeps this gate from
+    # throwing away a panel over one bad cell. A missing row is neither: it says
+    # nobody answered, and an unanswered question is not a refusal a reader can
+    # act on.
+    "Inference_Confirmed",
+    "Reviewed_At", "Note",
+]
+
+
 def value_review_columns():
     return list(VALUE_REVIEW_COLUMNS)
+
+
+def inference_review_columns():
+    return list(INFERENCE_REVIEW_COLUMNS)
 
 
 def write_review_template(path, review_queue):
@@ -137,8 +160,41 @@ def write_review_template(path, review_queue):
     return path
 
 
+def write_inference_template(path, manifest_rows):
+    """One unfilled row per reconstructed cell, with its identity pre-filled.
+
+    `manifest_rows` is what the run wrote into `inference-review/`, so the file a
+    person fills in cannot name a cell this run did not produce - and the
+    exact-set contract in `finalize` is then about their ANSWERS rather than
+    about their typing.
+    """
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(INFERENCE_REVIEW_COLUMNS)
+        for row in manifest_rows:
+            w.writerow([_s(row.get(c)) for c in ("Inference_ID", "Panel_ID",
+                                                 "Unit_ID", "Cell_Key")]
+                       + [""] * (len(INFERENCE_REVIEW_COLUMNS) - 4))
+    return path
+
+
 def _s(v):
     return "" if v is None else str(v).strip()
+
+
+def human_reviewers(reviewers):
+    """The Reviewer_IDs that may stand behind a number.
+
+    One reading of the registry for both files that carry a signature. It was
+    inline in `approved_panels`, and the per-cell contract needs the same answer
+    - a copy would be a second place for `Reviewer_Record_Type` to be spelled.
+    """
+    human = set()
+    if reviewers is not None and "Reviewer_ID" in getattr(reviewers, "columns", ()):
+        for _, r in reviewers.iterrows():
+            if _s(r.get("Reviewer_Record_Type")).upper() == "HUMAN":
+                human.add(_s(r.get("Reviewer_ID")))
+    return human
 
 
 def load_reviews(path, flag):
@@ -595,15 +651,238 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
     return withheld
 
 
+def load_inference_reviews(path, flag):
+    """The per-cell decisions, or an empty frame and a flag saying why.
+
+    A MISSING file is not an error on its own: most runs hold no reconstructed
+    value, and demanding the file from every run would be a refusal with nothing
+    behind it. The panels that need it are refused by
+    `inference_contract_failures`, which knows which cells were asked about.
+    """
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
+    try:
+        df = pd.read_csv(path, dtype=object).fillna("")
+    except Exception as exc:
+        flag("inference", "INFERENCE_FILE_UNREADABLE",
+             "%s: %s" % (type(exc).__name__, exc))
+        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
+    missing = [c for c in INFERENCE_REVIEW_COLUMNS if c not in df.columns]
+    if missing:
+        flag("inference", "INFERENCE_SCHEMA_INCOMPLETE", ", ".join(missing))
+        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
+    return df
+
+
+def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
+                                reviewers, flag, today=None, panels=()):
+    """The exact-set contract for cells whose NUMBER was reconstructed.
+
+    Returns `(withheld_panels, rejected_ids)`.
+
+    ## Why an exact set, and not "every row is signed"
+
+    `R3` is the tier where the number came from neighbouring ink rather than from
+    ink at the cell - a bracketed interpolation across a masked stretch, or the
+    edge of a run too thick to be one stroke. A panel-level "I looked at the
+    inferences" cannot carry it: one wrong cell in twenty does not show up in a
+    single answer, and the overlay draws a mark either way.
+
+    So the questions are enumerated, and the answers have to match the questions
+    exactly:
+
+        MISSING     an unanswered question holds the panel. Nobody said whether
+                    they looked, and a partial answer does not say which part.
+        DUPLICATE   two answers for one cell cannot be told apart in an audit,
+                    and which one wins would be the order of the rows.
+        UNKNOWN     an answer to a question this run did not ask means the person
+                    was working from a different list of cells.
+        REJECTED    an answer, and it costs the CELL rather than the panel. A
+                    reviewer who can see that one reconstruction is wrong should
+                    not have to throw away the nineteen beside it.
+
+    ## Derived from the values, not from the ledger
+
+    Which cells need asking about is recomputed here from `Identity_Method` and
+    `Value_Method`, exactly as the run computed it - not read out of the run's own
+    manifest. Nothing pins a minimum pipeline version, so a run made by an older
+    or a tampered producer arrives with a complete-looking ledger and no manifest
+    at all, and taking the producer's list would make that the fail-open case.
+    The manifest is then checked AGAINST the recomputed set, because it is what
+    the reviewer actually read.
+    """
+    today = today or datetime.date.today()
+    human = human_reviewers(reviewers)
+    withheld, rejected = set(), set()
+    machine_rows = (machine.to_dict("records")
+                    if hasattr(machine, "to_dict") else list(machine or ()))
+    asked = {}
+    for row in machine_rows:
+        pid = _s(row.get("Run_Panel_ID"))
+        if panels and pid not in panels:
+            continue
+        tier = PROV.review_tier(_s(row.get("Identity_Method")),
+                                _s(row.get("Value_Method")))
+        if tier in PROV.CELL_CONFIRMATION_TIERS:
+            asked.setdefault(pid, {})[RB.inference_id(row, panel_id=pid)] = row
+    by_panel = {}
+    for _, art in ledger_rows.iterrows():
+        by_panel.setdefault(_s(art.get("Panel_ID")), []).append(art)
+    # Answers first, so a row naming a panel that asked nothing is reported as
+    # what it is rather than falling out of the loop below.
+    answers, counted = {}, {}
+    for i, (_, row) in enumerate(decisions.iterrows()):
+        iid = _s(row.get("Inference_ID"))
+        pid = _s(row.get("Panel_ID"))
+        counted[(pid, iid)] = counted.get((pid, iid), 0) + 1
+        answers.setdefault(pid, {})[iid] = ("inference:%d" % (i + 2), row)
+    for (pid, iid), n in sorted(counted.items()):
+        if n > 1 and pid in asked:
+            flag("panel:%s" % pid, "INFERENCE_CONFIRMATION_DUPLICATE",
+                 "%d rows answer for %s; none of them is applied, because "
+                 "which one wins would otherwise be the order of the rows"
+                 % (n, iid or "(blank Inference_ID)"))
+            withheld.add(pid)
+    for pid, unknown in sorted(answers.items()):
+        for iid in sorted(set(unknown) - set(asked.get(pid, {}))):
+            flag("panel:%s" % pid, "INFERENCE_CONFIRMATION_UNKNOWN",
+                 "a decision answers for %s, which is not a reconstructed cell "
+                 "this run produced for %s. The answers were written against a "
+                 "different list of cells"
+                 % (iid or "(blank Inference_ID)", pid or "(blank Panel_ID)"))
+            if pid in panels:
+                withheld.add(pid)
+    for pid, cells in sorted(asked.items()):
+        # The list the reviewer read, checked against the list just recomputed.
+        manifests = [a for a in by_panel.get(pid, ())
+                     if _s(a.get("Artifact_Type")) == RB.INFERENCE_ARTIFACT_TYPE]
+        if len(manifests) != 1:
+            flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
+                 "%s holds %d reconstructed value(s) and carries %d %s "
+                 "artifact(s); the cells a person was asked about are not in "
+                 "this run" % (pid, len(cells), len(manifests),
+                               RB.INFERENCE_ARTIFACT_TYPE))
+            withheld.add(pid)
+        else:
+            listed = _inference_manifest_ids(run_dir, manifests[0], pid, flag)
+            if listed is None:
+                withheld.add(pid)
+            elif listed != set(cells):
+                flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISMATCH",
+                     "%s's inference manifest lists %d cell(s) and this run's "
+                     "values hold %d; the questions a person read are not the "
+                     "questions these values ask"
+                     % (pid, len(listed), len(cells)))
+                withheld.add(pid)
+        given = answers.get(pid, {})
+        for iid in sorted(cells):
+            if counted.get((pid, iid), 0) > 1:
+                continue                      # already withheld, above
+            entry = given.get(iid)
+            if entry is None:
+                row = cells[iid]
+                flag("panel:%s" % pid, "INFERENCE_CONFIRMATION_MISSING",
+                     "%s/%s was read as %s and nobody answered for it "
+                     "(%s). An approval of the panel does not say this "
+                     "reconstruction was looked at"
+                     % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")),
+                        _s(row.get("Value_Method")) or "(blank)", iid))
+                withheld.add(pid)
+                continue
+            line, row = entry
+            verdict = _s(row.get("Inference_Confirmed")).upper()
+            if verdict not in RB.INFERENCE_DECISIONS:
+                flag(line, "BAD_INFERENCE_DECISION",
+                     "Inference_Confirmed=%r is not one of %s"
+                     % (_s(row.get("Inference_Confirmed")),
+                        ", ".join(RB.INFERENCE_DECISIONS)))
+                withheld.add(pid)
+                continue
+            rid = _s(row.get("Reviewer_ID"))
+            if rid not in human:
+                flag(line, "REVIEWER_NOT_HUMAN_OR_NOT_REGISTERED",
+                     "Reviewer_ID=%r is not a Reviewer_Record_Type=HUMAN row in "
+                     "reviewer_registry.csv" % rid)
+                withheld.add(pid)
+                continue
+            when = _s(row.get("Reviewed_At"))
+            try:
+                stamped = datetime.datetime.fromisoformat(
+                    when.replace("Z", "+00:00"))
+            except ValueError:
+                flag(line, "BAD_REVIEWED_AT",
+                     "Reviewed_At=%r is not an ISO timestamp" % when)
+                withheld.add(pid)
+                continue
+            if stamped.date() > today:
+                flag(line, "BAD_REVIEWED_AT",
+                     "Reviewed_At=%s is in the future" % when)
+                withheld.add(pid)
+                continue
+            if verdict == "REJECTED":
+                row_ = cells[iid]
+                flag("%s/%s" % (_s(row_.get("Unit_ID")),
+                                _s(row_.get("Cell_Key"))),
+                     "INFERENCE_REJECTED",
+                     "the person who looked at this reconstruction refused it; "
+                     "the value is not accepted and the panel is not held for it")
+                rejected.add((pid, iid))
+    return withheld, rejected
+
+
+def collect_inference_manifests(run_dir):
+    """Every reconstructed cell this run wrote, in one list, for the template.
+
+    Read off the ledger rather than by globbing the directory: the ledger is what
+    the finalizer checks, so a file sitting in `inference-review/` that no panel
+    registered would produce a template row for a cell nobody will be asked
+    about.
+    """
+    try:
+        ledger = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
+                             dtype=object).fillna("")
+    except Exception:
+        return []
+    out = []
+    for _, art in ledger.iterrows():
+        if _s(art.get("Artifact_Type")) != RB.INFERENCE_ARTIFACT_TYPE:
+            continue
+        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+        if path is None or not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                out.extend(list(csv.DictReader(fh)))
+        except Exception:
+            continue
+    return sorted(out, key=lambda r: (_s(r.get("Panel_ID")),
+                                      _s(r.get("Cell_Key"))))
+
+
+def _inference_manifest_ids(run_dir, artifact, pid, flag):
+    """The Inference_IDs the run listed for one panel, or None if unreadable."""
+    path = RB.resolve_artifact(run_dir, _s(artifact.get("Artifact_Path")))
+    if path is None or not os.path.exists(path):
+        flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
+             "the inference manifest %s names for %s is not in the run"
+             % (_s(artifact.get("Artifact_Path")) or "(blank)", pid))
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+    except Exception as exc:
+        flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
+             "%s's inference manifest could not be parsed (%s: %s)"
+             % (pid, type(exc).__name__, exc))
+        return None
+    return {_s(r.get("Inference_ID")) for r in rows}
+
+
 def approved_panels(reviews, queue, reviewers, flag, today=None,
                     artifact_types=None):
     """Panel_ID -> the review row that approves it. Everything else is refused."""
     today = today or datetime.date.today()
-    human = set()
-    if reviewers is not None and "Reviewer_ID" in getattr(reviewers, "columns", ()):
-        for _, r in reviewers.iterrows():
-            if _s(r.get("Reviewer_Record_Type")).upper() == "HUMAN":
-                human.add(_s(r.get("Reviewer_ID")))
+    human = human_reviewers(reviewers)
     expected = {_s(r.get("Panel_ID")): _s(r.get("Review_Subject_SHA256"))
                 for _, r in queue.iterrows()}
     # What each queued panel said a reviewer would be looking at. A scatter used
@@ -882,7 +1161,7 @@ def _promote(staging, run_dir, fault_after=None):
 
 
 def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
-             today=None, fault_after=None):
+             today=None, fault_after=None, inference_review_path=None):
     """Read a completed run plus its decisions; write the accepted file or not."""
     problems = []
 
@@ -890,6 +1169,12 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
         problems.append(dict(where=where, check=check, detail=detail))
 
     review_path = review_path or os.path.join(run_dir, "value_review.csv")
+    # Beside the panel decisions rather than in the run directory. The two files
+    # are filled in together, `--review` is where a caller says where that is,
+    # and a default anchored to the run would send a caller who moved one file
+    # looking for the other in a different place.
+    inference_review_path = inference_review_path or os.path.join(
+        os.path.dirname(os.path.abspath(review_path)), "inference_review.csv")
     accepted_path = os.path.join(run_dir, FINALIZE_MARKER)
     stamp_path = os.path.join(run_dir, "finalize_stamp.json")
     staging = os.path.join(run_dir, FINALIZE_STAGING)
@@ -901,7 +1186,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     shutil.rmtree(staging, ignore_errors=True)
 
     def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
-              directory=None, blocked=0, unstated=0):
+              directory=None, blocked=0, unstated=0, inference_rejected=0):
         payload = {"schema": FINALIZE_SCHEMA, "Status": status,
                    "Run_Date": run_date, "Panels_Approved": approved,
                    "Values_Accepted": accepted,
@@ -913,6 +1198,11 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    # the stamp said the same thing for both.
                    "Values_Method_Blocked": blocked,
                    "Values_Method_Unstated": unstated,
+                   # And how many reconstructions a person looked at and
+                   # refused. A cell nobody answered for holds its panel and is
+                   # not counted here: the two are different outcomes and the
+                   # stamp said nothing about either.
+                   "Values_Inference_Rejected": inference_rejected,
                    "Accepted_SHA256": accepted_sha,
                    "Run_Stamp_SHA256": run_stamp_sha,
                    "Pipeline_Version": RB.PIPELINE_VERSION,
@@ -925,6 +1215,11 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    # file" was answerable only by trusting that nobody had
                    # since edited the answer.
                    "Review_File_SHA256": RB.file_sha256_or_blank(review_path),
+                   # The per-cell decisions, by path and by content, for the same
+                   # reason. Blank when no run in this batch asked for any.
+                   "Inference_Review_File": inference_review_path,
+                   "Inference_Review_File_SHA256":
+                       RB.file_sha256_or_blank(inference_review_path),
                    "Problems": problems, "Detail": detail}
         with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
                   "w", encoding="utf-8") as fh:
@@ -1071,6 +1366,21 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                     "no panel carries an APPROVED decision from a registered "
                     "human against this run's fingerprints")
 
+    # AND THE CELLS THAT WERE ASKED ABOUT ONE AT A TIME. Run over the approved
+    # panels only: a panel nobody approved is already refused, and reporting its
+    # unanswered per-cell questions would bury the reason it was refused.
+    inference_held, inference_rejected = inference_contract_failures(
+        run_dir, ledger_rows, machine,
+        load_inference_reviews(inference_review_path, flag), reviewers, flag,
+        today=today, panels=set(approved))
+    for pid in sorted(inference_held):
+        approved.pop(pid, None)
+    if not approved:
+        return stop("NOTHING_APPROVED",
+                    "every approved panel holds a reconstructed value whose "
+                    "per-cell confirmation is missing, duplicated or answers a "
+                    "question this run did not ask")
+
     keep = machine[machine["Run_Panel_ID"].isin(approved)].copy() if len(machine) \
         else machine.copy()
     if not len(keep):
@@ -1142,6 +1452,23 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                         "every approved value was read at a tier no signature "
                         "can finalize", approved=len(approved))
 
+    # And the reconstructions a person looked at and refused. Dropped here rather
+    # than in the contract above, so that a REJECTED cell costs one value while a
+    # MISSING answer costs the panel - the difference between an answer and a
+    # silence.
+    rejected_count = 0
+    if inference_rejected and len(keep):
+        dropped = [(_s(row.get("Run_Panel_ID")),
+                    RB.inference_id(row, panel_id=_s(row.get("Run_Panel_ID"))))
+                   in inference_rejected for _, row in keep.iterrows()]
+        rejected_count = sum(1 for d in dropped if d)
+        if rejected_count:
+            keep = keep[[not d for d in dropped]].copy()
+        if not len(keep):
+            return stop("NOTHING_FINALIZABLE",
+                        "every approved value's reconstruction was refused by "
+                        "the person who looked at it", approved=len(approved))
+
     keep["Value_Status"] = "HUMAN_APPROVED"
     keep["Pooling_Eligible"] = "TRUE"
     keep["Review_ID"] = [_s(approved[p].get("Review_ID")) for p in keep["Run_Panel_ID"]]
@@ -1159,7 +1486,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     accepted_sha = RB.file_sha256(staged_accepted)
     stamp("FINALIZED", "", approved=len(approved), accepted=len(keep),
           accepted_sha=accepted_sha, directory=staging,
-          blocked=blocked_count, unstated=unstated)
+          blocked=blocked_count, unstated=unstated,
+          inference_rejected=rejected_count)
     try:
         _promote(staging, run_dir, fault_after=fault_after)
     except Exception as exc:
@@ -1179,6 +1507,9 @@ def main(argv=None):
     ap.add_argument("run_dir")
     ap.add_argument("--review", default=None,
                     help="the decision file (default RUN_DIR/value_review.csv)")
+    ap.add_argument("--inference-review", default=None,
+                    help="the per-cell decision file for reconstructed values "
+                         "(default beside --review, as inference_review.csv)")
     ap.add_argument("--manifests", default=None,
                     help="the manifest directory (default RUN_DIR/manifests)")
     ap.add_argument("--date", default="")
@@ -1195,10 +1526,24 @@ def main(argv=None):
         out = args.review or os.path.join(args.run_dir, "value_review.csv")
         write_review_template(out, pd.read_csv(queue_path, dtype=object).fillna(""))
         print("wrote %s - fill Decision, Reviewer_ID and Reviewed_At" % out)
+        # And the per-cell questions, when the run asked any. Written from the
+        # run's own manifests, so the Inference_IDs are pre-filled: a reviewer
+        # who had to copy a hash by hand would be one typo away from confirming
+        # a different cell, and the exact-set contract would report it as an
+        # answer to a question nobody asked.
+        cells = collect_inference_manifests(args.run_dir)
+        if cells:
+            inf_out = args.inference_review or os.path.join(
+                os.path.dirname(os.path.abspath(out)), "inference_review.csv")
+            write_inference_template(inf_out, cells)
+            print("wrote %s - %d reconstructed value(s); fill Reviewer_ID, "
+                  "Inference_Confirmed and Reviewed_At for every row"
+                  % (inf_out, len(cells)))
         return 0
 
     result = finalize(args.run_dir, review_path=args.review,
-                      manifest_dir=args.manifests, run_date=args.date)
+                      manifest_dir=args.manifests, run_date=args.date,
+                      inference_review_path=args.inference_review)
     for p in result["problems"]:
         print("  %-10s %-38s %s" % (p["where"], p["check"], p["detail"]))
     print("%s | panels approved %d | values accepted %d"

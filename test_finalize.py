@@ -404,6 +404,245 @@ check("nor is a panel whose reader does not answer the question at all",
                        dtype=object).fillna("")["Review_Mode"]) == ["OVERLAY"])
 
 print()
+print("a cell whose number was reconstructed is answered for by itself")
+# R3 IS THE TIER WHERE THE NUMBER CAME FROM NEIGHBOURING INK rather than from ink
+# at the cell - a bracketed interpolation across a masked stretch, or the edge of
+# a run too thick to be one stroke. A panel-level "I looked at the inferences"
+# cannot carry it: one wrong cell in twenty does not show up in a single answer,
+# and the overlay draws a mark either way. So the questions are enumerated and the
+# answers have to match them exactly.
+def _reconstructed(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for i, r in enumerate(rows):
+        r["Identity_Method"] = "MEASURED_LINE_STYLE"
+        r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 2
+                             else "DIRECT_CURVE_INK")
+    return rows
+
+
+try:
+    MR.read_panel = _reconstructed
+    _R3_DIR, _r3_summary = fresh_run("run_cells")
+finally:
+    MR.read_panel = _real_read_panel
+_q3 = pd.read_csv(os.path.join(_R3_DIR, "review_queue.csv"),
+                  dtype=object).fillna("")
+check("the panel is queued in the mode that asks cell by cell",
+      list(_q3["Review_Mode"]) == ["OVERLAY_INFERRED_CELLS"],
+      "%r" % list(_q3["Review_Mode"]))
+check("and that mode requires the list of cells as an artifact",
+      "INFERENCE_MANIFEST" in RB.REVIEW_MODES["OVERLAY_INFERRED_CELLS"],
+      "%r" % (RB.REVIEW_MODES["OVERLAY_INFERRED_CELLS"],))
+_led3 = pd.read_csv(os.path.join(_R3_DIR, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_man3 = _led3[_led3["Artifact_Type"] == "INFERENCE_MANIFEST"]
+check("the run wrote that list and registered it, so it is hashed",
+      len(_man3) == 1
+      and os.path.exists(RB.resolve_artifact(_R3_DIR,
+                                             _man3.iloc[0]["Artifact_Path"]))
+      and len(_man3.iloc[0]["SHA256"]) == 64,
+      "%s" % _man3.to_dict("records"))
+_cells3 = FIN.collect_inference_manifests(_R3_DIR)
+_qc3 = pd.read_csv(os.path.join(_R3_DIR, "figure_values_machine_qc.csv"),
+                   dtype=object).fillna("")
+check("and it lists the reconstructed cells and nothing else",
+      len(_cells3) == 2
+      and {r["Value_Method"] for r in _cells3} == {"LOCAL_BRACKETED_INTERPOLATION"}
+      and len(_qc3) > 2, "%d of %d" % (len(_cells3), len(_qc3)))
+# Content-derived, and the number is part of the content: a re-run that
+# reconstructs the same cell to a different value has not been confirmed.
+_probe = dict(Unit_ID="U1", Cell_Key="ARM=CONTROL;TIMEPOINT=T0",
+              Identity_Method="MEASURED_LINE_STYLE",
+              Value_Method="LOCAL_BRACKETED_INTERPOLATION",
+              Mean="12.5", Dispersion_Value="1.0")
+check("the identifier is derived from the cell, the method and the number",
+      RB.inference_id(_probe, panel_id="P1")
+      == RB.inference_id(dict(_probe, Note="anything"), panel_id="P1")
+      and RB.inference_id(_probe, panel_id="P1")
+      != RB.inference_id(dict(_probe, Mean="12.6"), panel_id="P1")
+      and RB.inference_id(_probe, panel_id="P1")
+      != RB.inference_id(_probe, panel_id="P2"),
+      RB.inference_id(_probe, panel_id="P1"))
+check("and the ids in the file are the ones the finalizer re-derives",
+      {r["Inference_ID"] for r in _cells3}
+      == {RB.inference_id(v, panel_id=FIN._s(v.get("Run_Panel_ID")))
+          for v in _qc3.to_dict("records")
+          if FIN._s(v.get("Value_Method")) == "LOCAL_BRACKETED_INTERPOLATION"},
+      "%s" % sorted(r["Inference_ID"] for r in _cells3))
+
+# AND THE LIST IS PART OF WHAT THE PANEL'S APPROVAL IS OF. Registered in the
+# ledger, so a run that reconstructs one more cell than the run somebody signed
+# for is APPROVAL_STALE rather than an extra question nobody was asked.
+_arts3 = [(r["Artifact_Type"], r["Artifact_Path"], r["SHA256"],
+           r["Artifact_Reference"])
+          for _, r in _led3.iterrows() if r["Panel_ID"] == "P1"]
+check("dropping the list of cells changes what the approval is of",
+      RB.review_subject_sha256({"Panel_ID": "P1"}, [], {}, {},
+                               artifacts=_arts3)
+      != RB.review_subject_sha256(
+          {"Panel_ID": "P1"}, [], {}, {},
+          artifacts=[a for a in _arts3 if a[0] != "INFERENCE_MANIFEST"]),
+      "%s" % [a[0] for a in _arts3])
+
+_fp3 = _q3.loc[0, "Review_Subject_SHA256"]
+_r3_review = os.path.join(_R3_DIR, "value_review.csv")
+_r3_cells = os.path.join(_R3_DIR, "inference_review.csv")
+_ids3 = sorted(r["Inference_ID"] for r in _cells3)
+
+
+def _panel3():
+    return review([row(Review_Subject_SHA256=_fp3,
+                       Inference_Checked="CONFIRMED")], path=_r3_review)
+
+
+def _answers(rows):
+    with open(_r3_cells, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIN.inference_review_columns())
+        for r in rows:
+            w.writerow([r.get(c, "") for c in FIN.inference_review_columns()])
+    return _r3_cells
+
+
+def _answer(iid, verdict="CONFIRMED", **kw):
+    base = dict(Inference_ID=iid, Panel_ID="P1", Reviewer_ID="RV_H",
+                Inference_Confirmed=verdict, Reviewed_At="2026-08-06T10:00:00Z")
+    base.update(kw)
+    return base
+
+
+def _finalize3():
+    return FIN.finalize(_R3_DIR, review_path=_panel3(), run_date="2026-08-06",
+                        today=datetime.date(2026, 8, 6))
+
+
+if os.path.exists(_r3_cells):
+    os.remove(_r3_cells)
+_none = _finalize3()
+check("an approval with no per-cell answers finalizes nothing",
+      _none["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "INFERENCE_CONFIRMATION_MISSING"
+              for p in _none["problems"]), "%s" % _none)
+check("and the refusal names the cell and how its number was got",
+      any("LOCAL_BRACKETED_INTERPOLATION" in p["detail"]
+          for p in _none["problems"]
+          if p["check"] == "INFERENCE_CONFIRMATION_MISSING"),
+      "%s" % [p["detail"] for p in _none["problems"]])
+_answers([_answer(_ids3[0])])
+_half = _finalize3()
+check("answering one of two is not answering", _half["status"] == "NOTHING_APPROVED"
+      and sum(1 for p in _half["problems"]
+              if p["check"] == "INFERENCE_CONFIRMATION_MISSING") == 1,
+      "%s" % _half)
+_answers([_answer(i) for i in _ids3])
+_all3 = _finalize3()
+check("a confirmed answer for every one of them finalizes",
+      _all3["status"] == "FINALIZED" and _all3["accepted"] == len(_qc3),
+      "%s of %d" % (_all3, len(_qc3)))
+_stamp3 = json.load(open(os.path.join(_R3_DIR, "finalize_stamp.json"),
+                         encoding="utf-8"))
+check("and the stamp records those decisions by content, not by path",
+      _stamp3["Inference_Review_File_SHA256"] == RB.file_sha256(_r3_cells)
+      and _stamp3["Values_Inference_Rejected"] == 0, "%s" % _stamp3)
+# REJECTED IS AN ANSWER, AND IT COSTS THE CELL. A reviewer who can see that one
+# reconstruction is wrong should not have to throw away the values beside it -
+# which is what a contract with only CONFIRMED and silence would make them do.
+_answers([_answer(_ids3[0]), _answer(_ids3[1], "REJECTED")])
+_rej = _finalize3()
+_acc3 = pd.read_csv(os.path.join(_R3_DIR, "figure_values_accepted.csv"),
+                    dtype=object).fillna("")
+_stamp_rej = json.load(open(os.path.join(_R3_DIR, "finalize_stamp.json"),
+                            encoding="utf-8"))
+check("a refused reconstruction costs its cell and not its panel",
+      _rej["status"] == "FINALIZED" and len(_acc3) == len(_qc3) - 1
+      and _stamp_rej["Values_Inference_Rejected"] == 1, "%s" % _rej)
+check("and the refused cell is the one that is gone",
+      sum(1 for _, r in _acc3.iterrows()
+          if RB.inference_id(r.to_dict(),
+                             panel_id=FIN._s(r.get("Run_Panel_ID"))) == _ids3[1]) == 0
+      and any(p["check"] == "INFERENCE_REJECTED" for p in _rej["problems"]),
+      "%s" % [p["check"] for p in _rej["problems"]])
+_answers([_answer(i, "REJECTED") for i in _ids3]
+         + [_answer(RB.inference_id(v, panel_id=FIN._s(v.get("Run_Panel_ID"))),
+                    "REJECTED")
+            for v in _qc3.to_dict("records")
+            if FIN._s(v.get("Value_Method")) != "LOCAL_BRACKETED_INTERPOLATION"])
+_all_rej = _finalize3()
+check("answers for cells this run did not ask about are refused, not ignored",
+      _all_rej["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "INFERENCE_CONFIRMATION_UNKNOWN"
+              for p in _all_rej["problems"]), "%s" % _all_rej)
+_answers([_answer(_ids3[0]), _answer(_ids3[0]), _answer(_ids3[1])])
+_dup = _finalize3()
+check("two answers for one cell cannot be told apart, so neither applies",
+      _dup["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "INFERENCE_CONFIRMATION_DUPLICATE"
+              for p in _dup["problems"]), "%s" % _dup)
+_answers([_answer(_ids3[0]), _answer(_ids3[1], "")])
+_blank3 = _finalize3()
+check("a blank verdict is not one of the two answers",
+      _blank3["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "BAD_INFERENCE_DECISION"
+              for p in _blank3["problems"]), "%s" % _blank3)
+_answers([_answer(_ids3[0]), _answer(_ids3[1], Reviewer_ID="RV_D")])
+_demo3 = _finalize3()
+check("and a demonstration identity cannot confirm a reconstruction either",
+      _demo3["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "REVIEWER_NOT_HUMAN_OR_NOT_REGISTERED"
+              for p in _demo3["problems"]), "%s" % _demo3)
+_answers([_answer(_ids3[0], Reviewed_At="2027-01-01T00:00:00Z"),
+          _answer(_ids3[1])])
+_future3 = _finalize3()
+check("nor can a confirmation dated after the day it is read",
+      _future3["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "BAD_REVIEWED_AT" for p in _future3["problems"]),
+      "%s" % _future3)
+# THE TEMPLATE IS WHY A REVIEWER NEVER TYPES ONE OF THESE IDS. Copied by hand,
+# one transposed character is an answer to a question nobody asked - which the
+# contract above reports rather than accepts, but the reviewer's afternoon is
+# gone either way.
+_tmpl3 = os.path.join(_R3_DIR, "template_inference.csv")
+FIN.write_inference_template(_tmpl3, _cells3)
+_tmpl_rows = pd.read_csv(_tmpl3, dtype=object).fillna("")
+check("the template pre-fills every id, panel, unit and cell",
+      list(_tmpl_rows.columns) == FIN.inference_review_columns()
+      and sorted(_tmpl_rows["Inference_ID"]) == _ids3
+      and set(_tmpl_rows["Inference_Confirmed"]) == {""},
+      "%s" % _tmpl_rows.to_dict("records"))
+# AND A PANEL WITH NOTHING RECONSTRUCTED IS NOT ASKED FOR THE FILE AT ALL. The
+# ordinary run has no `inference_review.csv` anywhere near it, and finalizes.
+check("a panel with no reconstructed value needs no per-cell file",
+      list(pd.read_csv(os.path.join(OUT, "review_queue.csv"),
+                       dtype=object).fillna("")["Review_Mode"]) == ["OVERLAY"]
+      and not os.path.exists(os.path.join(OUT, "inference_review.csv")))
+# THE CONTRACT IS RE-DERIVED FROM THE VALUES, NOT READ OFF THE LEDGER. Nothing
+# pins a minimum pipeline version, so a run made by an older producer arrives with
+# a complete-looking ledger and no manifest at all. Called directly, because a
+# ledger edited on disk is RUN_ARTIFACT_MODIFIED long before this check runs.
+_p3 = []
+_held, _rejected = FIN.inference_contract_failures(
+    _R3_DIR, _led3[_led3["Artifact_Type"] != "INFERENCE_MANIFEST"], _qc3,
+    pd.DataFrame([_answer(i) for i in _ids3]), pd.DataFrame(REVIEWERS),
+    lambda w, c, d: _p3.append(c), today=datetime.date(2026, 8, 6),
+    panels={"P1"})
+check("a run whose producer wrote no list of cells is withheld",
+      _held == {"P1"} and "INFERENCE_MANIFEST_MISSING" in _p3, "%s" % _p3)
+# And a run whose values have MOVED since the list was written: same cells, one
+# different number, so the ids the finalizer re-derives are not the ids a person
+# was handed. Nudged in the frame rather than on disk, for the same reason.
+_p3 = []
+_moved = _qc3.copy()
+_moved.loc[_moved["Value_Method"] == "LOCAL_BRACKETED_INTERPOLATION",
+           "Mean"] = "999.9"
+_held, _ = FIN.inference_contract_failures(
+    _R3_DIR, _led3, _moved,
+    pd.DataFrame([_answer(i) for i in _ids3]), pd.DataFrame(REVIEWERS),
+    lambda w, c, d: _p3.append(c), today=datetime.date(2026, 8, 6),
+    panels={"P1"})
+check("and so is one whose list is not the questions its values ask",
+      _held == {"P1"} and "INFERENCE_MANIFEST_MISMATCH" in _p3, "%s" % _p3)
+
+print()
 print("an approval is a person, looking at this extraction, saying so")
 _ok = FIN.finalize(OUT, review_path=review([row()]), run_date="2026-08-06",
                    today=datetime.date(2026, 8, 6))

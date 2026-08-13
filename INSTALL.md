@@ -4505,6 +4505,83 @@ Still open of the review's list: **R3**, the per-cell confirmation — an
 an exact-set contract in `finalize` so every R3 cell carries its own decision.
 On 397 that is 2 cells.
 
+## v7.63 — a reconstructed number is answered for by itself
+
+R3, the last of the three gates and the last item on the review's list. A cell
+whose NUMBER came from neighbouring ink rather than from ink at the cell now gets
+a question of its own, and the panel's approval does not answer it.
+
+`OVERLAY_INFERRED_CELLS` is a third overlay mode, chosen when a machine-QC value
+on the panel prices at R3. It requires an artifact the other two do not:
+`inference-review/inference__<Panel_ID>.csv`, one row per reconstructed cell,
+written by the run and registered in `panel_artifacts.csv` — so the LIST OF
+QUESTIONS is inside `Review_Subject_SHA256`. A run that reconstructs one more
+cell than the run somebody signed for is `APPROVAL_STALE`, not an extra nobody
+was asked about.
+
+`Inference_ID` is content-derived from `(Panel_ID, Unit_ID, Cell_Key,
+Identity_Method, Value_Method, Mean, Dispersion_Value)` — not a row number, which
+would renumber when a cell is added and move every answer onto a different cell.
+The number is in the recipe on purpose: a re-run that reconstructs the same cell
+to a different value has not been confirmed.
+
+`finalize_batch.py --template` writes `inference_review.csv` beside
+`value_review.csv` with those ids pre-filled, and `finalize` enforces an exact
+set over the approved panels:
+
+    MISSING     an unanswered question HOLDS THE PANEL. Nobody said whether they
+                looked, and a partial answer does not say which part.
+    DUPLICATE   two answers for one cell cannot be told apart in an audit, and
+                which one wins would be the order of the rows.
+    UNKNOWN     an answer to a question this run did not ask means the person was
+                working from a different list of cells.
+    REJECTED    an answer, and it costs the CELL. A reviewer who can see that one
+                reconstruction is wrong should not have to throw away the
+                nineteen values beside it.
+
+That last line is why `Inference_Confirmed` has two values rather than being a
+`CONFIRMED`-or-blank column like the four on the panel review. With only
+CONFIRMED and silence, a reviewer who spotted a bad interpolation could either
+lie or lose the panel. The stamp counts them (`Values_Inference_Rejected`) and
+records the per-cell file by content, like the panel one.
+
+**Derived from the values, not read off the ledger.** Which cells need asking
+about is recomputed in `finalize` from the two provenance fields, exactly as the
+run computed it, and the run's own manifest is then checked AGAINST that set.
+Nothing pins a minimum pipeline version, so taking the producer's list would make
+an older or tampered run the fail-open case — the same reason
+`identity_contract_failures` re-derives its requirement.
+
+On publication 397 that is **2 cells in 2 panels** — `P1_MAP_WOMEN` and
+`P1_FPV_MEN`, both at 1:00, both `LOCAL_BRACKETED_INTERPOLATION` over a masked
+stretch. Neither panel reaches the queue today (397's dispersion definition is
+unresolved), so the contract is exercised end to end by `test_finalize` over a
+fixture whose reader answers the two questions, and by two direct calls for the
+cases a tampered run would produce — `panel_artifacts.csv` cannot be edited on
+disk without `RUN_ARTIFACT_MODIFIED` firing first.
+
+`inference-review` joins `CANONICAL_DIRS`: a previous run's list left in place is
+a list of questions about measurements that no longer exist, sitting where the
+finalizer looks for this run's. `inference_review_TEMPLATE.csv` ships and is
+pinned to `inference_review_columns()` by `test_reproducibility`, and `SKILL.md`
+gains the mode, the two-step `--template` flow and the exact-set rule.
+
+    reverted                                            scenarios that fail
+    the contract never called                            10
+    a missing answer allowed                              2
+    a refused reconstruction accepted anyway               2
+    two answers for one cell allowed                       1
+    an answer to a question nobody asked ignored           1
+    the mode never chosen                                  1
+    the run writes no list of cells                        6
+    the list written but not registered                    6
+    the id not derived from the number                     2
+    the list not on the cleanup list                       1, in test_run_batch
+
+The review's eight-step order is done. What is left is not the ladder but the
+readers: five of the six still answer neither provenance question, so their values
+are counted as `VALUE_METHOD_UNSTATED` and no gate can price them.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4517,9 +4594,9 @@ On 397 that is 2 cells.
 - the overlay still marks inference from `line_style_source` rather than from
   `Identity_Method`, so a reader that answers the new question without setting
   the old field would star nothing
-- R3 is unenforced: no per-cell `inference_review.csv`, no `inference_manifest.csv`
-  and no exact-set contract between them, so a cell whose value was interpolated
-  is confirmed only at the grain of its panel
+- `Dispersion_Method` does not exist: the two provenance fields are about the
+  MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
+  priced as whatever its mean was priced at
 - five of the six readers still answer neither provenance question, so their
   values are counted as `VALUE_METHOD_UNSTATED` rather than gated
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`

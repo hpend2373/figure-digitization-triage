@@ -2534,6 +2534,20 @@ check("and a new run removes both before it starts",
       not os.path.exists(os.path.join(_stale, "mono_bar_geometry.csv"))
       and not os.path.isdir(os.path.join(_stale, "geometry-review")),
       "%r" % sorted(os.listdir(_stale)))
+# THE SAME FOR THE LIST OF RECONSTRUCTED CELLS. Left behind, a previous run's
+# `inference__<Panel_ID>.csv` sits where the finalizer looks for this run's - a
+# list of questions about measurements that no longer exist, and its ids are the
+# ones a person's answers would still name.
+_inf_stale = os.path.join(ROOT, "inf_stale")
+os.makedirs(os.path.join(_inf_stale, "inference-review"), exist_ok=True)
+with open(os.path.join(_inf_stale, "inference-review", "inference__P1.csv"),
+          "w") as _fh:
+    _fh.write("questions about a previous run's numbers")
+RB.clear_outputs(_inf_stale)
+check("the list of reconstructed cells is on the cleanup list too",
+      "inference-review" in RB.CANONICAL_DIRS
+      and not os.path.isdir(os.path.join(_inf_stale, "inference-review")),
+      "%r %r" % (RB.CANONICAL_DIRS, sorted(os.listdir(_inf_stale))))
 # REVERT: `OVERLAY.reset_failures()` inside write_geometry_review. The run's
 # overlay log is global, so a helper that clears it erases every panel overlay
 # failure that happened before it - and the run reports a clean drawing pass it

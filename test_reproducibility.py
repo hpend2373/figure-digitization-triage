@@ -236,7 +236,11 @@ TEMPLATE_COLUMNS = dict(
        ("grid_definitions", GE_T.fig_grid_columns),
        ("unit_manifest", GE_T.fig_unit_columns),
        ("figure_values", GE_T.fig_values_columns),
-       ("value_review", FIN_T.value_review_columns)])
+       ("value_review", FIN_T.value_review_columns),
+       # The per-cell decisions. Shipped for the same reason the panel one is:
+       # somebody looking at the package should be able to see the shape of the
+       # answer before they have a run to answer about.
+       ("inference_review", FIN_T.inference_review_columns)])
 
 # The flat single-table template belongs to the pre-batch hand-extraction path
 # that `kernel.fig_validate_extraction` still serves. It does not follow the

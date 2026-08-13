@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.62"
+PIPELINE_VERSION = "7.63"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -227,6 +227,13 @@ REVIEW_QUEUE_COLUMNS = [
 #: What a reviewer is allowed to write in `Decision`.
 REVIEW_DECISIONS = ("APPROVED", "REJECTED")
 
+#: And in `Inference_Confirmed`, one row per reconstructed cell. REJECTED is
+#: here so that seeing a bad reconstruction costs the CELL and not the panel: a
+#: reviewer who can tell that one interpolation is wrong should not have to throw
+#: away the nineteen values beside it, and a blank row - which is neither answer -
+#: holds the panel instead, because nobody said whether they looked.
+INFERENCE_DECISIONS = ("CONFIRMED", "REJECTED")
+
 #: What a queued panel offers a reviewer, and which `panel_artifacts.csv`
 #: Artifact_Type must therefore be present for it. `OVERLAY` is the normal case. `WPD_ONLY` exists because
 #: `draw_panel_overlay` never raises - a picture that cannot be painted must not
@@ -248,6 +255,15 @@ REVIEW_MODES = {
     # and a column every panel carries is a column everybody types CONFIRMED
     # into.
     "OVERLAY_INFERRED": ("OVERLAY",),
+    # AND THE LIST OF CELLS, when one of them had its NUMBER reconstructed
+    # rather than read. This mode does need an artifact the ordinary one does
+    # not: the reviewer is answering per cell, and `inference__<Panel_ID>.csv`
+    # is what says which cells those are. Registered in the ledger, so the
+    # question list is inside `Review_Subject_SHA256` - a run that reconstructs
+    # one more cell than the run somebody signed for is a stale approval rather
+    # than an extra nobody was asked about.
+    # See `INFERENCE_ARTIFACT_TYPE`.
+    "OVERLAY_INFERRED_CELLS": ("OVERLAY", "INFERENCE_MANIFEST"),
     # Four, and the row pictures the index links to. See
     # `GEOMETRY_ARTIFACT_TYPES`.
     "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
@@ -284,6 +300,12 @@ REVIEW_CONFIRMATIONS = {
     # lands in. `Marks_Checked` says the marks are in the right places, which is
     # a different sentence.
     "OVERLAY_INFERRED": ("Marks_Checked", "Inference_Checked"),
+    # The same two at the panel, and `finalize` additionally requires one
+    # CONFIRMED row per named cell in `inference_review.csv`. Kept out of this
+    # table because a confirmation column is a field on the panel's decision
+    # row, and this one is a set of rows in another file - the exact-set contract
+    # cannot be expressed as a column name.
+    "OVERLAY_INFERRED_CELLS": ("Marks_Checked", "Inference_Checked"),
     # This mode puts the AXIS in front of the reviewer, so it asks about the
     # axis. A printed 30 typed as 3 makes every bar in the panel ten times too
     # small together and no arithmetic catches it; the panel picture is the
@@ -742,6 +764,89 @@ def _write_geometry_review(out_dir, pairs, pad=24):
         out[pid] = (list(zip(GEOMETRY_ARTIFACT_TYPES,
                              (csv_path, index, stem, meta)))
                     + [(GEOMETRY_ROW_ARTIFACT_TYPE, p) for p in crops])
+    return out
+
+
+#: The cells whose NUMBER was reasoned to rather than read - the R3 tier - listed
+#: per panel so a reviewer can be asked about each one by name.
+#:
+#: Registered in `panel_artifacts.csv` like the geometry bundle, which is what
+#: makes it part of `Review_Subject_SHA256`: the LIST of questions is bound into
+#: the panel's approval, so a run that produces one more interpolated cell than
+#: the run somebody signed for is a stale approval rather than an unnoticed
+#: extra. The finalizer re-hashes it with every other ledger artifact.
+INFERENCE_ARTIFACT_TYPE = "INFERENCE_MANIFEST"
+
+#: Enough to find the cell in the picture and to judge the reasoning that
+#: produced its number. The geometry columns are the ones that justify a LOCAL
+#: interpolation - how wide the unread stretch was, what covered it, how thick
+#: the stroke is - and they are blank for readers that do not measure them,
+#: which is visible in the file rather than absent from it.
+INFERENCE_MANIFEST_COLUMNS = [
+    "Inference_ID", "Panel_ID", "Source_Panel_ID", "Unit_ID", "Cell_Key",
+    "Identity_Method", "Value_Method", "Mean", "Dispersion_Value",
+    "Value_Span_Px", "Value_Support_Left_Px", "Value_Support_Right_Px",
+    "Occlusion_Cause", "Occlusion_Width_Px", "Local_Stroke_Px",
+    "Expected_Dash_Gap_Px",
+]
+
+#: What an `Inference_ID` is derived FROM. Not a counter: a counter renumbers
+#: when a cell is added, so every confirmation in the file would silently move to
+#: a different cell.
+#:
+#: The NUMBER is in here on purpose. A per-cell confirmation says "this
+#: reconstruction of this value is sound", and a re-run that reconstructs the
+#: same cell to a different number has not been confirmed - the id changes and
+#: the exact-set contract asks again. The panel-level `Review_Subject_SHA256`
+#: would also go stale, so this is belt and braces; the belt is worth having
+#: because these two files can be filled in by different people at different
+#: times.
+INFERENCE_IDENTITY_FIELDS = ("Panel_ID", "Unit_ID", "Cell_Key",
+                             "Identity_Method", "Value_Method",
+                             "Mean", "Dispersion_Value")
+
+
+def inference_id(record, panel_id=""):
+    """A content-derived identifier for one cell's reconstructed value.
+
+    Stable across re-runs that produce the same cell the same way, different the
+    moment any of `INFERENCE_IDENTITY_FIELDS` differs. Uniqueness within a run
+    follows from the value contract - one row per (Unit_ID, Cell_Key) - rather
+    than from a check here that nothing could reach.
+    """
+    material = "|".join(
+        "%s=%s" % (key, _s(panel_id) if key == "Panel_ID" and panel_id
+                   else _s(record.get(key)))
+        for key in INFERENCE_IDENTITY_FIELDS)
+    return "INF_" + sha256_of_text(material)[:16]
+
+
+def write_inference_manifests(out_dir, rows_by_panel):
+    """{Panel_ID: [(TYPE, path)]} for the panels holding a reconstructed value.
+
+    One CSV per panel rather than one for the run, for the reason
+    `identity__<Panel_ID>.csv` is per panel: an approval is per panel, and "the
+    file existed somewhere in the run" is not the claim being made.
+    """
+    out = {}
+    if not rows_by_panel:
+        return out
+    review_dir = os.path.join(out_dir, "inference-review")
+    os.makedirs(review_dir, exist_ok=True)
+    for pid, rows in sorted(rows_by_panel.items()):
+        if not rows:
+            continue
+        safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in pid)
+        path = os.path.join(review_dir, "inference__%s.csv" % safe)
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=INFERENCE_MANIFEST_COLUMNS)
+            writer.writeheader()
+            for row in sorted(rows, key=lambda r: _s(r.get("Cell_Key"))):
+                record = {c: _s(row.get(c)) for c in INFERENCE_MANIFEST_COLUMNS}
+                record["Panel_ID"] = pid
+                record["Inference_ID"] = inference_id(row, panel_id=pid)
+                writer.writerow(record)
+        out[pid] = [(INFERENCE_ARTIFACT_TYPE, path)]
     return out
 
 
@@ -2261,7 +2366,12 @@ CANONICAL_OUTPUTS = (
     "mono_bar_geometry.csv",
     "source_panel_coverage.csv",
 )
-CANONICAL_DIRS = ("raw", "projects", "review", "geometry-review")
+CANONICAL_DIRS = ("raw", "projects", "review", "geometry-review",
+                  # A previous run's list of reconstructed cells left beside this
+                  # run's numbers is a list of questions about measurements that
+                  # no longer exist, sitting where the finalizer looks for this
+                  # run's.
+                  "inference-review")
 STAGING = ".staging"
 
 
@@ -2911,6 +3021,28 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     raw_df["Pooling_Eligible"] = eligible
     machine_qc_df = raw_df[raw_df["Value_Status"] == "MACHINE_QC_PASSED"].copy()
 
+    # ---- the cells a person will be asked about one at a time.
+    #
+    # Written HERE, after the values are priced and before the review queue is
+    # built, because the queue's `Review_Subject_SHA256` hashes the panel's
+    # artifacts - so the list of questions has to exist before the subject of the
+    # approval is computed. Only MACHINE_QC_PASSED values: a cell the gate
+    # refused is not queued for anybody, and asking a reviewer to confirm the
+    # reconstruction of a value that will never be pooled spends the one thing
+    # this whole ladder is trying not to waste.
+    inference_rows = {}
+    for value in machine_qc_df.to_dict("records"):
+        tier = PROV.review_tier(_s(value.get("Identity_Method")),
+                                _s(value.get("Value_Method")))
+        if tier in PROV.CELL_CONFIRMATION_TIERS:
+            inference_rows.setdefault(_s(value.get("Run_Panel_ID")),
+                                      []).append(value)
+    for pid_, artifacts_ in write_inference_manifests(output_dir,
+                                                      inference_rows).items():
+        artifacts_by_panel[pid_] = artifacts_by_panel.get(pid_, []) + [
+            (item[0], _run_relative(item[1], output_dir),
+             file_sha256_or_blank(item[1]), "") for item in artifacts_]
+
     # Source-level coverage is the antidote to virtual Figure_IDs masking
     # omissions.  Every physical panel appears exactly once here, including
     # non-target, not-data, manual and no-reader panels.  The accepted values
@@ -2979,17 +3111,24 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # it is the tier that refuses the value outright, in `finalize`. So a
         # reader that does not answer these questions cannot put the question on
         # its panel, and nothing here has to say so twice.
-        inferred_here = any(
+        tiers_here = {
             PROV.review_tier(_s(v.get("Identity_Method")),
                              _s(v.get("Value_Method")))
-            in PROV.PANEL_CONFIRMATION_TIERS
             for v in machine_qc_df.to_dict("records")
-            if _s(v.get("Run_Panel_ID")) == row["Panel_ID"])
+            if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]}
+        inferred_here = bool(tiers_here & set(PROV.PANEL_CONFIRMATION_TIERS))
+        # And whether any of them needs answering ONE AT A TIME. A panel-level
+        # "I looked at the inferences" cannot carry a reconstructed number: one
+        # wrong cell in twenty does not show up in a single answer, and the
+        # picture shows a mark either way. The cells are named in
+        # `inference__<Panel_ID>.csv`, written above.
+        cells_here = bool(tiers_here & set(PROV.CELL_CONFIRMATION_TIERS))
         mode = ("BAR_MONO_GEOMETRY_RESOLVED"
                 if row["Panel_ID"] in geometry_artifacts
                 and resolutions_by_panel.get(row["Panel_ID"])
                 else "BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
-                else ("OVERLAY_INFERRED" if inferred_here else "OVERLAY")
+                else ("OVERLAY_INFERRED_CELLS" if cells_here
+                      else "OVERLAY_INFERRED" if inferred_here else "OVERLAY")
                 if overlay_file
                 else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({

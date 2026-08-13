@@ -11,6 +11,7 @@ The fixture draws the traps that make it hard: error bars whose stems cross both
 curves, whisker caps that look like short horizontal strokes, and a crossing
 where the two curves touch.
 """
+import collections
 import os
 import sys
 
@@ -646,6 +647,110 @@ check("the window reports every run of empty columns it crossed",
       "%r" % (_w["gaps"],))
 check("and the longest gap is still the separate thing it always was",
       _w["gap"] == 2, "%r" % _w["gap"])
+
+print("two sweeps, one answer, whichever way round they are handed in")
+# UNTIL v7.58 WHICHEVER CAME FIRST WON. Harmless while both directions returned
+# only a y; since v7.53 they also return how the number was got, and on 397's
+# twelve line panels 19 of 2472 same-position pairs name different methods -
+# forward EXTRAPOLATED against backward INTERPOLATED with spans of 1 and 21 -
+# plus 49 differing on the span and two whose values differ by 2 px. Forward is
+# the more conservative in all 19 there, so nothing it emitted was wrong. That is
+# luck: 19 to 0 on one paper is not a property.
+_F = [dict(y=40.0, value_method="EXTRAPOLATED_CURVE_INK", value_span=1, stroke=6)]
+_B = [dict(y=41.0, value_method="RESTORED_MASKED_FURNITURE", value_span=21,
+           stroke=6)]
+check("the same two traces give the same answer in either order",
+      LSM._merge_traces(_F, _B) == LSM._merge_traces(_B, _F),
+      "%r / %r" % (LSM._merge_traces(_F, _B), LSM._merge_traces(_B, _F)))
+_merged = LSM._merge_traces(_F, _B)
+check("and the answer is the more conservative of the two methods",
+      _merged[0]["value_method"] == "EXTRAPOLATED_CURVE_INK",
+      _merged[0]["value_method"])
+check("which is recorded, because a conflict resolved silently is a conflict lost",
+      _merged[0]["trace_agreement"] == LSM.TRACE_CONSERVATIVE,
+      _merged[0]["trace_agreement"])
+check("two traces that agree say so",
+      LSM._merge_traces(_F, _F)[0]["trace_agreement"] == LSM.TRACE_AGREED)
+check("and which sweep won is not part of the answer",
+      "trace" not in _merged[0], "%r" % sorted(_merged[0]))
+# THE VALUE IS THE MODE'S, THE PROVENANCE THE WORST CASE'S, and here they are
+# different members: both sweeps agree the curve is at 40-41, and one of them
+# could not see ink at x. The number is the position they agree on; the evidence
+# is the weaker of the two claims about how it was got.
+check("the value is the position both sweeps found, not the loser's row",
+      _merged[0]["y"] == 40.0, "%r" % _merged[0]["y"])
+# Sharper, with the two apart: two seeds on the curve at 40.0 and 40.5, and one
+# sweep that could only reach it from the side, at 41.5. The number is 40.0 -
+# where the tracing concentrated - and the evidence is the sideways one's.
+_spread = LSM._merge_traces(
+    [dict(y=40.0, value_method="DIRECT_CURVE_INK", value_span=0, stroke=6),
+     dict(y=40.5, value_method="DIRECT_CURVE_INK", value_span=0, stroke=6)],
+    [dict(y=41.5, value_method="EXTRAPOLATED_CURVE_INK", value_span=9, stroke=6)])
+check("the number is the mode's even when the evidence is another member's",
+      _spread[0]["y"] == 40.0
+      and _spread[0]["value_method"] == "EXTRAPOLATED_CURVE_INK",
+      "%r" % [(c["y"], c["value_method"]) for c in _spread])
+# AND THE READER HAS TO ACTUALLY USE IT. Every scenario above calls the function;
+# none of them notices the panel reader going back to concatenate-and-keep-first,
+# which is the gap that let an aliased blind mask pass in v7.55.
+_calls = []
+_real_merge = LSM._merge_traces
+
+
+def _counting_merge(forward, backward):
+    _calls.append((len(forward), len(backward)))
+    return _real_merge(forward, backward)
+
+
+try:
+    LSM._merge_traces = _counting_merge
+    _wired = read()
+finally:
+    LSM._merge_traces = _real_merge
+check("the panel reader merges its two sweeps through that function",
+      len(_calls) == len(XS) and _wired,
+      "%d calls for %d positions" % (len(_calls), len(XS)))
+
+# THE VALUE COMES FROM THE MODE, NOT FROM THE CONSERVATIVE MEMBER. A cluster is
+# not a pair: several seeds converge on one curve, and between two curves a fit
+# sometimes lands on neither. At 5:30 on 397's MEN panel the curves sit at rows
+# 169 and 182 with spurious fits at 173 and 177 between them. Taking the most
+# conservative member of the whole cluster moves the VALUE onto a fit that traced
+# nothing - it cost that position both its cells the first time this was written.
+_REAL = dict(y=169.3, value_method="DIRECT_CURVE_INK", value_span=0, stroke=7)
+_JUNK_F = dict(y=172.8, value_method="NONLOCAL_INTERPOLATION", value_span=20,
+               stroke=1)
+_JUNK_B = dict(y=177.2, value_method="EXTRAPOLATED_CURVE_INK", value_span=9,
+               stroke=2)
+_absorbed = LSM._merge_traces([_REAL, _JUNK_F],
+                              [dict(_REAL, y=169.5), _JUNK_B])
+check("a fit that landed between two curves is absorbed, not obeyed",
+      len(_absorbed) == 1 and _absorbed[0]["y"] == 169.3
+      and _absorbed[0]["value_method"] == "DIRECT_CURVE_INK",
+      "%r" % [(c["y"], c["value_method"]) for c in _absorbed])
+check("and absorbing it is not recorded as a disagreement between the sweeps",
+      _absorbed[0]["trace_agreement"] == LSM.TRACE_AGREED,
+      _absorbed[0]["trace_agreement"])
+
+# A DISAGREEMENT BETWEEN THE SWEEPS IS A DIFFERENT THING. If the mode is a
+# position only one sweep reached and the other put a candidate further away than
+# the stroke is thick, the two are not reading the same stroke, and taking either
+# would be resolving it by loop order.
+_thin = dict(y=10.0, value_method="DIRECT_CURVE_INK", value_span=0, stroke=2)
+check("two sweeps further apart than the stroke lose the cell, not one reading",
+      LSM._merge_traces([_thin], [dict(_thin, y=15.0)]) == [],
+      "%r" % LSM._merge_traces([_thin], [dict(_thin, y=15.0)]))
+check("and within the stroke they are one reading, conservatively named",
+      LSM._merge_traces([_thin], [dict(_thin, y=11.5,
+                                       value_method="NONLOCAL_INTERPOLATION",
+                                       value_span=9)])[0]["value_method"]
+      == "NONLOCAL_INTERPOLATION")
+# On the real figure: no outcome changed. The point of the release is that the
+# answer no longer DEPENDS on the sweep order, not that a number was wrong.
+_tr = collections.Counter(r["Trace_Agreement"] for r in read())
+check("the fixture's cells agree between the sweeps, and say which do not",
+      set(_tr) <= {LSM.TRACE_AGREED, LSM.TRACE_CONSERVATIVE}, "%r" % dict(_tr))
+
 
 print("and now the reference widths decide which interpolation this was")
 # THE FIRST RELEASE IN WHICH A TIER MOVES. Before it, every bracketed

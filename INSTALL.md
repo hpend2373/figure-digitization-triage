@@ -4243,6 +4243,71 @@ accidents.
 
 Still no gate reads a tier, and the value file still carries none of this.
 
+## v7.58 — the answer no longer depends on which way the panel was swept
+
+Step 5. The reader sweeps every panel twice, forward and backward, so a curve
+missed at the first position still has a neighbour to be carried from. The two
+traces were then concatenated and the first candidate within `_SAME_CURVE_PX`
+won.
+
+That was harmless while both directions returned only a y. **Since v7.53 they
+also return how the number was got**, and on 397's twelve line panels, of 2472
+same-position pairs:
+
+    19  name a different Value_Method   (forward EXTRAPOLATED span 1 against
+                                         backward INTERPOLATED span 21)
+    49  differ on the span
+    34  differ on the value by > 0.5 px
+     2  differ on the value by > 2 px
+
+Forward is the more conservative in **all 19**, so nothing the reader emitted was
+wrong. That is luck, not a property: 19 to 0 on one publication is not a
+guarantee about the next one, and a reader whose evidence depends on a loop
+direction cannot be reasoned about at all.
+
+**The value comes from the mode, the provenance from the worst case.** A cluster
+is not a pair — several seeds converge on one curve, and between two curves a fit
+sometimes lands on neither. The first version of this took the most conservative
+member of the whole cluster, and at 5:30 on the MEN panel, where the curves sit
+at rows 169 and 182 with spurious fits at 173 and 177 between them, that moved
+the value onto a fit that traced nothing and **cost the position both its cells**.
+Found by diffing the old and new merge cell by cell rather than by comparing
+totals. So: cluster by sorted y, take the position the most members agree with,
+and price it by the weakest claim among the members that agree.
+
+**A disagreement between the sweeps is not a sweep producing extra fits.** If the
+mode is a position only one sweep reached and the other put a candidate further
+from it than the stroke is thick, the two are not reading the same stroke; the
+position loses the cell rather than taking one of two readings for a reason that
+amounts to loop order.
+
+`_merge_traces(f, b) == _merge_traces(b, f)`, and which sweep won is dropped from
+the answer — left on, it was the one field that still differed when the lists
+were handed in the other way round, which would have made the equality this
+function exists to provide true of everything except itself.
+
+**397 is unchanged**: 180 cells, the same methods, the same tiers. Two cells now
+record `CONSERVATIVE_OF_CONFLICTING_TRACES` in `Trace_Agreement`. The release
+buys determinism, not a corrected number, and saying otherwise would be
+overselling it.
+
+Two of the five reverts were silent at first and are worth recording:
+
+* every new scenario called `_merge_traces` directly, so **none of them noticed
+  the panel reader going back to concatenate-and-keep-first** - the same gap that
+  let an aliased blind mask pass in v7.55. There is now a wiring scenario that
+  counts the calls.
+* taking the value from the mode rather than from the conservative member is a
+  difference of at most `_MODE_PX`, and the first scenarios for it happened to
+  use a cluster where the two coincide. Sharpened until a revert fails.
+
+    reverted                                       scenarios that fail
+    first-wins, the way it was                      1
+    the conservative pick                           2
+    the value coming from the mode                  1
+    the sweep-disagreement refusal                  1
+    the direction left on the answer                1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

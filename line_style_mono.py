@@ -113,6 +113,10 @@ import provenance as PROV
 
 LINE_STYLES = ("SOLID", "DASHED", "DOTTED")
 
+#: Worst first, so "the most conservative member" is a lookup rather than a
+#: comparison somebody has to get the direction of right.
+_TIER_ORDER = tuple(reversed(PROV.TIERS))
+
 #: Fraction of columns along a traced curve that carry real ink. Kept, because
 #: it is what separates DOTTED from DASHED, and dropped as the SOLID/DASHED
 #: discriminant - see below.
@@ -132,6 +136,10 @@ _SOLID_MAX_GAP = 2
 
 #: Two fitted centres closer than this are the same curve seen twice.
 _SAME_CURVE_PX = 8.0
+#: And this close, they are the same READING of it - the tolerance the two
+#: sweeps' agreement about a value is judged at, inside a cluster that may also
+#: hold a fit that landed between two curves.
+_MODE_PX = 2.0
 _DOTTED_MAX_DUTY = 0.30
 
 
@@ -660,6 +668,104 @@ def _complement_fill(found_at, declared):
             blank[0]["style_source"] = "COMPLEMENT_OF_DECLARED_STYLES"
 
 
+#: What a merged candidate says about the two traces behind it.
+TRACE_AGREED = "AGREED"
+TRACE_CONSERVATIVE = "CONSERVATIVE_OF_CONFLICTING_TRACES"
+
+
+def _merge_traces(forward, backward):
+    """One candidate per curve, from two traces, in an order-independent way.
+
+    THE TWO SWEEPS CAN DISAGREE, and until v7.58 whichever came first won.
+    That was harmless while both directions returned only a y. Since v7.53 they
+    also return HOW the number was got, and on publication 397's twelve line
+    panels 19 of 2472 same-position pairs name different methods - forward
+    `EXTRAPOLATED_CURVE_INK` against backward `INTERPOLATED_CURVE_INK` with
+    spans of 1 and 21 - plus 49 that differ on the span and two whose values
+    differ by 2 px. Concatenating and keeping the first meant the answer
+    depended on which way the panel was swept.
+
+    On that publication forward happens to be the more conservative in all 19,
+    so nothing it emitted was wrong. THAT IS LUCK: 19 to 0 on one paper is not a
+    property, and a reader whose evidence depends on a loop direction cannot be
+    reasoned about.
+
+    ## The value comes from the mode, the provenance from the worst case
+
+    A cluster is not a pair. Several seeds converge on one curve, and BETWEEN two
+    curves the fit sometimes lands on neither: at 5:30 on 397's MEN panel the two
+    curves sit at rows 169 and 182 with spurious fits at 173 and 177 in between.
+    First-wins absorbed those into whichever real centre came first, which was
+    right by accident. Taking the most conservative member of the whole cluster
+    is wrong on purpose - it moves the VALUE onto a fit that traced nothing, and
+    it cost that position both its cells the first time this was written.
+
+    So the value is the MODE: the member the most other members agree with,
+    which is the position both sweeps kept converging on. Among the members that
+    agree with it, the provenance is the most conservative - highest tier, then
+    the shorter span, then the upper y. A total order, so `_merge_traces(f, b)`
+    and `_merge_traces(b, f)` are the same answer.
+
+    Two traces of one stroke that disagree about the value by more than the
+    stroke's own thickness are not two traces of one stroke; that cluster is
+    dropped rather than resolved by loop order.
+    """
+    tagged = ([dict(c, trace="FORWARD") for c in forward]
+              + [dict(c, trace="BACKWARD") for c in backward])
+    clusters = []
+    for candidate in sorted(tagged, key=lambda c: (c["y"],
+                                                   c.get("value_span") or 0)):
+        for cluster in clusters:
+            if abs(candidate["y"] - cluster[0]["y"]) <= _SAME_CURVE_PX:
+                cluster.append(candidate)
+                break
+        else:
+            clusters.append([candidate])
+    out = []
+    for cluster in clusters:
+        # THE MODE, not the extreme. Ties go to the upper y so the answer does
+        # not depend on which member the counting happened to reach first.
+        def support(candidate):
+            return (-sum(1 for other in cluster
+                         if abs(other["y"] - candidate["y"]) <= _MODE_PX),
+                    candidate["y"])
+
+        centre = min(cluster, key=support)
+        agreeing = [c for c in cluster
+                    if abs(c["y"] - centre["y"]) <= _MODE_PX]
+        # `_TIER_ORDER` is worst first, so `min` on its index is the most
+        # conservative member of the ones that agree about the value.
+        chosen = min(agreeing, key=lambda c: (
+            _TIER_ORDER.index(PROV.value_tier(c.get("value_method"))),
+            c.get("value_span") or 0, c["y"]))
+        # A DISAGREEMENT BETWEEN THE SWEEPS IS NOT THE SAME THING AS A SWEEP
+        # PRODUCING EXTRA FITS. A cluster routinely holds several seeds that
+        # converged on one curve plus one that landed between two curves; those
+        # extras are absorbed, which is what the first-wins dedupe did by
+        # accident. But if the mode is a position only ONE sweep reached, and the
+        # other sweep put a candidate in this cluster further from it than the
+        # stroke is thick, the two traces are not reading the same stroke - and
+        # taking either would be resolving it by loop order. The position loses
+        # the cell instead.
+        reach = max(c.get("stroke") or 0 for c in agreeing)
+        found_by = {c["trace"] for c in agreeing}
+        dissent = [c for c in cluster
+                   if c["trace"] not in found_by
+                   and abs(c["y"] - centre["y"]) > reach]
+        if dissent:
+            continue
+        methods = {c.get("value_method") for c in agreeing}
+        merged = dict(chosen, y=centre["y"], trace_agreement=(
+            TRACE_AGREED if len(methods) == 1 else TRACE_CONSERVATIVE))
+        # WHICH sweep the winning member came from is not part of the answer.
+        # Left on, it is the one field that still differs when the two lists are
+        # handed in the other way round - which would make the equality this
+        # function exists to provide true of everything except itself.
+        merged.pop("trace", None)
+        out.append(merged)
+    return out
+
+
 def _resolved_value_method(candidate, dash_gap, style):
     """The value method, with a bracketed interpolation resolved into which one.
 
@@ -783,9 +889,7 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     found_at = {}
     for label, _x in ordered:
         seen = []
-        for candidate in forward[label] + backward[label]:
-            if any(abs(candidate["y"] - s["y"]) <= _SAME_CURVE_PX for s in seen):
-                continue      # the same curve, reached from either direction
+        for candidate in _merge_traces(forward[label], backward[label]):
             style = _local_style(candidate)
             seen.append(dict(candidate, style=style,
                              style_source="MEASURED" if style else ""))
@@ -889,6 +993,11 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 # drew, and the two are the same width.
                 Value_Support_Left_Px=candidate.get("support_left"),
                 Value_Support_Right_Px=candidate.get("support_right"),
+                # AGREED, or the more conservative of two traces that did not.
+                # A reader whose evidence depends on which way a panel was swept
+                # cannot be reasoned about, so the disagreement is recorded
+                # rather than resolved by loop order.
+                Trace_Agreement=candidate.get("trace_agreement") or TRACE_AGREED,
                 Occlusion_Cause=candidate.get("occlusion_cause") or NO_OCCLUSION,
                 Occlusion_Width_Px=candidate.get("occlusion_width") or 0,
                 # WHAT THE SPAN HAS TO BE JUDGED AGAINST, all three measured on

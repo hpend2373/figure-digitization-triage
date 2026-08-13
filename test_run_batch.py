@@ -40,6 +40,7 @@ import run_batch as RB              # noqa: E402
 import bar_reader as BR             # noqa: E402
 import datetime                     # noqa: E402
 import finalize_batch as FIN        # noqa: E402
+import provenance as PROV           # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -1543,9 +1544,25 @@ _prov = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"),
                     dtype=object).fillna("")
 for _col in ("Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
              "Position_Assignment", "Calibration_Max_Residual",
-             "Slot_Assignment_Residual_Px"):
+             "Slot_Assignment_Residual_Px",
+             # v7.60. No gate can read a tier that is not in the file, and until
+             # this release the two questions every reader answers - how the
+             # series was named, how the number was got - stopped at the raw
+             # marks. The tier itself is NOT here: it is derived from these two
+             # by whoever needs it.
+             "Identity_Method", "Value_Method"):
     check("the value schema has room for %s" % _col,
           _col in _prov.columns, "%s" % sorted(_prov.columns))
+# BLANK IS THE HONEST ANSWER FOR A READER THAT HAS NOT BEEN TAUGHT, and blank is
+# priced at the tier that asks the most. So adding these columns can only ever
+# make a value harder to pool, never easier - which is what makes it safe to put
+# them on every mark type before every reader can fill them.
+check("a reader that does not name its methods leaves them blank",
+      all(not str(r["Value_Method"]).strip() for _, r in _prov.iterrows()),
+      "%r" % sorted({str(r["Value_Method"]) for _, r in _prov.iterrows()}))
+check("and blank is priced at R4, not R0",
+      PROV.review_tier("", "") == "R4"
+      and "R4" not in PROV.FINALIZABLE_TIERS)
 # Room is not the same as carried. The calibration residual is stamped on every
 # row by the runner, so it is blank only if the carry is broken - it was
 # computed inside `bar_reader` and returned under a name nothing read.

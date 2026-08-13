@@ -1049,9 +1049,32 @@ _rows = [dict(series="A", x_label="T0", mean=10.0, dispersion=1.0,
               calib_max_resid=0.25, slot_residual_px=40.0)]
 _recs = to_value_records(_rows, "CONTINUOUS", "U1", x_factor="TIMEPOINT",
                          series_factor="ARM")
+# WHAT THE READER EMITTED, not every field the group names. v7.60 put
+# `Identity_Method` and `Value_Method` in `MARK_CARRIED` for every mark type,
+# and only LINE_MONO_STYLE fills them so far - so demanding the whole group of a
+# reader that answers neither turns "the adapter drops nothing" into "every
+# reader answers everything", which is a different and untrue claim.
+_emitted = [col for src, col in MARK_CARRIED if src in _rows[0]]
 check("every mark-level field the reader emitted reaches its value row",
-      all(all(col in r for _src, col in MARK_CARRIED) for r in _recs),
-      "%s" % sorted(_recs[0]))
+      _emitted and all(all(col in r for col in _emitted) for r in _recs),
+      "%s emitted, row has %s" % (_emitted, sorted(_recs[0])))
+# And a reader that DOES answer them has them carried the same way.
+_with_method = to_value_records(
+    [dict(_rows[0], Identity_Method="MEASURED_LINE_STYLE",
+          Value_Method="DIRECT_CURVE_INK")],
+    "CONTINUOUS", "U1", x_factor="TIMEPOINT", series_factor="ARM")
+check("and a reader that names its methods has them carried too",
+      _with_method[0].get("Identity_Method") == "MEASURED_LINE_STYLE"
+      and _with_method[0].get("Value_Method") == "DIRECT_CURVE_INK",
+      "%s" % {k: v for k, v in _with_method[0].items() if "Method" in k})
+# BLANK IS NOT SAFE. A value row that says nothing about how it was got is
+# priced at the highest tier, not the lowest: `provenance` answers R4 for an
+# unregistered method, so the two columns can only ever make a value harder to
+# pool than it was before they existed.
+_prov = __import__("provenance")
+check("and a row that names neither is priced at the tier that asks the most",
+      _prov.review_tier(_recs[0].get("Identity_Method"),
+                        _recs[0].get("Value_Method")) == "R4")
 check("and the two cells keep their own stem findings, not one shared answer",
       [r["Errorbar_Stem_Confirmed"] for r in _recs] == ["TRUE", "FALSE"],
       "%s" % [r.get("Errorbar_Stem_Confirmed") for r in _recs])

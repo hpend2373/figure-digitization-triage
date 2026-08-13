@@ -196,6 +196,17 @@ def fig_values_columns():
         # stopped at the raw marks.
         "Geometry_Row_SHA256", "Auto_Fill_Pattern", "Resolved_Fill_Pattern",
         "Identity_Source", "Identity_Evidence_Type", "Resolution_ID",
+        # HOW the series was named and HOW the number was got, in the shared
+        # vocabulary of `provenance.py`. `Identity_Source` above says WHO -
+        # AUTO or HUMAN - and a series named automatically by elimination is
+        # still named automatically, so one field cannot hold both questions.
+        #
+        # Blank on every reader that has not been taught to answer them, which
+        # as of v7.60 is all of them except LINE_MONO_STYLE. Blank means "this
+        # reader does not say", and `provenance.review_tier` prices that at the
+        # highest tier rather than the lowest - an unregistered method is not
+        # evidence of safety.
+        "Identity_Method", "Value_Method",
         # The project that can re-derive THIS value. It used to be looked up on
         # the figure, where a run stored whichever panel finished first - so on
         # a six-panel figure five values named a project of somebody else's

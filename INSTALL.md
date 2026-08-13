@@ -4346,6 +4346,52 @@ confirmation and R3 cell confirmation do not exist, and an R4 value is refused b
 nothing but arithmetic in a docstring. On 397 that is 48 cells whose numbers a
 model made, which the pipeline would pool today if the paper had said SD or SEM.
 
+## v7.60 — the two questions reach the grain that gets pooled
+
+Step 7 of the review's order, and the first half of the thing the last six
+releases were for: **no gate can read a tier that is not in the file.**
+
+`Identity_Method` and `Value_Method` are now in `MARK_CARRIED` and in
+`fig_values_columns()`, so `to_value_records` copies them and every value row in
+`figure_values_raw.csv`, `figure_values_machine_qc.csv` and
+`figure_values_accepted.csv` carries them. **The tier is not there**: it is
+derived from the two by whoever needs it, which is what v7.59 was about.
+
+Universal on purpose, and safe to make universal before every reader can answer:
+
+    blank means "this reader does not say", and `provenance.review_tier`
+    prices blank at R4 - the highest tier, not the lowest
+
+so the two columns can only ever make a value HARDER to pool than it was before
+they existed. An unregistered method is not evidence of safety. Only
+`LINE_MONO_STYLE` fills them today; `BAR_MONO`, `LINE_MONO`, `LINE_COLOR`,
+`SCATTER` and `BOX_VIOLIN` leave them blank, and that is visible in the file
+rather than absent from it.
+
+On publication 397 the values file now carries, per row, enough to derive:
+
+    R0  2 | R1 55 | R2 2 | R3 2 | R4 62     of 123 rows
+
+**62 rows a gate would refuse**, and nothing refuses them yet.
+
+A scenario had to be corrected rather than satisfied. `test_mark_readers` asserted
+that every field in `MARK_CARRIED` reaches the value row; with two fields added
+that only one reader fills, that turns "the adapter drops nothing" into "every
+reader answers everything" - a different and untrue claim. It now asserts what the
+reader actually emitted, plus a case where a reader does name its methods, plus
+that blank is priced at R4.
+
+`figure_values_TEMPLATE.csv` is regenerated from the column function, which
+`test_grid_engine` pins against each other.
+
+    reverted                                        scenarios that fail
+    the methods dropped from MARK_CARRIED            1
+    the columns dropped from the values schema       3, in two suites
+
+Next, and last: the gates. R2 wants a panel confirmation, R3 wants one per cell,
+R4 wants refusing outright - and on 397 that last one is 62 rows whose numbers a
+model made.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

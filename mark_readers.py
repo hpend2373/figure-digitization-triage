@@ -1503,6 +1503,14 @@ def read_panel(mark_type, **kwargs):
 #: a whisker the reader had confirmed from one it had not.
 MARK_CARRIED = (
     ("Errorbar_Stem_Confirmed", "Errorbar_Stem_Confirmed"),
+    # HOW the series was named and HOW the number was got. Universal on purpose:
+    # every reader answers both questions whether or not it has been taught to
+    # say so, and a field only the readers that answer it carry is a field the
+    # gate cannot require. Blank until each reader is taught, and blank is
+    # priced at the HIGHEST review tier by `provenance.review_tier` - the fields
+    # can only make a value harder to pool, never easier.
+    ("Identity_Method", "Identity_Method"),
+    ("Value_Method", "Value_Method"),
     ("Bar_Top_Definition", "Bar_Top_Definition"),
     ("Bar_Direction", "Bar_Direction"),
     ("Position_Assignment", "Position_Assignment"),

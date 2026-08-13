@@ -355,18 +355,28 @@ print("a window with nothing observable in it has no duty cycle")
 # eighteen-panel batch aborted on one panel's blind spot.
 _all_ink = np.ones((60, 80), dtype=bool)
 check("a fit whose every column is furniture returns nothing",
-      LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink)
-      == (None,) * 11,
+      LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink) is None,
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30, blind=_all_ink),))
 check("and the same window with nothing blinding it does report one",
-      LSM._line_fit_window(_all_ink, 40, 30)[0] == 1.0,
+      LSM._line_fit_window(_all_ink, 40, 30)["duty"] == 1.0,
       "%r" % (LSM._line_fit_window(_all_ink, 40, 30),))
 # The window also has to say HOW MUCH of itself it could not see, because a
 # duty measured through furniture is not the same claim as one measured
 # through air, and nothing downstream can tell them apart without this.
 check("and it reports how blinded it was, both ways",
-      LSM._line_fit_window(_all_ink, 40, 30)[4] == 0.0,
-      "%r" % (LSM._line_fit_window(_all_ink, 40, 30)[4],))
+      LSM._line_fit_window(_all_ink, 40, 30)["blindness"] == 0.0,
+      "%r" % (LSM._line_fit_window(_all_ink, 40, 30)["blindness"],))
+# A DICT, NOT A TUPLE. It was a tuple until v7.56 and grew from four fields to
+# eleven in three releases; each growth silently reindexed every caller, and two
+# of those reindexings were caught by an arity assertion rather than by anything
+# that cared what the numbers meant. Naming the set here means the next field
+# added cannot move an existing one.
+_WINDOW_KEYS = {"duty", "y", "slope", "gap", "blindness", "value_method",
+                "value_span", "support_left", "support_right",
+                "occlusion_cause", "occlusion_width", "gaps", "stroke"}
+check("a window reports named measurements, so adding one moves none",
+      set(LSM._line_fit_window(_all_ink, 40, 30)) == _WINDOW_KEYS,
+      "%r" % sorted(set(LSM._line_fit_window(_all_ink, 40, 30)) ^ _WINDOW_KEYS))
 
 
 print("the panel box says where the panel is; the positions say where the data is")
@@ -598,6 +608,64 @@ check("every cell says which two columns its number was measured between",
       all(r["Value_Support_Left_Px"] is not None
           and r["Value_Support_Right_Px"] is not None
           for r in read() if r["Value_Method"] != "FIT_FALLBACK"))
+
+
+print("a span means nothing until it is compared with the figure's own scale")
+# THREE PIXELS IS A RESTORED STROKE AT ONE RENDERING AND A WHOLE DASH PERIOD AT
+# ANOTHER. A fixed pixel threshold would make "is this gap local" depend on the
+# DPI somebody rendered at, which is the defect `forward_test_beckers_dpi`
+# exists to keep out of the values. So the three things a span has to be judged
+# against are measured on the figure and written on the row - and not yet
+# judged, so that the decision can be made against a corpus rather than an
+# intuition.
+_ink = np.zeros((40, 60), dtype=bool)
+_ink[18:23, 30] = True                       # a five-row stroke at column 30
+check("the stroke is measured at the columns the answer came from",
+      LSM._stroke_at(_ink, {30: 20.0}, 30, 30) == 5,
+      "%r" % LSM._stroke_at(_ink, {30: 20.0}, 30, 30))
+_ink[19:21, 34] = True                       # a two-row stroke at column 34
+check("and the thicker of the two supports is the one reported",
+      LSM._stroke_at(_ink, {30: 20.0, 34: 20.0}, 30, 34) == 5,
+      "%r" % LSM._stroke_at(_ink, {30: 20.0, 34: 20.0}, 30, 34))
+check("a support with no ink under it measures no stroke",
+      LSM._stroke_at(_ink, {}, None, None) == 0)
+# EVERY gap run, not just the longest: the dash period is what the gaps are
+# typically, and the longest one is a different statistic that already exists
+# for a different purpose (telling solid from dashed).
+_striped = np.zeros((40, 90), dtype=bool)
+for _c in range(20, 71):
+    if (_c - 20) % 5 < 3:                    # three on, two off
+        _striped[19:22, _c] = True
+_w = LSM._line_fit_window(_striped, 45, 20, half=22, band=5)
+check("the window reports every run of empty columns it crossed",
+      len(_w["gaps"]) >= 5 and set(_w["gaps"]) == {2},
+      "%r" % (_w["gaps"],))
+check("and the longest gap is still the separate thing it always was",
+      _w["gap"] == 2, "%r" % _w["gap"])
+
+print("the reference widths reach the row, measured per panel and per style")
+_ref = read()
+check("the position spacing is the closest two declared positions",
+      {r["Position_Spacing_Px"] for r in _ref} == {float(min(
+          b - a for a, b in zip(XS, XS[1:])))},
+      "%r" % sorted({r["Position_Spacing_Px"] for r in _ref}))
+# PER STYLE. A solid curve has no dashes to expect and a dashed one does, so one
+# number for the panel would describe neither.
+_dash_of = {r["line_style"]: r["Expected_Dash_Gap_Px"] for r in _ref}
+check("the expected dash gap is measured, and larger for the dashed curve",
+      _dash_of["DASHED"] > _dash_of["SOLID"], "%r" % _dash_of)
+check("every cell carries a stroke thickness it was measured against",
+      all(r["Local_Stroke_Px"] > 0 for r in _ref),
+      "%r" % sorted({(r["x_label"], r["Local_Stroke_Px"]) for r in _ref
+                     if not r["Local_Stroke_Px"]}))
+# The point of recording all three: on 397 Figure 1 the spacing is 32.5 px and
+# the widest interpolation spans 22 - two thirds of the way to the next datum,
+# on a figure whose own dash gaps are 4 px. Nothing here judges that yet; the
+# numbers are on the row so that it can be judged.
+check("nothing has been judged: no tier moved on any of this",
+      {r["Review_Tier"] for r in _ref}
+      == {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
+          for r in _ref})
 
 
 print("a number read off the ink and a number the fit made are not the same claim")

@@ -303,6 +303,29 @@ def _occlusion_cause(causes, curve, tol, left, right, height):
     return MIXED_OCCLUSION, width
 
 
+def _stroke_at(mask, seen, left, right):
+    """How thick the ink that supplied the value is, in rows.
+
+    Measured on the figure, at the very columns the answer came from, because
+    "three pixels" is a restored stroke at one rendering and a whole dash period
+    at another. A span can only be judged against the scale of the thing that
+    drew it.
+    """
+    thick = []
+    for column in (left, right):
+        if column is None or column not in seen:
+            continue
+        idx = np.where(mask[:, int(column)])[0]
+        if not len(idx):
+            continue
+        centre = seen[column]
+        for run in _runs(idx.tolist(), gap=1):
+            if run[0] - 1 <= centre <= run[-1] + 1:
+                thick.append(len(run))
+                break
+    return max(thick) if thick else 0
+
+
 def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
                      causes=None):
     """Duty cycle and refined y for the curve passing near (x, y).
@@ -322,9 +345,12 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
     is 14 px of horizontal stroke in a 45 px window - near 0.3, so caps fall out
     on their own rather than needing to be recognised.
 
-    Returns (duty, y_at_x, slope, longest_gap, blinded_fraction, value_method,
-    value_span, support_left, support_right, occlusion_cause, occlusion_width)
-    or Nones.
+    RETURNS A DICT, or None. It returned a tuple until v7.56, and the tuple grew
+    from four fields to eleven in three releases - each growth silently
+    reindexing every caller and every scenario that unpacked it, and two of
+    those reindexings were caught by an arity assertion rather than by anything
+    that cared what the numbers meant. A window reports a set of named
+    measurements; that is what a dict is.
     """
     height, width = mask.shape
     lo_x, hi_x = max(0, x - half), min(width, x + half + 1)
@@ -353,7 +379,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
                                      np.asarray(ys, dtype=float), 1))
         xs, ys = collect(lambda xi: float(first(xi)))
     if len(xs) < 5 or len(set(xs)) < 2:
-        return (None,) * 11
+        return None
     # Quadratic, not linear. A time course turns over, and a straight fit
     # through a peak leaves most of the window outside `tol` - the solid curve
     # at its own maximum measured a duty of 0.47 and was classified as dashed.
@@ -366,7 +392,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
     # columns as misses halved the duty of a perfectly solid line.
     lo_x, hi_x = min(xs), max(xs) + 1
     if hi_x - lo_x < 12:
-        return (None,) * 11
+        return None
     # A COLUMN WHERE THE CURVE IS COVERED IS NOT A COLUMN WHERE THE CURVE IS
     # ABSENT. The stems have been taken out of `mask` so that a tall glyph
     # cannot be traced as a curve, and that removal takes the curve's own two or
@@ -376,7 +402,7 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
     # and the reader found no solid line anywhere on the figure. Skipped in both
     # the numerator and the denominator, the gap measures the line style.
     hits, observed, gap, longest, blinded = 0, 0, 0, 0, 0
-    seen = {}
+    gaps, seen = [], {}
     for xi in range(lo_x, hi_x):
         predicted = float(curve(xi))
         lo_y, hi_y = max(0, int(predicted - tol)), min(height, int(predicted + tol) + 1)
@@ -387,24 +413,39 @@ def _line_fit_window(mask, x, y, half=22, band=5, tol=2.5, blind=None,
         idx = np.where(mask[lo_y:hi_y, xi])[0] if hi_y > lo_y else []
         if len(idx):
             hits += 1
+            if gap:
+                gaps.append(gap)
             gap = 0
             seen[xi] = lo_y + float(np.mean(idx))
         else:
             gap += 1
             longest = max(longest, gap)
+    if gap:
+        gaps.append(gap)
     if not observed:
         # Every column of the window is furniture. Publication 397's WOMEN MAP
         # panel has such a window and the reader divided by zero there, which
         # `run_batch` reports as an InternalReaderError and which aborts the
         # whole batch - one panel's blind spot taking seventeen readable panels
         # with it.
-        return (None,) * 11
+        return None
     slope = float(curve.deriv()(x)) if order == 2 else float(fit[0])
     value, method, span, left, right = _ink_at(seen, x, curve)
     cause, cause_width = _occlusion_cause(causes, curve, tol, left, right, height)
-    return (hits / float(observed), value, slope, longest,
-            blinded / float(observed + blinded), method, span,
-            left, right, cause, cause_width)
+    return dict(
+        duty=hits / float(observed), y=value, slope=slope, gap=longest,
+        blindness=blinded / float(observed + blinded),
+        value_method=method, value_span=span,
+        support_left=left, support_right=right,
+        occlusion_cause=cause, occlusion_width=cause_width,
+        # THE FIGURE'S OWN SCALE, measured on the figure rather than assumed.
+        # A span means nothing on its own: three pixels is a restored stroke on
+        # one rendering and a whole dash period on another, and a fixed pixel
+        # threshold would make the answer depend on the DPI somebody rendered
+        # at. `gaps` is every run of columns this window found empty - the
+        # dash pattern, measured - and `stroke` is how thick the ink that
+        # supplied the value actually is.
+        gaps=tuple(gaps), stroke=_stroke_at(mask, seen, left, right))
 
 
 def _ink_at(seen, x, curve):
@@ -484,19 +525,13 @@ def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
     for seed in seeds:
         first = _line_fit_window(mask, int(round(x)), seed, half=half,
                                  band=band, blind=blind, causes=causes)
-        if first[1] is None:
+        if first is None:
             continue
-        (duty, y_at_x, slope, gap, blindness, method, span,
-         left, right, cause, cause_width) = _line_fit_window(
-            mask, int(round(x)), first[1], half=half, band=band, blind=blind,
-            causes=causes)
-        if y_at_x is None or not (y0 <= y_at_x <= y1):
+        window = _line_fit_window(mask, int(round(x)), first["y"], half=half,
+                                  band=band, blind=blind, causes=causes)
+        if window is None or not (y0 <= window["y"] <= y1):
             continue
-        found.append(dict(y=y_at_x, duty=duty, slope=slope, gap=gap,
-                          blindness=blindness, value_method=method,
-                          value_span=span, support_left=left,
-                          support_right=right, occlusion_cause=cause,
-                          occlusion_width=cause_width))
+        found.append(window)
     return found
 
 
@@ -711,6 +746,13 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     # earlier neighbour to be carried from, and one missed anywhere breaks the
     # chain for every position after it.
     ordered = list(x_positions.items())
+    # THE SPACING BETWEEN PLOTTED POINTS, which is the scale at which a gap
+    # stops being local. An interpolation spanning most of the distance to the
+    # next datum is a guess about a curve nobody sampled, however cleanly the
+    # arithmetic runs. Measured from the declared positions, so it is the
+    # figure's own number and not a pixel constant.
+    _xs = sorted(float(v) for v in x_positions.values())
+    spacing = (min(b - a for a, b in zip(_xs, _xs[1:])) if len(_xs) > 1 else 0.0)
 
     def sweep(sequence):
         seen, carried = {}, []
@@ -768,6 +810,16 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
         here = {s["style"] for s in styled} & declared
         if here and here != expected:
             unresolved.add(label)
+    # THE DASH PERIOD, MEASURED PER STYLE ON THIS PANEL. Every run of empty
+    # columns any window found along a curve of this style, pooled - so a gap
+    # can be compared against what this figure's own dashes do rather than
+    # against a number somebody chose. A solid curve contributes nothing and
+    # gets 0, which is the right answer: it has no gaps to expect.
+    dash_gap = {}
+    for style in set(want):
+        pooled = sorted(g for styled, _c in per_x.values() for s_ in styled
+                        if s_["style"] == style for g in (s_.get("gaps") or ()))
+        dash_gap[style] = float(pooled[len(pooled) // 2]) if pooled else 0.0
     out = []
     for order, (label, x) in enumerate(x_positions.items()):
         xi = int(round(x))
@@ -828,6 +880,14 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 Value_Support_Right_Px=candidate.get("support_right"),
                 Occlusion_Cause=candidate.get("occlusion_cause") or NO_OCCLUSION,
                 Occlusion_Width_Px=candidate.get("occlusion_width") or 0,
+                # WHAT THE SPAN HAS TO BE JUDGED AGAINST, all three measured on
+                # this figure. Recorded and not yet judged: which combination
+                # makes a span local is the next release, and putting the
+                # numbers on the row first means that decision can be made
+                # against a corpus instead of against an intuition.
+                Local_Stroke_Px=candidate.get("stroke") or 0,
+                Expected_Dash_Gap_Px=dash_gap.get(style, 0.0),
+                Position_Spacing_Px=round(spacing, 1),
                 Marker_Definition="LINE_CENTER",
                 # Connected by construction: the bar IS the run of ink through
                 # the mark, so a recovered dispersion has a confirmed stem and

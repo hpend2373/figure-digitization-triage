@@ -4117,6 +4117,62 @@ Next, in order: the reference widths (stroke, dash period, position spacing) on
 the row, then `INTERPOLATED_CURVE_INK` split into restored-furniture,
 local-interpolation and nonlocal-interpolation with fixed tiers.
 
+## v7.56 — a span means nothing until it is compared with the figure's own scale
+
+Step 3. Three pixels is a restored stroke at one rendering and a whole dash
+period at another, so any fixed pixel threshold makes "is this gap local" depend
+on the DPI somebody rendered at — the defect `forward_test_beckers_dpi` exists to
+keep out of the values. The three things a span has to be judged against are now
+measured on the figure and written on the row:
+
+    Local_Stroke_Px          the ink that supplied the value, at the very
+                             columns it came from
+    Expected_Dash_Gap_Px     the median of every run of empty columns any window
+                             found along a curve of this style, on this panel
+    Position_Spacing_Px      the closest two declared positions
+
+Measured per style, because a solid curve has no dashes to expect and a dashed
+one does; one number for the panel would describe neither. On 397's twelve line
+panels: spacing 32.5–35.0 px, dashed gap 4–5 px, solid 0–2 px (which is the
+noise floor, not a dash pattern), stroke 1–9 px.
+
+**And the first candidate rule for step 4 died on contact with the numbers.**
+`span <= Local_Stroke_Px + Occlusion_Width_Px` looked like the natural test for
+"this gap is the furniture we removed". It passes 160 of 160 interpolations,
+including every `MIXED` one, because the span between two supports IS the
+occluded columns plus one — arithmetic, not evidence. What separates is the
+spacing:
+
+    cause              cells   over half the position spacing
+    ERRORBAR_STEM        121      0
+    HORIZONTAL_RULE        8      6
+    MIXED                 31      7
+
+Not one stem gap reaches half the distance to the next datum; six of the eight
+gridline gaps do. That is the locality axis, and it is independent of the cause
+axis — which is why both are recorded and neither is judged here.
+
+**`_line_fit_window` returns a dict.** It returned a tuple, and the tuple grew
+from four fields to eleven in three releases; each growth silently reindexed
+every caller, and two of those reindexings were caught by an arity assertion
+rather than by anything that cared what the numbers meant. Thirteen named fields
+now, pinned as a set by a scenario, so the next one added cannot move an
+existing one.
+
+Nothing consumes any of it. `pilot_397` reads the same cells, and a scenario
+asserts every row's tier is still exactly what the registry derives from its two
+methods.
+
+    reverted                                          scenarios that fail
+    the stroke measured at the supports                1
+    every gap run collected, not just the longest      2
+    the dash gap measured per style                    1
+    the position spacing measured from the declaration 1
+    the window reporting named fields                  1
+
+Next: `INTERPOLATED_CURVE_INK` split into restored-furniture, local-
+interpolation and nonlocal-interpolation, with a fixed tier each.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4129,8 +4185,8 @@ local-interpolation and nonlocal-interpolation with fixed tiers.
 - `Identity_Method` / `Value_Method` stop at the reader row: no gate reads a
   tier, the overlay still reads `line_style_source`, and the values file
   carries neither
-- the interpolated span needs a figure-derived reference (stroke width, dash
-  period, position spacing) before `INTERPOLATED_CURVE_INK` can be split;
-  the occlusion CAUSE is recorded as of v7.55, the reference widths are not
+- `INTERPOLATED_CURVE_INK` is still one method covering restored furniture,
+  local interpolation and nonlocal interpolation; the cause (v7.55) and the
+  reference widths (v7.56) are recorded, the split is not made
 - `BAR_MONO` prototype match, `BOX_VIOLIN` / `SCATTER` / marker-`ANY`
   single-series assignment: no `Identity_Method` emitted yet

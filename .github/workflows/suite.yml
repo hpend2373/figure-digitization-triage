@@ -112,17 +112,23 @@ jobs:
           stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
           assert stamp["Status"] == "RAN", stamp["Status"]
           assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
-          # 76 since LINE_MONO_STYLE shipped: all twelve two-black-curve
-          # panels of Figures 1 and 2 read, on geometry measured at the same
-          # time. A low yield on purpose - most of those panels run their two
-          # curves within a stroke of each other. Still nothing accepted:
-          # publication 397 does not say whether its error bars are SD or SEM,
-          # which no reader can fix. test_compile_plan names the panels behind
-          # every one of these numbers.
-          assert stamp["Values_Read"] == 76, stamp["Values_Read"]
+          # THE COUNTS ARE PINNED IN test_compile_plan.py AND NOWHERE ELSE.
+          # They used to be pinned here as well, and v7.50 moved them: the
+          # suite went green with the new numbers and this step failed on the
+          # old ones, which is CI reporting a defect that is not there. One
+          # number, one place - the same rule `verify_documented_status.py`
+          # exists to enforce on the README, applied to this file.
+          #
+          # What this step proves that the suite does not is the COMMAND-LINE
+          # path: compile_plan and run_batch as a person invokes them, writing
+          # a stamp a person can read. So it asserts the invariants of that
+          # path and leaves the arithmetic to the suite.
+          assert stamp["Values_Read"] > 0, stamp["Values_Read"]
           assert stamp["Values_Machine_QC_Passed"] == 0, stamp
+          # Nothing accepted, ever, on this publication: 397 does not say
+          # whether its error bars are SD or SEM, which no reader can fix.
           assert stamp["Values_Accepted"] == 0, stamp
-          assert stamp["QC_Problems"] == 252, stamp["QC_Problems"]
+          assert stamp["QC_Problems"] > 0, stamp["QC_Problems"]
           assert stamp["Environment"]["Libraries"]["cv2"], stamp
           print("plan -> run reproduces the pilot:", stamp["Status"],
                 stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")

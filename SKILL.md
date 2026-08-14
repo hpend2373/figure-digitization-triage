@@ -48,7 +48,14 @@ ones the mode declares: `Marks_Checked` always, plus `Axis_Labels_Checked` and
 the resolved one. Write `CONFIRMED`; blank is not confirmed and `APPROVED` alone
 is a signature on a filename.
 
-**And one more, asked by the VALUES rather than by the mode.** `Inference_Cells`
+**Three questions per cell, not two.** `Identity_Method` says how the SERIES was
+named, `Value_Method` how the NUMBER was got, and `Dispersion_Method` how the
+ERROR BAR was got — the last one decides the weight in a continuous
+meta-analysis, and a cell whose mean came off the ink and whose cap no stem
+connects to it is not a measured cell. The review tier is the worst of the three,
+derived where it is needed and written into no file.
+
+**And one more confirmation, asked by the VALUES rather than by the mode.** `Inference_Cells`
 on the queue row is how many of this panel's cells had their series reasoned to
 instead of measured — named by elimination, or matched against a fill prototype
 formed elsewhere in the figure. When it is not zero, the same decision row also

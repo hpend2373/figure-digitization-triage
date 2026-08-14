@@ -990,6 +990,16 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                                  if (candidate.get("style_source") or "MEASURED")
                                  == "MEASURED" else "COMPLEMENT_OF_DECLARED_STYLES"),
                 Value_Method=_resolved_value_method(candidate, dash_gap, style),
+                # THE THIRD AXIS. `_whisker_at` returns a pair only when it
+                # found ink at both ends of a stem it walked from this mark, so
+                # this reader has no unstemmed case: it either followed the bar
+                # or there is no bar. What it does NOT yet do is say whether the
+                # cap it reached was under furniture this reader removed - the
+                # mean has `Occlusion_Cause` for that and the dispersion does
+                # not, which is why `RESTORED_MASKED_CAP` exists in the registry
+                # and nothing emits it yet.
+                Dispersion_Method=("DIRECT_CONNECTED_CAP" if stem
+                                   else "NO_DISPERSION"),
                 Value_Span_Px=candidate.get("value_span") or 0,
                 # The two columns the answer was measured between, and WHY the
                 # ones in between carried nothing. A span of three pixels over

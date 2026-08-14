@@ -499,6 +499,98 @@ check("and every accepted value is priced, in the registry's own vocabulary",
                      for _, r in _acct.iterrows()}))
 
 print()
+print("the weight is evidence too, and the gate prices it")
+# v7.70. A cell whose mean came straight off the ink and whose error bar was read
+# from a cap no stem connects to it was R0 on both of the axes that existed. The
+# third axis is the one that decides the weight in a continuous meta-analysis.
+# The panel is LINE_COLOR here, not the style reader: an unstemmed cap is
+# something a marker reader can actually meet, and the dispersion contract in
+# v7.68's shape refuses a claim its reader could not have reached.
+def _unstemmed(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r["Dispersion_Method"] = "UNSTEMMED_CAP"
+    return rows
+
+
+try:
+    MR.read_panel = _unstemmed
+    _DISP_DIR, _ = fresh_run("run_dispersion")
+finally:
+    MR.read_panel = _real_read_panel
+_qd = pd.read_csv(os.path.join(_DISP_DIR, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("")
+check("a row measured on both mean axes can still be R3 on the third",
+      len(_qd) > 0
+      and {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
+           for _, r in _qd.iterrows()} == {"R0"}
+      and {PROV.row_tier(r) for _, r in _qd.iterrows()} == {"R3"},
+      "%s" % sorted({PROV.row_tier(r) for _, r in _qd.iterrows()}))
+_fpd = pd.read_csv(os.path.join(_DISP_DIR, "review_queue.csv"),
+                   dtype=object).fillna("")
+check("  so its panel is asked about the inference, off the same derivation",
+      int(_fpd.loc[0, "Inference_Cells"]) == len(_qd),
+      "%r" % _fpd.loc[0, "Inference_Cells"])
+_rd = FIN.finalize(_DISP_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fpd.loc[0, "Review_Subject_SHA256"],
+         Inference_Checked="CONFIRMED")],
+    path=os.path.join(_DISP_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("  and the cell-level contract asks about each one by name",
+      _rd["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "INFERENCE_CONFIRMATION_MISSING"
+              for p in _rd["problems"]), "%s" % _rd)
+# A SPREAD A MODEL PRODUCED is R4 and unfinalizable - and no reader may claim it
+# yet, which is the honest state rather than an end-to-end scenario over a
+# producer this package does not have. The registry prices what a future reader
+# will be able to say; the contract is what stops today's readers saying it.
+check("a weight a model produced is priced R4 and no reader may claim it",
+      PROV.dispersion_tier("FITTED_DISPERSION") == "R4"
+      and all(PROV.dispersion_contract_failure(mark, "FITTED_DISPERSION")
+              for mark in PROV.DISPERSION_CONTRACT),
+      "%s" % [m for m in PROV.DISPERSION_CONTRACT
+              if not PROV.dispersion_contract_failure(m, "FITTED_DISPERSION")])
+# AND A SPREAD WITH NO ACCOUNT OF ITSELF IS REFUSED AT THE GATE, which is the
+# reachable R4 on this axis: a reader that answers the two questions about the
+# mean and says nothing about the error bar it also emitted. Priced on the mean
+# alone this row is R0 and pools.
+def _mute_dispersion(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r.pop("Dispersion_Method", None)
+    return rows
+
+
+try:
+    MR.read_panel = _mute_dispersion
+    _MUTE_DIR, _ = fresh_run("run_mute_dispersion")
+finally:
+    MR.read_panel = _real_read_panel
+_qm = pd.read_csv(os.path.join(_MUTE_DIR, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("")
+_rm = FIN.finalize(_MUTE_DIR, review_path=review(
+    [row(Review_Subject_SHA256=pd.read_csv(
+        os.path.join(_MUTE_DIR, "review_queue.csv"),
+        dtype=object).fillna("").loc[0, "Review_Subject_SHA256"])],
+    path=os.path.join(_MUTE_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a row that says nothing about the spread it emitted is refused",
+      _rm["status"] == "NOTHING_FINALIZABLE" and _rm["accepted"] == 0
+      and all(str(r["Dispersion_Value"]).strip() for _, r in _qm.iterrows()),
+      "%s" % _rm)
+check("  which the two axes about the mean would have called R0 and pooled",
+      {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
+       for _, r in _qm.iterrows()} == {"R0"}
+      and {PROV.row_tier(r) for _, r in _qm.iterrows()} == {"R4"},
+      "%s" % sorted({PROV.row_tier(r) for _, r in _qm.iterrows()}))
+check("  and were one to arrive, the row would be refused and put on the list",
+      PROV.row_tier(dict(Identity_Method="MEASURED_LINE_STYLE",
+                         Value_Method="DIRECT_CURVE_INK",
+                         Dispersion_Value="1.0",
+                         Dispersion_Method="FITTED_DISPERSION"))
+      not in PROV.FINALIZABLE_TIERS)
+
+print()
 print("a method is a claim about evidence, and the evidence has a vote")
 # v7.68. Blank and unregistered methods are refused, so the remaining way to buy
 # a cheap tier is to write down a REGISTERED method that is not the one the

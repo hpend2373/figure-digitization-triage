@@ -265,6 +265,14 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 # `run_batch` refuses SEQUENTIAL outright rather than pricing it.
                 Identity_Method="MEASURED_COLOUR",
                 Value_Method="BAR_OUTLINE_CENTER",
+                # A cap is only accepted here when a vertical stem physically
+                # connects it to the bar top - the whole reason this reader
+                # exists in the shape it does, because significance glyphs sit
+                # exactly where a cap is and are the same colour. Recorded as
+                # provenance as well as a boolean, so the tier follows it.
+                Dispersion_Method=("DIRECT_CONNECTED_CAP" if stem_ok
+                                   else "NO_DISPERSION" if cap_c is None
+                                   else "UNSTEMMED_CAP"),
                 # Sampled INSIDE the bar rather than at its top edge: the top is
                 # an outline a neighbouring colour's antialiasing can reach, and
                 # what is being asked is whether another series' mask claims this

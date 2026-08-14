@@ -245,6 +245,34 @@ METHOD_CONTRACT = {
 }
 
 
+#: And which dispersion methods each reader can reach. Separate from the pair
+#: table because the axis is separate: a reader's spread comes from its own
+#: geometry, and `BOX_VIOLIN` claiming it followed a stem to a cap is as
+#: impossible as `LINE_COLOR` claiming a human resolution.
+DISPERSION_CONTRACT = {
+    "LINE_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
+    "LINE_MONO": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
+    "LINE_MONO_STYLE": {"DIRECT_CONNECTED_CAP", "RESTORED_MASKED_CAP",
+                        "NO_DISPERSION"},
+    "BAR_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
+    "BAR_MONO": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
+    "BOX_VIOLIN": {"DIRECT_BOX_GEOMETRY"},
+    "SCATTER": {"NO_DISPERSION"},
+}
+
+
+def dispersion_contract_failure(mark_type, dispersion_method):
+    """Why this reader could not have got its spread that way, or ""."""
+    allowed = DISPERSION_CONTRACT.get(str(mark_type or "").strip().upper())
+    text = str(dispersion_method or "").strip()
+    if allowed is None or not text:
+        return ""
+    if text in allowed:
+        return ""
+    return ("%s cannot produce Dispersion_Method=%s; its spread comes from %s"
+            % (mark_type, text, " or ".join(sorted(allowed))))
+
+
 def contract_failure(mark_type, identity_method, value_method):
     """Why this pair cannot have come from this reader, or "" if it could.
 
@@ -284,9 +312,89 @@ def value_tier(method):
     return VALUE_METHODS.get(str(method or "").strip().upper(), UNKNOWN_TIER)
 
 
+#: HOW THE DISPERSION WAS GOT - the third axis, and in a continuous
+#: meta-analysis often the one that decides the weight.
+#:
+#: `Identity_Method` and `Value_Method` are both about the MEAN. A cell whose
+#: mean came straight off the ink and whose error bar was reconstructed, or read
+#: off a cap that no stem connects to the mark, priced R0 on both axes and went
+#: into the pool with a weight nobody had checked. `Errorbar_Stem_Confirmed` is a
+#: boolean about ONE of these cases and says nothing about the rest.
+DISPERSION_METHODS = {
+    # A cap this reader followed a stem to, from this mark. The strongest thing
+    # a figure offers.
+    "DIRECT_CONNECTED_CAP": "R0",
+    # Both bounds read directly - an interval drawn as two ends rather than as a
+    # bar with caps.
+    "DIRECT_BOUND_PAIR": "R0",
+    # The box's own quartile lines, all three required present before the reader
+    # emits anything at all.
+    "DIRECT_BOX_GEOMETRY": "R0",
+    # Copied from the paper's text or table, not measured off the figure.
+    "SOURCE_TRANSCRIBED": "R0",
+    # Ink at the right distance with nothing joining it to the mark. It may be a
+    # cap; it may be a significance glyph, which sits exactly where a cap is and
+    # is the same colour. That is a question for a person, per cell.
+    "UNSTEMMED_CAP": "R3",
+    # A cap the reader restored across furniture it had removed itself, the same
+    # claim `RESTORED_MASKED_FURNITURE` makes about a mean.
+    "RESTORED_MASKED_CAP": "R3",
+    # Reconstructed from neighbouring cells rather than from this one's ink.
+    "INTERPOLATED_DISPERSION": "R3",
+    # A model produced it. No signature can finalize that, exactly as for a mean.
+    "FITTED_DISPERSION": "R4",
+    # THIS CELL HAS NO DISPERSION, and that is a statement rather than a silence.
+    # Priced R0 because nothing is claimed: whether a value without a weight may
+    # be pooled is the unit's question, and `NO_VARIANCE` already answers it.
+    "NO_DISPERSION": "R0",
+}
+
+
+def dispersion_tier(dispersion_method, has_dispersion=True):
+    """What this cell's dispersion costs a reviewer.
+
+    `has_dispersion=False` is the cell with no error bar at all: nothing is
+    claimed, so nothing is doubted. With a number present, a blank method is a
+    number with no account of itself and takes the highest tier - the same rule
+    the other two axes follow, for the same reason.
+    """
+    if not has_dispersion:
+        return TIERS[0]
+    text = str(dispersion_method or "").strip()
+    if not text:
+        return UNKNOWN_TIER
+    return DISPERSION_METHODS.get(text, UNKNOWN_TIER)
+
+
 def review_tier(identity_method, value_method):
     """The worse of the two tiers. Derived here and never read from a file."""
     return max(identity_tier(identity_method), value_tier(value_method))
+
+
+#: Which columns `row_tier` reads a dispersion out of. A five-number summary has
+#: no `Dispersion_Value` and is not a cell without dispersion: its quartiles ARE
+#: the spread, and pricing them as "nothing claimed" would let a box panel skip
+#: the axis entirely.
+DISPERSION_VALUE_FIELDS = ("Dispersion_Value", "Q1", "Q3", "Errorbar_Lower",
+                           "Errorbar_Upper")
+
+
+def row_tier(row):
+    """What one VALUE ROW costs, over all three axes.
+
+    The row-shaped question, and the one every gate should ask: a caller that
+    reaches for `review_tier` alone is asking about the mean and pricing the
+    cell. Whether the row has a dispersion at all is read off the row rather
+    than declared, so a reader that emits no method for a cell with no error bar
+    is not punished for a silence about nothing.
+    """
+    has_dispersion = any(
+        str(row.get(field, "") or "").strip() not in ("", "None")
+        for field in DISPERSION_VALUE_FIELDS)
+    return max(review_tier(str(row.get("Identity_Method", "") or ""),
+                           str(row.get("Value_Method", "") or "")),
+               dispersion_tier(str(row.get("Dispersion_Method", "") or ""),
+                               has_dispersion))
 
 
 def finalizable(identity_method, value_method):

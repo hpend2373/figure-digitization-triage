@@ -3866,6 +3866,31 @@ check("and every accepted bar says which route named it",
       and ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER") in _acc_methods
       and all(i and v for i, v in _acc_methods),
       "%s" % sorted(_acc_methods))
+# AND AN ASSOCIATION IS CHECKED AGAINST ITS OWN POINT CLOUD. v7.70. The scatter
+# reader names each POINT and the summary copies the answer; until the durable
+# file carried it, a summary claiming MEASURED_COLOUR over a cloud read from a
+# grey threshold could not be refuted from the artifact.
+_pt_led = pd.read_csv(os.path.join(ODIR, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+_pt_vals = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"),
+                       dtype=object).fillna("")
+_assoc = _pt_vals[_pt_vals["Point_Data_Reference"] != ""]
+_pt_probs = []
+check("an association whose cloud agrees with it is not withheld",
+      not FIN.method_contract_failures(
+          _assoc, pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c))
+      and not _pt_probs, "%s" % _pt_probs)
+_pt_probs = []
+_lying_assoc = _assoc.copy()
+_lying_assoc["Identity_Method"] = "DECLARED_SINGLE_SERIES"
+check("and one that disagrees with the cloud it was computed from is refused",
+      FIN.method_contract_failures(
+          _lying_assoc,
+          pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c))
+      and "METHOD_CONTRADICTS_POINTS" in _pt_probs, "%s" % _pt_probs)
+
 # AND THE ROUTE ON THE VALUE IS CHECKED AGAINST THE FIGURE'S OWN ANSWER. v7.68.
 # `MEASURED_FILL_RELATION` and `FIGURE_PROTOTYPE_MATCH` are the same word at two
 # tiers - R0 and R2 - so a producer writing the stronger one buys a panel

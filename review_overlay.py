@@ -165,7 +165,14 @@ def tier_of(mark):
     value = str(mark.get("Value_Method", "") or "").strip()
     if not identity and not value:
         return ""
-    return PROV.review_tier(identity, value)
+    # The ROW's tier, so a mark whose error bar came off an unstemmed cap is
+    # marked for the reviewer even though its mean was read off the ink. The
+    # mark is the reader's row, which carries `dispersion` rather than
+    # `Dispersion_Value`, so the two names are both offered to `row_tier`.
+    return PROV.row_tier(dict(
+        mark, Dispersion_Value=(mark.get("Dispersion_Value")
+                                if mark.get("Dispersion_Value") is not None
+                                else mark.get("dispersion"))))
 
 
 def inferred_note(marks):

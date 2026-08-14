@@ -193,10 +193,29 @@ for _name, _specs, _frag in (
         _msg = str(exc)
     check("%s is refused" % _name, _frag in _msg, _msg)
 
-check("BAR_MONO routes through the common dispatcher",
-      len(MR.read_panel(
-          "BAR_MONO", image=Image.open(IMG),
-          panel_box=tuple(truth["panel_box"]),
+# v7.70: IT DOES NOT, AND IT SAYS SO. This scenario used to assert that
+# `read_panel("BAR_MONO", ...)` returns twelve rows - which it did, from the
+# single-panel absolute-band reader, while the pipeline read the same panel in two
+# passes through `mono_bar_geometry` and got a different fill vocabulary and an
+# identity route. A common dispatcher that answers differently from the pipeline
+# is worse than one that refuses: the caller cannot tell.
+try:
+    MR.read_panel(
+        "BAR_MONO", image=Image.open(IMG),
+        panel_box=tuple(truth["panel_box"]),
+        x_positions=dict(zip(truth["groups"], truth["group_x"])),
+        y_calibration=MR.AxisCalibration.from_points(
+            [(v, p) for v, p in truth["y_ticks"]]),
+        series=SPECS)
+    _dispatch = "it returned rows"
+except MR.UnsupportedCapabilityError as exc:
+    _dispatch = str(exc)
+check("BAR_MONO refuses the common dispatcher rather than answering differently",
+      "two passes" in _dispatch and "fill_identities_by_figure" in _dispatch,
+      _dispatch)
+check("  and the single-panel reader still reads this panel, under its own name",
+      len(MR.read_monochrome_bar_panel(
+          Image.open(IMG), panel_box=tuple(truth["panel_box"]),
           x_positions=dict(zip(truth["groups"], truth["group_x"])),
           y_calibration=MR.AxisCalibration.from_points(
               [(v, p) for v, p in truth["y_ticks"]]),

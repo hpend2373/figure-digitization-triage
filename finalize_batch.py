@@ -721,9 +721,13 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
         pid = _s(row.get("Run_Panel_ID"))
         if panels and pid not in panels:
             continue
-        tier = PROV.review_tier(_s(row.get("Identity_Method")),
-                                _s(row.get("Value_Method")))
-        if tier in PROV.CELL_CONFIRMATION_TIERS:
+        # THE ROW, over all three axes. A cell can reach R3 because its NUMBER
+        # was reconstructed or because its SPREAD came off a cap nothing connects
+        # to the mark, and both are questions for a person about that one cell.
+        # Priced with `review_tier` here, this function asked about the first and
+        # not the second - and the two-axis version of the same derivation was
+        # already fixed in the runner, which is how the two came apart.
+        if PROV.row_tier(row) in PROV.CELL_CONFIRMATION_TIERS:
             asked.setdefault(pid, {})[RB.inference_id(row, panel_id=pid)] = row
     by_panel = {}
     for _, art in ledger_rows.iterrows():
@@ -781,7 +785,15 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
         pictured = {_s(a.get("Artifact_Reference")) for a in by_panel.get(pid, ())
                     if _s(a.get("Artifact_Type"))
                     == RB.INFERENCE_CONTEXT_ARTIFACT_TYPE}
-        for iid in sorted(set(cells) - pictured):
+        # ONLY THE CELLS WHOSE NUMBER WAS RECONSTRUCTED. The context crop pictures
+        # the two columns a value was interpolated between, which a cell that is
+        # R3 because of its ERROR BAR does not have: its evidence is the whisker
+        # on the panel overlay, and demanding a support crop for it would refuse a
+        # panel for the absence of a picture that cannot be drawn.
+        wants_picture = {iid for iid, r in cells.items()
+                         if PROV.value_tier(_s(r.get("Value_Method")))
+                         in PROV.CELL_CONFIRMATION_TIERS}
+        for iid in sorted(wants_picture - pictured):
             row = cells[iid]
             flag("panel:%s" % pid, "INFERENCE_CONTEXT_MISSING",
                  "%s/%s is asked about by name and this run carries no picture "
@@ -946,7 +958,9 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
         # has the useful one, and two flags on one row is one too many.
         if not (identity and value):
             continue
-        why = PROV.contract_failure(mark, identity, value)
+        why = (PROV.contract_failure(mark, identity, value)
+               or PROV.dispersion_contract_failure(
+                   mark, _s(row.get("Dispersion_Method"))))
         if why:
             flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
                  "METHOD_NOT_POSSIBLE_FOR_READER", why)
@@ -963,6 +977,53 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
                               _s(row.get("Resolution_ID")) or "(blank)"))
             withheld.add(pid)
     withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
+    withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
+    return withheld
+
+
+def _point_route_failures(machine, ledger_rows, run_dir, flag):
+    """Association rows whose identity disagrees with their own point cloud.
+
+    The scatter reader names each POINT and `_scatter_outcome` copies the answer
+    onto the summary; from v7.70 the point file records it too, so the copy can be
+    checked against the cloud it was copied from. A summary claiming
+    `MEASURED_COLOUR` over points read from a grey threshold was un-refutable
+    while the artifact carried only coordinates.
+    """
+    withheld = set()
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    by_reference = {}
+    for _, art in ledger_rows.iterrows():
+        if _s(art.get("Artifact_Type")) != "POINT_DATA":
+            continue
+        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+        if path is not None:
+            by_reference[os.path.realpath(path)] = path
+    for row in rows:
+        identity = _s(row.get("Identity_Method"))
+        reference = _s(row.get("Point_Data_Reference"))
+        if not identity or not reference:
+            continue
+        path = RB.resolve_artifact(run_dir, reference) or reference
+        if os.path.realpath(path) not in by_reference:
+            continue                  # not a point-backed row, or not in the run
+        try:
+            with open(path, encoding="utf-8") as fh:
+                said = _s(json.load(fh).get("Identity_Method"))
+        except Exception as exc:
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_CONTRADICTS_POINTS",
+                 "the point cloud this association was computed from could not "
+                 "be read (%s: %s)" % (type(exc).__name__, exc))
+            withheld.add(_s(row.get("Run_Panel_ID")))
+            continue
+        if said and said != identity:
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_CONTRADICTS_POINTS",
+                 "the association says its series was named by %s and the point "
+                 "cloud it was computed from says %s" % (identity, said))
+            withheld.add(_s(row.get("Run_Panel_ID")))
     return withheld
 
 
@@ -1599,7 +1660,12 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
             identity = _s(row.get("Identity_Method"))
             value = _s(row.get("Value_Method"))
             stated.append(bool(identity and value))
-            tiers.append(PROV.review_tier(identity, value))
+            # THE ROW, not the pair: `row_tier` prices the dispersion as well,
+            # and a cell whose mean came off the ink and whose error bar was read
+            # from a cap no stem connects to it is not an R0 cell. A caller that
+            # reaches for `review_tier` here is asking about the mean and
+            # answering for the value.
+            tiers.append(PROV.row_tier(row))
         # THE BLANK EXCEPTION IS GONE - v7.66. Until now a row was blocked only
         # if it was STATED and priced at an unfinalizable tier; a blank or
         # half-blank pair was counted, flagged and accepted. That branch was

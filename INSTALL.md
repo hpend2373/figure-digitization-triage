@@ -5008,6 +5008,81 @@ happened to the panel.
     the line reader not measuring the overlap          1
     a contested mark kept                              3
 
+## v7.70 — the weight has provenance too, and two entry points stop disagreeing
+
+**`Dispersion_Method` is the third axis.** The two that existed are both about the
+MEAN. In a continuous meta-analysis the DISPERSION is often what decides the
+weight, and a cell whose mean came straight off the ink and whose error bar was
+read from a cap no stem connects to it priced R0 twice and went into the pool with
+a weight nobody had examined. `Errorbar_Stem_Confirmed` is a boolean about one of
+those cases and says nothing about the rest.
+
+    DIRECT_CONNECTED_CAP     R0   a cap this reader followed a stem to
+    DIRECT_BOUND_PAIR        R0   an interval drawn as two ends
+    DIRECT_BOX_GEOMETRY      R0   the box's own quartile lines
+    SOURCE_TRANSCRIBED       R0   copied from the paper, not measured
+    UNSTEMMED_CAP            R3   ink at the right distance, nothing joining it -
+                                  a cap, or a significance glyph, which sits
+                                  exactly where a cap is and is the same colour
+    RESTORED_MASKED_CAP      R3   restored across furniture this reader removed
+    INTERPOLATED_DISPERSION  R3   from neighbouring cells, not this one's ink
+    FITTED_DISPERSION        R4   a model produced it
+    NO_DISPERSION            R0   this cell has none, and says so
+
+`NO_DISPERSION` is R0 because nothing is claimed — whether a value without a
+weight may be pooled is the unit's question and `NO_VARIANCE` already answers it.
+A blank BESIDE a dispersion number is R4, the same rule the other two axes
+follow. All six readers answer the new question; nothing emits
+`FITTED_DISPERSION` or `RESTORED_MASKED_CAP` yet, and `DISPERSION_CONTRACT` says
+so per reader rather than leaving the registry to imply otherwise.
+
+**`row_tier(row)` is the question every gate now asks** — the worst of the three
+axes, with "does this row have a dispersion at all" read off the row rather than
+declared. Wiring it revealed that the runner and the finalizer had come apart: the
+runner priced the per-cell queue on three axes and `finalize`'s exact-set contract
+still priced it on two, so a cell that reached R3 through its error bar was asked
+for no confirmation. A five-number summary's quartiles count as a dispersion, or a
+box panel would skip the axis entirely.
+
+The R3 CONTEXT CROP is required only where the NUMBER was reconstructed: the crop
+pictures the two columns a value was interpolated between, which a cell that is R3
+because of its cap does not have. Its evidence is the whisker on the panel
+overlay, and demanding a support crop for it would refuse a panel for the absence
+of a picture that cannot be drawn.
+
+Publication 397 states the third axis on all 123 rows — 47 connected caps, 76
+`NO_DISPERSION` — and its tiers are unchanged, which is what a new axis should do
+to a corpus that was already honest about its error bars.
+
+**`read_panel("BAR_MONO")` refuses instead of answering differently.** It
+dispatched to the single-panel absolute-band reader while the pipeline read the
+same panel in two passes through `mono_bar_geometry` — a different fill
+vocabulary, no STIPPLED support, no identity route, no durable geometry row. An
+agent reaching for the obvious entry point got a different answer from the
+pipeline and nothing said so. It now raises `UnsupportedCapabilityError` naming
+`geometry_rows`, `fill_identities_by_figure` and `run_batch`;
+`read_monochrome_bar_panel` keeps its own name for diagnostics.
+
+**The scatter point file records how its series was named.** The reader names each
+POINT and the association row copies the answer; until the durable file carried
+it, a summary claiming `MEASURED_COLOUR` over a cloud read from a grey threshold
+could not be refuted from the artifact. Schema `/3`, one agreed method on the
+record (empty where the points disagree), and `finalize` compares the row against
+the cloud it cites (`METHOD_CONTRADICTS_POINTS`).
+
+    reverted                                          scenarios that fail
+    a blank spread priced safe again                   3
+    the row priced on the two mean axes                2 + 4, in two suites
+    quartiles not counted as a spread                  1
+    the marker reader silent about its spread          1 + 1
+    the box reader claiming a cap it never followed     1
+    the axis off the value row                         1 + 1
+    the finalizer pricing the mean                     1
+    the per-cell contract pricing the mean             1
+    BAR_MONO dispatching to the other reader           2
+    the point file forgetting its method               1 + 1
+    the association never compared with its cloud      1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5020,9 +5095,9 @@ happened to the panel.
 - the overlay still marks inference from `line_style_source` rather than from
   `Identity_Method`, so a reader that answers the new question without setting
   the old field would star nothing
-- `Dispersion_Method` does not exist: the two provenance fields are about the
-  MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
-  priced as whatever its mean was priced at
+- nothing emits `RESTORED_MASKED_CAP` yet: the mean has `Occlusion_Cause` and
+  the dispersion has no equivalent, so a cap restored across furniture this
+  reader removed is reported as a connected cap
 - the R3 context crop draws the two supports and the placed value, and NOT the
   occlusion mask: the mask lives in the reader's memory at read time and nothing
   downstream has it, so the cause is named in the caption rather than shaded
@@ -5039,11 +5114,6 @@ happened to the panel.
   BAR_MONO. A `LINE_MONO_STYLE` row claiming `DIRECT_CURVE_INK` for a number a
   fit produced is inside its reader's set and passes; closing it needs the raw
   marks JSON joined to the values, which is the next step of the same idea
-- `read_panel("BAR_MONO")` still dispatches to the single-panel absolute-band
-  reader, while the batch runner uses the two-pass figure-local one. An agent
-  reaching for the generic entry point gets a different answer from the pipeline
-- the scatter point file does not record `Identity_Method` per point, so the
-  association row's identity cannot be re-derived from the durable artifact
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

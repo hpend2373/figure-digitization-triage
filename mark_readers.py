@@ -270,6 +270,13 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
                 # it stays on the open list rather than being priced here.
                 Identity_Method="MEASURED_COLOUR",
                 Value_Method="MARKER_CENTER",
+                # AND HOW THE ERROR BAR WAS GOT, which is a third question and
+                # often the one that decides the weight. `_marker_and_errorbar`
+                # follows a stem from this mark to the cap; ink at the right
+                # distance with nothing joining it is a cap or a significance
+                # glyph, and telling those apart is a person's job.
+                Dispersion_Method=("DIRECT_CONNECTED_CAP" if stem
+                                   else "UNSTEMMED_CAP"),
                 # HOW MANY OTHER DECLARED COLOURS ALSO COVER THIS MARK. Measured
                 # here and acted on by the batch layer, which is the division
                 # every other reader field follows: naming a series the ink does
@@ -605,6 +612,9 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                                      if spec.fill.upper() == "ANY"
                                      else "MEASURED_MARKER_FILL"),
                     Value_Method="MARKER_CENTER",
+                    Dispersion_Method=("NO_DISPERSION" if whisker is None
+                                       else "DIRECT_CONNECTED_CAP" if stem
+                                       else "UNSTEMMED_CAP"),
                     Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
                     marker_area_px=float(area)))
                 continue
@@ -643,6 +653,9 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                 # optional beside it.
                 Identity_Method="MEASURED_MARKER_SHAPE",
                 Value_Method="MARKER_CENTER",
+                Dispersion_Method=("NO_DISPERSION" if whisker is None
+                                   else "DIRECT_CONNECTED_CAP" if stem
+                                   else "UNSTEMMED_CAP"),
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
                 marker_area_px=float(area),
             ))
@@ -1120,6 +1133,9 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             # no competing identity to get wrong - and not R0, however carefully
             # the quartiles were measured.
             Identity_Method="DECLARED_SINGLE_SERIES",
+            # The spread IS the box: three wide lines and two caps, all five
+            # required present before a row is emitted at all.
+            Dispersion_Method="DIRECT_BOX_GEOMETRY",
             # The five numbers are the box's own lines: three wide ones for the
             # quartiles and two caps, each required to be present before a row is
             # emitted at all.
@@ -1546,7 +1562,31 @@ def read_panel(mark_type, **kwargs):
         from line_style_mono import read_monochrome_line_panel
         return read_monochrome_line_panel(**kwargs)
     if kind == "BAR_MONO":
-        return read_monochrome_bar_panel(**kwargs)
+        # NOT `read_monochrome_bar_panel`, which is what this line used to call.
+        #
+        # That reader classifies a fill against ABSOLUTE density bands measured on
+        # one publication, panel by panel. The pipeline stopped using it: a
+        # monochrome fill is figure-local, so `run_batch` measures every BAR_MONO
+        # panel of a figure with no series named, pools the samples, and lets the
+        # FIGURE say what its fills mean - which is the whole of
+        # `mono_bar_geometry.fill_identity`, and the only path that produces
+        # `Auto_Identity_Method`, STIPPLED support and a durable geometry row.
+        #
+        # So the generic entry point was quietly the OTHER reader. An agent
+        # reaching for `read_panel("BAR_MONO", ...)` - the obvious thing to reach
+        # for - got a different answer from the pipeline, with no identity
+        # provenance and a different fill vocabulary, and nothing said so.
+        raise UnsupportedCapabilityError(
+            "BAR_MONO is read in two passes and cannot be dispatched per panel: "
+            "a monochrome fill means what the FIGURE's other groups say it "
+            "means, so the panels of one figure are measured together and named "
+            "afterwards. Use `mono_bar_geometry.geometry_rows` for one panel's "
+            "measurements and `fill_identities_by_figure` to name them, or "
+            "`run_batch` for the whole thing. "
+            "`read_monochrome_bar_panel` is the single-panel absolute-band "
+            "reader this call used to reach: it is kept for diagnostics, it "
+            "produces no identity provenance, and it is not what the pipeline "
+            "runs.")
     if kind == "SCATTER":
         return read_scatter_panel(**kwargs)
     if kind == "BOX_VIOLIN":
@@ -1585,6 +1625,11 @@ MARK_CARRIED = (
     # can only make a value harder to pool, never easier.
     ("Identity_Method", "Identity_Method"),
     ("Value_Method", "Value_Method"),
+    # And the third: how the DISPERSION was got. Universal for the same reason
+    # the first two are - every reader that emits an error bar answers it, and a
+    # blank beside a dispersion NUMBER prices at the highest tier rather than the
+    # lowest.
+    ("Dispersion_Method", "Dispersion_Method"),
     ("Bar_Top_Definition", "Bar_Top_Definition"),
     ("Bar_Direction", "Bar_Direction"),
     ("Position_Assignment", "Position_Assignment"),
@@ -1659,7 +1704,10 @@ ASSOCIATION_CARRIED = (
 )
 
 
-POINT_DATA_SCHEMA = "figure-digitization-triage/point-data/2"
+#: Bumped to /3 in v7.70: every point now records how its series was named, and
+#: the record carries the one method they all agree on. A reader of a /2 file
+#: cannot distinguish "no method" from "the field did not exist yet".
+POINT_DATA_SCHEMA = "figure-digitization-triage/point-data/3"
 
 
 def _calibration_record(cal):
@@ -1726,9 +1774,22 @@ def write_point_data(points, path, unit_id, cell_key, source_image,
                 "point %d: y_value=%r does not follow from pixel %r under the "
                 "given calibration (would be %r)" % (i, yv, py, back))
         rows.append(dict(series=(None if p.get("series") is None else str(p["series"])),
-                         point_px_x=px, point_px_y=py, x_value=xv, y_value=yv))
+                         point_px_x=px, point_px_y=py, x_value=xv, y_value=yv,
+                         # HOW THIS POINT'S SERIES WAS NAMED, in the durable
+                         # file. The association row copies it off the points and
+                         # nothing could check that copy: a summary claiming
+                         # MEASURED_COLOUR over a cloud read from a grey
+                         # threshold was un-refutable from the artifact.
+                         Identity_Method=str(p.get("Identity_Method") or "")))
+    # ONE ANSWER, OR THE FILE SAYS SO. Every point of one series is named the
+    # same way by every reader in this package, and a future one that mixes them
+    # would make the association row's single `Identity_Method` a lie - so the
+    # record carries the agreed method, or the empty string where they disagree,
+    # and the finalizer can compare the row against the cloud it came from.
+    methods = {str(r.get("Identity_Method") or "") for r in rows}
     record = {
         "schema": POINT_DATA_SCHEMA,
+        "Identity_Method": (methods.pop() if len(methods) == 1 else ""),
         "Unit_ID": str(unit_id), "Cell_Key": str(cell_key),
         "Panel_ID": None if panel_id is None else str(panel_id),
         "Source_Image": str(source_image), "Image_SHA256": str(image_sha256),

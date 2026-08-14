@@ -207,6 +207,11 @@ def fig_values_columns():
         # highest tier rather than the lowest - an unregistered method is not
         # evidence of safety.
         "Identity_Method", "Value_Method",
+        # And how the DISPERSION was got - the third axis, and in a continuous
+        # meta-analysis often the one that decides the weight. Both fields above
+        # are about the MEAN: a cell whose mean came off the ink and whose error
+        # bar was read from a cap no stem connects to it priced R0 twice.
+        "Dispersion_Method",
         # AND WHAT A RECONSTRUCTED NUMBER WAS RECONSTRUCTED FROM - the two
         # columns with ink, the span between them, what covered it, and the
         # drawing scale that span has to be local against. Blank for every reader

@@ -713,6 +713,50 @@ vrows = read_box_violin_panel(
 check("a pure violin does not invent quartiles", vrows == [])
 
 
+print("the generic entry point cannot quietly be a different reader")
+# v7.70. `read_panel("BAR_MONO", ...)` dispatched to the single-panel
+# absolute-band reader while the pipeline used the two-pass figure-local one - so
+# an agent reaching for the obvious entry point got a different fill vocabulary,
+# no identity provenance, and no durable geometry row, with nothing saying so.
+try:
+    read_panel("BAR_MONO", image=im, panel_box=(0, 10, 0, 10),
+               x_positions={"T0": 5}, y_calibration=ycal, series=[])
+except _mr.UnsupportedCapabilityError as exc:
+    _bm_refusal = str(exc)
+except Exception as exc:                                   # pragma: no cover
+    _bm_refusal = "wrong exception: %s: %s" % (type(exc).__name__, exc)
+else:
+    _bm_refusal = "it returned rows"
+check("BAR_MONO refuses a per-panel dispatch rather than answering differently",
+      "two passes" in _bm_refusal, _bm_refusal)
+check("  and the refusal names what to call instead",
+      "fill_identities_by_figure" in _bm_refusal
+      and "run_batch" in _bm_refusal, _bm_refusal)
+check("  while the single-panel reader is still there, under its own name",
+      callable(_mr.read_monochrome_bar_panel))
+# AND THE POINT FILE RECORDS HOW ITS SERIES WAS NAMED. The association row copies
+# the method off the points; until the durable file carried it, that copy could
+# not be checked against the cloud it came from.
+_pt_path = _os.path.join(_e2e_dir, "points_provenance.json")
+_mr.write_point_data(bpoints, _pt_path, unit_id="U1", cell_key="ARM=ALL",
+                     source_image="synthetic.png", image_sha256="0" * 64,
+                     x_calibration=sxcal, y_calibration=sycal, panel_id="P1",
+                     reader="SCATTER")
+_pt = _json.load(open(_pt_path, encoding="utf-8"))
+check("every point in the durable file says how its series was named",
+      all(p.get("Identity_Method") == "DECLARED_SINGLE_SERIES"
+          for p in _pt["points"]),
+      "%s" % sorted({p.get("Identity_Method") for p in _pt["points"]}))
+check("  and the record carries the one answer they agree on",
+      _pt["Identity_Method"] == "DECLARED_SINGLE_SERIES"
+      and _pt["schema"].endswith("/3"), "%s" % _pt["Identity_Method"])
+_mixed = [dict(bpoints[0], Identity_Method="MEASURED_COLOUR")] + bpoints[1:]
+_mr.write_point_data(_mixed, _pt_path, unit_id="U1", cell_key="ARM=ALL",
+                     source_image="synthetic.png", image_sha256="0" * 64,
+                     x_calibration=sxcal, y_calibration=sycal)
+check("  and says nothing where they do not agree, rather than picking one",
+      _json.load(open(_pt_path, encoding="utf-8"))["Identity_Method"] == "")
+
 print("one adapter contract feeds the four-grain value table")
 routed = read_panel(
     "LINE_COLOR", image=im, panel_box=(100, 700, 40, 430),
@@ -1142,6 +1186,36 @@ check("  nothing compared with anything is a declaration, and costs a tier",
       and _prov.review_tier("DECLARED_SINGLE_SERIES", "MARKER_CENTER") == "R1"
       and _prov.review_tier("MEASURED_MARKER_FILL", "MARKER_CENTER") == "R0",
       "%s" % sorted({r.get("Identity_Method") for r in _any_any}))
+# AND THE THIRD QUESTION: HOW THE SPREAD WAS GOT. v7.70. Both fields above are
+# about the MEAN, and in a continuous meta-analysis the dispersion is often what
+# decides the weight - so a cell whose mean came off the ink and whose error bar
+# was read from a cap no stem connects to it was R0 twice and unexamined once.
+_DISPERSION_METHODS = [
+    ("LINE_COLOR, following a stem to the cap", rows, {"DIRECT_CONNECTED_CAP"}),
+    ("LINE_MONO, same question of a marker", mrows,
+     {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"}),
+    ("BOX_VIOLIN, whose spread IS the box", brows, {"DIRECT_BOX_GEOMETRY"}),
+]
+for _label, _got, _want in _DISPERSION_METHODS:
+    check("  %s" % _label,
+          bool(_got) and {r.get("Dispersion_Method") for r in _got} <= _want
+          and all(r.get("Dispersion_Method") for r in _got),
+          "%s" % sorted({r.get("Dispersion_Method") for r in _got}))
+check("  and a marker whose whisker was never found says so, rather than blank",
+      all(r.get("Dispersion_Method") == "NO_DISPERSION"
+          for r in read_monochrome_marker_panel(
+              _sim, panel_box=(80, 560, 30, 430),
+              x_positions={"T%d" % i: x for i, x in enumerate(_sxs)},
+              y_calibration=_sycal,
+              series=[SeriesSpec("S", marker="ANY", fill="OPEN")],
+              whisker_search_px=20)),
+      "a marker with no reachable whisker did not say NO_DISPERSION")
+check("  and every dispersion method they emit is one the registry prices",
+      all(m in _prov.DISPERSION_METHODS
+          for _l, got, _w in _DISPERSION_METHODS for r in got
+          for m in [r.get("Dispersion_Method")]),
+      "%s" % sorted({r.get("Dispersion_Method")
+                     for _l, got, _w in _DISPERSION_METHODS for r in got}))
 # AND EVERY METHOD A READER EMITS IS ONE THE REGISTRY PRICES. An unregistered
 # token is R4 by construction, which is safe - and silently unpoolable, which is
 # the failure mode a typo would produce and nothing else would report.

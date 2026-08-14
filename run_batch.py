@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.69"
+PIPELINE_VERSION = "7.70"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -338,9 +338,7 @@ def inference_confirmations(values):
     in the rows, so the check reads the rows.
     """
     for value in values:
-        if PROV.review_tier(_s(value.get("Identity_Method")),
-                            _s(value.get("Value_Method"))) \
-                in PROV.PANEL_CONFIRMATION_TIERS:
+        if PROV.row_tier(value) in PROV.PANEL_CONFIRMATION_TIERS:
             return (INFERENCE_CONFIRMATION,)
     return ()
 
@@ -1343,6 +1341,12 @@ def _geometry_marks(records, series_rows, positions, resolved=None):
             # has a measured top, which is why the identity can be missing from
             # a row whose number is not.
             Value_Method="BAR_OUTLINE_CENTER",
+            # `_mono_bar_errorbar` walks up from the bar top and only reports a
+            # cap it reached along a stem, so a dispersion on a monochrome bar is
+            # a connected cap or it is nothing.
+            Dispersion_Method=("DIRECT_CONNECTED_CAP"
+                               if record.get("dispersion") is not None
+                               else "NO_DISPERSION"),
             Errorbar_Stem_Confirmed=("TRUE" if record.get("dispersion")
                                      is not None else "FALSE"),
             Geometry_Row_SHA256=_s(record.get("geometry_row_sha256")),
@@ -1735,8 +1739,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     crops = {}
     if inference_dir:
         for mark, record in zip(converted, records):
-            if PROV.review_tier(_s(record.get("Identity_Method")),
-                                _s(record.get("Value_Method"))) \
+            # The VALUE axis, not the row: this picture shows the two columns
+            # a number was interpolated between, and a cell that is R3 because
+            # of its error bar has no such columns to picture.
+            if PROV.value_tier(_s(record.get("Value_Method"))) \
                     not in PROV.CELL_CONFIRMATION_TIERS:
                 continue
             safe = "".join(c if (c.isalnum() or c in "-_") else "_"
@@ -2436,6 +2442,9 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         # point is a measured marker centre, and the association is a statistic
         # over the set of them.
         summary["Value_Method"] = "POINT_CLOUD_ASSOCIATION"
+        # An association cell has no dispersion of its own: the confidence
+        # interval, where the paper gives one, is transcribed rather than read.
+        summary["Dispersion_Method"] = "NO_DISPERSION"
         planned.append((sid, factor, level, mine, summary))
 
     # ---- every refusal, BEFORE a single file is written --------------------
@@ -3248,7 +3257,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     for value in machine_qc_df.to_dict("records"):
         identity = _s(value.get("Identity_Method"))
         method = _s(value.get("Value_Method"))
-        if PROV.review_tier(identity, method) in PROV.FINALIZABLE_TIERS:
+        if PROV.row_tier(value) in PROV.FINALIZABLE_TIERS:
             continue
         pid_ = _s(value.get("Run_Panel_ID"))
         source = run_by_panel.get(pid_, {})
@@ -3279,9 +3288,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # this whole ladder is trying not to waste.
     inference_rows = {}
     for value in machine_qc_df.to_dict("records"):
-        tier = PROV.review_tier(_s(value.get("Identity_Method")),
-                                _s(value.get("Value_Method")))
-        if tier in PROV.CELL_CONFIRMATION_TIERS:
+        if PROV.row_tier(value) in PROV.CELL_CONFIRMATION_TIERS:
             inference_rows.setdefault(_s(value.get("Run_Panel_ID")),
                                       []).append(value)
     for pid_, artifacts_ in write_inference_manifests(output_dir,
@@ -3380,11 +3387,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # ask, and the finalizer re-derives it rather than trusting the number
         # here. Zero for most panels, which is what keeps `Inference_Checked`
         # from becoming a column everybody types CONFIRMED into.
-        inferred_cells = sum(
-            1 for v in mine
-            if PROV.review_tier(_s(v.get("Identity_Method")),
-                                _s(v.get("Value_Method")))
-            in PROV.PANEL_CONFIRMATION_TIERS)
+        inferred_cells = sum(1 for v in mine if PROV.row_tier(v)
+                             in PROV.PANEL_CONFIRMATION_TIERS)
         mode = ("BAR_MONO_GEOMETRY_RESOLVED"
                 if row["Panel_ID"] in geometry_artifacts
                 and resolutions_by_panel.get(row["Panel_ID"])

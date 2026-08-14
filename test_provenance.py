@@ -236,6 +236,54 @@ check("R4 asks for no confirmation, because it grants no finalization",
       "%r / %r" % (P.PANEL_CONFIRMATION_TIERS, P.CELL_CONFIRMATION_TIERS))
 
 print()
+print("the weight has provenance too, and it is not the mean's")
+# v7.70. `Identity_Method` and `Value_Method` are both about the MEAN. In a
+# continuous meta-analysis the DISPERSION is often what decides the weight, and a
+# cell whose mean came straight off the ink and whose error bar was read from a
+# cap no stem connects to it priced R0 on both axes and went into the pool.
+check("a cap a stem was followed to is the strongest thing a figure offers",
+      P.dispersion_tier("DIRECT_CONNECTED_CAP") == "R0"
+      and P.dispersion_tier("DIRECT_BOX_GEOMETRY") == "R0")
+check("ink at the right distance with nothing joining it is a person's question",
+      P.dispersion_tier("UNSTEMMED_CAP") == "R3"
+      and P.dispersion_tier("RESTORED_MASKED_CAP") == "R3"
+      and P.dispersion_tier("INTERPOLATED_DISPERSION") == "R3")
+check("and a spread a model produced is not rescuable by a signature",
+      P.dispersion_tier("FITTED_DISPERSION") == "R4"
+      and "R4" not in P.FINALIZABLE_TIERS)
+# NO DISPERSION IS A STATEMENT, NOT A SILENCE. Whether a value without a weight
+# may be pooled is the unit's question and `NO_VARIANCE` already answers it, so
+# pricing the absence as unsafe would refuse a legitimate cell twice.
+check("a cell with no error bar claims nothing and is doubted for nothing",
+      P.dispersion_tier("NO_DISPERSION") == "R0"
+      and P.dispersion_tier("", has_dispersion=False) == "R0")
+check("while a NUMBER with no account of itself takes the highest tier",
+      P.dispersion_tier("", has_dispersion=True) == "R4"
+      and P.dispersion_tier("A_METHOD_FROM_2027") == "R4")
+# THE ROW IS WHAT A GATE PRICES, and the row has three axes.
+_row = dict(Identity_Method="MEASURED_COLOUR", Value_Method="MARKER_CENTER")
+check("a row is priced over all three, not over the two about the mean",
+      P.row_tier(_row) == "R0"
+      and P.row_tier(dict(_row, Dispersion_Value="1.2",
+                          Dispersion_Method="DIRECT_CONNECTED_CAP")) == "R0"
+      and P.row_tier(dict(_row, Dispersion_Value="1.2",
+                          Dispersion_Method="UNSTEMMED_CAP")) == "R3"
+      and P.row_tier(dict(_row, Dispersion_Value="1.2")) == "R4",
+      P.row_tier(dict(_row, Dispersion_Value="1.2",
+                      Dispersion_Method="UNSTEMMED_CAP")))
+check("  and a five-number summary's quartiles count as a dispersion",
+      P.row_tier(dict(_row, Q1="3", Q3="7")) == "R4"
+      and P.row_tier(dict(_row, Q1="3", Q3="7",
+                          Dispersion_Method="DIRECT_BOX_GEOMETRY")) == "R0",
+      P.row_tier(dict(_row, Q1="3", Q3="7")))
+check("and a reader cannot claim a spread its own geometry does not offer",
+      P.dispersion_contract_failure("BOX_VIOLIN", "DIRECT_CONNECTED_CAP")
+      and P.dispersion_contract_failure("SCATTER", "UNSTEMMED_CAP")
+      and not P.dispersion_contract_failure("BAR_COLOR", "UNSTEMMED_CAP")
+      and not P.dispersion_contract_failure("A_READER_FROM_2027", "ANYTHING"),
+      P.dispersion_contract_failure("BOX_VIOLIN", "DIRECT_CONNECTED_CAP"))
+
+print()
 print("an occlusion cause this registry cannot name is a defect, not a tier")
 # v7.66. `interpolation_method` tested for NONE and for MIXED and returned the
 # FURNITURE answer for everything else - so a reader emitting `ERROR_BAR_STEM`

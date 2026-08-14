@@ -5083,6 +5083,64 @@ the cloud it cites (`METHOD_CONTRADICTS_POINTS`).
     the point file forgetting its method               1 + 1
     the association never compared with its cloud      1
 
+## v7.71 — blank evidence is not consent, and the spread is part of the question
+
+Both halves came out of the same review, and both are the same mistake made twice:
+a check that compares two answers only when both are present.
+
+**`if said and said != claimed` was the wrong shape.** The two evidence joins
+v7.68 and v7.70 added refused an artifact that DISAGREED with a value's claim and
+accepted one that said NOTHING — which is the fail-open they exist to close,
+arrived at from the other side. Blank evidence does not mean "no reason to doubt
+this"; it means the claim cannot be supported.
+
+    the scatter point file  the record-level method is EMPTY BY DESIGN when the
+                            points disagree, so a cloud that could not agree how
+                            its series was named bought whatever the row claimed.
+                            The methods are now re-derived from the points:
+                            disagreement is METHOD_EVIDENCE_UNRESOLVED, and record,
+                            points and value must all say the same thing
+    the geometry file       a row that resolved a pattern and left
+                            `Auto_Identity_Method` blank is internally consistent
+                            and says nothing. `artifact_row` now refuses to WRITE
+                            one (`AUTO_IDENTITY_ROUTE_MISSING`, and
+                            `AUTO_IDENTITY_ROUTE_UNKNOWN` for a route the registry
+                            cannot price), and the finalizer treats blank as
+                            contradiction for a bar that named a pattern
+
+**The spread joins the cell-level question.** `row_tier` has priced the
+dispersion since v7.70, and `Inference_ID` did not — so a cell asked about at that
+grain BECAUSE of its error bar kept the same identifier when the answer to that
+question changed. `UNSTEMMED_CAP` and `RESTORED_MASKED_CAP` are different
+questions about the same number. The manifest and therefore the identifier now
+carry `Dispersion_Method`, `Errorbar_Lower`, `Errorbar_Upper` and
+`Errorbar_Stem_Confirmed`; `method_blocked_cells.csv` carries `Dispersion_Method`
+and its `Detail` names which axis refused the cell, so nobody is sent to re-read a
+mean that was fine.
+
+**And the overlay stops conflating the two halves of R3.** A row reaches it
+because its NUMBER was reconstructed or because its SPREAD came off a cap nothing
+connects to the mark, and the footer said only the first — describing a question
+the reviewer was not being asked. `~` now marks and counts the spread case
+separately from `+`. Registering `Dispersion_Method` as a field the picture can
+read was part of the same change: without it every such mark carried a question
+mark on top of its own suffix, which the unknown-provenance guard reported
+correctly.
+
+**`row_finalizable(row)` is the three-axis helper.** `finalizable(identity,
+value)` stays for the scenarios that ask about the mean, with a docstring saying
+which question it answers; nothing in the pipeline gates on it.
+
+    reverted                                          scenarios that fail
+    a blank point cloud read as consent                2
+    the record trusted instead of re-derived           1 + 1, in two suites
+    a blank geometry route read as consent             1
+    the writer allowing a named bar with no route      1
+    the spread off the cell identifier                 1
+    the work list hiding which axis refused            1
+    the footer conflating the two halves of R3         1
+    the third shared field unregistered                1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5110,10 +5168,15 @@ the cloud it cites (`METHOD_CONTRADICTS_POINTS`).
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
-- the method contract is a MATRIX for five of the six readers and a JOIN for
-  BAR_MONO. A `LINE_MONO_STYLE` row claiming `DIRECT_CURVE_INK` for a number a
-  fit produced is inside its reader's set and passes; closing it needs the raw
-  marks JSON joined to the values, which is the next step of the same idea
+- the method contract is a MATRIX for five readers and a durable JOIN for two:
+  `BAR_MONO` against `mono_bar_geometry.csv` and `SCATTER` against its point
+  file. `LINE_COLOR`, `LINE_MONO`, `LINE_MONO_STYLE`, `BAR_COLOR` and
+  `BOX_VIOLIN` are matrix-only, so a `LINE_MONO_STYLE` row claiming
+  `DIRECT_CURVE_INK` for a number a fit produced is inside its reader's set and
+  passes. Closing it means promoting the raw marks JSON to an evidence envelope -
+  a per-mark measurement hash, a method attestation over it, and the value row
+  carrying both - and re-deriving the three methods from that evidence rather
+  than trusting them
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

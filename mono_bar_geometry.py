@@ -21,8 +21,16 @@ reasons are in the docstrings below and in INSTALL.md.
 """
 import hashlib
 import json
+import os
+import sys
 
 import numpy as np
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:                                     # pragma: no cover
+    sys.path.insert(0, _HERE)
+
+import provenance as _PROV                                        # noqa: E402
 
 try:
     import cv2
@@ -2173,6 +2181,28 @@ def artifact_row(record, allow_unstamped=False, require_auto_identity=False):
             raise ValueError(
                 "mono_bar_geometry: AUTO_IDENTITY_PARTIAL - an attested row "
                 "with no figure verdict behind it")
+        # A NAMED BAR HAS TO SAY BY WHICH ROUTE. `MEASURED_FILL_RELATION` and
+        # `FIGURE_PROTOTYPE_MATCH` are the same word at two review tiers, and a
+        # row that resolved a pattern and left the route blank is an artifact
+        # whose attestation is internally consistent and whose evidence says
+        # nothing - so the finalizer comparing a value's claim against it had
+        # nothing to compare and let the claim through. Refused here, where the
+        # file is written, rather than only where it is read.
+        if record.get("resolved_fill_pattern") and not str(
+                record.get("identity_method") or "").strip():
+            raise ValueError(
+                "mono_bar_geometry: AUTO_IDENTITY_ROUTE_MISSING - this row "
+                "names %r and does not say whether the figure reached it from "
+                "relations inside its own group or by matching another group's "
+                "prototypes. The two are R0 and R2 to a reviewer"
+                % (record.get("resolved_fill_pattern"),))
+        if (record.get("identity_method") and str(
+                record.get("identity_method")).strip()
+                not in _PROV.IDENTITY_METHODS):
+            raise ValueError(
+                "mono_bar_geometry: AUTO_IDENTITY_ROUTE_UNKNOWN - %r is not a "
+                "method the registry prices, so nothing downstream can price "
+                "this row" % (record.get("identity_method"),))
     elif state != "PRE_IDENTITY":
         raise ValueError(
             "mono_bar_geometry: %s - this row carries part of an auto identity "

@@ -125,6 +125,13 @@ IDENTITY_SOURCE_FIELDS = (("line_style_source", "MEASURED"),)
 #: and a dagger that renders as a box is worse than a plus.
 TIER_MARK_SUFFIXES = (("R2", " *"), ("R3", " +"), ("R4", " x"))
 
+#: R3 IS TWO QUESTIONS, and they are not the same one. From v7.70 a row reaches
+#: R3 either because its NUMBER was reconstructed from neighbouring ink or because
+#: its SPREAD came off a cap nothing connects to the mark - and a footer that said
+#: only the first was describing a question the reviewer was not being asked.
+#: `~` for the spread, so the two are countable separately on the picture.
+SPREAD_MARK_SUFFIX = " ~"
+
 #: How a reader names a provenance field. Everything matching this and not in
 #: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
 #: A convention can still be side-stepped by a field named nothing like this,
@@ -154,6 +161,19 @@ TIER_NOTES = {
           "makes these poolable; they are in method_blocked_cells.csv",
 }
 
+#: The other half of R3, in the words of the question actually being asked.
+SPREAD_NOTE = ("%d mark(s): the number is measured and the SPREAD is not - the "
+               "cap may be a cap or a significance glyph. Confirmed by name in "
+               "inference_review.csv, like a reconstructed number")
+
+
+def spread_only(mark):
+    """True when this mark is R3 for its ERROR BAR and not for its number."""
+    if tier_of(mark) not in ("R3",):
+        return False
+    return PROV.value_tier(
+        str(mark.get("Value_Method", "") or "")) not in ("R3",)
+
 
 def tier_of(mark):
     """The review tier this mark's own two methods imply, or "" if it says none.
@@ -179,9 +199,17 @@ def inferred_note(marks):
     """The footer key for starred and questioned marks, or "" if none."""
     lines = []
     for tier, suffix in TIER_MARK_SUFFIXES:
-        count = sum(1 for m in marks if tier_of(m) == tier)
-        if count:
-            lines.append("%s %s" % (suffix.strip(), TIER_NOTES[tier] % count))
+        here = [m for m in marks if tier_of(m) == tier]
+        if tier == "R3":
+            spread = [m for m in here if spread_only(m)]
+            if spread:
+                lines.append("%s %s"
+                             % (SPREAD_MARK_SUFFIX.strip(),
+                                SPREAD_NOTE % len(spread)))
+            here = [m for m in here if not spread_only(m)]
+        if here:
+            lines.append("%s %s" % (suffix.strip(),
+                                    TIER_NOTES[tier] % len(here)))
     starred = sum(1 for m in marks
                   if _inferred_identity(m) and not tier_of(m))
     if starred:
@@ -210,6 +238,8 @@ def mark_label(mark):
     # look at hardest - it is the whole question this picture exists to answer.
     # Unmarked, it looked exactly like a cell read off the ink.
     tier = tier_of(mark)
+    if spread_only(mark):
+        return label + SPREAD_MARK_SUFFIX
     for known, suffix in TIER_MARK_SUFFIXES:
         if tier == known:
             label += suffix
@@ -242,7 +272,12 @@ def unreadable_provenance(mark):
     not be drawn as one.
     """
     known = {field.lower() for field, _measured in IDENTITY_SOURCE_FIELDS}
-    known |= {"identity_method", "value_method"}
+    # All three shared fields, and the third was missed when it shipped: a mark
+    # carrying `Dispersion_Method` was reported as carrying provenance this
+    # picture cannot read, on top of the mark it had just been given for it. The
+    # guard caught it, which is the guard doing its job - and the fix is
+    # registering the field rather than loosening the guard.
+    known |= {"identity_method", "value_method", "dispersion_method"}
     # CASE-FOLDED. The suffixes are lower case and `Identity_Method` is not, so
     # the two fields this picture now reads were themselves "provenance this
     # overlay cannot read" - every mark in every panel would have carried a

@@ -5256,6 +5256,24 @@ check("and the footer counts each kind separately, in the reviewer's words",
       len(_key.splitlines()) == 3 and "2 mark(s)" in _key
       and "inference_review.csv" in _key
       and "method_blocked_cells.csv" in _key, "%r" % _key)
+# R3 IS TWO QUESTIONS. v7.71. A row reaches it because its NUMBER was
+# reconstructed or because its SPREAD came off a cap nothing connects to the mark,
+# and a footer that said only the first described a question the reviewer was not
+# being asked. `~` for the spread, so the two are countable on the picture.
+_SPREAD_MARK = dict(_MEASURED, Identity_Method="MEASURED_COLOUR",
+                    Value_Method="MARKER_CENTER", dispersion=1.2,
+                    Dispersion_Method="UNSTEMMED_CAP")
+check("a mark that is R3 for its ERROR BAR is marked as that, not as a "
+      "reconstructed number",
+      RB.OVERLAY.mark_label(_SPREAD_MARK).endswith(" ~")
+      and RB.OVERLAY.spread_only(_SPREAD_MARK)
+      and not RB.OVERLAY.spread_only(_R3_MARK),
+      "%r" % RB.OVERLAY.mark_label(_SPREAD_MARK))
+_both = RB.OVERLAY.inferred_note([_SPREAD_MARK, _R3_MARK])
+check("  and the footer asks the two questions separately",
+      len(_both.splitlines()) == 2
+      and "SPREAD is not" in _both
+      and "reconstructed from neighbouring ink" in _both, "%r" % _both)
 # THE TWO SHARED FIELDS ARE NOT "PROVENANCE THIS OVERLAY CANNOT READ". The
 # suffix check was case-sensitive against lower-case suffixes, so `Value_Method`
 # matched nothing and `Identity_Method` matched nothing - and the moment a reader

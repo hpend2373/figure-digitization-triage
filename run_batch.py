@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.70"
+PIPELINE_VERSION = "7.71"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -436,7 +436,10 @@ MANUAL_QUEUE_COLUMNS = [
 #: in the manual queue that nobody needs to digitize by hand.
 METHOD_BLOCKED_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Cell_Key",
-    "Identity_Method", "Value_Method",
+    # All three, because any one of them can be the axis that refused the row -
+    # and the person picking this work up needs to know WHICH. A list that names
+    # two of the three would send somebody to re-read a mean whose mean was fine.
+    "Identity_Method", "Value_Method", "Dispersion_Method",
     # NOT a review tier. Tiers are derived by whoever needs one and written into
     # no file, which `test_provenance` enforces by parsing this module. What goes
     # here is the STATE of the cell and the work it implies.
@@ -858,6 +861,14 @@ INFERENCE_MANIFEST_COLUMNS = [
     # a person is being asked to accept, so it is on the row they read - and
     # therefore in the identifier below.
     "Trace_Agreement",
+    # AND THE SPREAD, from v7.71. A cell can be asked about at this grain because
+    # its NUMBER was reconstructed or because its ERROR BAR came off a cap nothing
+    # connects to the mark - `row_tier` has priced both since v7.70 and this list
+    # named only the first, so the row a reviewer read said nothing about the
+    # question they were being asked, and the identifier below did not change when
+    # the answer to it did.
+    "Dispersion_Method", "Errorbar_Lower", "Errorbar_Upper",
+    "Errorbar_Stem_Confirmed",
 ]
 
 #: What an `Inference_ID` is derived FROM: EVERY COLUMN OF THE ROW THE REVIEWER
@@ -905,6 +916,17 @@ def _canon_field(value):
         return repr(float(text))
     except (TypeError, ValueError):
         return text
+
+
+def _blocked_detail(value, identity, method):
+    """Which axis refused this cell, in the words of the person who re-reads it."""
+    if not (identity and method):
+        return "nothing says how this number was got"
+    if PROV.review_tier(identity, method) not in PROV.FINALIZABLE_TIERS:
+        return "%s: the number was not read off the ink" % method
+    spread = _s(value.get("Dispersion_Method"))
+    return ("%s: the number is measured and the SPREAD is not"
+            % (spread or "nothing says how the spread was got"))
 
 
 def inference_id(record, panel_id=""):
@@ -3268,12 +3290,11 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Unit_ID": _s(value.get("Unit_ID")),
             "Cell_Key": _s(value.get("Cell_Key")),
             "Identity_Method": identity, "Value_Method": method,
+            "Dispersion_Method": _s(value.get("Dispersion_Method")),
             "Cell_State": METHOD_BLOCKED_STATE,
             "Next_Action": METHOD_BLOCKED_ACTION,
             "Image_Path": _s(source.get("Image_Path")),
-            "Detail": ("nothing says how this number was got"
-                       if not (identity and method) else
-                       "%s: the number was not read off the ink" % method),
+            "Detail": _blocked_detail(value, identity, method),
         })
     blocked_df = pd.DataFrame(blocked_rows, columns=METHOD_BLOCKED_COLUMNS)
 

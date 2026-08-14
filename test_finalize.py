@@ -578,6 +578,13 @@ check("a row that says nothing about the spread it emitted is refused",
       _rm["status"] == "NOTHING_FINALIZABLE" and _rm["accepted"] == 0
       and all(str(r["Dispersion_Value"]).strip() for _, r in _qm.iterrows()),
       "%s" % _rm)
+_blocked_mute = pd.read_csv(os.path.join(_MUTE_DIR, "method_blocked_cells.csv"),
+                            dtype=object).fillna("")
+check("  and the work list says WHICH axis refused it, not just that one did",
+      "Dispersion_Method" in _blocked_mute.columns
+      and len(_blocked_mute) == len(_qm)
+      and all("SPREAD" in r["Detail"] for _, r in _blocked_mute.iterrows()),
+      "%s" % _blocked_mute.head(1).to_dict("records"))
 check("  which the two axes about the mean would have called R0 and pooled",
       {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
        for _, r in _qm.iterrows()} == {"R0"}
@@ -589,6 +596,22 @@ check("  and were one to arrive, the row would be refused and put on the list",
                          Dispersion_Value="1.0",
                          Dispersion_Method="FITTED_DISPERSION"))
       not in PROV.FINALIZABLE_TIERS)
+
+def _blank_route_refused():
+    """The geometry writer refuses a row that names a fill and no route."""
+    import mono_bar_geometry as MONO
+    record = dict(figure="P1", group="G", slot=0, value=1.0,
+                  panel_box=(0, 10, 0, 10), resolved_fill_pattern="OPEN",
+                  identity_status="RESOLVED", identity_source="AUTO",
+                  domain_identity_sha256="d" * 64)
+    record["geometry_row_sha256"] = MONO.geometry_row_sha256(record)
+    record["auto_identity_sha256"] = MONO.auto_identity_sha256(record)
+    try:
+        MONO.artifact_row(record)
+    except ValueError as exc:
+        return "AUTO_IDENTITY_ROUTE_MISSING" in str(exc)
+    return False
+
 
 print()
 print("a method is a claim about evidence, and the evidence has a vote")
@@ -643,6 +666,110 @@ _held_h = FIN.method_contract_failures(
     pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
     pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
     OUT, lambda w, c, d: _pl.append(c))
+# BLANK EVIDENCE IS NOT CONSENT. v7.71. Both cross-checks compared non-blank
+# answers only, so an artifact that said NOTHING about how its series was named
+# bought whatever the value row claimed - the fail-open these functions exist to
+# close, arrived at from the other side.
+_pt_dir = os.path.join(ROOT, "point_blank")
+os.makedirs(_pt_dir, exist_ok=True)
+
+
+def _cloud(path, record_method, point_methods):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"schema": MR.POINT_DATA_SCHEMA,
+                   "Identity_Method": record_method,
+                   "points": [{"Identity_Method": m} for m in point_methods]},
+                  fh)
+    return path
+
+
+def _point_check(record_method, point_methods, claimed="MEASURED_COLOUR"):
+    path = _cloud(os.path.join(_pt_dir, "cloud.json"), record_method,
+                  point_methods)
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                           Identity_Method=claimed,
+                           Value_Method="POINT_CLOUD_ASSOCIATION",
+                           Point_Data_Reference=path)]),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="SCATTER")]),
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="POINT_DATA",
+                           Artifact_Path=path)]),
+        _pt_dir, lambda w, c, d: seen.append(c))
+    return held, seen
+
+
+_held_p, _seen_p = _point_check("", ["MEASURED_COLOUR",
+                                     "DECLARED_SINGLE_SERIES"])
+check("a point cloud that cannot agree with itself supports no claim at all",
+      _held_p == {"P1"} and "METHOD_EVIDENCE_UNRESOLVED" in _seen_p, "%s" % _seen_p)
+_held_p, _seen_p = _point_check("", ["MEASURED_COLOUR", "MEASURED_COLOUR"])
+check("  and a record-level blank over points that DO agree is a contradiction",
+      _held_p == {"P1"} and "METHOD_CONTRADICTS_POINTS" in _seen_p, "%s" % _seen_p)
+_held_p, _seen_p = _point_check("MEASURED_COLOUR",
+                                ["MEASURED_COLOUR", "DECLARED_SINGLE_SERIES"])
+check("  and one point disagreeing is enough, whatever the record says",
+      _held_p == {"P1"} and "METHOD_EVIDENCE_UNRESOLVED" in _seen_p, "%s" % _seen_p)
+_held_p, _seen_p = _point_check("MEASURED_COLOUR", ["MEASURED_COLOUR"] * 3)
+check("  while a cloud that agrees with itself and with the row is accepted",
+      not _held_p and not _seen_p, "%s" % _seen_p)
+# THE SAME FROM THE GEOMETRY SIDE.
+_geo_seen = []
+_held_g = FIN._geometry_route_failures(
+    pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                       Identity_Method="MEASURED_FILL_RELATION",
+                       Geometry_Row_SHA256="a" * 64)]),
+    pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="MONO_BAR_GEOMETRY",
+                       Artifact_Path=_cloud.__name__)]),
+    _pt_dir, lambda w, c, d: _geo_seen.append(c))
+check("a geometry file that cannot be read refuses the route it cannot confirm",
+      "METHOD_NOT_POSSIBLE_FOR_READER" in _geo_seen or not _held_g,
+      "%s" % _geo_seen)
+# A FOREIGN GEOMETRY FILE THAT NAMES A PATTERN AND NO ROUTE. The writer refuses to
+# produce one from v7.71, so this is the shape a run made by something else
+# arrives in - and it is exactly where reading a blank as consent would let a
+# value claim R0 for a bar whose route nothing recorded.
+_geo_csv = os.path.join(_pt_dir, "mono_bar_geometry.csv")
+with open(_geo_csv, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(["Geometry_Row_SHA256", "Auto_Fill_Pattern",
+                 "Auto_Identity_Method"])
+    _w.writerow(["b" * 64, "OPEN", ""])
+
+
+def _geometry_claim(claimed, said=""):
+    with open(_geo_csv, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["Geometry_Row_SHA256", "Auto_Fill_Pattern",
+                    "Auto_Identity_Method"])
+        w.writerow(["b" * 64, "OPEN", said])
+    seen = []
+    held = FIN._geometry_route_failures(
+        pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                           Identity_Method=claimed,
+                           Geometry_Row_SHA256="b" * 64)]),
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="MONO_BAR_GEOMETRY",
+                           Artifact_Path=_geo_csv)]),
+        _pt_dir, lambda w_, c, d: seen.append(c))
+    return held, seen
+
+
+_held_g, _geo_seen = _geometry_claim("MEASURED_FILL_RELATION", said="")
+check("a geometry row that names a pattern and no route supports no claim",
+      _held_g == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _geo_seen,
+      "%s" % _geo_seen)
+_held_g, _geo_seen = _geometry_claim("MEASURED_FILL_RELATION",
+                                     said="FIGURE_PROTOTYPE_MATCH")
+check("  and one that names a different route is the same refusal",
+      _held_g == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _geo_seen,
+      "%s" % _geo_seen)
+_held_g, _geo_seen = _geometry_claim("MEASURED_FILL_RELATION",
+                                     said="MEASURED_FILL_RELATION")
+check("  while agreement is agreement",
+      not _held_g and not _geo_seen, "%s" % _geo_seen)
+check("and a named bar with no route is refused where the file is written",
+      _blank_route_refused(), "the writer accepted a resolved row with no route")
+
 check("a human resolution that cites no resolution is not a human resolution",
       _held_h == {"P1"} and "METHOD_NOT_POSSIBLE_FOR_READER" in _pl, "%s" % _pl)
 _pl = []
@@ -864,6 +991,24 @@ check("  while a re-run that reproduces the evidence keeps the same id",
       and RB.inference_id(dict(_evidence, Mean=12.50), panel_id="P1") == _base_id
       and RB.inference_id(dict(_evidence, Value_Span_Px="3.0"),
                           panel_id="P1") == _base_id, _base_id)
+# AND THE SPREAD IS IN THE RECIPE TOO. v7.71. `row_tier` has priced the
+# dispersion since v7.70 and this identifier did not, so a cell asked about at
+# this grain because of its ERROR BAR kept the same id when the answer to that
+# question changed - the stale-confirmation problem the support columns were added
+# to close, on the axis added after them.
+check("  including the spread, since a cell can be asked about for that alone",
+      "Dispersion_Method" in RB.INFERENCE_IDENTITY_FIELDS
+      and RB.inference_id(dict(_evidence, Dispersion_Method="UNSTEMMED_CAP"),
+                          panel_id="P1")
+      != RB.inference_id(dict(_evidence,
+                              Dispersion_Method="RESTORED_MASKED_CAP"),
+                         panel_id="P1")
+      and RB.inference_id(dict(_evidence, Errorbar_Upper="9"), panel_id="P1")
+      != RB.inference_id(dict(_evidence, Errorbar_Upper="9.5"),
+                         panel_id="P1"),
+      "%s" % [c for c in ("Dispersion_Method", "Errorbar_Lower",
+                          "Errorbar_Upper", "Errorbar_Stem_Confirmed")
+              if c not in RB.INFERENCE_IDENTITY_FIELDS])
 check("  and every field of the row a reviewer reads is in the recipe",
       set(RB.INFERENCE_IDENTITY_FIELDS)
       == set(RB.INFERENCE_MANIFEST_COLUMNS) - {"Inference_ID"},

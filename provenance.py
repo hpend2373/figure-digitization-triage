@@ -397,5 +397,19 @@ def row_tier(row):
                                has_dispersion))
 
 
+def row_finalizable(row):
+    """Whether a VALUE ROW may be finalized at all, over all three axes.
+
+    The one a gate should call. `finalizable` below asks the same question of the
+    two axes about the MEAN, which is a narrower question than it sounds like:
+    from v7.70 a row can be unfinalizable because of its SPREAD, and a caller
+    reaching for the shorter name would not see it. Both are kept because they
+    answer different questions and the shorter one is used by scenarios about the
+    mean; nothing in the pipeline gates on it.
+    """
+    return row_tier(row) in FINALIZABLE_TIERS
+
+
 def finalizable(identity_method, value_method):
+    """The two axes about the MEAN only - see `row_finalizable`."""
     return review_tier(identity_method, value_method) in FINALIZABLE_TIERS

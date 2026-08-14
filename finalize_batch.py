@@ -1010,7 +1010,15 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag):
             continue                  # not a point-backed row, or not in the run
         try:
             with open(path, encoding="utf-8") as fh:
-                said = _s(json.load(fh).get("Identity_Method"))
+                cloud = json.load(fh)
+            # RE-DERIVED FROM THE POINTS, not read off the record. The writer
+            # leaves the record-level field EMPTY when its points disagree, and a
+            # check that only compared non-blank answers read that silence as
+            # consent: a cloud that could not agree how its series was named
+            # bought whatever the association row claimed.
+            point_methods = {_s(pt.get("Identity_Method"))
+                             for pt in (cloud.get("points") or [])}
+            said = _s(cloud.get("Identity_Method"))
         except Exception as exc:
             flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
                  "METHOD_CONTRADICTS_POINTS",
@@ -1018,11 +1026,24 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag):
                  "be read (%s: %s)" % (type(exc).__name__, exc))
             withheld.add(_s(row.get("Run_Panel_ID")))
             continue
-        if said and said != identity:
+        if len(point_methods) != 1 or not next(iter(point_methods)):
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_EVIDENCE_UNRESOLVED",
+                 "the association says its series was named by %s and its point "
+                 "cloud does not agree with itself about that (%s). A claim its "
+                 "own evidence cannot support is not a claim this module may "
+                 "accept" % (identity, ", ".join(sorted(m or "(blank)"
+                                                        for m in point_methods))
+                             or "no points"))
+            withheld.add(_s(row.get("Run_Panel_ID")))
+            continue
+        sole = next(iter(point_methods))
+        if said != sole or identity != sole:
             flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
                  "METHOD_CONTRADICTS_POINTS",
-                 "the association says its series was named by %s and the point "
-                 "cloud it was computed from says %s" % (identity, said))
+                 "the association says %s, its point file's record says %s, and "
+                 "every point in it says %s"
+                 % (identity, said or "(blank)", sole))
             withheld.add(_s(row.get("Run_Panel_ID")))
     return withheld
 
@@ -1062,13 +1083,19 @@ def _geometry_route_failures(machine, ledger_rows, run_dir, flag):
         if geo is None:
             continue
         said = _s(geo.get("Auto_Identity_Method"))
-        if said and said != identity:
+        # BLANK IS A CONTRADICTION HERE. A geometry row exists for this bar and
+        # says nothing about the route the figure took to name it, while the value
+        # claims one - so the claim has no evidence rather than disagreeing
+        # evidence, and reading the silence as consent is the fail-open this whole
+        # function exists to close. A row that names no pattern at all is skipped
+        # above; this one did name a pattern.
+        if said != identity:
             flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
                  "METHOD_CONTRADICTS_GEOMETRY",
                  "the value says the figure named this bar by %s and the "
                  "geometry file this run wrote says %s. The route decides the "
                  "review tier, and the file that recorded it is attested"
-                 % (identity, said))
+                 % (identity, said or "nothing"))
             withheld.add(_s(row.get("Run_Panel_ID")))
     return withheld
 

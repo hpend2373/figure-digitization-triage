@@ -46,6 +46,8 @@ picture cannot show - so approving it would launder a model estimate into a
 pooled measurement.
 """
 
+import collections
+
 TIERS = ("R0", "R1", "R2", "R3", "R4")
 
 
@@ -318,6 +320,16 @@ def dispersion_contract_failure(mark_type, dispersion_method):
 METHOD_FIELDS = ("Identity_Method", "Value_Method", "Dispersion_Method")
 
 
+#: What a re-derivation came to: the methods the evidence implies, and the
+#: questions it could not answer. Two fields rather than one dict, because
+#: "the evidence says DIRECT_CURVE_INK" and "the evidence does not say" are
+#: different answers and collapsing them is how a partial verifier passes: an
+#: axis it could not derive was simply absent from the dict, and an absent
+#: expectation compared equal to whatever the value claimed.
+EvidenceVerdict = collections.namedtuple("EvidenceVerdict",
+                                         "expected problems")
+
+
 def expected_line_style_methods(mark):
     """The three methods a LINE_MONO_STYLE mark's own evidence implies.
 
@@ -328,24 +340,62 @@ def expected_line_style_methods(mark):
     nothing new is trusted, and a value row claiming a cheaper method than its own
     ink supports has no way through.
 
-    Returns `{field: method}` for the fields it can answer and omits the rest, so
-    a caller compares what is derivable rather than demanding what is not.
+    TOTAL from v7.76: every axis ends with an expectation or with a problem, and
+    never with silence. Until then the function returned only what it could answer
+    and the caller compared only that, so a mark missing the evidence for an axis
+    bought whatever the value claimed on it - the fail-open this whole family of
+    checks keeps arriving at from a new direction. `_axes_are_total` asserts the
+    invariant over generated marks rather than trusting this docstring.
     """
-    out = {}
-    source = str(mark.get("line_style_source", "") or "").strip()
+    def field(name):
+        # NOT `or ""`. A span of ZERO is the most important value this function
+        # reads - it is what makes a support column a direct observation rather
+        # than a carry - and `0 or ""` is the empty string. While the span
+        # defaulted to "0" the bug was invisible, because the default happened to
+        # be the answer; taking the default away made every direct observation
+        # read as evidence that was never recorded.
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    out, problems = {}, []
+    source = field("line_style_source")
     if source:
         out["Identity_Method"] = ("MEASURED_LINE_STYLE" if source == "MEASURED"
                                   else "COMPLEMENT_OF_DECLARED_STYLES"
                                   if source == "COMPLEMENT_OF_DECLARED_STYLES"
                                   else source)
-    left = str(mark.get("Value_Support_Left_Px", "") or "").strip()
-    right = str(mark.get("Value_Support_Right_Px", "") or "").strip()
-    span = str(mark.get("Value_Span_Px", "") or "0").strip()
+    else:
+        problems.append("the mark records no line_style_source, so how its "
+                        "series was named cannot be re-derived")
+    left = field("Value_Support_Left_Px")
+    right = field("Value_Support_Right_Px")
+    span = field("Value_Span_Px")
     if not left and not right:
         # No ink either side: the fit produced the number, whatever else the row
         # says about spans and occlusions.
         out["Value_Method"] = "FIT_FALLBACK"
-    elif left == right:
+    elif not span:
+        # THE SPAN IS THE DISCRIMINATOR, so a missing one is a missing answer.
+        # It used to default to "0", which read a mark with supports and no span
+        # as a direct observation - R0 - and reopened the one-sided downgrade
+        # v7.73 closed from the other side. `line_style_mono` writes
+        # `value_span or 0`, so a blank here is a foreign producer, not this one.
+        problems.append("the mark records support at column %s and no "
+                        "Value_Span_Px, so a value read off the ink cannot be "
+                        "told from one carried sideways to it"
+                        % (left or right))
+    elif left and right and left != right:
+        cause = field("Occlusion_Cause")
+        if cause in OCCLUSION_CAUSES:
+            out["Value_Method"] = interpolation_method(
+                mark.get("Value_Span_Px"), mark.get("Local_Stroke_Px"),
+                mark.get("Expected_Dash_Gap_Px"), cause)
+        else:
+            problems.append("the mark was measured between two columns and "
+                            "gives its occlusion cause as %s, which is not one "
+                            "this registry prices"
+                            % (cause or "nothing"))
+    else:
         # ONE COLUMN, AND THE SPAN SAYS WHICH KIND. `_ink_at` reports the single
         # supporting column in BOTH fields when the ink is on one side only, and
         # the span is then the distance it was carried sideways; a directly
@@ -356,19 +406,23 @@ def expected_line_style_methods(mark):
         # nine one-sided carries at a non-zero span, which is the case that most
         # needs to keep its R4. Running the derivation against a real figure is
         # what found it; the fixtures agreed with it perfectly.
-        out["Value_Method"] = ("DIRECT_CURVE_INK" if span in ("0", "0.0")
-                               else "EXTRAPOLATED_CURVE_INK")
-    else:
-        cause = str(mark.get("Occlusion_Cause", "") or "").strip()
-        if cause in OCCLUSION_CAUSES:
-            out["Value_Method"] = interpolation_method(
-                mark.get("Value_Span_Px"), mark.get("Local_Stroke_Px"),
-                mark.get("Expected_Dash_Gap_Px"), cause)
-    stem = str(mark.get("Errorbar_Stem_Confirmed", "") or "").strip().upper()
+        try:
+            carried = float(span) != 0.0
+        except (TypeError, ValueError):
+            problems.append("the mark's Value_Span_Px is %r, which is not a "
+                            "distance" % span)
+        else:
+            out["Value_Method"] = ("EXTRAPOLATED_CURVE_INK" if carried
+                                   else "DIRECT_CURVE_INK")
+    stem = field("Errorbar_Stem_Confirmed").upper()
     if stem in ("TRUE", "FALSE"):
         out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
                                     else "NO_DISPERSION")
-    return out
+    else:
+        problems.append("the mark does not say whether a stem connected its cap "
+                        "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
+                        "cannot be re-derived" % (stem or "blank"))
+    return EvidenceVerdict(out, problems)
 
 
 #: Mark type -> the function that re-derives its methods from its own evidence.
@@ -383,23 +437,36 @@ EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods}
 
 
 def evidence_failure(mark_type, mark, claimed):
-    """Why this mark's evidence does not support the methods claimed, or "".
+    """(code, detail) for a mark whose evidence does not support its methods.
 
     `claimed` is the value row's three fields. Blank on either side is a failure:
     evidence that says nothing does not support a claim, which is the shape two
     earlier joins had to learn twice.
+
+    Two codes, because they are two findings and a reviewer acts differently on
+    each. `METHOD_CONTRADICTS_EVIDENCE` says the mark's own measurements come to a
+    different method than the value claims - somebody is wrong, and the ink says
+    which. `METHOD_EVIDENCE_INCOMPLETE` says the mark did not record enough to
+    answer, so nothing can be checked: not a contradiction, and equally not a
+    pass. Before v7.76 the second was silence, and silence compared equal.
     """
     verifier = EVIDENCE_VERIFIERS.get(str(mark_type or "").strip().upper())
     if verifier is None:
-        return ""
-    expected = verifier(mark)
+        return "", ""
+    verdict = verifier(mark)
     wrong = []
-    for field, want in sorted(expected.items()):
+    for field, want in sorted(verdict.expected.items()):
         got = str(claimed.get(field, "") or "").strip()
         if got != want:
             wrong.append("%s: the evidence supports %s and the value says %s"
                          % (field, want, got or "nothing"))
-    return "; ".join(wrong)
+    if wrong:
+        return "METHOD_CONTRADICTS_EVIDENCE", "; ".join(wrong)
+    if verdict.problems:
+        return ("METHOD_EVIDENCE_INCOMPLETE",
+                "the mark cannot answer for the methods this value claims: %s"
+                % "; ".join(verdict.problems))
+    return "", ""
 
 
 def contract_failure(mark_type, identity_method, value_method):

@@ -231,13 +231,24 @@ def _style_evidence(row):
                 "Value_Span_Px", "Occlusion_Cause", "Occlusion_Width_Px",
                 "Local_Stroke_Px", "Expected_Dash_Gap_Px"):
         row.pop(key, None)
+    # WRITTEN THE WAY `_ink_at` WRITES IT, which is the only thing that makes
+    # these scenarios evidence about the real reader. It reports the single
+    # supporting column in BOTH fields with the span measuring how far the value
+    # was carried, and it always records a span and a cause - `value_span or 0`,
+    # `occlusion_cause or NONE`. A fixture that omitted them was a foreign
+    # producer, and from v7.76 it is refused as one.
+    row["Errorbar_Stem_Confirmed"] = row.get("Errorbar_Stem_Confirmed", "TRUE")
     if method == "FIT_FALLBACK":
         return                                   # no ink either side, and it says so
     if method == "EXTRAPOLATED_CURVE_INK":
-        row["Value_Support_Left_Px"] = x - 3
+        row["Value_Support_Left_Px"] = row["Value_Support_Right_Px"] = x - 3
+        row["Value_Span_Px"] = 3
+        row["Occlusion_Cause"] = "NONE"
         return
     if method == "DIRECT_CURVE_INK":
         row["Value_Support_Left_Px"] = row["Value_Support_Right_Px"] = x
+        row["Value_Span_Px"] = 0
+        row["Occlusion_Cause"] = "NONE"
         return
     row.update(Value_Support_Left_Px=x - 2, Value_Support_Right_Px=x + 2,
                Value_Span_Px=4, Occlusion_Width_Px=3, Local_Stroke_Px=6,
@@ -1364,13 +1375,13 @@ check("  and an attestation that does not recompute is refused as well",
 # value that lies about its mark; this catches a MARK that lies about itself, and
 # it is the difference between "possible" and "true".
 check("a mark whose own supports do not support its method is refused",
-      PROV.evidence_failure(
+      "METHOD_CONTRADICTS_EVIDENCE" == PROV.evidence_failure(
           "LINE_MONO_STYLE",
           dict(line_style_source="MEASURED", Value_Support_Left_Px="",
                Value_Support_Right_Px="", Errorbar_Stem_Confirmed="TRUE"),
           dict(Identity_Method="MEASURED_LINE_STYLE",
                Value_Method="DIRECT_CURVE_INK",
-               Dispersion_Method="DIRECT_CONNECTED_CAP")),
+               Dispersion_Method="DIRECT_CONNECTED_CAP"))[0],
       "no ink either side and DIRECT_CURVE_INK was accepted")
 # ONE COLUMN, TWO MEANINGS, AND THE SPAN SAYS WHICH. `_ink_at` reports the single
 # supporting column in BOTH fields when the ink is on one side only. Read as
@@ -1381,18 +1392,18 @@ _one_sided = dict(line_style_source="MEASURED", Value_Support_Left_Px="727",
                   Value_Support_Right_Px="727", Value_Span_Px="7",
                   Errorbar_Stem_Confirmed="TRUE")
 check("one supporting column at a distance is a carry, not an observation",
-      PROV.expected_line_style_methods(_one_sided)["Value_Method"]
+      PROV.expected_line_style_methods(_one_sided).expected["Value_Method"]
       == "EXTRAPOLATED_CURVE_INK"
       and PROV.expected_line_style_methods(
-          dict(_one_sided, Value_Span_Px="0"))["Value_Method"]
+          dict(_one_sided, Value_Span_Px="0")).expected["Value_Method"]
       == "DIRECT_CURVE_INK",
-      "%s" % PROV.expected_line_style_methods(_one_sided))
+      "%s" % (PROV.expected_line_style_methods(_one_sided),))
 check("  and the two are R4 and R0, which is why the difference matters",
       PROV.value_tier("EXTRAPOLATED_CURVE_INK") == "R4"
       and PROV.value_tier("DIRECT_CURVE_INK") == "R0")
 check("  and a reader the registry cannot re-derive is left to the matrix",
-      not PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
-                                dict(Value_Method="BOX_GEOMETRY")))
+      PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
+                            dict(Value_Method="BOX_GEOMETRY")) == ("", ""))
 
 print()
 print("the join is to a cell and a number, not only to a method")
@@ -1470,6 +1481,23 @@ check("  and the cell it is refused against is derived from the manifests, not "
 # a measurement and its hash together produced a self-consistent artifact that
 # every check above accepted.
 _edit_dir = os.path.join(ROOT, "marks_edited")
+
+
+def _mark_detail_at(where, code):
+    """The detail one code carries, for the marks last written by `_edited_marks`."""
+    said = []
+    body = json.load(open(os.path.join(where, "P1_marks.json"), encoding="utf-8"))
+    rows = [dict(r, Mark_Record_SHA256=m["Mark_Record_SHA256"],
+                 Method_Attestation_SHA256=m["Method_Attestation_SHA256"])
+            for r, m in zip(_rows3, body["marks"])]
+    FIN.method_contract_failures(
+        pd.DataFrame(rows),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
+                           Artifact_Path=os.path.join(where, "P1_marks.json"))]),
+        where, lambda w, c, d: said.append(d) if c == code else None,
+        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+    return " | ".join(said)
 
 
 def _edited_marks(mutate, rows=None, restamp=False, rebind=False,
@@ -1554,6 +1582,19 @@ _held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_NOWHERE"),
 check("a mark read as a series the verified manifests do not declare supports "
       "no cell at all",
       _held_e == {"P1"} and "MARK_CELL_UNDECLARED" in _seen_e, "%s" % _seen_e)
+# AND A MARK THAT CANNOT ANSWER IS NOT A MARK THAT AGREES. v7.76. The
+# re-derivation was partial: an axis it could not derive was absent from its
+# answer, and an absent expectation compared equal to whatever the value claimed.
+# Here the run's own mark loses the one field that separates a value read off the
+# ink from one carried sideways to it.
+_held_e, _seen_e = _edited_marks(lambda m: m.update(Value_Span_Px=None),
+                                 restamp=True, rebind=True)
+check("a mark missing the evidence for an axis refuses the value on it",
+      _held_e == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_e,
+      "%s" % _seen_e)
+check("  and the refusal says which measurement is missing",
+      "Value_Span_Px" in _mark_detail_at(_edit_dir, "METHOD_EVIDENCE_INCOMPLETE"),
+      "%s" % _mark_detail_at(_edit_dir, "METHOD_EVIDENCE_INCOMPLETE"))
 # A SCHEMA THIS MODULE CANNOT JOIN IS NOT A SCHEMA IT MAY FINALIZE. v7.75. Every
 # check above was conditional on the producer's own choice of schema: a run
 # written to `mark-data/1` skipped the join, the numbers and the cell silently

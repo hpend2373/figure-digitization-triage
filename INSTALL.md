@@ -5364,6 +5364,51 @@ than of a list somebody has to remember to extend.
     a blank mark hash read as an exemption             2
     only the five named readers held to the join       1
 
+## v7.76 — the re-derivation is total, and a span of zero is a span
+
+`expected_line_style_methods` returned the axes it could answer and omitted the
+rest, and `evidence_failure` compared what it was given. An axis the mark could
+not answer for was therefore not a weaker check than one it could — it was **no
+check at all**, and from outside it looked identical to agreement. A mark with no
+`Errorbar_Stem_Confirmed` bought whatever `Dispersion_Method` the value claimed.
+
+It now returns an `EvidenceVerdict(expected, problems)` and every axis ends with
+one or the other:
+
+    line_style_source missing        how the series was named cannot be re-derived
+    supports and no Value_Span_Px    a value read off the ink cannot be told from
+                                     one carried sideways to it
+    two columns, unpriced cause      the interpolation cannot be classified
+    Errorbar_Stem_Confirmed missing  how the spread was got cannot be re-derived
+
+and the caller reports them as `METHOD_EVIDENCE_INCOMPLETE` rather than as a
+contradiction, because "your evidence says something else" and "your evidence
+says nothing" ask a reviewer for different work. `_axes_are_total` asserts the
+invariant by dropping each field of a complete mark in turn, so the next axis
+added cannot be silent by omission.
+
+**The blank span no longer defaults to `"0"`.** That default was the one-sided
+downgrade v7.73 closed, still open from the other side: a mark with a support
+column and no span read as a direct observation at R0.
+
+**And taking the default away exposed the bug it had been hiding.**
+`str(mark.get(name) or "")` turns the integer `0` into the empty string, and zero
+is the most important number this function reads — it is exactly what makes a
+support column a direct observation rather than a carry. Every real
+`DIRECT_CURVE_INK` mark, whose span `line_style_mono` writes as `value_span or 0`,
+was about to be refused as evidence that was never recorded. The fix reads the
+field rather than its truthiness; the scenario is a span of literal `0`.
+
+Run against publication 397's figure 1: **all 18 marks derive all three axes,
+with no problems and no disagreements** — the totality costs nothing on a figure
+whose reader records what it measured, which is the only evidence worth having
+that a fail-closed check is not a fail-everything check.
+
+    reverted                                          scenarios that fail
+    an axis the evidence cannot answer stays silent    4
+    a missing span defaults to zero again              2
+    a span of zero read as a missing span              3
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5396,12 +5441,10 @@ than of a list somebody has to remember to extend.
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
-- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only, and
-  that derivation is PARTIAL: `expected_line_style_methods` returns the methods it
-  can name and says nothing about the axes it cannot, so missing evidence fails to
-  refute rather than refusing. It needs to return its problems alongside its
-  expectations - `METHOD_EVIDENCE_INCOMPLETE` - and to stop defaulting a blank
-  span to zero, which reopens the one-sided downgrade v7.73 closed
+- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only. The
+  other six are held to the matrix, to the mark join and to the value-to-cell
+  binding, and not to a derivation from their own measurements - a real difference
+  in strength, and the next verifier to write is `BAR_COLOR`'s
 - `review_preflight` and `finalize_batch` answer overlapping questions through
   two code paths, so the preflight can report a clean bundle that the finalizer
   then refuses. They need one pure read-only validation function between them,

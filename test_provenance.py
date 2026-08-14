@@ -340,6 +340,85 @@ for _cause in _LSM.BLIND_CAUSES:
           == "RESTORED_MASKED_FURNITURE")
 
 print()
+print("a re-derivation that cannot answer says so, and does not stay quiet")
+# v7.76. `expected_line_style_methods` returned only the axes it could answer, so
+# an axis it could NOT answer was absent from the dict - and an absent expectation
+# compared equal to whatever the value claimed. A verifier that fails to refute is
+# not a weaker check than one that refutes; on the axis it skipped it is no check
+# at all, and it looks identical from the outside.
+_full = dict(line_style_source="MEASURED", Value_Support_Left_Px="100",
+             Value_Support_Right_Px="100", Value_Span_Px="0",
+             Occlusion_Cause="NONE", Errorbar_Stem_Confirmed="TRUE")
+_verdict = P.expected_line_style_methods(_full)
+check("a mark that records everything answers on all three axes",
+      set(_verdict.expected) == set(P.METHOD_FIELDS) and not _verdict.problems,
+      "%s" % (_verdict,))
+
+
+def _axes_are_total(mark):
+    """Every axis ends with an expectation or with a problem, never in silence."""
+    verdict = P.expected_line_style_methods(mark)
+    return len(verdict.expected) == 3 or bool(verdict.problems)
+
+
+_holes = [drop for drop in sorted(_full)
+          if not _axes_are_total({k: v for k, v in _full.items() if k != drop})]
+check("and every field it can be missing leaves a problem behind, not a hole",
+      not _holes, "silent when %s is missing" % ", ".join(_holes))
+check("  including the span, which is the difference between R0 and R4",
+      "Value_Span_Px" in " ".join(P.expected_line_style_methods(
+          {k: v for k, v in _full.items() if k != "Value_Span_Px"}).problems)
+      and "Value_Method" not in P.expected_line_style_methods(
+          {k: v for k, v in _full.items() if k != "Value_Span_Px"}).expected,
+      "%s" % (P.expected_line_style_methods(
+          {k: v for k, v in _full.items() if k != "Value_Span_Px"}),))
+# A SPAN OF ZERO IS A SPAN. `str(value or "")` turns the integer 0 into the empty
+# string, and zero is the most important number this function reads - it is what
+# makes a support column a direct observation rather than a carry. While the span
+# defaulted to "0" the bug was invisible, because the default happened to be the
+# answer.
+check("a span of zero is a measurement, not a missing field",
+      P.expected_line_style_methods(
+          dict(_full, Value_Span_Px=0)).expected.get("Value_Method")
+      == "DIRECT_CURVE_INK"
+      and not P.expected_line_style_methods(
+          dict(_full, Value_Span_Px=0)).problems,
+      "%s" % (P.expected_line_style_methods(dict(_full, Value_Span_Px=0)),))
+check("  while the same mark with no span at all is refused",
+      P.expected_line_style_methods(
+          dict(_full, Value_Span_Px="")).problems, "no problem reported")
+# AND THE TWO FINDINGS ARE TWO CODES. "Your evidence says something else" and
+# "your evidence says nothing" ask a reviewer for different work.
+check("a mark that contradicts the value is reported as a contradiction",
+      P.evidence_failure("LINE_MONO_STYLE", _full,
+                         dict(Identity_Method="MEASURED_LINE_STYLE",
+                              Value_Method="FIT_FALLBACK",
+                              Dispersion_Method="DIRECT_CONNECTED_CAP"))[0]
+      == "METHOD_CONTRADICTS_EVIDENCE")
+check("  and a mark that cannot answer is reported as incomplete",
+      P.evidence_failure("LINE_MONO_STYLE",
+                         {k: v for k, v in _full.items()
+                          if k != "Errorbar_Stem_Confirmed"},
+                         dict(Identity_Method="MEASURED_LINE_STYLE",
+                              Value_Method="DIRECT_CURVE_INK",
+                              Dispersion_Method="DIRECT_CONNECTED_CAP"))[0]
+      == "METHOD_EVIDENCE_INCOMPLETE",
+      "%s" % (P.evidence_failure("LINE_MONO_STYLE",
+                                 {k: v for k, v in _full.items()
+                                  if k != "Errorbar_Stem_Confirmed"},
+                                 dict(Identity_Method="MEASURED_LINE_STYLE",
+                                      Value_Method="DIRECT_CURVE_INK",
+                                      Dispersion_Method="DIRECT_CONNECTED_CAP")),))
+check("  and a mark whose two columns give a cause nobody prices is incomplete too",
+      P.evidence_failure("LINE_MONO_STYLE",
+                         dict(_full, Value_Support_Right_Px="140",
+                              Value_Span_Px="40", Occlusion_Cause="SMUDGE"),
+                         dict(Identity_Method="MEASURED_LINE_STYLE",
+                              Value_Method="DIRECT_CURVE_INK",
+                              Dispersion_Method="DIRECT_CONNECTED_CAP"))[0]
+      == "METHOD_EVIDENCE_INCOMPLETE")
+
+print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

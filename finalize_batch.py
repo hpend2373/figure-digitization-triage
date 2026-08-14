@@ -1301,9 +1301,9 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
                  % (_s(row.get("Cell_Key")) or "(blank)", expected))
             withheld.add(pid)
             continue
-        why = PROV.evidence_failure(mark_of.get(pid), mark, row)
-        if why:
-            flag(where, "METHOD_CONTRADICTS_EVIDENCE", why)
+        code, why = PROV.evidence_failure(mark_of.get(pid), mark, row)
+        if code:
+            flag(where, code, why)
             withheld.add(pid)
     return withheld
 

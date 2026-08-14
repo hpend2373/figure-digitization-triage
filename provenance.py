@@ -325,14 +325,24 @@ def expected_line_style_methods(mark):
                                   else source)
     left = str(mark.get("Value_Support_Left_Px", "") or "").strip()
     right = str(mark.get("Value_Support_Right_Px", "") or "").strip()
+    span = str(mark.get("Value_Span_Px", "") or "0").strip()
     if not left and not right:
         # No ink either side: the fit produced the number, whatever else the row
         # says about spans and occlusions.
         out["Value_Method"] = "FIT_FALLBACK"
-    elif not left or not right:
-        out["Value_Method"] = "EXTRAPOLATED_CURVE_INK"
     elif left == right:
-        out["Value_Method"] = "DIRECT_CURVE_INK"
+        # ONE COLUMN, AND THE SPAN SAYS WHICH KIND. `_ink_at` reports the single
+        # supporting column in BOTH fields when the ink is on one side only, and
+        # the span is then the distance it was carried sideways; a directly
+        # observed value is the same column with a span of zero.
+        #
+        # The first version of this verifier read `left == right` as DIRECT and
+        # disagreed with the reader on 9 of publication 397's 87 line marks - all
+        # nine one-sided carries at a non-zero span, which is the case that most
+        # needs to keep its R4. Running the derivation against a real figure is
+        # what found it; the fixtures agreed with it perfectly.
+        out["Value_Method"] = ("DIRECT_CURVE_INK" if span in ("0", "0.0")
+                               else "EXTRAPOLATED_CURVE_INK")
     else:
         cause = str(mark.get("Occlusion_Cause", "") or "").strip()
         if cause in OCCLUSION_CAUSES:

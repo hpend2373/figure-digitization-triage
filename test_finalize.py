@@ -1356,9 +1356,84 @@ check("a mark whose own supports do not support its method is refused",
                Value_Method="DIRECT_CURVE_INK",
                Dispersion_Method="DIRECT_CONNECTED_CAP")),
       "no ink either side and DIRECT_CURVE_INK was accepted")
+# ONE COLUMN, TWO MEANINGS, AND THE SPAN SAYS WHICH. `_ink_at` reports the single
+# supporting column in BOTH fields when the ink is on one side only. Read as
+# DIRECT, that turns an R4 carried sideways into an R0 - and it did, on 9 of
+# publication 397's 87 line marks, until the derivation was run against the real
+# figure rather than against fixtures that happened to agree with it.
+_one_sided = dict(line_style_source="MEASURED", Value_Support_Left_Px="727",
+                  Value_Support_Right_Px="727", Value_Span_Px="7",
+                  Errorbar_Stem_Confirmed="TRUE")
+check("one supporting column at a distance is a carry, not an observation",
+      PROV.expected_line_style_methods(_one_sided)["Value_Method"]
+      == "EXTRAPOLATED_CURVE_INK"
+      and PROV.expected_line_style_methods(
+          dict(_one_sided, Value_Span_Px="0"))["Value_Method"]
+      == "DIRECT_CURVE_INK",
+      "%s" % PROV.expected_line_style_methods(_one_sided))
+check("  and the two are R4 and R0, which is why the difference matters",
+      PROV.value_tier("EXTRAPOLATED_CURVE_INK") == "R4"
+      and PROV.value_tier("DIRECT_CURVE_INK") == "R0")
 check("  and a reader the registry cannot re-derive is left to the matrix",
       not PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
                                 dict(Value_Method="BOX_GEOMETRY")))
+
+print()
+print("everything about a review that can be checked without looking at ink")
+# v7.73. A human review of an R2 or R3 panel is a person looking at ink and
+# saying what they see, and nothing here does that. What a program can do is
+# everything around it - which cells will be asked about and why, whether the
+# bundle is complete, whether the answers are, and where two independent
+# reviewers disagree - and doing that badly is how a review becomes a formality.
+import review_preflight as PF                                      # noqa: E402
+_asked = PF.questions(_R3_DIR)
+check("the preflight names the cells that will be asked about, before anybody "
+      "starts",
+      len(_asked) == 2
+      and {q["Tier"] for q in _asked} == {"R3"}
+      and all(q["Inference_ID"] for q in _asked), "%s" % _asked)
+check("  and says WHY each one, in the words of the question",
+      all("NUMBER was reconstructed" in q["Asked_Because"] for q in _asked),
+      "%s" % [q["Asked_Because"] for q in _asked])
+check("  derived the same way the finalizer derives it, or the two disagree",
+      {q["Inference_ID"] for q in _asked} == set(_ids3),
+      "%s" % sorted(q["Inference_ID"] for q in _asked))
+check("a complete bundle has no problems to report",
+      PF.bundle_problems(_R3_DIR) == [], "%s" % PF.bundle_problems(_R3_DIR))
+_answers([_answer(_ids3[0])])
+check("and an unanswered question is reported before a finalizer is asked",
+      any("has no answer" in why for _w, why in PF.answer_problems(
+          _R3_DIR, _r3_review, _r3_cells)),
+      "%s" % PF.answer_problems(_R3_DIR, _r3_review, _r3_cells))
+_answers([_answer(i) for i in _ids3])
+_panel3()
+check("  while a complete set of answers reports nothing",
+      PF.answer_problems(_R3_DIR, _r3_review, _r3_cells) == [],
+      "%s" % PF.answer_problems(_R3_DIR, _r3_review, _r3_cells))
+# TWO REVIEWERS, COMPARED CELL BY CELL. The identifiers are content-derived, so
+# two people working from two copies of the bundle produce comparable rows
+# without having agreed on anything first.
+_second = os.path.join(_R3_DIR, "second_reviewer.csv")
+with open(_second, "w", newline="", encoding="utf-8") as _fh:
+    _w2 = csv.writer(_fh)
+    _w2.writerow(FIN.inference_review_columns())
+    for _i, _iid in enumerate(_ids3):
+        _row2 = _answer(_iid, "REJECTED" if _i == 0 else "CONFIRMED")
+        _w2.writerow([_row2.get(c, "") for c in FIN.inference_review_columns()])
+check("two reviewers who disagree about one cell are reported on that cell",
+      PF.disagreements(_r3_cells, _second)
+      == [(_ids3[0], "CONFIRMED", "REJECTED")],
+      "%s" % PF.disagreements(_r3_cells, _second))
+# AND IT SIGNS NOTHING. A preflight that finalizes is not a preflight, and a
+# program that fills in a confirmation is the one failure this package exists to
+# prevent - so the claim is checked the only way it can be: nothing in the run
+# directory changes.
+_before = sorted(os.walk(_R3_DIR))
+PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+         "--second", _second])
+check("and the preflight signs nothing: the run directory is untouched",
+      sorted(os.walk(_R3_DIR)) == _before,
+      "the preflight changed the run directory")
 
 print()
 print("an approval is a person, looking at this extraction, saying so")

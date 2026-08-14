@@ -92,6 +92,17 @@ whose reconstructed cell has no such crop: the row alone gives the supports as
 pixel coordinates, and confirming those against a printed figure by eye is
 arithmetic nobody can check.
 
+**Before a person starts, run the preflight.**
+
+    python3 review_preflight.py OUT/ --review value_review.csv
+
+It lists every cell that will be asked about and why, checks that each one has
+its manifest row and its picture, checks the answers for blanks, duplicates and
+answers to questions this run did not ask, and — with `--second` — compares two
+independent reviewers cell by cell. It writes nothing and signs nothing: the
+confirmations are a person's claim about what they saw, and a program filling one
+in is the failure this whole package is built to prevent.
+
 **Values no signature can finalize are work, not a footnote.**
 `method_blocked_cells.csv` is written by the RUN, before anybody reviews: one row
 per cell whose number was not read off the ink (`FIT_FALLBACK`,

@@ -5201,6 +5201,59 @@ the panel's own measured cap widths, and a real figure where that happens.
     the two hashes collapsed into one                  1
     RESTORED_MASKED_CAP claimed as producible          2
 
+## v7.73 — the derivation met a real figure, and the review got a preflight
+
+**Running the new verifier against publication 397 disagreed with the reader on
+9 of its 87 line marks**, and the reader was right. `_ink_at` reports the single
+supporting column in BOTH support fields when the ink is on one side only, with
+the span measuring how far the value was carried sideways; the verifier read
+`left == right` as a direct observation. Nine `EXTRAPOLATED_CURVE_INK` cells —
+R4, the tier that cannot be finalized at all — would have been re-derived as
+`DIRECT_CURVE_INK` at R0, and the check written to catch a downgrade would have
+performed one.
+
+The fixtures agreed with the verifier perfectly, because the fixtures were
+written from the same reading of the code. What found it was running the
+derivation over a real figure's marks and diffing, which is the only test that
+was ever going to.
+
+    no supports at all              FIT_FALLBACK
+    one column, span 0              DIRECT_CURVE_INK
+    one column, span > 0            EXTRAPOLATED_CURVE_INK   <- the nine
+    two columns                     interpolation_method(...)
+
+**`review_preflight.py`** is everything about a review that can be checked
+without looking at ink:
+
+    which cells will be asked about, and WHY, in the words of the question
+    whether every question has its manifest row and its context picture
+    whether the answers are complete - no blank, no duplicate, no answer to a
+        question this run did not ask
+    where two independent reviewers disagree, cell by cell
+    and nothing else: it writes no file and signs nothing
+
+The last line is the point, and a scenario checks it by walking the run directory
+before and after. A program that fills in a confirmation is the failure this
+package exists to prevent; a program that tells a person exactly which twelve
+cells to look at, and refuses to let a bundle reach them half-built, is the part
+worth automating. `finalize` refuses a panel for eight different reasons and a
+reviewer should meet none of them for the first time after signing.
+
+Measured on 397 for the pilot that has to come next: **5 of 5 line panels hold
+both a cell whose cap was followed and a cell where no cap was reachable** — 13
+`DIRECT_CONNECTED_CAP` against 74 `NO_DISPERSION`. Some of those 74 are curves the
+figure draws no error bar for, and some are caps this reader could not reach.
+Telling those two apart is what `RESTORED_MASKED_CAP` needs, and the number says
+the case is worth the work rather than assuming it.
+
+    reverted                                          scenarios that fail
+    one column read as a direct observation            2
+    the preflight not naming what will be asked        3
+    the bundle check dropped                           1
+    the answer check dropped                           2
+    the two-reviewer comparison dropped                1
+    the preflight writing into the run                 1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5221,7 +5274,10 @@ the panel's own measured cap widths, and a real figure where that happens.
 - the R3 context crop draws the two supports and the placed value, and NOT the
   occlusion mask: the mask lives in the reader's memory at read time and nothing
   downstream has it, so the cause is named in the caption rather than shaded
-- no R3 or R2 cell in the shipped corpus has reached a review queue yet - 397's
+- no R3 or R2 cell in the shipped corpus has reached a review queue yet, so the
+  first pilot needs a publication whose dispersion definition is settled - and
+  should include at least one cell the reviewer REJECTS, or the partial-rejection
+  path is exercised by nobody - 397's
   dispersion definition is unresolved, so its two of each fail machine QC - and
   the per-cell channel is therefore exercised end to end by fixtures rather than
   by a person

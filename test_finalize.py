@@ -172,6 +172,46 @@ def write_manifests(directory, **over):
     return directory
 
 
+# A PANEL DECLARED AS THE READER THAT RECONSTRUCTS VALUES.
+#
+# Every tier scenario below needs a value method only `LINE_MONO_STYLE` produces
+# - a fit fallback, a bracketed interpolation, a style named by elimination - and
+# from v7.68 the finalizer refuses a pair its panel's reader could not have
+# reached. The first version of these scenarios declared the panel `LINE_COLOR`
+# and had it claim `MEASURED_LINE_STYLE`, which is exactly the lie that gate
+# exists to catch, so the fixture now says what it is doing: the raster is the
+# colour fixture, the panel is declared for the style reader, and the wrapper
+# below stands in for that reader by reading the marks off the colours.
+STYLE_PANELS = [dict(PANELS[0], Mark_Type="LINE_MONO_STYLE")]
+STYLE_SERIES = [dict(s, Line_Style=style, Colour_Hex="", Marker_Shape="",
+                     Marker_Fill="")
+                for s, style in zip(SERIES, ("SOLID", "DASHED"))]
+_COLOUR_SPECS = [MR.SeriesSpec("S_B", rgb=(45, 80, 220), marker="CIRCLE"),
+                 MR.SeriesSpec("S_R", rgb=(215, 45, 45), marker="CIRCLE")]
+
+
+def style_reader(assign):
+    """A stand-in for `LINE_MONO_STYLE`, reading this fixture's coloured marks.
+
+    `assign(index, row)` writes the two provenance fields. The marks themselves
+    are real - found in the raster, calibrated, carried through
+    `to_value_records` and the grid gate like any other reader's - so the methods
+    arrive by the path a taught reader's would rather than by editing a CSV,
+    which `RUN_ARTIFACT_MODIFIED` refuses anyway.
+    """
+    def wrapped(mark_type, **kw):
+        rows = MR.read_line_marker_panel(
+            image=kw["image"], panel_box=kw["panel_box"],
+            x_positions=kw["x_positions"], y_calibration=kw["y_calibration"],
+            series=_COLOUR_SPECS)
+        for i, row in enumerate(rows):
+            row.pop("Identity_Method", None)
+            row.pop("Value_Method", None)
+            assign(i, row)
+        return rows
+    return wrapped
+
+
 def fresh_run(name, **over):
     """A completed ATTESTED run, with its manifests beside it as finalize expects."""
     out = os.path.join(ROOT, name)
@@ -242,18 +282,16 @@ print("an approval cannot buy a number a model made")
 # this scenario tripped it. So the READER answers them, the way a reader that has
 # been taught to will: this fixture's panel is LINE_COLOR, which does not, so it
 # is wrapped for the length of one run.
-def _with_methods(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for i, r in enumerate(rows):
-        r["Identity_Method"] = "MEASURED_LINE_STYLE"
-        r["Value_Method"] = "FIT_FALLBACK" if i == 0 else "DIRECT_CURVE_INK"
-    return rows
+def _with_methods(i, r):
+    r["Identity_Method"] = "MEASURED_LINE_STYLE"
+    r["Value_Method"] = "FIT_FALLBACK" if i == 0 else "DIRECT_CURVE_INK"
 
 
 _real_read_panel = MR.read_panel
+_STYLE = dict(panel_manifest=STYLE_PANELS, series_manifest=STYLE_SERIES)
 try:
-    MR.read_panel = _with_methods
-    _R4_DIR, _ = fresh_run("run_tier")
+    MR.read_panel = style_reader(_with_methods)
+    _R4_DIR, _ = fresh_run("run_tier", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
 _qc = pd.read_csv(os.path.join(_R4_DIR, "figure_values_machine_qc.csv"),
@@ -321,17 +359,14 @@ check("and names the cell and the reason",
 # ALL of them, and there is nothing to finalize. Distinct from NOTHING_APPROVED,
 # which is about the decisions; this is about the evidence, and whoever reads the
 # stamp needs different answers to the two.
-def _all_extrapolated(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r["Identity_Method"] = "MEASURED_LINE_STYLE"
-        r["Value_Method"] = "EXTRAPOLATED_CURVE_INK"
-    return rows
+def _all_extrapolated(_i, r):
+    r["Identity_Method"] = "MEASURED_LINE_STYLE"
+    r["Value_Method"] = "EXTRAPOLATED_CURVE_INK"
 
 
 try:
-    MR.read_panel = _all_extrapolated
-    _ALL_DIR, _ = fresh_run("run_tier_all")
+    MR.read_panel = style_reader(_all_extrapolated)
+    _ALL_DIR, _ = fresh_run("run_tier_all", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
 _fpall = pd.read_csv(os.path.join(_ALL_DIR, "review_queue.csv"),
@@ -464,6 +499,73 @@ check("and every accepted value is priced, in the registry's own vocabulary",
                      for _, r in _acct.iterrows()}))
 
 print()
+print("a method is a claim about evidence, and the evidence has a vote")
+# v7.68. Blank and unregistered methods are refused, so the remaining way to buy
+# a cheap tier is to write down a REGISTERED method that is not the one the
+# evidence supports - and every file hash in the run is then correct, because
+# whoever produced the values wrote them that way from the start.
+_liar = style_reader(lambda i, r: r.update(
+    Identity_Method="MEASURED_COLOUR", Value_Method="MARKER_CENTER"))
+try:
+    MR.read_panel = _liar
+    _LIE_DIR, _ = fresh_run("run_wrong_reader", **_STYLE)
+finally:
+    MR.read_panel = _real_read_panel
+_fpl = pd.read_csv(os.path.join(_LIE_DIR, "review_queue.csv"),
+                   dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_rl = FIN.finalize(_LIE_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fpl)],
+    path=os.path.join(_LIE_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a pair the panel's reader could not have produced is refused",
+      _rl["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "METHOD_NOT_POSSIBLE_FOR_READER"
+              for p in _rl["problems"]), "%s" % _rl)
+check("  and the refusal names what that reader does produce",
+      any("LINE_MONO_STYLE" in p["detail"] and "MEASURED_COLOUR" in p["detail"]
+          for p in _rl["problems"]
+          if p["check"] == "METHOD_NOT_POSSIBLE_FOR_READER"),
+      "%s" % [p["detail"] for p in _rl["problems"]][:1])
+# The matrix is over PAIRS, not over two independent lists: a value method one
+# reader produces beside an identity method another one does is still impossible.
+check("the contract answers per mark type, and says nothing about readers it "
+      "has not heard of",
+      not PROV.contract_failure("LINE_MONO_STYLE", "MEASURED_LINE_STYLE",
+                                "FIT_FALLBACK")
+      and PROV.contract_failure("BOX_VIOLIN", "MEASURED_LINE_STYLE",
+                                "DIRECT_CURVE_INK")
+      and PROV.contract_failure("LINE_COLOR", "HUMAN_RESOLUTION",
+                                "MARKER_CENTER")
+      and not PROV.contract_failure("A_READER_FROM_2027", "ANYTHING", "AT_ALL"),
+      PROV.contract_failure("BOX_VIOLIN", "MEASURED_LINE_STYLE",
+                            "DIRECT_CURVE_INK"))
+# HUMAN_RESOLUTION IS R0 BECAUSE A PERSON SIGNED FOR IT. A row claiming it
+# without an `Identity_Source=HUMAN` and a `Resolution_ID` is claiming the
+# strongest evidence the ladder has and citing none of it.
+_pl = []
+_held_h = FIN.method_contract_failures(
+    pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                       Identity_Method="HUMAN_RESOLUTION",
+                       Value_Method="BAR_OUTLINE_CENTER",
+                       Identity_Source="AUTO", Resolution_ID="")]),
+    pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
+    pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
+    OUT, lambda w, c, d: _pl.append(c))
+check("a human resolution that cites no resolution is not a human resolution",
+      _held_h == {"P1"} and "METHOD_NOT_POSSIBLE_FOR_READER" in _pl, "%s" % _pl)
+_pl = []
+_ok_h = FIN.method_contract_failures(
+    pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                       Identity_Method="HUMAN_RESOLUTION",
+                       Value_Method="BAR_OUTLINE_CENTER",
+                       Identity_Source="HUMAN", Resolution_ID="IR1")]),
+    pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
+    pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
+    OUT, lambda w, c, d: _pl.append(c))
+check("  while one that does is left to the resolution contract to check",
+      not _ok_h and not _pl, "%s" % _pl)
+
+print()
 print("a cell whose series was reasoned to asks the reviewer one more question")
 # R2 IS THE TIER WHERE THE NUMBER IS MEASURED AND THE ROW HEADING IS NOT - named
 # by elimination, or matched against a fill prototype formed in another group.
@@ -473,17 +575,14 @@ print("a cell whose series was reasoned to asks the reviewer one more question")
 #
 # The question is priced from the values, not declared anywhere, so a panel
 # cannot opt out of it by leaving a column blank.
-def _inferred_identity(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r["Identity_Method"] = "COMPLEMENT_OF_DECLARED_STYLES"
-        r["Value_Method"] = "DIRECT_CURVE_INK"
-    return rows
+def _inferred_identity(_i, r):
+    r["Identity_Method"] = "COMPLEMENT_OF_DECLARED_STYLES"
+    r["Value_Method"] = "DIRECT_CURVE_INK"
 
 
 try:
-    MR.read_panel = _inferred_identity
-    _R2_DIR, _ = fresh_run("run_inferred")
+    MR.read_panel = style_reader(_inferred_identity)
+    _R2_DIR, _ = fresh_run("run_inferred", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
 _q2 = pd.read_csv(os.path.join(_R2_DIR, "review_queue.csv"),
@@ -548,14 +647,11 @@ print("a cell whose number was reconstructed is answered for by itself")
 # cannot carry it: one wrong cell in twenty does not show up in a single answer,
 # and the overlay draws a mark either way. So the questions are enumerated and the
 # answers have to match them exactly.
-def _reconstructed(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for i, r in enumerate(rows):
-        r["Identity_Method"] = "MEASURED_LINE_STYLE"
-        r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 2
-                             else "DIRECT_CURVE_INK")
-        if i >= 2:
-            continue
+def _reconstructed(i, r):
+    r["Identity_Method"] = "MEASURED_LINE_STYLE"
+    r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 2
+                         else "DIRECT_CURVE_INK")
+    if i < 2:
         # A READER THAT RECONSTRUCTS A NUMBER SAYS BETWEEN WHICH COLUMNS. The
         # first version of this wrapper set the method and nothing else, which is
         # a reader claiming a bracketed interpolation with no brackets - and from
@@ -569,12 +665,11 @@ def _reconstructed(*a, **kw):
         r["Local_Stroke_Px"] = 2
         r["Expected_Dash_Gap_Px"] = 0
         r["Trace_Agreement"] = "AGREED"
-    return rows
 
 
 try:
-    MR.read_panel = _reconstructed
-    _R3_DIR, _r3_summary = fresh_run("run_cells")
+    MR.read_panel = style_reader(_reconstructed)
+    _R3_DIR, _r3_summary = fresh_run("run_cells", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
 _q3 = pd.read_csv(os.path.join(_R3_DIR, "review_queue.csv"),
@@ -720,18 +815,15 @@ check("  registered against the Inference_ID it belongs to, not by filename",
 # A READER THAT RECONSTRUCTS A NUMBER WITHOUT SAYING BETWEEN WHICH COLUMNS gets
 # no picture, and a cell nobody can see is a cell nobody can confirm. Refused,
 # rather than confirmed against a caption.
-def _no_supports(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for i, r in enumerate(rows):
-        r["Identity_Method"] = "MEASURED_LINE_STYLE"
-        r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 1
-                             else "DIRECT_CURVE_INK")
-    return rows
+def _no_supports(i, r):
+    r["Identity_Method"] = "MEASURED_LINE_STYLE"
+    r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 1
+                         else "DIRECT_CURVE_INK")
 
 
 try:
-    MR.read_panel = _no_supports
-    _NOCTX_DIR, _ = fresh_run("run_nocontext")
+    MR.read_panel = style_reader(_no_supports)
+    _NOCTX_DIR, _ = fresh_run("run_nocontext", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
 _led_noctx = pd.read_csv(os.path.join(_NOCTX_DIR, "panel_artifacts.csv"),

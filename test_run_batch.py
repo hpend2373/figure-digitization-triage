@@ -41,6 +41,7 @@ import bar_reader as BR             # noqa: E402
 import datetime                     # noqa: E402
 import finalize_batch as FIN        # noqa: E402
 import provenance as PROV           # noqa: E402
+import mono_bar_geometry as MONO    # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -3864,6 +3865,50 @@ check("and every accepted bar says which route named it",
       and ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER") in _acc_methods
       and all(i and v for i, v in _acc_methods),
       "%s" % sorted(_acc_methods))
+# AND THE ROUTE ON THE VALUE IS CHECKED AGAINST THE FIGURE'S OWN ANSWER. v7.68.
+# `MEASURED_FILL_RELATION` and `FIGURE_PROTOTYPE_MATCH` are the same word at two
+# tiers - R0 and R2 - so a producer writing the stronger one buys a panel
+# confirmation it never had to ask for, with every file hash in the run correct.
+# `mono_bar_geometry.csv` now carries `Auto_Identity_Method` per row, inside
+# `Auto_Identity_SHA256`, which makes that the one lie the durable geometry can
+# refuse.
+_geo_rows = list(csv.DictReader(open(os.path.join(_fin_dir,
+                                                  "mono_bar_geometry.csv"),
+                                     encoding="utf-8")))
+check("the geometry file records which route named each bar, and both happen",
+      {r["Auto_Identity_Method"] for r in _geo_rows if r["Auto_Fill_Pattern"]}
+      == {"FIGURE_PROTOTYPE_MATCH", "MEASURED_FILL_RELATION"},
+      "%s" % sorted({r["Auto_Identity_Method"] for r in _geo_rows}))
+check("  and a bar the figure could not name claims no route",
+      all(not r["Auto_Identity_Method"] for r in _geo_rows
+          if not r["Auto_Fill_Pattern"]),
+      "%s" % [(r["Auto_Fill_Pattern"], r["Auto_Identity_Method"])
+              for r in _geo_rows])
+check("  inside the attestation, so it cannot be edited without saying so",
+      "Auto_Identity_Method" in MONO.GEOMETRY_ARTIFACT_COLUMNS
+      and MONO.auto_identity_sha256(dict(identity_method="A"))
+      != MONO.auto_identity_sha256(dict(identity_method="B")))
+_acc_geo = pd.read_csv(os.path.join(_fin_dir, "figure_values_accepted.csv"),
+                       dtype=object).fillna("")
+_lied = _acc_geo.copy()
+_lied["Identity_Method"] = _lied["Identity_Method"].replace(
+    "FIGURE_PROTOTYPE_MATCH", "MEASURED_FILL_RELATION")
+_led_geo = pd.read_csv(os.path.join(_fin_dir, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_pg = []
+_held_geo = FIN.method_contract_failures(
+    _lied, pd.DataFrame([dict(Panel_ID="P_SHORT", Mark_Type="BAR_MONO")]),
+    _led_geo, _fin_dir, lambda w, c, d: _pg.append(c))
+check("a value claiming the stronger route is refused by the geometry it cites",
+      _held_geo == {"P_SHORT"} and "METHOD_CONTRADICTS_GEOMETRY" in _pg,
+      "%s" % _pg)
+_pg = []
+check("  while the run's own values agree with it",
+      not FIN.method_contract_failures(
+          _acc_geo, pd.DataFrame([dict(Panel_ID="P_SHORT",
+                                       Mark_Type="BAR_MONO")]),
+          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c))
+      and not _pg, "%s" % _pg)
 # REVERT: fold `Inference_Checked` back into a mode. This panel is queued
 # BAR_MONO_GEOMETRY_RESOLVED and holds a prototype-matched cell, so the question
 # has to reach it through the VALUES - a mode named after an overlay cannot.

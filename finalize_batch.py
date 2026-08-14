@@ -894,6 +894,124 @@ def _inference_manifest_ids(run_dir, artifact, pid, flag):
     return {_s(r.get("Inference_ID")) for r in rows}
 
 
+def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
+    """Panels whose values claim a method their reader could not have reached.
+
+    Two checks, and the second is the one with teeth.
+
+    ## The pair against the reader
+
+    `provenance.METHOD_CONTRACT` says which (identity, value) pairs each mark
+    type produces. A row claiming `MEASURED_LINE_STYLE` on a `BOX_VIOLIN` panel,
+    or `HUMAN_RESOLUTION` on a `LINE_COLOR` one, did not come from the reader the
+    queue says read it - and every hash in the run is correct, because whoever
+    produced it wrote it that way from the start. Blank and unregistered methods
+    are already refused by tier; this closes the pairs that are registered,
+    priced cheaply, and impossible.
+
+    ## The pair against the evidence
+
+    A pair the reader COULD have produced still has to be the one THIS row's
+    evidence supports, and only a durable artifact can say. `BAR_MONO` has one:
+    `mono_bar_geometry.csv` carries `Auto_Identity_Method` per row inside
+    `Auto_Identity_SHA256`, so a value claiming it read a bar's fill in relation
+    to its own group, for a bar the figure actually named by matching another
+    group's prototypes, is refused here - R0 bought at R2's expense.
+
+    `HUMAN_RESOLUTION` is checked the other way round: it is R0, and the only
+    thing that makes it R0 is that a registered person signed a resolution row
+    with evidence behind it. So it must arrive with `Identity_Source=HUMAN` and a
+    `Resolution_ID`, which `identity_contract_failures` then joins to the
+    resolution and its evidence file.
+
+    The other five readers have no comparable artifact, and this function does
+    not pretend otherwise.
+    """
+    withheld = set()
+    mark_of = {_s(r.get("Panel_ID")): _s(r.get("Mark_Type")).upper()
+               for _, r in queue.iterrows()}
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    for row in rows:
+        pid = _s(row.get("Run_Panel_ID"))
+        mark = mark_of.get(pid)
+        if not mark:
+            continue
+        identity = _s(row.get("Identity_Method"))
+        value = _s(row.get("Value_Method"))
+        # A pair with a blank half is refused by tier already, with a clearer
+        # reason than this one could give: "nothing says how this number was
+        # got" is what a reviewer needs to read, not "LINE_COLOR does not
+        # produce blank/MARKER_CENTER". Both findings are true; the tier gate
+        # has the useful one, and two flags on one row is one too many.
+        if not (identity and value):
+            continue
+        why = PROV.contract_failure(mark, identity, value)
+        if why:
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_NOT_POSSIBLE_FOR_READER", why)
+            withheld.add(pid)
+        if identity == "HUMAN_RESOLUTION" and (
+                _s(row.get("Identity_Source")).upper() != "HUMAN"
+                or not _s(row.get("Resolution_ID"))):
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_NOT_POSSIBLE_FOR_READER",
+                 "Identity_Method=HUMAN_RESOLUTION with Identity_Source=%s and "
+                 "Resolution_ID=%s. It is R0 because a registered person signed "
+                 "a resolution row with evidence behind it, and this row cites "
+                 "neither" % (_s(row.get("Identity_Source")) or "(blank)",
+                              _s(row.get("Resolution_ID")) or "(blank)"))
+            withheld.add(pid)
+    withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
+    return withheld
+
+
+def _geometry_route_failures(machine, ledger_rows, run_dir, flag):
+    """BAR_MONO values whose route disagrees with the figure's own answer."""
+    withheld = set()
+    by_row_hash = {}
+    for _, art in ledger_rows.iterrows():
+        if _s(art.get("Artifact_Type")) != "MONO_BAR_GEOMETRY":
+            continue
+        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+        if path is None or not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                for geo in csv.DictReader(fh):
+                    by_row_hash[_s(geo.get("Geometry_Row_SHA256"))] = geo
+        except Exception as exc:
+            flag("run", "METHOD_NOT_POSSIBLE_FOR_READER",
+                 "the geometry file could not be read, so no BAR_MONO route "
+                 "can be checked against it (%s: %s)"
+                 % (type(exc).__name__, exc))
+        break
+    if not by_row_hash:
+        return withheld
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    for row in rows:
+        identity = _s(row.get("Identity_Method"))
+        # A human resolution is not in the geometry file by construction - that
+        # file carries what the FIGURE said - and is checked against the
+        # resolution rows instead.
+        if not identity or identity == "HUMAN_RESOLUTION":
+            continue
+        geo = by_row_hash.get(_s(row.get("Geometry_Row_SHA256")))
+        if geo is None:
+            continue
+        said = _s(geo.get("Auto_Identity_Method"))
+        if said and said != identity:
+            flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                 "METHOD_CONTRADICTS_GEOMETRY",
+                 "the value says the figure named this bar by %s and the "
+                 "geometry file this run wrote says %s. The route decides the "
+                 "review tier, and the file that recorded it is attested"
+                 % (identity, said))
+            withheld.add(_s(row.get("Run_Panel_ID")))
+    return withheld
+
+
 def approved_panels(reviews, queue, reviewers, flag, today=None,
                     artifact_types=None, extra_confirmations=None):
     """Panel_ID -> the review row that approves it. Everything else is refused.
@@ -1392,14 +1510,25 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # `Identity_Method` and `Value_Method`, exactly as the run derived the count
     # it printed in the queue - so a run that printed zero cannot buy a panel an
     # approval that skips the question.
+    contract_refused = set()
     values_by_panel = {}
     for value in machine.to_dict("records"):
         values_by_panel.setdefault(_s(value.get("Run_Panel_ID")), []).append(value)
     extra_confirmations = {pid: RB.inference_confirmations(rows)
                            for pid, rows in values_by_panel.items()}
+    # A METHOD IS A CLAIM ABOUT EVIDENCE, AND EVIDENCE IS WHAT THIS MODULE
+    # CHECKS. Withheld before the approvals are read, like the other contracts:
+    # a panel whose values claim a route their reader could not have taken is
+    # not a panel an approval can rescue.
+    for pid in sorted(method_contract_failures(machine, queue, ledger_rows,
+                                               run_dir, flag)):
+        artifact_types.pop(pid, None)
+        contract_refused.add(pid)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types,
                                extra_confirmations=extra_confirmations)
+    for pid in sorted(contract_refused):
+        approved.pop(pid, None)
 
     if not approved:
         return stop("NOTHING_APPROVED",

@@ -1937,6 +1937,7 @@ ARTIFACT_FIELD_COLUMNS = (
     ("cap_px_image", "Cap_Px_Image"),
     ("fill_sample_status", "Fill_Sample_Status"),
     ("identity_status", "Auto_Identity_Status"),
+    ("identity_method", "Auto_Identity_Method"),
     ("resolved_fill_pattern", "Auto_Fill_Pattern"),
     ("error", "Geometry_Error_Code"),
     ("domain_identity_sha256", "Domain_Identity_SHA256"),
@@ -1948,7 +1949,12 @@ GEOMETRY_ARTIFACT_COLUMNS = (
     "Mean",
     "Dispersion_Value", "Edge_Px_Image", "Cap_Px_Image", "Footprint_X0",
     "Footprint_X1", "Fill_Sample_Status", "Auto_Identity_Status",
-    "Auto_Fill_Pattern", "Geometry_Error_Code", "Domain_Identity_SHA256",
+    # WHAT the figure decided, and BY WHICH ROUTE. A column of its own rather
+    # than a line in `Diagnostics_JSON`, because the finalizer joins on it: a
+    # value row saying MEASURED_FILL_RELATION for a bar this file named by
+    # prototype match is the one lie the durable geometry can now refuse.
+    "Auto_Fill_Pattern", "Auto_Identity_Method",
+    "Geometry_Error_Code", "Domain_Identity_SHA256",
     "Auto_Identity_SHA256", "Diagnostics_JSON", "Anonymous_Record_JSON",
     "Geometry_Row_SHA256",
 )
@@ -2053,6 +2059,13 @@ def auto_identity_sha256(record):
     return hashlib.sha256(canonical_json({
         "Auto_Fill_Pattern": record.get("resolved_fill_pattern", ""),
         "Auto_Identity_Status": record.get("identity_status", ""),
+        # AND BY WHICH ROUTE. Added v7.68. The pattern and the status say WHAT
+        # the figure decided; a bar named from relations inside its own complete
+        # group and one matched against a range formed in other groups are the
+        # same word at two tiers, and without this the geometry file could not
+        # tell them apart - so a value row claiming the stronger route had
+        # nothing durable to be checked against.
+        "Auto_Identity_Method": record.get("identity_method", ""),
         "Domain_Identity_SHA256": record.get("domain_identity_sha256", ""),
         "Geometry_Row_SHA256": record.get("geometry_row_sha256", ""),
     }).encode("utf-8")).hexdigest()
@@ -2287,6 +2300,10 @@ def read_artifact_row(row):
     full["geometry_row_sha256"] = row["Geometry_Row_SHA256"]
     full["identity_status"] = row["Auto_Identity_Status"] or "NOT_CALIBRATED"
     full["resolved_fill_pattern"] = row["Auto_Fill_Pattern"]
+    # The route, restored from its own column - it is inside
+    # `auto_identity_sha256`, so a reader that dropped it would recompute a
+    # different attestation and report every row of every file as tampered.
+    full["identity_method"] = row["Auto_Identity_Method"]
     if row["Domain_Identity_SHA256"] or row["Auto_Identity_SHA256"]:
         full["identity_source"] = "AUTO"
         full["domain_identity_sha256"] = row["Domain_Identity_SHA256"]

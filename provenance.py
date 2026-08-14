@@ -193,6 +193,76 @@ VALUE_METHODS = {
 #: pooled number.
 UNKNOWN_TIER = "R4"
 
+#: WHICH PAIRS EACH READER MAY CLAIM. The registry prices a method; this says
+#: whether the reader that produced the row could have arrived at it.
+#:
+#: ## Why a matrix, and why it is not enough on its own
+#:
+#: Blank and unregistered methods are refused, so the remaining way to buy a
+#: cheap tier is to write down a REGISTERED method that is not the one the
+#: evidence supports: `MEASURED_FILL_RELATION` for a bar matched against another
+#: group's prototypes (R2 -> R0), `MEASURED_LINE_STYLE` for a style named by
+#: elimination (R2 -> R0), `DIRECT_CURVE_INK` for a number a fit produced
+#: (R4 -> R0). Every file hash in the run is then correct: the values were
+#: written that way by whoever produced them.
+#:
+#: This table closes the crudest version - a pair no reader of that mark type
+#: could ever emit, like `BOX_VIOLIN` claiming it measured a line style, or
+#: `LINE_COLOR` claiming a human resolution it has no channel for. What it
+#: cannot do is check a pair that reader COULD have emitted against what this
+#: particular row's evidence actually was; that needs a durable artifact to
+#: compare with, which is why `BAR_MONO` additionally carries
+#: `Auto_Identity_Method` in `mono_bar_geometry.csv` and the finalizer joins on
+#: it. The other readers have no equivalent artifact yet, and saying so is worth
+#: more than a matrix that implies they do.
+METHOD_CONTRACT = {
+    "LINE_COLOR": {("MEASURED_COLOUR", "MARKER_CENTER")},
+    "LINE_MONO": {("MEASURED_MARKER_SHAPE", "MARKER_CENTER"),
+                  ("MEASURED_MARKER_FILL", "MARKER_CENTER"),
+                  ("DECLARED_SINGLE_SERIES", "MARKER_CENTER")},
+    # The one reader that reconstructs values, so the one with a value method
+    # per gap. Its identity is measured off the ink or named by elimination.
+    "LINE_MONO_STYLE": {(identity, value)
+                        for identity in ("MEASURED_LINE_STYLE",
+                                         "COMPLEMENT_OF_DECLARED_STYLES",
+                                         "CONTINUITY_TRACK")
+                        for value in ("DIRECT_CURVE_INK",
+                                      "RESTORED_MASKED_FURNITURE",
+                                      "RESTORED_LINE_PATTERN_GAP",
+                                      "LOCAL_BRACKETED_INTERPOLATION",
+                                      "INTERPOLATED_CURVE_INK",
+                                      "MERGED_RUN_EDGE",
+                                      "NONLOCAL_INTERPOLATION",
+                                      "EXTRAPOLATED_CURVE_INK",
+                                      "FIT_FALLBACK")},
+    "BAR_COLOR": {("MEASURED_COLOUR", "BAR_OUTLINE_CENTER")},
+    "BAR_MONO": {("MEASURED_FILL_RELATION", "BAR_OUTLINE_CENTER"),
+                 ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER"),
+                 ("HUMAN_RESOLUTION", "BAR_OUTLINE_CENTER")},
+    "BOX_VIOLIN": {("DECLARED_SINGLE_SERIES", "BOX_GEOMETRY")},
+    "SCATTER": {("MEASURED_COLOUR", "POINT_CLOUD_ASSOCIATION"),
+                ("DECLARED_SINGLE_SERIES", "POINT_CLOUD_ASSOCIATION")},
+}
+
+
+def contract_failure(mark_type, identity_method, value_method):
+    """Why this pair cannot have come from this reader, or "" if it could.
+
+    A mark type this table has never heard of is not an error here: the caller
+    knows whether an unknown reader is possible, and refusing one would make
+    adding a reader a two-file change with a failure in the middle.
+    """
+    allowed = METHOD_CONTRACT.get(str(mark_type or "").strip().upper())
+    if allowed is None:
+        return ""
+    pair = (str(identity_method or "").strip(), str(value_method or "").strip())
+    if pair in allowed:
+        return ""
+    return ("%s cannot produce Identity_Method=%s Value_Method=%s; it produces %s"
+            % (mark_type, pair[0] or "(blank)", pair[1] or "(blank)",
+               " or ".join("%s/%s" % p for p in sorted(allowed))))
+
+
 #: Tiers whose values a run may finalize at all. R4 is a model estimate: a
 #: reviewer looking at an overlay cannot tell a fitted y from a read one, so
 #: approving it would launder an estimate into a measurement.

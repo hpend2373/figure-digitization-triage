@@ -4865,6 +4865,69 @@ queue that nobody needs to digitize by hand.
     the count off the run stamp                        1
     the work list surviving a re-run                   1
 
+## v7.68 — a method is a claim about evidence, and the evidence gets a vote
+
+Blank methods are refused and unregistered ones price at R4, so the remaining way
+to buy a cheap tier is to write down a REGISTERED method that is not the one the
+evidence supports:
+
+    actually FIGURE_PROTOTYPE_MATCH        written MEASURED_FILL_RELATION   R2 -> R0
+    actually COMPLEMENT_OF_DECLARED_STYLES written MEASURED_LINE_STYLE      R2 -> R0
+    actually FIT_FALLBACK                  written DIRECT_CURVE_INK         R4 -> R0
+
+Every hash in such a run is correct. The values were written that way by whoever
+produced them, and re-hashing catches edits made AFTER a run, not a producer that
+was never honest. Two checks now stand between that and the accepted file.
+
+**The pair against the reader.** `provenance.METHOD_CONTRACT` says which
+(identity, value) pairs each mark type produces — `LINE_COLOR` produces exactly
+`MEASURED_COLOUR`/`MARKER_CENTER`, `BOX_VIOLIN` exactly
+`DECLARED_SINGLE_SERIES`/`BOX_GEOMETRY`, `LINE_MONO_STYLE` the cross of three
+identities and nine value methods. A pair outside its reader's set did not come
+from the reader the queue says read it, and `finalize` withholds the panel
+(`METHOD_NOT_POSSIBLE_FOR_READER`). A mark type the table has not heard of is not
+an error: adding a reader should not be a two-file change with a failure in the
+middle.
+
+`HUMAN_RESOLUTION` is checked the other way round. It is R0, and the only thing
+that makes it R0 is that a registered person signed a resolution row with
+evidence behind it — so it must arrive with `Identity_Source=HUMAN` and a
+`Resolution_ID`, which `identity_contract_failures` then joins to the resolution
+and its evidence file.
+
+**The pair against the evidence.** A pair the reader COULD have produced still
+has to be the one THIS row's evidence supports, and only a durable artifact can
+say. `BAR_MONO` now has one: `mono_bar_geometry.csv` carries
+`Auto_Identity_Method` per row, inside `Auto_Identity_SHA256` — so the two routes
+are distinguishable in the file the figure wrote, and a value claiming it read a
+bar's fill in relation to its own group, for a bar the figure named by matching
+another group's prototypes, is refused (`METHOD_CONTRADICTS_GEOMETRY`). The
+column is restored on read-back, because a reader that dropped it would recompute
+a different attestation and report every row of every file as tampered.
+
+**What this does not do**, and the honest boundary is worth writing down: the
+other five readers have no artifact comparable to the geometry file, so for them
+the contract is the matrix and nothing more. A `LINE_MONO_STYLE` row claiming
+`DIRECT_CURVE_INK` for a number a fit produced is inside its reader's set and
+passes. Closing that needs a durable per-mark artifact — the raw marks JSON is
+one, and joining values to it is the next step of this idea.
+
+**The fixtures had to stop lying too.** Five scenarios declared a `LINE_COLOR`
+panel and had it claim `MEASURED_LINE_STYLE` with a fit fallback, which is
+exactly the pair the new gate exists to catch — so they now declare the panel
+`LINE_MONO_STYLE` and a named stand-in reads the fixture's coloured marks in that
+reader's place. The marks are still real, still calibrated, and still travel
+through `to_value_records` and the grid gate; only the reader's name changed, and
+it changed to the truth.
+
+    reverted                                          scenarios that fail
+    the contract never called                          2
+    every pair possible for every reader               3
+    HUMAN_RESOLUTION with nothing signed behind it     1
+    the route off the geometry artifact                the artifact refuses itself
+    the route written but not attested                 1
+    the value's route never compared with the figure   1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4887,10 +4950,24 @@ queue that nobody needs to digitize by hand.
   dispersion definition is unresolved, so its two of each fail machine QC - and
   the per-cell channel is therefore exercised end to end by fixtures rather than
   by a person
-- `HUMAN_RESOLUTION` is priced R0 by the registry and has no review channel of
-  its own: the resolution row, its evidence and the reviewer are checked by
-  `identity_contract_failures`, but nothing asks the person who APPROVES the
-  panel to confirm that they agree with the person who resolved it
+- `HUMAN_RESOLUTION` has a review channel - `BAR_MONO_GEOMETRY_RESOLVED` asks
+  for `Identity_Checked`, and v7.68 requires the row to cite the resolution it
+  rests on. What is not decided is whether the approver and the resolver may be
+  the same person, and whether a resolution needs its own cell-level
+  confirmation the way a reconstructed value does
+- the method contract is a MATRIX for five of the six readers and a JOIN for
+  BAR_MONO. A `LINE_MONO_STYLE` row claiming `DIRECT_CURVE_INK` for a number a
+  fit produced is inside its reader's set and passes; closing it needs the raw
+  marks JSON joined to the values, which is the next step of the same idea
+- `LINE_COLOR` and `BAR_COLOR` build one mask per declared colour and read each
+  independently. Two colours closer than their tolerances can both claim one
+  marker, and the grid then looks complete while two series hold the same mark.
+  `SCATTER` measures this (`Series_Mask_Overlap_Count`) and the other two do not
+- `read_panel("BAR_MONO")` still dispatches to the single-panel absolute-band
+  reader, while the batch runner uses the two-pass figure-local one. An agent
+  reaching for the generic entry point gets a different answer from the pipeline
+- the scatter point file does not record `Identity_Method` per point, so the
+  association row's identity cannot be re-derived from the durable artifact
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

@@ -5254,6 +5254,81 @@ the case is worth the work rather than assuming it.
     the two-reviewer comparison dropped                1
     the preflight writing into the run                 1
 
+## v7.74 — the mark join reaches the number and the cell, and the mark is checked against itself
+
+v7.72 bound a value's three METHODS to the mark it was made from. It did not
+bind the value's NUMBERS or its `Cell_Key`, and it read both of the mark's own
+hashes off the artifact instead of recomputing them. Two consequences, and the
+first is the one that mattered:
+
+**Two values read the same way in one panel could exchange their marks and pass
+every check.** Both hashes existed, neither was shared, the methods agreed
+because they were identical, and nothing compared the means. A `Cell_Key`
+exchange was worse: every number stays correct, every file hash stays correct,
+and the figure now says the treated group did what the control group did. That
+is the same failure v7.29–v7.31 runs are withheld for on the BAR_MONO side —
+"per-bar hashes and means that agree while their `Cell_Key`s could have been
+exchanged, the one failure with no arithmetic signature" — and the five join
+readers were still open to it.
+
+So the join now re-derives what the value should have been:
+
+    Mean, Dispersion_Value, Errorbar_Lower/Upper,
+    Median, Q1, Q3, Whisker_Lower/Upper       the mark's own, compared as NUMBERS
+    Cell_Key                                  the mark's series and position ids,
+                                              looked up in the VERIFIED manifests
+
+`MARK_VALUE_FIELDS` is the second half of that table, and a scenario runs
+`to_value_records` over a probe mark and asserts that every number the adapter
+copies is a number the join checks — the drift `INTERPOLATION_CARRIED` was
+written for, guarded this time rather than commented about.
+
+A blank on the MARK side under a number on the value side is a mismatch, not a
+skip. A blank on the VALUE side is skipped, because a continuous row does not
+carry quartiles and a quantile row does not carry a mean; that asymmetry is
+deliberate and is stated in the code.
+
+**And the mark is now checked against itself.** Both hashes are RECOMPUTED from
+the mark's own fields before it is indexed, and the index is keyed by the
+recomputed value:
+
+    MARK_RECORD_HASH_MISMATCH   the measurement, the calibration or the panel box
+                                was changed after the run
+    METHOD_ATTESTATION_STALE    a method inside the artifact was rewritten
+
+Until now a doctored measurement whose hash was updated to match it joined
+perfectly: the artifact was self-consistent, the value agreed with it, and the
+only thing that would have disagreed — the pixels — was not in the comparison.
+The record hash covers the panel box, the calibration and the raster hash for
+exactly that reason, and it was not being used.
+
+`MARK_CELL_UNDECLARED` is the fail-closed half of the cell check: a mark read as
+a series or position the verified manifests do not declare yields no expected
+key, so the value is refused rather than compared against a mapping nobody
+approved. `cell_maps()` builds that mapping ONCE for both callers —
+`value_contract_failures` re-derives the BAR_MONO identity contract from the same
+frame — because two constructions could disagree about which level `S2` names,
+and a value that satisfied one check against one mapping and the other against
+another is the fail-open a shared frame exists to prevent.
+
+Measured on publication 397, which is where a check like this either holds or
+produces a wall of false refusals: **all 123 values pass the join clean**, and
+the panel holds **23 groups of two or more values read by the same three
+methods** — the exact population the method checks cannot tell apart. Every one
+of the 23 mark-hash exchanges and every one of the 23 `Cell_Key`-only exchanges
+is refused. Before v7.74, all 46 passed.
+
+    reverted                                          scenarios that fail
+    the numbers not compared at all                    5
+    a blank number on the mark read as consent         1
+    the cell key not compared                          3
+    an undeclared series skipped instead of refused    1
+    the mark's own record hash taken on trust          2
+    the mark's own attestation taken on trust          1
+    the finalizer not passing the verified manifests   4
+    the join not wired into the contract              18
+    the cell map built per caller instead of once      4
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5286,10 +5361,25 @@ the case is worth the work rather than assuming it.
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
-- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only. The
-  other six are held to the matrix and to the mark join, so a mark that lies
-  about itself consistently - the artifact and the value saying the same wrong
-  thing - is refused for those six only where the join or the matrix can see it
+- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only, and
+  that derivation is PARTIAL: `expected_line_style_methods` returns the methods it
+  can name and says nothing about the axes it cannot, so missing evidence fails to
+  refute rather than refusing. It needs to return its problems alongside its
+  expectations - `METHOD_EVIDENCE_INCOMPLETE` - and to stop defaulting a blank
+  span to zero, which reopens the one-sided downgrade v7.73 closed
+- a value whose `Mark_Record_SHA256` is BLANK still skips the join entirely, and
+  so does a `RAW_MARKS` artifact that is not `mark-data/2`. Both are the shape a
+  run made by an older producer arrives in, and both should withhold rather than
+  pass - `MARK_EVIDENCE_SCHEMA_UNSUPPORTED` - mandatory for the five readers that
+  have no other durable route. BAR_MONO and SCATTER keep their own
+- `review_preflight` and `finalize_batch` answer overlapping questions through
+  two code paths, so the preflight can report a clean bundle that the finalizer
+  then refuses. They need one pure read-only validation function between them,
+  with a parity scenario per mutation
+- `PF.disagreements()` builds its two sides with a dict comprehension, so a
+  reviewer file holding the same `Inference_ID` twice silently keeps the last row
+  instead of reporting a duplicate, and `--second`'s help text says directory
+  where the code wants a file
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

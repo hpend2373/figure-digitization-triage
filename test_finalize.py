@@ -703,7 +703,8 @@ _held_h = FIN.method_contract_failures(
                        Identity_Source="AUTO", Resolution_ID="")]),
     pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
     pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
-    OUT, lambda w, c, d: _pl.append(c))
+    OUT, lambda w, c, d: _pl.append(c), frames=RB.load_manifests(
+        os.path.join(OUT, "manifests")))
 # BLANK EVIDENCE IS NOT CONSENT. v7.71. Both cross-checks compared non-blank
 # answers only, so an artifact that said NOTHING about how its series was named
 # bought whatever the value row claimed - the fail-open these functions exist to
@@ -733,7 +734,8 @@ def _point_check(record_method, point_methods, claimed="MEASURED_COLOUR"):
         pd.DataFrame([dict(Panel_ID="P1", Mark_Type="SCATTER")]),
         pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="POINT_DATA",
                            Artifact_Path=path)]),
-        _pt_dir, lambda w, c, d: seen.append(c))
+        _pt_dir, lambda w, c, d: seen.append(c),
+        frames=RB.load_manifests(os.path.join(OUT, "manifests")))
     return held, seen
 
 
@@ -818,7 +820,8 @@ _ok_h = FIN.method_contract_failures(
                        Identity_Source="HUMAN", Resolution_ID="IR1")]),
     pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
     pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
-    OUT, lambda w, c, d: _pl.append(c))
+    OUT, lambda w, c, d: _pl.append(c), frames=RB.load_manifests(
+        os.path.join(OUT, "manifests")))
 check("  while one that does is left to the resolution contract to check",
       not _ok_h and not _pl, "%s" % _pl)
 
@@ -1320,8 +1323,21 @@ def _joined(rows):
     held = FIN.method_contract_failures(
         pd.DataFrame(rows),
         pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
-        _marks_led, _R3_DIR, lambda w, c, d: seen.append(c))
+        _marks_led, _R3_DIR, lambda w, c, d: seen.append(c),
+        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
     return held, seen
+
+
+def _mark_detail(rows, code):
+    """The detail the join reports for one code, so a message can be read back."""
+    said = []
+    FIN.method_contract_failures(
+        pd.DataFrame(rows),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
+        _marks_led, _R3_DIR,
+        lambda w, c, d: said.append(d) if c == code else None,
+        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+    return " | ".join(said)
 
 
 _rows3 = _qc3.to_dict("records")
@@ -1377,6 +1393,181 @@ check("  and the two are R4 and R0, which is why the difference matters",
 check("  and a reader the registry cannot re-derive is left to the matrix",
       not PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
                                 dict(Value_Method="BOX_GEOMETRY")))
+
+print()
+print("the join is to a cell and a number, not only to a method")
+# v7.74. Everything above binds a value's METHODS to its mark. Two values read
+# the SAME WAY in one panel could still exchange their marks and pass every one
+# of those checks: both hashes existed, neither was shared, and the methods
+# matched because they were identical. Nothing compared the numbers, and a
+# `Cell_Key` swap has no arithmetic signature at all - which is the failure
+# v7.29-v7.31 runs were withheld for on the BAR_MONO side and that the five join
+# readers were still open to.
+_same = [r for r in _rows3
+         if FIN._s(r.get("Value_Method")) == "DIRECT_CURVE_INK"]
+check("the fixture holds two values read the same way, which is what makes the "
+      "swap invisible to the method checks",
+      len(_same) >= 2
+      and {(FIN._s(r["Identity_Method"]), FIN._s(r["Value_Method"]),
+            FIN._s(r["Dispersion_Method"])) for r in _same[:2]} == {
+          (FIN._s(_same[0]["Identity_Method"]),
+           FIN._s(_same[0]["Value_Method"]),
+           FIN._s(_same[0]["Dispersion_Method"]))},
+      "%s" % [(r["Cell_Key"], r["Value_Method"]) for r in _rows3])
+_a, _b = dict(_same[0]), dict(_same[1])
+_swapped = [dict(_a, Mark_Record_SHA256=_b["Mark_Record_SHA256"],
+                 Method_Attestation_SHA256=_b["Method_Attestation_SHA256"]),
+            dict(_b, Mark_Record_SHA256=_a["Mark_Record_SHA256"],
+                 Method_Attestation_SHA256=_a["Method_Attestation_SHA256"])]
+_held_j, _seen_j = _joined(_swapped)
+check("two values that exchange their marks are refused, method for method "
+      "identical though they are",
+      _held_j == {"P1"} and "VALUE_CONTRADICTS_MARK" in _seen_j,
+      "%s" % _seen_j)
+# ONE NUMBER AT A TIME, because a swap of the whole row is the easy case: a value
+# that keeps its own cell and its own mark and takes ANOTHER mark's mean is the
+# shape a rounding, a re-fit or a copied cell produces.
+_held_j, _seen_j = _joined([dict(_a, Mean=_b["Mean"])])
+check("  a mean taken from another mark is refused on its own",
+      _held_j == {"P1"} and "VALUE_CONTRADICTS_MARK" in _seen_j
+      and _a["Mean"] != _b["Mean"], "%s" % _seen_j)
+check("  and the refusal names the column and both numbers",
+      _mark_detail([dict(_a, Mean=_b["Mean"])], "VALUE_CONTRADICTS_MARK")
+      .count("Mean") == 1
+      and FIN._s(_b["Mean"])[:6] in _mark_detail(
+          [dict(_a, Mean=_b["Mean"])], "VALUE_CONTRADICTS_MARK"),
+      "%s" % _mark_detail([dict(_a, Mean=_b["Mean"])],
+                          "VALUE_CONTRADICTS_MARK"))
+_disp = [r for r in _rows3 if not BM.blank(r.get("Dispersion_Value"))]
+_held_j, _seen_j = _joined([dict(_disp[0],
+                                 Dispersion_Value=str(
+                                     float(_disp[0]["Dispersion_Value"]) + 1.0))])
+check("  and a number the mark does not carry AT ALL is refused, not skipped",
+      _joined([dict(_a, Median="5.0")])[0] == {"P1"}
+      and "VALUE_CONTRADICTS_MARK" in _joined([dict(_a, Median="5.0")])[1]
+      and BM.blank(_a.get("Median")),
+      "%s" % _joined([dict(_a, Median="5.0")])[1])
+check("  and so is a dispersion the mark it cites does not carry",
+      _held_j == {"P1"} and "VALUE_CONTRADICTS_MARK" in _seen_j
+      and len(_disp) > 0, "%s" % _seen_j)
+# THE CELL KEY IS THE ONE WITH NO ARITHMETIC SIGNATURE. Every number stays the
+# mark's own; only the heading moves, so the panel's totals, means and hashes are
+# all unchanged and the figure now says the treated group did what the control
+# group did.
+_held_j, _seen_j = _joined([dict(_a, Cell_Key=_b["Cell_Key"])])
+check("a value filed under another cell's heading is refused, every number "
+      "correct though it is",
+      _held_j == {"P1"} and "CELL_CONTRADICTS_MARK" in _seen_j
+      and _a["Cell_Key"] != _b["Cell_Key"], "%s" % _seen_j)
+check("  and the cell it is refused against is derived from the manifests, not "
+      "from the value",
+      _b["Cell_Key"] in _mark_detail([dict(_a, Cell_Key=_b["Cell_Key"])],
+                                     "CELL_CONTRADICTS_MARK"),
+      "%s" % _mark_detail([dict(_a, Cell_Key=_b["Cell_Key"])],
+                          "CELL_CONTRADICTS_MARK"))
+# AND THE MARK IS CHECKED AGAINST ITSELF. Until v7.74 both of a mark's hashes
+# were read off the artifact and only the VALUE's copy was recomputed, so editing
+# a measurement and its hash together produced a self-consistent artifact that
+# every check above accepted.
+_edit_dir = os.path.join(ROOT, "marks_edited")
+
+
+def _edited_marks(mutate, rows=None, restamp=False, rebind=False):
+    """The run's own marks with one of them changed on disk, and the join re-run.
+
+    `rebind` moves the VALUE that cited the changed mark onto its new hashes, so
+    the artifact and the values agree with each other. That is the shape a run
+    made by something else arrives in, and it is where a check that only compared
+    the two of them to each other would find nothing to say.
+    """
+    shutil.rmtree(_edit_dir, ignore_errors=True)
+    os.makedirs(_edit_dir)
+    body = json.loads(json.dumps(_envelope))
+    header = {k: v for k, v in body.items() if k != "marks"}
+    was = FIN._s(body["marks"][0]["Mark_Record_SHA256"])
+    mutate(body["marks"][0])
+    if restamp:
+        body["marks"] = RB.stamp_marks(
+            [{k: v for k, v in m.items()
+              if k not in ("Mark_Record_SHA256", "Method_Attestation_SHA256")}
+             for m in body["marks"]], header)
+    path = os.path.join(_edit_dir, "P1_marks.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, indent=1, sort_keys=True)
+    if rebind:
+        now = body["marks"][0]
+        rows = [dict(r, Mark_Record_SHA256=now["Mark_Record_SHA256"],
+                     Method_Attestation_SHA256=now["Method_Attestation_SHA256"])
+                if FIN._s(r.get("Mark_Record_SHA256")) == was else dict(r)
+                for r in (rows if rows is not None else _rows3)]
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame(rows if rows is not None else _rows3),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
+                           Artifact_Path=path)]),
+        _edit_dir, lambda w, c, d: seen.append(c),
+        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+    return held, seen
+
+
+_held_e, _seen_e = _edited_marks(lambda m: m.update(mean=float(m["mean"]) + 5.0))
+check("a measurement edited inside the artifact no longer hashes to its own "
+      "record",
+      _held_e == {"P1"} and "MARK_RECORD_HASH_MISMATCH" in _seen_e, "%s" % _seen_e)
+_held_e, _seen_e = _edited_marks(
+    lambda m: m.update(mean=float(m["mean"]) + 5.0), restamp=True)
+check("  and re-hashing it does not help: the value cites a mark that is gone",
+      _held_e == {"P1"} and "MARK_EVIDENCE_MISSING" in _seen_e, "%s" % _seen_e)
+# THE SERIES ON THE MARK IS INSIDE THE MEASUREMENT HASH, so moving a mark to
+# another series is the same refusal - which is what closes the last door on the
+# cell-key check: an attacker who cannot change the value's key changes the
+# mark's series instead.
+_held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_R"))
+check("  and a mark moved to another series is refused the same way",
+      _held_e == {"P1"} and "MARK_RECORD_HASH_MISMATCH" in _seen_e, "%s" % _seen_e)
+_held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_R"), restamp=True)
+check("  re-hashed, the value that cites it no longer finds its evidence",
+      _held_e == {"P1"} and "MARK_EVIDENCE_MISSING" in _seen_e, "%s" % _seen_e)
+# AND REBOUND - the shape a foreign producer arrives in rather than an edit: the
+# marks and the values agree with each other, and they agree about a series the
+# figure's own manifests do not declare.
+_held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_R"), restamp=True,
+                                 rebind=True)
+check("  rebound to it, the mark and the value agree about the wrong cell, and "
+      "the manifests refuse both",
+      _held_e == {"P1"} and "CELL_CONTRADICTS_MARK" in _seen_e, "%s" % _seen_e)
+_held_e, _seen_e = _edited_marks(
+    lambda m: m.update(Value_Method="DIRECT_CURVE_INK",
+                       Mark_Record_SHA256=m["Mark_Record_SHA256"]))
+check("and a method rewritten inside the artifact leaves the mark's own "
+      "attestation stale",
+      _held_e == {"P1"} and "METHOD_ATTESTATION_STALE" in _seen_e, "%s" % _seen_e)
+# A SERIES NO MANIFEST DECLARES CANNOT NAME A CELL, and a mark that names one is
+# not evidence for whatever heading the value happens to carry. Fail-closed: the
+# expected key is derived or the value is refused, never guessed.
+_held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_NOWHERE"),
+                                 restamp=True, rebind=True)
+check("a mark read as a series the verified manifests do not declare supports "
+      "no cell at all",
+      _held_e == {"P1"} and "MARK_CELL_UNDECLARED" in _seen_e, "%s" % _seen_e)
+# AND THE COLUMNS THIS BINDS ARE THE COLUMNS THE ADAPTER WRITES. A reader that
+# starts carrying a tenth number would otherwise be bound to its mark in nine,
+# and the tenth would be free - the same drift `INTERPOLATION_CARRIED` was
+# written for.
+_probe = dict(mean=1.0, dispersion=2.0, errorbar_lower=3.0, errorbar_upper=4.0,
+              median=5.0, q1=6.0, q3=7.0, whisker_lower=8.0, whisker_upper=9.0,
+              series="S_B", x_label="D0")
+_from_marks = set()
+for _kind in ("CONTINUOUS", "QUANTILE_SUMMARY"):
+    _rec = MR.to_value_records([dict(_probe)], _kind, "U1",
+                               x_factor="TIMEPOINT", series_factor="GROUP")[0]
+    _from_marks |= {c for c, v in _rec.items()
+                    if isinstance(v, float) and v in set(_probe.values())}
+check("every number the adapter copies from a mark is a number the join checks",
+      _from_marks == {c for c, _f in FIN.MARK_VALUE_FIELDS},
+      "adapter %s / bound %s"
+      % (sorted(_from_marks), sorted(c for c, _f in FIN.MARK_VALUE_FIELDS)))
 
 print()
 print("everything about a review that can be checked without looking at ink")

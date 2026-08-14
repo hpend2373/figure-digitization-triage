@@ -65,6 +65,7 @@ if HERE not in sys.path:
 
 import batch_manifests as BM                                       # noqa: E402
 import run_batch as RB                                             # noqa: E402
+import grid_engine as GE                                           # noqa: E402
 import provenance as PROV                                          # noqa: E402
 
 FINALIZE_SCHEMA = "figure-digitization-triage/finalize-stamp/1"
@@ -265,6 +266,61 @@ def verify_manifest_inputs(manifest_dir, run_stamp, flag):
     return frames if ok else None
 
 
+#: A panel the manifests do not describe. Named rather than written inline so
+#: the two callers cannot disagree about what "no declaration" looks like.
+EMPTY_CELL_MAP = {"position_factor": "", "position_levels": {},
+                  "series_factor": "", "series_levels": {},
+                  "series_by_fill": {}}
+
+
+def cell_maps(frames):
+    """{Panel_ID: Cell_Map} from the VERIFIED manifests.
+
+    One construction, two readers. `value_contract_failures` re-derives the
+    BAR_MONO identity contract from it and `_mark_evidence_failures` re-derives
+    the `Cell_Key` a mark's own series and position ids should have produced, and
+    those two must not be able to disagree about which level `S2` names: a value
+    could then satisfy one check against one mapping and the other against
+    another, which is the fail-open a shared frame exists to prevent.
+
+    `Factor_Name` is taken panel-wide rather than per row, because a `Cell_Key`
+    has one factor per axis - the same reading `run_batch._read_panel` takes when
+    it builds the key in the first place.
+    """
+    panels = frames["panels"] if frames is not None and "panels" in frames \
+        else pd.DataFrame()
+    series = frames["series"] if frames is not None and "series" in frames \
+        else pd.DataFrame()
+    positions = frames["positions"] if frames is not None \
+        and "positions" in frames else pd.DataFrame()
+    by_panel_series, by_panel_position = {}, {}
+    for _, r in series.iterrows():
+        by_panel_series.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    for _, r in positions.iterrows():
+        by_panel_position.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    out = {}
+    for _, panel in panels.iterrows():
+        pid = _s(panel.get("Panel_ID"))
+        prows = by_panel_series.get(pid, [])
+        qrows = by_panel_position.get(pid, [])
+        out[pid] = {
+            "position_factor": next(
+                (_s(r.get("Factor_Name")).upper() for r in qrows
+                 if _s(r.get("Factor_Name"))), ""),
+            "position_levels": {_s(r.get("Position_ID")):
+                                _s(r.get("Factor_Level")) for r in qrows},
+            "series_factor": next(
+                (_s(r.get("Factor_Name")).upper() for r in prows
+                 if _s(r.get("Factor_Name"))), ""),
+            "series_levels": {_s(r.get("Series_ID")):
+                              _s(r.get("Factor_Level")) for r in prows},
+            "series_by_fill": {_s(r.get("Bar_Fill_Pattern")).upper():
+                               _s(r.get("Series_ID")) for r in prows
+                               if _s(r.get("Bar_Fill_Pattern"))},
+        }
+    return out
+
+
 def value_contract_failures(run_dir, frames, machine, flag):
     """Panels whose values fail the runner's own BAR_MONO contract, re-derived.
 
@@ -294,34 +350,17 @@ def value_contract_failures(run_dir, frames, machine, flag):
                    if frames.get("resolutions") is not None
                    else pd.DataFrame()).iterrows():
         resolutions.setdefault(_s(row.get("Panel_ID")), []).append(row)
+    maps = cell_maps(frames)
     panel_index = {}
     for _, panel in panels.iterrows():
         pid = _s(panel.get("Panel_ID"))
-        prows = [r for _, r in series.iterrows()
-                 if _s(r.get("Panel_ID")) == pid]
-        qrows = [r for _, r in positions.iterrows()
-                 if _s(r.get("Panel_ID")) == pid]
         panel_index[pid] = {
             "Mark_Type": _s(panel.get("Mark_Type")),
             "Unit_ID": _s(panel.get("Unit_ID")),
             "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
             "Figure_ID": _s(panel.get("Figure_ID")),
             "Identity_Domain_ID": _s(panel.get("Identity_Domain_ID")),
-            "Cell_Map": {
-                "position_factor": next(
-                    (_s(r.get("Factor_Name")).upper() for r in qrows
-                     if _s(r.get("Factor_Name"))), ""),
-                "position_levels": {_s(r.get("Position_ID")):
-                                    _s(r.get("Factor_Level")) for r in qrows},
-                "series_factor": next(
-                    (_s(r.get("Factor_Name")).upper() for r in prows
-                     if _s(r.get("Factor_Name"))), ""),
-                "series_levels": {_s(r.get("Series_ID")):
-                                  _s(r.get("Factor_Level")) for r in prows},
-                "series_by_fill": {_s(r.get("Bar_Fill_Pattern")).upper():
-                                   _s(r.get("Series_ID")) for r in prows
-                                   if _s(r.get("Bar_Fill_Pattern"))},
-            },
+            "Cell_Map": maps.get(pid, EMPTY_CELL_MAP),
         }
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
             else list(machine or ()))
@@ -906,7 +945,7 @@ def _inference_manifest_ids(run_dir, artifact, pid, flag):
     return {_s(r.get("Inference_ID")) for r in rows}
 
 
-def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
+def method_contract_failures(machine, queue, ledger_rows, run_dir, flag, frames):
     """Panels whose values claim a method their reader could not have reached.
 
     Two checks, and the second is the one with teeth.
@@ -979,18 +1018,91 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
     withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
-                                        flag)
+                                        flag, cell_maps(frames))
     return withheld
 
 
-def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag):
+#: The value columns a MARK's own measurement decides, and the mark field each
+#: one is copied from by `mark_readers.to_value_records`. Asserted against that
+#: function by the suite rather than trusted: a reader that starts carrying a
+#: tenth number would otherwise be bound to the mark in nine.
+MARK_VALUE_FIELDS = (
+    ("Mean", "mean"),
+    ("Dispersion_Value", "dispersion"),
+    ("Errorbar_Lower", "errorbar_lower"),
+    ("Errorbar_Upper", "errorbar_upper"),
+    ("Median", "median"),
+    ("Q1", "q1"),
+    ("Q3", "q3"),
+    ("Whisker_Lower", "whisker_lower"),
+    ("Whisker_Upper", "whisker_upper"),
+)
+
+
+def _same_number(text, number):
+    """Is this value column the mark's own number?
+
+    Compared as NUMBERS, not as text: the run wrote a float through pandas and
+    this reads a string back, so "12.0" and 12.0 are the same measurement while
+    "12.0" and 12.5 are not. Blank on the value side is skipped by the caller -
+    a statistic a row does not carry is not a contradiction - but a blank MARK
+    under a number is one, and lands here as a mismatch.
+    """
+    if number is None:
+        return False
+    try:
+        return float(text) == float(number)
+    except (TypeError, ValueError):
+        return False
+
+
+def _expected_cell_key(mark, cell_map):
+    """The `Cell_Key` this mark's own series and position ids name.
+
+    `run_batch._read_panel` builds the key by looking each id up in the panel's
+    series and position manifests; this repeats that lookup on the VERIFIED
+    frames. Returns (key, problem) and never guesses: an id no manifest declares
+    gives no key, because a key derived from a mapping nobody approved would
+    agree with whatever the value happened to say.
+    """
+    levels = {}
+    sid, qid = _s(mark.get("series")), _s(mark.get("x_label"))
+    if sid:
+        if sid not in cell_map["series_levels"] or not cell_map["series_factor"]:
+            return None, ("the mark was read as series %s and the verified "
+                          "manifests declare no such series for this panel" % sid)
+        levels[cell_map["series_factor"]] = cell_map["series_levels"][sid]
+    if qid:
+        if qid not in cell_map["position_levels"] \
+                or not cell_map["position_factor"]:
+            return None, ("the mark sits at position %s and the verified "
+                          "manifests declare no such position for this panel"
+                          % qid)
+        levels[cell_map["position_factor"]] = cell_map["position_levels"][qid]
+    if not levels:
+        return None, ("the mark carries neither a series nor a position, so "
+                      "there is no cell it can be the measurement of")
+    return GE.fig_cell_key(levels), None
+
+
+def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
     """Values joined to the MARK they were made from, and checked against it.
 
     The matrix says which methods a reader can produce. This says which one THIS
     row's own evidence came to - the difference between "possible" and "true", and
     the thing five of the seven readers had no durable artifact for.
 
-    Four checks, and each one closes a different way of getting a cheap tier:
+    ## The mark is checked against itself first
+
+    Both of a mark's hashes are RECOMPUTED from its own fields before it is
+    indexed. Until v7.74 they were read off the artifact and only the value's
+    copy was ever recomputed, so a doctored measurement whose hash was updated to
+    match it joined perfectly: the artifact was self-consistent and the value
+    agreed with it, and the only thing that would have disagreed - the pixels the
+    mark was measured from - was not in the comparison. The record hash covers
+    the panel box, the calibration and the raster hash for exactly that reason.
+
+    ## Then the value is checked against the mark
 
         the mark exists       a value citing a `Mark_Record_SHA256` no raw-mark
                               artifact carries is a value with no evidence
@@ -1000,8 +1112,19 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag):
                               nothing does not support a claim
         the attestation holds recomputed from the mark's own fields, so swapping
                               a method inside the artifact is caught too
+        THE NUMBERS AGREE     `Mean`, the dispersion, the bounds and the
+                              quartiles are the mark's own, compared as numbers
+        THE CELL AGREES       the mark's series and position ids, looked up in
+                              the verified manifests, name this row's `Cell_Key`
 
-    Panels whose mark type has an `EVIDENCE_VERIFIER` get a fifth: the three
+    The last two are what makes this a value-to-cell join rather than a
+    method-provenance one. Without them two values in one panel that were read
+    the same way could EXCHANGE their marks and every check above still passed:
+    both hashes existed, neither was shared, the methods matched because they
+    were identical, and nothing compared the numbers. A `Cell_Key` swap had no
+    arithmetic signature at all.
+
+    Panels whose mark type has an `EVIDENCE_VERIFIER` get one more: the three
     methods are RE-DERIVED from the measurements and compared. The rest are held
     to the join, which is weaker and is not pretended otherwise.
     """
@@ -1022,11 +1145,34 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag):
             continue                  # verify_run_outputs owns unreadable bytes
         if _s(envelope.get("schema")) != RB.MARK_DATA_SCHEMA:
             continue                  # an older producer: the join is not there
+        panel = _s(envelope.get("Panel_ID"))
+        header = {k: v for k, v in envelope.items() if k != "marks"}
         for mark in envelope.get("marks") or []:
-            key = _s(mark.get("Mark_Record_SHA256"))
+            # RECOMPUTED, and the recomputed value is what the index is keyed by.
+            # A mark whose stated hash was edited to match an edited measurement
+            # would otherwise be found under the name it gave itself.
+            key = RB.mark_record_sha256(mark, header)
+            if _s(mark.get("Mark_Record_SHA256")) != key:
+                flag("panel:%s" % panel, "MARK_RECORD_HASH_MISMATCH",
+                     "a mark in %s's raw marks does not hash to the "
+                     "Mark_Record_SHA256 it carries (%s... against %s...); its "
+                     "measurement, its calibration or its panel box was changed "
+                     "after the run"
+                     % (panel, key[:16],
+                        _s(mark.get("Mark_Record_SHA256"))[:16] or "(blank)"))
+                withheld.add(panel)
+                continue
+            if _s(mark.get("Method_Attestation_SHA256")) \
+                    != RB.method_attestation_sha256(mark, key):
+                flag("panel:%s" % panel, "METHOD_ATTESTATION_STALE",
+                     "mark %s... in %s's raw marks carries methods that do not "
+                     "hash to its own attestation; one of them was rewritten "
+                     "after the run" % (key[:16], panel))
+                withheld.add(panel)
+                continue
             if key in by_hash:
                 duplicated.add(key)
-            by_hash[key] = (_s(envelope.get("Panel_ID")), mark)
+            by_hash[key] = (panel, mark)
     if not by_hash:
         return withheld
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
@@ -1086,6 +1232,40 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag):
             flag(where, "METHOD_ATTESTATION_STALE",
                  "the methods on this mark do not hash to the attestation the "
                  "value carries; something rewrote one of them after the run")
+            withheld.add(pid)
+            continue
+        # THE NUMBERS. A value column this row does not carry is not a
+        # contradiction - `to_value_records` writes the quartiles for a quantile
+        # summary and the mean for a continuous one, and neither is missing the
+        # other's - but a number that is NOT the mark's own is one, and this is
+        # the only check that can see it.
+        off = [(col, row.get(col), mark.get(field))
+               for col, field in MARK_VALUE_FIELDS
+               if not BM.blank(row.get(col))
+               and not _same_number(row.get(col), mark.get(field))]
+        if off:
+            flag(where, "VALUE_CONTRADICTS_MARK",
+                 "the value and the mark it cites disagree about %s"
+                 % "; ".join("%s (%s against the mark's %s)"
+                             % (col, _s(text) or "(blank)",
+                                "(nothing)" if number is None else number)
+                             for col, text, number in off))
+            withheld.add(pid)
+            continue
+        # AND THE CELL. The mark's own series and position ids, looked up in the
+        # manifests the run was validated against - so a value that carries the
+        # right number under the wrong heading is refused, which is the one
+        # failure with no arithmetic signature.
+        expected, why = _expected_cell_key(mark, maps.get(pid, EMPTY_CELL_MAP))
+        if why:
+            flag(where, "MARK_CELL_UNDECLARED", why)
+            withheld.add(pid)
+            continue
+        if _s(row.get("Cell_Key")) != expected:
+            flag(where, "CELL_CONTRADICTS_MARK",
+                 "this value is filed under %s and the mark it cites was read "
+                 "from the cell the manifests call %s"
+                 % (_s(row.get("Cell_Key")) or "(blank)", expected))
             withheld.add(pid)
             continue
         why = PROV.evidence_failure(mark_of.get(pid), mark, row)
@@ -1723,7 +1903,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # a panel whose values claim a route their reader could not have taken is
     # not a panel an approval can rescue.
     for pid in sorted(method_contract_failures(machine, queue, ledger_rows,
-                                               run_dir, flag)):
+                                               run_dir, flag, frames=verified)):
         artifact_types.pop(pid, None)
         contract_refused.add(pid)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,

@@ -3879,7 +3879,8 @@ _pt_probs = []
 check("an association whose cloud agrees with it is not withheld",
       not FIN.method_contract_failures(
           _assoc, pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
-          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c))
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
+          frames=RB.load_manifests(MDIR))
       and not _pt_probs, "%s" % _pt_probs)
 _pt_probs = []
 _lying_assoc = _assoc.copy()
@@ -3888,7 +3889,8 @@ check("and one that disagrees with the cloud it was computed from is refused",
       FIN.method_contract_failures(
           _lying_assoc,
           pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
-          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c))
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
+          frames=RB.load_manifests(MDIR))
       and "METHOD_CONTRADICTS_POINTS" in _pt_probs, "%s" % _pt_probs)
 
 # AND THE ROUTE ON THE VALUE IS CHECKED AGAINST THE FIGURE'S OWN ANSWER. v7.68.
@@ -3924,7 +3926,7 @@ _led_geo = pd.read_csv(os.path.join(_fin_dir, "panel_artifacts.csv"),
 _pg = []
 _held_geo = FIN.method_contract_failures(
     _lied, pd.DataFrame([dict(Panel_ID="P_SHORT", Mark_Type="BAR_MONO")]),
-    _led_geo, _fin_dir, lambda w, c, d: _pg.append(c))
+    _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
 check("a value claiming the stronger route is refused by the geometry it cites",
       _held_geo == {"P_SHORT"} and "METHOD_CONTRADICTS_GEOMETRY" in _pg,
       "%s" % _pg)
@@ -3933,7 +3935,7 @@ check("  while the run's own values agree with it",
       not FIN.method_contract_failures(
           _acc_geo, pd.DataFrame([dict(Panel_ID="P_SHORT",
                                        Mark_Type="BAR_MONO")]),
-          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c))
+          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
       and not _pg, "%s" % _pg)
 # REVERT: fold `Inference_Checked` back into a mode. This panel is queued
 # BAR_MONO_GEOMETRY_RESOLVED and holds a prototype-matched cell, so the question

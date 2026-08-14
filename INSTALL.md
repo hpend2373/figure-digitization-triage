@@ -5141,6 +5141,66 @@ which question it answers; nothing in the pipeline gates on it.
     the footer conflating the two halves of R3         1
     the third shared field unregistered                1
 
+## v7.72 — a value is joined to the mark it was made from
+
+The method contract was a MATRIX for five of the seven readers: it said which
+methods a reader COULD produce and nothing about which one THIS row's evidence
+came to. `BAR_MONO` and `SCATTER` had durable artifacts to be checked against;
+the rest were joinable to the raw marks only by panel, so a value could carry any
+mark's number and any method the matrix allowed.
+
+**`mark-data/2`.** Every mark in a panel's raw-marks file now carries two hashes,
+and the value rows carry both:
+
+    Mark_Record_SHA256         WHAT WAS MEASURED - this mark's geometry, under
+                               this panel box, this calibration and this raster
+    Method_Attestation_SHA256  HOW IT WAS READ - the three methods, bound to that
+                               measurement
+
+Two hashes rather than one, for the reason `Geometry_Row_SHA256` and
+`Auto_Identity_SHA256` are two: a method corrected later must not move the hash
+that answers "is this the same measurement".
+
+`finalize` then checks four things per value — the mark exists in the run, no two
+values cite one mark, the three methods equal the mark's EXACTLY (blank included),
+and the attestation recomputes from the mark's own fields. Then a fifth, where the
+reader has one: **the methods are re-derived from the measurements**.
+`expected_line_style_methods` recomputes all three for `LINE_MONO_STYLE` from the
+support columns, the occlusion cause and the drawing scale that reader had to
+measure anyway — no ink either side is `FIT_FALLBACK` whatever the row says, one
+side is `EXTRAPOLATED_CURVE_INK`, and a bracketed span goes back through
+`interpolation_method`. `EVIDENCE_VERIFIERS` has one entry today, and the mark
+types absent from it are held to the matrix and the join, which is weaker and is
+written down rather than implied away.
+
+The fixtures had to stop lying again, in the same way and for the same reason:
+five scenarios named a method and recorded no supports, which is now a reader
+claiming an interpolation it cannot show. `_style_evidence` writes the
+measurements each method rests on, in one place, so a scenario says one thing
+rather than two. The picture requirement is still tested — through a crop that
+could not be painted, which is the reason it can legitimately be missing.
+
+**`RESTORED_MASKED_CAP` is reserved, and the file says so.** It sat in the
+registry and in one reader's contract for a release looking exactly like a
+capability, with no emitter and no forward test behind it. `RESERVED_METHODS`
+names the five methods that are priced and not yet producible, the contract no
+longer claims `LINE_MONO_STYLE` can emit it, and a scenario asserts every
+dispersion method is either producible by some reader or reserved — never both,
+never neither. What it needs to become a capability is written beside it: cap
+masks kept apart instead of one `blind` union, ink on both sides of the covered
+stretch, the whole stretch explained by ONE known mask, a restored width inside
+the panel's own measured cap widths, and a real figure where that happens.
+
+    reverted                                          scenarios that fail
+    the mark join never consulted                      5
+    a value citing a mark nothing carries              1
+    one mark shared by two values                      1
+    the methods not compared with the mark's           1
+    the attestation not recomputed                     1
+    the methods not re-derived from the evidence       1
+    the two hashes collapsed into one                  1
+    RESTORED_MASKED_CAP claimed as producible          2
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5153,9 +5213,11 @@ which question it answers; nothing in the pipeline gates on it.
 - the overlay still marks inference from `line_style_source` rather than from
   `Identity_Method`, so a reader that answers the new question without setting
   the old field would star nothing
-- nothing emits `RESTORED_MASKED_CAP` yet: the mean has `Occlusion_Cause` and
-  the dispersion has no equivalent, so a cap restored across furniture this
-  reader removed is reported as a connected cap
+- `RESERVED_METHODS` is five methods deep: `RESTORED_MASKED_CAP`,
+  `INTERPOLATED_DISPERSION`, `FITTED_DISPERSION`, `DIRECT_BOUND_PAIR` and
+  `SOURCE_TRANSCRIBED` are priced and not producible. The first needs the reader
+  to keep its cap masks apart instead of one `blind` union, and a real figure
+  where a cap is partly covered by exactly one of them
 - the R3 context crop draws the two supports and the placed value, and NOT the
   occlusion mask: the mask lives in the reader's memory at read time and nothing
   downstream has it, so the cause is named in the caption rather than shaded
@@ -5168,15 +5230,10 @@ which question it answers; nothing in the pipeline gates on it.
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
-- the method contract is a MATRIX for five readers and a durable JOIN for two:
-  `BAR_MONO` against `mono_bar_geometry.csv` and `SCATTER` against its point
-  file. `LINE_COLOR`, `LINE_MONO`, `LINE_MONO_STYLE`, `BAR_COLOR` and
-  `BOX_VIOLIN` are matrix-only, so a `LINE_MONO_STYLE` row claiming
-  `DIRECT_CURVE_INK` for a number a fit produced is inside its reader's set and
-  passes. Closing it means promoting the raw marks JSON to an evidence envelope -
-  a per-mark measurement hash, a method attestation over it, and the value row
-  carrying both - and re-deriving the three methods from that evidence rather
-  than trusting them
+- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only. The
+  other six are held to the matrix and to the mark join, so a mark that lies
+  about itself consistently - the artifact and the value saying the same wrong
+  thing - is refused for those six only where the join or the matrix can see it
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

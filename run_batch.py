@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.71"
+PIPELINE_VERSION = "7.72"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1705,15 +1705,22 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         converted, statistic or "CONTINUOUS", unit_id,
         x_factor=(position_factor if any(r.get("x_label") for r in converted) else None),
         series_factor=(series_factor if any(r.get("series") for r in converted) else None))
+    envelope = {"schema": MARK_DATA_SCHEMA,
+                "Panel_ID": pid, "Unit_ID": unit_id, "Mark_Type": mark,
+                "Source_Image": resolved, "Image_SHA256": file_sha256(resolved),
+                "Reader_Version": MR.READER_VERSION,
+                "Y_Calibration": MR._calibration_record(ycal),
+                "X_Calibration": MR._calibration_record(xcal),
+                "Panel_Box": list(box)}
+    envelope["marks"] = stamp_marks(_jsonable(kept), envelope)
+    # Back onto the value rows, in the order `to_value_records` preserves - the
+    # same pairing the inference crops rely on. This is what lets a value be
+    # joined to the mark it was made from rather than merely to the panel.
+    for record, stamped in zip(records, envelope["marks"]):
+        record["Mark_Record_SHA256"] = stamped["Mark_Record_SHA256"]
+        record["Method_Attestation_SHA256"] = stamped["Method_Attestation_SHA256"]
     with open(raw_path, "w", encoding="utf-8") as fh:
-        json.dump({"schema": "figure-digitization-triage/mark-data/1",
-                   "Panel_ID": pid, "Unit_ID": unit_id, "Mark_Type": mark,
-                   "Source_Image": resolved, "Image_SHA256": file_sha256(resolved),
-                   "Reader_Version": MR.READER_VERSION,
-                   "Y_Calibration": MR._calibration_record(ycal),
-                   "X_Calibration": MR._calibration_record(xcal),
-                   "Panel_Box": list(box), "marks": _jsonable(kept)},
-                  fh, indent=1, sort_keys=True)
+        json.dump(envelope, fh, indent=1, sort_keys=True)
 
     project = None
     if project_dir:
@@ -2386,6 +2393,65 @@ def _all_cells(series_level, position_level):
                 levels[pf] = pl
             if levels:
                 out.add(GE.fig_cell_key(levels))
+    return out
+
+
+#: Bumped to /2 in v7.72: every mark carries a measurement hash and an
+#: attestation over the methods read off it, so a value row can be joined to the
+#: mark it was made from and the join can be checked by somebody who did not make
+#: either.
+MARK_DATA_SCHEMA = "figure-digitization-triage/mark-data/2"
+
+#: The fields a mark's METHODS are written in. Outside the measurement hash, for
+#: the reason `mono_bar_geometry.UNHASHED_FIELDS` exists: how a measurement was
+#: interpreted is a different claim from what was measured, and a hash that mixes
+#: them cannot answer "is this the same mark" after an identity is resolved.
+MARK_METHOD_FIELDS = tuple(PROV.METHOD_FIELDS)
+
+
+def mark_record_sha256(mark, envelope):
+    """WHAT WAS MEASURED: this mark's own geometry, under this calibration.
+
+    The panel box, the calibration and the raster hash are in it because a pixel
+    is only a measurement relative to them - the same reason `write_point_data`
+    refuses to store a value without the pixel and the calibration that produced
+    it.
+    """
+    material = {k: v for k, v in mark.items()
+                if k not in MARK_METHOD_FIELDS
+                and k not in ("Mark_Record_SHA256",
+                              "Method_Attestation_SHA256")}
+    return sha256_of_text(json.dumps(
+        {"mark": material,
+         "Panel_Box": envelope.get("Panel_Box"),
+         "X_Calibration": envelope.get("X_Calibration"),
+         "Y_Calibration": envelope.get("Y_Calibration"),
+         "Image_SHA256": envelope.get("Image_SHA256"),
+         "Panel_ID": envelope.get("Panel_ID")},
+        sort_keys=True, default=float))
+
+
+def method_attestation_sha256(mark, record_sha):
+    """HOW IT WAS READ: the three methods, bound to the measurement.
+
+    Two hashes rather than one, exactly as `Geometry_Row_SHA256` and
+    `Auto_Identity_SHA256` are two: an identity resolved later must not move the
+    hash that answers "is this the same measurement", and a method swapped later
+    must not hide behind one that does.
+    """
+    return sha256_of_text(json.dumps(
+        dict({f: _s(mark.get(f)) for f in MARK_METHOD_FIELDS},
+             Mark_Record_SHA256=record_sha), sort_keys=True))
+
+
+def stamp_marks(marks, envelope):
+    """Every mark with its two hashes, ready to be written and joined to."""
+    out = []
+    for mark in marks:
+        record_sha = mark_record_sha256(mark, envelope)
+        out.append(dict(mark, Mark_Record_SHA256=record_sha,
+                        Method_Attestation_SHA256=method_attestation_sha256(
+                            mark, record_sha)))
     return out
 
 

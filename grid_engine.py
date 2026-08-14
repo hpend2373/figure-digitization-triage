@@ -212,6 +212,11 @@ def fig_values_columns():
         # are about the MEAN: a cell whose mean came off the ink and whose error
         # bar was read from a cap no stem connects to it priced R0 twice.
         "Dispersion_Method",
+        # WHICH MARK THIS VALUE WAS MADE FROM, and how that mark's methods were
+        # attested. The value file and the raw marks were joinable only by panel
+        # until v7.72, so a value could carry any mark's number and any method
+        # the matrix allowed.
+        "Mark_Record_SHA256", "Method_Attestation_SHA256",
         # AND WHAT A RECONSTRUCTED NUMBER WAS RECONSTRUCTED FROM - the two
         # columns with ink, the span between them, what covered it, and the
         # drawing scale that span has to be local against. Blank for every reader

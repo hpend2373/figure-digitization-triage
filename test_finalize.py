@@ -208,8 +208,46 @@ def style_reader(assign):
             row.pop("Identity_Method", None)
             row.pop("Value_Method", None)
             assign(i, row)
+            _style_evidence(row)
         return rows
     return wrapped
+
+
+def _style_evidence(row):
+    """Give the stand-in's mark the measurements its method claims to rest on.
+
+    v7.72 re-derives a LINE_MONO_STYLE row's methods from its own evidence, so a
+    fixture that names a method and records no supports is a reader claiming an
+    interpolation it cannot show - which is what the new check exists to refuse.
+    Setting the evidence here keeps every scenario below saying one thing rather
+    than two, and keeps the honesty in one place.
+    """
+    method = row.get("Value_Method")
+    row["line_style_source"] = (
+        "MEASURED" if row.get("Identity_Method") == "MEASURED_LINE_STYLE"
+        else row.get("Identity_Method"))
+    x = float(row["x"])
+    for key in ("Value_Support_Left_Px", "Value_Support_Right_Px",
+                "Value_Span_Px", "Occlusion_Cause", "Occlusion_Width_Px",
+                "Local_Stroke_Px", "Expected_Dash_Gap_Px"):
+        row.pop(key, None)
+    if method == "FIT_FALLBACK":
+        return                                   # no ink either side, and it says so
+    if method == "EXTRAPOLATED_CURVE_INK":
+        row["Value_Support_Left_Px"] = x - 3
+        return
+    if method == "DIRECT_CURVE_INK":
+        row["Value_Support_Left_Px"] = row["Value_Support_Right_Px"] = x
+        return
+    row.update(Value_Support_Left_Px=x - 2, Value_Support_Right_Px=x + 2,
+               Value_Span_Px=4, Occlusion_Width_Px=3, Local_Stroke_Px=6,
+               Expected_Dash_Gap_Px=0,
+               Occlusion_Cause={"LOCAL_BRACKETED_INTERPOLATION": "MIXED",
+                                "RESTORED_MASKED_FURNITURE": "ERRORBAR_STEM",
+                                "RESTORED_LINE_PATTERN_GAP": "NONE"}
+               .get(method, "MIXED"))
+    if method == "NONLOCAL_INTERPOLATION":
+        row.update(Value_Span_Px=40, Local_Stroke_Px=2)
 
 
 def fresh_run(name, **over):
@@ -870,20 +908,11 @@ def _reconstructed(i, r):
     r["Identity_Method"] = "MEASURED_LINE_STYLE"
     r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 2
                          else "DIRECT_CURVE_INK")
-    if i < 2:
-        # A READER THAT RECONSTRUCTS A NUMBER SAYS BETWEEN WHICH COLUMNS. The
-        # first version of this wrapper set the method and nothing else, which is
-        # a reader claiming a bracketed interpolation with no brackets - and from
-        # v7.67 that panel is refused, because no picture of the cell can be
-        # drawn from a row that does not say where the ink was.
-        r["Value_Support_Left_Px"] = float(r["x"]) - 2
-        r["Value_Support_Right_Px"] = float(r["x"]) + 2
-        r["Value_Span_Px"] = 4
-        r["Occlusion_Cause"] = "ERRORBAR_STEM"
-        r["Occlusion_Width_Px"] = 3
-        r["Local_Stroke_Px"] = 2
-        r["Expected_Dash_Gap_Px"] = 0
-        r["Trace_Agreement"] = "AGREED"
+    # A READER THAT RECONSTRUCTS A NUMBER SAYS BETWEEN WHICH COLUMNS, and from
+    # v7.72 the finalizer re-derives the method from those columns - so the
+    # evidence is written by `_style_evidence` for every method this stand-in
+    # names, in one place, rather than by each scenario for its own.
+    r["Trace_Agreement"] = "AGREED"
 
 
 try:
@@ -1049,20 +1078,26 @@ check("every cell asked about by name has a picture of itself",
 check("  registered against the Inference_ID it belongs to, not by filename",
       all(_s_ref.startswith("INF_") for _s_ref in _ctx3["Artifact_Reference"]),
       "%s" % list(_ctx3["Artifact_Reference"]))
-# A READER THAT RECONSTRUCTS A NUMBER WITHOUT SAYING BETWEEN WHICH COLUMNS gets
-# no picture, and a cell nobody can see is a cell nobody can confirm. Refused,
-# rather than confirmed against a caption.
+# A CELL NOBODY CAN SEE IS A CELL NOBODY CAN CONFIRM. The picture can go missing
+# for a reason that is nobody's fault - a crop that could not be painted, which
+# `draw_inference_context` reports rather than raising, exactly as every other
+# picture in this package does. (A reader that claims a bracketed interpolation
+# and records no supports is refused earlier and harder, by the evidence check
+# below: it is not a missing picture, it is a missing measurement.)
 def _no_supports(i, r):
     r["Identity_Method"] = "MEASURED_LINE_STYLE"
     r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 1
                          else "DIRECT_CURVE_INK")
 
 
+_real_context = RB.OVERLAY.draw_inference_context
 try:
     MR.read_panel = style_reader(_no_supports)
+    RB.OVERLAY.draw_inference_context = lambda *a, **kw: None
     _NOCTX_DIR, _ = fresh_run("run_nocontext", **_STYLE)
 finally:
     MR.read_panel = _real_read_panel
+    RB.OVERLAY.draw_inference_context = _real_context
 _led_noctx = pd.read_csv(os.path.join(_NOCTX_DIR, "panel_artifacts.csv"),
                          dtype=object).fillna("")
 _q_noctx = pd.read_csv(os.path.join(_NOCTX_DIR, "review_queue.csv"),
@@ -1073,7 +1108,7 @@ _r_noctx = FIN.finalize(_NOCTX_DIR, review_path=review(
          Inference_Checked="CONFIRMED")],
     path=os.path.join(_NOCTX_DIR, "value_review.csv")),
     run_date="2026-08-06", today=datetime.date(2026, 8, 6))
-check("a reconstruction with no supports on the row can be pictured by nobody",
+check("a reconstruction whose picture could not be painted has none registered",
       len(_cells_noctx) == 1
       and not any(_led_noctx["Artifact_Type"] == "INFERENCE_CONTEXT"),
       "%s" % sorted(set(_led_noctx["Artifact_Type"])))
@@ -1239,6 +1274,91 @@ _held, _ = FIN.inference_contract_failures(
     panels={"P1"})
 check("and so is one whose list is not the questions its values ask",
       _held == {"P1"} and "INFERENCE_MANIFEST_MISMATCH" in _p3, "%s" % _p3)
+
+print()
+print("a value is joined to the mark it was made from, and checked against it")
+# v7.72. The matrix says which methods a reader CAN produce; this says which one
+# THIS row's own evidence came to. Five of the seven readers had no durable
+# artifact for that question at all - the raw marks and the values were joinable
+# only by panel, so a value could carry any mark's number and any method the
+# matrix allowed.
+_marks_led = pd.read_csv(os.path.join(_R3_DIR, "panel_artifacts.csv"),
+                         dtype=object).fillna("")
+_marks_path = RB.resolve_artifact(
+    _R3_DIR, _marks_led[_marks_led["Artifact_Type"] == "RAW_MARKS"]
+    .iloc[0]["Artifact_Path"])
+_envelope = json.load(open(_marks_path, encoding="utf-8"))
+check("every mark carries a measurement hash and an attestation over its methods",
+      _envelope["schema"].endswith("/2")
+      and all(len(m["Mark_Record_SHA256"]) == 64
+              and len(m["Method_Attestation_SHA256"]) == 64
+              for m in _envelope["marks"]),
+      "%s" % _envelope["schema"])
+check("  and the value rows cite them, so the join is by content",
+      set(_qc3["Mark_Record_SHA256"])
+      == {m["Mark_Record_SHA256"] for m in _envelope["marks"]},
+      "%d values, %d marks" % (len(_qc3), len(_envelope["marks"])))
+# THE TWO HASHES ARE TWO CLAIMS. A method resolved or corrected later must not
+# move the hash that answers "is this the same measurement" - the same separation
+# `Geometry_Row_SHA256` and `Auto_Identity_SHA256` have had since v7.29.
+_m0 = dict(_envelope["marks"][0])
+_env0 = {k: v for k, v in _envelope.items() if k != "marks"}
+check("the measurement hash ignores the methods, and the attestation does not",
+      RB.mark_record_sha256(dict(_m0, Value_Method="FIT_FALLBACK"), _env0)
+      == RB.mark_record_sha256(_m0, _env0)
+      and RB.method_attestation_sha256(dict(_m0, Value_Method="FIT_FALLBACK"),
+                                       _m0["Mark_Record_SHA256"])
+      != RB.method_attestation_sha256(_m0, _m0["Mark_Record_SHA256"]),
+      "%s" % _m0["Mark_Record_SHA256"][:16])
+check("  and a mark measured differently is a different mark",
+      RB.mark_record_sha256(dict(_m0, mean=float(_m0["mean"]) + 1.0), _env0)
+      != RB.mark_record_sha256(_m0, _env0))
+
+
+def _joined(rows):
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame(rows),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
+        _marks_led, _R3_DIR, lambda w, c, d: seen.append(c))
+    return held, seen
+
+
+_rows3 = _qc3.to_dict("records")
+_held_j, _seen_j = _joined(_rows3)
+check("the run's own values pass the join they were stamped by",
+      not _held_j and not _seen_j, "%s" % _seen_j)
+_held_j, _seen_j = _joined([dict(_rows3[0], Mark_Record_SHA256="f" * 64)])
+check("a value citing a mark no artifact carries has no evidence at all",
+      _held_j == {"P1"} and "MARK_EVIDENCE_MISSING" in _seen_j, "%s" % _seen_j)
+_held_j, _seen_j = _joined([dict(_rows3[0]),
+                            dict(_rows3[1],
+                                 Mark_Record_SHA256=_rows3[0]
+                                 ["Mark_Record_SHA256"])])
+check("and one printed mark cannot be the evidence for two values",
+      _held_j == {"P1"} and "MARK_EVIDENCE_SHARED" in _seen_j, "%s" % _seen_j)
+_held_j, _seen_j = _joined([dict(_rows3[0], Value_Method="DIRECT_CURVE_INK")])
+check("a method swapped on the value disagrees with the mark it cites",
+      _held_j == {"P1"} and "METHOD_CONTRADICTS_MARK" in _seen_j, "%s" % _seen_j)
+_held_j, _seen_j = _joined([dict(_rows3[0],
+                                 Method_Attestation_SHA256="0" * 64)])
+check("  and an attestation that does not recompute is refused as well",
+      _held_j == {"P1"} and "METHOD_ATTESTATION_STALE" in _seen_j, "%s" % _seen_j)
+# AND THE METHODS ARE RE-DERIVED FROM THE MEASUREMENTS. The join above catches a
+# value that lies about its mark; this catches a MARK that lies about itself, and
+# it is the difference between "possible" and "true".
+check("a mark whose own supports do not support its method is refused",
+      PROV.evidence_failure(
+          "LINE_MONO_STYLE",
+          dict(line_style_source="MEASURED", Value_Support_Left_Px="",
+               Value_Support_Right_Px="", Errorbar_Stem_Confirmed="TRUE"),
+          dict(Identity_Method="MEASURED_LINE_STYLE",
+               Value_Method="DIRECT_CURVE_INK",
+               Dispersion_Method="DIRECT_CONNECTED_CAP")),
+      "no ink either side and DIRECT_CURVE_INK was accepted")
+check("  and a reader the registry cannot re-derive is left to the matrix",
+      not PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
+                                dict(Value_Method="BOX_GEOMETRY")))
 
 print()
 print("an approval is a person, looking at this extraction, saying so")

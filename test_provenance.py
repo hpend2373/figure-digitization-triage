@@ -283,6 +283,23 @@ check("and a reader cannot claim a spread its own geometry does not offer",
       and not P.dispersion_contract_failure("A_READER_FROM_2027", "ANYTHING"),
       P.dispersion_contract_failure("BOX_VIOLIN", "DIRECT_CONNECTED_CAP"))
 
+# A METHOD IS EITHER PRODUCIBLE OR RESERVED, AND THE FILE SAYS WHICH. v7.72.
+# `RESTORED_MASKED_CAP` sat in the registry and in one reader's contract for a
+# release looking exactly like a capability, with no emitter and no forward test
+# behind it. A vocabulary ahead of the readers is deliberate; a vocabulary that
+# does not say so is a claim about software that does not exist.
+_producible = {m for methods in P.DISPERSION_CONTRACT.values() for m in methods}
+check("every dispersion method is producible by some reader or reserved",
+      set(P.DISPERSION_METHODS) == _producible | set(P.RESERVED_METHODS),
+      "%s" % sorted(set(P.DISPERSION_METHODS)
+                    - _producible - set(P.RESERVED_METHODS)))
+check("  and none is both, which would be a contract contradicting itself",
+      not (_producible & set(P.RESERVED_METHODS)),
+      "%s" % sorted(_producible & set(P.RESERVED_METHODS)))
+check("  and a reserved method still has a tier, so it is priced when it lands",
+      all(P.dispersion_tier(m) in P.TIERS for m in P.RESERVED_METHODS
+          if m in P.DISPERSION_METHODS))
+
 print()
 print("an occlusion cause this registry cannot name is a defect, not a tier")
 # v7.66. `interpolation_method` tested for NONE and for MIXED and returned the

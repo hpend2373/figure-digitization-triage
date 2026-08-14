@@ -978,6 +978,120 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag):
             withheld.add(pid)
     withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
+    withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
+                                        flag)
+    return withheld
+
+
+def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag):
+    """Values joined to the MARK they were made from, and checked against it.
+
+    The matrix says which methods a reader can produce. This says which one THIS
+    row's own evidence came to - the difference between "possible" and "true", and
+    the thing five of the seven readers had no durable artifact for.
+
+    Four checks, and each one closes a different way of getting a cheap tier:
+
+        the mark exists       a value citing a `Mark_Record_SHA256` no raw-mark
+                              artifact carries is a value with no evidence
+        one mark, one value   two values citing one mark means one of them was
+                              made from something else
+        the methods agree     exactly, blank included: an artifact that says
+                              nothing does not support a claim
+        the attestation holds recomputed from the mark's own fields, so swapping
+                              a method inside the artifact is caught too
+
+    Panels whose mark type has an `EVIDENCE_VERIFIER` get a fifth: the three
+    methods are RE-DERIVED from the measurements and compared. The rest are held
+    to the join, which is weaker and is not pretended otherwise.
+    """
+    withheld = set()
+    mark_of = {_s(r.get("Panel_ID")): _s(r.get("Mark_Type")).upper()
+               for _, r in queue.iterrows()}
+    by_hash, duplicated = {}, set()
+    for _, art in ledger_rows.iterrows():
+        if _s(art.get("Artifact_Type")) != "RAW_MARKS":
+            continue
+        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+        if path is None or not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                envelope = json.load(fh)
+        except Exception:
+            continue                  # verify_run_outputs owns unreadable bytes
+        if _s(envelope.get("schema")) != RB.MARK_DATA_SCHEMA:
+            continue                  # an older producer: the join is not there
+        for mark in envelope.get("marks") or []:
+            key = _s(mark.get("Mark_Record_SHA256"))
+            if key in by_hash:
+                duplicated.add(key)
+            by_hash[key] = (_s(envelope.get("Panel_ID")), mark)
+    if not by_hash:
+        return withheld
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    claimed_by = {}
+    for row in rows:
+        pid = _s(row.get("Run_Panel_ID"))
+        key = _s(row.get("Mark_Record_SHA256"))
+        if not key:
+            continue                  # a reader that does not stamp its marks
+        claimed_by.setdefault(key, []).append(row)
+    for key, sharing in sorted(claimed_by.items()):
+        if len(sharing) > 1:
+            for row in sharing:
+                flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                     "MARK_EVIDENCE_SHARED",
+                     "%d values cite the same mark %s; one printed mark is one "
+                     "measurement, and which of them it belongs to cannot be "
+                     "decided by row order" % (len(sharing), key[:16]))
+                withheld.add(_s(row.get("Run_Panel_ID")))
+    for key, sharing in sorted(claimed_by.items()):
+        row = sharing[0]
+        pid = _s(row.get("Run_Panel_ID"))
+        where = "%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")))
+        if key in duplicated:
+            flag(where, "MARK_EVIDENCE_MISSING",
+                 "the raw marks carry %s twice, so the mark this value was made "
+                 "from cannot be identified" % key[:16])
+            withheld.add(pid)
+            continue
+        if key not in by_hash:
+            flag(where, "MARK_EVIDENCE_MISSING",
+                 "this value cites mark %s and no raw-mark artifact in the run "
+                 "carries it" % key[:16])
+            withheld.add(pid)
+            continue
+        mark_panel, mark = by_hash[key]
+        if mark_panel and pid and mark_panel != pid:
+            flag(where, "MARK_EVIDENCE_MISSING",
+                 "this value is filed under %s and the mark it cites was read "
+                 "from %s" % (pid, mark_panel))
+            withheld.add(pid)
+            continue
+        wrong = [f for f in PROV.METHOD_FIELDS
+                 if _s(row.get(f)) != _s(mark.get(f))]
+        if wrong:
+            flag(where, "METHOD_CONTRADICTS_MARK",
+                 "the value and the mark it was made from disagree about %s (%s "
+                 "against %s)"
+                 % (", ".join(wrong),
+                    "/".join(_s(row.get(f)) or "nothing" for f in wrong),
+                    "/".join(_s(mark.get(f)) or "nothing" for f in wrong)))
+            withheld.add(pid)
+            continue
+        want = RB.method_attestation_sha256(mark, key)
+        if _s(row.get("Method_Attestation_SHA256")) != want:
+            flag(where, "METHOD_ATTESTATION_STALE",
+                 "the methods on this mark do not hash to the attestation the "
+                 "value carries; something rewrote one of them after the run")
+            withheld.add(pid)
+            continue
+        why = PROV.evidence_failure(mark_of.get(pid), mark, row)
+        if why:
+            flag(where, "METHOD_CONTRADICTS_EVIDENCE", why)
+            withheld.add(pid)
     return withheld
 
 

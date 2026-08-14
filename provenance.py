@@ -252,13 +252,38 @@ METHOD_CONTRACT = {
 DISPERSION_CONTRACT = {
     "LINE_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
     "LINE_MONO": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
-    "LINE_MONO_STYLE": {"DIRECT_CONNECTED_CAP", "RESTORED_MASKED_CAP",
-                        "NO_DISPERSION"},
+    # NOT `RESTORED_MASKED_CAP`: it is reserved, and listing it here said this
+    # reader could produce it, which is what a contract is for saying.
+    "LINE_MONO_STYLE": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
     "BAR_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
     "BAR_MONO": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
     "BOX_VIOLIN": {"DIRECT_BOX_GEOMETRY"},
     "SCATTER": {"NO_DISPERSION"},
 }
+
+
+#: PRICED, AND NOT YET PRODUCIBLE. A method in this set has a tier and a place in
+#: the ladder and no reader that can emit it: the vocabulary is ahead of the
+#: readers on purpose, because pricing a case before meeting it is how the ladder
+#: stays a ladder rather than a list of whatever the last figure needed.
+#:
+#: Saying so is the point. `RESTORED_MASKED_CAP` sat in the registry and in one
+#: reader's contract for a release looking exactly like a capability - and a
+#: capability nothing produces and no forward test exercises is a claim about
+#: software that does not exist. What it needs before it becomes one:
+#:
+#:   the reader keeps its cap masks apart instead of one `blind` union
+#:   a candidate cap with ink on BOTH sides of the covered stretch
+#:   the whole stretch explained by one known mask
+#:   the restored cap width inside the panel's own measured cap widths
+#:   a real figure where that happens, read against a person's reading
+#:
+#: `SOURCE_TRANSCRIBED` is reserved for a different reason: it belongs to a value
+#: copied from the paper's text, and no reader reads text.
+RESERVED_METHODS = frozenset((
+    "RESTORED_MASKED_CAP", "INTERPOLATED_DISPERSION", "FITTED_DISPERSION",
+    "DIRECT_BOUND_PAIR", "SOURCE_TRANSCRIBED",
+))
 
 
 def dispersion_contract_failure(mark_type, dispersion_method):
@@ -271,6 +296,85 @@ def dispersion_contract_failure(mark_type, dispersion_method):
         return ""
     return ("%s cannot produce Dispersion_Method=%s; its spread comes from %s"
             % (mark_type, text, " or ".join(sorted(allowed))))
+
+
+#: The three method fields, in one place, because everything that carries or
+#: compares them has to carry or compare all three.
+METHOD_FIELDS = ("Identity_Method", "Value_Method", "Dispersion_Method")
+
+
+def expected_line_style_methods(mark):
+    """The three methods a LINE_MONO_STYLE mark's own evidence implies.
+
+    RE-DERIVED, not read. The matrix says which methods a reader COULD emit; this
+    says which one THIS mark's measurements come to, and the difference is the
+    whole gap between "possible" and "true". Everything below is on the mark
+    record already, because `line_style_mono` had to measure it to decide - so
+    nothing new is trusted, and a value row claiming a cheaper method than its own
+    ink supports has no way through.
+
+    Returns `{field: method}` for the fields it can answer and omits the rest, so
+    a caller compares what is derivable rather than demanding what is not.
+    """
+    out = {}
+    source = str(mark.get("line_style_source", "") or "").strip()
+    if source:
+        out["Identity_Method"] = ("MEASURED_LINE_STYLE" if source == "MEASURED"
+                                  else "COMPLEMENT_OF_DECLARED_STYLES"
+                                  if source == "COMPLEMENT_OF_DECLARED_STYLES"
+                                  else source)
+    left = str(mark.get("Value_Support_Left_Px", "") or "").strip()
+    right = str(mark.get("Value_Support_Right_Px", "") or "").strip()
+    if not left and not right:
+        # No ink either side: the fit produced the number, whatever else the row
+        # says about spans and occlusions.
+        out["Value_Method"] = "FIT_FALLBACK"
+    elif not left or not right:
+        out["Value_Method"] = "EXTRAPOLATED_CURVE_INK"
+    elif left == right:
+        out["Value_Method"] = "DIRECT_CURVE_INK"
+    else:
+        cause = str(mark.get("Occlusion_Cause", "") or "").strip()
+        if cause in OCCLUSION_CAUSES:
+            out["Value_Method"] = interpolation_method(
+                mark.get("Value_Span_Px"), mark.get("Local_Stroke_Px"),
+                mark.get("Expected_Dash_Gap_Px"), cause)
+    stem = str(mark.get("Errorbar_Stem_Confirmed", "") or "").strip().upper()
+    if stem in ("TRUE", "FALSE"):
+        out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
+                                    else "NO_DISPERSION")
+    return out
+
+
+#: Mark type -> the function that re-derives its methods from its own evidence.
+#:
+#: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
+#: every value method there is, reaches R2, R3 and R4 on real figures, and already
+#: carries the support columns, the occlusion cause and the drawing scale its
+#: decision was made from. A mark type absent from this table is checked by the
+#: matrix and by the artifact join, and not by re-derivation - which is a real
+#: difference in strength and is written down rather than implied away.
+EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods}
+
+
+def evidence_failure(mark_type, mark, claimed):
+    """Why this mark's evidence does not support the methods claimed, or "".
+
+    `claimed` is the value row's three fields. Blank on either side is a failure:
+    evidence that says nothing does not support a claim, which is the shape two
+    earlier joins had to learn twice.
+    """
+    verifier = EVIDENCE_VERIFIERS.get(str(mark_type or "").strip().upper())
+    if verifier is None:
+        return ""
+    expected = verifier(mark)
+    wrong = []
+    for field, want in sorted(expected.items()):
+        got = str(claimed.get(field, "") or "").strip()
+        if got != want:
+            wrong.append("%s: the evidence supports %s and the value says %s"
+                         % (field, want, got or "nothing"))
+    return "; ".join(wrong)
 
 
 def contract_failure(mark_type, identity_method, value_method):

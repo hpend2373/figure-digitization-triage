@@ -1630,6 +1630,12 @@ MARK_CARRIED = (
     # blank beside a dispersion NUMBER prices at the highest tier rather than the
     # lowest.
     ("Dispersion_Method", "Dispersion_Method"),
+    # AND WHICH MARK THIS VALUE WAS MADE FROM, by content. `run_batch` stamps
+    # both onto the mark and onto the value in one place, so a value can be
+    # joined to its own evidence rather than to the panel that happens to contain
+    # it - and the join can be checked by somebody who made neither.
+    ("Mark_Record_SHA256", "Mark_Record_SHA256"),
+    ("Method_Attestation_SHA256", "Method_Attestation_SHA256"),
     ("Bar_Top_Definition", "Bar_Top_Definition"),
     ("Bar_Direction", "Bar_Direction"),
     ("Position_Assignment", "Position_Assignment"),

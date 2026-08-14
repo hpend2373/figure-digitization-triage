@@ -76,6 +76,22 @@ NO_OCCLUSION = "NONE"
 #: it. Not "furniture", because the claim is that the WHOLE gap is explained.
 MIXED_OCCLUSION = "MIXED"
 
+#: The furniture a reader may claim to have removed over a whole gap. ONE
+#: vocabulary, here, and `line_style_mono.BLIND_CAUSES` is built from it: the
+#: reader named its masks in string literals and this module tested for two of
+#: them, so `ERROR_BAR_STEM` for `ERRORBAR_STEM` - one character - would have
+#: fallen through `interpolation_method` to the FURNITURE branch and priced an
+#: unexplained gap at R1.
+#:
+#: That is the fail-open this file refuses everywhere else: an unregistered
+#: identity or value method costs R4 rather than R0, and the token those methods
+#: are DERIVED FROM had the opposite rule. It is a defect in a reader rather than
+#: a property of a figure, so it raises instead of pricing - the same reasoning
+#: `InternalReaderError` is built on, where one reader's defect stops the batch
+#: rather than mis-reading 115 more publications quietly.
+OCCLUSION_CAUSES = ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP",
+                    MIXED_OCCLUSION, NO_OCCLUSION)
+
 
 def interpolation_method(span, stroke, dash_gap, occlusion):
     """Which of the four bracketed interpolations this one is.
@@ -108,6 +124,12 @@ def interpolation_method(span, stroke, dash_gap, occlusion):
     says the same thing at any rendering, because both references are measured
     on the figure rather than chosen in pixels.
     """
+    if occlusion not in OCCLUSION_CAUSES:
+        raise ValueError(
+            "Occlusion_Cause=%r is not one of %s. An unrecognised cause cannot "
+            "be priced: the branch below would read it as furniture this reader "
+            "removed and charge R1 for a gap nobody has explained"
+            % (occlusion, "/".join(OCCLUSION_CAUSES)))
     reach = max(float(stroke or 0), float(dash_gap or 0))
     if float(span or 0) > reach:
         # Wider than anything the figure draws at this scale. Whatever covered

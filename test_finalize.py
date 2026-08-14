@@ -315,17 +315,20 @@ check("and it is not reported as nobody having looked",
       _rall["status"] != "NOTHING_APPROVED" and not os.path.exists(
           os.path.join(_ALL_DIR, "figure_values_accepted.csv")))
 
-# A BLANK PAIR IS AN ABSENCE OF EVIDENCE, NOT A MEASUREMENT OF UNSAFETY. Readers
-# that do not answer these two questions yet are still the majority. Gating on
-# blank would refuse their values outright - pilot_beckers would stop reaching
-# POOLING_ELIGIBLE and every scenario above would go dark - so the answer to an
-# absence is to count it and say so.
+# A BLANK PAIR IS NOT AN ABSENCE THIS GATE MAY WAIVE - v7.66, and this scenario
+# is the reverse of what it asserted for five releases.
 #
-# THE BLANKNESS IS PRODUCED, not inherited. This fixture's panel is LINE_COLOR,
-# which has answered both questions since v7.64 - so the scenario that simply ran
-# the fixture stopped testing the blank case the moment a reader was taught, and
-# said so by failing. An untaught reader is one that returns rows without the two
-# keys, which is exactly what this wrapper does.
+# v7.61 blocked only a pair that was STATED and priced at an unfinalizable tier.
+# That exception was correct then and only then: five of the six readers answered
+# neither question, and treating blank as R4 refused every value in the package.
+# v7.64 and v7.65 taught all six, so the exception now protects nothing this
+# package produces - and what it does protect is a run made by SOMETHING ELSE.
+# `review_tier("", "")` has always been R4; the point of pricing an unregistered
+# method at the top is that a gate acts on it.
+#
+# THE BLANKNESS IS PRODUCED, not inherited: this fixture's panel is LINE_COLOR,
+# which answers both questions, so an untaught producer is simulated by a wrapper
+# that returns rows without the two keys.
 def _no_methods(*a, **kw):
     rows = _real_read_panel(*a, **kw)
     for r in rows:
@@ -347,13 +350,59 @@ _rb = FIN.finalize(_BLANK_DIR, review_path=review(
     run_date="2026-08-06", today=datetime.date(2026, 8, 6))
 _stamp_plain = json.load(open(os.path.join(_BLANK_DIR, "finalize_stamp.json"),
                               encoding="utf-8"))
-check("a reader that does not answer yet is counted, not refused",
-      _rb["status"] == "FINALIZED"
-      and _stamp_plain["Values_Method_Unstated"] == _stamp_plain["Values_Accepted"]
-      and _stamp_plain["Values_Method_Blocked"] == 0, "%s" % _stamp_plain)
-check("and the gap is a flag on the run, not a silence",
-      any(p["check"] == "VALUE_METHOD_UNSTATED" for p in _stamp_plain["Problems"]),
-      "%s" % [p["check"] for p in _stamp_plain["Problems"]])
+check("a value that does not say how it was got is refused, not counted",
+      _rb["status"] == "NOTHING_FINALIZABLE"
+      and _stamp_plain["Values_Accepted"] == 0
+      and not os.path.exists(os.path.join(_BLANK_DIR,
+                                          "figure_values_accepted.csv")),
+      "%s" % _rb)
+check("and the refusal is counted in the stamp, not only in the problem list",
+      _stamp_plain["Values_Method_Unstated"] > 0
+      and _stamp_plain["Values_Method_Blocked"]
+      == _stamp_plain["Values_Method_Unstated"], "%s" % _stamp_plain)
+check("and every refused cell is named, with the reason and the tier",
+      sum(1 for p in _stamp_plain["Problems"]
+          if p["check"] == "VALUE_METHOD_UNSTATED" and "/" in p["where"])
+      == _stamp_plain["Values_Method_Unstated"]
+      and all("R4" in p["detail"] for p in _stamp_plain["Problems"]
+              if p["check"] == "VALUE_METHOD_UNSTATED" and "/" in p["where"]),
+      "%s" % [p["where"] for p in _stamp_plain["Problems"]])
+# HALF-BLANK IS BLANK. A row naming how the number was got and not how the series
+# was named is a number with no series behind it, and the pair is what is priced.
+def _half_stated(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for r in rows:
+        r.pop("Identity_Method", None)
+        r["Value_Method"] = "MARKER_CENTER"
+    return rows
+
+
+try:
+    MR.read_panel = _half_stated
+    _HALF_DIR, _ = fresh_run("run_half")
+finally:
+    MR.read_panel = _real_read_panel
+_fph = pd.read_csv(os.path.join(_HALF_DIR, "review_queue.csv"),
+                   dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+_rh = FIN.finalize(_HALF_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_fph)],
+    path=os.path.join(_HALF_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+_stamp_half = json.load(open(os.path.join(_HALF_DIR, "finalize_stamp.json"),
+                             encoding="utf-8"))
+check("a row that answers one of the two questions is refused as well",
+      _rh["status"] == "NOTHING_FINALIZABLE" and _rh["accepted"] == 0,
+      "%s" % _rh)
+check("  and is counted as UNSTATED, not as a method that failed on its merits",
+      _stamp_half["Values_Method_Unstated"] == _stamp_half["Values_Method_Blocked"]
+      > 0
+      and all(p["check"] == "VALUE_METHOD_UNSTATED"
+              for p in _stamp_half["Problems"]),
+      "%s" % {p["check"] for p in _stamp_half["Problems"]})
+check("  because the PAIR is what is priced, not the better half",
+      PROV.review_tier("", "MARKER_CENTER") == "R4"
+      and PROV.review_tier("MEASURED_COLOUR", "MARKER_CENTER") == "R0",
+      PROV.review_tier("", "MARKER_CENTER"))
 # AND A READER THAT DOES ANSWER CLOSES THE GAP. Same fixture, same panel, the real
 # reader: v7.64 taught LINE_COLOR, so this run's values say how the series was
 # named and how the number was got, the flag does not fire, and the count is zero.
@@ -528,6 +577,46 @@ check("the identifier is derived from the cell, the method and the number",
       and RB.inference_id(_probe, panel_id="P1")
       != RB.inference_id(_probe, panel_id="P2"),
       RB.inference_id(_probe, panel_id="P1"))
+# AND FROM THE EVIDENCE, NOT ONLY THE ANSWER - v7.66. Hashing the cell, the
+# methods and the number binds the OUTPUT, and output and evidence move
+# independently: a re-run whose supports shift and whose occlusion changes from
+# one cause to MIXED can land on the same mean, and a curve is smooth enough over
+# a few pixels that it does not have to be much of a coincidence. The identifier
+# was then unchanged and a confirmation given against the first reconstruction
+# attached itself to the second. The panel's subject hash does go stale in that
+# case - but the two files are filled in by different people at different times,
+# and nothing made the cell answer expire with the panel one.
+_evidence = dict(_probe, Source_Panel_ID="P1", Value_Span_Px="3",
+                 Value_Support_Left_Px="101", Value_Support_Right_Px="104",
+                 Occlusion_Cause="ERRORBAR_STEM", Occlusion_Width_Px="2",
+                 Local_Stroke_Px="3", Expected_Dash_Gap_Px="0",
+                 Trace_Agreement="AGREED")
+_base_id = RB.inference_id(_evidence, panel_id="P1")
+for _field, _moved in (("Value_Support_Left_Px", "96"),
+                       ("Value_Support_Right_Px", "109"),
+                       ("Value_Span_Px", "13"),
+                       ("Occlusion_Cause", "MIXED"),
+                       ("Occlusion_Width_Px", "6"),
+                       ("Local_Stroke_Px", "4"),
+                       ("Expected_Dash_Gap_Px", "5"),
+                       ("Trace_Agreement",
+                        "CONSERVATIVE_OF_CONFLICTING_TRACES")):
+    check("  %s moving refuses the old confirmation, at the same mean" % _field,
+          RB.inference_id(dict(_evidence, **{_field: _moved}), panel_id="P1")
+          != _base_id, _field)
+check("  while a re-run that reproduces the evidence keeps the same id",
+      RB.inference_id(dict(_evidence), panel_id="P1") == _base_id
+      # And a number that has been through a CSV hashes as the number it is:
+      # the run derives these in memory and `finalize` derives them again from
+      # the file, so `12.5` and `"12.50"` cannot be two different questions.
+      and RB.inference_id(dict(_evidence, Mean=12.50), panel_id="P1") == _base_id
+      and RB.inference_id(dict(_evidence, Value_Span_Px="3.0"),
+                          panel_id="P1") == _base_id, _base_id)
+check("  and every field of the row a reviewer reads is in the recipe",
+      set(RB.INFERENCE_IDENTITY_FIELDS)
+      == set(RB.INFERENCE_MANIFEST_COLUMNS) - {"Inference_ID"},
+      "%s" % sorted(set(RB.INFERENCE_MANIFEST_COLUMNS)
+                    - {"Inference_ID"} - set(RB.INFERENCE_IDENTITY_FIELDS)))
 check("and the ids in the file are the ones the finalizer re-derives",
       {r["Inference_ID"] for r in _cells3}
       == {RB.inference_id(v, panel_id=FIN._s(v.get("Run_Panel_ID")))

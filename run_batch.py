@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.65"
+PIPELINE_VERSION = "7.66"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -806,35 +806,72 @@ INFERENCE_MANIFEST_COLUMNS = [
     "Value_Span_Px", "Value_Support_Left_Px", "Value_Support_Right_Px",
     "Occlusion_Cause", "Occlusion_Width_Px", "Local_Stroke_Px",
     "Expected_Dash_Gap_Px",
+    # Whether the forward and backward traces agreed about this cell, or the
+    # more conservative of two disagreeing readings was taken. It is part of what
+    # a person is being asked to accept, so it is on the row they read - and
+    # therefore in the identifier below.
+    "Trace_Agreement",
 ]
 
-#: What an `Inference_ID` is derived FROM. Not a counter: a counter renumbers
-#: when a cell is added, so every confirmation in the file would silently move to
-#: a different cell.
+#: What an `Inference_ID` is derived FROM: EVERY COLUMN OF THE ROW THE REVIEWER
+#: READS, which is what makes the identifier a hash of the question rather than a
+#: label on it. Not a counter - a counter renumbers when a cell is added, so
+#: every confirmation in the file would silently move to a different cell.
 #:
-#: The NUMBER is in here on purpose. A per-cell confirmation says "this
-#: reconstruction of this value is sound", and a re-run that reconstructs the
-#: same cell to a different number has not been confirmed - the id changes and
-#: the exact-set contract asks again. The panel-level `Review_Subject_SHA256`
-#: would also go stale, so this is belt and braces; the belt is worth having
-#: because these two files can be filled in by different people at different
-#: times.
-INFERENCE_IDENTITY_FIELDS = ("Panel_ID", "Unit_ID", "Cell_Key",
-                             "Identity_Method", "Value_Method",
-                             "Mean", "Dispersion_Value")
+#: ## Why the whole row and not just the answer
+#:
+#: v7.63 hashed the cell, the two methods and the number. That binds the
+#: OUTPUT and not the EVIDENCE, and the two can move independently: a re-run
+#: whose supports shift from 101-104 to 96-109 and whose occlusion goes from
+#: ERRORBAR_STEM to MIXED can land on the same mean by coincidence, and did not
+#: have to land on it by much of one - a curve is smooth over a few pixels. The
+#: identifier was then unchanged, and a confirmation given against the first
+#: reconstruction attached itself to the second.
+#:
+#: The panel's `Review_Subject_SHA256` does go stale in that case, so the PANEL
+#: has to be approved again - but the two files are filled in by different people
+#: at different times, and nothing made the cell-level answer expire with the
+#: panel-level one. What a person confirms at this grain is "this reconstruction,
+#: from these supports, across this occlusion, at this drawing scale", and every
+#: one of those is a column here.
+#:
+#: Every field must be one the VALUE ROW carries, because `finalize` re-derives
+#: these identifiers from `figure_values_machine_qc.csv` rather than trusting the
+#: manifest. That is why the raster hash is not in the recipe: it is not on the
+#: value row, and the panel signature covers it.
+INFERENCE_IDENTITY_FIELDS = tuple(c for c in INFERENCE_MANIFEST_COLUMNS
+                                  if c != "Inference_ID")
+
+
+def _canon_field(value):
+    """One spelling for a number that has been through a CSV and one that has not.
+
+    The run derives these identifiers from value records in memory and `finalize`
+    derives them again from the file those records were written to, so `90.0` the
+    float and `"90.0"` the string have to hash the same - and so do `"90"` and
+    `"90.0"`, which is the same number written by two different writers.
+    """
+    text = _s(value)
+    if not text:
+        return ""
+    try:
+        return repr(float(text))
+    except (TypeError, ValueError):
+        return text
 
 
 def inference_id(record, panel_id=""):
     """A content-derived identifier for one cell's reconstructed value.
 
-    Stable across re-runs that produce the same cell the same way, different the
-    moment any of `INFERENCE_IDENTITY_FIELDS` differs. Uniqueness within a run
-    follows from the value contract - one row per (Unit_ID, Cell_Key) - rather
+    Stable across re-runs that reproduce the cell AND its evidence; different the
+    moment any column of `INFERENCE_IDENTITY_FIELDS` moves. Uniqueness within a
+    run follows from the value contract - one row per (Unit_ID, Cell_Key) - rather
     than from a check here that nothing could reach.
     """
     material = "|".join(
-        "%s=%s" % (key, _s(panel_id) if key == "Panel_ID" and panel_id
-                   else _s(record.get(key)))
+        "%s=%s" % (key, _canon_field(panel_id)
+                   if key == "Panel_ID" and panel_id
+                   else _canon_field(record.get(key)))
         for key in INFERENCE_IDENTITY_FIELDS)
     return "INF_" + sha256_of_text(material)[:16]
 

@@ -236,6 +236,45 @@ check("R4 asks for no confirmation, because it grants no finalization",
       "%r / %r" % (P.PANEL_CONFIRMATION_TIERS, P.CELL_CONFIRMATION_TIERS))
 
 print()
+print("an occlusion cause this registry cannot name is a defect, not a tier")
+# v7.66. `interpolation_method` tested for NONE and for MIXED and returned the
+# FURNITURE answer for everything else - so a reader emitting `ERROR_BAR_STEM`
+# for `ERRORBAR_STEM`, one character, had its unexplained gap priced at R1: the
+# tier that asks for no signature at all. Everywhere else in this file an
+# unregistered token costs the HIGHEST tier, and the token these methods are
+# derived from had the opposite rule.
+_reach = dict(span=1, stroke=3, dash_gap=0)
+check("a cause the registry knows is priced by which cause it is",
+      P.interpolation_method(occlusion="ERRORBAR_STEM", **_reach)
+      == "RESTORED_MASKED_FURNITURE"
+      and P.interpolation_method(occlusion=P.NO_OCCLUSION, **_reach)
+      == "RESTORED_LINE_PATTERN_GAP"
+      and P.interpolation_method(occlusion=P.MIXED_OCCLUSION, **_reach)
+      == "LOCAL_BRACKETED_INTERPOLATION")
+for _typo in ("ERROR_BAR_STEM", "errorbar_stem", "", "GRIDLINE", None):
+    try:
+        _got = P.interpolation_method(occlusion=_typo, **_reach)
+    except ValueError:
+        _got = None
+    check("  and one it does not is refused rather than read as furniture (%r)"
+          % (_typo,), _got is None, "returned %r" % (_got,))
+# ONE VOCABULARY. The reader named its masks in string literals and this module
+# tested for two of them; the copy is what let them drift.
+import line_style_mono as _LSM                                     # noqa: E402
+check("and the reader's causes are built from this list, not spelled again",
+      set(_LSM.BLIND_CAUSES) | {P.NO_OCCLUSION, P.MIXED_OCCLUSION}
+      == set(P.OCCLUSION_CAUSES)
+      and P.NO_OCCLUSION not in _LSM.BLIND_CAUSES
+      and P.MIXED_OCCLUSION not in _LSM.BLIND_CAUSES,
+      "%r vs %r" % (_LSM.BLIND_CAUSES, P.OCCLUSION_CAUSES))
+# And every cause the reader can actually put on a row survives the round trip -
+# a vocabulary that raises on its own reader's output would stop every batch.
+for _cause in _LSM.BLIND_CAUSES:
+    check("  %s is a cause this registry prices" % _cause,
+          P.interpolation_method(occlusion=_cause, **_reach)
+          == "RESTORED_MASKED_FURNITURE")
+
+print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

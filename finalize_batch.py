@@ -1234,8 +1234,13 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                   "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=1, sort_keys=True)
 
-    def stop(status, detail, approved=0, accepted=0):
-        stamp(status, detail, approved=approved, accepted=accepted)
+    def stop(status, detail, approved=0, accepted=0, blocked=0, unstated=0):
+        # The counts travel with the refusal too. A NOTHING_FINALIZABLE stamp
+        # reporting `Values_Method_Blocked: 0` says the opposite of what
+        # happened: it refused everything and then reported refusing nothing,
+        # and the problem list was the only place the truth survived.
+        stamp(status, detail, approved=approved, accepted=accepted,
+              blocked=blocked, unstated=unstated)
         return dict(status=status, approved=approved, accepted=accepted,
                     problems=problems, detail=detail)
 
@@ -1418,24 +1423,30 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     # APPROVED decision over such a value is a signature on something nobody
     # could have checked.
     #
-    # ## Why this gate asks whether the methods are STATED, and does not treat a
-    # ## blank as R4
+    # ## A blank pair is refused too, and for four releases it was not
     #
     # `review_tier("", "")` is R4, and that is right where it is: an unregistered
-    # method must not look safer than a registered bad one. Applied here as a
-    # block it would refuse every value in the package, because five of the six
-    # readers do not answer these two questions yet - `pilot_beckers` would stop
-    # reaching POOLING_ELIGIBLE and every scenario in `test_finalize` would go
-    # dark. That is not a safety improvement, it is a shutdown, and shipping it
-    # as one would have been the most expensive way possible to discover that
-    # blank is not the same claim as "measured, and unsafe".
+    # method must not look safer than a registered bad one. v7.61 nevertheless
+    # blocked only a pair that was STATED, because applying it to blank would
+    # have refused every value in the package - five of the six readers answered
+    # neither question then, `pilot_beckers` would have stopped reaching
+    # POOLING_ELIGIBLE and every scenario in `test_finalize` would have gone
+    # dark. That was a shutdown rather than a safety improvement, and the
+    # exception was written down as temporary in as many words: "when the other
+    # readers can answer, the blank case becomes a block and the count goes to
+    # zero on its own".
     #
-    # So this gate refuses what it KNOWS: a pair that is stated and prices at a
-    # tier no signature can finalize. A blank pair is an absence of evidence, and
-    # the answer to an absence is to count it and say so - `Values_Unstated` on
-    # the stamp, and one flag per run - rather than to pretend either way. When
-    # the other readers can answer, the blank case becomes a block and the count
-    # goes to zero on its own.
+    # v7.64 and v7.65 taught all six. Publication 397 states 123 of 123, the
+    # count went to zero, and v7.66 removed the exception. What it protected at
+    # the end was not this package's output but somebody else's: an older
+    # producer, a hand-built values file, a reader with a typo in one of the two
+    # column names. This module exists to be producer-independent, and a
+    # provenance gate that waives itself whenever the provenance is missing is
+    # the one shape that cannot be.
+    #
+    # HALF-BLANK IS BLANK. `review_tier` prices the PAIR, not the better half: a
+    # row naming how the number was got and not how the series was named is a
+    # number with no series behind it.
     blocked_count = unstated = 0
     if len(keep):
         stated, tiers = [], []
@@ -1444,32 +1455,53 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
             value = _s(row.get("Value_Method"))
             stated.append(bool(identity and value))
             tiers.append(PROV.review_tier(identity, value))
-        blocked = [is_stated and tier not in PROV.FINALIZABLE_TIERS
-                   for is_stated, tier in zip(stated, tiers)]
+        # THE BLANK EXCEPTION IS GONE - v7.66. Until now a row was blocked only
+        # if it was STATED and priced at an unfinalizable tier; a blank or
+        # half-blank pair was counted, flagged and accepted. That branch was
+        # written in v7.61 for a package where five of the six readers answered
+        # neither question, and wiring blank straight into this gate then refused
+        # every value there was. v7.64 and v7.65 taught all six - publication 397
+        # states 123 of 123 - so the exception now protects nothing this package
+        # produces, and what it does protect is a run made by SOMETHING ELSE:
+        # an older producer, a hand-built values file, a reader with a typo in one
+        # of the two column names. `review_tier("", "")` has always been R4, and
+        # the whole point of pricing an unregistered method at the top is that a
+        # gate then acts on it.
+        #
+        # HALF-BLANK IS BLANK. A row naming a value method and no identity method
+        # is a number with no series behind it, and `review_tier` already prices
+        # the pair rather than the better half.
+        blocked = [tier not in PROV.FINALIZABLE_TIERS for tier in tiers]
         unstated = sum(1 for is_stated in stated if not is_stated)
         blocked_count = sum(1 for b in blocked if b)
         if unstated:
             flag("run", "VALUE_METHOD_UNSTATED",
-                 "%d of %d approved values do not say how they were got. The "
-                 "readers that answer are gated on it; the rest are not gated "
-                 "at all, which is a gap in this run and not a property of the "
-                 "values" % (unstated, len(keep)))
+                 "%d of %d approved values do not say how they were got, and "
+                 "are refused. A value whose provenance is absent is not a value "
+                 "whose provenance is good - every reader in this package answers "
+                 "both questions, so a row that does not was produced by "
+                 "something else" % (unstated, len(keep)))
         if any(blocked):
-            for (_, row), is_blocked, tier in zip(keep.iterrows(), blocked, tiers):
+            for (_, row), is_blocked, tier, is_stated in zip(
+                    keep.iterrows(), blocked, tiers, stated):
                 if not is_blocked:
                     continue
                 flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
-                     "VALUE_METHOD_NOT_FINALIZABLE",
-                     "Identity_Method=%s Value_Method=%s is %s: the number was "
-                     "not read off the ink, and an overlay cannot show a "
-                     "reviewer the difference"
+                     ("VALUE_METHOD_NOT_FINALIZABLE" if is_stated
+                      else "VALUE_METHOD_UNSTATED"),
+                     "Identity_Method=%s Value_Method=%s is %s: %s"
                      % (_s(row.get("Identity_Method")) or "(blank)",
-                        _s(row.get("Value_Method")) or "(blank)", tier))
+                        _s(row.get("Value_Method")) or "(blank)", tier,
+                        "the number was not read off the ink, and an overlay "
+                        "cannot show a reviewer the difference" if is_stated
+                        else "nothing says how this number was got, so nothing "
+                             "can say it is safe to pool"))
             keep = keep[[not b for b in blocked]].copy()
         if not len(keep):
             return stop("NOTHING_FINALIZABLE",
                         "every approved value was read at a tier no signature "
-                        "can finalize", approved=len(approved))
+                        "can finalize", approved=len(approved),
+                        blocked=blocked_count, unstated=unstated)
 
     # And the reconstructions a person looked at and refused. Dropped here rather
     # than in the contract above, so that a REJECTED cell costs one value while a

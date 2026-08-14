@@ -267,7 +267,11 @@ def _column_runs(mask, x, max_thickness=7):
 #: three-pixel dash gap is the difference between restoring a printed stroke and
 #: guessing at one, and a boolean union cannot tell them apart. Neither can the
 #: span: they are the same width.
-BLIND_CAUSES = ("ERRORBAR_STEM", "HORIZONTAL_RULE", "WHISKER_CAP")
+#: Built from the registry rather than spelled again here. Two copies of a
+#: vocabulary are two chances to disagree, and the disagreement priced an
+#: unexplained gap at R1 rather than refusing it.
+BLIND_CAUSES = tuple(c for c in PROV.OCCLUSION_CAUSES
+                     if c not in (PROV.NO_OCCLUSION, PROV.MIXED_OCCLUSION))
 
 #: The two sentinels live in `provenance`, with the vocabulary that reads them.
 NO_OCCLUSION = PROV.NO_OCCLUSION

@@ -4723,6 +4723,77 @@ printing 0 would be a requirement in name only.
 All six readers now answer both questions. What is left is not a reader but a
 grain: `Dispersion_Method`.
 
+## v7.66 — three holes in the producer-independent contract
+
+All three were raised in review against v7.65, and all three are the same shape:
+a check that is strict about what this package produces and lenient about what
+something else might.
+
+**A blank pair no longer buys a signature.** v7.61 blocked a value only if its
+method pair was STATED and priced at an unfinalizable tier. `review_tier("", "")`
+has always been R4, so a row with no methods at all — or with one of the two —
+was counted, flagged and accepted. That exception was correct exactly once: five
+of the six readers answered neither question, and blocking blank would have
+refused every value in the package. It was written down as temporary in as many
+words, and v7.64 and v7.65 discharged the condition — 397 states 123 of 123, the
+count went to zero on its own. What the exception protected at the end was not
+this package's output but an older producer's, a hand-built values file, or a
+reader with a typo in a column name. A provenance gate that waives itself
+whenever the provenance is missing is the one shape that cannot be
+producer-independent.
+
+Half-blank is blank: `review_tier` prices the pair, not the better half. The
+refusals are per cell, coded `VALUE_METHOD_UNSTATED` rather than
+`VALUE_METHOD_NOT_FINALIZABLE` — "nothing says how this number was got" and "this
+is how, and it is not enough" are different findings. And the counts now travel
+with a `NOTHING_FINALIZABLE` stamp, which used to report
+`Values_Method_Blocked: 0` after refusing everything.
+
+**`Inference_ID` binds the evidence, not just the answer.** It hashed the cell,
+the two methods, the mean and the dispersion — the OUTPUT. Output and evidence
+move independently: a re-run whose supports shift from 101–104 to 96–109 and
+whose occlusion goes from `ERRORBAR_STEM` to `MIXED` can land on the same mean,
+and over a few pixels of a smooth curve that is not much of a coincidence. The id
+was then unchanged, and a cell confirmation given against the first
+reconstruction attached itself to the second. The panel's
+`Review_Subject_SHA256` does go stale — but the two files are filled in by
+different people at different times, and nothing made the cell answer expire with
+the panel one.
+
+The recipe is now every column of the row the reviewer reads —
+`INFERENCE_IDENTITY_FIELDS` is derived from `INFERENCE_MANIFEST_COLUMNS`, so a
+column added to the manifest enters the identifier by construction — plus
+`Trace_Agreement`, which the manifest now carries. Every field has to be one the
+VALUE ROW carries, because `finalize` re-derives these identifiers from
+`figure_values_machine_qc.csv` rather than trusting the manifest; that is why the
+raster hash is not in it, and the panel signature covers the raster anyway.
+Numbers are canonicalised through `float`, because the run derives these in
+memory and the finalizer derives them again from a CSV.
+
+**An occlusion cause the registry cannot name is a defect, not a tier.**
+`interpolation_method` tested for `NONE` and `MIXED` and returned the FURNITURE
+answer for everything else, so `ERROR_BAR_STEM` for `ERRORBAR_STEM` — one
+character — would have priced an unexplained gap at R1, the tier that asks for no
+signature at all. Everywhere else in `provenance.py` an unregistered token costs
+the HIGHEST tier; the token these methods are DERIVED FROM had the opposite rule.
+`OCCLUSION_CAUSES` is now the one vocabulary, `line_style_mono.BLIND_CAUSES` is
+built from it rather than spelled again, and an unrecognised cause raises — a
+reader that emits one is a defect in a reader, and this package already stops the
+batch for those rather than mis-reading 115 more publications quietly.
+
+    reverted                                          scenarios that fail
+    the blank exception back                           4
+    half-blank counted as stated                       1
+    the counts dropped from the refusal stamp          3
+    the id binding only the answer                     9
+    no canonical spelling for a number                 1
+    an unknown cause read as furniture                 5
+    the reader spelling its vocabulary again           1 + 1, in two suites
+
+Still open from the same review, and neither is a pooling-safety defect: a
+refused R4 cell is not routed to anybody as a durable work item, and an R3
+reviewer has pixel numbers rather than a picture of the two supports.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4738,6 +4809,14 @@ grain: `Dispersion_Method`.
 - `Dispersion_Method` does not exist: the two provenance fields are about the
   MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
   priced as whatever its mean was priced at
+- a value refused as R4 is dropped from the accepted file and counted on the
+  stamp, and becomes nobody's work item: it is not written to
+  `manual_queue_cells.csv` or anywhere else a person picks work up from, so
+  "26 of 123 refused" is a number a reviewer meets after approving the panel
+- an R3 reviewer is given the support pixels, the span and the occlusion cause
+  as NUMBERS. There is no per-cell crop drawing the two supports, the
+  interpolated span and the occlusion mask over the figure, so the confirmation
+  asks a person to hold a coordinate in their head against the original
 - `HUMAN_RESOLUTION` is priced R0 by the registry and has no review channel of
   its own: the resolution row, its evidence and the reviewer are checked by
   `identity_contract_failures`, but nothing asks the person who APPROVES the

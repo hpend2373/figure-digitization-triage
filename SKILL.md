@@ -75,6 +75,25 @@ answer for a cell this run did not produce holds the whole panel. `REJECTED` is
 an answer — it drops that one value and keeps the rest, and the finalize stamp
 counts them in `Values_Inference_Rejected`.
 
+**Look at the picture, not the pixel numbers.** Beside each row the run writes
+one crop — `inference-review/context__<Panel_ID>__<Cell_Key>.png`, registered in
+`panel_artifacts.csv` against that row's `Inference_ID` — showing the stretch of
+figure between the two supporting columns, each support in blue, and the column
+and row where the value was placed in red. A value sitting outside its own two
+supports is the defect the picture exists for. The finalizer refuses a panel
+whose reconstructed cell has no such crop: the row alone gives the supports as
+pixel coordinates, and confirming those against a printed figure by eye is
+arithmetic nobody can check.
+
+**Values no signature can finalize are work, not a footnote.**
+`method_blocked_cells.csv` is written by the RUN, before anybody reviews: one row
+per cell whose number was not read off the ink (`FIT_FALLBACK`,
+`EXTRAPOLATED_CURVE_INK`, `NONLOCAL_INTERPOLATION`, or a reader that says
+nothing), with `Cell_State=MODEL_ESTIMATE_ONLY`, `Next_Action=MANUAL_REDIGITIZATION`
+and the raster to re-read it from. `Values_Method_Blocked` on `run_stamp.json` is
+the count. The panel still goes to review — its other cells stand — but nobody
+has to discover the refusal from a number on a finalize stamp after signing.
+
 The axis question is the one worth being slow about. If a tick VALUE was typed
 wrong — a printed 30 entered as 3 — every bar in the panel is ten times out
 TOGETHER, no arithmetic can see it, and the panel picture is the only place it

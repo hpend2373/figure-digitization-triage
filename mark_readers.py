@@ -1606,6 +1606,30 @@ IDENTITY_CARRIED = (
 
 
 
+#: WHAT A RECONSTRUCTED NUMBER WAS RECONSTRUCTED FROM. Carried like
+#: `IDENTITY_CARRIED` and listed apart from `MARK_CARRIED` for the same reason:
+#: only a reader that interpolates HAS these, and a line panel's three-pixel span
+#: is not a question a bar reader can answer.
+#:
+#: They existed on the reader row from v7.58 and stopped there. `Inference_ID`
+#: was then bound to them in v7.66 - the recipe named all eight - and every one
+#: of them hashed as the empty string, because the value row the finalizer
+#: re-derives from did not carry them. The comment beside the recipe said "every
+#: field must be one the VALUE ROW carries"; nothing checked that it was true,
+#: which is the same defect as v7.51's field whitelist and was found the same
+#: way, by looking at what an artifact actually contained.
+INTERPOLATION_CARRIED = (
+    ("Value_Span_Px", "Value_Span_Px"),
+    ("Value_Support_Left_Px", "Value_Support_Left_Px"),
+    ("Value_Support_Right_Px", "Value_Support_Right_Px"),
+    ("Occlusion_Cause", "Occlusion_Cause"),
+    ("Occlusion_Width_Px", "Occlusion_Width_Px"),
+    ("Local_Stroke_Px", "Local_Stroke_Px"),
+    ("Expected_Dash_Gap_Px", "Expected_Dash_Gap_Px"),
+    ("Trace_Agreement", "Trace_Agreement"),
+)
+
+
 ASSOCIATION_CARRIED = (
     "Association_Type", "Association_Value", "P_Value", "P_Value_Method",
     "N_Pairs", "P_Value_Extraction_Method", "Ties_Present",
@@ -1779,7 +1803,8 @@ def to_value_records(rows, statistic_type, unit_id, x_factor=None,
         if not levels:
             raise ValueError("at least one Cell_Key factor must be supplied")
         record = dict(Unit_ID=unit_id, Cell_Key=_cell_key(levels))
-        for source, column in MARK_CARRIED + IDENTITY_CARRIED:
+        for source, column in (MARK_CARRIED + IDENTITY_CARRIED
+                               + INTERPOLATION_CARRIED):
             if row.get(source) is not None:
                 record[column] = row.get(source)
         if kind == "CONTINUOUS":

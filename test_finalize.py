@@ -279,6 +279,37 @@ check("while the ones read off the ink are",
       "%d of %d, %r" % (len(_acc4), len(_qc), sorted(set(_acc4["Value_Method"]))))
 _stamp4 = json.load(open(os.path.join(_R4_DIR, "finalize_stamp.json"),
                          encoding="utf-8"))
+# AND THE REFUSAL IS SOMEBODY'S WORK, at run time rather than after an approval.
+# v7.67. The value is dropped and counted, and until now that was the end of it:
+# a reviewer met "one of eight refused" after signing for the panel, with no list
+# of which one or what to do about it.
+_blocked_list = pd.read_csv(os.path.join(_R4_DIR, "method_blocked_cells.csv"),
+                            dtype=object).fillna("")
+check("the run writes the refused cell down as work, before anybody reviews it",
+      len(_blocked_list) == 1
+      and _blocked_list.iloc[0]["Value_Method"] == "FIT_FALLBACK"
+      and _blocked_list.iloc[0]["Cell_State"] == "MODEL_ESTIMATE_ONLY"
+      and _blocked_list.iloc[0]["Next_Action"] == "MANUAL_REDIGITIZATION",
+      "%s" % _blocked_list.to_dict("records"))
+check("  with the raster to re-read it from, and the cell to re-read",
+      bool(_blocked_list.iloc[0]["Image_Path"])
+      and bool(_blocked_list.iloc[0]["Cell_Key"])
+      and bool(_blocked_list.iloc[0]["Unit_ID"]),
+      "%s" % _blocked_list.to_dict("records"))
+check("  and the panel is still queued for review, because its other cells stand",
+      list(pd.read_csv(os.path.join(_R4_DIR, "review_queue.csv"),
+                       dtype=object).fillna("")["Panel_ID"]) == ["P1"])
+# The cells that CAN be finalized are not on the list. A work list that names
+# every cell is a work list nobody reads.
+check("  and a value a signature can finalize is not somebody's work",
+      len(_blocked_list) < len(_qc), "%d of %d" % (len(_blocked_list), len(_qc)))
+# ON THE RUN STAMP, so it is known before an afternoon is spent reviewing rather
+# than after. The finalize stamp says the same number from the other end.
+_run_stamp4 = json.load(open(os.path.join(_R4_DIR, "run_stamp.json"),
+                             encoding="utf-8"))
+check("  and the run says how many before anybody opens the queue",
+      _run_stamp4["Values_Method_Blocked"] == len(_blocked_list) == 1,
+      "%s" % _run_stamp4.get("Values_Method_Blocked"))
 check("the stamp counts what it refused, so the yield is not a mystery",
       _stamp4["Values_Method_Blocked"] == 1
       and _stamp4["Values_Accepted"] == len(_qc) - 1, "%s" % _stamp4)
@@ -523,6 +554,21 @@ def _reconstructed(*a, **kw):
         r["Identity_Method"] = "MEASURED_LINE_STYLE"
         r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 2
                              else "DIRECT_CURVE_INK")
+        if i >= 2:
+            continue
+        # A READER THAT RECONSTRUCTS A NUMBER SAYS BETWEEN WHICH COLUMNS. The
+        # first version of this wrapper set the method and nothing else, which is
+        # a reader claiming a bracketed interpolation with no brackets - and from
+        # v7.67 that panel is refused, because no picture of the cell can be
+        # drawn from a row that does not say where the ink was.
+        r["Value_Support_Left_Px"] = float(r["x"]) - 2
+        r["Value_Support_Right_Px"] = float(r["x"]) + 2
+        r["Value_Span_Px"] = 4
+        r["Occlusion_Cause"] = "ERRORBAR_STEM"
+        r["Occlusion_Width_Px"] = 3
+        r["Local_Stroke_Px"] = 2
+        r["Expected_Dash_Gap_Px"] = 0
+        r["Trace_Agreement"] = "AGREED"
     return rows
 
 
@@ -556,9 +602,28 @@ check("the run wrote that list and registered it, so it is hashed",
                                              _man3.iloc[0]["Artifact_Path"]))
       and len(_man3.iloc[0]["SHA256"]) == 64,
       "%s" % _man3.to_dict("records"))
-_cells3 = FIN.collect_inference_manifests(_R3_DIR)
 _qc3 = pd.read_csv(os.path.join(_R3_DIR, "figure_values_machine_qc.csv"),
                    dtype=object).fillna("")
+_cells3 = FIN.collect_inference_manifests(_R3_DIR)
+# THE EVIDENCE IS ON THE ROW, not only in the reader's memory. v7.66 bound
+# `Inference_ID` to these eight columns and every one of them hashed as the empty
+# string, because the value row the finalizer re-derives from did not carry them:
+# the recipe named columns that existed on the mark and nowhere else.
+_manifest_evidence = [r for r in _cells3
+                      if all(FIN._s(r.get(c)) for c in
+                             ("Value_Span_Px", "Value_Support_Left_Px",
+                              "Value_Support_Right_Px", "Occlusion_Cause",
+                              "Local_Stroke_Px", "Trace_Agreement"))]
+check("the list a reviewer reads carries the evidence, not just the answer",
+      len(_manifest_evidence) == len(_cells3) == 2,
+      "%s" % [{k: v for k, v in r.items() if "Px" in k or "Occlusion" in k}
+              for r in _cells3])
+check("  and the same columns are on the value row the finalizer re-derives from",
+      all(c in _qc3.columns for c in RB.INFERENCE_IDENTITY_FIELDS
+          if c not in ("Panel_ID",)),
+      "%s" % [c for c in RB.INFERENCE_IDENTITY_FIELDS
+              if c not in ("Panel_ID",) and c not in _qc3.columns])
+
 check("and it lists the reconstructed cells and nothing else",
       len(_cells3) == 2
       and {r["Value_Method"] for r in _cells3} == {"LOCAL_BRACKETED_INTERPOLATION"}
@@ -637,6 +702,56 @@ check("dropping the list of cells changes what the approval is of",
           {"Panel_ID": "P1"}, [], {}, {},
           artifacts=[a for a in _arts3 if a[0] != "INFERENCE_MANIFEST"]),
       "%s" % [a[0] for a in _arts3])
+
+_ids3_pre = sorted(r["Inference_ID"] for r in _cells3)
+# AND A PICTURE OF EACH ONE. The manifest gives a reviewer the supports, the span
+# and the cause as pixel NUMBERS; holding a coordinate in your head against a
+# printed figure is arithmetic performed by somebody who cannot check it.
+_ctx3 = _led3[_led3["Artifact_Type"] == "INFERENCE_CONTEXT"]
+check("every cell asked about by name has a picture of itself",
+      len(_ctx3) == 2
+      and set(_ctx3["Artifact_Reference"]) == set(_ids3_pre)
+      and all(os.path.exists(RB.resolve_artifact(_R3_DIR, p_))
+              for p_ in _ctx3["Artifact_Path"]),
+      "%s" % _ctx3[["Artifact_Path", "Artifact_Reference"]].to_dict("records"))
+check("  registered against the Inference_ID it belongs to, not by filename",
+      all(_s_ref.startswith("INF_") for _s_ref in _ctx3["Artifact_Reference"]),
+      "%s" % list(_ctx3["Artifact_Reference"]))
+# A READER THAT RECONSTRUCTS A NUMBER WITHOUT SAYING BETWEEN WHICH COLUMNS gets
+# no picture, and a cell nobody can see is a cell nobody can confirm. Refused,
+# rather than confirmed against a caption.
+def _no_supports(*a, **kw):
+    rows = _real_read_panel(*a, **kw)
+    for i, r in enumerate(rows):
+        r["Identity_Method"] = "MEASURED_LINE_STYLE"
+        r["Value_Method"] = ("LOCAL_BRACKETED_INTERPOLATION" if i < 1
+                             else "DIRECT_CURVE_INK")
+    return rows
+
+
+try:
+    MR.read_panel = _no_supports
+    _NOCTX_DIR, _ = fresh_run("run_nocontext")
+finally:
+    MR.read_panel = _real_read_panel
+_led_noctx = pd.read_csv(os.path.join(_NOCTX_DIR, "panel_artifacts.csv"),
+                         dtype=object).fillna("")
+_q_noctx = pd.read_csv(os.path.join(_NOCTX_DIR, "review_queue.csv"),
+                       dtype=object).fillna("")
+_cells_noctx = FIN.collect_inference_manifests(_NOCTX_DIR)
+_r_noctx = FIN.finalize(_NOCTX_DIR, review_path=review(
+    [row(Review_Subject_SHA256=_q_noctx.loc[0, "Review_Subject_SHA256"],
+         Inference_Checked="CONFIRMED")],
+    path=os.path.join(_NOCTX_DIR, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a reconstruction with no supports on the row can be pictured by nobody",
+      len(_cells_noctx) == 1
+      and not any(_led_noctx["Artifact_Type"] == "INFERENCE_CONTEXT"),
+      "%s" % sorted(set(_led_noctx["Artifact_Type"])))
+check("  so the panel is held, whatever the decision file says",
+      _r_noctx["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "INFERENCE_CONTEXT_MISSING"
+              for p in _r_noctx["problems"]), "%s" % _r_noctx)
 
 _fp3 = _q3.loc[0, "Review_Subject_SHA256"]
 _r3_review = os.path.join(_R3_DIR, "value_review.csv")

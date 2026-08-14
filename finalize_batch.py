@@ -774,6 +774,22 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
                      "questions these values ask"
                      % (pid, len(listed), len(cells)))
                 withheld.add(pid)
+        # A PICTURE OF EVERY CELL BEING ASKED ABOUT. Registered against the
+        # `Inference_ID` it belongs to, so a panel that produced three
+        # reconstructed cells and two crops is refused rather than reviewed on
+        # two thirds of its evidence.
+        pictured = {_s(a.get("Artifact_Reference")) for a in by_panel.get(pid, ())
+                    if _s(a.get("Artifact_Type"))
+                    == RB.INFERENCE_CONTEXT_ARTIFACT_TYPE}
+        for iid in sorted(set(cells) - pictured):
+            row = cells[iid]
+            flag("panel:%s" % pid, "INFERENCE_CONTEXT_MISSING",
+                 "%s/%s is asked about by name and this run carries no picture "
+                 "of it (%s). The row gives its supports and its span as pixel "
+                 "numbers, and a confirmation given against numbers nobody can "
+                 "see the figure behind is a signature on a filename"
+                 % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")), iid))
+            withheld.add(pid)
         given = answers.get(pid, {})
         for iid in sorted(cells):
             if counted.get((pid, iid), 0) > 1:

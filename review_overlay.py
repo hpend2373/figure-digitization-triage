@@ -654,6 +654,88 @@ def draw_panel_geometry(path, image_path, records, pad=24):
         return None
 
 
+#: How much of the figure to keep either side of the two supports, as a multiple
+#: of the span between them - with a floor, because a three-pixel span zoomed to
+#: three pixels of context is a picture of nothing.
+CONTEXT_MARGIN, CONTEXT_MIN_PAD, CONTEXT_HALF_HEIGHT = 3.0, 40, 60
+
+
+def draw_inference_context(path, image_path, panel_box, mark, title="",
+                           subtitle=""):
+    """One picture of one reconstructed cell, for the person confirming it.
+
+    The R3 contract asks a reviewer to say whether a NUMBER that came from
+    neighbouring ink is sound. Everything they need to judge that is on the
+    manifest row - the two supporting columns, the span between them, what
+    covered it, the stroke and dash scale it has to be local against - and all of
+    it is in PIXELS. Holding a coordinate in your head against a printed figure
+    is not reviewing; it is arithmetic performed by a person who cannot check it.
+
+    So this draws the arithmetic: the stretch of figure between the two supports,
+    each support marked where the ink actually is, the target column the value
+    was placed at, and the value's own row. What it does NOT draw is the
+    occlusion mask - that lives in the reader's memory at read time and nothing
+    downstream has it - so the cause is named in the caption rather than shaded,
+    and the caption says which of the two it is.
+
+    Never raises, like every other picture here: a crop that cannot be painted is
+    recorded in `failures()`. What it must not do is come back with a picture of
+    the wrong thing, so a mark with no supports and no centre returns None rather
+    than a crop of the panel's top-left corner.
+    """
+    try:
+        left = mark.get("Value_Support_Left_Px")
+        right = mark.get("Value_Support_Right_Px")
+        cx = mark.get("x", mark.get("point_px_x"))
+        cy = _mark_y(mark)
+        if cy is None or cx is None or left is None or right is None:
+            return None
+        left, right, cx, cy = float(left), float(right), float(cx), float(cy)
+        x0, x1, y0, y1 = (int(v) for v in panel_box)
+        span = max(abs(right - left), 1.0)
+        pad = max(CONTEXT_MIN_PAD, int(round(CONTEXT_MARGIN * span)))
+        source = Image.open(image_path).convert("RGB")
+        cropbox = (max(0, int(min(left, cx) - pad)),
+                   max(0, int(cy - CONTEXT_HALF_HEIGHT)),
+                   min(source.width, int(max(right, cx) + pad)),
+                   min(source.height, int(cy + CONTEXT_HALF_HEIGHT)))
+        if cropbox[2] - cropbox[0] < 4 or cropbox[3] - cropbox[1] < 4:
+            return None
+        crop = source.crop(cropbox)
+        ox, oy = cropbox[0], cropbox[1]
+        scale = 3
+        crop = crop.resize((crop.width * scale, crop.height * scale),
+                           Image.NEAREST)
+        canvas = Image.new("RGB", (crop.width, crop.height + FOOTER), "white")
+        canvas.paste(crop, (0, 0))
+        draw = ImageDraw.Draw(canvas)
+        font = _font()
+        top, bottom = 0, crop.height
+        # The two columns the answer was measured BETWEEN, in the colour of a
+        # measurement, and the column it was placed AT in the colour of a
+        # reconstruction. A reviewer who sees the target line sitting outside its
+        # own two supports is looking at the defect this picture exists for.
+        for at, colour in ((left, (31, 119, 180)), (right, (31, 119, 180))):
+            sx = (at - ox) * scale
+            draw.line((sx, top, sx, bottom), fill=colour, width=1)
+        tx, ty = (cx - ox) * scale, (cy - oy) * scale
+        draw.line((tx, top, tx, bottom), fill=(214, 39, 40), width=1)
+        draw.line((tx - 9, ty, tx + 9, ty), fill=(214, 39, 40), width=2)
+        draw.line((tx, ty - 9, tx, ty + 9), fill=(214, 39, 40), width=2)
+        draw.text((6, crop.height + 6), title, fill=(0, 0, 0), font=font)
+        draw.text((6, crop.height + 20), subtitle, fill=(70, 70, 70), font=font)
+        draw.text((6, crop.height + 36),
+                  "blue: the two columns with ink   red: where the value was "
+                  "placed", fill=(70, 70, 70), font=font)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        canvas.save(path)
+        return path
+    except Exception as exc:
+        _FAILURES.append("%s: %s: %s" % (os.path.basename(path),
+                                         type(exc).__name__, exc))
+        return None
+
+
 def write_row_crops(directory, pairs, pad=24):
     """A folder of pictures, one per geometry row, plus a contact sheet.
 

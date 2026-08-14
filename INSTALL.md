@@ -4794,6 +4794,77 @@ Still open from the same review, and neither is a pooling-safety defect: a
 refused R4 cell is not routed to anybody as a durable work item, and an R3
 reviewer has pixel numbers rather than a picture of the two supports.
 
+## v7.67 — a refused value is somebody's work, and a reconstructed one has a picture
+
+The two items the review left open, and a defect found while closing the first
+of them.
+
+**v7.66's `Inference_ID` was bound to eight columns the value row did not carry.**
+The recipe named `Value_Span_Px`, the two supports, the occlusion cause and width,
+the stroke, the dash gap and `Trace_Agreement`, and the comment beside it said
+"every field must be one the VALUE ROW carries, because `finalize` re-derives
+these identifiers from `figure_values_machine_qc.csv`". Nothing checked that it
+was true. Those eight lived on the reader's mark row and stopped there, so every
+one of them hashed as the empty string and the identifier still bound only the
+answer. The unit scenarios passed because they call `inference_id` with the
+fields in hand — arithmetic, not evidence, and the same defect as v7.51's field
+whitelist, found the same way: by opening the artifact and looking at it.
+
+`INTERPOLATION_CARRIED` now carries the eight into the value row, as
+`IDENTITY_CARRIED` does for the BAR_MONO identity fields and for the same reason
+— only a reader that reconstructs a number HAS them. The value schema is 81
+columns, and publication 397's two R3 cells now read, in the file:
+
+    P1_MAP_WOMEN  1:00  span 4 px  supports 647-651  MIXED  stroke 2  AGREED
+    P1_FPV_MEN    1:00  span 3 px  supports 137-140  MIXED  stroke 6  AGREED
+
+**Every cell asked about by name now has a picture of itself.**
+`inference-review/context__<Panel_ID>__<Cell_Key>.png` is a 3× crop of the
+stretch of figure between the two supporting columns: each support drawn in blue,
+the column and row where the value was placed in red, and the method, span,
+supports and cause in the caption. A value sitting outside its own supports is
+the defect it exists for.
+
+Drawn in the panel loop, because that is the only place holding the raster, the
+panel box and the mark's own pixels at once — the value row keeps the support
+columns but not the row the value sits on, and the manifest is written after the
+grid gate, by which point the image is closed. Registered against the
+`Inference_ID` when the manifest is written, using `Artifact_Reference`, which
+exists for exactly this join: `IDENTITY_EVIDENCE` is registered against its
+`Resolution_ID` the same way. Keyed by cell rather than by id in between, because
+the id depends on a value the grid gate may still reconcile.
+
+`finalize` refuses a panel whose reconstructed cell has no crop
+(`INFERENCE_CONTEXT_MISSING`). A reader that claims a bracketed interpolation
+without saying which columns bracket it cannot be pictured, and a per-cell
+confirmation against pixel coordinates nobody can see the figure behind is the
+signature on a filename this package refuses everywhere else.
+
+**And a refused value is work, at run time.** `method_blocked_cells.csv` is
+written by the RUN — one row per machine-QC-passed cell no signature will be able
+to finalize, with `Cell_State=MODEL_ESTIMATE_ONLY`,
+`Next_Action=MANUAL_REDIGITIZATION`, the two methods, the cell key and the raster
+to re-read it from. `Values_Method_Blocked` on `run_stamp.json` is the count, so
+it is known before an afternoon is spent reviewing rather than after. The panel
+still goes to the queue: its other cells stand, and the picture is still what
+says so.
+
+A separate file rather than rows in `manual_queue_cells.csv`, because the claim
+differs at both grains: that queue is cells a reader could not read, on panels
+that went to a person; these are cells a reader DID read, on panels that passed,
+whose numbers a model made. Filing them together would put panels in the manual
+queue that nobody needs to digitize by hand.
+
+    reverted                                          scenarios that fail
+    the evidence off the value row                     1
+    no room for it in the value schema                 2 + 1, in two suites
+    no picture drawn                                   2
+    the picture drawn and not registered               2
+    the finalizer not asking for one                   1
+    a refused value becoming nobody's work             1
+    the count off the run stamp                        1
+    the work list surviving a re-run                   1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4809,14 +4880,13 @@ reviewer has pixel numbers rather than a picture of the two supports.
 - `Dispersion_Method` does not exist: the two provenance fields are about the
   MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
   priced as whatever its mean was priced at
-- a value refused as R4 is dropped from the accepted file and counted on the
-  stamp, and becomes nobody's work item: it is not written to
-  `manual_queue_cells.csv` or anywhere else a person picks work up from, so
-  "26 of 123 refused" is a number a reviewer meets after approving the panel
-- an R3 reviewer is given the support pixels, the span and the occlusion cause
-  as NUMBERS. There is no per-cell crop drawing the two supports, the
-  interpolated span and the occlusion mask over the figure, so the confirmation
-  asks a person to hold a coordinate in their head against the original
+- the R3 context crop draws the two supports and the placed value, and NOT the
+  occlusion mask: the mask lives in the reader's memory at read time and nothing
+  downstream has it, so the cause is named in the caption rather than shaded
+- no R3 or R2 cell in the shipped corpus has reached a review queue yet - 397's
+  dispersion definition is unresolved, so its two of each fail machine QC - and
+  the per-cell channel is therefore exercised end to end by fixtures rather than
+  by a person
 - `HUMAN_RESOLUTION` is priced R0 by the registry and has no review channel of
   its own: the resolution row, its evidence and the reviewer are checked by
   `identity_contract_failures`, but nothing asks the person who APPROVES the

@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.66"
+PIPELINE_VERSION = "7.67"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -424,6 +424,33 @@ MANUAL_QUEUE_COLUMNS = [
     "Missing_Cell_Count", "Image_Path", "Panel_Box", "Detail",
 ]
 
+#: WHAT BECOMES OF A VALUE NO SIGNATURE CAN FINALIZE. `finalize` refuses an R4
+#: cell - the fitted curve produced the number, or it was carried sideways from
+#: one side, or interpolated across a stretch wider than anything the figure
+#: draws - and until now that was the end of it: the value was dropped from the
+#: accepted file, counted on the stamp, and became nobody's work. A reviewer met
+#: "26 of 123 refused" AFTER approving the panel, with no list of which.
+#:
+#: A separate file rather than more rows in `manual_queue_cells.csv`, because the
+#: claim is different at both grains. That queue is cells a reader could not read
+#: on panels that went to a person; these are cells a reader DID read, on panels
+#: that passed, whose numbers a model made. Filing them together would put panels
+#: in the manual queue that nobody needs to digitize by hand.
+METHOD_BLOCKED_COLUMNS = [
+    "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Cell_Key",
+    "Identity_Method", "Value_Method",
+    # NOT a review tier. Tiers are derived by whoever needs one and written into
+    # no file, which `test_provenance` enforces by parsing this module. What goes
+    # here is the STATE of the cell and the work it implies.
+    "Cell_State", "Next_Action",
+    "Image_Path", "Detail",
+]
+
+#: The only state this file records today. A second one would mean a value
+#: refused for a reason that is not "a model made this number".
+METHOD_BLOCKED_STATE = "MODEL_ESTIMATE_ONLY"
+METHOD_BLOCKED_ACTION = "MANUAL_REDIGITIZATION"
+
 MANUAL_QUEUE_CELL_COLUMNS = [
     "Panel_ID", "Source_Panel_ID", "Figure_ID", "Unit_ID", "Run_State", "Cell_Key",
 ]
@@ -604,7 +631,7 @@ def _x_positions(rows):
 class PanelOutcome(object):
     def __init__(self, state, values=None, detail="", raw=None,
                  declared=0, read=0, with_dispersion=0, missing=(), project=None,
-                 overlay=None, artifacts=()):
+                 overlay=None, artifacts=(), inference_crops=None):
         self.state = state
         self.values = values or []
         self.detail = detail
@@ -621,6 +648,13 @@ class PanelOutcome(object):
         # ";" - so the one thing that hashed it got a path that does not exist
         # and recorded an empty hash. A list cannot be joined into a lie.
         self.artifacts = list(artifacts)
+        # {Cell_Key: path} for the cells whose NUMBER was reconstructed. Keyed by
+        # cell rather than by `Inference_ID`, because the id is derived from the
+        # value AFTER the grid gate has run - two readers of one unit reconcile
+        # to a midpoint - and a picture named for an id the run then does not
+        # produce is a picture nobody can find. The ledger ties the two together
+        # when the manifest is written.
+        self.inference_crops = dict(inference_crops or {})
 
 
 #: Everything a run leaves on disk that a person looks at or a script re-derives
@@ -794,6 +828,15 @@ def _write_geometry_review(out_dir, pairs, pad=24):
 #: the run somebody signed for is a stale approval rather than an unnoticed
 #: extra. The finalizer re-hashes it with every other ledger artifact.
 INFERENCE_ARTIFACT_TYPE = "INFERENCE_MANIFEST"
+
+#: And one picture per cell on that list, registered against the `Inference_ID`
+#: it belongs to. The manifest gives a reviewer the support columns, the span and
+#: the occlusion cause as NUMBERS; this is the same claim as a picture, because
+#: holding a pixel coordinate in your head against a printed figure is arithmetic
+#: performed by somebody who cannot check it. `finalize` requires one per cell it
+#: asks about - a per-cell confirmation with no picture of that cell is the
+#: signature on a filename this package refuses everywhere else.
+INFERENCE_CONTEXT_ARTIFACT_TYPE = "INFERENCE_CONTEXT"
 
 #: Enough to find the cell in the picture and to judge the reasoning that
 #: produced its number. The geometry columns are the ones that justify a LOCAL
@@ -1319,7 +1362,7 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
               file_root=".", project_dir=None, review_dir=None, geometry=None,
-              geometry_refusal=None, resolutions=()):
+              geometry_refusal=None, resolutions=(), inference_dir=None):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -1657,8 +1700,40 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         record.setdefault("WPD_Project_File", project or "")
     seen = {r["Cell_Key"] for r in records}
     missing = sorted(_all_cells(series_level, position_level) - seen)
+    # ---- one picture per reconstructed cell.
+    #
+    # Drawn HERE and nowhere later, because this is the only place that holds the
+    # raster, the panel box and the mark's own pixels at the same time. The value
+    # rows keep the support columns but not the row the value sits on, and the
+    # manifest is written after the grid gate, by which point the image is closed
+    # and the calibration is gone.
+    #
+    # `records` comes back from `to_value_records` in the order of `converted`,
+    # which is what lets a mark be paired with the cell key its value landed in.
+    crops = {}
+    if inference_dir:
+        for mark, record in zip(converted, records):
+            if PROV.review_tier(_s(record.get("Identity_Method")),
+                                _s(record.get("Value_Method"))) \
+                    not in PROV.CELL_CONFIRMATION_TIERS:
+                continue
+            safe = "".join(c if (c.isalnum() or c in "-_") else "_"
+                           for c in "%s__%s" % (pid, record["Cell_Key"]))
+            drawn = OVERLAY.draw_inference_context(
+                os.path.join(inference_dir, "context__%s.png" % safe),
+                resolved, box, mark,
+                title="%s  %s" % (pid, record["Cell_Key"]),
+                subtitle="%s: span %s px between columns %s and %s, over %s"
+                         % (_s(record.get("Value_Method")),
+                            _s(record.get("Value_Span_Px")),
+                            _s(record.get("Value_Support_Left_Px")),
+                            _s(record.get("Value_Support_Right_Px")),
+                            _s(record.get("Occlusion_Cause")) or "nothing this "
+                            "reader removed"))
+            if drawn:
+                crops[record["Cell_Key"]] = drawn
     return PanelOutcome("AUTO_PASS", values=records, raw=raw_path, project=project,
-                        overlay=overlay,
+                        overlay=overlay, inference_crops=crops,
                         artifacts=_panel_artifacts(raw_marks=[raw_path],
                                                    project=project, overlay=overlay),
                         declared=declared, read=len(records),
@@ -2444,6 +2519,9 @@ CANONICAL_OUTPUTS = (
     "run_manifest.csv", "manual_queue.csv", "qc_problems.csv",
     "manifest_problems.csv", "run_stamp.json", "figure_manifest.csv",
     "manual_queue_cells.csv", "panel_artifacts.csv",
+    # The cells whose numbers a model made. A previous run's copy left beside
+    # this run's values is a work list for measurements that no longer exist.
+    "method_blocked_cells.csv",
     # The BAR_MONO geometry bundle. Left behind, a previous run's panel
     # picture sits beside this run's numbers and passes the writer's existence
     # check, so an approval could be given against a picture of a different
@@ -2561,7 +2639,7 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
                 panels=0, read=0, accepted=0, machine_qc=0, qc_problems=0,
                 problems=0, detail="", run_mode="ATTESTED",
                 output_sha256=None, reviewer_registry_sha256="",
-                manifest_dir=""):
+                manifest_dir="", method_blocked=0):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
@@ -2573,6 +2651,12 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
         json.dump({
             "schema": "figure-digitization-triage/run-stamp/7",
             "Status": status, "Run_Mode": run_mode, "Run_Date": run_date,
+            # How many of the values this run produced no signature will be able
+            # to finalize, and which are therefore already somebody's work in
+            # `method_blocked_cells.csv`. On the RUN stamp because that is where
+            # a person looks before spending an afternoon reviewing: a panel
+            # whose numbers a model made is worth knowing about first.
+            "Values_Method_Blocked": method_blocked,
             "Reader_Version": MR.READER_VERSION,
             "Pipeline_Version": PIPELINE_VERSION,
             "Pipeline_Code_SHA256": pipeline_code_sha256(),
@@ -2681,6 +2765,11 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     os.makedirs(project_dir, exist_ok=True)
     review_dir = os.path.join(output_dir, "review")
     os.makedirs(review_dir, exist_ok=True)
+    # Where the per-cell pictures and the per-panel lists of reconstructed cells
+    # both live. Made unconditionally, like `review/`: a run with none of them
+    # leaves it empty rather than making its absence mean two things.
+    inference_dir = os.path.join(output_dir, "inference-review")
+    os.makedirs(inference_dir, exist_ok=True)
     # Module state, cleared per run. An agent working through 116 publications
     # in one process would otherwise carry every previous run's drawing
     # failures into this run's stamp, naming panels this run never saw.
@@ -2712,6 +2801,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     # different panel's marks and a different panel's calibration.
     projects_by_panel = {}
     overlays_by_panel = {}
+    crops_by_panel = {}
     artifacts_by_panel = {}
     # ---- the geometry pass, BEFORE the panel loop.
     #
@@ -2773,7 +2863,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 review_dir=review_dir,
                 geometry=geometry_rows_by_panel.get(pid),
                 geometry_refusal=geometry_refusals.get(pid),
-                resolutions=resolutions_by_panel.get(pid, ()))
+                resolutions=resolutions_by_panel.get(pid, ()),
+                inference_dir=inference_dir)
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by
@@ -2786,6 +2877,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             raise
         overlays_by_panel[pid] = (_run_relative(outcome.overlay, output_dir)
                                   if outcome.overlay else "")
+        if outcome.inference_crops:
+            crops_by_panel[pid] = outcome.inference_crops
         if outcome.project:
             projects_by_panel[pid] = _run_relative(outcome.project, output_dir)
         # Hashed the moment they are written, before anything else touches the
@@ -3106,6 +3199,42 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     raw_df["Pooling_Eligible"] = eligible
     machine_qc_df = raw_df[raw_df["Value_Status"] == "MACHINE_QC_PASSED"].copy()
 
+    # ---- and the cells no signature will ever be able to finalize.
+    #
+    # Priced from the same two fields as everything else, and written down as
+    # WORK: `finalize` will refuse these whatever a reviewer says, so the person
+    # who has to re-read them by hand should not have to discover that from a
+    # count on a stamp after approving the panel. Only machine-QC-passed values,
+    # for the same reason the inference manifest takes only those - a cell the
+    # gate already refused is somebody else's problem and has its own queue.
+    #
+    # The panel still goes to review: its other cells are fine, and the picture
+    # is still the thing that says so.
+    run_by_panel = {row["Panel_ID"]: row for row in run_rows}
+    blocked_rows = []
+    for value in machine_qc_df.to_dict("records"):
+        identity = _s(value.get("Identity_Method"))
+        method = _s(value.get("Value_Method"))
+        if PROV.review_tier(identity, method) in PROV.FINALIZABLE_TIERS:
+            continue
+        pid_ = _s(value.get("Run_Panel_ID"))
+        source = run_by_panel.get(pid_, {})
+        blocked_rows.append({
+            "Panel_ID": pid_,
+            "Source_Panel_ID": _s(value.get("Source_Panel_ID")),
+            "Figure_ID": _s(source.get("Figure_ID")),
+            "Unit_ID": _s(value.get("Unit_ID")),
+            "Cell_Key": _s(value.get("Cell_Key")),
+            "Identity_Method": identity, "Value_Method": method,
+            "Cell_State": METHOD_BLOCKED_STATE,
+            "Next_Action": METHOD_BLOCKED_ACTION,
+            "Image_Path": _s(source.get("Image_Path")),
+            "Detail": ("nothing says how this number was got"
+                       if not (identity and method) else
+                       "%s: the number was not read off the ink" % method),
+        })
+    blocked_df = pd.DataFrame(blocked_rows, columns=METHOD_BLOCKED_COLUMNS)
+
     # ---- the cells a person will be asked about one at a time.
     #
     # Written HERE, after the values are priced and before the review queue is
@@ -3127,6 +3256,20 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         artifacts_by_panel[pid_] = artifacts_by_panel.get(pid_, []) + [
             (item[0], _run_relative(item[1], output_dir),
              file_sha256_or_blank(item[1]), "") for item in artifacts_]
+    # AND THE PICTURE OF EACH ONE, drawn in the panel loop and registered here -
+    # under the `Inference_ID` the manifest just derived, which is the join
+    # between a file named for a cell and a question named for its evidence.
+    # `Artifact_Reference` exists for exactly this: `IDENTITY_EVIDENCE` is
+    # registered against the `Resolution_ID` it belongs to for the same reason.
+    for pid_, rows_ in sorted(inference_rows.items()):
+        for value in rows_:
+            drawn = crops_by_panel.get(pid_, {}).get(_s(value.get("Cell_Key")))
+            if not drawn:
+                continue
+            artifacts_by_panel.setdefault(pid_, []).append(
+                (INFERENCE_CONTEXT_ARTIFACT_TYPE,
+                 _run_relative(drawn, output_dir), file_sha256_or_blank(drawn),
+                 inference_id(value, panel_id=pid_)))
 
     # Source-level coverage is the antidote to virtual Figure_IDs masking
     # omissions.  Every physical panel appears exactly once here, including
@@ -3283,6 +3426,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     queue_df.to_csv(os.path.join(work_dir, "manual_queue.csv"), index=False)
     queue_cells_df.to_csv(os.path.join(work_dir, "manual_queue_cells.csv"),
                           index=False)
+    blocked_df.to_csv(os.path.join(work_dir, "method_blocked_cells.csv"),
+                      index=False)
     qc.to_csv(os.path.join(work_dir, "qc_problems.csv"), index=False)
     coverage_df.to_csv(os.path.join(work_dir, "source_panel_coverage.csv"), index=False)
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
@@ -3291,6 +3436,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=0,
                 machine_qc=len(machine_qc_df),
+                method_blocked=len(blocked_df),
                 qc_problems=int(len(qc)),
                 # What the finalizer must find unchanged. Everything it reads
                 # to decide whether a value is poolable is hashed here, so a

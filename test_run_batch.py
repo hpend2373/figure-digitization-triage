@@ -2588,6 +2588,19 @@ check("the list of reconstructed cells is on the cleanup list too",
       "inference-review" in RB.CANONICAL_DIRS
       and not os.path.isdir(os.path.join(_inf_stale, "inference-review")),
       "%r %r" % (RB.CANONICAL_DIRS, sorted(os.listdir(_inf_stale))))
+# AND SO IS THE WORK LIST. A previous run's `method_blocked_cells.csv` beside
+# this run's values is a list of re-digitization jobs for measurements that no
+# longer exist, and the person working through it has no way to tell.
+_mb_stale = os.path.join(ROOT, "mb_stale")
+os.makedirs(_mb_stale, exist_ok=True)
+with open(os.path.join(_mb_stale, "method_blocked_cells.csv"), "w") as _fh:
+    _fh.write("work items from a previous run")
+RB.clear_outputs(_mb_stale)
+check("and the list of values a model made does not survive a re-run",
+      "method_blocked_cells.csv" in RB.CANONICAL_OUTPUTS
+      and not os.path.exists(os.path.join(_mb_stale,
+                                          "method_blocked_cells.csv")),
+      "%r" % sorted(os.listdir(_mb_stale)))
 # REVERT: `OVERLAY.reset_failures()` inside write_geometry_review. The run's
 # overlay log is global, so a helper that clears it erases every panel overlay
 # failure that happened before it - and the run reports a clean drawing pass it

@@ -207,6 +207,19 @@ def fig_values_columns():
         # highest tier rather than the lowest - an unregistered method is not
         # evidence of safety.
         "Identity_Method", "Value_Method",
+        # AND WHAT A RECONSTRUCTED NUMBER WAS RECONSTRUCTED FROM - the two
+        # columns with ink, the span between them, what covered it, and the
+        # drawing scale that span has to be local against. Blank for every reader
+        # that measures its values rather than rebuilding them, which is most
+        # rows in most runs.
+        #
+        # Here rather than only on the reader row, because `finalize` re-derives
+        # `Inference_ID` from THIS FILE. v7.66 bound that identifier to all eight
+        # and every one of them hashed as the empty string: the recipe named
+        # columns the value row did not carry, and nothing checked that it did.
+        "Value_Span_Px", "Value_Support_Left_Px", "Value_Support_Right_Px",
+        "Occlusion_Cause", "Occlusion_Width_Px", "Local_Stroke_Px",
+        "Expected_Dash_Gap_Px", "Trace_Agreement",
         # The project that can re-derive THIS value. It used to be looked up on
         # the figure, where a run stored whichever panel finished first - so on
         # a six-panel figure five values named a project of somebody else's

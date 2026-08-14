@@ -879,8 +879,15 @@ def _inference_manifest_ids(run_dir, artifact, pid, flag):
 
 
 def approved_panels(reviews, queue, reviewers, flag, today=None,
-                    artifact_types=None):
-    """Panel_ID -> the review row that approves it. Everything else is refused."""
+                    artifact_types=None, extra_confirmations=None):
+    """Panel_ID -> the review row that approves it. Everything else is refused.
+
+    `extra_confirmations` is {Panel_ID: (column, ...)} for the questions this
+    panel's own VALUES ask on top of the ones its mode asks - see
+    `RB.inference_confirmations`. Passed in rather than read off the queue: the
+    queue prints the count for a reviewer to see, and a requirement a run could
+    lower by printing a different number is not a requirement.
+    """
     today = today or datetime.date.today()
     human = human_reviewers(reviewers)
     expected = {_s(r.get("Panel_ID")): _s(r.get("Review_Subject_SHA256"))
@@ -975,7 +982,9 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
                  "carries no %s for it. There is nothing this approval can be "
                  "an approval of" % (pid, mode, "/".join(absent)))
             continue
-        unconfirmed = [c for c in RB.REVIEW_CONFIRMATIONS.get(mode, ())
+        wanted = tuple(RB.REVIEW_CONFIRMATIONS.get(mode, ())) + tuple(
+            (extra_confirmations or {}).get(pid, ()))
+        unconfirmed = [c for c in wanted
                        if _s(r.get(c)).upper() != RB.REVIEW_CONFIRMED]
         if unconfirmed:
             flag(line, "REVIEW_CONFIRMATION_MISSING",
@@ -1358,8 +1367,18 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                         "this run's values could not be re-checked against the "
                         "manifests it was produced from")
         artifact_types.pop(pid, None)
+    # What each panel's own values ask on top of its mode. Re-derived here from
+    # `Identity_Method` and `Value_Method`, exactly as the run derived the count
+    # it printed in the queue - so a run that printed zero cannot buy a panel an
+    # approval that skips the question.
+    values_by_panel = {}
+    for value in machine.to_dict("records"):
+        values_by_panel.setdefault(_s(value.get("Run_Panel_ID")), []).append(value)
+    extra_confirmations = {pid: RB.inference_confirmations(rows)
+                           for pid, rows in values_by_panel.items()}
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
-                               artifact_types=artifact_types)
+                               artifact_types=artifact_types,
+                               extra_confirmations=extra_confirmations)
 
     if not approved:
         return stop("NOTHING_APPROVED",

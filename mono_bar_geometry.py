@@ -1534,6 +1534,20 @@ def _assign_group(samples, declared):
     return out if len(out) == len(samples) else None
 
 
+def _method_rows(methods):
+    """`{((figure, group), slot): method}` as a list a JSON dump can hold.
+
+    In the VERDICT, which is hashed into `Domain_Identity_SHA256` - so an
+    identity attests to the route it was reached by as well as to the answer.
+    Two figures that name the same bar the same pattern, one by relation and one
+    against a prototype, are not the same claim and no longer share a bundle.
+    """
+    return [dict(figure=_plain(key[0]), group=_plain(key[1]),
+                 slot=_plain(slot), method=method)
+            for (key, slot), method in sorted(
+                methods.items(), key=lambda kv: (str(kv[0][0]), kv[0][1]))]
+
+
 def fill_identity(records):
     """Name the series of one FIGURE by fill, from that figure's own samples.
 
@@ -1586,7 +1600,7 @@ def fill_identity(records):
     """
     identity_domain_ids = {r.get("identity_domain_id", r.get("figure")) for r in records}
     if len(identity_domain_ids) > 1:
-        return {}, dict(status="MULTIPLE_FIGURES",
+        return {}, dict(status="MULTIPLE_FIGURES", identity_methods=[],
                         identity_domain_ids=sorted(str(f) for f in identity_domain_ids))
     groups, claims, arrivals = {}, {}, {}
     for rec in records:
@@ -1650,6 +1664,12 @@ def fill_identity(records):
             partial[key] = slots
 
     assigned, unassignable = {}, []
+    # HOW each cell was named, beside WHAT it was named. The two routes below
+    # carry different risk and the reviewer's ladder prices them differently: a
+    # complete group is assigned from relations between samples measured in that
+    # group, and an incomplete one is matched against a range formed from OTHER
+    # groups of the figure. Same answer, different evidence.
+    methods = {}
     for key, slots in complete.items():
         got = _assign_group(slots, declared[key])
         if got is None:
@@ -1657,6 +1677,7 @@ def fill_identity(records):
             continue
         for slot, pattern in got.items():
             assigned[(key, slot)] = pattern
+            methods[(key, slot)] = "MEASURED_FILL_RELATION"
 
     if not assigned:
         # "No complete group" and "complete groups nobody could assign" are
@@ -1664,6 +1685,7 @@ def fill_identity(records):
         # every measured bar to NOT_CALIBRATED when the truth was AMBIGUOUS.
         return {}, dict(status="AMBIGUOUS" if unassignable
                         else "NOT_ENOUGH_COMPLETE_GROUPS",
+                        identity_methods=[],
                         prototype_ready=False,
                         complete_groups=len(complete),
                         truncated_groups={str(k): v for k, v in truncated.items()},
@@ -1722,12 +1744,14 @@ def fill_identity(records):
                                for p, v in sorted(pooled.items())},
                    separation=gaps, failures=failures)
     if verdict["status"] == "AMBIGUOUS":
+        verdict["identity_methods"] = []
         return {}, verdict
     if verdict["status"] == "DIRECT_ONLY":
         # The complete groups were assigned from relations inside themselves,
         # which stands on its own. Nothing else may lean on it.
         verdict["matched_against_prototypes"] = 0
         verdict["cells_identified"] = len(assigned)
+        verdict["identity_methods"] = _method_rows(methods)
         return assigned, verdict
 
     matched = 0
@@ -1752,9 +1776,11 @@ def fill_identity(records):
                     and min(v) - floor <= sample["ink"] <= max(v) + floor]
             if len(hits) == 1:
                 assigned[(key, slot)] = hits[0]
+                methods[(key, slot)] = "FIGURE_PROTOTYPE_MATCH"
                 matched += 1
     verdict["matched_against_prototypes"] = matched
     verdict["cells_identified"] = len(assigned)
+    verdict["identity_methods"] = _method_rows(methods)
     return assigned, verdict
 
 
@@ -1790,6 +1816,8 @@ def fill_identities_by_figure(records):
         # cannot be carried over from a figure that reached it differently.
         bundle = hashlib.sha256(
             canonical_json(verdict).encode("utf-8")).hexdigest()
+        methods = {(m["figure"], m["group"], m["slot"]): m["method"]
+                   for m in verdict.get("identity_methods") or ()}
         for rec in rows:
             # Refusals too. They belong to the figure that was answered, and a
             # row with an attestation is a row an artifact writer can check;
@@ -1802,8 +1830,19 @@ def fill_identities_by_figure(records):
                 if pattern:
                     rec["identity_status"] = "RESOLVED"
                     rec["resolved_fill_pattern"] = pattern
+                    # And HOW, in the registry's vocabulary, so the review tier
+                    # a cell costs follows the evidence that named it rather
+                    # than the fact that something did.
+                    rec["identity_method"] = methods.get(
+                        (_plain(rec["figure"]), _plain(rec["group"]),
+                         _plain(rec["slot"])), "")
                 else:
                     rec["resolved_fill_pattern"] = ""
+                    # Explicitly blank, like the pattern beside it: a row that
+                    # exists with the field missing and a row that says "no
+                    # route" read the same to a caller using `.get`, and only one
+                    # of them has been through this function.
+                    rec["identity_method"] = ""
                     rec["identity_status"] = (
                         "UNRESOLVED_NO_FILL"
                         if rec.get("fill_sample_status") != "MEASURED"
@@ -1838,6 +1877,11 @@ def fill_identities_by_figure(records):
 #: `spec_fill` is the diagnostic driver's fixture truth and is not part of the
 #: measurement either.
 UNHASHED_FIELDS = ("identity_status", "resolved_fill_pattern",
+                   # HOW the figure named this bar. Written by identity like the
+                   # pattern beside it, so a human resolution arriving later must
+                   # not move the hash that answers "is this the same
+                   # measurement".
+                   "identity_method",
                    "identity_source", "domain_identity_sha256",
                    "auto_identity_sha256", "geometry_row_sha256", "spec_fill")
 

@@ -391,8 +391,8 @@ print("a cell whose series was reasoned to asks the reviewer one more question")
 # sentence: the row heading decides WHICH COLUMN OF THE ANALYSIS this number
 # lands in, and it came from reasoning rather than from ink.
 #
-# The mode is priced from the values, not declared anywhere, so a panel cannot
-# opt out of the question by leaving a column blank.
+# The question is priced from the values, not declared anywhere, so a panel
+# cannot opt out of it by leaving a column blank.
 def _inferred_identity(*a, **kw):
     rows = _real_read_panel(*a, **kw)
     for r in rows:
@@ -408,12 +408,22 @@ finally:
     MR.read_panel = _real_read_panel
 _q2 = pd.read_csv(os.path.join(_R2_DIR, "review_queue.csv"),
                   dtype=object).fillna("")
-check("the panel is queued in the mode that asks about the inference",
-      list(_q2["Review_Mode"]) == ["OVERLAY_INFERRED"],
-      "%r" % list(_q2["Review_Mode"]))
-check("and that mode needs no artifact the ordinary one does not",
-      RB.REVIEW_MODES["OVERLAY_INFERRED"] == RB.REVIEW_MODES["OVERLAY"],
-      "%r" % (RB.REVIEW_MODES["OVERLAY_INFERRED"],))
+_qc2 = pd.read_csv(os.path.join(_R2_DIR, "figure_values_machine_qc.csv"),
+                   dtype=object).fillna("")
+# v7.65: THE QUESTION IS NOT A MODE. It was two - `OVERLAY_INFERRED` and
+# `OVERLAY_INFERRED_CELLS` - and both opened the same overlay as `OVERLAY`, so
+# what they carried was a question rather than an artifact. Folded back into the
+# values, it reaches every mode: teaching BAR_MONO produced R2 cells on panels
+# queued `BAR_MONO_GEOMETRY`, which no overlay-shaped mode name could ask about.
+check("the panel is queued in the ordinary mode, with the question beside it",
+      list(_q2["Review_Mode"]) == ["OVERLAY"]
+      and [int(v or -1) for v in _q2.get("Inference_Cells", [])] == [len(_qc2)],
+      "%r / %r" % (list(_q2["Review_Mode"]), list(_q2["Inference_Cells"])))
+check("and the question is asked of the values, whatever the mode",
+      RB.inference_confirmations(_qc2.to_dict("records"))
+      == (RB.INFERENCE_CONFIRMATION,)
+      and RB.inference_confirmations([]) == (),
+      "%r" % (RB.inference_confirmations(_qc2.to_dict("records")),))
 _fp2 = _q2.loc[0, "Review_Subject_SHA256"]
 _r2_path = os.path.join(_R2_DIR, "value_review.csv")
 _no_inf = FIN.finalize(_R2_DIR, review_path=review(
@@ -474,12 +484,20 @@ finally:
     MR.read_panel = _real_read_panel
 _q3 = pd.read_csv(os.path.join(_R3_DIR, "review_queue.csv"),
                   dtype=object).fillna("")
-check("the panel is queued in the mode that asks cell by cell",
-      list(_q3["Review_Mode"]) == ["OVERLAY_INFERRED_CELLS"],
-      "%r" % list(_q3["Review_Mode"]))
-check("and that mode requires the list of cells as an artifact",
-      "INFERENCE_MANIFEST" in RB.REVIEW_MODES["OVERLAY_INFERRED_CELLS"],
-      "%r" % (RB.REVIEW_MODES["OVERLAY_INFERRED_CELLS"],))
+check("the panel is queued in the ordinary mode, and counts its reasoned cells",
+      list(_q3["Review_Mode"]) == ["OVERLAY"]
+      and [int(v or -1) for v in _q3.get("Inference_Cells", [])] == [2],
+      "%r / %r" % (list(_q3["Review_Mode"]), list(_q3["Inference_Cells"])))
+# THE ARTIFACT REQUIREMENT IS DERIVED TOO, and always was: no review mode names
+# `INFERENCE_MANIFEST`. `inference_contract_failures` requires it of a panel whose
+# VALUES hold a reconstructed number, which is why v7.65 could drop the two modes
+# without touching this half of the contract - and why a run made by a producer
+# that never wrote the file is refused rather than believed.
+check("and no mode requires the list of cells - the values do",
+      not any("INFERENCE_MANIFEST" in types
+              for types in RB.REVIEW_MODES.values()),
+      "%r" % {m: t for m, t in RB.REVIEW_MODES.items()
+              if "INFERENCE_MANIFEST" in t})
 _led3 = pd.read_csv(os.path.join(_R3_DIR, "panel_artifacts.csv"),
                     dtype=object).fillna("")
 _man3 = _led3[_led3["Artifact_Type"] == "INFERENCE_MANIFEST"]

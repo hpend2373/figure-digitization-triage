@@ -37,6 +37,7 @@ import mark_readers as MRX                 # noqa: E402
 import review_overlay as OVERLAY           # noqa: E402
 import measure_mono_bars as M              # noqa: E402
 import mono_bar_geometry as G              # noqa: E402
+import provenance as _prov                 # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -854,6 +855,47 @@ try:
           sum(1 for k in ident if k[0][0] == "holey") == 2, repr(ident))
     check("the short bar is not named",
           not any(k[0][0] == "holey" and k[1] == 2 for k in ident), repr(ident))
+    # AND THE TWO ROUTES ARE NOT THE SAME CLAIM. v7.65. The six bars in the
+    # complete groups were named from relations between samples measured in their
+    # own group; the two in `holey` were named by landing inside a range formed
+    # in OTHER groups of the figure. Same answer, evidence one step further away
+    # - R0 against R2 on the reviewer's ladder, and until the verdict said which
+    # was which every BAR_MONO value claimed the stronger of the two.
+    _methods = {(m["figure"], m["slot"]): m["method"]
+                for m in verdict["identity_methods"]}
+    check("a complete group is named by relations between its own samples",
+          {v for (f, _s_), v in _methods.items() if f != "holey"}
+          == {"MEASURED_FILL_RELATION"}, repr(sorted(_methods.items())))
+    check("and an incomplete one by matching the figure's prototypes",
+          {v for (f, _s_), v in _methods.items() if f == "holey"}
+          == {"FIGURE_PROTOTYPE_MATCH"}, repr(sorted(_methods.items())))
+    check("  which is the difference between R0 and a panel confirmation",
+          _prov.review_tier("MEASURED_FILL_RELATION", "BAR_OUTLINE_CENTER") == "R0"
+          and _prov.review_tier("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER")
+          in _prov.PANEL_CONFIRMATION_TIERS,
+          _prov.review_tier("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER"))
+    check("and every named cell has a route, with nothing left over",
+          len(_methods) == len(ident)
+          and all((k[0][0], k[1]) in _methods for k in ident),
+          "%d methods for %d identities" % (len(_methods), len(ident)))
+    # WRITTEN ONTO THE RECORDS, not left in the verdict. `_geometry_marks` copies
+    # it onto the mark and `to_value_records` onto the value, which is the whole
+    # path from "how the figure decided" to "what a gate may pool".
+    _rows2 = [dict(r) for r in rows]
+    M.fill_identities_by_figure(_rows2)
+    check("and the answer is written onto the record the value comes from",
+          {(r["figure"], r["identity_method"]) for r in _rows2
+           if r.get("identity_status") == "RESOLVED"}
+          == {("whole_a", "MEASURED_FILL_RELATION"),
+              ("whole_b", "MEASURED_FILL_RELATION"),
+              ("holey", "FIGURE_PROTOTYPE_MATCH")},
+          "%s" % sorted({(r["figure"], r.get("identity_method") or "-")
+                         for r in _rows2}))
+    check("  and a bar the figure could not name claims no route either",
+          all(not r.get("identity_method") for r in _rows2
+              if r.get("identity_status") != "RESOLVED"),
+          "%s" % [(r["figure"], r.get("identity_status"), r.get("identity_method"))
+                  for r in _rows2 if r.get("identity_status") != "RESOLVED"])
 
     # -------------------------------------------------- 26b. DIRECT_ONLY
     #

@@ -3811,6 +3811,13 @@ def _write_review(path, panels):
             Reviewer_ID="RV_T1", Decision="APPROVED",
             Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
             Calibration_Checked="CONFIRMED", Identity_Checked="CONFIRMED",
+            # v7.65. This panel's short bar has no fill to sample, which makes
+            # its group incomplete - so the bars beside it were named by matching
+            # the FIGURE's prototypes rather than by relations inside their own
+            # group, and that is R2. The question follows the values, so a
+            # BAR_MONO panel gets it exactly as an overlay panel would; before
+            # the modes were folded together, no mode name could ask it here.
+            Inference_Checked="CONFIRMED",
             Reviewed_At="2026-08-07T10:00:00Z", Note=""))
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=FIN.value_review_columns())
@@ -3834,6 +3841,54 @@ check("and the pooled value still says a person named its series",
       and _acc_named.iloc[0]["Resolution_ID"] == "IR1"
       and _acc_named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
       "%s" % (_acc_named.to_dict("records") or "no row"))
+# AND HOW, in the registry's vocabulary. v7.65. A person's answer is
+# HUMAN_RESOLUTION; the bars beside it were named against prototypes formed in
+# another group of the FIGURE, because this panel's short bar left its group
+# incomplete - so this one BAR_MONO panel holds both routes at once.
+_acc_methods = set(zip(_acc["Identity_Method"], _acc["Value_Method"]))
+check("and every accepted bar says which route named it",
+      ("HUMAN_RESOLUTION", "BAR_OUTLINE_CENTER") in _acc_methods
+      and ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER") in _acc_methods
+      and all(i and v for i, v in _acc_methods),
+      "%s" % sorted(_acc_methods))
+# REVERT: fold `Inference_Checked` back into a mode. This panel is queued
+# BAR_MONO_GEOMETRY_RESOLVED and holds a prototype-matched cell, so the question
+# has to reach it through the VALUES - a mode named after an overlay cannot.
+_fq_short = pd.read_csv(os.path.join(_fin_dir, "review_queue.csv"),
+                        dtype=object).fillna("")
+check("the geometry queue row says how many of its cells were reasoned to",
+      int(_fq_short[_fq_short["Panel_ID"] == "P_SHORT"].iloc[0]
+          .get("Inference_Cells") or -1) > 0
+      and _fq_short[_fq_short["Panel_ID"] == "P_SHORT"].iloc[0]["Review_Mode"]
+      == "BAR_MONO_GEOMETRY_RESOLVED",
+      "%s" % _fq_short[["Panel_ID", "Review_Mode", "Inference_Cells"]]
+      .to_dict("records"))
+_rows_noinf = []
+for _i, _panel in enumerate(["P_SHORT"]):
+    _hit = _fq2[_fq2["Panel_ID"] == _panel]
+    _rows_noinf.append(dict(
+        Review_ID="R%03d" % (_i + 1), Panel_ID=_panel,
+        Review_Subject_SHA256=_hit.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Reviewed_At="2026-08-07T10:00:00Z",
+        Note=""))
+_noinf_path = os.path.join(_fin_dir, "value_review_noinf.csv")
+with open(_noinf_path, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerows(_rows_noinf)
+_fr_no = FIN.finalize(_fin_dir, review_path=_noinf_path, manifest_dir=_s2,
+                      run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("and an approval that skips the inference question is refused there too",
+      _fr_no["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "REVIEW_CONFIRMATION_MISSING"
+              and "Inference_Checked" in p["detail"]
+              for p in _fr_no["problems"]), "%s" % _fr_no)
+# Put the finalized state back: the scenarios below read this run's accepted
+# file, and the refusal above deleted it.
+FIN.finalize(_fin_dir, review_path=_fin_review, manifest_dir=_s2,
+             run_date="2026-08-06", today=datetime.date(2026, 8, 8))
 # The same run with the copy struck from the ledger - a 7.29-shaped run - and a
 # re-hashed stamp, so the only thing wrong with it is the missing evidence.
 _fin2 = os.path.join(ROOT, "o_short_final_noev")

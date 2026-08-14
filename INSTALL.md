@@ -4656,6 +4656,73 @@ behind.
     BAR_COLOR silent again                              1
     POINT_CLOUD_ASSOCIATION out of the registry         1 + 1, in two suites
 
+## v7.65 — the last reader, and the question follows the values rather than the mode
+
+Two halves, and the first forced the second.
+
+**`BAR_MONO` answers now, and it has two answers.** `fill_identity` names a
+figure's series in two passes, and they are not the same claim. A COMPLETE group —
+every slot yielded a fill — is assigned from relations between samples measured in
+that group, which is `MEASURED_FILL_RELATION` (R0). An INCOMPLETE group's
+remaining samples are matched against prototype ranges formed in OTHER groups of
+the figure: same answer, evidence one step further away, and that is
+`FIGURE_PROTOTYPE_MATCH` (R2). A bar a person named in
+`identity_resolution.csv` is `HUMAN_RESOLUTION` (R0) — not because a person cannot
+be wrong, but because it is the strongest evidence the ladder has and there is no
+further signature to ask for. Every BAR_MONO value carries
+`BAR_OUTLINE_CENTER`.
+
+The route is decided where the assignment happens, carried in the verdict — so it
+is inside `Domain_Identity_SHA256`, and two figures that reach the same pattern by
+different routes no longer share a bundle — written onto the record by
+`fill_identities_by_figure`, and copied onto the mark by `_geometry_marks`. It is
+in `UNHASHED_FIELDS` beside `resolved_fill_pattern`: written by identity, not by
+measurement, so a human resolution arriving later must not move the hash that
+answers "is this the same measurement".
+
+**Publication 397 now states all 123 of its 123 rows.** Before v7.64 it stated 87;
+before v7.60, none.
+
+    R0  38   R1  55   R2  2   R3  2   R4  26
+
+**And that broke the shape of the R2 gate, two releases old.** `OVERLAY_INFERRED`
+and `OVERLAY_INFERRED_CELLS` were modes whose required artifacts were the ordinary
+overlay's; what they actually carried was one extra question. That works until a
+panel reviewed some other way holds an inferred cell — and teaching `BAR_MONO`
+made exactly that panel, because a short bar with no fill leaves its group
+incomplete and the bars beside it are then prototype-matched. Those panels are
+queued `BAR_MONO_GEOMETRY`, where no overlay-shaped mode name reaches them. The
+alternative was a combinatorial table: two geometry modes times inferred-or-not.
+
+So the two modes are gone and the question follows the evidence.
+`RB.inference_confirmations(values)` returns `("Inference_Checked",)` for a panel
+whose own values price at R2 or R3, `finalize` adds it to whatever its mode
+declares, and it composes with every mode there is or ever will be. This is the
+shape `identity_contract_failures` already used for `IDENTITY_EVIDENCE`, for the
+reason recorded there: the condition is in the rows, so the check reads the rows.
+The R3 half needed no change at all — `inference_contract_failures` already
+required `INFERENCE_MANIFEST` of a panel whose VALUES hold a reconstructed number,
+and no review mode ever named that artifact.
+
+The reviewer still has to be told, so the queue gains `Inference_Cells`: how many
+of this panel's cells were reasoned to rather than measured. Informative, and
+re-derived by the finalizer — a queue that could lower its own requirement by
+printing 0 would be a requirement in name only.
+
+    reverted                                            scenarios that fail
+    the prototype route claiming the measured one        2 + 3, in two suites
+    the route never written onto the record              1 + 3
+    the mark dropping the route                          3
+    a human resolution not named as one                  1
+    BAR_MONO silent about its value                      3
+    the question never asked of anybody                  1 + 3
+    the finalizer asking only what the mode declares     1 + 2
+    the queue not telling the reviewer                   1 + 2
+    the route inside the row hash                        2 + 1
+
+All six readers now answer both questions. What is left is not a reader but a
+grain: `Dispersion_Method`.
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4671,12 +4738,10 @@ behind.
 - `Dispersion_Method` does not exist: the two provenance fields are about the
   MEAN, and a dispersion read off a whisker that the errorbar stem occluded is
   priced as whatever its mean was priced at
-- `BAR_MONO` is the last reader that answers neither question, and it is the one
-  with the most to say: a fill measured at the bar and matched against a
-  prototype formed in ANOTHER panel of the figure is `FIGURE_PROTOTYPE_MATCH`
-  (R2), the same fill matched against what its own panel declares is
-  `MEASURED_FILL_RELATION` (R0), and a bar named by a person is
-  `HUMAN_RESOLUTION`. Its 36 rows on 397 are `VALUE_METHOD_UNSTATED`
+- `HUMAN_RESOLUTION` is priced R0 by the registry and has no review channel of
+  its own: the resolution row, its evidence and the reviewer are checked by
+  `identity_contract_failures`, but nothing asks the person who APPROVES the
+  panel to confirm that they agree with the person who resolved it
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

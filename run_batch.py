@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.64"
+PIPELINE_VERSION = "7.65"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -215,6 +215,13 @@ REVIEW_QUEUE_COLUMNS = [
     # panel now declares what a reviewer will actually be looking at, and the
     # finalizer refuses an approval whose declared artifact is not there.
     "Review_Mode",
+    # And what the VALUES ask on top of it. A cell whose series was reasoned to
+    # rather than measured needs `Inference_Checked` from whoever signs for the
+    # panel, whatever mode the panel is reviewed in - see
+    # `inference_confirmations`. Informative here and re-derived by the
+    # finalizer: a queue that could lower its own requirement by writing 0 would
+    # be a requirement in name only.
+    "Inference_Cells",
     "Overlay_File", "WPD_Project_File", "Raw_Data_File",
     # What the approval is an approval OF: the values, the manifests, the
     # artifacts and the environment. Change any of them and this changes, which
@@ -247,23 +254,14 @@ INFERENCE_DECISIONS = ("CONFIRMED", "REJECTED")
 #: artifacts are not all in the ledger.
 REVIEW_MODES = {
     "OVERLAY": ("OVERLAY",), "WPD_ONLY": ("WPD_PROJECT",),
-    # THE SAME PICTURE, FOR A PANEL THAT HOLDS AN INFERRED CELL. No new
-    # artifact: the overlay has starred those marks since v7.51 and counted them
-    # in its footer, so the reviewer already has what the extra question asks
-    # about. A separate MODE rather than a sixth confirmation on OVERLAY, for the
-    # reason `BAR_MONO_GEOMETRY_RESOLVED` exists - the requirement is per PANEL,
-    # and a column every panel carries is a column everybody types CONFIRMED
-    # into.
-    "OVERLAY_INFERRED": ("OVERLAY",),
-    # AND THE LIST OF CELLS, when one of them had its NUMBER reconstructed
-    # rather than read. This mode does need an artifact the ordinary one does
-    # not: the reviewer is answering per cell, and `inference__<Panel_ID>.csv`
-    # is what says which cells those are. Registered in the ledger, so the
-    # question list is inside `Review_Subject_SHA256` - a run that reconstructs
-    # one more cell than the run somebody signed for is a stale approval rather
-    # than an extra nobody was asked about.
-    # See `INFERENCE_ARTIFACT_TYPE`.
-    "OVERLAY_INFERRED_CELLS": ("OVERLAY", "INFERENCE_MANIFEST"),
+    # AND NO `OVERLAY_INFERRED` / `OVERLAY_INFERRED_CELLS`. v7.62 and v7.63 made
+    # those two modes, and v7.65 folded them back in here - see
+    # `inference_confirmations` for why. A mode is what a reviewer OPENS, and
+    # both of them opened the same overlay as `OVERLAY`; what they actually
+    # carried was an extra question, which belongs to the VALUES and reaches
+    # every mode once it is derived from them. As two modes it reached one:
+    # teaching BAR_MONO to answer the provenance questions put R2 cells on panels
+    # queued `BAR_MONO_GEOMETRY`, where no mode name could ask about them.
     # Four, and the row pictures the index links to. See
     # `GEOMETRY_ARTIFACT_TYPES`.
     "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
@@ -292,20 +290,6 @@ REVIEW_MODES = {
 #: such a mode - a confirmation field nobody can act on is worse than none.
 REVIEW_CONFIRMATIONS = {
     "OVERLAY": ("Marks_Checked",), "WPD_ONLY": ("Marks_Checked",),
-    # And that the inferred cells were looked at as inferred. R2 is the tier for
-    # a cell whose NUMBER came off the ink and whose SERIES was reasoned to -
-    # named by elimination, or matched against a fill prototype formed in
-    # another group. The value is measured; the row heading is not, and it is
-    # the row heading that decides which column of the analysis this number
-    # lands in. `Marks_Checked` says the marks are in the right places, which is
-    # a different sentence.
-    "OVERLAY_INFERRED": ("Marks_Checked", "Inference_Checked"),
-    # The same two at the panel, and `finalize` additionally requires one
-    # CONFIRMED row per named cell in `inference_review.csv`. Kept out of this
-    # table because a confirmation column is a field on the panel's decision
-    # row, and this one is a set of rows in another file - the exact-set contract
-    # cannot be expressed as a column name.
-    "OVERLAY_INFERRED_CELLS": ("Marks_Checked", "Inference_Checked"),
     # This mode puts the AXIS in front of the reviewer, so it asks about the
     # axis. A printed 30 typed as 3 makes every bar in the panel ten times too
     # small together and no arithmetic catches it; the panel picture is the
@@ -325,6 +309,40 @@ REVIEW_CONFIRMATIONS = {
 
 #: What a reviewer writes in a confirmation column. Blank is not CONFIRMED.
 REVIEW_CONFIRMED = "CONFIRMED"
+
+#: The confirmation that is asked for by the VALUES rather than by the mode.
+INFERENCE_CONFIRMATION = "Inference_Checked"
+
+
+def inference_confirmations(values):
+    """The extra confirmation this panel's own values ask for, if any.
+
+    ## Why this is derived and not a mode
+
+    v7.62 and v7.63 shipped `OVERLAY_INFERRED` and `OVERLAY_INFERRED_CELLS`,
+    modes whose required artifacts were the ordinary overlay's and whose only
+    real content was one more question. That works until a panel that is not
+    reviewed through an overlay holds an inferred cell - and v7.65 made exactly
+    that panel, by teaching `BAR_MONO` to say when it named a bar against a
+    prototype formed in another group of the figure. Those panels are queued
+    `BAR_MONO_GEOMETRY`, and no amount of mode naming reaches them without a
+    combinatorial table: two geometry modes times inferred-or-not is four modes
+    for one question.
+
+    So the question follows the evidence. A mode says what a reviewer OPENS;
+    this says what the values in front of them additionally require, and it
+    composes with every mode there is or ever will be.
+
+    The same shape `identity_contract_failures` already uses for
+    `IDENTITY_EVIDENCE`, and for the same reason recorded there: the condition is
+    in the rows, so the check reads the rows.
+    """
+    for value in values:
+        if PROV.review_tier(_s(value.get("Identity_Method")),
+                            _s(value.get("Value_Method"))) \
+                in PROV.PANEL_CONFIRMATION_TIERS:
+            return (INFERENCE_CONFIRMATION,)
+    return ()
 
 
 def sha256_of_text(text):
@@ -1191,7 +1209,15 @@ def _geometry_marks(records, series_rows, positions, resolved=None):
                 Identity_Source="AUTO",
                 Identity_Evidence_Type=BM.AUTO_IDENTITY_EVIDENCE[0],
                 Resolution_ID="", Auto_Fill_Pattern=pattern,
-                Resolved_Fill_Pattern=pattern)
+                Resolved_Fill_Pattern=pattern,
+                # WHICH ROUTE the figure took to that pattern, straight off the
+                # geometry record. `MEASURED_FILL_RELATION` is a complete group
+                # assigned from relations between its own measured samples;
+                # `FIGURE_PROTOTYPE_MATCH` is an incomplete group's sample landing
+                # inside a range formed in OTHER groups of the figure - the same
+                # answer with the evidence one step further away, which is R2 and
+                # asks a person to confirm it. Copied, never re-decided here.
+                Identity_Method=_s(record.get("identity_method")))
         elif human:
             series, pattern = human["series"], human["pattern"]
             identity = dict(
@@ -1202,7 +1228,14 @@ def _geometry_marks(records, series_rows, positions, resolved=None):
                 # this bar. Filling it in with the person's answer is the audit
                 # trail saying the machine decided something a person did.
                 Auto_Fill_Pattern="",
-                Resolved_Fill_Pattern=pattern)
+                Resolved_Fill_Pattern=pattern,
+                # A person, on the channel that already exists for it: the
+                # resolution row, its evidence and the reviewer are all in
+                # `identity_resolution.csv` and re-checked by
+                # `identity_contract_failures`. R0 - not because a person cannot
+                # be wrong, but because this is the strongest evidence the ladder
+                # has and there is no further signature to ask for.
+                Identity_Method="HUMAN_RESOLUTION")
         else:
             continue
         out.append(dict(
@@ -1218,6 +1251,12 @@ def _geometry_marks(records, series_rows, positions, resolved=None):
                if record.get("footprint_px_image") else None),
             Bar_Direction=_upper(record.get("direction")),
             Bar_Top_Definition="OUTLINE_CENTER",
+            # The top edge this reader walked to, in outline-centre terms - the
+            # same measurement `Bar_Top_Definition` names, in the vocabulary the
+            # tier registry prices. A bar too small to sample its own fill still
+            # has a measured top, which is why the identity can be missing from
+            # a row whose number is not.
+            Value_Method="BAR_OUTLINE_CENTER",
             Errorbar_Stem_Confirmed=("TRUE" if record.get("dispersion")
                                      is not None else "FALSE"),
             Geometry_Row_SHA256=_s(record.get("geometry_row_sha256")),
@@ -3120,25 +3159,24 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         # it is the tier that refuses the value outright, in `finalize`. So a
         # reader that does not answer these questions cannot put the question on
         # its panel, and nothing here has to say so twice.
-        tiers_here = {
-            PROV.review_tier(_s(v.get("Identity_Method")),
-                             _s(v.get("Value_Method")))
-            for v in machine_qc_df.to_dict("records")
-            if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]}
-        inferred_here = bool(tiers_here & set(PROV.PANEL_CONFIRMATION_TIERS))
-        # And whether any of them needs answering ONE AT A TIME. A panel-level
-        # "I looked at the inferences" cannot carry a reconstructed number: one
-        # wrong cell in twenty does not show up in a single answer, and the
-        # picture shows a mark either way. The cells are named in
-        # `inference__<Panel_ID>.csv`, written above.
-        cells_here = bool(tiers_here & set(PROV.CELL_CONFIRMATION_TIERS))
+        mine = [v for v in machine_qc_df.to_dict("records")
+                if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]]
+        # How many of this panel's cells were reasoned to rather than measured -
+        # a COUNT in its own column, not a variant of the mode. The mode says
+        # what to open; this says what the values in front of you additionally
+        # ask, and the finalizer re-derives it rather than trusting the number
+        # here. Zero for most panels, which is what keeps `Inference_Checked`
+        # from becoming a column everybody types CONFIRMED into.
+        inferred_cells = sum(
+            1 for v in mine
+            if PROV.review_tier(_s(v.get("Identity_Method")),
+                                _s(v.get("Value_Method")))
+            in PROV.PANEL_CONFIRMATION_TIERS)
         mode = ("BAR_MONO_GEOMETRY_RESOLVED"
                 if row["Panel_ID"] in geometry_artifacts
                 and resolutions_by_panel.get(row["Panel_ID"])
                 else "BAR_MONO_GEOMETRY" if row["Panel_ID"] in geometry_artifacts
-                else ("OVERLAY_INFERRED_CELLS" if cells_here
-                      else "OVERLAY_INFERRED" if inferred_here else "OVERLAY")
-                if overlay_file
+                else "OVERLAY" if overlay_file
                 else ("WPD_ONLY" if row["WPD_Project_File"] else ""))
         review_rows.append({
             "Panel_ID": row["Panel_ID"], "Source_Panel_ID": row["Source_Panel_ID"],
@@ -3146,13 +3184,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             "Mark_Type": row["Mark_Type"],
             "Cells_Read": row["Cells_Read"], "Cells_Declared": row["Cells_Declared"],
             "Review_Mode": mode,
+            "Inference_Cells": inferred_cells,
             "Overlay_File": overlay_file,
             "WPD_Project_File": row["WPD_Project_File"],
             "Raw_Data_File": row["Raw_Data_File"],
             "Review_Subject_SHA256": review_subject_sha256(
-                row, [v for v in machine_qc_df.to_dict("records")
-                      if _s(v.get("Run_Panel_ID")) == row["Panel_ID"]],
-                manifest_hashes, environment_record(),
+                row, mine, manifest_hashes, environment_record(),
                 artifacts=artifacts_by_panel.get(row["Panel_ID"], [])),
             "Decision": "", "Reviewer_ID": "", "Reviewed_At": "", "Note": "",
         })

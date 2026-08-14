@@ -1472,7 +1472,8 @@ check("  and the cell it is refused against is derived from the manifests, not "
 _edit_dir = os.path.join(ROOT, "marks_edited")
 
 
-def _edited_marks(mutate, rows=None, restamp=False, rebind=False):
+def _edited_marks(mutate, rows=None, restamp=False, rebind=False,
+                  envelope=None):
     """The run's own marks with one of them changed on disk, and the join re-run.
 
     `rebind` moves the VALUE that cited the changed mark onto its new hashes, so
@@ -1486,6 +1487,8 @@ def _edited_marks(mutate, rows=None, restamp=False, rebind=False):
     header = {k: v for k, v in body.items() if k != "marks"}
     was = FIN._s(body["marks"][0]["Mark_Record_SHA256"])
     mutate(body["marks"][0])
+    if envelope:
+        envelope(body)
     if restamp:
         body["marks"] = RB.stamp_marks(
             [{k: v for k, v in m.items()
@@ -1551,6 +1554,29 @@ _held_e, _seen_e = _edited_marks(lambda m: m.update(series="S_NOWHERE"),
 check("a mark read as a series the verified manifests do not declare supports "
       "no cell at all",
       _held_e == {"P1"} and "MARK_CELL_UNDECLARED" in _seen_e, "%s" % _seen_e)
+# A SCHEMA THIS MODULE CANNOT JOIN IS NOT A SCHEMA IT MAY FINALIZE. v7.75. Every
+# check above was conditional on the producer's own choice of schema: a run
+# written to `mark-data/1` skipped the join, the numbers and the cell silently
+# and finalized on the method matrix alone, which is the fail-open that reads as
+# a pass.
+_held_e, _seen_e = _edited_marks(
+    lambda m: None,
+    envelope=lambda b: b.update(schema="figure-digitization-triage/mark-data/1"))
+check("raw marks this module cannot join are refused, not skipped",
+      _held_e == {"P1"} and "MARK_EVIDENCE_SCHEMA_UNSUPPORTED" in _seen_e,
+      "%s" % _seen_e)
+# AND A BLANK HASH IS NOT AN EXEMPTION EITHER. The five readers with no other
+# durable route must cite a mark; so must any value whose panel HAS joinable
+# marks, whatever its type - the run itself says the evidence was there.
+_held_j, _seen_j = _joined([dict(_a, Mark_Record_SHA256="",
+                                 Method_Attestation_SHA256="")])
+check("a value of a join reader that cites no mark at all is refused",
+      _held_j == {"P1"} and "MARK_EVIDENCE_MISSING" in _seen_j, "%s" % _seen_j)
+check("  and the five readers named are the ones with no other durable route",
+      PROV.MARK_JOIN_REQUIRED == {"LINE_COLOR", "LINE_MONO", "LINE_MONO_STYLE",
+                                  "BAR_COLOR", "BOX_VIOLIN"}
+      and not (PROV.MARK_JOIN_REQUIRED & {"BAR_MONO", "SCATTER"}),
+      "%s" % sorted(PROV.MARK_JOIN_REQUIRED))
 # AND THE COLUMNS THIS BINDS ARE THE COLUMNS THE ADAPTER WRITES. A reader that
 # starts carrying a tenth number would otherwise be bound to its mark in nine,
 # and the tenth would be free - the same drift `INTERPOLATION_CARRIED` was

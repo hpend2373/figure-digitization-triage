@@ -262,6 +262,21 @@ DISPERSION_CONTRACT = {
 }
 
 
+#: THE READERS WITH NO DURABLE ROUTE OF THEIR OWN. `BAR_MONO` writes
+#: `mono_bar_geometry.csv` and `SCATTER` writes a point cloud, and both are joined
+#: to their values by hashes that predate the mark join. These five have neither:
+#: the raw marks are the only durable record of what was measured, so a value of
+#: theirs that cites no mark cites nothing at all, and until v7.75 that blank was
+#: read as "a reader that does not stamp its marks" and skipped.
+#:
+#: Keyed by `Mark_Type` because that is what the queue records and what
+#: `METHOD_CONTRACT` is keyed by; a reader added later is refused by the matrix
+#: until it appears in both.
+MARK_JOIN_REQUIRED = frozenset((
+    "LINE_COLOR", "LINE_MONO", "LINE_MONO_STYLE", "BAR_COLOR", "BOX_VIOLIN",
+))
+
+
 #: PRICED, AND NOT YET PRODUCIBLE. A method in this set has a tier and a place in
 #: the ladder and no reader that can emit it: the vocabulary is ahead of the
 #: readers on purpose, because pricing a case before meeting it is how the ladder

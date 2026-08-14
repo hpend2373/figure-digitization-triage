@@ -5329,6 +5329,41 @@ is refused. Before v7.74, all 46 passed.
     the join not wired into the contract              18
     the cell map built per caller instead of once      4
 
+## v7.75 — the join is mandatory for the readers that have nothing else
+
+Two doors were still open beside the one v7.74 closed, and both were the same
+shape: a check that only ran when the producer had made it possible.
+
+**A `RAW_MARKS` artifact written to any other schema was skipped.** The line read
+`continue  # an older producer: the join is not there`, so a run written to
+`mark-data/1` had no join, no numbers compared and no cell derived, and
+finalized on the method matrix alone. `MARK_EVIDENCE_SCHEMA_UNSUPPORTED` refuses
+it: the version that cannot be checked is the version that must not be
+finalized, and a producer that wants the panel finalized can re-run it.
+
+**A blank `Mark_Record_SHA256` on the value was skipped too**, as "a reader that
+does not stamp its marks". That was true of every reader once and is true of
+none of the five now, so the blank had quietly changed meaning — from "this
+reader has not been taught yet" to "this value opted out of the only evidence it
+has". Two rules now:
+
+    PROV.MARK_JOIN_REQUIRED    LINE_COLOR, LINE_MONO, LINE_MONO_STYLE,
+                               BAR_COLOR, BOX_VIOLIN - the readers whose raw
+                               marks are their ONLY durable record
+    the panel is joinable      whatever its type, if this run's own marks carry
+                               a record hash then its values must cite one
+
+`BAR_MONO` and `SCATTER` are deliberately not in the first list — they have
+`mono_bar_geometry.csv` and the point cloud, joined by hashes that predate the
+mark join — but they are caught by the second whenever their marks are stamped,
+which they are. The second rule is what makes this a property of the RUN rather
+than of a list somebody has to remember to extend.
+
+    reverted                                          scenarios that fail
+    an unjoinable schema skipped instead of refused    1
+    a blank mark hash read as an exemption             2
+    only the five named readers held to the join       1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5367,11 +5402,6 @@ is refused. Before v7.74, all 46 passed.
   refute rather than refusing. It needs to return its problems alongside its
   expectations - `METHOD_EVIDENCE_INCOMPLETE` - and to stop defaulting a blank
   span to zero, which reopens the one-sided downgrade v7.73 closed
-- a value whose `Mark_Record_SHA256` is BLANK still skips the join entirely, and
-  so does a `RAW_MARKS` artifact that is not `mark-data/2`. Both are the shape a
-  run made by an older producer arrives in, and both should withhold rather than
-  pass - `MARK_EVIDENCE_SCHEMA_UNSUPPORTED` - mandatory for the five readers that
-  have no other durable route. BAR_MONO and SCATTER keep their own
 - `review_preflight` and `finalize_batch` answer overlapping questions through
   two code paths, so the preflight can report a clean bundle that the finalizer
   then refuses. They need one pure read-only validation function between them,

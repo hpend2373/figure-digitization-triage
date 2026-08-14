@@ -1132,6 +1132,7 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
     mark_of = {_s(r.get("Panel_ID")): _s(r.get("Mark_Type")).upper()
                for _, r in queue.iterrows()}
     by_hash, duplicated = {}, set()
+    joinable = set()                  # panels whose marks can be joined to
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "RAW_MARKS":
             continue
@@ -1143,9 +1144,23 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
                 envelope = json.load(fh)
         except Exception:
             continue                  # verify_run_outputs owns unreadable bytes
+        panel = _s(envelope.get("Panel_ID")) or _s(art.get("Panel_ID"))
         if _s(envelope.get("schema")) != RB.MARK_DATA_SCHEMA:
-            continue                  # an older producer: the join is not there
-        panel = _s(envelope.get("Panel_ID"))
+            # AN OLDER PRODUCER, AND THE JOIN IS NOT THERE. Skipped until v7.75,
+            # which made every check above conditional on the producer's own
+            # choice of schema: a run written to `mark-data/1` had no join, no
+            # numbers compared and no cell derived, and finalized on the method
+            # matrix alone. The version that cannot be checked is the version
+            # that must not be finalized.
+            flag("panel:%s" % panel, "MARK_EVIDENCE_SCHEMA_UNSUPPORTED",
+                 "%s's raw marks are written as %s and this module can only "
+                 "join %s; a value cannot be checked against a mark whose "
+                 "record hash does not exist"
+                 % (panel, _s(envelope.get("schema")) or "(no schema)",
+                    RB.MARK_DATA_SCHEMA))
+            withheld.add(panel)
+            continue
+        joinable.add(panel)
         header = {k: v for k, v in envelope.items() if k != "marks"}
         for mark in envelope.get("marks") or []:
             # RECOMPUTED, and the recomputed value is what the index is keyed by.
@@ -1173,8 +1188,6 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
             if key in by_hash:
                 duplicated.add(key)
             by_hash[key] = (panel, mark)
-    if not by_hash:
-        return withheld
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
             else list(machine or ()))
     claimed_by = {}
@@ -1182,7 +1195,27 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
         pid = _s(row.get("Run_Panel_ID"))
         key = _s(row.get("Mark_Record_SHA256"))
         if not key:
-            continue                  # a reader that does not stamp its marks
+            # A BLANK IS NOT AN EXEMPTION. Skipped until v7.75 as "a reader that
+            # does not stamp its marks", which was true of every reader once and
+            # is true of none of the five now - so the blank that used to mean
+            # "this reader has not been taught" came to mean "this value opted
+            # out of the only evidence it has". `PROV.MARK_JOIN_REQUIRED` names
+            # the readers with no other durable route; a panel that HAS joinable
+            # marks is held to them whatever its type, because the run itself
+            # says the evidence was there to cite.
+            if mark_of.get(pid) in PROV.MARK_JOIN_REQUIRED or pid in joinable:
+                flag("%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key"))),
+                     "MARK_EVIDENCE_MISSING",
+                     "this value carries no Mark_Record_SHA256, and %s"
+                     % ("its panel's raw marks carry one for every mark in it"
+                        if pid in joinable else
+                        "a %s value has no durable evidence of its own besides "
+                        "the mark it was read from" % mark_of.get(pid)))
+                withheld.add(pid)
+            continue
+        if not by_hash and mark_of.get(pid) not in PROV.MARK_JOIN_REQUIRED \
+                and pid not in joinable:
+            continue                  # nothing in this run to join against
         claimed_by.setdefault(key, []).append(row)
     for key, sharing in sorted(claimed_by.items()):
         if len(sharing) > 1:

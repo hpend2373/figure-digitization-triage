@@ -3937,6 +3937,23 @@ check("  while the run's own values agree with it",
                                        Mark_Type="BAR_MONO")]),
           _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
       and not _pg, "%s" % _pg)
+# AND A PANEL THAT HAS JOINABLE MARKS IS HELD TO THEM WHATEVER ITS TYPE. v7.75.
+# `BAR_MONO` is not in `MARK_JOIN_REQUIRED` - it has the geometry artifact as its
+# own durable route - but this run's marks carry a record hash for every bar, so a
+# value of it that cites none has dropped evidence the run says was there. Read as
+# "a reader that does not stamp its marks", that blank was an exemption any row
+# could take.
+_pg = []
+_unbound = _acc_geo.copy()
+_unbound["Mark_Record_SHA256"] = ""
+_unbound["Method_Attestation_SHA256"] = ""
+check("a value that drops its mark hash on a panel whose marks carry one is "
+      "refused",
+      FIN.method_contract_failures(
+          _unbound, pd.DataFrame([dict(Panel_ID="P_SHORT",
+                                       Mark_Type="BAR_MONO")]),
+          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
+      == {"P_SHORT"} and "MARK_EVIDENCE_MISSING" in _pg, "%s" % _pg)
 # REVERT: fold `Inference_Checked` back into a mode. This panel is queued
 # BAR_MONO_GEOMETRY_RESOLVED and holds a prototype-matched cell, so the question
 # has to reach it through the VALUES - a mode named after an overlay cannot.

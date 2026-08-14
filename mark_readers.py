@@ -224,13 +224,24 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
     x0, x1, y0, y1 = map(int, panel_box)
     out = []
+    # EVERY MASK BEFORE ANY MARK, so each mark can be asked whether another
+    # series' colour also claims it. Two declared colours closer than the sum of
+    # their tolerances produce two masks over one printed marker, and reading
+    # them independently gives a complete grid in which two series hold the same
+    # mark - no cell missing, no count wrong, and one of the two numbers
+    # attributed to a series that was never there. `read_scatter_panel` has
+    # measured this since it shipped; the two colour readers did not.
+    masks = {}
     for spec in series:
         if spec.rgb is None:
             raise ValueError("coloured line reader requires SeriesSpec.rgb")
         mask = _rgb_mask(rgb, spec.rgb, spec.tolerance)
         region = np.zeros_like(mask)
         region[max(0, y0):min(mask.shape[0], y1), max(0, x0):min(mask.shape[1], x1)] = True
-        mask &= region
+        masks[spec.name] = mask & region
+    for spec in series:
+        mask = masks[spec.name]
+        others = [m for name, m in masks.items() if name != spec.name]
         for order, (label, x) in enumerate(x_positions.items()):
             found = _marker_and_errorbar(mask, x, y0, y1, half_window=x_window)
             if found is None:
@@ -259,6 +270,11 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
                 # it stays on the open list rather than being priced here.
                 Identity_Method="MEASURED_COLOUR",
                 Value_Method="MARKER_CENTER",
+                # HOW MANY OTHER DECLARED COLOURS ALSO COVER THIS MARK. Measured
+                # here and acted on by the batch layer, which is the division
+                # every other reader field follows: naming a series the ink does
+                # not separate is not this function's decision to make quietly.
+                mask_overlap=int(_pixel_claimed_by(others, x, cy)),
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
             ))
     out.sort(key=lambda row: (row["series"], row["order"]))

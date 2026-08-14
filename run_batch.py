@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.68"
+PIPELINE_VERSION = "7.69"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -597,7 +597,13 @@ def _reader_kwargs(options, mark_type):
 
 
 def _series_specs(rows, mark_type, options):
-    tolerance = (options or {}).get("colour_tolerance", 70.0)
+    # The same resolution `batch_manifests.colour_tolerance_for` uses, from the
+    # same table: series, then config, then the reader's own default. Two copies
+    # of that order are two chances for the validator to check a figure the run
+    # does not read.
+    tolerance = (options or {}).get(
+        "colour_tolerance",
+        BM.COLOUR_TOLERANCE_DEFAULTS.get(_upper(mark_type), 70.0))
     specs = []
     for r in rows:
         rgb = None
@@ -1484,7 +1490,8 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # and `colour_tolerance` was an option with no reader keyword.
             # Mask_Key still works where it is declared, for the two worked
             # examples that use it.
-            default_tolerance = float(options.get("colour_tolerance", 60.0))
+            default_tolerance = float(options.get(
+                "colour_tolerance", BM.COLOUR_TOLERANCE_DEFAULTS["BAR_COLOR"]))
             declared_colours, mapping = {}, {}
             for r in series_rows:
                 sid = _s(r.get("Series_ID"))
@@ -1611,6 +1618,16 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     # ---- relabel reader output with the DECLARED identity before it becomes a
     # ---- value row. The reader never learns what a series means.
     converted, kept = [], []
+    # A MARK TWO DECLARED COLOURS BOTH CLAIM IS NOT A MARK EITHER OF THEM NAMED.
+    # The colour readers measure this per mark (`mask_overlap`); the decision is
+    # here, because dropping a value is a batch-layer judgement and because the
+    # cell then goes missing, is queued, and is read by a person - which is the
+    # right outcome for ink that does not separate the series drawn on it.
+    #
+    # Left in, the grid is COMPLETE and wrong in the way nothing else catches:
+    # two series holding one printed mark, no cell missing and no count off.
+    contested = [row for row in rows if int(row.get("mask_overlap") or 0)]
+    rows = [row for row in rows if not int(row.get("mask_overlap") or 0)]
     for row in rows:
         sid = row.get("series")
         qid = row.get("x_label")
@@ -1700,6 +1717,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         record.setdefault("WPD_Project_File", project or "")
     seen = {r["Cell_Key"] for r in records}
     missing = sorted(_all_cells(series_level, position_level) - seen)
+    contested_note = ("" if not contested else
+                      "%d mark(s) were claimed by more than one declared "
+                      "colour and were not attributed to any series; declare "
+                      "colours further apart than their tolerances, or read "
+                      "these cells by hand" % len(contested))
     # ---- one picture per reconstructed cell.
     #
     # Drawn HERE and nowhere later, because this is the only place that holds the
@@ -1738,9 +1760,12 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                                                    project=project, overlay=overlay),
                         declared=declared, read=len(records),
                         with_dispersion=with_disp, missing=missing,
-                        detail=("" if not missing else
-                                "%d of %d declared cells were not resolved"
-                                % (len(missing), declared)))
+                        detail="; ".join(
+                            part for part in
+                            (("" if not missing else
+                              "%d of %d declared cells were not resolved"
+                              % (len(missing), declared)), contested_note)
+                            if part))
 
 
 def write_panel_project(path, panel, marks, xcal, ycal):
@@ -3099,8 +3124,16 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             if row["Run_State"] != "AUTO_PASS" or not uid or uid not in blamed:
                 continue
             row["Run_State"] = "QC_FAILED"
-            row["Detail"] = ("the grid gate rejected this unit's values: %s"
-                             % ", ".join(sorted(blamed[uid])))
+            # APPENDED, not replaced. The gate says WHICH CHECK refused the
+            # unit; the reader's own detail says what happened to the panel, and
+            # the two are different halves of the same answer. Overwritten, a
+            # panel whose marks two declared colours both claimed reported
+            # `FACTORIAL_CELL_MISSING` and nothing about the colours - the cell
+            # went missing for a reason the run had measured and then discarded.
+            row["Detail"] = "; ".join(part for part in (
+                "the grid gate rejected this unit's values: %s"
+                % ", ".join(sorted(blamed[uid])), _s(row.get("Detail")))
+                if part)
             # Update the panel's existing queue entry rather than adding a
             # second one, and keep the missing cells it already carried. The
             # old code appended, with the removed `Missing_Cells` key and no

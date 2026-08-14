@@ -4928,6 +4928,86 @@ it changed to the truth.
     the route written but not attested                 1
     the value's route never compared with the figure   1
 
+## v7.69 — the picture reads the same vocabulary the gate does, and two colours have to be two colours
+
+**The overlay was starring one reader's field.** `line_style_source` marks a
+LINE_MONO_STYLE series named by elimination and says nothing about a BAR_MONO bar
+named against another group's prototypes, or about a NUMBER that was interpolated
+rather than read — both of which the ladder prices exactly as it prices the
+first. So a panel could be asked for `Inference_Checked` while its picture showed
+nothing to check.
+
+The overlay now derives the tier from the two fields every reader answers, and
+marks three different questions differently:
+
+    *  the SERIES was reasoned to; the number is measured        R2
+    +  the NUMBER was reconstructed from neighbouring ink        R3
+    x  no signature can finalize this value at all               R4
+
+with a footer line for each, naming `inference_review.csv` and
+`method_blocked_cells.csv` where those are what the reviewer does next. ASCII,
+because the default bitmap font is what is installed everywhere and a dagger that
+renders as a box is worse than a plus. The reader-local field stays as the
+fallback for a row that answers neither question.
+
+**And the suffix check was case-sensitive.** `PROVENANCE_SUFFIXES` is lower case
+and `Identity_Method` is not, so the two fields the overlay now reads were
+themselves "provenance this overlay cannot read" — every mark in every panel
+would have carried a question mark the moment a reader answered them. Case-folded,
+with the two shared fields registered as known.
+
+**The BAR_MONO row crop names the route.** That crop is the whole evidence a
+BAR_MONO reviewer has, and its panel is asked for `Inference_Checked` precisely
+because some of its bars were named against another group's prototypes. The
+caption is now a function (`row_caption`) so what the picture says can be
+asserted without reading pixels back out of a PNG — the route was added to it
+once and nothing could tell whether it was there.
+
+**Two colours that cannot be told apart do not name two series.** A colour reader
+builds one mask per series — every pixel within `Colour_Tolerance` of the declared
+hex — and reads each on its own. Two colours closer than the sum of their
+tolerances put one printed mark in both masks, and the grid then comes out
+COMPLETE with two series holding it: no cell missing, no count wrong, one number
+under a series that was never there. `SCATTER` has measured this since it
+shipped; `LINE_COLOR` and `BAR_COLOR` did not.
+
+Two layers, because neither is enough:
+
+    the manifest    two declared colours whose distance is no more than the sum
+                    of the tolerances they will be read at -> SERIES_COLOURS_OVERLAP,
+                    refused before a raster is opened
+    the raster      the reader counts how many OTHER masks claim each mark it
+                    found, and the batch layer drops the contested ones - the
+                    cell goes missing, the panel is refused by the gate, and it
+                    is queued for a person
+
+The manifest arithmetic is complete for declared colours (a pixel in two masks
+needs the centres within the sum of the tolerances), so the raster check is the
+one that reaches `Mask_Key`, where two BUILT-IN masks overlap and no declared
+colour exists for the arithmetic to refuse — `dark` covers a blue bar's outline.
+
+Writing that check surfaced a drift it exists to prevent: it hard-coded 60.0
+while the line reader was using 70.0, so a validator would have been checking a
+figure the run does not read. `COLOUR_TOLERANCE_DEFAULTS` is now one table, per
+mark type, that `run_batch` reads too, and the check resolves the tolerance in
+the order the run does: series, then reader config, then default.
+
+**And a QC failure stopped erasing the reader's reason.** The gate overwrote the
+panel's `Detail` with its own, so a panel whose marks two colours claimed
+reported `FACTORIAL_CELL_MISSING` and nothing about the colours — the cell went
+missing for a reason the run had measured and then discarded. The two are
+appended now: the gate says which check refused the unit, the reader says what
+happened to the panel.
+
+    reverted                                          scenarios that fail
+    the overlay reading one reader's field only        3
+    the footer silent about the tiers                  1
+    the suffix check case-sensitive again              1
+    the crop hiding the route                          1
+    the manifest allowing colours that overlap         2
+    the line reader not measuring the overlap          1
+    a contested mark kept                              3
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -4959,10 +5039,6 @@ it changed to the truth.
   BAR_MONO. A `LINE_MONO_STYLE` row claiming `DIRECT_CURVE_INK` for a number a
   fit produced is inside its reader's set and passes; closing it needs the raw
   marks JSON joined to the values, which is the next step of the same idea
-- `LINE_COLOR` and `BAR_COLOR` build one mask per declared colour and read each
-  independently. Two colours closer than their tolerances can both claim one
-  marker, and the grid then looks complete while two series hold the same mark.
-  `SCATTER` measures this (`Series_Mask_Overlap_Count`) and the other two do not
 - `read_panel("BAR_MONO")` still dispatches to the single-panel absolute-band
   reader, while the batch runner uses the two-pass figure-local one. An agent
   reaching for the generic entry point gets a different answer from the pipeline

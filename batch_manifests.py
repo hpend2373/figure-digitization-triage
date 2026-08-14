@@ -63,6 +63,35 @@ POSITIONAL_MARK_TYPES = ("BAR_COLOR", "BAR_MONO", "LINE_COLOR", "LINE_MONO",
 #: Which mark types separate series by colour and therefore need one.
 COLOUR_MARK_TYPES = ("BAR_COLOR", "LINE_COLOR")
 
+#: What a colour series' mask reaches when neither the series nor its reader
+#: config says. PER MARK TYPE, because the two readers were born with different
+#: numbers, and named HERE because the separability check below has to know how
+#: wide a declared colour's net will actually be.
+#:
+#: The first version of that check hard-coded 60.0 and the line reader was using
+#: 70.0 - two defaults, already drifted, in the one place whose whole job is to
+#: say whether two nets meet. `run_batch` reads these rather than repeating them.
+COLOUR_TOLERANCE_DEFAULTS = {"BAR_COLOR": 60.0, "LINE_COLOR": 70.0,
+                             "SCATTER": 70.0}
+
+
+def colour_tolerance_for(series_row, mark_type, config_options=None):
+    """The net this series' mask will actually be built with.
+
+    Declared on the series, else declared for its reader config, else the
+    reader's own default. Same order `run_batch._series_specs` resolves it in,
+    because a check that guesses a different tolerance from the one the run uses
+    is a check about a different figure.
+    """
+    own = series_row.get("Colour_Tolerance")
+    if not blank(own):
+        return float(own)
+    configured = (config_options or {}).get("colour_tolerance")
+    if configured is not None and not blank(configured):
+        return float(configured)
+    return COLOUR_TOLERANCE_DEFAULTS.get(
+        str(mark_type or "").strip().upper(), 70.0)
+
 #: Which mark types separate series by drawn form rather than by colour.
 MONO_MARK_TYPES = ("BAR_MONO", "LINE_MONO", "LINE_MONO_STYLE")
 
@@ -1452,6 +1481,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 
     # -------------------------------------------------------------- panels
     panel_index, panel_mark, mark_by_config = {}, {}, {}
+    panel_config = {}
     for i, r in panels.iterrows():
         line = "panels:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
@@ -1486,6 +1516,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag(line, "BAD_MARK_TYPE",
                  "Mark_Type=%s (expected %s)" % (mark, "/".join(BATCH_MARK_TYPES)))
         panel_mark[pid] = mark
+        panel_config[pid] = str(r.get("Config_ID", "")).strip()
         mode = str(r.get("Panel_Mode", "")).strip().upper() or "AUTO"
         if mode not in PANEL_MODES:
             flag(line, "BAD_PANEL_MODE",
@@ -1762,6 +1793,15 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag("source_panel:%s" % spid, "SOURCE_PANEL_RUN_LINK_MISSING",
                  "%s requires at least one panel_manifest row" % disposition)
 
+    # What each reader config says a colour mask should reach, for the
+    # separability check below. Read straight off the long-form rows rather than
+    # through `load_reader_configs`, which flags as it parses and would report
+    # every option twice.
+    config_tolerance = {}
+    for _, cfg in configs.iterrows():
+        if str(cfg.get("Option", "")).strip() == "colour_tolerance":
+            config_tolerance[str(cfg.get("Config_ID", "")).strip()] = \
+                cfg.get("Value")
     # Two series of one panel that are told apart by nothing are not two series.
     for pid in panel_index:
         mark = panel_mark.get(pid, "")
@@ -1786,6 +1826,40 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag("panels:%s" % pid, "SERIES_NOT_SEPARABLE",
                  "two series in this panel carry identical discriminants, so no "
                  "reader can tell them apart and neither can a reviewer")
+        # AND IDENTICAL IS NOT THE ONLY WAY TO BE INSEPARABLE. A colour reader
+        # builds one mask per series - every pixel within `Colour_Tolerance` of
+        # the declared hex - and reads each mask on its own. Two colours closer
+        # than the sum of their tolerances produce two masks over one printed
+        # mark, and the grid then comes out COMPLETE with two series holding it:
+        # no cell missing, no count wrong, one number under a series that was
+        # never there. The reader now measures the overlap and the batch layer
+        # drops the mark, but a manifest that guarantees it is a manifest to
+        # refuse before a raster is opened.
+        if mark in COLOUR_MARK_TYPES and len(rows) > 1:
+            declared = []
+            for r in rows:
+                if blank(r.get("Colour_Hex")):
+                    continue          # Mask_Key: a built-in, not a declaration
+                try:
+                    rgb = parse_colour(r.get("Colour_Hex"))
+                except ValueError:
+                    continue          # already flagged, above
+                declared.append((
+                    str(r.get("Series_ID", "")).strip(), rgb,
+                    colour_tolerance_for(
+                        r, mark,
+                        {"colour_tolerance": config_tolerance.get(
+                            panel_config.get(pid))})))
+            for a, b in [(x, y) for i, x in enumerate(declared)
+                         for y in declared[i + 1:]]:
+                distance = sum((p - q) ** 2 for p, q in zip(a[1], b[1])) ** 0.5
+                if distance <= a[2] + b[2]:
+                    flag("panels:%s" % pid, "SERIES_COLOURS_OVERLAP",
+                         "%s and %s are %.1f apart in RGB and claim %.1f + %.1f "
+                         "of tolerance between them, so one printed mark can "
+                         "fall in both masks. Declare tighter tolerances, or "
+                         "colours further apart, or route the panel to MANUAL"
+                         % (a[0], b[0], distance, a[2], b[2]))
 
     # ------------------------------------------------------------ positions
     seen_pos = set()

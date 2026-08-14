@@ -27,6 +27,7 @@ import ast
 import tarfile
 import tempfile
 
+import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 
@@ -5010,6 +5011,140 @@ check("and the mode it declares is backed by a ledger artifact",
       "%s" % [(r["Panel_ID"], r["Review_Mode"]) for _, r in _rq.iterrows()])
 
 
+print("two colours that cannot be told apart do not name two series")
+# v7.69. A colour reader builds one mask per series and reads each on its own.
+# Declare two colours closer than the sum of their tolerances and one printed
+# mark falls in both masks - the grid then comes out COMPLETE, with two series
+# holding the same mark: no cell missing, no count wrong, and one number under a
+# series that was never there. `read_scatter_panel` has measured this since it
+# shipped; the two colour readers did not.
+_close = [dict(SERIES[0], Series_ID="S_A", Colour_Hex="#2d50dc",
+               Colour_Tolerance="80", Factor_Level="CONTROL"),
+          dict(SERIES[0], Series_ID="S_B", Colour_Hex="#3050d0",
+               Colour_Tolerance="80", Factor_Level="TREATED")]
+# THE READER MEASURES IT, on the marks it actually found. Two masks built from
+# one colour claim every mark twice, which is the degenerate case of the thing
+# the manifest check computes in the abstract.
+_ov_img = Image.new("RGB", (300, 200), "white")
+_ovd = ImageDraw.Draw(_ov_img)
+for _x in (80, 160, 240):
+    _ovd.ellipse((_x - 6, 96, _x + 6, 108), fill=(45, 80, 220))
+_ov_cal = MR.AxisCalibration.from_points([(10.0, 40.0), (0.0, 160.0)])
+_ov_x = {"T%d" % i: x for i, x in enumerate((80, 160, 240))}
+_ov_same = MR.read_line_marker_panel(
+    _ov_img, panel_box=(20, 280, 20, 180), x_positions=_ov_x,
+    y_calibration=_ov_cal,
+    series=[MR.SeriesSpec("S_A", rgb=(45, 80, 220), tolerance=60),
+            MR.SeriesSpec("S_B", rgb=(45, 80, 220), tolerance=60)])
+check("the reader counts the other colours that claim each mark it found",
+      _ov_same and all(r.get("mask_overlap") == 1 for r in _ov_same),
+      "%s" % [(r["series"], r.get("mask_overlap")) for r in _ov_same])
+_ov_apart = MR.read_line_marker_panel(
+    _ov_img, panel_box=(20, 280, 20, 180), x_positions=_ov_x,
+    y_calibration=_ov_cal,
+    series=[MR.SeriesSpec("S_A", rgb=(45, 80, 220), tolerance=60),
+            MR.SeriesSpec("S_B", rgb=(215, 45, 45), tolerance=60)])
+check("  and reports none when only one colour reaches the ink",
+      _ov_apart and all(r.get("mask_overlap") == 0 for r in _ov_apart),
+      "%s" % [(r["series"], r.get("mask_overlap")) for r in _ov_apart])
+# AND THE BATCH LAYER DROPS THEM, end to end: the cell goes missing, is queued,
+# and the run says why. Reachable through `Mask_Key`, where two BUILT-IN masks
+# can cover one bar and no declared colour exists for the manifest arithmetic to
+# refuse - `dark` covers every outline, including a blue bar's.
+_ov_masked = [dict(SERIES[0], Colour_Hex="", Mask_Key="blue"),
+              dict(SERIES[1], Colour_Hex="", Mask_Key="dark")]
+_ov_panels = [dict(PANELS[0], Mark_Type="BAR_COLOR")]
+check("a manifest naming two built-in masks passes the colour arithmetic",
+      "SERIES_COLOURS_OVERLAP" not in validate(series_rows=_ov_masked,
+                                               panels=_ov_panels),
+      "%s" % validate(series_rows=_ov_masked, panels=_ov_panels))
+check("  which is why the reader measures the overlap as well as the manifest",
+      "mask_overlap" in _ov_same[0],
+      "%s" % sorted(_ov_same[0]))
+check("a manifest whose two colours overlap at their tolerances is refused",
+      "SERIES_COLOURS_OVERLAP" in validate(series_rows=_close),
+      "%s" % validate(series_rows=_close))
+check("  while the fixture's own two colours, 246 apart, are not",
+      "SERIES_COLOURS_OVERLAP" not in validate(), "%s" % validate())
+# THE TOLERANCES DECIDE, not the colours alone. The fixture's own two colours
+# are 246 apart and separate at their defaults; give each of them a net of 200
+# and they meet in the middle, on the same manifest and the same figure.
+_wide = [dict(r, Colour_Tolerance="200") for r in SERIES]
+check("  and it is the TOLERANCES that decide, not the colours alone",
+      "SERIES_COLOURS_OVERLAP" in validate(series_rows=_wide),
+      "%s" % validate(series_rows=_wide))
+# AND THE RASTER GETS A VOTE TOO. A manifest can pass the arithmetic above and
+# still print two colours that meet on the page - antialiasing, a scanner, a
+# figure redrawn between the manifest and the render. The reader measures which
+# marks another series' mask also claims, and the batch layer drops them: the
+# cell goes missing, is queued, and is read by a person.
+_shared = np.zeros((40, 40), dtype=bool)
+_shared[18:22, 18:22] = True
+check("a mark another series' mask claims is counted by the reader",
+      MR._pixel_claimed_by([_shared], 20, 20) == 1
+      and MR._pixel_claimed_by([_shared], 5, 5) == 0)
+# AND THE BATCH LAYER DROPS THEM, in a run: the cell goes missing, is queued for
+# a person, and the run manifest says why. Simulated at the reader boundary,
+# because for DECLARED colours the manifest arithmetic above is complete - a mark
+# in two masks needs the two centres within the sum of the tolerances - so the
+# reachable raster case is `Mask_Key`, where two built-in masks overlap and no
+# declared colour exists for the arithmetic to refuse.
+_real_rp = MR.read_panel
+
+
+def _one_contested(*a, **kw):
+    rows = _real_rp(*a, **kw)
+    for r in rows[:1]:
+        r["mask_overlap"] = 1
+    return rows
+
+
+_cont_out = os.path.join(ROOT, "contested_run")
+try:
+    MR.read_panel = _one_contested
+    _cont = RB.run_batch(write_manifests(os.path.join(_cont_out, "manifests")),
+                         _cont_out, file_root=ROOT, run_date="2026-08-06")
+finally:
+    MR.read_panel = _real_rp
+_cont_values = pd.read_csv(os.path.join(_cont_out, "figure_values_raw.csv"),
+                           dtype=object).fillna("")
+_cont_run = pd.read_csv(os.path.join(_cont_out, "run_manifest.csv"),
+                        dtype=object).fillna("")
+_cont_cells = pd.read_csv(os.path.join(_cont_out, "manual_queue_cells.csv"),
+                          dtype=object).fillna("")
+check("a mark two colours claim produces no value at all",
+      len(_cont_values) == len(values) - 1,
+      "%d against %d" % (len(_cont_values), len(values)))
+check("  and the run says why, rather than reporting a cell that went missing",
+      any("claimed by more than one declared colour" in str(r["Detail"])
+          for _, r in _cont_run.iterrows()),
+      "%s" % sorted({str(r["Detail"]) for _, r in _cont_run.iterrows()}))
+check("  and the cell is queued for a person, like any other unread cell",
+      any(r["Panel_ID"] == "P_LINE" for _, r in _cont_cells.iterrows()),
+      "%s" % _cont_cells.to_dict("records"))
+check("  and the panel is refused by the gate, not quietly one cell short",
+      any(r["Panel_ID"] == "P_LINE" and r["Run_State"] == "QC_FAILED"
+          for _, r in _cont_run.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Run_State"]) for _, r in _cont_run.iterrows()])
+
+# AND THE BAR_MONO CROP NAMES THE ROUTE. That crop is the whole evidence a
+# BAR_MONO reviewer has, and its panel is asked for `Inference_Checked` precisely
+# because some of its bars were named against another group's prototypes - so
+# without this the question had no visible subject. The caption is a function so
+# that what the picture says can be asserted without reading pixels back.
+_cap_match = RB.OVERLAY.row_caption(dict(
+    figure="P1", group="G", slot=0, value=1.0, dispersion=0.1,
+    resolved_fill_pattern="SOLID", identity_method="FIGURE_PROTOTYPE_MATCH"))
+_cap_own = RB.OVERLAY.row_caption(dict(
+    figure="P1", group="G", slot=0, value=1.0, dispersion=0.1,
+    resolved_fill_pattern="SOLID", identity_method="MEASURED_FILL_RELATION"))
+check("the row crop says which route named the bar it pictures",
+      "other groups" in _cap_match[1] and "relation" in _cap_own[1],
+      "%r / %r" % (_cap_match[1], _cap_own[1]))
+check("  and says nothing where the figure named nothing",
+      "[" not in RB.OVERLAY.row_caption(dict(figure="P1", group="G", slot=0))[1],
+      "%r" % RB.OVERLAY.row_caption(dict(figure="P1", group="G", slot=0))[1])
+
 print("the picture says which marks had their series reasoned to, not measured")
 # THE OVERLAY IS THE ARTIFACT A REVIEWER APPROVES. Its whole question is "did
 # it put the marks in the right places", and after v7.50 some marks are in a
@@ -5063,6 +5198,49 @@ check("a registered field is not questioned",
       "%r" % (RB.OVERLAY.unreadable_provenance(_NAMED),))
 check("nor is an ordinary reader field that is not provenance",
       RB.OVERLAY.unreadable_provenance(dict(_MEASURED, top_px=3.0)) == [])
+# AND THE SHARED VOCABULARY, which is what this picture should have been reading
+# all along. v7.69. `line_style_source` is one reader's own field: it stars a
+# LINE_MONO_STYLE series named by elimination and says nothing about a BAR_MONO
+# bar named against another group's prototypes, or about a NUMBER that was
+# interpolated rather than read - both of which the ladder prices exactly as it
+# prices the first. Three marks, because they are three different questions.
+_R2_MARK = dict(_MEASURED, Identity_Method="FIGURE_PROTOTYPE_MATCH",
+                Value_Method="BAR_OUTLINE_CENTER")
+_R3_MARK = dict(_MEASURED, Identity_Method="MEASURED_LINE_STYLE",
+                Value_Method="LOCAL_BRACKETED_INTERPOLATION")
+_R4_MARK = dict(_MEASURED, Identity_Method="MEASURED_LINE_STYLE",
+                Value_Method="FIT_FALLBACK")
+_R0_MARK = dict(_MEASURED, Identity_Method="MEASURED_COLOUR",
+                Value_Method="MARKER_CENTER")
+for _label, _mark, _want in (("a series reasoned to", _R2_MARK, " *"),
+                             ("a number reconstructed", _R3_MARK, " +"),
+                             ("a number no signature can buy", _R4_MARK, " x")):
+    check("%s is marked, off the two fields every reader now answers" % _label,
+          RB.OVERLAY.mark_label(_mark).endswith(_want),
+          "%r" % RB.OVERLAY.mark_label(_mark))
+check("and a mark measured both ways is left alone",
+      RB.OVERLAY.mark_label(_R0_MARK) == "S_A/T1 9.5",
+      "%r" % RB.OVERLAY.mark_label(_R0_MARK))
+check("the tier is derived from the mark, never read off it",
+      RB.OVERLAY.tier_of(_R3_MARK) == "R3"
+      and RB.OVERLAY.tier_of(dict(_R3_MARK, Review_Tier="R0")) == "R3"
+      and RB.OVERLAY.tier_of(dict(series="S")) == "",
+      RB.OVERLAY.tier_of(_R3_MARK))
+_key = RB.OVERLAY.inferred_note([_R2_MARK, _R3_MARK, _R3_MARK, _R4_MARK])
+check("and the footer counts each kind separately, in the reviewer's words",
+      len(_key.splitlines()) == 3 and "2 mark(s)" in _key
+      and "inference_review.csv" in _key
+      and "method_blocked_cells.csv" in _key, "%r" % _key)
+# THE TWO SHARED FIELDS ARE NOT "PROVENANCE THIS OVERLAY CANNOT READ". The
+# suffix check was case-sensitive against lower-case suffixes, so `Value_Method`
+# matched nothing and `Identity_Method` matched nothing - and the moment a reader
+# answered them, every mark in every panel would have carried a question mark.
+check("the shared fields are readable, and the check is case-folded",
+      RB.OVERLAY.unreadable_provenance(_R3_MARK) == []
+      and RB.OVERLAY.unreadable_provenance(
+          dict(_MEASURED, Marker_Identity_Source="ELIMINATION"))
+      == ["Marker_Identity_Source"],
+      "%r" % RB.OVERLAY.unreadable_provenance(_R3_MARK))
 # Two keys, two footer lines, and the canvas grows for both.
 _two = RB.OVERLAY.inferred_note([_NAMED, _STRANGE])
 check("a picture with both kinds of doubt says both",

@@ -19,8 +19,15 @@ signature on a filename.
 """
 import json
 import os
+import sys
 
 from PIL import Image, ImageDraw
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:                                      # pragma: no cover
+    sys.path.insert(0, HERE)
+
+import provenance as PROV                                         # noqa: E402
 
 #: Distinct enough to tell apart on a greyscale journal figure, in order.
 SERIES_COLOURS = ((214, 39, 40), (31, 119, 180), (44, 160, 44), (148, 103, 189),
@@ -98,6 +105,26 @@ def _mark_y(mark):
 #: the ink named it.
 IDENTITY_SOURCE_FIELDS = (("line_style_source", "MEASURED"),)
 
+#: AND THE VOCABULARY EVERY READER SHARES, which is what this picture should
+#: have been reading all along. `line_style_source` above is one reader's own
+#: field: it stars a LINE_MONO_STYLE series named by elimination and says nothing
+#: about a BAR_MONO bar named against another group's prototypes, or about a
+#: NUMBER that was interpolated rather than read - both of which the tier ladder
+#: prices exactly as it prices the first. So the overlay now asks `provenance`,
+#: and the reader-local field stays beside it because it is still the only thing
+#: that distinguishes MEASURED from a blank on a row that predates the shared
+#: vocabulary.
+#:
+#: Three marks rather than one, because they are three different questions:
+#:
+#:   *  the SERIES was reasoned to; the number is measured        (R2)
+#:   +  the NUMBER was reconstructed from neighbouring ink        (R3)
+#:   x  no signature can finalize this value at all               (R4)
+#:
+#: ASCII, not Unicode: the default bitmap font is what is installed everywhere,
+#: and a dagger that renders as a box is worse than a plus.
+TIER_MARK_SUFFIXES = (("R2", " *"), ("R3", " +"), ("R4", " x"))
+
 #: How a reader names a provenance field. Everything matching this and not in
 #: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
 #: A convention can still be side-stepped by a field named nothing like this,
@@ -117,10 +144,39 @@ INFERRED_MARK_SUFFIX = " *"
 UNKNOWN_MARK_SUFFIX = " ?"
 
 
+#: What each tier's mark means, in the footer, in the words a reviewer needs.
+TIER_NOTES = {
+    "R2": "%d mark(s): SERIES reasoned to, not read off the ink - check these "
+          "first",
+    "R3": "%d mark(s): NUMBER reconstructed from neighbouring ink - each one is "
+          "confirmed by name in inference_review.csv",
+    "R4": "%d mark(s): the number was not read off the ink at all. No approval "
+          "makes these poolable; they are in method_blocked_cells.csv",
+}
+
+
+def tier_of(mark):
+    """The review tier this mark's own two methods imply, or "" if it says none.
+
+    Derived, never read off the mark: a tier in a file is a tier a producer can
+    lower, which is why `provenance` computes it and nothing writes it down.
+    """
+    identity = str(mark.get("Identity_Method", "") or "").strip()
+    value = str(mark.get("Value_Method", "") or "").strip()
+    if not identity and not value:
+        return ""
+    return PROV.review_tier(identity, value)
+
+
 def inferred_note(marks):
     """The footer key for starred and questioned marks, or "" if none."""
     lines = []
-    starred = sum(1 for m in marks if _inferred_identity(m))
+    for tier, suffix in TIER_MARK_SUFFIXES:
+        count = sum(1 for m in marks if tier_of(m) == tier)
+        if count:
+            lines.append("%s %s" % (suffix.strip(), TIER_NOTES[tier] % count))
+    starred = sum(1 for m in marks
+                  if _inferred_identity(m) and not tier_of(m))
     if starred:
         lines.append("* %d mark(s): SERIES named by elimination, not read off "
                      "the ink - check these first" % starred)
@@ -146,8 +202,17 @@ def mark_label(mark):
     # last curve by elimination, and that cell is the one a reviewer should
     # look at hardest - it is the whole question this picture exists to answer.
     # Unmarked, it looked exactly like a cell read off the ink.
-    if _inferred_identity(mark):
-        label += INFERRED_MARK_SUFFIX
+    tier = tier_of(mark)
+    for known, suffix in TIER_MARK_SUFFIXES:
+        if tier == known:
+            label += suffix
+            break
+    else:
+        # No shared vocabulary on this mark - fall back to the one reader-local
+        # field that predates it. A row that answers both questions is priced
+        # above; a row that answers neither prices R4 and is marked as such.
+        if _inferred_identity(mark):
+            label += INFERRED_MARK_SUFFIX
     if unreadable_provenance(mark):
         label += UNKNOWN_MARK_SUFFIX
     return label
@@ -169,10 +234,15 @@ def unreadable_provenance(mark):
     decided. A key this file does not understand is not a measurement and must
     not be drawn as one.
     """
-    known = {field for field, _measured in IDENTITY_SOURCE_FIELDS}
+    known = {field.lower() for field, _measured in IDENTITY_SOURCE_FIELDS}
+    known |= {"identity_method", "value_method"}
+    # CASE-FOLDED. The suffixes are lower case and `Identity_Method` is not, so
+    # the two fields this picture now reads were themselves "provenance this
+    # overlay cannot read" - every mark in every panel would have carried a
+    # question mark the moment a reader started answering.
     return sorted(key for key in mark
-                  if key not in known
-                  and any(key.endswith(s) for s in PROVENANCE_SUFFIXES)
+                  if key.lower() not in known
+                  and any(key.lower().endswith(s) for s in PROVENANCE_SUFFIXES)
                   and str(mark.get(key) or ""))
 
 
@@ -361,20 +431,7 @@ def draw_row_crop(path, image_path, record, pad=24):
         # The caption is the row, in the row's own words. `value` and
         # `dispersion` are what this picture is evidence FOR, and the hash is
         # what says which row it is evidence for.
-        def num(key, fmt="%.3f"):
-            v = record.get(key)
-            return "-" if v is None else fmt % float(v)
-
-        head = "%s / %s / slot %s" % (record.get("figure"), record.get("group"),
-                                      record.get("slot"))
-        body = "mean %s   dispersion %s   fill %s%s" % (
-            num("value"), num("dispersion"),
-            record.get("resolved_fill_pattern") or "-",
-            "   %s" % record["error"] if record.get("error") else "")
-        tail = "row %s   figure %s" % (
-            str(record.get("geometry_row_sha256", ""))[:16] or "UNSTAMPED",
-            record.get("figure_id"))
-        for n, text in enumerate((head, body, tail)):
+        for n, text in enumerate(row_caption(record)):
             draw.text((6, crop.height + 6 + 14 * n), text,
                       fill=(0, 0, 0) if not n else (70, 70, 70), font=font)
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -384,6 +441,40 @@ def draw_row_crop(path, image_path, record, pad=24):
         _FAILURES.append("%s: %s: %s" % (os.path.basename(path),
                                          type(exc).__name__, exc))
         return None
+
+
+def row_caption(record):
+    """The three lines under a geometry row crop, as text.
+
+    A function rather than three locals inside the drawing code, so what the
+    picture says can be asserted without reading pixels back out of a PNG - the
+    route below was added to the caption and nothing could tell whether it was
+    there.
+    """
+    def num(key, fmt="%.3f"):
+        v = record.get(key)
+        return "-" if v is None else fmt % float(v)
+
+    head = "%s / %s / slot %s" % (record.get("figure"), record.get("group"),
+                                  record.get("slot"))
+    # AND HOW THE FIGURE ARRIVED AT THAT FILL. A bar assigned from relations
+    # inside its own complete group and one matched against a range formed in
+    # other groups carry the same word and different tiers - and this crop is the
+    # whole evidence a BAR_MONO reviewer has, on a panel that is asked for
+    # `Inference_Checked` precisely because some of its bars took the second
+    # route. Without it the question had no visible subject.
+    route = str(record.get("identity_method") or "")
+    body = "mean %s   dispersion %s   fill %s%s%s" % (
+        num("value"), num("dispersion"),
+        record.get("resolved_fill_pattern") or "-",
+        "  [%s]" % ("named against the FIGURE's other groups"
+                    if route == "FIGURE_PROTOTYPE_MATCH"
+                    else route.lower().replace("_", " ")) if route else "",
+        "   %s" % record["error"] if record.get("error") else "")
+    tail = "row %s   figure %s" % (
+        str(record.get("geometry_row_sha256", ""))[:16] or "UNSTAMPED",
+        record.get("figure_id"))
+    return (head, body, tail)
 
 
 def row_crop_name(record):

@@ -98,6 +98,17 @@ def calibrate(ticks):
     return (lambda py: float(k * py + b)), resid
 
 
+def _claimed_by_others(others, px, py, radius=1):
+    """How many OTHER series masks cover this bar's own ink."""
+    hits = 0
+    for mask in others:
+        r0, r1 = max(0, int(round(py)) - radius), int(round(py)) + radius + 1
+        c0, c1 = max(0, int(round(px)) - radius), int(round(px)) + radius + 1
+        if mask[r0:r1, c0:c1].any():
+            hits += 1
+    return hits
+
+
 def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                    stem_half_width=3, max_whisker_px=90, stem_required=True,
                    baseline_value=0.0, y_calibration=None, x_positions=None,
@@ -140,6 +151,12 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
             % baseline_value)
     zero_row = y_calibration.value_to_pixel(baseline_value)
     out = []
+    # Every other series' mask, for the overlap question below. Two declared
+    # colours closer than the sum of their tolerances make two masks over one
+    # printed bar, and reading them independently fills the grid twice.
+    others_of = {sname: [masks[k] for other, k in series.items()
+                         if other != sname and k in masks]
+                 for sname in series}
     for sname, key in series.items():
         m = np.zeros_like(dark)
         m[y0:y1, x0:x1] = True
@@ -248,6 +265,13 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 # `run_batch` refuses SEQUENTIAL outright rather than pricing it.
                 Identity_Method="MEASURED_COLOUR",
                 Value_Method="BAR_OUTLINE_CENTER",
+                # Sampled INSIDE the bar rather than at its top edge: the top is
+                # an outline a neighbouring colour's antialiasing can reach, and
+                # what is being asked is whether another series' mask claims this
+                # bar's own ink.
+                mask_overlap=_claimed_by_others(
+                    others_of.get(sname, ()), xc,
+                    top_c + (-4 if down else 4)),
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,
             ))

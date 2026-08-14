@@ -1682,16 +1682,111 @@ check("two reviewers who disagree about one cell are reported on that cell",
       PF.disagreements(_r3_cells, _second)
       == [(_ids3[0], "CONFIRMED", "REJECTED")],
       "%s" % PF.disagreements(_r3_cells, _second))
+# AND WHAT THE FINALIZER WOULD SAY, THROUGH THE FINALIZER'S OWN FUNCTION. v7.77.
+# The preflight answered overlapping questions in its own code, so it could report
+# a clean bundle that `finalize` then refused - the worst failure a preflight has,
+# because the reviewer trusts it and signs. `validate_finalization` decides and
+# `finalize` writes; the preflight calls the decider.
+#
+# PARITY IS CHECKED PER MUTATION, not once on the happy path, because two code
+# paths agree on the happy path by construction.
+_answers([_answer(i) for i in _ids3])
+_panel3()
+
+
+def _parity(name, mutate):
+    """Break one thing; the preflight and the finalizer must say the same."""
+    keep_review = open(_r3_review, encoding="utf-8").read()
+    keep_cells = open(_r3_cells, encoding="utf-8").read()
+    try:
+        mutate()
+        said, refusals = PF.would_refuse(_R3_DIR, _r3_review, _r3_cells,
+                                         today=datetime.date(2026, 8, 6))
+        done = FIN.finalize(_R3_DIR, review_path=_r3_review,
+                            inference_review_path=_r3_cells,
+                            run_date="2026-08-06",
+                            today=datetime.date(2026, 8, 6))
+    finally:
+        open(_r3_review, "w", encoding="utf-8").write(keep_review)
+        open(_r3_cells, "w", encoding="utf-8").write(keep_cells)
+    check("  the preflight and the finalizer agree: %s" % name,
+          said == done["status"]
+          and {c for _w, c, _d in refusals}
+          == {FIN._s(p["check"]) for p in done["problems"]},
+          "preflight %s %s / finalizer %s %s"
+          % (said, sorted({c for _w, c, _d in refusals}), done["status"],
+             sorted({FIN._s(p["check"]) for p in done["problems"]})))
+
+
+_parity("a complete bundle", lambda: None)
+_parity("one cell unanswered", lambda: _answers([_answer(_ids3[0])]))
+_parity("a cell answered twice",
+        lambda: _answers([_answer(_ids3[0]), _answer(_ids3[0]),
+                          _answer(_ids3[1])]))
+_parity("a rejected reconstruction",
+        lambda: _answers([_answer(_ids3[0]), _answer(_ids3[1], "REJECTED")]))
+_parity("an unregistered approver",
+        lambda: review([row(Review_Subject_SHA256=_fp3,
+                            Inference_Checked="CONFIRMED",
+                            Reviewer_ID="RV_NOBODY")], path=_r3_review))
+_parity("an approval of a different run",
+        lambda: review([row(Review_Subject_SHA256="e" * 64,
+                            Inference_Checked="CONFIRMED")], path=_r3_review))
+_parity("no panel decision at all", lambda: review([], path=_r3_review))
+_parity("the inference confirmation withheld",
+        lambda: review([row(Review_Subject_SHA256=_fp3,
+                            Inference_Checked="")], path=_r3_review))
+_answers([_answer(i) for i in _ids3])
+_panel3()
+# TWO REVIEWERS WHO EACH CONTRADICT THEMSELVES ARE NOT TWO REVIEWERS WHO AGREE.
+# `disagreements` built each side with a dict comprehension, so a file answering
+# one cell twice kept the last row silently - and the duplicate is exactly what
+# the answer check refuses, reported by one function and hidden by the other.
+_twice = os.path.join(_R3_DIR, "answered_twice.csv")
+with open(_twice, "w", newline="", encoding="utf-8") as _fh:
+    _w3 = csv.writer(_fh)
+    _w3.writerow(FIN.inference_review_columns())
+    for _v in ("CONFIRMED", "REJECTED"):
+        _r = _answer(_ids3[0], _v)
+        _w3.writerow([_r.get(c, "") for c in FIN.inference_review_columns()])
+check("a reviewer who answered one cell twice is reported, not silently merged",
+      any("answered 2 times" in b
+          for _iid, _a, b in PF.disagreements(_r3_cells, _twice)),
+      "%s" % PF.disagreements(_r3_cells, _twice))
 # AND IT SIGNS NOTHING. A preflight that finalizes is not a preflight, and a
 # program that fills in a confirmation is the one failure this package exists to
 # prevent - so the claim is checked the only way it can be: nothing in the run
 # directory changes.
-_before = sorted(os.walk(_R3_DIR))
+def _fingerprint(directory):
+    """Every file under the run, by content. Names alone miss a rewrite."""
+    out = {}
+    for where, _dirs, files in os.walk(directory):
+        for name in files:
+            path = os.path.join(where, name)
+            out[os.path.relpath(path, directory)] = RB.file_sha256(path)
+    return out
+
+
+_before = _fingerprint(_R3_DIR)
 PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
          "--second", _second])
 check("and the preflight signs nothing: the run directory is untouched",
-      sorted(os.walk(_R3_DIR)) == _before,
-      "the preflight changed the run directory")
+      _fingerprint(_R3_DIR) == _before,
+      "the preflight changed %s"
+      % sorted(set(_fingerprint(_R3_DIR).items())
+               ^ set(_before.items())))
+# INCLUDING THE FUNCTION IT SHARES WITH THE FINALIZER. `finalize` removes the
+# previous accepted file and stamp before it decides anything, so the decider had
+# to be lifted out of that; a decider that still deleted would take a bundle
+# apart every time a reviewer asked what would happen.
+_before = _fingerprint(_R3_DIR)
+FIN.validate_finalization(_R3_DIR, review_path=_r3_review,
+                          inference_review_path=_r3_cells,
+                          today=datetime.date(2026, 8, 6))
+check("  and neither does the decision function inside the finalizer",
+      _fingerprint(_R3_DIR) == _before,
+      "validate_finalization changed %s"
+      % sorted(set(_fingerprint(_R3_DIR).items()) ^ set(_before.items())))
 
 print()
 print("an approval is a person, looking at this extraction, saying so")

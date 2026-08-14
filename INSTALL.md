@@ -5409,6 +5409,47 @@ that a fail-closed check is not a fail-everything check.
     a missing span defaults to zero again              2
     a span of zero read as a missing span              3
 
+## v7.77 — one function decides, and the preflight calls it
+
+`review_preflight` answered overlapping questions in its own code, so it could
+report a clean bundle that `finalize` then refused. That is the worst failure a
+preflight has: the reviewer trusts it and signs, and finds out afterwards.
+
+`finalize` is now a wrapper. `validate_finalization(run_dir, review_path,
+manifest_dir, today, inference_review_path)` does the deciding and returns a
+`Verdict(status, detail, problems, approved, keep, blocked, unstated,
+inference_rejected, run_stamp_sha)`; `finalize` removes the previous
+finalization, calls it, writes the stamp and promotes the accepted file last.
+The preflight calls the same function and prints what it says.
+
+Lifting it out meant separating two things that had been interleaved since v6:
+the finalizer DELETES the previous accepted file and stamp before it decides
+anything, and a decider that still deleted would take a reviewer's bundle apart
+every time they asked what would happen. A scenario fingerprints every file
+under the run by content — not by name, which misses a rewrite — before and
+after both calls.
+
+PARITY IS CHECKED PER MUTATION, because two code paths agree on the happy path
+by construction. Eight mutations, each asserting that the preflight's status and
+set of refusal codes are the finalizer's:
+
+    a complete bundle                 a rejected reconstruction
+    one cell unanswered               an unregistered approver
+    a cell answered twice             an approval of a different run
+    no panel decision at all          the inference confirmation withheld
+
+**`disagreements()` no longer merges a duplicate.** It built each side with a
+dict comprehension, so a reviewer file answering one cell twice kept the last row
+silently — and two reviewers who each contradicted themselves were reported as
+agreeing. The duplicate is what the answer check refuses one function away.
+`--second` also says FILE in its help text, which is what the code has always
+wanted.
+
+    reverted                                          scenarios that fail
+    the preflight answering with its own code again    7
+    the decision function deleting like the writer      1
+    a duplicate answer merged instead of reported       1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5445,14 +5486,6 @@ that a fail-closed check is not a fail-everything check.
   other six are held to the matrix, to the mark join and to the value-to-cell
   binding, and not to a derivation from their own measurements - a real difference
   in strength, and the next verifier to write is `BAR_COLOR`'s
-- `review_preflight` and `finalize_batch` answer overlapping questions through
-  two code paths, so the preflight can report a clean bundle that the finalizer
-  then refuses. They need one pure read-only validation function between them,
-  with a parity scenario per mutation
-- `PF.disagreements()` builds its two sides with a dict comprehension, so a
-  reviewer file holding the same `Inference_ID` twice silently keeps the last row
-  instead of reporting a duplicate, and `--second`'s help text says directory
-  where the code wants a file
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

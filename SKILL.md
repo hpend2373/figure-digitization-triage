@@ -98,8 +98,11 @@ arithmetic nobody can check.
 
 It lists every cell that will be asked about and why, checks that each one has
 its manifest row and its picture, checks the answers for blanks, duplicates and
-answers to questions this run did not ask, and — with `--second` — compares two
-independent reviewers cell by cell. It writes nothing and signs nothing: the
+answers to questions this run did not ask, and — with `--second FILE` — compares
+two independent reviewers cell by cell. It then prints what the finalizer WOULD
+say, by calling the finalizer's own decision function rather than a second
+implementation of it, so a bundle the preflight calls clean is not one
+`finalize_batch.py` then refuses. It writes nothing and signs nothing: the
 confirmations are a person's claim about what they saw, and a program filling one
 in is the failure this whole package is built to prevent.
 

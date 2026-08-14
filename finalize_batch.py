@@ -49,6 +49,7 @@ a demonstration.
 default is always the empty file.
 """
 import argparse
+import collections
 import csv
 import datetime
 import hashlib
@@ -1718,80 +1719,57 @@ def _promote(staging, run_dir, fault_after=None):
     shutil.rmtree(staging, ignore_errors=True)
 
 
-def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
-             today=None, fault_after=None, inference_review_path=None):
-    """Read a completed run plus its decisions; write the accepted file or not."""
+#: What a finalization DECIDED, before anything is written. `keep` is the frame
+#: that would be accepted and is None on every refusal.
+Verdict = collections.namedtuple(
+    "Verdict",
+    "status detail problems approved keep blocked unstated inference_rejected "
+    "run_stamp_sha")
+
+
+def review_paths(run_dir, review_path=None, inference_review_path=None):
+    """Where the two decision files are, resolved once for both callers.
+
+    Beside the panel decisions rather than in the run directory. The two files
+    are filled in together, `--review` is where a caller says where that is, and
+    a default anchored to the run would send a caller who moved one file looking
+    for the other in a different place.
+    """
+    review_path = review_path or os.path.join(run_dir, "value_review.csv")
+    inference_review_path = inference_review_path or os.path.join(
+        os.path.dirname(os.path.abspath(review_path)), "inference_review.csv")
+    return review_path, inference_review_path
+
+
+def validate_finalization(run_dir, review_path=None, manifest_dir=None,
+                          today=None, inference_review_path=None):
+    """Everything a finalization decides, deciding nothing on disk.
+
+    ONE FUNCTION, TWO CALLERS. `finalize` wraps this and writes; `review_preflight`
+    calls it and prints. Until v7.77 the preflight answered overlapping questions
+    through its own code, so it could report a clean bundle that the finalizer then
+    refused - and a preflight that disagrees with the thing it is a preflight for
+    is worse than none, because the reviewer trusts it and signs.
+
+    It reads files and returns a `Verdict`. Nothing here creates, deletes or
+    promotes anything: the scenario that proves it walks the run directory before
+    and after, the same way the preflight's own no-write claim is checked.
+    """
     problems = []
 
     def flag(where, check, detail):
         problems.append(dict(where=where, check=check, detail=detail))
 
-    review_path = review_path or os.path.join(run_dir, "value_review.csv")
-    # Beside the panel decisions rather than in the run directory. The two files
-    # are filled in together, `--review` is where a caller says where that is,
-    # and a default anchored to the run would send a caller who moved one file
-    # looking for the other in a different place.
-    inference_review_path = inference_review_path or os.path.join(
-        os.path.dirname(os.path.abspath(review_path)), "inference_review.csv")
-    accepted_path = os.path.join(run_dir, FINALIZE_MARKER)
-    stamp_path = os.path.join(run_dir, "finalize_stamp.json")
-    staging = os.path.join(run_dir, FINALIZE_STAGING)
+    review_path, inference_review_path = review_paths(
+        run_dir, review_path, inference_review_path)
 
-    # Whatever happens, the previous finalization does not survive this one.
-    for stale in (accepted_path, stamp_path):
-        if os.path.exists(stale):
-            os.remove(stale)
-    shutil.rmtree(staging, ignore_errors=True)
-
-    def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
-              directory=None, blocked=0, unstated=0, inference_rejected=0):
-        payload = {"schema": FINALIZE_SCHEMA, "Status": status,
-                   "Run_Date": run_date, "Panels_Approved": approved,
-                   "Values_Accepted": accepted,
-                   # How many approved values this finalization REFUSED because
-                   # the number was not read off the ink, and how many could not
-                   # be asked because their reader does not answer yet. A run
-                   # that accepted forty values out of forty is a different
-                   # artifact from one that accepted forty out of a hundred, and
-                   # the stamp said the same thing for both.
-                   "Values_Method_Blocked": blocked,
-                   "Values_Method_Unstated": unstated,
-                   # And how many reconstructions a person looked at and
-                   # refused. A cell nobody answered for holds its panel and is
-                   # not counted here: the two are different outcomes and the
-                   # stamp said nothing about either.
-                   "Values_Inference_Rejected": inference_rejected,
-                   "Accepted_SHA256": accepted_sha,
-                   "Run_Stamp_SHA256": run_stamp_sha,
-                   "Pipeline_Version": RB.PIPELINE_VERSION,
-                   "Pipeline_Code_SHA256": RB.pipeline_code_sha256(),
-                   "Environment": RB.environment_record(),
-                   "Review_File": review_path,
-                   # The decisions themselves, hashed. The stamp named the
-                   # review file by path and recorded nothing about its
-                   # contents, so "which decisions produced this accepted
-                   # file" was answerable only by trusting that nobody had
-                   # since edited the answer.
-                   "Review_File_SHA256": RB.file_sha256_or_blank(review_path),
-                   # The per-cell decisions, by path and by content, for the same
-                   # reason. Blank when no run in this batch asked for any.
-                   "Inference_Review_File": inference_review_path,
-                   "Inference_Review_File_SHA256":
-                       RB.file_sha256_or_blank(inference_review_path),
-                   "Problems": problems, "Detail": detail}
-        with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
-                  "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=1, sort_keys=True)
-
-    def stop(status, detail, approved=0, accepted=0, blocked=0, unstated=0):
-        # The counts travel with the refusal too. A NOTHING_FINALIZABLE stamp
-        # reporting `Values_Method_Blocked: 0` says the opposite of what
-        # happened: it refused everything and then reported refusing nothing,
-        # and the problem list was the only place the truth survived.
-        stamp(status, detail, approved=approved, accepted=accepted,
-              blocked=blocked, unstated=unstated)
-        return dict(status=status, approved=approved, accepted=accepted,
-                    problems=problems, detail=detail)
+    def stop(status, detail, approved=None, blocked=0, unstated=0):
+        # The approved PANELS travel with the refusal, not a count of them: the
+        # stamp reports how many were approved even when none of their values
+        # could be finalized, and a refusal that reported zero approvals said the
+        # reviewer had not signed when they had.
+        return Verdict(status, detail, problems, approved or {}, None, blocked,
+                       unstated, 0, run_stamp_sha)
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
     run_stamp_sha = ""
@@ -1970,7 +1948,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     if not len(keep):
         return stop("NOTHING_APPROVED",
                     "the approved panels produced no machine-QC-passed values",
-                    approved=len(approved))
+                    approved=approved)
 
     # AN APPROVAL CANNOT BUY A NUMBER A MODEL MADE.
     #
@@ -2065,7 +2043,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
         if not len(keep):
             return stop("NOTHING_FINALIZABLE",
                         "every approved value was read at a tier no signature "
-                        "can finalize", approved=len(approved),
+                        "can finalize", approved=approved,
                         blocked=blocked_count, unstated=unstated)
 
     # And the reconstructions a person looked at and refused. Dropped here rather
@@ -2083,7 +2061,7 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
         if not len(keep):
             return stop("NOTHING_FINALIZABLE",
                         "every approved value's reconstruction was refused by "
-                        "the person who looked at it", approved=len(approved))
+                        "the person who looked at it", approved=approved)
 
     keep["Value_Status"] = "HUMAN_APPROVED"
     keep["Pooling_Eligible"] = "TRUE"
@@ -2092,6 +2070,92 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     keep["Reviewed_At"] = [_s(approved[p].get("Reviewed_At")) for p in keep["Run_Panel_ID"]]
     keep["Review_Subject_SHA256"] = [
         _s(approved[p].get("Review_Subject_SHA256")) for p in keep["Run_Panel_ID"]]
+    return Verdict("FINALIZED", "", problems, approved, keep, blocked_count,
+                   unstated, rejected_count, run_stamp_sha)
+
+
+def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
+             today=None, fault_after=None, inference_review_path=None):
+    """Read a completed run plus its decisions; write the accepted file or not.
+
+    The DECIDING is `validate_finalization`, which the preflight calls too. What
+    is left here is the writing, and the order it is written in: the previous
+    finalization is removed first, the new one is staged, and the accepted file
+    is promoted last - so poolable values never exist without a stamp behind
+    them.
+    """
+    review_path, inference_review_path = review_paths(
+        run_dir, review_path, inference_review_path)
+    accepted_path = os.path.join(run_dir, FINALIZE_MARKER)
+    stamp_path = os.path.join(run_dir, "finalize_stamp.json")
+    staging = os.path.join(run_dir, FINALIZE_STAGING)
+
+    # Whatever happens, the previous finalization does not survive this one.
+    for stale in (accepted_path, stamp_path):
+        if os.path.exists(stale):
+            os.remove(stale)
+    shutil.rmtree(staging, ignore_errors=True)
+
+    verdict = validate_finalization(
+        run_dir, review_path=review_path, manifest_dir=manifest_dir,
+        today=today, inference_review_path=inference_review_path)
+    problems = verdict.problems
+
+    def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
+              directory=None, blocked=0, unstated=0, inference_rejected=0):
+        payload = {"schema": FINALIZE_SCHEMA, "Status": status,
+                   "Run_Date": run_date, "Panels_Approved": approved,
+                   "Values_Accepted": accepted,
+                   # How many approved values this finalization REFUSED because
+                   # the number was not read off the ink, and how many could not
+                   # be asked because their reader does not answer yet. A run
+                   # that accepted forty values out of forty is a different
+                   # artifact from one that accepted forty out of a hundred, and
+                   # the stamp said the same thing for both.
+                   "Values_Method_Blocked": blocked,
+                   "Values_Method_Unstated": unstated,
+                   # And how many reconstructions a person looked at and
+                   # refused. A cell nobody answered for holds its panel and is
+                   # not counted here: the two are different outcomes and the
+                   # stamp said nothing about either.
+                   "Values_Inference_Rejected": inference_rejected,
+                   "Accepted_SHA256": accepted_sha,
+                   "Run_Stamp_SHA256": verdict.run_stamp_sha,
+                   "Pipeline_Version": RB.PIPELINE_VERSION,
+                   "Pipeline_Code_SHA256": RB.pipeline_code_sha256(),
+                   "Environment": RB.environment_record(),
+                   "Review_File": review_path,
+                   # The decisions themselves, hashed. The stamp named the
+                   # review file by path and recorded nothing about its
+                   # contents, so "which decisions produced this accepted
+                   # file" was answerable only by trusting that nobody had
+                   # since edited the answer.
+                   "Review_File_SHA256": RB.file_sha256_or_blank(review_path),
+                   # The per-cell decisions, by path and by content, for the same
+                   # reason. Blank when no run in this batch asked for any.
+                   "Inference_Review_File": inference_review_path,
+                   "Inference_Review_File_SHA256":
+                       RB.file_sha256_or_blank(inference_review_path),
+                   "Problems": problems, "Detail": detail}
+        with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
+                  "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=1, sort_keys=True)
+
+    def stop(status, detail, approved=0, accepted=0, blocked=0, unstated=0):
+        # The counts travel with the refusal too. A NOTHING_FINALIZABLE stamp
+        # reporting `Values_Method_Blocked: 0` says the opposite of what
+        # happened: it refused everything and then reported refusing nothing,
+        # and the problem list was the only place the truth survived.
+        stamp(status, detail, approved=approved, accepted=accepted,
+              blocked=blocked, unstated=unstated)
+        return dict(status=status, approved=approved, accepted=accepted,
+                    problems=problems, detail=detail)
+
+    if verdict.status != "FINALIZED":
+        return stop(verdict.status, verdict.detail,
+                    approved=len(verdict.approved), blocked=verdict.blocked,
+                    unstated=verdict.unstated)
+    keep, approved = verdict.keep, verdict.approved
 
     # Staged, then promoted with the accepted file last. Writing it directly and
     # stamping afterwards left a window where poolable values existed with no
@@ -2102,8 +2166,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
     accepted_sha = RB.file_sha256(staged_accepted)
     stamp("FINALIZED", "", approved=len(approved), accepted=len(keep),
           accepted_sha=accepted_sha, directory=staging,
-          blocked=blocked_count, unstated=unstated,
-          inference_rejected=rejected_count)
+          blocked=verdict.blocked, unstated=verdict.unstated,
+          inference_rejected=verdict.inference_rejected)
     try:
         _promote(staging, run_dir, fault_after=fault_after)
     except Exception as exc:
@@ -2111,7 +2175,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
             if os.path.exists(leftover):
                 os.remove(leftover)
         shutil.rmtree(staging, ignore_errors=True)
-        flag("commit", "COMMIT_FAILED", "%s: %s" % (type(exc).__name__, exc))
+        problems.append(dict(where="commit", check="COMMIT_FAILED",
+                             detail="%s: %s" % (type(exc).__name__, exc)))
         return stop("COMMIT_FAILED",
                     "the finalization did not complete; nothing is poolable")
     return dict(status="FINALIZED", approved=len(approved), accepted=len(keep),

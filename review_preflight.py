@@ -179,21 +179,54 @@ def answer_problems(run_dir, review_path, inference_path):
     return problems
 
 
+def would_refuse(run_dir, review_path, inference_path, today=None):
+    """What the finalizer would say, run through the finalizer's own function.
+
+    `FIN.validate_finalization` decides; `FIN.finalize` wraps it and writes. This
+    calls the decider, so the preflight cannot report a clean bundle that the
+    finalizer then refuses - which it could while the two answered overlapping
+    questions through separate code, and which is the worst failure a preflight
+    has, because the reviewer trusts it and signs.
+
+    Returns (status, [(where, check, detail)]).
+    """
+    verdict = FIN.validate_finalization(
+        run_dir, review_path=review_path, inference_review_path=inference_path,
+        today=today)
+    return verdict.status, [(_s(p.get("where")), _s(p.get("check")),
+                             _s(p.get("detail"))) for p in verdict.problems]
+
+
 def disagreements(first, second):
     """Where two independent reviewers answered the same cell differently.
 
     Both files are read as answers to the SAME questions - the identifiers are
     content-derived, so two reviewers working from two copies of the bundle
     produce comparable rows without agreeing on anything first.
+
+    A file that answers one cell TWICE is a problem, not a merge. The first
+    version built each side with a dict comprehension, so the second row silently
+    won and two reviewers who each contradicted themselves could be reported as
+    agreeing.
     """
     def verdicts(path):
-        return {_s(r.get("Inference_ID")):
-                _s(r.get("Inference_Confirmed")).upper()
-                for _, r in _read(path, FIN.inference_review_columns()).iterrows()}
+        out, twice = {}, []
+        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+            iid = _s(r.get("Inference_ID"))
+            if iid in out:
+                twice.append(iid)
+            out[iid] = _s(r.get("Inference_Confirmed")).upper()
+        return out, sorted(set(twice))
 
-    one, two = verdicts(first), verdicts(second)
-    out = []
+    one, dup_one = verdicts(first)
+    two, dup_two = verdicts(second)
+    out = [(iid, "(answered %d times)" % (1 + dup_one.count(iid)), "")
+           for iid in dup_one]
+    out += [(iid, "", "(answered %d times)" % (1 + dup_two.count(iid)))
+            for iid in dup_two]
     for iid in sorted(set(one) | set(two)):
+        if iid in dup_one or iid in dup_two:
+            continue                  # already reported, and its verdict is moot
         if one.get(iid) != two.get(iid):
             out.append((iid, one.get(iid) or "(no answer)",
                         two.get(iid) or "(no answer)"))
@@ -205,8 +238,9 @@ def main(argv=None):
     ap.add_argument("run_dir")
     ap.add_argument("--review", default=None)
     ap.add_argument("--inference", default=None)
-    ap.add_argument("--second", default=None,
-                    help="a second reviewer's inference_review.csv, to compare")
+    ap.add_argument("--second", default=None, metavar="FILE",
+                    help="a second reviewer's inference_review.csv file, to "
+                         "compare cell by cell")
     args = ap.parse_args(argv)
 
     if not os.path.exists(os.path.join(args.run_dir, "run_stamp.json")):
@@ -230,13 +264,19 @@ def main(argv=None):
     if args.second:
         for iid, a, b in disagreements(inference, args.second):
             print("  DIFFER   %-34s %s against %s" % (iid, a, b))
-    print("%d bundle problem(s), %d answer problem(s)"
-          % (len(bundle), len(answers)))
-    # WHAT WOULD HAPPEN, without doing it. `finalize` is not called: it writes,
-    # and a preflight that finalizes is not a preflight.
+    # WHAT WOULD HAPPEN, without doing it. `FIN.finalize` is not called - it
+    # writes, and a preflight that finalizes is not a preflight - but the function
+    # inside it that DECIDES is, so this is the finalizer's own answer rather than
+    # a second implementation of it.
+    status, refusals = would_refuse(args.run_dir, review, inference)
+    print("the finalizer would say %s" % status)
+    for where, check, detail in refusals:
+        print("  WOULD    %-34s %s: %s" % (where, check, detail))
+    print("%d bundle problem(s), %d answer problem(s), %d finalizer refusal(s)"
+          % (len(bundle), len(answers), len(refusals)))
     print("nothing here signs anything: the confirmations are a person's claim "
           "about what they saw")
-    return 2 if (bundle or answers) else 0
+    return 2 if (bundle or answers or refusals) else 0
 
 
 if __name__ == "__main__":

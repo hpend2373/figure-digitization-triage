@@ -295,6 +295,24 @@ MARK_JOIN_REQUIRED = frozenset((
 ))
 
 
+#: WHY A MARK CARRIES NO SPREAD - or that it carries one. A reader that finds no
+#: error bar knows perfectly well why, and until v7.92 it returned the same
+#: `None` for every reason: a cell with no weight looked exactly like a cell
+#: whose two curves share one column of ink, which is the difference between
+#: "this figure draws no error bar here" and "nobody, human or otherwise, could
+#: say whose cap that is".
+CAP_READ = "CAP_READ"
+NO_INK_AT_MARK = "NO_INK_AT_MARK"
+INK_DOES_NOT_END = "INK_DOES_NOT_END"
+NO_BAR_AROUND_STROKE = "NO_BAR_AROUND_STROKE"
+MARKS_SHARE_A_COLUMN = "MARKS_SHARE_A_COLUMN"
+NO_BOUNDED_CAP = "NO_BOUNDED_CAP"
+
+DISPERSION_REFUSALS = (CAP_READ, NO_INK_AT_MARK, INK_DOES_NOT_END,
+                       NO_BAR_AROUND_STROKE, MARKS_SHARE_A_COLUMN,
+                       NO_BOUNDED_CAP)
+
+
 #: PRICED, AND NOT YET PRODUCIBLE. A method in this set has a tier and a place in
 #: the ladder and no reader that can emit it: the vocabulary is ahead of the
 #: readers on purpose, because pricing a case before meeting it is how the ladder
@@ -310,6 +328,12 @@ MARK_JOIN_REQUIRED = frozenset((
 #:   the whole stretch explained by one known mask
 #:   the restored cap width inside the panel's own measured cap widths
 #:   a real figure where that happens, read against a person's reading
+#:
+#: The last one was MEASURED in v7.92 and is not met: on publication 397 figure 1,
+#: the only real line panel in the package, three marks read a cap, twelve are two
+#: curves in one column of ink, and three miss the cap-width rule by a pixel. Not
+#: one is a cap partly covered by furniture. `DISPERSION_REFUSALS` is what made
+#: that countable, and the forward test pins the distribution.
 #:
 #: `SOURCE_TRANSCRIBED` is reserved for a different reason: it belongs to a value
 #: copied from the paper's text, and no reader reads text.
@@ -530,13 +554,32 @@ def expected_line_style_methods(mark, context=None):
         out["Value_Method"] = ("DIRECT_CURVE_INK" if abs(float(span)) <= PIXEL_EPSILON
                                else "EXTRAPOLATED_CURVE_INK")
     stem = field("Errorbar_Stem_Confirmed").upper()
-    if stem in ("TRUE", "FALSE"):
-        out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
-                                    else "NO_DISPERSION")
-    else:
+    refusal = field("Dispersion_Refusal").upper()
+    if stem not in ("TRUE", "FALSE"):
         problems.append("the mark does not say whether a stem connected its cap "
                         "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
                         "cannot be re-derived" % (stem or "blank"))
+    elif refusal and refusal not in DISPERSION_REFUSALS:
+        problems.append("the mark gives %s as its reason for the spread it "
+                        "reports, and this registry prices %s"
+                        % (refusal, ", ".join(DISPERSION_REFUSALS)))
+    elif stem == "TRUE" and refusal and refusal != CAP_READ:
+        problems.append("the mark says a stem connected its cap and gives %s as "
+                        "the reason it looked" % refusal)
+    elif stem == "FALSE" and refusal == CAP_READ:
+        problems.append("the mark says its cap was read and no stem connected "
+                        "it, which are two different answers to one question")
+    elif stem == "FALSE" and not refusal:
+        # NO SPREAD IS A FINDING, NOT A SILENCE. This reader knows why it found
+        # no error bar - the two curves share a column, the ink never ends, the
+        # cap is not bounded - and a mark that does not say which cannot support
+        # NO_DISPERSION any more than a blank method can support a tier.
+        problems.append("the mark reports no spread and does not say why; "
+                        "'this figure draws no error bar here' and 'nobody "
+                        "could say whose cap that is' are different findings")
+    else:
+        out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
+                                    else "NO_DISPERSION")
     problems.extend(_curve_arithmetic_problems(field, finite_number, context))
     return EvidenceVerdict(out, problems)
 

@@ -570,6 +570,41 @@ check("  and a mark with no row to have read at all answers nothing",
       and P.expected_line_style_methods(_full, None).problems,
       "%s" % (P.expected_line_style_methods(_full, None),))
 
+# AND "NO SPREAD" IS A FINDING, NOT A SILENCE. v7.92. The reader knows why it
+# found no error bar - the two curves share a column, the ink never ends, the cap
+# is not bounded - and a mark that does not say which cannot support
+# NO_DISPERSION any more than a blank method can support a tier.
+check("a mark with no spread and no reason supports no dispersion method",
+      "Dispersion_Method" not in P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE", dispersion=None,
+               Errorbar_Top_Px="", Errorbar_Bottom_Px="")).expected,
+      "%s" % (P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE", dispersion=None,
+               Errorbar_Top_Px="", Errorbar_Bottom_Px="")),))
+check("  while one that says why does",
+      P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE", dispersion=None,
+               Errorbar_Top_Px="", Errorbar_Bottom_Px="",
+               Dispersion_Refusal=P.MARKS_SHARE_A_COLUMN)).expected
+      ["Dispersion_Method"] == "NO_DISPERSION")
+check("  and a reason this registry does not price is refused",
+      "Dispersion_Method" not in P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE", dispersion=None,
+               Errorbar_Top_Px="", Errorbar_Bottom_Px="",
+               Dispersion_Refusal="BECAUSE_I_SAID_SO")).expected,
+      "%s" % (P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE", dispersion=None,
+               Errorbar_Top_Px="", Errorbar_Bottom_Px="",
+               Dispersion_Refusal="BECAUSE_I_SAID_SO")),))
+check("  and a cap that was read beside a stem that was not is two answers",
+      P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Stem_Confirmed="FALSE",
+               Dispersion_Refusal=P.CAP_READ)).problems
+      and P_expected_line_style_methods_ctx(
+          dict(_full, Dispersion_Refusal=P.NO_BOUNDED_CAP)).problems,
+      "%s" % (P_expected_line_style_methods_ctx(
+          dict(_full, Dispersion_Refusal=P.NO_BOUNDED_CAP)),))
+
 print()
 print("the second reader whose methods are re-derived from its own evidence")
 # v7.83. `BAR_COLOR` reaches R0 on all three axes, which means every one of its

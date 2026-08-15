@@ -6066,6 +6066,49 @@ a missing one.
     the five numbers not recomputed                    1
     the reader dropping its line rows                  1
 
+## v7.92 — why there is no error bar, and what that says about a reserved method
+
+`RESTORED_MASKED_CAP` has sat in the registry since v7.71 with a written list of
+what it needs, ending in "a real figure where a cap is partly covered by exactly
+one of them". Before writing the emitter, the reader was instrumented against
+the only real line panel in the package. **There is no such cap on it.**
+
+Publication 397 figure 1, 18 marks:
+
+    CAP_READ                  3    a bar the reader followed to both caps
+    MARKS_SHARE_A_COLUMN     12    the two curves are one column of ink, and no
+                                   rule local to that column - and no person
+                                   reading that figure - can say whose cap is
+                                   whose
+    NO_BOUNDED_CAP            3    a cap one pixel narrower than the rule takes
+
+Not one is a cap interrupted by furniture. Writing the emitter would have been
+writing a capability this corpus cannot exercise, which is what the reserved list
+exists to prevent - so the measurement is the deliverable, and it is pinned in
+the forward test rather than described here: a distribution that drifts is the
+reader changing its mind about a figure nobody re-drew.
+
+**The reason is part of the answer now.** `_bar_extent` returned the same `None`
+for every one of those cases, so "this figure draws no error bar here" and
+"nobody could say whose cap that is" were the same silence. `DISPERSION_REFUSALS`
+names the five outcomes, the mark records which, and the `LINE_MONO_STYLE`
+verifier requires one: **a mark that reports no spread and does not say why
+cannot support `NO_DISPERSION`**, any more than a blank method can support a
+tier. A cap that was read beside a stem that was not is two answers to one
+question, and is refused as one.
+
+The three one-pixel misses are NOT fixed by widening the rule. A cap of 9 pixels
+where the reader requires 10 is a measurement this reader declines to make, and
+widening a constant to make three cells pass is the failure this package is
+built around. It is on the open list with its number.
+
+    reverted                                          scenarios that fail
+    no spread needing no reason                        1
+    an unpriced reason accepted                        1
+    a read cap beside no stem being one answer         1
+    the reader not saying why                          3
+    every refusal being the same refusal               the forward test on 397
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -6075,6 +6118,11 @@ a missing one.
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
 - 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
   stroke and its edges are the two curves, unread
+- 397 figure 1's three `NO_BOUNDED_CAP` marks miss the cap-width rule by ONE
+  PIXEL (9 against 10). The rule is `max(4, half_window)` and half_window is the
+  reader's x window; whether that coupling is right is a question about the
+  reader, and widening the constant to admit three cells is not the way to answer
+  it
 - `RESERVED_METHODS` is five methods deep: `RESTORED_MASKED_CAP`,
   `INTERPOLATED_DISPERSION`, `FITTED_DISPERSION`, `DIRECT_BOUND_PAIR` and
   `SOURCE_TRANSCRIBED` are priced and not producible. The first needs the reader

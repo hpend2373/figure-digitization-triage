@@ -134,6 +134,27 @@ rows = LSM.read_monochrome_line_panel(
             MR.SeriesSpec("NO_FLUID", line_style="DASHED")],
     threshold=150, x_window=10, search_radius=60)
 
+# WHY EACH ERROR BAR WAS READ OR REFUSED, on the real figure. v7.92 made the
+# reason part of the reader's answer; this is the measurement that reason exists
+# for, and it is the evidence behind `RESTORED_MASKED_CAP` staying reserved: not
+# one of these marks has a cap partly covered by furniture. Three read a bar,
+# twelve share a column of ink with the other curve - which no reader and no
+# person can attribute from that column - and three have a cap one pixel
+# narrower than the rule accepts. Pinned rather than printed: a distribution that
+# drifts is the reader changing its mind about a figure nobody re-drew.
+import collections as _collections                                # noqa: E402
+_why = _collections.Counter(r["Dispersion_Refusal"] for r in rows)
+_WHY_EXPECTED = {"CAP_READ": 3, "MARKS_SHARE_A_COLUMN": 12, "NO_BOUNDED_CAP": 3}
+print()
+print("why each error bar was read or refused")
+for _reason, _n in sorted(_why.items()):
+    print("    %-24s %2d" % (_reason, _n))
+if dict(_why) != _WHY_EXPECTED:
+    print("MISMATCH: expected %s" % _WHY_EXPECTED)
+    raise SystemExit(1)
+print("    (no cap on this figure is partly covered by furniture, which is what "
+      "RESTORED_MASKED_CAP is reserved for)")
+
 print("publication 397 figure 1, MEN / mean arterial pressure")
 errors, failures = [], []
 for row in sorted(rows, key=lambda r: (r["series"], r["order"])):

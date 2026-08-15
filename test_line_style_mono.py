@@ -191,6 +191,27 @@ check("  and they reproduce it under this panel's own calibration",
                   - CAL.pixel_to_value(r["Errorbar_Bottom_Px"])) / 2.0
               - r["dispersion"]) < 1e-9 for r in _capped),
       "%s" % [(r["x_label"], r["dispersion"]) for r in _capped][:3])
+# AND EVERY MARK SAYS WHY IT HAS THE SPREAD IT HAS, or has none. v7.92: a cell
+# with no weight and a cell whose two curves share one column of ink were the
+# same silence, and they are different findings - the second is one no reader
+# and no person can resolve from that column.
+check("every mark says why its error bar was read or refused",
+      all(r.get("Dispersion_Refusal") in PROV.DISPERSION_REFUSALS
+          for r in rows),
+      "%s" % sorted({r.get("Dispersion_Refusal") for r in rows}))
+check("  and CAP_READ is exactly the marks that have a spread",
+      all((r["Dispersion_Refusal"] == PROV.CAP_READ)
+          == (r["dispersion"] is not None) for r in rows))
+# WHERE THE TWO BARS MERGE, the walk runs off the end of its search radius
+# before it finds a cap - the two error bars plus the two curves are one column
+# of ink taller than any bar - so the reason is that the ink does not end. Not
+# the reason a person would give from the picture, and the honest one for what
+# this reader can see from that column.
+check("  and where the two bars are one run of ink the reason says so",
+      {r["Dispersion_Refusal"] for r in rows if r["x_label"] == MERGED_BARS}
+      == {PROV.INK_DOES_NOT_END},
+      "%s" % {r["x_label"]: r["Dispersion_Refusal"] for r in rows
+              if r["dispersion"] is None})
 check("  while a mark with no stem carries neither",
       all(r.get("Errorbar_Top_Px") is None
           and r.get("Errorbar_Bottom_Px") is None

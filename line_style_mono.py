@@ -543,7 +543,17 @@ def _curve_candidates(mask, x, y0, y1, probe=8, half=22, band=5,
 
 def _bar_extent(mask, x, cy, other_centres, half_window, marker_half_height,
                 search_radius):
-    """The error bar around the curve at cy, as (top, bottom), or None.
+    """The error bar around the curve at cy: ((top, bottom) or None, why).
+
+    THE REASON IS PART OF THE ANSWER. "This cell has no weight" and "this cell's
+    two curves share one column of ink, so nobody could attribute its caps" are
+    different findings for a reviewer and for the next reader to be written, and
+    until v7.92 they were the same `None`. Measured on publication 397 figure 1
+    the moment the reason existed: of 18 marks, 3 read a bar, 12 share a column
+    with the other curve, and 3 have a cap one pixel narrower than the rule
+    accepts. NONE of them is a cap partly covered by furniture - which is the
+    case `RESTORED_MASKED_CAP` is reserved for, and this corpus does not contain
+    it.
 
     THE ERROR BAR IS THE CONNECTED COLUMN OF INK THROUGH THE MARK. Not the
     nearest wide stroke either side, which is what `_errorbar_around_marker`
@@ -572,7 +582,7 @@ def _bar_extent(mask, x, cy, other_centres, half_window, marker_half_height,
     column = mask[:, max(0, xc - 1):min(width, xc + 2)].any(axis=1)
     row0 = int(round(cy))
     if not (0 <= row0 < height) or not column[row0]:
-        return None
+        return None, PROV.NO_INK_AT_MARK
     reach = max(6, half_window * 3)
     lo_x, hi_x = max(0, xc - reach), min(width, xc + reach + 1)
 
@@ -594,18 +604,22 @@ def _bar_extent(mask, x, cy, other_centres, half_window, marker_half_height,
     while top - 1 >= 0 and column[top - 1]:
         top -= 1
         if row0 - top > limit:
-            return None           # the ink does not end: an axis, not a bar
+            return None, PROV.INK_DOES_NOT_END
     while bottom + 1 < height and column[bottom + 1]:
         bottom += 1
         if bottom - row0 > limit:
-            return None
+            return None, PROV.INK_DOES_NOT_END
     if row0 - top <= marker_half_height or bottom - row0 <= marker_half_height:
-        return None               # the stroke itself, with no bar around it
+        return None, PROV.NO_BAR_AROUND_STROKE
     if any(top <= centre <= bottom for centre in other_centres):
-        return None               # two marks in one column of ink: unattributable
+        # Two marks in one column of ink. No rule local to this column can say
+        # which cap belongs to which mark, and a human reading the figure cannot
+        # attribute them either - which is why this is the reason it is, rather
+        # than a cell quietly missing a weight.
+        return None, PROV.MARKS_SHARE_A_COLUMN
     if not bounded_run(top) or not bounded_run(bottom):
-        return None
-    return float(top), float(bottom)
+        return None, PROV.NO_BOUNDED_CAP
+    return (float(top), float(bottom)), PROV.CAP_READ
 
 
 #: A window this far blinded cannot say a curve is SOLID. Half, because a call
@@ -951,7 +965,7 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 continue          # absent here, or two curves of the same style
             candidate = next(c for c in styled if c["style"] == style)
             cy = candidate["y"]
-            whisker = _bar_extent(mask, xi, cy,
+            whisker, cap_refusal = _bar_extent(mask, xi, cy,
                                   [c["y"] for c in styled if c is not candidate],
                                   half_window=x_window,
                                   marker_half_height=4,
@@ -977,6 +991,10 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 marker_center_px=cy, mean=y_calibration.pixel_to_value(cy),
                 dispersion=dispersion, errorbar_lower=lower, errorbar_upper=upper,
                 Errorbar_Top_Px=cap_rows[0], Errorbar_Bottom_Px=cap_rows[1],
+                # WHY THERE IS NO SPREAD, when there is none. A cell with no
+                # weight and a cell whose two curves share one column of ink are
+                # different findings, and they were the same silence.
+                Dispersion_Refusal=cap_refusal,
                 line_style=style, line_duty=round(candidate["duty"], 3),
                 # The gap, not the duty, is what said SOLID or DASHED. Recorded
                 # beside the duty so a reviewer can check the call that was

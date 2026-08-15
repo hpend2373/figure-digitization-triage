@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.83"
+PIPELINE_VERSION = "7.84"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1719,8 +1719,25 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     for record, stamped in zip(records, envelope["marks"]):
         record["Mark_Record_SHA256"] = stamped["Mark_Record_SHA256"]
         record["Method_Attestation_SHA256"] = stamped["Method_Attestation_SHA256"]
-    with open(raw_path, "w", encoding="utf-8") as fh:
-        json.dump(envelope, fh, indent=1, sort_keys=True)
+    try:
+        with open(raw_path, "w", encoding="utf-8") as fh:
+            # `allow_nan=False`: Python writes bare `NaN` and `Infinity`, which
+            # are not JSON, and a mark carrying one passed every
+            # `abs(a - b) > EPSILON` check downstream because every comparison
+            # against NaN is False - a geometry that cannot be checked reading
+            # as one that agrees.
+            json.dump(envelope, fh, indent=1, sort_keys=True, allow_nan=False)
+    except ValueError as exc:
+        # A DEFECT HERE, NOT A DIFFICULT FIGURE, and therefore the same answer
+        # this module gives a KeyError from a renamed field: stop the batch and
+        # say which panel. A reader that computes a NaN has a bug, and a run
+        # that quietly refused that panel would hide it behind a queue row
+        # somebody would spend an afternoon re-reading by hand.
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+        raise InternalReaderError(
+            "reader %s on panel %s produced a value JSON cannot express: %s"
+            % (mark, pid, exc)) from exc
 
     project = None
     if project_dir:

@@ -5728,6 +5728,56 @@ these cover that the entry answers in the two codes the finalizer branches on.
     an unstemmed cap priced as a followed one          2
     a counted x label not refused                      1
 
+## v7.84 — a verifier that only refutes can be starved
+
+v7.83 asked whether each field CONTRADICTED the claim and let a missing one
+through. So a mark like this took all three methods at R0:
+
+    mask_overlap  "garbage"      not a positive number, so not contested
+    fill_top_px   ""             the fill-edge comparison was skipped
+    cap_px        ""             never read; a dispersion number was enough
+    Position_...  ""             checked only when filled in
+
+Every field the BAR_COLOR verifier decides from is now REQUIRED, and the
+diagnosis says which one is missing:
+
+    mask_overlap   a finite non-negative integer, and MEASURED_COLOUR only at 0
+    the value      top_px, fill_top_px, mean and mean_if_read_at_fill_edge, all
+                   four finite - the fill-edge reading is the only thing on the
+                   mark that can tell an outline-centre reading from a fill-edge
+                   one, so a mark without it cannot support the claim
+    the spread     DIRECT_CONNECTED_CAP needs cap_px AND dispersion; NO_DISPERSION
+                   needs neither; a cap with no stem is a contradiction
+    the position   DECLARED_ANCHOR whenever the mark sits at an x_label, blank
+                   only when the panel has no position dimension
+
+**`UNSTEMMED_CAP` is out of `BAR_COLOR`'s contract.** `bar_reader` sets `cap_px`
+only inside the branch that also confirms the stem, so a cap without one is a
+shape it cannot produce - and listing it said this reader could, which is what a
+contract is for saying. The line readers keep it: theirs is reachable
+(`_marker_and_errorbar` returns a whisker extent with `stem=False` whenever the
+caps are not on both sides).
+
+**NaN is not a number, in either verifier.** `float("nan")` succeeds and every
+comparison against NaN is False, so a mark carrying one passed each
+`abs(a - b) > EPSILON` check silently: a geometry that cannot be checked read as
+a geometry that agrees. `finite_number` is shared by both verifiers, and the
+raw-mark writer uses `allow_nan=False` - a reader that computes a NaN now stops
+the batch with `InternalReaderError` naming the panel, which is the answer this
+module already gives a KeyError from a renamed field. A defect here is not a
+difficult figure, and a run that quietly refused the panel would hide it behind a
+queue row somebody would spend an afternoon re-reading by hand.
+
+    reverted                                          scenarios that fail
+    a non-numeric overlap counting as no overlap       2
+    the fill-edge evidence optional again              2
+    a stem needing no cap under it                     2
+    a cap with no stem priced instead of refused       1
+    a bar at a label not saying how it got there       2
+    BAR_COLOR claiming an unstemmed cap again          1
+    nan being a number again                           2
+    the writer accepting a NaN into an artifact        3
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5737,9 +5787,6 @@ these cover that the entry answers in the two codes the finalizer branches on.
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text
 - 397 Figure 1 at 4:30, 5:00 and 6:00: the merged run is thicker than one
   stroke and its edges are the two curves, unread
-- the overlay still marks inference from `line_style_source` rather than from
-  `Identity_Method`, so a reader that answers the new question without setting
-  the old field would star nothing
 - `RESERVED_METHODS` is five methods deep: `RESTORED_MASKED_CAP`,
   `INTERPOLATED_DISPERSION`, `FITTED_DISPERSION`, `DIRECT_BOUND_PAIR` and
   `SOURCE_TRANSCRIBED` are priced and not producible. The first needs the reader
@@ -5763,9 +5810,10 @@ these cover that the entry answers in the two codes the finalizer branches on.
 - the methods are RE-DERIVED from the evidence for two readers of the seven,
   `LINE_MONO_STYLE` and `BAR_COLOR`. The other five are held to the matrix, to the
   mark join and to the value-to-cell binding, and not to a derivation from their
-  own measurements - a real difference in strength. `LINE_MONO` and `BOX_VIOLIN`
-  are the next two, and `BAR_MONO` and `SCATTER` have their own durable artifacts
-  checked instead
+  own measurements - a real difference in strength. THREE are left, not two:
+  `LINE_COLOR`, `LINE_MONO` and `BOX_VIOLIN`, in that order - `LINE_COLOR` reuses
+  the colour evidence with marker centres and cap geometry - while `BAR_MONO` and
+  `SCATTER` have their own durable artifacts checked instead
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

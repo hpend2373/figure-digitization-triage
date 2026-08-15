@@ -279,7 +279,11 @@ check("  and a five-number summary's quartiles count as a dispersion",
 check("and a reader cannot claim a spread its own geometry does not offer",
       P.dispersion_contract_failure("BOX_VIOLIN", "DIRECT_CONNECTED_CAP")
       and P.dispersion_contract_failure("SCATTER", "UNSTEMMED_CAP")
-      and not P.dispersion_contract_failure("BAR_COLOR", "UNSTEMMED_CAP")
+      # AND NEITHER CAN BAR_COLOR, from v7.84: `bar_reader` sets `cap_px` only
+      # inside the branch that also confirms the stem, so a cap without one is a
+      # shape it cannot produce. The line readers keep it - theirs is reachable.
+      and P.dispersion_contract_failure("BAR_COLOR", "UNSTEMMED_CAP")
+      and not P.dispersion_contract_failure("LINE_MONO", "UNSTEMMED_CAP")
       and not P.dispersion_contract_failure("A_READER_FROM_2027", "ANYTHING"),
       P.dispersion_contract_failure("BOX_VIOLIN", "DIRECT_CONNECTED_CAP"))
 
@@ -525,8 +529,9 @@ print("the second reader whose methods are re-derived from its own evidence")
 # "this reader could have produced that" and "this mark did".
 _bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
             top_px="177.5", fill_top_px="180.0", mean="116.76",
-            mean_if_read_at_fill_edge="115.91", dispersion="4.2",
-            Errorbar_Stem_Confirmed="TRUE", Position_Assignment="DECLARED_ANCHOR")
+            mean_if_read_at_fill_edge="115.91", cap_px="165.0",
+            dispersion="4.2", Errorbar_Stem_Confirmed="TRUE",
+            x_label="T0", Position_Assignment="DECLARED_ANCHOR")
 check("a bar with its own colour, its outline and a stemmed cap answers all three",
       P.expected_bar_colour_methods(_bar).expected
       == {"Identity_Method": "MEASURED_COLOUR",
@@ -565,19 +570,18 @@ check("  and another edge definition is refused outright",
           dict(_bar, Bar_Top_Definition="FILL_EDGE")).problems)
 # THE SPREAD FOLLOWS THE STEM AND THE CAP, which are the two facts the reader
 # decides from.
-check("a cap with no stem is UNSTEMMED_CAP, and no cap at all is NO_DISPERSION",
+check("no cap and no stem is NO_DISPERSION, and this reader has no third answer",
       P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="FALSE")).expected
-      ["Dispersion_Method"] == "UNSTEMMED_CAP"
+          dict(_bar, Errorbar_Stem_Confirmed="FALSE", cap_px=None,
+               dispersion=None)).expected["Dispersion_Method"] == "NO_DISPERSION"
       and P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="FALSE", dispersion=None)).expected
-      ["Dispersion_Method"] == "NO_DISPERSION"
-      and P.dispersion_tier("UNSTEMMED_CAP") == "R3",
+          dict(_bar, Errorbar_Stem_Confirmed="FALSE")).problems,
       "%s" % (P.expected_bar_colour_methods(
           dict(_bar, Errorbar_Stem_Confirmed="FALSE")),))
 check("  and a stem with nothing measured under it is incomplete",
-      P.expected_bar_colour_methods(
-          dict(_bar, dispersion=None)).problems)
+      P.expected_bar_colour_methods(dict(_bar, dispersion=None)).problems
+      and P.expected_bar_colour_methods(dict(_bar, cap_px=None)).problems,
+      "%s" % (P.expected_bar_colour_methods(dict(_bar, cap_px=None)),))
 check("  and a mark that does not say whether a stem connected cannot answer",
       P.expected_bar_colour_methods(
           dict(_bar, Errorbar_Stem_Confirmed="")).problems)
@@ -589,9 +593,46 @@ check("a bar whose x label was counted rather than declared is refused",
           dict(_bar, Position_Assignment="SEQUENTIAL")).problems,
       "%s" % (P.expected_bar_colour_methods(
           dict(_bar, Position_Assignment="SEQUENTIAL")),))
-check("  while a panel that declares no positions is not asked for one",
+# AND A BAR THAT SITS AT A LABEL AND SAYS NOTHING ABOUT HOW IT GOT THERE IS
+# REFUSED TOO. v7.83 checked the field only when it was filled in, so blanking
+# it was the way past the check - and blanking it on the VALUE is already how a
+# counted label gets past `grid_engine`.
+check("  and so is one that sits at a declared label and says nothing",
+      P.expected_bar_colour_methods(
+          dict(_bar, Position_Assignment="")).problems,
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, Position_Assignment="")),))
+check("  while a panel with no position dimension is not asked for one",
       not P.expected_bar_colour_methods(
-          dict(_bar, Position_Assignment="")).problems)
+          dict(_bar, x_label="", Position_Assignment="")).problems)
+# EVERY FIELD IT DECIDES FROM IS REQUIRED. A verifier that only refutes can be
+# starved: v7.83 gave all three methods at R0 to a mark with a non-numeric
+# overlap, no fill-edge reading and no cap.
+_starved = dict(mask_overlap="garbage", Bar_Top_Definition="OUTLINE_CENTER",
+                top_px="177.5", fill_top_px="", mean="999",
+                mean_if_read_at_fill_edge="", dispersion="4.2", cap_px="",
+                Errorbar_Stem_Confirmed="TRUE", x_label="T0",
+                Position_Assignment="")
+check("a mark that simply omits its evidence answers on no axis at all",
+      not P.expected_bar_colour_methods(_starved).expected
+      and len(P.expected_bar_colour_methods(_starved).problems) == 4,
+      "%s" % (P.expected_bar_colour_methods(_starved),))
+check("  and a count that is not a count says nothing about the ink",
+      all("Identity_Method" not in P.expected_bar_colour_methods(
+          dict(_bar, mask_overlap=bad)).expected
+          for bad in ("garbage", "-1", "nan", "inf", "0.5", "")),
+      "%s" % [P.expected_bar_colour_methods(
+          dict(_bar, mask_overlap=bad)).expected.get("Identity_Method")
+          for bad in ("garbage", "-1", "nan", "inf", "0.5", "")])
+# NaN IS NOT A NUMBER, and every comparison against it is False - so a geometry
+# that cannot be checked read as a geometry that agrees.
+check("nan and inf are not measurements, in either verifier",
+      P.finite_number("nan") is None and P.finite_number("inf") is None
+      and P.finite_number("4.5") == 4.5
+      and P.expected_line_style_methods(
+          dict(_geo, Value_Span_Px="nan")).problems
+      and P.expected_bar_colour_methods(dict(_bar, top_px="nan")).problems,
+      "%s" % (P.expected_line_style_methods(dict(_geo, Value_Span_Px="nan")),))
 check("two of the seven readers now re-derive their methods, and the table says "
       "which",
       set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR"},
@@ -607,7 +648,8 @@ check("a BAR_COLOR mark that cannot answer is incomplete, and one that "
       P.evidence_failure("BAR_COLOR", dict(_bar, mask_overlap=1),
                          _claimed)[0] == "METHOD_EVIDENCE_INCOMPLETE"
       and P.evidence_failure(
-          "BAR_COLOR", dict(_bar, Errorbar_Stem_Confirmed="FALSE"),
+          "BAR_COLOR", dict(_bar, Errorbar_Stem_Confirmed="FALSE", cap_px=None,
+                            dispersion=None),
           _claimed)[0] == "METHOD_CONTRADICTS_EVIDENCE"
       and P.evidence_failure("BAR_COLOR", _bar, _claimed) == ("", ""),
       "%s" % (P.evidence_failure("BAR_COLOR", _bar, _claimed),))

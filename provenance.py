@@ -47,6 +47,7 @@ pooled measurement.
 """
 
 import collections
+import math
 
 TIERS = ("R0", "R1", "R2", "R3", "R4")
 
@@ -257,7 +258,12 @@ DISPERSION_CONTRACT = {
     # NOT `RESTORED_MASKED_CAP`: it is reserved, and listing it here said this
     # reader could produce it, which is what a contract is for saying.
     "LINE_MONO_STYLE": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
-    "BAR_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
+    # NOT `UNSTEMMED_CAP`: `bar_reader` sets `cap_px` only inside the branch
+    # that also sets `stem_ok`, so a cap without a stem is a shape it cannot
+    # produce. Listing it said this reader could, which is what a contract is
+    # for saying - the same mistake `RESTORED_MASKED_CAP` was removed from
+    # LINE_MONO_STYLE for. The line readers keep it: theirs is reachable.
+    "BAR_COLOR": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
     "BAR_MONO": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
     "BOX_VIOLIN": {"DIRECT_BOX_GEOMETRY"},
     "SCATTER": {"NO_DISPERSION"},
@@ -330,6 +336,21 @@ EvidenceVerdict = collections.namedtuple("EvidenceVerdict",
                                          "expected problems")
 
 
+def finite_number(value):
+    """`value` as a float, or None if it is not one - and NaN is not one.
+
+    `float("nan")` succeeds, and every comparison against NaN is False, so a
+    mark carrying `nan` passed each `abs(a - b) > EPSILON` test in this module
+    silently: a geometry that cannot be checked read as a geometry that agrees.
+    `inf` is the same shape from the other side.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 #: What two pixel measurements may differ by and still be the same measurement.
 #: FLOAT NOISE, NOT A TOLERANCE: `right - left` and a recorded span are the same
 #: subtraction done twice, and a hundredth of a pixel is not a distance any
@@ -361,11 +382,7 @@ def support_shape(left, right, span, target):
     So the shape is decided first and every other shape is a refusal. A verifier
     that guesses at malformed evidence is a verifier that can be fed.
     """
-    def number(text):
-        try:
-            return float(text)
-        except (TypeError, ValueError):
-            return None
+    number = finite_number
 
     if not left and not right:
         return "NO_SUPPORT", ""
@@ -493,8 +510,7 @@ def expected_bar_colour_methods(mark):
 
     The second verifier, and the reader worth doing next: `BAR_COLOR` reaches
     R0 on every axis, which means every one of its cells goes into a pool on the
-    strength of three words nothing re-derived. What it records is enough to
-    re-derive all three.
+    strength of three words nothing re-derived.
 
         identity     the bar was found in a mask built from the colour this
                      series declares - unless ANOTHER declared colour's mask
@@ -505,53 +521,66 @@ def expected_bar_colour_methods(mark):
                      the fill edge. A mean equal to that one, from a bar whose
                      fill edge is a different pixel row, was not read at the
                      outline centre whatever the field says
-        dispersion   the stem and the cap, the same two facts the reader decides
-                     from: a cap with a stem is DIRECT_CONNECTED_CAP, a cap
-                     without one is UNSTEMMED_CAP at R3, and no cap at all is
-                     NO_DISPERSION
+        dispersion   the stem and the cap, the two facts the reader decides
+                     from: a cap a stem reaches is DIRECT_CONNECTED_CAP and no
+                     cap at all is NO_DISPERSION. This reader has no third
+                     answer - see `DISPERSION_CONTRACT`
 
-    `Position_Assignment` is checked too, when the mark carries one. It is not a
-    method - it says whether this bar's x label came from a declared anchor or
-    from counting bars left to right - and `grid_engine` refuses a VALUE that
-    admits to counting. A value that drops the column passes that gate, and the
-    mark cannot: it is hashed.
+    EVERY FIELD IT DECIDES FROM IS REQUIRED. v7.83 asked whether a field
+    contradicted the claim and let a missing one through, so a mark carrying
+    `mask_overlap="garbage"`, no fill-edge reading and no cap took all three
+    methods at R0: the identity because a non-number is not positive, the value
+    because the fill-edge comparison was skipped, the spread because a number
+    was present. A verifier that only refutes is a verifier that can be starved.
+
+    `Position_Assignment` is checked whenever the mark sits at a declared
+    x_label. It is not a method - it says whether the label came from a declared
+    anchor or from counting bars left to right - and `grid_engine` refuses a
+    VALUE that admits to counting. A value that drops the column passes that
+    gate, and the mark cannot: it is hashed.
     """
     def field(name):
         value = mark.get(name)
         return "" if value is None else str(value).strip()
 
     def number(name):
-        try:
-            return float(field(name))
-        except (TypeError, ValueError):
-            return None
+        return finite_number(field(name))
 
     out, problems = {}, []
-    overlap = field("mask_overlap")
-    if not overlap:
-        problems.append("the mark does not say whether another declared "
-                        "colour's mask claims its ink, so its identity cannot "
-                        "be re-derived")
-    elif overlap.upper() in ("TRUE", "1") or (number("mask_overlap") or 0) > 0:
-        problems.append("another declared colour's mask claims this bar's own "
-                        "ink; a contested mark is not evidence of either "
-                        "identity, and the run drops it rather than choosing")
+    overlap, overlap_px = field("mask_overlap"), number("mask_overlap")
+    if not overlap or overlap_px is None or overlap_px < 0 \
+            or overlap_px != int(overlap_px):
+        problems.append("the mark gives mask_overlap as %s, which is not a "
+                        "count of the other declared colours claiming its ink, "
+                        "so its identity cannot be re-derived"
+                        % (overlap or "nothing"))
+    elif overlap_px > 0:
+        problems.append("%d other declared colour(s) claim this bar's own ink; "
+                        "a contested mark is not evidence of either identity, "
+                        "and the run drops it rather than choosing"
+                        % int(overlap_px))
     else:
         out["Identity_Method"] = "MEASURED_COLOUR"
     edge = field("Bar_Top_Definition").upper()
     top, fill = number("top_px"), number("fill_top_px")
     mean, at_fill = number("mean"), number("mean_if_read_at_fill_edge")
+    missing = [name for name, value in (("top_px", top), ("fill_top_px", fill),
+                                        ("mean", mean),
+                                        ("mean_if_read_at_fill_edge", at_fill))
+               if value is None]
     if edge != "OUTLINE_CENTER":
         problems.append("the mark gives its Bar_Top_Definition as %s, and this "
                         "reader measures the outline centre"
                         % (edge or "nothing"))
-    elif top is None or mean is None:
+    elif missing:
+        # THE FILL-EDGE READING IS EVIDENCE, not an optional extra. It is the
+        # only thing on the mark that can tell an outline-centre reading from a
+        # fill-edge one, so a mark without it cannot support the claim - and
+        # skipping the comparison when it was absent is what let a producer
+        # simply not write it.
         problems.append("the mark records no %s, so which edge its number came "
-                        "from cannot be re-derived"
-                        % ("top_px" if top is None else "mean"))
-    elif (at_fill is not None and fill is not None
-            and abs(top - fill) > PIXEL_EPSILON
-            and abs(mean - at_fill) <= PIXEL_EPSILON):
+                        "from cannot be re-derived" % ", ".join(missing))
+    elif abs(top - fill) > PIXEL_EPSILON and abs(mean - at_fill) <= PIXEL_EPSILON:
         problems.append("the mark's mean is what its FILL EDGE would have read "
                         "(%s) and its outline centre is a different row (%s "
                         "against %s), so the number did not come from the "
@@ -559,22 +588,34 @@ def expected_bar_colour_methods(mark):
     else:
         out["Value_Method"] = "BAR_OUTLINE_CENTER"
     stem = field("Errorbar_Stem_Confirmed").upper()
-    spread = number("dispersion")
+    cap, spread = number("cap_px"), number("dispersion")
     if stem not in ("TRUE", "FALSE"):
         problems.append("the mark does not say whether a stem connected its cap "
                         "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
                         "cannot be re-derived" % (stem or "blank"))
+    elif stem == "TRUE" and (cap is None or spread is None):
+        problems.append("the mark says a stem connected its cap and records no "
+                        "%s for it to have measured"
+                        % ("cap_px" if cap is None else "dispersion"))
     elif stem == "TRUE":
-        if spread is None:
-            problems.append("the mark says a stem connected its cap and records "
-                            "no dispersion for it to have measured")
-        else:
-            out["Dispersion_Method"] = "DIRECT_CONNECTED_CAP"
+        out["Dispersion_Method"] = "DIRECT_CONNECTED_CAP"
+    elif cap is None and spread is None:
+        out["Dispersion_Method"] = "NO_DISPERSION"
     else:
-        out["Dispersion_Method"] = ("NO_DISPERSION" if spread is None
-                                    else "UNSTEMMED_CAP")
-    placed = field("Position_Assignment").upper()
-    if placed and placed != "DECLARED_ANCHOR":
+        # NO THIRD ANSWER. This reader accepts a cap only when a stem physically
+        # reaches it, so "a cap and no stem" is not an unstemmed cap it declined
+        # to follow - it is a mark whose three fields disagree with each other.
+        problems.append("the mark says no stem connected a cap and still "
+                        "records cap_px=%s and dispersion=%s; this reader "
+                        "measures a cap only through a stem"
+                        % (field("cap_px") or "nothing",
+                           field("dispersion") or "nothing"))
+    placed, label = field("Position_Assignment").upper(), field("x_label")
+    if label and placed != "DECLARED_ANCHOR":
+        problems.append("this bar sits at %s and its label came from %s rather "
+                        "than from a declared anchor"
+                        % (label, placed or "nothing recorded"))
+    elif placed and placed != "DECLARED_ANCHOR":
         problems.append("this bar's x label came from %s rather than from a "
                         "declared anchor" % placed)
     return EvidenceVerdict(out, problems)

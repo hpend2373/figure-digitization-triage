@@ -1310,6 +1310,42 @@ check("and so is one whose list is not the questions its values ask",
       _held == {"P1"} and "INFERENCE_MANIFEST_MISMATCH" in _p3, "%s" % _p3)
 
 print()
+print("a number JSON cannot express never reaches an artifact")
+# v7.84. Python writes a bare `NaN`, which is not JSON, and every
+# `abs(a - b) > EPSILON` comparison downstream is False against it - so a
+# geometry that cannot be checked reads as one that agrees. The writer refuses,
+# and the panel is refused with a reason rather than finalized from an artifact
+# nothing can check.
+def _nan_mean(i, r):
+    r["Identity_Method"] = "MEASURED_LINE_STYLE"
+    r["Value_Method"] = "DIRECT_CURVE_INK"
+    if i == 0:
+        r["mean"] = float("nan")
+
+
+_NAN_DIR = os.path.join(ROOT, "run_nan")
+_nan_raised = None
+try:
+    MR.read_panel = style_reader(_nan_mean)
+    fresh_run("run_nan", **_STYLE)
+except Exception as exc:
+    _nan_raised = exc
+finally:
+    MR.read_panel = _real_read_panel
+check("a reader that computes a NaN stops the batch, naming the panel",
+      isinstance(_nan_raised, RB.InternalReaderError)
+      and "P1" in "%s" % _nan_raised, "%r" % _nan_raised)
+check("  and no artifact nothing can check is left behind",
+      not os.path.exists(os.path.join(_NAN_DIR, "raw", "P1_marks.json")),
+      "%s" % (sorted(os.listdir(os.path.join(_NAN_DIR, "raw")))
+              if os.path.isdir(os.path.join(_NAN_DIR, "raw")) else "no raw"))
+check("  and the stamp says INTERNAL_ERROR, not a figure problem",
+      json.load(open(os.path.join(_NAN_DIR, "run_stamp.json"),
+                     encoding="utf-8")).get("Status") == "INTERNAL_ERROR",
+      "%s" % json.load(open(os.path.join(_NAN_DIR, "run_stamp.json"),
+                            encoding="utf-8")).get("Status"))
+
+print()
 print("a value is joined to the mark it was made from, and checked against it")
 # v7.72. The matrix says which methods a reader CAN produce; this says which one
 # THIS row's own evidence came to. Five of the seven readers had no durable

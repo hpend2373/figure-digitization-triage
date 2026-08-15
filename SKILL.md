@@ -99,10 +99,16 @@ arithmetic nobody can check.
 It lists every cell that will be asked about and why, checks that each one has
 its manifest row and its picture, checks the answers for blanks, duplicates and
 answers to questions this run did not ask, and — with `--second FILE` — compares
-two independent reviewers cell by cell. It then prints what the finalizer WOULD
-say, by calling the finalizer's own decision function rather than a second
+two independent reviewers cell by cell. It prints what the finalizer WOULD say
+first, by calling the finalizer's own decision function rather than a second
 implementation of it, so a bundle the preflight calls clean is not one
-`finalize_batch.py` then refuses. It writes nothing and signs nothing: the
+`finalize_batch.py` then refuses. Pass `--manifests DIR` when the run has been
+moved, exactly as you would to the finalizer. **Its exit code is the finalizer's
+answer**: 0 if the run would finalize, 2 if it would not. A reconstruction a
+person correctly REJECTED is a review done right — the run finalizes without that
+cell — so it is printed as `EXCLUDED` and does not fail the preflight; use
+`--require-all-values` when a batch is only acceptable whole. It writes nothing
+and signs nothing: the
 confirmations are a person's claim about what they saw, and a program filling one
 in is the failure this whole package is built to prevent.
 

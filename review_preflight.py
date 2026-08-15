@@ -2,7 +2,9 @@
 
     python3 review_preflight.py OUT/ [--review value_review.csv]
                                      [--inference inference_review.csv]
-                                     [--second other_reviewer/]
+                                     [--manifests MANIFEST_DIR]
+                                     [--second other_inference_review.csv]
+                                     [--require-all-values]
 
 A human review of an R2 or R3 panel is a person looking at ink and saying what
 they see. Nothing here does that, and nothing here may: the attestation in
@@ -23,8 +25,12 @@ The last one matters most for a first pilot. `finalize` refuses a panel for eigh
 different reasons and a reviewer should meet none of them for the first time
 after signing.
 
-Exit status is 0 when the bundle and the answers are consistent, 2 when they are
-not, and 1 when the run cannot be read at all. Nothing here writes to the run.
+Exit status is the FINALIZER's answer, not a count of lines printed: 0 when the
+run would finalize, 2 when it would not, and 1 when the run cannot be read at
+all. A reconstruction a person correctly REJECTED is a review done right - the
+run finalizes without that cell - so it is reported as an exclusion and does not
+fail the preflight. Pass `--require-all-values` when a batch is only acceptable
+whole. Nothing here writes to the run.
 """
 import argparse
 import csv
@@ -47,10 +53,25 @@ def _s(value):
     return "" if value is None else str(value).strip()
 
 
-def _read(path, columns=None):
+def _read(path, columns=None, problems=None):
+    """A frame, or an empty one and a problem: never a traceback.
+
+    The preflight reads several of the same CSVs the finalizer does. Unguarded,
+    a malformed `value_review.csv` raised out of `pd.read_csv` here - so the
+    reviewer got a stack trace where the finalizer would have given them
+    `REVIEW_FILE_UNREADABLE` and a line saying which file, which is the whole
+    difference between a tool and a crash.
+    """
     if not os.path.exists(path):
         return pd.DataFrame(columns=columns or [])
-    return pd.read_csv(path, dtype=object).fillna("")
+    try:
+        return pd.read_csv(path, dtype=object).fillna("")
+    except Exception as exc:
+        if problems is not None:
+            problems.append((os.path.basename(path),
+                             "could not be parsed (%s: %s)"
+                             % (type(exc).__name__, exc)))
+        return pd.DataFrame(columns=columns or [])
 
 
 def questions(run_dir):
@@ -179,7 +200,8 @@ def answer_problems(run_dir, review_path, inference_path):
     return problems
 
 
-def would_refuse(run_dir, review_path, inference_path, today=None):
+def would_refuse(run_dir, review_path, inference_path, today=None,
+                 manifest_dir=None):
     """What the finalizer would say, run through the finalizer's own function.
 
     `FIN.validate_finalization` decides; `FIN.finalize` wraps it and writes. This
@@ -188,11 +210,17 @@ def would_refuse(run_dir, review_path, inference_path, today=None):
     questions through separate code, and which is the worst failure a preflight
     has, because the reviewer trusts it and signs.
 
+    `manifest_dir` is passed through for the same reason it exists on the
+    finalizer: a run that has been moved, or one whose manifests live outside it,
+    is checked against the manifests the CALLER names. One shared function with
+    two different inputs is not parity - the preflight would fail on the run
+    directory while `finalize_batch.py --manifests DIR` succeeded.
+
     Returns (status, [(where, check, detail)]).
     """
     verdict = FIN.validate_finalization(
         run_dir, review_path=review_path, inference_review_path=inference_path,
-        today=today)
+        today=today, manifest_dir=manifest_dir)
     return verdict.status, [(_s(p.get("where")), _s(p.get("check")),
                              _s(p.get("detail"))) for p in verdict.problems]
 
@@ -238,17 +266,38 @@ def main(argv=None):
     ap.add_argument("run_dir")
     ap.add_argument("--review", default=None)
     ap.add_argument("--inference", default=None)
+    ap.add_argument("--manifests", default=None, metavar="DIR",
+                    help="the manifests this run was produced from, when they "
+                         "are not inside it. The same argument finalize_batch.py "
+                         "takes, and it must be the same directory")
     ap.add_argument("--second", default=None, metavar="FILE",
                     help="a second reviewer's inference_review.csv file, to "
                          "compare cell by cell")
+    ap.add_argument("--require-all-values", action="store_true",
+                    help="fail unless every approved value is finalized. Off by "
+                         "default: a REJECTED reconstruction is a review done "
+                         "right, and the run finalizes without that cell")
     args = ap.parse_args(argv)
 
     if not os.path.exists(os.path.join(args.run_dir, "run_stamp.json")):
         print("%s is not a run directory" % args.run_dir)
         return 1
-    review = args.review or os.path.join(args.run_dir, "value_review.csv")
-    inference = args.inference or os.path.join(
-        os.path.dirname(os.path.abspath(review)), "inference_review.csv")
+    review, inference = FIN.review_paths(args.run_dir, args.review,
+                                         args.inference)
+
+    # THE SHARED VERDICT FIRST. Everything below it is help for a person; this is
+    # the answer, and it comes from the function the finalizer decides with. Run
+    # last, a malformed decision file crashed the preflight's own reading of it
+    # before the finalizer's structured refusal was ever reached.
+    status, refusals = would_refuse(args.run_dir, review, inference,
+                                    manifest_dir=args.manifests)
+    excluded = [r for r in refusals if r[1] in FIN.NONFATAL_CHECKS]
+    blocking = [r for r in refusals if r[1] not in FIN.NONFATAL_CHECKS]
+    print("the finalizer would say %s" % status)
+    for where, check, detail in blocking:
+        print("  WOULD    %-34s %s: %s" % (where, check, detail))
+    for where, check, detail in excluded:
+        print("  EXCLUDED %-34s %s: %s" % (where, check, detail))
 
     asked = questions(args.run_dir)
     print("%d cell(s) will be asked about" % len(asked))
@@ -264,19 +313,20 @@ def main(argv=None):
     if args.second:
         for iid, a, b in disagreements(inference, args.second):
             print("  DIFFER   %-34s %s against %s" % (iid, a, b))
-    # WHAT WOULD HAPPEN, without doing it. `FIN.finalize` is not called - it
-    # writes, and a preflight that finalizes is not a preflight - but the function
-    # inside it that DECIDES is, so this is the finalizer's own answer rather than
-    # a second implementation of it.
-    status, refusals = would_refuse(args.run_dir, review, inference)
-    print("the finalizer would say %s" % status)
-    for where, check, detail in refusals:
-        print("  WOULD    %-34s %s: %s" % (where, check, detail))
-    print("%d bundle problem(s), %d answer problem(s), %d finalizer refusal(s)"
-          % (len(bundle), len(answers), len(refusals)))
+    print("%d bundle problem(s), %d answer problem(s), %d refusal(s), "
+          "%d value(s) excluded"
+          % (len(bundle), len(answers), len(blocking), len(excluded)))
     print("nothing here signs anything: the confirmations are a person's claim "
           "about what they saw")
-    return 2 if (bundle or answers or refusals) else 0
+    # THE EXIT CODE IS THE FINALIZER'S ANSWER, not a count of lines printed. It
+    # was "any problem at all", which made a correctly REJECTED reconstruction -
+    # a review done right, and the case the first pilot is designed around -
+    # indistinguishable from an unanswered question.
+    if status != FIN.FINALIZED_STATUS:
+        return 2
+    if args.require_all_values and excluded:
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

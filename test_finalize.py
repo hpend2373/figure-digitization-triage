@@ -1775,6 +1775,112 @@ check("and the preflight signs nothing: the run directory is untouched",
       "the preflight changed %s"
       % sorted(set(_fingerprint(_R3_DIR).items())
                ^ set(_before.items())))
+# AND THE EXIT CODE IS THE FINALIZER'S ANSWER. v7.78. It was "any problem at
+# all", so a reconstruction a person correctly REJECTED - the run finalizes
+# without that cell, which is the partial-rejection path the first pilot is
+# designed around - came back from the preflight as a failure. A pilot whose own
+# designed-in rejection reads as a broken bundle teaches the reviewer to ignore
+# the tool.
+_answers([_answer(_ids3[0]), _answer(_ids3[1], "REJECTED")])
+_panel3()
+_rej_status, _rej_problems = PF.would_refuse(_R3_DIR, _r3_review, _r3_cells,
+                                             today=datetime.date(2026, 8, 6))
+check("a rejected reconstruction still finalizes, and the preflight passes",
+      _rej_status == "FINALIZED"
+      and any(c == "INFERENCE_REJECTED" for _w, c, _d in _rej_problems)
+      and PF.main([_R3_DIR, "--review", _r3_review,
+                   "--inference", _r3_cells]) == 0,
+      "%s / %s" % (_rej_status, [c for _w, c, _d in _rej_problems]))
+check("  and it is reported as an exclusion, not as a refusal",
+      all(c in FIN.NONFATAL_CHECKS for _w, c, _d in _rej_problems),
+      "%s" % [c for _w, c, _d in _rej_problems])
+check("  while a batch that must be whole says so with --require-all-values",
+      PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+               "--require-all-values"]) == 2)
+_answers([_answer(_ids3[0])])
+check("and an unanswered question still fails the preflight",
+      PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells]) == 2)
+_answers([_answer(i) for i in _ids3])
+check("  while a complete review passes it",
+      PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells]) == 0)
+# AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
+# the finalizer for a run that has been moved; without it on the preflight, the
+# same run could fail one and pass the other with the same decision function
+# between them.
+_moved_dir = os.path.join(ROOT, "moved_run")
+shutil.rmtree(_moved_dir, ignore_errors=True)
+shutil.copytree(_R3_DIR, _moved_dir)
+_moved_manifests = os.path.join(ROOT, "moved_manifests")
+shutil.rmtree(_moved_manifests, ignore_errors=True)
+shutil.move(os.path.join(_moved_dir, "manifests"), _moved_manifests)
+# WHAT A RUN HANDED TO SOMEBODY ELSE LOOKS LIKE: the stamp records the absolute
+# path of a directory on the machine that produced it, and that directory is not
+# on this one. The `manifests/` copy inside the run is the fallback that travels;
+# a run whose manifests live elsewhere has neither, and needs to be told.
+_moved_stamp = os.path.join(_moved_dir, "run_stamp.json")
+_ms = json.load(open(_moved_stamp, encoding="utf-8"))
+_ms["Manifest_Dir"] = os.path.join(ROOT, "a_directory_on_another_machine")
+json.dump(_ms, open(_moved_stamp, "w", encoding="utf-8"), indent=1,
+          sort_keys=True)
+_moved_review = os.path.join(_moved_dir, "value_review.csv")
+_moved_cells = os.path.join(_moved_dir, "inference_review.csv")
+check("a run whose manifests were moved out is refused by both",
+      PF.would_refuse(_moved_dir, _moved_review, _moved_cells,
+                      today=datetime.date(2026, 8, 6))[0]
+      == FIN.finalize(_moved_dir, review_path=_moved_review,
+                      inference_review_path=_moved_cells,
+                      run_date="2026-08-06",
+                      today=datetime.date(2026, 8, 6))["status"]
+      != "FINALIZED",
+      "%s" % (PF.would_refuse(_moved_dir, _moved_review, _moved_cells,
+                              today=datetime.date(2026, 8, 6))[0],))
+check("  and pointed at them, both finalize",
+      PF.would_refuse(_moved_dir, _moved_review, _moved_cells,
+                      today=datetime.date(2026, 8, 6),
+                      manifest_dir=_moved_manifests)[0] == "FINALIZED"
+      and PF.main([_moved_dir, "--review", _moved_review,
+                   "--inference", _moved_cells,
+                   "--manifests", _moved_manifests]) == 0,
+      "%s" % (PF.would_refuse(_moved_dir, _moved_review, _moved_cells,
+                              today=datetime.date(2026, 8, 6),
+                              manifest_dir=_moved_manifests),))
+# A DECISION FILE THAT WILL NOT PARSE IS A FINDING, NOT A TRACEBACK. The preflight
+# read the same CSVs the finalizer does, unguarded, so a reviewer with a broken
+# file got a stack trace where the finalizer gives a code and a filename.
+_broken = os.path.join(ROOT, "broken_review.csv")
+with open(_broken, "w", encoding="utf-8") as _fh:
+    _fh.write('Review_ID,Panel_ID\n"unclosed,quote\n')
+_pf_broken = PF.would_refuse(_R3_DIR, _broken, _r3_cells,
+                             today=datetime.date(2026, 8, 6))
+_fin_broken = FIN.finalize(_R3_DIR, review_path=_broken,
+                           inference_review_path=_r3_cells,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+check("a malformed review file gives both of them the same finding",
+      _pf_broken[0] == _fin_broken["status"]
+      and {c for _w, c, _d in _pf_broken[1]}
+      == {FIN._s(p["check"]) for p in _fin_broken["problems"]}
+      and "REVIEW_FILE_UNREADABLE" in {c for _w, c, _d in _pf_broken[1]},
+      "%s / %s" % (_pf_broken, _fin_broken["status"]))
+check("  and the preflight reports it instead of raising",
+      PF.main([_R3_DIR, "--review", _broken, "--inference", _r3_cells]) == 2)
+_broken_cells = os.path.join(ROOT, "broken_inference.csv")
+with open(_broken_cells, "w", encoding="utf-8") as _fh:
+    _fh.write('Inference_ID,Panel_ID\n"unclosed,quote\n')
+_pf_bc = PF.would_refuse(_R3_DIR, _r3_review, _broken_cells,
+                         today=datetime.date(2026, 8, 6))
+_fin_bc = FIN.finalize(_R3_DIR, review_path=_r3_review,
+                       inference_review_path=_broken_cells,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("and so does a malformed per-cell answer file",
+      _pf_bc[0] == _fin_bc["status"]
+      and {c for _w, c, _d in _pf_bc[1]}
+      == {FIN._s(p["check"]) for p in _fin_bc["problems"]}
+      and PF.main([_R3_DIR, "--review", _r3_review,
+                   "--inference", _broken_cells]) == 2,
+      "%s / %s" % (_pf_bc, _fin_bc["status"]))
+_answers([_answer(i) for i in _ids3])
+_panel3()
 # INCLUDING THE FUNCTION IT SHARES WITH THE FINALIZER. `finalize` removes the
 # previous accepted file and stamp before it decides anything, so the decider had
 # to be lifted out of that; a decider that still deleted would take a bundle

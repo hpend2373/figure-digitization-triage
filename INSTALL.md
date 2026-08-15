@@ -5450,6 +5450,49 @@ wanted.
     the decision function deleting like the writer      1
     a duplicate answer merged instead of reported       1
 
+## v7.78 — the preflight's answer is the finalizer's answer
+
+Two gaps left over from v7.77, and the first one aimed straight at the pilot that
+has to come next.
+
+**A correctly REJECTED reconstruction failed the preflight.** The exit code was
+"any problem at all", and `INFERENCE_REJECTED` is in the finalizer's problem list
+— so a reviewer who did exactly what the pilot is designed to exercise, refusing
+one reconstruction while the panel's other values stand, got:
+
+    the finalizer would say FINALIZED
+    Values_Inference_Rejected = 1
+    review_preflight exit = 2
+
+A tool that calls a correct review a failure is a tool the reviewer learns to
+ignore. The exit code now follows the finalizer's STATUS — 0 if the run would
+finalize, 2 if it would not — and `NONFATAL_CHECKS` groups the three findings
+that exclude a VALUE from a run that still finalizes (`INFERENCE_REJECTED`,
+`VALUE_METHOD_NOT_FINALIZABLE`, `VALUE_METHOD_UNSTATED`) so they print as
+`EXCLUDED` rather than as refusals. `--require-all-values` is there for a batch
+that is only acceptable whole. The grouping never gates: a panel refused while
+another finalizes puts a refusal code in a FINALIZED run's problem list, so the
+status is the only thing that can decide.
+
+**And the two shared a decider without sharing its inputs.** `--manifests` exists
+on the finalizer for a run that has been moved — the stamp records an absolute
+path on the machine that produced it — and the preflight had no such argument, so
+the same run could fail one and pass the other with one decision function between
+them. It has the argument now, and a scenario builds the actual shape: the
+manifests moved out of the run and the stamp pointing at a directory that does
+not exist.
+
+The preflight also calls the shared verdict FIRST and reads its own CSVs
+afterwards, with `_read` guarded. Unguarded and run last, a malformed
+`value_review.csv` raised a traceback out of the preflight where the finalizer
+gives `REVIEW_FILE_UNREADABLE` and a filename.
+
+    reverted                                          scenarios that fail
+    the preflight failing on a correct rejection       1
+    --require-all-values not requiring them            1
+    the preflight not passing the manifest directory   1
+    a malformed decision file raising                  1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

@@ -103,10 +103,34 @@ VERIFIED_OUTPUTS = ("figure_values_machine_qc.csv", "review_queue.csv",
                     # ledger could be rewritten to match tampered artifacts.
                     "panel_artifacts.csv")
 
+#: Findings that report a value EXCLUDED from an otherwise successful
+#: finalization, rather than a reason the finalization cannot happen.
+#:
+#: The distinction is the preflight's exit code. A reviewer who correctly REJECTS
+#: one reconstruction has done the review right, and the run finalizes without
+#: that cell - so a preflight that returned "problems found" for it told the
+#: first real pilot that its own designed-in rejection was a failure. These three
+#: are the ways a value can be dropped while its panel still finalizes; every
+#: other code is a refusal.
+#:
+#: Grouping only, never gating: the exit code follows the finalizer's STATUS,
+#: because a panel refused for one reason while another panel finalizes puts a
+#: refusal code in the problem list of a FINALIZED run, and a check that read
+#: this set as "the finalization succeeded" would be wrong about that run.
+NONFATAL_CHECKS = frozenset((
+    "INFERENCE_REJECTED",
+    "VALUE_METHOD_NOT_FINALIZABLE",
+    "VALUE_METHOD_UNSTATED",
+))
+
 FINALIZE_STAGING = ".finalize-staging"
 
 #: Moved last. Its presence is what says a finalization committed.
 FINALIZE_MARKER = "figure_values_accepted.csv"
+
+#: The one status that means values became poolable. Named because two modules
+#: branch on it and a string in both is a string that can drift apart.
+FINALIZED_STATUS = "FINALIZED"
 
 FINALIZE_STATUSES = ("FINALIZED", "NOTHING_APPROVED", "RUN_NOT_FINALIZABLE",
                      "RUN_ARTIFACT_MODIFIED", "COMMIT_FAILED",

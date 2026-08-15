@@ -1158,11 +1158,13 @@ def panel_expectations(frames):
                                     envelope, panel,
                                     positions_by_panel.get(pid, []),
                                     configs_by_id.get(
-                                        _s(panel.get("Config_ID")), [])))}
+                                        _s(panel.get("Config_ID")), []),
+                                    series_by_panel.get(pid, [])))}
     return out
 
 
-def _verifier_context(envelope, panel, position_rows, config_rows):
+def _verifier_context(envelope, panel, position_rows, config_rows,
+                      series_rows=()):
     """What a verifier may re-derive a mark against: the run's own declaration.
 
     A SUPERSET of the hashed envelope, and deliberately not part of it. The
@@ -1194,8 +1196,22 @@ def _verifier_context(envelope, panel, position_rows, config_rows):
                 row.get("Value"))
         except Exception:
             tolerance = None
+    # WHICH MASK EACH SERIES IS. `bar_reader` finds a bar in the mask its series
+    # declares - a named built-in under `Mask_Key`, or one built from
+    # `Colour_Hex` and keyed by the series id - and records which one it was
+    # found in. Without the declaration here, "found in its own mask" could only
+    # be checked against the mark's word for what its own mask is.
+    discriminants = {}
+    for row in series_rows:
+        sid = _s(row.get("Series_ID"))
+        discriminants[sid] = {
+            "Mask_Key": _s(row.get("Mask_Key")),
+            "Colour_Hex": _s(row.get("Colour_Hex")),
+            "Expected_Mask": _s(row.get("Mask_Key")) or sid,
+        }
     return dict(envelope, Position_Anchors=anchors,
                 Slot_Tolerance_Px=tolerance,
+                Series_Discriminants=discriminants,
                 Baseline_Value=_s(panel.get("Baseline_Value")))
 
 

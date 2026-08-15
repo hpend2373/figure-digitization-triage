@@ -5912,6 +5912,36 @@ line marks and the style fixture's capped marks all reproduce their own numbers.
     the marker reader dropping its cap rows            1
     the style reader dropping its cap rows             1
 
+## v7.88 — the other half of the colour evidence
+
+`mask_overlap=0` says no OTHER declared colour covers this bar's ink. It does not
+say the colour THIS series declares does — and `MEASURED_COLOUR` is a claim about
+the second. The reader always knew, because it found the bar in that mask; it
+wrote nothing down, so the identity rested on an execution path rather than on
+evidence.
+
+`bar_reader` now records the pair from the same sample point:
+
+    mask_overlap    how many OTHER declared masks cover this pixel
+    own_mask_hit    whether this series' own mask covers it
+    own_mask_key    WHICH mask that was
+
+and the verifier requires all three: no other claim, its own claim, and the mask
+it was found in being the one this run declares for that series — a named
+built-in under `Mask_Key`, or the mask built from `Colour_Hex` and keyed by the
+series id. The declaration reaches the verifier through the same context the
+anchors and the baseline do.
+
+All 37 marks across the four bar fixtures record `own_mask_hit=1`,
+`mask_overlap=0`, and the mask their series declares.
+
+    reverted                                          scenarios that fail
+    the own-mask hit not required                      2
+    the mask found in need not be the declared one     2
+    the reader dropping its own-mask hit               2
+    the reader dropping which mask                     2
+    the discriminants never reaching the verifier      1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

@@ -1546,6 +1546,24 @@ def _bar_swapped_labels():
     return held, seen, marks
 
 
+# THE OWN-COLOUR HALF, through the finalizer. v7.88: a mark that does not record
+# its own declared mask claiming its ink names no series, and one found in a mask
+# this run declares for nobody is refused - both reachable only because the
+# reader writes the pair down now.
+_held_b, _seen_b = _bar_edited(lambda m: m.update(own_mask_hit=0))
+check("a bar whose own declared colour does not claim its ink names no series",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
+_held_b, _seen_b = _bar_edited(lambda m: m.update(own_mask_key="dark"))
+check("  and one found in a mask this run declares for nobody",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
+check("  while the run's own marks record both halves",
+      all(FIN._s(m.get("own_mask_key")) and FIN._s(m.get("own_mask_hit")) == "1"
+          and FIN._s(m.get("mask_overlap")) == "0"
+          for m in _bar_env["marks"]),
+      "%s" % [(m.get("own_mask_key"), m.get("own_mask_hit"))
+              for m in _bar_env["marks"]][:3])
 _held_b, _seen_b, _ = _bar_swapped_labels()
 check("two bars that exchange their x labels are refused, cells and hashes "
       "recomputed though they are",

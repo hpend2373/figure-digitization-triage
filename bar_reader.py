@@ -98,15 +98,16 @@ def calibrate(ticks):
     return (lambda py: float(k * py + b)), resid
 
 
+def _covers(mask, px, py, radius=1):
+    """Does this mask cover the pixel a bar was sampled at?"""
+    r0, r1 = max(0, int(round(py)) - radius), int(round(py)) + radius + 1
+    c0, c1 = max(0, int(round(px)) - radius), int(round(px)) + radius + 1
+    return bool(mask[r0:r1, c0:c1].any())
+
+
 def _claimed_by_others(others, px, py, radius=1):
     """How many OTHER series masks cover this bar's own ink."""
-    hits = 0
-    for mask in others:
-        r0, r1 = max(0, int(round(py)) - radius), int(round(py)) + radius + 1
-        c0, c1 = max(0, int(round(px)) - radius), int(round(px)) + radius + 1
-        if mask[r0:r1, c0:c1].any():
-            hits += 1
-    return hits
+    return sum(1 for mask in others if _covers(mask, px, py, radius))
 
 
 def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
@@ -280,6 +281,16 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 mask_overlap=_claimed_by_others(
                     others_of.get(sname, ()), xc,
                     top_c + (-4 if down else 4)),
+                # AND WHETHER THIS SERIES' OWN MASK CLAIMS IT, at the same
+                # pixel. `mask_overlap=0` says no OTHER declared colour covers
+                # this ink; it does not say the colour this series declares
+                # does. Without both, `MEASURED_COLOUR` rests on the reader
+                # having found the bar in its own mask - true, and not written
+                # down anywhere a checker could read. One number each, from the
+                # same sample point, so the pair is comparable.
+                own_mask_hit=int(_covers(masks[key], xc,
+                                         top_c + (-4 if down else 4))),
+                own_mask_key=key,
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,
             ))

@@ -643,6 +643,9 @@ def expected_bar_colour_methods(mark, context=None):
     import mark_readers as MR                                      # noqa: E402
     axis = MR.calibration_from_record((context or {}).get("Y_Calibration"))
     overlap, overlap_px = field("mask_overlap"), number("mask_overlap")
+    own, own_px = field("own_mask_hit"), number("own_mask_hit")
+    declared = ((context or {}).get("Series_Discriminants")
+                or {}).get(field("series")) or {}
     if not overlap or overlap_px is None or overlap_px < 0 \
             or overlap_px != int(overlap_px):
         problems.append("the mark gives mask_overlap as %s, which is not a "
@@ -654,6 +657,22 @@ def expected_bar_colour_methods(mark, context=None):
                         "a contested mark is not evidence of either identity, "
                         "and the run drops it rather than choosing"
                         % int(overlap_px))
+    elif not own or own_px is None or own_px < 1:
+        # HALF THE EVIDENCE WAS MISSING UNTIL v7.88. `mask_overlap=0` says no
+        # OTHER declared colour covers this ink; it does not say the colour THIS
+        # series declares does, and `MEASURED_COLOUR` is a claim about the
+        # second. The reader always knew - it found the bar in that mask - and
+        # nothing wrote it down.
+        problems.append("the mark does not record its own declared colour "
+                        "claiming its ink (own_mask_hit=%s), so nothing says it "
+                        "was measured as this series rather than merely not "
+                        "measured as another" % (own or "nothing"))
+    elif declared and field("own_mask_key") != declared.get("Expected_Mask"):
+        problems.append("the mark was found in the mask %s and this run declares "
+                        "%s for series %s"
+                        % (field("own_mask_key") or "nothing",
+                           declared.get("Expected_Mask") or "nothing",
+                           field("series") or "(unnamed)"))
     else:
         out["Identity_Method"] = "MEASURED_COLOUR"
     edge = field("Bar_Top_Definition").upper()

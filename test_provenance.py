@@ -587,8 +587,12 @@ _AXIS = MR.AxisCalibration.from_points([(400.0, 60.0), (100.0, 162.3)])
 _BAR_CONTEXT = {"Y_Calibration": MR._calibration_record(_AXIS),
                 "Panel_Box": [40, 600, 20, 420],
                 "Baseline_Value": "0",
-                "Position_Anchors": {"T0": 200.0, "T1": 300.0, "T2": 400.0}}
-_bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
+                "Position_Anchors": {"T0": 200.0, "T1": 300.0, "T2": 400.0},
+                "Series_Discriminants": {
+                    "SUPINE": {"Mask_Key": "blue", "Colour_Hex": "",
+                               "Expected_Mask": "blue"}}}
+_bar = dict(mask_overlap=0, own_mask_hit=1, own_mask_key="blue",
+            series="SUPINE", Bar_Top_Definition="OUTLINE_CENTER",
             top_px="177.5", fill_top_px="180.0",
             mean=repr(_AXIS.pixel_to_value(177.5)),
             mean_if_read_at_fill_edge=repr(_AXIS.pixel_to_value(180.0)),
@@ -744,6 +748,34 @@ check("a mark that simply omits its evidence answers on no axis at all",
       not P.expected_bar_colour_methods(_starved, _BAR_CONTEXT).expected
       and len(P.expected_bar_colour_methods(_starved, _BAR_CONTEXT).problems) == 4,
       "%s" % (P.expected_bar_colour_methods(_starved, _BAR_CONTEXT),))
+# AND THE OTHER HALF OF THE COLOUR EVIDENCE. v7.88. `mask_overlap=0` says no
+# OTHER declared colour covers this ink; it does not say the colour THIS series
+# declares does, and MEASURED_COLOUR is a claim about the second. The reader
+# always knew - it found the bar in that mask - and wrote nothing down.
+check("a bar that does not record its own colour claiming its ink names no "
+      "series",
+      "Identity_Method" not in _bar_verdict(own_mask_hit="").expected
+      and "Identity_Method" not in _bar_verdict(own_mask_hit=0).expected,
+      "%s" % (_bar_verdict(own_mask_hit=0),))
+check("  and one found in a mask this run declares for nobody",
+      "Identity_Method" not in _bar_verdict(own_mask_key="dark").expected,
+      "%s" % (_bar_verdict(own_mask_key="dark"),))
+check("  while the two halves together are the claim",
+      _bar_verdict().expected["Identity_Method"] == "MEASURED_COLOUR")
+# AND THE OTHER HALF OF THE COLOUR EVIDENCE. v7.88. `mask_overlap=0` says no
+# OTHER declared colour covers this ink; it does not say the colour THIS series
+# declares does, and MEASURED_COLOUR is a claim about the second. The reader
+# always knew - it found the bar in that mask - and wrote nothing down.
+check("a bar that does not record its own colour claiming its ink names no "
+      "series",
+      "Identity_Method" not in _bar_verdict(own_mask_hit="").expected
+      and "Identity_Method" not in _bar_verdict(own_mask_hit=0).expected,
+      "%s" % (_bar_verdict(own_mask_hit=0),))
+check("  and one found in a mask this run declares for nobody",
+      "Identity_Method" not in _bar_verdict(own_mask_key="dark").expected,
+      "%s" % (_bar_verdict(own_mask_key="dark"),))
+check("  while the two halves together are the claim",
+      _bar_verdict().expected["Identity_Method"] == "MEASURED_COLOUR")
 check("  and a count that is not a count says nothing about the ink",
       all("Identity_Method" not in _bar_verdict(mask_overlap=bad).expected
           for bad in ("garbage", "-1", "nan", "inf", "0.5", "")),

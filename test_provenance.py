@@ -533,7 +533,13 @@ print("the second reader whose methods are re-derived from its own evidence")
 # run declared, so the fixture's means and dispersion are derived here the same
 # way the reader derives them rather than typed.
 _AXIS = MR.AxisCalibration.from_points([(400.0, 60.0), (100.0, 162.3)])
-_BAR_CONTEXT = {"Y_Calibration": MR._calibration_record(_AXIS)}
+# The declaration a bar mark is re-derived against: the axis, the anchors its x
+# label is assigned from, the baseline it is measured from, and the box it has
+# to be inside.
+_BAR_CONTEXT = {"Y_Calibration": MR._calibration_record(_AXIS),
+                "Panel_Box": [40, 600, 20, 420],
+                "Baseline_Value": "0",
+                "Position_Anchors": {"T0": 200.0, "T1": 300.0, "T2": 400.0}}
 _bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
             top_px="177.5", fill_top_px="180.0",
             mean=repr(_AXIS.pixel_to_value(177.5)),
@@ -541,7 +547,8 @@ _bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
             cap_px="165.0",
             dispersion=repr(abs(_AXIS.pixel_to_value(165.0)
                                 - _AXIS.pixel_to_value(177.5))),
-            Errorbar_Stem_Confirmed="TRUE",
+            Errorbar_Stem_Confirmed="TRUE", Bar_Direction="UP",
+            x="203.0", slot_residual_px="3.0",
             x_label="T0", Position_Assignment="DECLARED_ANCHOR")
 
 
@@ -608,6 +615,75 @@ check("  and so is one that sits at a declared label and says nothing",
       "%s" % (_bar_verdict(Position_Assignment=""),))
 check("  while a panel with no position dimension is not asked for one",
       not _bar_verdict(x_label="", Position_Assignment="").problems)
+# AND THE LABEL HAS TO BE THE ANCHOR THE MARK IS NEAREST TO. v7.86.
+# `DECLARED_ANCHOR` says the reader used declared anchors; it does not say THIS
+# mark is at the one it names. Two bars could exchange their labels, have their
+# cells and hashes recomputed to match, and pass everything - the heading
+# exchange v7.74 closed, reopened at the pixel-to-position boundary.
+check("a bar filed under an anchor it is not nearest to is refused",
+      "nearest the declared anchor" in " ".join(
+          _bar_verdict(x_label="T1", slot_residual_px="97.0").problems),
+      "%s" % (_bar_verdict(x_label="T1", slot_residual_px="97.0"),))
+check("  and one whose recorded distance is not the distance it is at",
+      "from its anchor" in " ".join(
+          _bar_verdict(slot_residual_px="0.0").problems),
+      "%s" % (_bar_verdict(slot_residual_px="0.0"),))
+check("  and one that records no distance at all",
+      _bar_verdict(slot_residual_px="").problems)
+# THE TOLERANCE IS THE PANEL'S, and the reader's default is half the smallest
+# gap between declared anchors - so a bar three pixels off its anchor is fine
+# here and refused where the config says two.
+check("  and one further from its anchor than the panel accepts",
+      "accepts" in " ".join(P.expected_bar_colour_methods(
+          _bar, dict(_BAR_CONTEXT, Slot_Tolerance_Px=2.0)).problems),
+      "%s" % (P.expected_bar_colour_methods(
+          _bar, dict(_BAR_CONTEXT, Slot_Tolerance_Px=2.0)),))
+# The default is half the smallest gap between declared anchors, so a bar can
+# never be BOTH nearest to its own anchor and beyond it - which is the point:
+# the tolerance only bites when a config narrows it, or when a panel declares
+# one anchor and a mark is somewhere else entirely.
+check("  while the default is half the gap between the anchors themselves",
+      not _bar_verdict().problems
+      and "accepts" in " ".join(P.expected_bar_colour_methods(
+          dict(_bar, x="900.0", slot_residual_px="700.0"),
+          dict(_BAR_CONTEXT, Position_Anchors={"T0": 200.0})).problems),
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, x="900.0", slot_residual_px="700.0"),
+          dict(_BAR_CONTEXT, Position_Anchors={"T0": 200.0})),))
+check("  and a bar equidistant from two anchors belongs to neither",
+      "not decidable" in " ".join(P.expected_bar_colour_methods(
+          dict(_bar, x="250.0", slot_residual_px="50.0"),
+          dict(_BAR_CONTEXT, Slot_Tolerance_Px=60.0)).problems),
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, x="250.0", slot_residual_px="50.0"),
+          dict(_BAR_CONTEXT, Slot_Tolerance_Px=60.0)),))
+check("  and a label the run declares no anchors for supports nothing",
+      P.expected_bar_colour_methods(
+          _bar, {k: v for k, v in _BAR_CONTEXT.items()
+                 if k != "Position_Anchors"}).problems)
+# THE BASELINE DECIDES WHICH END IS THE DATA END, and which side of it a cap can
+# be on. Re-computing calibrate(top_px) says the number matches the row; it does
+# not say the row was the right end.
+check("a cap between the bar top and the baseline is not an error bar's cap",
+      "measured outward" in " ".join(_bar_verdict(
+          cap_px="185.0",
+          dispersion=repr(abs(_AXIS.pixel_to_value(185.0)
+                              - _AXIS.pixel_to_value(177.5)))).problems),
+      "%s" % (_bar_verdict(cap_px="185.0"),))
+check("  and a bar that says it grows the other way is refused",
+      "grows" in " ".join(_bar_verdict(Bar_Direction="DOWN").problems),
+      "%s" % (_bar_verdict(Bar_Direction="DOWN"),))
+check("  and a row measured outside the panel box the run declares",
+      "outside the panel box" in " ".join(_bar_verdict(
+          top_px="12.0",
+          mean=repr(_AXIS.pixel_to_value(12.0))).problems),
+      "%s" % (_bar_verdict(top_px="12.0",
+                           mean=repr(_AXIS.pixel_to_value(12.0))),))
+check("  while a blank Baseline_Value is the zero the reader defaults to",
+      not P.expected_bar_colour_methods(
+          _bar, dict(_BAR_CONTEXT, Baseline_Value="")).problems,
+      "%s" % (P.expected_bar_colour_methods(
+          _bar, dict(_BAR_CONTEXT, Baseline_Value="")),))
 # EVERY FIELD IT DECIDES FROM IS REQUIRED. A verifier that only refutes can be
 # starved: v7.83 gave all three methods at R0 to a mark with a non-numeric
 # overlap, no fill-edge reading and no cap.

@@ -5822,6 +5822,62 @@ distance the dispersion claims, and a stem the mark itself denies.
     a stem needing no top row to measure from          1
     the log axis converted as a linear one             1
 
+## v7.86 — a bar has to BE at the position it says it is, and measured from the baseline
+
+Two things the BAR_COLOR verifier still took on trust, both at the boundary
+between a pixel and a declaration.
+
+**`DECLARED_ANCHOR` was half an answer.** It says the reader used declared
+anchors; it does not say THIS mark is at the one it names. So two bars in a
+panel could exchange their `x_label`s, have their cells and every hash
+recomputed to match, and pass: the numbers still matched their marks, the cells
+still matched the labels, and nothing compared a mark's own x column to the
+anchors. The heading exchange v7.74 closed, reopened one layer down.
+
+`bar_reader` assigns the nearest declared column within a tolerance and records
+the distance it accepted, so all of it re-derives from the verified position
+rows:
+
+    the label IS the nearest anchor        and no other is equally near
+    slot_residual_px IS that distance      recorded, and required
+    the distance is inside the tolerance   the config's, or the reader's own
+                                           default - half the smallest gap
+                                           between anchors, the panel's width
+                                           when there is only one
+
+**And the baseline decides which end of the bar was measured.** Re-computing
+`calibrate(top_px)` says the number matches the row; it does not say the row was
+the right end. Move the cap to between the top and the baseline, update the
+dispersion to the new distance, re-stamp everything, and the arithmetic is
+perfect while the cap is not an error bar's. So:
+
+    Bar_Direction agrees with which side of the baseline the top row is on
+    the cap is FURTHER from the baseline than the top - an error bar is
+        measured outward from the data end
+    top, fill and cap are inside the panel box this run declares
+
+The declaration reaches the verifier through a context that is a SUPERSET of the
+hashed envelope - anchors, tolerance, baseline - and deliberately not part of
+it: adding them to the artifact would only give a producer one more field to
+write correctly. The tolerance is read through `READER_OPTIONS`' own parser, not
+a second `float()`.
+
+The end-to-end regression is the one the review named: two of the bar fixture's
+marks exchange their `x_label`s, the artifact is re-stamped, and the values are
+rebound with the cell keys the manifests give the labels they now claim. Refused.
+
+    reverted                                          scenarios that fail
+    the label need not be the nearest anchor           1
+    a tie between two anchors decided by order         1
+    the recorded residual not being the distance       1
+    a mark beyond the tolerance accepted               2
+    the anchors not asked for at all                   7
+    the cap allowed between the top and the baseline   1
+    the bar allowed to grow either way                 1
+    a row outside the panel box measured anyway        1
+    the baseline not asked about                       3
+    the finalizer handing over the envelope only       1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

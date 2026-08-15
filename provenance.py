@@ -685,7 +685,124 @@ def expected_bar_colour_methods(mark, context=None):
     elif placed and placed != "DECLARED_ANCHOR":
         problems.append("this bar's x label came from %s rather than from a "
                         "declared anchor" % placed)
+    elif label:
+        problems.extend(_anchor_problems(mark, number("x"),
+                                         number("slot_residual_px"), label,
+                                         context))
+    if axis is not None:
+        problems.extend(_baseline_problems(field, number, axis, context))
     return EvidenceVerdict(out, problems)
+
+
+def _anchor_problems(mark, x_px, residual, label, context):
+    """Is this bar AT the position it says it is?
+
+    `DECLARED_ANCHOR` was taken as the whole answer, and it is only half of one:
+    it says the reader used declared anchors, not that THIS mark is nearest to
+    the one it names. Two bars in a panel could exchange their `x_label`s, have
+    their cells and hashes recomputed to match, and pass everything - the
+    heading exchange v7.74 closed, reopened at the pixel-to-position boundary.
+
+    `bar_reader` assigns the NEAREST declared column within a tolerance, and
+    records the distance it accepted, so all of it is re-derivable from the
+    verified position rows.
+    """
+    anchors = (context or {}).get("Position_Anchors") or {}
+    if not anchors:
+        return ["this bar carries the label %s and this run declares no anchor "
+                "pixels for the panel, so nothing says the mark is at it"
+                % label]
+    if x_px is None:
+        return ["the mark records no x column, so the position it was assigned "
+                "to cannot be re-derived"]
+    distances = sorted((abs(x_px - px), pid) for pid, px in anchors.items())
+    nearest, closest = distances[0][1], distances[0][0]
+    problems = []
+    if len(distances) > 1 and abs(distances[1][0] - closest) <= PIXEL_EPSILON:
+        problems.append("the mark at column %s is the same distance from %s and "
+                        "%s, so which position it belongs to is not decidable"
+                        % (x_px, nearest, distances[1][1]))
+    elif label != nearest:
+        problems.append("the mark sits at column %s, which is nearest the "
+                        "declared anchor for %s (%s away), and it is filed under "
+                        "%s" % (x_px, nearest, closest, label))
+    if residual is None:
+        problems.append("the mark records no slot_residual_px, so how far it "
+                        "was from the anchor it was assigned to is not stated")
+    elif abs(residual - abs(x_px - anchors.get(label, x_px))) > PIXEL_EPSILON:
+        problems.append("the mark says it landed %s from its anchor and it is "
+                        "%s from the one it names"
+                        % (residual, abs(x_px - anchors.get(label, x_px))))
+    # THE READER'S OWN DEFAULT, reproduced rather than approximated: half the
+    # smallest gap between declared anchors, and the panel's width when there is
+    # only one anchor to be near. A tolerance guessed differently here would
+    # refuse marks the run accepted, or accept marks it refused.
+    tolerance = (context or {}).get("Slot_Tolerance_Px")
+    if tolerance is None:
+        spans = sorted(anchors.values())
+        gaps = [b - a for a, b in zip(spans, spans[1:])]
+        box = (context or {}).get("Panel_Box") or []
+        width = (abs(finite_number(box[1]) - finite_number(box[0]))
+                 if len(box) == 4 and finite_number(box[0]) is not None
+                 and finite_number(box[1]) is not None else None)
+        tolerance = 0.5 * min(gaps) if gaps else width
+    if tolerance is not None and closest > float(tolerance) + PIXEL_EPSILON:
+        problems.append("the mark at column %s is %s from the nearest declared "
+                        "anchor, and this panel accepts %s"
+                        % (x_px, closest, tolerance))
+    return problems
+
+
+def _baseline_problems(field, number, axis, context):
+    """Which end of the bar was measured, and which side of it the cap is on.
+
+    A bar is measured from its BASELINE: the data end is the end further from
+    it, and the cap is further still. Re-computing `calibrate(top_px)` says the
+    number matches the row; it does not say the row was the right end. Move the
+    cap to between the top and the baseline, update the dispersion to the new
+    distance, and the arithmetic is perfect while the cap is not an error bar's.
+    """
+    declared = (context or {}).get("Baseline_Value")
+    top, cap = number("top_px"), number("cap_px")
+    if top is None:
+        return []                 # already refused where the value is derived
+    text = "" if declared is None else str(declared).strip()
+    # BLANK IS THE READER'S DEFAULT, which is zero: `run_panel` passes
+    # `baseline_value=0.0` when the panel declares none, so a blank here is a
+    # declaration of zero rather than an absence.
+    baseline = finite_number(text) if text else 0.0
+    if baseline is None:
+        return ["this run declares Baseline_Value=%s, which is not a number a "
+                "bar can be measured from" % declared]
+    try:
+        baseline_px = axis.value_to_pixel(baseline)
+    except (ValueError, ZeroDivisionError):
+        return ["this run's y calibration cannot place the declared baseline "
+                "%s on the panel" % declared]
+    problems = []
+    box = (context or {}).get("Panel_Box") or []
+    rows = [("top_px", top), ("fill_top_px", number("fill_top_px")),
+            ("cap_px", cap)]
+    if len(box) == 4:
+        low, high = sorted((finite_number(box[2]), finite_number(box[3])))
+        outside = ["%s=%s" % (name, value) for name, value in rows
+                   if value is not None and not low <= value <= high]
+        if outside:
+            problems.append("the mark was measured at %s, outside the panel box "
+                            "this run declares (%s to %s)"
+                            % (", ".join(outside), low, high))
+    said = field("Bar_Direction").upper()
+    grows = "UP" if top < baseline_px else "DOWN"
+    if said and said != grows:
+        problems.append("the mark says the bar grows %s and its top row (%s) is "
+                        "on the %s side of the declared baseline (%s)"
+                        % (said, top, grows, baseline_px))
+    if cap is not None and abs(cap - baseline_px) <= abs(top - baseline_px):
+        problems.append("the cap at row %s is no further from the declared "
+                        "baseline (%s) than the bar top at %s, and an error bar "
+                        "is measured outward from the data end"
+                        % (cap, baseline_px, top))
+    return problems
 
 
 #: Mark type -> the function that re-derives its methods from its own evidence.

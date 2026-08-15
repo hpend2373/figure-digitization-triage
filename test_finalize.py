@@ -1494,6 +1494,63 @@ check("  and so is one whose cap is not the distance its dispersion claims",
 # each other and finds nothing. A stem this reader did not confirm beside a cap
 # it measured anyway is the shape `bar_reader` cannot produce, and the artifact
 # says both.
+# TWO BARS EXCHANGING THEIR LABELS. v7.86. `DECLARED_ANCHOR` said the reader
+# used declared anchors, not that THIS mark is at the one it names - so a
+# producer could swap two marks' x_labels, recompute their cells and every hash,
+# and pass: the numbers still match their marks, the cells still match the
+# labels, and nothing compared a mark's own x column to the anchors.
+def _bar_swapped_labels():
+    shutil.rmtree(_bar_edit, ignore_errors=True)
+    os.makedirs(_bar_edit)
+    shutil.copy(os.path.join(_BAR_DIR, "run_manifest.csv"), _bar_edit)
+    body = json.loads(json.dumps(_bar_env))
+    first = body["marks"][0]
+    partner = next(m for m in body["marks"][1:]
+                   if m["series"] == first["series"]
+                   and m["x_label"] != first["x_label"])
+    was = {m["Mark_Record_SHA256"]: m["x_label"] for m in (first, partner)}
+    first["x_label"], partner["x_label"] = partner["x_label"], first["x_label"]
+    header = {k: v for k, v in body.items() if k != "marks"}
+    body["marks"] = RB.stamp_marks(
+        [{k: v for k, v in m.items()
+          if k not in ("Mark_Record_SHA256", "Method_Attestation_SHA256")}
+         for m in body["marks"]], header)
+    path = os.path.join(_bar_edit, "P1_marks.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, indent=1, sort_keys=True)
+    # And the values follow them: new hashes, and the cell key the manifests
+    # give the label each mark now claims.
+    levels = {FIN._s(r.get("Position_ID")): FIN._s(r.get("Factor_Level"))
+              for _, r in _verified(_BAR_DIR)["positions"].iterrows()}
+    rows, marks = [], {m["Mark_Record_SHA256"]: m for m in body["marks"]}
+    for old_hash, old_label in was.items():
+        value = next(r for r in _bar_rows
+                     if FIN._s(r.get("Mark_Record_SHA256")) == old_hash)
+        mark = next(m for m in body["marks"]
+                    if abs(float(m["x"]) - float(
+                        next(mm for mm in _bar_env["marks"]
+                             if mm["Mark_Record_SHA256"] == old_hash)["x"]))
+                    < 1e-9)
+        rows.append(dict(
+            value, Mark_Record_SHA256=mark["Mark_Record_SHA256"],
+            Method_Attestation_SHA256=mark["Method_Attestation_SHA256"],
+            Cell_Key=GE.fig_cell_key({"ARM": mark["series"],
+                                      "TIMEPOINT": levels[mark["x_label"]]})))
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame(rows), _bar_queue,
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
+                           Artifact_Path=path)]),
+        _bar_edit, lambda w, c, d: seen.append(c),
+        frames=_verified(_bar_edit, os.path.join(_BAR_DIR, "manifests")))
+    return held, seen, marks
+
+
+_held_b, _seen_b, _ = _bar_swapped_labels()
+check("two bars that exchange their x labels are refused, cells and hashes "
+      "recomputed though they are",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
 _held_b, _seen_b = _bar_edited(
     lambda m: m.update(Errorbar_Stem_Confirmed="FALSE"))
 check("a mark and a value agreeing on a spread the mark's own stem denies is "

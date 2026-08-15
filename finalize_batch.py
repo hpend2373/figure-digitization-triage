@@ -1152,8 +1152,51 @@ def panel_expectations(frames):
                 # it. Left as None, which is refused rather than compared.
                 envelope = None
         out[pid] = {"cell_map": maps.get(pid, EMPTY_CELL_MAP),
-                    "envelope": envelope}
+                    "envelope": envelope,
+                    "context": (None if envelope is None else
+                                _verifier_context(
+                                    envelope, panel,
+                                    positions_by_panel.get(pid, []),
+                                    configs_by_id.get(
+                                        _s(panel.get("Config_ID")), [])))}
     return out
+
+
+def _verifier_context(envelope, panel, position_rows, config_rows):
+    """What a verifier may re-derive a mark against: the run's own declaration.
+
+    A SUPERSET of the hashed envelope, and deliberately not part of it. The
+    envelope is what the artifact must carry and agree with; this is what THIS
+    MODULE knows from the manifests and hands to the re-derivation, and adding
+    the anchors to the artifact instead would only give a producer one more
+    field to write correctly.
+
+    The anchors are what `bar_reader` assigns x labels from - nearest declared
+    column within a tolerance - so with them a verifier can ask whether a mark
+    is at the position it says it is, rather than taking the label's word for
+    it. `Baseline_Value` is where a bar is measured FROM, which decides both
+    which end of the body is the data end and which side of it a cap can be on.
+    """
+    anchors = {}
+    for row in position_rows:
+        pixel = PROV.finite_number(row.get("X_Pixel"))
+        if pixel is not None:
+            anchors[_s(row.get("Position_ID"))] = pixel
+    tolerance = None
+    for row in config_rows:
+        if _s(row.get("Option")) != "slot_tolerance_px":
+            continue
+        try:
+            # THE DECLARED PARSER, not `float()`: the run reads this option
+            # through `READER_OPTIONS` and a second reading of the same text is
+            # a second chance to disagree about it.
+            tolerance = BM.READER_OPTIONS["slot_tolerance_px"][0](
+                row.get("Value"))
+        except Exception:
+            tolerance = None
+    return dict(envelope, Position_Anchors=anchors,
+                Slot_Tolerance_Px=tolerance,
+                Baseline_Value=_s(panel.get("Baseline_Value")))
 
 
 def _canonical(value):
@@ -1471,7 +1514,7 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
             continue
         code, why = PROV.evidence_failure(
             mark_of.get(pid), mark, row,
-            context=expected.get(pid, {}).get("envelope"))
+            context=expected.get(pid, {}).get("context"))
         if code:
             flag(where, code, why)
             withheld.add(pid)

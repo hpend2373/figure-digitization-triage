@@ -790,9 +790,10 @@ check("nan and inf are not measurements, in either verifier",
           dict(_geo, Value_Span_Px="nan")).problems
       and _bar_verdict(top_px="nan").problems,
       "%s" % (P_expected_line_style_methods_ctx(dict(_geo, Value_Span_Px="nan")),))
-check("two of the seven readers now re-derive their methods, and the table says "
-      "which",
-      set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR"},
+check("three of the seven readers now re-derive their methods, and the table "
+      "says which",
+      set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR",
+                                    "LINE_COLOR"},
       "%s" % sorted(P.EVIDENCE_VERIFIERS))
 # AND THE JOIN ASKS IT THE SAME WAY IT ASKS THE OTHER ONE. The call site is table
 # driven - `EVIDENCE_VERIFIERS[mark_type]` - so what has to be checked here is
@@ -857,6 +858,70 @@ check("a log axis is re-computed as a log axis",
           _log_bar, _BAR_CONTEXT).expected,
       "%s" % (P.expected_bar_colour_methods(
           _log_bar, {"Y_Calibration": MR._calibration_record(_LOG)}),))
+
+print()
+print("the third: a coloured marker, whose every part existed already")
+# v7.89. `LINE_COLOR` needed no new question - the colour pair is `BAR_COLOR`'s,
+# the value is the marker centre through the panel's axis, and the spread is the
+# two cap rows the reader now keeps. What is different is WHERE: a bar is found
+# anywhere and assigned to the nearest anchor; a marker is looked for AT the
+# declared column, so its own x must BE that column.
+_MARKER_AXIS = MR.AxisCalibration.from_points([(440.0, 0.0), (40.0, 220.0)])
+_MARKER_CONTEXT = {"Y_Calibration": MR._calibration_record(_MARKER_AXIS),
+                   "Position_Anchors": {"T0": 149.0, "T1": 249.0},
+                   "Series_Discriminants": {
+                       "S_B": {"Mask_Key": "", "Colour_Hex": "#2d50dc",
+                               "Expected_Mask": "S_B"}}}
+_marker = dict(series="S_B", x_label="T0", x="149.0", mask_overlap=0,
+               own_mask_hit=108.0, own_mask_key="S_B",
+               Marker_Definition="MARKER_CENTER",
+               marker_center_px="380.0",
+               mean=repr(_MARKER_AXIS.pixel_to_value(380.0)),
+               Errorbar_Top_Px="360.0", Errorbar_Bottom_Px="400.0",
+               dispersion=repr(abs(_MARKER_AXIS.pixel_to_value(360.0)
+                                   - _MARKER_AXIS.pixel_to_value(400.0)) / 2.0),
+               Errorbar_Stem_Confirmed="TRUE")
+
+
+def _marker_verdict(**over):
+    return P.expected_line_colour_methods(dict(_marker, **over),
+                                          _MARKER_CONTEXT)
+
+
+check("a marker in its own colour at its declared column answers all three",
+      _marker_verdict().expected
+      == {"Identity_Method": "MEASURED_COLOUR",
+          "Value_Method": "MARKER_CENTER",
+          "Dispersion_Method": "DIRECT_CONNECTED_CAP"}
+      and not _marker_verdict().problems, "%s" % (_marker_verdict(),))
+check("  and the colour evidence is the same pair a bar answers with",
+      not _marker_verdict(mask_overlap=1).expected.get("Identity_Method")
+      and not _marker_verdict(own_mask_hit=0).expected.get("Identity_Method")
+      and not _marker_verdict(own_mask_key="S_R").expected.get(
+          "Identity_Method"),
+      "%s" % (_marker_verdict(own_mask_hit=0),))
+check("a marker read anywhere but its declared column is not this cell's",
+      "the same number" in " ".join(_marker_verdict(x="152.0").problems),
+      "%s" % (_marker_verdict(x="152.0"),))
+check("  and one whose label the run declares no anchor for",
+      _marker_verdict(x_label="T9").problems)
+check("a stem says DIRECT_CONNECTED_CAP and its absence says UNSTEMMED_CAP",
+      _marker_verdict(Errorbar_Stem_Confirmed="FALSE").expected
+      ["Dispersion_Method"] == "UNSTEMMED_CAP"
+      and _marker_verdict().expected["Dispersion_Method"]
+      == "DIRECT_CONNECTED_CAP")
+check("  and this reader has no NO_DISPERSION to give",
+      P.dispersion_contract_failure("LINE_COLOR", "NO_DISPERSION")
+      and _marker_verdict(dispersion=None, Errorbar_Top_Px="",
+                          Errorbar_Bottom_Px="").problems,
+      "%s" % (_marker_verdict(dispersion=None),))
+check("the marker's own numbers are re-computed like every other reader's",
+      _marker_verdict(mean="999").problems
+      and _marker_verdict(dispersion="99").problems,
+      "%s" % (_marker_verdict(mean="999"),))
+check("  and a marker whose definition is not the centre is refused",
+      "Value_Method" not in _marker_verdict(
+          Marker_Definition="MARKER_TOP").expected)
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

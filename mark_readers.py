@@ -171,7 +171,13 @@ def _marker_and_errorbar(mask, x, y0, y1, half_window=12):
         else float(whisker[0])
     bottom = (off + float(np.mean(min(below, key=lambda g: g[0])))) if below \
         else float(whisker[-1])
-    return cy, top, bottom, bool(above and below)
+    # AND HOW MUCH OF THIS SERIES' OWN INK THE MARKER WAS FOUND IN. Already
+    # computed - it is the key this function picks the marker group by - and
+    # thrown away until v7.89, which left `MEASURED_COLOUR` resting on the fact
+    # that a mask was searched rather than on anything a checker could read.
+    # A COUNT over the marker, not a probe at its centre: an OPEN marker is a
+    # ring, and its centre pixel is the paper.
+    return cy, top, bottom, bool(above and below), float(counts[marker].sum())
 
 
 def _errorbar_around_marker(mask, x, cy, y0, y1, half_window=8,
@@ -246,7 +252,7 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
             found = _marker_and_errorbar(mask, x, y0, y1, half_window=x_window)
             if found is None:
                 continue
-            cy, top, bottom, stem = found
+            cy, top, bottom, stem, own_ink = found
             upper = max(y_calibration.pixel_to_value(top), y_calibration.pixel_to_value(bottom))
             lower = min(y_calibration.pixel_to_value(top), y_calibration.pixel_to_value(bottom))
             mean = y_calibration.pixel_to_value(cy)
@@ -288,6 +294,13 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
                 # every other reader field follows: naming a series the ink does
                 # not separate is not this function's decision to make quietly.
                 mask_overlap=int(_pixel_claimed_by(others, x, cy)),
+                # AND WHETHER ITS OWN DECLARED COLOUR CLAIMS IT, at the same
+                # pixel. The count above says no OTHER colour covers this mark;
+                # it does not say this series' own does, and `MEASURED_COLOUR`
+                # is a claim about the second. Same pair, same sample point, as
+                # `bar_reader` records.
+                own_mask_hit=own_ink,
+                own_mask_key=spec.name,
                 Errorbar_Stem_Confirmed="TRUE" if stem else "FALSE",
             ))
     out.sort(key=lambda row: (row["series"], row["order"]))

@@ -259,7 +259,11 @@ METHOD_CONTRACT = {
 #: geometry, and `BOX_VIOLIN` claiming it followed a stem to a cap is as
 #: impossible as `LINE_COLOR` claiming a human resolution.
 DISPERSION_CONTRACT = {
-    "LINE_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
+    # NOT `NO_DISPERSION`: `read_line_marker_panel` takes the connected column
+    # through the marker as the extent, so every mark it emits has one. The same
+    # reachability question `UNSTEMMED_CAP` failed for BAR_COLOR in v7.84, asked
+    # of this reader while writing its verifier.
+    "LINE_COLOR": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP"},
     "LINE_MONO": {"DIRECT_CONNECTED_CAP", "UNSTEMMED_CAP", "NO_DISPERSION"},
     # NOT `RESTORED_MASKED_CAP`: it is reserved, and listing it here said this
     # reader could produce it, which is what a contract is for saying.
@@ -642,37 +646,14 @@ def expected_bar_colour_methods(mark, context=None):
     # wrong on a log axis eventually.
     import mark_readers as MR                                      # noqa: E402
     axis = MR.calibration_from_record((context or {}).get("Y_Calibration"))
-    overlap, overlap_px = field("mask_overlap"), number("mask_overlap")
-    own, own_px = field("own_mask_hit"), number("own_mask_hit")
-    declared = ((context or {}).get("Series_Discriminants")
-                or {}).get(field("series")) or {}
-    if not overlap or overlap_px is None or overlap_px < 0 \
-            or overlap_px != int(overlap_px):
-        problems.append("the mark gives mask_overlap as %s, which is not a "
-                        "count of the other declared colours claiming its ink, "
-                        "so its identity cannot be re-derived"
-                        % (overlap or "nothing"))
-    elif overlap_px > 0:
-        problems.append("%d other declared colour(s) claim this bar's own ink; "
-                        "a contested mark is not evidence of either identity, "
-                        "and the run drops it rather than choosing"
-                        % int(overlap_px))
-    elif not own or own_px is None or own_px < 1:
-        # HALF THE EVIDENCE WAS MISSING UNTIL v7.88. `mask_overlap=0` says no
-        # OTHER declared colour covers this ink; it does not say the colour THIS
-        # series declares does, and `MEASURED_COLOUR` is a claim about the
-        # second. The reader always knew - it found the bar in that mask - and
-        # nothing wrote it down.
-        problems.append("the mark does not record its own declared colour "
-                        "claiming its ink (own_mask_hit=%s), so nothing says it "
-                        "was measured as this series rather than merely not "
-                        "measured as another" % (own or "nothing"))
-    elif declared and field("own_mask_key") != declared.get("Expected_Mask"):
-        problems.append("the mark was found in the mask %s and this run declares "
-                        "%s for series %s"
-                        % (field("own_mask_key") or "nothing",
-                           declared.get("Expected_Mask") or "nothing",
-                           field("series") or "(unnamed)"))
+    # THE COLOUR PAIR, shared with `LINE_COLOR`: no other declared mask over the
+    # ink, this series' own mask over it, and that mask being the one the run
+    # declares. Half of it was missing until v7.88 - `mask_overlap=0` says no
+    # OTHER colour covers the ink, and `MEASURED_COLOUR` is a claim about this
+    # one.
+    identity = _colour_identity_problems(field, number, context)
+    if identity:
+        problems.extend(identity)
     else:
         out["Identity_Method"] = "MEASURED_COLOUR"
     edge = field("Bar_Top_Definition").upper()
@@ -880,6 +861,112 @@ def _baseline_problems(field, number, axis, context):
     return problems
 
 
+def _colour_identity_problems(field, number, context):
+    """Was this mark measured as the series it says, and only as that series?
+
+    Two halves and a name, shared by every reader that names a series by
+    colour: no OTHER declared mask over the ink, this series' OWN mask over it,
+    and the mask it was found in being the one this run declares. The units
+    differ - a bar samples one pixel inside its body, a marker counts its own
+    ink across the marker - and the question does not.
+    """
+    overlap, overlap_px = field("mask_overlap"), number("mask_overlap")
+    own, own_px = field("own_mask_hit"), number("own_mask_hit")
+    declared = ((context or {}).get("Series_Discriminants")
+                or {}).get(field("series")) or {}
+    if not overlap or overlap_px is None or overlap_px < 0 \
+            or overlap_px != int(overlap_px):
+        return ["the mark gives mask_overlap as %s, which is not a count of the "
+                "other declared colours claiming its ink, so its identity "
+                "cannot be re-derived" % (overlap or "nothing")]
+    if overlap_px > 0:
+        return ["%d other declared colour(s) claim this mark's own ink; a "
+                "contested mark is not evidence of either identity, and the run "
+                "drops it rather than choosing" % int(overlap_px)]
+    if not own or own_px is None or own_px < 1:
+        return ["the mark does not record its own declared colour claiming its "
+                "ink (own_mask_hit=%s), so nothing says it was measured as this "
+                "series rather than merely not measured as another"
+                % (own or "nothing")]
+    if declared and field("own_mask_key") != declared.get("Expected_Mask"):
+        return ["the mark was found in the mask %s and this run declares %s for "
+                "series %s" % (field("own_mask_key") or "nothing",
+                               declared.get("Expected_Mask") or "nothing",
+                               field("series") or "(unnamed)")]
+    return []
+
+
+def expected_line_colour_methods(mark, context=None):
+    """The three methods a LINE_COLOR mark's own evidence implies.
+
+    The third verifier, and the one that needed no new question: every part of
+    it exists already. The identity is the colour pair `BAR_COLOR` answers with,
+    the value is the marker centre through the panel's axis, and the spread is
+    the two cap rows - `_marker_and_errorbar` follows a stem from the mark to the
+    cap and says whether it found one on both sides.
+
+    `NO_DISPERSION` is not among the answers: this reader takes the connected
+    column through the marker as the extent, so every mark it emits has one -
+    see `DISPERSION_CONTRACT`.
+
+    WHERE THE MARK SITS is checked differently from a bar's. A bar is found
+    anywhere and assigned to the nearest declared anchor; a marker is looked for
+    AT the declared column, so its own x must BE that column rather than merely
+    be nearest to it.
+    """
+    def field(name):
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    def number(name):
+        return finite_number(field(name))
+
+    out, problems = {}, []
+    identity = _colour_identity_problems(field, number, context)
+    if identity:
+        problems.extend(identity)
+    else:
+        out["Identity_Method"] = "MEASURED_COLOUR"
+    definition = field("Marker_Definition").upper()
+    if definition != "MARKER_CENTER":
+        problems.append("the mark gives its Marker_Definition as %s, and this "
+                        "reader measures the marker centre"
+                        % (definition or "nothing"))
+    else:
+        out["Value_Method"] = "MARKER_CENTER"
+    stem = field("Errorbar_Stem_Confirmed").upper()
+    if stem not in ("TRUE", "FALSE"):
+        problems.append("the mark does not say whether a stem connected its cap "
+                        "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
+                        "cannot be re-derived" % (stem or "blank"))
+    elif number("dispersion") is None:
+        problems.append("the mark reports no dispersion, and this reader takes "
+                        "the connected column through the marker as one for "
+                        "every mark it emits")
+    else:
+        out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
+                                    else "UNSTEMMED_CAP")
+    anchors = (context or {}).get("Position_Anchors") or {}
+    label, x_px = field("x_label"), number("x")
+    if label and anchors:
+        declared_x = anchors.get(label)
+        if declared_x is None:
+            problems.append("the mark carries the label %s and this run declares "
+                            "no anchor pixel for it" % label)
+        elif x_px is None or abs(x_px - declared_x) > PIXEL_EPSILON:
+            problems.append("the mark was read at column %s and this run "
+                            "declares %s sits at %s - this reader looks AT the "
+                            "declared column, so the two are the same number or "
+                            "the mark is not this cell's"
+                            % (field("x") or "nothing", label, declared_x))
+    elif label:
+        problems.append("the mark carries the label %s and this run declares no "
+                        "anchor pixels for the panel, so nothing says the mark "
+                        "is at it" % label)
+    problems.extend(_curve_arithmetic_problems(field, finite_number, context))
+    return EvidenceVerdict(out, problems)
+
+
 #: Mark type -> the function that re-derives its methods from its own evidence.
 #:
 #: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
@@ -889,7 +976,8 @@ def _baseline_problems(field, number, axis, context):
 #: matrix and by the artifact join, and not by re-derivation - which is a real
 #: difference in strength and is written down rather than implied away.
 EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
-                      "BAR_COLOR": expected_bar_colour_methods}
+                      "BAR_COLOR": expected_bar_colour_methods,
+                      "LINE_COLOR": expected_line_colour_methods}
 
 
 def evidence_failure(mark_type, mark, claimed, context=None):

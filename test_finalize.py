@@ -303,6 +303,19 @@ check("and wrote no accepted file",
       "%s" % sorted(os.listdir(OUT)))
 
 QUEUE = pd.read_csv(os.path.join(OUT, "review_queue.csv"), dtype=object).fillna("")
+# AND THE ORDINARY RUN IS A LINE_COLOR RUN, whose reader re-derives its own three
+# methods from v7.89. Everything downstream of here is that verifier's evidence:
+# if the colour pair, the marker centre or the cap rows did not reproduce, this
+# fixture's own values would be refused before any scenario reached them.
+check("the fixture's own coloured markers record both halves of their colour",
+      all(FIN._s(m.get("own_mask_key")) and float(m.get("own_mask_hit") or 0) > 0
+          and FIN._s(m.get("mask_overlap")) == "0"
+          for m in json.load(open(RB.resolve_artifact(
+              OUT, pd.read_csv(os.path.join(OUT, "panel_artifacts.csv"),
+                               dtype=object).fillna("")
+              .pipe(lambda d: d[d["Artifact_Type"] == "RAW_MARKS"])
+              .iloc[0]["Artifact_Path"]), encoding="utf-8"))["marks"]),
+      "the LINE_COLOR fixture's marks carry no own-colour evidence")
 check("every passing panel is in the review queue",
       set(QUEUE["Panel_ID"]) == {"P1"}, "%s" % sorted(set(QUEUE["Panel_ID"])))
 # Recorded relative to the run, so the queue still points at the right picture
@@ -466,17 +479,50 @@ check("and it is not reported as nobody having looked",
 # THE BLANKNESS IS PRODUCED, not inherited: this fixture's panel is LINE_COLOR,
 # which answers both questions, so an untaught producer is simulated by a wrapper
 # that returns rows without the two keys.
-def _no_methods(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r.pop("Identity_Method", None)
-        r.pop("Value_Method", None)
-    return rows
+# A PANEL DECLARED AS A READER WITH NO EVIDENCE VERIFIER.
+#
+# The four scenarios below are about the TIER GATE: a value that does not say how
+# it was got is refused and counted, whatever its reader. From v7.89 `LINE_COLOR`
+# re-derives its own methods, so on a colour panel a blank method is refused one
+# step earlier - by the mark that contradicts it - and the gate is never reached.
+# Both refusals are right; the gate is what these scenarios exist for, so they
+# declare a reader that has none: `LINE_MONO`, standing in the same way
+# `style_reader` stands in for `LINE_MONO_STYLE`.
+MONO_PANELS = [dict(PANELS[0], Mark_Type="LINE_MONO")]
+MONO_SERIES = [dict(s, Colour_Hex="", Marker_Shape=shape, Marker_Fill="ANY",
+                    Line_Style="")
+               for s, shape in zip(SERIES, ("CIRCLE", "SQUARE"))]
+_MONO = dict(panel_manifest=MONO_PANELS, series_manifest=MONO_SERIES)
+
+
+def mono_reader(assign):
+    """A stand-in for `LINE_MONO`, reading this fixture's coloured marks.
+
+    The marks are real - found in the raster, calibrated, carried through
+    `to_value_records` and the grid gate like any other reader's - and the panel
+    says which reader they are attributed to, so the finalizer asks the contract
+    that reader has. `LINE_MONO` has no evidence verifier yet, which is exactly
+    what these scenarios need: the tier gate answers.
+    """
+    def wrapped(mark_type, **kw):
+        rows = MR.read_line_marker_panel(
+            image=kw["image"], panel_box=kw["panel_box"],
+            x_positions=kw["x_positions"], y_calibration=kw["y_calibration"],
+            series=_COLOUR_SPECS)
+        for r in rows:
+            assign(r)
+        return rows
+    return wrapped
+
+
+def _no_methods(r):
+    r.pop("Identity_Method", None)
+    r.pop("Value_Method", None)
 
 
 try:
-    MR.read_panel = _no_methods
-    _BLANK_DIR, _ = fresh_run("run_blank")
+    MR.read_panel = mono_reader(_no_methods)
+    _BLANK_DIR, _ = fresh_run("run_blank", **_MONO)
 finally:
     MR.read_panel = _real_read_panel
 _fpb = pd.read_csv(os.path.join(_BLANK_DIR, "review_queue.csv"),
@@ -506,17 +552,14 @@ check("and every refused cell is named, with the reason and the tier",
       "%s" % [p["where"] for p in _stamp_plain["Problems"]])
 # HALF-BLANK IS BLANK. A row naming how the number was got and not how the series
 # was named is a number with no series behind it, and the pair is what is priced.
-def _half_stated(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r.pop("Identity_Method", None)
-        r["Value_Method"] = "MARKER_CENTER"
-    return rows
+def _half_stated(r):
+    r.pop("Identity_Method", None)
+    r["Value_Method"] = "MARKER_CENTER"
 
 
 try:
-    MR.read_panel = _half_stated
-    _HALF_DIR, _ = fresh_run("run_half")
+    MR.read_panel = mono_reader(_half_stated)
+    _HALF_DIR, _ = fresh_run("run_half", **_MONO)
 finally:
     MR.read_panel = _real_read_panel
 _fph = pd.read_csv(os.path.join(_HALF_DIR, "review_queue.csv"),
@@ -577,16 +620,14 @@ print("the weight is evidence too, and the gate prices it")
 # The panel is LINE_COLOR here, not the style reader: an unstemmed cap is
 # something a marker reader can actually meet, and the dispersion contract in
 # v7.68's shape refuses a claim its reader could not have reached.
-def _unstemmed(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r["Dispersion_Method"] = "UNSTEMMED_CAP"
-    return rows
+def _unstemmed(r):
+    r["Identity_Method"] = "MEASURED_MARKER_SHAPE"
+    r["Dispersion_Method"] = "UNSTEMMED_CAP"
 
 
 try:
-    MR.read_panel = _unstemmed
-    _DISP_DIR, _ = fresh_run("run_dispersion")
+    MR.read_panel = mono_reader(_unstemmed)
+    _DISP_DIR, _ = fresh_run("run_dispersion", **_MONO)
 finally:
     MR.read_panel = _real_read_panel
 _qd = pd.read_csv(os.path.join(_DISP_DIR, "figure_values_machine_qc.csv"),
@@ -625,16 +666,14 @@ check("a weight a model produced is priced R4 and no reader may claim it",
 # reachable R4 on this axis: a reader that answers the two questions about the
 # mean and says nothing about the error bar it also emitted. Priced on the mean
 # alone this row is R0 and pools.
-def _mute_dispersion(*a, **kw):
-    rows = _real_read_panel(*a, **kw)
-    for r in rows:
-        r.pop("Dispersion_Method", None)
-    return rows
+def _mute_dispersion(r):
+    r["Identity_Method"] = "MEASURED_MARKER_SHAPE"
+    r.pop("Dispersion_Method", None)
 
 
 try:
-    MR.read_panel = _mute_dispersion
-    _MUTE_DIR, _ = fresh_run("run_mute_dispersion")
+    MR.read_panel = mono_reader(_mute_dispersion)
+    _MUTE_DIR, _ = fresh_run("run_mute_dispersion", **_MONO)
 finally:
     MR.read_panel = _real_read_panel
 _qm = pd.read_csv(os.path.join(_MUTE_DIR, "figure_values_machine_qc.csv"),

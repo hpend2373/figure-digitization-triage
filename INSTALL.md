@@ -5942,6 +5942,47 @@ All 37 marks across the four bar fixtures record `own_mask_hit=1`,
     the reader dropping which mask                     2
     the discriminants never reaching the verifier      1
 
+## v7.89 — the third verifier, and a fixture that had to say which reader it was
+
+`LINE_COLOR` needed no new question. The colour pair is the one `BAR_COLOR`
+answers with — no other declared mask over the ink, this series' own mask over
+it, the mask being the one the run declares — so it is one function now
+(`_colour_identity_problems`) and both readers call it. The value is the marker
+centre through the panel's axis, which v7.87 already re-computes. The spread is
+the two cap rows v7.87 started keeping.
+
+What is different is WHERE. A bar is found anywhere and assigned to the nearest
+declared anchor; a marker is looked for AT the declared column, so its own x must
+BE that column rather than merely be nearest to it.
+
+`read_line_marker_panel` records its own-colour evidence as a COUNT of the
+series' own mask pixels across the marker it measured - already computed, as the
+key the marker group is chosen by, and thrown away. A probe at the centre pixel
+would have been wrong: an open marker is a ring, and its centre is the paper.
+
+**`NO_DISPERSION` leaves `LINE_COLOR`'s contract.** This reader takes the
+connected column through the marker as the extent, so every mark it emits has a
+spread - the same reachability question `UNSTEMMED_CAP` failed for `BAR_COLOR`
+in v7.84, asked of this reader while writing its verifier.
+
+**And four scenarios had to say which reader they were about.** They test the
+TIER GATE: a value that does not say how it was got is refused and counted,
+whatever its reader. They ran on the colour fixture, and from this release a
+colour panel refuses a blank method one step earlier - the mark contradicts it -
+so the gate was never reached. Both refusals are right; the gate is what those
+scenarios exist for, so their panel is now declared `LINE_MONO`, which has no
+verifier yet, with a stand-in reader exactly as `LINE_MONO_STYLE` has had since
+v7.68. `Values_Method_Unstated` is reachable for readers without a verifier and
+for foreign producers, and no longer for the three that have one.
+
+    reverted                                          scenarios that fail
+    LINE_COLOR having no verifier again                1
+    a marker need not be at its declared column        1
+    a marker's definition not checked                  1
+    LINE_COLOR claiming NO_DISPERSION again            1
+    the colour reader dropping its own ink             2
+    the support count being a probe at the centre      2
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5974,13 +6015,11 @@ All 37 marks across the four bar fixtures record `own_mask_hit=1`,
 - the numbers are re-computed from the pixels for `BAR_COLOR` and
   `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
   them yet, because they have no verifier to do it in
-- the methods are RE-DERIVED from the evidence for two readers of the seven,
-  `LINE_MONO_STYLE` and `BAR_COLOR`. The other five are held to the matrix, to the
-  mark join and to the value-to-cell binding, and not to a derivation from their
-  own measurements - a real difference in strength. THREE are left, not two:
-  `LINE_COLOR`, `LINE_MONO` and `BOX_VIOLIN`, in that order - `LINE_COLOR` reuses
-  the colour evidence with marker centres and cap geometry - while `BAR_MONO` and
-  `SCATTER` have their own durable artifacts checked instead
+- the methods are RE-DERIVED from the evidence for three readers of the seven,
+  `LINE_MONO_STYLE`, `BAR_COLOR` and `LINE_COLOR`. `LINE_MONO` and `BOX_VIOLIN`
+  are left - `LINE_MONO` needs its marker-shape and fill measurements re-derived
+  the way the colour pair now is, `BOX_VIOLIN` its five box rows - while
+  `BAR_MONO` and `SCATTER` have their own durable artifacts checked instead
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

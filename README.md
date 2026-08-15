@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.92 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2785 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2823 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.93 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2789 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2827 -->
 
-2785 scenarios on main after v7.92 under `requirements-lock.txt`, and 2823 with
+2789 scenarios on main after v7.93 under `requirements-lock.txt`, and 2827 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -151,7 +151,8 @@ commit messages record how many scenarios each revert broke.
 
 `INSTALL.md` is the long-form version of that record. `SKILL.md` is the whole
 protocol as an extractor - or an agent - reads it, standalone and installable;
-`MIGRATION.md` covers the schema changes.
+`MIGRATION.md` covers the schema changes; `PILOT.md` is the order a PERSON works
+in for the one part of this package a program may not do.
 
 ## Status
 

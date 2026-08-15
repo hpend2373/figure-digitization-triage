@@ -6109,6 +6109,38 @@ built around. It is on the open list with its number.
     the reader not saying why                          3
     every refusal being the same refusal               the forward test on 397
 
+## v7.93 — the runbook for the review a program may not do
+
+Every part of a human review that a program may do is finished: the preflight
+says which cells will be asked about and why, the templates pre-fill every
+identifier, the crops are drawn, the finalizer refuses an incomplete answer set,
+and the two-reviewer comparison works off content-derived ids. What was left was
+the procedure, and an improvised procedure is a review nobody can repeat.
+
+`PILOT.md` is the order a person works in - run, preflight, template, look,
+answer, preflight again, finalize - with what each confirmation claims, what
+CONFIRMED and REJECTED each cost, and what a reviewer is never asked (R4 cells
+never reach them; they are work, not a signature). It opens by saying that none
+of it may be done by an agent, because the failure this package is built around
+is easiest to commit when the procedure is vague enough that filling in a
+confirmation looks helpful.
+
+It also states what a pilot needs before it starts, which is the honest reason
+one has not run: a publication whose dispersion definition is settled in its
+methods text. 397's is not, and a pilot that begins by guessing at a weight is
+not a pilot of this package.
+
+The suite parses the runbook: every command line in it is checked against the
+real parsers, every flag against the module that would receive it, and every
+file it tells a reviewer to open against what a run writes. A procedure that
+names a flag nothing accepts is worse than none - the reviewer runs it, gets an
+error, and improvises.
+
+    reverted                                          scenarios that fail
+    a command the runbook names that does not exist    1
+    a flag no module accepts                           1
+    a file no run writes                               1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -6131,8 +6163,9 @@ built around. It is on the open list with its number.
 - the R3 context crop draws the two supports and the placed value, and NOT the
   occlusion mask: the mask lives in the reader's memory at read time and nothing
   downstream has it, so the cause is named in the caption rather than shaded
-- no R3 or R2 cell in the shipped corpus has reached a review queue yet, so the
-  first pilot needs a publication whose dispersion definition is settled - and
+- no R3 or R2 cell in the shipped corpus has reached a review queue yet.
+  `PILOT.md` is the procedure and everything a program may do is built; what is
+  missing is a publication whose dispersion definition is settled - and
   should include at least one cell the reviewer REJECTS, or the partial-rejection
   path is exercised by nobody - 397's
   dispersion definition is unresolved, so its two of each fail machine QC - and

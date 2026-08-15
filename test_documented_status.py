@@ -191,6 +191,53 @@ check("an unknown profile is refused rather than treated as core",
 check("and the two profiles are the two CI jobs",
       V.PROFILES == ("core", "full"), "%r" % (V.PROFILES,))
 
+print()
+print("the runbook names commands and flags this package actually has")
+# PILOT.md is the procedure a person follows, and a procedure that names a flag
+# nothing accepts is worse than none: the reviewer runs it, gets an error, and
+# improvises - which is the one thing the file exists to prevent. Every command
+# line in it is parsed against the real parsers.
+import re as _re                                                   # noqa: E402
+import finalize_batch as _FIN                                      # noqa: E402
+import review_preflight as _PF                                     # noqa: E402
+import run_batch as _RB                                            # noqa: E402
+
+_PILOT = os.path.join(HERE, "PILOT.md")
+check("the runbook is in the package", os.path.exists(_PILOT))
+_lines = [l.strip() for l in open(_PILOT, encoding="utf-8").read().splitlines()
+          if l.strip().startswith("python3 ")]
+_lines += [l.strip() for l in open(_PILOT, encoding="utf-8").read().splitlines()
+           if _re.match(r"^\s+\d+\s+python3 ", l)]
+_lines = [_re.sub(r"^\d+\s+", "", l) for l in _lines]
+check("  and it gives a command for every step of the review",
+      len(_lines) >= 5, "%s" % _lines)
+_MODULES = {"run_batch.py": _RB, "review_preflight.py": _PF,
+            "finalize_batch.py": _FIN}
+_unknown = []
+for _line in _lines:
+    _parts = _line.split()
+    _module = _MODULES.get(_parts[1])
+    if _module is None:
+        _unknown.append(_parts[1])
+        continue
+    _flags = {p for p in _parts[2:] if p.startswith("--")}
+    _src = open(os.path.join(HERE, _parts[1]), encoding="utf-8").read()
+    for _flag in _flags:
+        if 'add_argument("%s"' % _flag not in _src:
+            _unknown.append("%s %s" % (_parts[1], _flag))
+check("  and every flag it names is one that module accepts",
+      not _unknown, "%s" % _unknown)
+# AND THE FILES IT TELLS A REVIEWER TO OPEN are the ones the run writes.
+_named = set(_re.findall(r'`?(OUT/[A-Za-z0-9_./<>-]+)`?', open(_PILOT).read()))
+_writes = set(_RB.CANONICAL_DIRS) | set(_RB.CANONICAL_OUTPUTS) | {
+    "value_review.csv", "inference_review.csv", "figure_values_accepted.csv"}
+_missing = [n for n in _named
+            if n.split("/")[1].split("<")[0].rstrip("_")
+            not in {w.split("/")[0].rstrip("/") for w in _writes}
+            and n.split("/")[1] not in _writes]
+check("  and every file it tells a reviewer to open is one the run writes",
+      not _missing, "%s / writes %s" % (sorted(_missing), sorted(_writes)))
+
 shutil.rmtree(ROOT, ignore_errors=True)
 print()
 # One line, one format, for the CI guard that checks the documented

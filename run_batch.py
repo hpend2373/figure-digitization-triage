@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.79"
+PIPELINE_VERSION = "7.80"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1705,13 +1705,9 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         converted, statistic or "CONTINUOUS", unit_id,
         x_factor=(position_factor if any(r.get("x_label") for r in converted) else None),
         series_factor=(series_factor if any(r.get("series") for r in converted) else None))
-    envelope = {"schema": MARK_DATA_SCHEMA,
-                "Panel_ID": pid, "Unit_ID": unit_id, "Mark_Type": mark,
-                "Source_Image": resolved, "Image_SHA256": file_sha256(resolved),
-                "Reader_Version": MR.READER_VERSION,
-                "Y_Calibration": MR._calibration_record(ycal),
-                "X_Calibration": MR._calibration_record(xcal),
-                "Panel_Box": list(box)}
+    envelope = dict(mark_envelope_header(panel, file_sha256(resolved),
+                                         MR.READER_VERSION),
+                    schema=MARK_DATA_SCHEMA, Source_Image=resolved)
     envelope["marks"] = stamp_marks(_jsonable(kept), envelope)
     # Back onto the value rows, in the order `to_value_records` preserves - the
     # same pairing the inference crops rely on. This is what lets a value be
@@ -2394,6 +2390,44 @@ def _all_cells(series_level, position_level):
             if levels:
                 out.add(GE.fig_cell_key(levels))
     return out
+
+
+#: THE CONDITIONS A MARK WAS MEASURED UNDER. Inside `Mark_Record_SHA256`,
+#: because a pixel is only a measurement relative to them - and therefore
+#: re-derivable from the panel manifest and the run manifest, which is what makes
+#: the hash checkable by somebody who did not produce the run.
+MARK_ENVELOPE_FIELDS = ("Panel_ID", "Unit_ID", "Mark_Type", "Panel_Box",
+                        "X_Calibration", "Y_Calibration", "Image_SHA256",
+                        "Reader_Version")
+
+
+def mark_envelope_header(panel, image_sha256, reader_version):
+    """The envelope a panel's marks must have been read under.
+
+    ONE CONSTRUCTION, TWO CALLERS. `_read_panel` builds the envelope with this
+    and `finalize_batch` re-derives it from the VERIFIED panel manifest and run
+    manifest to compare - so a producer cannot read a figure under a calibration
+    or a panel box nobody declared, hash its marks under those, and present a run
+    where the marks, the values and both hashes agree with each other.
+
+    Everything here comes from the panel row: the box is the four declared
+    corners and the calibrations are fitted from the declared ticks, exactly as
+    the reader fits them. `Image_SHA256` and `Reader_Version` are what the RUN
+    recorded, because a run made by an older reader is a run this module still
+    has to be able to check.
+    """
+    return {
+        "Panel_ID": _s(panel.get("Panel_ID")),
+        "Unit_ID": _s(panel.get("Unit_ID")),
+        "Mark_Type": _upper(panel.get("Mark_Type")),
+        "Panel_Box": list(BM.parse_box(",".join(
+            _s(panel.get(c)) for c in
+            ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")))),
+        "X_Calibration": MR._calibration_record(_calibration(panel, "X")),
+        "Y_Calibration": MR._calibration_record(_calibration(panel, "Y")),
+        "Image_SHA256": _s(image_sha256),
+        "Reader_Version": _s(reader_version),
+    }
 
 
 #: Bumped to /2 in v7.72: every mark carries a measurement hash and an

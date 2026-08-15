@@ -1516,12 +1516,20 @@ def _edited_marks(mutate, rows=None, restamp=False, rebind=False,
     """
     shutil.rmtree(_edit_dir, ignore_errors=True)
     os.makedirs(_edit_dir)
+    # The run's own manifest travels with the marks: from v7.80 the finalizer
+    # re-derives the conditions a panel was measured under from the panel
+    # manifest and this file, so a scratch directory without it is a run that
+    # never read the panel at all.
+    shutil.copy(os.path.join(_R3_DIR, "run_manifest.csv"), _edit_dir)
     body = json.loads(json.dumps(_envelope))
-    header = {k: v for k, v in body.items() if k != "marks"}
     was = FIN._s(body["marks"][0]["Mark_Record_SHA256"])
     mutate(body["marks"][0])
     if envelope:
         envelope(body)
+    # AFTER the mutations, so a re-stamp is a re-stamp under the CHANGED
+    # conditions - the artifact a foreign producer hands over, internally
+    # perfect and externally undeclared - rather than under the old ones.
+    header = {k: v for k, v in body.items() if k != "marks"}
     if restamp:
         body["marks"] = RB.stamp_marks(
             [{k: v for k, v in m.items()
@@ -1636,6 +1644,74 @@ check("  and the five readers named are the ones with no other durable route",
                                   "BAR_COLOR", "BOX_VIOLIN"}
       and not (PROV.MARK_JOIN_REQUIRED & {"BAR_MONO", "SCATTER"}),
       "%s" % sorted(PROV.MARK_JOIN_REQUIRED))
+# AND THE CONDITIONS THE MARKS WERE MEASURED UNDER ARE THE RUN'S, NOT THE
+# ARTIFACT'S OWN. v7.80. `Mark_Record_SHA256` covers the panel box, both
+# calibrations and the raster hash - correctly, a pixel is only a measurement
+# relative to them - and the finalizer re-hashed the artifact's own copy of them.
+# A producer could declare one tick mapping, read the figure under another, hash
+# the marks under the second, and hand over a run where the marks, the values and
+# every hash agree with each other. The only thing that disagreed was the
+# manifest the run was validated against, and nothing compared them.
+def _under(change):
+    return _edited_marks(lambda m: None, envelope=change, restamp=True,
+                         rebind=True)
+
+
+_held_e, _seen_e = _under(
+    lambda b: b.__setitem__("Y_Calibration",
+                            dict(b["Y_Calibration"],
+                                 slope=b["Y_Calibration"]["slope"] * 1.1)))
+check("marks measured under a calibration the manifests do not declare are "
+      "refused, however well they agree with their own hashes",
+      _held_e == {"P1"} and "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e,
+      "%s" % _seen_e)
+check("  and the refusal names the field that disagrees",
+      "Y_Calibration" in _mark_detail_at(_edit_dir,
+                                         "MARK_ENVELOPE_CONTRADICTS_RUN"),
+      "%s" % _mark_detail_at(_edit_dir, "MARK_ENVELOPE_CONTRADICTS_RUN"))
+_held_e, _seen_e = _under(
+    lambda b: b.__setitem__("Panel_Box", [b["Panel_Box"][0] + 5]
+                            + list(b["Panel_Box"][1:])))
+check("  and so is a panel box nobody declared",
+      _held_e == {"P1"} and "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e,
+      "%s" % _seen_e)
+_held_e, _seen_e = _under(lambda b: b.__setitem__("Image_SHA256", "c" * 64))
+check("  and marks read from a raster this run did not read",
+      _held_e == {"P1"} and "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e,
+      "%s" % _seen_e)
+_held_e, _seen_e = _under(lambda b: b.__setitem__("Panel_ID", "P_ELSEWHERE"))
+check("  and marks filed under a panel the manifests do not declare at all",
+      "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e, "%s" % _seen_e)
+# AND A NUMBER SPELLED DIFFERENTLY IS THE SAME NUMBER. A producer whose JSON
+# writes the box as floats has not measured under a different box, and refusing
+# it would be this module inventing a disagreement out of an encoder's habits.
+_held_e, _seen_e = _under(
+    lambda b: b.__setitem__("Panel_Box", [float(v) for v in b["Panel_Box"]]))
+check("  while a box spelled as floats is the same box",
+      "MARK_ENVELOPE_CONTRADICTS_RUN" not in _seen_e, "%s" % _seen_e)
+# A TOKEN IS NOT A NUMBER, THOUGH. The axis scale is a declaration, and the mark
+# hashes cover it: marks hashed under `linear` were hashed under a string this
+# run's manifests do not produce, and the fix for float spelling must not quietly
+# become case-insensitivity for everything.
+_held_e, _seen_e = _under(
+    lambda b: b["Y_Calibration"].__setitem__(
+        "scale", str(b["Y_Calibration"]["scale"]).lower()))
+check("  while an axis scale spelled differently is a different declaration",
+      _held_e == {"P1"} and "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e,
+      "%s" % _seen_e)
+# THE HEADER IS BUILT BY ONE FUNCTION, so the writer and the checker cannot
+# drift: the run's own envelope re-derives exactly from the verified manifests.
+_run_row = next(r for r in csv.DictReader(
+    open(os.path.join(_R3_DIR, "run_manifest.csv"), encoding="utf-8"))
+    if r["Panel_ID"] == "P1")
+_panel_row = next(p for _, p in RB.load_manifests(
+    os.path.join(_R3_DIR, "manifests"))["panels"].iterrows()
+    if FIN._s(p.get("Panel_ID")) == "P1")
+check("the run's own marks were measured under the conditions it declared",
+      {k: _envelope.get(k) for k in RB.MARK_ENVELOPE_FIELDS}
+      == json.loads(json.dumps(RB.mark_envelope_header(
+          _panel_row, _run_row["Image_SHA256"], _run_row["Reader_Version"]))),
+      "%s" % {k: _envelope.get(k) for k in RB.MARK_ENVELOPE_FIELDS})
 # AND THE COLUMNS THIS BINDS ARE THE COLUMNS THE ADAPTER WRITES. A reader that
 # starts carrying a tenth number would otherwise be bound to its mark in nine,
 # and the tenth would be free - the same drift `INTERPOLATION_CARRIED` was

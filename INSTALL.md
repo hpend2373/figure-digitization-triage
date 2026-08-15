@@ -5544,6 +5544,50 @@ cell reported as two.
     the stamp hashing the path again after deciding    1
     parsing from the path, not the hashed bytes        1
 
+## v7.80 — the conditions a mark was measured under are the run's, not the artifact's
+
+`Mark_Record_SHA256` covers the panel box, both calibrations and the raster
+hash. That is right — a pixel is only a measurement relative to them — and the
+finalizer re-hashed **the artifact's own copy of them**. So a producer could:
+
+    panel_manifest.csv    tick mapping A, panel box A, raster A
+    mark-data/2           calibration B, box B, raster hash B, marks hashed under B
+    figure_values         the same numbers, citing those hashes
+
+and every check in this module passed. The marks agreed with themselves, the
+values agreed with the marks, both hashes recomputed, the cell keys matched. The
+only thing that disagreed was the manifest the run was validated against, and
+nothing compared them.
+
+`run_batch.mark_envelope_header(panel, image_sha256, reader_version)` now builds
+the envelope, and `finalize_batch.panel_expectations` re-derives it from the
+VERIFIED panel manifest and the run manifest to compare — one construction, two
+callers, the same shape `cell_maps` has. `Image_SHA256` and `Reader_Version` come
+from the run's own manifest row rather than from this process, because a run made
+by an older reader is still a run this module has to be able to check.
+`MARK_ENVELOPE_CONTRADICTS_RUN` names the fields that differ, and a panel the run
+manifest has no row for is refused rather than measured against a declaration
+nobody made.
+
+Four mutations, each re-stamping the marks and rebinding the values so the
+artifact is internally perfect: a Y calibration nobody declared, a panel box
+nobody declared, a raster this run did not read, and a panel that is not in the
+manifests. All four are refused.
+
+The comparison is numeric where numbers are numbers — `12` and `12.0` are the
+same pixel, and refusing that spelling would be inventing a disagreement out of a
+JSON encoder's habits — and exact where tokens are tokens: marks hashed under a
+`linear` scale were hashed under a string this run's manifests do not produce.
+Both directions are scenarios.
+
+Publication 397, re-run under this release: **123 values, no refusals.**
+
+    reverted                                          scenarios that fail
+    the envelope taken from the artifact itself        4
+    a panel the run does not declare not refused       1
+    a number spelled differently is a different one    1
+    the case of a declaration stops mattering          1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

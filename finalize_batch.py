@@ -1058,7 +1058,8 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag, frames)
     withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
-                                        flag, cell_maps(frames))
+                                        flag, panel_expectations(frames,
+                                                                 run_dir))
     return withheld
 
 
@@ -1077,6 +1078,82 @@ MARK_VALUE_FIELDS = (
     ("Whisker_Lower", "whisker_lower"),
     ("Whisker_Upper", "whisker_upper"),
 )
+
+
+def panel_expectations(frames, run_dir):
+    """{Panel_ID: {cell_map, envelope}} - what a panel's marks must look like.
+
+    Two questions with one answer each, built together because both are
+    re-derivations of the same declaration: which cell a mark's series and
+    position name, and under what conditions the panel was measured.
+
+    The envelope half is the one the mark hashes rest on. `Mark_Record_SHA256`
+    covers the panel box, both calibrations and the raster hash - correctly, a
+    pixel is only a measurement relative to them - and until v7.80 the finalizer
+    re-hashed those from the ARTIFACT'S OWN copy of them. A producer could
+    therefore declare one tick mapping in `panel_manifest.csv`, read the figure
+    under another, hash the marks under the second, and hand over a run in which
+    the marks, the values and both hashes agreed with each other perfectly. The
+    only thing that disagreed was the manifest the run was validated against, and
+    nothing compared them.
+
+    `None` for a panel the run manifest has no row for: a value citing marks from
+    a panel this run does not say it read is refused rather than measured against
+    a declaration nobody made.
+    """
+    maps = cell_maps(frames)
+    panels = {}
+    if frames is not None and "panels" in frames:
+        panels = {_s(p.get("Panel_ID")): p
+                  for _, p in frames["panels"].iterrows()}
+    run_rows = {}
+    try:
+        with open(os.path.join(run_dir, "run_manifest.csv"),
+                  encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                run_rows[_s(row.get("Panel_ID"))] = row
+    except Exception:
+        run_rows = {}             # verify_run_outputs owns this file's bytes
+    out = {}
+    for pid in set(maps) | set(panels) | set(run_rows):
+        envelope = None
+        panel, run_row = panels.get(pid), run_rows.get(pid)
+        if panel is not None and run_row is not None:
+            try:
+                envelope = RB.mark_envelope_header(
+                    panel, _s(run_row.get("Image_SHA256")),
+                    _s(run_row.get("Reader_Version")))
+            except Exception:
+                # A box that does not parse or ticks that will not fit: the run
+                # refused this panel long before here, and a value that reached
+                # this module claiming marks from it has no declaration behind
+                # it. Left as None, which is refused rather than compared.
+                envelope = None
+        out[pid] = {"cell_map": maps.get(pid, EMPTY_CELL_MAP),
+                    "envelope": envelope}
+    return out
+
+
+def _canonical(value):
+    """Comparable across a JSON round trip, and across int/float spelling.
+
+    `12` and `12.0` are the same pixel, and a producer that writes its panel box
+    as floats has not measured under a different box - refusing it would be this
+    module inventing a disagreement out of a JSON encoder's habits. Strings stay
+    exact: `LINEAR` and `linear` are two declarations.
+    """
+    def norm(item):
+        if isinstance(item, bool):
+            return item
+        if isinstance(item, (int, float)):
+            return float(item)
+        if isinstance(item, dict):
+            return {k: norm(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [norm(v) for v in item]
+        return item
+
+    return json.dumps(norm(value), sort_keys=True, default=float)
 
 
 def _same_number(text, number):
@@ -1125,7 +1202,8 @@ def _expected_cell_key(mark, cell_map):
     return GE.fig_cell_key(levels), None
 
 
-def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
+def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
+                            expected):
     """Values joined to the MARK they were made from, and checked against it.
 
     The matrix says which methods a reader can produce. This says which one THIS
@@ -1198,6 +1276,33 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
                  "record hash does not exist"
                  % (panel, _s(envelope.get("schema")) or "(no schema)",
                     RB.MARK_DATA_SCHEMA))
+            withheld.add(panel)
+            continue
+        # THE CONDITIONS THE MARKS WERE MEASURED UNDER, against the ones the
+        # run was validated against. Everything below re-hashes the envelope's
+        # own copy of the box, the calibrations and the raster hash, so an
+        # artifact that is internally perfect and externally undeclared passed
+        # every check in this function.
+        want = expected.get(panel, {}).get("envelope")
+        if want is None:
+            flag("panel:%s" % panel, "MARK_ENVELOPE_CONTRADICTS_RUN",
+                 "%s's raw marks cite a panel this run's manifests do not "
+                 "declare, so there is nothing to check the conditions they "
+                 "were measured under against" % (panel or "(unnamed)"))
+            withheld.add(panel)
+            continue
+        got = {k: envelope.get(k) for k in RB.MARK_ENVELOPE_FIELDS}
+        if _canonical(got) != _canonical(want):
+            differ = [k for k in RB.MARK_ENVELOPE_FIELDS
+                      if _canonical(got.get(k)) != _canonical(want.get(k))]
+            flag("panel:%s" % panel, "MARK_ENVELOPE_CONTRADICTS_RUN",
+                 "%s's marks were measured under a %s this run did not declare "
+                 "(%s against %s). Every hash below rests on these numbers, so "
+                 "an artifact that agrees with itself about them still has to "
+                 "agree with the manifests"
+                 % (panel, ", ".join(differ),
+                    "; ".join(_canonical(got.get(k))[:60] for k in differ),
+                    "; ".join(_canonical(want.get(k))[:60] for k in differ)))
             withheld.add(panel)
             continue
         joinable.add(panel)
@@ -1329,16 +1434,17 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag, maps):
         # manifests the run was validated against - so a value that carries the
         # right number under the wrong heading is refused, which is the one
         # failure with no arithmetic signature.
-        expected, why = _expected_cell_key(mark, maps.get(pid, EMPTY_CELL_MAP))
+        wanted, why = _expected_cell_key(
+            mark, expected.get(pid, {}).get("cell_map", EMPTY_CELL_MAP))
         if why:
             flag(where, "MARK_CELL_UNDECLARED", why)
             withheld.add(pid)
             continue
-        if _s(row.get("Cell_Key")) != expected:
+        if _s(row.get("Cell_Key")) != wanted:
             flag(where, "CELL_CONTRADICTS_MARK",
                  "this value is filed under %s and the mark it cites was read "
                  "from the cell the manifests call %s"
-                 % (_s(row.get("Cell_Key")) or "(blank)", expected))
+                 % (_s(row.get("Cell_Key")) or "(blank)", wanted))
             withheld.add(pid)
             continue
         code, why = PROV.evidence_failure(mark_of.get(pid), mark, row)

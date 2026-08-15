@@ -6141,6 +6141,62 @@ error, and improvises.
     a flag no module accepts                           1
     a file no run writes                               1
 
+## v7.94 — the pilot has a subject, and the runbook's promises are checked
+
+v7.93's runbook was right about what a person does and wrong in three places
+about how it is done. All three are corrected here, and the first pilot now has
+a name.
+
+**The prohibition was too wide to be followed.** "None of this may be done by an
+agent" would have banned running the batch, which is a command, not a judgement.
+It now reads: no review judgment, confirmation, rejection or attestation may be
+performed by an agent — an agent may run the batch, generate the templates and
+the review artifacts, and run the read-only preflight.
+
+**The preflight is run twice, and the first run is expected to fail.** v7.93 put
+the preflight before the template, which cannot be right: the finalizer cannot
+say `FINALIZED` before a person has answered anything, so a check run there
+always exits 2 and a reviewer taught to expect 0 learns to ignore it. The order
+is run → `--template` → PRE-REVIEW preflight → review → POST-REVIEW preflight →
+finalize. The pre-review run is *expected* to exit 2; what must be clean is the
+bundle — 0 bundle problems, every question with its manifest row and its context
+picture, and answer problems that are all of one kind, a person has not answered
+yet. The post-review run must exit 0.
+
+Both numbers are now read OUT OF `PILOT.md` by `test_finalize.py` and checked
+against the real tools, on a real R3 run driven through `finalize_batch.py
+--template`'s own CLI. Nothing else in the suite reads those two sentences, and
+a runbook that promises the wrong code sends every reviewer to fix a bundle that
+was never broken.
+
+**A pilot may not require a rejection.** v7.93 asked for "at least one cell the
+reviewer will REJECT". A reviewer who knows something must fail pushes an
+ambiguous cell over, and the answer records a software path rather than a
+reading. Nobody is told how many cells to reject, or which. The
+partial-rejection path is exercised by fixtures today and is validated
+operationally in a separate BLINDED exercise, against a cell an independent
+manual reading has already found wrong.
+
+**The first pilot is publication 127, Verheyden 2007, Figure 4** — named exactly
+*the first production R2 + human-resolution pilot*. Its methods say mean ± SE in
+so many words, it holds an R0 control group, an R2 identity named by a prototype
+formed in another group and two 15 px bars a person resolved by hand, and its
+bundle is the furthest along. SLOW and NORMAL are the finalization target;
+LOWFREQ is withheld if its skewness QC problem stands and is not part of the
+success condition, because mixing the QC-semantics question into the review
+pilot would make a failure in either look like a failure of both. What 127
+cannot test is written down where nobody can claim otherwise: the per-cell
+CONFIRMED/REJECTED channel, the R3 context crop, and partial rejection. Resolver
+and approver are separate roles and, for the first pilot, separate people; if
+that is impossible they review independently and are compared with `--second`.
+The second pilot is chosen for the per-cell channel, and the criteria are in the
+file.
+
+    reverted                                          scenarios that fail
+    the runbook promises the wrong exit code           1
+    step 2 hands the reviewer only half the templates  2
+    a blank template row reads as an unasked question  1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -6164,18 +6220,20 @@ error, and improvises.
   occlusion mask: the mask lives in the reader's memory at read time and nothing
   downstream has it, so the cause is named in the caption rather than shaded
 - no R3 or R2 cell in the shipped corpus has reached a review queue yet.
-  `PILOT.md` is the procedure and everything a program may do is built; what is
-  missing is a publication whose dispersion definition is settled - and
-  should include at least one cell the reviewer REJECTS, or the partial-rejection
-  path is exercised by nobody - 397's
-  dispersion definition is unresolved, so its two of each fail machine QC - and
-  the per-cell channel is therefore exercised end to end by fixtures rather than
-  by a person
+  `PILOT.md` is the procedure, everything a program may do is built, and the
+  first subject is chosen - publication 127, whose methods settle the dispersion
+  definition 397's does not. But 127 has no R3 cell, so the per-cell
+  CONFIRMED/REJECTED channel stays exercised end to end by fixtures rather than
+  by a person until the second pilot. A production pilot may not manufacture the
+  rejection that would exercise it; that belongs to a blinded exercise against a
+  cell an independent reading has already found wrong
 - `HUMAN_RESOLUTION` has a review channel - `BAR_MONO_GEOMETRY_RESOLVED` asks
   for `Identity_Checked`, and v7.68 requires the row to cite the resolution it
-  rests on. What is not decided is whether the approver and the resolver may be
-  the same person, and whether a resolution needs its own cell-level
-  confirmation the way a reconstructed value does
+  rests on. Whether the approver and the resolver may be the same person is
+  still not decided in the package - v7.94 only rules that the first pilot is
+  not the place it gets decided by default, and uses two people - and a
+  resolution still has no cell-level confirmation of its own the way a
+  reconstructed value does
 - the numbers are re-computed from the pixels for `BAR_COLOR` and
   `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
   them yet, because they have no verifier to do it in

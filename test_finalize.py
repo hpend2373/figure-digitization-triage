@@ -12,6 +12,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2375,6 +2376,58 @@ check("and an unanswered question still fails the preflight",
 _answers([_answer(i) for i in _ids3])
 check("  while a complete review passes it",
       PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells]) == 0)
+# THE TWO-PREFLIGHT CONTRACT PILOT.md PROMISES A PERSON. v7.94. The runbook now
+# tells a reviewer to run the preflight TWICE - once on the bundle before they
+# open a figure, once on their answers - and it names the exit code each run
+# must give. Those two numbers are read OUT OF PILOT.md here rather than written
+# again: a document that says the first check exits 0 would send every reviewer
+# to fix a bundle that was never broken, and nothing else in this suite reads
+# that sentence.
+_claims = open(os.path.join(HERE, "PILOT.md"), encoding="utf-8").read()
+_pre_code = re.search(r"expected to exit (\d)", _claims)
+_post_code = re.search(r"must exit (\d)", _claims)
+check("the runbook states an exit code for each of its two preflight runs",
+      _pre_code and _post_code, "%s / %s" % (_pre_code, _post_code))
+# STEP 2 THROUGH ITS OWN CLI, because that is the command in the file. The
+# templates are what the reviewer is handed, so the pre-review check has to be
+# clean against THEM, not against a decision file a test wrote.
+os.remove(_r3_review)
+os.remove(_r3_cells)
+check("  step 2 writes both decision files with every identifier pre-filled",
+      FIN.main([_R3_DIR, "--template"]) == 0
+      and os.path.exists(_r3_review) and os.path.exists(_r3_cells)
+      and sorted(pd.read_csv(_r3_cells, dtype=object).fillna("")
+                 ["Inference_ID"]) == _ids3
+      and set(pd.read_csv(_r3_cells, dtype=object).fillna("")
+              ["Inference_Confirmed"]) == {""})
+_pre_bundle = PF.bundle_problems(_R3_DIR)
+_pre_answers = PF.answer_problems(_R3_DIR, _r3_review, _r3_cells)
+check("  step 3 exits %s on that bundle, as the runbook says it will"
+      % _pre_code.group(1),
+      PF.main([_R3_DIR]) == int(_pre_code.group(1)),
+      "%s" % PF.main([_R3_DIR]))
+check("    with nothing wrong with the bundle itself",
+      _pre_bundle == [], "%s" % _pre_bundle)
+# AND THE ANSWER PROBLEMS ARE ALL OF ONE KIND: a person has not answered yet.
+# The runbook tells the reviewer that anything else is a bundle to fix before a
+# figure is opened, so an unanswered template must not produce one - a blank row
+# reported as "answers a question this run did not ask" would send them looking
+# for a fault in a run that has none.
+_unexpected = [(w, why) for w, why in _pre_answers
+               if not (why.startswith("has no answer")
+                       or why.startswith("does not say")
+                       or why.startswith("says ''"))]
+check("    and every answer problem is a missing human answer, nothing else",
+      _pre_answers and not _unexpected,
+      "%s / unexpected %s" % (_pre_answers, _unexpected))
+check("    one per question the run asked, and one per confirmation it wants",
+      len([w for w, why in _pre_answers if why.startswith("says ''")])
+      == len(_asked), "%s" % _pre_answers)
+_answers([_answer(i) for i in _ids3])
+_panel3()
+check("  step 5 exits %s once those answers are in" % _post_code.group(1),
+      PF.main([_R3_DIR]) == int(_post_code.group(1)),
+      "%s" % PF.main([_R3_DIR]))
 # AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
 # the finalizer for a run that has been moved; without it on the preflight, the
 # same run could fail one and pass the other with the same decision function

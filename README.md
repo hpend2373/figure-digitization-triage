@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.93 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2789 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2827 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.94 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2796 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2834 -->
 
-2789 scenarios on main after v7.93 under `requirements-lock.txt`, and 2827 with
+2796 scenarios on main after v7.94 under `requirements-lock.txt`, and 2834 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -153,6 +153,17 @@ commit messages record how many scenarios each revert broke.
 protocol as an extractor - or an agent - reads it, standalone and installable;
 `MIGRATION.md` covers the schema changes; `PILOT.md` is the order a PERSON works
 in for the one part of this package a program may not do.
+
+That order now names its first subject and runs the preflight twice. Publication
+127, Verheyden 2007 Figure 4, is **the first production R2 + human-resolution
+pilot** — not an R3 partial-rejection pilot, and the runbook does not let anyone
+claim it was one. Before a figure is opened, `review_preflight.py` is run on the
+templates and is *expected* to exit 2: the finalizer cannot say `FINALIZED`
+before a person has answered anything, so what must be clean at that point is
+the bundle. Run again on the filled-in answers it must exit 0. Both numbers are
+read out of `PILOT.md` by the suite and checked against the tools, because a
+runbook that promises the wrong exit code sends every reviewer to fix a bundle
+that was never broken.
 
 ## Status
 

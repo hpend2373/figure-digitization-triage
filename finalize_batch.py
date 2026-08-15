@@ -53,6 +53,7 @@ import collections
 import csv
 import datetime
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -223,21 +224,45 @@ def human_reviewers(reviewers):
     return human
 
 
-def load_reviews(path, flag):
+def read_decisions(path, columns, flag, where, unreadable, incomplete,
+                   absent=None):
+    """(frame, sha256) - the decisions, and a hash OF THE BYTES THEY CAME FROM.
+
+    Hashed once, parsed from the same bytes. The stamp used to name the review
+    file and then hash the path again after the verdict was decided, so a
+    spreadsheet autosave landing in between produced an accepted file decided
+    from one set of decisions and a `Review_File_SHA256` naming another - the
+    exact question the hash exists to answer, answered wrong, with nothing in the
+    run saying so. It is the same fix the manifests got: hash the bytes, then
+    parse the bytes you hashed.
+
+    The codes are ARGUMENTS rather than built from a name, so every code this
+    module can emit is a literal somebody can grep for.
+    """
     if not os.path.exists(path):
-        flag("review", "REVIEW_FILE_MISSING",
-             "%s does not exist. Nothing is approved by default" % path)
-        return pd.DataFrame(columns=VALUE_REVIEW_COLUMNS)
+        if absent:
+            flag(where, absent,
+                 "%s does not exist. Nothing is approved by default" % path)
+        return pd.DataFrame(columns=columns), ""
     try:
-        df = pd.read_csv(path, dtype=object).fillna("")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        digest = hashlib.sha256(data).hexdigest()
+        df = pd.read_csv(io.BytesIO(data), dtype=object).fillna("")
     except Exception as exc:
-        flag("review", "REVIEW_FILE_UNREADABLE", "%s: %s" % (type(exc).__name__, exc))
-        return pd.DataFrame(columns=VALUE_REVIEW_COLUMNS)
-    missing = [c for c in VALUE_REVIEW_COLUMNS if c not in df.columns]
+        flag(where, unreadable, "%s: %s" % (type(exc).__name__, exc))
+        return pd.DataFrame(columns=columns), RB.file_sha256_or_blank(path)
+    missing = [c for c in columns if c not in df.columns]
     if missing:
-        flag("review", "REVIEW_SCHEMA_INCOMPLETE", ", ".join(missing))
-        return pd.DataFrame(columns=VALUE_REVIEW_COLUMNS)
-    return df
+        flag(where, incomplete, ", ".join(missing))
+        return pd.DataFrame(columns=columns), digest
+    return df, digest
+
+
+def load_reviews(path, flag):
+    return read_decisions(path, VALUE_REVIEW_COLUMNS, flag, "review",
+                          "REVIEW_FILE_UNREADABLE", "REVIEW_SCHEMA_INCOMPLETE",
+                          absent="REVIEW_FILE_MISSING")[0]
 
 
 def verify_manifest_inputs(manifest_dir, run_stamp, flag):
@@ -723,19 +748,9 @@ def load_inference_reviews(path, flag):
     behind it. The panels that need it are refused by
     `inference_contract_failures`, which knows which cells were asked about.
     """
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
-    try:
-        df = pd.read_csv(path, dtype=object).fillna("")
-    except Exception as exc:
-        flag("inference", "INFERENCE_FILE_UNREADABLE",
-             "%s: %s" % (type(exc).__name__, exc))
-        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
-    missing = [c for c in INFERENCE_REVIEW_COLUMNS if c not in df.columns]
-    if missing:
-        flag("inference", "INFERENCE_SCHEMA_INCOMPLETE", ", ".join(missing))
-        return pd.DataFrame(columns=INFERENCE_REVIEW_COLUMNS)
-    return df
+    return read_decisions(path, INFERENCE_REVIEW_COLUMNS, flag, "inference",
+                          "INFERENCE_FILE_UNREADABLE",
+                          "INFERENCE_SCHEMA_INCOMPLETE")[0]
 
 
 def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
@@ -1748,7 +1763,7 @@ def _promote(staging, run_dir, fault_after=None):
 Verdict = collections.namedtuple(
     "Verdict",
     "status detail problems approved keep blocked unstated inference_rejected "
-    "run_stamp_sha")
+    "run_stamp_sha review_sha inference_sha")
 
 
 def review_paths(run_dir, review_path=None, inference_review_path=None):
@@ -1786,6 +1801,11 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
 
     review_path, inference_review_path = review_paths(
         run_dir, review_path, inference_review_path)
+    # Hashed when they are READ, and carried out with the verdict. Blank until
+    # the read happens, which is after the run's own outputs are verified: a
+    # refusal that never opened the decisions records no hash for them, which is
+    # the truth.
+    review_sha = inference_sha = ""
 
     def stop(status, detail, approved=None, blocked=0, unstated=0):
         # The approved PANELS travel with the refusal, not a count of them: the
@@ -1793,7 +1813,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         # could be finalized, and a refusal that reported zero approvals said the
         # reviewer had not signed when they had.
         return Verdict(status, detail, problems, approved or {}, None, blocked,
-                       unstated, 0, run_stamp_sha)
+                       unstated, 0, run_stamp_sha, review_sha, inference_sha)
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
     run_stamp_sha = ""
@@ -1888,7 +1908,10 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
                     "the reviewer registry this run was validated against does "
                     "not pass the registry contract")
 
-    reviews = load_reviews(review_path, flag)
+    reviews, review_sha = read_decisions(
+        review_path, VALUE_REVIEW_COLUMNS, flag, "review",
+        "REVIEW_FILE_UNREADABLE", "REVIEW_SCHEMA_INCOMPLETE",
+        absent="REVIEW_FILE_MISSING")
     # Which artifacts the run says each panel has. Read after the verification
     # above, so every entry here is one whose bytes have just been confirmed.
     artifact_types = {}
@@ -1955,9 +1978,12 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # AND THE CELLS THAT WERE ASKED ABOUT ONE AT A TIME. Run over the approved
     # panels only: a panel nobody approved is already refused, and reporting its
     # unanswered per-cell questions would bury the reason it was refused.
+    inference_reviews, inference_sha = read_decisions(
+        inference_review_path, INFERENCE_REVIEW_COLUMNS, flag, "inference",
+        "INFERENCE_FILE_UNREADABLE", "INFERENCE_SCHEMA_INCOMPLETE")
     inference_held, inference_rejected = inference_contract_failures(
         run_dir, ledger_rows, machine,
-        load_inference_reviews(inference_review_path, flag), reviewers, flag,
+        inference_reviews, reviewers, flag,
         today=today, panels=set(approved))
     for pid in sorted(inference_held):
         approved.pop(pid, None)
@@ -2095,7 +2121,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     keep["Review_Subject_SHA256"] = [
         _s(approved[p].get("Review_Subject_SHA256")) for p in keep["Run_Panel_ID"]]
     return Verdict("FINALIZED", "", problems, approved, keep, blocked_count,
-                   unstated, rejected_count, run_stamp_sha)
+                   unstated, rejected_count, run_stamp_sha, review_sha,
+                   inference_sha)
 
 
 def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
@@ -2154,12 +2181,16 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    # contents, so "which decisions produced this accepted
                    # file" was answerable only by trusting that nobody had
                    # since edited the answer.
-                   "Review_File_SHA256": RB.file_sha256_or_blank(review_path),
+                   # THE BYTES THE VERDICT WAS DECIDED FROM, hashed when they
+                   # were read rather than re-hashed from the path afterwards. A
+                   # save landing between the decision and the stamp used to
+                   # produce an accepted file decided from one review and a hash
+                   # naming another.
+                   "Review_File_SHA256": verdict.review_sha,
                    # The per-cell decisions, by path and by content, for the same
                    # reason. Blank when no run in this batch asked for any.
                    "Inference_Review_File": inference_review_path,
-                   "Inference_Review_File_SHA256":
-                       RB.file_sha256_or_blank(inference_review_path),
+                   "Inference_Review_File_SHA256": verdict.inference_sha,
                    "Problems": problems, "Detail": detail}
         with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
                   "w", encoding="utf-8") as fh:

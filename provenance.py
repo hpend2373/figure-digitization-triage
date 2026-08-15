@@ -330,6 +330,55 @@ EvidenceVerdict = collections.namedtuple("EvidenceVerdict",
                                          "expected problems")
 
 
+#: What two pixel measurements may differ by and still be the same measurement.
+#: FLOAT NOISE, NOT A TOLERANCE: `right - left` and a recorded span are the same
+#: subtraction done twice, and a hundredth of a pixel is not a distance any
+#: reader means. Widening this to absorb a real disagreement would be widening a
+#: constant to make something pass.
+PIXEL_EPSILON = 1e-9
+
+
+def _geometry_problem(left, right, span, target):
+    """Why these support columns, this span and this x cannot all be true, or "".
+
+    Three relations, and the reader satisfies all three on every one of
+    publication 397's line marks - measured before this was made a refusal,
+    because a consistency check nobody has run against a real figure is a
+    prediction rather than a check:
+
+        one column     span == |support - x|      the carry distance
+        two columns    left < x < right           they BRACKET the value
+        two columns    span == right - left       the gap they bracket
+
+    Returns "" when the fields are not all numbers: an unparseable field is
+    somebody else's finding, reported where it is read.
+    """
+    try:
+        span_px, target_px = float(span), float(target)
+        left_px = float(left) if left else None
+        right_px = float(right) if right else None
+    except (TypeError, ValueError):
+        return ""
+    if left_px is None or right_px is None:
+        return ""
+    if left_px == right_px:
+        want = abs(left_px - target_px)
+        if abs(span_px - want) > PIXEL_EPSILON:
+            return ("the mark was read from column %s and sits at %s, which is "
+                    "%s away, and it records a span of %s"
+                    % (left, target, want, span))
+        return ""
+    if not left_px < target_px < right_px:
+        return ("the mark sits at %s and its supports are %s and %s, which do "
+                "not bracket it - an interpolation is between two columns and "
+                "this is not between them" % (target, left, right))
+    want = right_px - left_px
+    if abs(span_px - want) > PIXEL_EPSILON:
+        return ("the mark was measured between %s and %s, a gap of %s, and it "
+                "records a span of %s" % (left, right, want, span))
+    return ""
+
+
 def expected_line_style_methods(mark):
     """The three methods a LINE_MONO_STYLE mark's own evidence implies.
 
@@ -370,6 +419,7 @@ def expected_line_style_methods(mark):
     left = field("Value_Support_Left_Px")
     right = field("Value_Support_Right_Px")
     span = field("Value_Span_Px")
+    target = field("x")
     if not left and not right:
         # No ink either side: the fit produced the number, whatever else the row
         # says about spans and occlusions.
@@ -384,6 +434,14 @@ def expected_line_style_methods(mark):
                         "Value_Span_Px, so a value read off the ink cannot be "
                         "told from one carried sideways to it"
                         % (left or right))
+    elif _geometry_problem(left, right, span, target):
+        # THE FIELDS HAVE TO AGREE WITH EACH OTHER. Each was read on its own -
+        # is there a support, are there two, is the span zero - and a mark whose
+        # numbers are internally impossible answered every one of those
+        # questions and got a tier. `left = right = 130` beside `x = 140` and
+        # `span = 0` re-derived as DIRECT_CURVE_INK at R0, and it is a ten-pixel
+        # carry: the same downgrade v7.73 found on 397, in the general form.
+        problems.append(_geometry_problem(left, right, span, target))
     elif left and right and left != right:
         cause = field("Occlusion_Cause")
         if cause in OCCLUSION_CAUSES:

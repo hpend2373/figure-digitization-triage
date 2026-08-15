@@ -419,6 +419,59 @@ check("  and a mark whose two columns give a cause nobody prices is incomplete t
       == "METHOD_EVIDENCE_INCOMPLETE")
 
 print()
+print("the support columns, the span and the x have to agree with each other")
+# v7.79. Each field was read on its own - is there a support, are there two, is
+# the span zero - so a mark whose numbers are internally impossible answered every
+# question and got a tier. This is the general form of the nine one-sided carries
+# v7.73 found on 397: there the SPAN was ignored, here the span is believed
+# without checking it against the columns and the value's own x.
+_geo = dict(line_style_source="MEASURED", x="140",
+            Value_Support_Left_Px="130", Value_Support_Right_Px="130",
+            Value_Span_Px="10", Occlusion_Cause="NONE",
+            Errorbar_Stem_Confirmed="TRUE")
+check("a one-sided support at a distance is a carry, and its span says so",
+      P.expected_line_style_methods(_geo).expected["Value_Method"]
+      == "EXTRAPOLATED_CURVE_INK"
+      and not P.expected_line_style_methods(_geo).problems,
+      "%s" % (P.expected_line_style_methods(_geo),))
+check("  and the same columns claiming a span of zero are refused, not read as "
+      "a direct observation",
+      "10" in " ".join(P.expected_line_style_methods(
+          dict(_geo, Value_Span_Px="0")).problems)
+      and "Value_Method" not in P.expected_line_style_methods(
+          dict(_geo, Value_Span_Px="0")).expected,
+      "%s" % (P.expected_line_style_methods(dict(_geo, Value_Span_Px="0")),))
+_bracket = dict(_geo, Value_Support_Left_Px="120",
+                Value_Support_Right_Px="160", Value_Span_Px="40",
+                Occlusion_Cause="ERRORBAR_STEM", Local_Stroke_Px="6",
+                Expected_Dash_Gap_Px="0")
+check("two columns that bracket the value and match their own gap are read",
+      P.expected_line_style_methods(_bracket).expected.get("Value_Method")
+      and not P.expected_line_style_methods(_bracket).problems,
+      "%s" % (P.expected_line_style_methods(_bracket),))
+check("  while a span narrower than the gap it claims to cross is refused",
+      P.expected_line_style_methods(
+          dict(_bracket, Value_Span_Px="2")).problems,
+      "a 40px gap was priced as a 2px interpolation")
+check("  and supports that do not bracket the value are not an interpolation",
+      P.expected_line_style_methods(
+          dict(_bracket, Value_Support_Left_Px="150",
+               Value_Support_Right_Px="190", Value_Span_Px="40")).problems,
+      "the value sits outside its own supports and was interpolated anyway")
+check("  including the boundary: a support ON the value does not bracket it",
+      P.expected_line_style_methods(
+          dict(_bracket, Value_Support_Left_Px="140",
+               Value_Support_Right_Px="180", Value_Span_Px="40")).problems)
+# AND THE EPSILON IS FLOAT NOISE, NOT A TOLERANCE. `right - left` and a recorded
+# span are the same subtraction done twice; a pixel is a disagreement.
+check("a hundredth of a pixel is the same measurement and a whole one is not",
+      not P.expected_line_style_methods(
+          dict(_bracket, Value_Span_Px="40.0000000001")).problems
+      and P.expected_line_style_methods(
+          dict(_bracket, Value_Span_Px="41")).problems
+      and P.PIXEL_EPSILON < 1e-6)
+
+print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

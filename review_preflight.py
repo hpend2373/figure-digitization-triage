@@ -33,6 +33,7 @@ fail the preflight. Pass `--require-all-values` when a batch is only acceptable
 whole. Nothing here writes to the run.
 """
 import argparse
+import collections
 import csv
 import json
 import os
@@ -238,20 +239,23 @@ def disagreements(first, second):
     agreeing.
     """
     def verdicts(path):
-        out, twice = {}, []
+        out, seen = {}, collections.Counter()
         for _, r in _read(path, FIN.inference_review_columns()).iterrows():
             iid = _s(r.get("Inference_ID"))
-            if iid in out:
-                twice.append(iid)
+            seen[iid] += 1
             out[iid] = _s(r.get("Inference_Confirmed")).upper()
-        return out, sorted(set(twice))
+        return out, {iid: n for iid, n in seen.items() if n > 1}
 
     one, dup_one = verdicts(first)
     two, dup_two = verdicts(second)
-    out = [(iid, "(answered %d times)" % (1 + dup_one.count(iid)), "")
-           for iid in dup_one]
-    out += [(iid, "", "(answered %d times)" % (1 + dup_two.count(iid)))
-            for iid in dup_two]
+    # COUNTED, not "at least twice". The first version deduplicated the list of
+    # duplicates and then counted occurrences IN THAT LIST, so three answers to
+    # one cell reported as two - a number that is wrong in the direction of
+    # looking smaller.
+    out = [(iid, "(answered %d times)" % n, "")
+           for iid, n in sorted(dup_one.items())]
+    out += [(iid, "", "(answered %d times)" % n)
+            for iid, n in sorted(dup_two.items())]
     for iid in sorted(set(one) | set(two)):
         if iid in dup_one or iid in dup_two:
             continue                  # already reported, and its verdict is moot

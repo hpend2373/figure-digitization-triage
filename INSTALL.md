@@ -5493,6 +5493,57 @@ gives `REVIEW_FILE_UNREADABLE` and a filename.
     the preflight not passing the manifest directory   1
     a malformed decision file raising                  1
 
+## v7.79 — the evidence has to agree with itself, and the hash is of the bytes that were read
+
+**The verifier read each field on its own.** Is there a support, are there two,
+is the span zero — every question answered separately, so a mark whose numbers
+are internally impossible answered all of them and got a tier:
+
+    x = 140, left = right = 130, span = 0   ->  DIRECT_CURVE_INK at R0
+
+which is a ten-pixel carry. That is the general form of the nine one-sided
+carries v7.73 found on 397: there the span was ignored, here the span is
+believed without checking it against the columns and the value's own x. Three
+relations now have to hold, and `_geometry_problem` refuses the mark when one
+does not:
+
+    one column     span == |support - x|      the carry distance
+    two columns    left < x < right           they BRACKET the value
+    two columns    span == right - left       the gap they bracket
+
+Measured before it was made a refusal, because a consistency check nobody has run
+against a real figure is a prediction: **all 18 of publication 397 figure 1's
+marks satisfy all three exactly.** `PIXEL_EPSILON` is 1e-9 and is float noise -
+`right - left` and a recorded span are the same subtraction done twice - not a
+tolerance; a scenario pins that a hundredth of a pixel passes and a whole one
+does not.
+
+**And the stamp hashed the decision files again, after deciding from them.**
+`validate_finalization` read them; `finalize` re-opened the paths to hash. A
+spreadsheet autosave landing in between produced an accepted file decided from
+one set of decisions and a `Review_File_SHA256` naming another — the exact
+question the hash exists to answer, answered wrong, with nothing in the run
+saying so. `read_decisions` now hashes the bytes and parses THOSE bytes, and the
+verdict carries both hashes out to the stamp.
+
+Both ends of the window are scenarios rather than claims: one lands a save the
+moment the file has been read, the other lands it between the hash and the parse
+by giving the loader a `hashlib` that saves when it hashes. The second is what
+makes parsing from the bytes rather than from the path an observable property
+instead of a comment.
+
+`disagreements()` also counts duplicates properly: it deduplicated the list of
+duplicates and then counted occurrences in that list, so three answers to one
+cell reported as two.
+
+    reverted                                          scenarios that fail
+    the geometry of the evidence not checked           6
+    supports need not bracket the value                2
+    the span need not match the gap                    2
+    the one-sided carry distance not checked           2
+    the stamp hashing the path again after deciding    1
+    parsing from the path, not the hashed bytes        1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

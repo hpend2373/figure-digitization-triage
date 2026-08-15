@@ -258,7 +258,12 @@ def _style_evidence(row):
                                 "RESTORED_LINE_PATTERN_GAP": "NONE"}
                .get(method, "MIXED"))
     if method == "NONLOCAL_INTERPOLATION":
-        row.update(Value_Span_Px=40, Local_Stroke_Px=2)
+        # THE SUPPORTS MOVE WITH THE SPAN. From v7.79 the verifier checks that
+        # the two columns bracket the value and that the span is the gap between
+        # them, so a fixture that widened the span alone described a mark no
+        # reader can produce.
+        row.update(Value_Support_Left_Px=x - 20, Value_Support_Right_Px=x + 20,
+                   Value_Span_Px=40, Local_Stroke_Px=2)
 
 
 def fresh_run(name, **over):
@@ -1595,6 +1600,19 @@ check("a mark missing the evidence for an axis refuses the value on it",
 check("  and the refusal says which measurement is missing",
       "Value_Span_Px" in _mark_detail_at(_edit_dir, "METHOD_EVIDENCE_INCOMPLETE"),
       "%s" % _mark_detail_at(_edit_dir, "METHOD_EVIDENCE_INCOMPLETE"))
+# AND THE GEOMETRY OF THE EVIDENCE IS CHECKED, not only its presence. v7.79. A
+# mark whose support columns, span and x cannot all be true re-derived a method
+# from fields that contradict each other - the general form of the nine carries
+# v7.73 found, and reachable from a foreign producer with every hash correct.
+_held_e, _seen_e = _edited_marks(
+    lambda m: m.update(Value_Support_Left_Px=float(m["x"]) - 10,
+                       Value_Support_Right_Px=float(m["x"]) - 10,
+                       Value_Span_Px=0),
+    restamp=True, rebind=True)
+check("a mark ten pixels away claiming a span of zero is refused, not read as a "
+      "direct observation",
+      _held_e == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_e,
+      "%s" % _seen_e)
 # A SCHEMA THIS MODULE CANNOT JOIN IS NOT A SCHEMA IT MAY FINALIZE. v7.75. Every
 # check above was conditional on the producer's own choice of schema: a run
 # written to `mark-data/1` skipped the join, the numbers and the cell silently
@@ -1753,6 +1771,20 @@ check("a reviewer who answered one cell twice is reported, not silently merged",
       any("answered 2 times" in b
           for _iid, _a, b in PF.disagreements(_r3_cells, _twice)),
       "%s" % PF.disagreements(_r3_cells, _twice))
+# AND THE COUNT IS THE COUNT. It deduplicated the duplicates and then counted
+# occurrences in that list, so three answers to one cell reported as two - wrong
+# in the direction of looking smaller.
+_thrice = os.path.join(_R3_DIR, "answered_thrice.csv")
+with open(_thrice, "w", newline="", encoding="utf-8") as _fh:
+    _w4 = csv.writer(_fh)
+    _w4.writerow(FIN.inference_review_columns())
+    for _v in ("CONFIRMED", "REJECTED", "CONFIRMED"):
+        _r = _answer(_ids3[0], _v)
+        _w4.writerow([_r.get(c, "") for c in FIN.inference_review_columns()])
+check("  and three answers are reported as three",
+      any("answered 3 times" in b
+          for _iid, _a, b in PF.disagreements(_r3_cells, _thrice)),
+      "%s" % PF.disagreements(_r3_cells, _thrice))
 # AND IT SIGNS NOTHING. A preflight that finalizes is not a preflight, and a
 # program that fills in a confirmation is the one failure this package exists to
 # prevent - so the claim is checked the only way it can be: nothing in the run
@@ -1893,6 +1925,109 @@ check("  and neither does the decision function inside the finalizer",
       _fingerprint(_R3_DIR) == _before,
       "validate_finalization changed %s"
       % sorted(set(_fingerprint(_R3_DIR).items()) ^ set(_before.items())))
+
+print()
+print("the hash on the stamp is the hash of the decisions that were read")
+# v7.79. `validate_finalization` read the review files and `finalize` hashed the
+# PATHS afterwards, so a spreadsheet autosave landing between the decision and
+# the stamp produced an accepted file decided from one set of decisions and a
+# `Review_File_SHA256` naming another - the exact question the hash exists to
+# answer, answered wrong, with nothing in the run saying so.
+#
+# Observed by making the race happen: the loader writes into the file the moment
+# it has been read, which is what a save landing in that window does.
+_race_dir, _ = fresh_run("run_race")
+_race_review = os.path.join(_race_dir, "value_review.csv")
+_race_q = pd.read_csv(os.path.join(_race_dir, "review_queue.csv"),
+                      dtype=object).fillna("")
+review([row(Review_Subject_SHA256=_race_q.loc[0, "Review_Subject_SHA256"])],
+       path=_race_review)
+_read_bytes = RB.file_sha256(_race_review)
+_real_read_decisions = FIN.read_decisions
+
+
+def _read_then_save(path, *a, **kw):
+    out = _real_read_decisions(path, *a, **kw)
+    if path == _race_review:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("\n")            # an autosave, landing in the window
+    return out
+
+
+try:
+    FIN.read_decisions = _read_then_save
+    _raced = FIN.finalize(_race_dir, review_path=_race_review,
+                          run_date="2026-08-06",
+                          today=datetime.date(2026, 8, 6))
+finally:
+    FIN.read_decisions = _real_read_decisions
+_race_stamp = json.load(open(os.path.join(_race_dir, "finalize_stamp.json"),
+                             encoding="utf-8"))
+check("a save landing between the decision and the stamp does not change what "
+      "the stamp says was read",
+      _raced["status"] == "FINALIZED"
+      and _race_stamp["Review_File_SHA256"] == _read_bytes
+      and RB.file_sha256(_race_review) != _read_bytes,
+      "stamp %s / read %s / on disk %s"
+      % (_race_stamp["Review_File_SHA256"][:12], _read_bytes[:12],
+         RB.file_sha256(_race_review)[:12]))
+# AND THE WINDOW IS CLOSED AT BOTH ENDS. Above, the save lands after the read;
+# here it lands between the HASH and the PARSE, which is the window that exists
+# only inside the loader. Hashing the bytes and then re-opening the path would
+# decide from a file nobody hashed - the same defect the other way round.
+_race2_dir, _ = fresh_run("run_race2")
+_race2_review = os.path.join(_race2_dir, "value_review.csv")
+_race2_q = pd.read_csv(os.path.join(_race2_dir, "review_queue.csv"),
+                       dtype=object).fillna("")
+review([row(Review_Subject_SHA256=_race2_q.loc[0, "Review_Subject_SHA256"])],
+       path=_race2_review)
+_race2_bytes = RB.file_sha256(_race2_review)
+
+
+class _SaveOnHash:
+    """`hashlib`, with an autosave landing the instant the bytes are hashed."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def sha256(self, data=b""):
+        if data and _race2_review in getattr(self, "_armed", [_race2_review]):
+            review([row(Review_Subject_SHA256=_race2_q.loc[
+                0, "Review_Subject_SHA256"], Reviewer_ID="RV_NOBODY")],
+                path=_race2_review)
+        return self._real.sha256(data)
+
+
+_real_hashlib = FIN.hashlib
+try:
+    FIN.hashlib = _SaveOnHash(_real_hashlib)
+    _raced2 = FIN.finalize(_race2_dir, review_path=_race2_review,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+finally:
+    FIN.hashlib = _real_hashlib
+check("and the decisions are parsed from the bytes that were hashed, not from "
+      "the path again",
+      _raced2["status"] == "FINALIZED"
+      and json.load(open(os.path.join(_race2_dir, "finalize_stamp.json"),
+                         encoding="utf-8"))["Review_File_SHA256"]
+      == _race2_bytes,
+      "%s / stamp %s / hashed %s"
+      % (_raced2["status"],
+         json.load(open(os.path.join(_race2_dir, "finalize_stamp.json"),
+                        encoding="utf-8"))["Review_File_SHA256"][:12],
+         _race2_bytes[:12]))
+check("  and the per-cell answers are hashed the same way, when there are any",
+      FIN.validate_finalization(
+          _R3_DIR, review_path=_r3_review, inference_review_path=_r3_cells,
+          today=datetime.date(2026, 8, 6)).inference_sha
+      == RB.file_sha256(_r3_cells),
+      "%s" % FIN.validate_finalization(
+          _R3_DIR, review_path=_r3_review, inference_review_path=_r3_cells,
+          today=datetime.date(2026, 8, 6)).inference_sha)
 
 print()
 print("an approval is a person, looking at this extraction, saying so")

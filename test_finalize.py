@@ -1766,8 +1766,13 @@ check("  and the two are R4 and R0, which is why the difference matters",
       PROV.value_tier("EXTRAPOLATED_CURVE_INK") == "R4"
       and PROV.value_tier("DIRECT_CURVE_INK") == "R0")
 check("  and a reader the registry cannot re-derive is left to the matrix",
-      PROV.evidence_failure("BOX_VIOLIN", dict(anything=1),
-                            dict(Value_Method="BOX_GEOMETRY")) == ("", ""))
+      PROV.evidence_failure("BAR_MONO", dict(anything=1),
+                            dict(Value_Method="BAR_OUTLINE_CENTER"))
+      == ("", "")
+      # ...which from v7.91 is only the two with a durable artifact of their
+      # own. Every reader whose values join to raw marks re-derives now.
+      and set(PROV.EVIDENCE_VERIFIERS) == set(PROV.MARK_JOIN_REQUIRED),
+      "%s" % sorted(PROV.EVIDENCE_VERIFIERS))
 
 print()
 print("the join is to a cell and a number, not only to a method")

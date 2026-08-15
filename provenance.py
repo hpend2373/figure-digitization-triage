@@ -1106,6 +1106,116 @@ def _nearest_anchor_problems(field, number, context):
     return []
 
 
+def expected_box_violin_methods(mark, context=None):
+    """The three methods a BOX_VIOLIN mark's own evidence implies.
+
+    The last of the five join readers, and the one whose evidence is the most
+    literal: five horizontal lines, three of them wide enough to be the box.
+    The reader refuses a panel that does not show all five - a violin with a
+    median dot is not a five-number summary - so the verifier's job is to
+    re-derive that refusal from what was recorded rather than to trust that it
+    happened.
+
+        identity     `DECLARED_SINGLE_SERIES`, and R1 rather than R0 however
+                     carefully the quartiles were measured: nothing about a box
+                     says which series it is. Checkable in one way that matters -
+                     the run must declare exactly ONE series for the panel, or
+                     "one series was declared" is not true
+        value        the three WIDE lines are the quartiles and the two narrow
+                     ones the whisker caps, and each of the five numbers is its
+                     own row through the panel's axis
+        dispersion   `DIRECT_BOX_GEOMETRY`: the box IS the spread, so there is
+                     nothing else it could be - and the quartiles have to be in
+                     order for it to be one
+    """
+    import mark_readers as MR                                      # noqa: E402
+
+    def field(name):
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    def number(name):
+        return finite_number(field(name))
+
+    def rows(name):
+        out = []
+        for piece in field(name).split(";"):
+            if piece.strip():
+                out.append(finite_number(piece))
+        return out
+
+    out, problems = {}, []
+    declared = (context or {}).get("Series_Discriminants")
+    if declared is None:
+        problems.append("this run's series declarations did not reach the "
+                        "check, so a single-series claim cannot be re-derived")
+    elif len(declared) != 1:
+        problems.append("the mark claims one series was declared and this run "
+                        "declares %d for the panel (%s); nothing about a box "
+                        "says which of them it is"
+                        % (len(declared), ", ".join(sorted(declared)) or "none"))
+    else:
+        out["Identity_Method"] = "DECLARED_SINGLE_SERIES"
+    definition = field("Marker_Definition").upper()
+    summary = field("Summary_Type").upper()
+    line_rows, widths = rows("Box_Line_Rows_Px"), rows("Box_Line_Widths_Px")
+    axis = MR.calibration_from_record((context or {}).get("Y_Calibration"))
+    five = [("whisker_lower", number("whisker_lower")),
+            ("q1", number("q1")), ("median", number("median")),
+            ("q3", number("q3")), ("whisker_upper", number("whisker_upper"))]
+    missing = [name for name, value in five if value is None]
+    if definition != "BOX_OVERLAY" or summary != "MEDIAN_IQR_RANGE":
+        problems.append("the mark gives its Marker_Definition as %s and its "
+                        "Summary_Type as %s, and this reader emits a box "
+                        "overlay read as a median with an IQR and a range"
+                        % (definition or "nothing", summary or "nothing"))
+    elif missing:
+        problems.append("the mark records no %s, so the summary it reports is "
+                        "not the five numbers this reader emits"
+                        % ", ".join(missing))
+    elif len(line_rows) != 5 or None in line_rows or len(widths) != 5:
+        problems.append("the mark records %d line rows and %d widths, and this "
+                        "reader emits a row only when it can see five lines"
+                        % (len(line_rows), len(widths)))
+    elif sum(1 for w in widths if w is not None
+             and w >= MR.BOX_LINE_MIN_WIDTH_PX) != 3:
+        problems.append("the mark records %s as its line widths, and a box is "
+                        "the three lines at least %s wide - a violin with a "
+                        "median dot is not a five-number summary"
+                        % (field("Box_Line_Widths_Px") or "nothing",
+                           MR.BOX_LINE_MIN_WIDTH_PX))
+    elif axis is None:
+        problems.append("this run declares no y calibration for the panel, so "
+                        "what the box's own rows should have read cannot be "
+                        "re-computed")
+    else:
+        paired = sorted(zip(line_rows, widths))
+        box = sorted(row for row, width in paired
+                     if width >= MR.BOX_LINE_MIN_WIDTH_PX)
+        caps = sorted(row for row, width in paired
+                      if width < MR.BOX_LINE_MIN_WIDTH_PX)
+        want = sorted(axis.pixel_to_value(row) for row in line_rows)
+        want_box = sorted(axis.pixel_to_value(row) for row in box)
+        wrong = [name for (name, value), expected in zip(
+            [five[0], five[4]], [want[0], want[-1]]) if _off_by(value, expected)]
+        wrong += [name for (name, value), expected in zip(
+            five[1:4], want_box) if _off_by(value, expected)]
+        if len(caps) != 2 or not (min(box) > min(caps)
+                                  and max(box) < max(caps)):
+            problems.append("the mark's box lines at %s are not between its two "
+                            "cap lines at %s, and a whisker runs outward from "
+                            "the box" % (box, caps))
+        elif wrong:
+            problems.append("the mark's own line rows do not produce its %s "
+                            "under this run's y calibration"
+                            % ", ".join(wrong))
+        else:
+            out["Value_Method"] = "BOX_GEOMETRY"
+            out["Dispersion_Method"] = "DIRECT_BOX_GEOMETRY"
+    problems.extend(_nearest_anchor_problems(field, number, context))
+    return EvidenceVerdict(out, problems)
+
+
 #: Mark type -> the function that re-derives its methods from its own evidence.
 #:
 #: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
@@ -1117,7 +1227,8 @@ def _nearest_anchor_problems(field, number, context):
 EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
                       "BAR_COLOR": expected_bar_colour_methods,
                       "LINE_COLOR": expected_line_colour_methods,
-                      "LINE_MONO": expected_line_mono_methods}
+                      "LINE_MONO": expected_line_mono_methods,
+                      "BOX_VIOLIN": expected_box_violin_methods}
 
 
 def evidence_failure(mark_type, mark, claimed, context=None):

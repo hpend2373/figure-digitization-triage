@@ -6031,6 +6031,41 @@ foreign producers, and no longer for the four readers that re-derive.
     a spread that is half recorded accepted            1
     an undeclared series measured as one anyway        1
 
+## v7.91 — the fifth verifier: every reader that joins to raw marks re-derives now
+
+`BOX_VIOLIN` has the most literal evidence in the package - five horizontal
+lines, three of them wide enough to be the box - and the reader already refuses
+a panel that does not show all five, because a violin with a median dot is not a
+five-number summary. It kept the five NUMBERS and threw the rows away, so the
+refusal was something a checker had to trust rather than re-derive.
+
+`Box_Line_Rows_Px` and `Box_Line_Widths_Px` are on the mark now, and the verifier
+re-derives the whole reading:
+
+    five lines, and exactly three at least BOX_LINE_MIN_WIDTH_PX wide
+    the box between the two caps, because a whisker runs outward from it
+    each of the five numbers being its own row through the panel's axis
+    DECLARED_SINGLE_SERIES only if the run declares exactly ONE series for the
+        panel - nothing about a box says which series it is, so "one was
+        declared" is the claim, and it is checkable
+
+    EVIDENCE_VERIFIERS == MARK_JOIN_REQUIRED
+
+is now true, and a scenario says so: the five readers whose values join to raw
+marks all re-derive their three methods and their numbers from those marks.
+`BAR_MONO` and `SCATTER` are checked through their own durable artifacts -
+`mono_bar_geometry.csv` and the point cloud - which is a different route and not
+a missing one.
+
+    reverted                                          scenarios that fail
+    BOX_VIOLIN having no verifier again                1
+    two declared series buying a single-series claim   1
+    four lines being a five-number summary             1
+    a violin with one wide line being a box            1
+    the box not having to sit between its caps         1
+    the five numbers not recomputed                    1
+    the reader dropping its line rows                  1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -6063,10 +6098,10 @@ foreign producers, and no longer for the four readers that re-derive.
 - the numbers are re-computed from the pixels for `BAR_COLOR` and
   `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
   them yet, because they have no verifier to do it in
-- the methods are RE-DERIVED from the evidence for four readers of the seven.
-  `BOX_VIOLIN` is the last one without a verifier - its five box rows are the
-  evidence - while `BAR_MONO` and `SCATTER` have their own durable artifacts
-  checked instead
+- `BAR_MONO` and `SCATTER` re-derive nothing from their marks: they are checked
+  through `mono_bar_geometry.csv` and the point cloud, which bind the identity
+  route and the association but not the arithmetic - a bar's `Mean` is not
+  re-computed from its own top row the way `BAR_COLOR`'s now is
 - NO PRODUCIBLE DISPERSION METHOD IS BOTH R3 AND ABLE TO REACH THE FINALIZER.
   `grid_engine` refuses any cell whose whisker the reader could not connect, so
   an `UNSTEMMED_CAP` value never survives machine QC; the two R3 methods that

@@ -790,10 +790,10 @@ check("nan and inf are not measurements, in either verifier",
           dict(_geo, Value_Span_Px="nan")).problems
       and _bar_verdict(top_px="nan").problems,
       "%s" % (P_expected_line_style_methods_ctx(dict(_geo, Value_Span_Px="nan")),))
-check("four of the seven readers now re-derive their methods, and the table "
-      "says which",
-      set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR",
-                                    "LINE_COLOR", "LINE_MONO"},
+check("every reader that joins to raw marks now re-derives its methods",
+      set(P.EVIDENCE_VERIFIERS) == set(P.MARK_JOIN_REQUIRED)
+      == {"LINE_MONO_STYLE", "BAR_COLOR", "LINE_COLOR", "LINE_MONO",
+          "BOX_VIOLIN"},
       "%s" % sorted(P.EVIDENCE_VERIFIERS))
 # AND THE JOIN ASKS IT THE SAME WAY IT ASKS THE OTHER ONE. The call site is table
 # driven - `EVIDENCE_VERIFIERS[mark_type]` - so what has to be checked here is
@@ -1003,6 +1003,74 @@ check("  and the numbers are re-computed like every other reader's",
 check("a series this run does not declare cannot be measured as one",
       _mono_verdict(series="S_NOWHERE").problems,
       "%s" % (_mono_verdict(series="S_NOWHERE"),))
+
+print()
+print("the fifth: a box, whose evidence is five lines and their widths")
+# v7.91. The last of the five join readers, and the most literal evidence in the
+# package: five horizontal lines, three of them wide enough to be the box. The
+# reader refuses a panel that does not show all five - a violin with a median
+# dot is not a five-number summary - and the verifier re-derives that refusal
+# from what was recorded rather than trusting that it happened.
+_BOX_AXIS = MR.AxisCalibration.from_points([(450.0, 0.0), (50.0, 100.0)])
+_box_rows = [370.0, 330.0, 274.0, 206.0, 122.0]
+_BOX_CONTEXT = {"Y_Calibration": MR._calibration_record(_BOX_AXIS),
+                "Position_Anchors": {"G0": 200.0, "G1": 400.0},
+                "Series_Discriminants": {"S_ONE": {}}}
+_box = dict(x_label="G0", x="200.0", Marker_Definition="BOX_OVERLAY",
+            Summary_Type="MEDIAN_IQR_RANGE",
+            Box_Line_Rows_Px=";".join(repr(r) for r in _box_rows),
+            Box_Line_Widths_Px="14;26;26;26;14",
+            whisker_lower=repr(_BOX_AXIS.pixel_to_value(370.0)),
+            q1=repr(_BOX_AXIS.pixel_to_value(330.0)),
+            median=repr(_BOX_AXIS.pixel_to_value(274.0)),
+            q3=repr(_BOX_AXIS.pixel_to_value(206.0)),
+            whisker_upper=repr(_BOX_AXIS.pixel_to_value(122.0)))
+
+
+def _box_verdict(**over):
+    return P.expected_box_violin_methods(dict(_box, **over), _BOX_CONTEXT)
+
+
+check("a box of five lines answers all three, and its identity is R1",
+      _box_verdict().expected
+      == {"Identity_Method": "DECLARED_SINGLE_SERIES",
+          "Value_Method": "BOX_GEOMETRY",
+          "Dispersion_Method": "DIRECT_BOX_GEOMETRY"}
+      and not _box_verdict().problems
+      and P.identity_tier("DECLARED_SINGLE_SERIES") == "R1",
+      "%s" % (_box_verdict(),))
+check("  and a panel that declares two series cannot claim one was declared",
+      P.expected_box_violin_methods(
+          _box, dict(_BOX_CONTEXT,
+                     Series_Discriminants={"A": {}, "B": {}})).problems,
+      "%s" % (P.expected_box_violin_methods(
+          _box, dict(_BOX_CONTEXT, Series_Discriminants={"A": {}, "B": {}})),))
+check("four lines are not a five-number summary",
+      _box_verdict(Box_Line_Rows_Px="370.0;330.0;274.0;206.0",
+                   Box_Line_Widths_Px="14;26;26;26").problems,
+      "%s" % (_box_verdict(Box_Line_Rows_Px="370.0;330.0;274.0;206.0",
+                           Box_Line_Widths_Px="14;26;26;26"),))
+check("  and neither is a violin with one wide line through it",
+      "at least" in " ".join(
+          _box_verdict(Box_Line_Widths_Px="14;8;26;8;14").problems)
+      and MR.BOX_LINE_MIN_WIDTH_PX == 20,
+      "%s" % (_box_verdict(Box_Line_Widths_Px="14;8;26;8;14"),))
+check("the box has to sit between its own whisker caps",
+      "not between its two cap lines" in " ".join(
+          _box_verdict(Box_Line_Widths_Px="26;26;26;14;14").problems),
+      "%s" % (_box_verdict(Box_Line_Widths_Px="26;26;26;14;14"),))
+check("every one of the five numbers is its own row through the axis",
+      all(_box_verdict(**{name: "999"}).problems
+          for name in ("whisker_lower", "q1", "median", "q3",
+                       "whisker_upper")),
+      "%s" % (_box_verdict(median="999"),))
+check("  and a box that records no rows records no evidence",
+      _box_verdict(Box_Line_Rows_Px="").problems
+      and "Value_Method" not in _box_verdict(Box_Line_Rows_Px="").expected)
+check("  and one whose panel has no axis cannot be re-computed at all",
+      P.expected_box_violin_methods(
+          _box, {k: v for k, v in _BOX_CONTEXT.items()
+                 if k != "Y_Calibration"}).problems)
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

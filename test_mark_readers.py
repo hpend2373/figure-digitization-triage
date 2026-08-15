@@ -10,6 +10,7 @@ from mark_readers import (AxisCalibration, SeriesSpec, read_line_marker_panel,
                           read_monochrome_marker_panel, read_scatter_panel,
                           summarize_association, read_box_violin_panel,
                           read_panel, to_value_records, MARK_CARRIED,
+                          BOX_LINE_MIN_WIDTH_PX,
                           _one_interior_per_marker, measure_marker_scale)
 
 
@@ -698,6 +699,28 @@ brows = read_box_violin_panel(
     y_calibration=bycal,
 )
 check("three box summaries are found", len(brows) == 3, "got %d" % len(brows))
+# AND EACH ONE KEEPS THE FIVE LINES IT WAS READ FROM. v7.91: the five numbers are
+# a conversion of five pixel rows, and `finalize_batch` re-computes them from the
+# axis the run declared - which it can only do for numbers whose pixels survive.
+# The widths are what say which three lines were the BOX rather than the caps.
+check("every box keeps its five line rows and their widths",
+      all(len(r["Box_Line_Rows_Px"].split(";")) == 5
+          and len(r["Box_Line_Widths_Px"].split(";")) == 5 for r in brows),
+      "%s" % [(r["Box_Line_Rows_Px"], r["Box_Line_Widths_Px"])
+              for r in brows][:1])
+check("  and exactly three of them are wide enough to be the box",
+      all(sum(1 for w in r["Box_Line_Widths_Px"].split(";")
+              if int(w) >= BOX_LINE_MIN_WIDTH_PX) == 3 for r in brows),
+      "%s" % [r["Box_Line_Widths_Px"] for r in brows])
+check("  and the rows reproduce all five numbers under this panel's axis",
+      all(abs(bycal.pixel_to_value(float(row)) - value) < 1e-9
+          for r in brows
+          for row, value in zip(
+              sorted((float(v) for v in r["Box_Line_Rows_Px"].split(";")),
+                     reverse=True),
+              (r["whisker_lower"], r["q1"], r["median"], r["q3"],
+               r["whisker_upper"]))),
+      "%s" % [(r["Box_Line_Rows_Px"], r["median"]) for r in brows][:1])
 berr = []
 for row, want in zip(brows, btruth):
     got5 = [row[k] for k in ("whisker_lower", "q1", "median", "q3", "whisker_upper")]

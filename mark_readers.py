@@ -1116,6 +1116,12 @@ def summarize_association(points, association_type="PEARSON_R"):
                 Ties_Present="TRUE" if ties else "FALSE")
 
 
+#: How wide a line has to be to be part of the BOX rather than a whisker cap.
+#: Named because the verifier re-derives which three of the five lines were the
+#: box, and a second copy of the number would eventually disagree.
+BOX_LINE_MIN_WIDTH_PX = 20
+
+
 def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
                           half_window=18, threshold=100):
     """Read five-number summaries from boxes or box-overlaid violins.
@@ -1141,7 +1147,7 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
         # or a violin with only a median dot, is not convertible to an IQR.
         if len(lines) != 5:
             continue
-        box_lines = [row for row in lines if row[1] >= 20]
+        box_lines = [row for row in lines if row[1] >= BOX_LINE_MIN_WIDTH_PX]
         if len(box_lines) != 3:
             continue
         values = sorted(y_calibration.pixel_to_value(row[0]) for row in lines)
@@ -1150,6 +1156,13 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             order=order, x_label=label, x=float(x),
             whisker_lower=values[0], q1=qvalues[0], median=qvalues[1],
             q3=qvalues[2], whisker_upper=values[-1],
+            # THE FIVE ROWS THE FIVE NUMBERS CAME FROM, and how wide each line
+            # was. The five numbers are a conversion of these; without them a
+            # checker can compare the numbers to each other and not to the
+            # figure, and cannot re-derive which three lines were the BOX -
+            # which is the whole reason a violin with a median dot is refused.
+            Box_Line_Rows_Px=";".join("%r" % row[0] for row in lines),
+            Box_Line_Widths_Px=";".join("%d" % row[1] for row in lines),
             Summary_Type="MEDIAN_IQR_RANGE", Marker_Definition="BOX_OVERLAY",
             # NOTHING ABOUT THE BOX SAYS WHICH SERIES IT IS. This reader takes no
             # series at all: it reads one five-number summary per declared x

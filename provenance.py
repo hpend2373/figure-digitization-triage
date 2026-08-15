@@ -48,6 +48,12 @@ pooled measurement.
 
 import collections
 import math
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 
 TIERS = ("R0", "R1", "R2", "R3", "R4")
 
@@ -336,6 +342,23 @@ EvidenceVerdict = collections.namedtuple("EvidenceVerdict",
                                          "expected problems")
 
 
+def _off_by(recorded, expected):
+    """Is this number NOT the one the arithmetic produces?
+
+    Compared exactly, up to the same float noise the pixel geometry allows.
+    Both sides are the same formula on the same numbers - the reader ran
+    `pixel_to_value` at read time and this runs it again on the calibration the
+    run declared - so a difference is a different measurement, not a rounding.
+    Scaled by the magnitude, because an axis in millilitres and an axis in
+    milliseconds do not share an absolute tolerance.
+
+    Both arguments are numbers by the time this is called: every caller has
+    already refused a mark that is missing one, and a `None` here would be this
+    function inventing a comparison rather than making one.
+    """
+    return abs(recorded - expected) > PIXEL_EPSILON * max(1.0, abs(expected))
+
+
 def finite_number(value):
     """`value` as a float, or None if it is not one - and NaN is not one.
 
@@ -421,7 +444,7 @@ def support_shape(left, right, span, target):
     return "TWO_COLUMNS", ""
 
 
-def expected_line_style_methods(mark):
+def expected_line_style_methods(mark, context=None):
     """The three methods a LINE_MONO_STYLE mark's own evidence implies.
 
     RE-DERIVED, not read. The matrix says which methods a reader COULD emit; this
@@ -430,6 +453,10 @@ def expected_line_style_methods(mark):
     record already, because `line_style_mono` had to measure it to decide - so
     nothing new is trusted, and a value row claiming a cheaper method than its own
     ink supports has no way through.
+
+    `context` is the panel's verified envelope, and this reader does not use it:
+    a curve's value is read off ink at a column, and the mark records the columns
+    rather than a pixel row this module could re-calibrate. `BAR_COLOR`'s does.
 
     TOTAL from v7.76: every axis ends with an expectation or with a problem, and
     never with silence. Until then the function returned only what it could answer
@@ -505,7 +532,7 @@ def expected_line_style_methods(mark):
     return EvidenceVerdict(out, problems)
 
 
-def expected_bar_colour_methods(mark):
+def expected_bar_colour_methods(mark, context=None):
     """The three methods a BAR_COLOR mark's own evidence implies.
 
     The second verifier, and the reader worth doing next: `BAR_COLOR` reaches
@@ -547,6 +574,18 @@ def expected_bar_colour_methods(mark):
         return finite_number(field(name))
 
     out, problems = {}, []
+    # WHAT THE PIXELS SHOULD HAVE READ, under the calibration the run declared.
+    # Not the artifact's own copy of it: `finalize_batch` hands the envelope it
+    # re-derived from the verified manifests, so this is the figure's axis
+    # rather than the producer's claim about it.
+    # IMPORTED HERE, not at the top: `mono_bar_geometry` imports this module and
+    # `mark_readers` imports that one, so a module-level import closes a cycle
+    # and leaves whichever gets there first half-built. The conversion lives in
+    # `mark_readers` because that is where the calibration is fitted, and one
+    # copy of `slope * pixel + intercept` is the point - a second one would be
+    # wrong on a log axis eventually.
+    import mark_readers as MR                                      # noqa: E402
+    axis = MR.calibration_from_record((context or {}).get("Y_Calibration"))
     overlap, overlap_px = field("mask_overlap"), number("mask_overlap")
     if not overlap or overlap_px is None or overlap_px < 0 \
             or overlap_px != int(overlap_px):
@@ -585,6 +624,21 @@ def expected_bar_colour_methods(mark):
                         "(%s) and its outline centre is a different row (%s "
                         "against %s), so the number did not come from the "
                         "outline centre it claims" % (at_fill, top, fill))
+    elif axis is None:
+        # THE ARITHMETIC IS THE CLAIM. Without the axis this module can compare
+        # the mark's numbers to each other and not to the figure, and "the two
+        # numbers I made up are consistent" is not evidence that a pixel row was
+        # converted to a value.
+        problems.append("this run declares no y calibration for the panel, so "
+                        "what the mark's own pixel rows should have read cannot "
+                        "be re-computed")
+    elif _off_by(mean, axis.pixel_to_value(top)) \
+            or _off_by(at_fill, axis.pixel_to_value(fill)):
+        problems.append("the mark's pixel rows do not produce its numbers under "
+                        "this run's y calibration: %s reads %s and the mark says "
+                        "%s; %s reads %s and the mark says %s"
+                        % (top, axis.pixel_to_value(top), mean,
+                           fill, axis.pixel_to_value(fill), at_fill))
     else:
         out["Value_Method"] = "BAR_OUTLINE_CENTER"
     stem = field("Errorbar_Stem_Confirmed").upper()
@@ -593,10 +647,23 @@ def expected_bar_colour_methods(mark):
         problems.append("the mark does not say whether a stem connected its cap "
                         "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
                         "cannot be re-derived" % (stem or "blank"))
-    elif stem == "TRUE" and (cap is None or spread is None):
+    elif stem == "TRUE" and (cap is None or spread is None or top is None):
         problems.append("the mark says a stem connected its cap and records no "
                         "%s for it to have measured"
-                        % ("cap_px" if cap is None else "dispersion"))
+                        % ("cap_px" if cap is None else
+                           "dispersion" if spread is None else "top_px"))
+    elif stem == "TRUE" and axis is None:
+        problems.append("this run declares no y calibration for the panel, so "
+                        "what the cap this mark followed should have measured "
+                        "cannot be re-computed")
+    elif stem == "TRUE" and _off_by(
+            spread, abs(axis.pixel_to_value(cap) - axis.pixel_to_value(top))):
+        problems.append("the cap at row %s and the bar top at row %s are %s "
+                        "apart under this run's y calibration, and the mark "
+                        "records a dispersion of %s"
+                        % (cap, top,
+                           abs(axis.pixel_to_value(cap)
+                               - axis.pixel_to_value(top)), spread))
     elif stem == "TRUE":
         out["Dispersion_Method"] = "DIRECT_CONNECTED_CAP"
     elif cap is None and spread is None:
@@ -633,12 +700,17 @@ EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
                       "BAR_COLOR": expected_bar_colour_methods}
 
 
-def evidence_failure(mark_type, mark, claimed):
+def evidence_failure(mark_type, mark, claimed, context=None):
     """(code, detail) for a mark whose evidence does not support its methods.
 
     `claimed` is the value row's three fields. Blank on either side is a failure:
     evidence that says nothing does not support a claim, which is the shape two
     earlier joins had to learn twice.
+
+    `context` is the panel's envelope AS THIS MODULE RE-DERIVED IT from the
+    verified manifests, not the artifact's own copy: a verifier that recomputed a
+    mark's numbers under the producer's calibration would be checking the
+    artifact against itself.
 
     Two codes, because they are two findings and a reviewer acts differently on
     each. `METHOD_CONTRADICTS_EVIDENCE` says the mark's own measurements come to a
@@ -650,7 +722,7 @@ def evidence_failure(mark_type, mark, claimed):
     verifier = EVIDENCE_VERIFIERS.get(str(mark_type or "").strip().upper())
     if verifier is None:
         return "", ""
-    verdict = verifier(mark)
+    verdict = verifier(mark, context)
     wrong = []
     for field, want in sorted(verdict.expected.items()):
         got = str(claimed.get(field, "") or "").strip()

@@ -1469,7 +1469,9 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
                  % (_s(row.get("Cell_Key")) or "(blank)", wanted))
             withheld.add(pid)
             continue
-        code, why = PROV.evidence_failure(mark_of.get(pid), mark, row)
+        code, why = PROV.evidence_failure(
+            mark_of.get(pid), mark, row,
+            context=expected.get(pid, {}).get("envelope"))
         if code:
             flag(where, code, why)
             withheld.add(pid)

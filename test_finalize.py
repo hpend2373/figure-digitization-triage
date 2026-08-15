@@ -1345,6 +1345,162 @@ check("  and the stamp says INTERNAL_ERROR, not a figure problem",
       "%s" % json.load(open(os.path.join(_NAN_DIR, "run_stamp.json"),
                             encoding="utf-8")).get("Status"))
 
+
+
+# A REAL BAR_COLOR RUN, end to end. Everything above reads the line fixture; the
+# BAR_COLOR verifier is asked for by `Mark_Type`, so without a bar panel in a
+# real run the finalizer's side of it - the join, the envelope, the calibration
+# it hands the verifier - is exercised by nothing.
+_BAR_TRUTH = json.load(open(os.path.join(HERE, "bar_fixture_truth.json"),
+                            encoding="utf-8"))
+# Copied into the run root, because a panel's `Image_Path` is resolved against
+# `file_root` and the manifest validator refuses one that is not on disk.
+_BAR_IMG = os.path.join(ROOT, "bar_fixture.png")
+shutil.copy(os.path.join(HERE, "bar_fixture.png"), _BAR_IMG)
+_BAR_SHA = RB.file_sha256(_BAR_IMG)
+_BAR_TICKS = ";".join("%s:%s" % (v, px) for v, px in _BAR_TRUTH["ticks"])
+_BAR_SESSIONS = sorted({b["session"] for b in _BAR_TRUTH["bars"]},
+                       key=lambda s: min(b["x_pixel"] for b in _BAR_TRUTH["bars"]
+                                         if b["session"] == s))
+_BAR_ANCHORS = {s: sum(b["x_pixel"] for b in _BAR_TRUTH["bars"]
+                       if b["session"] == s)
+                / len([b for b in _BAR_TRUTH["bars"] if b["session"] == s])
+                for s in _BAR_SESSIONS}
+
+
+def bar_manifests():
+    """The bar fixture declared as a panel: box, ticks, colours and anchors."""
+    x0, x1, y0, y1 = _BAR_TRUTH["panel_box"]
+    return dict(
+        source_figure_manifest=[dict(SOURCE_FIGURES[0], Source_Image=_BAR_IMG,
+                                     Source_Image_SHA256=_BAR_SHA)],
+        figure_manifest=[dict(FIGURES[0], Source_Image=_BAR_IMG,
+                              Image_Resolution_Or_Hash="sha256:" + _BAR_SHA)],
+        grid_definitions=([dict(Grid_ID="G", Factor_Name="ARM", Factor_Level=lv,
+                     Level_Order=i, Note="")
+                for i, lv in enumerate(("SUPINE", "ORTHOSTASIS"))]
+               + [dict(Grid_ID="G", Factor_Name="TIMEPOINT", Factor_Level=s,
+                       Level_Order=i, Note="")
+                  for i, s in enumerate(_BAR_SESSIONS)]),
+        unit_manifest=[dict(UNITS[0], Bar_Top_Definition="OUTLINE_CENTER")],
+        panel_manifest=[dict(PANELS[0], Mark_Type="BAR_COLOR", Image_Path=_BAR_IMG,
+                     Panel_X0=x0, Panel_X1=x1, Panel_Y0=y0, Panel_Y1=y1,
+                     Axis_Y_Ticks=_BAR_TICKS, Baseline_Value="0")],
+        series_manifest=[dict(Panel_ID="P1", Series_ID=sid, Colour_Hex="",
+                              Colour_Tolerance="", Mask_Key=key,
+                              Marker_Shape="", Marker_Fill="", Line_Style="",
+                              Bar_Fill_Pattern="", Factor_Name="ARM",
+                              Factor_Level=sid, Note="")
+                         for sid, key in (("SUPINE", "blue"),
+                                          ("ORTHOSTASIS", "red"))],
+        position_manifest=[dict(Panel_ID="P1", Position_ID=s,
+                                X_Pixel=_BAR_ANCHORS[s], Slot_Index=i,
+                                Display_Order=i, Factor_Name="TIMEPOINT",
+                                Factor_Level=s, Timepoint_Label=s,
+                                Timepoint_Days=i, Note="")
+                           for i, s in enumerate(_BAR_SESSIONS)])
+
+
+_BAR_DIR, _bar_summary = fresh_run("run_bars", **bar_manifests())
+_bar_qc = pd.read_csv(os.path.join(_BAR_DIR, "figure_values_machine_qc.csv"),
+                      dtype=object).fillna("")
+_bar_led = pd.read_csv(os.path.join(_BAR_DIR, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_bar_queue = pd.read_csv(os.path.join(_BAR_DIR, "review_queue.csv"),
+                         dtype=object).fillna("")
+check("the bar fixture runs as a BAR_COLOR panel and produces values",
+      _bar_summary["status"] == "RAN" and len(_bar_qc) == 12
+      and set(_bar_qc["Identity_Method"]) == {"MEASURED_COLOUR"}
+      and set(_bar_qc["Value_Method"]) == {"BAR_OUTLINE_CENTER"},
+      "%s / %d values" % (_bar_summary, len(_bar_qc)))
+
+
+def _bar_join(rows=None, flag_all=False):
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame(rows if rows is not None else _bar_qc.to_dict("records")),
+        _bar_queue.rename(columns={"Panel_ID": "Panel_ID"}), _bar_led, _BAR_DIR,
+        lambda w, c, d: seen.append(c), frames=_verified(_BAR_DIR))
+    return held, seen
+
+
+check("and every one of them passes the join, verifier included",
+      _bar_join() == (set(), []), "%s" % (_bar_join(),))
+# THE VERIFIER IS ASKED, AND IT IS ASKED WITH THE RUN'S OWN CALIBRATION. Both
+# halves matter: a verifier nobody calls is decoration, and one handed no axis
+# cannot re-compute what a pixel row should have read.
+_bar_rows = _bar_qc.to_dict("records")
+check("a bar value whose mark disagrees with it about the spread is refused",
+      "METHOD_CONTRADICTS_MARK" in _bar_join(
+          [dict(_bar_rows[0], Dispersion_Method="NO_DISPERSION")])[1],
+      "%s" % (_bar_join([dict(_bar_rows[0],
+                              Dispersion_Method="NO_DISPERSION")])[1],))
+_bar_env_path = RB.resolve_artifact(
+    _BAR_DIR, _bar_led[_bar_led["Artifact_Type"] == "RAW_MARKS"]
+    .iloc[0]["Artifact_Path"])
+_bar_env = json.load(open(_bar_env_path, encoding="utf-8"))
+check("  and the mark it was checked against carries the pixel rows the numbers "
+      "came from",
+      all(FIN._s(m.get("top_px")) and FIN._s(m.get("fill_top_px"))
+          and FIN._s(m.get("cap_px")) for m in _bar_env["marks"]),
+      "%s" % _bar_env["marks"][0])
+# THE ARITHMETIC, THROUGH THE FINALIZER. A mark whose pixel row no longer
+# produces its number is refused - which is only possible because the finalizer
+# hands the verifier the calibration it re-derived from the verified manifests.
+_bar_edit = os.path.join(ROOT, "bar_marks_edited")
+
+
+def _bar_edited(mutate):
+    shutil.rmtree(_bar_edit, ignore_errors=True)
+    os.makedirs(_bar_edit)
+    shutil.copy(os.path.join(_BAR_DIR, "run_manifest.csv"), _bar_edit)
+    body = json.loads(json.dumps(_bar_env))
+    was = FIN._s(body["marks"][0]["Mark_Record_SHA256"])
+    mutate(body["marks"][0])
+    header = {k: v for k, v in body.items() if k != "marks"}
+    body["marks"] = RB.stamp_marks(
+        [{k: v for k, v in m.items()
+          if k not in ("Mark_Record_SHA256", "Method_Attestation_SHA256")}
+         for m in body["marks"]], header)
+    path = os.path.join(_bar_edit, "P1_marks.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(body, fh, indent=1, sort_keys=True)
+    now = body["marks"][0]
+    rows = [dict(r, Mark_Record_SHA256=now["Mark_Record_SHA256"],
+                 Method_Attestation_SHA256=now["Method_Attestation_SHA256"])
+            if FIN._s(r.get("Mark_Record_SHA256")) == was else dict(r)
+            for r in _bar_rows]
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame(rows), _bar_queue,
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
+                           Artifact_Path=path)]),
+        _bar_edit, lambda w, c, d: seen.append(c),
+        frames=_verified(_bar_edit, os.path.join(_BAR_DIR, "manifests")))
+    return held, seen
+
+
+_held_b, _seen_b = _bar_edited(lambda m: m.update(top_px=float(m["top_px"]) + 6))
+check("a bar whose top row no longer produces its mean is refused by the "
+      "calibration this run declared",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
+_held_b, _seen_b = _bar_edited(lambda m: m.update(cap_px=float(m["cap_px"]) - 9))
+check("  and so is one whose cap is not the distance its dispersion claims",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
+# AND WHEN THE MARK AND THE VALUE AGREE ON A METHOD THE INK DOES NOT SUPPORT,
+# the verifier is the only thing left that can say so - the join compares them to
+# each other and finds nothing. A stem this reader did not confirm beside a cap
+# it measured anyway is the shape `bar_reader` cannot produce, and the artifact
+# says both.
+_held_b, _seen_b = _bar_edited(
+    lambda m: m.update(Errorbar_Stem_Confirmed="FALSE"))
+check("a mark and a value agreeing on a spread the mark's own stem denies is "
+      "refused by the verifier",
+      _held_b == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_b,
+      "%s" % _seen_b)
+
 print()
 print("a value is joined to the mark it was made from, and checked against it")
 # v7.72. The matrix says which methods a reader CAN produce; this says which one

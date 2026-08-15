@@ -1716,6 +1716,26 @@ ASSOCIATION_CARRIED = (
 POINT_DATA_SCHEMA = "figure-digitization-triage/point-data/3"
 
 
+def calibration_from_record(record):
+    """An `AxisCalibration` back from what `_calibration_record` wrote.
+
+    The envelope stores a calibration as three numbers and a scale, because a
+    hash needs text. Anything that wants to USE it - `finalize_batch`
+    re-computing what a mark's pixel row should have read - needs the object
+    again, and rebuilding it here rather than re-implementing
+    `slope * pixel + intercept` at the other end is what keeps the two from
+    drifting on a log axis.
+    """
+    if not isinstance(record, dict):
+        return None
+    try:
+        return AxisCalibration(float(record["slope"]), float(record["intercept"]),
+                               str(record.get("scale") or "LINEAR"),
+                               float(record.get("max_residual") or 0.0))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _calibration_record(cal):
     if cal is None:
         return None

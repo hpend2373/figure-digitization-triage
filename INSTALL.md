@@ -5778,6 +5778,50 @@ queue row somebody would spend an afternoon re-reading by hand.
     nan being a number again                           2
     the writer accepting a NaN into an artifact        3
 
+## v7.85 — the numbers on a bar mark are re-computed from the axis the run declared
+
+v7.84 made the BAR_COLOR verifier total on the FIELDS. It still checked the
+numbers only against each other: a mean of 999 passed as long as it was not
+equal to the fill-edge reading, and a dispersion passed as long as some number
+was there. Every number on a bar mark is a pixel row put through the panel's y
+calibration, and v7.80–v7.82 had already bound that calibration to the mark —
+so the arithmetic can be re-run:
+
+    mean                        == calibration(top_px)
+    mean_if_read_at_fill_edge   == calibration(fill_top_px)
+    dispersion                  == |calibration(cap_px) - calibration(top_px)|
+
+The verifiers now take `(mark, context)`, and `finalize_batch` hands them the
+envelope IT re-derived from the verified manifests — not the artifact's own copy,
+because a verifier recomputing a mark's numbers under the producer's calibration
+would be checking the artifact against itself. A mark with no axis behind it is
+refused rather than compared to itself: "the two numbers I made up agree" is not
+evidence that a pixel row became a value.
+
+`mark_readers.calibration_from_record` rebuilds the calibration OBJECT from the
+three numbers in the envelope, so the conversion exists once. A copied
+`slope * pixel + intercept` is the wrong answer on a log axis, and a scenario
+runs the whole derivation on one.
+
+**And the finalizer's side of this is exercised by a real BAR_COLOR run.** The
+bar fixture is now declared as a panel — box, ticks, mask keys, session anchors —
+and goes through `run_batch` end to end: 12 values, all `MEASURED_COLOUR` /
+`BAR_OUTLINE_CENTER`, all passing the join. Without it the verifier was reached
+only by direct calls, and passing the context could be dropped with nothing to
+notice; that mutation now fails a scenario. Three edits to the artifact, each
+re-stamped and rebound so the marks and the values agree with each other, are
+refused: a top row that no longer produces the mean, a cap that is not the
+distance the dispersion claims, and a stem the mark itself denies.
+
+    reverted                                          scenarios that fail
+    the mean not recomputed from its pixel row         4
+    the dispersion not recomputed from the cap         1
+    a missing calibration assumed away                 1
+    a missing calibration assumed away, spread side    1
+    the finalizer not handing over its context         1
+    a stem needing no top row to measure from          1
+    the log axis converted as a linear one             1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

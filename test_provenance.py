@@ -16,6 +16,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import provenance as P                                            # noqa: E402
+import mark_readers as MR                                          # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -527,84 +528,86 @@ print("the second reader whose methods are re-derived from its own evidence")
 # cells goes into a pool on the strength of three words nothing re-derived. It
 # records enough to re-derive all three, and a verifier is the difference between
 # "this reader could have produced that" and "this mark did".
+# THE NUMBERS ARE THE CALIBRATION'S, not decoration: from v7.85 the verifier
+# re-computes what each pixel row should have read under the y calibration this
+# run declared, so the fixture's means and dispersion are derived here the same
+# way the reader derives them rather than typed.
+_AXIS = MR.AxisCalibration.from_points([(400.0, 60.0), (100.0, 162.3)])
+_BAR_CONTEXT = {"Y_Calibration": MR._calibration_record(_AXIS)}
 _bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
-            top_px="177.5", fill_top_px="180.0", mean="116.76",
-            mean_if_read_at_fill_edge="115.91", cap_px="165.0",
-            dispersion="4.2", Errorbar_Stem_Confirmed="TRUE",
+            top_px="177.5", fill_top_px="180.0",
+            mean=repr(_AXIS.pixel_to_value(177.5)),
+            mean_if_read_at_fill_edge=repr(_AXIS.pixel_to_value(180.0)),
+            cap_px="165.0",
+            dispersion=repr(abs(_AXIS.pixel_to_value(165.0)
+                                - _AXIS.pixel_to_value(177.5))),
+            Errorbar_Stem_Confirmed="TRUE",
             x_label="T0", Position_Assignment="DECLARED_ANCHOR")
+
+
+def _bar_verdict(**over):
+    return P.expected_bar_colour_methods(dict(_bar, **over), _BAR_CONTEXT)
 check("a bar with its own colour, its outline and a stemmed cap answers all three",
-      P.expected_bar_colour_methods(_bar).expected
+      _bar_verdict().expected
       == {"Identity_Method": "MEASURED_COLOUR",
           "Value_Method": "BAR_OUTLINE_CENTER",
           "Dispersion_Method": "DIRECT_CONNECTED_CAP"}
-      and not P.expected_bar_colour_methods(_bar).problems,
-      "%s" % (P.expected_bar_colour_methods(_bar),))
+      and not _bar_verdict().problems,
+      "%s" % (_bar_verdict(),))
 # CONTESTED INK IS NOT EVIDENCE OF IDENTITY. The run drops a mark two declared
 # colours both claim rather than choosing; a producer that kept one is claiming
 # MEASURED_COLOUR for ink that measured as two colours.
 check("a bar another declared colour also claims supports no identity",
-      "Identity_Method" not in P.expected_bar_colour_methods(
-          dict(_bar, mask_overlap=1)).expected
-      and P.expected_bar_colour_methods(dict(_bar, mask_overlap=1)).problems,
-      "%s" % (P.expected_bar_colour_methods(dict(_bar, mask_overlap=1)),))
+      "Identity_Method" not in _bar_verdict(mask_overlap=1).expected
+      and _bar_verdict(mask_overlap=1).problems,
+      "%s" % (_bar_verdict(mask_overlap=1),))
 check("  and a mark that does not say either way is incomplete, not clean",
-      P.expected_bar_colour_methods(dict(_bar, mask_overlap="")).problems)
+      _bar_verdict(mask_overlap="").problems)
 # THE NUMBER CAME FROM THE OUTLINE CENTRE OR IT DID NOT, and the reader records
 # what the fill edge would have read - so the claim is checkable against a second
 # number the same mark carries.
 check("a mean equal to the fill-edge reading did not come from the outline "
       "centre",
-      P.expected_bar_colour_methods(
-          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])).problems
-      and "Value_Method" not in P.expected_bar_colour_methods(
-          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])).expected,
-      "%s" % (P.expected_bar_colour_methods(
-          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])),))
+      _bar_verdict(mean=_bar["mean_if_read_at_fill_edge"]).problems
+      and "Value_Method" not in _bar_verdict(mean=_bar["mean_if_read_at_fill_edge"]).expected,
+      "%s" % (_bar_verdict(mean=_bar["mean_if_read_at_fill_edge"]),))
 check("  while a bar whose outline IS its fill edge is not accused of it",
-      P.expected_bar_colour_methods(
-          dict(_bar, fill_top_px="177.5",
-               mean=_bar["mean_if_read_at_fill_edge"])).expected
-      .get("Value_Method") == "BAR_OUTLINE_CENTER")
+      _bar_verdict(fill_top_px="177.5",
+                   mean_if_read_at_fill_edge=_bar["mean"]).expected
+      .get("Value_Method") == "BAR_OUTLINE_CENTER",
+      "%s" % (_bar_verdict(fill_top_px="177.5",
+                           mean_if_read_at_fill_edge=_bar["mean"]),))
 check("  and another edge definition is refused outright",
-      P.expected_bar_colour_methods(
-          dict(_bar, Bar_Top_Definition="FILL_EDGE")).problems)
+      _bar_verdict(Bar_Top_Definition="FILL_EDGE").problems)
 # THE SPREAD FOLLOWS THE STEM AND THE CAP, which are the two facts the reader
 # decides from.
 check("no cap and no stem is NO_DISPERSION, and this reader has no third answer",
-      P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="FALSE", cap_px=None,
-               dispersion=None)).expected["Dispersion_Method"] == "NO_DISPERSION"
-      and P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="FALSE")).problems,
-      "%s" % (P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="FALSE")),))
+      _bar_verdict(Errorbar_Stem_Confirmed="FALSE", cap_px=None,
+               dispersion=None).expected["Dispersion_Method"] == "NO_DISPERSION"
+      and _bar_verdict(Errorbar_Stem_Confirmed="FALSE").problems,
+      "%s" % (_bar_verdict(Errorbar_Stem_Confirmed="FALSE"),))
 check("  and a stem with nothing measured under it is incomplete",
-      P.expected_bar_colour_methods(dict(_bar, dispersion=None)).problems
-      and P.expected_bar_colour_methods(dict(_bar, cap_px=None)).problems,
-      "%s" % (P.expected_bar_colour_methods(dict(_bar, cap_px=None)),))
+      _bar_verdict(dispersion=None).problems
+      and _bar_verdict(cap_px=None).problems
+      and "Dispersion_Method" not in _bar_verdict(top_px="").expected,
+      "%s" % (_bar_verdict(cap_px=None),))
 check("  and a mark that does not say whether a stem connected cannot answer",
-      P.expected_bar_colour_methods(
-          dict(_bar, Errorbar_Stem_Confirmed="")).problems)
+      _bar_verdict(Errorbar_Stem_Confirmed="").problems)
 # AND A BAR PLACED BY COUNTING IS REFUSED HERE TOO. `grid_engine` refuses a VALUE
 # that admits to counting; a value that drops the column passes that gate, and
 # the mark cannot - it is hashed.
 check("a bar whose x label was counted rather than declared is refused",
-      P.expected_bar_colour_methods(
-          dict(_bar, Position_Assignment="SEQUENTIAL")).problems,
-      "%s" % (P.expected_bar_colour_methods(
-          dict(_bar, Position_Assignment="SEQUENTIAL")),))
+      _bar_verdict(Position_Assignment="SEQUENTIAL").problems,
+      "%s" % (_bar_verdict(Position_Assignment="SEQUENTIAL"),))
 # AND A BAR THAT SITS AT A LABEL AND SAYS NOTHING ABOUT HOW IT GOT THERE IS
 # REFUSED TOO. v7.83 checked the field only when it was filled in, so blanking
 # it was the way past the check - and blanking it on the VALUE is already how a
 # counted label gets past `grid_engine`.
 check("  and so is one that sits at a declared label and says nothing",
-      P.expected_bar_colour_methods(
-          dict(_bar, Position_Assignment="")).problems,
-      "%s" % (P.expected_bar_colour_methods(
-          dict(_bar, Position_Assignment="")),))
+      _bar_verdict(Position_Assignment="").problems,
+      "%s" % (_bar_verdict(Position_Assignment=""),))
 check("  while a panel with no position dimension is not asked for one",
-      not P.expected_bar_colour_methods(
-          dict(_bar, x_label="", Position_Assignment="")).problems)
+      not _bar_verdict(x_label="", Position_Assignment="").problems)
 # EVERY FIELD IT DECIDES FROM IS REQUIRED. A verifier that only refutes can be
 # starved: v7.83 gave all three methods at R0 to a mark with a non-numeric
 # overlap, no fill-edge reading and no cap.
@@ -614,15 +617,13 @@ _starved = dict(mask_overlap="garbage", Bar_Top_Definition="OUTLINE_CENTER",
                 Errorbar_Stem_Confirmed="TRUE", x_label="T0",
                 Position_Assignment="")
 check("a mark that simply omits its evidence answers on no axis at all",
-      not P.expected_bar_colour_methods(_starved).expected
-      and len(P.expected_bar_colour_methods(_starved).problems) == 4,
-      "%s" % (P.expected_bar_colour_methods(_starved),))
+      not P.expected_bar_colour_methods(_starved, _BAR_CONTEXT).expected
+      and len(P.expected_bar_colour_methods(_starved, _BAR_CONTEXT).problems) == 4,
+      "%s" % (P.expected_bar_colour_methods(_starved, _BAR_CONTEXT),))
 check("  and a count that is not a count says nothing about the ink",
-      all("Identity_Method" not in P.expected_bar_colour_methods(
-          dict(_bar, mask_overlap=bad)).expected
+      all("Identity_Method" not in _bar_verdict(mask_overlap=bad).expected
           for bad in ("garbage", "-1", "nan", "inf", "0.5", "")),
-      "%s" % [P.expected_bar_colour_methods(
-          dict(_bar, mask_overlap=bad)).expected.get("Identity_Method")
+      "%s" % [_bar_verdict(mask_overlap=bad).expected.get("Identity_Method")
           for bad in ("garbage", "-1", "nan", "inf", "0.5", "")])
 # NaN IS NOT A NUMBER, and every comparison against it is False - so a geometry
 # that cannot be checked read as a geometry that agrees.
@@ -631,7 +632,7 @@ check("nan and inf are not measurements, in either verifier",
       and P.finite_number("4.5") == 4.5
       and P.expected_line_style_methods(
           dict(_geo, Value_Span_Px="nan")).problems
-      and P.expected_bar_colour_methods(dict(_bar, top_px="nan")).problems,
+      and _bar_verdict(top_px="nan").problems,
       "%s" % (P.expected_line_style_methods(dict(_geo, Value_Span_Px="nan")),))
 check("two of the seven readers now re-derive their methods, and the table says "
       "which",
@@ -645,14 +646,61 @@ _claimed = dict(Identity_Method="MEASURED_COLOUR",
                 Dispersion_Method="DIRECT_CONNECTED_CAP")
 check("a BAR_COLOR mark that cannot answer is incomplete, and one that "
       "disagrees is a contradiction",
-      P.evidence_failure("BAR_COLOR", dict(_bar, mask_overlap=1),
-                         _claimed)[0] == "METHOD_EVIDENCE_INCOMPLETE"
+      P.evidence_failure("BAR_COLOR", dict(_bar, mask_overlap=1), _claimed,
+                         _BAR_CONTEXT)[0] == "METHOD_EVIDENCE_INCOMPLETE"
       and P.evidence_failure(
           "BAR_COLOR", dict(_bar, Errorbar_Stem_Confirmed="FALSE", cap_px=None,
                             dispersion=None),
-          _claimed)[0] == "METHOD_CONTRADICTS_EVIDENCE"
-      and P.evidence_failure("BAR_COLOR", _bar, _claimed) == ("", ""),
+          _claimed, _BAR_CONTEXT)[0] == "METHOD_CONTRADICTS_EVIDENCE"
+      and P.evidence_failure("BAR_COLOR", _bar, _claimed, _BAR_CONTEXT)
+      == ("", ""),
+      "%s" % (P.evidence_failure("BAR_COLOR", _bar, _claimed, _BAR_CONTEXT),))
+# AND WITHOUT THE AXIS IT ANSWERS NOTHING. A verifier handed no calibration can
+# compare the mark's numbers to each other and not to the figure, and "the two
+# numbers I made up agree" is not evidence that a pixel row became a value.
+check("  and a verifier handed no calibration refuses rather than assuming one",
+      P.evidence_failure("BAR_COLOR", _bar, _claimed)[0]
+      == "METHOD_EVIDENCE_INCOMPLETE",
       "%s" % (P.evidence_failure("BAR_COLOR", _bar, _claimed),))
+# THE ARITHMETIC ITSELF. Every number on a bar mark is a pixel row put through
+# the panel's y calibration, and until v7.85 nothing re-computed it: a mean of
+# 999 passed as long as it was not equal to the fill-edge reading.
+check("a mean that is not what its own pixel row reads is refused",
+      "Value_Method" not in _bar_verdict(mean="999").expected
+      and _bar_verdict(mean="999").problems,
+      "%s" % (_bar_verdict(mean="999"),))
+check("  and so is a top_px moved while the mean stays",
+      "Value_Method" not in _bar_verdict(top_px="150.0").expected,
+      "%s" % (_bar_verdict(top_px="150.0"),))
+check("  and a fill-edge reading that is not what the fill edge reads",
+      "Value_Method" not in _bar_verdict(
+          mean_if_read_at_fill_edge="42").expected)
+check("a dispersion that is not the cap-to-top distance is refused",
+      "Dispersion_Method" not in _bar_verdict(dispersion="9.9").expected
+      and "Dispersion_Method" not in _bar_verdict(cap_px="150.0").expected,
+      "%s" % (_bar_verdict(dispersion="9.9"),))
+check("  while the reader's own arithmetic passes on both axes",
+      _bar_verdict().expected["Value_Method"] == "BAR_OUTLINE_CENTER"
+      and _bar_verdict().expected["Dispersion_Method"]
+      == "DIRECT_CONNECTED_CAP")
+# A LOG AXIS IS THE REASON THE CALIBRATION IS REBUILT rather than the formula
+# copied: `slope * pixel + intercept` is the wrong answer on one, and two copies
+# of the conversion are two chances to have only one of them right.
+_LOG = MR.AxisCalibration.from_points([(400.0, 1.0), (100.0, 100.0)], scale="LOG")
+_log_bar = dict(_bar, mean=repr(_LOG.pixel_to_value(177.5)),
+                mean_if_read_at_fill_edge=repr(_LOG.pixel_to_value(180.0)),
+                dispersion=repr(abs(_LOG.pixel_to_value(165.0)
+                                    - _LOG.pixel_to_value(177.5))))
+check("a log axis is re-computed as a log axis",
+      P.expected_bar_colour_methods(
+          _log_bar, {"Y_Calibration": MR._calibration_record(_LOG)}).expected
+      == {"Identity_Method": "MEASURED_COLOUR",
+          "Value_Method": "BAR_OUTLINE_CENTER",
+          "Dispersion_Method": "DIRECT_CONNECTED_CAP"}
+      and "Value_Method" not in P.expected_bar_colour_methods(
+          _log_bar, _BAR_CONTEXT).expected,
+      "%s" % (P.expected_bar_colour_methods(
+          _log_bar, {"Y_Calibration": MR._calibration_record(_LOG)}),))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

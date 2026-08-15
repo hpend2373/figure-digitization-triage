@@ -3776,7 +3776,19 @@ _led = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
 _machine2 = pd.read_csv(os.path.join(_o2, "figure_values_machine_qc.csv"),
                         dtype=object).fillna("")
 # The frames `verify_manifest_inputs` hands the checks, built the same way.
-_FRAMES2 = RB.load_manifests(_s2)
+def _verified_bundle(run_dir, manifest_dir=None):
+    """Manifests plus the run's own verified output rows - the bundle
+    `finalize` hands its contract checks. See `test_finalize._verified`."""
+    frames = RB.load_manifests(manifest_dir
+                               or os.path.join(run_dir, "manifests"))
+    path = os.path.join(run_dir, "run_manifest.csv")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            frames["outputs"] = {"run_manifest.csv": list(csv.DictReader(fh))}
+    return frames
+
+
+_FRAMES2 = _verified_bundle(_o2, _s2)
 _probs = []
 check("a run that copied its evidence in withholds nothing",
       not FIN.identity_contract_failures(_o2, _led, _machine2,
@@ -3880,7 +3892,7 @@ check("an association whose cloud agrees with it is not withheld",
       not FIN.method_contract_failures(
           _assoc, pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
           _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
-          frames=RB.load_manifests(MDIR))
+          frames=_verified_bundle(ODIR, MDIR))
       and not _pt_probs, "%s" % _pt_probs)
 _pt_probs = []
 _lying_assoc = _assoc.copy()
@@ -3890,7 +3902,7 @@ check("and one that disagrees with the cloud it was computed from is refused",
           _lying_assoc,
           pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
           _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
-          frames=RB.load_manifests(MDIR))
+          frames=_verified_bundle(ODIR, MDIR))
       and "METHOD_CONTRADICTS_POINTS" in _pt_probs, "%s" % _pt_probs)
 
 # AND THE ROUTE ON THE VALUE IS CHECKED AGAINST THE FIGURE'S OWN ANSWER. v7.68.
@@ -4111,8 +4123,22 @@ FIN.verify_run_outputs(
     _o2, json.load(open(os.path.join(_o2, "run_stamp.json"), encoding="utf-8")),
     _s2, lambda w, c, d: _probs.append(c), verified=_verified)
 check("verifying the manifests hands the frames on, all twelve of them",
-      set(_verified) == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
+      set(_verified) - {"outputs"}
+      == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
       "%s" % sorted(_verified))
+# AND THE OUTPUTS IT HASHED, as rows. v7.81: `panel_expectations` re-derives the
+# conditions a panel was measured under from `run_manifest.csv`, and it opened
+# that path again after this function had hashed it - the same hash-then-reopen
+# window closed everywhere else.
+check("  and the rows of every output it hashed, so nothing is opened twice",
+      set(_verified.get("outputs", {})) == set(FIN.VERIFIED_OUTPUTS)
+      and [r["Panel_ID"] for r in _verified["outputs"]["run_manifest.csv"]]
+      == list(pd.read_csv(os.path.join(_o2, "run_manifest.csv"),
+                          dtype=object).fillna("")["Panel_ID"]),
+      "%s / %s" % (sorted(_verified.get("outputs", {})),
+                   [r["Panel_ID"]
+                    for r in _verified.get("outputs", {})
+                    .get("run_manifest.csv", [])]))
 _probs = []
 check("and a value check handed no verified frames refuses the run",
       FIN.value_contract_failures(_o2, {}, _machine2,

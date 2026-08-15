@@ -346,9 +346,13 @@ print("a re-derivation that cannot answer says so, and does not stay quiet")
 # compared equal to whatever the value claimed. A verifier that fails to refute is
 # not a weaker check than one that refutes; on the axis it skipped it is no check
 # at all, and it looks identical from the outside.
-_full = dict(line_style_source="MEASURED", Value_Support_Left_Px="100",
-             Value_Support_Right_Px="100", Value_Span_Px="0",
-             Occlusion_Cause="NONE", Errorbar_Stem_Confirmed="TRUE")
+# `x` is the value's own column, and every reader mark carries it: from v7.81 a
+# support geometry without it cannot be measured, which is the point - a support
+# column means nothing until you know where the value sits.
+_full = dict(line_style_source="MEASURED", x="100",
+             Value_Support_Left_Px="100", Value_Support_Right_Px="100",
+             Value_Span_Px="0", Occlusion_Cause="NONE",
+             Errorbar_Stem_Confirmed="TRUE")
 _verdict = P.expected_line_style_methods(_full)
 check("a mark that records everything answers on all three axes",
       set(_verdict.expected) == set(P.METHOD_FIELDS) and not _verdict.problems,
@@ -463,13 +467,55 @@ check("  including the boundary: a support ON the value does not bracket it",
           dict(_bracket, Value_Support_Left_Px="140",
                Value_Support_Right_Px="180", Value_Span_Px="40")).problems)
 # AND THE EPSILON IS FLOAT NOISE, NOT A TOLERANCE. `right - left` and a recorded
-# span are the same subtraction done twice; a pixel is a disagreement.
-check("a hundredth of a pixel is the same measurement and a whole one is not",
+# span are the same subtraction done twice; a pixel is a disagreement. The
+# fixture is 1e-10 of a pixel, which is what 1e-9 admits - the first version of
+# this scenario called that "a hundredth of a pixel", a description two orders of
+# magnitude looser than the constant it was describing.
+check("a ten-billionth of a pixel is the same measurement and a whole one is not",
       not P.expected_line_style_methods(
           dict(_bracket, Value_Span_Px="40.0000000001")).problems
       and P.expected_line_style_methods(
+          dict(_bracket, Value_Span_Px="40.01")).problems
+      and P.expected_line_style_methods(
           dict(_bracket, Value_Span_Px="41")).problems
-      and P.PIXEL_EPSILON < 1e-6)
+      and P.PIXEL_EPSILON == 1e-9)
+# THE SHAPE OF THE EVIDENCE IS A CONTRACT, not a best effort. v7.81. The geometry
+# check returned "" whenever a field was missing or unparseable, and the caller
+# then fell through to a branch that derived a method anyway - so the two shapes
+# no reader in this package produces were the two that bought a tier.
+# AND IT IS DIAGNOSED AS THE SHAPE PROBLEM IT IS. A blank column and a column
+# reading "foo" are different mistakes - one is a producer that encodes one-sided
+# support the way no reader here does, the other is a corrupt field - and a
+# reviewer given "not a number" for a blank goes looking for the wrong thing.
+check("one support column recorded and the other blank is neither shape",
+      "neither shape" in " ".join(P.expected_line_style_methods(
+          dict(_geo, Value_Support_Right_Px="")).problems)
+      and "Value_Method" not in P.expected_line_style_methods(
+          dict(_geo, Value_Support_Right_Px="")).expected,
+      "%s" % (P.expected_line_style_methods(
+          dict(_geo, Value_Support_Right_Px="")),))
+check("  and it is refused whichever side is missing",
+      P.expected_line_style_methods(
+          dict(_geo, Value_Support_Left_Px="")).problems)
+check("supports that are not numbers support nothing, span and cause "
+      "notwithstanding",
+      P.expected_line_style_methods(
+          dict(_bracket, Value_Support_Left_Px="foo",
+               Value_Support_Right_Px="bar")).problems
+      and "Value_Method" not in P.expected_line_style_methods(
+          dict(_bracket, Value_Support_Left_Px="foo",
+               Value_Support_Right_Px="bar")).expected,
+      "%s" % (P.expected_line_style_methods(
+          dict(_bracket, Value_Support_Left_Px="foo",
+               Value_Support_Right_Px="bar")),))
+check("  and neither does a value whose own column is not a number",
+      P.expected_line_style_methods(dict(_geo, x="somewhere")).problems)
+check("the three shapes a reader does produce are named, and only those",
+      P.support_shape("", "", "", "")[0] == "NO_SUPPORT"
+      and P.support_shape("130", "130", "10", "140")[0] == "ONE_COLUMN"
+      and P.support_shape("120", "160", "40", "140")[0] == "TWO_COLUMNS"
+      and set(P.SUPPORT_SHAPES) == {"NO_SUPPORT", "ONE_COLUMN", "TWO_COLUMNS"},
+      "%s" % (P.support_shape("130", "130", "10", "140"),))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

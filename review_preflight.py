@@ -30,7 +30,8 @@ run would finalize, 2 when it would not, and 1 when the run cannot be read at
 all. A reconstruction a person correctly REJECTED is a review done right - the
 run finalizes without that cell - so it is reported as an exclusion and does not
 fail the preflight. Pass `--require-all-values` when a batch is only acceptable
-whole. Nothing here writes to the run.
+whole - it fails on any excluded value AND on any refused panel. Nothing here
+writes to the run.
 """
 import argparse
 import collections
@@ -278,9 +279,10 @@ def main(argv=None):
                     help="a second reviewer's inference_review.csv file, to "
                          "compare cell by cell")
     ap.add_argument("--require-all-values", action="store_true",
-                    help="fail unless every approved value is finalized. Off by "
-                         "default: a REJECTED reconstruction is a review done "
-                         "right, and the run finalizes without that cell")
+                    help="fail unless the whole batch went through: no value "
+                         "excluded AND no panel refused. Off by default, because "
+                         "a REJECTED reconstruction is a review done right and "
+                         "the run finalizes without that cell")
     args = ap.parse_args(argv)
 
     if not os.path.exists(os.path.join(args.run_dir, "run_stamp.json")):
@@ -328,7 +330,11 @@ def main(argv=None):
     # indistinguishable from an unanswered question.
     if status != FIN.FINALIZED_STATUS:
         return 2
-    if args.require_all_values and excluded:
+    # THE WHOLE BATCH, which is what the name says. Checking only `excluded`
+    # let a run pass strict mode with a panel refused beside the one that
+    # finalized - values lost, and the flag that exists to notice that said
+    # nothing.
+    if args.require_all_values and (excluded or blocking):
         return 2
     return 0
 

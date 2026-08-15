@@ -338,45 +338,70 @@ EvidenceVerdict = collections.namedtuple("EvidenceVerdict",
 PIXEL_EPSILON = 1e-9
 
 
-def _geometry_problem(left, right, span, target):
-    """Why these support columns, this span and this x cannot all be true, or "".
+#: What a LINE_MONO_STYLE mark's support columns can legitimately look like, and
+#: what each shape means. `_ink_at` writes the SAME column into both fields when
+#: the ink is on one side only, so "one side recorded and the other blank" is not
+#: this reader's one-sided encoding - it is a shape no reader in this package
+#: produces, and a shape nothing can be re-derived from.
+SUPPORT_SHAPES = ("NO_SUPPORT", "ONE_COLUMN", "TWO_COLUMNS")
 
-    Three relations, and the reader satisfies all three on every one of
-    publication 397's line marks - measured before this was made a refusal,
-    because a consistency check nobody has run against a real figure is a
-    prediction rather than a check:
 
-        one column     span == |support - x|      the carry distance
-        two columns    left < x < right           they BRACKET the value
-        two columns    span == right - left       the gap they bracket
+def support_shape(left, right, span, target):
+    """(shape, problem) for a mark's support geometry. One of them is always "".
 
-    Returns "" when the fields are not all numbers: an unparseable field is
-    somebody else's finding, reported where it is read.
+    EXACT, not best-effort. v7.79 checked the three geometric relations and
+    returned "" whenever a field was missing or unparseable, and the caller then
+    fell through to a branch that derived a method anyway:
+
+        left=130, right=""      -> read as one-sided, which this reader never
+                                   writes; DIRECT_CURVE_INK at R0
+        left="foo", right="bar" -> read as bracketed, and the method came from
+                                   the span and the cause alone
+
+    So the shape is decided first and every other shape is a refusal. A verifier
+    that guesses at malformed evidence is a verifier that can be fed.
     """
-    try:
-        span_px, target_px = float(span), float(target)
-        left_px = float(left) if left else None
-        right_px = float(right) if right else None
-    except (TypeError, ValueError):
-        return ""
-    if left_px is None or right_px is None:
-        return ""
+    def number(text):
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return None
+
+    if not left and not right:
+        return "NO_SUPPORT", ""
+    if not left or not right:
+        return "", ("the mark records one support column (%s) and leaves the "
+                    "other blank. A value read from ink on one side carries the "
+                    "same column in both fields; this is neither shape"
+                    % (left or right))
+    left_px, right_px = number(left), number(right)
+    span_px, target_px = number(span), number(target)
+    unreadable = [name for name, value in (("Value_Support_Left_Px", left_px),
+                                           ("Value_Support_Right_Px", right_px),
+                                           ("Value_Span_Px", span_px),
+                                           ("x", target_px))
+                  if value is None]
+    if unreadable:
+        return "", ("the mark's %s %s not a number, and a geometry that cannot "
+                    "be measured cannot support a method"
+                    % (", ".join(unreadable),
+                       "are" if len(unreadable) > 1 else "is"))
     if left_px == right_px:
         want = abs(left_px - target_px)
         if abs(span_px - want) > PIXEL_EPSILON:
-            return ("the mark was read from column %s and sits at %s, which is "
-                    "%s away, and it records a span of %s"
-                    % (left, target, want, span))
-        return ""
+            return "", ("the mark was read from column %s and sits at %s, which "
+                        "is %s away, and it records a span of %s"
+                        % (left, target, want, span))
+        return "ONE_COLUMN", ""
     if not left_px < target_px < right_px:
-        return ("the mark sits at %s and its supports are %s and %s, which do "
-                "not bracket it - an interpolation is between two columns and "
-                "this is not between them" % (target, left, right))
+        return "", ("the mark sits at %s and its supports are %s and %s, which "
+                    "do not bracket it - an interpolation is between two columns "
+                    "and this is not between them" % (target, left, right))
     want = right_px - left_px
     if abs(span_px - want) > PIXEL_EPSILON:
-        return ("the mark was measured between %s and %s, a gap of %s, and it "
-                "records a span of %s" % (left, right, want, span))
-    return ""
+        return "", ("the mark was measured between %s and %s, a gap of %s, and "
+                    "it records a span of %s" % (left, right, want, span))
+    return "TWO_COLUMNS", ""
 
 
 def expected_line_style_methods(mark):
@@ -420,29 +445,14 @@ def expected_line_style_methods(mark):
     right = field("Value_Support_Right_Px")
     span = field("Value_Span_Px")
     target = field("x")
-    if not left and not right:
+    shape, why = support_shape(left, right, span, target)
+    if why:
+        problems.append(why)
+    elif shape == "NO_SUPPORT":
         # No ink either side: the fit produced the number, whatever else the row
         # says about spans and occlusions.
         out["Value_Method"] = "FIT_FALLBACK"
-    elif not span:
-        # THE SPAN IS THE DISCRIMINATOR, so a missing one is a missing answer.
-        # It used to default to "0", which read a mark with supports and no span
-        # as a direct observation - R0 - and reopened the one-sided downgrade
-        # v7.73 closed from the other side. `line_style_mono` writes
-        # `value_span or 0`, so a blank here is a foreign producer, not this one.
-        problems.append("the mark records support at column %s and no "
-                        "Value_Span_Px, so a value read off the ink cannot be "
-                        "told from one carried sideways to it"
-                        % (left or right))
-    elif _geometry_problem(left, right, span, target):
-        # THE FIELDS HAVE TO AGREE WITH EACH OTHER. Each was read on its own -
-        # is there a support, are there two, is the span zero - and a mark whose
-        # numbers are internally impossible answered every one of those
-        # questions and got a tier. `left = right = 130` beside `x = 140` and
-        # `span = 0` re-derived as DIRECT_CURVE_INK at R0, and it is a ten-pixel
-        # carry: the same downgrade v7.73 found on 397, in the general form.
-        problems.append(_geometry_problem(left, right, span, target))
-    elif left and right and left != right:
+    elif shape == "TWO_COLUMNS":
         cause = field("Occlusion_Cause")
         if cause in OCCLUSION_CAUSES:
             out["Value_Method"] = interpolation_method(
@@ -457,21 +467,16 @@ def expected_line_style_methods(mark):
         # ONE COLUMN, AND THE SPAN SAYS WHICH KIND. `_ink_at` reports the single
         # supporting column in BOTH fields when the ink is on one side only, and
         # the span is then the distance it was carried sideways; a directly
-        # observed value is the same column with a span of zero.
+        # observed value is the same column with a span of zero - and
+        # `support_shape` has already checked that the span IS that distance.
         #
         # The first version of this verifier read `left == right` as DIRECT and
         # disagreed with the reader on 9 of publication 397's 87 line marks - all
         # nine one-sided carries at a non-zero span, which is the case that most
         # needs to keep its R4. Running the derivation against a real figure is
         # what found it; the fixtures agreed with it perfectly.
-        try:
-            carried = float(span) != 0.0
-        except (TypeError, ValueError):
-            problems.append("the mark's Value_Span_Px is %r, which is not a "
-                            "distance" % span)
-        else:
-            out["Value_Method"] = ("EXTRAPOLATED_CURVE_INK" if carried
-                                   else "DIRECT_CURVE_INK")
+        out["Value_Method"] = ("DIRECT_CURVE_INK" if abs(float(span)) <= PIXEL_EPSILON
+                               else "EXTRAPOLATED_CURVE_INK")
     stem = field("Errorbar_Stem_Confirmed").upper()
     if stem in ("TRUE", "FALSE"):
         out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"

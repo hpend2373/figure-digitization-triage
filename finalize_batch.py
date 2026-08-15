@@ -244,6 +244,11 @@ def read_decisions(path, columns, flag, where, unreadable, incomplete,
             flag(where, absent,
                  "%s does not exist. Nothing is approved by default" % path)
         return pd.DataFrame(columns=columns), ""
+    # DECLARED FIRST, so a refusal records the bytes that CAUSED it. The parse
+    # branch used to hash the path again, which named whatever was on disk
+    # afterwards - a smaller window than the one this function closes, on the
+    # audit rather than on the accepted values, and the same shape.
+    digest = ""
     try:
         with open(path, "rb") as fh:
             data = fh.read()
@@ -251,7 +256,8 @@ def read_decisions(path, columns, flag, where, unreadable, incomplete,
         df = pd.read_csv(io.BytesIO(data), dtype=object).fillna("")
     except Exception as exc:
         flag(where, unreadable, "%s: %s" % (type(exc).__name__, exc))
-        return pd.DataFrame(columns=columns), RB.file_sha256_or_blank(path)
+        return (pd.DataFrame(columns=columns),
+                digest or RB.file_sha256_or_blank(path))
     missing = [c for c in columns if c not in df.columns]
     if missing:
         flag(where, incomplete, ", ".join(missing))
@@ -1058,8 +1064,7 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag, frames)
     withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
-                                        flag, panel_expectations(frames,
-                                                                 run_dir))
+                                        flag, panel_expectations(frames))
     return withheld
 
 
@@ -1080,7 +1085,7 @@ MARK_VALUE_FIELDS = (
 )
 
 
-def panel_expectations(frames, run_dir):
+def panel_expectations(frames):
     """{Panel_ID: {cell_map, envelope}} - what a panel's marks must look like.
 
     Two questions with one answer each, built together because both are
@@ -1100,20 +1105,22 @@ def panel_expectations(frames, run_dir):
     `None` for a panel the run manifest has no row for: a value citing marks from
     a panel this run does not say it read is refused rather than measured against
     a declaration nobody made.
+
+    `frames` carries both halves of what was verified: the manifest frames the
+    run was validated against, and under `outputs` the rows of the run's own
+    outputs as they were when their bytes were hashed.
     """
     maps = cell_maps(frames)
     panels = {}
     if frames is not None and "panels" in frames:
         panels = {_s(p.get("Panel_ID")): p
                   for _, p in frames["panels"].iterrows()}
-    run_rows = {}
-    try:
-        with open(os.path.join(run_dir, "run_manifest.csv"),
-                  encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                run_rows[_s(row.get("Panel_ID"))] = row
-    except Exception:
-        run_rows = {}             # verify_run_outputs owns this file's bytes
+    # THE ROWS `verify_run_outputs` HASHED, not the path opened again. Read here
+    # a second time, a save landing in between would have this module comparing
+    # an artifact against a declaration nobody verified.
+    run_rows = {_s(row.get("Panel_ID")): row
+                for row in (frames or {}).get("outputs", {})
+                .get("run_manifest.csv", [])}
     out = {}
     for pid in set(maps) | set(panels) | set(run_rows):
         envelope = None
@@ -1750,6 +1757,19 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
             ok = False
             continue
         actual = RB.file_sha256(path)
+        # KEPT, not re-opened later. `panel_expectations` re-derives the
+        # conditions a panel was measured under from `run_manifest.csv`, and it
+        # opened the path again after this loop had hashed it - the same
+        # hash-then-reopen window the decision files and the manifest frames were
+        # both closed against, on the file that now decides whether an artifact's
+        # calibration was declared.
+        if verified is not None and actual == recorded.get(name):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    verified.setdefault("outputs", {})[name] = list(
+                        csv.DictReader(fh))
+            except Exception:
+                pass          # the parse failure is reported where it is used
         if actual != recorded.get(name):
             flag("run", "RUN_ARTIFACT_MODIFIED",
                  "%s hashes to %s..., the run recorded %s.... It was edited "

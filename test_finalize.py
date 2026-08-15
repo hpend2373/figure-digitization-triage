@@ -145,6 +145,23 @@ POSITIONS = [dict(Panel_ID="P1", Position_ID=q, X_Pixel=x + 9, Slot_Index=i,
              for i, (q, x) in enumerate(zip(LABELS, XS))]
 
 
+def _verified(run_dir, manifest_dir=None):
+    """The bundle `finalize` hands its contract checks: manifests plus outputs.
+
+    `verify_run_outputs` keeps the rows of each output it hashed under
+    `outputs`, so the checks that re-derive a declaration read the bytes that
+    were verified rather than opening the path again. A caller that reaches
+    `method_contract_failures` directly has to build the same bundle.
+    """
+    frames = RB.load_manifests(manifest_dir
+                               or os.path.join(run_dir, "manifests"))
+    path = os.path.join(run_dir, "run_manifest.csv")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            frames["outputs"] = {"run_manifest.csv": list(csv.DictReader(fh))}
+    return frames
+
+
 def write_manifests(directory, **over):
     os.makedirs(directory, exist_ok=True)
     tables = {
@@ -719,8 +736,7 @@ _held_h = FIN.method_contract_failures(
                        Identity_Source="AUTO", Resolution_ID="")]),
     pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
     pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
-    OUT, lambda w, c, d: _pl.append(c), frames=RB.load_manifests(
-        os.path.join(OUT, "manifests")))
+    OUT, lambda w, c, d: _pl.append(c), frames=_verified(OUT))
 # BLANK EVIDENCE IS NOT CONSENT. v7.71. Both cross-checks compared non-blank
 # answers only, so an artifact that said NOTHING about how its series was named
 # bought whatever the value row claimed - the fail-open these functions exist to
@@ -751,7 +767,7 @@ def _point_check(record_method, point_methods, claimed="MEASURED_COLOUR"):
         pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="POINT_DATA",
                            Artifact_Path=path)]),
         _pt_dir, lambda w, c, d: seen.append(c),
-        frames=RB.load_manifests(os.path.join(OUT, "manifests")))
+        frames=_verified(OUT))
     return held, seen
 
 
@@ -836,8 +852,7 @@ _ok_h = FIN.method_contract_failures(
                        Identity_Source="HUMAN", Resolution_ID="IR1")]),
     pd.DataFrame([dict(Panel_ID="P1", Mark_Type="BAR_MONO")]),
     pd.DataFrame(columns=["Panel_ID", "Artifact_Type", "Artifact_Path"]),
-    OUT, lambda w, c, d: _pl.append(c), frames=RB.load_manifests(
-        os.path.join(OUT, "manifests")))
+    OUT, lambda w, c, d: _pl.append(c), frames=_verified(OUT))
 check("  while one that does is left to the resolution contract to check",
       not _ok_h and not _pl, "%s" % _pl)
 
@@ -1340,7 +1355,7 @@ def _joined(rows):
         pd.DataFrame(rows),
         pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
         _marks_led, _R3_DIR, lambda w, c, d: seen.append(c),
-        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+        frames=_verified(_R3_DIR))
     return held, seen
 
 
@@ -1352,7 +1367,7 @@ def _mark_detail(rows, code):
         pd.DataFrame([dict(Panel_ID="P1", Mark_Type="LINE_MONO_STYLE")]),
         _marks_led, _R3_DIR,
         lambda w, c, d: said.append(d) if c == code else None,
-        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+        frames=_verified(_R3_DIR))
     return " | ".join(said)
 
 
@@ -1393,14 +1408,14 @@ check("a mark whose own supports do not support its method is refused",
 # DIRECT, that turns an R4 carried sideways into an R0 - and it did, on 9 of
 # publication 397's 87 line marks, until the derivation was run against the real
 # figure rather than against fixtures that happened to agree with it.
-_one_sided = dict(line_style_source="MEASURED", Value_Support_Left_Px="727",
-                  Value_Support_Right_Px="727", Value_Span_Px="7",
-                  Errorbar_Stem_Confirmed="TRUE")
+_one_sided = dict(line_style_source="MEASURED", x="734",
+                  Value_Support_Left_Px="727", Value_Support_Right_Px="727",
+                  Value_Span_Px="7", Errorbar_Stem_Confirmed="TRUE")
 check("one supporting column at a distance is a carry, not an observation",
       PROV.expected_line_style_methods(_one_sided).expected["Value_Method"]
       == "EXTRAPOLATED_CURVE_INK"
       and PROV.expected_line_style_methods(
-          dict(_one_sided, Value_Span_Px="0")).expected["Value_Method"]
+          dict(_one_sided, x="727", Value_Span_Px="0")).expected["Value_Method"]
       == "DIRECT_CURVE_INK",
       "%s" % (PROV.expected_line_style_methods(_one_sided),))
 check("  and the two are R4 and R0, which is why the difference matters",
@@ -1501,7 +1516,7 @@ def _mark_detail_at(where, code):
         pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
                            Artifact_Path=os.path.join(where, "P1_marks.json"))]),
         where, lambda w, c, d: said.append(d) if c == code else None,
-        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+        frames=_verified(_R3_DIR))
     return " | ".join(said)
 
 
@@ -1551,7 +1566,7 @@ def _edited_marks(mutate, rows=None, restamp=False, rebind=False,
         pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="RAW_MARKS",
                            Artifact_Path=path)]),
         _edit_dir, lambda w, c, d: seen.append(c),
-        frames=RB.load_manifests(os.path.join(_R3_DIR, "manifests")))
+        frames=_verified(_R3_DIR))
     return held, seen
 
 
@@ -1905,6 +1920,28 @@ check("  and it is reported as an exclusion, not as a refusal",
 check("  while a batch that must be whole says so with --require-all-values",
       PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                "--require-all-values"]) == 2)
+# AND "WHOLE" MEANS THE PANELS TOO. Checking only the exclusions let a run pass
+# strict mode with one panel refused beside the one that finalized: values lost,
+# and the flag that exists to notice that said nothing. Built by approving a
+# panel this run does not have, which is a refusal on a run that still
+# finalizes.
+_answers([_answer(i) for i in _ids3])
+review([row(Review_Subject_SHA256=_fp3, Inference_Checked="CONFIRMED"),
+        dict(row(Review_Subject_SHA256=_fp3, Inference_Checked="CONFIRMED"),
+             Review_ID="R002", Panel_ID="P_NOT_IN_THIS_RUN")],
+       path=_r3_review)
+_side_status, _side_problems = PF.would_refuse(
+    _R3_DIR, _r3_review, _r3_cells, today=datetime.date(2026, 8, 6))
+check("a run that finalizes with something refused beside it passes by default "
+      "and fails strict",
+      _side_status == "FINALIZED"
+      and any(c not in FIN.NONFATAL_CHECKS for _w, c, _d in _side_problems)
+      and PF.main([_R3_DIR, "--review", _r3_review,
+                   "--inference", _r3_cells]) == 0
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--require-all-values"]) == 2,
+      "%s / %s" % (_side_status, [c for _w, c, _d in _side_problems]))
+_panel3()
 _answers([_answer(_ids3[0])])
 check("and an unanswered question still fails the preflight",
       PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells]) == 2)
@@ -2096,6 +2133,42 @@ check("and the decisions are parsed from the bytes that were hashed, not from "
          json.load(open(os.path.join(_race2_dir, "finalize_stamp.json"),
                         encoding="utf-8"))["Review_File_SHA256"][:12],
          _race2_bytes[:12]))
+# AND A REFUSAL RECORDS THE BYTES THAT CAUSED IT. The parse branch hashed the
+# path again, so a malformed file saved over immediately afterwards left the
+# stamp naming bytes that would have parsed. Smaller than the other window - it
+# is the audit rather than the accepted values - and the same shape.
+_bad_dir, _ = fresh_run("run_badbytes")
+_bad_review = os.path.join(_bad_dir, "value_review.csv")
+with open(_bad_review, "w", encoding="utf-8") as _fh:
+    _fh.write('Review_ID,Panel_ID\n"unclosed,quote\n')
+_bad_bytes = RB.file_sha256(_bad_review)
+_real_or_blank = RB.file_sha256_or_blank
+
+
+def _repair_then_hash(path):
+    """A save landing the moment somebody re-opens the file to hash it.
+
+    Only reachable if the refusal DOES re-open it: the loader that hashes before
+    it parses already has the digest and never calls this for the review file.
+    """
+    if path == _bad_review:
+        review([row()], path=_bad_review)
+    return _real_or_blank(path)
+
+
+try:
+    RB.file_sha256_or_blank = _repair_then_hash
+    FIN.finalize(_bad_dir, review_path=_bad_review, run_date="2026-08-06",
+                 today=datetime.date(2026, 8, 6))
+finally:
+    RB.file_sha256_or_blank = _real_or_blank
+check("a refusal names the bytes that caused it, not the ones saved after",
+      json.load(open(os.path.join(_bad_dir, "finalize_stamp.json"),
+                     encoding="utf-8"))["Review_File_SHA256"] == _bad_bytes,
+      "stamp %s / broken %s / on disk %s"
+      % (json.load(open(os.path.join(_bad_dir, "finalize_stamp.json"),
+                        encoding="utf-8"))["Review_File_SHA256"][:12],
+         _bad_bytes[:12], RB.file_sha256(_bad_review)[:12]))
 check("  and the per-cell answers are hashed the same way, when there are any",
       FIN.validate_finalization(
           _R3_DIR, review_path=_r3_review, inference_review_path=_r3_cells,

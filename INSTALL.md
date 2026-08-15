@@ -5588,6 +5588,65 @@ Publication 397, re-run under this release: **123 values, no refusals.**
     a number spelled differently is a different one    1
     the case of a declaration stops mattering          1
 
+## v7.81 — the shape of the evidence is a contract, and the last two re-reads are closed
+
+**The geometry check was exact and its guard was not.** v7.79 checked three
+relations and returned "" whenever a field was missing or unparseable, and the
+caller then fell through to a branch that derived a method anyway. So the two
+shapes no reader in this package produces were the two that bought a tier:
+
+    left=130, right=""        read as one-sided -> DIRECT_CURVE_INK at R0
+    left="foo", right="bar"   read as bracketed -> method from span and cause
+
+`support_shape()` decides the shape FIRST and names only three:
+
+    NO_SUPPORT    both blank                    -> FIT_FALLBACK
+    ONE_COLUMN    same column in both fields,   -> span 0 is DIRECT,
+                  all four numeric,                anything else is a carry
+                  span == |support - x|
+    TWO_COLUMNS   all four numeric,             -> interpolation_method(cause)
+                  left < x < right,
+                  span == right - left
+
+Everything else is `METHOD_EVIDENCE_INCOMPLETE`, and the two mistakes are
+diagnosed apart: a blank column is "neither shape", a column reading `foo` is
+"not a number". A reviewer handed the wrong one goes looking for the wrong thing.
+397 figure 1: 18 marks, 0 problems.
+
+**And `run_manifest.csv` was hashed and then opened again.** `panel_expectations`
+re-derives the conditions a panel was measured under from that file — the check
+v7.80 added — and read it by path after `verify_run_outputs` had verified its
+bytes. The same hash-then-reopen window the decision files and the manifest
+frames were both closed against, on the file that now decides whether an
+artifact's calibration was declared. The verification keeps the ROWS of every
+output it hashes under `verified["outputs"]`, and the expectation is built from
+those.
+
+Two smaller ones:
+
+- `read_decisions` declared its digest before the try, so a refusal names the
+  bytes that CAUSED it. The parse branch re-hashed the path, which named whatever
+  was on disk afterwards — the audit rather than the accepted values, and the
+  same shape. Observed by giving `file_sha256_or_blank` a hook that saves over
+  the file: only reachable if the refusal does re-open it.
+- `--require-all-values` now means what it says: it fails on any excluded value
+  AND on any refused panel. Checking only the exclusions let a run pass strict
+  mode with one panel refused beside the one that finalized — values lost, and
+  the flag that exists to notice that said nothing.
+
+The `PIXEL_EPSILON` scenario also says what it measures: the fixture is a
+ten-billionth of a pixel, and the description called it a hundredth — two orders
+of magnitude looser than the constant.
+
+    reverted                                          scenarios that fail
+    a half-recorded support read as one-sided          1
+    supports that are not numbers skipped              2
+    the shape decided after the method                 2
+    the envelope checker opening run_manifest again    1
+    the verification not handing on the rows it hashed 1
+    a refusal hashing the path again                   1
+    strict mode ignoring a refused panel               1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic

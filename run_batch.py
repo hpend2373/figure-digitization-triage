@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.81"
+PIPELINE_VERSION = "7.82"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1394,7 +1394,8 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
 
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
               file_root=".", project_dir=None, review_dir=None, geometry=None,
-              geometry_refusal=None, resolutions=(), inference_dir=None):
+              geometry_refusal=None, resolutions=(), inference_dir=None,
+              config_rows=()):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -1706,7 +1707,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
         x_factor=(position_factor if any(r.get("x_label") for r in converted) else None),
         series_factor=(series_factor if any(r.get("series") for r in converted) else None))
     envelope = dict(mark_envelope_header(panel, file_sha256(resolved),
-                                         MR.READER_VERSION),
+                                         MR.READER_VERSION,
+                                         series_rows=series_rows,
+                                         position_rows=position_rows,
+                                         config_rows=config_rows),
                     schema=MARK_DATA_SCHEMA, Source_Image=resolved)
     envelope["marks"] = stamp_marks(_jsonable(kept), envelope)
     # Back onto the value rows, in the order `to_value_records` preserves - the
@@ -2398,10 +2402,60 @@ def _all_cells(series_level, position_level):
 #: the hash checkable by somebody who did not produce the run.
 MARK_ENVELOPE_FIELDS = ("Panel_ID", "Unit_ID", "Mark_Type", "Panel_Box",
                         "X_Calibration", "Y_Calibration", "Image_SHA256",
-                        "Reader_Version")
+                        "Reader_Version",
+                        # AND EVERYTHING ELSE THE RUN DECLARED about how this
+                        # panel would be measured: the baseline, the reader
+                        # options, the series discriminants, the position
+                        # columns. Named fields are the conditions a pixel is
+                        # relative to; this is the rest of the instruction.
+                        "Measurement_Declaration_SHA256")
 
 
-def mark_envelope_header(panel, image_sha256, reader_version):
+def _declared_rows(rows, key):
+    """Rows as text, in a stable order: a declaration, not a frame."""
+    out = []
+    for row in rows or ():
+        item = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+        out.append({str(k): _s(v) for k, v in item.items()})
+    return sorted(out, key=lambda r: (_s(r.get(key)), json.dumps(r, sort_keys=True)))
+
+
+def measurement_declaration_sha256(panel, series_rows, position_rows,
+                                   config_rows, image_sha256, reader_version):
+    """Everything the run declared about HOW this panel would be measured.
+
+    The panel box, the ticks and the raster hash were bound to the marks first,
+    because those are the conditions a pixel is a measurement relative to. They
+    are not all of them. `Baseline_Value` decides where a bar is measured from,
+    the reader options decide the threshold and the tolerances, the series rows
+    decide what counts as which series, and `X_Pixel` decides which column a
+    position IS - and a producer could declare one set, read the figure under
+    another, and hash the marks under the second with every check passing.
+
+    WHOLE ROWS, not a curated subset. A list of the measurement-relevant columns
+    is a list that drifts behind the manifests: a column added next year would be
+    outside the digest by default, and nothing would say so. The manifests are
+    hashed into the run stamp anyway, so an unrelated edit is already a refusal
+    with a clearer name than this one would give.
+
+    What this binds is the CLAIM: marks read under one declaration cannot be
+    presented under another. It does not prove the producer obeyed its own
+    declaration - nothing in an artifact can - and that is why the digest sits
+    inside `Mark_Record_SHA256` rather than beside it.
+    """
+    return sha256_of_text(json.dumps({
+        "panel": _declared_rows([panel], "Panel_ID")[0] if panel is not None
+                 else {},
+        "series": _declared_rows(series_rows, "Series_ID"),
+        "positions": _declared_rows(position_rows, "Position_ID"),
+        "reader_config": _declared_rows(config_rows, "Option"),
+        "Image_SHA256": _s(image_sha256),
+        "Reader_Version": _s(reader_version),
+    }, sort_keys=True))
+
+
+def mark_envelope_header(panel, image_sha256, reader_version, series_rows=(),
+                         position_rows=(), config_rows=()):
     """The envelope a panel's marks must have been read under.
 
     ONE CONSTRUCTION, TWO CALLERS. `_read_panel` builds the envelope with this
@@ -2427,6 +2481,9 @@ def mark_envelope_header(panel, image_sha256, reader_version):
         "Y_Calibration": MR._calibration_record(_calibration(panel, "Y")),
         "Image_SHA256": _s(image_sha256),
         "Reader_Version": _s(reader_version),
+        "Measurement_Declaration_SHA256": measurement_declaration_sha256(
+            panel, series_rows, position_rows, config_rows, image_sha256,
+            reader_version),
     }
 
 
@@ -2434,7 +2491,7 @@ def mark_envelope_header(panel, image_sha256, reader_version):
 #: attestation over the methods read off it, so a value row can be joined to the
 #: mark it was made from and the join can be checked by somebody who did not make
 #: either.
-MARK_DATA_SCHEMA = "figure-digitization-triage/mark-data/2"
+MARK_DATA_SCHEMA = "figure-digitization-triage/mark-data/3"
 
 #: The fields a mark's METHODS are written in. Outside the measurement hash, for
 #: the reason `mono_bar_geometry.UNHASHED_FIELDS` exists: how a measurement was
@@ -2461,7 +2518,13 @@ def mark_record_sha256(mark, envelope):
          "X_Calibration": envelope.get("X_Calibration"),
          "Y_Calibration": envelope.get("Y_Calibration"),
          "Image_SHA256": envelope.get("Image_SHA256"),
-         "Panel_ID": envelope.get("Panel_ID")},
+         "Panel_ID": envelope.get("Panel_ID"),
+         # /3: and the rest of the instruction the panel was read under. A mark
+         # measured under one baseline, threshold or series declaration is not
+         # the same mark under another, and until it was in here the two hashed
+         # identically.
+         "Measurement_Declaration_SHA256":
+             envelope.get("Measurement_Declaration_SHA256")},
         sort_keys=True, default=float))
 
 
@@ -3007,6 +3070,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             return dict(status="GEOMETRY_REVIEW_FAILED", detail="%s" % exc,
                         panels=0, values=0, machine_qc=0, accepted=0,
                         problems=0)
+    config_rows_by_id = {}
+    for _, row in m["configs"].iterrows():
+        config_rows_by_id.setdefault(_s(row.get("Config_ID")), []).append(row)
     for _, panel in m["panels"].iterrows():
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
@@ -3016,6 +3082,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 panel, series_by_panel.get(pid, []),
                 positions_by_panel.get(pid, []), options, unit,
                 raw_dir, file_root=file_root, project_dir=project_dir,
+                config_rows=config_rows_by_id.get(
+                    _s(panel.get("Config_ID")), []),
                 review_dir=review_dir,
                 geometry=geometry_rows_by_panel.get(pid),
                 geometry_refusal=geometry_refusals.get(pid),

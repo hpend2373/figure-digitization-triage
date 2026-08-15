@@ -1323,7 +1323,7 @@ _marks_path = RB.resolve_artifact(
     .iloc[0]["Artifact_Path"])
 _envelope = json.load(open(_marks_path, encoding="utf-8"))
 check("every mark carries a measurement hash and an attestation over its methods",
-      _envelope["schema"].endswith("/2")
+      _envelope["schema"].endswith("/3")
       and all(len(m["Mark_Record_SHA256"]) == 64
               and len(m["Method_Attestation_SHA256"]) == 64
               for m in _envelope["marks"]),
@@ -1347,6 +1347,17 @@ check("the measurement hash ignores the methods, and the attestation does not",
 check("  and a mark measured differently is a different mark",
       RB.mark_record_sha256(dict(_m0, mean=float(_m0["mean"]) + 1.0), _env0)
       != RB.mark_record_sha256(_m0, _env0))
+# AND A MARK READ UNDER A DIFFERENT INSTRUCTION IS A DIFFERENT MARK. v7.82. The
+# digest sits INSIDE the record hash, not beside it: two artifacts of the same
+# figure read under two declarations - a different baseline, a different
+# threshold, a different series colour - would otherwise hash their marks
+# identically, and a value could be joined to a mark from the other one.
+check("  and so is one read under a different measurement declaration",
+      RB.mark_record_sha256(
+          _m0, dict(_env0, Measurement_Declaration_SHA256="e" * 64))
+      != RB.mark_record_sha256(_m0, _env0)
+      and len(_env0["Measurement_Declaration_SHA256"]) == 64,
+      "%s" % _env0.get("Measurement_Declaration_SHA256"))
 
 
 def _joined(rows):
@@ -1704,6 +1715,21 @@ _held_e, _seen_e = _under(
     lambda b: b.__setitem__("Panel_Box", [float(v) for v in b["Panel_Box"]]))
 check("  while a box spelled as floats is the same box",
       "MARK_ENVELOPE_CONTRADICTS_RUN" not in _seen_e, "%s" % _seen_e)
+# AND THE DECLARATION DIGEST IS CHECKED LIKE THE REST OF THE ENVELOPE. Marks
+# hashed under a declaration this run's manifests do not produce are refused
+# however well they agree with themselves - which is what closes the baseline,
+# the reader options, the series discriminants and the position columns, none of
+# which have a named field in the envelope.
+_held_e, _seen_e = _under(
+    lambda b: b.__setitem__("Measurement_Declaration_SHA256", "d" * 64))
+check("marks hashed under a measurement declaration this run did not make are "
+      "refused",
+      _held_e == {"P1"} and "MARK_ENVELOPE_CONTRADICTS_RUN" in _seen_e,
+      "%s" % _seen_e)
+check("  and the refusal names the declaration, not just the calibration",
+      "Measurement_Declaration_SHA256" in _mark_detail_at(
+          _edit_dir, "MARK_ENVELOPE_CONTRADICTS_RUN"),
+      "%s" % _mark_detail_at(_edit_dir, "MARK_ENVELOPE_CONTRADICTS_RUN"))
 # A TOKEN IS NOT A NUMBER, THOUGH. The axis scale is a declaration, and the mark
 # hashes cover it: marks hashed under `linear` were hashed under a string this
 # run's manifests do not produce, and the fix for float spelling must not quietly
@@ -1722,11 +1748,61 @@ _run_row = next(r for r in csv.DictReader(
 _panel_row = next(p for _, p in RB.load_manifests(
     os.path.join(_R3_DIR, "manifests"))["panels"].iterrows()
     if FIN._s(p.get("Panel_ID")) == "P1")
+_r3_frames = RB.load_manifests(os.path.join(_R3_DIR, "manifests"))
 check("the run's own marks were measured under the conditions it declared",
       {k: _envelope.get(k) for k in RB.MARK_ENVELOPE_FIELDS}
       == json.loads(json.dumps(RB.mark_envelope_header(
-          _panel_row, _run_row["Image_SHA256"], _run_row["Reader_Version"]))),
+          _panel_row, _run_row["Image_SHA256"], _run_row["Reader_Version"],
+          series_rows=[r for _, r in _r3_frames["series"].iterrows()
+                       if FIN._s(r.get("Panel_ID")) == "P1"],
+          position_rows=[r for _, r in _r3_frames["positions"].iterrows()
+                         if FIN._s(r.get("Panel_ID")) == "P1"],
+          config_rows=[r for _, r in _r3_frames["configs"].iterrows()
+                       if FIN._s(r.get("Config_ID"))
+                       == FIN._s(_panel_row.get("Config_ID"))]))),
       "%s" % {k: _envelope.get(k) for k in RB.MARK_ENVELOPE_FIELDS})
+# AND THE DECLARATION DIGEST IS OVER MORE THAN THE NAMED FIELDS. v7.82. A
+# baseline, a reader threshold, a series colour or a position's own column are
+# all instructions this panel was read under, and none of them were bound to the
+# marks: a producer could declare one set, read the figure under another, and
+# hash the marks under the second with every check passing.
+_decl = RB.measurement_declaration_sha256(
+    _panel_row, [r for _, r in _r3_frames["series"].iterrows()
+                 if FIN._s(r.get("Panel_ID")) == "P1"],
+    [r for _, r in _r3_frames["positions"].iterrows()
+     if FIN._s(r.get("Panel_ID")) == "P1"], [],
+    _run_row["Image_SHA256"], _run_row["Reader_Version"])
+check("the measurement declaration is the panel, its series, its positions and "
+      "its reader options",
+      _decl == _envelope["Measurement_Declaration_SHA256"]
+      and all(_decl != RB.measurement_declaration_sha256(
+          changed, series, positions, configs, _run_row["Image_SHA256"],
+          _run_row["Reader_Version"])
+          for changed, series, positions, configs in (
+              (dict(_panel_row, Baseline_Value="7"),
+               [r for _, r in _r3_frames["series"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"],
+               [r for _, r in _r3_frames["positions"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"], []),
+              (_panel_row,
+               [dict(r, Colour_Hex="#000000")
+                for _, r in _r3_frames["series"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"],
+               [r for _, r in _r3_frames["positions"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"], []),
+              (_panel_row,
+               [r for _, r in _r3_frames["series"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"],
+               [dict(r, X_Pixel=str(int(float(r["X_Pixel"])) + 3))
+                for _, r in _r3_frames["positions"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"], []),
+              (_panel_row,
+               [r for _, r in _r3_frames["series"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"],
+               [r for _, r in _r3_frames["positions"].iterrows()
+                if FIN._s(r.get("Panel_ID")) == "P1"],
+               [dict(Config_ID="C1", Option="threshold", Value="150")]))),
+      "%s" % _decl[:16])
 # AND THE COLUMNS THIS BINDS ARE THE COLUMNS THE ADAPTER WRITES. A reader that
 # starts carrying a tenth number would otherwise be bound to its mark in nine,
 # and the tenth would be free - the same drift `INTERPOLATION_CARRIED` was

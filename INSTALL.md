@@ -5149,7 +5149,8 @@ came to. `BAR_MONO` and `SCATTER` had durable artifacts to be checked against;
 the rest were joinable to the raw marks only by panel, so a value could carry any
 mark's number and any method the matrix allowed.
 
-**`mark-data/2`.** Every mark in a panel's raw-marks file now carries two hashes,
+**`mark-data/2`** (superseded by `/3` in v7.82). Every mark in a panel's
+raw-marks file now carries two hashes,
 and the value rows carry both:
 
     Mark_Record_SHA256         WHAT WAS MEASURED - this mark's geometry, under
@@ -5647,6 +5648,43 @@ of magnitude looser than the constant.
     a refusal hashing the path again                   1
     strict mode ignoring a refused panel               1
 
+## v7.82 — `mark-data/3`: the whole instruction is bound to the marks
+
+v7.80 bound the conditions a pixel is a measurement relative to: the panel box,
+the two calibrations, the raster. Those are not all the instructions a panel is
+read under. `Baseline_Value` decides where a bar is measured FROM. The reader
+options decide the threshold, the search radius and the colour tolerances. The
+series rows decide what counts as which series. `X_Pixel` decides which column a
+position IS. None of them were bound to the marks, so a producer could declare
+one set, read the figure under another, and hash the marks under the second with
+every check in the module passing.
+
+`Measurement_Declaration_SHA256` is taken over the panel row, its series rows,
+its position rows, its reader-config rows, the raster hash and the reader
+version — **whole rows, not a curated subset**, because a list of the
+measurement-relevant columns is a list that drifts behind the manifests: a column
+added next year would be outside the digest by default and nothing would say so.
+
+It sits in the envelope AND inside `Mark_Record_SHA256`, which is the schema
+bump. Beside the hash rather than inside it, two artifacts of the same figure
+read under two declarations would hash their marks identically, and a value could
+be joined to a mark from the other one. `finalize_batch` re-derives the digest
+from the verified manifests exactly as it re-derives the rest of the envelope.
+
+What this binds is the CLAIM. Marks read under one declaration cannot be
+presented under another; it does not prove a producer obeyed its own
+declaration, and nothing in an artifact can. That is written down in the
+function rather than implied.
+
+Publication 397 re-runs clean: 123 values, no refusals, `mark-data/3`.
+
+    reverted                                          scenarios that fail
+    the declaration not in the mark's own hash         1
+    the declaration not in the envelope at all         1
+    the digest ignoring the series and position rows   1
+    the digest ignoring the reader options             1
+    the checker building it without the declared rows  1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5682,7 +5720,9 @@ of magnitude looser than the constant.
 - the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only. The
   other six are held to the matrix, to the mark join and to the value-to-cell
   binding, and not to a derivation from their own measurements - a real difference
-  in strength, and the next verifier to write is `BAR_COLOR`'s
+  in strength, and the next verifier to write is `BAR_COLOR`'s: its identity from
+  the measured colour distance and the mask overlap, its value from the bar
+  outline against the declared baseline, its dispersion from the stem
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

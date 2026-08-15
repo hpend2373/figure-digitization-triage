@@ -1115,6 +1115,17 @@ def panel_expectations(frames):
     if frames is not None and "panels" in frames:
         panels = {_s(p.get("Panel_ID")): p
                   for _, p in frames["panels"].iterrows()}
+    # The declared rows the measurement digest is taken over, grouped the way
+    # the runner groups them.
+    series_by_panel, positions_by_panel, configs_by_id = {}, {}, {}
+    for key, target, group in (("series", series_by_panel, "Panel_ID"),
+                               ("positions", positions_by_panel, "Panel_ID"),
+                               ("configs", configs_by_id, "Config_ID")):
+        frame = (frames or {}).get(key)
+        if frame is None:
+            continue
+        for _, row in frame.iterrows():
+            target.setdefault(_s(row.get(group)), []).append(row)
     # THE ROWS `verify_run_outputs` HASHED, not the path opened again. Read here
     # a second time, a save landing in between would have this module comparing
     # an artifact against a declaration nobody verified.
@@ -1129,7 +1140,11 @@ def panel_expectations(frames):
             try:
                 envelope = RB.mark_envelope_header(
                     panel, _s(run_row.get("Image_SHA256")),
-                    _s(run_row.get("Reader_Version")))
+                    _s(run_row.get("Reader_Version")),
+                    series_rows=series_by_panel.get(pid, []),
+                    position_rows=positions_by_panel.get(pid, []),
+                    config_rows=configs_by_id.get(
+                        _s(panel.get("Config_ID")), []))
             except Exception:
                 # A box that does not parse or ticks that will not fit: the run
                 # refused this panel long before here, and a value that reached

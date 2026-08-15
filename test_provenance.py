@@ -518,6 +518,101 @@ check("the three shapes a reader does produce are named, and only those",
       "%s" % (P.support_shape("130", "130", "10", "140"),))
 
 print()
+print("the second reader whose methods are re-derived from its own evidence")
+# v7.83. `BAR_COLOR` reaches R0 on all three axes, which means every one of its
+# cells goes into a pool on the strength of three words nothing re-derived. It
+# records enough to re-derive all three, and a verifier is the difference between
+# "this reader could have produced that" and "this mark did".
+_bar = dict(mask_overlap=0, Bar_Top_Definition="OUTLINE_CENTER",
+            top_px="177.5", fill_top_px="180.0", mean="116.76",
+            mean_if_read_at_fill_edge="115.91", dispersion="4.2",
+            Errorbar_Stem_Confirmed="TRUE", Position_Assignment="DECLARED_ANCHOR")
+check("a bar with its own colour, its outline and a stemmed cap answers all three",
+      P.expected_bar_colour_methods(_bar).expected
+      == {"Identity_Method": "MEASURED_COLOUR",
+          "Value_Method": "BAR_OUTLINE_CENTER",
+          "Dispersion_Method": "DIRECT_CONNECTED_CAP"}
+      and not P.expected_bar_colour_methods(_bar).problems,
+      "%s" % (P.expected_bar_colour_methods(_bar),))
+# CONTESTED INK IS NOT EVIDENCE OF IDENTITY. The run drops a mark two declared
+# colours both claim rather than choosing; a producer that kept one is claiming
+# MEASURED_COLOUR for ink that measured as two colours.
+check("a bar another declared colour also claims supports no identity",
+      "Identity_Method" not in P.expected_bar_colour_methods(
+          dict(_bar, mask_overlap=1)).expected
+      and P.expected_bar_colour_methods(dict(_bar, mask_overlap=1)).problems,
+      "%s" % (P.expected_bar_colour_methods(dict(_bar, mask_overlap=1)),))
+check("  and a mark that does not say either way is incomplete, not clean",
+      P.expected_bar_colour_methods(dict(_bar, mask_overlap="")).problems)
+# THE NUMBER CAME FROM THE OUTLINE CENTRE OR IT DID NOT, and the reader records
+# what the fill edge would have read - so the claim is checkable against a second
+# number the same mark carries.
+check("a mean equal to the fill-edge reading did not come from the outline "
+      "centre",
+      P.expected_bar_colour_methods(
+          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])).problems
+      and "Value_Method" not in P.expected_bar_colour_methods(
+          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])).expected,
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, mean=_bar["mean_if_read_at_fill_edge"])),))
+check("  while a bar whose outline IS its fill edge is not accused of it",
+      P.expected_bar_colour_methods(
+          dict(_bar, fill_top_px="177.5",
+               mean=_bar["mean_if_read_at_fill_edge"])).expected
+      .get("Value_Method") == "BAR_OUTLINE_CENTER")
+check("  and another edge definition is refused outright",
+      P.expected_bar_colour_methods(
+          dict(_bar, Bar_Top_Definition="FILL_EDGE")).problems)
+# THE SPREAD FOLLOWS THE STEM AND THE CAP, which are the two facts the reader
+# decides from.
+check("a cap with no stem is UNSTEMMED_CAP, and no cap at all is NO_DISPERSION",
+      P.expected_bar_colour_methods(
+          dict(_bar, Errorbar_Stem_Confirmed="FALSE")).expected
+      ["Dispersion_Method"] == "UNSTEMMED_CAP"
+      and P.expected_bar_colour_methods(
+          dict(_bar, Errorbar_Stem_Confirmed="FALSE", dispersion=None)).expected
+      ["Dispersion_Method"] == "NO_DISPERSION"
+      and P.dispersion_tier("UNSTEMMED_CAP") == "R3",
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, Errorbar_Stem_Confirmed="FALSE")),))
+check("  and a stem with nothing measured under it is incomplete",
+      P.expected_bar_colour_methods(
+          dict(_bar, dispersion=None)).problems)
+check("  and a mark that does not say whether a stem connected cannot answer",
+      P.expected_bar_colour_methods(
+          dict(_bar, Errorbar_Stem_Confirmed="")).problems)
+# AND A BAR PLACED BY COUNTING IS REFUSED HERE TOO. `grid_engine` refuses a VALUE
+# that admits to counting; a value that drops the column passes that gate, and
+# the mark cannot - it is hashed.
+check("a bar whose x label was counted rather than declared is refused",
+      P.expected_bar_colour_methods(
+          dict(_bar, Position_Assignment="SEQUENTIAL")).problems,
+      "%s" % (P.expected_bar_colour_methods(
+          dict(_bar, Position_Assignment="SEQUENTIAL")),))
+check("  while a panel that declares no positions is not asked for one",
+      not P.expected_bar_colour_methods(
+          dict(_bar, Position_Assignment="")).problems)
+check("two of the seven readers now re-derive their methods, and the table says "
+      "which",
+      set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR"},
+      "%s" % sorted(P.EVIDENCE_VERIFIERS))
+# AND THE JOIN ASKS IT THE SAME WAY IT ASKS THE OTHER ONE. The call site is table
+# driven - `EVIDENCE_VERIFIERS[mark_type]` - so what has to be checked here is
+# that the entry answers in the two codes the finalizer branches on.
+_claimed = dict(Identity_Method="MEASURED_COLOUR",
+                Value_Method="BAR_OUTLINE_CENTER",
+                Dispersion_Method="DIRECT_CONNECTED_CAP")
+check("a BAR_COLOR mark that cannot answer is incomplete, and one that "
+      "disagrees is a contradiction",
+      P.evidence_failure("BAR_COLOR", dict(_bar, mask_overlap=1),
+                         _claimed)[0] == "METHOD_EVIDENCE_INCOMPLETE"
+      and P.evidence_failure(
+          "BAR_COLOR", dict(_bar, Errorbar_Stem_Confirmed="FALSE"),
+          _claimed)[0] == "METHOD_CONTRADICTS_EVIDENCE"
+      and P.evidence_failure("BAR_COLOR", _bar, _claimed) == ("", ""),
+      "%s" % (P.evidence_failure("BAR_COLOR", _bar, _claimed),))
+
+print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

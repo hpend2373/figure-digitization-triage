@@ -488,6 +488,98 @@ def expected_line_style_methods(mark):
     return EvidenceVerdict(out, problems)
 
 
+def expected_bar_colour_methods(mark):
+    """The three methods a BAR_COLOR mark's own evidence implies.
+
+    The second verifier, and the reader worth doing next: `BAR_COLOR` reaches
+    R0 on every axis, which means every one of its cells goes into a pool on the
+    strength of three words nothing re-derived. What it records is enough to
+    re-derive all three.
+
+        identity     the bar was found in a mask built from the colour this
+                     series declares - unless ANOTHER declared colour's mask
+                     claims the same ink, and then the bar is not evidence of
+                     either identity
+        value        `Bar_Top_Definition` says which edge the number came from,
+                     and the reader records what the number WOULD have been at
+                     the fill edge. A mean equal to that one, from a bar whose
+                     fill edge is a different pixel row, was not read at the
+                     outline centre whatever the field says
+        dispersion   the stem and the cap, the same two facts the reader decides
+                     from: a cap with a stem is DIRECT_CONNECTED_CAP, a cap
+                     without one is UNSTEMMED_CAP at R3, and no cap at all is
+                     NO_DISPERSION
+
+    `Position_Assignment` is checked too, when the mark carries one. It is not a
+    method - it says whether this bar's x label came from a declared anchor or
+    from counting bars left to right - and `grid_engine` refuses a VALUE that
+    admits to counting. A value that drops the column passes that gate, and the
+    mark cannot: it is hashed.
+    """
+    def field(name):
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    def number(name):
+        try:
+            return float(field(name))
+        except (TypeError, ValueError):
+            return None
+
+    out, problems = {}, []
+    overlap = field("mask_overlap")
+    if not overlap:
+        problems.append("the mark does not say whether another declared "
+                        "colour's mask claims its ink, so its identity cannot "
+                        "be re-derived")
+    elif overlap.upper() in ("TRUE", "1") or (number("mask_overlap") or 0) > 0:
+        problems.append("another declared colour's mask claims this bar's own "
+                        "ink; a contested mark is not evidence of either "
+                        "identity, and the run drops it rather than choosing")
+    else:
+        out["Identity_Method"] = "MEASURED_COLOUR"
+    edge = field("Bar_Top_Definition").upper()
+    top, fill = number("top_px"), number("fill_top_px")
+    mean, at_fill = number("mean"), number("mean_if_read_at_fill_edge")
+    if edge != "OUTLINE_CENTER":
+        problems.append("the mark gives its Bar_Top_Definition as %s, and this "
+                        "reader measures the outline centre"
+                        % (edge or "nothing"))
+    elif top is None or mean is None:
+        problems.append("the mark records no %s, so which edge its number came "
+                        "from cannot be re-derived"
+                        % ("top_px" if top is None else "mean"))
+    elif (at_fill is not None and fill is not None
+            and abs(top - fill) > PIXEL_EPSILON
+            and abs(mean - at_fill) <= PIXEL_EPSILON):
+        problems.append("the mark's mean is what its FILL EDGE would have read "
+                        "(%s) and its outline centre is a different row (%s "
+                        "against %s), so the number did not come from the "
+                        "outline centre it claims" % (at_fill, top, fill))
+    else:
+        out["Value_Method"] = "BAR_OUTLINE_CENTER"
+    stem = field("Errorbar_Stem_Confirmed").upper()
+    spread = number("dispersion")
+    if stem not in ("TRUE", "FALSE"):
+        problems.append("the mark does not say whether a stem connected its cap "
+                        "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
+                        "cannot be re-derived" % (stem or "blank"))
+    elif stem == "TRUE":
+        if spread is None:
+            problems.append("the mark says a stem connected its cap and records "
+                            "no dispersion for it to have measured")
+        else:
+            out["Dispersion_Method"] = "DIRECT_CONNECTED_CAP"
+    else:
+        out["Dispersion_Method"] = ("NO_DISPERSION" if spread is None
+                                    else "UNSTEMMED_CAP")
+    placed = field("Position_Assignment").upper()
+    if placed and placed != "DECLARED_ANCHOR":
+        problems.append("this bar's x label came from %s rather than from a "
+                        "declared anchor" % placed)
+    return EvidenceVerdict(out, problems)
+
+
 #: Mark type -> the function that re-derives its methods from its own evidence.
 #:
 #: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
@@ -496,7 +588,8 @@ def expected_line_style_methods(mark):
 #: decision was made from. A mark type absent from this table is checked by the
 #: matrix and by the artifact join, and not by re-derivation - which is a real
 #: difference in strength and is written down rather than implied away.
-EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods}
+EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
+                      "BAR_COLOR": expected_bar_colour_methods}
 
 
 def evidence_failure(mark_type, mark, claimed):

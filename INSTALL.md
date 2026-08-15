@@ -5685,6 +5685,49 @@ Publication 397 re-runs clean: 123 values, no refusals, `mark-data/3`.
     the digest ignoring the reader options             1
     the checker building it without the declared rows  1
 
+## v7.83 — the second reader whose methods are re-derived from its own evidence
+
+`BAR_COLOR` reaches R0 on all three axes, which means every one of its cells goes
+into a pool on the strength of three words nothing re-derived. It records enough
+to re-derive all three, so `expected_bar_colour_methods` does:
+
+    identity     the bar was found in a mask built from this series' declared
+                 colour - UNLESS another declared colour's mask claims the same
+                 ink, and then the bar is evidence of neither identity. The run
+                 drops a contested mark rather than choosing; a producer that
+                 kept one is claiming MEASURED_COLOUR for ink that measured as
+                 two colours
+    value        `Bar_Top_Definition` says which edge the number came from, and
+                 the reader records what the number WOULD have been at the fill
+                 edge. A mean equal to that one, from a bar whose fill edge is a
+                 different pixel row, was not read at the outline centre whatever
+                 the field says - a second number the same mark carries, which is
+                 what makes the claim checkable at all
+    dispersion   the stem and the cap: a cap with a stem is
+                 DIRECT_CONNECTED_CAP, a cap without one is UNSTEMMED_CAP at R3,
+                 no cap is NO_DISPERSION
+
+`Position_Assignment` is checked too, when the mark carries one. It is not a
+method - it says whether the bar's x label came from a declared anchor or from
+counting bars left to right - and `grid_engine` refuses a VALUE that admits to
+counting. A value that DROPS the column passes that gate; the mark cannot,
+because it is hashed.
+
+Run against every bar fixture in the package - 37 marks across the plain, signed,
+glyph-free and vanishing-bar rasters - the derivation agrees with the reader on
+every mark and reports no problems.
+
+The join is table-driven (`EVIDENCE_VERIFIERS[mark_type]`), so what v7.83 adds at
+the call site is an entry; the LINE_MONO_STYLE scenarios cover the wiring, and
+these cover that the entry answers in the two codes the finalizer branches on.
+
+    reverted                                          scenarios that fail
+    BAR_COLOR having no verifier again                 2
+    contested ink still naming a colour                2
+    the fill-edge reading not compared                 1
+    an unstemmed cap priced as a followed one          2
+    a counted x label not refused                      1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5717,12 +5760,12 @@ Publication 397 re-runs clean: 123 values, no refusals, `mark-data/3`.
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
-- the methods are RE-DERIVED from the evidence for `LINE_MONO_STYLE` only. The
-  other six are held to the matrix, to the mark join and to the value-to-cell
-  binding, and not to a derivation from their own measurements - a real difference
-  in strength, and the next verifier to write is `BAR_COLOR`'s: its identity from
-  the measured colour distance and the mask overlap, its value from the bar
-  outline against the declared baseline, its dispersion from the stem
+- the methods are RE-DERIVED from the evidence for two readers of the seven,
+  `LINE_MONO_STYLE` and `BAR_COLOR`. The other five are held to the matrix, to the
+  mark join and to the value-to-cell binding, and not to a derivation from their
+  own measurements - a real difference in strength. `LINE_MONO` and `BOX_VIOLIN`
+  are the next two, and `BAR_MONO` and `SCATTER` have their own durable artifacts
+  checked instead
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

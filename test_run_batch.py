@@ -3868,6 +3868,39 @@ check("and the pooled value still says a person named its series",
       and _acc_named.iloc[0]["Resolution_ID"] == "IR1"
       and _acc_named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
       "%s" % (_acc_named.to_dict("records") or "no row"))
+# WHAT A PREFLIGHT SAYS ABOUT THIS PANEL, WHICH IS THE FIRST PILOT'S MODE. v7.95.
+# `PILOT.md` sends publication 127's reviewer through six geometry artifacts, so
+# the preflight has to agree the bundle holding them is complete - and has to NOT
+# ask for the one thing this tier does not have. An R2 identity is answered AT
+# THE PANEL: no `Inference_ID`, no cell crop. v7.94's runbook promised "every
+# question has its manifest row and its context picture", which describes a
+# bundle the first pilot cannot produce, and would have read as broken.
+import review_preflight as PF                                      # noqa: E402
+_gq = PF.questions(_fin_dir)
+check("the first pilot's mode asks an R2 identity question, at the panel",
+      _gq and {q["Tier"] for q in _gq} == {"R2"}
+      and not any(q["Inference_ID"] for q in _gq), "%s" % _gq)
+check("  so its bundle needs no context crop and reports no problem",
+      PF.bundle_problems(_fin_dir) == [], "%s" % PF.bundle_problems(_fin_dir))
+_gled = pd.read_csv(os.path.join(_fin_dir, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_gshort = set(_gled[_gled["Panel_ID"] == "P_SHORT"]["Artifact_Type"])
+_gwant = set(RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"])
+check("  and every artifact the runbook sends them to is in the panel's ledger",
+      _gwant <= _gshort, "%s missing" % sorted(_gwant - _gshort))
+# AND THE TEMPLATE ASKS FOR THE IDENTITY. `Identity_Checked` is the one claim in
+# the pipeline with no measurement behind it, and an unanswered template has to
+# name it as missing - otherwise the reviewer who skips it is the reviewer the
+# mode exists for.
+_gtmpl = os.path.join(_fin_dir, "template_value_review.csv")
+FIN.write_review_template(_gtmpl, pd.read_csv(
+    os.path.join(_fin_dir, "review_queue.csv"), dtype=object).fillna(""))
+_gmiss = [why for _w, why in PF.answer_problems(
+    _fin_dir, _gtmpl, os.path.join(_fin_dir, "no_such_inference.csv"))]
+check("  the unfilled template is missing every confirmation this mode asks for",
+      all(any(c in why for why in _gmiss)
+          for c in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]),
+      "%s" % _gmiss)
 # AND HOW, in the registry's vocabulary. v7.65. A person's answer is
 # HUMAN_RESOLUTION; the bars beside it were named against prototypes formed in
 # another group of the FIGURE, because this panel's short bar left its group

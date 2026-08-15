@@ -6197,8 +6197,71 @@ file.
     step 2 hands the reviewer only half the templates  2
     a blank template row reads as an unasked question  1
 
+## v7.95 — the runbook meets the mode the first pilot actually uses
+
+v7.94 chose publication 127 and then described a review it does not get. Two
+things were wrong, and both would have shown up on the day.
+
+**`--second` cannot stand in for a second person, least of all here.** v7.94's
+"Who does what" said: two people, and if a second is impossible, review
+independently and compare with `--second`. But `--second` reads two
+`inference_review.csv` files. The only channel it compares is per-cell
+CONFIRMED/REJECTED — not the panel decision, not the confirmations a mode asks
+for, not the identity the resolver wrote down; none of those columns is even in
+the file it reads. And 127 has no R3 cell, which the same document says twice.
+So the fallback was two empty templates agreeing with each other, printing
+nothing, and one person holding both roles reading as an independent check.
+
+The fallback is gone: **if a second person is not available, 127 runs as a dry
+run and nothing is finalized.** `review_preflight.py` no longer lets the flag be
+quietly useless either — it reports how many reconstructed cells it compared,
+says in one line what that channel does not cover, and exits 2 when the answer
+is none. Asking for an independent check and getting none is the case the exit
+code exists for.
+
+**The reviewer was sent to the wrong picture.** 127 Figure 4 is queued
+`BAR_MONO_GEOMETRY_RESOLVED`, and v7.94's review step named an overlay and an
+inference crop. That mode asks for `Marks_Checked`, `Axis_Labels_Checked`,
+`Calibration_Checked` and `Identity_Checked`, and three of those four cannot be
+made from a panel overlay: the printed tick numbers, the ink inside a 15 px bar,
+and somebody else's reading of a legend are each in a different artifact. The
+mode registers six, and `PILOT.md` now walks them in the order they answer in —
+`geometry-review/index.html` and its row/picture/panel counts, the three
+`CALIBRATION_PANEL`s against the printed ticks, the `GEOMETRY_ROW_CROP`s for
+NORMAL/SUPINE slots 0–2, the `IDENTITY_RESOLUTION` file and its evidence, and
+the overlay last, once the axis and the identities under it have been checked.
+
+`test_documented_status.py` reads `REVIEW_MODES` and `REVIEW_CONFIRMATIONS` and
+requires the section that names the mode to name every artifact it registers,
+and to pair every confirmation against the picture that answers it — the
+confirmations are checked on the `->` lines specifically, because the paragraph
+above the steps lists all four by name and a whole-section check passed while
+the mapping was deleted.
+
+**And the pre-review promise was R3-shaped.** "Every question has its manifest
+row and its context picture" is not true of an R2 identity: it has no
+`Inference_ID` and no cell crop, it is judged at the panel, and `bundle_problems`
+knows that. The first pilot is R2, so v7.94's own success condition described a
+bundle 127 cannot produce. The wording is now per tier, and the R2 case is
+pinned on the real `BAR_MONO_GEOMETRY_RESOLVED` run: an R2 question with a blank
+`Inference_ID`, zero bundle problems, all six artifacts in the panel's ledger,
+and an unfilled template that reports every one of the four confirmations as
+missing.
+
+    reverted                                          scenarios that fail
+    --second is a substitute for a second person       1
+    R2 is asked for a context crop it cannot have      1
+    the runbook forgets an artifact the mode registers 1
+    the runbook forgets a confirmation it asks for     1
+
 ## Still open
 
+- letting ONE person hold both the resolver and the approver role would need a
+  comparison this package does not have: `--second-value-review`,
+  `--second-identity-resolution`, or a whole independent decision bundle diffed
+  against the first. `--second` is the R3 per-cell channel and nothing else, and
+  v7.95 makes it say so rather than extending it — the shape of an independent
+  panel-level check is a decision, not a flag
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
   exists to read, and it stays MANUAL
 - 397 Figure 4, 386 Figures 3–4

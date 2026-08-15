@@ -237,6 +237,41 @@ _missing = [n for n in _named
             and n.split("/")[1] not in _writes]
 check("  and every file it tells a reviewer to open is one the run writes",
       not _missing, "%s / writes %s" % (sorted(_missing), sorted(_writes)))
+# AND THE FIRST PILOT'S REVIEW MODE IS DESCRIBED IN FULL. v7.95. Publication 127
+# Figure 4 is queued `BAR_MONO_GEOMETRY_RESOLVED`, which is not an overlay: it
+# registers six artifacts and asks for four confirmations, and three of those
+# four cannot be made from a panel picture. The printed tick numbers, the ink
+# inside a 15 px bar and somebody else's reading of a legend are each somewhere
+# else. A runbook that names the mode and then sends the reviewer to one overlay
+# collects a signature on an axis nobody read - and v7.94's did exactly that.
+#
+# IN THE SECTION THAT NAMES THE MODE, not anywhere in the file. Scoped to the
+# whole document the first version passed while the artifact-to-confirmation
+# mapping was deleted: `Identity_Checked` also appears in the glossary further
+# down, so "the word is present somewhere" is satisfied by a table that does not
+# say WHICH picture answers it. What a reviewer needs is the pairing.
+_text = open(_PILOT, encoding="utf-8").read()
+_MODE = "BAR_MONO_GEOMETRY_RESOLVED"
+_sections = [s for s in _re.split(r"^## ", _text, flags=_re.M) if _MODE in s]
+check("  it names the review mode the first pilot will be queued under",
+      _MODE in _RB.REVIEW_MODES and len(_sections) == 1,
+      "%d section(s) mention it" % len(_sections))
+_section = _sections[0] if _sections else ""
+_unnamed = [a for a in _RB.REVIEW_MODES[_MODE] if a not in _section]
+check("    and, in that section, every artifact that mode registers",
+      not _unnamed, "%s" % _unnamed)
+#
+# AND THE CONFIRMATIONS ARE CHECKED ON THE `->` LINES, which are the mapping from
+# a picture to the claim it answers. Checked against the section's prose instead,
+# the mutation that deletes the mapping passes: the paragraph above the steps
+# lists all four confirmations by name, so the file can say WHICH claims are
+# wanted while no longer saying which artifact answers any of them. The pairing
+# is the part a reviewer cannot reconstruct.
+_mapped = " ".join(l for l in _section.splitlines() if l.strip().startswith("->"))
+_unasked = [c for c in _RB.REVIEW_CONFIRMATIONS[_MODE] if c not in _mapped]
+check("    and every confirmation it asks a person to make, against the picture "
+      "that answers it",
+      not _unasked, "%s / mapped %r" % (_unasked, _mapped))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

@@ -69,13 +69,23 @@ the panel. The means and the SEs were measured off the ink.
        here is the BUNDLE:
 
            0 bundle problems
-           every question has its manifest row and its context picture
+           every question has the artifact ITS TIER requires: for an R2
+               identity, the panel and geometry review artifacts its mode
+               names; for an R3 reconstructed number, an inference manifest
+               row AND a context picture
            the only answer problems are missing human answers
+
+       The tiers are not asked the same thing and the check does not pretend
+       they are. An R2 question has no `Inference_ID` and no cell crop - it is
+       judged on the panel - so a runbook demanding a context picture for every
+       question would describe a bundle the first pilot cannot produce.
 
        Anything else is a bundle to fix before a figure is opened. A reviewer
        who meets a refusal after signing has spent their afternoon twice.
 
-    4  THE REVIEW ITSELF, one panel at a time:
+    4  THE REVIEW ITSELF, one panel at a time. WHAT TO OPEN IS THE PANEL'S
+       `Review_Mode`, not a habit - `review_queue.csv` names it, and the next
+       section gives 127's in full. An `OVERLAY` panel is one picture:
 
        open  OUT/review/<Panel_ID>_overlay.png
              every mark this panel read, labelled with the series and cell it
@@ -96,16 +106,60 @@ the panel. The means and the SEs were measured off the ink.
     5  python3 review_preflight.py OUT --review ... --inference ...
        THE POST-REVIEW CHECK, and this one must exit 0: no blank, no duplicate,
        no answer to a question this run did not ask, and the finalizer would say
-       FINALIZED. With `--second FILE` it also reports where two independent
-       reviewers differ, cell by cell.
+       FINALIZED. On `--second FILE` see "Who does what": it compares the
+       per-cell channel and nothing else, and on a run without one it now says
+       so and exits 2 rather than reporting agreement.
 
     6  python3 finalize_batch.py OUT
        writes `figure_values_accepted.csv` and the stamp, or refuses and says
        why.
 
+## What 127's reviewer opens, in order
+
+127 Figure 4 is queued `BAR_MONO_GEOMETRY_RESOLVED`, and that mode is not an
+overlay. It asks for `Marks_Checked`, `Axis_Labels_Checked`,
+`Calibration_Checked` and `Identity_Checked`, and a person cannot make three of
+those four claims from a panel overlay: the printed tick numbers, the ink inside
+a 15 px bar, and somebody else's reading of a legend are each in a different
+artifact. The mode registers six, and the order below is the order they answer
+in.
+
+    1  OUT/geometry-review/index.html
+       GEOMETRY_REVIEW_INDEX, the contact sheet. It prints "N rows, M pictures,
+       K panels" - and the
+       three numbers agreeing is the check. A row with no picture is a row
+       nobody can look at, and the sheet is the only place the count shows.
+
+    2  OUT/geometry-review/panel__<Panel_ID>.png  and  panel__<Panel_ID>.json
+       CALIBRATION_PANEL and CALIBRATION_PANEL_META, once per sub-panel: SLOW,
+       NORMAL, LOWFREQ. The printed tick labels against the calibration's own
+       idea of each round value. This is where a printed 30 entered as 3 shows,
+       and nowhere else.
+              -> Axis_Labels_Checked, Calibration_Checked
+
+    3  OUT/geometry-review/<row>__slot<N>__<hash>.png
+       GEOMETRY_ROW_CROP, one per bar. For NORMAL/SUPINE slots 0, 1 and 2 the
+       question is the fill itself: OPEN, STIPPLED or SOLID, read off the ink
+       inside the bar rather than off the label the run gave it.
+
+    4  OUT/geometry-review/identity__<Panel_ID>.csv  and its Evidence_Artifact
+       IDENTITY_RESOLUTION: the two 15 px bars whose fill could not be sampled,
+       the series a PERSON named them, and the evidence behind that naming.
+              -> Identity_Checked
+
+    5  OUT/review/<Panel_ID>_overlay.png
+       last, not first: the labels sitting on the marks, once the axis and the
+       identities under them have been checked.
+              -> Marks_Checked
+
+`OUT/mono_bar_geometry.csv` is the sixth artifact, MONO_BAR_GEOMETRY. It is what
+the pictures are drawn FROM and carries each row's `Geometry_Row_SHA256`; a
+reviewer does not read it, and does not need to, because every row in it is
+bound into `Review_Subject_SHA256` and the finalizer re-hashes the lot.
+
 ## Who does what
 
-Two roles, and for the first pilot two people:
+Two roles, and for the first pilot two PEOPLE:
 
     RESOLVER   recorded the OPEN/SOLID identity of the two 15 px bars in
                `identity_resolution.csv`, with the evidence file behind it
@@ -113,9 +167,22 @@ Two roles, and for the first pilot two people:
                identity resolution, and signs the panel
 
 Whether one person may be both is not decided in this package, and the first
-pilot should not be the place it is decided by default. If a second person is
-impossible, they must at least review independently and be compared with
-`--second`.
+pilot is not the place it gets decided by default. **If a second person is not
+available, 127 is run as a dry run and nothing is finalized.**
+
+There is no `--second` fallback, and there was: v7.94 offered it, and it does
+not work here. `--second` reads two `inference_review.csv` files, so the only
+thing it can compare is the per-cell CONFIRMED/REJECTED channel - not the panel
+decision, not the four confirmations this mode asks for, not the identity the
+resolver wrote down. 127 has no R3 cell, so those two files are two empty
+templates: they agree, the flag prints nothing, and one person doing both roles
+reads as an independent check having happened. The tool now says how many cells
+it compared and exits 2 when that is none.
+
+Letting one person hold both roles would need a comparison this package does not
+have - `--second-value-review`, `--second-identity-resolution`, or a whole
+independent decision bundle diffed against the first. Until then the answer is
+two people.
 
 ## What the answers mean
 

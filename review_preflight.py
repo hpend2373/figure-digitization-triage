@@ -266,6 +266,30 @@ def disagreements(first, second):
     return out
 
 
+def second_comparison(inference_path, second_path):
+    """What a `--second` run actually compared, and the cells it disagreed on.
+
+    `--second` reads two `inference_review.csv` files, so the channel it compares
+    is the per-cell CONFIRMED/REJECTED one and NOTHING ELSE: not the panel
+    decision, not the confirmations a mode asks for, not an identity somebody
+    resolved by hand. On a run with no reconstructed cell it therefore compares
+    nothing at all - and v7.94 offered exactly that as the fallback when a
+    second person was impossible, on a first pilot the file itself says has no
+    R3 cell. Two empty files agree, the flag prints nothing, and one person
+    doing both roles reads as an independent check having happened.
+
+    Returns `(compared, differences)`. `compared` is every cell either file
+    answered, so a caller can say how much of the review the flag saw.
+    """
+    compared = set()
+    for path in (inference_path, second_path):
+        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+            iid = _s(r.get("Inference_ID"))
+            if iid:
+                compared.add(iid)
+    return sorted(compared), disagreements(inference_path, second_path)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("run_dir")
@@ -277,7 +301,11 @@ def main(argv=None):
                          "takes, and it must be the same directory")
     ap.add_argument("--second", default=None, metavar="FILE",
                     help="a second reviewer's inference_review.csv file, to "
-                         "compare cell by cell")
+                         "compare cell by cell. THIS CHANNEL ONLY: it cannot "
+                         "compare panel decisions, the confirmations a mode "
+                         "asks for, or a hand-resolved identity, so on a run "
+                         "with no reconstructed cell it compares nothing and "
+                         "says so")
     ap.add_argument("--require-all-values", action="store_true",
                     help="fail unless the whole batch went through: no value "
                          "excluded AND no panel refused. Off by default, because "
@@ -316,9 +344,18 @@ def main(argv=None):
     answers = answer_problems(args.run_dir, review, inference)
     for where, why in answers:
         print("  ANSWERS  %-34s %s" % (where, why))
+    compared = None
     if args.second:
-        for iid, a, b in disagreements(inference, args.second):
+        compared, differ = second_comparison(inference, args.second)
+        for iid, a, b in differ:
             print("  DIFFER   %-34s %s against %s" % (iid, a, b))
+        print("  SECOND   %d reconstructed cell(s) compared. --second reads two "
+              "inference_review.csv files and compares that channel only: not "
+              "the panel decision, not the confirmations its mode asks for, "
+              "not a hand-resolved identity" % len(compared))
+        if not compared:
+            print("  SECOND   nothing was compared, so no independent check "
+                  "happened here. Two people, or none")
     print("%d bundle problem(s), %d answer problem(s), %d refusal(s), "
           "%d value(s) excluded"
           % (len(bundle), len(answers), len(blocking), len(excluded)))
@@ -329,6 +366,15 @@ def main(argv=None):
     # a review done right, and the case the first pilot is designed around -
     # indistinguishable from an unanswered question.
     if status != FIN.FINALIZED_STATUS:
+        return 2
+    # AND A `--second` THAT COMPARED NOTHING IS NOT AN INDEPENDENT CHECK. v7.95.
+    # Asking for one and being told nothing is the failure this exit code exists
+    # for: a run with no reconstructed cell has no per-cell channel, the two
+    # files are two empty templates, and the flag agreeing with itself is what a
+    # single reviewer doing both roles would see. Returning 0 there let the
+    # runbook offer `--second` as the substitute for a second PERSON, on a first
+    # pilot the same file says has no R3 cell in it.
+    if compared is not None and not compared:
         return 2
     # THE WHOLE BATCH, which is what the name says. Checking only `excluded`
     # let a run pass strict mode with a panel refused beside the one that

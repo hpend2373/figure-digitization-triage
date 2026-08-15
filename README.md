@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.94 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2796 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2834 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.95 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2809 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2847 -->
 
-2796 scenarios on main after v7.94 under `requirements-lock.txt`, and 2834 with
+2809 scenarios on main after v7.95 under `requirements-lock.txt`, and 2847 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -164,6 +164,18 @@ the bundle. Run again on the filled-in answers it must exit 0. Both numbers are
 read out of `PILOT.md` by the suite and checked against the tools, because a
 runbook that promises the wrong exit code sends every reviewer to fix a bundle
 that was never broken.
+
+127 is queued `BAR_MONO_GEOMETRY_RESOLVED`, which is not an overlay: three of
+the four confirmations it asks for cannot be made from a panel picture, so the
+runbook walks its reviewer through the six artifacts that mode registers — the
+contact sheet, the calibration panels, the row crops, the identity resolution
+and its evidence, the overlay last — and the suite checks that every one of
+them, and every confirmation paired against the picture that answers it, is
+named there. **Two people, or the pilot is a dry run.** There is no `--second`
+fallback: that flag reads two `inference_review.csv` files, so on a pilot with
+no reconstructed cell it compares two empty templates, and reporting their
+agreement is how one person holding both roles reads as an independent check.
+It now says how many cells it compared and exits 2 when that is none.
 
 ## Status
 

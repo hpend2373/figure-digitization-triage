@@ -2428,6 +2428,55 @@ _panel3()
 check("  step 5 exits %s once those answers are in" % _post_code.group(1),
       PF.main([_R3_DIR]) == int(_post_code.group(1)),
       "%s" % PF.main([_R3_DIR]))
+# WHAT `--second` CANNOT DO, AND WHY IT STOPPED BEING OFFERED AS A SUBSTITUTE FOR
+# A SECOND PERSON. v7.95. It reads two `inference_review.csv` files, so the only
+# thing it compares is the per-cell CONFIRMED/REJECTED channel: not the panel
+# decision, not the confirmations a mode asks for, not an identity somebody
+# resolved by hand. v7.94's runbook offered it as the fallback when a second
+# person was impossible - on a first pilot the same file says has no R3 cell.
+_cmp3, _diff3 = PF.second_comparison(_r3_cells, _second)
+check("--second on a run with reconstructed cells compares them, and says which",
+      _cmp3 == _ids3 and len(_diff3) == 1, "%s / %s" % (_cmp3, _diff3))
+# NOW THE FIRST PILOT'S SHAPE: a run that finalizes and has no reconstructed cell
+# anywhere in it. Two reviewers who disagree about the panel are handed to the
+# flag, and it sees nothing - because what they disagree about is not in the file
+# it reads.
+_solo_dir, _ = fresh_run("solo_run")
+_sq = pd.read_csv(os.path.join(_solo_dir, "review_queue.csv"),
+                  dtype=object).fillna("")
+_solo_a = review([row(Panel_ID=_sq.iloc[0]["Panel_ID"],
+                      Review_Subject_SHA256=_sq.iloc[0]
+                      ["Review_Subject_SHA256"])],
+                 path=os.path.join(_solo_dir, "value_review.csv"))
+_solo_b = review([row(Panel_ID=_sq.iloc[0]["Panel_ID"],
+                      Review_Subject_SHA256=_sq.iloc[0]
+                      ["Review_Subject_SHA256"], Marks_Checked="")],
+                 path=os.path.join(_solo_dir, "value_review_second.csv"))
+_solo_cells = []
+for _name in ("inference_review.csv", "inference_review_second.csv"):
+    _p = os.path.join(_solo_dir, _name)
+    with open(_p, "w", newline="", encoding="utf-8") as _fh:
+        csv.writer(_fh).writerow(FIN.inference_review_columns())
+    _solo_cells.append(_p)
+check("  this run finalizes and has no reconstructed cell in it",
+      PF.questions(_solo_dir) == []
+      and PF.main([_solo_dir, "--review", _solo_a]) == 0,
+      "%s" % PF.questions(_solo_dir))
+_cmp0, _diff0 = PF.second_comparison(*_solo_cells)
+check("  so two reviewers there compare nothing, and disagree about nothing",
+      _cmp0 == [] and _diff0 == [], "%s / %s" % (_cmp0, _diff0))
+check("    while the decisions the flag cannot see are in fact different",
+      open(_solo_a, encoding="utf-8").read()
+      != open(_solo_b, encoding="utf-8").read())
+check("  asking for an independent check and getting none exits 2, not 0",
+      PF.main([_solo_dir, "--review", _solo_a, "--inference", _solo_cells[0],
+               "--second", _solo_cells[1]]) == 2)
+check("    and no confirmation the first pilot's mode asks for is even IN the "
+      "file --second reads",
+      not (set(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"])
+           & set(FIN.inference_review_columns())),
+      "%s" % sorted(set(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"])
+                    & set(FIN.inference_review_columns())))
 # AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
 # the finalizer for a run that has been moved; without it on the preflight, the
 # same run could fail one and pass the other with the same decision function

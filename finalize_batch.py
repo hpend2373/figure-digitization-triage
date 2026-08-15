@@ -1208,6 +1208,12 @@ def _verifier_context(envelope, panel, position_rows, config_rows,
             "Mask_Key": _s(row.get("Mask_Key")),
             "Colour_Hex": _s(row.get("Colour_Hex")),
             "Expected_Mask": _s(row.get("Mask_Key")) or sid,
+            # And what a MONOCHROME series is told apart by, which is a marker
+            # rather than a colour: the shape the manifest declares, or the fill
+            # when every series is the same shape.
+            "Marker_Shape": _s(row.get("Marker_Shape")),
+            "Marker_Fill": _s(row.get("Marker_Fill")),
+            "Line_Style": _s(row.get("Line_Style")),
         }
     return dict(envelope, Position_Anchors=anchors,
                 Slot_Tolerance_Px=tolerance,

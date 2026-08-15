@@ -790,10 +790,10 @@ check("nan and inf are not measurements, in either verifier",
           dict(_geo, Value_Span_Px="nan")).problems
       and _bar_verdict(top_px="nan").problems,
       "%s" % (P_expected_line_style_methods_ctx(dict(_geo, Value_Span_Px="nan")),))
-check("three of the seven readers now re-derive their methods, and the table "
+check("four of the seven readers now re-derive their methods, and the table "
       "says which",
       set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR",
-                                    "LINE_COLOR"},
+                                    "LINE_COLOR", "LINE_MONO"},
       "%s" % sorted(P.EVIDENCE_VERIFIERS))
 # AND THE JOIN ASKS IT THE SAME WAY IT ASKS THE OTHER ONE. The call site is table
 # driven - `EVIDENCE_VERIFIERS[mark_type]` - so what has to be checked here is
@@ -922,6 +922,87 @@ check("the marker's own numbers are re-computed like every other reader's",
 check("  and a marker whose definition is not the centre is refused",
       "Value_Method" not in _marker_verdict(
           Marker_Definition="MARKER_TOP").expected)
+
+print()
+print("the fourth: a monochrome marker, named by shape or by fill or by neither")
+# v7.90. A monochrome panel has no colour to name a series by, so it names it by
+# the marker - and which of the three identity methods that is depends on what
+# the MANIFEST declared, not on what the reader felt like. All three are
+# re-derivable from the measurement and the declaration together.
+_MONO_CONTEXT = {"Y_Calibration": MR._calibration_record(_MARKER_AXIS),
+                 "Position_Anchors": {"T0": 149.0, "T1": 249.0},
+                 "Series_Discriminants": {
+                     "S_1": {"Marker_Shape": "CIRCLE", "Marker_Fill": "ANY"},
+                     "S_FILL": {"Marker_Shape": "ANY", "Marker_Fill": "FILLED"},
+                     "S_ONLY": {"Marker_Shape": "ANY", "Marker_Fill": "ANY"}}}
+_mono = dict(series="S_1", x_label="T0", x="149.0",
+             Marker_Definition="CIRCLE", Marker_Fill="FILLED",
+             marker_fill_ratio="0.91", marker_area_px="120",
+             marker_center_px="380.0",
+             mean=repr(_MARKER_AXIS.pixel_to_value(380.0)),
+             Errorbar_Top_Px="360.0", Errorbar_Bottom_Px="400.0",
+             dispersion=repr(abs(_MARKER_AXIS.pixel_to_value(360.0)
+                                 - _MARKER_AXIS.pixel_to_value(400.0)) / 2.0),
+             Errorbar_Stem_Confirmed="TRUE")
+
+
+def _mono_verdict(**over):
+    return P.expected_line_mono_methods(dict(_mono, **over), _MONO_CONTEXT)
+
+
+check("a marker of the shape its series declares is named by that shape",
+      _mono_verdict().expected
+      == {"Identity_Method": "MEASURED_MARKER_SHAPE",
+          "Value_Method": "MARKER_CENTER",
+          "Dispersion_Method": "DIRECT_CONNECTED_CAP"}
+      and not _mono_verdict().problems, "%s" % (_mono_verdict(),))
+check("  and one that measured as another shape is refused",
+      "Identity_Method" not in _mono_verdict(
+          Marker_Definition="SQUARE").expected,
+      "%s" % (_mono_verdict(Marker_Definition="SQUARE"),))
+check("a series told apart by FILL is named by the fill it measured",
+      _mono_verdict(series="S_FILL").expected["Identity_Method"]
+      == "MEASURED_MARKER_FILL"
+      and "Identity_Method" not in _mono_verdict(
+          series="S_FILL", Marker_Fill="OPEN",
+          marker_fill_ratio="0.02").expected,
+      "%s" % (_mono_verdict(series="S_FILL"),))
+check("  and one series declared with neither is R1, not R0",
+      _mono_verdict(series="S_ONLY").expected["Identity_Method"]
+      == "DECLARED_SINGLE_SERIES"
+      and P.identity_tier("DECLARED_SINGLE_SERIES") == "R1")
+check("the fill state has to be the ratio's own answer",
+      _mono_verdict(marker_fill_ratio="0.10").problems
+      and _mono_verdict(Marker_Fill="OPEN",
+                        marker_fill_ratio="0.10").expected
+      .get("Identity_Method") == "MEASURED_MARKER_SHAPE"
+      and P.MARKER_FILLED_RATIO == 0.58,
+      "%s" % (_mono_verdict(marker_fill_ratio="0.10"),))
+check("  and a fill state with no ratio behind it is not a measurement",
+      _mono_verdict(marker_fill_ratio="").problems)
+check("a monochrome marker is FOUND, so it is nearest-anchor like a bar",
+      _mono_verdict(x="151.0").expected["Identity_Method"]
+      == "MEASURED_MARKER_SHAPE"
+      and _mono_verdict(x="248.0").problems,
+      "%s" % (_mono_verdict(x="248.0"),))
+check("all three spreads this reader can produce are re-derived",
+      _mono_verdict(Errorbar_Stem_Confirmed="FALSE").expected
+      ["Dispersion_Method"] == "UNSTEMMED_CAP"
+      and _mono_verdict(dispersion=None, Errorbar_Top_Px="",
+                        Errorbar_Bottom_Px="").expected["Dispersion_Method"]
+      == "NO_DISPERSION"
+      and _mono_verdict(Errorbar_Top_Px="").problems
+      and "Dispersion_Method" not in _mono_verdict(
+          Errorbar_Top_Px="").expected
+      and "Dispersion_Method" not in _mono_verdict(dispersion=None).expected,
+      "%s" % (_mono_verdict(dispersion=None, Errorbar_Top_Px="",
+                            Errorbar_Bottom_Px=""),))
+check("  and the numbers are re-computed like every other reader's",
+      _mono_verdict(mean="999").problems
+      and _mono_verdict(dispersion="99").problems)
+check("a series this run does not declare cannot be measured as one",
+      _mono_verdict(series="S_NOWHERE").problems,
+      "%s" % (_mono_verdict(series="S_NOWHERE"),))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))

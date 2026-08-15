@@ -5983,6 +5983,54 @@ for foreign producers, and no longer for the three that have one.
     the colour reader dropping its own ink             2
     the support count being a probe at the centre      2
 
+## v7.90 — the fourth verifier, and two fixtures that described impossible marks
+
+`LINE_MONO` has no colour to name a series by, so it names it by the marker -
+and WHICH of its three identity methods that is depends on what the manifest
+declared:
+
+    MEASURED_MARKER_SHAPE    the series declares a shape and the marker was
+                             classified as that shape
+    MEASURED_MARKER_FILL     no shape declared, a fill declared, and the marker
+                             measured as that fill
+    DECLARED_SINGLE_SERIES   neither: nothing about the mark was compared with
+                             anything, which is R1 and not R0
+
+All three re-derive from the measurement and the declaration together. The fill
+state is checked against the RATIO the reader recorded it from
+(`MARKER_FILLED_RATIO`, named once and shared), the position is nearest-anchor -
+a monochrome marker is FOUND rather than looked up, so its x is a measurement -
+and the numbers are re-computed like every other reader's.
+
+**Two fixtures turned out to describe marks no reader can make.** Both were
+found by the new verifier, which is what a verifier is for:
+
+- a mark with `Errorbar_Stem_Confirmed=TRUE` beside `Dispersion_Method=
+  UNSTEMMED_CAP` — a stem that was confirmed and a method that says no stem was
+  found. It had stood since v7.71 as the R3-on-the-spread-axis fixture.
+- the tier-gate fixtures, which is the deeper finding: **no producible
+  dispersion method is both R3 and able to reach the finalizer.** `grid_engine`
+  refuses any cell whose whisker the reader could not connect, so an
+  `UNSTEMMED_CAP` value never survives machine QC, and the two R3 methods that
+  would - `RESTORED_MASKED_CAP` and `INTERPOLATED_DISPERSION` - are reserved and
+  producible by nobody. The scenario now checks the derivation where it lives
+  and the gate's refusal end to end, and the gap is on the open list rather than
+  hidden behind a fixture that could not happen.
+
+Same for the blank-method scenarios: with a verifier on the reader, a value that
+says nothing is refused by the MARK that contradicts it, one step before the
+tier gate. `Values_Method_Unstated` is reachable for `BAR_MONO`, `SCATTER` and
+foreign producers, and no longer for the four readers that re-derive.
+
+    reverted                                          scenarios that fail
+    LINE_MONO having no verifier again                 1
+    a declared shape need not be the measured one      1
+    a declared fill need not be the measured one       1
+    the fill state need not match its own ratio        1
+    a monochrome marker need not be near its anchor    1
+    a spread that is half recorded accepted            1
+    an undeclared series measured as one anyway        1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -6015,11 +6063,16 @@ for foreign producers, and no longer for the three that have one.
 - the numbers are re-computed from the pixels for `BAR_COLOR` and
   `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
   them yet, because they have no verifier to do it in
-- the methods are RE-DERIVED from the evidence for three readers of the seven,
-  `LINE_MONO_STYLE`, `BAR_COLOR` and `LINE_COLOR`. `LINE_MONO` and `BOX_VIOLIN`
-  are left - `LINE_MONO` needs its marker-shape and fill measurements re-derived
-  the way the colour pair now is, `BOX_VIOLIN` its five box rows - while
-  `BAR_MONO` and `SCATTER` have their own durable artifacts checked instead
+- the methods are RE-DERIVED from the evidence for four readers of the seven.
+  `BOX_VIOLIN` is the last one without a verifier - its five box rows are the
+  evidence - while `BAR_MONO` and `SCATTER` have their own durable artifacts
+  checked instead
+- NO PRODUCIBLE DISPERSION METHOD IS BOTH R3 AND ABLE TO REACH THE FINALIZER.
+  `grid_engine` refuses any cell whose whisker the reader could not connect, so
+  an `UNSTEMMED_CAP` value never survives machine QC; the two R3 methods that
+  would are reserved. Either the gate should let an unstemmed cap through AS R3 -
+  a cell-level question a person can answer from the picture - or the tier is
+  decoration on that axis. Found in v7.90 by a fixture that could not happen
 - the hand-reconciled worked examples (`id323_figure_values.csv`) carry no
   methods either: they come from two raster readings reconciled to a midpoint,
   which is a `MANUAL_DIGITIZED` value with no reader behind it and no channel

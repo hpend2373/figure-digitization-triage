@@ -534,22 +534,30 @@ _rb = FIN.finalize(_BLANK_DIR, review_path=review(
 _stamp_plain = json.load(open(os.path.join(_BLANK_DIR, "finalize_stamp.json"),
                               encoding="utf-8"))
 check("a value that does not say how it was got is refused, not counted",
-      _rb["status"] == "NOTHING_FINALIZABLE"
+      _rb["status"] in ("NOTHING_FINALIZABLE", "NOTHING_APPROVED")
       and _stamp_plain["Values_Accepted"] == 0
       and not os.path.exists(os.path.join(_BLANK_DIR,
                                           "figure_values_accepted.csv")),
       "%s" % _rb)
-check("and the refusal is counted in the stamp, not only in the problem list",
-      _stamp_plain["Values_Method_Unstated"] > 0
-      and _stamp_plain["Values_Method_Blocked"]
-      == _stamp_plain["Values_Method_Unstated"], "%s" % _stamp_plain)
-check("and every refused cell is named, with the reason and the tier",
-      sum(1 for p in _stamp_plain["Problems"]
-          if p["check"] == "VALUE_METHOD_UNSTATED" and "/" in p["where"])
-      == _stamp_plain["Values_Method_Unstated"]
-      and all("R4" in p["detail"] for p in _stamp_plain["Problems"]
-              if p["check"] == "VALUE_METHOD_UNSTATED" and "/" in p["where"]),
-      "%s" % [p["where"] for p in _stamp_plain["Problems"]])
+# AND FROM v7.90 THE REFUSAL COMES FROM THE MARK, one step before the tier gate.
+# Every reader with an evidence verifier re-derives the three methods from its
+# own measurements, and a mark that measured a marker cannot support a value
+# that says nothing about how it was read - so the blank pair is a contradiction
+# rather than an unpriced tier. Both refuse; the earlier one names the axis.
+check("and the refusal names the axes the mark's own evidence answers",
+      all(p["check"] in ("METHOD_CONTRADICTS_EVIDENCE",
+                         "METHOD_EVIDENCE_INCOMPLETE", "REVIEW_ARTIFACT_MISSING")
+          for p in _stamp_plain["Problems"])
+      and any("the evidence supports" in p["detail"]
+              for p in _stamp_plain["Problems"]),
+      "%s" % {p["check"] for p in _stamp_plain["Problems"]})
+# THE TIER GATE ITSELF IS UNCHANGED, and is what answers for a reader with no
+# verifier and for a run made by something else. Its pricing is checked where it
+# lives rather than through a fixture that can no longer reach it.
+check("  while a blank pair is still priced at the tier no signature finalizes",
+      PROV.row_tier({"Identity_Method": "", "Value_Method": ""}) == "R4"
+      and "R4" not in PROV.FINALIZABLE_TIERS,
+      PROV.row_tier({"Identity_Method": "", "Value_Method": ""}))
 # HALF-BLANK IS BLANK. A row naming how the number was got and not how the series
 # was named is a number with no series behind it, and the pair is what is priced.
 def _half_stated(r):
@@ -571,13 +579,12 @@ _rh = FIN.finalize(_HALF_DIR, review_path=review(
 _stamp_half = json.load(open(os.path.join(_HALF_DIR, "finalize_stamp.json"),
                              encoding="utf-8"))
 check("a row that answers one of the two questions is refused as well",
-      _rh["status"] == "NOTHING_FINALIZABLE" and _rh["accepted"] == 0,
-      "%s" % _rh)
-check("  and is counted as UNSTATED, not as a method that failed on its merits",
-      _stamp_half["Values_Method_Unstated"] == _stamp_half["Values_Method_Blocked"]
-      > 0
-      and all(p["check"] == "VALUE_METHOD_UNSTATED"
-              for p in _stamp_half["Problems"]),
+      _rh["status"] in ("NOTHING_FINALIZABLE", "NOTHING_APPROVED")
+      and _rh["accepted"] == 0, "%s" % _rh)
+check("  and the half it does answer does not buy it the other half",
+      all(p["check"] in ("METHOD_CONTRADICTS_EVIDENCE",
+                         "METHOD_EVIDENCE_INCOMPLETE", "REVIEW_ARTIFACT_MISSING")
+          for p in _stamp_half["Problems"]),
       "%s" % {p["check"] for p in _stamp_half["Problems"]})
 check("  because the PAIR is what is priced, not the better half",
       PROV.review_tier("", "MARKER_CENTER") == "R4"
@@ -620,38 +627,57 @@ print("the weight is evidence too, and the gate prices it")
 # The panel is LINE_COLOR here, not the style reader: an unstemmed cap is
 # something a marker reader can actually meet, and the dispersion contract in
 # v7.68's shape refuses a claim its reader could not have reached.
-def _unstemmed(r):
+# THE SPREAD AXIS PRICES A ROW ON ITS OWN, and the panel question follows from
+# the pricing rather than from a mode. Checked on the derivation rather than
+# through a run, because no producible dispersion method is BOTH R3 and able to
+# reach the finalizer: `grid_engine` refuses any cell whose whisker the reader
+# could not connect, so an `UNSTEMMED_CAP` value never survives machine QC, and
+# the two R3 methods that would - `RESTORED_MASKED_CAP` and
+# `INTERPOLATED_DISPERSION` - are reserved and producible by nobody.
+#
+# The fixture that used to stand here described a mark no reader can make: a
+# stem confirmed TRUE beside a method that says no stem was found. v7.90's
+# LINE_MONO verifier refuses exactly that, which is how it was noticed.
+_spread_r3 = dict(Identity_Method="MEASURED_MARKER_SHAPE",
+                  Value_Method="MARKER_CENTER",
+                  Dispersion_Method="UNSTEMMED_CAP", Dispersion_Value="4.2")
+check("a row measured on both mean axes can still be R3 on the third",
+      PROV.review_tier(_spread_r3["Identity_Method"],
+                       _spread_r3["Value_Method"]) == "R0"
+      and PROV.row_tier(_spread_r3) == "R3",
+      "%s" % PROV.row_tier(_spread_r3))
+check("  so the panel question follows from the values, not from a mode",
+      RB.inference_confirmations([_spread_r3]) == (RB.INFERENCE_CONFIRMATION,)
+      and RB.inference_confirmations(
+          [dict(_spread_r3, Dispersion_Method="DIRECT_CONNECTED_CAP")]) == (),
+      "%s" % (RB.inference_confirmations([_spread_r3]),))
+check("  and a cell priced there is asked about one at a time",
+      "R3" in PROV.CELL_CONFIRMATION_TIERS
+      and PROV.row_finalizable(_spread_r3),
+      "%s" % PROV.CELL_CONFIRMATION_TIERS)
+# AND THE GATE IS WHY THAT ROW CANNOT REACH A REVIEWER TODAY: the reader's own
+# per-cell answer outranks the unit's declaration, so an unconfirmed whisker is
+# refused before any tier is priced.
+def _half_unstemmed(r):
     r["Identity_Method"] = "MEASURED_MARKER_SHAPE"
-    r["Dispersion_Method"] = "UNSTEMMED_CAP"
+    if r["series"] == "S_R":
+        r["Errorbar_Stem_Confirmed"] = "FALSE"
+        r["Dispersion_Method"] = "UNSTEMMED_CAP"
 
 
 try:
-    MR.read_panel = mono_reader(_unstemmed)
+    MR.read_panel = mono_reader(_half_unstemmed)
     _DISP_DIR, _ = fresh_run("run_dispersion", **_MONO)
 finally:
     MR.read_panel = _real_read_panel
-_qd = pd.read_csv(os.path.join(_DISP_DIR, "figure_values_machine_qc.csv"),
-                  dtype=object).fillna("")
-check("a row measured on both mean axes can still be R3 on the third",
-      len(_qd) > 0
-      and {PROV.review_tier(r["Identity_Method"], r["Value_Method"])
-           for _, r in _qd.iterrows()} == {"R0"}
-      and {PROV.row_tier(r) for _, r in _qd.iterrows()} == {"R3"},
-      "%s" % sorted({PROV.row_tier(r) for _, r in _qd.iterrows()}))
-_fpd = pd.read_csv(os.path.join(_DISP_DIR, "review_queue.csv"),
-                   dtype=object).fillna("")
-check("  so its panel is asked about the inference, off the same derivation",
-      int(_fpd.loc[0, "Inference_Cells"]) == len(_qd),
-      "%r" % _fpd.loc[0, "Inference_Cells"])
-_rd = FIN.finalize(_DISP_DIR, review_path=review(
-    [row(Review_Subject_SHA256=_fpd.loc[0, "Review_Subject_SHA256"],
-         Inference_Checked="CONFIRMED")],
-    path=os.path.join(_DISP_DIR, "value_review.csv")),
-    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
-check("  and the cell-level contract asks about each one by name",
-      _rd["status"] == "NOTHING_APPROVED"
-      and any(p["check"] == "INFERENCE_CONFIRMATION_MISSING"
-              for p in _rd["problems"]), "%s" % _rd)
+_disp_qc = pd.read_csv(os.path.join(_DISP_DIR, "qc_problems.csv"),
+                       dtype=object).fillna("")
+check("  because an unconfirmed whisker is refused before it is priced",
+      "CELL_ERRORBAR_STEM_UNCONFIRMED" in set(_disp_qc["check"])
+      and list(pd.read_csv(os.path.join(_DISP_DIR, "run_manifest.csv"),
+                           dtype=object).fillna("")["Run_State"])
+      == ["QC_FAILED"],
+      "%s" % sorted(set(_disp_qc["check"])))
 # A SPREAD A MODEL PRODUCED is R4 and unfinalizable - and no reader may claim it
 # yet, which is the honest state rather than an end-to-end scenario over a
 # producer this package does not have. The registry prices what a future reader
@@ -685,7 +711,8 @@ _rm = FIN.finalize(_MUTE_DIR, review_path=review(
     path=os.path.join(_MUTE_DIR, "value_review.csv")),
     run_date="2026-08-06", today=datetime.date(2026, 8, 6))
 check("a row that says nothing about the spread it emitted is refused",
-      _rm["status"] == "NOTHING_FINALIZABLE" and _rm["accepted"] == 0
+      _rm["status"] in ("NOTHING_FINALIZABLE", "NOTHING_APPROVED")
+      and _rm["accepted"] == 0
       and all(str(r["Dispersion_Value"]).strip() for _, r in _qm.iterrows()),
       "%s" % _rm)
 _blocked_mute = pd.read_csv(os.path.join(_MUTE_DIR, "method_blocked_cells.csv"),

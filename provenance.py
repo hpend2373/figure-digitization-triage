@@ -967,6 +967,145 @@ def expected_line_colour_methods(mark, context=None):
     return EvidenceVerdict(out, problems)
 
 
+#: What `mark_readers` calls a filled marker: the share of the marker's own
+#: outline that is ink. Named here because the verifier re-derives the fill
+#: claim from the ratio the reader recorded, and two copies of the threshold
+#: would eventually disagree about a marker on the line.
+MARKER_FILLED_RATIO = 0.58
+
+
+def expected_line_mono_methods(mark, context=None):
+    """The three methods a LINE_MONO mark's own evidence implies.
+
+    A monochrome panel has no colour to name a series by, so it names it by the
+    marker: the SHAPE the manifest declares, or the FILL when every series is the
+    same shape, or nothing at all when one series was declared and there is
+    nothing to tell apart. The reader records what it measured - the shape it
+    classified, the fill state and the ratio behind it - so each of the three
+    identity methods is re-derivable from the measurement and the declaration
+    together.
+
+        MEASURED_MARKER_SHAPE      the series declares a shape, and the marker
+                                   was classified as that shape
+        MEASURED_MARKER_FILL       the series declares no shape and a fill, and
+                                   the marker measured as that fill
+        DECLARED_SINGLE_SERIES     neither was declared: nothing about the mark
+                                   was compared with anything, which is R1
+
+    The value and the spread are the marker centre and the cap rows, checked by
+    the same arithmetic every other reader's are.
+    """
+    def field(name):
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    def number(name):
+        return finite_number(field(name))
+
+    out, problems = {}, []
+    declared = ((context or {}).get("Series_Discriminants")
+                or {}).get(field("series")) or {}
+    shape = field("Marker_Definition").upper()
+    fill = field("Marker_Fill").upper()
+    ratio = number("marker_fill_ratio")
+    want_shape = _s_upper(declared.get("Marker_Shape"))
+    want_fill = _s_upper(declared.get("Marker_Fill"))
+    if not declared:
+        problems.append("this run declares no series %s for the panel, so what "
+                        "the marker had to look like to be it is not stated"
+                        % (field("series") or "(unnamed)"))
+    elif not shape:
+        problems.append("the mark records no measured marker shape, so how its "
+                        "series was named cannot be re-derived")
+    elif want_shape and want_shape != "ANY":
+        if shape != want_shape:
+            problems.append("the mark measured as a %s and this run declares "
+                            "series %s is a %s"
+                            % (shape, field("series"), want_shape))
+        else:
+            out["Identity_Method"] = "MEASURED_MARKER_SHAPE"
+    elif want_fill and want_fill != "ANY":
+        if fill != want_fill:
+            problems.append("the mark measured as %s and this run declares "
+                            "series %s is %s"
+                            % (fill or "nothing", field("series"), want_fill))
+        else:
+            out["Identity_Method"] = "MEASURED_MARKER_FILL"
+    else:
+        out["Identity_Method"] = "DECLARED_SINGLE_SERIES"
+    # AND THE FILL STATE IS THE RATIO'S OWN ANSWER. The reader calls a marker
+    # filled when at least `MARKER_FILLED_RATIO` of its outline is ink; a mark
+    # whose state and ratio disagree was not classified by this reader.
+    if fill in ("FILLED", "OPEN") and ratio is not None:
+        should = "FILLED" if ratio >= MARKER_FILLED_RATIO else "OPEN"
+        if fill != should:
+            problems.append("the mark says its marker is %s and %s of its "
+                            "outline is ink, which is %s"
+                            % (fill, ratio, should))
+    elif fill in ("FILLED", "OPEN"):
+        problems.append("the mark says its marker is %s and records no fill "
+                        "ratio it was measured from" % fill)
+    if not shape:
+        pass                      # already refused above
+    else:
+        out["Value_Method"] = "MARKER_CENTER"
+    stem = field("Errorbar_Stem_Confirmed").upper()
+    spread = number("dispersion")
+    rows = (number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px"))
+    if stem not in ("TRUE", "FALSE"):
+        problems.append("the mark does not say whether a stem connected its cap "
+                        "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
+                        "cannot be re-derived" % (stem or "blank"))
+    elif spread is None and rows == (None, None):
+        out["Dispersion_Method"] = "NO_DISPERSION"
+    elif spread is None or None in rows:
+        problems.append("the mark reports a spread of %s between rows %s and "
+                        "%s, and a spread is both or neither"
+                        % (field("dispersion") or "nothing",
+                           field("Errorbar_Top_Px") or "nothing",
+                           field("Errorbar_Bottom_Px") or "nothing"))
+    else:
+        out["Dispersion_Method"] = ("DIRECT_CONNECTED_CAP" if stem == "TRUE"
+                                    else "UNSTEMMED_CAP")
+    problems.extend(_nearest_anchor_problems(field, number, context))
+    problems.extend(_curve_arithmetic_problems(field, finite_number, context))
+    return EvidenceVerdict(out, problems)
+
+
+def _s_upper(value):
+    return "" if value is None else str(value).strip().upper()
+
+
+def _nearest_anchor_problems(field, number, context):
+    """Is this mark nearest to the anchor it is filed under?
+
+    A monochrome marker is FOUND rather than looked up: the reader takes the
+    centroid of the blob it classified, so its x is a measurement and not the
+    declared column. Nearest-anchor is therefore the question, as it is for a
+    bar - and unlike a bar, this reader records no residual to check.
+    """
+    anchors = (context or {}).get("Position_Anchors") or {}
+    label, x_px = field("x_label"), number("x")
+    if not label:
+        return []
+    if not anchors:
+        return ["the mark carries the label %s and this run declares no anchor "
+                "pixels for the panel, so nothing says the mark is at it" % label]
+    if x_px is None:
+        return ["the mark records no x column, so the position it was assigned "
+                "to cannot be re-derived"]
+    distances = sorted((abs(x_px - px), pid) for pid, px in anchors.items())
+    if len(distances) > 1 and abs(distances[1][0] - distances[0][0]) <= PIXEL_EPSILON:
+        return ["the mark at column %s is the same distance from %s and %s, so "
+                "which position it belongs to is not decidable"
+                % (x_px, distances[0][1], distances[1][1])]
+    if label != distances[0][1]:
+        return ["the mark sits at column %s, which is nearest the declared "
+                "anchor for %s (%s away), and it is filed under %s"
+                % (x_px, distances[0][1], distances[0][0], label)]
+    return []
+
+
 #: Mark type -> the function that re-derives its methods from its own evidence.
 #:
 #: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
@@ -977,7 +1116,8 @@ def expected_line_colour_methods(mark, context=None):
 #: difference in strength and is written down rather than implied away.
 EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
                       "BAR_COLOR": expected_bar_colour_methods,
-                      "LINE_COLOR": expected_line_colour_methods}
+                      "LINE_COLOR": expected_line_colour_methods,
+                      "LINE_MONO": expected_line_mono_methods}
 
 
 def evidence_failure(mark_type, mark, claimed, context=None):

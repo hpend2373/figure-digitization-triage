@@ -5878,6 +5878,40 @@ rebound with the cell keys the manifests give the labels they now claim. Refused
     the baseline not asked about                       3
     the finalizer handing over the envelope only       1
 
+## v7.87 — a curve's numbers are re-computed too, and the cap rows are kept
+
+`expected_line_style_methods` said it did not use its context: a curve's value is
+read off ink at a column, so there was nothing to re-calibrate. That was wrong
+about the reader's own record. Every line mark carries `marker_center_px`, and
+its mean IS that row put through the panel's y calibration - on publication 397,
+exactly, for all 18 marks and every value method, including the reconstructed
+ones (the reconstruction happens in pixel space and the conversion happens once).
+
+So the same third party arrives: re-deriving the METHOD from the support columns
+says how the number was got, and re-computing the number says it is the one those
+pixels produce. A producer could otherwise move `marker_center_px`, keep the
+mean, re-stamp everything, and the value-to-mark join would find two fields
+agreeing with each other.
+
+**The cap rows are now on the mark.** All four marker/curve readers kept the
+calibrated bounds and threw the pixels away, so `dispersion` was a conversion
+nothing downstream could repeat. `Errorbar_Top_Px` and `Errorbar_Bottom_Px` are
+recorded beside them - and only when there is a spread to have measured - so:
+
+    mean         == calibrate(marker_center_px)
+    dispersion   == |calibrate(top) - calibrate(bottom)| / 2
+
+Both verified against the real readers before being made a refusal: 397's 18
+line marks and the style fixture's capped marks all reproduce their own numbers.
+
+    reverted                                          scenarios that fail
+    a curve's mean not recomputed                      1
+    a curve's dispersion not recomputed                1
+    a dispersion with no cap rows accepted             2
+    the curve arithmetic not asked for                 3
+    the marker reader dropping its cap rows            1
+    the style reader dropping its cap rows             1
+
 ## Still open
 
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
@@ -5907,6 +5941,9 @@ rebound with the cell keys the manifests give the labels they now claim. Refused
   rests on. What is not decided is whether the approver and the resolver may be
   the same person, and whether a resolution needs its own cell-level
   confirmation the way a reconstructed value does
+- the numbers are re-computed from the pixels for `BAR_COLOR` and
+  `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
+  them yet, because they have no verifier to do it in
 - the methods are RE-DERIVED from the evidence for two readers of the seven,
   `LINE_MONO_STYLE` and `BAR_COLOR`. The other five are held to the matrix, to the
   mark join and to the value-to-cell binding, and not to a derivation from their

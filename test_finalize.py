@@ -1896,6 +1896,19 @@ check("a mark ten pixels away claiming a span of zero is refused, not read as a 
       "direct observation",
       _held_e == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_e,
       "%s" % _seen_e)
+# AND A CURVE MARK'S OWN ARITHMETIC, THROUGH THE FINALIZER. v7.87. The line
+# reader's numbers are pixel rows put through the panel's axis, exactly as a
+# bar's are, and until now only the method was re-derived from them.
+_held_e, _seen_e = _edited_marks(
+    lambda m: m.update(marker_center_px=float(m["marker_center_px"]) + 7),
+    restamp=True, rebind=True)
+check("a curve mark read at a row that does not produce its mean is refused",
+      _held_e == {"P1"} and "METHOD_EVIDENCE_INCOMPLETE" in _seen_e,
+      "%s" % _seen_e)
+check("  and the refusal names the row and what it actually reads",
+      "under this run's y calibration" in _mark_detail_at(
+          _edit_dir, "METHOD_EVIDENCE_INCOMPLETE"),
+      "%s" % _mark_detail_at(_edit_dir, "METHOD_EVIDENCE_INCOMPLETE"))
 # A SCHEMA THIS MODULE CANNOT JOIN IS NOT A SCHEMA IT MAY FINALIZE. v7.75. Every
 # check above was conditional on the producer's own choice of schema: a run
 # written to `mark-data/1` skipped the join, the numbers and the cell silently

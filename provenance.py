@@ -454,9 +454,13 @@ def expected_line_style_methods(mark, context=None):
     nothing new is trusted, and a value row claiming a cheaper method than its own
     ink supports has no way through.
 
-    `context` is the panel's verified envelope, and this reader does not use it:
-    a curve's value is read off ink at a column, and the mark records the columns
-    rather than a pixel row this module could re-calibrate. `BAR_COLOR`'s does.
+    `context` carries the run's own declaration, and from v7.87 this reader uses
+    it the way `BAR_COLOR`'s does: every number on the mark is a pixel row put
+    through the panel's y calibration, and the rows are on the record - the
+    marker centre the value was read at, and the two cap rows a spread was
+    measured between. Re-deriving the METHOD from the support columns says how
+    the number was got; re-computing the number says it is the one those pixels
+    produce.
 
     TOTAL from v7.76: every axis ends with an expectation or with a problem, and
     never with silence. Until then the function returned only what it could answer
@@ -529,7 +533,59 @@ def expected_line_style_methods(mark, context=None):
         problems.append("the mark does not say whether a stem connected its cap "
                         "(Errorbar_Stem_Confirmed=%s), so how its spread was got "
                         "cannot be re-derived" % (stem or "blank"))
+    problems.extend(_curve_arithmetic_problems(field, finite_number, context))
     return EvidenceVerdict(out, problems)
+
+
+def _curve_arithmetic_problems(field, number, context):
+    """Do this mark's own pixel rows produce its own numbers?
+
+    The same question v7.85 asked of a bar, and the answer was the same shape:
+    until it was asked, a producer could move `marker_center_px`, keep the mean
+    or invent one, re-stamp everything, and the value-to-mark join found two
+    fields that agreed with each other. The axis is the third party.
+
+        mean         == calibrate(marker_center_px)
+        dispersion   == |calibrate(top) - calibrate(bottom)| / 2
+
+    The two cap rows were added to the reader in v7.87 for this: it kept the
+    calibrated bounds and threw the pixels away, so the conversion was a claim
+    nothing downstream could repeat. A mark with no dispersion needs neither.
+    """
+    import mark_readers as MR                                      # noqa: E402
+    axis = MR.calibration_from_record((context or {}).get("Y_Calibration"))
+    centre, mean = number(field("marker_center_px")), number(field("mean"))
+    spread = number(field("dispersion"))
+    top, bottom = (number(field("Errorbar_Top_Px")),
+                   number(field("Errorbar_Bottom_Px")))
+    if centre is None or mean is None:
+        return ["the mark records no %s, so the number it reports cannot be "
+                "re-computed from the pixels it was read at"
+                % ("marker_center_px" if centre is None else "mean")]
+    if axis is None:
+        return ["this run declares no y calibration for the panel, so what the "
+                "mark's own pixel row should have read cannot be re-computed"]
+    problems = []
+    if _off_by(mean, axis.pixel_to_value(centre)):
+        problems.append("the mark was read at row %s, which is %s under this "
+                        "run's y calibration, and it reports %s"
+                        % (centre, axis.pixel_to_value(centre), mean))
+    if spread is None:
+        return problems
+    if top is None or bottom is None:
+        problems.append("the mark reports a dispersion of %s and no cap rows to "
+                        "have measured it between" % spread)
+    elif _off_by(spread, abs(axis.pixel_to_value(top)
+                             - axis.pixel_to_value(bottom)) / 2.0):
+        problems.append("the cap rows %s and %s are %s apart under this run's y "
+                        "calibration, half of which is %s, and the mark reports "
+                        "a dispersion of %s"
+                        % (top, bottom,
+                           abs(axis.pixel_to_value(top)
+                               - axis.pixel_to_value(bottom)),
+                           abs(axis.pixel_to_value(top)
+                               - axis.pixel_to_value(bottom)) / 2.0, spread))
+    return problems
 
 
 def expected_bar_colour_methods(mark, context=None):

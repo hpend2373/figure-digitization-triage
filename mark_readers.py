@@ -255,6 +255,12 @@ def read_line_marker_panel(image, panel_box, x_positions, y_calibration, series,
                 marker_center_px=cy, mean=mean,
                 errorbar_lower=lower, errorbar_upper=upper,
                 dispersion=(upper - lower) / 2.0,
+                # THE ROWS THE SPREAD WAS MEASURED BETWEEN. The calibrated
+                # bounds are a conversion, and a conversion nothing kept the
+                # inputs of cannot be repeated: `finalize_batch` re-computes a
+                # mark's numbers from the axis the run declared, and it can only
+                # do that for numbers whose pixels are on the record.
+                Errorbar_Top_Px=float(top), Errorbar_Bottom_Px=float(bottom),
                 Marker_Definition="MARKER_CENTER",
                 # HOW THIS SERIES WAS NAMED AND HOW THE NUMBER WAS GOT. The mask
                 # this marker was found in was built from the colour the manifest
@@ -583,8 +589,10 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                     search_radius=whisker_search_px)
                 lower = upper = dispersion = None
                 stem = False
+                cap_rows = (None, None)
                 if whisker is not None:
                     top, bottom, stem = whisker
+                    cap_rows = (float(top), float(bottom))
                     upper = max(y_calibration.pixel_to_value(top),
                                 y_calibration.pixel_to_value(bottom))
                     lower = min(y_calibration.pixel_to_value(top),
@@ -596,6 +604,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                     mean=y_calibration.pixel_to_value(cy),
                     dispersion=dispersion, errorbar_lower=lower,
                     errorbar_upper=upper,
+                    Errorbar_Top_Px=cap_rows[0], Errorbar_Bottom_Px=cap_rows[1],
                     # What it actually LOOKED like, never "ANY": the artifact
                     # records the measurement, and the declaration is in the
                     # manifest where the author put it.
@@ -631,6 +640,7 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                 marker_half_height=marker_half_height,
                 search_radius=whisker_search_px)
             lower = upper = dispersion = None
+            cap_rows = (None, None)
             stem = False
             if whisker is not None:
                 top, bottom, stem = whisker
@@ -639,10 +649,12 @@ def read_monochrome_marker_panel(image, panel_box, x_positions, y_calibration,
                 lower = min(y_calibration.pixel_to_value(top),
                             y_calibration.pixel_to_value(bottom))
                 dispersion = (upper - lower) / 2.0
+                cap_rows = (float(top), float(bottom))
             out.append(dict(
                 series=spec.name, order=order, x_label=label, x=float(cx),
                 marker_center_px=float(cy), mean=y_calibration.pixel_to_value(cy),
                 dispersion=dispersion, errorbar_lower=lower, errorbar_upper=upper,
+                Errorbar_Top_Px=cap_rows[0], Errorbar_Bottom_Px=cap_rows[1],
                 Marker_Definition=shape,
                 Marker_Fill=fill_state, marker_fill_ratio=fill_ratio,
                 # The shape WAS the discriminant here: every candidate whose

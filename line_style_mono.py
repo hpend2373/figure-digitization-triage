@@ -957,6 +957,7 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                                   marker_half_height=4,
                                   search_radius=search_radius)
             lower = upper = dispersion = None
+            cap_rows = (None, None)
             stem = whisker is not None
             if whisker is not None:
                 top, bottom = whisker
@@ -965,10 +966,17 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 lower = min(y_calibration.pixel_to_value(top),
                             y_calibration.pixel_to_value(bottom))
                 dispersion = (upper - lower) / 2.0
+                # THE ROWS THE SPREAD WAS MEASURED BETWEEN, kept beside the
+                # calibrated bounds. Without them the conversion is a claim
+                # nothing downstream can repeat: `finalize_batch` re-computes a
+                # mark's numbers from the axis this run declared, and it can
+                # only do that for numbers whose pixels are on the record.
+                cap_rows = (float(top), float(bottom))
             out.append(dict(
                 series=spec.name, order=order, x_label=label, x=float(xi),
                 marker_center_px=cy, mean=y_calibration.pixel_to_value(cy),
                 dispersion=dispersion, errorbar_lower=lower, errorbar_upper=upper,
+                Errorbar_Top_Px=cap_rows[0], Errorbar_Bottom_Px=cap_rows[1],
                 line_style=style, line_duty=round(candidate["duty"], 3),
                 # The gap, not the duty, is what said SOLID or DASHED. Recorded
                 # beside the duty so a reviewer can check the call that was

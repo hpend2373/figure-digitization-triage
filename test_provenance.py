@@ -18,6 +18,8 @@ sys.path.insert(0, HERE)
 import provenance as P                                            # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 
+
+
 FAILURES, PASSED = [], [0]
 
 
@@ -354,11 +356,26 @@ print("a re-derivation that cannot answer says so, and does not stay quiet")
 # `x` is the value's own column, and every reader mark carries it: from v7.81 a
 # support geometry without it cannot be measured, which is the point - a support
 # column means nothing until you know where the value sits.
+# The pixel rows are the fixture's own, put through the same axis the verifier
+# is handed: from v7.87 a curve mark's numbers are re-computed, so typing them
+# would be describing a mark no reader produces.
+_CURVE_AXIS = MR.AxisCalibration.from_points([(400.0, 60.0), (100.0, 162.3)])
+_CURVE_CONTEXT = {"Y_Calibration": MR._calibration_record(_CURVE_AXIS)}
 _full = dict(line_style_source="MEASURED", x="100",
              Value_Support_Left_Px="100", Value_Support_Right_Px="100",
              Value_Span_Px="0", Occlusion_Cause="NONE",
-             Errorbar_Stem_Confirmed="TRUE")
-_verdict = P.expected_line_style_methods(_full)
+             Errorbar_Stem_Confirmed="TRUE",
+             marker_center_px="200.0",
+             mean=repr(_CURVE_AXIS.pixel_to_value(200.0)),
+             Errorbar_Top_Px="190.0", Errorbar_Bottom_Px="210.0",
+             dispersion=repr(abs(_CURVE_AXIS.pixel_to_value(190.0)
+                                 - _CURVE_AXIS.pixel_to_value(210.0)) / 2.0))
+
+
+def P_expected_line_style_methods_ctx(mark):
+    """The verifier, always handed the fixture's own axis."""
+    return P.expected_line_style_methods(mark, _CURVE_CONTEXT)
+_verdict = P_expected_line_style_methods_ctx(_full)
 check("a mark that records everything answers on all three axes",
       set(_verdict.expected) == set(P.METHOD_FIELDS) and not _verdict.problems,
       "%s" % (_verdict,))
@@ -366,7 +383,7 @@ check("a mark that records everything answers on all three axes",
 
 def _axes_are_total(mark):
     """Every axis ends with an expectation or with a problem, never in silence."""
-    verdict = P.expected_line_style_methods(mark)
+    verdict = P_expected_line_style_methods_ctx(mark)
     return len(verdict.expected) == 3 or bool(verdict.problems)
 
 
@@ -375,11 +392,11 @@ _holes = [drop for drop in sorted(_full)
 check("and every field it can be missing leaves a problem behind, not a hole",
       not _holes, "silent when %s is missing" % ", ".join(_holes))
 check("  including the span, which is the difference between R0 and R4",
-      "Value_Span_Px" in " ".join(P.expected_line_style_methods(
+      "Value_Span_Px" in " ".join(P_expected_line_style_methods_ctx(
           {k: v for k, v in _full.items() if k != "Value_Span_Px"}).problems)
-      and "Value_Method" not in P.expected_line_style_methods(
+      and "Value_Method" not in P_expected_line_style_methods_ctx(
           {k: v for k, v in _full.items() if k != "Value_Span_Px"}).expected,
-      "%s" % (P.expected_line_style_methods(
+      "%s" % (P_expected_line_style_methods_ctx(
           {k: v for k, v in _full.items() if k != "Value_Span_Px"}),))
 # A SPAN OF ZERO IS A SPAN. `str(value or "")` turns the integer 0 into the empty
 # string, and zero is the most important number this function reads - it is what
@@ -387,14 +404,14 @@ check("  including the span, which is the difference between R0 and R4",
 # defaulted to "0" the bug was invisible, because the default happened to be the
 # answer.
 check("a span of zero is a measurement, not a missing field",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_full, Value_Span_Px=0)).expected.get("Value_Method")
       == "DIRECT_CURVE_INK"
-      and not P.expected_line_style_methods(
+      and not P_expected_line_style_methods_ctx(
           dict(_full, Value_Span_Px=0)).problems,
-      "%s" % (P.expected_line_style_methods(dict(_full, Value_Span_Px=0)),))
+      "%s" % (P_expected_line_style_methods_ctx(dict(_full, Value_Span_Px=0)),))
 check("  while the same mark with no span at all is refused",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_full, Value_Span_Px="")).problems, "no problem reported")
 # AND THE TWO FINDINGS ARE TWO CODES. "Your evidence says something else" and
 # "your evidence says nothing" ask a reviewer for different work.
@@ -437,38 +454,43 @@ print("the support columns, the span and the x have to agree with each other")
 _geo = dict(line_style_source="MEASURED", x="140",
             Value_Support_Left_Px="130", Value_Support_Right_Px="130",
             Value_Span_Px="10", Occlusion_Cause="NONE",
-            Errorbar_Stem_Confirmed="TRUE")
+            Errorbar_Stem_Confirmed="TRUE",
+            marker_center_px="200.0",
+            mean=repr(_CURVE_AXIS.pixel_to_value(200.0)),
+            Errorbar_Top_Px="190.0", Errorbar_Bottom_Px="210.0",
+            dispersion=repr(abs(_CURVE_AXIS.pixel_to_value(190.0)
+                                - _CURVE_AXIS.pixel_to_value(210.0)) / 2.0))
 check("a one-sided support at a distance is a carry, and its span says so",
-      P.expected_line_style_methods(_geo).expected["Value_Method"]
+      P_expected_line_style_methods_ctx(_geo).expected["Value_Method"]
       == "EXTRAPOLATED_CURVE_INK"
-      and not P.expected_line_style_methods(_geo).problems,
-      "%s" % (P.expected_line_style_methods(_geo),))
+      and not P_expected_line_style_methods_ctx(_geo).problems,
+      "%s" % (P_expected_line_style_methods_ctx(_geo),))
 check("  and the same columns claiming a span of zero are refused, not read as "
       "a direct observation",
-      "10" in " ".join(P.expected_line_style_methods(
+      "10" in " ".join(P_expected_line_style_methods_ctx(
           dict(_geo, Value_Span_Px="0")).problems)
-      and "Value_Method" not in P.expected_line_style_methods(
+      and "Value_Method" not in P_expected_line_style_methods_ctx(
           dict(_geo, Value_Span_Px="0")).expected,
-      "%s" % (P.expected_line_style_methods(dict(_geo, Value_Span_Px="0")),))
+      "%s" % (P_expected_line_style_methods_ctx(dict(_geo, Value_Span_Px="0")),))
 _bracket = dict(_geo, Value_Support_Left_Px="120",
                 Value_Support_Right_Px="160", Value_Span_Px="40",
                 Occlusion_Cause="ERRORBAR_STEM", Local_Stroke_Px="6",
                 Expected_Dash_Gap_Px="0")
 check("two columns that bracket the value and match their own gap are read",
-      P.expected_line_style_methods(_bracket).expected.get("Value_Method")
-      and not P.expected_line_style_methods(_bracket).problems,
-      "%s" % (P.expected_line_style_methods(_bracket),))
+      P_expected_line_style_methods_ctx(_bracket).expected.get("Value_Method")
+      and not P_expected_line_style_methods_ctx(_bracket).problems,
+      "%s" % (P_expected_line_style_methods_ctx(_bracket),))
 check("  while a span narrower than the gap it claims to cross is refused",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Span_Px="2")).problems,
       "a 40px gap was priced as a 2px interpolation")
 check("  and supports that do not bracket the value are not an interpolation",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Support_Left_Px="150",
                Value_Support_Right_Px="190", Value_Span_Px="40")).problems,
       "the value sits outside its own supports and was interpolated anyway")
 check("  including the boundary: a support ON the value does not bracket it",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Support_Left_Px="140",
                Value_Support_Right_Px="180", Value_Span_Px="40")).problems)
 # AND THE EPSILON IS FLOAT NOISE, NOT A TOLERANCE. `right - left` and a recorded
@@ -477,11 +499,11 @@ check("  including the boundary: a support ON the value does not bracket it",
 # this scenario called that "a hundredth of a pixel", a description two orders of
 # magnitude looser than the constant it was describing.
 check("a ten-billionth of a pixel is the same measurement and a whole one is not",
-      not P.expected_line_style_methods(
+      not P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Span_Px="40.0000000001")).problems
-      and P.expected_line_style_methods(
+      and P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Span_Px="40.01")).problems
-      and P.expected_line_style_methods(
+      and P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Span_Px="41")).problems
       and P.PIXEL_EPSILON == 1e-9)
 # THE SHAPE OF THE EVIDENCE IS A CONTRACT, not a best effort. v7.81. The geometry
@@ -493,34 +515,60 @@ check("a ten-billionth of a pixel is the same measurement and a whole one is not
 # support the way no reader here does, the other is a corrupt field - and a
 # reviewer given "not a number" for a blank goes looking for the wrong thing.
 check("one support column recorded and the other blank is neither shape",
-      "neither shape" in " ".join(P.expected_line_style_methods(
+      "neither shape" in " ".join(P_expected_line_style_methods_ctx(
           dict(_geo, Value_Support_Right_Px="")).problems)
-      and "Value_Method" not in P.expected_line_style_methods(
+      and "Value_Method" not in P_expected_line_style_methods_ctx(
           dict(_geo, Value_Support_Right_Px="")).expected,
-      "%s" % (P.expected_line_style_methods(
+      "%s" % (P_expected_line_style_methods_ctx(
           dict(_geo, Value_Support_Right_Px="")),))
 check("  and it is refused whichever side is missing",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_geo, Value_Support_Left_Px="")).problems)
 check("supports that are not numbers support nothing, span and cause "
       "notwithstanding",
-      P.expected_line_style_methods(
+      P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Support_Left_Px="foo",
                Value_Support_Right_Px="bar")).problems
-      and "Value_Method" not in P.expected_line_style_methods(
+      and "Value_Method" not in P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Support_Left_Px="foo",
                Value_Support_Right_Px="bar")).expected,
-      "%s" % (P.expected_line_style_methods(
+      "%s" % (P_expected_line_style_methods_ctx(
           dict(_bracket, Value_Support_Left_Px="foo",
                Value_Support_Right_Px="bar")),))
 check("  and neither does a value whose own column is not a number",
-      P.expected_line_style_methods(dict(_geo, x="somewhere")).problems)
+      P_expected_line_style_methods_ctx(dict(_geo, x="somewhere")).problems)
 check("the three shapes a reader does produce are named, and only those",
       P.support_shape("", "", "", "")[0] == "NO_SUPPORT"
       and P.support_shape("130", "130", "10", "140")[0] == "ONE_COLUMN"
       and P.support_shape("120", "160", "40", "140")[0] == "TWO_COLUMNS"
       and set(P.SUPPORT_SHAPES) == {"NO_SUPPORT", "ONE_COLUMN", "TWO_COLUMNS"},
       "%s" % (P.support_shape("130", "130", "10", "140"),))
+
+# AND A CURVE'S NUMBERS ARE RE-COMPUTED TOO. v7.87. Re-deriving the METHOD from
+# the support columns says how the number was got; nothing said it was the number
+# those pixels produce - so a producer could move `marker_center_px`, keep the
+# mean, re-stamp everything, and the value-to-mark join found two fields that
+# agreed with each other. The axis is the third party.
+check("a curve mark's mean is what its own row reads under this run's axis",
+      not P_expected_line_style_methods_ctx(_full).problems
+      and P_expected_line_style_methods_ctx(
+          dict(_full, mean="999")).problems
+      and P_expected_line_style_methods_ctx(
+          dict(_full, marker_center_px="150.0")).problems,
+      "%s" % (P_expected_line_style_methods_ctx(dict(_full, mean="999")),))
+check("  and its dispersion is half the distance between its own cap rows",
+      P_expected_line_style_methods_ctx(dict(_full, dispersion="99")).problems
+      and P_expected_line_style_methods_ctx(
+          dict(_full, Errorbar_Top_Px="")).problems
+      and not P_expected_line_style_methods_ctx(
+          dict(_full, dispersion=None, Errorbar_Top_Px="",
+               Errorbar_Bottom_Px="")).problems,
+      "%s" % (P_expected_line_style_methods_ctx(dict(_full, dispersion="99")),))
+check("  and a mark with no row to have read at all answers nothing",
+      P_expected_line_style_methods_ctx(
+          dict(_full, marker_center_px="")).problems
+      and P.expected_line_style_methods(_full, None).problems,
+      "%s" % (P.expected_line_style_methods(_full, None),))
 
 print()
 print("the second reader whose methods are re-derived from its own evidence")
@@ -706,10 +754,10 @@ check("  and a count that is not a count says nothing about the ink",
 check("nan and inf are not measurements, in either verifier",
       P.finite_number("nan") is None and P.finite_number("inf") is None
       and P.finite_number("4.5") == 4.5
-      and P.expected_line_style_methods(
+      and P_expected_line_style_methods_ctx(
           dict(_geo, Value_Span_Px="nan")).problems
       and _bar_verdict(top_px="nan").problems,
-      "%s" % (P.expected_line_style_methods(dict(_geo, Value_Span_Px="nan")),))
+      "%s" % (P_expected_line_style_methods_ctx(dict(_geo, Value_Span_Px="nan")),))
 check("two of the seven readers now re-derive their methods, and the table says "
       "which",
       set(P.EVIDENCE_VERIFIERS) == {"LINE_MONO_STYLE", "BAR_COLOR"},

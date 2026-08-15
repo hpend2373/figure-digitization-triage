@@ -174,6 +174,29 @@ check("a dispersion is reported only with the stem that carries it",
           == (r["dispersion"] is not None) for r in rows))
 check("no cell is claimed twice",
       len({(r["series"], r["x_label"]) for r in rows}) == len(rows))
+# AND THE ROWS THE SPREAD WAS MEASURED BETWEEN ARE ON THE RECORD. v7.87. The
+# reader kept the calibrated bounds and threw the pixels away, so the conversion
+# was a claim nothing downstream could repeat - and `finalize_batch` re-computes
+# a mark's numbers from the axis the run declared, which it can only do for
+# numbers whose pixels survive.
+_capped = [r for r in rows if r["dispersion"] is not None]
+check("every dispersion carries the two cap rows it was measured between",
+      _capped and all(r.get("Errorbar_Top_Px") is not None
+                      and r.get("Errorbar_Bottom_Px") is not None
+                      for r in _capped),
+      "%d of %d" % (sum(1 for r in _capped
+                        if r.get("Errorbar_Top_Px") is not None), len(_capped)))
+check("  and they reproduce it under this panel's own calibration",
+      all(abs(abs(CAL.pixel_to_value(r["Errorbar_Top_Px"])
+                  - CAL.pixel_to_value(r["Errorbar_Bottom_Px"])) / 2.0
+              - r["dispersion"]) < 1e-9 for r in _capped),
+      "%s" % [(r["x_label"], r["dispersion"]) for r in _capped][:3])
+check("  while a mark with no stem carries neither",
+      all(r.get("Errorbar_Top_Px") is None
+          and r.get("Errorbar_Bottom_Px") is None
+          for r in rows if r["dispersion"] is None),
+      "%s" % [(r["x_label"], r.get("Errorbar_Top_Px"))
+              for r in rows if r["dispersion"] is None][:3])
 
 
 print("an error bar is the connected column of ink through the mark")

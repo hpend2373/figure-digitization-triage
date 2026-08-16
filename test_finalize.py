@@ -77,6 +77,14 @@ REVIEWERS = [dict(Reviewer_ID="RV_H", Reviewer_Name="Test Reviewer",
                   Reviewer_Contact="reviewer@example.org",
                   Registered_By="Test Reviewer", Registration_Date="2026-08-01",
                   Human_Attestation="HUMAN_CONFIRMED", Note=""),
+             # A SECOND registered human, for `--second`: the flag exists to
+             # evidence an independent reading, and one person answering twice
+             # is not one. Nothing else in this module signs with it.
+             dict(Reviewer_ID="RV_H2", Reviewer_Name="Second Reviewer",
+                  Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+                  Reviewer_Contact="0000-0001-5109-3700",
+                  Registered_By="Test Reviewer", Registration_Date="2026-08-01",
+                  Human_Attestation="HUMAN_CONFIRMED", Note=""),
              dict(Reviewer_ID="RV_D", Reviewer_Name="Josiah Carberry",
                   Reviewer_Record_Type="DEMO_IDENTITY", Contact_Type="ORCID",
                   Reviewer_Contact="0000-0002-1825-0097",
@@ -2213,7 +2221,8 @@ with open(_second, "w", newline="", encoding="utf-8") as _fh:
     _w2 = csv.writer(_fh)
     _w2.writerow(FIN.inference_review_columns())
     for _i, _iid in enumerate(_ids3):
-        _row2 = _answer(_iid, "REJECTED" if _i == 0 else "CONFIRMED")
+        _row2 = _answer(_iid, "REJECTED" if _i == 0 else "CONFIRMED",
+                        Reviewer_ID="RV_H2")
         _w2.writerow([_row2.get(c, "") for c in FIN.inference_review_columns()])
 check("two reviewers who disagree about one cell are reported on that cell",
       PF.disagreements(_r3_cells, _second)
@@ -2462,6 +2471,21 @@ check("  this run finalizes and has no reconstructed cell in it",
       PF.questions(_solo_dir) == []
       and PF.main([_solo_dir, "--review", _solo_a]) == 0,
       "%s" % PF.questions(_solo_dir))
+# AND STEP 2 WRITES ONE FILE HERE, NOT TWO. v7.97. The runbook said "writes both
+# decision files", which is true of an R3 run and not of the first pilot: 127
+# holds no reconstructed cell, so `--template` writes `value_review.csv` alone
+# and a reviewer told to expect two files starts by looking for a missing one.
+for _stale in (os.path.join(_solo_dir, "value_review.csv"),
+               os.path.join(_solo_dir, "inference_review.csv")):
+    if os.path.exists(_stale):
+        os.remove(_stale)
+check("  and --template gives it ONE decision file, not two",
+      FIN.main([_solo_dir, "--template"]) == 0
+      and os.path.exists(os.path.join(_solo_dir, "value_review.csv"))
+      and not os.path.exists(os.path.join(_solo_dir, "inference_review.csv")))
+review([row(Panel_ID=_sq.iloc[0]["Panel_ID"],
+            Review_Subject_SHA256=_sq.iloc[0]["Review_Subject_SHA256"])],
+       path=_solo_a)
 _cmp0, _diff0 = PF.second_comparison(*_solo_cells)
 check("  so two reviewers there compare nothing, and disagree about nothing",
       _cmp0 == [] and _diff0 == [], "%s / %s" % (_cmp0, _diff0))
@@ -2498,7 +2522,8 @@ def _second_file(name, rows):
     return path
 
 
-_one_sided = _second_file("second_one_sided.csv", [_answer(_ids3[0])])
+_one_sided = _second_file("second_one_sided.csv",
+                          [_answer(_ids3[0], Reviewer_ID="RV_H2")])
 check("a second file that answers one of two cells compared ONE, not two",
       PF.second_comparison(_r3_cells, _one_sided)[0] == [_ids3[0]],
       "%s" % (PF.second_comparison(_r3_cells, _one_sided)[0],))
@@ -2506,15 +2531,17 @@ check("  and a half-done independent check exits 2, not 0",
       PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                "--second", _one_sided]) == 2)
 _blank_side = _second_file("second_blank.csv",
-                           [_answer(i, "") for i in _ids3])
+                           [_answer(i, "", Reviewer_ID="RV_H2")
+                            for i in _ids3])
 check("a second reviewer who filled nothing in compared nothing",
       PF.second_comparison(_r3_cells, _blank_side)[0] == []
       and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                    "--second", _blank_side]) == 2,
       "%s" % (PF.second_comparison(_r3_cells, _blank_side)[0],))
 _twice_side = _second_file("second_twice.csv",
-                           [_answer(_ids3[0]), _answer(_ids3[0]),
-                            _answer(_ids3[1])])
+                           [_answer(_ids3[0], Reviewer_ID="RV_H2"),
+                            _answer(_ids3[0], Reviewer_ID="RV_H2"),
+                            _answer(_ids3[1], Reviewer_ID="RV_H2")])
 check("a cell one of them answered twice is not a comparison of that cell",
       PF.second_comparison(_r3_cells, _twice_side)[0] == [_ids3[1]]
       and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
@@ -2525,12 +2552,52 @@ check("and two readings of the ink that CONTRADICT each other exit 2",
       and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                    "--second", _second]) == 2,
       "%s" % (PF.second_comparison(_r3_cells, _second),))
-_agree = _second_file("second_agrees.csv", [_answer(i) for i in _ids3])
-check("  while two who agree on every cell pass",
+_agree = _second_file("second_agrees.csv",
+                      [_answer(i, Reviewer_ID="RV_H2") for i in _ids3])
+check("  while two DIFFERENT reviewers who agree on every cell pass",
       PF.second_comparison(_r3_cells, _agree) == (_ids3, [])
       and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                    "--second", _agree]) == 0,
       "%s" % (PF.second_comparison(_r3_cells, _agree),))
+# AND WHO THE SECOND READING CAME FROM, which v7.96 did not ask. Counting the
+# cells both files answered says the two files agree; it says nothing about
+# where the second file came from, so the same file passed against itself and so
+# did a copy carrying the same Reviewer_ID. A flag whose whole purpose is to
+# evidence independent review has to be able to say NO.
+_registry = pd.DataFrame(REVIEWERS)
+check("a file compared against ITSELF is not an independent reading",
+      any("same file" in why for _w, why in
+          PF.second_problems(_r3_cells, _r3_cells, _registry))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _r3_cells]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _r3_cells, _registry))
+_copy = _second_file("second_copy.csv", [_answer(i) for i in _ids3])
+check("  nor is a copy of it signed by the same person",
+      PF.second_comparison(_r3_cells, _copy) == (_ids3, [])
+      and any("one person answering twice" in why
+              for _w, why in PF.second_problems(_r3_cells, _copy, _registry))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _copy]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _copy, _registry))
+_stranger = _second_file("second_stranger.csv",
+                         [_answer(i, Reviewer_ID="RV_NOBODY") for i in _ids3])
+check("  nor a second reading by somebody the registry does not carry",
+      any("not a registered HUMAN" in why for _w, why in
+          PF.second_problems(_r3_cells, _stranger, _registry))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _stranger]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _stranger, _registry))
+_demo = _second_file("second_demo.csv",
+                     [_answer(i, Reviewer_ID="RV_D") for i in _ids3])
+check("  nor one by a DEMO_IDENTITY, which is registered and is not a person",
+      any("not a registered HUMAN" in why for _w, why in
+          PF.second_problems(_r3_cells, _demo, _registry))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _demo]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _demo, _registry))
+check("  and the run that DOES have two named readers reports no such problem",
+      PF.second_problems(_r3_cells, _agree, _registry) == [],
+      "%s" % PF.second_problems(_r3_cells, _agree, _registry))
 # AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
 # the finalizer for a run that has been moved; without it on the preflight, the
 # same run could fail one and pass the other with the same decision function

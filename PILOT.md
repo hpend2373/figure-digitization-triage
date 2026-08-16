@@ -59,9 +59,11 @@ the panel. The means and the SEs were measured off the ink.
        stops at MACHINE_QC_PASSED. Nothing is poolable yet.
 
     2  python3 finalize_batch.py OUT --template
-       writes both decision files with every identifier pre-filled. A reviewer
-       never types an `Inference_ID`: one transposed character is an answer to a
-       question nobody asked.
+       writes `value_review.csv` with every identifier pre-filled, and writes
+       `inference_review.csv` ONLY when the run holds R3 reconstructed cells. 127
+       holds none, so the first pilot gets one file and there is nothing missing
+       about that. A reviewer never types an `Inference_ID`: one transposed
+       character is an answer to a question nobody asked.
 
     3  python3 review_preflight.py OUT --review OUT/value_review.csv
        THE PRE-REVIEW CHECK, and it is expected to exit 2 - the finalizer cannot
@@ -130,9 +132,9 @@ artifact. The mode registers seven.
 **And the mode is not the whole list.** A panel's own VALUES add
 `Inference_Checked` when any of them was reasoned to rather than measured -
 `run_batch.inference_confirmations` derives it from the rows, so it composes
-with every mode instead of doubling the mode table. 127's NORMAL and SUPINE
-groups hold cells named `FIGURE_PROTOTYPE_MATCH`, so those panels ask for FIVE
-confirmations, not four. Count them off the run, not off this file:
+with every mode instead of doubling the mode table. 127's NORMAL panel holds
+cells named `FIGURE_PROTOTYPE_MATCH` in its SUPINE group, so that panel asks for
+FIVE confirmations, not four. Count them off the run, not off this file:
 `review_queue.csv` prints `Inference_Cells` per panel and
 `figure_values_machine_qc.csv` names the method on every row.
 
@@ -218,6 +220,15 @@ the asked cells were answered on BOTH sides and exits 2 unless all of them were
 and the two answers agree - a five-question run against an empty second file
 reported "5 compared" until v7.96.
 
+`--second` also refuses to be handed the same file twice, two files whose cells
+carry the same `Reviewer_ID`, or a second reading signed by somebody the
+registry does not carry as HUMAN. Even so it is a READ-ONLY QUALIFICATION CHECK
+and not part of the finalization contract: the finalizer reads `--inference` and
+never the second file, so nothing about the second reading is bound into
+`Review_Subject_SHA256` or recorded in the stamp. Making it a contract would
+mean the finalizer taking the file and stamping its hash, its reviewer and its
+disagreement count - which is the shape of a decision, not a flag.
+
 Letting one person hold both roles would still need a comparison this package
 does not have - `--second-value-review`, `--second-identity-resolution`, or a
 whole independent decision bundle diffed against the first. Until then the
@@ -233,9 +244,16 @@ answer is two people, and `--distinct-reviewers` is how a run says so.
     Identity_Checked     for a bar whose fill could not be sampled: the series
                          named in `identity_resolution.csv` is the one the legend
                          gives it
-    Inference_Checked    the panel's reasoned cells were looked at. The per-cell
-                         file is where each one is answered; this says the
-                         question was not skipped
+    Inference_Checked    the panel's reasoned cells were looked at. What it
+                         means depends on the tier, and 127 is the first case:
+
+                         R2 - a series the reader reasoned to. There is no
+                         per-cell file and no `Inference_ID`; this confirmation
+                         IS the answer, made at the panel
+
+                         R3 - a number the reader reconstructed. This says the
+                         question was not skipped, and each cell's own
+                         CONFIRMED / REJECTED is in `inference_review.csv`
 
     CONFIRMED   I looked at this and it is what I would have read
     REJECTED    I looked at this and it is not. The value is dropped; the panel

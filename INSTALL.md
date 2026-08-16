@@ -6316,8 +6316,74 @@ a separate number that must equal the figure's panel count - three for 127.
     a --second that compared nothing passes            5
     a half-done or contradicted --second passes        3
 
+## v7.97 — a governance record that cannot lie, and a second reader who has to be one
+
+v7.96 built the separation contract and left three holes in it, each of the same
+kind: a check that looks like it establishes something and does not.
+
+**A policy the enforcement did not recognise was recorded as though it had been
+applied.** `SEPARATION_POLICIES` was declared in v7.96 and never consulted -
+enforcement was one exact string comparison, and the stamp echoed whatever the
+caller passed. So `finalize(run_dir, separation_policy="DISTINCT_REVIEWERS")`
+produced an accepted file whose stamp named a strict-sounding contract that ran
+against nothing. That is the one way a governance record can fail: not by being
+absent, but by being wrong. The policy is canonicalised before anything else is
+read, an unrecognised token is `BAD_REVIEWER_SEPARATION_POLICY` and stops the
+finalization, and the stamp records the canonical policy or `UNRECOGNIZED` -
+never the caller's string.
+
+**"Two people" was two Reviewer_IDs, and a Reviewer_ID identifies a row.** The
+registry refuses a duplicated ID and nothing refuses a duplicated PERSON, so one
+human registered twice satisfied the check - by a registry merge, an
+ID-convention change, or on purpose. The comparison is on the normalized contact
+now, and it requires an ORCID: an ORCID identifies a person, an email address
+identifies a mailbox somebody may share or change, and two addresses prove
+nothing. Where an ORCID is missing on either side the contract refuses with
+`REVIEWER_IDENTITY_UNPROVABLE` instead of assuming. Runs that declare nothing are
+unaffected.
+
+**`--second` did not ask who wrote the second file.** Counting the cells both
+files answered says the two files agree; it says nothing about where the second
+came from, so `--inference A.csv --second A.csv` exited 0 on a complete answer
+set, and so did a copy of A signed by the same person. It now refuses the same
+file twice, two files whose cells carry the same `Reviewer_ID`, and a second
+reading signed by somebody the registry does not carry as HUMAN - a
+`DEMO_IDENTITY` included. And it says out loud what it is: a READ-ONLY
+qualification check, not part of the finalization contract. The finalizer reads
+`--inference` and never the second file, so nothing about the second reading is
+bound into `Review_Subject_SHA256` or stamped. Making it a contract means the
+finalizer taking the file and recording its hash, its reviewer and its
+disagreement count, which is a decision rather than a flag.
+
+Two documentation corrections, both of them R3 assumptions leaking into an R2
+pilot: `--template` writes `inference_review.csv` only where there are
+reconstructed cells - 127 has none, so the first pilot gets one file, and the
+suite now requires the runbook to name each file rather than say "both" - and
+`Inference_Checked` means different things at the two tiers. At R2 there is no
+per-cell file and no `Inference_ID`; the confirmation IS the answer, made at the
+panel. At R3 it asserts the question was not skipped and each cell is answered in
+`inference_review.csv`. The grain is written properly too: 127's NORMAL panel,
+SUPINE group.
+
+    reverted                                          scenarios that fail
+    an unrecognised policy token is accepted           3
+    the stamp echoes the caller's policy string        1
+    reviewers are compared as row identifiers again    1
+    an unprovable identity is assumed to be a person   1
+    --second accepts the same file twice               1
+    --second does not ask who signed the second read   1
+    --second accepts an unregistered second reader     2
+    the second file's problems do not change the exit  4
+    the runbook promises two template files everywhere 1
+
 ## Still open
 
+- `--second` is a qualification check and not a finalization contract. To make
+  it one the finalizer would have to take the second file and stamp
+  `Second_Inference_Review_File_SHA256`, the second reviewer, the compared count
+  and the disagreement count — at which point an independent reading becomes part
+  of what an accepted value rests on. That is a decision about what this package
+  requires, not a missing flag
 - letting ONE person hold both the resolver and the approver role would need a
   comparison this package does not have: `--second-value-review`,
   `--second-identity-resolution`, or a whole independent decision bundle diffed

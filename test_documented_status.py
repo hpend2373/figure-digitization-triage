@@ -267,6 +267,20 @@ check("    and, in that section, every artifact that mode registers",
 # lists all four confirmations by name, so the file can say WHICH claims are
 # wanted while no longer saying which artifact answers any of them. The pairing
 # is the part a reviewer cannot reconstruct.
+#
+# AND THE TEMPLATE STEP NAMES ITS FILES ONE BY ONE. "Writes both decision files"
+# is true of an R3 run and false of the first pilot: `--template` writes
+# `inference_review.csv` only where there are reconstructed cells, 127 has none,
+# and a reviewer told to expect two starts by hunting for a missing one. The
+# tier that makes the second file conditional is read from the code, so the
+# sentence cannot go stale against `CELL_CONFIRMATION_TIERS` either.
+import provenance as _PROV                                         # noqa: E402
+_step2 = [b for b in _text.split("\n\n") if "--template" in b]
+_want2 = (["value_review.csv", "inference_review.csv"]
+          + list(_PROV.CELL_CONFIRMATION_TIERS))
+_absent2 = [w for w in _want2 if not any(w in b for b in _step2)]
+check("  the template step names each decision file, and when the second exists",
+      _step2 and not _absent2, "%s missing from %s" % (_absent2, _step2))
 _mapped = " ".join(l for l in _section.splitlines() if l.strip().startswith("->"))
 _unasked = [c for c in _RB.REVIEW_CONFIRMATIONS[_MODE] if c not in _mapped]
 check("    and every confirmation it asks a person to make, against the picture "

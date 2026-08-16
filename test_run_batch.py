@@ -3948,6 +3948,22 @@ _TWO = REVIEWERS + [dict(
     Reviewer_Contact="0000-0002-1825-0097", Registered_By="Test Fixture",
     Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
     Note="the approver, who did not write the resolution")]
+_ORCID_T1 = "0000-0001-5109-3700"
+
+
+def _orcid_reviewer(rid, orcid, note):
+    return dict(Reviewer_ID=rid, Reviewer_Name="Reviewer %s" % rid,
+                Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+                Reviewer_Contact=orcid, Registered_By="Test Fixture",
+                Registration_Date="2026-08-01",
+                Human_Attestation="HUMAN_CONFIRMED", Note=note)
+
+
+# THE RESOLVER NEEDS AN ORCID TOO, under the declared contract. The registry
+# fixture reaches everything in this module, so the separation batch gets its own
+# copy with both people identified rather than changing what every other scenario
+# runs against.
+_TWO = [_orcid_reviewer("RV_T1", _ORCID_T1, "the resolver")] + _TWO[1:]
 _sep_m = short_manifests(os.path.join(ROOT, "m_short_sep"),
                          resolutions=[_resolution()], reviewers=_TWO)
 _sep_o = os.path.join(ROOT, "o_short_sep")
@@ -4028,6 +4044,109 @@ check("  and both CLIs carry the same flag under the same name",
                 "--distinct-reviewers"]) == 2
       and PF2.main([_sep_o, "--review", _two_people, "--manifests", _sep_m,
                     "--distinct-reviewers"]) == 0)
+# TWO Reviewer_IDs ARE TWO ROWS, NOT TWO PEOPLE. v7.97. The registry refuses a
+# duplicated Reviewer_ID and nothing refuses a duplicated PERSON, so one human
+# registered twice - by a registry merge, an ID-convention change, or on purpose
+# - satisfied a check that compares identifiers. The comparison is on the
+# normalized contact now, and an ORCID is what makes it a comparison about a
+# person at all.
+_TWICE = [_orcid_reviewer("RV_T1", _ORCID_T1, "the resolver"),
+          _orcid_reviewer("RV_SAME", _ORCID_T1, "the same human, second row")]
+_twice_m = short_manifests(os.path.join(ROOT, "m_short_twice"),
+                           resolutions=[_resolution()], reviewers=_TWICE)
+_twice_o = os.path.join(ROOT, "o_short_twice")
+shutil.rmtree(_twice_o, ignore_errors=True)
+RB.run_batch(_twice_m, _twice_o, file_root=ROOT, run_date="2026-08-06")
+_twice_q = pd.read_csv(os.path.join(_twice_o, "review_queue.csv"),
+                       dtype=object).fillna("")
+_twice_rev = os.path.join(_twice_o, "value_review.csv")
+_hit_tw = _twice_q[_twice_q["Panel_ID"] == "P_SHORT"]
+with open(_twice_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_hit_tw.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_SAME", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+check("the two rows really are two different Reviewer_IDs",
+      FIN.resolution_reviewers(
+          _twice_o, pd.read_csv(os.path.join(_twice_o, "panel_artifacts.csv"),
+                                dtype=object).fillna("")) == {"P_SHORT": {"RV_T1"}})
+_twice_r = FIN.finalize(_twice_o, review_path=_twice_rev,
+                        manifest_dir=_twice_m, run_date="2026-08-06",
+                        today=datetime.date(2026, 8, 8),
+                        separation_policy=FIN.DISTINCT_RESOLVERS)
+check("  but one human registered twice does not become two people",
+      _twice_r["status"] != "FINALIZED"
+      and any(p["check"] == "RESOLVER_IS_APPROVER" and _ORCID_T1 in p["detail"]
+              for p in _twice_r.get("problems", [])),
+      "%s %s" % (_twice_r["status"], _twice_r.get("problems")))
+# AND WITHOUT AN ORCID THE QUESTION CANNOT BE ANSWERED AT ALL, so the contract
+# refuses instead of assuming. Two email addresses are two mailboxes.
+_MAIL = REVIEWERS + [dict(
+    Reviewer_ID="RV_T2", Reviewer_Name="Second Reviewer",
+    Reviewer_Record_Type="HUMAN", Contact_Type="EMAIL",
+    Reviewer_Contact="second@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="a different mailbox, which is not the same as a different person")]
+_mail_m = short_manifests(os.path.join(ROOT, "m_short_mail"),
+                          resolutions=[_resolution()], reviewers=_MAIL)
+_mail_o = os.path.join(ROOT, "o_short_mail")
+shutil.rmtree(_mail_o, ignore_errors=True)
+RB.run_batch(_mail_m, _mail_o, file_root=ROOT, run_date="2026-08-06")
+_mail_q = pd.read_csv(os.path.join(_mail_o, "review_queue.csv"),
+                      dtype=object).fillna("")
+_mail_rev = os.path.join(_mail_o, "value_review.csv")
+_hit_ml = _mail_q[_mail_q["Panel_ID"] == "P_SHORT"]
+with open(_mail_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_hit_ml.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T2", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mail_r = FIN.finalize(_mail_o, review_path=_mail_rev, manifest_dir=_mail_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("two email addresses cannot establish two people, so the panel is refused",
+      _mail_r["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEWER_IDENTITY_UNPROVABLE"
+              for p in _mail_r.get("problems", [])),
+      "%s %s" % (_mail_r["status"], _mail_r.get("problems")))
+check("  and the same run finalizes when no separation is declared",
+      FIN.finalize(_mail_o, review_path=_mail_rev, manifest_dir=_mail_m,
+                   run_date="2026-08-06",
+                   today=datetime.date(2026, 8, 8))["status"] == "FINALIZED")
+# A POLICY THE ENFORCEMENT DOES NOT RECOGNISE IS NOT A POLICY. v7.97.
+# SEPARATION_POLICIES was declared in v7.96 and never consulted: enforcement was
+# one exact comparison and the stamp echoed the caller's string, so a library
+# caller passing "DISTINCT_REVIEWERS" got an accepted file whose stamp named a
+# strict-sounding contract that was applied to nothing. That is the one way a
+# governance record can lie - the record itself is the thing that is wrong.
+_bad = FIN.finalize(_sep_o, review_path=_two_people, manifest_dir=_sep_m,
+                    run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                    separation_policy="DISTINCT_REVIEWERS")
+check("a policy token this package does not enforce stops the finalization",
+      _bad["status"] == "RUN_NOT_FINALIZABLE"
+      and any(p["check"] == "BAD_REVIEWER_SEPARATION_POLICY"
+              and "DISTINCT_REVIEWERS" in p["detail"]
+              for p in _bad.get("problems", [])), "%s" % _bad)
+check("  and the stamp does not echo it back as though it had been applied",
+      json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                     encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == "UNRECOGNIZED"
+      and not os.path.exists(os.path.join(_sep_o,
+                                          "figure_values_accepted.csv")))
+check("  while every name the vocabulary does carry is accepted",
+      all(FIN.canonical_policy(p) == p for p in FIN.SEPARATION_POLICIES)
+      and FIN.canonical_policy(None) == FIN.NO_POLICY
+      and FIN.canonical_policy("DISTINCT_REVIEWERS") is None)
 # AND HOW, in the registry's vocabulary. v7.65. A person's answer is
 # HUMAN_RESOLUTION; the bars beside it were named against prototypes formed in
 # another group of the FIGURE, because this panel's short bar left its group

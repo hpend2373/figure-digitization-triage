@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.96 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2827 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2865 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.97 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2841 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2879 -->
 
-2827 scenarios on main after v7.96 under `requirements-lock.txt`, and 2865 with
+2841 scenarios on main after v7.97 under `requirements-lock.txt`, and 2879 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -178,11 +178,21 @@ one to be paired against the picture that answers it.
 **Two people, and the tools now check it.** `--distinct-reviewers` on the
 finalizer and the preflight refuses `RESOLVER_IS_APPROVER` when the person who
 named a series in `identity_resolution.csv` is the person signing the panel that
-naming lands in; the finalize stamp records `Reviewer_Separation_Policy` either
-way, so an accepted file can say which contract it was finalized under. There is
-no `--second` fallback: that flag reads two `inference_review.csv` files, so it
-sees the per-cell channel and nothing else, and it exits 2 unless every question
-was answered once on both sides and the two answers agree.
+naming lands in — compared as PEOPLE, by normalized ORCID, because a
+`Reviewer_ID` identifies a row and one human registered twice under two IDs read
+as two reviewers. Where an ORCID is absent the contract refuses
+(`REVIEWER_IDENTITY_UNPROVABLE`) rather than treating two mailboxes as two
+people. The policy itself is checked against `SEPARATION_POLICIES` and an
+unrecognised token stops the finalization, so the stamp's
+`Reviewer_Separation_Policy` can never name a contract that was applied to
+nothing.
+
+There is no `--second` fallback: that flag reads two `inference_review.csv`
+files, so it sees the per-cell channel and nothing else. It exits 2 unless every
+question was answered once on both sides, the two answers agree, the two files
+are two files, and each cell's answers come from two different registered HUMAN
+reviewers. It remains a read-only qualification check — the finalizer never
+reads the second file.
 
 ## Status
 

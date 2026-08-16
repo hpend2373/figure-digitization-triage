@@ -1675,6 +1675,59 @@ def _geometry_route_failures(machine, ledger_rows, run_dir, flag):
 #: name lands in.
 SEPARATION_POLICIES = ("NOT_DECLARED", "DISTINCT_RESOLVER_APPROVER")
 DISTINCT_RESOLVERS = "DISTINCT_RESOLVER_APPROVER"
+NO_POLICY = "NOT_DECLARED"
+
+
+def canonical_policy(declared):
+    """The policy this finalization runs under, or None if it is not one of ours.
+
+    v7.96 defined `SEPARATION_POLICIES` and then never consulted it: enforcement
+    was a single `== DISTINCT_RESOLVER_APPROVER`, and the stamp recorded whatever
+    string the caller passed. So a library caller could write
+
+        finalize(run_dir, separation_policy="DISTINCT_REVIEWERS")
+
+    and get an accepted file whose stamp names a strict-sounding policy that was
+    never applied - the worst shape a governance record can take, because it is
+    the record itself that is wrong. A vocabulary that is declared and not
+    checked is a comment.
+    """
+    text = _s(declared) or NO_POLICY
+    return text if text in SEPARATION_POLICIES else None
+
+
+def person_keys(reviewers):
+    """Reviewer_ID -> the PERSON behind it, where the registry can prove one.
+
+    `Reviewer_ID` identifies a ROW, not a human being, and the registry only
+    refuses a duplicated ID. Register one person twice under two IDs and a check
+    that compares IDs reports two people:
+
+        RV_RESOLVER   ORCID 0000-0002-1825-0097
+        RV_APPROVER   ORCID 0000-0002-1825-0097
+
+    So the key is the CONTACT, normalized. An ORCID identifies a PERSON; an email
+    address identifies a mailbox somebody may share, hand over or change, and two
+    different addresses prove nothing about two different people. That is why the
+    separation contract requires an ORCID on both sides and refuses rather than
+    guessing when one is missing - see `REVIEWER_IDENTITY_UNPROVABLE`. A reviewer
+    with no usable contact gets no key at all, and the caller decides what that
+    means.
+    """
+    out = {}
+    if reviewers is None or "Reviewer_ID" not in getattr(reviewers, "columns", ()):
+        return out
+    for _, r in reviewers.iterrows():
+        ctype = _s(r.get("Contact_Type")).upper()
+        contact = _s(r.get("Reviewer_Contact"))
+        rid = _s(r.get("Reviewer_ID"))
+        if not rid or not contact:
+            continue
+        if ctype == "ORCID":
+            out[rid] = "ORCID:%s" % contact.upper()
+        elif ctype == "EMAIL":
+            out[rid] = "EMAIL:%s" % contact.lower()
+    return out
 
 
 def resolution_reviewers(run_dir, ledger_rows):
@@ -1705,7 +1758,7 @@ def resolution_reviewers(run_dir, ledger_rows):
 
 def approved_panels(reviews, queue, reviewers, flag, today=None,
                     artifact_types=None, extra_confirmations=None,
-                    resolvers=None, separation_policy=None):
+                    resolvers=None, separation_policy=None, people=None):
     """Panel_ID -> the review row that approves it. Everything else is refused.
 
     `extra_confirmations` is {Panel_ID: (column, ...)} for the questions this
@@ -1819,12 +1872,36 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
         # finalize anyway.
         if separation_policy == DISTINCT_RESOLVERS:
             mine = (resolvers or {}).get(pid, set())
-            if rid in mine:
+            keys = people or {}
+            # COMPARED AS PEOPLE, NOT AS ROW IDENTIFIERS. v7.96 compared
+            # Reviewer_IDs, and a Reviewer_ID identifies a ROW: register one
+            # person twice under two IDs with the same ORCID and the check
+            # reported two reviewers. The registry refuses a duplicated ID and
+            # nothing refuses a duplicated PERSON, which is not only how somebody
+            # games this - it is what a registry merge or an ID-convention change
+            # produces by accident.
+            unproven = [who for who in sorted(mine | {rid})
+                        if not keys.get(who, "").startswith("ORCID:")]
+            if unproven:
+                flag(line, "REVIEWER_IDENTITY_UNPROVABLE",
+                     "%s runs under %s, and %s %s registered without an ORCID. "
+                     "Two Reviewer_IDs are two rows; an email address is a "
+                     "mailbox. Nothing here can establish that these are two "
+                     "people, so the panel is refused rather than assumed"
+                     % (pid, DISTINCT_RESOLVERS, "/".join(unproven),
+                        "is" if len(unproven) == 1 else "are"))
+                continue
+            clash = sorted(who for who in mine
+                           if who != rid and keys.get(who) == keys.get(rid))
+            if rid in mine or clash:
                 flag(line, "RESOLVER_IS_APPROVER",
                      "%s runs under %s, and %s both resolved an identity on "
-                     "this panel and signed it. A person confirming their own "
+                     "this panel and signed it%s. A person confirming their own "
                      "reading of a legend is not a second reading of it"
-                     % (pid, DISTINCT_RESOLVERS, rid))
+                     % (pid, DISTINCT_RESOLVERS, rid,
+                        "" if rid in mine
+                        else " - registered twice, as %s and %s, against %s"
+                        % (rid, "/".join(clash), keys.get(rid))))
                 continue
         wanted = tuple(RB.REVIEW_CONFIRMATIONS.get(mode, ())) + tuple(
             (extra_confirmations or {}).get(pid, ()))
@@ -2086,6 +2163,19 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
     run_stamp_sha = ""
+    # THE POLICY IS CANONICALISED FIRST, and an unrecognised one stops the
+    # finalization before anything else is read. Everything downstream - the
+    # approval check, the verdict, the stamp - is given `policy`, never the raw
+    # argument, so a stamp cannot name a contract that was not the one applied.
+    policy = canonical_policy(separation_policy)
+    if policy is None:
+        flag("review-policy", "BAD_REVIEWER_SEPARATION_POLICY",
+             "%r is not one of %s. A policy the enforcement does not recognise "
+             "would be recorded in the stamp and applied to nothing"
+             % (_s(separation_policy), "/".join(SEPARATION_POLICIES)))
+        return stop("RUN_NOT_FINALIZABLE",
+                    "the reviewer-separation policy is not one this package "
+                    "enforces")
     if not os.path.exists(run_stamp_path):
         run_stamp = {}
         return stop("RUN_NOT_FINALIZABLE", "no run_stamp.json in %s" % run_dir)
@@ -2238,7 +2328,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
                                extra_confirmations=extra_confirmations,
                                resolvers=resolution_reviewers(run_dir,
                                                               ledger_rows),
-                               separation_policy=separation_policy)
+                               separation_policy=policy,
+                               people=person_keys(reviewers))
     for pid in sorted(contract_refused):
         approved.pop(pid, None)
 
@@ -2470,8 +2561,13 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    # be able to say whether resolver-approver separation was
                    # required of it, and NOT_DECLARED has to be as visible as
                    # the declaration.
-                   "Reviewer_Separation_Policy": (separation_policy
-                                                  or "NOT_DECLARED"),
+                   # WHAT WAS APPLIED, canonicalised - never the caller's raw
+                   # string. `UNRECOGNIZED` can only appear on a refusal, where
+                   # the problem list names the token that was rejected: a stamp
+                   # is a governance record, and echoing back an unenforced
+                   # policy is the one way it can lie.
+                   "Reviewer_Separation_Policy": (
+                       canonical_policy(separation_policy) or "UNRECOGNIZED"),
                    "Problems": problems, "Detail": detail}
         with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
                   "w", encoding="utf-8") as fh:

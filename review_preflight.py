@@ -303,6 +303,64 @@ def second_comparison(inference_path, second_path):
             disagreements(inference_path, second_path))
 
 
+def second_problems(inference_path, second_path, reviewers=None):
+    """Why a `--second` run is not evidence that a second PERSON reviewed.
+
+    Counting the cells both files answered says the two files agree. It says
+    nothing about where the second file came from, and v7.96 checked nothing
+    else - so
+
+        review_preflight.py OUT --inference review_A.csv --second review_A.csv
+
+    exited 0 on a complete answer set, and so did a copy of that file carrying
+    the same `Reviewer_ID`. A flag whose whole purpose is to evidence independent
+    review has to establish that the second reading is somebody else's.
+
+    Three things, and none of them is the comparison itself: the two files are
+    two files, each compared cell was answered by two DIFFERENT people, and both
+    of those people are registered HUMAN reviewers. The identity comparison is
+    on `Reviewer_ID` here rather than on a person key, because the per-cell file
+    is not the panel signature and `--second` is not part of the finalization
+    contract - it is a read-only qualification check a person runs to see whether
+    two independent readings exist. What makes it worth running is that it can
+    now say NO.
+    """
+    problems = []
+    if os.path.realpath(inference_path) == os.path.realpath(second_path):
+        problems.append(("--second",
+                         "is the same file as --inference; a file agrees with "
+                         "itself"))
+    human = FIN.human_reviewers(reviewers) if reviewers is not None else None
+
+    def by_cell(path):
+        out = {}
+        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+            iid = _s(r.get("Inference_ID"))
+            if iid:
+                out.setdefault(iid, []).append(_s(r.get("Reviewer_ID")))
+        return out
+
+    first, second = by_cell(inference_path), by_cell(second_path)
+    for iid in sorted(set(first) & set(second)):
+        who_one = [w for w in first[iid] if w]
+        who_two = [w for w in second[iid] if w]
+        if not who_one or not who_two:
+            problems.append((iid, "an answer with no Reviewer_ID cannot be "
+                                  "attributed to a second reader"))
+            continue
+        if set(who_one) & set(who_two):
+            problems.append((iid, "both answers are %s; one person answering "
+                                  "twice is not two readings"
+                             % "/".join(sorted(set(who_one) & set(who_two)))))
+            continue
+        if human is not None:
+            outside = sorted({w for w in who_one + who_two if w not in human})
+            if outside:
+                problems.append((iid, "%s is not a registered HUMAN reviewer"
+                                 % "/".join(outside)))
+    return problems
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("run_dir")
@@ -365,8 +423,22 @@ def main(argv=None):
     for where, why in answers:
         print("  ANSWERS  %-34s %s" % (where, why))
     compared = differ = None
+    second_bad = []
     if args.second:
         compared, differ = second_comparison(inference, args.second)
+        # WHO the second reading came from, which needs the registry. Loaded
+        # from the same directory the finalizer was pointed at, and skipped
+        # rather than guessed when it cannot be read - a missing registry is
+        # already `RUN_NOT_FINALIZABLE` above.
+        mdir = args.manifests or os.path.join(args.run_dir, "manifests")
+        registry = None
+        try:
+            registry = RB.load_manifests(mdir).get("reviewers")
+        except Exception:
+            registry = None
+        second_bad = second_problems(inference, args.second, registry)
+        for where, why in second_bad:
+            print("  SECOND   %-34s %s" % (where, why))
         for iid, a, b in differ:
             print("  DIFFER   %-34s %s against %s" % (iid, a, b))
         # BOTH NUMBERS, because they answer different questions. The asked count
@@ -381,6 +453,9 @@ def main(argv=None):
         if not compared:
             print("  SECOND   nothing was compared, so no independent check "
                   "happened here. Two people, or none")
+        print("  SECOND   this is a read-only qualification check, not part of "
+              "the finalization contract: the finalizer reads --inference and "
+              "never the second file")
     print("%d bundle problem(s), %d answer problem(s), %d refusal(s), "
           "%d value(s) excluded"
           % (len(bundle), len(answers), len(blocking), len(excluded)))
@@ -408,7 +483,7 @@ def main(argv=None):
     # passed while the two readings of the ink contradicted each other.
     if compared is not None:
         every = {q["Inference_ID"] for q in asked if q["Inference_ID"]}
-        if not compared or set(compared) != every or differ:
+        if not compared or set(compared) != every or differ or second_bad:
             return 2
     # THE WHOLE BATCH, which is what the name says. Checking only `excluded`
     # let a run pass strict mode with a panel refused beside the one that

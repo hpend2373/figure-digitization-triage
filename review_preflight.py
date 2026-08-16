@@ -37,6 +37,7 @@ writes to the run.
 import argparse
 import collections
 import csv
+import datetime
 import json
 import os
 import sys
@@ -303,7 +304,8 @@ def second_comparison(inference_path, second_path):
             disagreements(inference_path, second_path))
 
 
-def second_problems(inference_path, second_path, reviewers=None):
+def second_problems(inference_path, second_path, reviewers=None, run_dir=None,
+                    today=None):
     """Why a `--second` run is not evidence that a second PERSON reviewed.
 
     Counting the cells both files answered says the two files agree. It says
@@ -316,14 +318,24 @@ def second_problems(inference_path, second_path, reviewers=None):
     the same `Reviewer_ID`. A flag whose whole purpose is to evidence independent
     review has to establish that the second reading is somebody else's.
 
-    Three things, and none of them is the comparison itself: the two files are
-    two files, each compared cell was answered by two DIFFERENT people, and both
-    of those people are registered HUMAN reviewers. The identity comparison is
-    on `Reviewer_ID` here rather than on a person key, because the per-cell file
-    is not the panel signature and `--second` is not part of the finalization
-    contract - it is a read-only qualification check a person runs to see whether
-    two independent readings exist. What makes it worth running is that it can
-    now say NO.
+    WHO, compared as PEOPLE. v7.97 compared `Reviewer_ID`s here while the
+    resolver-approver contract had already moved to ORCID person keys, so one
+    human registered twice - `RV_A` and `RV_B`, one ORCID - passed this and not
+    that. The two checks answer the same question and now answer it the same way:
+    an ORCID identifies a person, and where one is missing the answer is "cannot
+    tell", not "yes".
+
+    AND WHAT, as a review record rather than two columns. v7.97 read
+    `Inference_ID`, `Inference_Confirmed` and `Reviewer_ID` and looked at nothing
+    else, so a second file could answer a question this run did not ask, name
+    another panel's `Cell_Key`, or carry no timestamp at all. `Inference_ID`
+    binds the cell cryptographically, so no number moves - but "a registered
+    person answered this question on this date" was not established, and that is
+    the whole content of a second reading.
+
+    Still a READ-ONLY QUALIFICATION CHECK. The finalizer reads `--inference` and
+    never this file, so nothing here is bound into `Review_Subject_SHA256` or
+    stamped. What makes it worth running is that it can say NO.
     """
     problems = []
     if os.path.realpath(inference_path) == os.path.realpath(second_path):
@@ -331,6 +343,37 @@ def second_problems(inference_path, second_path, reviewers=None):
                          "is the same file as --inference; a file agrees with "
                          "itself"))
     human = FIN.human_reviewers(reviewers) if reviewers is not None else None
+    keys = FIN.person_keys(reviewers) if reviewers is not None else {}
+    rows = _read(second_path, FIN.inference_review_columns())
+
+    # THE SAME ROW CONTRACT THE FIRST FILE IS HELD TO, applied read-only.
+    if run_dir is not None:
+        asked = {q["Inference_ID"]: q for q in questions(run_dir)
+                 if q["Inference_ID"]}
+        seen = collections.Counter(_s(r.get("Inference_ID"))
+                                   for _, r in rows.iterrows())
+        for iid in sorted(k for k in seen if k and k not in asked):
+            problems.append((iid, "answers a question this run did not ask"))
+        for iid in sorted(k for k, n in seen.items() if k and n > 1):
+            problems.append((iid, "is answered %d times in the second file"
+                             % seen[iid]))
+        for iid in sorted(k for k in asked if k not in seen):
+            problems.append((iid, "has no answer in the second file"))
+        for _, r in rows.iterrows():
+            iid = _s(r.get("Inference_ID"))
+            question = asked.get(iid)
+            if question is None:
+                continue
+            for column, expected in (("Panel_ID", question["Panel_ID"]),
+                                     ("Unit_ID", question["Unit_ID"]),
+                                     ("Cell_Key", question["Cell_Key"])):
+                got = _s(r.get(column))
+                if got and got != expected:
+                    problems.append((iid, "says %s=%r; this run asks it of %r"
+                                     % (column, got, expected)))
+            problems.extend((iid, why) for why in
+                            _reviewed_at_problems(_s(r.get("Reviewed_At")),
+                                                  today))
 
     def by_cell(path):
         out = {}
@@ -348,17 +391,55 @@ def second_problems(inference_path, second_path, reviewers=None):
             problems.append((iid, "an answer with no Reviewer_ID cannot be "
                                   "attributed to a second reader"))
             continue
-        if set(who_one) & set(who_two):
-            problems.append((iid, "both answers are %s; one person answering "
-                                  "twice is not two readings"
-                             % "/".join(sorted(set(who_one) & set(who_two)))))
-            continue
         if human is not None:
             outside = sorted({w for w in who_one + who_two if w not in human})
             if outside:
                 problems.append((iid, "%s is not a registered HUMAN reviewer"
                                  % "/".join(outside)))
+                continue
+        if set(who_one) & set(who_two):
+            problems.append((iid, "both answers are %s; one person answering "
+                                  "twice is not two readings"
+                             % "/".join(sorted(set(who_one) & set(who_two)))))
+            continue
+        if reviewers is None:
+            continue
+        unproven = sorted({w for w in who_one + who_two
+                           if not keys.get(w, "").startswith("ORCID:")})
+        if unproven:
+            problems.append((iid, "%s %s registered without an ORCID, so two "
+                                  "Reviewer_IDs cannot be shown to be two people"
+                             % ("/".join(unproven),
+                                "is" if len(unproven) == 1 else "are")))
+            continue
+        shared = {keys[w] for w in who_one} & {keys[w] for w in who_two}
+        if shared:
+            problems.append((iid, "%s and %s are the same person (%s) "
+                                  "registered twice"
+                             % ("/".join(sorted(set(who_one))),
+                                "/".join(sorted(set(who_two))),
+                                "/".join(sorted(shared)))))
     return problems
+
+
+def _reviewed_at_problems(stamp, today=None):
+    """A second reading has to say WHEN, and the when has to be a real past date."""
+    if not stamp:
+        return ["carries no Reviewed_At, so nothing says when it was read"]
+    text = stamp.replace("Z", "+00:00")
+    try:
+        when = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            when = datetime.datetime.combine(datetime.date.fromisoformat(stamp),
+                                             datetime.time())
+        except ValueError:
+            return ["Reviewed_At=%r is not an ISO timestamp" % stamp]
+    day = when.date()
+    limit = today or datetime.date.today()
+    if day > limit:
+        return ["Reviewed_At=%s is in the future" % day.isoformat()]
+    return []
 
 
 def main(argv=None):
@@ -430,13 +511,14 @@ def main(argv=None):
         # from the same directory the finalizer was pointed at, and skipped
         # rather than guessed when it cannot be read - a missing registry is
         # already `RUN_NOT_FINALIZABLE` above.
-        mdir = args.manifests or os.path.join(args.run_dir, "manifests")
-        registry = None
-        try:
-            registry = RB.load_manifests(mdir).get("reviewers")
-        except Exception:
-            registry = None
-        second_bad = second_problems(inference, args.second, registry)
+        # Resolved by the finalizer's own rule - `--manifests`, then the copy
+        # inside the run, then the stamp - because a second copy of a path rule
+        # is a second answer. v7.97 stopped at `RUN/manifests`, so a run whose
+        # manifests live outside it came back with no registry and the HUMAN
+        # check was skipped in silence.
+        registry = FIN.verified_registry(args.run_dir, args.manifests)
+        second_bad = second_problems(inference, args.second, registry,
+                                     run_dir=args.run_dir)
         for where, why in second_bad:
             print("  SECOND   %-34s %s" % (where, why))
         for iid, a, b in differ:

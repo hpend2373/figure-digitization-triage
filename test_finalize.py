@@ -73,8 +73,11 @@ SHA = MR.sha256_of(IMG)
 TICKS = "220:40;0:440"
 
 REVIEWERS = [dict(Reviewer_ID="RV_H", Reviewer_Name="Test Reviewer",
-                  Reviewer_Record_Type="HUMAN", Contact_Type="EMAIL",
-                  Reviewer_Contact="reviewer@example.org",
+                  # ORCID rather than EMAIL, because `--second` compares people
+                  # and an email address is a mailbox. A reviewer this package
+                  # can hold to the two-reader contract has an ORCID.
+                  Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+                  Reviewer_Contact="0000-0002-1694-233X",
                   Registered_By="Test Reviewer", Registration_Date="2026-08-01",
                   Human_Attestation="HUMAN_CONFIRMED", Note=""),
              # A SECOND registered human, for `--second`: the flag exists to
@@ -2598,6 +2601,89 @@ check("  nor one by a DEMO_IDENTITY, which is registered and is not a person",
 check("  and the run that DOES have two named readers reports no such problem",
       PF.second_problems(_r3_cells, _agree, _registry) == [],
       "%s" % PF.second_problems(_r3_cells, _agree, _registry))
+# ONE HUMAN, TWO Reviewer_IDs. v7.98. The resolver-approver contract moved to
+# ORCID person keys in v7.97 and this did not, so the same registry merge that
+# is refused on a panel signature passed here: `RV_H` and `RV_TWIN` share an
+# ORCID, both are HUMAN, and the two files "disagree about nobody".
+_TWIN = REVIEWERS + [dict(REVIEWERS[0], Reviewer_ID="RV_TWIN",
+                          Reviewer_Name="Test Reviewer, second row")]
+_twin_reg = pd.DataFrame(_TWIN)
+_twin = _second_file("second_twin.csv",
+                     [_answer(i, Reviewer_ID="RV_TWIN") for i in _ids3])
+check("one human registered twice is not two readers here either",
+      PF.second_comparison(_r3_cells, _twin)[0] == _ids3
+      and all(any("same person" in why for _w, why in
+                  [p for p in PF.second_problems(_r3_cells, _twin, _twin_reg)
+                   if p[0] == i])
+              for i in _ids3),
+      "%s" % PF.second_problems(_r3_cells, _twin, _twin_reg))
+_noorcid = pd.DataFrame([dict(REVIEWERS[0], Contact_Type="EMAIL",
+                              Reviewer_Contact="first@example.org"),
+                         dict(REVIEWERS[1], Contact_Type="EMAIL",
+                              Reviewer_Contact="second@example.org")])
+check("  and two mailboxes cannot be shown to be two people",
+      all(any("without an ORCID" in why for _w, why in
+              [p for p in PF.second_problems(_r3_cells, _agree, _noorcid)
+               if p[0] == i]) for i in _ids3),
+      "%s" % PF.second_problems(_r3_cells, _agree, _noorcid))
+# AND THE SECOND FILE IS A REVIEW RECORD, not two columns. v7.97 read
+# Inference_ID, Inference_Confirmed and Reviewer_ID and nothing else, so a second
+# reading could name another panel's cell or carry no date at all. Inference_ID
+# binds the cell cryptographically, so no NUMBER moves - but "a registered person
+# answered this question on this date" was never established, and that is the
+# whole content of an independent reading.
+_wrongcell = _second_file(
+    "second_wrongcell.csv",
+    [dict(_answer(i, Reviewer_ID="RV_H2"), Cell_Key="ARM=NOT_THIS_ONE")
+     for i in _ids3])
+check("a second reading that names another cell is reported against the run",
+      all(any("this run asks it of" in why for _w, why in
+              [p for p in PF.second_problems(_r3_cells, _wrongcell, _registry,
+                                             run_dir=_R3_DIR) if p[0] == i])
+          for i in _ids3)
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _wrongcell]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _wrongcell, _registry,
+                                run_dir=_R3_DIR))
+_undated = _second_file(
+    "second_undated.csv",
+    [dict(_answer(i, Reviewer_ID="RV_H2"), Reviewed_At="") for i in _ids3])
+check("  a second reading with no date says nothing about when it happened",
+      all(any("no Reviewed_At" in why for _w, why in
+              [p for p in PF.second_problems(_r3_cells, _undated, _registry,
+                                             run_dir=_R3_DIR) if p[0] == i])
+          for i in _ids3)
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _undated]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _undated, _registry,
+                                run_dir=_R3_DIR))
+_future = _second_file(
+    "second_future.csv",
+    [dict(_answer(i, Reviewer_ID="RV_H2"), Reviewed_At="2099-01-01T00:00:00Z")
+     for i in _ids3])
+check("  and one dated after today is not a reading that has happened",
+      any("in the future" in why for _w, why in
+          PF.second_problems(_r3_cells, _future, _registry, run_dir=_R3_DIR,
+                             today=datetime.date(2026, 8, 8)))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _future]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _future, _registry, run_dir=_R3_DIR,
+                                today=datetime.date(2026, 8, 8)))
+_extra = _second_file(
+    "second_extra.csv",
+    [_answer(i, Reviewer_ID="RV_H2") for i in _ids3]
+    + [_answer("INF_notarealcell", Reviewer_ID="RV_H2")])
+check("  an answer to a question this run did not ask is reported too",
+      any("did not ask" in why for _w, why in
+          PF.second_problems(_r3_cells, _extra, _registry, run_dir=_R3_DIR))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _extra]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _extra, _registry, run_dir=_R3_DIR))
+check("  while the complete, dated, two-person second reading reports nothing",
+      PF.second_problems(_r3_cells, _agree, _registry, run_dir=_R3_DIR,
+                         today=datetime.date(2026, 8, 8)) == [],
+      "%s" % PF.second_problems(_r3_cells, _agree, _registry, run_dir=_R3_DIR,
+                                today=datetime.date(2026, 8, 8)))
 # AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
 # the finalizer for a run that has been moved; without it on the preflight, the
 # same run could fail one and pass the other with the same decision function
@@ -2608,6 +2694,59 @@ shutil.copytree(_R3_DIR, _moved_dir)
 _moved_manifests = os.path.join(ROOT, "moved_manifests")
 shutil.rmtree(_moved_manifests, ignore_errors=True)
 shutil.move(os.path.join(_moved_dir, "manifests"), _moved_manifests)
+# AND THE REGISTRY COMES FROM WHERE THE FINALIZER LOOKS. v7.97 resolved it as
+# `--manifests or RUN/manifests` and missed the stamp fallback, so on a run whose
+# manifests live outside it the registry read as unreadable, the HUMAN check was
+# skipped in silence, and an unregistered second reader passed the one flag that
+# exists to catch them.
+check("the registry resolves for a run whose manifests are not inside it",
+      FIN.verified_registry(_moved_dir, None) is not None
+      and "RV_H" in FIN.human_reviewers(
+          FIN.verified_registry(_moved_dir, None)),
+      "%s" % (FIN.verified_registry(_moved_dir, None) is None))
+_moved_stamp = json.load(open(os.path.join(_moved_dir, "run_stamp.json"),
+                              encoding="utf-8"))
+check("  by the stamp when the run carries no manifests of its own",
+      not os.path.isdir(os.path.join(_moved_dir, "manifests"))
+      and FIN.manifest_directory(_moved_dir, None, _moved_stamp)
+      == _moved_stamp["Manifest_Dir"],
+      "%s" % FIN.manifest_directory(_moved_dir, None, _moved_stamp))
+check("  and by the argument when one is given, which is why it exists",
+      FIN.manifest_directory(_moved_dir, _moved_manifests, _moved_stamp)
+      == _moved_manifests)
+check("  one rule, not two: the preflight's registry follows the same order",
+      FIN.verified_registry(_moved_dir, _moved_manifests) is not None
+      and "RV_H" in FIN.human_reviewers(
+          FIN.verified_registry(_moved_dir, _moved_manifests)))
+# AND THROUGH THE CLI, which is where the defect was. `main` resolved the
+# registry as `--manifests or RUN/manifests` and never reached the stamp, so on
+# THIS run - manifests outside it, stamp pointing at them - the registry read as
+# unreadable and `second_problems` skipped its HUMAN check in silence. An
+# unregistered second reader passed the one flag that exists to catch them, with
+# no `--manifests` given and nothing printed to say a check had been dropped.
+_mv_review = os.path.join(_moved_dir, "value_review.csv")
+_mv_cells = os.path.join(_moved_dir, "inference_review.csv")
+
+
+def _moved_second(name, reviewer):
+    path = os.path.join(_moved_dir, name)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIN.inference_review_columns())
+        for iid in _ids3:
+            r = _answer(iid, Reviewer_ID=reviewer)
+            w.writerow([r.get(c, "") for c in FIN.inference_review_columns()])
+    return path
+
+
+_mv_ok = _moved_second("second_ok.csv", "RV_H2")
+_mv_bad = _moved_second("second_bad.csv", "RV_NOBODY")
+check("the moved run passes with a registered second reader and no --manifests",
+      PF.main([_moved_dir, "--review", _mv_review, "--inference", _mv_cells,
+               "--second", _mv_ok]) == 0)
+check("  and the unregistered one is caught there too, not silently skipped",
+      PF.main([_moved_dir, "--review", _mv_review, "--inference", _mv_cells,
+               "--second", _mv_bad]) == 2)
 # WHAT A RUN HANDED TO SOMEBODY ELSE LOOKS LIKE: the stamp records the absolute
 # path of a directory on the machine that produced it, and that directory is not
 # on this one. The `manifests/` copy inside the run is the fallback that travels;

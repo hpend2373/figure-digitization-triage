@@ -1696,6 +1696,52 @@ def canonical_policy(declared):
     return text if text in SEPARATION_POLICIES else None
 
 
+def manifest_directory(run_dir, manifest_dir=None, run_stamp=None):
+    """Where this run's manifests are, in the order that survives a moved run.
+
+    The stamp records an ABSOLUTE path, so a run folder handed to somebody else
+    names a directory on the machine that produced it; a `manifests/` directory
+    inside the run is the one answer that travels with it. Hence: what the caller
+    said, then the copy inside the run, then the stamp, then the copy inside the
+    run again as the path to name in the error.
+
+    ONE IMPLEMENTATION, because the preflight needs the same answer. v7.97's
+    `--second` resolved it as `--manifests or RUN/manifests`, missing the stamp
+    fallback - so on a run whose manifests live outside it the registry came back
+    unreadable, `second_problems` skipped its HUMAN check without saying so, and
+    an unregistered second reader passed the one flag that exists to catch them.
+    A second copy of a path rule is a second answer to the same question.
+    """
+    run_stamp = run_stamp or {}
+    inside = os.path.join(run_dir, "manifests")
+    return (manifest_dir
+            or (inside if os.path.isdir(inside) else "")
+            or _s(run_stamp.get("Manifest_Dir"))
+            or inside)
+
+
+def verified_registry(run_dir, manifest_dir=None):
+    """This run's reviewer registry, resolved the way the finalizer resolves it.
+
+    Read-only and best-effort: an unreadable registry is already
+    `RUN_NOT_FINALIZABLE` in the decider, and this exists so a caller that only
+    wants to know WHO can ask without re-deriving where.
+    """
+    stamp = {}
+    path = os.path.join(run_dir, "run_stamp.json")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                stamp = json.load(fh)
+        except Exception:
+            stamp = {}
+    try:
+        return RB.load_manifests(
+            manifest_directory(run_dir, manifest_dir, stamp)).get("reviewers")
+    except Exception:
+        return None
+
+
 def person_keys(reviewers):
     """Reviewer_ID -> the PERSON behind it, where the registry can prove one.
 
@@ -1870,8 +1916,15 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
         # meaning "yes, I am still of the same opinion". `PILOT.md` said two
         # people and nothing checked it, so a run could say the words and
         # finalize anyway.
-        if separation_policy == DISTINCT_RESOLVERS:
-            mine = (resolvers or {}).get(pid, set())
+        mine = (resolvers or {}).get(pid, set())
+        # THE CONTRACT IS ABOUT A PAIR, so it applies where the pair exists.
+        # v7.97 checked every approved panel, `mine` empty or not, which quietly
+        # made `DISTINCT_RESOLVER_APPROVER` mean "and every approver under this
+        # policy must hold an ORCID" - a wider rule than its name, arrived at by
+        # accident. A panel nobody hand-resolved has no resolver for the approver
+        # to be distinct FROM, so it is satisfied with nothing to check. If the
+        # wider rule is ever wanted it gets its own name in `SEPARATION_POLICIES`.
+        if separation_policy == DISTINCT_RESOLVERS and mine:
             keys = people or {}
             # COMPARED AS PEOPLE, NOT AS ROW IDENTIFIERS. v7.96 compared
             # Reviewer_IDs, and a Reviewer_ID identifies a ROW: register one
@@ -2200,12 +2253,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # stamp records an absolute path, so a run folder handed to somebody else
     # named a directory on the machine it was produced on; a `manifests/`
     # directory sitting inside the run is the one answer that travels with it.
-    manifest_dir = (manifest_dir
-                    or (os.path.join(run_dir, "manifests")
-                        if os.path.isdir(os.path.join(run_dir, "manifests"))
-                        else "")
-                    or _s(run_stamp.get("Manifest_Dir"))
-                    or os.path.join(run_dir, "manifests"))
+    manifest_dir = manifest_directory(run_dir, manifest_dir, run_stamp)
     if run_stamp.get("Status") != "RAN":
         return stop("RUN_NOT_FINALIZABLE",
                     "the run says Status=%s; only a completed run can be "

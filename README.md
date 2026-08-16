@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.97 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2841 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2879 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.98 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2856 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2894 -->
 
-2841 scenarios on main after v7.97 under `requirements-lock.txt`, and 2879 with
+2856 scenarios on main after v7.98 under `requirements-lock.txt`, and 2894 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -182,17 +182,20 @@ naming lands in — compared as PEOPLE, by normalized ORCID, because a
 `Reviewer_ID` identifies a row and one human registered twice under two IDs read
 as two reviewers. Where an ORCID is absent the contract refuses
 (`REVIEWER_IDENTITY_UNPROVABLE`) rather than treating two mailboxes as two
-people. The policy itself is checked against `SEPARATION_POLICIES` and an
-unrecognised token stops the finalization, so the stamp's
-`Reviewer_Separation_Policy` can never name a contract that was applied to
-nothing.
+people, and it applies to panels that carry a hand-resolved identity: a panel
+nobody resolved has no resolver for its approver to be distinct from. The policy
+itself is checked against `SEPARATION_POLICIES` and an unrecognised token stops
+the finalization, so the stamp's `Reviewer_Separation_Policy` can never name a
+contract that was applied to nothing.
 
 There is no `--second` fallback: that flag reads two `inference_review.csv`
 files, so it sees the per-cell channel and nothing else. It exits 2 unless every
 question was answered once on both sides, the two answers agree, the two files
-are two files, and each cell's answers come from two different registered HUMAN
-reviewers. It remains a read-only qualification check — the finalizer never
-reads the second file.
+are two files, the two readers are two PEOPLE by ORCID, and the second file is a
+complete review record — this run's own panel, unit and cell on every row, and a
+`Reviewed_At` that is a real past date. It remains a read-only qualification
+check: the finalizer never reads the second file, so nothing in it is bound into
+`Review_Subject_SHA256` or stamped.
 
 ## Status
 

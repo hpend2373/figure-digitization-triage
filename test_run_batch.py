@@ -4123,6 +4123,40 @@ check("  and the same run finalizes when no separation is declared",
       FIN.finalize(_mail_o, review_path=_mail_rev, manifest_dir=_mail_m,
                    run_date="2026-08-06",
                    today=datetime.date(2026, 8, 8))["status"] == "FINALIZED")
+# AND THE CONTRACT APPLIES WHERE THE PAIR EXISTS. v7.98. P_MONO's fills are all
+# measurable, so nobody hand-resolved anything on it and there is no resolver for
+# its approver to be distinct FROM. v7.97 checked every approved panel anyway,
+# which quietly turned `DISTINCT_RESOLVER_APPROVER` into "and every approver
+# under this policy holds an ORCID" - a wider rule than its name, arrived at by
+# accident. The same EMAIL-only reviewer that is refused on the resolved panel
+# signs this one and it finalizes.
+_mono_rev = os.path.join(_mail_o, "value_review_mono.csv")
+_hit_mono = _mail_q[_mail_q["Panel_ID"] == "P_MONO"]
+check("the unresolved panel really has no human resolution behind it",
+      len(_hit_mono) == 1
+      and "P_MONO" not in FIN.resolution_reviewers(
+          _mail_o, pd.read_csv(os.path.join(_mail_o, "panel_artifacts.csv"),
+                               dtype=object).fillna("")),
+      "%s" % _hit_mono[["Panel_ID", "Review_Mode"]].to_dict("records"))
+with open(_mono_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_MONO",
+        Review_Subject_SHA256=_hit_mono.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mono_r = FIN.finalize(_mail_o, review_path=_mono_rev, manifest_dir=_mail_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("  so an EMAIL-only approver signs it under the declared contract",
+      _mono_r["status"] == "FINALIZED"
+      and not any(p["check"] in ("REVIEWER_IDENTITY_UNPROVABLE",
+                                 "RESOLVER_IS_APPROVER")
+                  for p in _mono_r.get("problems", [])),
+      "%s %s" % (_mono_r["status"], _mono_r.get("problems")))
 # A POLICY THE ENFORCEMENT DOES NOT RECOGNISE IS NOT A POLICY. v7.97.
 # SEPARATION_POLICIES was declared in v7.96 and never consulted: enforcement was
 # one exact comparison and the stamp echoed the caller's string, so a library

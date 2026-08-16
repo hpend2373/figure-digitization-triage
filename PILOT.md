@@ -201,9 +201,14 @@ pilot is not the place it gets decided by default. **If a second person is not
 available, 127 is run as a dry run and nothing is finalized.**
 
 **And this is a contract now, not a paragraph.** `--distinct-reviewers` on both
-tools compares the `Reviewer_ID` in `identity_resolution.csv` against the one
-signing the panel that naming lands in, and refuses `RESOLVER_IS_APPROVER` when
-they are the same person: one reading of a legend confirming itself is not a
+tools compares the person in `identity_resolution.csv` against the one signing
+the panel that naming lands in - by normalized ORCID, because a `Reviewer_ID`
+identifies a row and one human registered twice would otherwise read as two
+people. Where an ORCID is missing it refuses `REVIEWER_IDENTITY_UNPROVABLE`
+rather than treating two mailboxes as two people. It applies to panels that
+CARRY a hand-resolved identity: a panel nobody resolved has no resolver for its
+approver to be distinct from, and is satisfied with nothing to check. It refuses
+`RESOLVER_IS_APPROVER` when they are the same person: one reading of a legend confirming itself is not a
 second reading of it. Run without the flag the finalizer permits it, because
 this package has not decided the general case - and the stamp then records
 `Reviewer_Separation_Policy = NOT_DECLARED` rather than nothing, so what a run
@@ -220,9 +225,12 @@ the asked cells were answered on BOTH sides and exits 2 unless all of them were
 and the two answers agree - a five-question run against an empty second file
 reported "5 compared" until v7.96.
 
-`--second` also refuses to be handed the same file twice, two files whose cells
-carry the same `Reviewer_ID`, or a second reading signed by somebody the
-registry does not carry as HUMAN. Even so it is a READ-ONLY QUALIFICATION CHECK
+`--second` also refuses to be handed the same file twice, two readings by the
+same PERSON - compared by ORCID, so one human registered under two Reviewer_IDs
+does not read as two - a reader the registry does not carry as HUMAN, or a
+second file that is not a complete review record: every question answered once,
+each row naming this run's own panel, unit and cell, and a `Reviewed_At` that is
+a real date and not in the future. Even so it is a READ-ONLY QUALIFICATION CHECK
 and not part of the finalization contract: the finalizer reads `--inference` and
 never the second file, so nothing about the second reading is bound into
 `Review_Subject_SHA256` or recorded in the stamp. Making it a contract would

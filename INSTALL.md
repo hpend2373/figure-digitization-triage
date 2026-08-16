@@ -6376,6 +6376,56 @@ SUPINE group.
     the second file's problems do not change the exit  4
     the runbook promises two template files everywhere 1
 
+## v7.98 — the two checks that answer the same question answer it the same way
+
+v7.97 moved the resolver-approver contract to ORCID person keys and left
+`--second` comparing `Reviewer_ID`s, so one human registered twice was refused on
+a panel signature and accepted as an independent reading. Both are the question
+"are these two people", and there is no reason for two answers.
+
+**`--second` compares people now.** Same `FIN.person_keys`, same rule: an ORCID
+identifies a person, and where one is missing on either side the answer is
+"cannot tell" rather than "yes". `RV_A` and `RV_B` sharing an ORCID are reported
+as one person registered twice.
+
+**And the second file is checked as a review record**, not as three columns.
+v7.97 read `Inference_ID`, `Inference_Confirmed` and `Reviewer_ID` and looked at
+nothing else, so a second reading could answer a question this run did not ask,
+name another panel's `Cell_Key`, be answered twice, or carry no date at all.
+`Inference_ID` binds the cell cryptographically so no NUMBER could move - but "a
+registered person answered this question on this date" was never established, and
+that is the whole content of an independent reading. Every question answered once,
+each row naming this run's own panel, unit and cell, and a `Reviewed_At` that
+parses and is not in the future.
+
+**The registry comes from where the finalizer looks.** The preflight resolved it
+as `--manifests or RUN/manifests` and never reached the stamp, so on a run whose
+manifests live outside it the registry read as unreadable and the HUMAN check was
+skipped in silence - an unregistered second reader passing the one flag that
+exists to catch them, with nothing printed to say a check had been dropped.
+`manifest_directory()` is now the single rule both tools call, and
+`verified_registry()` is how a caller asks WHO without re-deriving WHERE. Two
+copies of a path rule are two answers to one question.
+
+**And the separation contract applies where the pair exists.** v7.97 checked every
+approved panel, `mine` empty or not, which quietly turned
+`DISTINCT_RESOLVER_APPROVER` into "and every approver under this policy holds an
+ORCID" - a wider rule than its name, arrived at by accident rather than decided.
+A panel nobody hand-resolved has no resolver for its approver to be distinct
+FROM. If the wider rule is ever wanted it gets its own name in
+`SEPARATION_POLICIES`.
+
+    reverted                                          scenarios that fail
+    the preflight resolves the manifest dir its own way 1
+    the strict policy checks panels with no resolver   1
+    --second compares Reviewer_IDs, not people         1
+    --second accepts two unprovable identities         1
+    the second file may name another run's cell        1
+    the second file needs no date                      1
+    a future date is a reading that happened           1
+    the second file may answer an unasked question     1
+    the stamp fallback is dropped from the one rule    2
+
 ## Still open
 
 - `--second` is a qualification check and not a finalization contract. To make

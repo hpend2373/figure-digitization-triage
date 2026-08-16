@@ -4,6 +4,7 @@
                                      [--inference inference_review.csv]
                                      [--manifests MANIFEST_DIR]
                                      [--second other_inference_review.csv]
+                                     [--distinct-reviewers]
                                      [--require-all-values]
 
 A human review of an R2 or R3 panel is a person looking at ink and saying what
@@ -203,7 +204,7 @@ def answer_problems(run_dir, review_path, inference_path):
 
 
 def would_refuse(run_dir, review_path, inference_path, today=None,
-                 manifest_dir=None):
+                 manifest_dir=None, separation_policy=None):
     """What the finalizer would say, run through the finalizer's own function.
 
     `FIN.validate_finalization` decides; `FIN.finalize` wraps it and writes. This
@@ -222,7 +223,8 @@ def would_refuse(run_dir, review_path, inference_path, today=None,
     """
     verdict = FIN.validate_finalization(
         run_dir, review_path=review_path, inference_review_path=inference_path,
-        today=today, manifest_dir=manifest_dir)
+        today=today, manifest_dir=manifest_dir,
+        separation_policy=separation_policy)
     return verdict.status, [(_s(p.get("where")), _s(p.get("check")),
                              _s(p.get("detail"))) for p in verdict.problems]
 
@@ -278,16 +280,27 @@ def second_comparison(inference_path, second_path):
     R3 cell. Two empty files agree, the flag prints nothing, and one person
     doing both roles reads as an independent check having happened.
 
-    Returns `(compared, differences)`. `compared` is every cell either file
-    answered, so a caller can say how much of the review the flag saw.
+    Returns `(compared, differences)`. `compared` is the cells that were
+    ACTUALLY compared - answered exactly once, with a verdict this package
+    accepts, on BOTH sides. v7.95 counted the UNION and over-reported in the one
+    direction that matters: five answers against an empty file read as five
+    cells compared, when nothing was compared at all. On an R3 pilot that is the
+    same failure the two-empty-files case is, one reviewer short instead of two.
     """
-    compared = set()
-    for path in (inference_path, second_path):
+    def answered(path):
+        out, seen = {}, collections.Counter()
         for _, r in _read(path, FIN.inference_review_columns()).iterrows():
             iid = _s(r.get("Inference_ID"))
-            if iid:
-                compared.add(iid)
-    return sorted(compared), disagreements(inference_path, second_path)
+            if not iid:
+                continue
+            seen[iid] += 1
+            out[iid] = _s(r.get("Inference_Confirmed")).upper()
+        return {iid: verdict for iid, verdict in out.items()
+                if seen[iid] == 1 and verdict in RB.INFERENCE_DECISIONS}
+
+    one, two = answered(inference_path), answered(second_path)
+    return (sorted(set(one) & set(two)),
+            disagreements(inference_path, second_path))
 
 
 def main(argv=None):
@@ -306,6 +319,11 @@ def main(argv=None):
                          "asks for, or a hand-resolved identity, so on a run "
                          "with no reconstructed cell it compares nothing and "
                          "says so")
+    ap.add_argument("--distinct-reviewers", action="store_true",
+                    help="the finalizer's --distinct-reviewers, asked in "
+                         "advance: refuse a panel whose approver also resolved "
+                         "an identity on it. The two must be given the same "
+                         "flag or they answer different questions")
     ap.add_argument("--require-all-values", action="store_true",
                     help="fail unless the whole batch went through: no value "
                          "excluded AND no panel refused. Off by default, because "
@@ -323,8 +341,10 @@ def main(argv=None):
     # the answer, and it comes from the function the finalizer decides with. Run
     # last, a malformed decision file crashed the preflight's own reading of it
     # before the finalizer's structured refusal was ever reached.
-    status, refusals = would_refuse(args.run_dir, review, inference,
-                                    manifest_dir=args.manifests)
+    status, refusals = would_refuse(
+        args.run_dir, review, inference, manifest_dir=args.manifests,
+        separation_policy=(FIN.DISTINCT_RESOLVERS
+                           if args.distinct_reviewers else None))
     excluded = [r for r in refusals if r[1] in FIN.NONFATAL_CHECKS]
     blocking = [r for r in refusals if r[1] not in FIN.NONFATAL_CHECKS]
     print("the finalizer would say %s" % status)
@@ -344,15 +364,20 @@ def main(argv=None):
     answers = answer_problems(args.run_dir, review, inference)
     for where, why in answers:
         print("  ANSWERS  %-34s %s" % (where, why))
-    compared = None
+    compared = differ = None
     if args.second:
         compared, differ = second_comparison(inference, args.second)
         for iid, a, b in differ:
             print("  DIFFER   %-34s %s against %s" % (iid, a, b))
-        print("  SECOND   %d reconstructed cell(s) compared. --second reads two "
-              "inference_review.csv files and compares that channel only: not "
-              "the panel decision, not the confirmations its mode asks for, "
-              "not a hand-resolved identity" % len(compared))
+        # BOTH NUMBERS, because they answer different questions. The asked count
+        # is the size of the job; the compared count is how much of it two people
+        # actually did twice. Printing only the second let a five-question run
+        # with one reviewer's file missing read as "5 compared".
+        print("  SECOND   %d of %d reconstructed cell(s) compared twice. "
+              "--second reads two inference_review.csv files and compares that "
+              "channel only: not the panel decision, not the confirmations its "
+              "mode asks for, not a hand-resolved identity"
+              % (len(compared), len([q for q in asked if q["Inference_ID"]])))
         if not compared:
             print("  SECOND   nothing was compared, so no independent check "
                   "happened here. Two people, or none")
@@ -367,15 +392,24 @@ def main(argv=None):
     # indistinguishable from an unanswered question.
     if status != FIN.FINALIZED_STATUS:
         return 2
-    # AND A `--second` THAT COMPARED NOTHING IS NOT AN INDEPENDENT CHECK. v7.95.
-    # Asking for one and being told nothing is the failure this exit code exists
-    # for: a run with no reconstructed cell has no per-cell channel, the two
-    # files are two empty templates, and the flag agreeing with itself is what a
-    # single reviewer doing both roles would see. Returning 0 there let the
-    # runbook offer `--second` as the substitute for a second PERSON, on a first
-    # pilot the same file says has no R3 cell in it.
-    if compared is not None and not compared:
-        return 2
+    # AND A `--second` THAT DID NOT ACTUALLY COMPARE IS NOT AN INDEPENDENT CHECK.
+    # v7.95 for the empty case, v7.96 for the rest. Asking for one and being told
+    # nothing is the failure this exit code exists for: a run with no
+    # reconstructed cell has no per-cell channel, the two files are two empty
+    # templates, and the flag agreeing with itself is what a single reviewer
+    # doing both roles would see.
+    #
+    # THREE MORE WAYS TO GET NOTHING while looking like something, all of them
+    # exit 2 now: a cell one file answered and the other did not, a cell answered
+    # twice on either side, and a cell the two answered DIFFERENTLY. The last is
+    # not a bundle problem and not a refusal - the finalizer only ever reads the
+    # first file, so a second reviewer who disagrees changes nothing it can see.
+    # Reporting the difference and exiting 0 was telling a person the review
+    # passed while the two readings of the ink contradicted each other.
+    if compared is not None:
+        every = {q["Inference_ID"] for q in asked if q["Inference_ID"]}
+        if not compared or set(compared) != every or differ:
+            return 2
     # THE WHOLE BATCH, which is what the name says. Checking only `excluded`
     # let a run pass strict mode with a panel refused beside the one that
     # finalized - values lost, and the flag that exists to notice that said

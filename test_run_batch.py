@@ -3901,6 +3901,133 @@ check("  the unfilled template is missing every confirmation this mode asks for"
       all(any(c in why for why in _gmiss)
           for c in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]),
       "%s" % _gmiss)
+# AND THE MODE IS NOT THE WHOLE LIST. v7.96. A panel's own VALUES add
+# `Inference_Checked` when one of them was reasoned to - `inference_confirmations`
+# derives it from the rows, which is why it composes with every mode instead of
+# doubling the mode table. This panel has a prototype-matched cell, so it asks
+# FIVE things, and `PILOT.md` mapped four: the static tuple is what the runbook
+# test reads, and a runbook checked against it alone can leave the reviewer with
+# no picture for the one question the first pilot is actually about.
+_gvalues = [v for v in pd.read_csv(
+    os.path.join(_fin_dir, "figure_values_machine_qc.csv"),
+    dtype=object).fillna("").to_dict("records")
+    if str(v.get("Run_Panel_ID") or "").strip() == "P_SHORT"]
+_gextra = RB.inference_confirmations(_gvalues)
+check("this panel's own values ask for a confirmation its mode does not",
+      _gextra == (RB.INFERENCE_CONFIRMATION,)
+      and RB.INFERENCE_CONFIRMATION
+      not in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"],
+      "%s" % (_gextra,))
+_pilot = open(os.path.join(HERE, "PILOT.md"), encoding="utf-8").read()
+_sec = [s for s in _pilot.split("\n## ")
+        if "BAR_MONO_GEOMETRY_RESOLVED" in s]
+_arrows = " ".join(l for l in "".join(_sec).splitlines()
+                   if l.strip().startswith("->"))
+_wanted = tuple(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]) + _gextra
+check("  and the runbook pairs all FIVE against the picture that answers it",
+      len(_sec) == 1 and all(c in _arrows for c in _wanted),
+      "%s missing from %r" % ([c for c in _wanted if c not in _arrows], _arrows))
+
+# RESOLVER AND APPROVER, AND WHETHER THEY MAY BE ONE PERSON. v7.96.
+#
+# `PILOT.md` says two people for the first pilot and, until now, nothing checked
+# it: `identity_resolution.csv` carries the Reviewer_ID of the person who named
+# a series the reader could not, `value_review.csv` carries the Reviewer_ID of
+# the person approving the panel that naming lands in, and the finalizer never
+# compared them. One person filling in both is `Identity_Checked=CONFIRMED`
+# meaning "yes, I am still of the same opinion" - a reading of a legend
+# confirming itself - and it finalized.
+#
+# DECLARED, not defaulted. Whether one person may hold both roles is a decision
+# this package has not made, so the default is `NOT_DECLARED` and says so in the
+# stamp. What v7.96 adds is that a run which DOES declare the contract has it
+# enforced instead of merely written down.
+_TWO = REVIEWERS + [dict(
+    Reviewer_ID="RV_T2", Reviewer_Name="Second Reviewer",
+    Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+    Reviewer_Contact="0000-0002-1825-0097", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="the approver, who did not write the resolution")]
+_sep_m = short_manifests(os.path.join(ROOT, "m_short_sep"),
+                         resolutions=[_resolution()], reviewers=_TWO)
+_sep_o = os.path.join(ROOT, "o_short_sep")
+shutil.rmtree(_sep_o, ignore_errors=True)
+RB.run_batch(_sep_m, _sep_o, file_root=ROOT, run_date="2026-08-06")
+_sep_q = pd.read_csv(os.path.join(_sep_o, "review_queue.csv"),
+                     dtype=object).fillna("")
+_sep_led = pd.read_csv(os.path.join(_sep_o, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+check("the run knows who resolved each panel's identities",
+      FIN.resolution_reviewers(_sep_o, _sep_led) == {"P_SHORT": {"RV_T1"}},
+      "%s" % FIN.resolution_reviewers(_sep_o, _sep_led))
+
+
+def _sep_review(path, reviewer):
+    hit = _sep_q[_sep_q["Panel_ID"] == "P_SHORT"]
+    rows = [dict(Review_ID="R001", Panel_ID="P_SHORT",
+                 Review_Subject_SHA256=hit.iloc[0]["Review_Subject_SHA256"],
+                 Reviewer_ID=reviewer, Decision="APPROVED",
+                 Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+                 Calibration_Checked="CONFIRMED", Identity_Checked="CONFIRMED",
+                 Inference_Checked="CONFIRMED",
+                 Reviewed_At="2026-08-07T10:00:00Z", Note="")]
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIN.value_review_columns())
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
+_same = _sep_review(os.path.join(_sep_o, "review_same.csv"), "RV_T1")
+_sep_undeclared = FIN.finalize(_sep_o, review_path=_same, manifest_dir=_sep_m,
+                               run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8))
+check("one person resolving and signing finalizes while nothing is declared",
+      _sep_undeclared["status"] == "FINALIZED", "%s" % _sep_undeclared)
+check("  and the stamp says which policy that was, rather than staying silent",
+      json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                     encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == "NOT_DECLARED")
+_sep_declared = FIN.finalize(_sep_o, review_path=_same, manifest_dir=_sep_m,
+                             run_date="2026-08-06",
+                             today=datetime.date(2026, 8, 8),
+                             separation_policy=FIN.DISTINCT_RESOLVERS)
+check("the same signature under the declared contract is refused, by name",
+      _sep_declared["status"] != "FINALIZED"
+      and any(p["check"] == "RESOLVER_IS_APPROVER" and "RV_T1" in p["detail"]
+              for p in _sep_declared.get("problems", [])),
+      "%s %s" % (_sep_declared["status"], _sep_declared.get("problems")))
+check("  and it writes no accepted file",
+      not os.path.exists(os.path.join(_sep_o, "figure_values_accepted.csv")))
+_two_people = _sep_review(os.path.join(_sep_o, "review_two.csv"), "RV_T2")
+_sep_ok = FIN.finalize(_sep_o, review_path=_two_people, manifest_dir=_sep_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("while a second person signing the same panel finalizes under it",
+      _sep_ok["status"] == "FINALIZED"
+      and json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                         encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == FIN.DISTINCT_RESOLVERS, "%s" % _sep_ok)
+# AND THE PREFLIGHT ASKS THE SAME QUESTION IN ADVANCE, or the reviewer meets the
+# refusal after signing - the failure the whole preflight exists to prevent.
+import review_preflight as PF2                                     # noqa: E402
+check("the preflight refuses it in advance, and only when asked to",
+      PF2.would_refuse(_sep_o, _same, None, today=datetime.date(2026, 8, 8),
+                       manifest_dir=_sep_m,
+                       separation_policy=FIN.DISTINCT_RESOLVERS)[0]
+      != "FINALIZED"
+      and PF2.would_refuse(_sep_o, _same, None,
+                           today=datetime.date(2026, 8, 8),
+                           manifest_dir=_sep_m)[0] == "FINALIZED",
+      "%s" % (PF2.would_refuse(_sep_o, _same, None,
+                               today=datetime.date(2026, 8, 8),
+                               manifest_dir=_sep_m,
+                               separation_policy=FIN.DISTINCT_RESOLVERS),))
+check("  and both CLIs carry the same flag under the same name",
+      PF2.main([_sep_o, "--review", _same, "--manifests", _sep_m,
+                "--distinct-reviewers"]) == 2
+      and PF2.main([_sep_o, "--review", _two_people, "--manifests", _sep_m,
+                    "--distinct-reviewers"]) == 0)
 # AND HOW, in the registry's vocabulary. v7.65. A person's answer is
 # HUMAN_RESOLUTION; the bars beside it were named against prototypes formed in
 # another group of the FIGURE, because this panel's short bar left its group
@@ -4063,6 +4190,45 @@ check("a run whose evidence was never copied in does not finalize",
       "%s %s" % (_fr2["status"], _fr2.get("problems")))
 check("and it writes no accepted file",
       not os.path.exists(os.path.join(_fin2, "figure_values_accepted.csv")))
+# AND THE SAME FOR THE OVERLAY, which this mode did not require until v7.96.
+# Both geometry modes ask for `Marks_Checked` - "the labels sit on the marks a
+# reader would give them" - and the only picture that shows a LABEL ON A MARK is
+# the panel overlay: a row crop shows one bar with no label, and the calibration
+# panel shows the axis. So the mode demanded a claim and required no artifact a
+# person could make it from. A run holding the five geometry files and no
+# overlay finalized, and `PILOT.md` sent its reviewer to a picture the mode did
+# not guarantee. Same shape as the evidence case above: struck from the ledger,
+# stamp re-hashed, so the only thing wrong with it is the missing picture.
+_fin_noov = os.path.join(ROOT, "o_short_final_noov")
+shutil.rmtree(_fin_noov, ignore_errors=True)
+shutil.copytree(_o2, _fin_noov)
+_ledov = pd.read_csv(os.path.join(_fin_noov, "panel_artifacts.csv"),
+                     dtype=object).fillna("")
+check("the geometry run really does carry an overlay for its panel",
+      "OVERLAY" in set(_ledov[_ledov["Panel_ID"] == "P_SHORT"]["Artifact_Type"]),
+      "%s" % sorted(set(_ledov[_ledov["Panel_ID"] == "P_SHORT"]
+                        ["Artifact_Type"])))
+_ledov[~((_ledov["Artifact_Type"] == "OVERLAY")
+         & (_ledov["Panel_ID"] == "P_SHORT"))].to_csv(
+    os.path.join(_fin_noov, "panel_artifacts.csv"), index=False)
+_stampov = json.load(open(os.path.join(_fin_noov, "run_stamp.json"),
+                          encoding="utf-8"))
+_stampov["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(
+    os.path.join(_fin_noov, "panel_artifacts.csv"))
+with open(os.path.join(_fin_noov, "run_stamp.json"), "w",
+          encoding="utf-8") as _fh:
+    json.dump(_stampov, _fh, indent=1)
+_frov = FIN.finalize(_fin_noov,
+                     review_path=_write_review(
+                         os.path.join(_fin_noov, "value_review.csv"),
+                         ["P_SHORT"]),
+                     manifest_dir=_s2, run_date="2026-08-06",
+                     today=datetime.date(2026, 8, 8))
+check("  and a geometry approval with no overlay behind it is refused by name",
+      _frov["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEW_ARTIFACT_MISSING" and "OVERLAY" in p["detail"]
+              for p in _frov.get("problems", [])),
+      "%s %s" % (_frov["status"], _frov.get("problems")))
 
 # And the value-to-resolution join, re-derived by the finalizer as well: a value
 # whose Resolution_ID was exchanged for the panel's other one keeps every number

@@ -2477,6 +2477,60 @@ check("    and no confirmation the first pilot's mode asks for is even IN the "
            & set(FIN.inference_review_columns())),
       "%s" % sorted(set(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"])
                     & set(FIN.inference_review_columns())))
+# AND ON THE SECOND PILOT'S SHAPE - a run that HAS reconstructed cells - the
+# count has to be the cells two people actually answered, not the cells anybody
+# answered. v7.95 counted the union, which over-reports in the one direction
+# that matters: five answers against an empty file read as five compared. The
+# second reviewer being absent, having answered a cell twice, or having answered
+# it differently are three ways to get no independent check while the flag
+# prints a number that looks like one.
+_answers([_answer(i) for i in _ids3])
+_panel3()
+
+
+def _second_file(name, rows):
+    path = os.path.join(_R3_DIR, name)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIN.inference_review_columns())
+        for r in rows:
+            w.writerow([r.get(c, "") for c in FIN.inference_review_columns()])
+    return path
+
+
+_one_sided = _second_file("second_one_sided.csv", [_answer(_ids3[0])])
+check("a second file that answers one of two cells compared ONE, not two",
+      PF.second_comparison(_r3_cells, _one_sided)[0] == [_ids3[0]],
+      "%s" % (PF.second_comparison(_r3_cells, _one_sided)[0],))
+check("  and a half-done independent check exits 2, not 0",
+      PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+               "--second", _one_sided]) == 2)
+_blank_side = _second_file("second_blank.csv",
+                           [_answer(i, "") for i in _ids3])
+check("a second reviewer who filled nothing in compared nothing",
+      PF.second_comparison(_r3_cells, _blank_side)[0] == []
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _blank_side]) == 2,
+      "%s" % (PF.second_comparison(_r3_cells, _blank_side)[0],))
+_twice_side = _second_file("second_twice.csv",
+                           [_answer(_ids3[0]), _answer(_ids3[0]),
+                            _answer(_ids3[1])])
+check("a cell one of them answered twice is not a comparison of that cell",
+      PF.second_comparison(_r3_cells, _twice_side)[0] == [_ids3[1]]
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _twice_side]) == 2,
+      "%s" % (PF.second_comparison(_r3_cells, _twice_side)[0],))
+check("and two readings of the ink that CONTRADICT each other exit 2",
+      PF.second_comparison(_r3_cells, _second)[0] == _ids3
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _second]) == 2,
+      "%s" % (PF.second_comparison(_r3_cells, _second),))
+_agree = _second_file("second_agrees.csv", [_answer(i) for i in _ids3])
+check("  while two who agree on every cell pass",
+      PF.second_comparison(_r3_cells, _agree) == (_ids3, [])
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _agree]) == 0,
+      "%s" % (PF.second_comparison(_r3_cells, _agree),))
 # AND THE TWO SHARE THEIR INPUTS, not only their decider. `--manifests` exists on
 # the finalizer for a run that has been moved; without it on the preflight, the
 # same run could fail one and pass the other with the same decision function

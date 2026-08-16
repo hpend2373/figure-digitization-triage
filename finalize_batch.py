@@ -1662,8 +1662,50 @@ def _geometry_route_failures(machine, ledger_rows, run_dir, flag):
     return withheld
 
 
+#: What a run may declare about who is allowed to sign it. `NOT_DECLARED` is the
+#: default and the honest name for it: the package has NOT decided whether one
+#: person may both resolve an identity and approve the panel that rests on it,
+#: and a default that silently permits it should say so rather than call itself
+#: something reassuring.
+#:
+#: `DISTINCT_RESOLVER_APPROVER` is the contract the first pilot runs under. It is
+#: a per-RUN declaration, not a per-publication rule: any run may ask for it, and
+#: what it asks for is the same thing everywhere - the person who wrote a series
+#: name into `identity_resolution.csv` is not the person who signs the panel that
+#: name lands in.
+SEPARATION_POLICIES = ("NOT_DECLARED", "DISTINCT_RESOLVER_APPROVER")
+DISTINCT_RESOLVERS = "DISTINCT_RESOLVER_APPROVER"
+
+
+def resolution_reviewers(run_dir, ledger_rows):
+    """Panel_ID -> the Reviewer_IDs that named a series by hand on that panel.
+
+    Read off the `IDENTITY_RESOLUTION` artifact the run copied in, which
+    `verify_run_outputs` has already re-hashed, rather than off the manifest
+    directory: the question is who signed the resolutions THIS RUN was read
+    under.
+    """
+    out = {}
+    for _, art in ledger_rows.iterrows():
+        if _s(art.get("Artifact_Type")) != RB.IDENTITY_ARTIFACT_TYPE:
+            continue
+        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
+        if path is None or not os.path.exists(path):
+            continue
+        try:
+            rows = pd.read_csv(path, dtype=object).fillna("")
+        except Exception:
+            continue
+        for _, row in rows.iterrows():
+            rid = _s(row.get("Reviewer_ID"))
+            if rid:
+                out.setdefault(_s(art.get("Panel_ID")), set()).add(rid)
+    return out
+
+
 def approved_panels(reviews, queue, reviewers, flag, today=None,
-                    artifact_types=None, extra_confirmations=None):
+                    artifact_types=None, extra_confirmations=None,
+                    resolvers=None, separation_policy=None):
     """Panel_ID -> the review row that approves it. Everything else is refused.
 
     `extra_confirmations` is {Panel_ID: (column, ...)} for the questions this
@@ -1766,6 +1808,24 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
                  "carries no %s for it. There is nothing this approval can be "
                  "an approval of" % (pid, mode, "/".join(absent)))
             continue
+        # AND, WHERE THE RUN DECLARED IT, THAT THE SIGNATURE IS NOT THE
+        # RESOLVER'S OWN. v7.96. `identity_resolution.csv` carries the
+        # Reviewer_ID of the person who named a series the reader could not, and
+        # `value_review.csv` carries the Reviewer_ID of the person approving the
+        # panel that naming lands in. The two being the same person is one
+        # reading of a legend confirming itself - `Identity_Checked=CONFIRMED`
+        # meaning "yes, I am still of the same opinion". `PILOT.md` said two
+        # people and nothing checked it, so a run could say the words and
+        # finalize anyway.
+        if separation_policy == DISTINCT_RESOLVERS:
+            mine = (resolvers or {}).get(pid, set())
+            if rid in mine:
+                flag(line, "RESOLVER_IS_APPROVER",
+                     "%s runs under %s, and %s both resolved an identity on "
+                     "this panel and signed it. A person confirming their own "
+                     "reading of a legend is not a second reading of it"
+                     % (pid, DISTINCT_RESOLVERS, rid))
+                continue
         wanted = tuple(RB.REVIEW_CONFIRMATIONS.get(mode, ())) + tuple(
             (extra_confirmations or {}).get(pid, ()))
         unconfirmed = [c for c in wanted
@@ -1989,7 +2049,8 @@ def review_paths(run_dir, review_path=None, inference_review_path=None):
 
 
 def validate_finalization(run_dir, review_path=None, manifest_dir=None,
-                          today=None, inference_review_path=None):
+                          today=None, inference_review_path=None,
+                          separation_policy=None):
     """Everything a finalization decides, deciding nothing on disk.
 
     ONE FUNCTION, TWO CALLERS. `finalize` wraps this and writes; `review_preflight`
@@ -2174,7 +2235,10 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         contract_refused.add(pid)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types,
-                               extra_confirmations=extra_confirmations)
+                               extra_confirmations=extra_confirmations,
+                               resolvers=resolution_reviewers(run_dir,
+                                                              ledger_rows),
+                               separation_policy=separation_policy)
     for pid in sorted(contract_refused):
         approved.pop(pid, None)
 
@@ -2334,7 +2398,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
 
 
 def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
-             today=None, fault_after=None, inference_review_path=None):
+             today=None, fault_after=None, inference_review_path=None,
+             separation_policy=None):
     """Read a completed run plus its decisions; write the accepted file or not.
 
     The DECIDING is `validate_finalization`, which the preflight calls too. What
@@ -2357,7 +2422,8 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
 
     verdict = validate_finalization(
         run_dir, review_path=review_path, manifest_dir=manifest_dir,
-        today=today, inference_review_path=inference_review_path)
+        today=today, inference_review_path=inference_review_path,
+        separation_policy=separation_policy)
     problems = verdict.problems
 
     def stamp(status, detail, approved=0, accepted=0, accepted_sha="",
@@ -2399,6 +2465,13 @@ def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",
                    # reason. Blank when no run in this batch asked for any.
                    "Inference_Review_File": inference_review_path,
                    "Inference_Review_File_SHA256": verdict.inference_sha,
+                   # UNDER WHAT POLICY. A CLI flag that leaves no trace is a
+                   # claim nobody can check afterwards: an accepted file has to
+                   # be able to say whether resolver-approver separation was
+                   # required of it, and NOT_DECLARED has to be as visible as
+                   # the declaration.
+                   "Reviewer_Separation_Policy": (separation_policy
+                                                  or "NOT_DECLARED"),
                    "Problems": problems, "Detail": detail}
         with open(os.path.join(directory or run_dir, "finalize_stamp.json"),
                   "w", encoding="utf-8") as fh:
@@ -2460,6 +2533,11 @@ def main(argv=None):
     ap.add_argument("--template", action="store_true",
                     help="write an unfilled decision file from review_queue.csv "
                          "and exit")
+    ap.add_argument("--distinct-reviewers", action="store_true",
+                    help="require that nobody both resolved an identity on a "
+                         "panel and signed it. Recorded in the stamp either "
+                         "way, because an accepted file has to be able to say "
+                         "which policy it was finalized under")
     args = ap.parse_args(argv)
 
     if args.template:
@@ -2487,7 +2565,9 @@ def main(argv=None):
 
     result = finalize(args.run_dir, review_path=args.review,
                       manifest_dir=args.manifests, run_date=args.date,
-                      inference_review_path=args.inference_review)
+                      inference_review_path=args.inference_review,
+                      separation_policy=(DISTINCT_RESOLVERS
+                                         if args.distinct_reviewers else None))
     for p in result["problems"]:
         print("  %-10s %-38s %s" % (p["where"], p["check"], p["detail"]))
     print("%s | panels approved %d | values accepted %d"

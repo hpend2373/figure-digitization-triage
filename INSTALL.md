@@ -6254,6 +6254,68 @@ missing.
     the runbook forgets an artifact the mode registers 1
     the runbook forgets a confirmation it asks for     1
 
+## v7.96 — the runbook's promises become the software's refusals
+
+v7.95 described 127's review correctly and left three of its promises as prose.
+A runbook that says something the tools do not enforce is a runbook that gets
+followed until the day somebody is in a hurry.
+
+**`Marks_Checked` had no required picture behind it.** Both geometry modes ask
+for it - "the labels sit on the marks a reader would give them" - and the only
+artifact that shows a LABEL on a MARK is the panel overlay. `OVERLAY` was not in
+either mode's required list: a row crop shows one bar with no label and the
+calibration panel shows the axis, so a run holding the five geometry files and
+no overlay satisfied the requirement, and `PILOT.md` sent its reviewer to a
+picture the mode did not guarantee. Both modes require it now, which makes 127's
+list seven artifacts, and an approval on a geometry run whose overlay is not in
+the ledger is `REVIEW_ARTIFACT_MISSING` naming `OVERLAY`.
+
+**The mode is not the whole list of confirmations.** A panel's own values add
+`Inference_Checked` through `inference_confirmations` - derived from the rows, so
+it composes with every mode instead of doubling the mode table - and 127's
+NORMAL and SUPINE hold cells named `FIGURE_PROTOTYPE_MATCH`. Those panels ask
+five things, not four, and v7.95's runbook mapped four: the reviewer had no
+picture for the one piece of reasoning the first pilot is actually about. The
+runbook now splits the row crops into two questions - a bar whose fill was
+sampled, read against its own ink; a bar matched to a prototype pooled over the
+whole figure, read beside a sampled bar's crop - and the check is made on a real
+`BAR_MONO_GEOMETRY_RESOLVED` run against `REVIEW_CONFIRMATIONS` *plus* whatever
+that panel's values add, not against the static tuple alone.
+
+**"Two people" was a paragraph.** `identity_resolution.csv` carries the
+Reviewer_ID of the person who named a series the reader could not, and
+`value_review.csv` carries the Reviewer_ID of the person approving the panel
+that naming lands in. Nothing compared them, so one person filling in both
+finalized - `Identity_Checked=CONFIRMED` meaning "yes, I am still of the same
+opinion". `--distinct-reviewers`, on the finalizer and on the preflight, refuses
+`RESOLVER_IS_APPROVER`. It is DECLARED rather than defaulted, because whether one
+person may hold both roles is a decision this package has not made; what it adds
+is that a run declaring the contract has it enforced. The finalize stamp records
+`Reviewer_Separation_Policy` either way - `NOT_DECLARED` is written out, not left
+blank - so an accepted file can be asked afterwards which contract produced it.
+
+**And `--second` was counting the wrong thing.** v7.95 counted the UNION of the
+two files' cells, which over-reports in the one direction that matters: five
+answers against an empty second file read as "5 compared". It now counts only
+cells answered exactly once with a valid verdict on BOTH sides, prints that
+against the number asked, and exits 2 unless every question was compared and the
+two answers agree. A second reader who contradicts the first is not a passing
+preflight - the finalizer only ever reads the first file, so the disagreement
+changes nothing it can see, and reporting it while exiting 0 told a person the
+review passed while the two readings of the ink contradicted each other.
+
+The contact sheet wording is fixed too: rows must equal pictures, and panels is
+a separate number that must equal the figure's panel count - three for 127.
+
+    reverted                                          scenarios that fail
+    the overlay is not required by the geometry mode   1
+    the runbook drops the value-derived confirmation   1
+    the resolver may sign their own reading            4
+    the stamp stops recording the policy               1
+    --second counts the union again                    3
+    a --second that compared nothing passes            5
+    a half-done or contradicted --second passes        3
+
 ## Still open
 
 - letting ONE person hold both the resolver and the approver role would need a
@@ -6261,7 +6323,15 @@ missing.
   `--second-identity-resolution`, or a whole independent decision bundle diffed
   against the first. `--second` is the R3 per-cell channel and nothing else, and
   v7.95 makes it say so rather than extending it — the shape of an independent
-  panel-level check is a decision, not a flag
+  panel-level check is a decision, not a flag. v7.96 adds the other half:
+  `--distinct-reviewers` can now REFUSE the same person in both roles, which is
+  not the same as being able to compare two people who each did the whole thing
+- and the separation policy is a run-time declaration recorded in the finalize
+  stamp, not a hashed input. It is therefore not part of `Review_Subject_SHA256`:
+  two finalizations of one approved run under two different policies produce two
+  stamps and the same subject hash. Binding the policy into the subject would
+  mean an approval is only valid under the policy it was given, which is
+  probably right and is a schema change
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
   exists to read, and it stays MANUAL
 - 397 Figure 4, 386 Figures 3–4

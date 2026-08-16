@@ -103,16 +103,20 @@ the panel. The means and the SEs were measured off the ink.
              inference_review.csv one row per reconstructed cell: CONFIRMED or
                                   REJECTED, and nothing else
 
-    5  python3 review_preflight.py OUT --review ... --inference ...
+    5  python3 review_preflight.py OUT --review ... --distinct-reviewers
        THE POST-REVIEW CHECK, and this one must exit 0: no blank, no duplicate,
        no answer to a question this run did not ask, and the finalizer would say
-       FINALIZED. On `--second FILE` see "Who does what": it compares the
-       per-cell channel and nothing else, and on a run without one it now says
-       so and exits 2 rather than reporting agreement.
+       FINALIZED. `--distinct-reviewers` is the two-people contract asked in
+       ADVANCE, and step 6 must be given the same flag or the two are answering
+       different questions. On `--second FILE` see "Who does what": it compares
+       the per-cell channel and nothing else, and it exits 2 unless every
+       question was answered once on both sides and the two answers agree.
 
-    6  python3 finalize_batch.py OUT
+    6  python3 finalize_batch.py OUT --distinct-reviewers
        writes `figure_values_accepted.csv` and the stamp, or refuses and says
-       why.
+       why. The stamp records `Reviewer_Separation_Policy` either way -
+       `NOT_DECLARED` when the flag is absent - so an accepted file can be asked
+       afterwards which contract it was finalized under.
 
 ## What 127's reviewer opens, in order
 
@@ -121,14 +125,23 @@ overlay. It asks for `Marks_Checked`, `Axis_Labels_Checked`,
 `Calibration_Checked` and `Identity_Checked`, and a person cannot make three of
 those four claims from a panel overlay: the printed tick numbers, the ink inside
 a 15 px bar, and somebody else's reading of a legend are each in a different
-artifact. The mode registers six, and the order below is the order they answer
-in.
+artifact. The mode registers seven.
+
+**And the mode is not the whole list.** A panel's own VALUES add
+`Inference_Checked` when any of them was reasoned to rather than measured -
+`run_batch.inference_confirmations` derives it from the rows, so it composes
+with every mode instead of doubling the mode table. 127's NORMAL and SUPINE
+groups hold cells named `FIGURE_PROTOTYPE_MATCH`, so those panels ask for FIVE
+confirmations, not four. Count them off the run, not off this file:
+`review_queue.csv` prints `Inference_Cells` per panel and
+`figure_values_machine_qc.csv` names the method on every row.
 
     1  OUT/geometry-review/index.html
        GEOMETRY_REVIEW_INDEX, the contact sheet. It prints "N rows, M pictures,
-       K panels" - and the
-       three numbers agreeing is the check. A row with no picture is a row
-       nobody can look at, and the sheet is the only place the count shows.
+       K panels". Rows must equal pictures - a row with no picture is a row
+       nobody can look at, and the sheet is the only place that shortfall shows.
+       Panels is a separate number and must equal the panels this figure has,
+       which for 127 Figure 4 is three: SLOW, NORMAL, LOWFREQ.
 
     2  OUT/geometry-review/panel__<Panel_ID>.png  and  panel__<Panel_ID>.json
        CALIBRATION_PANEL and CALIBRATION_PANEL_META, once per sub-panel: SLOW,
@@ -138,21 +151,36 @@ in.
               -> Axis_Labels_Checked, Calibration_Checked
 
     3  OUT/geometry-review/<row>__slot<N>__<hash>.png
-       GEOMETRY_ROW_CROP, one per bar. For NORMAL/SUPINE slots 0, 1 and 2 the
-       question is the fill itself: OPEN, STIPPLED or SOLID, read off the ink
-       inside the bar rather than off the label the run gave it.
+       GEOMETRY_ROW_CROP, one per bar. Two different questions land on these
+       pictures, and the run says which bar is which - do not go by slot number.
+
+       a bar whose fill the reader SAMPLED
+             read the ink inside it: OPEN, STIPPLED or SOLID, against the fill
+             the run gave it rather than against the label
+
+       a bar the run named FIGURE_PROTOTYPE_MATCH
+             the reader could not resolve it inside its own group and matched it
+             to a fill prototype pooled over the whole FIGURE. So the question is
+             comparative: open this crop beside the crop of a bar that WAS
+             sampled and ask whether the two inks are the same fill. This is the
+             R2 cell in 127, and it is the only reasoning in the pilot.
+              -> Inference_Checked
 
     4  OUT/geometry-review/identity__<Panel_ID>.csv  and its Evidence_Artifact
-       IDENTITY_RESOLUTION: the two 15 px bars whose fill could not be sampled,
-       the series a PERSON named them, and the evidence behind that naming.
+       IDENTITY_RESOLUTION: the two 15 px bars whose fill could not be sampled
+       at all, the series a PERSON named them, and the evidence behind that
+       naming. Different claim from step 3: there the reader made a match and
+       you are checking it, here the reader made nothing and somebody else did.
               -> Identity_Checked
 
     5  OUT/review/<Panel_ID>_overlay.png
        last, not first: the labels sitting on the marks, once the axis and the
-       identities under them have been checked.
+       identities under them have been checked. This is the seventh artifact,
+       OVERLAY, and it is the only picture in the bundle that shows a LABEL on a
+       MARK - which is what `Marks_Checked` claims.
               -> Marks_Checked
 
-`OUT/mono_bar_geometry.csv` is the sixth artifact, MONO_BAR_GEOMETRY. It is what
+`OUT/mono_bar_geometry.csv` is the remaining artifact, MONO_BAR_GEOMETRY. It is what
 the pictures are drawn FROM and carries each row's `Geometry_Row_SHA256`; a
 reviewer does not read it, and does not need to, because every row in it is
 bound into `Review_Subject_SHA256` and the finalizer re-hashes the lot.
@@ -170,19 +198,30 @@ Whether one person may be both is not decided in this package, and the first
 pilot is not the place it gets decided by default. **If a second person is not
 available, 127 is run as a dry run and nothing is finalized.**
 
+**And this is a contract now, not a paragraph.** `--distinct-reviewers` on both
+tools compares the `Reviewer_ID` in `identity_resolution.csv` against the one
+signing the panel that naming lands in, and refuses `RESOLVER_IS_APPROVER` when
+they are the same person: one reading of a legend confirming itself is not a
+second reading of it. Run without the flag the finalizer permits it, because
+this package has not decided the general case - and the stamp then records
+`Reviewer_Separation_Policy = NOT_DECLARED` rather than nothing, so what a run
+was finalized under is a question the accepted file can answer.
+
 There is no `--second` fallback, and there was: v7.94 offered it, and it does
 not work here. `--second` reads two `inference_review.csv` files, so the only
 thing it can compare is the per-cell CONFIRMED/REJECTED channel - not the panel
-decision, not the four confirmations this mode asks for, not the identity the
+decision, not the confirmations this mode asks for, not the identity the
 resolver wrote down. 127 has no R3 cell, so those two files are two empty
 templates: they agree, the flag prints nothing, and one person doing both roles
-reads as an independent check having happened. The tool now says how many cells
-it compared and exits 2 when that is none.
+reads as an independent check having happened. The tool now prints how many of
+the asked cells were answered on BOTH sides and exits 2 unless all of them were
+and the two answers agree - a five-question run against an empty second file
+reported "5 compared" until v7.96.
 
-Letting one person hold both roles would need a comparison this package does not
-have - `--second-value-review`, `--second-identity-resolution`, or a whole
-independent decision bundle diffed against the first. Until then the answer is
-two people.
+Letting one person hold both roles would still need a comparison this package
+does not have - `--second-value-review`, `--second-identity-resolution`, or a
+whole independent decision bundle diffed against the first. Until then the
+answer is two people, and `--distinct-reviewers` is how a run says so.
 
 ## What the answers mean
 

@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "7.95"
+PIPELINE_VERSION = "7.96"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -264,7 +264,16 @@ REVIEW_MODES = {
     # queued `BAR_MONO_GEOMETRY`, where no mode name could ask about them.
     # Four, and the row pictures the index links to. See
     # `GEOMETRY_ARTIFACT_TYPES`.
-    "BAR_MONO_GEOMETRY": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
+    #
+    # AND THE OVERLAY, which was missing until v7.96. Both geometry modes ask a
+    # person for `Marks_Checked` - "the labels sit on the marks a reader would
+    # give them" - and the only picture that shows a label on a mark is the
+    # panel overlay. A row crop shows one bar with no label; the calibration
+    # panel shows the axis. So the mode demanded a claim and required no
+    # artifact a person could make it from: a run holding the five geometry
+    # files and no overlay passed the requirement, and `PILOT.md` sent its
+    # reviewer to a picture the mode did not guarantee was there.
+    "BAR_MONO_GEOMETRY": ("OVERLAY", "MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
                           "CALIBRATION_PANEL", "CALIBRATION_PANEL_META",
                           "GEOMETRY_ROW_CROP"),
     # The same review, plus the rows a person signed. A separate mode rather
@@ -272,7 +281,8 @@ REVIEW_MODES = {
     # BAR_MONO panels have no human-named cell, and a mode that demanded an
     # identity file from all of them would make the file mandatory - which is
     # how `Identity_Checked` becomes a column everybody types CONFIRMED into.
-    "BAR_MONO_GEOMETRY_RESOLVED": ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX",
+    "BAR_MONO_GEOMETRY_RESOLVED": ("OVERLAY", "MONO_BAR_GEOMETRY",
+                                   "GEOMETRY_REVIEW_INDEX",
                                    "CALIBRATION_PANEL", "CALIBRATION_PANEL_META",
                                    "GEOMETRY_ROW_CROP", "IDENTITY_RESOLUTION"),
 }

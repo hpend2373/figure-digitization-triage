@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.95 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2809 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2847 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.96 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2827 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2865 -->
 
-2809 scenarios on main after v7.95 under `requirements-lock.txt`, and 2847 with
+2827 scenarios on main after v7.96 under `requirements-lock.txt`, and 2865 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -166,16 +166,23 @@ runbook that promises the wrong exit code sends every reviewer to fix a bundle
 that was never broken.
 
 127 is queued `BAR_MONO_GEOMETRY_RESOLVED`, which is not an overlay: three of
-the four confirmations it asks for cannot be made from a panel picture, so the
-runbook walks its reviewer through the six artifacts that mode registers — the
+the four confirmations that mode asks for cannot be made from a panel picture,
+so the runbook walks its reviewer through the seven artifacts it registers — the
 contact sheet, the calibration panels, the row crops, the identity resolution
-and its evidence, the overlay last — and the suite checks that every one of
-them, and every confirmation paired against the picture that answers it, is
-named there. **Two people, or the pilot is a dry run.** There is no `--second`
-fallback: that flag reads two `inference_review.csv` files, so on a pilot with
-no reconstructed cell it compares two empty templates, and reporting their
-agreement is how one person holding both roles reads as an independent check.
-It now says how many cells it compared and exits 2 when that is none.
+and its evidence, the overlay last — and a fifth confirmation the mode does not
+ask for at all. `Inference_Checked` is derived from the panel's own values, so
+the suite checks the runbook against `REVIEW_CONFIRMATIONS` *plus*
+`inference_confirmations` on a real prototype-matched panel, and requires every
+one to be paired against the picture that answers it.
+
+**Two people, and the tools now check it.** `--distinct-reviewers` on the
+finalizer and the preflight refuses `RESOLVER_IS_APPROVER` when the person who
+named a series in `identity_resolution.csv` is the person signing the panel that
+naming lands in; the finalize stamp records `Reviewer_Separation_Policy` either
+way, so an accepted file can say which contract it was finalized under. There is
+no `--second` fallback: that flag reads two `inference_review.csv` files, so it
+sees the per-cell channel and nothing else, and it exits 2 unless every question
+was answered once on both sides and the two answers agree.
 
 ## Status
 

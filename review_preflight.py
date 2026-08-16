@@ -78,15 +78,25 @@ def _read(path, columns=None, problems=None):
         return pd.DataFrame(columns=columns or [])
 
 
-def questions(run_dir):
-    """Every cell this run will ask a person about, with the reason.
+def _frame(source, columns=None):
+    """A frame, whether the caller has one or only knows where it is.
 
-    Derived from the values exactly as `run_batch` and `finalize` derive it -
-    `row_tier` over the three provenance axes - so a reviewer preparing with this
-    and a finalizer refusing with that cannot disagree about which cells are in
-    play.
+    `main` reads each file ONCE - or takes the frame the finalizer's verdict
+    already carries - and passes the frame down. The scenarios and other callers
+    pass a path. One adapter, so the functions below never decide for themselves
+    how many times a file is opened: v7.99 fixed the reviewer registry that way
+    and left `second_comparison` opening both decision files twice and
+    `disagreements` opening them a third time, which is the same defect with a
+    smaller blast radius - a comparison run against a combination of bytes that
+    never existed at one moment.
     """
-    machine = _read(os.path.join(run_dir, "figure_values_machine_qc.csv"))
+    if isinstance(source, pd.DataFrame):
+        return source
+    return _read(source, columns)
+
+
+def questions_from(machine):
+    """The asked-about cells, from a machine-QC FRAME rather than a path."""
     out = []
     for _, row in machine.iterrows():
         tier = PROV.row_tier(row)
@@ -106,6 +116,18 @@ def questions(run_dir):
             "Asked_Because": _asked_because(row),
         })
     return sorted(out, key=lambda r: (r["Panel_ID"], r["Cell_Key"]))
+
+
+def questions(run_dir):
+    """Every cell this run will ask a person about, with the reason.
+
+    Derived from the values exactly as `run_batch` and `finalize` derive it -
+    `row_tier` over the three provenance axes - so a reviewer preparing with this
+    and a finalizer refusing with that cannot disagree about which cells are in
+    play.
+    """
+    return questions_from(
+        _read(os.path.join(run_dir, "figure_values_machine_qc.csv")))
 
 
 def _asked_because(row):
@@ -257,9 +279,12 @@ def disagreements(first, second):
     won and two reviewers who each contradicted themselves could be reported as
     agreeing.
     """
-    def verdicts(path):
+    first = _frame(first, FIN.inference_review_columns())
+    second = _frame(second, FIN.inference_review_columns())
+
+    def verdicts(frame):
         out, seen = {}, collections.Counter()
-        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+        for _, r in frame.iterrows():
             iid = _s(r.get("Inference_ID"))
             seen[iid] += 1
             out[iid] = _s(r.get("Inference_Confirmed")).upper()
@@ -303,9 +328,12 @@ def second_comparison(inference_path, second_path):
     cells compared, when nothing was compared at all. On an R3 pilot that is the
     same failure the two-empty-files case is, one reviewer short instead of two.
     """
-    def answered(path):
+    first = _frame(inference_path, FIN.inference_review_columns())
+    second = _frame(second_path, FIN.inference_review_columns())
+
+    def answered(frame):
         out, seen = {}, collections.Counter()
-        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+        for _, r in frame.iterrows():
             iid = _s(r.get("Inference_ID"))
             if not iid:
                 continue
@@ -314,13 +342,12 @@ def second_comparison(inference_path, second_path):
         return {iid: verdict for iid, verdict in out.items()
                 if seen[iid] == 1 and verdict in RB.INFERENCE_DECISIONS}
 
-    one, two = answered(inference_path), answered(second_path)
-    return (sorted(set(one) & set(two)),
-            disagreements(inference_path, second_path))
+    one, two = answered(first), answered(second)
+    return sorted(set(one) & set(two)), disagreements(first, second)
 
 
 def second_problems(inference_path, second_path, reviewers=None, run_dir=None,
-                    today=None):
+                    today=None, asked=None, paths=None):
     """Why a `--second` run is not evidence that a second PERSON reviewed.
 
     Counting the cells both files answered says the two files agree. It says
@@ -353,18 +380,22 @@ def second_problems(inference_path, second_path, reviewers=None, run_dir=None,
     stamped. What makes it worth running is that it can say NO.
     """
     problems = []
-    if os.path.realpath(inference_path) == os.path.realpath(second_path):
+    one, two = paths or (inference_path, second_path)
+    if isinstance(one, str) and isinstance(two, str) \
+            and os.path.realpath(one) == os.path.realpath(two):
         problems.append(("--second",
                          "is the same file as --inference; a file agrees with "
                          "itself"))
     human = FIN.human_reviewers(reviewers) if reviewers is not None else None
     keys = FIN.person_keys(reviewers) if reviewers is not None else {}
-    rows = _read(second_path, FIN.inference_review_columns())
+    first_frame = _frame(inference_path, FIN.inference_review_columns())
+    rows = _frame(second_path, FIN.inference_review_columns())
 
     # THE SAME ROW CONTRACT THE FIRST FILE IS HELD TO, applied read-only.
-    if run_dir is not None:
+    if asked is None and run_dir is not None:
         asked = {q["Inference_ID"]: q for q in questions(run_dir)
                  if q["Inference_ID"]}
+    if asked is not None:
         seen = collections.Counter(_s(r.get("Inference_ID"))
                                    for _, r in rows.iterrows())
         for iid in sorted(k for k in seen if k and k not in asked):
@@ -412,15 +443,15 @@ def second_problems(inference_path, second_path, reviewers=None, run_dir=None,
                                  "answers nothing this run asked"))
                 break
 
-    def by_cell(path):
+    def by_cell(frame):
         out = {}
-        for _, r in _read(path, FIN.inference_review_columns()).iterrows():
+        for _, r in frame.iterrows():
             iid = _s(r.get("Inference_ID"))
             if iid:
                 out.setdefault(iid, []).append(_s(r.get("Reviewer_ID")))
         return out
 
-    first, second = by_cell(inference_path), by_cell(second_path)
+    first, second = by_cell(first_frame), by_cell(rows)
     for iid in sorted(set(first) & set(second)):
         who_one = [w for w in first[iid] if w]
         who_two = [w for w in second[iid] if w]
@@ -532,11 +563,22 @@ def main(argv=None):
     for where, check, detail in excluded:
         print("  EXCLUDED %-34s %s: %s" % (where, check, detail))
 
-    asked = questions(args.run_dir)
+    # EVERY FRAME BELOW COMES FROM ONE READ. The verdict carries what the
+    # decider hashed and parsed - the machine-QC rows, the registry, the first
+    # decision file - and the second file is read here exactly once. Before v8.0
+    # this stretch opened `figure_values_machine_qc.csv` again for the question
+    # list, both decision files twice for the comparison and a third time for
+    # the identity checks: an autosave in the middle produced a verdict on one
+    # combination of bytes and a qualification on another, and exit 0 meant a
+    # state that had never existed at any instant.
+    snap = verdict.snapshot
+    asked = (questions_from(snap.machine) if snap.machine is not None
+             else questions(args.run_dir))
     print("%d cell(s) will be asked about" % len(asked))
     for q in asked:
         print("  %-14s %-34s %s  %s"
               % (q["Panel_ID"], q["Cell_Key"], q["Tier"], q["Asked_Because"]))
+    asked_by_id = {q["Inference_ID"]: q for q in asked if q["Inference_ID"]}
     bundle = bundle_problems(args.run_dir)
     for where, why in bundle:
         print("  BUNDLE   %-34s %s" % (where, why))
@@ -546,7 +588,23 @@ def main(argv=None):
     compared = differ = None
     second_bad = []
     if args.second:
-        compared, differ = second_comparison(inference, args.second)
+        first_frame = (snap.inference_reviews
+                       if snap.inference_reviews is not None
+                       else _read(inference, FIN.inference_review_columns()))
+        second_frame, second_sha, second_error = FIN.read_verified_csv(
+            args.second)
+        if second_frame is None:
+            second_frame = pd.DataFrame(
+                columns=FIN.inference_review_columns())
+            second_bad.append(("--second", "could not be read (%s)"
+                               % (second_error or "no such file")))
+        # THE BYTES THAT WERE COMPARED, named. Nothing about the second reading
+        # is bound into `Review_Subject_SHA256` or the stamp - it is a
+        # qualification check - so printing its digest is the only way anybody
+        # can say afterwards which file this run was compared against.
+        print("  SECOND   sha256 %s  %s" % (second_sha[:16] or "(unread)",
+                                            args.second))
+        compared, differ = second_comparison(first_frame, second_frame)
         # WHO the second reading came from, which needs the registry. Loaded
         # from the same directory the finalizer was pointed at, and skipped
         # rather than guessed when it cannot be read - a missing registry is
@@ -565,8 +623,9 @@ def main(argv=None):
         # exit code is already 2. A guard on it fires in no reachable state,
         # which makes it decoration: reverting it broke nothing, and a check
         # nobody can observe is a check nobody can trust.
-        second_bad = second_problems(inference, args.second, verdict.reviewers,
-                                     run_dir=args.run_dir)
+        second_bad += second_problems(
+            first_frame, second_frame, snap.reviewers, asked=asked_by_id,
+            paths=(inference, args.second))
         for where, why in second_bad:
             print("  SECOND   %-34s %s" % (where, why))
         for iid, a, b in differ:

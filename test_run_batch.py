@@ -4475,7 +4475,7 @@ FIN.verify_run_outputs(
     _o2, json.load(open(os.path.join(_o2, "run_stamp.json"), encoding="utf-8")),
     _s2, lambda w, c, d: _probs.append(c), verified=_verified)
 check("verifying the manifests hands the frames on, all twelve of them",
-      set(_verified) - {"outputs"}
+      set(_verified) - {"outputs", "frames"}
       == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
       "%s" % sorted(_verified))
 # AND THE OUTPUTS IT HASHED, as rows. v7.81: `panel_expectations` re-derives the
@@ -4491,6 +4491,16 @@ check("  and the rows of every output it hashed, so nothing is opened twice",
                    [r["Panel_ID"]
                     for r in _verified.get("outputs", {})
                     .get("run_manifest.csv", [])]))
+# AND AS FRAMES, which is what the decider now consumes. v8.0: the outputs were
+# hashed here and re-read with `pd.read_csv` inside `validate_finalization`, so
+# the queue and the artifact ledger the decision ran on were never the bytes the
+# run stamp approved.
+check("  and as frames, one per verified output, parsed from those same bytes",
+      set(_verified.get("frames", {})) == set(FIN.VERIFIED_OUTPUTS)
+      and list(_verified["frames"]["run_manifest.csv"]["Panel_ID"])
+      == list(pd.read_csv(os.path.join(_o2, "run_manifest.csv"),
+                          dtype=object).fillna("")["Panel_ID"]),
+      "%s" % sorted(_verified.get("frames", {})))
 _probs = []
 check("and a value check handed no verified frames refuses the run",
       FIN.value_contract_failures(_o2, {}, _machine2,

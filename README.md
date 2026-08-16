@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.99 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2864 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2902 -->
+<!-- CURRENT_PIPELINE_VERSION: 8.0 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2872 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2910 -->
 
-2864 scenarios on main after v7.99 under `requirements-lock.txt`, and 2902 with
+2872 scenarios on main after v8.0 under `requirements-lock.txt`, and 2910 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -131,6 +131,16 @@ environment that produced them. Change any of it — swap what `CONTROL` and
 `APPROVAL_STALE`, not inherited. The finalizer also re-hashes everything it
 reads before consulting a decision, so editing a value after approving the
 overlay is `RUN_ARTIFACT_MODIFIED` rather than an input.
+
+**Hashed and parsed from the same bytes, once.** A hash check that re-opens the
+path names one file and decides from another, and a save landing between the two
+is all it takes. Every verified input now goes through `read_verified_csv` — one
+read, hash those bytes, parse those bytes — and the frames travel out of the
+decision as a `RunSnapshot` on the verdict: the registry, the machine rows, the
+queue, the artifact ledger and both decision files. `review_preflight.py` runs
+its questions, its comparison and its identity checks on that same snapshot
+rather than opening the paths again, so the finalizer's answer and the
+preflight's cannot come from two different moments.
 
 To run the pilot as attested work:
 

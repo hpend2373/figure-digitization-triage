@@ -6475,6 +6475,61 @@ against.
     the registry is read again after the verdict       1
     the verdict stops carrying its registry            7
 
+## v8.0 — one read, one snapshot, one moment
+
+The package closed hash-then-reopen four times, one file at a time:
+`read_decisions` on the decision files (v7.79), `verify_manifest_inputs` on the
+manifests (v7.80), the mark envelope on the run's conditions (v7.80), and v7.99
+on the reviewer registry. Each fix was the same sentence — keep what you read
+instead of opening the path again — and each was written locally, so the next
+caller re-introduced it. This release makes the sentence a function and applies
+it to everything left.
+
+**`read_verified_csv(path)` is the whole idea**: one read, hash those bytes,
+parse those bytes, return `(frame, sha256, error)`. `verify_run_outputs` uses it
+for all five verified outputs and keeps the frames, where it used to call
+`file_sha256(path)` and then open the path again.
+
+**The decider stopped re-reading.** `validate_finalization` opened
+`figure_values_machine_qc.csv`, `review_queue.csv` and `panel_artifacts.csv`
+with `pd.read_csv` after they had been verified - a THIRD read of files already
+read twice. It takes them from the verified frames now. So the ledger the run
+stamp approved and the ledger the artifact checks run against are the same rows,
+and the queue that carries `Review_Mode` and `Review_Subject_SHA256` cannot be
+swapped between the hash and the decision.
+
+**And the verdict carries the snapshot out.** `Verdict.reviewers` becomes
+`Verdict.snapshot`, a `RunSnapshot` of the registry, the machine rows, the
+queue, the ledger and both decision files - every field None until the read that
+fills it, so a refusal that never got past the run stamp says so rather than
+inviting the caller to open a path itself. `review_preflight.main` derives its
+question list, its comparison and its identity checks from that snapshot, and
+reads the second file exactly once through the same helper. It prints that
+file's SHA-256, because nothing about the second reading is bound into
+`Review_Subject_SHA256` or the stamp and the digest is the only record of which
+bytes were compared.
+
+Before this, `questions()` re-opened the machine rows, `second_comparison`
+opened both decision files twice and `disagreements` a third time. An autosave
+mid-run produced a verdict decided from one combination of bytes and a
+qualification decided from another - a state that had never existed at any
+instant, exiting 0.
+
+The four scenarios that make it visible all swap a file the moment it is read:
+the artifact ledger loses its `OVERLAY` row, the queue's `Review_Subject_SHA256`
+is replaced, the second decision file is exchanged for a clean one, and the
+machine rows grow a phantom reconstructed cell. Each finalizes or passes on the
+pre-swap bytes and would refuse on the post-swap ones.
+
+    reverted                                          scenarios that fail
+    the run outputs are hashed and then re-opened      3
+    the decider re-reads the queue and the machine     2
+    the decider re-reads the artifact ledger           1
+    the verdict stops carrying the rows it read        8
+    the second file is opened by path, more than once  1
+    the identity checks re-open both decision files    2
+    the question list is derived from another read     1
+
 ## Still open
 
 - `--second` is a qualification check and not a finalization contract. To make

@@ -1967,6 +1967,34 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
     return out
 
 
+def read_verified_csv(path):
+    """One read: hash THOSE bytes, parse THOSE bytes. Never the path twice.
+
+    Everything downstream of a hash check has to be derived from the bytes that
+    were hashed, or the check names a file and the decision uses another. The
+    package closed this on decision files (v7.79), on the manifest frames
+    (v7.80) and on the reviewer registry (v7.99) one at a time; this is the same
+    fix as a function, so the run outputs stop being the last place with the
+    hole in it.
+
+    Returns `(frame, sha256, error)`. `frame` is None when the bytes will not
+    parse, and `sha256` is still the digest of what was on disk - a refusal that
+    records the hash of the thing that caused it is worth more than one that
+    records nothing.
+    """
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except Exception as exc:
+        return None, "", "%s: %s" % (type(exc).__name__, exc)
+    digest = hashlib.sha256(data).hexdigest()
+    try:
+        return (pd.read_csv(io.BytesIO(data), dtype=object).fillna(""),
+                digest, "")
+    except Exception as exc:
+        return None, digest, "%s: %s" % (type(exc).__name__, exc)
+
+
 def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
     """The run must be the run that was reviewed, byte for byte.
 
@@ -2006,20 +2034,18 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
             flag("run", "RUN_ARTIFACT_MODIFIED", "%s is gone" % name)
             ok = False
             continue
-        actual = RB.file_sha256(path)
-        # KEPT, not re-opened later. `panel_expectations` re-derives the
-        # conditions a panel was measured under from `run_manifest.csv`, and it
-        # opened the path again after this loop had hashed it - the same
-        # hash-then-reopen window the decision files and the manifest frames were
-        # both closed against, on the file that now decides whether an artifact's
-        # calibration was declared.
-        if verified is not None and actual == recorded.get(name):
-            try:
-                with open(path, encoding="utf-8") as fh:
-                    verified.setdefault("outputs", {})[name] = list(
-                        csv.DictReader(fh))
-            except Exception:
-                pass          # the parse failure is reported where it is used
+        # ONE READ. `RB.file_sha256(path)` then `open(path)` was two, and the
+        # window between them is the whole point of hashing: the ledger could be
+        # hashed as A and parsed as B, and the artifact checks would run against
+        # rows the run stamp never approved. Same for the queue, which carries
+        # `Review_Mode` and `Review_Subject_SHA256`.
+        frame, actual, error = read_verified_csv(path)
+        if verified is not None and actual == recorded.get(name) \
+                and frame is not None:
+            verified.setdefault("frames", {})[name] = frame
+            # The list-of-dicts view the older consumers take, derived from the
+            # SAME frame rather than from another read of the file.
+            verified.setdefault("outputs", {})[name] = frame.to_dict("records")
         if actual != recorded.get(name):
             flag("run", "RUN_ARTIFACT_MODIFIED",
                  "%s hashes to %s..., the run recorded %s.... It was edited "
@@ -2136,10 +2162,26 @@ def _promote(staging, run_dir, fault_after=None):
 
 #: What a finalization DECIDED, before anything is written. `keep` is the frame
 #: that would be accepted and is None on every refusal.
+#: The bytes this finalization decided from, parsed once and carried out with
+#: the answer. Every field is None until the read that fills it has happened, so
+#: a refusal that never got past the run stamp carries an empty snapshot and says
+#: so rather than inviting a caller to open the path itself.
+#:
+#: THIS IS THE SHAPE OF THE FIX, generalised. `read_decisions` closed
+#: hash-then-reopen on the decision files (v7.79), `verify_manifest_inputs` on
+#: the manifests (v7.80), and v7.99 on the reviewer registry - each time by
+#: keeping what was read instead of re-opening the path. Anything downstream that
+#: still opens a path is deciding from bytes nobody hashed, and the caller that
+#: needs those rows is usually the preflight, one process boundary away from the
+#: decision it is supposed to agree with.
+RunSnapshot = collections.namedtuple(
+    "RunSnapshot", "reviewers machine queue ledger reviews inference_reviews")
+EMPTY_SNAPSHOT = RunSnapshot(None, None, None, None, None, None)
+
 Verdict = collections.namedtuple(
     "Verdict",
     "status detail problems approved keep blocked unstated inference_rejected "
-    "run_stamp_sha review_sha inference_sha reviewers")
+    "run_stamp_sha review_sha inference_sha snapshot")
 #: `reviewers` is the registry frame THIS verdict was decided against, verified
 #: with every other manifest before it was parsed, and None on a refusal that
 #: never got that far. It travels with the verdict because the preflight's
@@ -2179,8 +2221,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     """
     problems = []
     # A one-slot box rather than a bare name: `stop` is a closure and reads it
-    # at call time, and the registry is not known until the manifests verify.
-    verified_reviewers = [None]
+    # at call time, and none of these is known until the read that fills it.
+    snapshot = [EMPTY_SNAPSHOT]
 
     def flag(where, check, detail):
         problems.append(dict(where=where, check=check, detail=detail))
@@ -2200,7 +2242,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         # reviewer had not signed when they had.
         return Verdict(status, detail, problems, approved or {}, None, blocked,
                        unstated, 0, run_stamp_sha, review_sha, inference_sha,
-                       verified_reviewers[0])
+                       snapshot[0])
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
     run_stamp_sha = ""
@@ -2270,21 +2312,25 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         return stop("RUN_ARTIFACT_MODIFIED",
                     "the run this approval refers to is not the run on disk")
 
-    try:
-        machine = pd.read_csv(machine_path, dtype=object).fillna("")
-        queue = pd.read_csv(queue_path, dtype=object).fillna("")
-    except Exception as exc:
+    # THE FRAMES `verify_run_outputs` PARSED FROM THE BYTES IT HASHED, not the
+    # paths opened again. Re-reading here is the hash-then-reopen window closed
+    # everywhere else in this module: between the two reads an autosave or a
+    # swap puts the decision on rows the hash never covered.
+    frames = verified.get("frames", {})
+    machine = frames.get("figure_values_machine_qc.csv")
+    queue = frames.get("review_queue.csv")
+    if machine is None or queue is None:
         # The bytes hashed correctly and still will not parse: that is a run
         # this module cannot read, not an approval it can refuse on the merits.
         return stop("RUN_NOT_FINALIZABLE",
-                    "a verified run output could not be parsed (%s: %s)"
-                    % (type(exc).__name__, exc))
+                    "a verified run output could not be parsed")
 
     # The frame `verify_manifest_inputs` hashed, not the path read again. The
     # registry decides who may approve, so re-opening it after verifying it is
     # the same window the manifests were just closed against.
     reviewers = verified.get("reviewers")
-    verified_reviewers[0] = reviewers
+    snapshot[0] = snapshot[0]._replace(reviewers=reviewers, machine=machine,
+                                       queue=queue)
     if reviewers is None:
         return stop("RUN_NOT_FINALIZABLE",
                     "the verified manifests carry no reviewer_registry.csv, so "
@@ -2308,16 +2354,15 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         review_path, VALUE_REVIEW_COLUMNS, flag, "review",
         "REVIEW_FILE_UNREADABLE", "REVIEW_SCHEMA_INCOMPLETE",
         absent="REVIEW_FILE_MISSING")
+    snapshot[0] = snapshot[0]._replace(reviews=reviews)
     # Which artifacts the run says each panel has. Read after the verification
     # above, so every entry here is one whose bytes have just been confirmed.
     artifact_types = {}
-    try:
-        ledger_rows = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
-                                  dtype=object).fillna("")
-    except Exception as exc:
+    ledger_rows = frames.get("panel_artifacts.csv")
+    if ledger_rows is None:
         return stop("RUN_NOT_FINALIZABLE",
-                    "the artifact ledger could not be parsed (%s: %s)"
-                    % (type(exc).__name__, exc))
+                    "the artifact ledger could not be parsed")
+    snapshot[0] = snapshot[0]._replace(ledger=ledger_rows)
     for _, art in ledger_rows.iterrows():
         artifact_types.setdefault(_s(art.get("Panel_ID")), set()).add(
             _s(art.get("Artifact_Type")))
@@ -2381,6 +2426,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     inference_reviews, inference_sha = read_decisions(
         inference_review_path, INFERENCE_REVIEW_COLUMNS, flag, "inference",
         "INFERENCE_FILE_UNREADABLE", "INFERENCE_SCHEMA_INCOMPLETE")
+    snapshot[0] = snapshot[0]._replace(inference_reviews=inference_reviews)
     inference_held, inference_rejected = inference_contract_failures(
         run_dir, ledger_rows, machine,
         inference_reviews, reviewers, flag,
@@ -2522,7 +2568,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         _s(approved[p].get("Review_Subject_SHA256")) for p in keep["Run_Panel_ID"]]
     return Verdict("FINALIZED", "", problems, approved, keep, blocked_count,
                    unstated, rejected_count, run_stamp_sha, review_sha,
-                   inference_sha, verified_reviewers[0])
+                   inference_sha, snapshot[0])
 
 
 def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",

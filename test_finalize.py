@@ -2758,11 +2758,12 @@ _mv_cells0 = os.path.join(_moved_dir, "inference_review.csv")
 # skipped in silence, and an unregistered second reader passed the one flag that
 # exists to catch them.
 check("the registry resolves for a run whose manifests are not inside it",
-      PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0).reviewers is not None
+      PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0).snapshot.reviewers is not None
       and "RV_H" in FIN.human_reviewers(
-          PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0).reviewers),
+          PF.verdict_of(_moved_dir, _mv_review0,
+                        _mv_cells0).snapshot.reviewers),
       "%s" % (PF.verdict_of(_moved_dir, _mv_review0,
-                            _mv_cells0).reviewers is None,))
+                            _mv_cells0).snapshot.reviewers is None,))
 _moved_stamp = json.load(open(os.path.join(_moved_dir, "run_stamp.json"),
                               encoding="utf-8"))
 check("  by the stamp when the run carries no manifests of its own",
@@ -2775,7 +2776,8 @@ check("  and by the argument when one is given, which is why it exists",
       == _moved_manifests)
 check("  one rule, not two: the preflight's verdict follows the same order",
       PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0,
-                    manifest_dir=_moved_manifests).reviewers is not None)
+                    manifest_dir=_moved_manifests).snapshot.reviewers
+      is not None)
 # AND THROUGH THE CLI, which is where the defect was. `main` resolved the
 # registry as `--manifests or RUN/manifests` and never reached the stamp, so on
 # THIS run - manifests outside it, stamp pointing at them - the registry read as
@@ -2838,6 +2840,77 @@ try:
                       _mv_cells, "--second", _mv_bad])
 finally:
     RB.load_manifests = _real_load
+# AND SO DOES EVERY OTHER FILE THE COMPARISON RUNS ON. v8.0. The registry was
+# fixed in v7.99 and the rest were not: `questions()` re-opened the machine-QC
+# file, `second_comparison` opened both decision files twice and `disagreements`
+# a third time. So an autosave landing mid-run produced a verdict decided from
+# one combination of bytes and a qualification decided from another - a state
+# that had never existed at any instant, passing with exit 0.
+#
+# HOOKED AT THE READ. Every `pd.read_csv` after the verdict returns a DIFFERENT
+# second file, one in which the two readers agree and are two people. A preflight
+# that re-reads sees a clean comparison; one that holds its snapshot does not.
+_clean_second = _second_file("second_race_clean.csv",
+                             [_answer(i, Reviewer_ID="RV_H2") for i in _ids3])
+_dirty_second = _second_file("second_race_dirty.csv",
+                             [_answer(i, Reviewer_ID="RV_H") for i in _ids3])
+_real_read_csv = pd.read_csv
+_reads = []
+
+
+def _swapping_read_csv(source, *a, **kw):
+    _reads.append(source)
+    if isinstance(source, str) and source == _dirty_second:
+        source = _clean_second
+    return _real_read_csv(source, *a, **kw)
+
+
+pd.read_csv = _swapping_read_csv
+try:
+    _raced_files = PF.main([_R3_DIR, "--review", _r3_review, "--inference",
+                            _r3_cells, "--second", _dirty_second])
+finally:
+    pd.read_csv = _real_read_csv
+check("a decision file swapped after it was read does not reach the comparison",
+      _raced_files == 2,
+      "%s after reads of %s"
+      % (_raced_files, [os.path.basename(str(r)) for r in _reads
+                        if isinstance(r, str)]))
+# AND THE QUESTION LIST COMES FROM THE SAME SNAPSHOT. `questions()` opened
+# `figure_values_machine_qc.csv` again, so the cells the preflight asked about
+# were derived from a read the verdict knew nothing about. Here that read returns
+# one EXTRA reconstructed cell: a preflight deriving its questions from the
+# snapshot compares the two the run actually asked and passes; one that re-reads
+# asks about a third nobody answered and refuses.
+_phantom = _real_read_csv(os.path.join(_R3_DIR, "figure_values_machine_qc.csv"),
+                          dtype=object).fillna("")
+_extra_row = _phantom[_phantom["Cell_Key"] == _CELL_OF[_ids3[0]][1]].copy()
+_extra_row["Cell_Key"] = "ARM=CONTROL;TIMEPOINT=T_PHANTOM"
+_phantom = pd.concat([_phantom, _extra_row], ignore_index=True)
+
+
+def _phantom_read_csv(source, *a, **kw):
+    if isinstance(source, str) \
+            and os.path.basename(source) == "figure_values_machine_qc.csv":
+        return _phantom.copy()
+    return _real_read_csv(source, *a, **kw)
+
+
+check("the phantom row really would be a third question",
+      len([q for q in PF.questions_from(_phantom) if q["Inference_ID"]])
+      == len(_ids3) + 1)
+pd.read_csv = _phantom_read_csv
+try:
+    _raced_q = PF.main([_R3_DIR, "--review", _r3_review, "--inference",
+                        _r3_cells, "--second", _agree])
+finally:
+    pd.read_csv = _real_read_csv
+check("  and the preflight asks the questions the verdict saw, not a re-read's",
+      _raced_q == 0, "%s" % _raced_q)
+check("  because the second file is opened once, by bytes, and named by hash",
+      not [r for r in _reads if isinstance(r, str)
+           and os.path.basename(r) == os.path.basename(_dirty_second)],
+      "%s" % [os.path.basename(str(r)) for r in _reads if isinstance(r, str)])
 check("a registry that changes after the verdict does not reach the check",
       _raced == 2 and len(_loads) >= 1,
       "%s after %d load(s)" % (_raced, len(_loads)))
@@ -2845,7 +2918,7 @@ check("a registry that changes after the verdict does not reach the check",
 _no_reg = FIN.validate_finalization(
     ROOT, review_path=_mv_review, inference_review_path=_mv_cells)
 check("  a verdict that never got that far carries no registry, and says so",
-      _no_reg.reviewers is None and _no_reg.status != "FINALIZED",
+      _no_reg.snapshot.reviewers is None and _no_reg.status != "FINALIZED",
       "%s" % (_no_reg.status,))
 # THE INVARIANT THE PREFLIGHT RESTS ON, rather than a guard on it: a verdict
 # that finalizes has always verified the registry, because the decider refuses
@@ -2860,10 +2933,11 @@ _all_verdicts = [
     _no_reg,
 ]
 check("  and every verdict that finalizes carries the rows it decided against",
-      all(v.reviewers is not None for v in _all_verdicts
+      all(v.snapshot.reviewers is not None for v in _all_verdicts
           if v.status == FIN.FINALIZED_STATUS)
       and any(v.status == FIN.FINALIZED_STATUS for v in _all_verdicts),
-      "%s" % [(v.status, v.reviewers is None) for v in _all_verdicts])
+      "%s" % [(v.status, v.snapshot.reviewers is None)
+              for v in _all_verdicts])
 # WHAT A RUN HANDED TO SOMEBODY ELSE LOOKS LIKE: the stamp records the absolute
 # path of a directory on the machine that produced it, and that directory is not
 # on this one. The `manifests/` copy inside the run is the fallback that travels;
@@ -2990,6 +3064,103 @@ check("a save landing between the decision and the stamp does not change what "
       "stamp %s / read %s / on disk %s"
       % (_race_stamp["Review_File_SHA256"][:12], _read_bytes[:12],
          RB.file_sha256(_race_review)[:12]))
+# AND THE RUN OUTPUTS THEMSELVES, which were the last files still hashed through
+# one read and parsed through another. v8.0. `verify_run_outputs` hashed each
+# path with `file_sha256` and then re-opened it; `validate_finalization` opened
+# the queue, the machine rows and the artifact ledger a THIRD time. So the ledger
+# the run stamp approved and the ledger the artifact checks ran against were two
+# reads apart, and a save landing between them decided the finalization.
+#
+# HOOKED ON BOTH READERS, because the defect can enter through either: the swap
+# lands the moment the target file is first read, whichever function reads it.
+# An implementation that reads once decides from the pre-swap bytes and
+# finalizes; one that reads twice sees the swapped file the second time.
+
+
+def _swap_after_first_read(target, swapped_bytes):
+    """Rewrite `target` the instant something reads it. Returns an undo."""
+    real_verified, real_sha = FIN.read_verified_csv, RB.file_sha256
+    fired = []
+
+    def land():
+        if not fired and os.path.exists(target):
+            fired.append(1)
+            with open(target, "wb") as fh:
+                fh.write(swapped_bytes)
+
+    def hooked_verified(path):
+        got = real_verified(path)
+        if os.path.abspath(path) == os.path.abspath(target):
+            land()
+        return got
+
+    def hooked_sha(path):
+        got = real_sha(path)
+        if os.path.abspath(path) == os.path.abspath(target):
+            land()
+        return got
+
+    FIN.read_verified_csv, RB.file_sha256 = hooked_verified, hooked_sha
+
+    def undo():
+        FIN.read_verified_csv, RB.file_sha256 = real_verified, real_sha
+
+    return undo
+
+
+_led_dir, _ = fresh_run("run_ledger_race")
+_led_q = pd.read_csv(os.path.join(_led_dir, "review_queue.csv"),
+                     dtype=object).fillna("")
+_led_review = review([row(Panel_ID=_led_q.loc[0, "Panel_ID"],
+                          Review_Subject_SHA256=_led_q.loc[
+                              0, "Review_Subject_SHA256"])],
+                     path=os.path.join(_led_dir, "value_review.csv"))
+_led_path = os.path.join(_led_dir, "panel_artifacts.csv")
+_led_now = pd.read_csv(_led_path, dtype=object).fillna("")
+_led_swapped = _led_now[_led_now["Artifact_Type"] != "OVERLAY"].to_csv(
+    index=False).encode("utf-8")
+check("the run really does need its overlay registered",
+      "OVERLAY" in set(_led_now["Artifact_Type"]))
+_undo = _swap_after_first_read(_led_path, _led_swapped)
+try:
+    _led_result = FIN.finalize(_led_dir, review_path=_led_review,
+                               run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 6))
+finally:
+    _undo()
+check("a ledger rewritten the instant it is read does not decide the run",
+      _led_result["status"] == "FINALIZED"
+      and "OVERLAY" not in set(pd.read_csv(_led_path, dtype=object)
+                               .fillna("")["Artifact_Type"]),
+      "%s / on disk now %s"
+      % (_led_result["status"],
+         sorted(set(pd.read_csv(_led_path, dtype=object)
+                    .fillna("")["Artifact_Type"]))))
+# AND THE QUEUE, which carries the review mode and the subject hash an approval
+# is checked against. Swapped, a re-reading decider calls a correct approval
+# APPROVAL_STALE against a fingerprint the run never published.
+_q_dir, _ = fresh_run("run_queue_race")
+_q_path = os.path.join(_q_dir, "review_queue.csv")
+_q_now = pd.read_csv(_q_path, dtype=object).fillna("")
+_q_review = review([row(Panel_ID=_q_now.loc[0, "Panel_ID"],
+                        Review_Subject_SHA256=_q_now.loc[
+                            0, "Review_Subject_SHA256"])],
+                   path=os.path.join(_q_dir, "value_review.csv"))
+_q_swapped = _q_now.copy()
+_q_swapped.loc[0, "Review_Subject_SHA256"] = "f" * 64
+_undo = _swap_after_first_read(_q_path,
+                               _q_swapped.to_csv(index=False).encode("utf-8"))
+try:
+    _q_result = FIN.finalize(_q_dir, review_path=_q_review,
+                             run_date="2026-08-06",
+                             today=datetime.date(2026, 8, 6))
+finally:
+    _undo()
+check("nor does a queue rewritten the instant it is read",
+      _q_result["status"] == "FINALIZED"
+      and pd.read_csv(_q_path, dtype=object).fillna("").loc[
+          0, "Review_Subject_SHA256"] == "f" * 64,
+      "%s" % _q_result["status"])
 # AND THE WINDOW IS CLOSED AT BOTH ENDS. Above, the save lands after the read;
 # here it lands between the HASH and the PARSE, which is the window that exists
 # only inside the loader. Hashing the bytes and then re-opening the path would
@@ -3013,7 +3184,13 @@ class _SaveOnHash:
         return getattr(self._real, name)
 
     def sha256(self, data=b""):
-        if data and _race2_review in getattr(self, "_armed", [_race2_review]):
+        # ARMED ON THE DECISION FILE'S OWN BYTES, not on any hash at all. v8.0
+        # hashes every verified run output through the same module, so a hook
+        # that fires on the first `sha256` with data rewrites the review file
+        # while the LEDGER is being hashed - which tests nothing about the
+        # loader and everything about the order of the caller's reads.
+        if data and os.path.exists(_race2_review) \
+                and data == open(_race2_review, "rb").read():
             review([row(Review_Subject_SHA256=_race2_q.loc[
                 0, "Review_Subject_SHA256"], Reviewer_ID="RV_NOBODY")],
                 path=_race2_review)

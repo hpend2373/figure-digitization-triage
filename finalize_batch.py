@@ -1967,6 +1967,36 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
     return out
 
 
+def read_verified_bytes(path):
+    """The bytes and their digest, from one read. Everything else builds on it.
+
+    Splitting this out is what makes the rule apply to a format other than CSV:
+    `run_stamp.json` was hashed with `file_sha256(path)` and then opened again
+    with `json.load`, so `Run_Mode`, `Status`, `Output_SHA256` and `Manifest_Dir`
+    were all interpreted from a file that need not be the one the stamp names. A
+    DEMO_ONLY run hashed and an ATTESTED run parsed is the whole finalization
+    contract decided on bytes nobody recorded.
+    """
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except Exception as exc:
+        return b"", "", "%s: %s" % (type(exc).__name__, exc)
+    return data, hashlib.sha256(data).hexdigest(), ""
+
+
+def read_verified_json(path):
+    """One read: hash THOSE bytes, parse THOSE bytes, as JSON."""
+    data, digest, error = read_verified_bytes(path)
+    if error:
+        return None, digest, error
+    try:
+        value = json.loads(data.decode("utf-8"))
+    except Exception as exc:
+        return None, digest, "%s: %s" % (type(exc).__name__, exc)
+    return value, digest, ""
+
+
 def read_verified_csv(path):
     """One read: hash THOSE bytes, parse THOSE bytes. Never the path twice.
 
@@ -1982,12 +2012,9 @@ def read_verified_csv(path):
     records the hash of the thing that caused it is worth more than one that
     records nothing.
     """
-    try:
-        with open(path, "rb") as fh:
-            data = fh.read()
-    except Exception as exc:
-        return None, "", "%s: %s" % (type(exc).__name__, exc)
-    digest = hashlib.sha256(data).hexdigest()
+    data, digest, error = read_verified_bytes(path)
+    if error:
+        return None, digest, error
     try:
         return (pd.read_csv(io.BytesIO(data), dtype=object).fillna(""),
                 digest, "")
@@ -2028,6 +2055,11 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
              "Output_SHA256 holds a non-string hash for %s" % ", ".join(off_type))
         return False
     ok = True
+    # KEPT LOCALLY WHETHER OR NOT A CALLER WANTS THEM. `verified` is the caller's
+    # collecting dict and is optional; the frames are not optional to THIS
+    # function, which checks the artifact ledger against itself. Reading them
+    # only when somebody asked was how the ledger ended up being opened twice.
+    parsed = {}
     for name in VERIFIED_OUTPUTS:
         path = os.path.join(run_dir, name)
         if not os.path.exists(path):
@@ -2040,12 +2072,24 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
         # rows the run stamp never approved. Same for the queue, which carries
         # `Review_Mode` and `Review_Subject_SHA256`.
         frame, actual, error = read_verified_csv(path)
-        if verified is not None and actual == recorded.get(name) \
-                and frame is not None:
-            verified.setdefault("frames", {})[name] = frame
-            # The list-of-dicts view the older consumers take, derived from the
-            # SAME frame rather than from another read of the file.
-            verified.setdefault("outputs", {})[name] = frame.to_dict("records")
+        if actual == recorded.get(name) and frame is not None:
+            parsed[name] = frame
+            if verified is not None:
+                verified.setdefault("frames", {})[name] = frame
+                # The list-of-dicts view the older consumers take, derived from
+                # the SAME frame rather than from another read of the file.
+                verified.setdefault("outputs", {})[name] = frame.to_dict(
+                    "records")
+        if actual == recorded.get(name) and frame is None:
+            # HASHING SAYS THE BYTES DID NOT CHANGE. It does not say they are a
+            # run output. A malformed CSV whose digest matches used to pass this
+            # loop and only be noticed if something downstream happened to want
+            # the frame - and `figure_values_raw.csv` is wanted by nothing here.
+            flag("run", "RUN_OUTPUT_UNREADABLE",
+                 "%s matches its recorded hash and will not parse (%s)"
+                 % (name, error or "no reason given"))
+            ok = False
+            continue
         if actual != recorded.get(name):
             flag("run", "RUN_ARTIFACT_MODIFIED",
                  "%s hashes to %s..., the run recorded %s.... It was edited "
@@ -2064,15 +2108,18 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
              "panel_artifacts.csv is missing - this run predates artifact "
              "verification and cannot be finalized")
         return False
-    try:
-        ledger_df = pd.read_csv(ledger, dtype=object).fillna("")
-    except Exception as exc:
+    # THE FRAME THE LOOP ABOVE PARSED FROM THE BYTES IT HASHED. Re-reading the
+    # path here made the ledger that declares a panel's artifacts and the ledger
+    # the artifact hashes are checked against two different reads: strike a row
+    # from the second and its file stops being checked at all, while the decider
+    # still believes the artifact is there.
+    ledger_df = parsed.get("panel_artifacts.csv")
+    if ledger_df is None:
         # It hashed correctly and still will not parse. Refusing is the only
         # honest answer, and it has to be a flagged refusal rather than a
         # traceback, or the run ends with no stamp explaining itself.
         flag("run", "RUN_ARTIFACT_MODIFIED",
-             "panel_artifacts.csv could not be parsed (%s: %s)"
-             % (type(exc).__name__, exc))
+             "panel_artifacts.csv could not be parsed")
         return False
     for _, art in ledger_df.iterrows():
         recorded_path = _s(art.get("Artifact_Path"))
@@ -2121,15 +2168,19 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
         # sentence this module makes is that the contract runs on the frames
         # that were verified.
         verified.update(frames)
+    manifest_frames = frames or {}
 
     registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
     if os.path.exists(registry_path):
-        try:
-            registry_df = pd.read_csv(registry_path, dtype=object).fillna("")
-        except Exception as exc:
+        # FROM THE VERIFIED FRAMES, not another read of the same path.
+        # `verify_manifest_inputs` has already read and hashed this file; opening
+        # it again let one producer output satisfy the manifest check with one
+        # registry and this check with another.
+        registry_df = manifest_frames.get("reviewers")
+        if registry_df is None:
             flag("run", "REVIEWER_REGISTRY_CHANGED",
-                 "the registry at %s could not be read (%s: %s)"
-                 % (manifest_dir, type(exc).__name__, exc))
+                 "the registry at %s is not among the verified manifests"
+                 % manifest_dir)
             return False
         actual = RB.frame_sha256(registry_df)
         if actual != _s(run_stamp.get("Reviewer_Registry_SHA256")):
@@ -2175,8 +2226,9 @@ def _promote(staging, run_dir, fault_after=None):
 #: needs those rows is usually the preflight, one process boundary away from the
 #: decision it is supposed to agree with.
 RunSnapshot = collections.namedtuple(
-    "RunSnapshot", "reviewers machine queue ledger reviews inference_reviews")
-EMPTY_SNAPSHOT = RunSnapshot(None, None, None, None, None, None)
+    "RunSnapshot",
+    "run_stamp reviewers machine queue ledger reviews inference_reviews")
+EMPTY_SNAPSHOT = RunSnapshot(None, None, None, None, None, None, None)
 
 Verdict = collections.namedtuple(
     "Verdict",
@@ -2267,18 +2319,19 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # a truncated or non-UTF-8 `run_stamp.json` raised out of the finalizer
     # leaving the run with no result AND no stamp explaining the absence, which
     # is the one outcome this module is supposed to make impossible.
-    run_stamp_sha = RB.file_sha256_or_blank(run_stamp_path)
-    try:
-        with open(run_stamp_path, encoding="utf-8") as fh:
-            run_stamp = json.load(fh)
-        if not isinstance(run_stamp, dict):
-            raise ValueError("run_stamp.json holds a %s, not an object"
-                             % type(run_stamp).__name__)
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    # ONE READ, and the digest is of the bytes that were parsed. `file_sha256`
+    # then `json.load` was two: `Status`, `Run_Mode`, `Output_SHA256` and
+    # `Manifest_Dir` all came out of the second, while `Run_Stamp_SHA256` named
+    # the first. A DEMO_ONLY stamp hashed and an ATTESTED stamp parsed decides
+    # the whole finalization contract on bytes nobody recorded.
+    run_stamp, run_stamp_sha, stamp_error = read_verified_json(run_stamp_path)
+    if stamp_error or not isinstance(run_stamp, dict):
+        detail = stamp_error or ("run_stamp.json holds a %s, not an object"
+                                 % type(run_stamp).__name__)
         run_stamp = {}
         return stop("RUN_NOT_FINALIZABLE",
-                    "run_stamp.json could not be interpreted (%s: %s)"
-                    % (type(exc).__name__, exc))
+                    "run_stamp.json could not be interpreted (%s)" % detail)
+    snapshot[0] = snapshot[0]._replace(run_stamp=run_stamp)
     # Where the manifests are, in the order that survives a moved run. The
     # stamp records an absolute path, so a run folder handed to somebody else
     # named a directory on the machine it was produced on; a `manifests/`

@@ -6530,8 +6530,76 @@ pre-swap bytes and would refuse on the post-swap ones.
     the identity checks re-open both decision files    2
     the question list is derived from another read     1
 
+## v8.1 — the stamp, the ledger and the diagnoses join the snapshot
+
+v8.0 built the snapshot and left four files outside it. Each is the same defect:
+hashed one way, interpreted another.
+
+**`run_stamp.json` was the worst of them.** `file_sha256(path)` and then
+`json.load(open(path))`: the digest named file A while `Status`, `Run_Mode`,
+`Output_SHA256` and `Manifest_Dir` all came out of file B. A DEMO_ONLY run
+hashed and an ATTESTED run parsed decides the entire finalization contract from
+bytes the result does not name. `read_verified_bytes` is split out of
+`read_verified_csv` and `read_verified_json` sits beside it, so the rule now
+applies to a format other than CSV; the stamp joins the snapshot. Three
+scenarios swap `Run_Mode`, `Status` and `Manifest_Dir` the instant the stamp is
+read and require the pre-swap meaning every time.
+
+**The artifact checks re-read the ledger.** `panel_artifacts.csv` was parsed in
+the verification loop and opened again three lines later, so the ledger that
+DECLARES a panel's artifacts and the ledger the artifact hashes are CHECKED
+against were two reads apart. Strike a row from the second and that file stops
+being hashed at all while the decision still counts it present. The scenario
+does both halves: the `OVERLAY` row goes and the picture it named is
+overwritten, and the run is refused.
+
+**A verified output that will not parse was a silence.** Hashing says the bytes
+did not change; it does not say they are a run output. Nothing downstream wants
+`figure_values_raw.csv`, so a malformed one whose digest matched passed the loop
+unmentioned. `RUN_OUTPUT_UNREADABLE` now, by name.
+
+**And the registry was read twice** - once by `verify_manifest_inputs`, once
+again beside it to compare against `Reviewer_Registry_SHA256`. It comes from the
+verified frames.
+
+**The preflight's diagnoses were the last path readers.** `PILOT.md` tells a
+reviewer to require "0 bundle problems" and to check that the answer problems
+are all of one kind, so those two lists are judgement inputs rather than
+decoration - and they were derived from four more reads. They come from the
+snapshot now, and where a field is absent the line says `NOT EVALUATED` rather
+than falling back to a path: a snapshot field that is None means the decider
+never got that far, and re-reading to fill the gap is the second read this layer
+exists to remove. The second file's digest prints in full, because a
+16-character prefix is a hint and that digest is the only record of which bytes
+were compared.
+
+**Still outside the snapshot,** and named here rather than implied: the
+structured artifacts the ledger points at - `IDENTITY_RESOLUTION`,
+`INFERENCE_MANIFEST`, `RAW_MARKS`, `POINT_DATA`, `MONO_BAR_GEOMETRY`. Their bytes
+are hashed against the ledger and then re-opened by the contract checks that
+interpret them. That is the same defect one level down, and it is the next
+release rather than this one: it needs an artifact snapshot on `RunSnapshot` and
+six contract functions taking it instead of a run directory.
+
+    reverted                                          scenarios that fail
+    the run stamp is hashed and then re-opened         2
+    the artifact checks re-read the ledger             1
+    a verified output that will not parse is a silence 1
+    the registry is read again beside the manifests    1
+    the bundle diagnosis falls back to the paths       1
+    the answer diagnosis falls back to the paths       1
+    the second digest is printed as a prefix           1
+
 ## Still open
 
+- the STRUCTURED ARTIFACT chain is not snapshotted. `verify_run_outputs` hashes
+  every file the ledger names, and then `identity_contract_failures`,
+  `collect_inference_manifests`, `inference_contract_failures`, the mark-evidence
+  checks and the geometry route check each re-open the ones they interpret. A
+  geometry file swapped between the hash and the read becomes the evidence for a
+  route it does not support. Closing it means an `ArtifactSnapshot` (type, panel,
+  path, sha, bytes, parsed) built in the verification loop and threaded through
+  those six functions
 - `--second` is a qualification check and not a finalization contract. To make
   it one the finalizer would have to take the second file and stamp
   `Second_Inference_Review_File_SHA256`, the second reviewer, the compared count

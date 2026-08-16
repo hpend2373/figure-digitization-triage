@@ -8,8 +8,10 @@ having happened.
 The fixture is deliberately one that produces values. A gate tested only on a
 batch that accepts nothing tests nothing.
 """
+import contextlib
 import csv
 import datetime
+import io
 import json
 import os
 import re
@@ -2905,6 +2907,91 @@ try:
                         _r3_cells, "--second", _agree])
 finally:
     pd.read_csv = _real_read_csv
+# AND SO DO THE DIAGNOSTICS A REVIEWER READS. `PILOT.md` tells them to require
+# "0 bundle problems" and to check that the answer problems are all of one kind,
+# so those two lists are judgement inputs, not decoration. They were derived
+# from four more path reads - the ledger, the queue, the machine rows and both
+# decision files - which is how a verdict decided at one moment could be printed
+# above a diagnosis of another.
+_phantom_ledger = _real_read_csv(
+    os.path.join(_R3_DIR, "panel_artifacts.csv"), dtype=object).fillna("")
+_stripped = _phantom_ledger[
+    _phantom_ledger["Artifact_Type"] != RB.INFERENCE_CONTEXT_ARTIFACT_TYPE]
+
+
+def _stripping_read_csv(source, *a, **kw):
+    if isinstance(source, str) \
+            and os.path.basename(source) == "panel_artifacts.csv":
+        return _stripped.copy()
+    return _real_read_csv(source, *a, **kw)
+
+
+check("the stripped ledger really would report a bundle problem",
+      PF.bundle_problems_from(
+          _real_read_csv(os.path.join(_R3_DIR,
+                                      "figure_values_machine_qc.csv"),
+                         dtype=object).fillna(""),
+          _stripped,
+          {r["Inference_ID"] for r in FIN.collect_inference_manifests(_R3_DIR)})
+      != [])
+_diag_out = io.StringIO()
+pd.read_csv = _stripping_read_csv
+try:
+    with contextlib.redirect_stdout(_diag_out):
+        _diag = PF.main([_R3_DIR, "--review", _r3_review,
+                         "--inference", _r3_cells])
+finally:
+    pd.read_csv = _real_read_csv
+# THE PRINTED LIST, not the exit code. `PILOT.md` tells a reviewer to require
+# "0 bundle problems", so the line on the screen IS the contract; the exit code
+# comes from the verdict and would not move either way.
+check("  and the bundle a reviewer is shown is the one the verdict saw",
+      _diag == 0 and "BUNDLE" not in _diag_out.getvalue(),
+      "%s / %s" % (_diag, [l for l in _diag_out.getvalue().splitlines()
+                           if "BUNDLE" in l]))
+_q_extra = _real_read_csv(os.path.join(_R3_DIR, "review_queue.csv"),
+                          dtype=object).fillna("")
+_q_extra = pd.concat([_q_extra, _q_extra.assign(Panel_ID="P_NOT_IN_THIS_RUN")],
+                     ignore_index=True)
+
+
+def _queue_read_csv(source, *a, **kw):
+    if isinstance(source, str) \
+            and os.path.basename(source) == "review_queue.csv":
+        return _q_extra.copy()
+    return _real_read_csv(source, *a, **kw)
+
+
+check("the swapped queue really would report an answer problem",
+      PF.answer_problems_from(
+          _real_read_csv(os.path.join(_R3_DIR,
+                                      "figure_values_machine_qc.csv"),
+                         dtype=object).fillna(""),
+          _q_extra,
+          _real_read_csv(_r3_review, dtype=object).fillna(""),
+          _real_read_csv(_r3_cells, dtype=object).fillna("")) != [])
+_ans_out = io.StringIO()
+pd.read_csv = _queue_read_csv
+try:
+    with contextlib.redirect_stdout(_ans_out):
+        _ans = PF.main([_R3_DIR, "--review", _r3_review,
+                        "--inference", _r3_cells])
+finally:
+    pd.read_csv = _real_read_csv
+check("  and the answers a reviewer is shown come from the same snapshot",
+      _ans == 0 and "ANSWERS" not in _ans_out.getvalue(),
+      "%s / %s" % (_ans, [l for l in _ans_out.getvalue().splitlines()
+                          if "ANSWERS" in l]))
+# AND THE SECOND FILE'S DIGEST IS PRINTED WHOLE. It is the only record of which
+# bytes were compared - nothing about the second reading reaches
+# `Review_Subject_SHA256` or the stamp - and a 16-character prefix is a hint.
+_sha_out = io.StringIO()
+with contextlib.redirect_stdout(_sha_out):
+    PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+             "--second", _agree])
+check("the second file's whole digest is printed, not a prefix of it",
+      RB.file_sha256(_agree) in _sha_out.getvalue(),
+      "%s" % [l for l in _sha_out.getvalue().splitlines() if "sha256" in l])
 check("  and the preflight asks the questions the verdict saw, not a re-read's",
       _raced_q == 0, "%s" % _raced_q)
 check("  because the second file is opened once, by bytes, and named by hash",
@@ -3079,6 +3166,7 @@ check("a save landing between the decision and the stamp does not change what "
 
 def _swap_after_first_read(target, swapped_bytes):
     """Rewrite `target` the instant something reads it. Returns an undo."""
+    real_bytes = FIN.read_verified_bytes
     real_verified, real_sha = FIN.read_verified_csv, RB.file_sha256
     fired = []
 
@@ -3094,6 +3182,12 @@ def _swap_after_first_read(target, swapped_bytes):
             land()
         return got
 
+    def hooked_bytes(path):
+        got = real_bytes(path)
+        if os.path.abspath(path) == os.path.abspath(target):
+            land()
+        return got
+
     def hooked_sha(path):
         got = real_sha(path)
         if os.path.abspath(path) == os.path.abspath(target):
@@ -3101,9 +3195,11 @@ def _swap_after_first_read(target, swapped_bytes):
         return got
 
     FIN.read_verified_csv, RB.file_sha256 = hooked_verified, hooked_sha
+    FIN.read_verified_bytes = hooked_bytes
 
     def undo():
         FIN.read_verified_csv, RB.file_sha256 = real_verified, real_sha
+        FIN.read_verified_bytes = real_bytes
 
     return undo
 
@@ -3136,6 +3232,158 @@ check("a ledger rewritten the instant it is read does not decide the run",
       % (_led_result["status"],
          sorted(set(pd.read_csv(_led_path, dtype=object)
                     .fillna("")["Artifact_Type"]))))
+# AND THE RUN STAMP ITSELF, which was the last file still hashed one way and
+# parsed another. v8.1. `file_sha256(path)` then `json.load(open(path))`: the
+# digest named file A and `Status`, `Run_Mode`, `Output_SHA256` and
+# `Manifest_Dir` all came out of file B. A DEMO_ONLY run hashed and an ATTESTED
+# run parsed is the entire finalization contract decided from bytes the stamp
+# does not name - and `Run_Stamp_SHA256` in the result would name the other one.
+_stamp_dir, _ = fresh_run("run_stamp_race")
+_stamp_q = pd.read_csv(os.path.join(_stamp_dir, "review_queue.csv"),
+                       dtype=object).fillna("")
+_stamp_review = review([row(Panel_ID=_stamp_q.loc[0, "Panel_ID"],
+                            Review_Subject_SHA256=_stamp_q.loc[
+                                0, "Review_Subject_SHA256"])],
+                       path=os.path.join(_stamp_dir, "value_review.csv"))
+_stamp_path = os.path.join(_stamp_dir, "run_stamp.json")
+_stamp_now = json.load(open(_stamp_path, encoding="utf-8"))
+_stamp_bytes = RB.file_sha256(_stamp_path)
+for _field, _bad, _why in (
+        ("Run_Mode", "DEMO_ONLY", "a demonstration promoted between two reads"),
+        ("Status", "PROMOTE_FAILED", "a failed run read as a completed one"),
+        ("Manifest_Dir", os.path.join(ROOT, "somewhere_else"),
+         "the manifests re-pointed after the stamp was hashed")):
+    _swapped_stamp = dict(_stamp_now)
+    _swapped_stamp[_field] = _bad
+    _undo = _swap_after_first_read(
+        _stamp_path,
+        json.dumps(_swapped_stamp, indent=1, sort_keys=True).encode("utf-8"))
+    try:
+        _sr = FIN.finalize(_stamp_dir, review_path=_stamp_review,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    finally:
+        _undo()
+    _sr_stamp = json.load(open(os.path.join(_stamp_dir, "finalize_stamp.json"),
+                               encoding="utf-8"))
+    check("a run stamp rewritten the instant it is read cannot change %s"
+          % _field,
+          _sr["status"] == "FINALIZED"
+          and _sr_stamp["Run_Stamp_SHA256"] == _stamp_bytes
+          and json.load(open(_stamp_path, encoding="utf-8"))[_field] == _bad,
+          "%s / %s (%s)" % (_sr["status"],
+                            _sr_stamp["Run_Stamp_SHA256"][:12], _why))
+    with open(_stamp_path, "w", encoding="utf-8") as _fh:
+        json.dump(_stamp_now, _fh, indent=1, sort_keys=True)
+# AND THE ARTIFACT CHECKS RUN ON THE LEDGER THE DECIDER SAW. Striking a row from
+# a re-read ledger removes that artifact from the hash check while the decision
+# still counts it as present, so a panel could be approved against an overlay
+# whose bytes nobody looked at. Both halves are swapped here: the row goes, and
+# the picture it named is overwritten.
+_two_dir, _ = fresh_run("run_ledger_two_ways")
+_two_q = pd.read_csv(os.path.join(_two_dir, "review_queue.csv"),
+                     dtype=object).fillna("")
+_two_review = review([row(Panel_ID=_two_q.loc[0, "Panel_ID"],
+                          Review_Subject_SHA256=_two_q.loc[
+                              0, "Review_Subject_SHA256"])],
+                     path=os.path.join(_two_dir, "value_review.csv"))
+_two_led_path = os.path.join(_two_dir, "panel_artifacts.csv")
+_two_led = pd.read_csv(_two_led_path, dtype=object).fillna("")
+_two_overlay = RB.resolve_artifact(
+    _two_dir, _two_led[_two_led["Artifact_Type"] == "OVERLAY"].iloc[0]
+    ["Artifact_Path"])
+_undo = _swap_after_first_read(
+    _two_led_path,
+    _two_led[_two_led["Artifact_Type"] != "OVERLAY"].to_csv(
+        index=False).encode("utf-8"))
+with open(_two_overlay, "ab") as _fh:
+    _fh.write(b"\n<not the picture anybody approved>")
+try:
+    _two_result = FIN.finalize(_two_dir, review_path=_two_review,
+                               run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 6))
+finally:
+    _undo()
+check("an overlay edited behind a struck ledger row is still caught",
+      _two_result["status"] != "FINALIZED"
+      and any(p["check"] == "RUN_ARTIFACT_MODIFIED"
+              for p in _two_result.get("problems", [])),
+      "%s %s" % (_two_result["status"],
+                 [p["check"] for p in _two_result.get("problems", [])]))
+# AND THE REGISTRY IS THE ONE THE MANIFESTS VERIFIED. `verify_manifest_inputs`
+# reads and hashes it; `verify_run_outputs` then compared it against
+# `Reviewer_Registry_SHA256` by opening the path AGAIN. Two reads, so a producer
+# could satisfy one check with one registry and the other with another. Swapped
+# the instant the manifests are read, a re-reading check sees a registry whose
+# frame hash is not the one the run recorded.
+_reg_dir, _ = fresh_run("run_registry_race")
+_reg_q = pd.read_csv(os.path.join(_reg_dir, "review_queue.csv"),
+                     dtype=object).fillna("")
+_reg_review = review([row(Panel_ID=_reg_q.loc[0, "Panel_ID"],
+                          Review_Subject_SHA256=_reg_q.loc[
+                              0, "Review_Subject_SHA256"])],
+                     path=os.path.join(_reg_dir, "value_review.csv"))
+_reg_path = os.path.join(_reg_dir, "manifests", "reviewer_registry.csv")
+_reg_now = pd.read_csv(_reg_path, dtype=object).fillna("")
+_reg_swapped = pd.concat(
+    [_reg_now, pd.DataFrame([dict(REVIEWERS[0], Reviewer_ID="RV_LATE")])],
+    ignore_index=True).to_csv(index=False).encode("utf-8")
+_real_load_m = RB.load_manifests
+_reg_fired = []
+
+
+def _load_then_swap(directory):
+    frames = _real_load_m(directory)
+    if not _reg_fired and os.path.exists(_reg_path):
+        _reg_fired.append(1)
+        with open(_reg_path, "wb") as fh:
+            fh.write(_reg_swapped)
+    return frames
+
+
+RB.load_manifests = _load_then_swap
+try:
+    _reg_result = FIN.finalize(_reg_dir, review_path=_reg_review,
+                               run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 6))
+finally:
+    RB.load_manifests = _real_load_m
+check("a registry rewritten the instant the manifests are read is not consulted",
+      _reg_result["status"] == "FINALIZED"
+      and "RV_LATE" in set(pd.read_csv(_reg_path, dtype=object)
+                           .fillna("")["Reviewer_ID"]),
+      "%s / %s" % (_reg_result["status"],
+                   [p["check"] for p in _reg_result.get("problems", [])]))
+# AND A VERIFIED OUTPUT THAT WILL NOT PARSE IS A REFUSAL, not a silence. Hashing
+# says the bytes did not change; it does not say they are a run output. Nothing
+# downstream wants `figure_values_raw.csv`, so a malformed one whose digest
+# matched passed the loop and was never mentioned again.
+_raw_dir, _ = fresh_run("run_raw_unreadable")
+_raw_q = pd.read_csv(os.path.join(_raw_dir, "review_queue.csv"),
+                     dtype=object).fillna("")
+_raw_review = review([row(Panel_ID=_raw_q.loc[0, "Panel_ID"],
+                          Review_Subject_SHA256=_raw_q.loc[
+                              0, "Review_Subject_SHA256"])],
+                     path=os.path.join(_raw_dir, "value_review.csv"))
+_raw_path = os.path.join(_raw_dir, "figure_values_raw.csv")
+with open(_raw_path, "w", encoding="utf-8") as _fh:
+    _fh.write('Unit_ID,Cell_Key\n"unterminated,quote\n')
+_raw_stamp = json.load(open(os.path.join(_raw_dir, "run_stamp.json"),
+                            encoding="utf-8"))
+_raw_stamp["Output_SHA256"]["figure_values_raw.csv"] = RB.file_sha256(_raw_path)
+with open(os.path.join(_raw_dir, "run_stamp.json"), "w",
+          encoding="utf-8") as _fh:
+    json.dump(_raw_stamp, _fh, indent=1, sort_keys=True)
+_raw_result = FIN.finalize(_raw_dir, review_path=_raw_review,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+check("an output that matches its hash and will not parse is refused by name",
+      _raw_result["status"] != "FINALIZED"
+      and any(p["check"] == "RUN_OUTPUT_UNREADABLE"
+              and "figure_values_raw.csv" in p["detail"]
+              for p in _raw_result.get("problems", [])),
+      "%s %s" % (_raw_result["status"],
+                 [p["check"] for p in _raw_result.get("problems", [])]))
 # AND THE QUEUE, which carries the review mode and the subject hash an approval
 # is checked against. Swapped, a re-reading decider calls a correct approval
 # APPROVAL_STALE against a fingerprint the run never published.

@@ -141,18 +141,21 @@ def _asked_because(row):
     return "the SPREAD needs a look: %s" % (spread or "unstated")
 
 
-def bundle_problems(run_dir):
-    """What is missing from the bundle a reviewer is about to open."""
+def bundle_problems_from(machine, ledger, listed, asked=None):
+    """What is missing from the bundle, from FRAMES the caller already read.
+
+    `bundle_problems` is the path-taking wrapper; this is the body, so `main`
+    can run it on the finalizer's own snapshot. Until v8.1 it re-opened the
+    ledger, the machine rows and - through `questions()` - the machine rows
+    again, which meant the "0 bundle problems" a reviewer is told to require
+    could describe a different moment than the verdict printed above it.
+    """
     problems = []
-    ledger = _read(os.path.join(run_dir, "panel_artifacts.csv"))
     pictured = {_s(r.get("Artifact_Reference"))
                 for _, r in ledger.iterrows()
                 if _s(r.get("Artifact_Type"))
                 == RB.INFERENCE_CONTEXT_ARTIFACT_TYPE}
-    listed = {_s(r.get("Inference_ID"))
-              for r in FIN.collect_inference_manifests(run_dir)}
-    machine = _read(os.path.join(run_dir, "figure_values_machine_qc.csv"))
-    for question in questions(run_dir):
+    for question in (asked if asked is not None else questions_from(machine)):
         iid = question["Inference_ID"]
         if not iid:
             continue
@@ -176,12 +179,23 @@ def bundle_problems(run_dir):
     return problems
 
 
-def answer_problems(run_dir, review_path, inference_path):
-    """What is missing from the answers, before a finalizer is asked."""
+def bundle_problems(run_dir):
+    """What is missing from the bundle a reviewer is about to open."""
+    return bundle_problems_from(
+        _read(os.path.join(run_dir, "figure_values_machine_qc.csv")),
+        _read(os.path.join(run_dir, "panel_artifacts.csv")),
+        {_s(r.get("Inference_ID"))
+         for r in FIN.collect_inference_manifests(run_dir)})
+
+
+def answer_problems_from(machine, queue, reviews, inference_reviews,
+                         asked=None):
+    """What is missing from the answers, from FRAMES the caller already read."""
     problems = []
-    asked = {q["Inference_ID"]: q for q in questions(run_dir)
-             if q["Inference_ID"]}
-    answers = _read(inference_path, FIN.inference_review_columns())
+    if asked is None:
+        asked = {q["Inference_ID"]: q for q in questions_from(machine)
+                 if q["Inference_ID"]}
+    answers = inference_reviews
     seen = {}
     for _, row in answers.iterrows():
         iid = _s(row.get("Inference_ID"))
@@ -204,9 +218,6 @@ def answer_problems(run_dir, review_path, inference_path):
             problems.append((iid, "says %r, which is neither %s"
                              % (verdict, " nor ".join(RB.INFERENCE_DECISIONS))))
     # And the panel decisions, for the confirmation the values ask for.
-    reviews = _read(review_path, FIN.value_review_columns())
-    queue = _read(os.path.join(run_dir, "review_queue.csv"))
-    machine = _read(os.path.join(run_dir, "figure_values_machine_qc.csv"))
     by_panel = {}
     for _, row in machine.iterrows():
         by_panel.setdefault(_s(row.get("Run_Panel_ID")), []).append(row)
@@ -224,6 +235,15 @@ def answer_problems(run_dir, review_path, inference_path):
             if _s(decision.get(column)).upper() != RB.REVIEW_CONFIRMED:
                 problems.append((pid, "does not say %s was checked" % column))
     return problems
+
+
+def answer_problems(run_dir, review_path, inference_path):
+    """What is missing from the answers, before a finalizer is asked."""
+    return answer_problems_from(
+        _read(os.path.join(run_dir, "figure_values_machine_qc.csv")),
+        _read(os.path.join(run_dir, "review_queue.csv")),
+        _read(review_path, FIN.value_review_columns()),
+        _read(inference_path, FIN.inference_review_columns()))
 
 
 def verdict_of(run_dir, review_path, inference_path, today=None,
@@ -572,25 +592,49 @@ def main(argv=None):
     # combination of bytes and a qualification on another, and exit 0 meant a
     # state that had never existed at any instant.
     snap = verdict.snapshot
-    asked = (questions_from(snap.machine) if snap.machine is not None
-             else questions(args.run_dir))
+    # NO PATH FALLBACK. A snapshot field that is None means the decider never
+    # got that far, and re-reading the path to fill the gap is exactly the
+    # second read this whole layer exists to remove: it would print a diagnosis
+    # of a different moment beside a verdict that had refused before reading.
+    # Saying NOT EVALUATED is the honest report, and the refusal above already
+    # says why.
+    asked = ([] if snap.machine is None else questions_from(snap.machine))
     print("%d cell(s) will be asked about" % len(asked))
     for q in asked:
         print("  %-14s %-34s %s  %s"
               % (q["Panel_ID"], q["Cell_Key"], q["Tier"], q["Asked_Because"]))
     asked_by_id = {q["Inference_ID"]: q for q in asked if q["Inference_ID"]}
-    bundle = bundle_problems(args.run_dir)
-    for where, why in bundle:
-        print("  BUNDLE   %-34s %s" % (where, why))
-    answers = answer_problems(args.run_dir, review, inference)
-    for where, why in answers:
-        print("  ANSWERS  %-34s %s" % (where, why))
+    if snap.machine is None or snap.ledger is None:
+        bundle = []
+        print("  BUNDLE   NOT EVALUATED - this run's outputs did not verify, so "
+              "there is no bundle to describe")
+    else:
+        bundle = bundle_problems_from(
+            snap.machine, snap.ledger,
+            {_s(r.get("Inference_ID"))
+             for r in FIN.collect_inference_manifests(args.run_dir)},
+            asked=asked)
+        for where, why in bundle:
+            print("  BUNDLE   %-34s %s" % (where, why))
+    if snap.reviews is None or snap.machine is None or snap.queue is None:
+        answers = []
+        print("  ANSWERS  NOT EVALUATED - the decisions were not read")
+    else:
+        answers = answer_problems_from(
+            snap.machine, snap.queue, snap.reviews,
+            snap.inference_reviews
+            if snap.inference_reviews is not None
+            else pd.DataFrame(columns=FIN.inference_review_columns()),
+            asked=asked_by_id)
+        for where, why in answers:
+            print("  ANSWERS  %-34s %s" % (where, why))
     compared = differ = None
     second_bad = []
     if args.second:
         first_frame = (snap.inference_reviews
                        if snap.inference_reviews is not None
-                       else _read(inference, FIN.inference_review_columns()))
+                       else pd.DataFrame(
+                           columns=FIN.inference_review_columns()))
         second_frame, second_sha, second_error = FIN.read_verified_csv(
             args.second)
         if second_frame is None:
@@ -602,7 +646,10 @@ def main(argv=None):
         # is bound into `Review_Subject_SHA256` or the stamp - it is a
         # qualification check - so printing its digest is the only way anybody
         # can say afterwards which file this run was compared against.
-        print("  SECOND   sha256 %s  %s" % (second_sha[:16] or "(unread)",
+        # THE WHOLE DIGEST. A 16-character prefix is a hint; this is the only
+        # record of which bytes were compared, because nothing about the second
+        # reading reaches `Review_Subject_SHA256` or the stamp.
+        print("  SECOND   sha256 %s  %s" % (second_sha or "(unread)",
                                             args.second))
         compared, differ = second_comparison(first_frame, second_frame)
         # WHO the second reading came from, which needs the registry. Loaded

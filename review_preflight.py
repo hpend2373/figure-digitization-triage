@@ -204,6 +204,22 @@ def answer_problems(run_dir, review_path, inference_path):
     return problems
 
 
+def verdict_of(run_dir, review_path, inference_path, today=None,
+               manifest_dir=None, separation_policy=None):
+    """The finalizer's whole answer, decided once.
+
+    `would_refuse` returns the two fields a caller usually wants; this returns
+    the `Verdict` itself, because `main` needs one more - the reviewer registry
+    the decider VERIFIED. Re-reading it from a path afterwards is the
+    hash-then-reopen shape this package closes everywhere else, and a re-read
+    that failed made the `--second` identity checks skip themselves in silence.
+    """
+    return FIN.validate_finalization(
+        run_dir, review_path=review_path, inference_review_path=inference_path,
+        today=today, manifest_dir=manifest_dir,
+        separation_policy=separation_policy)
+
+
 def would_refuse(run_dir, review_path, inference_path, today=None,
                  manifest_dir=None, separation_policy=None):
     """What the finalizer would say, run through the finalizer's own function.
@@ -222,10 +238,9 @@ def would_refuse(run_dir, review_path, inference_path, today=None,
 
     Returns (status, [(where, check, detail)]).
     """
-    verdict = FIN.validate_finalization(
-        run_dir, review_path=review_path, inference_review_path=inference_path,
-        today=today, manifest_dir=manifest_dir,
-        separation_policy=separation_policy)
+    verdict = verdict_of(run_dir, review_path, inference_path, today=today,
+                         manifest_dir=manifest_dir,
+                         separation_policy=separation_policy)
     return verdict.status, [(_s(p.get("where")), _s(p.get("check")),
                              _s(p.get("detail"))) for p in verdict.problems]
 
@@ -364,16 +379,38 @@ def second_problems(inference_path, second_path, reviewers=None, run_dir=None,
             question = asked.get(iid)
             if question is None:
                 continue
+            # EXACT EQUALITY, blank included. v7.98 wrote `if got and got !=
+            # expected`, which refuses a WRONG panel and accepts a MISSING one -
+            # and a column left out of the file entirely reads as blank through
+            # the same door. So a second file carrying four columns satisfied a
+            # check whose whole claim is "each row names this run's own panel,
+            # unit and cell". A blank key is not agreement; it is the absence of
+            # the statement being checked.
             for column, expected in (("Panel_ID", question["Panel_ID"]),
                                      ("Unit_ID", question["Unit_ID"]),
                                      ("Cell_Key", question["Cell_Key"])):
                 got = _s(r.get(column))
-                if got and got != expected:
+                if got != expected:
                     problems.append((iid, "says %s=%r; this run asks it of %r"
-                                     % (column, got, expected)))
+                                     % (column, got or "(blank)", expected)))
             problems.extend((iid, why) for why in
                             _reviewed_at_problems(_s(r.get("Reviewed_At")),
                                                   today))
+        # AND THE FILE HAS TO HAVE THE COLUMNS. `_read` names them for an absent
+        # file and does not impose them on a present one, so a header missing
+        # `Cell_Key` produced blanks rather than a complaint - reported once
+        # here rather than once per row.
+        absent = [c for c in FIN.inference_review_columns()
+                  if c not in list(rows.columns)]
+        if absent and len(rows):
+            problems.append(("--second", "has no %s column"
+                             % "/".join(absent)))
+        for _, r in rows.iterrows():
+            if not _s(r.get("Inference_ID")):
+                problems.append(("--second",
+                                 "carries a row with no Inference_ID, which "
+                                 "answers nothing this run asked"))
+                break
 
     def by_cell(path):
         out = {}
@@ -480,10 +517,13 @@ def main(argv=None):
     # the answer, and it comes from the function the finalizer decides with. Run
     # last, a malformed decision file crashed the preflight's own reading of it
     # before the finalizer's structured refusal was ever reached.
-    status, refusals = would_refuse(
+    verdict = verdict_of(
         args.run_dir, review, inference, manifest_dir=args.manifests,
         separation_policy=(FIN.DISTINCT_RESOLVERS
                            if args.distinct_reviewers else None))
+    status = verdict.status
+    refusals = [(_s(p.get("where")), _s(p.get("check")), _s(p.get("detail")))
+                for p in verdict.problems]
     excluded = [r for r in refusals if r[1] in FIN.NONFATAL_CHECKS]
     blocking = [r for r in refusals if r[1] not in FIN.NONFATAL_CHECKS]
     print("the finalizer would say %s" % status)
@@ -511,13 +551,21 @@ def main(argv=None):
         # from the same directory the finalizer was pointed at, and skipped
         # rather than guessed when it cannot be read - a missing registry is
         # already `RUN_NOT_FINALIZABLE` above.
-        # Resolved by the finalizer's own rule - `--manifests`, then the copy
-        # inside the run, then the stamp - because a second copy of a path rule
-        # is a second answer. v7.97 stopped at `RUN/manifests`, so a run whose
-        # manifests live outside it came back with no registry and the HUMAN
-        # check was skipped in silence.
-        registry = FIN.verified_registry(args.run_dir, args.manifests)
-        second_bad = second_problems(inference, args.second, registry,
+        # THE REGISTRY THE DECIDER VERIFIED, carried out with its verdict. v7.98
+        # resolved the path again and re-read the file, which is one read too
+        # many: between the two, an autosave, a symlink swap or a delete puts the
+        # identity checks on rows the finalizer never saw - and a read that
+        # simply FAILED returned None, whereupon `second_problems` skipped the
+        # HUMAN and ORCID checks without saying so. Unavailable is now a refusal,
+        # not a silence.
+        # NO None BRANCH, and one was written and removed. A verdict that
+        # finalizes has ALWAYS verified the registry - `validate_finalization`
+        # refuses `RUN_NOT_FINALIZABLE` the moment the manifests carry none - so
+        # `reviewers is None` implies the status is already a refusal and the
+        # exit code is already 2. A guard on it fires in no reachable state,
+        # which makes it decoration: reverting it broke nothing, and a check
+        # nobody can observe is a check nobody can trust.
+        second_bad = second_problems(inference, args.second, verdict.reviewers,
                                      run_dir=args.run_dir)
         for where, why in second_bad:
             print("  SECOND   %-34s %s" % (where, why))

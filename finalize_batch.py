@@ -1720,28 +1720,6 @@ def manifest_directory(run_dir, manifest_dir=None, run_stamp=None):
             or inside)
 
 
-def verified_registry(run_dir, manifest_dir=None):
-    """This run's reviewer registry, resolved the way the finalizer resolves it.
-
-    Read-only and best-effort: an unreadable registry is already
-    `RUN_NOT_FINALIZABLE` in the decider, and this exists so a caller that only
-    wants to know WHO can ask without re-deriving where.
-    """
-    stamp = {}
-    path = os.path.join(run_dir, "run_stamp.json")
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                stamp = json.load(fh)
-        except Exception:
-            stamp = {}
-    try:
-        return RB.load_manifests(
-            manifest_directory(run_dir, manifest_dir, stamp)).get("reviewers")
-    except Exception:
-        return None
-
-
 def person_keys(reviewers):
     """Reviewer_ID -> the PERSON behind it, where the registry can prove one.
 
@@ -2161,7 +2139,13 @@ def _promote(staging, run_dir, fault_after=None):
 Verdict = collections.namedtuple(
     "Verdict",
     "status detail problems approved keep blocked unstated inference_rejected "
-    "run_stamp_sha review_sha inference_sha")
+    "run_stamp_sha review_sha inference_sha reviewers")
+#: `reviewers` is the registry frame THIS verdict was decided against, verified
+#: with every other manifest before it was parsed, and None on a refusal that
+#: never got that far. It travels with the verdict because the preflight's
+#: `--second` identity checks need the same rows: re-reading the registry from a
+#: path afterwards is the hash-then-reopen shape this package closes everywhere
+#: else, and a re-read that FAILS made those checks skip themselves in silence.
 
 
 def review_paths(run_dir, review_path=None, inference_review_path=None):
@@ -2194,6 +2178,9 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     and after, the same way the preflight's own no-write claim is checked.
     """
     problems = []
+    # A one-slot box rather than a bare name: `stop` is a closure and reads it
+    # at call time, and the registry is not known until the manifests verify.
+    verified_reviewers = [None]
 
     def flag(where, check, detail):
         problems.append(dict(where=where, check=check, detail=detail))
@@ -2212,7 +2199,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         # could be finalized, and a refusal that reported zero approvals said the
         # reviewer had not signed when they had.
         return Verdict(status, detail, problems, approved or {}, None, blocked,
-                       unstated, 0, run_stamp_sha, review_sha, inference_sha)
+                       unstated, 0, run_stamp_sha, review_sha, inference_sha,
+                       verified_reviewers[0])
 
     run_stamp_path = os.path.join(run_dir, "run_stamp.json")
     run_stamp_sha = ""
@@ -2296,6 +2284,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # registry decides who may approve, so re-opening it after verifying it is
     # the same window the manifests were just closed against.
     reviewers = verified.get("reviewers")
+    verified_reviewers[0] = reviewers
     if reviewers is None:
         return stop("RUN_NOT_FINALIZABLE",
                     "the verified manifests carry no reviewer_registry.csv, so "
@@ -2533,7 +2522,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         _s(approved[p].get("Review_Subject_SHA256")) for p in keep["Run_Panel_ID"]]
     return Verdict("FINALIZED", "", problems, approved, keep, blocked_count,
                    unstated, rejected_count, run_stamp_sha, review_sha,
-                   inference_sha)
+                   inference_sha, verified_reviewers[0])
 
 
 def finalize(run_dir, review_path=None, manifest_dir=None, run_date="",

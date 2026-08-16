@@ -6426,6 +6426,55 @@ FROM. If the wider rule is ever wanted it gets its own name in
     the second file may answer an unasked question     1
     the stamp fallback is dropped from the one rule    2
 
+## v7.99 — a blank key is not a match, and the registry is read once
+
+Two holes in v7.98's `--second`, both of the same shape as the ones before them:
+a check that reads as established and is not.
+
+**A blank key passed as a matching one.** The comparison was `if got and got !=
+expected`, which refuses a WRONG `Panel_ID` and accepts a MISSING one - and a
+column left out of the header entirely arrives as blank through the same door.
+So a second file carrying four columns satisfied a check whose whole claim is
+"each row names this run's own panel, unit and cell". Exact equality now, blank
+included; a header short of the schema is reported once by name; and a row with
+no `Inference_ID` is an answer to nothing.
+
+The fixture was the tell. `_answer()` never filled `Unit_ID` or `Cell_Key`
+because nothing had ever looked at them - but `write_inference_template` fills
+both, so the fixture was testing a file no reviewer would ever produce. It fills
+them now, which is what made the exact-equality change visible at all.
+
+**And the registry was read twice.** `verified_registry()` resolved the path and
+re-read the file, which is one read too many: between the finalizer's verified
+snapshot and the `--second` identity checks, an autosave, a symlink swap or a
+delete puts those checks on rows the decider never saw - and a re-read that
+simply FAILED returned None, whereupon the HUMAN and ORCID checks skipped
+themselves in silence. This is the hash-then-reopen shape already closed on
+decision files, manifests and run outputs; the name said `verified` and the
+function verified nothing.
+
+The `Verdict` carries `reviewers` now - the frame the decider was given, or None
+on a refusal that never got that far - and `verdict_of()` hands the whole verdict
+to `main` so status, problems and registry come from one decision.
+`verified_registry()` is deleted rather than renamed. The scenario hooks
+`RB.load_manifests` to return a registry on the second call in which the
+unregistered second reader IS human: a preflight that re-reads accepts them.
+
+**One guard was removed rather than kept.** A `registry is None` branch in the
+`--second` path fired in no reachable state - a verdict that finalizes has
+always verified the registry, so None implies the status is already a refusal
+and the exit code is already 2. Reverting it broke nothing, which is the
+definition of decoration here. What replaced it is the invariant itself, pinned
+across four verdicts: every verdict that finalizes carries the rows it decided
+against.
+
+    reverted                                          scenarios that fail
+    a blank key counts as a matching one               3
+    the second file need not carry the key columns     1
+    a row with no Inference_ID is not reported         1
+    the registry is read again after the verdict       1
+    the verdict stops carrying its registry            7
+
 ## Still open
 
 - `--second` is a qualification check and not a finalization contract. To make

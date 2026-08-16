@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 7.98 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2856 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2894 -->
+<!-- CURRENT_PIPELINE_VERSION: 7.99 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2864 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2902 -->
 
-2856 scenarios on main after v7.98 under `requirements-lock.txt`, and 2894 with
+2864 scenarios on main after v7.99 under `requirements-lock.txt`, and 2902 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -192,9 +192,12 @@ There is no `--second` fallback: that flag reads two `inference_review.csv`
 files, so it sees the per-cell channel and nothing else. It exits 2 unless every
 question was answered once on both sides, the two answers agree, the two files
 are two files, the two readers are two PEOPLE by ORCID, and the second file is a
-complete review record — this run's own panel, unit and cell on every row, and a
-`Reviewed_At` that is a real past date. It remains a read-only qualification
-check: the finalizer never reads the second file, so nothing in it is bound into
+complete review record — this run's own panel, unit and cell on every row,
+matched exactly rather than "matching or blank", and a `Reviewed_At` that is a
+real past date. The registry those identity checks run against travels out of
+the finalizer's verdict, so it is the snapshot the decider verified rather than
+a second reading of the same path. It remains a read-only qualification check:
+the finalizer never reads the second file, so nothing in it is bound into
 `Review_Subject_SHA256` or stamped.
 
 ## Status

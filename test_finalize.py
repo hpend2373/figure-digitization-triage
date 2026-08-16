@@ -1249,8 +1249,17 @@ def _answers(rows):
     return _r3_cells
 
 
+#: Inference_ID -> the unit and cell the template pre-fills for it. A reviewer
+#: never types these, so a fixture that leaves them blank is testing a file
+#: nobody would produce - and v7.98 accepted a blank key as agreement.
+_CELL_OF = {_c["Inference_ID"]: (_c.get("Unit_ID", ""), _c.get("Cell_Key", ""))
+            for _c in _cells3}
+
+
 def _answer(iid, verdict="CONFIRMED", **kw):
-    base = dict(Inference_ID=iid, Panel_ID="P1", Reviewer_ID="RV_H",
+    unit, cell = _CELL_OF.get(iid, ("", ""))
+    base = dict(Inference_ID=iid, Panel_ID="P1", Unit_ID=unit, Cell_Key=cell,
+                Reviewer_ID="RV_H",
                 Inference_Confirmed=verdict, Reviewed_At="2026-08-06T10:00:00Z")
     base.update(kw)
     return base
@@ -2679,6 +2688,53 @@ check("  an answer to a question this run did not ask is reported too",
       and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
                    "--second", _extra]) == 2,
       "%s" % PF.second_problems(_r3_cells, _extra, _registry, run_dir=_R3_DIR))
+# AND A BLANK KEY IS NOT AGREEMENT. v7.99. The comparison read `if got and got
+# != expected`, which refuses a WRONG panel and accepts a MISSING one - and a
+# column left out of the header entirely arrives as blank through the same door.
+# So a second file carrying Inference_ID, Reviewer_ID, a verdict and a date
+# satisfied a check whose whole claim is "each row names this run's own panel,
+# unit and cell". Blank is the absence of the statement, not a matching one.
+for _blank in ("Panel_ID", "Unit_ID", "Cell_Key"):
+    _bfile = _second_file(
+        "second_blank_%s.csv" % _blank,
+        [dict(_answer(i, Reviewer_ID="RV_H2"), **{_blank: ""})
+         for i in _ids3])
+    check("a second reading with a blank %s is not a matching one" % _blank,
+          any("says %s='(blank)'" % _blank in why for _w, why in
+              PF.second_problems(_r3_cells, _bfile, _registry,
+                                 run_dir=_R3_DIR))
+          and PF.main([_R3_DIR, "--review", _r3_review, "--inference",
+                       _r3_cells, "--second", _bfile]) == 2,
+          "%s" % PF.second_problems(_r3_cells, _bfile, _registry,
+                                    run_dir=_R3_DIR))
+# AND THE COLUMNS HAVE TO BE THERE AT ALL. `_read` names the schema for a file
+# that is ABSENT and imposes nothing on one that is present, so a header with
+# three of the eight columns produced blanks rather than a complaint.
+_headerless = os.path.join(_R3_DIR, "second_no_columns.csv")
+with open(_headerless, "w", newline="", encoding="utf-8") as _fh:
+    _w3 = csv.writer(_fh)
+    _w3.writerow(["Inference_ID", "Reviewer_ID", "Inference_Confirmed",
+                  "Reviewed_At"])
+    for _iid in _ids3:
+        _w3.writerow([_iid, "RV_H2", "CONFIRMED", "2026-08-06T10:00:00Z"])
+check("a second file missing the key columns says so once, by name",
+      any(why.startswith("has no ") and "Cell_Key" in why for _w, why in
+          PF.second_problems(_r3_cells, _headerless, _registry,
+                             run_dir=_R3_DIR))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _headerless]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _headerless, _registry,
+                                run_dir=_R3_DIR))
+_noiid = _second_file(
+    "second_no_iid.csv",
+    [dict(_answer(i, Reviewer_ID="RV_H2")) for i in _ids3]
+    + [dict(_answer(_ids3[0], Reviewer_ID="RV_H2"), Inference_ID="")])
+check("  and a row that answers nothing this run asked is reported too",
+      any("no Inference_ID" in why for _w, why in
+          PF.second_problems(_r3_cells, _noiid, _registry, run_dir=_R3_DIR))
+      and PF.main([_R3_DIR, "--review", _r3_review, "--inference", _r3_cells,
+                   "--second", _noiid]) == 2,
+      "%s" % PF.second_problems(_r3_cells, _noiid, _registry, run_dir=_R3_DIR))
 check("  while the complete, dated, two-person second reading reports nothing",
       PF.second_problems(_r3_cells, _agree, _registry, run_dir=_R3_DIR,
                          today=datetime.date(2026, 8, 8)) == [],
@@ -2694,16 +2750,19 @@ shutil.copytree(_R3_DIR, _moved_dir)
 _moved_manifests = os.path.join(ROOT, "moved_manifests")
 shutil.rmtree(_moved_manifests, ignore_errors=True)
 shutil.move(os.path.join(_moved_dir, "manifests"), _moved_manifests)
+_mv_review0 = os.path.join(_moved_dir, "value_review.csv")
+_mv_cells0 = os.path.join(_moved_dir, "inference_review.csv")
 # AND THE REGISTRY COMES FROM WHERE THE FINALIZER LOOKS. v7.97 resolved it as
 # `--manifests or RUN/manifests` and missed the stamp fallback, so on a run whose
 # manifests live outside it the registry read as unreadable, the HUMAN check was
 # skipped in silence, and an unregistered second reader passed the one flag that
 # exists to catch them.
 check("the registry resolves for a run whose manifests are not inside it",
-      FIN.verified_registry(_moved_dir, None) is not None
+      PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0).reviewers is not None
       and "RV_H" in FIN.human_reviewers(
-          FIN.verified_registry(_moved_dir, None)),
-      "%s" % (FIN.verified_registry(_moved_dir, None) is None))
+          PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0).reviewers),
+      "%s" % (PF.verdict_of(_moved_dir, _mv_review0,
+                            _mv_cells0).reviewers is None,))
 _moved_stamp = json.load(open(os.path.join(_moved_dir, "run_stamp.json"),
                               encoding="utf-8"))
 check("  by the stamp when the run carries no manifests of its own",
@@ -2714,10 +2773,9 @@ check("  by the stamp when the run carries no manifests of its own",
 check("  and by the argument when one is given, which is why it exists",
       FIN.manifest_directory(_moved_dir, _moved_manifests, _moved_stamp)
       == _moved_manifests)
-check("  one rule, not two: the preflight's registry follows the same order",
-      FIN.verified_registry(_moved_dir, _moved_manifests) is not None
-      and "RV_H" in FIN.human_reviewers(
-          FIN.verified_registry(_moved_dir, _moved_manifests)))
+check("  one rule, not two: the preflight's verdict follows the same order",
+      PF.verdict_of(_moved_dir, _mv_review0, _mv_cells0,
+                    manifest_dir=_moved_manifests).reviewers is not None)
 # AND THROUGH THE CLI, which is where the defect was. `main` resolved the
 # registry as `--manifests or RUN/manifests` and never reached the stamp, so on
 # THIS run - manifests outside it, stamp pointing at them - the registry read as
@@ -2747,6 +2805,65 @@ check("the moved run passes with a registered second reader and no --manifests",
 check("  and the unregistered one is caught there too, not silently skipped",
       PF.main([_moved_dir, "--review", _mv_review, "--inference", _mv_cells,
                "--second", _mv_bad]) == 2)
+# AND THE REGISTRY IS THE ONE THE DECIDER VERIFIED, not a second reading of the
+# same path. v7.99. Between the finalizer's verified snapshot and the identity
+# check, v7.98 re-read the file: an autosave, a symlink swap or a delete in that
+# window put the `--second` checks on rows the finalizer never saw, and a read
+# that simply FAILED returned None, whereupon the HUMAN and ORCID checks skipped
+# themselves without a word.
+#
+# HOOKED AT THE READ, because that is the only place the two can differ. The
+# second call to `load_manifests` returns a registry in which RV_NOBODY is a
+# HUMAN; a preflight that re-reads accepts the unregistered second reader.
+_real_load = RB.load_manifests
+_loads = []
+
+
+def _swapping_load(directory):
+    frames = _real_load(directory)
+    _loads.append(directory)
+    if len(_loads) > 1 and frames.get("reviewers") is not None:
+        frames = dict(frames)
+        frames["reviewers"] = pd.concat(
+            [frames["reviewers"],
+             pd.DataFrame([dict(REVIEWERS[0], Reviewer_ID="RV_NOBODY",
+                                Reviewer_Contact="0000-0001-5109-3700")])],
+            ignore_index=True)
+    return frames
+
+
+RB.load_manifests = _swapping_load
+try:
+    _raced = PF.main([_moved_dir, "--review", _mv_review, "--inference",
+                      _mv_cells, "--second", _mv_bad])
+finally:
+    RB.load_manifests = _real_load
+check("a registry that changes after the verdict does not reach the check",
+      _raced == 2 and len(_loads) >= 1,
+      "%s after %d load(s)" % (_raced, len(_loads)))
+# AND WHERE THE VERDICT HAS NO REGISTRY, `--second` refuses rather than skipping.
+_no_reg = FIN.validate_finalization(
+    ROOT, review_path=_mv_review, inference_review_path=_mv_cells)
+check("  a verdict that never got that far carries no registry, and says so",
+      _no_reg.reviewers is None and _no_reg.status != "FINALIZED",
+      "%s" % (_no_reg.status,))
+# THE INVARIANT THE PREFLIGHT RESTS ON, rather than a guard on it: a verdict
+# that finalizes has always verified the registry, because the decider refuses
+# RUN_NOT_FINALIZABLE the moment the manifests carry none. `--second` therefore
+# never meets a FINALIZED verdict with no rows behind it - a branch for that
+# case was written, reverted, broke nothing, and was removed.
+_all_verdicts = [
+    FIN.validate_finalization(_R3_DIR, review_path=_r3_review,
+                              inference_review_path=_r3_cells),
+    FIN.validate_finalization(ROOT, review_path=_mv_review,
+                              inference_review_path=_mv_cells),
+    _no_reg,
+]
+check("  and every verdict that finalizes carries the rows it decided against",
+      all(v.reviewers is not None for v in _all_verdicts
+          if v.status == FIN.FINALIZED_STATUS)
+      and any(v.status == FIN.FINALIZED_STATUS for v in _all_verdicts),
+      "%s" % [(v.status, v.reviewers is None) for v in _all_verdicts])
 # WHAT A RUN HANDED TO SOMEBODY ELSE LOOKS LIKE: the stamp records the absolute
 # path of a directory on the machine that produced it, and that directory is not
 # on this one. The `manifests/` copy inside the run is the fallback that travels;

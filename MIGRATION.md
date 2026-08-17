@@ -27,7 +27,7 @@ split by outcome and is never used to prove completeness.
 |---|---|---|
 | figure manifest | figure | the source, the image, the panel reconciliation |
 | grid definitions | grid x factor x level | what the axes and series actually are |
-| unit manifest | figure x panel x outcome x statistic | how it was read, and how the grid must behave |
+| unit manifest | figure x panel x outcome x statistic | which panel fills it (`Panel_ID`, `Source_Panel_ID`), how it was read, and how the grid must behave |
 | **figure values** | cell | the reading, addressed by `Cell_Key` |
 
 A hand-curated set names these whatever suits it — `id323_figure_values.csv` in
@@ -176,3 +176,57 @@ row of an old file reproduces exactly the ambiguity the column exists to remove.
 than one. Nothing about the two shipped modes changes; a mode that needs the
 numbers, the pictures and the index tying them together now has somewhere to
 say so.
+
+
+# v9.3: `unit_manifest` names the panel that fills it
+
+## Why
+
+v9.1 made the panel-unit binding two-sided in the PLAN: `unit.panel_id` beside
+`panel.read.unit_id`, so exchanging the units of two panels of one figure is
+refused before a raster is opened. `unit_manifest.csv` was not changed, and it
+carried a free-text `Panel` label - which means a manifest set that did not come
+through `compile_plan.py` contained no statement of which panel each unit was.
+Exchange two panels' `Unit_ID` there and every check passes: the measurements are
+right, each value matches its own mark hash, the factor sets and cell counts are
+identical, and one panel's correct numbers arrive under the other's outcome.
+
+## What changed
+
+Two columns, and a bijection `validate_batch_manifests` now requires.
+
+| | before | v9.3 |
+|---|---|---|
+| columns | `Unit_ID, Figure_ID, Grid_ID, Panel, ...` | `Unit_ID, Figure_ID, Grid_ID, Panel_ID, Source_Panel_ID, Panel, ...` |
+| a unit with no `Panel_ID` | ran | `UNIT_NAMES_NO_PANEL` |
+| two panels reading one unit | ran, the second overwrote the first's calibration | `UNIT_FILLED_TWICE` |
+| the units of two panels exchanged | ran, values under the wrong outcome | `PANEL_UNIT_MISMATCH` |
+
+`Panel` is unchanged and still a human label ("MEN", "NO_FLUID_HDT"). It was
+never a foreign key and is not one now.
+
+**Existing unit manifests need two columns added.** For a set whose panels each
+fill one unit, the back-fill is mechanical and safe - take
+`panel_manifest.Panel_ID` and `panel_manifest.Source_Panel_ID` from the row whose
+`Unit_ID` matches:
+
+    python3 - <<'PY'
+    import csv, sys
+    panels = {r["Unit_ID"]: r for r in csv.DictReader(open("panel_manifest.csv"))}
+    rows = list(csv.DictReader(open("unit_manifest.csv")))
+    out = []
+    for r in rows:
+        p = panels.get(r["Unit_ID"])
+        if p is None:
+            sys.exit("no panel reads %s - the pairing is a decision, not a "
+                     "back-fill" % r["Unit_ID"])
+        r["Panel_ID"], r["Source_Panel_ID"] = p["Panel_ID"], p["Source_Panel_ID"]
+        out.append(r)
+    ...
+    PY
+
+It stops rather than guessing in the two cases where the answer is a decision: a
+unit no panel reads, and a unit two panels read. Those are the states the new
+checks exist to name, and a script that picks one of the two panels reproduces
+exactly the ambiguity the columns remove. `compile_plan.py` fills both columns
+from the plan, so a plan-driven set needs no migration at all - recompile it.

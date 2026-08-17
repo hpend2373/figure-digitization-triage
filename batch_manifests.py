@@ -1461,6 +1461,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 
     source_figure_index = {}
     source_figures_by_document = {}
+    #: (document, normalized Figure_Number) -> the first figure to claim it.
+    figure_number_seen = {}
     # The one hash every other layer is measured against. A figure is the raster
     # it names; if the file changed, the panel count, the boxes and the
     # calibrations were all taken from something else.
@@ -1499,6 +1501,25 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "document's digest is over the second file, so a figure "
                      "read from the first is provenance nothing covers"
                      % (fig_file, sdid, doc_file))
+        # ONE FIGURE NUMBER PER DOCUMENT. Source completeness compares
+        # `Observed_Figure_Count` against the NUMBER OF ROWS under the document,
+        # so three rows satisfy a count of three - including three rows that are
+        # FIG1, FIG2 and FIG2 while the article's FIG3 is missing entirely. Both
+        # FIG2 rows carry different `Source_Figure_ID`s and different rasters, so
+        # the duplicate-ID check never sees them and the coverage gate reads as
+        # satisfied: the one thing the source layer exists to prevent - a whole
+        # figure disappearing before the panel check begins - happening while
+        # every count agrees. Normalized, because FIG2 and "fig 2" are one figure.
+        fignum = re.sub(r"[^0-9A-Z]", "",
+                        str(r.get("Figure_Number", "")).strip().upper())
+        if fignum:
+            first = figure_number_seen.setdefault((sdid, fignum), sfid)
+            if first != sfid:
+                flag(line, "DUPLICATE_SOURCE_FIGURE_NUMBER",
+                     "%s and %s are both %s of %s. The coverage gate counts rows, "
+                     "so a document whose figure numbers repeat can satisfy its "
+                     "own figure count with one of its figures missing"
+                     % (first, sfid, r.get("Figure_Number"), sdid or "(no document)"))
         for c in ("Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File", "Source_Page",
                   "Source_Image", "Source_Image_SHA256", "Observed_Panel_Count",
                   "Inventory_Status", "Panel_Count_Method", "Reviewer_ID",
@@ -1617,6 +1638,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     # -------------------------------------------------------------- panels
     panel_index, panel_mark, mark_by_config = {}, {}, {}
     panel_config = {}
+    #: Unit_ID -> the panels whose rows name it. The other half of the v9.3
+    #: bijection, collected here so the check below can be stated once over both
+    #: manifests rather than inside either loop.
+    unit_claims = {}
     for i, r in panels.iterrows():
         line = "panels:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
@@ -1740,6 +1765,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 flag(line, "UNIT_NOT_FOUND",
                      "Unit_ID=%s is not in the unit manifest" % uid)
             else:
+                unit_claims.setdefault(uid, []).append(pid)
                 ustat = str(unit_index[uid].get("Statistic_Type", "")).strip().upper()
                 # A statistic the validator understands and the runner cannot
                 # execute is a sentence, not a discovery halfway through a run.
@@ -2066,6 +2092,56 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         if mark in POSITIONAL_MARK_TYPES and not any(p == pid for p, _ in seen_pos):
             flag("panels:%s" % pid, "PANEL_HAS_NO_POSITIONS",
                  "%s reads at declared x positions and none are declared" % mark)
+
+    # ------------------------------------------------- panel <-> unit bijection
+    # THE PROTECTION v9.1 ADDED TO THE PLAN, AT THE GRAIN A THIRD PARTY WRITES.
+    # `panel.Unit_ID` said which unit a panel fills and the unit said nothing
+    # back, so exchanging the `Unit_ID` of two panels of one figure produced a
+    # manifest set that is internally consistent and wrong: the SAP raster's
+    # correct numbers arrive under the DAP outcome, every hash matches, the
+    # factor sets and cell counts are identical. v9.1 caught that in
+    # `validate_plan`, which protects plans the compiler wrote and nothing else -
+    # a hand-written, migrated or third-party manifest set never passes through
+    # it. `unit_manifest.Panel_ID` (v9.3) is what makes the pairing checkable
+    # here, and the contract is a bijection rather than two lookups.
+    for uid, u in unit_index.items():
+        line = "unit:%s" % uid
+        named = str(u.get("Panel_ID", "")).strip()
+        fillers = unit_claims.get(uid, [])
+        if not named:
+            flag(line, "UNIT_NAMES_NO_PANEL",
+                 "the unit does not say which panel fills it. Panel_ID is the "
+                 "other half of panel_manifest.Unit_ID, and without it an "
+                 "exchange between two panels of one figure is invisible")
+        elif named not in panel_index:
+            flag(line, "UNIT_PANEL_NOT_FOUND",
+                 "Panel_ID=%s is not in the panel manifest" % named)
+        elif named not in fillers:
+            flag(line, "PANEL_UNIT_MISMATCH",
+                 "this unit names %s and %s reads %s. One of the two is wrong, "
+                 "and the values would be filed under the other panel's outcome "
+                 "with nothing else disagreeing"
+                 % (named, named,
+                    str(panel_index[named].get("Unit_ID", "")).strip() or "nothing"))
+        else:
+            # Same pairing, stated twice more: the physical panel and the figure
+            # view. Both are already in the two rows, so disagreement is a
+            # statement about which panel this unit is, not a missing field.
+            pspid = str(panel_index[named].get("Source_Panel_ID", "")).strip()
+            uspid = str(u.get("Source_Panel_ID", "")).strip()
+            if uspid and pspid and uspid != pspid:
+                flag(line, "PANEL_UNIT_SOURCE_PANEL_MISMATCH",
+                     "the unit names physical panel %s and %s is %s"
+                     % (uspid, named, pspid))
+            pfig = str(panel_index[named].get("Figure_ID", "")).strip()
+            ufig = str(u.get("Figure_ID", "")).strip()
+            if pfig and ufig and pfig != ufig:
+                flag(line, "PANEL_UNIT_VIEW_MISMATCH",
+                     "the unit belongs to %s and %s reads %s" % (ufig, named, pfig))
+        if len(fillers) > 1:
+            flag(line, "UNIT_FILLED_TWICE",
+                 "%s is filled by %s. The unit's calibration can only describe "
+                 "one of them" % (uid, ", ".join(sorted(set(fillers)))))
 
     # A factor cannot be both the series axis and the position axis of one panel.
     for pid in panel_index:

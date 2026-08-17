@@ -223,8 +223,12 @@ GRIDS = ([dict(Grid_ID="G_TIME", Factor_Name="ARM", Factor_Level=lv,
 
 
 def unit(uid, grid, statistic, **kw):
+    # `Panel_ID` follows this fixture's own naming - U_LINE is filled by P_LINE -
+    # and a derivation that gets it wrong is refused rather than silent: the
+    # v9.3 bijection check reports UNIT_PANEL_NOT_FOUND or PANEL_UNIT_MISMATCH.
     base = dict(
-        Unit_ID=uid, Figure_ID="F1", Grid_ID=grid, Panel=uid,
+        Unit_ID=uid, Figure_ID="F1", Grid_ID=grid,
+        Panel_ID="P" + uid[1:], Source_Panel_ID="P" + uid[1:], Panel=uid,
         Outcome_Variable="Heart rate", Outcome_Domain="CV", Unit="bpm",
         Statistic_Type=statistic, Display_Hint="UNSPECIFIED", Grid_Rule="FULL",
         Sparse_Justification="", Dispersion_Type="SD",
@@ -511,6 +515,100 @@ check("a figure cut out of a different file than its document is refused",
                                 Source_File="other.pdf")),
       "%s" % validate(source_figures=edited(
           SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Source_File="other.pdf")))
+
+# ONE FIGURE NUMBER PER DOCUMENT (v9.3). Coverage counts ROWS against
+# Observed_Figure_Count, so a document whose figure numbers repeat satisfies its
+# own count while one of its figures is missing entirely - which is the exact
+# failure the source layer exists to prevent, passing every gate.
+check("two rows claiming one figure number of one document are refused",
+      "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                Figure_Number="FIG2")),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF3"}, Figure_Number="FIG2")))
+for _spelling in ("fig2", "FIG 2", "Fig. 2", "  FIG2  "):
+    check("and %r is the same figure number as FIG2" % _spelling,
+          "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+              source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                    Figure_Number=_spelling)),
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+              Figure_Number=_spelling)))
+check("  and the count still agrees, which is why the check is needed",
+      len([f for f in SOURCE_FIGURES]) == int(SOURCE_DOCUMENTS[0]["Observed_Figure_Count"]),
+      "%d rows against Observed_Figure_Count=%s"
+      % (len(SOURCE_FIGURES), SOURCE_DOCUMENTS[0]["Observed_Figure_Count"]))
+# The same number under two DIFFERENT documents is a different thing: an article
+# and its supplement both have a Figure 1.
+check("one figure number under two documents is not a duplicate",
+      validate(source_documents=SOURCE_DOCUMENTS + [dict(
+          SOURCE_DOCUMENTS[0], Source_Document_ID="SD2",
+          Document_Role="SUPPLEMENT", Source_File="supplement.pdf",
+          Source_File_SHA256="NOT_HELD", Observed_Figure_Count=1,
+          Note="one supplementary figure")],
+               source_figures=SOURCE_FIGURES + [dict(
+                   SOURCE_FIGURES[0], Source_Figure_ID="SF_S1",
+                   Source_Document_ID="SD2", Source_File="supplement.pdf",
+                   Figure_Number="FIG1")],
+               source_panels=SOURCE_PANELS + [dict(
+                   SOURCE_PANELS[0], Source_Panel_ID="P_S1",
+                   Source_Figure_ID="SF_S1", Panel_Label="P_S1",
+                   Panel_Disposition="NO_READER_AVAILABLE",
+                   Disposition_Reason="supplementary figure, no reader")]) == [],
+      "%s" % validate(source_documents=SOURCE_DOCUMENTS + [dict(
+          SOURCE_DOCUMENTS[0], Source_Document_ID="SD2",
+          Document_Role="SUPPLEMENT", Source_File="supplement.pdf",
+          Source_File_SHA256="NOT_HELD", Observed_Figure_Count=1,
+          Note="one supplementary figure")],
+          source_figures=SOURCE_FIGURES + [dict(
+              SOURCE_FIGURES[0], Source_Figure_ID="SF_S1",
+              Source_Document_ID="SD2", Source_File="supplement.pdf",
+              Figure_Number="FIG1")],
+          source_panels=SOURCE_PANELS + [dict(
+              SOURCE_PANELS[0], Source_Panel_ID="P_S1",
+              Source_Figure_ID="SF_S1", Panel_Label="P_S1",
+              Panel_Disposition="NO_READER_AVAILABLE",
+              Disposition_Reason="supplementary figure, no reader")]))
+
+# --------------------------------------------------------------------------
+# THE PANEL <-> UNIT BIJECTION AT THE GRAIN A THIRD PARTY WRITES (v9.3)
+# --------------------------------------------------------------------------
+# v9.1 closed the panel-unit exchange in `validate_plan`, which protects plans
+# the compiler wrote and nothing else: `unit_manifest` carried a free-text
+# `Panel` label and no `Panel_ID`, so a hand-written, migrated or third-party
+# manifest set could exchange the units of two panels of one figure and every
+# check still passed. The measurements are right, the hashes match, the factor
+# sets and cell counts are identical - and the SAP panel's numbers arrive under
+# the DAP outcome.
+_swapped = [dict(u, Panel_ID={"U_LINE": "P_FLAT", "U_FLAT": "P_LINE"}.get(
+    u["Unit_ID"], u["Panel_ID"])) for u in UNITS]
+check("two units of one figure with their panels exchanged are refused",
+      "PANEL_UNIT_MISMATCH" in validate(units=_swapped),
+      "%s" % validate(units=_swapped))
+check("a unit that does not say which panel fills it is refused",
+      "UNIT_NAMES_NO_PANEL" in validate(
+          units=[dict(u, Panel_ID="") for u in UNITS]),
+      "%s" % validate(units=[dict(u, Panel_ID="") for u in UNITS]))
+check("a unit naming a panel that is not in the manifest is refused",
+      "UNIT_PANEL_NOT_FOUND" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Panel_ID="P_NOWHERE")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Panel_ID="P_NOWHERE")))
+check("a unit and its panel disagreeing about the physical panel is refused",
+      "PANEL_UNIT_SOURCE_PANEL_MISMATCH" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Source_Panel_ID="P_FLAT")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Source_Panel_ID="P_FLAT")))
+check("a unit and its panel disagreeing about the figure view is refused",
+      "PANEL_UNIT_VIEW_MISMATCH" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Figure_ID="F_ELSEWHERE")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Figure_ID="F_ELSEWHERE")))
+check("two panels reading one unit are refused",
+      "UNIT_FILLED_TWICE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Unit_ID="U_LINE")),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                                    Unit_ID="U_LINE")))
 
 # What the run stamp will say, derived from the same column.
 _mixed = (_doc(Source_File="elsewhere.pdf", Source_File_SHA256="NOT_HELD")
@@ -1110,7 +1208,11 @@ check("the clean scatter unit is unaffected and still accepted",
       set(_acc["Unit_ID"]) == {"U_SCAT"}, "%s" % sorted(set(_acc["Unit_ID"])))
 
 # The whole-figure case the review named: publication 397, every panel rejected.
-_all_bad = [dict(u, Errorbar_Definition_Source="TBD") for u in UNITS]
+# The scatter panel is dropped from this fixture, so ITS UNIT GOES WITH IT: since
+# v9.3 a unit names the panel that fills it, and a unit left behind naming a panel
+# this manifest set does not have is `UNIT_PANEL_NOT_FOUND`.
+_all_bad = [dict(u, Errorbar_Definition_Source="TBD") for u in UNITS
+            if u["Unit_ID"] != "U_SCAT"]
 _mdir = write_manifests(os.path.join(ROOT, "m_allbad"), units=_all_bad,
                         panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
                         series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"],
@@ -2148,24 +2250,70 @@ _mdir = write_manifests(os.path.join(ROOT, "m_split"),
                         source_panels=_split_source_panels)
 _o = os.path.join(ROOT, "o_split")
 _split_summary = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
-check("the two-panel-one-unit fixture actually ran",
+# AND SINCE v9.3 THIS FIXTURE CANNOT RUN AT ALL. v9.1 made one-panel-per-unit a
+# contract in the plan layer - the unit's calibration comes from the first panel
+# that claimed it, so a second claimant's marks are priced against an axis they
+# were not measured on - and v9.3 carries that rule down to the manifests, where
+# a third party's or a hand-written set lives. The scenarios below therefore keep
+# the pre-v9.1 fixture and assert the refusal; the run-time behaviour they used to
+# pin is re-pinned underneath on two panels with a unit each.
+check("two panels of one unit are refused before the run",
+      _split_summary["status"] == "MANIFEST_REJECTED"
+      and "UNIT_FILLED_TWICE" in _split_summary["detail"],
+      "%s" % _split_summary)
+check("and nothing is written for them",
+      not os.path.exists(os.path.join(_o, "figure_values_raw.csv")),
+      "%s" % sorted(os.listdir(_o)))
+
+# The same two panels, each with its own unit: the blank one cannot be read and
+# the readable one reads cleanly. Keying panel state by Unit_ID once let the
+# second overwrite the first, so a half nobody could read came out ACCEPTED.
+_pair_panels = [
+    panel("P_HALF_A", "U_HALF_A", "LINE_COLOR", BLANK_IMG, (100, 500, 40, 440)),
+    panel("P_HALF_B", "U_HALF_B", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440)),
+]
+_pair_series = [series(p, s, lv, Colour_Hex=hx)
+                for p in ("P_HALF_A", "P_HALF_B")
+                for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                  ("S_RED", "TREATED", "#d72d2d"))]
+_pair_units = UNITS + [unit("U_HALF_A", "G_TIME", "CONTINUOUS",
+                            Panel_ID="P_HALF_A", Source_Panel_ID="P_HALF_A"),
+                       unit("U_HALF_B", "G_TIME", "CONTINUOUS",
+                            Panel_ID="P_HALF_B", Source_Panel_ID="P_HALF_B")]
+_mdir = write_manifests(os.path.join(ROOT, "m_pair"),
+                        panels=PANELS + _pair_panels,
+                        series_rows=SERIES + _pair_series,
+                        positions=POSITION_ROWS + [
+                            dict(p, Panel_ID=pid)
+                            for pid in ("P_HALF_A", "P_HALF_B")
+                            for p in _split_positions
+                            if p["Panel_ID"] == "P_HALF_A"],
+                        units=_pair_units,
+                        source_figures=[
+                            dict(f, Observed_Panel_Count=2)
+                            if f["Source_Figure_ID"] in ("SF1", "SF4") else f
+                            for f in SOURCE_FIGURES],
+                        source_panels=_split_source_panels)
+_o = os.path.join(ROOT, "o_pair")
+_split_summary = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+check("the two-panel fixture actually ran",
       _split_summary["status"] == "RAN", "%s" % _split_summary)
 _sr = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
 _sraw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
 _sacc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
                     dtype=object).fillna("")
 _sstates = dict(zip(_sr["Panel_ID"], _sr["Run_State"]))
-check("two panels of one unit keep two separate run rows",
+check("two panels of one figure keep two separate run rows",
       _sstates.get("P_HALF_A") and _sstates.get("P_HALF_B"), "%s" % _sstates)
 check("the blank panel of the pair did not pass",
       _sstates.get("P_HALF_A") != "AUTO_PASS", "%s" % _sstates)
 check("the readable panel's rows name the readable panel",
-      set(_sraw[_sraw["Unit_ID"] == "U_SPLIT"]["Run_Panel_ID"]) == {"P_HALF_B"},
-      "%s" % sorted(set(_sraw[_sraw["Unit_ID"] == "U_SPLIT"]["Run_Panel_ID"])))
-check("and the unit is not silently accepted on the strength of one panel",
-      not len(_sacc[_sacc["Unit_ID"] == "U_SPLIT"]),
-      "%d rows accepted for a unit whose other panel could not be read"
-      % len(_sacc[_sacc["Unit_ID"] == "U_SPLIT"]))
+      set(_sraw[_sraw["Unit_ID"] == "U_HALF_B"]["Run_Panel_ID"]) == {"P_HALF_B"},
+      "%s" % sorted(set(_sraw[_sraw["Unit_ID"] == "U_HALF_B"]["Run_Panel_ID"])))
+check("and the unreadable panel's unit accepts nothing on its neighbour's strength",
+      not len(_sacc[_sacc["Unit_ID"] == "U_HALF_A"]),
+      "%d rows accepted for a unit whose panel could not be read"
+      % len(_sacc[_sacc["Unit_ID"] == "U_HALF_A"]))
 
 
 print("the run records what would have to match for it to be reproducible")
@@ -3043,6 +3191,7 @@ _short_source_panel = dict(_mono_source_panel, Source_Panel_ID="P_SHORT",
 # reusing the previous unit would have made this scenario about the plausibility
 # table instead of about the identity.
 _short_unit = dict(_mono_unit, Unit_ID="U_SHORT", Figure_ID="F_SHORT",
+                   Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
                    Panel="U_SHORT",
                    Outcome_Variable="Total peripheral resistance",
                    Unit="mmHg/L/min")
@@ -5411,6 +5560,7 @@ for _side, _spec in _HALF.items():
         Config_ID="", Axis_Y_Ticks=";".join("%g:%g" % (v, p)
                                             for v, p in _gt["y_ticks"])))
     _half_units.append(dict(_short_unit, Unit_ID=_uid, Figure_ID=_fid,
+                            Panel_ID=_pid, Source_Panel_ID=_pid,
                             Panel=_side, Grid_ID="G_%s" % _side))
     _half_series += [series(_pid, "S_%s" % f, _MONO_ARMS[f], Bar_Fill_Pattern=f)
                      for f in _MONO_FILLS]

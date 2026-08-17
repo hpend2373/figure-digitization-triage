@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import compile_plan as CP                                          # noqa: E402
+import grid_engine as GE                                            # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import run_batch as RB                                             # noqa: E402
 
@@ -78,6 +79,13 @@ def compile_to(name, plan=None, file_root=HERE):
 
 def codes(problems):
     return sorted({p["check"] for p in problems})
+
+
+def _mutated(mutate):
+    """A copy of the shipped plan with one thing changed."""
+    plan = copy.deepcopy(PLAN)
+    mutate(plan)
+    return plan
 
 
 print("one plan compiles to eleven manifests")
@@ -353,13 +361,77 @@ for _label, _mutate, _want in (
                     [sp.update(factor="ARM")
                      for pan in _auto_panels(p, "FIG5")
                      for sp in pan["read"]["series"]]],
-         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED")):
+         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED"),
+        # ONE FACTOR, ONE AXIS (v9.3). The runner builds a single `Cell_Key`
+        # mapping from the series factor and the position factor, so a factor
+        # naming both axes is written twice and one of the two readings of it is
+        # lost. `batch_manifests` has refused this since the series layer
+        # existed; here it is reported against the plan line rather than against
+        # a generated CSV - and with a single series it is silent downstream,
+        # because nothing is then missing a cell to complain about.
+        ("a factor labelling both the series and the positions",
+         lambda p: [sp.update(factor="TIMEPOINT", level="0:30")
+                    for sp in _auto_panels(p, "FIG1")[0]["read"]["series"]],
+         "PLAN_FACTOR_ON_BOTH_AXES"),
+        # TWO MARKS, ONE CELL. The grid gate catches this as
+        # `FACTORIAL_CELL_DUPLICATE` after both marks have been measured, and
+        # which of the two numbers the cell should hold is not a question it can
+        # answer. The declaration says the same thing twice, so it is answerable
+        # here.
+        ("two series of one panel declaring the same level",
+         lambda p: _auto_panels(p, "FIG1")[0]["read"]["series"][1].update(
+             level=_auto_panels(p, "FIG1")[0]["read"]["series"][0]["level"]),
+         "PLAN_DUPLICATE_FACTOR_LEVEL_ASSIGNMENT"),
+        ("two positions of one panel declaring the same level",
+         lambda p: _auto_panels(p, "FIG1")[0]["read"]["positions"][1].update(
+             level=_auto_panels(p, "FIG1")[0]["read"]["positions"][0]["level"]),
+         "PLAN_DUPLICATE_FACTOR_LEVEL_ASSIGNMENT"),
+        # A UNIT NOBODY FILLS. `PLAN_UNIT_HAS_NO_PANEL` asked whether any panel
+        # read the unit's VIEW, which is a weaker question: a unit of a view
+        # another panel occupies could have zero claimants and pass - declared,
+        # priced by a grid, filled by nobody. v9.3 counts the claimants.
+        ("a unit of an occupied view that no panel fills",
+         lambda p: p["units"].append(dict(p["units"][0], unit_id="U_ORPHAN",
+                                          panel_id="P_ORPHAN")),
+         "PLAN_UNIT_HAS_NO_PANEL")):
     _p = copy.deepcopy(PLAN)
     _mutate(_p)
     _out, (_w, _probs) = compile_to("m_bad", plan=_p)
     check("%s is refused" % _label, _want in codes(_probs), "%s" % codes(_probs))
     check("  and no manifest is written", not _w and not os.path.isdir(_out),
           "%s" % sorted(_w))
+
+print()
+print("the level check normalizes case the way the gate does")
+# v9.2 compared the level text as the plan wrote it, and `fig_cell_key` upper-
+# cases the factor AND the level while `grid_engine` upper-cases what a grid
+# declares. So `Pre` in a grid against `PRE` on a mark is ONE cell downstream and
+# was two at plan time: a false refusal rather than a false acceptance, and still
+# a contract that differed between two layers of one package.
+_p = copy.deepcopy(PLAN)
+for _g in _p["grids"]:
+    for _f, _lv in list(_g["factors"].items()):
+        _g["factors"][_f] = [str(x).lower() for x in _lv]
+_out, (_w, _probs) = compile_to("m_case", plan=_p)
+check("a grid declaring its levels in lower case is not refused",
+      not _probs, "%s" % codes(_probs))
+_case_grids = pd.read_csv(os.path.join(_out, "grid_definitions.csv"), dtype=object)
+_case_series = pd.read_csv(os.path.join(_out, "series_manifest.csv"), dtype=object)
+check("  and the two spellings really are one cell downstream",
+      GE.fig_cell_key({"ARM": "fluid"}) == GE.fig_cell_key({"ARM": "FLUID"})
+      == "ARM=FLUID",
+      "%s vs %s" % (GE.fig_cell_key({"ARM": "fluid"}),
+                    GE.fig_cell_key({"ARM": "FLUID"})))
+check("  and a level the grid does not declare in ANY case is still refused",
+      "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED" in codes(
+          CP.validate_plan(_mutated(lambda p: [
+              sp.update(level="placebo")
+              for sp in _auto_panels(p, "FIG1")[0]["read"]["series"]]),
+              file_root=HERE)),
+      "%s" % codes(CP.validate_plan(_mutated(lambda p: [
+          sp.update(level="placebo")
+          for sp in _auto_panels(p, "FIG1")[0]["read"]["series"]]),
+          file_root=HERE)))
 
 print()
 print("the plan says which document its figures came out of")

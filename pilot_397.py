@@ -294,8 +294,13 @@ def figure(fid, image, caption, panels):
 
 
 def unit(uid, fid, grid, panel_label, outcome, units, domain, **kw):
+    # Every unit here is `"U_" + Panel_ID`, and v9.3 asks the unit to SAY which
+    # panel fills it rather than leaving `panel_manifest.Unit_ID` to be the only
+    # statement of the pairing. Derived from the convention, and a derivation
+    # that misses is refused by the bijection check rather than accepted.
     base = dict(
-        Unit_ID=uid, Figure_ID=fid, Grid_ID=grid, Panel=panel_label,
+        Unit_ID=uid, Figure_ID=fid, Grid_ID=grid,
+        Panel_ID=uid[2:], Source_Panel_ID=uid[2:], Panel=panel_label,
         Outcome_Variable=outcome, Outcome_Domain=domain, Unit=units,
         Statistic_Type="CONTINUOUS", Display_Hint="UNSPECIFIED",
         Grid_Rule="FULL", Sparse_Justification="", Dispersion_Type="SD",

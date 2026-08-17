@@ -7160,6 +7160,93 @@ files outside `file_root`: the guard can only ask the corpus what it is holding.
 *(This section also removes two duplicate `## Still open` headings that had
 accumulated above it.)*
 
+## v9.3 — the plan's protections come down to the grain a third party writes
+
+**v9.1 and v9.2 both closed real defects in `validate_plan`, which protects
+manifests the compiler wrote and nothing else.** A hand-written set, a migrated
+set, a set from somebody else's producer, or `finalize_batch` reading a directory
+whose plan nobody has - none of those pass through the plan validator. So the
+panel-unit exchange v9.1 caught was still live one layer down: `unit_manifest`
+carried a free-text `Panel` LABEL and no `Panel_ID`, which is to say the
+manifests contained no statement of which panel each unit was. Exchange the
+`Unit_ID` of two panels of one figure in such a set and every check passes - the
+measurements are right, each value matches its own mark hash, the factor sets and
+cell counts are identical - and the SAP panel's correct numbers arrive under the
+DAP outcome. `Panel_ID` and `Source_Panel_ID` are now part of the unit schema and
+`validate_batch_manifests` requires a bijection:
+
+    UNIT_NAMES_NO_PANEL                 the unit does not say which panel fills it
+    UNIT_PANEL_NOT_FOUND                it names a panel the manifest does not have
+    PANEL_UNIT_MISMATCH                 the two rows name each other's panel
+    PANEL_UNIT_SOURCE_PANEL_MISMATCH    they disagree about the physical panel
+    PANEL_UNIT_VIEW_MISMATCH            they disagree about the figure view
+    UNIT_FILLED_TWICE                   two panels read one unit
+
+The last one is v9.1's one-panel-per-unit rule arriving at the same grain, and it
+retired a fixture: `test_run_batch` had a two-panels-one-unit batch pinning what
+the runner did with it. That set cannot run any more, so the scenario now pins the
+refusal and the run-time behaviour it used to cover is re-pinned on two panels
+with a unit each.
+
+**A document could satisfy its own figure count with a figure missing.** Source
+completeness compares `Observed_Figure_Count` against the NUMBER OF ROWS under
+the document, so three rows satisfy a count of three - including rows numbered
+FIG1, FIG2 and FIG2 while the article's FIG3 is absent. The two FIG2 rows carry
+different `Source_Figure_ID`s and different rasters, so the duplicate-ID check
+never sees them, and the one thing this layer exists to prevent - a whole figure
+disappearing before the panel check begins - happens with every count agreeing.
+`DUPLICATE_SOURCE_FIGURE_NUMBER`, on `(Source_Document_ID, normalized
+Figure_Number)`: `FIG2`, `fig 2` and `Fig. 2` are one figure, and an article and
+its supplement may both have a Figure 1. Raster-hash uniqueness would have been
+the wrong rule - two figures can be cropped from one page raster.
+
+**A unit nobody fills could pass.** `PLAN_UNIT_HAS_NO_PANEL` asked whether any
+panel read the unit's VIEW, which is a weaker question than the one it means: a
+unit belonging to a view another panel occupies had zero claimants and compiled -
+declared, priced by a grid, filled by nobody. The contract is now
+`len(claimed[unit_id]) == 1` for every unit, counted against the panels that name
+it.
+
+**And two plan-time checks about what a `Cell_Key` can hold.**
+`PLAN_FACTOR_ON_BOTH_AXES` - the runner builds one `Cell_Key` mapping from the
+series factor and the position factor, so a factor naming both axes is written
+twice and one of the two readings is lost; with a single series it is lost
+silently, because nothing downstream is then missing a cell to complain about.
+`batch_manifests` has refused this since the series layer existed, and saying it
+at plan time reports the defect against the line that has it rather than against a
+generated CSV. `PLAN_DUPLICATE_FACTOR_LEVEL_ASSIGNMENT` - two marks of one panel
+declaring the same `(factor, level)` are two readings of one cell. The grid gate
+catches that as `FACTORIAL_CELL_DUPLICATE` after both have been measured, and
+which of the two numbers the cell should hold is not a question it can answer; the
+declaration says the same thing twice, which is answerable here.
+
+**A false refusal v9.2 introduced.** `fig_cell_key` upper-cases the factor AND
+the level, and `grid_engine` upper-cases what a grid declares - so `Pre` in a grid
+against `PRE` on a mark is one cell downstream. v9.2's new level check compared
+the text as written and would have refused that plan: not a wrong number, but a
+contract that differed between two layers of one package, and the kind of
+difference that teaches people to work around the stricter layer. Both sides are
+upper-cased now, and a scenario asserts the two spellings really do produce one
+`Cell_Key`.
+
+    reverted                                          scenarios that fail
+    the manifest bijection removed                      8
+    Panel_ID dropped from the unit schema               25
+    the duplicate figure-number check removed            5
+    the zero-claimant count reverted to the view test    2
+    the plan-time axis-overlap check removed              1
+    the duplicate-cell assignment check removed           4
+    the level case normalization reverted                 1
+
+**What this does NOT close.** The inventory's SCOPE is still a free-text
+`Article_Page_Range`. v9.2 bound the document's BYTES; nothing can check that the
+range names pages the file has, that a figure's `Source_Page` falls inside it, or
+that a partial record declares itself partial - `Scope_Type`, `Start_Page`,
+`End_Page` and a parent document ID would be the structure for that, and it is a
+schema change with a migration rather than a check. The grid-level direction of
+the level comparison is still deliberately unchecked (see v9.2). And the document
+digest still has no producer inside the package.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

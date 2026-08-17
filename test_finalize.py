@@ -133,7 +133,8 @@ GRIDS = ([dict(Grid_ID="G", Factor_Name="ARM", Factor_Level=lv, Level_Order=i,
          + [dict(Grid_ID="G", Factor_Name="TIMEPOINT", Factor_Level=lv,
                  Level_Order=i, Note="") for i, lv in enumerate(LABELS)])
 UNITS = [dict(
-    Unit_ID="U1", Figure_ID="F1", Grid_ID="G", Panel="P1", Outcome_Name="Heart rate",
+    Unit_ID="U1", Figure_ID="F1", Grid_ID="G",
+    Panel_ID="P1", Source_Panel_ID="P1", Panel="P1", Outcome_Name="Heart rate",
     Outcome_Variable="Heart rate", Outcome_Domain="CV_HEMO", Unit="bpm",
     Units="bpm", Statistic_Type="CONTINUOUS", Grid_Rule="FULL",
     Value_Scale="RATIO", Analysis_Transformation="UNTRANSFORMED",

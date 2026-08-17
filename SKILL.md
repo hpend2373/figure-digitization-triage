@@ -537,11 +537,20 @@ The individual readings may be fine; a unit with a hole in its grid is not
 poolable, and the raw file keeps the numbers for whoever resolves it.
 
 Every value row also carries `Source_Panel_ID`, and is judged by **its own**
-panel plus the worst state among every panel building that unit. Two panels can
-feed one unit; keying state by `Unit_ID` alone let the last panel seen overwrite
-the first, so a unit whose readable half filled the whole grid came out accepted
-while its unreadable half was never mentioned. Nobody knows whether the panel
-that could not be read would have agreed.
+panel plus the worst state among every panel building that unit. Keying state by
+`Unit_ID` alone once let the last panel seen overwrite the first, so a unit whose
+readable half filled the whole grid came out accepted while its unreadable half
+was never mentioned. Nobody knows whether the panel that could not be read would
+have agreed.
+
+**One panel per unit, stated on both rows.** `unit_manifest.Panel_ID` and
+`panel_manifest.Unit_ID` have to name each other, and exactly one panel may read
+a unit (`UNIT_FILLED_TWICE`). Without the unit's half of that, exchanging the
+`Unit_ID` of two panels of one figure produces a manifest set in which every
+measurement is right, every hash matches, and one panel's numbers sit under the
+other's outcome — which no downstream check can see, because nothing else
+disagrees. `Source_Panel_ID` on the unit says the same pairing at the physical
+grain.
 
 **Clearing up happens at the START of a run, before anything can fail** —
 including reading the manifests. A run that tidies

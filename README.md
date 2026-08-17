@@ -37,7 +37,8 @@ They are not licensed for redistribution.
     ────────────────────────────────────────────────────────────────────────────
     figure_manifest.csv          the figure a value came from
     grid_definitions.csv         the factors and levels a figure declares
-    unit_manifest.csv            Figure × Panel × Outcome × Statistic
+    unit_manifest.csv            Figure × Panel × Outcome × Statistic, naming
+                                 the panel that fills it
     figure_values.csv            Unit_ID × Cell_Key
     ────────────────────────────────────────────────────────────────────────────
     panel_manifest.csv           panel box, mark type, axis calibration
@@ -82,11 +83,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 9.2 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2984 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3022 -->
+<!-- CURRENT_PIPELINE_VERSION: 9.3 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3010 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3048 -->
 
-2984 scenarios on main after v9.2 under `requirements-lock.txt`, and 3022 with
+3010 scenarios on main after v9.3 under `requirements-lock.txt`, and 3048 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the

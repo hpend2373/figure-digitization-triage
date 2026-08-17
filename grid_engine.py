@@ -131,8 +131,19 @@ def fig_grid_columns():
 
 
 def fig_unit_columns():
+    """One row per Figure x Panel x Outcome x Statistic.
+
+    `Panel_ID` and `Source_Panel_ID` name the panel that fills this unit, and
+    they are the other half of a binding that until v9.3 existed only in the
+    plan validator. `Panel` beside them is a human LABEL - "MEN", "NO_FLUID_HDT"
+    - and was the only thing here that pointed at a panel at all, which is to
+    say nothing pointed at one: exchange the `Unit_ID` of two panels of one
+    figure in a hand-written or third-party manifest set and every check passed,
+    because the manifests carried no statement of which panel each unit was
+    supposed to be. `validate_batch_manifests` now requires the bijection.
+    """
     return [
-        "Unit_ID", "Figure_ID", "Grid_ID", "Panel",
+        "Unit_ID", "Figure_ID", "Grid_ID", "Panel_ID", "Source_Panel_ID", "Panel",
         "Outcome_Variable", "Outcome_Domain", "Unit",
         "Statistic_Type", "Display_Hint", "Grid_Rule", "Sparse_Justification",
         "Dispersion_Type", "Errorbar_Definition_Source", "N_Outcome", "Value_Scale",

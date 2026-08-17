@@ -436,12 +436,20 @@ def validate_plan(plan, file_root="."):
     #: then refused one by one as `FACTOR_SET_INCONSISTENT` - the same
     #: after-all-the-work diagnosis v9.0 removed at the name grain, still
     #: waiting one grain down.
+    #:
+    #: UPPER-CASED ON BOTH SIDES, because `fig_cell_key` upper-cases the factor
+    #: AND the level and `grid_engine` upper-cases what it declares - so `Pre`
+    #: in a grid and `PRE` on a mark are one cell downstream. v9.2 compared the
+    #: text as written and would have refused that plan: a false refusal rather
+    #: than a false acceptance, and still a contract that differs between two
+    #: layers of the same package.
     grid_levels = {}
     for g in plan["grids"]:
         levels = {}
         for factor, values in (g.get("factors") or {}).items():
             if isinstance(values, list):
-                levels[str(factor).strip().upper()] = {_s(v) for v in values}
+                levels[str(factor).strip().upper()] = {_s(v).upper()
+                                                      for v in values}
         grid_levels[_s(g.get("grid_id"))] = levels
     unit_grid = {_s(u.get("unit_id")): _s(u.get("grid_id"))
                  for u in plan["units"]}
@@ -643,28 +651,70 @@ def validate_plan(plan, file_root="."):
             # level nobody declared is different in kind - it cannot be
             # filed at all - so it is refused before the raster is opened.
             unit_levels = grid_levels.get(unit_grid.get(uid))
-            if unit_levels:
-                for kind, marks, id_key in (
-                        ("series", read.get("series") or [], "series_id"),
-                        ("positions", read.get("positions") or [], "position_id")):
-                    for mi, mark in enumerate(marks):
-                        factor = _s(mark.get("factor")).upper()
-                        level = _s(mark.get("level"))
-                        if not factor or factor not in unit_levels:
-                            continue          # the name check has this one
-                        if level and level not in unit_levels[factor]:
-                            problems.append(_problem(
-                                "%s.%s[%d]" % (pwhere, kind, mi),
-                                "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED",
-                                "%s=%r names %s level %r and grid %r declares "
-                                "%s for that factor. The runner writes the level "
-                                "into the Cell_Key, so this mark would be read "
-                                "off the raster and then refused as a cell that "
-                                "does not exist"
-                                % (id_key, _s(mark.get(id_key)), factor, level,
-                                   unit_grid.get(uid),
-                                   "{%s}" % ", ".join(
-                                       sorted(unit_levels[factor])))))
+            #: (factor, level) -> the mark that already took that cell, per axis.
+            #: Two marks over one pair are two readings of the same cell.
+            taken = {}
+            for kind, marks, id_key in (
+                    ("series", read.get("series") or [], "series_id"),
+                    ("positions", read.get("positions") or [], "position_id")):
+                for mi, mark in enumerate(marks):
+                    factor = _s(mark.get("factor")).upper()
+                    level = _s(mark.get("level")).upper()
+                    if not factor:
+                        continue
+                    if unit_levels and factor in unit_levels \
+                            and level and level not in unit_levels[factor]:
+                        problems.append(_problem(
+                            "%s.%s[%d]" % (pwhere, kind, mi),
+                            "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED",
+                            "%s=%r names %s level %r and grid %r declares "
+                            "%s for that factor. The runner writes the level "
+                            "into the Cell_Key, so this mark would be read "
+                            "off the raster and then refused as a cell that "
+                            "does not exist"
+                            % (id_key, _s(mark.get(id_key)), factor,
+                               _s(mark.get("level")), unit_grid.get(uid),
+                               "{%s}" % ", ".join(
+                                   sorted(unit_levels[factor])))))
+                    # ONE MARK PER CELL, PER AXIS. Two series of one panel
+                    # declaring the same level are two readings of one cell:
+                    # the grid gate catches it as `FACTORIAL_CELL_DUPLICATE`
+                    # after both marks have been measured, and which of the two
+                    # numbers the cell should hold is not a question the gate
+                    # can answer. It is answerable here - the declaration says
+                    # the same thing twice - and the marks are two curves a
+                    # person told the reader apart by colour or shape.
+                    first = taken.setdefault((kind, factor, level), mi)
+                    if first != mi:
+                        problems.append(_problem(
+                            "%s.%s[%d]" % (pwhere, kind, mi),
+                            "PLAN_DUPLICATE_FACTOR_LEVEL_ASSIGNMENT",
+                            "%s=%r declares %s=%r, which %s[%d] already "
+                            "declares. Both marks would be filed in one cell"
+                            % (id_key, _s(mark.get(id_key)), factor,
+                               _s(mark.get("level")), kind, first)))
+            # AND A FACTOR IS ONE AXIS OR THE OTHER. The runner puts the series
+            # factor and the position factor into the same `Cell_Key` mapping, so
+            # a factor naming both axes is written twice and one of the two
+            # meanings is lost - silently, when the series is alone, because
+            # nothing downstream is then missing a cell to complain about.
+            # `batch_manifests` has refused this since the series layer existed
+            # (`FACTOR_ON_BOTH_AXES`); saying it here reports the defect against
+            # the plan line that has it rather than against a generated CSV.
+            _series_factors = {_s(sp.get("factor")).upper()
+                               for sp in (read.get("series") or [])
+                               if _s(sp.get("factor"))}
+            _position_factors = {_s(pp.get("factor")).upper()
+                                 for pp in (read.get("positions") or [])
+                                 if _s(pp.get("factor"))}
+            _overlap = sorted(_series_factors & _position_factors)
+            if _overlap:
+                problems.append(_problem(
+                    pwhere, "PLAN_FACTOR_ON_BOTH_AXES",
+                    "%s labels both the series and the positions of this panel. "
+                    "The runner writes one Cell_Key from both axes, so the "
+                    "factor is set twice and one of the two readings of it is "
+                    "lost" % ", ".join(_overlap)))
             views.setdefault(_s(read.get("figure_view")), []).append((sfid, panel))
             box = read.get("box") or []
             if not isinstance(box, list) or len(box) != 4 or not all(
@@ -710,7 +760,14 @@ def validate_plan(plan, file_root="."):
         statistic = _s(u.get("statistic")).upper()
         if statistic not in BM.CAPABILITY_MATRIX:
             problems.append(_problem(where, "BAD_STATISTIC_TYPE", statistic))
-        if _s(u.get("figure_view")) not in views:
+        # EXACTLY ONE CLAIMANT, counted against the panels that actually name
+        # this unit. Testing `figure_view in views` asked a weaker question -
+        # "does any panel read this unit's view?" - so a unit of a view another
+        # panel occupies could have zero claimants and pass: declared, priced by
+        # a grid, and filled by nobody. Its cells are then missing rather than
+        # wrong, which the gate reports one layer later against a unit whose
+        # calibration was never built.
+        if not claimed.get(_s(u.get("unit_id"))):
             problems.append(_problem(
                 where, "PLAN_UNIT_HAS_NO_PANEL",
                 "%s is declared but no panel fills it - a unit nobody reads is "
@@ -953,7 +1010,18 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                     cal["Axis_Calib_%s%d_Pixel" % (axis, n)] = pixel
         row = dict(
             Unit_ID=uid, Figure_ID=_s(u.get("figure_view")),
-            Grid_ID=_s(u.get("grid_id")), Panel=_s(u.get("panel")),
+            Grid_ID=_s(u.get("grid_id")),
+            # THE BINDING, CARRIED INTO THE MANIFEST (v9.3). Taken from the
+            # plan's `unit.panel_id`, which `validate_plan` has already required
+            # to be the panel that reads this unit - so the CSV a third party or
+            # a finalizer reads states the pairing instead of leaving it to be
+            # inferred from `panel_manifest.Unit_ID` alone. `Source_Panel_ID` is
+            # the physical panel of the same pairing, read off the panel row
+            # rather than re-declared.
+            Panel_ID=_s(u.get("panel_id")),
+            Source_Panel_ID=(_s(fills[0].get("Source_Panel_ID")) if fills
+                             else _s(u.get("panel_id"))),
+            Panel=_s(u.get("panel")),
             Outcome_Name=_s(u.get("outcome_name")),
             Outcome_Variable=_s(u.get("outcome_variable")) or _s(u.get("outcome_name")),
             Outcome_Domain=_s(u.get("domain")), Unit=_s(u.get("unit")),

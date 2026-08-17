@@ -612,7 +612,8 @@ def main(argv=None):
         bundle = bundle_problems_from(
             snap.machine, snap.ledger,
             {_s(r.get("Inference_ID"))
-             for r in FIN.collect_inference_manifests(args.run_dir)},
+             for r in FIN.collect_inference_manifests(
+                 args.run_dir, artifacts=snap.artifacts, ledger=snap.ledger)},
             asked=asked)
         for where, why in bundle:
             print("  BUNDLE   %-34s %s" % (where, why))

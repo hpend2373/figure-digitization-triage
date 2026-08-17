@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 8.2 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2889 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2927 -->
+<!-- CURRENT_PIPELINE_VERSION: 8.3 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2893 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2931 -->
 
-2889 scenarios on main after v8.2 under `requirements-lock.txt`, and 2927 with
+2893 scenarios on main after v8.3 under `requirements-lock.txt`, and 2931 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -150,7 +150,10 @@ is kept from the read that hashed it and handed to the contract check that
 interprets it, so a geometry file swapped after verification cannot become the
 evidence for a route it does not support. A picture or a contact sheet is hashed
 and nothing more: this module never parses one, so its digest is the whole of
-what the finalizer needs.
+what the finalizer needs. The bytes are addressed by what the LEDGER recorded —
+type, panel, reference, run-relative path, digest — not by a realpath computed
+afterwards, so re-pointing a symlink between the hash and the read cannot move
+which entry a row resolves to.
 
 To run the pilot as attested work:
 

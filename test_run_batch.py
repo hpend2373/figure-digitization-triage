@@ -4024,6 +4024,72 @@ _artifact_race("nor does a resolution file rewritten as it is hashed",
 # The join's own snapshot is pinned in `test_finalize` against a reader that has
 # one.
 
+# AND THE SNAPSHOT IS ADDRESSED BY WHAT THE LEDGER RECORDED, not by asking the
+# filesystem again. v8.3. The bytes were keyed on `os.path.realpath(path)` and
+# looked up the same way, so the ADDRESS was recomputed against the filesystem
+# after verification: re-point a symlink in between and the lookup misses -
+# evidence that is present reads as absent - or lands on another artifact's
+# entry. The bytes were immutable and the way to find them was not.
+_lnk_dir = os.path.join(ROOT, "o_short_symlink")
+shutil.rmtree(_lnk_dir, ignore_errors=True)
+shutil.copytree(_o2, _lnk_dir)
+_lnk_review = _write_review(os.path.join(_lnk_dir, "value_review.csv"),
+                            ["P_SHORT"])
+_lnk_led_path = os.path.join(_lnk_dir, "panel_artifacts.csv")
+_lnk_led = pd.read_csv(_lnk_led_path, dtype=object).fillna("")
+_lnk_row = _lnk_led[_lnk_led["Artifact_Type"] == "IDENTITY_RESOLUTION"].iloc[0]
+_lnk_real = RB.resolve_artifact(_lnk_dir, _lnk_row["Artifact_Path"])
+# The ledger points at a SYMLINK inside the run; the link points at the real
+# file. Nothing about the recorded path or its hash changes.
+_lnk_target = os.path.join(os.path.dirname(_lnk_real), "resolution_target.csv")
+_lnk_decoy = os.path.join(os.path.dirname(_lnk_real), "resolution_decoy.csv")
+shutil.move(_lnk_real, _lnk_target)
+_decoy = pd.read_csv(_lnk_target, dtype=object).fillna("")
+_decoy["Resolved_Fill_Pattern"] = ["SOLID"] * len(_decoy)
+_decoy.to_csv(_lnk_decoy, index=False)
+os.symlink(_lnk_target, _lnk_real)
+_lnk_stamp = json.load(open(os.path.join(_lnk_dir, "run_stamp.json"),
+                            encoding="utf-8"))
+_lnk_stamp["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(_lnk_led_path)
+with open(os.path.join(_lnk_dir, "run_stamp.json"), "w",
+          encoding="utf-8") as _fh:
+    json.dump(_lnk_stamp, _fh, indent=1, sort_keys=True)
+check("the run reads the resolution through a symlink, hash unchanged",
+      os.path.islink(_lnk_real)
+      and RB.file_sha256(_lnk_real) == _lnk_row["SHA256"])
+
+
+def _repoint_after_verification(link, new_target):
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        os.remove(link)
+        os.symlink(new_target, link)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
+_undo_l = _repoint_after_verification(_lnk_real, _lnk_decoy)
+try:
+    _lnk_result = FIN.finalize(_lnk_dir, review_path=_lnk_review,
+                               manifest_dir=_s2, run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8))
+finally:
+    _undo_l()
+check("a symlink re-pointed after verification finds the bytes that were hashed",
+      _lnk_result["status"] == "FINALIZED"
+      and os.path.realpath(_lnk_real) == os.path.realpath(_lnk_decoy),
+      "%s / now points at %s / %s"
+      % (_lnk_result["status"], os.path.basename(os.path.realpath(_lnk_real)),
+         [p["check"] for p in _lnk_result.get("problems", [])]))
+
 # RESOLVER AND APPROVER, AND WHETHER THEY MAY BE ONE PERSON. v7.96.
 #
 # `PILOT.md` says two people for the first pilot and, until now, nothing checked

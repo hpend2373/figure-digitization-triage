@@ -6632,6 +6632,45 @@ not raced: a swapped marks envelope is `RUN_ARTIFACT_MODIFIED` before the join i
 reached - a true refusal, and not the question being asked. Both readers use the
 snapshot; neither has a scenario that would notice if one stopped.
 
+## v8.3 — the snapshot has an address that the filesystem cannot move
+
+Two ways the snapshot could still be reached around, both closed here.
+
+**The bytes were immutable and the address for them was not.** v8.2 keyed the
+artifact snapshot on `os.path.realpath(path)` and looked it up the same way, so
+the key was recomputed against the filesystem AFTER verification. Re-point a
+symlink in between and the lookup misses - evidence that is present reads as
+absent - or lands on another artifact's entry. `artifact_key` is the ledger's own
+identity now: type, panel, reference, the run-relative path as recorded, and the
+SHA-256 the run put beside it. `artifact_data` takes the LEDGER ROW rather than
+a path, and with a snapshot it does not touch the filesystem at all. Containment
+and the symlink target are checked once, in the verification loop, on the path
+that was actually read.
+
+The point cloud was matched the same way - a value's `Point_Data_Reference`
+against `os.path.realpath` of the ledger's artifacts - and now matches on the
+recorded path instead.
+
+**And the bundle diagnosis re-read the manifests.** `review_preflight.main`
+called `collect_inference_manifests(args.run_dir)` with nothing else, so the ONE
+diagnosis `PILOT.md` tells a reviewer to require - "0 bundle problems" - was
+built by re-reading the ledger and every inference manifest it points at, two
+reads after the verdict printed above it. It takes `ledger=` and `artifacts=`
+now, and the preflight passes the snapshot. The path fallback stays for the
+template command, which has no verified run behind it.
+
+    reverted                                          scenarios that fail
+    the snapshot is addressed by a live realpath again  1
+    the snapshot is stored under a live realpath again  1
+    the bundle diagnosis re-reads the inference manifests 1
+    collect_inference_manifests ignores its ledger       2
+
+The symlink scenario builds a run whose resolution file is reached through a
+link inside the run - recorded path and hash unchanged - and re-points that link
+to a decoy the moment verification finishes. A mutation that computes the
+address afterwards finds the decoy or nothing; the ledger key finds the bytes
+that were hashed.
+
 ## Still open
 
 - two of the artifact readers have no scenario of their own — see v8.2. Both

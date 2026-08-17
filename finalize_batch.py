@@ -634,8 +634,7 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
             # ledger ORDER. One reference, one file, checked below.
             evidence.setdefault(_s(a.get("Artifact_Reference")), []).append(a)
         for art in resolutions:
-            path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                       artifacts)
+            path, blob = artifact_data(run_dir, art, artifacts)
             if path is None or blob is None:
                 # `verify_run_outputs` has already refused the whole run for
                 # this; withholding the panel as well keeps the two independent.
@@ -960,7 +959,7 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
     return withheld, rejected
 
 
-def collect_inference_manifests(run_dir, artifacts=None):
+def collect_inference_manifests(run_dir, artifacts=None, ledger=None):
     """Every reconstructed cell this run wrote, in one list, for the template.
 
     Read off the ledger rather than by globbing the directory: the ledger is what
@@ -968,17 +967,23 @@ def collect_inference_manifests(run_dir, artifacts=None):
     registered would produce a template row for a cell nobody will be asked
     about.
     """
-    try:
-        ledger = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
-                             dtype=object).fillna("")
-    except Exception:
-        return []
+    # THE VERIFIED LEDGER WHEN THE CALLER HAS ONE. v8.3: the preflight called
+    # this with a run directory and nothing else, so the one diagnosis a reviewer
+    # is told to require - "0 bundle problems" - was built by re-reading the
+    # ledger AND the manifests it points at, two reads after the verdict above it
+    # was decided. The template command has no verified run and still passes a
+    # path, which is what the fallback is for.
+    if ledger is None:
+        try:
+            ledger = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
+                                 dtype=object).fillna("")
+        except Exception:
+            return []
     out = []
     for _, art in ledger.iterrows():
         if _s(art.get("Artifact_Type")) != RB.INFERENCE_ARTIFACT_TYPE:
             continue
-        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                   artifacts)
+        path, blob = artifact_data(run_dir, art, artifacts)
         if path is None or blob is None:
             continue
         try:
@@ -991,8 +996,7 @@ def collect_inference_manifests(run_dir, artifacts=None):
 
 def _inference_manifest_ids(run_dir, artifact, pid, flag, artifacts=None):
     """The Inference_IDs the run listed for one panel, or None if unreadable."""
-    path, blob = artifact_data(run_dir, _s(artifact.get("Artifact_Path")),
-                               artifacts)
+    path, blob = artifact_data(run_dir, artifact, artifacts)
     if path is None or blob is None:
         flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
              "the inference manifest %s names for %s is not in the run"
@@ -1362,8 +1366,7 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "RAW_MARKS":
             continue
-        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                   artifacts)
+        path, blob = artifact_data(run_dir, art, artifacts)
         if path is None or blob is None:
             continue
         try:
@@ -1577,22 +1580,33 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag,
     withheld = set()
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
             else list(machine or ()))
+    # THE LEDGER ROW A VALUE'S REFERENCE NAMES, matched on the run-relative path
+    # the ledger recorded rather than on a realpath computed now. A value cites
+    # `Point_Data_Reference`; the ledger says which artifact that is; the
+    # snapshot is keyed on the ledger's identity. Nothing in that chain asks the
+    # filesystem what a symlink currently points at.
+    def _norm(text):
+        return _s(text).replace("\\", "/").strip("/")
+
     by_reference = {}
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "POINT_DATA":
             continue
-        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-        if path is not None:
-            by_reference[os.path.realpath(path)] = path
+        for alias in (_norm(art.get("Artifact_Path")),
+                      _norm(art.get("Artifact_Reference"))):
+            if alias:
+                by_reference[alias] = art
     for row in rows:
         identity = _s(row.get("Identity_Method"))
         reference = _s(row.get("Point_Data_Reference"))
         if not identity or not reference:
             continue
-        path, blob = artifact_data(run_dir, reference, artifacts)
-        path = path or reference
-        if os.path.realpath(path) not in by_reference or blob is None:
+        art = by_reference.get(_norm(reference))
+        if art is None:
             continue                  # not a point-backed row, or not in the run
+        path, blob = artifact_data(run_dir, art, artifacts)
+        if blob is None:
+            continue
         try:
             cloud = json.loads(blob.decode("utf-8"))
             # RE-DERIVED FROM THE POINTS, not read off the record. The writer
@@ -1640,8 +1654,7 @@ def _geometry_route_failures(machine, ledger_rows, run_dir, flag,
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "MONO_BAR_GEOMETRY":
             continue
-        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                   artifacts)
+        path, blob = artifact_data(run_dir, art, artifacts)
         if path is None or blob is None:
             continue
         try:
@@ -1789,8 +1802,7 @@ def resolution_reviewers(run_dir, ledger_rows, artifacts=None):
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != RB.IDENTITY_ARTIFACT_TYPE:
             continue
-        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                   artifacts)
+        path, blob = artifact_data(run_dir, art, artifacts)
         if path is None or blob is None:
             continue
         try:
@@ -2009,8 +2021,7 @@ def geometry_index_of(run_dir, verified, artifacts=None):
     for _, art in ledger.iterrows():
         if _s(art.get("Artifact_Type")) != "MONO_BAR_GEOMETRY":
             continue
-        _path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
-                                    artifacts)
+        _path, blob = artifact_data(run_dir, art, artifacts)
         if blob is None:
             continue
         return RB.geometry_index(
@@ -2018,7 +2029,30 @@ def geometry_index_of(run_dir, verified, artifacts=None):
     return {}
 
 
-def artifact_data(run_dir, artifact_path, artifacts=None):
+def artifact_key(art):
+    """The LEDGER's identity for an artifact, independent of the filesystem.
+
+    v8.3. The snapshot was keyed on `os.path.realpath(path)` and looked up the
+    same way, so the key was recomputed against the filesystem AFTER
+    verification: re-point a symlink in between and the lookup misses (evidence
+    that is present reads as absent) or, worse, hits another artifact's entry.
+    The bytes were immutable and the address for them was not.
+
+    So the key is what the ledger recorded - type, panel, reference, the
+    run-relative path as written, and the SHA-256 the run put beside it. None of
+    it is read off disk, so nothing between the hash and the read can change
+    which entry a row resolves to. Containment and the symlink target are checked
+    once, in the verification loop, on the path that was actually read.
+    """
+    return "|".join([
+        _s(art.get("Artifact_Type")), _s(art.get("Panel_ID")),
+        _s(art.get("Artifact_Reference")),
+        _s(art.get("Artifact_Path")).replace("\\", "/").strip("/"),
+        _s(art.get("SHA256")).lower(),
+    ])
+
+
+def artifact_data(run_dir, art, artifacts=None):
     """The bytes `verify_run_outputs` hashed for this artifact, or a fresh read.
 
     `artifacts` is `RunSnapshot.artifacts` - the structured artifacts kept from
@@ -2033,14 +2067,18 @@ def artifact_data(run_dir, artifact_path, artifacts=None):
     template command, and the scenarios. `validate_finalization` always passes
     the snapshot, so the finalization contract never takes that branch.
 
-    Returns `(path, data)`; `data` is None when there is nothing to interpret.
+    `art` is the LEDGER ROW, not a path: with a snapshot the answer comes from
+    what the run recorded and the filesystem is not consulted at all.
+
+    Returns `(path, data)`; `data` is None when there is nothing to interpret,
+    and `path` is the recorded path when the snapshot answered - enough for a
+    message, and never used to open anything.
     """
-    path = RB.resolve_artifact(run_dir, artifact_path)
-    if path is None:
-        return None, None
+    recorded = _s(art.get("Artifact_Path"))
     if artifacts is not None:
-        return path, artifacts.get(os.path.realpath(path))
-    if not os.path.exists(path):
+        return (recorded or None), artifacts.get(artifact_key(art))
+    path = RB.resolve_artifact(run_dir, recorded)
+    if path is None or not os.path.exists(path):
         return path, None
     try:
         with open(path, "rb") as fh:
@@ -2230,7 +2268,7 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
         if _s(art.get("Artifact_Type")) in STRUCTURED_ARTIFACTS:
             data, actual, _err = read_verified_bytes(path)
             if actual == recorded_hash:
-                artifact_bytes[os.path.realpath(path)] = data
+                artifact_bytes[artifact_key(art)] = data
         else:
             actual = RB.file_sha256(path)
         if actual != recorded_hash:

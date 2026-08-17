@@ -306,6 +306,24 @@ def fresh_run(name, **over):
     return out, summary
 
 
+def _swap_after_verification(target, swapped_bytes):
+    """Rewrite `target` the moment verification finishes. Returns an undo."""
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        with open(target, "wb") as fh:
+            fh.write(swapped_bytes)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
 OUT, SUMMARY = fresh_run("run1")
 print("the batch reaches machine QC and stops there")
 check("the run completed", SUMMARY["status"] == "RAN", "%s" % SUMMARY)
@@ -2945,6 +2963,44 @@ finally:
 # THE PRINTED LIST, not the exit code. `PILOT.md` tells a reviewer to require
 # "0 bundle problems", so the line on the screen IS the contract; the exit code
 # comes from the verdict and would not move either way.
+# AND THE LEDGER BEHIND IT. v8.3: the bundle diagnosis asked
+# `collect_inference_manifests(run_dir)` with nothing else, so it re-read the
+# ledger AND every manifest the ledger points at - two reads after the verdict
+# printed above it. Swapped here so the ledger no longer names its inference
+# manifests at all: a re-reading diagnosis finds no listed cell and prints
+# "not on the panel's inference manifest" beside a verdict that saw one.
+_bundle_led_path = os.path.join(_R3_DIR, "panel_artifacts.csv")
+_bundle_led = _real_read_csv(_bundle_led_path, dtype=object).fillna("")
+with open(_bundle_led_path, "rb") as _fh:
+    _bundle_led_before = _fh.read()
+_bundle_stripped = _bundle_led[
+    _bundle_led["Artifact_Type"] != "INFERENCE_MANIFEST"]
+check("the stripped ledger really would leave the questions unlisted",
+      len(_bundle_stripped) < len(_bundle_led)
+      and PF.bundle_problems_from(
+          _real_read_csv(os.path.join(_R3_DIR,
+                                      "figure_values_machine_qc.csv"),
+                         dtype=object).fillna(""),
+          _bundle_led,
+          {r["Inference_ID"]
+           for r in FIN.collect_inference_manifests(
+               _R3_DIR, ledger=_bundle_stripped)}) != [])
+_undo_b = _swap_after_verification(
+    _bundle_led_path, _bundle_stripped.to_csv(index=False).encode("utf-8"))
+_bundle_out = io.StringIO()
+try:
+    with contextlib.redirect_stdout(_bundle_out):
+        _bundle_rc = PF.main([_R3_DIR, "--review", _r3_review,
+                              "--inference", _r3_cells])
+finally:
+    _undo_b()
+    with open(_bundle_led_path, "wb") as _fh:
+        _fh.write(_bundle_led_before)
+check("a ledger swapped after the verdict adds no bundle problem",
+      _bundle_rc == 0 and "BUNDLE" not in _bundle_out.getvalue(),
+      "%s / %s" % (_bundle_rc,
+                   [l for l in _bundle_out.getvalue().splitlines()
+                    if "BUNDLE" in l]))
 check("  and the bundle a reviewer is shown is the one the verdict saw",
       _diag == 0 and "BUNDLE" not in _diag_out.getvalue(),
       "%s / %s" % (_diag, [l for l in _diag_out.getvalue().splitlines()
@@ -3237,24 +3293,6 @@ check("a ledger rewritten the instant it is read does not decide the run",
 # interprets one opened it AGAIN. This run has R3 cells and a reader in
 # `MARK_JOIN_REQUIRED`, so both the inference manifest and the raw marks decide
 # something here: swapped after verification, a path-reading check refuses.
-
-
-def _swap_after_verification(target, swapped_bytes):
-    """Rewrite `target` the moment verification finishes. Returns an undo."""
-    real_verify = FIN.verify_run_outputs
-
-    def hooked(*a, **kw):
-        got = real_verify(*a, **kw)
-        with open(target, "wb") as fh:
-            fh.write(swapped_bytes)
-        return got
-
-    FIN.verify_run_outputs = hooked
-
-    def undo():
-        FIN.verify_run_outputs = real_verify
-
-    return undo
 
 
 def _artifact_after_verification(name, artifact_type, mutate, run_dir,

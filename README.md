@@ -82,11 +82,11 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
-<!-- CURRENT_PIPELINE_VERSION: 8.1 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 2883 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 2921 -->
+<!-- CURRENT_PIPELINE_VERSION: 8.2 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 2889 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 2927 -->
 
-2883 scenarios on main after v8.1 under `requirements-lock.txt`, and 2921 with
+2889 scenarios on main after v8.2 under `requirements-lock.txt`, and 2927 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
@@ -144,10 +144,13 @@ opening the paths again, and says `NOT EVALUATED` where a field is absent rather
 than falling back to a second read. So the finalizer's answer and everything
 printed beside it come from one moment.
 
-Still outside the snapshot: the structured artifacts the ledger points at —
-identity resolutions, inference manifests, raw marks, point data, the geometry
-file. Their bytes are hashed against the ledger and then re-opened by the
-contract checks that read them.
+That now reaches the structured artifacts the ledger points at — identity
+resolutions, inference manifests, raw marks, point data, the geometry file. Each
+is kept from the read that hashed it and handed to the contract check that
+interprets it, so a geometry file swapped after verification cannot become the
+evidence for a route it does not support. A picture or a contact sheet is hashed
+and nothing more: this module never parses one, so its digest is the whole of
+what the finalizer needs.
 
 To run the pilot as attested work:
 

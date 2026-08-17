@@ -3232,6 +3232,91 @@ check("a ledger rewritten the instant it is read does not decide the run",
       % (_led_result["status"],
          sorted(set(pd.read_csv(_led_path, dtype=object)
                     .fillna("")["Artifact_Type"]))))
+# AND THE STRUCTURED ARTIFACTS THE LEDGER POINTS AT. v8.2. `verify_run_outputs`
+# hashed every file the ledger names and then each contract check that
+# interprets one opened it AGAIN. This run has R3 cells and a reader in
+# `MARK_JOIN_REQUIRED`, so both the inference manifest and the raw marks decide
+# something here: swapped after verification, a path-reading check refuses.
+
+
+def _swap_after_verification(target, swapped_bytes):
+    """Rewrite `target` the moment verification finishes. Returns an undo."""
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        with open(target, "wb") as fh:
+            fh.write(swapped_bytes)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
+def _artifact_after_verification(name, artifact_type, mutate, run_dir,
+                                 review_path, inference_path=None):
+    led = pd.read_csv(os.path.join(run_dir, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+    hit = led[led["Artifact_Type"] == artifact_type]
+    if not len(hit):
+        check(name + " (no such artifact in this run)", False)
+        return
+    target = RB.resolve_artifact(run_dir, hit.iloc[0]["Artifact_Path"])
+    with open(target, "rb") as fh:
+        before = fh.read()
+    undo = _swap_after_verification(target, mutate(before))
+    try:
+        got = FIN.finalize(run_dir, review_path=review_path,
+                           inference_review_path=inference_path,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 6))
+    finally:
+        undo()
+    with open(target, "rb") as fh:
+        after = fh.read()
+    # PUT IT BACK. The swap is the point of the scenario and a permanent one
+    # would leave every later scenario deciding against a corrupted artifact.
+    with open(target, "wb") as fh:
+        fh.write(before)
+    check(name, got["status"] == "FINALIZED" and after != before,
+          "%s / swapped=%s / %s" % (got["status"], after != before,
+                                    [p["check"]
+                                     for p in got.get("problems", [])]))
+
+
+_answers([_answer(i) for i in _ids3])
+_panel3()
+
+
+def _blank_manifest_ids(before):
+    rows = list(csv.DictReader(io.StringIO(before.decode("utf-8"))))
+    for r in rows:
+        r["Inference_ID"] = "INF_notthisone"
+    out = io.StringIO()
+    if rows:
+        w = csv.DictWriter(out, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    return out.getvalue().encode("utf-8")
+
+
+_artifact_after_verification(
+    "an inference manifest rewritten after verification asks no new question",
+    "INFERENCE_MANIFEST", _blank_manifest_ids, _R3_DIR, _r3_review, _r3_cells)
+
+
+# The RAW_MARKS join is not raced here. Its envelope hash is part of what the
+# panel's approval is bound to, so a swapped marks file is `RUN_ARTIFACT_MODIFIED`
+# before the join is reached - a true refusal, and not the question. The join now
+# reads from the snapshot like the rest, and this fixture cannot tell the two
+# readers apart; INSTALL.md says so rather than a scenario passing for the wrong
+# reason.
+_answers([_answer(i) for i in _ids3])
+_panel3()
 # AND THE RUN STAMP ITSELF, which was the last file still hashed one way and
 # parsed another. v8.1. `file_sha256(path)` then `json.load(open(path))`: the
 # digest named file A and `Status`, `Run_Mode`, `Output_SHA256` and

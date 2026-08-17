@@ -6590,16 +6590,52 @@ six contract functions taking it instead of a run directory.
     the answer diagnosis falls back to the paths       1
     the second digest is printed as a prefix           1
 
+## v8.2 — the artifact chain joins the snapshot
+
+The last layer. `verify_run_outputs` hashed every file the ledger names and then
+each contract check that INTERPRETS one opened it again: the identity
+resolutions, the inference manifest, the raw marks, the point cloud and the
+geometry file - eight read sites in all, counting `geometry_index_from_run`,
+which is the one that decides `IDENTITY_GEOMETRY_ROW_UNKNOWN`. A geometry file
+swapped between the hash and the read becomes the evidence for a route it does
+not support, with the ledger still naming the file that was hashed.
+
+`STRUCTURED_ARTIFACTS` names the five types whose CONTENT this module reads.
+Their bytes are kept from the read that hashed them, travel on
+`RunSnapshot.artifacts`, and reach every check through `artifact_data`. A PNG, a
+contact sheet or a WPD project is hashed and nothing more - the finalizer never
+parses one, so its digest is the whole of what it needs, and keeping the bytes
+of a raster would be holding a run's worth of images in memory for nothing.
+
+`artifact_data` reads the path when no snapshot is given, which is what a direct
+caller with no verified run behind it needs - `collect_inference_manifests` from
+the template command, and the scenarios. `validate_finalization` always passes
+the snapshot, so the finalization contract never takes that branch.
+
+The scenarios swap a file the moment verification finishes, which is exactly the
+window: hashed against the ledger, and every reader that opens the path again
+gets whatever is there now.
+
+    reverted                                          scenarios that fail
+    the identity resolutions are opened again          2
+    the inference manifest is opened again             1
+    the resolver ids are read from the path again      1
+    the geometry index is built from the run dir again 1
+    the structured artifacts are hashed and not kept   1
+    the decider stops passing the artifact bytes       1
+
+TWO GAPS, recorded rather than papered over. `_geometry_route_failures` and
+`geometry_index_of` read the same file; reverting the first alone changes
+nothing on the current fixtures because the second refuses the swapped run
+first, so only one of the two is independently pinned. And the RAW_MARKS join is
+not raced: a swapped marks envelope is `RUN_ARTIFACT_MODIFIED` before the join is
+reached - a true refusal, and not the question being asked. Both readers use the
+snapshot; neither has a scenario that would notice if one stopped.
+
 ## Still open
 
-- the STRUCTURED ARTIFACT chain is not snapshotted. `verify_run_outputs` hashes
-  every file the ledger names, and then `identity_contract_failures`,
-  `collect_inference_manifests`, `inference_contract_failures`, the mark-evidence
-  checks and the geometry route check each re-open the ones they interpret. A
-  geometry file swapped between the hash and the read becomes the evidence for a
-  route it does not support. Closing it means an `ArtifactSnapshot` (type, panel,
-  path, sha, bytes, parsed) built in the verification loop and threaded through
-  those six functions
+- two of the artifact readers have no scenario of their own — see v8.2. Both
+  take the snapshot; neither would be noticed if it stopped
 - `--second` is a qualification check and not a finalization contract. To make
   it one the finalizer would have to take the second file and stamp
   `Second_Inference_Review_File_SHA256`, the second reviewer, the compared count

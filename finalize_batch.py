@@ -97,6 +97,20 @@ VALUE_REVIEW_COLUMNS = [
 
 #: Files the finalizer reads to decide whether a value is poolable. Each is
 #: hashed by the run and re-hashed here.
+#: Artifact types whose CONTENT a contract check interprets, rather than only
+#: hashing. These are the ones that have to be kept from the read that hashed
+#: them: a PNG or an HTML sheet is evidence a PERSON looks at and this module
+#: never parses, so its digest is the whole of what the finalizer needs.
+#:
+#: v8.2. Until this list existed, `verify_run_outputs` hashed each of these and
+#: then `identity_contract_failures`, `collect_inference_manifests`, the
+#: mark-evidence join, the point-cloud check and the geometry route check each
+#: opened the ones they wanted AGAIN. Swap a geometry file between the hash and
+#: the read and it becomes the evidence for a route it does not support, with
+#: the ledger still naming the file that was hashed.
+STRUCTURED_ARTIFACTS = ("IDENTITY_RESOLUTION", "INFERENCE_MANIFEST",
+                        "RAW_MARKS", "POINT_DATA", "MONO_BAR_GEOMETRY")
+
 VERIFIED_OUTPUTS = ("figure_values_machine_qc.csv", "review_queue.csv",
                     "figure_values_raw.csv", "run_manifest.csv",
                     # The ledger of everything else. Verifying it is what makes
@@ -422,7 +436,7 @@ def value_contract_failures(run_dir, frames, machine, flag):
             else list(machine or ()))
     problems = RB.identity_provenance_problems(
         rows, panel_index,
-        geometry=RB.geometry_index_from_run(run_dir),
+        geometry=geometry_index_of(run_dir, frames),
         resolutions=RB.resolution_index(resolutions))
     for where, code, detail in problems:
         try:
@@ -544,7 +558,7 @@ def resolution_copy_failures(rows_by_panel, frames, flag):
 
 
 def identity_contract_failures(run_dir, ledger_rows, machine, flag,
-                               frames=None):
+                               frames=None, artifacts=None):
     """Panels whose human-named identities do not hold up against this run.
 
     Two things, both re-derived here rather than taken from the producer's word,
@@ -620,8 +634,9 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
             # ledger ORDER. One reference, one file, checked below.
             evidence.setdefault(_s(a.get("Artifact_Reference")), []).append(a)
         for art in resolutions:
-            path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-            if path is None or not os.path.exists(path):
+            path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                       artifacts)
+            if path is None or blob is None:
                 # `verify_run_outputs` has already refused the whole run for
                 # this; withholding the panel as well keeps the two independent.
                 flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
@@ -630,8 +645,8 @@ def identity_contract_failures(run_dir, ledger_rows, machine, flag,
                 withheld.add(pid)
                 continue
             try:
-                with open(path, encoding="utf-8") as fh:
-                    rows = list(csv.DictReader(fh))
+                rows = list(csv.DictReader(
+                    io.StringIO(blob.decode("utf-8"))))
             except Exception as exc:
                 flag("panel:%s" % pid, "REVIEW_EVIDENCE_MISSING",
                      "the resolution rows for %s could not be parsed (%s: %s)"
@@ -760,7 +775,8 @@ def load_inference_reviews(path, flag):
 
 
 def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
-                                reviewers, flag, today=None, panels=()):
+                                reviewers, flag, today=None, panels=(),
+                                artifacts=None):
     """The exact-set contract for cells whose NUMBER was reconstructed.
 
     Returns `(withheld_panels, rejected_ids)`.
@@ -853,7 +869,8 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
                                RB.INFERENCE_ARTIFACT_TYPE))
             withheld.add(pid)
         else:
-            listed = _inference_manifest_ids(run_dir, manifests[0], pid, flag)
+            listed = _inference_manifest_ids(run_dir, manifests[0], pid, flag,
+                                             artifacts=artifacts)
             if listed is None:
                 withheld.add(pid)
             elif listed != set(cells):
@@ -943,7 +960,7 @@ def inference_contract_failures(run_dir, ledger_rows, machine, decisions,
     return withheld, rejected
 
 
-def collect_inference_manifests(run_dir):
+def collect_inference_manifests(run_dir, artifacts=None):
     """Every reconstructed cell this run wrote, in one list, for the template.
 
     Read off the ledger rather than by globbing the directory: the ledger is what
@@ -960,29 +977,29 @@ def collect_inference_manifests(run_dir):
     for _, art in ledger.iterrows():
         if _s(art.get("Artifact_Type")) != RB.INFERENCE_ARTIFACT_TYPE:
             continue
-        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-        if path is None or not os.path.exists(path):
+        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                   artifacts)
+        if path is None or blob is None:
             continue
         try:
-            with open(path, encoding="utf-8") as fh:
-                out.extend(list(csv.DictReader(fh)))
+            out.extend(list(csv.DictReader(io.StringIO(blob.decode("utf-8")))))
         except Exception:
             continue
     return sorted(out, key=lambda r: (_s(r.get("Panel_ID")),
                                       _s(r.get("Cell_Key"))))
 
 
-def _inference_manifest_ids(run_dir, artifact, pid, flag):
+def _inference_manifest_ids(run_dir, artifact, pid, flag, artifacts=None):
     """The Inference_IDs the run listed for one panel, or None if unreadable."""
-    path = RB.resolve_artifact(run_dir, _s(artifact.get("Artifact_Path")))
-    if path is None or not os.path.exists(path):
+    path, blob = artifact_data(run_dir, _s(artifact.get("Artifact_Path")),
+                               artifacts)
+    if path is None or blob is None:
         flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
              "the inference manifest %s names for %s is not in the run"
              % (_s(artifact.get("Artifact_Path")) or "(blank)", pid))
         return None
     try:
-        with open(path, encoding="utf-8") as fh:
-            rows = list(csv.DictReader(fh))
+        rows = list(csv.DictReader(io.StringIO(blob.decode("utf-8"))))
     except Exception as exc:
         flag("panel:%s" % pid, "INFERENCE_MANIFEST_MISSING",
              "%s's inference manifest could not be parsed (%s: %s)"
@@ -991,7 +1008,8 @@ def _inference_manifest_ids(run_dir, artifact, pid, flag):
     return {_s(r.get("Inference_ID")) for r in rows}
 
 
-def method_contract_failures(machine, queue, ledger_rows, run_dir, flag, frames):
+def method_contract_failures(machine, queue, ledger_rows, run_dir, flag,
+                             frames, artifacts=None):
     """Panels whose values claim a method their reader could not have reached.
 
     Two checks, and the second is the one with teeth.
@@ -1061,10 +1079,13 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag, frames)
                  "neither" % (_s(row.get("Identity_Source")) or "(blank)",
                               _s(row.get("Resolution_ID")) or "(blank)"))
             withheld.add(pid)
-    withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag)
-    withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag)
+    withheld |= _geometry_route_failures(machine, ledger_rows, run_dir, flag,
+                                         artifacts=artifacts)
+    withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag,
+                                      artifacts=artifacts)
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
-                                        flag, panel_expectations(frames))
+                                        flag, panel_expectations(frames),
+                                        artifacts=artifacts)
     return withheld
 
 
@@ -1290,7 +1311,7 @@ def _expected_cell_key(mark, cell_map):
 
 
 def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
-                            expected):
+                            expected, artifacts=None):
     """Values joined to the MARK they were made from, and checked against it.
 
     The matrix says which methods a reader can produce. This says which one THIS
@@ -1341,12 +1362,12 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "RAW_MARKS":
             continue
-        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-        if path is None or not os.path.exists(path):
+        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                   artifacts)
+        if path is None or blob is None:
             continue
         try:
-            with open(path, encoding="utf-8") as fh:
-                envelope = json.load(fh)
+            envelope = json.loads(blob.decode("utf-8"))
         except Exception:
             continue                  # verify_run_outputs owns unreadable bytes
         panel = _s(envelope.get("Panel_ID")) or _s(art.get("Panel_ID"))
@@ -1543,7 +1564,8 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
     return withheld
 
 
-def _point_route_failures(machine, ledger_rows, run_dir, flag):
+def _point_route_failures(machine, ledger_rows, run_dir, flag,
+                          artifacts=None):
     """Association rows whose identity disagrees with their own point cloud.
 
     The scatter reader names each POINT and `_scatter_outcome` copies the answer
@@ -1567,12 +1589,12 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag):
         reference = _s(row.get("Point_Data_Reference"))
         if not identity or not reference:
             continue
-        path = RB.resolve_artifact(run_dir, reference) or reference
-        if os.path.realpath(path) not in by_reference:
+        path, blob = artifact_data(run_dir, reference, artifacts)
+        path = path or reference
+        if os.path.realpath(path) not in by_reference or blob is None:
             continue                  # not a point-backed row, or not in the run
         try:
-            with open(path, encoding="utf-8") as fh:
-                cloud = json.load(fh)
+            cloud = json.loads(blob.decode("utf-8"))
             # RE-DERIVED FROM THE POINTS, not read off the record. The writer
             # leaves the record-level field EMPTY when its points disagree, and a
             # check that only compared non-blank answers read that silence as
@@ -1610,20 +1632,21 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag):
     return withheld
 
 
-def _geometry_route_failures(machine, ledger_rows, run_dir, flag):
+def _geometry_route_failures(machine, ledger_rows, run_dir, flag,
+                             artifacts=None):
     """BAR_MONO values whose route disagrees with the figure's own answer."""
     withheld = set()
     by_row_hash = {}
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != "MONO_BAR_GEOMETRY":
             continue
-        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-        if path is None or not os.path.exists(path):
+        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                   artifacts)
+        if path is None or blob is None:
             continue
         try:
-            with open(path, encoding="utf-8") as fh:
-                for geo in csv.DictReader(fh):
-                    by_row_hash[_s(geo.get("Geometry_Row_SHA256"))] = geo
+            for geo in csv.DictReader(io.StringIO(blob.decode("utf-8"))):
+                by_row_hash[_s(geo.get("Geometry_Row_SHA256"))] = geo
         except Exception as exc:
             flag("run", "METHOD_NOT_POSSIBLE_FOR_READER",
                  "the geometry file could not be read, so no BAR_MONO route "
@@ -1754,7 +1777,7 @@ def person_keys(reviewers):
     return out
 
 
-def resolution_reviewers(run_dir, ledger_rows):
+def resolution_reviewers(run_dir, ledger_rows, artifacts=None):
     """Panel_ID -> the Reviewer_IDs that named a series by hand on that panel.
 
     Read off the `IDENTITY_RESOLUTION` artifact the run copied in, which
@@ -1766,11 +1789,12 @@ def resolution_reviewers(run_dir, ledger_rows):
     for _, art in ledger_rows.iterrows():
         if _s(art.get("Artifact_Type")) != RB.IDENTITY_ARTIFACT_TYPE:
             continue
-        path = RB.resolve_artifact(run_dir, _s(art.get("Artifact_Path")))
-        if path is None or not os.path.exists(path):
+        path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                   artifacts)
+        if path is None or blob is None:
             continue
         try:
-            rows = pd.read_csv(path, dtype=object).fillna("")
+            rows = pd.read_csv(io.BytesIO(blob), dtype=object).fillna("")
         except Exception:
             continue
         for _, row in rows.iterrows():
@@ -1967,6 +1991,64 @@ def approved_panels(reviews, queue, reviewers, flag, today=None,
     return out
 
 
+def geometry_index_of(run_dir, verified, artifacts=None):
+    """The BAR_MONO geometry index, from the bytes that were hashed.
+
+    `RB.geometry_index_from_run` opens `mono_bar_geometry.csv` in the run
+    directory - the same file the ledger names as `MONO_BAR_GEOMETRY` and
+    `verify_run_outputs` has already hashed. It was the eighth structured read
+    and the one that decides `IDENTITY_GEOMETRY_ROW_UNKNOWN`, so a geometry file
+    swapped after verification made every human-resolved value cite a row that
+    no longer existed.
+    """
+    artifacts = artifacts if artifacts is not None else \
+        (verified or {}).get("artifact_bytes")
+    ledger = (verified or {}).get("frames", {}).get("panel_artifacts.csv")
+    if artifacts is None or ledger is None:
+        return RB.geometry_index_from_run(run_dir)
+    for _, art in ledger.iterrows():
+        if _s(art.get("Artifact_Type")) != "MONO_BAR_GEOMETRY":
+            continue
+        _path, blob = artifact_data(run_dir, _s(art.get("Artifact_Path")),
+                                    artifacts)
+        if blob is None:
+            continue
+        return RB.geometry_index(
+            list(csv.DictReader(io.StringIO(blob.decode("utf-8")))))
+    return {}
+
+
+def artifact_data(run_dir, artifact_path, artifacts=None):
+    """The bytes `verify_run_outputs` hashed for this artifact, or a fresh read.
+
+    `artifacts` is `RunSnapshot.artifacts` - the structured artifacts kept from
+    the read that hashed them. When it is given, an artifact absent from it was
+    either not structured or did not match its recorded hash, and the answer is
+    "no bytes" rather than "open the path and see": a file whose digest failed is
+    already a refusal, and reading it anyway is the second read this layer
+    exists to remove.
+
+    When it is None the path is read, which is what a direct caller with no
+    verified run behind it needs - `collect_inference_manifests(run_dir)` from a
+    template command, and the scenarios. `validate_finalization` always passes
+    the snapshot, so the finalization contract never takes that branch.
+
+    Returns `(path, data)`; `data` is None when there is nothing to interpret.
+    """
+    path = RB.resolve_artifact(run_dir, artifact_path)
+    if path is None:
+        return None, None
+    if artifacts is not None:
+        return path, artifacts.get(os.path.realpath(path))
+    if not os.path.exists(path):
+        return path, None
+    try:
+        with open(path, "rb") as fh:
+            return path, fh.read()
+    except Exception:
+        return path, None
+
+
 def read_verified_bytes(path):
     """The bytes and their digest, from one read. Everything else builds on it.
 
@@ -2113,6 +2195,7 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
     # the artifact hashes are checked against two different reads: strike a row
     # from the second and its file stops being checked at all, while the decider
     # still believes the artifact is there.
+    artifact_bytes = {}
     ledger_df = parsed.get("panel_artifacts.csv")
     if ledger_df is None:
         # It hashed correctly and still will not parse. Refusing is the only
@@ -2142,7 +2225,14 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
                  "%s is gone; the run recorded it at %s" % (label, recorded_path))
             ok = False
             continue
-        actual = RB.file_sha256(path)
+        # ONE READ FOR THE STRUCTURED ONES, and the bytes are kept. The others
+        # are hashed and nothing more, because nothing here interprets them.
+        if _s(art.get("Artifact_Type")) in STRUCTURED_ARTIFACTS:
+            data, actual, _err = read_verified_bytes(path)
+            if actual == recorded_hash:
+                artifact_bytes[os.path.realpath(path)] = data
+        else:
+            actual = RB.file_sha256(path)
         if actual != recorded_hash:
             flag("panel:%s" % _s(art.get("Panel_ID")), "RUN_ARTIFACT_MODIFIED",
                  "%s hashes to %s..., the run recorded %s.... The reviewer "
@@ -2169,6 +2259,8 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
         # that were verified.
         verified.update(frames)
     manifest_frames = frames or {}
+    if verified is not None:
+        verified["artifact_bytes"] = artifact_bytes
 
     registry_path = os.path.join(manifest_dir, "reviewer_registry.csv")
     if os.path.exists(registry_path):
@@ -2227,8 +2319,9 @@ def _promote(staging, run_dir, fault_after=None):
 #: decision it is supposed to agree with.
 RunSnapshot = collections.namedtuple(
     "RunSnapshot",
-    "run_stamp reviewers machine queue ledger reviews inference_reviews")
-EMPTY_SNAPSHOT = RunSnapshot(None, None, None, None, None, None, None)
+    "run_stamp reviewers machine queue ledger reviews inference_reviews "
+    "artifacts")
+EMPTY_SNAPSHOT = RunSnapshot(None, None, None, None, None, None, None, None)
 
 Verdict = collections.namedtuple(
     "Verdict",
@@ -2426,8 +2519,11 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # resolution rows say, and reading them is the only way to know. Without
     # this the finalizer accepted any run whose producer had not copied the
     # evidence in, including every run made before it started doing so.
+    artifacts = verified.get("artifact_bytes")
+    snapshot[0] = snapshot[0]._replace(artifacts=artifacts)
     for pid in sorted(identity_contract_failures(run_dir, ledger_rows, machine,
-                                                flag, frames=verified)):
+                                                flag, frames=verified,
+                                                artifacts=artifacts)):
         artifact_types.pop(pid, None)
     # And the runner's own value contract, re-run here on the verified files.
     # A run this module did not produce is the case it exists for, and nothing
@@ -2455,14 +2551,15 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # a panel whose values claim a route their reader could not have taken is
     # not a panel an approval can rescue.
     for pid in sorted(method_contract_failures(machine, queue, ledger_rows,
-                                               run_dir, flag, frames=verified)):
+                                               run_dir, flag, frames=verified,
+                                               artifacts=artifacts)):
         artifact_types.pop(pid, None)
         contract_refused.add(pid)
     approved = approved_panels(reviews, queue, reviewers, flag, today=today,
                                artifact_types=artifact_types,
                                extra_confirmations=extra_confirmations,
-                               resolvers=resolution_reviewers(run_dir,
-                                                              ledger_rows),
+                               resolvers=resolution_reviewers(
+                                   run_dir, ledger_rows, artifacts),
                                separation_policy=policy,
                                people=person_keys(reviewers))
     for pid in sorted(contract_refused):
@@ -2483,7 +2580,7 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     inference_held, inference_rejected = inference_contract_failures(
         run_dir, ledger_rows, machine,
         inference_reviews, reviewers, flag,
-        today=today, panels=set(approved))
+        today=today, panels=set(approved), artifacts=artifacts)
     for pid in sorted(inference_held):
         approved.pop(pid, None)
     if not approved:

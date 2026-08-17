@@ -18,6 +18,7 @@ Three classes of scenario, in order:
    is byte-identical.
 """
 import csv
+import io
 import json
 import os
 import shutil
@@ -3928,6 +3929,101 @@ check("  and the runbook pairs all FIVE against the picture that answers it",
       len(_sec) == 1 and all(c in _arrows for c in _wanted),
       "%s missing from %r" % ([c for c in _wanted if c not in _arrows], _arrows))
 
+# THE STRUCTURED ARTIFACTS ARE INTERPRETED FROM THE BYTES THAT WERE HASHED.
+# v8.2. `verify_run_outputs` hashed every file the ledger names and then every
+# contract check that reads one opened it AGAIN: the identity resolutions, the
+# inference manifest, the raw marks, the point cloud and the geometry file. Swap
+# the geometry between the two and it becomes the evidence for a route it does
+# not support, while the ledger still names the file that was hashed - the whole
+# BAR_MONO identity chain deciding from bytes nobody recorded.
+#
+# HOOKED BELOW THE READER, not on it. The swap lands when `read_verified_bytes`
+# hashes the target - which is the moment `verify_run_outputs` takes its copy -
+# so a check that uses the copy is unaffected and one that opens the path sees
+# the swapped file. Hooking `artifact_data` instead would have tested the
+# function under test.
+
+
+def _swap_artifact_after_hash(target, swapped_bytes):
+    """Rewrite `target` the moment verification finishes. Returns an undo.
+
+    Between `verify_run_outputs` and the contract checks is the window: the file
+    has been hashed against the ledger and every reader that opens the path
+    again gets whatever is there now. A reader using the kept bytes is immune,
+    which is the difference this measures. Hooking the reader itself would have
+    measured the function under test; hooking a single hash call would land the
+    swap inside the verification loop, where a ledger naming the same file for
+    two panels hashes it twice and reports the swap as tampering - true, and not
+    the thing being asked.
+    """
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        with open(target, "wb") as fh:
+            fh.write(swapped_bytes)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
+def _artifact_race(name, artifact_type, mutate, expect_reruns, **kw):
+    """Finalize a copy of the short run with one artifact swapped as it is read."""
+    where = os.path.join(ROOT, "o_race_%s" % name)
+    shutil.rmtree(where, ignore_errors=True)
+    shutil.copytree(_o2, where)
+    review_path = _write_review(os.path.join(where, "value_review.csv"),
+                                ["P_SHORT"])
+    led = pd.read_csv(os.path.join(where, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+    hit = led[led["Artifact_Type"] == artifact_type]
+    target = RB.resolve_artifact(where, hit.iloc[0]["Artifact_Path"])
+    with open(target, "rb") as fh:
+        before = fh.read()
+    undo = _swap_artifact_after_hash(target, mutate(before))
+    try:
+        got = FIN.finalize(where, review_path=review_path, manifest_dir=_s2,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 8), **kw)
+    finally:
+        undo()
+    with open(target, "rb") as fh:
+        after = fh.read()
+    check(name,
+          got["status"] == "FINALIZED" and after != before,
+          "%s / swapped=%s / %s" % (got["status"], after != before,
+                                    [p["check"]
+                                     for p in got.get("problems", [])]))
+    return got
+
+
+def _rewrite_column(column, value):
+    def mutate(before):
+        frame = pd.read_csv(io.BytesIO(before), dtype=object).fillna("")
+        frame[column] = [value] * len(frame)
+        return frame.to_csv(index=False).encode("utf-8")
+    return mutate
+
+
+_artifact_race("a geometry file rewritten as it is hashed decides no route",
+               "MONO_BAR_GEOMETRY",
+               _rewrite_column("Geometry_Row_SHA256", "e" * 64), 1)
+_artifact_race("nor does a resolution file rewritten as it is hashed",
+               "IDENTITY_RESOLUTION",
+               _rewrite_column("Resolved_Fill_Pattern", "SOLID"), 1)
+
+
+# The raw-mark join is not exercised here on purpose: P_SHORT is BAR_MONO, which
+# is not in `MARK_JOIN_REQUIRED`, so a swapped marks file changes nothing on this
+# fixture and a scenario asserting otherwise would pass for the wrong reason.
+# The join's own snapshot is pinned in `test_finalize` against a reader that has
+# one.
+
 # RESOLVER AND APPROVER, AND WHETHER THEY MAY BE ONE PERSON. v7.96.
 #
 # `PILOT.md` says two people for the first pilot and, until now, nothing checked
@@ -4044,6 +4140,37 @@ check("  and both CLIs carry the same flag under the same name",
                 "--distinct-reviewers"]) == 2
       and PF2.main([_sep_o, "--review", _two_people, "--manifests", _sep_m,
                     "--distinct-reviewers"]) == 0)
+# AND THE RESOLVER IDS THE SEPARATION CONTRACT COMPARES, which come out of the
+# same file. Swapped to the approver's own id after verification, a path-reading
+# check refuses the panel `RESOLVER_IS_APPROVER` under the declared contract; a
+# snapshot check never sees the swap.
+_rid_o = os.path.join(ROOT, "o_short_rid_race")
+shutil.rmtree(_rid_o, ignore_errors=True)
+shutil.copytree(_sep_o, _rid_o)
+_rid_review = _sep_review(os.path.join(_rid_o, "review_two.csv"), "RV_T2")
+_rid_led = pd.read_csv(os.path.join(_rid_o, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_rid_path = RB.resolve_artifact(
+    _rid_o, _rid_led[_rid_led["Artifact_Type"] == "IDENTITY_RESOLUTION"]
+    .iloc[0]["Artifact_Path"])
+_rid_swapped = pd.read_csv(_rid_path, dtype=object).fillna("")
+_rid_swapped["Reviewer_ID"] = ["RV_T2"] * len(_rid_swapped)
+_undo = _swap_artifact_after_hash(
+    _rid_path, _rid_swapped.to_csv(index=False).encode("utf-8"))
+try:
+    _rid_result = FIN.finalize(_rid_o, review_path=_rid_review,
+                               manifest_dir=_sep_m, run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8),
+                               separation_policy=FIN.DISTINCT_RESOLVERS)
+finally:
+    _undo()
+check("resolver ids swapped after verification do not decide the contract",
+      _rid_result["status"] == "FINALIZED"
+      and set(pd.read_csv(_rid_path, dtype=object).fillna("")["Reviewer_ID"])
+      == {"RV_T2"},
+      "%s / %s" % (_rid_result["status"],
+                   [p["check"] for p in _rid_result.get("problems", [])]))
+
 # TWO Reviewer_IDs ARE TWO ROWS, NOT TWO PEOPLE. v7.97. The registry refuses a
 # duplicated Reviewer_ID and nothing refuses a duplicated PERSON, so one human
 # registered twice - by a registry merge, an ID-convention change, or on purpose
@@ -4475,7 +4602,7 @@ FIN.verify_run_outputs(
     _o2, json.load(open(os.path.join(_o2, "run_stamp.json"), encoding="utf-8")),
     _s2, lambda w, c, d: _probs.append(c), verified=_verified)
 check("verifying the manifests hands the frames on, all twelve of them",
-      set(_verified) - {"outputs", "frames"}
+      set(_verified) - {"outputs", "frames", "artifact_bytes"}
       == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
       "%s" % sorted(_verified))
 # AND THE OUTPUTS IT HASHED, as rows. v7.81: `panel_expectations` re-derives the
@@ -4495,6 +4622,23 @@ check("  and the rows of every output it hashed, so nothing is opened twice",
 # hashed here and re-read with `pd.read_csv` inside `validate_finalization`, so
 # the queue and the artifact ledger the decision ran on were never the bytes the
 # run stamp approved.
+# AND THE STRUCTURED ARTIFACTS THE LEDGER POINTS AT. v8.2: hashed here and then
+# re-opened by every contract check that interprets one, so a geometry file
+# swapped between the two became the evidence for a route it does not support.
+_art_types = set(pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                             dtype=object).fillna("")["Artifact_Type"])
+check("  and the bytes of every structured artifact it hashed",
+      set(FIN.STRUCTURED_ARTIFACTS) & _art_types
+      and len(_verified.get("artifact_bytes", {})) > 0
+      and all(isinstance(v, bytes)
+              for v in _verified["artifact_bytes"].values()),
+      "%s / %s" % (sorted(_art_types),
+                   len(_verified.get("artifact_bytes", {}))))
+check("  and nothing it only hashed - a picture is not parsed here",
+      not [p for p in _verified.get("artifact_bytes", {})
+           if p.lower().endswith((".png", ".html"))],
+      "%s" % [os.path.basename(p)
+              for p in _verified.get("artifact_bytes", {})])
 check("  and as frames, one per verified output, parsed from those same bytes",
       set(_verified.get("frames", {})) == set(FIN.VERIFIED_OUTPUTS)
       and list(_verified["frames"]["run_manifest.csv"]["Panel_ID"])

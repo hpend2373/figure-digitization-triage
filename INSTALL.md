@@ -7374,6 +7374,75 @@ same dependency v9.4 introduced now covers the gate as well: a future data-contr
 check that needs the corpus would make every historical run unfinalizable for want
 of a directory, so it would have to be split rather than added.
 
+## v9.6 — the candidates are gated, and the fingerprint is re-derived
+
+**v9.5 gated the raw file, and the raw file is not what gets accepted.** It has
+to be the frame the gate sees - cell coverage can only be judged against the whole
+reading - and for a run this package produced that is also a check on the
+candidates, because `figure_values_machine_qc.csv` is a row subset of the raw file
+and nothing else. A foreign producer is under no such obligation, and the
+finalizer exists for foreign producers. The bypass: ship a raw file that passes
+today's gate (`ARM=CONTROL`, `ARM=TREATED`) and a candidate row filed under
+`ARM=PLACEBO`, matching a series manifest that also says PLACEBO. Marks agree with
+values, values agree with the manifests they name, every hash agrees, the raw gate
+is clean, and the row that would be accepted sits in a cell no grid declares.
+
+    MACHINE_QC_NOT_DERIVED_FROM_RAW   a candidate that is not in the raw file
+                                      it claims to be a subset of
+
+Counted as a multiset, so two identical candidates against one raw row is one
+value counted twice. And every candidate is put through today's gate on its own
+row - only the row-scoped problems, because a `unit:` problem here would be about
+cells the run's own gate legitimately dropped, which is the refusal v9.5 exists to
+avoid manufacturing.
+
+**And the strongest sentence in the README rested on the producer's arithmetic.**
+"The approval names the extraction, not the panel" holds because
+`Review_Subject_SHA256` covers the values, every manifest, the artifacts and the
+environment - and the finalizer only ever compared the APPROVAL's copy of that
+hash against the QUEUE's copy. Both are written by the same producer. A producer
+whose formula leaves the Mean out writes one subject for two runs with different
+numbers, and an approval of the first finalizes the second: every hash in the
+second run's own stamp agrees, its marks and values agree, and the person who
+signed was looking at a different number. The subject is now RE-DERIVED with
+`RB.review_subject_sha256` - the same function the runner calls - from the
+verified run-manifest row, the verified candidates, the manifest hashes and
+environment the stamp records, and the verified artifact ledger:
+
+    QUEUE_REVIEW_SUBJECT_INVALID   the queue's fingerprint is not a fingerprint
+                                   of this run
+
+**Which found that the subject was not recomputable at all.** The material line
+for a value was `"%s=%s" % (k, row.get(k, ""))`, so a Python `None` in the
+runner's own dict hashed as the four characters `None` while the CSV a reviewer
+opens - and the CSV the finalizer re-reads - has an empty cell there. Every
+BAR_MONO panel in this suite has such a cell (`Errorbar_Lower`), so the first
+version of the re-derivation refused two healthy fixtures. A fingerprint only its
+producer can compute is not a fingerprint, so `_blank_text` now makes `None` and
+NaN both the empty string, and the subject is over the text the files carry.
+
+**This expires some approvals, and that is the migration.** A run produced before
+v9.6 whose candidates carry an empty numeric cell has a queue fingerprint computed
+the old way, so today's finalizer refuses it with
+`QUEUE_REVIEW_SUBJECT_INVALID` - correctly, since nobody but that run can check
+it. Re-run and re-approve; there is no back-fill worth writing, because computing
+the old hash to match it would be reinstating the thing the check is for.
+
+    reverted                                          scenarios that fail
+    the candidate derivation check removed               1
+    the candidate row gate removed                       1
+    the queue subject re-derivation removed              3
+    the None-is-blank normalization reverted             1
+
+**What this does NOT close.** The re-derived subject uses the manifest hashes and
+the environment RECORDED IN THE STAMP rather than recomputed from the manifests
+themselves - the manifests are verified against those same recorded hashes a few
+lines earlier, so the stamp is not being trusted for their content, but a stamp
+whose `Environment` was never true of any machine is still a stamp this check
+takes at its word. And the artifact ledger's own rows are the subject's artifact
+material: their bytes are verified, and what type each artifact IS remains the
+producer's statement.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.5"
+PIPELINE_VERSION = "9.6"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -364,6 +364,20 @@ def file_sha256_or_blank(path):
         return ""
 
 
+def _blank_text(value):
+    """The text a CSV would carry for this cell: None and NaN are both empty.
+
+    The review subject is a fingerprint of the run's own files, so it has to be
+    computable FROM those files. Anything that distinguishes `None` from `""`
+    makes it computable only by the process that happened to hold the None.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, float) and value != value:      # NaN
+        return ""
+    return "%s" % value
+
+
 def review_subject_sha256(run_row, values, manifest_hashes, environment,
                           artifacts=()):
     """Everything a person is actually approving when they approve a panel.
@@ -417,7 +431,14 @@ def review_subject_sha256(run_row, values, manifest_hashes, environment,
          for item in sorted(artifacts)]
     for row in sorted(values, key=lambda r: _s(r.get("Cell_Key"))):
         material.append("value:" + "|".join(
-            "%s=%s" % (k, row.get(k, "")) for k in sorted(row)
+            # AS THE FILE CARRIES IT (v9.6). This was `row.get(k, "")` through
+            # `%s`, so a Python `None` in the runner's own dict hashed as the
+            # four characters "None" while the CSV a reviewer opens - and the
+            # CSV the finalizer re-reads - has an empty cell there. The subject
+            # was therefore NOT recomputable from the run's own outputs: only
+            # the producer could check it, which is the one thing a fingerprint
+            # must not be. Two blanks are one blank.
+            "%s=%s" % (k, _blank_text(row.get(k))) for k in sorted(row)
             if k not in ("Note", "Reconciliation_Note")))
     return sha256_of_text("\n".join(material))
 

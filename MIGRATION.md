@@ -230,3 +230,37 @@ unit no panel reads, and a unit two panels read. Those are the states the new
 checks exist to name, and a script that picks one of the two panels reproduces
 exactly the ambiguity the columns remove. `compile_plan.py` fills both columns
 from the plan, so a plan-driven set needs no migration at all - recompile it.
+
+
+# v9.6: an approval's fingerprint is re-derived, so some old approvals expire
+
+## Why
+
+`Review_Subject_SHA256` is what makes an approval an approval of an EXTRACTION
+rather than of a panel name. The finalizer compared the approval's copy of it
+against the review queue's copy - and both were written by the same producer, so
+the guarantee reduced to that producer's arithmetic being right. It is now
+re-derived from the verified run with `run_batch.review_subject_sha256`.
+
+Re-deriving it showed the formula was not derivable at all: a value cell holding
+Python `None` hashed as the text `None`, while the CSV that same run wrote - and
+that a reviewer and the finalizer both read - carries an empty cell there. So the
+subject could only ever be recomputed by the process that happened to hold the
+None. `None` and NaN are now both the empty string (`run_batch._blank_text`).
+
+## What changed for a run you already have
+
+| | before | v9.6 |
+|---|---|---|
+| the queue's fingerprint | trusted | re-derived; `QUEUE_REVIEW_SUBJECT_INVALID` when it does not match |
+| a value cell holding `None` | hashed as `None` | hashed as empty, like the CSV |
+
+**An approved run made before v9.6 whose candidates have an empty numeric cell
+will be refused.** Every BAR_MONO panel has one (`Errorbar_Lower`). The fix is to
+re-run and re-approve. There is deliberately no back-fill: a script that
+recomputed the old hash so the old approval matched would be reinstating exactly
+the thing the check exists to stop, and the approval it preserved would be an
+approval nobody can verify.
+
+Runs whose candidate rows have no empty cells are unaffected, and every run
+produced by v9.6 or later re-derives exactly.

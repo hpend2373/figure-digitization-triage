@@ -4629,6 +4629,61 @@ check("  and nothing is accepted from it",
       not os.path.exists(os.path.join(_placebo_dir,
                                       "figure_values_accepted.csv")),
       "%s" % sorted(os.listdir(_placebo_dir)))
+# THE CANDIDATE FILE IS NOT THE RAW FILE (v9.6). The pass above judges
+# `figure_values_raw.csv`, which is a check on the candidates only for a producer
+# whose candidate file really is a row subset of it - `run_batch` makes it one,
+# and a foreign producer is under no such obligation. So: a raw file that passes
+# today's gate, and a machine-QC row filed under the PLACEBO cell the series
+# manifest also declares. Marks agree with values, values agree with the
+# manifests, hashes all agree, and the raw gate is clean.
+_bypass_dir = _historical("run_machine_bypass", [dict(PANELS[0])],
+                          [dict(UNITS[0])])
+with open(os.path.join(_bypass_dir, "manifests", "series_manifest.csv"), "w",
+          newline="", encoding="utf-8") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(BM.series_manifest_columns())
+    for _r in _placebo_series:
+        _w.writerow([_r.get(c, "") for c in BM.series_manifest_columns()])
+_bypass_qc = os.path.join(_bypass_dir, "figure_values_machine_qc.csv")
+_bypass_frame = pd.read_csv(_bypass_qc, dtype=object).fillna("")
+_bypass_frame["Cell_Key"] = [k.replace("ARM=CONTROL", "ARM=PLACEBO")
+                             for k in _bypass_frame["Cell_Key"]]
+_bypass_frame.to_csv(_bypass_qc, index=False)
+_bypass_stamp_path = os.path.join(_bypass_dir, "run_stamp.json")
+_bypass_stamp = json.load(open(_bypass_stamp_path, encoding="utf-8"))
+_bypass_stamp["Manifest_SHA256"]["series"] = RB.frame_sha256(
+    RB.load_manifests(os.path.join(_bypass_dir, "manifests"))["series"])
+_bypass_stamp["Output_SHA256"]["figure_values_machine_qc.csv"] = RB.file_sha256(
+    _bypass_qc)
+with open(_bypass_stamp_path, "w", encoding="utf-8") as _fh:
+    json.dump(_bypass_stamp, _fh, indent=1, sort_keys=True)
+_bypass_raw = pd.read_csv(os.path.join(_bypass_dir, "figure_values_raw.csv"),
+                          dtype=object).fillna("")
+check("the raw file of the bypass run really does pass today's gate",
+      not any("PLACEBO" in k for k in _bypass_raw["Cell_Key"]),
+      "%s" % sorted(set(_bypass_raw["Cell_Key"]))[:3])
+_bypass_fin = FIN.finalize(_bypass_dir, review_path=review(
+    [row(Review_Subject_SHA256=pd.read_csv(
+        os.path.join(_bypass_dir, "review_queue.csv"),
+        dtype=object).fillna("").loc[0, "Review_Subject_SHA256"])],
+    path=os.path.join(_bypass_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a candidate that is not in the raw file it claims to come from is refused",
+      _bypass_fin["status"] != "FINALIZED"
+      and any(p["check"] == "MACHINE_QC_NOT_DERIVED_FROM_RAW"
+              for p in _bypass_fin["problems"]),
+      "%s / %s" % (_bypass_fin["status"],
+                   sorted({p["check"] for p in _bypass_fin["problems"]})))
+check("  and the candidate is also judged by today's gate on its own row",
+      any(p["check"] == "RUN_GRID_CONTRACT_INVALID"
+          and "UNDECLARED_FACTOR_LEVEL" in p["detail"]
+          for p in _bypass_fin["problems"]),
+      "%s" % [p["detail"][:60] for p in _bypass_fin["problems"]])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_bypass_dir,
+                                      "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_bypass_dir)))
+
 # AND A UNIT WITH NOTHING LEFT TO LOSE IS NOT CHARGED AGAIN. A run whose own gate
 # refused every value of a unit has nothing in `figure_values_machine_qc.csv` for
 # it, so no approval can turn those values into accepted ones - publication 397 is
@@ -4673,6 +4728,100 @@ check("a unit whose values the run's own gate refused is not charged twice",
                    [(p["where"], p["check"]) for p in _nothing_fin["problems"]]))
 check("  and it accepts nothing either way",
       _nothing_fin["accepted"] == 0, "%s" % _nothing_fin)
+
+print()
+print("an approval names the extraction even when the producer's fingerprint does not")
+# THE STRONGEST SENTENCE IN THE README RESTED ON THE PRODUCER'S ARITHMETIC. The
+# subject hash covers the values, the manifests, the artifacts and the
+# environment - and the finalizer only ever compared the approval's copy against
+# the QUEUE's copy, both written by the same producer. A producer whose formula
+# leaves the Mean out writes one subject for two runs with different numbers, and
+# an approval of the first finalizes the second: every hash in the second run's
+# own stamp agrees, its marks and values agree, and the person who signed was
+# looking at a different number.
+_forged = "f" * 64
+
+
+def _fixed_subject(name, mean=None):
+    """A run whose queue fingerprint is a constant its producer chose."""
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.copytree(_hist_dir, out)
+    if mean is not None:
+        for fname in ("figure_values_raw.csv", "figure_values_machine_qc.csv"):
+            path = os.path.join(out, fname)
+            frame = pd.read_csv(path, dtype=object).fillna("")
+            frame["Mean"] = [mean] * len(frame)
+            frame.to_csv(path, index=False)
+    queue_path = os.path.join(out, "review_queue.csv")
+    queue_frame = pd.read_csv(queue_path, dtype=object).fillna("")
+    queue_frame["Review_Subject_SHA256"] = [_forged] * len(queue_frame)
+    queue_frame.to_csv(queue_path, index=False)
+    stamp_path = os.path.join(out, "run_stamp.json")
+    stamp = json.load(open(stamp_path, encoding="utf-8"))
+    for fname in ("figure_values_raw.csv", "figure_values_machine_qc.csv",
+                  "review_queue.csv"):
+        stamp["Output_SHA256"][fname] = RB.file_sha256(os.path.join(out, fname))
+    with open(stamp_path, "w", encoding="utf-8") as fh:
+        json.dump(stamp, fh, indent=1, sort_keys=True)
+    return out
+
+
+_run_a = _fixed_subject("run_forged_a", mean="10")
+_run_b = _fixed_subject("run_forged_b", mean="20")
+check("two runs with different numbers carry the producer's one fingerprint",
+      pd.read_csv(os.path.join(_run_a, "review_queue.csv"), dtype=object).loc[
+          0, "Review_Subject_SHA256"]
+      == pd.read_csv(os.path.join(_run_b, "review_queue.csv"), dtype=object).loc[
+          0, "Review_Subject_SHA256"] == _forged,
+      "the fixture does not reproduce a producer with a broken formula")
+check("  and each of them verifies against its own stamp",
+      pd.read_csv(os.path.join(_run_b, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("").loc[0, "Mean"] == "20",
+      "the fixture's second run does not carry the second number")
+# The approval a person gave to run A, moved to run B. Same Review_ID, same
+# subject - because the producer wrote the same subject for both.
+_ab_fin = FIN.finalize(_run_b, review_path=review(
+    [row(Review_Subject_SHA256=_forged)],
+    path=os.path.join(_run_b, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("an approval of another run's numbers cannot finalize this one",
+      _ab_fin["status"] != "FINALIZED"
+      and any(p["check"] == "QUEUE_REVIEW_SUBJECT_INVALID"
+              for p in _ab_fin["problems"]),
+      "%s / %s" % (_ab_fin["status"],
+                   sorted({p["check"] for p in _ab_fin["problems"]})))
+check("  because the subject is re-derived from the run, not read from its queue",
+      any(p["check"] == "QUEUE_REVIEW_SUBJECT_INVALID"
+          and _forged[:16] in p["detail"] for p in _ab_fin["problems"]),
+      "%s" % [p["detail"][:80] for p in _ab_fin["problems"]])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_run_b, "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_run_b)))
+# A queue row for a panel the run manifest does not carry names no extraction
+# either, and that is the same refusal rather than a traceback.
+_ghost_dir = os.path.join(ROOT, "run_ghost_queue")
+shutil.rmtree(_ghost_dir, ignore_errors=True)
+shutil.copytree(_hist_dir, _ghost_dir)
+_ghost_queue = os.path.join(_ghost_dir, "review_queue.csv")
+_ghost_frame = pd.read_csv(_ghost_queue, dtype=object).fillna("")
+_ghost_frame["Panel_ID"] = ["P_NOWHERE"] * len(_ghost_frame)
+_ghost_frame.to_csv(_ghost_queue, index=False)
+_ghost_stamp = os.path.join(_ghost_dir, "run_stamp.json")
+_gs = json.load(open(_ghost_stamp, encoding="utf-8"))
+_gs["Output_SHA256"]["review_queue.csv"] = RB.file_sha256(_ghost_queue)
+with open(_ghost_stamp, "w", encoding="utf-8") as _fh:
+    json.dump(_gs, _fh, indent=1, sort_keys=True)
+_ghost_fin = FIN.finalize(_ghost_dir, review_path=review(
+    [row(Panel_ID="P_NOWHERE", Review_Subject_SHA256=_forged)],
+    path=os.path.join(_ghost_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a queue asking about a panel the run never ran is refused by name",
+      _ghost_fin["status"] != "FINALIZED"
+      and any(p["check"] == "QUEUE_REVIEW_SUBJECT_INVALID"
+              for p in _ghost_fin["problems"]),
+      "%s / %s" % (_ghost_fin["status"],
+                   sorted({p["check"] for p in _ghost_fin["problems"]})))
 
 # AND THE SAME RUN, UNTOUCHED, STILL FINALIZES. Without this the scenario above
 # only proves the finalizer can refuse something.

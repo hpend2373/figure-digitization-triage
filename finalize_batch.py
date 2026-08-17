@@ -567,6 +567,153 @@ def grid_contract_failures(frames, machine, flag):
     return withheld
 
 
+def machine_candidate_failures(frames, machine, flag):
+    """Panels whose FINALIZATION CANDIDATES are not what the raw gate cleared.
+
+    `grid_contract_failures` re-runs the gate on `figure_values_raw.csv`, which
+    is the frame the runner gave it and the only frame cell coverage can be
+    judged against. In a run this package produced that is also a check on the
+    candidates, because `figure_values_machine_qc.csv` is a row SUBSET of the raw
+    file - `raw_df[raw_df["Value_Status"] == "MACHINE_QC_PASSED"]` and nothing
+    else. A foreign producer is under no such obligation, and the finalizer
+    exists for foreign producers.
+
+    So the bypass: write a raw file that passes today's gate (`ARM=CONTROL`,
+    `ARM=TREATED`) and a machine-QC file whose row says `ARM=PLACEBO`, matching
+    the series manifest that also says PLACEBO. Marks agree with values, values
+    agree with the manifests they name, every hash matches, the raw gate is
+    clean - and the row that would be accepted is filed in a cell no grid
+    declares.
+
+    Two checks, in the order that makes the second cheap. Every candidate must
+    appear in the raw file it claims to be a subset of, and every candidate is
+    judged by the current gate on its own row.
+    """
+    withheld = set()
+    outputs = (frames or {}).get("frames") or {}
+    raw = outputs.get("figure_values_raw.csv")
+    if raw is None or (frames or {}).get("units") is None:
+        return withheld                 # grid_contract_failures said so already
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    if not rows:
+        return withheld
+    # THE ROW, over the columns both files carry. Compared as a counted multiset
+    # rather than as a set: two identical candidate rows against one raw row is
+    # one value counted twice, which is the same class of defect.
+    shared = [c for c in GE.fig_values_columns() if c in raw.columns]
+    raw_rows = collections.Counter(
+        tuple(_s(r.get(c)) for c in shared) for r in raw.to_dict("records"))
+    for row in rows:
+        key = tuple(_s(row.get(c)) for c in shared)
+        if raw_rows[key] > 0:
+            raw_rows[key] -= 1
+            continue
+        pid = _s(row.get("Run_Panel_ID")) or "?"
+        flag("panel:%s" % pid, "MACHINE_QC_NOT_DERIVED_FROM_RAW",
+             "a candidate for %s/%s is not in figure_values_raw.csv. The "
+             "machine-QC file is the rows of the raw file that passed the gate; "
+             "a row that is only in the candidate file was never gated at all"
+             % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")) or "(no cell)"))
+        withheld.add(pid)
+    # AND THE CANDIDATES THEMSELVES, THROUGH TODAY'S GATE. Only the row-scoped
+    # problems are kept: a `unit:` or `grid:` problem here would be about cells
+    # the run's own gate legitimately dropped, which is the refusal the raw pass
+    # exists to avoid manufacturing.
+    values = pd.DataFrame(
+        [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in rows],
+        columns=GE.fig_values_columns())
+    qc = GE.fig_validate_bundle(frames["figures"], frames["grids"],
+                                frames["units"], values, kernel=RB.K,
+                                check_files=False)
+    for _, problem in qc.iterrows():
+        where = _s(problem.get("where"))
+        if not where.startswith("values:"):
+            continue
+        try:
+            index = int(where.split(":", 1)[1]) - 2
+        except ValueError:                  # pragma: no cover - defensive
+            continue
+        if not 0 <= index < len(rows):
+            continue                        # pragma: no cover - defensive
+        pid = _s(rows[index].get("Run_Panel_ID")) or "?"
+        flag("panel:%s" % pid, "RUN_GRID_CONTRACT_INVALID",
+             "a value this run would have accepted fails the current gate: "
+             "%s - %s" % (_s(problem.get("check")), _s(problem.get("detail"))))
+        withheld.add(pid)
+    return withheld
+
+
+def queue_subject_failures(frames, machine, queue, run_stamp, flag):
+    """Panels whose queued `Review_Subject_SHA256` is not the subject of the run.
+
+    THE STRONGEST SENTENCE IN THE README RESTED ON THE PRODUCER'S ARITHMETIC.
+    "The approval names the extraction, not the panel" holds because the subject
+    hash covers the values, every manifest, the artifacts and the environment -
+    and the finalizer only ever compared the approval's copy of that hash against
+    the QUEUE's copy. Both come from the same producer. A producer whose formula
+    left the Mean out writes the same subject for two runs with different
+    numbers, and an approval of the first finalizes the second: every hash in the
+    second run's own stamp agrees, the marks and the values agree, and the person
+    who signed looked at a different number.
+
+    So the subject is RE-DERIVED here with `RB.review_subject_sha256` - the same
+    function the runner calls - from the verified run manifest row, the verified
+    candidates, the manifest hashes and environment the stamp records, and the
+    verified artifact ledger. A queue row that does not match it is not a stale
+    approval; it is a fingerprint that was never a fingerprint of this run.
+    """
+    withheld = set()
+    outputs = (frames or {}).get("frames") or {}
+    run_rows = outputs.get("run_manifest.csv")
+    ledger = outputs.get("panel_artifacts.csv")
+    if run_rows is None or ledger is None or queue is None:
+        flag("run", "RUN_NOT_FINALIZABLE",
+             "the verified run does not carry the run manifest and artifact "
+             "ledger, so the queue's review subjects cannot be re-derived")
+        return {"*"}
+    manifest_hashes = run_stamp.get("Manifest_SHA256")
+    environment = run_stamp.get("Environment")
+    if not isinstance(manifest_hashes, dict) or not isinstance(environment, dict):
+        flag("run", "RUN_STAMP_SCHEMA_INVALID",
+             "Manifest_SHA256 and Environment must both be objects for the "
+             "review subject to be re-derivable")
+        return {"*"}
+    by_panel = {_s(r.get("Panel_ID")): r for _, r in run_rows.iterrows()}
+    values_by_panel = {}
+    for row in (machine.to_dict("records") if hasattr(machine, "to_dict")
+                else list(machine or ())):
+        values_by_panel.setdefault(_s(row.get("Run_Panel_ID")), []).append(row)
+    artifacts_by_panel = {}
+    for _, art in ledger.iterrows():
+        artifacts_by_panel.setdefault(_s(art.get("Panel_ID")), []).append(
+            (_s(art.get("Artifact_Type")), _s(art.get("Artifact_Path")),
+             _s(art.get("SHA256")), _s(art.get("Artifact_Reference"))))
+    for _, q in queue.iterrows():
+        pid = _s(q.get("Panel_ID"))
+        declared = _s(q.get("Review_Subject_SHA256"))
+        run_row = by_panel.get(pid)
+        if run_row is None:
+            flag("panel:%s" % pid, "QUEUE_REVIEW_SUBJECT_INVALID",
+                 "the queue asks for a review of %s and the run manifest has no "
+                 "row for it, so there is no extraction to name" % pid)
+            withheld.add(pid)
+            continue
+        expected = RB.review_subject_sha256(
+            {k: _s(run_row.get(k)) for k in run_row.index},
+            values_by_panel.get(pid, []), manifest_hashes, environment,
+            artifacts=artifacts_by_panel.get(pid, []))
+        if declared != expected:
+            flag("panel:%s" % pid, "QUEUE_REVIEW_SUBJECT_INVALID",
+                 "the queue says this panel's subject is %s... and the run's own "
+                 "values, manifests, artifacts and environment hash to %s.... An "
+                 "approval can only name an extraction if the fingerprint is "
+                 "derived from it, and this one is not"
+                 % (declared[:16] or "(blank)", expected[:16]))
+            withheld.add(pid)
+    return withheld
+
+
 def resolution_copy_failures(rows_by_panel, frames, flag):
     """The run's copies of the resolution rows, checked ONCE and against the run.
 
@@ -2756,6 +2903,19 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
             return stop("RUN_NOT_FINALIZABLE",
                         "this run's values could not be re-checked against the "
                         "current grid contract")
+        artifact_types.pop(pid, None)
+    # AND THE CANDIDATES THEMSELVES (v9.6). The pass above judges the raw file,
+    # which is a check on the candidates only for a producer whose candidate file
+    # really is a subset of it.
+    for pid in sorted(machine_candidate_failures(verified, machine, flag)):
+        artifact_types.pop(pid, None)
+    # AND WHAT AN APPROVAL OF THIS RUN CAN NAME (v9.6). The subject hash is
+    # re-derived from the run rather than read from the queue that came with it.
+    for pid in sorted(queue_subject_failures(verified, machine, queue,
+                                             run_stamp, flag)):
+        if pid == "*":
+            return stop("RUN_NOT_FINALIZABLE",
+                        "this run's review subjects could not be re-derived")
         artifact_types.pop(pid, None)
     for pid in sorted(value_contract_failures(run_dir, verified, machine,
                                               flag)):

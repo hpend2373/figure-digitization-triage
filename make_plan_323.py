@@ -227,8 +227,8 @@ def build(raster_root=None):
                     series=_series_blocks(fig["series"]),
                     positions=_positions(centres, levels))))
             units.append(dict(
-                unit_id=uid, figure_view=_view_id(fid), grid_id=_grid_id(fig),
-                panel=name,
+                unit_id=uid, panel_id=pid, figure_view=_view_id(fid),
+                grid_id=_grid_id(fig), panel=name,
                 outcome_name=outcome, domain=DOMAIN, unit=unit,
                 statistic="CONTINUOUS",
                 # THE DECLARATION THIS PLAN EXISTS FOR, and it is build_id323's,

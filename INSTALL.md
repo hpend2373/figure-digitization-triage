@@ -7017,6 +7017,43 @@ review queue, and it lifts when the person who inspected the figures is
 registered. That is now a claim the suite makes rather than one this release
 asserts.
 
+## v9.1 — a unit names the panel that fills it
+
+**Two panels of one figure could exchange their units and nothing would notice.**
+`panel.read.unit_id` and `unit.panel_id` say the same thing and only the first
+existed. Swap them and: each panel's measurements are still right, every value
+still matches its own mark hash, the factor sets and cell counts are identical,
+and both units are still filled by exactly one panel. Reproduced on
+`plan_397.json` - `validate_plan` returned zero problems - and the consequence is
+that two panels' numbers arrive under each other's outcome with nothing in the run
+disagreeing. It is the heading exchange this package has caught four times at
+other grains, surviving at the panel-unit boundary, and it was silent by
+construction: a swap preserves every invariant that was being checked.
+
+`unit.panel_id` is now part of the plan schema and three refusals stand on it:
+
+    PLAN_UNIT_NAMES_NO_PANEL       a unit filled by a panel that it does not name
+    PLAN_PANEL_UNIT_MISMATCH       the two sides name different panels
+    PLAN_PANEL_UNIT_VIEW_MISMATCH  the unit belongs to another figure
+
+**And one panel per unit.** The unit calibration is built from the FIRST panel
+that claimed the unit, so a second claimant contributes its marks to the unit and
+its axis to nothing - values calibrated against a panel they were not measured in.
+`PLAN_UNIT_FILLED_TWICE`.
+
+Both plan generators emit the key and `plan_397.json` is regenerated; the diff is
+26 `panel_id` lines and nothing else.
+
+    reverted                                          scenarios that fail
+    the binding check removed                          3
+    one-panel-per-unit removed                         1
+
+**The other three items of the review are NOT in this release.** Source-document
+bytes are still unhashed, the run stamp still zeroes its machine-QC tally on a
+refusal, and the plan still compares factor NAMES without their LEVELS. Each is
+real; none of them can put a right number under a wrong outcome, which is why this
+one went first alone.
+
 ## Still open
 ## Still open
 ## Still open

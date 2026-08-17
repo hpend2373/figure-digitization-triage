@@ -57,7 +57,7 @@ for fid, image, outcome, unit, domain, rows in BAR_FIGURES:
                             x_pixel=xs[level], timepoint_label=printed)
                        for level, printed in SESSIONS])
         UNITS.append(dict(
-            unit_id=uid, figure_view=fid, grid_id="G_SESSION", panel=sex,
+            unit_id=uid, panel_id=pid, figure_view=fid, grid_id="G_SESSION", panel=sex,
             outcome_name=outcome, domain=domain, unit=unit,
             statistic="CONTINUOUS", dispersion_type="SD", n_outcome=10,
             n_source="caption", bar_top_definition="OUTLINE_CENTER",
@@ -82,7 +82,7 @@ for fid, image, rows in LINE_FIGURES:
                             x_pixel=x_pixels[o])
                        for o, t in enumerate(HDT)])
         UNITS.append(dict(
-            unit_id=uid, figure_view=fid, grid_id="G_HDT", panel=sex,
+            unit_id=uid, panel_id=pid, figure_view=fid, grid_id="G_HDT", panel=sex,
             outcome_name=outcome, domain="CV_HEMO", unit=unit,
             statistic="CONTINUOUS", dispersion_type="SEM", n_outcome=10,
             n_source="text p.90", bar_top_definition="NOT_A_BAR",
@@ -111,7 +111,8 @@ for pid, label, box in (("P5_NOFLUID", "NO_FLUID_HDT", [84, 430, 60, 300]),
                         + round(o * (box[1] - box[0] - 40) / (len(HDT) - 1)))
                    for o, t in enumerate(HDT)])
     UNITS.append(dict(
-        unit_id="U_" + pid, figure_view="F397_5", grid_id="G_HDT", panel=label,
+        unit_id="U_" + pid, panel_id=pid, figure_view="F397_5",
+        grid_id="G_HDT", panel=label,
         outcome_name="Heart rate", domain="CV_HEMO", unit="bpm",
         statistic="CONTINUOUS", dispersion_type="NO_ERRORBAR", n_outcome=1,
         n_source="figure", bar_top_definition="NOT_A_BAR",

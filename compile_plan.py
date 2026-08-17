@@ -96,7 +96,8 @@ PLAN_KEYS = {
                "mask_key", "note"),
     "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
                  "display_order", "timepoint_label", "timepoint_days", "note"),
-    "unit": ("unit_id", "figure_view", "grid_id", "panel", "outcome_name",
+    "unit": ("unit_id", "panel_id", "figure_view", "grid_id", "panel",
+             "outcome_name",
              "outcome_variable", "domain", "unit", "statistic",
              "dispersion_type", "n_outcome", "n_source", "bar_top_definition",
              "errorbar_stem_confirmed", "errorbar_source", "x_calibration",
@@ -428,6 +429,9 @@ def validate_plan(plan, file_root="."):
                     for g in plan["grids"]}
     unit_grid = {_s(u.get("unit_id")): _s(u.get("grid_id"))
                  for u in plan["units"]}
+    plan_units = {_s(u.get("unit_id")): u for u in plan["units"]}
+    #: unit -> the panels that claim to fill it. Exactly one is the contract.
+    claimed = {}
 
     for section, rows, key in (("reviewers", plan["reviewers"], "reviewer_id"),
                                ("documents", plan["documents"], "document_id"),
@@ -540,6 +544,40 @@ def validate_plan(plan, file_root="."):
             # spent a release like that: one series declared `ARM` against a grid
             # of `{TIMEPOINT}`, and all 30 of its values were thrown away after
             # the reader had done the work.
+            # THE BINDING, IN BOTH DIRECTIONS. `panel.read.unit_id` and
+            # `unit.panel_id` say the same thing, and until v9.1 only the first
+            # existed: nothing checked that the unit a panel fills is the unit
+            # that names it back. Swap the `unit_id` of two panels in one figure
+            # and every downstream check still passes - the measurements are
+            # right, each value matches its own mark hash, the factor sets and
+            # cell counts are identical, both units are filled by exactly one
+            # panel - and the two panels' numbers land under each other's
+            # outcome. That is the heading exchange this package has caught four
+            # times at other grains, surviving at the panel-unit boundary, and it
+            # is silent by construction.
+            unit_of = plan_units.get(uid)
+            if unit_of is not None:
+                named = _s(unit_of.get("panel_id"))
+                if not named:
+                    problems.append(_problem(
+                        pwhere, "PLAN_UNIT_NAMES_NO_PANEL",
+                        "%s is filled by this panel and does not say which panel "
+                        "fills it. The binding has to be declared on both sides "
+                        "or a swap between two panels is invisible" % uid))
+                elif named != _s(panel.get("panel_id")):
+                    problems.append(_problem(
+                        pwhere, "PLAN_PANEL_UNIT_MISMATCH",
+                        "this panel fills %s and %s names %s as its panel. One of "
+                        "the two is wrong, and the values would be filed under the "
+                        "other panel's outcome with nothing else disagreeing"
+                        % (uid, uid, named)))
+                uview = _s(unit_of.get("figure_view"))
+                if uview and uview != _s(read.get("figure_view")):
+                    problems.append(_problem(
+                        pwhere, "PLAN_PANEL_UNIT_VIEW_MISMATCH",
+                        "this panel reads %s and %s belongs to %s"
+                        % (_s(read.get("figure_view")), uid, uview)))
+                claimed.setdefault(uid, []).append(_s(panel.get("panel_id")))
             said = {_s(sp.get("factor")).upper()
                     for sp in (read.get("series") or []) if _s(sp.get("factor"))}
             said |= {_s(pp.get("factor")).upper()
@@ -605,6 +643,17 @@ def validate_plan(plan, file_root="."):
                 where, "PLAN_UNIT_HAS_NO_PANEL",
                 "%s is declared but no panel fills it - a unit nobody reads is "
                 "a grid of missing cells" % _s(u.get("unit_id"))))
+    # ONE PANEL PER UNIT. The unit calibration is built from the FIRST panel that
+    # claimed the unit, so a second claimant contributes its marks to the unit and
+    # its axis to nothing - the values arrive calibrated against a panel they were
+    # not measured in, and nothing else disagrees.
+    for uid, panels in sorted(claimed.items()):
+        if len(panels) > 1:
+            problems.append(_problem(
+                "units[%s]" % uid, "PLAN_UNIT_FILLED_TWICE",
+                "%s is filled by %s. The unit's calibration comes from the first "
+                "of them and the marks come from all of them"
+                % (uid, ", ".join(sorted(panels)))))
     return problems
 
 

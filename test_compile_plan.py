@@ -43,6 +43,24 @@ def check(name, ok, detail=""):
         FAILURES.append(name)
 
 
+def _auto_panels(plan, number):
+    """The panels of one publisher figure that carry a read block."""
+    figure = [f for f in plan["figures"]
+              if f.get("figure_number") == number][0]
+    return [p for p in figure["panels"] if p.get("read")]
+
+
+def _exchange_units(plan, number):
+    a, b = _auto_panels(plan, number)[:2]
+    a["read"]["unit_id"], b["read"]["unit_id"] = (b["read"]["unit_id"],
+                                                 a["read"]["unit_id"])
+
+
+def _claim_twice(plan, number):
+    a, b = _auto_panels(plan, number)[:2]
+    b["read"]["unit_id"] = a["read"]["unit_id"]
+
+
 PLAN_PATH = os.path.join(HERE, "plan_397.json")
 if not os.path.exists(PLAN_PATH):
     print("BLOCKED: plan_397.json is not in the package", file=sys.stderr)
@@ -273,6 +291,26 @@ for _label, _mutate, _want in (
         # of the declaration that caused them. Publication 323's Figure 2 spent a
         # release like that - one series declaring `ARM` against a grid of
         # `{TIMEPOINT}` - and 30 values were thrown away after the reading.
+        # THE BINDING, IN BOTH DIRECTIONS. `panel.read.unit_id` and
+        # `unit.panel_id` say the same thing, and until v9.1 only the first
+        # existed. Swapping the `unit_id` of two panels in ONE figure passed every
+        # check there was: the measurements are right, each value matches its own
+        # mark hash, the factor sets and cell counts are identical, and both units
+        # are still filled by exactly one panel - so two panels' numbers land
+        # under each other's outcome with nothing disagreeing. Reproduced on
+        # `plan_397.json` before the fix: zero problems.
+        ("two panels of one figure with their units exchanged",
+         lambda p: _exchange_units(p, "FIG3"),
+         "PLAN_PANEL_UNIT_MISMATCH"),
+        ("a unit that does not name the panel filling it",
+         lambda p: [u.pop("panel_id", None) for u in p["units"]],
+         "PLAN_UNIT_NAMES_NO_PANEL"),
+        ("a unit two panels both claim to fill",
+         lambda p: _claim_twice(p, "FIG3"),
+         "PLAN_UNIT_FILLED_TWICE"),
+        ("a panel reading a unit that belongs to another figure",
+         lambda p: p["units"][0].update(figure_view="F397_5"),
+         "PLAN_PANEL_UNIT_VIEW_MISMATCH"),
         ("a panel naming a factor its unit's grid does not declare",
          lambda p: [sp.update(factor="LIMB")
                     for sp in p["figures"][2]["panels"][0]["read"]["series"]],

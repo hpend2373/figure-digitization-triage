@@ -3038,6 +3038,7 @@
  "units": [
   {
    "unit_id": "U_P3_MEN",
+   "panel_id": "P3_MEN",
    "figure_view": "F397_3",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3064,6 +3065,7 @@
   },
   {
    "unit_id": "U_P3_WOMEN",
+   "panel_id": "P3_WOMEN",
    "figure_view": "F397_3",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3090,6 +3092,7 @@
   },
   {
    "unit_id": "U_P3_TPR_MEN",
+   "panel_id": "P3_TPR_MEN",
    "figure_view": "F397_3_TPR",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3116,6 +3119,7 @@
   },
   {
    "unit_id": "U_P3_TPR_WOMEN",
+   "panel_id": "P3_TPR_WOMEN",
    "figure_view": "F397_3_TPR",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3142,6 +3146,7 @@
   },
   {
    "unit_id": "U_P3_FPV_MEN",
+   "panel_id": "P3_FPV_MEN",
    "figure_view": "F397_3_FPV",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3168,6 +3173,7 @@
   },
   {
    "unit_id": "U_P3_FPV_WOMEN",
+   "panel_id": "P3_FPV_WOMEN",
    "figure_view": "F397_3_FPV",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3194,6 +3200,7 @@
   },
   {
    "unit_id": "U_P4_HR_MEN",
+   "panel_id": "P4_HR_MEN",
    "figure_view": "F397_4_HR",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3220,6 +3227,7 @@
   },
   {
    "unit_id": "U_P4_HR_WOMEN",
+   "panel_id": "P4_HR_WOMEN",
    "figure_view": "F397_4_HR",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3246,6 +3254,7 @@
   },
   {
    "unit_id": "U_P4_SV_MEN",
+   "panel_id": "P4_SV_MEN",
    "figure_view": "F397_4_SV",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3272,6 +3281,7 @@
   },
   {
    "unit_id": "U_P4_SV_WOMEN",
+   "panel_id": "P4_SV_WOMEN",
    "figure_view": "F397_4_SV",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3298,6 +3308,7 @@
   },
   {
    "unit_id": "U_P4_CO_MEN",
+   "panel_id": "P4_CO_MEN",
    "figure_view": "F397_4_CO",
    "grid_id": "G_SESSION",
    "panel": "MEN",
@@ -3324,6 +3335,7 @@
   },
   {
    "unit_id": "U_P4_CO_WOMEN",
+   "panel_id": "P4_CO_WOMEN",
    "figure_view": "F397_4_CO",
    "grid_id": "G_SESSION",
    "panel": "WOMEN",
@@ -3350,6 +3362,7 @@
   },
   {
    "unit_id": "U_P1_MAP_MEN",
+   "panel_id": "P1_MAP_MEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3376,6 +3389,7 @@
   },
   {
    "unit_id": "U_P1_MAP_WOMEN",
+   "panel_id": "P1_MAP_WOMEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3402,6 +3416,7 @@
   },
   {
    "unit_id": "U_P1_TPR_MEN",
+   "panel_id": "P1_TPR_MEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3428,6 +3443,7 @@
   },
   {
    "unit_id": "U_P1_TPR_WOMEN",
+   "panel_id": "P1_TPR_WOMEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3454,6 +3470,7 @@
   },
   {
    "unit_id": "U_P1_FPV_MEN",
+   "panel_id": "P1_FPV_MEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3480,6 +3497,7 @@
   },
   {
    "unit_id": "U_P1_FPV_WOMEN",
+   "panel_id": "P1_FPV_WOMEN",
    "figure_view": "F397_1",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3506,6 +3524,7 @@
   },
   {
    "unit_id": "U_P2_HR_MEN",
+   "panel_id": "P2_HR_MEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3532,6 +3551,7 @@
   },
   {
    "unit_id": "U_P2_HR_WOMEN",
+   "panel_id": "P2_HR_WOMEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3558,6 +3578,7 @@
   },
   {
    "unit_id": "U_P2_TFV_MEN",
+   "panel_id": "P2_TFV_MEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3584,6 +3605,7 @@
   },
   {
    "unit_id": "U_P2_TFV_WOMEN",
+   "panel_id": "P2_TFV_WOMEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3610,6 +3632,7 @@
   },
   {
    "unit_id": "U_P2_CO_MEN",
+   "panel_id": "P2_CO_MEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "MEN",
@@ -3636,6 +3659,7 @@
   },
   {
    "unit_id": "U_P2_CO_WOMEN",
+   "panel_id": "P2_CO_WOMEN",
    "figure_view": "F397_2",
    "grid_id": "G_HDT",
    "panel": "WOMEN",
@@ -3662,6 +3686,7 @@
   },
   {
    "unit_id": "U_P5_NOFLUID",
+   "panel_id": "P5_NOFLUID",
    "figure_view": "F397_5",
    "grid_id": "G_HDT",
    "panel": "NO_FLUID_HDT",
@@ -3689,6 +3714,7 @@
   },
   {
    "unit_id": "U_P5_FLUID",
+   "panel_id": "P5_FLUID",
    "figure_view": "F397_5",
    "grid_id": "G_HDT",
    "panel": "FLUID_HDT",

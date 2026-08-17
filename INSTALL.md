@@ -6975,6 +6975,49 @@ constants tuned to 323's render DPI. Fine for a versioned raster and wrong for a
 corpus-wide proposer, where they would have to be relative to glyph height or
 panel scale.
 
+## v9.0 — the two factor grains are compared before a raster is opened
+
+v8.9 shipped a fix that nothing pinned: declaring `SERIES` in Figure 2's grid took
+publication 323 from 72 values to 102, and reverting it left the suite green
+because no scenario built that plan and ran it. Both halves are closed here, and
+the better half turned out to be the earlier one.
+
+**`PLAN_PANEL_FACTOR_SET_MISMATCH`.** The runner writes a panel's series factor
+AND its position factor into every `Cell_Key` - whether or not the series is alone
+- and the grid gate then requires the value's factor set to equal the grid's
+exactly. Nothing compared the two at plan time. So a panel naming a factor its
+unit's grid did not declare compiled cleanly, ran, read its marks off the raster,
+and had every value of that panel refused as `FACTOR_SET_INCONSISTENT` - a
+diagnosis of the VALUES rather than of the declaration that caused them, arriving
+after all the work. `compile_plan` now compares the two sets and refuses, naming
+both, before a raster is opened. 323's Figure 2 spent a release like that and 30
+values were thrown away after the reading.
+
+**And the whole chain runs in the suite.** `test_compile_plan` builds 323's plan
+off its own rasters, validates it, compiles it and runs the batch, asserting 102
+values past the gate, 107 read, 2 QC problems, and `DEMO_OUTPUT_REFUSED` with
+nothing written. The count lives in the stamp's `Detail` because a refusal zeroes
+`Values_Machine_QC_Passed` - the run kept nothing, so the field for how many it
+kept says 0, and the sentence is the only place the gate's own tally survives.
+
+**Reverting the grid declaration now fails twice** - the plan validation and the
+compile - instead of failing nothing. The 102-against-72 measurement is no longer
+the evidence; it is a consequence.
+
+    reverted                                          scenarios that fail
+    the grid stops declaring SERIES                    2
+    a panel names a factor its grid does not           1
+    a grid drops a factor its panels name              1
+
+**What is left on 323 is one attestation.** The plan builds, validates, compiles
+and runs; 102 of its 107 values pass the gate; the five that do not are the cell
+the figure does not print and the four this package has recorded as unpaired since
+v7.2. `DEMO_OUTPUT_REFUSED` is the only thing standing between those values and a
+review queue, and it lifts when the person who inspected the figures is
+registered. That is now a claim the suite makes rather than one this release
+asserts.
+
+## Still open
 ## Still open
 ## Still open
 

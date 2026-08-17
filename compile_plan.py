@@ -419,6 +419,15 @@ def validate_plan(plan, file_root="."):
     document_ids = {_s(d.get("document_id")) for d in plan["documents"]}
     grid_ids = {_s(g.get("grid_id")) for g in plan["grids"]}
     unit_ids = {_s(u.get("unit_id")) for u in plan["units"]}
+    #: grid -> the factor names it declares, and unit -> its grid, so a panel's
+    #: own factor names can be checked against the grid its values will be
+    #: priced by. Upper-cased on both sides, because the compiler upper-cases
+    #: what it writes and a case difference here would read as a mismatch.
+    grid_factors = {_s(g.get("grid_id")): {str(k).strip().upper()
+                                           for k in (g.get("factors") or {})}
+                    for g in plan["grids"]}
+    unit_grid = {_s(u.get("unit_id")): _s(u.get("grid_id"))
+                 for u in plan["units"]}
 
     for section, rows, key in (("reviewers", plan["reviewers"], "reviewer_id"),
                                ("documents", plan["documents"], "document_id"),
@@ -519,6 +528,33 @@ def validate_plan(plan, file_root="."):
             uid = _s(read.get("unit_id"))
             if uid and uid not in unit_ids:
                 problems.append(_problem(pwhere, "PLAN_UNIT_NOT_FOUND", uid))
+            # THE TWO GRAINS, COMPARED BEFORE A RASTER IS OPENED. The runner puts
+            # a panel's series factor AND its position factor into every
+            # `Cell_Key`, whether or not the series is alone, and the grid gate
+            # then requires the value's factor set to equal the grid's exactly.
+            # Nothing compared the two at plan time, so a panel that named a
+            # factor its unit's grid did not declare compiled cleanly, ran, read
+            # its marks, and had every value of the panel refused as
+            # `FACTOR_SET_INCONSISTENT` - which is a diagnosis of the values and
+            # not of the declaration that caused it. Publication 323's Figure 2
+            # spent a release like that: one series declared `ARM` against a grid
+            # of `{TIMEPOINT}`, and all 30 of its values were thrown away after
+            # the reader had done the work.
+            said = {_s(sp.get("factor")).upper()
+                    for sp in (read.get("series") or []) if _s(sp.get("factor"))}
+            said |= {_s(pp.get("factor")).upper()
+                     for pp in (read.get("positions") or [])
+                     if _s(pp.get("factor"))}
+            declared = grid_factors.get(unit_grid.get(uid))
+            if said and declared is not None and said != declared:
+                problems.append(_problem(
+                    pwhere, "PLAN_PANEL_FACTOR_SET_MISMATCH",
+                    "the panel's series and positions name %s and grid %r "
+                    "declares %s. The runner writes both into every Cell_Key, so "
+                    "the grid gate would refuse every value of this panel"
+                    % ("{%s}" % ", ".join(sorted(said)),
+                       unit_grid.get(uid),
+                       "{%s}" % ", ".join(sorted(declared)))))
             views.setdefault(_s(read.get("figure_view")), []).append((sfid, panel))
             box = read.get("box") or []
             if not isinstance(box, list) or len(box) != 4 or not all(

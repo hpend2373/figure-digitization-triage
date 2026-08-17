@@ -16,6 +16,7 @@ import copy
 import json
 import csv
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -261,7 +262,24 @@ for _label, _mutate, _want in (
          "BAD_STATISTIC_TYPE"),
         ("a schema nobody published",
          lambda p: p.update(schema="figure-digitization-triage/plan/99"),
-         "PLAN_SCHEMA_UNKNOWN")):
+         "PLAN_SCHEMA_UNKNOWN"),
+        # THE TWO FACTOR GRAINS, compared before a raster is opened. The runner
+        # writes a panel's series factor AND its position factor into every
+        # `Cell_Key` - whether or not the series is alone - and the grid gate then
+        # requires the value's factor set to equal the grid's exactly. Nothing
+        # compared them at plan time, so a panel naming a factor its grid did not
+        # declare compiled cleanly, ran, read its marks, and had every value
+        # refused as `FACTOR_SET_INCONSISTENT`: a diagnosis of the values instead
+        # of the declaration that caused them. Publication 323's Figure 2 spent a
+        # release like that - one series declaring `ARM` against a grid of
+        # `{TIMEPOINT}` - and 30 values were thrown away after the reading.
+        ("a panel naming a factor its unit's grid does not declare",
+         lambda p: [sp.update(factor="LIMB")
+                    for sp in p["figures"][2]["panels"][0]["read"]["series"]],
+         "PLAN_PANEL_FACTOR_SET_MISMATCH"),
+        ("  and a grid that drops a factor its panels name",
+         lambda p: [g["factors"].pop("ARM", None) for g in p["grids"]],
+         "PLAN_PANEL_FACTOR_SET_MISMATCH")):
     _p = copy.deepcopy(PLAN)
     _mutate(_p)
     _out, (_w, _probs) = compile_to("m_bad", plan=_p)
@@ -694,6 +712,80 @@ check("a panel that prints no category row is refused, not fitted",
 check("  and so is one that prints the wrong number of them",
       _refuses(_CENTRES[:5]) and _refuses(_CENTRES + [1990.0]),
       "five or seven columns satisfied a six-level grid")
+
+# --------------------------------------------------------------------------
+# publication 323, plan to values, on the real rasters
+# --------------------------------------------------------------------------
+# v9.0. Everything above tests the plan layer against fixtures and prepared
+# inputs. This runs the whole chain the way a person does - `build()` off the
+# rasters, `compile_plan`, `run_batch` - and it exists because the fix that let
+# Figure 2 contribute at all was NOT pinned by anything: reverting it dropped the
+# run from 102 values to 72 and the suite stayed green, which is the shape this
+# package refuses everywhere else.
+#
+# The reviewer stays the demonstration identity, so `run_batch` ends in
+# DEMO_OUTPUT_REFUSED and writes no values - the assertions are on the STAMP,
+# which records what passed the gate before the refusal.
+_e2e = os.path.join(ROOT, "e2e_323")
+_e2e_plan = os.path.join(_e2e, "plan_323.json")
+os.makedirs(_e2e, exist_ok=True)
+_e2e_ok = True
+try:
+    _plan323 = MP323.build(HERE)
+    with open(_e2e_plan, "w", encoding="utf-8") as _fh:
+        json.dump(_plan323, _fh, indent=1, sort_keys=True)
+except SystemExit as _exc:                                   # pragma: no cover
+    _e2e_ok = False
+    check("323's plan builds off its own rasters", False, "%s" % _exc)
+
+if _e2e_ok:
+    check("323's plan builds off its own rasters",
+          len(_plan323["figures"]) == 2 and len(_plan323["units"]) == 12
+          and sum(len(f["panels"]) for f in _plan323["figures"]) == 12,
+          "%d figure(s), %d unit(s)"
+          % (len(_plan323["figures"]), len(_plan323["units"])))
+    # AND ITS TWO FACTOR GRAINS AGREE, which is the check added above applied to
+    # the plan that motivated it rather than to a mutation of another one.
+    _e2e_probs = CP.validate_plan(copy.deepcopy(_plan323), file_root=HERE)
+    check("  and the plan layer accepts it, factor grains included",
+          not _e2e_probs, "%s" % codes(_e2e_probs))
+    _e2e_m = os.path.join(_e2e, "manifests")
+    _e2e_out = os.path.join(_e2e, "out")
+    _w323, _probs323 = CP.compile_plan(copy.deepcopy(_plan323), _e2e_m,
+                                       file_root=HERE, run_date="2026-08-17")
+    check("  and compiles to a manifest set with no problems",
+          not _probs323 and _w323, "%s" % codes(_probs323))
+    _sum323 = RB.run_batch(_e2e_m, _e2e_out, file_root=HERE,
+                           run_date="2026-08-17")
+    # 102 = Figure 1's 72 (6 panels x 6 timepoints x 2 postures) plus Figure 2's
+    # 30. Figure 2 contributed ZERO until the series factor was declared in the
+    # grid: `ARM=RESPONSE;TIMEPOINT=B-1` against a grid of `{TIMEPOINT}` is
+    # FACTOR_SET_INCONSISTENT on every one of them. This number is the whole
+    # regression - drop the declaration and it is 72.
+    _stamp323 = json.load(open(os.path.join(_e2e_out, "run_stamp.json"),
+                               encoding="utf-8"))
+    # THE COUNT IS IN `Detail`, because a refusal zeroes `Values_Machine_QC_Passed`
+    # - the run kept nothing, so the field that says how many it kept says 0. The
+    # sentence is the only place the gate's own tally survives, and `QC_Problems`
+    # is the structured half of the same statement: 2 with the grid declaring
+    # SERIES, one per unit that lost a cell, and 8 the moment the declaration goes
+    # and Figure 2's six units are refused wholesale.
+    _passed323 = re.match(r"^(\d+) values passed the gate",
+                          _stamp323.get("Detail", ""))
+    check("  and 102 values pass the gate, Figure 2's 30 among them",
+          _passed323 is not None and int(_passed323.group(1)) == 102
+          and _stamp323["QC_Problems"] == 2
+          and _stamp323["Values_Read"] == 107,
+          "%r / %d qc problem(s) / %s read"
+          % (_stamp323.get("Detail", "")[:40], _stamp323.get("QC_Problems"),
+             _stamp323.get("Values_Read")))
+    check("  under a demonstration identity, so none of them is written",
+          _stamp323["Status"] == "DEMO_OUTPUT_REFUSED"
+          and _stamp323["Values_Accepted"] == 0
+          and not os.path.exists(os.path.join(_e2e_out,
+                                              "figure_values_accepted.csv")),
+          "%s / accepted %s" % (_stamp323.get("Status"),
+                                _stamp323.get("Values_Accepted")))
 
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))

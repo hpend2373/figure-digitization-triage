@@ -4478,6 +4478,109 @@ check("a directory that is not a run cannot be finalized",
       FIN.finalize(_stampless, run_date="2026-08-06")["status"]
       == "RUN_NOT_FINALIZABLE")
 
+
+print()
+print("a run may only be finalized under today's manifest contract")
+# HASHING ANSWERS "ARE THESE THE MANIFESTS THE RUN VALIDATED". It says nothing
+# about whether what they declare is coherent, because the run's own validator
+# answered that - in whatever version it happened to be. So every contract this
+# package has added since a run was produced was a contract that run escaped, and
+# the escape is not hypothetical: a v9.0-era producer could exchange the `Unit_ID`
+# of two panels of one figure (v9.1 closed it in the plan layer, v9.3 in the
+# manifests) and one panel's correct numbers sit under the other panel's outcome,
+# with every hash matching.
+#
+# The fixture below is that run. The manifests are rewritten to a foreign
+# producer's set AND the stamp's `Manifest_SHA256` is recomputed to match, so the
+# hash check passes and the ONLY thing that can refuse it is the re-validation.
+_hist_dir, _ = fresh_run("run_historical")
+_hist_fp = pd.read_csv(os.path.join(_hist_dir, "review_queue.csv"),
+                       dtype=object).fillna("").loc[0, "Review_Subject_SHA256"]
+
+
+def _historical(name, panels, units):
+    """A completed run whose manifests are a foreign producer's, hash-consistent."""
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.copytree(_hist_dir, out)
+    mdir = os.path.join(out, "manifests")
+    for fname, rows, cols in (
+            ("panel_manifest.csv", panels, BM.panel_manifest_columns()),
+            ("unit_manifest.csv", units, GE.fig_unit_columns())):
+        with open(os.path.join(mdir, fname), "w", newline="",
+                  encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(cols)
+            for r in rows:
+                w.writerow([r.get(c, "") for c in cols])
+    # The stamp records what the run validated, so an older run's stamp records
+    # ITS manifests. Recomputed rather than left stale, because a stale hash is
+    # `RUN_MANIFEST_MODIFIED` and would prove nothing about the contract.
+    stamp_path = os.path.join(out, "run_stamp.json")
+    stamp = json.load(open(stamp_path, encoding="utf-8"))
+    frames = RB.load_manifests(mdir)
+    for key in ("panels", "units"):
+        stamp["Manifest_SHA256"][key] = RB.frame_sha256(frames[key])
+    with open(stamp_path, "w", encoding="utf-8") as fh:
+        json.dump(stamp, fh, indent=1, sort_keys=True)
+    return out
+
+
+# THE EXCHANGE ITSELF. Two panels, two units, each unit naming the other's panel:
+# P1 reads U1 and U1 says it is filled by P2. Every measurement in the run is
+# right and the headings are swapped.
+_swapped_panels = [dict(PANELS[0]),
+                   dict(PANELS[0], Panel_ID="P2", Source_Panel_ID="P2",
+                        Unit_ID="U2")]
+_swapped_units = [dict(UNITS[0], Panel_ID="P2", Source_Panel_ID="P2"),
+                  dict(UNITS[0], Unit_ID="U2", Panel_ID="P1",
+                       Source_Panel_ID="P1")]
+_swapped_dir = _historical("run_swapped", _swapped_panels, _swapped_units)
+_swapped_fin = FIN.finalize(_swapped_dir, review_path=review(
+    [row(Review_Subject_SHA256=_hist_fp)],
+    path=os.path.join(_swapped_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a hash-consistent run whose units name each other's panels is refused",
+      _swapped_fin["status"] != "FINALIZED"
+      and _swapped_fin["status"] == "RUN_MANIFEST_CONTRACT_INVALID",
+      "%s / %s" % (_swapped_fin["status"],
+                   sorted({p["check"] for p in _swapped_fin["problems"]})))
+check("  and the refusal names the check the older producer escaped",
+      any("PANEL_UNIT_MISMATCH" in p["detail"]
+          for p in _swapped_fin["problems"]
+          if p["check"] == "RUN_MANIFEST_CONTRACT_INVALID")
+      and "PANEL_UNIT_MISMATCH" in _swapped_fin["detail"],
+      "%s" % [p["detail"][:70] for p in _swapped_fin["problems"]
+              if p["check"] == "RUN_MANIFEST_CONTRACT_INVALID"])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_swapped_dir,
+                                      "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_swapped_dir)))
+# The migrated case: v9.3 added the two columns and a producer that does not fill
+# them leaves them empty. Same refusal, one row.
+_blank_dir2 = _historical("run_blank_panel_id", [dict(PANELS[0])],
+                          [dict(UNITS[0], Panel_ID="", Source_Panel_ID="")])
+_blank_fin2 = FIN.finalize(_blank_dir2, review_path=review(
+    [row(Review_Subject_SHA256=_hist_fp)],
+    path=os.path.join(_blank_dir2, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a run whose units never said which panel filled them is refused",
+      _blank_fin2["status"] != "FINALIZED"
+      and any(p["check"] == "RUN_MANIFEST_CONTRACT_INVALID"
+              and "UNIT_NAMES_NO_PANEL" in p["detail"]
+              for p in _blank_fin2["problems"]),
+      "%s / %s" % (_blank_fin2["status"],
+                   sorted({p["check"] for p in _blank_fin2["problems"]})))
+# AND THE SAME RUN, UNTOUCHED, STILL FINALIZES. Without this the scenario above
+# only proves the finalizer can refuse something.
+_ok_dir = _historical("run_contract_ok", [dict(PANELS[0])], [dict(UNITS[0])])
+_ok_fin = FIN.finalize(_ok_dir, review_path=review(
+    [row(Review_Subject_SHA256=_hist_fp)],
+    path=os.path.join(_ok_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("the same run with a contract-satisfying manifest set finalizes",
+      _ok_fin["status"] == "FINALIZED", "%s" % _ok_fin)
+
 print()
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is

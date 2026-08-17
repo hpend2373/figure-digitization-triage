@@ -220,6 +220,31 @@ SOURCE_DOCUMENT_ROLES = ("MAIN_ARTICLE", "SUPPLEMENT", "APPENDIX",
 SOURCE_FILE_NOT_HELD = "NOT_HELD"
 SHA256_TEXT = re.compile(r"^[0-9a-f]{64}$")
 
+#: The label a `Figure_Number` may carry, stripped before two of them are
+#: compared. `图` / `圖` for the same reason `corpus_intake.CAPTION_RE` has them:
+#: the China Astronaut Research and Training Center papers in this corpus print
+#: `图 1.` with an English `Fig. 1.` underneath, so both spellings of one figure
+#: are in circulation for one article.
+_FIGURE_LABEL = re.compile(r"^(?:FIG(?:URE)?\.?|图|圖)\s*")
+
+
+def normalize_figure_number(value):
+    """The canonical identity of a printed figure number within one document.
+
+    `FIG2`, `Fig. 2`, `Figure 2`, `图 2` and `2` are one figure, and v9.3's
+    duplicate check only collapsed the first two: it stripped punctuation, so
+    `FIG2` and `FIGURE2` came out as different figures and a document could
+    satisfy its own `Observed_Figure_Count` with two rows for Figure 2 spelled
+    two ways while a real figure was missing - the P0 that check exists to close,
+    reopened by a spelling. NFKC first, because a full-width `２` is the same
+    digit as `2` and the corpus has CJK typesetting in it.
+
+    A panel suffix is part of the identity and survives: `FIG2A` -> `2A`.
+    """
+    text = unicodedata.normalize("NFKC", str(value)).strip().upper()
+    text = _FIGURE_LABEL.sub("", text)
+    return re.sub(r"[^0-9A-Z]", "", text)
+
 
 REVIEWER_ATTESTATIONS = ("HUMAN_CONFIRMED", "AUTOMATED_AGENT", "DEMO_EXAMPLE")
 
@@ -1510,8 +1535,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         # satisfied: the one thing the source layer exists to prevent - a whole
         # figure disappearing before the panel check begins - happening while
         # every count agrees. Normalized, because FIG2 and "fig 2" are one figure.
-        fignum = re.sub(r"[^0-9A-Z]", "",
-                        str(r.get("Figure_Number", "")).strip().upper())
+        # Normalized through `normalize_figure_number`, so `Fig. 2`, `Figure 2`,
+        # `图 2` and `2` are the same figure. Stripping punctuation alone left
+        # FIG2 and FIGURE2 as two figures and reopened this hole by spelling.
+        fignum = normalize_figure_number(r.get("Figure_Number", ""))
         if fignum:
             first = figure_number_seen.setdefault((sdid, fignum), sfid)
             if first != sfid:
@@ -1642,6 +1669,9 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     #: bijection, collected here so the check below can be stated once over both
     #: manifests rather than inside either loop.
     unit_claims = {}
+    #: (panel, factor, level) -> the first mark that claimed that cell, per axis.
+    #: v9.4: two marks over one pair are two readings of the same cell.
+    cell_claim_series, cell_claim_positions = {}, {}
     for i, r in panels.iterrows():
         line = "panels:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
@@ -1845,6 +1875,24 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         else:
             factors_by_panel.setdefault(pid, set()).add(
                 str(r.get("Factor_Name")).strip().upper())
+            # TWO MARKS, ONE CELL. `DUPLICATE_SERIES_ID` above is about the
+            # identifier; this is about what the identifier MEANS. Two series of
+            # one panel declaring `ARM=CONTROL` are two readings of one cell, and
+            # the grid gate catches that as `FACTORIAL_CELL_DUPLICATE` only after
+            # both marks have been measured - at which point which of the two
+            # numbers belongs in the cell is not a question it can answer. The
+            # declaration says the same thing twice, which is answerable before a
+            # raster is opened. Upper-cased on both parts, because `fig_cell_key`
+            # is. `compile_plan` refuses the same thing in a plan
+            # (`PLAN_DUPLICATE_FACTOR_LEVEL_ASSIGNMENT`); this is the copy for a
+            # manifest set that never passed through it.
+            pair = (pid, str(r.get("Factor_Name")).strip().upper(),
+                    str(r.get("Factor_Level")).strip().upper())
+            first = cell_claim_series.setdefault(pair, sid)
+            if first != sid:
+                flag(line, "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT",
+                     "series %s and %s of %s both declare %s=%s; both would be "
+                     "filed in one cell" % (first, sid, pid, pair[1], pair[2]))
         for col, vocab in (("Marker_Shape", MARKER_SHAPES),
                            ("Marker_Fill", MARKER_FILLS),
                            ("Line_Style", LINE_STYLES),
@@ -2045,6 +2093,17 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         else:
             factors_by_panel.setdefault(pid, set()).add(
                 str(r.get("Factor_Name")).strip().upper())
+            # The position axis of the same rule as the series axis above: two x
+            # positions of one panel declaring one level are two readings of one
+            # cell, found before the reader is asked which is which.
+            pair = (pid, str(r.get("Factor_Name")).strip().upper(),
+                    str(r.get("Factor_Level")).strip().upper())
+            first = cell_claim_positions.setdefault(pair, qid)
+            if first != qid:
+                flag(line, "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT",
+                     "positions %s and %s of %s both declare %s=%s; both would "
+                     "be filed in one cell"
+                     % (first, qid, pid, pair[1], pair[2]))
         mark = panel_mark.get(pid, "")
         # `Slot_Index` used to satisfy this on its own, and `_x_positions` only
         # ever passes rows that have an `X_Pixel` - so a Slot_Index-only
@@ -2129,7 +2188,19 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             # statement about which panel this unit is, not a missing field.
             pspid = str(panel_index[named].get("Source_Panel_ID", "")).strip()
             uspid = str(u.get("Source_Panel_ID", "")).strip()
-            if uspid and pspid and uspid != pspid:
+            if not uspid:
+                # v9.3 only compared the physical grain when BOTH sides filled
+                # it in, so a third-party unit row could leave it blank and the
+                # second half of the pairing simply went unstated. Not a wrong
+                # number - `Panel_ID` still names the panel the physical panel can
+                # be read off - but the claim this schema makes is that the two
+                # grains check each other at the physical grain too, and a column
+                # that may be blank does not make that claim.
+                flag(line, "UNIT_NAMES_NO_SOURCE_PANEL",
+                     "the unit names %s and does not say which physical panel "
+                     "that is. Source_Panel_ID is the pairing at the grain the "
+                     "source inventory uses" % named)
+            elif pspid and uspid != pspid:
                 flag(line, "PANEL_UNIT_SOURCE_PANEL_MISMATCH",
                      "the unit names physical panel %s and %s is %s"
                      % (uspid, named, pspid))

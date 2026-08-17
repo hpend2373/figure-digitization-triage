@@ -7247,6 +7247,75 @@ schema change with a migration rather than a check. The grid-level direction of
 the level comparison is still deliberately unchecked (see v9.2). And the document
 digest still has no producer inside the package.
 
+## v9.4 — a run is finalized under today's contract, not the one it was made under
+
+**Every contract this package has added since a run was produced was a contract
+that run escaped.** `verify_manifest_inputs` answers one question - are these the
+manifests the run validated - and it answers it well: frame hashes for all twelve
+inputs, compared as frames so a re-saved CSV is the same manifest. It says
+nothing about whether what they DECLARE is coherent, because the run's own
+validator answered that, in whatever version it happened to be. Nothing in
+`finalize_batch` re-ran `validate_batch_manifests`.
+
+So a completed run from a v9.0-era producer could carry the panel-unit exchange
+v9.1 closed in the plan layer and v9.3 closed in the manifests: two panels of one
+figure with their units swapped, every measurement right, every hash right, and
+one panel's numbers under the other panel's outcome. The finalizer confirmed the
+hashes and, given an approval, wrote them into `figure_values_accepted.csv` - the
+one file this whole package exists to be careful about. The current validator now
+runs over the VERIFIED frames, and a run that does not satisfy it is refused with
+its own status rather than a borrowed one:
+
+    RUN_MANIFEST_CONTRACT_INVALID   the manifests are the ones this run
+                                    validated and they do not satisfy the
+                                    contract this package holds now
+
+It is a separate status from `RUN_ARTIFACT_MODIFIED` deliberately. Nothing was
+modified - the sentence "the run this approval refers to is not the run on disk"
+would be false, and what such a run needs is a re-run, not an investigation into
+who edited what. `check_files=False`: this is a check on what the manifests say,
+and re-reading rasters would make an approval depend on a corpus directory the
+approver does not need to have.
+
+**And `Figure_Number` was normalized by stripping punctuation, which is not the
+same as canonicalizing it.** `FIG2` and `Fig. 2` collapsed; `Figure 2` became
+`FIGURE2`, `2` stayed `2`, and `图 2` became `2`. So the v9.3 duplicate check -
+whose whole purpose is that a document cannot satisfy its own
+`Observed_Figure_Count` with one figure listed twice while another is missing -
+reopened on a spelling: two rows for Figure 2, one written `Fig. 2` and one
+`Figure 2`, counted as two figures. Not hypothetical for this corpus:
+`corpus_intake.CAPTION_RE` accepts `Fig`, `Figure`, `图` and `圖` because the China
+Astronaut Research and Training Center papers print `图 1.` with an English
+`Fig. 1.` underneath, so both spellings of one figure are in circulation for one
+article. `BM.normalize_figure_number` is now the one definition - NFKC, strip the
+label, keep the panel suffix - so `2`, `FIG2`, `Fig. 2`, `Figure 2`, `图 2`, `圖2`
+and `２` are one figure and `Figure 2A` is not `Figure 2`.
+
+**Two smaller halves of v9.3 finished.** `DUPLICATE_FACTOR_LEVEL_ASSIGNMENT` is
+now checked in the manifests as well as in a plan: two series (or two positions)
+of one panel declaring one `(Factor_Name, Factor_Level)` are two readings of one
+cell, and the grid gate only says so after both marks have been measured - when
+which number belongs in the cell is no longer a question it can answer.
+`UNIT_NAMES_NO_SOURCE_PANEL` refuses a blank `Source_Panel_ID` on a unit: v9.3
+compared the physical grain only when both sides filled it in, so the second half
+of the pairing could simply go unstated, and a column that may be blank does not
+make the claim the schema makes.
+
+    reverted                                          scenarios that fail
+    the finalizer's re-validation removed                4
+    figure-number label stripping reverted               7
+    the manifest duplicate-cell check removed            3
+    the blank Source_Panel_ID check removed              1
+
+**What this does NOT close.** The re-validation is `check_files=False`, so a
+finalization still does not re-verify that the rasters on disk are the ones the
+inventory hashed - the review subject covers the panel's own raster, which is the
+narrower true claim. `Article_Page_Range` is still free text (see v9.3). And the
+finalizer now depends on the manifest validator staying decidable from the
+manifests alone: a future check that needs the corpus would have to be split
+rather than added, or every historical run becomes unfinalizable for want of a
+directory.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

@@ -609,6 +609,65 @@ check("two panels reading one unit are refused",
           panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Unit_ID="U_LINE")),
       "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
                                     Unit_ID="U_LINE")))
+# v9.3 compared the physical grain only when BOTH sides filled it in, so a unit
+# row could leave it blank and the second half of the pairing went unstated.
+check("a unit that does not say which physical panel it is, is refused",
+      "UNIT_NAMES_NO_SOURCE_PANEL" in validate(
+          units=[dict(u, Source_Panel_ID="") for u in UNITS]),
+      "%s" % validate(units=[dict(u, Source_Panel_ID="") for u in UNITS]))
+
+# TWO MARKS, ONE CELL, BEFORE THE RASTER (v9.4). `DUPLICATE_SERIES_ID` is about
+# the identifier; this is about what the identifier means. Two series declaring
+# `ARM=CONTROL` are two readings of one cell, and the grid gate only says so
+# after both have been measured - when which number belongs in the cell is no
+# longer a question it can answer.
+check("two series of one panel declaring one level are refused",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Factor_Level="CONTROL")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+          Factor_Level="CONTROL")))
+check("  and case is not a second cell",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Factor_Level="control")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+          Factor_Level="control")))
+check("two positions of one panel declaring one level are refused",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          positions=edited(POSITION_ROWS,
+                           {"Panel_ID": "P_LINE", "Position_ID": "T1"},
+                           Factor_Level="T0")),
+      "%s" % validate(positions=edited(
+          POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": "T1"},
+          Factor_Level="T0")))
+check("  and the same level under two panels is not a duplicate",
+      validate() == [], "%s" % validate())
+
+# ONE FIGURE, HOWEVER IT IS SPELLED (v9.4). v9.3 stripped punctuation, so FIG2
+# and FIGURE2 came out as two figures and the missing-figure hole reopened by
+# spelling. The corpus has both: `corpus_intake.CAPTION_RE` accepts Fig, Figure,
+# 图 and 圖 because the China Astronaut Research and Training Center papers print
+# `图 1.` with an English `Fig. 1.` underneath.
+check("Fig/Figure/图/圖 and a bare number are one figure number",
+      len({BM.normalize_figure_number(x)
+           for x in ("2", "FIG2", "Fig. 2", "Figure 2", "图 2", "圖2", "２")}) == 1,
+      "%s" % sorted({BM.normalize_figure_number(x)
+                     for x in ("2", "FIG2", "Fig. 2", "Figure 2", "图 2",
+                               "圖2", "２")}))
+check("  and a panel suffix stays part of the identity",
+      BM.normalize_figure_number("Figure 2A") == "2A" != "2",
+      "%s" % BM.normalize_figure_number("Figure 2A"))
+for _spelling in ("Figure 2", "图 2", "圖 2", "2", "２"):
+    check("a document with FIG2 and %r has one figure twice" % _spelling,
+          "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+              source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                    Figure_Number=_spelling)),
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+              Figure_Number=_spelling)))
 
 # What the run stamp will say, derived from the same column.
 _mixed = (_doc(Source_File="elsewhere.pdf", Source_File_SHA256="NOT_HELD")

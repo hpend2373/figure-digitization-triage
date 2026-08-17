@@ -148,7 +148,14 @@ FINALIZE_MARKER = "figure_values_accepted.csv"
 FINALIZED_STATUS = "FINALIZED"
 
 FINALIZE_STATUSES = ("FINALIZED", "NOTHING_APPROVED", "RUN_NOT_FINALIZABLE",
-                     "RUN_ARTIFACT_MODIFIED", "COMMIT_FAILED",
+                     "RUN_ARTIFACT_MODIFIED",
+                     # The manifests are the ones the run validated and they do
+                     # not satisfy the contract this package holds today (v9.4).
+                     # Distinct from RUN_ARTIFACT_MODIFIED because nothing was
+                     # modified: the run was produced under an earlier contract,
+                     # and what it needs is a re-run rather than an
+                     # investigation into who edited what.
+                     "RUN_MANIFEST_CONTRACT_INVALID", "COMMIT_FAILED",
                      # Panels were approved and every value under them was read
                      # at a tier no signature can finalize. Distinct from
                      # NOTHING_APPROVED, which is about the decisions; this is
@@ -2304,6 +2311,56 @@ def verify_run_outputs(run_dir, run_stamp, manifest_dir, flag, verified=None):
         # that were verified.
         verified.update(frames)
     manifest_frames = frames or {}
+    # AND THE CONTRACT THOSE FRAMES HAVE TO SATISFY TODAY, not the one that was
+    # in force when the run was made. Hashing answers "are these the manifests
+    # the run validated"; it says nothing about whether what they declare is
+    # coherent, because the run's own validator is the thing that answered that -
+    # in whatever version it happened to be.
+    #
+    # The gap is a completed run from an older producer. A v9.0-era set could
+    # exchange the `Unit_ID` of two panels of one figure (v9.1 closed that in the
+    # plan layer, v9.3 in the manifests): its numbers are right, its hashes are
+    # right, and one panel's values sit under the other panel's outcome. The
+    # finalizer used to confirm the hashes and approve it, so every contract this
+    # package has added since a run was produced was a contract that run escaped.
+    # Re-running the CURRENT validator over the VERIFIED frames closes that: a
+    # run may only be finalized under the semantics of the package doing the
+    # finalizing.
+    #
+    # `check_files=False`, because this is a check on what the manifests SAY. The
+    # rasters were hashed at run time and are hashed again as review subjects;
+    # re-reading them here would make finalization depend on a corpus directory
+    # that a reviewer approving values does not need to have.
+    if frames is not None:
+        contract = BM.validate_batch_manifests(
+            frames.get("panels"), frames.get("series"), frames.get("positions"),
+            frames.get("configs"), units=frames.get("units"),
+            source_documents=frames.get("source_documents"),
+            source_figures=frames.get("source_figures"),
+            source_panels=frames.get("source_panels"),
+            reviewers=frames.get("reviewers"),
+            resolutions=frames.get("resolutions"),
+            check_files=False)
+        if len(contract):
+            # Reported to the caller so the REFUSAL can say what happened. The
+            # generic verification status is `RUN_ARTIFACT_MODIFIED`, whose
+            # sentence is "the run this approval refers to is not the run on
+            # disk" - and here nothing was modified: the manifests are exactly
+            # the ones the run validated, and they do not satisfy the contract
+            # this package holds today. A true refusal under a false heading is
+            # the kind of thing somebody debugs for an afternoon.
+            if verified is not None:
+                verified["contract_problems"] = sorted(set(contract["check"]))
+            for code in sorted(set(contract["check"])):
+                rows = contract[contract["check"] == code]
+                flag("run", "RUN_MANIFEST_CONTRACT_INVALID",
+                     "%s (%d row(s), e.g. %s: %s). The manifests are the ones "
+                     "the run validated and they do not satisfy the contract "
+                     "this package holds now - the run was produced under an "
+                     "earlier one. Re-run it before approving its values"
+                     % (code, len(rows), _s(rows.iloc[0].get("where")),
+                        _s(rows.iloc[0].get("detail"))[:160]))
+            ok = False
     if verified is not None:
         verified["artifact_bytes"] = artifact_bytes
 
@@ -2500,6 +2557,18 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     verified = {}
     if not verify_run_outputs(run_dir, run_stamp, manifest_dir, flag,
                               verified=verified):
+        if verified.get("contract_problems"):
+            # Nothing was modified. The manifests hash exactly as the run
+            # recorded them and they do not satisfy the contract this package
+            # holds now - which is what happens to a run produced under an
+            # earlier one, and is a different sentence from "not the run on
+            # disk".
+            return stop("RUN_MANIFEST_CONTRACT_INVALID",
+                        "the manifests are the ones this run validated and they "
+                        "do not satisfy the current manifest contract (%s). The "
+                        "run was produced under an earlier one; re-run it before "
+                        "approving its values"
+                        % ", ".join(verified["contract_problems"]))
         return stop("RUN_ARTIFACT_MODIFIED",
                     "the run this approval refers to is not the run on disk")
 

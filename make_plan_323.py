@@ -1,0 +1,265 @@
+"""Write `plan_323.json` from the declarations `build_id323.py` already holds.
+
+    python3 make_plan_323.py [OUTPUT.json] [RASTER_DIR]
+
+Publication 323 is the corpus's only figure whose caption STATES what its error
+bars are - "Data are given for a group of 10 subjects (Mean +/- SEM)" - and that
+is the one declaration publication 397 cannot make. 397's units are held by
+`UNRESOLVED_ERRORBAR_DEFINITION` on every panel, so no value of its 123 reaches a
+review queue and `PILOT.md` steps 4 and 5 have never been walked on a real
+figure. This plan exists to make that walk possible.
+
+NOTHING HERE IS A NEW CLAIM ABOUT THE PUBLICATION. Every declaration is read out
+of `build_id323.py`, which ships, runs in CI and has produced the package's
+hand-reconciled worked example since v7.2: the panel boxes, the printed tick
+values, the two series and their colour masks, the factor levels, the caption
+verbatim, `Dispersion_Type=SEM` and its source, `N_Outcome=10`,
+`Bar_Top_Definition` and `Errorbar_Stem_Confirmed`. The geometry that is
+MEASURED rather than declared - each panel's tick pixel rows and each
+timepoint's group centre - is measured here from the same raster by the same
+functions, because retyping measured numbers into JSON by hand would put
+transcription errors into the document that exists to remove them.
+
+## What is deliberately absent
+
+The document-level inventory. Nobody in this package has opened publication 323's
+full article and counted its figures, so `observed_figure_count` is 0 and
+`inventory_status` is `PENDING`, which the manifest layer flags as
+`SOURCE_DOCUMENT_NOT_VERIFIED`. That flag is the truth. `pilot_323.py` takes the
+count from `FDT_323_FIGURE_COUNT` for the person who does open it, the same way
+it takes the reviewer's name and ORCID - an inventory is an attestation, and a
+number invented here would read exactly like one somebody made.
+
+The reviewer is ORCID's fictional demonstration record, so a plan run with no
+environment is `DEMO_ONLY` and accepts nothing.
+"""
+import json
+import os
+import sys
+
+import numpy as np
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+from bar_reader import colour_masks, read_bar_panel                # noqa: E402
+
+#: `build_id323.py` runs a whole extraction on import, so it is read as DATA:
+#: everything above `figs=[]` is declaration and nothing below it is. The same
+#: split `make_plan_397.py` uses on the 397 pilot.
+_MARKER = "figs=[];grids=[]"
+_SOURCE = open(os.path.join(HERE, "build_id323.py"), encoding="utf-8").read()
+_NS = {"__file__": os.path.join(HERE, "build_id323.py"), "__name__": "plan_323"}
+exec(compile(_SOURCE[:_SOURCE.index(_MARKER)], "build_id323.py", "exec"), _NS)
+
+FIGS = _NS["FIGS"]
+SESSIONS = _NS["SESS"]
+CAPTION_SOURCE = _NS["SRC"]
+
+#: WHAT THE METHODS SAY, which is what `INSTALL.md` has been asking for. The open
+#: list has carried "ID 323 and 397 both need their SD/SEM wording resolved from
+#: the methods text" since v7.2, and `build_id323` declares SEM on the CAPTION
+#: alone. For 323 the methods text settles it, and it settles it the same way, so
+#: the declaration is unchanged and its evidence is now the sentence the open item
+#: asked for. Quoted rather than summarised: `Errorbar_Definition_Source` is read
+#: by `fig_unresolved_marker`, and a paraphrase is not a source.
+#:
+#: 397 is NOT resolved by this. Its own methods are silent, which is why its
+#: source string still contains "NOT STATED" and its units are still held.
+METHODS_SOURCE = (
+    'methods (Statistics): "The values are given as mean and SEM, besides '
+    'anthropometric data and time intervals which are given as mean and SD." '
+    "The hemodynamic values of Figures 1 and 2 are the former. Caption of both "
+    "figures, verbatim, agreeing: " + _NS["SRC"])
+ticks_of = _NS["ticks_of"]
+
+#: 323's outcome names are the panel labels; the domain is the one this package
+#: has, and the unit comes with the panel.
+DOMAIN = "CV_HEMO"
+
+DOCUMENT_ID = "SD323_MAIN"
+SOURCE_FILE = "323_10.3389_fphys.2020.00455.pdf"
+
+
+def _number(fid):
+    """`1` from `323|FIG1`."""
+    return fid.split("FIG")[1]
+
+
+def _panel_id(fid, name):
+    """`P1_SAP` from `323|FIG1` and `SAP` - a run panel id, not a figure key."""
+    return "P%s_%s" % (_number(fid), name)
+
+
+def _view_id(fid):
+    """`F323_1`. `build_id323`'s own ids are pipe-separated figure KEYS, which
+    the plan layer refuses as unsafe - and rightly: these become manifest
+    foreign keys and a `|` in one is a delimiter inside a value."""
+    return "F323_%s" % _number(fid)
+
+
+def _grid_id(fig):
+    """`G_SESSION6_POSTURE2` from `GRID|SESSION6xPOSTURE2`, for the same reason."""
+    return "G_" + fig["gid"].split("|", 1)[1].replace("x", "_")
+
+
+def _series_blocks(series):
+    # THE MASK AND NOTHING ELSE. Declaring `Colour_Hex` beside `Mask_Key` is
+    # `SERIES_DISCRIMINANT_AMBIGUOUS`, and rightly so: two discriminants for one
+    # series is two answers to "which ink is this", and the reader can only obey
+    # one. `build_id323` declares the mask, so the mask is what this carries.
+    return [dict(series_id=name, factor="POSTURE" if len(series) > 1 else "ARM",
+                 level=name, mask_key=key,
+                 marker="NONE", line_style="NONE", bar_fill="SOLID",
+                 note="build_id323 declares the %s mask for %s" % (key, name))
+            for name, key in sorted(series.items())]
+
+
+def _positions(bars, levels):
+    """One x per TIMEPOINT: the centre of that timepoint's group of bars.
+
+    The reader groups bars into slots itself and the position manifest declares
+    where each slot is, so the declared x has to be the group's centre rather
+    than any one series' bar - two postures 30 px apart around a centre is the
+    same statement as one bar at the centre, and the tolerance is the reader's
+    group window.
+
+    A slot NO bar was read at still has a place on the axis, and it is the axis
+    that says where: the slots are evenly spaced, so the missing one is fitted
+    from the ones that were read. That is a measurement of the axis, not a guess
+    about the data - the cell stays absent and `run_batch` still reports the
+    level as unread, which is what `build_id323` already reports for FIG2's DAP
+    at R5. A slot declared with no `X_Pixel` at all is `UNSUPPORTED_CAPABILITY`,
+    and leaving the position out entirely would make the axis shorter than the
+    grid rather than making one cell missing from it.
+    """
+    seen = [(order, [float(b["x"]) for b in bars if int(b["order"]) == order])
+            for order in range(len(levels))]
+    known = [(o, sum(xs) / len(xs)) for o, xs in seen if xs]
+    if len(known) >= 2:
+        slope, intercept = np.polyfit([float(o) for o, _ in known],
+                                      [x for _, x in known], 1)
+    else:
+        slope = intercept = None
+    out = []
+    for order, level in enumerate(levels):
+        xs = [x for o, x in known if o == order]
+        if xs:
+            out.append(dict(position_id=level, factor="TIMEPOINT", level=level,
+                            x_pixel=int(round(xs[0])), slot_index=order,
+                            display_order=order, timepoint_label=level))
+        elif slope is None:
+            raise SystemExit("no slot of this panel was read, so the axis "
+                             "cannot be fitted and nothing here may invent it")
+        else:
+            out.append(dict(
+                position_id=level, factor="TIMEPOINT", level=level,
+                x_pixel=int(round(slope * order + intercept)),
+                slot_index=order, display_order=order, timepoint_label=level,
+                note="no bar was read at this slot; its x is fitted from the "
+                     "evenly spaced slots that were"))
+    return out
+
+
+def build(raster_root=None):
+    """The whole plan, as a dict."""
+    root = raster_root or HERE
+    reviewers = [dict(
+        reviewer_id="RV_INSPECTOR", name="Josiah Carberry",
+        record_type="DEMO_IDENTITY", contact_type="ORCID",
+        contact="0000-0002-1825-0097", registered_by="Josiah Carberry",
+        registration_date="2026-08-17", human_attestation="DEMO_EXAMPLE",
+        note="ORCID's fictional demonstration record; pilot_323.py replaces it")]
+    documents = [dict(
+        document_id=DOCUMENT_ID, role="MAIN_ARTICLE", source_file=SOURCE_FILE,
+        page_range="pages 4-5, the two figures this plan reads",
+        observed_figure_count=4, inventory_status="PENDING",
+        figure_count_method="HUMAN_VISUAL", reviewer_id="RV_INSPECTOR",
+        inspection_date="2026-08-17",
+        note="four figures, read off the publisher's own figure list rather "
+             "than counted by a person opening the article - so the status is "
+             "PENDING and SOURCE_DOCUMENT_NOT_VERIFIED is its flag. Figures 3 "
+             "and 4 are phase-synchronization spectra and are not inventoried "
+             "here, which SOURCE_FIGURE_COVERAGE_INCOMPLETE says")]
+    grids, figures, units, views = [], [], [], {}
+    # THE DEFAULTS, EXCEPT THE ONE build_id323 PASSES. It calls
+    # `read_bar_panel(masks, box, ticks, series, baseline_value=0.0)` and takes
+    # every other option as it comes, so declaring anything else here would be
+    # this file tuning a reader the worked example did not tune.
+    configs = [dict(config_id="C_COLOUR_BAR", options=dict(baseline_value=0.0))]
+    for fig in FIGS:
+        fid = fig["fid"]
+        image = os.path.join(root, fig["img"])
+        raster = Image.open(image).convert("RGB")
+        masks = colour_masks(raster)
+        grids.append(dict(grid_id=_grid_id(fig), factors=dict(fig["factors"])))
+        views[_view_id(fid)] = dict(caption=fig["cap"])
+        panels = []
+        for name, box, tick_values, outcome, unit in fig["panels"]:
+            pid = _panel_id(fid, name)
+            uid = "U_" + pid
+            rows = ticks_of(masks["dark"], box, len(tick_values))
+            y_ticks = [[float(v), float(p)] for v, p in zip(tick_values, rows)]
+            bars = read_bar_panel(masks, box, list(zip(tick_values, rows)),
+                                  fig["series"], baseline_value=0.0)
+            panels.append(dict(
+                panel_id=pid, label=name, outcome_label="%s (%s)" % (outcome, unit),
+                target_status="TARGET", disposition="AUTO_DIGITIZE",
+                reason="reader/run manifest configured",
+                note=("this panel is one build_id323 lists as UNLISTED on the "
+                      "original worklist" if name == fig["unlisted"] else ""),
+                read=dict(
+                    mark_type="BAR_COLOR", unit_id=uid, figure_view=_view_id(fid),
+                    box=list(box), y_ticks=y_ticks, y_scale="LINEAR",
+                    x_scale="LINEAR", baseline=0.0,
+                    config_id=configs[0]["config_id"], panel_mode="AUTO",
+                    note="tick rows and group centres measured from %s"
+                         % fig["img"],
+                    series=_series_blocks(fig["series"]),
+                    positions=_positions(bars, fig["factors"]["TIMEPOINT"]))))
+            units.append(dict(
+                unit_id=uid, figure_view=_view_id(fid), grid_id=_grid_id(fig),
+                panel=name,
+                outcome_name=outcome, domain=DOMAIN, unit=unit,
+                statistic="CONTINUOUS",
+                # THE DECLARATION THIS PLAN EXISTS FOR, and it is build_id323's,
+                # not this file's: the caption states it in words.
+                dispersion_type="SEM", errorbar_source=METHODS_SOURCE,
+                n_outcome=10, n_source="caption",
+                bar_top_definition="OUTLINE_CENTER",
+                errorbar_stem_confirmed="TRUE",
+                value_scale=fig["scale"],
+                x_calibration=[[0, box[0]], [1, box[1]]]))
+        figures.append(dict(
+            source_figure_id="SF323_%s" % _number(fid),
+            document_id=DOCUMENT_ID, figure_number="FIG%s" % _number(fid),
+            source_file=SOURCE_FILE, source_page=fig["page"], image=fig["img"],
+            observed_panel_count=fig["obs"], inventory_status="VISUALLY_VERIFIED",
+            panel_count_method="HUMAN_VISUAL", reviewer_id="RV_INSPECTOR",
+            inspection_date="2026-08-17",
+            note="panel count and the unlisted panel are build_id323's, which "
+                 "has shipped them since v7.2",
+            panels=panels))
+    return dict(schema="figure-digitization-triage/extraction-plan/1",
+                publication_id=323, reviewers=reviewers, documents=documents,
+                grids=grids, reader_configs=configs, figure_views=views,
+                figures=figures, units=units)
+
+
+def main(argv):
+    out = argv[0] if argv else os.path.join(HERE, "plan_323.json")
+    root = argv[1] if len(argv) > 1 else HERE
+    plan = build(root)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(plan, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    print("wrote %s: %d figure(s), %d panel(s), %d unit(s)"
+          % (out, len(plan["figures"]),
+             sum(len(f["panels"]) for f in plan["figures"]), len(plan["units"])))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

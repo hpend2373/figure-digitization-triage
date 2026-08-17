@@ -6919,6 +6919,63 @@ from the printed axis.
     reverted                                          scenarios that fail
     the plan fits its slots from the bars again        2
 
+## v8.9 — 323 reaches machine QC, and Figure 2 was blocked by a factor nobody declared
+
+**102 values of publication 323 pass the gate.** That is the first real figure in
+this corpus to get past `MACHINE_QC_PASSED`, and the only thing between them and a
+review queue is now `DEMO_OUTPUT_REFUSED` - the reviewer registry is the
+demonstration identity, and registering the person who inspected the figures is an
+attestation this package does not make for anybody.
+
+**Figure 2 contributed nothing until this release, for a reason no fixture could
+show.** `_series_blocks` gave a single-series panel `Factor_Name=ARM` - 323 has no
+arms - and the grid copied `build_id323`'s factor table, which for Figure 2 is
+`{TIMEPOINT}` alone. The runner puts a series factor into every `Cell_Key`
+whether or not the series is alone, so every value came out as
+`ARM=RESPONSE;TIMEPOINT=B-1` against a grid that declared no `ARM`, and the grid
+gate refused all of them as `FACTOR_SET_INCONSISTENT`. It is now `SERIES`, which
+is what it is, and the grid declares it beside `TIMEPOINT`. The cell count is
+unchanged at 6x1. Measured: 72 values passed before, 102 after, and reverting the
+grid line puts it back to 72.
+
+**The document record is bounded rather than widened.** The article has four
+figures; Figures 3 and 4 are a PSI spectrum and three panels of PSI and spectral
+density, and their rasters are not held here. The source layer refuses - in
+`compile_plan` and again in `batch_manifests` - to inventory a figure whose raster
+the package does not have, which is the right rule. So `Article_Page_Range` says
+pages 4-5 and `observed_figure_count` is 2, and within that range the inventory is
+complete: a narrower true claim instead of a wider unverifiable one. Whether those
+two figures are in scope for this review is undecided and is not decided here.
+
+**`x_category_columns` refuses `count < 2`** instead of returning None. The
+contract is a SPACING and one cluster has none, so None read as "this panel does
+not say" when the truth was that the function cannot be asked. And the module
+docstring said `observed_figure_count` is 0 and that `pilot_323.py` reads a count
+from the environment; neither was true of the code and `pilot_323.py` does not
+exist.
+
+    reverted                                          scenarios that fail
+    count < 2 returns None again                       1
+    the grid stops declaring SERIES                    0  -- see below
+
+**THE FACTOR FIX IS NOT PINNED BY A SCENARIO, and that is the honest state.**
+Reverting it drops the run from 102 values to 72, which is a measurement taken by
+hand: nothing in the suite builds this plan, compiles it and runs it, so the suite
+stays green either way. `test_compile_plan` checks `_positions` with prepared
+centres and no more. What is needed is an end-to-end scenario -
+`make_plan_323.build()` -> `compile_plan` -> `run_batch`, asserting zero
+`FACTOR_SET_INCONSISTENT`, `DAP/DI19` absent and `DAP/R1` at 0.788 - and, better,
+a plan-validation refusal (`PLAN_PANEL_FACTOR_SET_MISMATCH`) so the factor grains
+are compared before a raster is opened rather than after. Both are the next
+release. Until then this fix rests on one hand measurement, which is exactly the
+kind of thing this package refuses to call verified.
+
+**Also still open on `x_category_columns`:** `band`, `step` and `gap` are pixel
+constants tuned to 323's render DPI. Fine for a versioned raster and wrong for a
+corpus-wide proposer, where they would have to be relative to glyph height or
+panel scale.
+
+## Still open
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

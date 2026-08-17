@@ -75,6 +75,14 @@ def x_category_columns(dark, panel_box, count, band=34, step=4, gap=8,
     publication 323 come in under 0.013, and a row of clusters that is not evenly
     spaced is not a category axis.
     """
+    # TWO OR MORE, because the contract is a SPACING and one cluster has none.
+    # `count=1` used to fall through the loop and return None whatever the panel
+    # printed, which reads as "this panel does not say" when the truth is that
+    # this function cannot be asked. A one-category panel needs a different
+    # question and does not have one here.
+    if count < 2:
+        raise ValueError("a category axis needs at least two categories to have "
+                         "a spacing; got count=%r" % (count,))
     x0, x1, y0, y1 = (int(v) for v in panel_box)
     axis = axis_column(dark, panel_box)
     left = (axis + 6) if axis is not None else x0

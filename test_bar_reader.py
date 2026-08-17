@@ -598,6 +598,14 @@ check("a panel that prints no row of categories at all is refused, not guessed",
 # this function answering a question it was not asked. Without the gate the
 # best-scoring band still wins, so nothing above notices its absence: this is the
 # only scenario that does.
+def _raises_value_error(call):
+    try:
+        call()
+    except ValueError:
+        return True
+    return False
+
+
 _UNEVEN = os.path.join(HERE, "fixtures", "uneven_x_bars.png")
 _ui = Image.new("RGB", (760, 480), "white")
 _ud = ImageDraw.Draw(_ui)
@@ -610,6 +618,9 @@ for _x in (160, 240, 430, 490, 640):
                   fill=(220, 30, 30), outline=(0, 0, 0), width=3)
 _ui.save(_UNEVEN)
 _umasks = colour_masks(_ui)
+check("a single category cannot be asked for, and says so",
+      _raises_value_error(lambda: x_category_columns(_gmasks["dark"], _GBOX, 1)),
+      "count=1 returned instead of refusing")
 check("  and a row of five marks at arbitrary x is not a category axis",
       x_category_columns(_umasks["dark"], _GBOX, 5) is None,
       "%s" % (x_category_columns(_umasks["dark"], _GBOX, 5),))

@@ -20,18 +20,22 @@ timepoint's group centre - is measured here from the same raster by the same
 functions, because retyping measured numbers into JSON by hand would put
 transcription errors into the document that exists to remove them.
 
-## What is deliberately absent
+## What this record does and does not claim
 
-The document-level inventory. Nobody in this package has opened publication 323's
-full article and counted its figures, so `observed_figure_count` is 0 and
-`inventory_status` is `PENDING`, which the manifest layer flags as
-`SOURCE_DOCUMENT_NOT_VERIFIED`. That flag is the truth. `pilot_323.py` takes the
-count from `FDT_323_FIGURE_COUNT` for the person who does open it, the same way
-it takes the reviewer's name and ORCID - an inventory is an attestation, and a
-number invented here would read exactly like one somebody made.
+The document record covers PAGES 4-5 and the two figures printed there, and
+within that range its inventory is complete. The article has four figures;
+Figures 3 and 4 are a PSI spectrum and three panels of PSI and spectral density,
+their rasters are not held here, and the source layer refuses - correctly, in
+`compile_plan` and again in `batch_manifests` - to inventory a figure whose raster
+the package does not have. `Article_Page_Range` is where that bound is stated, so
+this is a narrower true claim rather than a wider unverifiable one. Whether those
+two figures are in scope for this review is undecided and is not decided here.
 
-The reviewer is ORCID's fictional demonstration record, so a plan run with no
-environment is `DEMO_ONLY` and accepts nothing.
+The reviewer is ORCID's fictional demonstration record, so a run built from this
+plan is `DEMO_ONLY` and accepts nothing: 102 values pass machine QC and
+`DEMO_OUTPUT_REFUSED` writes none of them. Registering the person who actually
+inspected the figures is the remaining step, and it is an attestation - which is
+why nothing in this file makes it.
 """
 import json
 import os
@@ -111,7 +115,15 @@ def _series_blocks(series):
     # `SERIES_DISCRIMINANT_AMBIGUOUS`, and rightly so: two discriminants for one
     # series is two answers to "which ink is this", and the reader can only obey
     # one. `build_id323` declares the mask, so the mask is what this carries.
-    return [dict(series_id=name, factor="POSTURE" if len(series) > 1 else "ARM",
+    # THE FACTOR A SINGLE SERIES CARRIES IS STILL A FACTOR. `ARM` was wrong
+    # twice over: 323 has no arms, and the grid did not declare it - the runner
+    # puts a series factor into every `Cell_Key` whether or not the series is
+    # alone, so Figure 2's values came out as `ARM=RESPONSE;TIMEPOINT=B-1`
+    # against a grid of `{TIMEPOINT}` and every one of them was
+    # `FACTOR_SET_INCONSISTENT`. `SERIES` is what it is, it is declared in the
+    # grid beside `TIMEPOINT`, and the cell count is unchanged at 6x1.
+    return [dict(series_id=name,
+                 factor="POSTURE" if len(series) > 1 else "SERIES",
                  level=name, mask_key=key,
                  marker="NONE", line_style="NONE", bar_fill="SOLID",
                  note="build_id323 declares the %s mask for %s" % (key, name))
@@ -150,15 +162,27 @@ def build(raster_root=None):
         note="ORCID's fictional demonstration record; pilot_323.py replaces it")]
     documents = [dict(
         document_id=DOCUMENT_ID, role="MAIN_ARTICLE", source_file=SOURCE_FILE,
-        page_range="pages 4-5, the two figures this plan reads",
-        observed_figure_count=4, inventory_status="PENDING",
+        # THE RANGE IS PART OF THE CLAIM, which is what `Article_Page_Range` is
+        # for. The article has FOUR figures; this document record covers pages
+        # 4-5 and the two figures printed there, and within that range the
+        # inventory is complete. A narrower true claim rather than a wider one
+        # that would need Figures 3 and 4 on disk to be checkable - the source
+        # layer refuses to inventory a figure whose raster the package does not
+        # hold, in `compile_plan` and again in `batch_manifests`, and that rule
+        # is right.
+        #
+        # SAID OUT LOUD so nobody reads this as "the article has two figures":
+        # Figures 3 and 4 are a PSI spectrum and three panels of PSI and
+        # spectral density, and whether they are in scope for this review is
+        # undecided. Widening this record to four is what admitting them costs.
+        page_range="pages 4-5 (Figures 1 and 2); the article's Figures 3 and 4 "
+                   "are outside this record and their rasters are not held",
+        observed_figure_count=2, inventory_status="VISUALLY_VERIFIED",
         figure_count_method="HUMAN_VISUAL", reviewer_id="RV_INSPECTOR",
         inspection_date="2026-08-17",
-        note="four figures, read off the publisher's own figure list rather "
-             "than counted by a person opening the article - so the status is "
-             "PENDING and SOURCE_DOCUMENT_NOT_VERIFIED is its flag. Figures 3 "
-             "and 4 are phase-synchronization spectra and are not inventoried "
-             "here, which SOURCE_FIGURE_COVERAGE_INCOMPLETE says")]
+        note="two figures on pages 4-5, both inventoried. The reviewer is the "
+             "demonstration identity unless pilot_323.py is given a real one, "
+             "and the run is DEMO_ONLY either way")]
     grids, figures, units, views = [], [], [], {}
     # THE DEFAULTS, EXCEPT THE ONE build_id323 PASSES. It calls
     # `read_bar_panel(masks, box, ticks, series, baseline_value=0.0)` and takes
@@ -170,7 +194,14 @@ def build(raster_root=None):
         image = os.path.join(root, fig["img"])
         raster = Image.open(image).convert("RGB")
         masks = colour_masks(raster)
-        grids.append(dict(grid_id=_grid_id(fig), factors=dict(fig["factors"])))
+        # AND THE GRID DECLARES IT. `build_id323`'s factor table is the
+        # analysis grid; a panel with one series still has that series in every
+        # cell key, so the grid this plan compiles has to name it or the two
+        # grains disagree by construction.
+        factors = dict(fig["factors"])
+        if len(fig["series"]) == 1:
+            factors["SERIES"] = sorted(fig["series"])
+        grids.append(dict(grid_id=_grid_id(fig), factors=factors))
         views[_view_id(fid)] = dict(caption=fig["cap"])
         panels = []
         for name, box, tick_values, outcome, unit in fig["panels"]:

@@ -4439,6 +4439,28 @@ check("and no approval finalizes it",
       "%s" % _demo_fin)
 check("and the reason names the run mode, not the reviewer",
       "DEMO" in _demo_fin["detail"], "%s" % _demo_fin["detail"])
+# AND THE PREFLIGHT SAYS IT TOO. v8.6, found by rehearsing `PILOT.md` on a real
+# figure. A run refused on its run mode, its status or an unreadable stamp is
+# stopped BEFORE any check runs, so it produces no problem rows - and the
+# preflight printed a bare `RUN_NOT_FINALIZABLE`, `0 refusal(s)`, and a BUNDLE
+# line asserting "this run's outputs did not verify". Nothing had opened an
+# output. Every run in the shipped corpus is DEMO_ONLY, so step 3 - the check a
+# reviewer is told to read before opening a figure - named the wrong cause on
+# every rehearsal there is, and sent them to re-run a batch whose artifacts were
+# fine.
+_why_out = io.StringIO()
+with contextlib.redirect_stdout(_why_out):
+    _why_exit = PF.main([OUT3, "--review",
+                         os.path.join(OUT3, "value_review.csv")])
+_why = _why_out.getvalue()
+check("the preflight carries the refusal that has no problem row",
+      _why_exit == 2 and not _demo_fin["problems"]
+      and ("  WHY      %s" % _demo_fin["detail"]) in _why.splitlines(),
+      "%r" % _why.splitlines()[:3])
+check("  and does not blame outputs it never opened",
+      "did not verify" not in _why
+      and "NOT EVALUATED - the decider stopped at the refusal above" in _why,
+      "%s" % [l for l in _why.splitlines() if "NOT EVALUATED" in l])
 
 _stampless = os.path.join(ROOT, "no_run")
 os.makedirs(_stampless, exist_ok=True)

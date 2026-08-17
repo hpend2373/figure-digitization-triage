@@ -27,6 +27,7 @@ import types
 import ast
 import tarfile
 import tempfile
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -5932,6 +5933,107 @@ _hp = Image.open(_plain).height if _plain else 0
 _hs = Image.open(_starred).height if _starred else 0
 check("the picture with an inferred mark carries the extra line that explains it",
       _hs - _hp == RB.OVERLAY.INFERRED_NOTE_HEIGHT, "%d against %d" % (_hs, _hp))
+
+# NO TWO LABELS SHARE A ROW. v8.6, found by running the pilot procedure on a real
+# figure. The placement was `my - 5 + (index % 4 - 1.5) * 13`: a fixed fan added
+# to each mark's OWN row, which assumes the marks are at the same height. On 397
+# Figure 4's `P4_HR_MEN` the POST pair sits 11 px apart and the fan moved the
+# lower one 13 px down - 2 px of separation for an 11 px glyph, and
+# `FLUID/POST 81.22` was unreadable under `NON_FLUID/POST 83.47`. A reviewer is
+# asked whether each label sits on the mark a reader would give it, and cannot
+# answer that about a label they cannot read.
+#
+# The fixture is the real geometry: four marks, two x slots 67 px apart so the
+# labels overlap horizontally, and the second of each pair 11 px above the first.
+
+
+def _label_boxes(marks, box=(10, 300, 10, 200)):
+    """Where `draw_panel_overlay` ACTUALLY put each label, as (left, right, top).
+
+    Through the drawer, not beside it. The first version of this helper called
+    `label_row` itself with the same arguments the drawer uses - so reverting the
+    DRAWER to the old fan left `label_row` in place, every scenario passed, and
+    the revert harness reported SILENT. A placement contract has to be observed
+    where the pixels are decided.
+    """
+    seen = []
+    real = RB.OVERLAY.label_row
+
+    def recording(left, right, wanted, mark_row, placed, height):
+        top = real(left, right, wanted, mark_row, placed, height)
+        seen.append((left, right, top))
+        return top
+
+    RB.OVERLAY.label_row = recording
+    try:
+        drawn = RB.OVERLAY.draw_panel_overlay(
+            os.path.join(_ov_dir, "placed.png"), _ov_src, box, marks)
+    finally:
+        RB.OVERLAY.label_row = real
+    assert drawn, "the overlay was not drawn, so nothing was placed"
+    return [(l, r, t, RB.OVERLAY.mark_label(m))
+            for (l, r, t), m in zip(seen, marks)]
+
+
+def _sharing_a_row(boxes, glyph=11):
+    return [(a[3], b[3]) for a, b in itertools.combinations(boxes, 2)
+            if a[0] < b[1] and b[0] < a[1] and abs(a[2] - b[2]) < glyph]
+
+
+# A BAR, so `_mark_y` reads `top_px` and the four marks are at four heights.
+# Built from `_MEASURED` at first, whose `marker_center_px` wins over `top_px`
+# and put all four at the same row - where the fan is CORRECT, and the scenario
+# passed against the old code as well.
+_BARM = dict(x_label="T1", mean=9.5, x=120.0, top_px=150.0)
+_PAIR = [dict(_BARM, series="FLUID", x=152.0, top_px=147.0,
+              x_label="PRE", mean=73.06),
+         dict(_BARM, series="NON_FLUID", x=219.0, top_px=136.0,
+              x_label="PRE", mean=74.29),
+         dict(_BARM, series="FLUID", x=375.0, top_px=107.0,
+              x_label="POST", mean=81.22),
+         dict(_BARM, series="NON_FLUID", x=442.0, top_px=96.0,
+              x_label="POST", mean=83.47)]
+_pair_boxes = _label_boxes(_PAIR)
+check("two marks a glyph apart get two rows, not one",
+      len(_pair_boxes) == len(_PAIR) and _sharing_a_row(_pair_boxes) == [],
+      "%d placed / %s" % (len(_pair_boxes), _sharing_a_row(_pair_boxes)))
+# AND THE FIXTURE REALLY IS THE CASE THE FAN GOT WRONG, so this cannot pass
+# because the marks were too far apart to collide in the first place.
+_fanned = []
+for _i, _m in enumerate(_PAIR):
+    _mx = float(_m["x"]) - max(0, 10 - RB.OVERLAY.PAD)
+    _my = float(RB.OVERLAY._mark_y(_m)) - max(0, 10 - RB.OVERLAY.PAD)
+    _lab = RB.OVERLAY.mark_label(_m)
+    _l = _mx + 18
+    _fanned.append((_l, _l + RB.OVERLAY._text_width(
+        ImageDraw.Draw(Image.new("RGB", (10, 10))), _lab, RB.OVERLAY._font()),
+        _my - 5 + (_i % 4 - 1.5) * 13, _lab))
+check("  and the fan this replaces put both pairs on one row",
+      len(_sharing_a_row(_fanned)) == 2,
+      "%s" % _sharing_a_row(_fanned))
+# THE ROW BESIDE ITS OWN MARK when nothing is in the way, because a label three
+# rows from the mark it belongs to is a label a reviewer has to trace.
+_alone = _label_boxes([_PAIR[0]])
+check("a mark with no neighbour keeps the row beside itself",
+      _alone[0][2] == float(RB.OVERLAY._mark_y(_PAIR[0])) - 5
+      - RB.OVERLAY.LABEL_ROW_HEIGHT,
+      "%s" % _alone[0][2])
+# UP FIRST, DOWN WHEN UP RUNS OUT. Upward is where the white is above a bar top;
+# a dense line panel has more labels than the space above its topmost curve, and
+# upward-only left 397 Figure 1's `P1_MAP_MEN` with 12 pairs sharing a row.
+_CROWD = [dict(_BARM, series="S_%d" % _i, x=120.0 + _i, top_px=30.0,
+               x_label="T%d" % _i, mean=10.0 + _i) for _i in range(9)]
+_crowded = _label_boxes(_CROWD)
+check("  and the drawer asked the placement for every one of them",
+      len(_crowded) == len(_CROWD), "%d of %d" % (len(_crowded), len(_CROWD)))
+check("nine labels crowding one corner still get nine rows",
+      _sharing_a_row(_crowded) == []
+      and min(b[2] for b in _crowded) >= 4,
+      "%s / top %s" % (_sharing_a_row(_crowded),
+                       min(b[2] for b in _crowded)))
+check("  and the ones that could not go up went down, below the mark",
+      max(b[2] for b in _crowded) > float(RB.OVERLAY._mark_y(_CROWD[0])) - 5,
+      "%s" % sorted(b[2] for b in _crowded))
 
 
 # `draw_panel_overlay` never raises: a picture that cannot be painted must not

@@ -578,6 +578,14 @@ def main(argv=None):
     excluded = [r for r in refusals if r[1] in FIN.NONFATAL_CHECKS]
     blocking = [r for r in refusals if r[1] not in FIN.NONFATAL_CHECKS]
     print("the finalizer would say %s" % status)
+    # AND WHY. `validate_finalization` carries a `detail` for the refusals it
+    # takes before any check runs - a demo run, a run that never completed, an
+    # unreadable stamp - and those produce NO problem rows, so this printed a
+    # bare `RUN_NOT_FINALIZABLE` and then `0 refusal(s)`. Every run in the
+    # shipped corpus is DEMO_ONLY, so `PILOT.md` step 3 rehearsed on one told the
+    # reviewer nothing at all about what stopped it.
+    if _s(verdict.detail) and not blocking:
+        print("  WHY      %s" % _s(verdict.detail))
     for where, check, detail in blocking:
         print("  WOULD    %-34s %s: %s" % (where, check, detail))
     for where, check, detail in excluded:
@@ -604,10 +612,23 @@ def main(argv=None):
         print("  %-14s %-34s %s  %s"
               % (q["Panel_ID"], q["Cell_Key"], q["Tier"], q["Asked_Because"]))
     asked_by_id = {q["Inference_ID"]: q for q in asked if q["Inference_ID"]}
+    # AND WHY IT WAS NOT EVALUATED IS THE REFUSAL THAT STOPPED THE DECIDER, not
+    # a guess. This line used to assert "this run's outputs did not verify",
+    # which is one of several reasons the snapshot can be empty and was the wrong
+    # one for the most common: a DEMO_ONLY run is refused on its run mode BEFORE
+    # any output is opened, so every rehearsal on the shipped corpus told the
+    # reviewer their artifacts had failed to verify when nothing had looked at
+    # them. `PILOT.md` step 3 sends a person here to check the bundle before they
+    # open a figure; a diagnosis naming the wrong cause sends them to fix the
+    # wrong thing.
+    # The codes when there are codes, and otherwise the WHY line above rather
+    # than its text repeated twice more.
+    stopped = (", ".join(sorted({check for _w, check, _d in blocking}))
+               or "the refusal above")
     if snap.machine is None or snap.ledger is None:
         bundle = []
-        print("  BUNDLE   NOT EVALUATED - this run's outputs did not verify, so "
-              "there is no bundle to describe")
+        print("  BUNDLE   NOT EVALUATED - the decider stopped at %s, so it never "
+              "read the outputs this would describe" % stopped)
     else:
         bundle = bundle_problems_from(
             snap.machine, snap.ledger,
@@ -619,7 +640,8 @@ def main(argv=None):
             print("  BUNDLE   %-34s %s" % (where, why))
     if snap.reviews is None or snap.machine is None or snap.queue is None:
         answers = []
-        print("  ANSWERS  NOT EVALUATED - the decisions were not read")
+        print("  ANSWERS  NOT EVALUATED - the decider stopped at %s, so the "
+              "decisions were not read" % stopped)
     else:
         answers = answer_problems_from(
             snap.machine, snap.queue, snap.reviews,

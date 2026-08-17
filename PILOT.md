@@ -82,6 +82,14 @@ the panel. The means and the SEs were measured off the ink.
        judged on the panel - so a runbook demanding a context picture for every
        question would describe a bundle the first pilot cannot produce.
 
+       AND THIS STEP CANNOT BE REHEARSED ON A DEMONSTRATION. A `DEMO_ONLY` run
+       is refused on its run mode before a single output is opened, so the
+       BUNDLE and ANSWERS lines read `NOT EVALUATED` and there is nothing to
+       judge - the `WHY` line says which refusal stopped it. Every worked
+       example in this package is `DEMO_ONLY`; a rehearsal that reaches a real
+       bundle diagnosis needs an attested run, which means the registry and the
+       dates of step 1 filled in for real.
+
        Anything else is a bundle to fix before a figure is opened. A reviewer
        who meets a refusal after signing has spent their afternoon twice.
 

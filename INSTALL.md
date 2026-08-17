@@ -6772,6 +6772,67 @@ alone.
     the usage line without --profile restored          1
     the pre-split marker name restored                 1
 
+## v8.6 — what the pilot rehearsal found
+
+Two defects, both found by running `PILOT.md`'s six steps against real rasters
+rather than fixtures: publication 397 Figures 1, 3 and 4, each sliced out of the
+397 plan into its own run so the gates are per-figure rather than pooled. Neither
+is reachable from a fixture, and neither would have been found by reading the
+code.
+
+**Two labels on one row, and one value unreadable.** The overlay placed each
+label at `my - 5 + (index % 4 - 1.5) * 13`: a fixed fan added to the mark's OWN
+row. That assumes the marks are at the same height. On Figure 4's `P4_HR_MEN` the
+POST pair sits 11 px apart and the fan moved the lower one 13 px down - 2 px of
+separation for an 11 px glyph, and `FLUID/POST 81.22` was drawn under
+`NON_FLUID/POST 83.47`. Step 4 asks a reviewer whether each label sits on the
+mark a reader would give it; they cannot answer that about a label they cannot
+read, and the fan spreads four bars of equal height correctly while collapsing
+two of different height - the failure it exists to prevent, inverted.
+
+`label_row` resolves collisions instead: a label moves a row at a time, and only
+when its x range actually overlaps a placed one, so marks far apart across a wide
+panel each keep the row beside their own. UP first, because everything above a
+bar top is white inside the panel - the old fan got that half right by accident,
+`index % 4 - 1.5` being negative for the first two marks of every four. DOWN when
+up runs out, because a dense line panel has more labels than the space above its
+topmost curve: Figure 1's `P1_MAP_MEN` is 18 labels in a 300-pixel panel, and
+upward-only left 12 pairs sharing a row against 0 with the fallback. Measured
+across all 13 panels of the three figures: 65 colliding pairs before, 0 after,
+and no panel worse.
+
+**And the pre-review check named a cause nothing had looked at.** A run refused
+on its run mode, its status or an unreadable stamp is stopped before any check
+runs, so it produces no problem ROWS - only a `detail` on the verdict, which the
+preflight never printed. Step 3 on a demonstration therefore showed a bare
+`RUN_NOT_FINALIZABLE`, `0 refusal(s)`, and a BUNDLE line asserting "this run's
+outputs did not verify" when nothing had opened an output. Every worked example
+in this package is `DEMO_ONLY`, so the one check `PILOT.md` tells a reviewer to
+read before opening a figure named the wrong cause on every rehearsal available
+and sent them to re-run a batch whose artifacts were fine. The verdict's detail
+now prints as `WHY`, and the two `NOT EVALUATED` lines point at it instead of
+asserting a cause. `PILOT.md` step 3 says outright that it cannot be rehearsed on
+a demonstration.
+
+**The first scenario was decoration and the harness said so.** It called
+`label_row` beside the drawer with the same arguments, so reverting the DRAWER to
+the fan left the helper in place and every scenario passed - SILENT. It records
+what `draw_panel_overlay` actually asks for, which is where the pixels are
+decided.
+
+    reverted                                          scenarios that fail
+    the fixed fan restored in the drawer               1
+    the downward fallback removed                      2
+    the WHY line removed                               1
+    the BUNDLE line's asserted cause restored          1
+
+**What the rehearsal could not reach.** No figure in the shipped corpus gets past
+step 3: 397's dispersion definition is unresolved, so `UNRESOLVED_ERRORBAR_DEFINITION`
+holds every unit of all three figures and the review queue is empty. Figure 3 is
+the closest - 8 QC problems, 6 of them that one declaration. Steps 4 and 5 stay
+unexercised on a real publication until 127's raster is on disk or a plan exists
+for a publication whose caption states its dispersion, which 323's does.
+
 ## Still open
 
 - `--second` is a qualification check and not a finalization contract. To make

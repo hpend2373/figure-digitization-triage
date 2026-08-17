@@ -40,6 +40,10 @@ INFERRED_NOTE_HEIGHT = 16
 #: Room to the right for labels, so a value is never clipped by the panel edge.
 LABEL_MARGIN = 150
 
+#: One label's own row. The default bitmap glyph is 11 px tall, so this is the
+#: smallest gap at which two labels are separately readable.
+LABEL_ROW_HEIGHT = 13
+
 #: Why an overlay could not be drawn, in the order it happened.
 _FAILURES = []
 
@@ -70,6 +74,71 @@ def _font():
         return ImageFont.load_default()
     except Exception:                                            # pragma: no cover
         return None
+
+
+def _text_width(draw, text, font):
+    """How wide this label will actually be drawn.
+
+    `6 * len(text)` is the estimate the rest of this module uses and it is the
+    fallback here, because the width decides whether two labels can share a row
+    and an estimate that is too small puts them back on top of each other.
+    """
+    try:
+        return float(draw.textlength(text, font=font))
+    except Exception:                                            # pragma: no cover
+        return 6.0 * len(text)
+
+
+def _clear_row(left, right, wanted, placed, height, down):
+    """(row, whether it is clear) moving one label row at a time in one direction."""
+    top, floor = float(wanted), float(height) - 14.0
+    for _ in range(len(placed) + 1):
+        clash = [p for p in placed
+                 if p[0] < right and left < p[1]
+                 and abs(p[2] - top) < LABEL_ROW_HEIGHT]
+        if not clash:
+            return top, True
+        if down:
+            top = max(p[2] for p in clash) + LABEL_ROW_HEIGHT
+            if top > floor:
+                return top, False
+        else:
+            top = min(p[2] for p in clash) - LABEL_ROW_HEIGHT
+            if top < 4.0:
+                return top, False
+    return top, True                                             # pragma: no cover
+
+
+def label_row(left, right, wanted, mark_row, placed, height):
+    """The row to draw a label on: `wanted`, or the nearest clear row.
+
+    Two labels collide only if their x ranges overlap AND they are within a row
+    height of each other, so marks far apart across a wide panel each keep the
+    row beside their own. When they do overlap the later label moves a row at a
+    time rather than being fanned by a fixed step - the fixed step is what put
+    397 Figure 4's POST pair 2 px apart and made one of the two values
+    unreadable.
+
+    UP FIRST, and that direction is not arbitrary: everything above a bar top is
+    white inside the panel, so a label lifted out of a collision stays legible
+    while one pushed down lands on the ink of the bar it belongs to. The old fan
+    got this half right by accident - `index % 4 - 1.5` is negative for the first
+    two marks of every four - and this makes it the rule.
+
+    DOWN WHEN UP RUNS OUT, because a dense line panel has more labels than the
+    space above its topmost curve: 397 Figure 1's `P1_MAP_MEN` is 18 labels in a
+    300-pixel panel, and upward-only left 12 pairs sharing a row against 0 with
+    the fallback. The clamp at the end is still allowed to reintroduce an overlap
+    - two labels on one row is worse than one row apart and better than a value
+    drawn off the edge, which is a value the reviewer cannot see at all.
+    """
+    top, clear = _clear_row(left, right, wanted, placed, height, False)
+    if not clear:
+        below, clear_below = _clear_row(left, right, mark_row, placed, height,
+                                        True)
+        if clear_below:
+            top = below
+    return min(max(4.0, top), max(4.0, float(height) - 14.0))
 
 
 def _mark_y(mark):
@@ -326,9 +395,18 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
         draw.rectangle((x0 - ox, y0 - oy, x1 - ox, y1 - oy),
                        outline=(160, 160, 160))
 
-        # Labels are staggered by mark order. Four bars in a 400-pixel panel put
-        # four labels on top of each other otherwise, and an unreadable label is
-        # the same as no label for the person who has to judge it.
+        # Labels are placed by RESOLVING COLLISIONS, not by fanning on mark
+        # order. The fan added `(index % 4 - 1.5) * 13` to each mark's OWN row,
+        # which assumes the marks are at the same height: it spreads four bars of
+        # equal height correctly and can shove two bars of DIFFERENT height onto
+        # one row, which is the failure it exists to prevent, inverted. Found on
+        # publication 397 Figure 4, panel P4_HR_MEN, where the POST pair sits
+        # 11 px apart and the fan moved the lower label 13 px down - 2 px of
+        # separation for an 11 px glyph, and `FLUID/POST 81.22` was unreadable
+        # under `NON_FLUID/POST 83.47`. A reviewer is asked whether each label
+        # sits on the mark a reader would give it, and cannot answer that about a
+        # label they cannot read.
+        placed = []                       # (left, right, top) already drawn
         for slot, mark in enumerate(marks):
             mx = mark.get("x", mark.get("point_px_x"))
             my = _mark_y(mark)
@@ -346,10 +424,15 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
             if not label_marks:
                 continue
             label = mark_label(mark)
-            ly = min(max(4, my - 5 + (slot % 4 - 1.5) * 13),
-                     crop.height - 14)
+            left = mx + 18
+            right = left + _text_width(draw, label, font)
+            # ONE ROW ABOVE THE MARK to start with, because that is white for a
+            # bar and the leader line says which mark it belongs to either way.
+            ly = label_row(left, right, my - 5 - LABEL_ROW_HEIGHT, my - 5,
+                           placed, crop.height)
+            placed.append((left, right, ly))
             draw.line((mx + 10, my, mx + 16, ly + 5), fill=colour, width=1)
-            draw.text((mx + 18, ly), label, fill=colour, font=font)
+            draw.text((left, ly), label, fill=colour, font=font)
 
         draw.text((6, crop.height + 6), title or os.path.basename(image_path),
                   fill=(0, 0, 0), font=font)

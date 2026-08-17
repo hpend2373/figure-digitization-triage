@@ -1261,12 +1261,20 @@ def expected_box_violin_methods(mark, context=None):
 
 #: Mark type -> the function that re-derives its methods from its own evidence.
 #:
-#: One entry today, and the one worth having first: `LINE_MONO_STYLE` produces
-#: every value method there is, reaches R2, R3 and R4 on real figures, and already
-#: carries the support columns, the occlusion cause and the drawing scale its
-#: decision was made from. A mark type absent from this table is checked by the
-#: matrix and by the artifact join, and not by re-derivation - which is a real
-#: difference in strength and is written down rather than implied away.
+#: `LINE_MONO_STYLE` was the first and is still the reason for the shape: it
+#: produces every value method there is, reaches R2, R3 and R4 on real figures,
+#: and already carries the support columns, the occlusion cause and the drawing
+#: scale its decision was made from. Four more have followed it, and the table is
+#: now exactly `MARK_JOIN_REQUIRED` - a reader that has to join its values to its
+#: marks also has to be able to re-derive what those marks support.
+#:
+#: `BAR_MONO` and `SCATTER` are the two that are NOT here, and that is a real
+#: difference in strength rather than an oversight: they are bound through
+#: `mono_bar_geometry.csv` and the point cloud, which pin the identity route and
+#: the association but not the arithmetic. A bar's `Mean` is not re-computed from
+#: its own top row the way `BAR_COLOR`'s is. Written down rather than implied
+#: away - and `test_finalize` pins the two sets equal, so a verifier removed here
+#: is a failing scenario and not a quiet downgrade.
 EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
                       "BAR_COLOR": expected_bar_colour_methods,
                       "LINE_COLOR": expected_line_colour_methods,

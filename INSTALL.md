@@ -6715,6 +6715,63 @@ so.
     the route the figure took stops being compared     1
     an unreadable decision file is hashed from the path again  1
 
+## v8.5 — one place says what the package runs, and it is checked
+
+Three pieces of documentation had drifted away from the code, and the guard that
+exists to stop exactly that had drifted itself.
+
+**Two files went on quoting a package total nobody measured.**
+`requirements-intake.txt` and `verify_documented_status.py` both said the package
+runs 2244 under the lock file and 2282 with the intake backends. That was true
+for one release. `verify_documented_status.py` makes README's total agree with
+the measurement every CI run and nothing made the rest of the package agree with
+README, so the numbers sat eleven releases stale one directory away from the
+guard whose whole subject is stale numbers. Both now point at the two markers in
+`README.md` instead of copying them. `requirements-intake.txt` keeps 111 against
+149, because that difference is a property of THIS file - it is the gap the
+backends open in `test_corpus_intake`, and it is the only number the file is
+entitled to state.
+
+**And the guard's own usage was two releases out of date.** Its docstring opened
+with a command line that predated `--profile` and named
+`<!-- CURRENT_SCENARIO_COUNT -->`, a marker the code has not looked for since
+the count became per-profile. The one file whose job is documentation drift was
+carrying its own.
+
+Neither is fixed by an edit alone, so both are pinned in `test_reproducibility`,
+which is where this package keeps its properties of the tree rather than of a
+run:
+
+- a shipped file may not state a package-wide scenario count unless it is one of
+  README's current markers or its PARAGRAPH cites a version. Paragraphs, not
+  lines: "the tree ran 2282 scenarios while the file said 2184 after v7.43" is
+  one dated sentence written over two, and a line-by-line check would call its
+  second half undated. README.md is exempt because it is measured; INSTALL.md
+  because it is a history and its numbers are records on purpose; the suites
+  because their paragraphs are full of fixture numbers, ORCIDs and dates - and a
+  suite that drifts is caught by running it
+- the invocation the guard's docstring SHOWS has to pass `--profile`, and every
+  marker it names has to be one the code reads. The first draft asserted
+  `"--profile" in __doc__`, which is true whatever the command line at the top
+  says because the flag is explained further down - a check that could not fail,
+  caught by reverting the usage line and watching it pass
+
+**And `EVIDENCE_VERIFIERS` says how many it has.** The comment above it still
+read "One entry today" with five readers in the table, and the open list still
+said the other readers had no verifier. The table is now exactly
+`MARK_JOIN_REQUIRED` - a reader that must join its values to its marks must also
+be able to re-derive what those marks support - and `test_finalize` pins the two
+sets equal, so a verifier removed is a failing scenario rather than a quiet
+downgrade. `BAR_MONO` and `SCATTER` are the two that are genuinely not there,
+which the next bullet of the open list already scoped correctly and now scopes
+alone.
+
+    reverted                                          scenarios that fail
+    requirements-intake.txt's stale total restored     1
+    the guard's stale total restored                   1
+    the usage line without --profile restored          1
+    the pre-split marker name restored                 1
+
 ## Still open
 
 - `--second` is a qualification check and not a finalization contract. To make
@@ -6772,9 +6829,6 @@ so.
   not the place it gets decided by default, and uses two people - and a
   resolution still has no cell-level confirmation of its own the way a
   reconstructed value does
-- the numbers are re-computed from the pixels for `BAR_COLOR` and
-  `LINE_MONO_STYLE`; the other readers record the rows now but nothing re-derives
-  them yet, because they have no verifier to do it in
 - `BAR_MONO` and `SCATTER` re-derive nothing from their marks: they are checked
   through `mono_bar_geometry.csv` and the point cloud, which bind the identity
   route and the association but not the arithmetic - a bar's `Mean` is not

@@ -411,6 +411,73 @@ assert not vacuous, ("a scenario that cannot fail is not a scenario: %s"
 passed("no scenario is written so that it cannot fail (%d files)"
       % len(glob.glob(os.path.join(HERE, "test_*.py"))))
 
+# --------------------------------------------------------------------------
+# one place says what the package runs today
+# --------------------------------------------------------------------------
+# `verify_documented_status.py` makes README's total agree with the measurement.
+# Nothing made the REST of the package agree with README, so two files went on
+# saying 2244/2282 for eleven releases while the tree ran 2900/2938 - stale in
+# exactly the way the guard exists to prevent, one directory away from it.
+#
+# So: a shipped file may not state a package-wide scenario count unless it is
+# the current one or it dates itself. README.md is the current-status line and
+# is measured every CI run; INSTALL.md is a release history and its numbers are
+# records on purpose; the suites are exempt because their paragraphs are full of
+# fixture numbers, ORCIDs and dates, and a suite that drifts is caught by
+# running it. Everything else either quotes today's number or cites the version
+# its number belonged to.
+import re                                                          # noqa: E402
+
+_readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+_current = set(re.findall(r"<!-- CURRENT_SCENARIO_COUNT_\w+: (\d+) -->", _readme))
+assert len(_current) == 2, "README should carry two profile totals: %s" % _current
+_FOUR = re.compile(r"(?<![.\d])(\d{4})(?![.\d])")
+_VERSION = re.compile(r"\bv\d+\.\d+\b")
+_stale = []
+for path in sorted(glob.glob(os.path.join(HERE, "*.py"))
+                   + glob.glob(os.path.join(HERE, "*.md"))
+                   + glob.glob(os.path.join(HERE, "*.txt"))
+                   + glob.glob(os.path.join(HERE, ".github/workflows/*.yml"))):
+    name = os.path.basename(path)
+    if name in ("README.md", "INSTALL.md") or name.startswith(
+            ("test_", "forward_test_")):
+        continue
+    # PARAGRAPHS, not lines. "the tree ran 2282 scenarios while the file said
+    # 2184 after v7.43" is one dated sentence written over two lines, and a
+    # line-by-line check would call its second half undated.
+    for para in re.split(r"\n\s*\n", open(path, encoding="utf-8").read()):
+        if not re.search(r"scenario", para, re.I) or _VERSION.search(para):
+            continue
+        for found in _FOUR.finditer(para):
+            if found.group(1) not in _current:
+                _stale.append("%s: %s" % (name, found.group(1)))
+assert not _stale, ("a package total outside README.md that is neither current "
+                    "nor dated: %s" % ", ".join(_stale))
+passed("only README.md says what the package runs today")
+
+# And the guard's own usage has to be the guard's own contract. Its docstring
+# opened with a command line that predated `--profile` and named a marker
+# (`CURRENT_SCENARIO_COUNT`) the code has not looked for since the split, so the
+# one file whose job is documentation drift was carrying two years of it.
+import verify_documented_status as V_DOC                           # noqa: E402
+
+_usage = V_DOC.__doc__ or ""
+# THE INVOCATION LINE, not the docstring. `--profile` is explained further down
+# either way, so `"--profile" in doc` is true whatever the command line at the
+# top says - a guard that cannot fail, which the first draft of this check was.
+_call = _usage.split("python3 verify_documented_status.py", 1)
+assert len(_call) == 2, "the docstring shows no invocation"
+assert "--profile" in _call[1][:80], (
+    "the invocation the docstring shows does not pass --profile: %r"
+    % _call[1][:80].strip())
+_named = set(re.findall(r"CURRENT_SCENARIO_COUNT_?\w*", _usage))
+_real = {"CURRENT_SCENARIO_COUNT_%s" % p.upper() for p in V_DOC.PROFILES}
+_ghosts = sorted(n for n in _named if n not in _real)
+assert not _ghosts, ("the docstring names markers the code does not read: %s"
+                     % ", ".join(_ghosts))
+assert _named, "the docstring names no marker at all"
+passed("the documentation guard's usage is the contract it enforces")
+
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one.
 print("FDT_SCENARIOS_RUN=%d" % _PASSES[0])

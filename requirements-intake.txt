@@ -10,9 +10,12 @@
 #
 # THE SPLIT IS ALSO WHY THE SCENARIO COUNT HAS TWO VALUES. `test_corpus_intake`
 # SKIPs its adapter, per-status, renderer and crop sections where no backend is
-# installed: 111 scenarios without, 149 with. The package runs 2244 under the
-# lock file alone and 2282 with this file and poppler-utils, and CI checks both
-# rather than documenting one and hoping.
+# installed: 111 scenarios without, 149 with - a difference this file is the
+# cause of, and the only number it is entitled to state. What the WHOLE package
+# runs under each profile is in the `CURRENT_SCENARIO_COUNT_CORE` and
+# `CURRENT_SCENARIO_COUNT_FULL` markers in `README.md`, measured every CI run;
+# it was copied here as well and went stale for eleven releases, which is what
+# a second copy of a moving number does.
 #
 # poppler-utils is not a Python package and cannot be pinned here. The
 # `intake-full` job records `pdftotext -v` in its log, so a runner image that

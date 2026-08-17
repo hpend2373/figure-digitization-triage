@@ -1,6 +1,7 @@
 """The documented status is the measured status, or CI is red.
 
-    python3 verify_documented_status.py COUNTS.tsv README.md run_batch.py
+    python3 verify_documented_status.py --profile {core|full} \
+        COUNTS.tsv README.md run_batch.py
 
 Every commit that adds a scenario moves the suite total, and the number in
 `README.md` followed by hand. It was wrong: the tree ran 2282 scenarios while
@@ -9,10 +10,10 @@ trust is worse than no status line, because a reader takes it as the state of
 the package - and the reader most likely to take it that way is the next person
 deciding whether this thing can be pointed at a corpus.
 
-Three things have to agree:
+Three things have to agree, for the profile named on the command line:
 
     the SUM of what the suites reported this run
-    <!-- CURRENT_SCENARIO_COUNT: N -->     in README.md
+    <!-- CURRENT_SCENARIO_COUNT_CORE: N -->  or  _FULL, in README.md
     the sentence a person reads in README.md
 
 and separately:
@@ -40,7 +41,10 @@ that runs nothing passes.
 
 `test_corpus_intake` SKIPs its PDF-adapter, per-status, renderer and crop
 sections when no PDF backend is installed: 111 scenarios without, 149 with.
-2244 against 2282 for the package.
+That difference is the whole of the gap between the two package totals, and the
+totals themselves are not repeated here - they are the two markers in
+`README.md`, which this file measures. A number that moves every release and is
+written down in two places is a number that will disagree with itself.
 
 The first version of this file documented one number and explained the other in
 prose, which left a real contradiction: a correct run in a full environment

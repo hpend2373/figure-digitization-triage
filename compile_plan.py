@@ -72,7 +72,8 @@ PLAN_KEYS = {
     "reviewer": ("reviewer_id", "name", "record_type", "contact_type",
                  "contact", "registered_by", "registration_date",
                  "human_attestation", "note"),
-    "document": ("document_id", "role", "source_file", "page_range",
+    "document": ("document_id", "role", "source_file", "source_file_sha256",
+                 "page_range",
                  "observed_figure_count", "inventory_status",
                  "figure_count_method", "reviewer_id", "inspection_date",
                  "note"),
@@ -427,6 +428,21 @@ def validate_plan(plan, file_root="."):
     grid_factors = {_s(g.get("grid_id")): {str(k).strip().upper()
                                            for k in (g.get("factors") or {})}
                     for g in plan["grids"]}
+    #: And the LEVELS under each name, which the name check could not see.
+    #: Comparing the two factor sets is comparing headings; a panel whose
+    #: TIMEPOINT positions are B1..R3 against a grid declaring B-1..R-3 matches
+    #: on {TIMEPOINT} and shares not one cell with it. The runner writes the
+    #: level into every `Cell_Key`, so those values are read off the raster and
+    #: then refused one by one as `FACTOR_SET_INCONSISTENT` - the same
+    #: after-all-the-work diagnosis v9.0 removed at the name grain, still
+    #: waiting one grain down.
+    grid_levels = {}
+    for g in plan["grids"]:
+        levels = {}
+        for factor, values in (g.get("factors") or {}).items():
+            if isinstance(values, list):
+                levels[str(factor).strip().upper()] = {_s(v) for v in values}
+        grid_levels[_s(g.get("grid_id"))] = levels
     unit_grid = {_s(u.get("unit_id")): _s(u.get("grid_id"))
                  for u in plan["units"]}
     plan_units = {_s(u.get("unit_id")): u for u in plan["units"]}
@@ -449,6 +465,29 @@ def validate_plan(plan, file_root="."):
             seen.add(ident)
             if not BM.SAFE_ID.match(ident):
                 problems.append(_problem(where, "UNSAFE_ID", "%s=%r" % (key, ident)))
+
+    # ---- documents: which bytes the inventory was taken from -----------------
+    # Checked HERE and not left to the manifest layer, because the plan is the
+    # thing a person writes: a compiler that emits a blank column and lets
+    # `validate_batch_manifests` refuse it later reports the defect against a
+    # generated file rather than against the line that has the mistake in it.
+    for di, document in enumerate(plan["documents"]):
+        where = "documents[%d]" % di
+        digest = _s(document.get("source_file_sha256")).lower()
+        if not digest:
+            problems.append(_problem(
+                where, "PLAN_DOCUMENT_BYTES_UNDECLARED",
+                "source_file_sha256 is the sha256 of the whole document file, "
+                "or %r when the corpus does not hold it. The figure inventory "
+                "is a claim about one article and nothing said which bytes that "
+                "article was" % BM.SOURCE_FILE_NOT_HELD))
+        elif digest != BM.SOURCE_FILE_NOT_HELD.lower() \
+                and not BM.SHA256_TEXT.match(digest):
+            problems.append(_problem(
+                where, "PLAN_DOCUMENT_BYTES_UNDECLARED",
+                "source_file_sha256=%r is neither a sha256 digest nor %r"
+                % (_s(document.get("source_file_sha256")),
+                   BM.SOURCE_FILE_NOT_HELD)))
 
     panel_ids, figure_ids, views = set(), set(), {}
     for fi, figure in enumerate(plan["figures"]):
@@ -593,6 +632,39 @@ def validate_plan(plan, file_root="."):
                     % ("{%s}" % ", ".join(sorted(said)),
                        unit_grid.get(uid),
                        "{%s}" % ", ".join(sorted(declared)))))
+            # ---- and the LEVELS under those names ------------------------
+            # Every level a series or position NAMES has to be one the grid
+            # declares, because that pair - factor and level - is the cell the
+            # value will be filed in. The other direction is deliberately not
+            # checked here: a level the grid declares and no mark fills is an
+            # EMPTY cell, which the gate reports against the unit as a
+            # coverage problem, and 323's `DAP` panel legitimately has one
+            # (the cell the figure does not print, recorded since v7.2). A
+            # level nobody declared is different in kind - it cannot be
+            # filed at all - so it is refused before the raster is opened.
+            unit_levels = grid_levels.get(unit_grid.get(uid))
+            if unit_levels:
+                for kind, marks, id_key in (
+                        ("series", read.get("series") or [], "series_id"),
+                        ("positions", read.get("positions") or [], "position_id")):
+                    for mi, mark in enumerate(marks):
+                        factor = _s(mark.get("factor")).upper()
+                        level = _s(mark.get("level"))
+                        if not factor or factor not in unit_levels:
+                            continue          # the name check has this one
+                        if level and level not in unit_levels[factor]:
+                            problems.append(_problem(
+                                "%s.%s[%d]" % (pwhere, kind, mi),
+                                "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED",
+                                "%s=%r names %s level %r and grid %r declares "
+                                "%s for that factor. The runner writes the level "
+                                "into the Cell_Key, so this mark would be read "
+                                "off the raster and then refused as a cell that "
+                                "does not exist"
+                                % (id_key, _s(mark.get(id_key)), factor, level,
+                                   unit_grid.get(uid),
+                                   "{%s}" % ", ".join(
+                                       sorted(unit_levels[factor])))))
             views.setdefault(_s(read.get("figure_view")), []).append((sfid, panel))
             box = read.get("box") or []
             if not isinstance(box, list) or len(box) != 4 or not all(
@@ -702,6 +774,11 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
     documents = [dict(
         Source_Document_ID=_s(d.get("document_id")), Publication_ID=pub,
         Document_Role=_s(d.get("role")).upper(), Source_File=_s(d.get("source_file")),
+        # Whatever the plan says, and NOT defaulted to NOT_HELD: a compiler that
+        # fills this in for a silent plan is a compiler that decides the corpus
+        # does not hold an article it may well be holding. `validate_plan`
+        # refuses the silence instead.
+        Source_File_SHA256=_s(d.get("source_file_sha256")),
         Article_Page_Range=_s(d.get("page_range")),
         Observed_Figure_Count=d.get("observed_figure_count"),
         Inventory_Status=_s(d.get("inventory_status")).upper(),

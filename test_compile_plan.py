@@ -317,13 +317,103 @@ for _label, _mutate, _want in (
          "PLAN_PANEL_FACTOR_SET_MISMATCH"),
         ("  and a grid that drops a factor its panels name",
          lambda p: [g["factors"].pop("ARM", None) for g in p["grids"]],
-         "PLAN_PANEL_FACTOR_SET_MISMATCH")):
+         "PLAN_PANEL_FACTOR_SET_MISMATCH"),
+        # AND THE LEVELS UNDER THOSE NAMES (v9.2). Comparing the two factor SETS
+        # compares headings. A panel whose TIMEPOINT positions are `B1..R3`
+        # against a grid declaring `B-1..R-3` matches on {TIMEPOINT} and shares
+        # not one cell with it, and the runner writes the level into every
+        # `Cell_Key` - so the marks are read off the raster and then refused one
+        # by one as `UNDECLARED_FACTOR_LEVEL`. Which is the same
+        # after-all-the-work diagnosis v9.0 removed at the name grain, waiting
+        # one grain down.
+        ("a series naming a level its grid does not declare",
+         lambda p: p["figures"][2]["panels"][0]["read"]["series"][0].update(
+             level="PLACEBO"),
+         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED"),
+        ("a position naming a level its grid does not declare",
+         lambda p: p["figures"][2]["panels"][0]["read"]["positions"][0].update(
+             level="MIDWAY"),
+         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED"),
+        # The near-miss this is really about: "0:30" against a grid that
+        # declares "0_30". Two spellings of one timepoint, and the factor sets
+        # are identical.
+        ("a level that differs from the grid's only in punctuation",
+         lambda p: [pp.update(level=pp["level"].replace(":", "_"))
+                    for pp in _auto_panels(p, "FIG1")[0]["read"]["positions"]],
+         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED"),
+        # THE DEFECT THIS CHECK FOUND IN THE SHIPPED PLAN, kept as the scenario
+        # it came from. Figure 5's two curves are the two people its caption
+        # names, and they were declared `factor=ARM, level=Y01` against `G_HDT`,
+        # whose ARM levels are FLUID and NON_FLUID: the factor names matched the
+        # grid exactly and not one of the cells existed. v9.2 gives Figure 5 its
+        # own SUBJECT grid; this is the old declaration, refused.
+        ("two named individuals declared as arms of the fluid grid",
+         lambda p: [[u.update(grid_id="G_HDT") for u in p["units"]
+                     if u["unit_id"].startswith("U_P5")],
+                    [sp.update(factor="ARM")
+                     for pan in _auto_panels(p, "FIG5")
+                     for sp in pan["read"]["series"]]],
+         "PLAN_PANEL_FACTOR_LEVEL_UNDECLARED")):
     _p = copy.deepcopy(PLAN)
     _mutate(_p)
     _out, (_w, _probs) = compile_to("m_bad", plan=_p)
     check("%s is refused" % _label, _want in codes(_probs), "%s" % codes(_probs))
     check("  and no manifest is written", not _w and not os.path.isdir(_out),
           "%s" % sorted(_w))
+
+print()
+print("the plan says which document its figures came out of")
+# The other direction of the level check is NOT an error, deliberately. A level
+# the grid declares and no mark fills is an EMPTY cell - the gate reports it
+# against the unit as `FACTOR_LEVEL_MISSING` once the reading is in - and
+# publication 323 has a legitimate one: the cell its Figure 2 does not print,
+# recorded since v7.2. Refusing it at plan time would refuse 323.
+_p = copy.deepcopy(PLAN)
+_p["grids"][1]["factors"]["TIMEPOINT"].append("7:00")
+_out, (_w, _probs) = compile_to("m_extra_level", plan=_p)
+check("a level the grid declares and no mark fills still compiles",
+      not _probs, "%s" % codes(_probs))
+
+# v9.2: the document's own bytes. The rasters have been hashed since the first
+# release; the article they were cut out of was a filename, so nothing in a
+# compiled manifest set said which bytes the figure inventory was taken from.
+for _label, _value, _want in (
+        ("a plan that does not say", None, "PLAN_DOCUMENT_BYTES_UNDECLARED"),
+        ("a plan that says PENDING", "PENDING",
+         "PLAN_DOCUMENT_BYTES_UNDECLARED"),
+        ("a plan that says a truncated digest", "abc123",
+         "PLAN_DOCUMENT_BYTES_UNDECLARED")):
+    _p = copy.deepcopy(PLAN)
+    if _value is None:
+        _p["documents"][0].pop("source_file_sha256", None)
+    else:
+        _p["documents"][0]["source_file_sha256"] = _value
+    _out, (_w, _probs) = compile_to("m_doc_bytes", plan=_p)
+    check("%s about its document's bytes is refused" % _label,
+          _want in codes(_probs), "%s" % codes(_probs))
+_docs = pd.read_csv(os.path.join(MDIR, "source_document_manifest.csv"),
+                    dtype=object).fillna("")
+check("and the compiled manifest carries what the plan declared",
+      list(_docs["Source_File_SHA256"]) == ["NOT_HELD"],
+      "%s" % list(_docs["Source_File_SHA256"]))
+check("  which is the honest answer here: the repository has 397's rasters, "
+      "not its article",
+      not os.path.exists(os.path.join(HERE, "397.pdf")))
+# And a plan that CLAIMS a digest for an article the corpus does not hold
+# compiles - the plan layer only checks the shape of the claim - and is then
+# refused by the layer that can look. Written from the compiled manifests rather
+# than a fixture, so it is the real path a plan takes.
+_p = copy.deepcopy(PLAN)
+_p["documents"][0]["source_file_sha256"] = "d" * 64
+_claimed, (_w, _probs) = compile_to("m_doc_claimed", plan=_p)
+check("a plan may state a digest without the compiler looking for the file",
+      not _probs, "%s" % codes(_probs))
+_claimed_run = RB.run_batch(_claimed, os.path.join(ROOT, "o_doc_claimed"),
+                            file_root=HERE, run_date="2026-08-07")
+check("  and the run refuses it, because the run is what can look",
+      _claimed_run["status"] == "MANIFEST_REJECTED"
+      and "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _claimed_run["detail"],
+      "%s" % _claimed_run)
 
 print()
 print("a half-formed plan is a problem list, not a traceback")
@@ -802,21 +892,31 @@ if _e2e_ok:
     # regression - drop the declaration and it is 72.
     _stamp323 = json.load(open(os.path.join(_e2e_out, "run_stamp.json"),
                                encoding="utf-8"))
-    # THE COUNT IS IN `Detail`, because a refusal zeroes `Values_Machine_QC_Passed`
-    # - the run kept nothing, so the field that says how many it kept says 0. The
-    # sentence is the only place the gate's own tally survives, and `QC_Problems`
-    # is the structured half of the same statement: 2 with the grid declaring
-    # SERIES, one per unit that lost a cell, and 8 the moment the declaration goes
-    # and Figure 2's six units are refused wholesale.
-    _passed323 = re.match(r"^(\d+) values passed the gate",
-                          _stamp323.get("Detail", ""))
+    # THE COUNT IS A FIELD SINCE v9.2. `Values_Machine_QC_Passed` is how many
+    # gate-passing values the run KEPT and a refusal keeps none, so it is 0 -
+    # correctly - and until v9.2 it was the only tally in the stamp, which left
+    # this scenario matching a regular expression against an English sentence to
+    # find out what the gate had counted. `QC_Problems` is the structured half of
+    # the same statement: 2 with the grid declaring SERIES, one per unit that
+    # lost a cell, and 8 the moment the declaration goes and Figure 2's six units
+    # are refused wholesale.
     check("  and 102 values pass the gate, Figure 2's 30 among them",
-          _passed323 is not None and int(_passed323.group(1)) == 102
+          _stamp323["Values_Gate_Passed"] == 102
+          and _stamp323["Values_Machine_QC_Passed"] == 0
           and _stamp323["QC_Problems"] == 2
           and _stamp323["Values_Read"] == 107,
-          "%r / %d qc problem(s) / %s read"
-          % (_stamp323.get("Detail", "")[:40], _stamp323.get("QC_Problems"),
-             _stamp323.get("Values_Read")))
+          "%s past the gate / %s kept / %s qc problem(s) / %s read"
+          % (_stamp323.get("Values_Gate_Passed"),
+             _stamp323.get("Values_Machine_QC_Passed"),
+             _stamp323.get("QC_Problems"), _stamp323.get("Values_Read")))
+    check("  and the sentence still agrees with the field",
+          re.match(r"^%d values passed the gate" % _stamp323["Values_Gate_Passed"],
+                   _stamp323.get("Detail", "")) is not None,
+          "%r" % _stamp323.get("Detail", "")[:48])
+    # 323 ships two rasters and not the article they were cut out of.
+    check("  and the stamp says its inventory was not bound to any bytes",
+          _stamp323["Source_Document_Bytes_Bound"] == "NONE",
+          "%s" % _stamp323.get("Source_Document_Bytes_Bound"))
     check("  under a demonstration identity, so none of them is written",
           _stamp323["Status"] == "DEMO_OUTPUT_REFUSED"
           and _stamp323["Values_Accepted"] == 0

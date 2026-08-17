@@ -162,6 +162,14 @@ def build(raster_root=None):
         note="ORCID's fictional demonstration record; pilot_323.py replaces it")]
     documents = [dict(
         document_id=DOCUMENT_ID, role="MAIN_ARTICLE", source_file=SOURCE_FILE,
+        # THE BYTES ARE NOT HELD, AND THE RANGE STILL SAYS PAGES 4-5. The two
+        # are independent on purpose (v9.2): the digest, when there is one, is
+        # over the WHOLE article file, because that is the artefact a publisher
+        # issued and the only thing a second person could re-hash. Digesting two
+        # pages would produce a number that matches nothing anybody else can
+        # make. So the range below stays exactly the claim it always was, and
+        # the file it is a range OF would be identified beside it.
+        source_file_sha256="NOT_HELD",
         # THE RANGE IS PART OF THE CLAIM, which is what `Article_Page_Range` is
         # for. The article has FOUR figures; this document record covers pages
         # 4-5 and the two figures printed there, and within that range the

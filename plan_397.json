@@ -19,6 +19,7 @@
    "document_id": "SD397_MAIN",
    "role": "MAIN_ARTICLE",
    "source_file": "397.pdf",
+   "source_file_sha256": "NOT_HELD",
    "page_range": "full target article",
    "observed_figure_count": 5,
    "inventory_status": "VISUALLY_VERIFIED",
@@ -48,6 +49,29 @@
     "ARM": [
      "FLUID",
      "NON_FLUID"
+    ],
+    "TIMEPOINT": [
+     "0:30",
+     "1:00",
+     "1:30",
+     "2:00",
+     "2:30",
+     "3:00",
+     "3:30",
+     "4:00",
+     "4:30",
+     "5:00",
+     "5:30",
+     "6:00"
+    ]
+   }
+  },
+  {
+   "grid_id": "G_P5_SUBJECT",
+   "factors": {
+    "SUBJECT": [
+     "Y01",
+     "Y07"
     ],
     "TIMEPOINT": [
      "0:30",
@@ -2738,7 +2762,7 @@
       "series": [
        {
         "series_id": "Y01",
-        "factor": "ARM",
+        "factor": "SUBJECT",
         "level": "Y01",
         "marker": "CIRCLE",
         "marker_fill": "ANY",
@@ -2746,7 +2770,7 @@
        },
        {
         "series_id": "Y07",
-        "factor": "ARM",
+        "factor": "SUBJECT",
         "level": "Y07",
         "marker": "SQUARE",
         "marker_fill": "ANY",
@@ -2875,7 +2899,7 @@
       "series": [
        {
         "series_id": "Y01",
-        "factor": "ARM",
+        "factor": "SUBJECT",
         "level": "Y01",
         "marker": "CIRCLE",
         "marker_fill": "ANY",
@@ -2883,7 +2907,7 @@
        },
        {
         "series_id": "Y07",
-        "factor": "ARM",
+        "factor": "SUBJECT",
         "level": "Y07",
         "marker": "SQUARE",
         "marker_fill": "ANY",
@@ -3688,7 +3712,7 @@
    "unit_id": "U_P5_NOFLUID",
    "panel_id": "P5_NOFLUID",
    "figure_view": "F397_5",
-   "grid_id": "G_HDT",
+   "grid_id": "G_P5_SUBJECT",
    "panel": "NO_FLUID_HDT",
    "outcome_name": "Heart rate",
    "domain": "CV_HEMO",
@@ -3716,7 +3740,7 @@
    "unit_id": "U_P5_FLUID",
    "panel_id": "P5_FLUID",
    "figure_view": "F397_5",
-   "grid_id": "G_HDT",
+   "grid_id": "G_P5_SUBJECT",
    "panel": "FLUID_HDT",
    "outcome_name": "Heart rate",
    "domain": "CV_HEMO",

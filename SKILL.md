@@ -240,7 +240,14 @@ Create four source manifests before creating any reader row:
 Use an immutable `Source_Document_ID` and record the complete target article or
 supplement page range.  Its `Observed_Figure_Count` must equal the number of
 physical source figures attached to it, which prevents an entire figure from
-vanishing before the panel check begins.  Then use an immutable
+vanishing before the panel check begins.  `Source_File_SHA256` is the sha256 of
+the WHOLE document file, whatever range `Article_Page_Range` names, or the literal
+`NOT_HELD` when the corpus does not have the file — a figure inventory is a claim
+about one article, and without the digest it is a claim about a filename that a
+preprint and its version of record both satisfy.  Saying `NOT_HELD` about a file
+that IS under `--file-root` is refused, and the run stamp records
+`Source_Document_Bytes_Bound` so a NOT_HELD inventory cannot be read back later
+as a byte-bound one.  Then use an immutable
 `Source_Figure_ID` such as `PMID123_MAIN_FIG2`.  Count panels on the
 full raster, not from the caption.  Count plots, photographs, schematics and
 table/inset subpanels before deciding whether they contain target data.  A legend

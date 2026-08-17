@@ -1383,7 +1383,7 @@ paper.
 
 | file | one row per | carries |
 |---|---|---|
-| `source_document_manifest.csv` | main article/supplement/chapter | complete page range, verified figure count, source role |
+| `source_document_manifest.csv` | main article/supplement/chapter | the whole file's `Source_File_SHA256` (or `NOT_HELD`), the page range inventoried, verified figure count, source role |
 | `source_figure_manifest.csv` | physical publisher figure | immutable ID, full-raster panel count, visual verification method and verifier |
 | `source_panel_inventory.csv` | visually distinct source subpanel | outcome, target status, and a mandatory disposition even when no reader exists |
 | `panel_manifest.csv` | readable/configured panel | physical `Source_Panel_ID`, box, `Mark_Type`, axis ticks and scale, baseline, `Unit_ID`, `Panel_Mode` |
@@ -7052,10 +7052,114 @@ Both plan generators emit the key and `plan_397.json` is regenerated; the diff i
 bytes are still unhashed, the run stamp still zeroes its machine-QC tally on a
 refusal, and the plan still compares factor NAMES without their LEVELS. Each is
 real; none of them can put a right number under a wrong outcome, which is why this
-one went first alone.
+one went first alone. *(All three are closed in v9.2, which is where the third
+one turned out to be able to do exactly that. This paragraph is left as it was
+written: it is the record of what was true at the time.)*
 
-## Still open
-## Still open
+## v9.2 — the review's last three items, and the third one found Figure 5
+
+**An inventory now names the bytes it was taken from.** Every raster in this
+package has been hashed since the first release, and the article they were cut
+out of was a filename. So "publication 397 has five figures and these are they"
+was a claim about the string `397.pdf`: a preprint and its version of record
+produce the same manifest, the same figure count, the same panel counts and the
+same attestation, and the inventory reads as verified against whichever one the
+reviewer happened to have open. `Source_File_SHA256` is now part of the
+`source_document_manifest` schema and of the plan document, and four refusals
+stand on it:
+
+    BAD_SOURCE_FILE_SHA256                  neither a digest nor NOT_HELD
+    SOURCE_DOCUMENT_HASH_MISMATCH           the file on disk is a different article
+    SOURCE_DOCUMENT_FILE_NOT_FOUND          a digest claimed for bytes nobody holds
+    SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED NOT_HELD about a file under file_root
+    PLAN_DOCUMENT_BYTES_UNDECLARED          a plan that does not say, at plan time
+
+**THE DIGEST IS OVER THE WHOLE FILE, AND `Article_Page_Range` IS UNCHANGED.**
+The two claims are deliberately independent. Publication 323's document record
+covers pages 4-5 of a four-figure article whose other two rasters this package
+does not hold (v8.9), and the honest form of that is a whole-file digest beside a
+narrower range - not a digest of two pages, which is a hash of an artefact no
+publisher ever issued and which nobody could reproduce from the PDF they have.
+The range says what was inventoried; the digest says what it was inventoried
+*from*.
+
+**`NOT_HELD` is a state, not a blank.** This repository ships rasters and no
+PDFs, so 323 and 397 both declare it, and their run stamps say
+`Source_Document_Bytes_Bound=NONE`. Recorded rather than left empty, because a
+blank column reads as "nobody got round to it" and this one has to read as "the
+bytes behind this inventory are not here". It is not a free pass either:
+`SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED` refuses a row that says NOT_HELD about
+a file the corpus is holding, which is what stops every producer that would
+rather not hash its document from writing NOT_HELD and meeting no disagreement.
+Two more bindings make the digest reach the rasters rather than sit beside them:
+`DUPLICATE_SOURCE_DOCUMENT_BYTES` (one article inventoried under two IDs counts
+its figures twice in every coverage check below it) and
+`SOURCE_FIGURE_DOCUMENT_FILE_MISMATCH` (a figure carries its own `Source_File`,
+so it could name a different article while pointing at a document row whose bytes
+are hashed).
+
+**Two tallies, because a refusal separates them.** `Values_Machine_QC_Passed` is
+how many gate-passing values a run KEPT, and a refusal keeps none - so on
+`DEMO_OUTPUT_REFUSED` it is 0, which is correct and was the only tally the stamp
+had. The gate's own count survived in the `Detail` sentence and nowhere a program
+could read it, and the proof of the cost is in the suite: `test_compile_plan`
+asserted 323's 102 values by matching a regular expression against English prose.
+`Values_Gate_Passed` is now a field, the scenario reads it, and the stamp schema
+is `run-stamp/8`. `Source_Document_Bytes_Bound` is written on every outcome for
+the same reason - a refused run still says what its inventory would have rested
+on.
+
+**And the plan compares factor levels, which is where the third item stopped
+being harmless.** v9.0 compared the two factor SETS before a raster is opened;
+that compares headings. A panel whose TIMEPOINT positions are `0_30..6_00`
+against a grid declaring `0:30..6:00` matches on `{ARM, TIMEPOINT}` and shares
+not one cell with it, and the runner writes the level into every `Cell_Key` - so
+the marks are read off the raster and refused one by one as
+`UNDECLARED_FACTOR_LEVEL`, the same after-all-the-work diagnosis v9.0 removed one
+grain up. `PLAN_PANEL_FACTOR_LEVEL_UNDECLARED` refuses it at plan time.
+
+**Its first catch was in `plan_397.json`.** Figure 5's two curves are the two
+individuals its caption names, and they were declared `factor=ARM, level=Y01` and
+`level=Y07` against `G_HDT`, whose ARM levels are `FLUID` and `NON_FLUID`. The
+factor names matched the grid exactly and not one of the twenty-four cells
+existed. It survived nine releases because the fluid/non-fluid split in Figure 5
+is between its two PANELS and what varies inside a panel is which person is
+drawn - so calling a subject an arm was consistent at the grain anything looked
+at. Figure 5 is `NO_SUMMARY_STATISTIC` and MANUAL, so no value was ever filed
+under a cell that does not exist; had those panels been AUTO, every reading would
+have come back refused. Both units now name `G_P5_SUBJECT`, a grid of
+`SUBJECT x TIMEPOINT`, and the old declaration is a scenario.
+
+The reverse direction is NOT checked, on purpose: a level a grid declares and no
+mark fills is an EMPTY cell, which the gate reports against the unit as
+`FACTOR_LEVEL_MISSING` once the reading is in, and 323 has a legitimate one - the
+cell its Figure 2 does not print, recorded since v7.2. Refusing that at plan time
+would refuse 323.
+
+    reverted                                          scenarios that fail
+    the document digest check removed                  10
+    the required column removed                         1
+    the NOT_HELD guard removed                          1
+    the duplicate-bytes check removed                   1
+    the figure-document file binding removed            1
+    the plan-time digest check removed                  3
+    the gate tally field removed                        4
+    the level comparison removed                        8
+    Figure 5 restored to ARM against G_HDT              2
+
+**What this does NOT close.** `corpus_intake` has computed
+`Source_File_SHA256` in its ledger since the intake layer existed, and there is
+still no emitter that turns a ledger row into a `source_document_manifest` row -
+`inventory_rows` produces figure rows only. So the digest is hand-carried by
+whoever writes the plan, which is the same shape of gap the raster hash does not
+have (the compiler reads that off the bytes). Until that emitter exists,
+`Source_Document_Bytes_Bound=ALL` is exercised by fixtures and by nothing in the
+shipped corpus. And `NOT_HELD` is still a declaration a producer makes about
+files outside `file_root`: the guard can only ask the corpus what it is holding.
+
+*(This section also removes two duplicate `## Still open` headings that had
+accumulated above it.)*
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section
@@ -7098,7 +7202,14 @@ one went first alone.
   mean an approval is only valid under the policy it was given, which is
   probably right and is a schema change
 - 397 Figure 5 is two named individuals beat by beat — no summary statistic
-  exists to read, and it stays MANUAL
+  exists to read, and it stays MANUAL. Since v9.2 it is at least declared as what
+  it is: `SUBJECT=Y01|Y07` against its own grid, rather than two ARM levels of
+  the fluid grid that shared no cell with it
+- the source-document digest has no producer inside the package: `corpus_intake`
+  computes `Source_File_SHA256` for every PDF it walks and nothing turns a ledger
+  row into a `source_document_manifest` row. Until it does, every document digest
+  is typed by whoever writes the plan — the one hash in this package that is not
+  read off the bytes by the code that needs it
 - 397 Figure 4, 386 Figures 3–4
 - ID 323 FIG2 DAP DI19 (1 cell) and 4 unpaired cells need a human reading
 - ID 323 and 397 both need their SD/SEM wording resolved from the methods text

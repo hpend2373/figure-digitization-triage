@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.1"
+PIPELINE_VERSION = "9.2"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -2858,7 +2858,8 @@ def promote(work_dir, output_dir, fault_after=None):
     shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED"):
+def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED",
+                    document_bytes_bound="NO_DOCUMENTS"):
     """Undo a half-finished promotion: no marker, and a stamp that says why.
 
     Called when `promote` raises. The accepted file is removed whether or not it
@@ -2871,7 +2872,8 @@ def withdraw_commit(output_dir, run_date, detail, run_mode="ATTESTED"):
         os.remove(marker)
     shutil.rmtree(os.path.join(output_dir, STAGING), ignore_errors=True)
     write_stamp(os.path.join(output_dir, "run_stamp.json"), "PROMOTE_FAILED",
-                run_date, run_mode=run_mode, detail=detail)
+                run_date, run_mode=run_mode, detail=detail,
+                document_bytes_bound=document_bytes_bound)
 
 
 #: Every verdict a run directory can carry. RAN is the only one under which
@@ -2885,18 +2887,32 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
                 panels=0, read=0, accepted=0, machine_qc=0, qc_problems=0,
                 problems=0, detail="", run_mode="ATTESTED",
                 output_sha256=None, reviewer_registry_sha256="",
-                manifest_dir="", method_blocked=0):
+                manifest_dir="", method_blocked=0, gate_passed=None,
+                document_bytes_bound="NO_DOCUMENTS"):
     """The run's verdict, written on EVERY outcome including a rejection.
 
     A rejected run used to write no stamp at all, which left the previous run's
     stamp in place claiming `Values_Accepted=8`. A stamp that is absent when
     things go wrong is worse than no stamp at all - it is only ever there to
     reassure.
+
+    `gate_passed` defaults to `machine_qc` because on a run that kept its
+    results the two ARE the same number, and a caller that has only one of them
+    has that one. They come apart on a refusal, which is the whole reason the
+    second field exists.
     """
+    if gate_passed is None:
+        gate_passed = machine_qc
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({
-            "schema": "figure-digitization-triage/run-stamp/7",
+            "schema": "figure-digitization-triage/run-stamp/8",
             "Status": status, "Run_Mode": run_mode, "Run_Date": run_date,
+            # WHAT THE INVENTORY RESTS ON. ALL, PARTIAL, NONE or NO_DOCUMENTS,
+            # from `Source_File_SHA256` (v9.2). Every raster in this package has
+            # been hashed since the first release and the article they were cut
+            # out of was a filename, so a stamp that says nothing about the
+            # document reads as though the document were covered too.
+            "Source_Document_Bytes_Bound": document_bytes_bound,
             # How many of the values this run produced no signature will be able
             # to finalize, and which are therefore already somebody's work in
             # `method_blocked_cells.csv`. On the RUN stamp because that is where
@@ -2910,6 +2926,16 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
             "Config_SHA256": cfg_hash,
             "Manifest_SHA256": manifest_hashes or {},
             "Panels": panels, "Values_Read": read,
+            # TWO TALLIES, BECAUSE A REFUSAL SEPARATES THEM.
+            # `Values_Machine_QC_Passed` is how many gate-passing values this
+            # run KEPT, and a refusal keeps none - so on `DEMO_OUTPUT_REFUSED`
+            # it is 0, correctly. `Values_Gate_Passed` is the GATE's own tally:
+            # how many values cleared machine QC before anything decided what to
+            # do with them. Until v9.2 only the first field existed, so the one
+            # number that says how much work a refused run actually did survived
+            # in the `Detail` sentence and nowhere a program could read it -
+            # `test_compile_plan` had to parse the prose to assert 102.
+            "Values_Gate_Passed": gate_passed,
             "Values_Machine_QC_Passed": machine_qc, "Values_Accepted": accepted,
             "QC_Problems": qc_problems, "Manifest_Problems": problems,
             "Output_SHA256": output_sha256 or {},
@@ -2986,12 +3012,17 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                                  m["source_figures"])
     run_mode = ("DEMO_ONLY" if "DEMO_ONLY" in (derived, requested_run_mode)
                 else "ATTESTED")
+    # Read off the manifests rather than passed in, and read even when the batch
+    # is rejected: a run refused for one bad column still says what its
+    # inventory would have rested on.
+    bytes_bound = BM.document_bytes_bound(m["source_documents"])
     if len(problems):
         problems.to_csv(os.path.join(output_dir, "manifest_problems.csv"),
                         index=False)
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "MANIFEST_REJECTED", run_date, run_mode=run_mode,
                     manifest_dir=os.path.realpath(manifest_dir),
+                    document_bytes_bound=bytes_bound,
                     manifest_hashes=manifest_hashes, problems=len(problems))
         return dict(status="MANIFEST_REJECTED", problems=len(problems),
                     values=0, accepted=0, run_mode=run_mode,
@@ -3093,6 +3124,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             clear_outputs(output_dir)
             write_stamp(os.path.join(output_dir, "run_stamp.json"),
                         "GEOMETRY_REVIEW_FAILED", run_date, run_mode=run_mode,
+                        document_bytes_bound=bytes_bound,
                         manifest_hashes=manifest_hashes, detail="%s" % exc)
             return dict(status="GEOMETRY_REVIEW_FAILED", detail="%s" % exc,
                         panels=0, values=0, machine_qc=0, accepted=0,
@@ -3123,6 +3155,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
             clear_outputs(output_dir)
             write_stamp(os.path.join(output_dir, "run_stamp.json"),
                         "INTERNAL_ERROR", run_date, run_mode=run_mode,
+                        document_bytes_bound=bytes_bound,
                         manifest_hashes=manifest_hashes,
                         detail="%s" % exc)
             raise
@@ -3663,8 +3696,14 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         write_stamp(os.path.join(output_dir, "run_stamp.json"),
                     "DEMO_OUTPUT_REFUSED", run_date, run_mode=run_mode,
                     manifest_dir=os.path.realpath(manifest_dir),
+                    document_bytes_bound=bytes_bound,
                     cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                     panels=len(run_df), read=len(raw_df), accepted=0,
+                    # KEPT NOTHING, AND THE GATE STILL COUNTED. `machine_qc`
+                    # stays 0 because that is the truth about what survived this
+                    # run; `gate_passed` is the number the refusal is ABOUT, and
+                    # before v9.2 it existed only inside `detail` below.
+                    machine_qc=0, gate_passed=len(machine_qc_df),
                     qc_problems=int(len(qc)), detail=detail)
         return dict(status="DEMO_OUTPUT_REFUSED", panels=len(run_df),
                     values=0, accepted=0, would_accept=len(machine_qc_df),
@@ -3686,6 +3725,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     write_stamp(os.path.join(work_dir, "run_stamp.json"), "RAN", run_date,
                 run_mode=run_mode, detail=stamp_detail,
                 manifest_dir=os.path.realpath(manifest_dir),
+                document_bytes_bound=bytes_bound,
                 cfg_hash=cfg_hash, manifest_hashes=manifest_hashes,
                 panels=len(run_df), read=len(raw_df), accepted=0,
                 machine_qc=len(machine_qc_df),
@@ -3709,7 +3749,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         promote(work_dir, output_dir, fault_after=fault_after)
     except Exception as exc:
         withdraw_commit(output_dir, run_date, "%s: %s" % (type(exc).__name__, exc),
-                        run_mode=run_mode)
+                        run_mode=run_mode, document_bytes_bound=bytes_bound)
         raise
 
     counts = run_df["Run_State"].value_counts().to_dict() if len(run_df) else {}

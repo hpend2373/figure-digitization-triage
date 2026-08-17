@@ -269,6 +269,15 @@ GRIDS += [dict(Grid_ID="G_HDT", Factor_Name="ARM", Factor_Level=lv,
                Level_Order=i, Note="") for i, lv in enumerate(("FLUID", "NON_FLUID"))]
 GRIDS += [dict(Grid_ID="G_HDT", Factor_Name="TIMEPOINT", Factor_Level=lv,
                Level_Order=i, Note="") for i, lv in enumerate(HDT)]
+# Figure 5's own grid. Its two curves are the two people the caption names, and
+# they were declared as ARM levels against G_HDT until v9.2 - factor names that
+# matched the grid exactly over levels that shared no cell with it. See the note
+# in `make_plan_397.py`; the fluid/non-fluid split of Figure 5 is between its
+# PANELS, not inside one.
+GRIDS += [dict(Grid_ID="G_P5_SUBJECT", Factor_Name="SUBJECT", Factor_Level=lv,
+               Level_Order=i, Note="") for i, lv in enumerate(("Y01", "Y07"))]
+GRIDS += [dict(Grid_ID="G_P5_SUBJECT", Factor_Name="TIMEPOINT", Factor_Level=lv,
+               Level_Order=i, Note="") for i, lv in enumerate(HDT)]
 
 
 def figure(fid, image, caption, panels):
@@ -403,7 +412,7 @@ figure("F397_5", "397_fig5.jpeg",
 for pid, sex, box in (("P5_NOFLUID", "NO_FLUID_HDT", (84, 430, 60, 300)),
                       ("P5_FLUID", "FLUID_HDT", (520, 870, 60, 300))):
     uid = "U_" + pid
-    unit(uid, "F397_5", "G_HDT", sex, "Heart rate", "bpm", "CV_HEMO",
+    unit(uid, "F397_5", "G_P5_SUBJECT", sex, "Heart rate", "bpm", "CV_HEMO",
          Bar_Top_Definition="NOT_A_BAR", Errorbar_Stem_Confirmed="FALSE",
          Dispersion_Type="NO_ERRORBAR",
          Errorbar_Definition_Source=(
@@ -425,7 +434,7 @@ for pid, sex, box in (("P5_NOFLUID", "NO_FLUID_HDT", (84, 430, 60, 300)),
         SERIES.append(dict(
             Panel_ID=pid, Series_ID=series_id, Colour_Hex="", Colour_Tolerance="",
             Mask_Key="", Marker_Shape=shape, Marker_Fill="ANY", Line_Style="",
-            Bar_Fill_Pattern="", Factor_Name="ARM", Factor_Level=series_id,
+            Bar_Fill_Pattern="", Factor_Name="SUBJECT", Factor_Level=series_id,
             Note="named individual subject"))
     for order, label in enumerate(HDT):
         POSITIONS.append(dict(
@@ -505,6 +514,10 @@ _SOURCE_SPECS = {
 SOURCE_DOCUMENTS.append(dict(
     Source_Document_ID="SD397_MAIN", Publication_ID=397,
     Document_Role="MAIN_ARTICLE", Source_File="397.pdf",
+    # The rasters are in the repository; the article is not. See
+    # `BM.SOURCE_FILE_NOT_HELD` - the state is recorded rather than left blank,
+    # and the run stamp carries `Source_Document_Bytes_Bound=NONE`.
+    Source_File_SHA256="NOT_HELD",
     Article_Page_Range="full target article", Observed_Figure_Count=5,
     Inventory_Status="VISUALLY_VERIFIED", Figure_Count_Method="HUMAN_VISUAL",
     Reviewer_ID="RV_INSPECTOR", Inspection_Date=INSPECTION_DATE,

@@ -74,6 +74,14 @@ draw()
 SHA = MR.sha256_of(IMG)
 TICKS = "220:40;0:440"
 
+# The article the fixture's one figure came out of, as bytes: `Source_File` has
+# named a PDF since the source layer existed and v9.2 hashes it, so the file has
+# to be there for `run_batch` to agree with the manifest.
+SOURCE_PDF = os.path.join(ROOT, "synthetic.pdf")
+with open(SOURCE_PDF, "wb") as _fh:
+    _fh.write(b"%PDF-1.4\n% synthetic finalize document, one figure\n%%EOF\n")
+SOURCE_PDF_SHA = MR.sha256_of(SOURCE_PDF)
+
 REVIEWERS = [dict(Reviewer_ID="RV_H", Reviewer_Name="Test Reviewer",
                   # ORCID rather than EMAIL, because `--second` compares people
                   # and an email address is a mailbox. A reviewer this package
@@ -98,7 +106,8 @@ REVIEWERS = [dict(Reviewer_ID="RV_H", Reviewer_Name="Test Reviewer",
 
 SOURCE_DOCUMENTS = [dict(
     Source_Document_ID="SD1", Publication_ID=9, Document_Role="MAIN_ARTICLE",
-    Source_File="synthetic.pdf", Article_Page_Range="1-1", Observed_Figure_Count=1,
+    Source_File="synthetic.pdf", Source_File_SHA256=SOURCE_PDF_SHA,
+    Article_Page_Range="1-1", Observed_Figure_Count=1,
     Inventory_Status="VISUALLY_VERIFIED", Figure_Count_Method="HUMAN_VISUAL",
     Reviewer_ID="RV_H", Inspection_Date="2026-08-06", Note="")]
 SOURCE_FIGURES = [dict(

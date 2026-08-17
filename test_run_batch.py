@@ -61,6 +61,16 @@ ROOT = tempfile.mkdtemp(prefix="fdt_batch_")
 IMAGES = os.path.join(ROOT, "images")
 os.makedirs(IMAGES, exist_ok=True)
 
+# THE DOCUMENT THE FIXTURE'S FOUR FIGURES CAME OUT OF, as bytes on disk. The
+# fixture named `synthetic.pdf` in `Source_File` for eleven releases and no such
+# file existed, which was fine while nothing hashed it. v9.2 hashes it, and the
+# scenarios that matter - a digest that disagrees with the file, a row saying
+# NOT_HELD about a file the corpus is holding - can only be written against a
+# document that is really there.
+SOURCE_PDF = os.path.join(ROOT, "synthetic.pdf")
+with open(SOURCE_PDF, "wb") as _fh:
+    _fh.write(b"%PDF-1.4\n% synthetic regression document, four figures\n%%EOF\n")
+
 BLUE, RED = (45, 80, 220), (215, 45, 45)
 XS = [140, 240, 340, 440]
 POSITIONS = ["T0", "T1", "T2", "T3"]
@@ -169,7 +179,8 @@ REVIEWERS = [dict(
 
 SOURCE_DOCUMENTS = [dict(
     Source_Document_ID="SD1", Publication_ID=1, Document_Role="MAIN_ARTICLE",
-    Source_File="synthetic.pdf", Article_Page_Range="1-1",
+    Source_File="synthetic.pdf", Source_File_SHA256=MR.sha256_of(SOURCE_PDF),
+    Article_Page_Range="1-1",
     Observed_Figure_Count=4, Inventory_Status="VISUALLY_VERIFIED",
     Figure_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
     Inspection_Date="2026-08-06", Note="four synthetic source figures")]
@@ -425,6 +436,94 @@ for _fld, _val in (("Reviewer_ID", "RV_T1"), ("Inspection_Date", "2026-08-06")):
                                          **{_fld: _val})) == [],
           "%s" % validate(source_figures=edited(
               SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, **{_fld: _val})))
+
+# --------------------------------------------------------------------------
+# WHICH DOCUMENT THE INVENTORY IS OF (v9.2)
+# --------------------------------------------------------------------------
+# Every raster in this package has been hashed since the first release. The
+# article they were cut out of was a filename, so "this publication has four
+# figures and these are they" was a claim about a string: a preprint and its
+# version of record produce the same manifest, the same counts and the same
+# attestation, and the inventory reads as verified against whichever one the
+# reviewer happened to have open.
+_DOC_SHA = MR.sha256_of(SOURCE_PDF)
+
+
+def _doc(**changes):
+    return [dict(SOURCE_DOCUMENTS[0], **changes)]
+
+
+check("the document's own bytes are required",
+      "MISSING_REQUIRED" in validate(source_documents=_doc(Source_File_SHA256="")),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="")))
+for _bad in ("yes", "sha256:" + _DOC_SHA, _DOC_SHA[:32], "NOT HELD", "PENDING"):
+    check("Source_File_SHA256=%r is neither a digest nor NOT_HELD" % _bad,
+          "BAD_SOURCE_FILE_SHA256" in validate(
+              source_documents=_doc(Source_File_SHA256=_bad)),
+          "%s" % validate(source_documents=_doc(Source_File_SHA256=_bad)))
+check("a digest that disagrees with the file on disk is refused",
+      "SOURCE_DOCUMENT_HASH_MISMATCH" in validate(
+          source_documents=_doc(Source_File_SHA256="0" * 64)),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="0" * 64)))
+# The CLAIM is what makes the absence a problem. A row that says NOT_HELD about
+# a document nobody holds is the ordinary case and passes below.
+check("a digest claimed for a document that is not in the corpus is refused",
+      "SOURCE_DOCUMENT_FILE_NOT_FOUND" in validate(
+          source_documents=_doc(Source_File="absent.pdf",
+                                Source_File_SHA256=_DOC_SHA),
+          source_figures=[dict(f, Source_File="absent.pdf")
+                          for f in SOURCE_FIGURES]),
+      "%s" % validate(source_documents=_doc(Source_File="absent.pdf",
+                                            Source_File_SHA256=_DOC_SHA)))
+# NOT_HELD IS NOT A WAY OUT OF HASHING A FILE YOU HAVE. Without this the column
+# is optional in practice and the whole check is decoration: every producer that
+# does not want to hash its document writes NOT_HELD and nothing disagrees.
+check("NOT_HELD about a document the corpus is holding is refused",
+      "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED" in validate(
+          source_documents=_doc(Source_File_SHA256="NOT_HELD")),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="NOT_HELD")))
+check("NOT_HELD about a document nobody holds is the ordinary case",
+      validate(source_documents=_doc(Source_File="elsewhere.pdf",
+                                     Source_File_SHA256="NOT_HELD"),
+               source_figures=[dict(f, Source_File="elsewhere.pdf")
+                               for f in SOURCE_FIGURES]) == [],
+      "%s" % validate(source_documents=_doc(Source_File="elsewhere.pdf",
+                                            Source_File_SHA256="NOT_HELD"),
+                      source_figures=[dict(f, Source_File="elsewhere.pdf")
+                                      for f in SOURCE_FIGURES]))
+check("lower and upper case are the same digest",
+      validate(source_documents=_doc(
+          Source_File_SHA256=_DOC_SHA.upper())) == [],
+      "%s" % validate(source_documents=_doc(Source_File_SHA256=_DOC_SHA.upper())))
+# One article inventoried under two IDs counts its figures twice in every
+# coverage check below this line.
+check("two document IDs over one set of bytes are refused",
+      "DUPLICATE_SOURCE_DOCUMENT_BYTES" in validate(
+          source_documents=SOURCE_DOCUMENTS + _doc(Source_Document_ID="SD1_AGAIN")),
+      "%s" % validate(
+          source_documents=SOURCE_DOCUMENTS + _doc(Source_Document_ID="SD1_AGAIN")))
+# And the binding that makes the document digest reach the rasters: a figure
+# carries its own Source_File, so it can name a different article while pointing
+# at a document row whose bytes are hashed.
+check("a figure cut out of a different file than its document is refused",
+      "SOURCE_FIGURE_DOCUMENT_FILE_MISMATCH" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_File="other.pdf")),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Source_File="other.pdf")))
+
+# What the run stamp will say, derived from the same column.
+_mixed = (_doc(Source_File="elsewhere.pdf", Source_File_SHA256="NOT_HELD")
+          + _doc(Source_Document_ID="SD2", Source_File_SHA256=_DOC_SHA))
+for _rows, _want in ((SOURCE_DOCUMENTS, "ALL"),
+                     (_doc(Source_File_SHA256="NOT_HELD"), "NONE"),
+                     (_mixed, "PARTIAL"),
+                     ([], "NO_DOCUMENTS"),
+                     (_doc(Source_File_SHA256=""), "UNDECLARED")):
+    _got = BM.document_bytes_bound(
+        fr(_rows, BM.source_document_manifest_columns()))
+    check("an inventory of %d document(s) is %s-bound" % (len(_rows), _want),
+          _got == _want, _got)
 
 # --------------------------------------------------------------------------
 # the reviewer registry
@@ -1832,6 +1931,47 @@ check("and no accepted file survives the replay",
 check("and the stamp on the replay says DEMO_ONLY",
       json.load(open(os.path.join(ROOT, "o_replay", "run_stamp.json"))
                 )["Run_Mode"] == "DEMO_ONLY")
+
+# THE ONE NUMBER A REFUSED RUN IS ABOUT (v9.2). `Values_Machine_QC_Passed` is
+# how many gate-passing values the run KEPT, and a refusal keeps none - so it is
+# 0, correctly. Until v9.2 that was the only tally in the stamp, and the gate's
+# own count survived in the `Detail` sentence: `test_compile_plan` had to parse
+# English out of the prose to assert that 323 put 102 values through the gate.
+_refused_stamp = json.load(open(os.path.join(ROOT, "o_replay", "run_stamp.json")))
+check("a refusal keeps nothing, and Values_Machine_QC_Passed says so",
+      _refused_stamp["Values_Machine_QC_Passed"] == 0, "%s" % _refused_stamp)
+check("and the gate's own tally survives the refusal in a field, not a sentence",
+      _refused_stamp["Values_Gate_Passed"] == _replay["would_accept"] > 0,
+      "Values_Gate_Passed=%r would_accept=%r"
+      % (_refused_stamp.get("Values_Gate_Passed"), _replay["would_accept"]))
+check("and it is the number the refusal's own sentence quotes",
+      str(_refused_stamp["Values_Gate_Passed"]) in _refused_stamp["Detail"],
+      "%s" % _refused_stamp["Detail"])
+_ran_stamp = json.load(open(os.path.join(ODIR, "run_stamp.json")))
+check("on a run that kept its results the two tallies are the same number",
+      _ran_stamp["Values_Gate_Passed"] == _ran_stamp["Values_Machine_QC_Passed"] > 0,
+      "%s" % _ran_stamp)
+# And what the inventory rested on, on every outcome. The fixture hashes the
+# document its four figures came out of, so this one is ALL; publications 323
+# and 397 ship rasters without their articles and stamp NONE.
+check("a run stamp says which bytes its inventory rested on",
+      _ran_stamp["Source_Document_Bytes_Bound"] == "ALL", "%s" % _ran_stamp)
+check("and so does a refusal",
+      _refused_stamp["Source_Document_Bytes_Bound"] == "ALL", "%s" % _refused_stamp)
+_unbound = write_manifests(
+    os.path.join(ROOT, "m_notheld"),
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Source_File="elsewhere.pdf",
+                           Source_File_SHA256="NOT_HELD")],
+    source_figures=[dict(f, Source_File="elsewhere.pdf") for f in SOURCE_FIGURES])
+RB.run_batch(_unbound, os.path.join(ROOT, "o_notheld"), file_root=ROOT,
+             run_date="2026-08-06")
+check("a run over an article nobody holds stamps NONE rather than nothing",
+      json.load(open(os.path.join(ROOT, "o_notheld", "run_stamp.json"))
+                )["Source_Document_Bytes_Bound"] == "NONE",
+      "%s" % json.load(open(os.path.join(ROOT, "o_notheld", "run_stamp.json"))))
+check("the stamp schema moved with the two fields",
+      _ran_stamp["schema"] == "figure-digitization-triage/run-stamp/8",
+      "%s" % _ran_stamp["schema"])
 
 _promote = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_promote"),
                         file_root=ROOT, run_date="2026-08-06",

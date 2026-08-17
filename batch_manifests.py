@@ -191,6 +191,35 @@ SOURCE_PANEL_COUNT_METHODS = ("HUMAN_VISUAL", "MACHINE_PLUS_HUMAN")
 SOURCE_DOCUMENT_ROLES = ("MAIN_ARTICLE", "SUPPLEMENT", "APPENDIX",
                          "PROCEEDINGS_CHAPTER")
 
+#: What `Source_File_SHA256` may say, and the one thing it may not say: nothing.
+#:
+#: A figure inventory is a claim about ONE DOCUMENT - "the article has five
+#: figures and these are they" - and until v9.2 nothing in the package said
+#: which bytes that document was. The rasters were hashed from the first
+#: release; the article they were cut out of was a filename. So a preprint and
+#: its published version, or v1 and v2 of the same preprint, produce the same
+#: manifest, the same figure count and the same panel counts, and the inventory
+#: reads as verified against whichever one the reviewer happened to open.
+#:
+#: THE DIGEST IS OVER THE WHOLE FILE, and `Article_Page_Range` stays exactly
+#: what it was: a declaration of the range that was inventoried. The two are
+#: deliberately not tied together. Publication 323 inventories pages 4-5 of an
+#: article whose remaining figures this package does not hold (see v8.9), and
+#: the honest record of that is a whole-file digest beside a narrower range -
+#: not a digest of two pages, which would be a hash of something no publisher
+#: ever issued and which nobody could reproduce from the article they have.
+#:
+#: `NOT_HELD` is the corpus saying it does not have the file. It is a real
+#: state - the shipped corpus holds rasters and no PDFs - and it is recorded
+#: rather than blank, because a blank column reads as "nobody got round to it"
+#: and this one has to read as "the bytes behind this inventory are not here".
+#: It is not a free pass: `SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED` refuses a
+#: row that says NOT_HELD about a file the corpus is holding, and the run stamp
+#: carries `Source_Document_Bytes_Bound` so a NOT_HELD inventory cannot be read
+#: back later as a byte-bound one.
+SOURCE_FILE_NOT_HELD = "NOT_HELD"
+SHA256_TEXT = re.compile(r"^[0-9a-f]{64}$")
+
 
 REVIEWER_ATTESTATIONS = ("HUMAN_CONFIRMED", "AUTOMATED_AGENT", "DEMO_EXAMPLE")
 
@@ -443,6 +472,38 @@ def derive_run_mode(reviewers, *inventory_frames):
         if str(r.get("Reviewer_Record_Type", "")).strip().upper() == "DEMO_IDENTITY":
             return "DEMO_ONLY"
     return "ATTESTED"
+
+
+def document_bytes_bound(source_documents):
+    """ALL, PARTIAL, NONE or NO_DOCUMENTS - what the inventory rests on.
+
+    `NOT_HELD` is a legitimate answer (see `SOURCE_FILE_NOT_HELD`) and it must
+    not be a quiet one. A manifest layer that accepts it and says nothing leaves
+    every reader downstream to assume the article was hashed, because everything
+    else in this package is. So the run's own verdict carries the summary: NONE
+    means every figure in this run was inventoried from a document whose bytes
+    are not in the corpus, and no later reader has to open the manifests to
+    find that out.
+    """
+    if source_documents is None or not len(source_documents):
+        return "NO_DOCUMENTS"
+    hashed = notheld = 0
+    for _, r in source_documents.iterrows():
+        text = str(r.get("Source_File_SHA256", "")).strip().lower()
+        if SHA256_TEXT.match(text):
+            hashed += 1
+        elif text == SOURCE_FILE_NOT_HELD.lower():
+            notheld += 1
+    if hashed and not notheld:
+        return "ALL"
+    if notheld and not hashed:
+        return "NONE"
+    if hashed and notheld:
+        return "PARTIAL"
+    # Neither: the column is blank or malformed, which `validate_batch_manifests`
+    # refuses. Reported rather than guessed, so a caller that skipped validation
+    # does not read a blank column as ALL.
+    return "UNDECLARED"
 
 
 def check_attestation(row, line, flag, reviewer_index=None, kernel=None):
@@ -740,9 +801,16 @@ def source_figure_manifest_columns():
 
 
 def source_document_manifest_columns():
-    """One row per source document whose full article range was inventoried."""
+    """One row per source document whose full article range was inventoried.
+
+    `Source_File_SHA256` names the bytes the inventory was taken from - the
+    whole file, whatever `Article_Page_Range` says about the part of it that was
+    inventoried - or `NOT_HELD` when the corpus does not have the file. See
+    `SOURCE_FILE_NOT_HELD`.
+    """
     return [
         "Source_Document_ID", "Publication_ID", "Document_Role", "Source_File",
+        "Source_File_SHA256",
         "Article_Page_Range", "Observed_Figure_Count", "Inventory_Status",
         "Figure_Count_Method", "Reviewer_ID", "Inspection_Date", "Note",
     ]
@@ -1302,6 +1370,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     # forbidden as the completeness namespace: only Source_Figure_ID can prove
     # that every visible panel in the publisher's physical figure was handled.
     source_document_index = {}
+    #: digest -> the first document ID that declared it. Two IDs over one set of
+    #: bytes is the same article inventoried twice, and its figures are then
+    #: counted twice by every coverage check downstream.
+    document_bytes = {}
     for i, r in source_documents.iterrows():
         line = "source_documents:%d" % (i + 2)
         sdid = str(r.get("Source_Document_ID", "")).strip()
@@ -1313,12 +1385,61 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         source_document_index[sdid] = r
         for c in ("Publication_ID", "Document_Role", "Source_File",
+                  "Source_File_SHA256",
                   "Article_Page_Range", "Observed_Figure_Count",
                   "Inventory_Status", "Figure_Count_Method", "Reviewer_ID",
                   "Inspection_Date"):
             if blank(r.get(c)):
                 flag(line, "MISSING_REQUIRED", c)
         check_attestation(r, line, flag, reviewer_index)
+        # ------------------------------------------- the document's own bytes
+        # The article this inventory is OF. Everything below it was hashed from
+        # the first release and this was a filename, so an inventory could not
+        # tell a preprint from the version of record it was taken from.
+        declared_doc_sha = str(r.get("Source_File_SHA256", "")).strip().lower()
+        held = resolve(r.get("Source_File"))
+        if declared_doc_sha == SOURCE_FILE_NOT_HELD.lower():
+            # Not a way out of hashing a file you have. The corpus is asked
+            # whether it is holding this document, and only its own answer
+            # counts: a row may not say NOT_HELD about a file sitting under
+            # `file_root`.
+            if check_files and held is not None:
+                flag(line, "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED",
+                     "Source_File_SHA256 says %s and %s is under %s. Hash the "
+                     "file the corpus is holding; NOT_HELD is for a document "
+                     "whose bytes this package does not have"
+                     % (SOURCE_FILE_NOT_HELD, r.get("Source_File"), root))
+        elif declared_doc_sha:
+            if not SHA256_TEXT.match(declared_doc_sha):
+                flag(line, "BAD_SOURCE_FILE_SHA256",
+                     "Source_File_SHA256=%r is neither a sha256 digest nor %s"
+                     % (r.get("Source_File_SHA256"), SOURCE_FILE_NOT_HELD))
+            else:
+                first = document_bytes.setdefault(declared_doc_sha, sdid)
+                if first != sdid:
+                    flag(line, "DUPLICATE_SOURCE_DOCUMENT_BYTES",
+                         "%s declares the same bytes as %s. One document "
+                         "inventoried under two IDs counts its figures twice"
+                         % (sdid, first))
+                if check_files:
+                    if held is None:
+                        # Only ever raised against a row that CLAIMED a digest.
+                        # The claim is what makes the absence a problem: the
+                        # digest says these bytes were read, and they are not
+                        # here to disagree with.
+                        flag(line, "SOURCE_DOCUMENT_FILE_NOT_FOUND",
+                             "Source_File=%r declares a digest and is not on "
+                             "disk under %s. Put the document in the corpus or "
+                             "say %s" % (r.get("Source_File"), root,
+                                         SOURCE_FILE_NOT_HELD))
+                    else:
+                        actual = sha256_of_file(held)
+                        if actual != declared_doc_sha:
+                            flag(line, "SOURCE_DOCUMENT_HASH_MISMATCH",
+                                 "Source_File_SHA256 says %s..., the file on "
+                                 "disk is %s.... The figures were inventoried "
+                                 "in a different document than the one held"
+                                 % (declared_doc_sha[:16], actual[:16]))
         role = str(r.get("Document_Role", "")).strip().upper()
         if role not in SOURCE_DOCUMENT_ROLES:
             flag(line, "BAD_SOURCE_DOCUMENT_ROLE", role)
@@ -1364,6 +1485,20 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "%s belongs to Publication_ID=%s, not %s" % (
                      sdid, source_document_index[sdid].get("Publication_ID"),
                      r.get("Publication_ID")))
+        # A figure names its document's FILE as well as its ID, and until v9.2
+        # nothing compared the two. That is what makes the document digest reach
+        # the rasters: a figure carrying its own `Source_File` is a figure that
+        # can have been cut out of some other article while still pointing at a
+        # document row whose bytes are hashed.
+        if sdid in source_document_index:
+            doc_file = str(source_document_index[sdid].get("Source_File", "")).strip()
+            fig_file = str(r.get("Source_File", "")).strip()
+            if doc_file and fig_file and doc_file != fig_file:
+                flag(line, "SOURCE_FIGURE_DOCUMENT_FILE_MISMATCH",
+                     "this figure says it came out of %r and %s is %r. The "
+                     "document's digest is over the second file, so a figure "
+                     "read from the first is provenance nothing covers"
+                     % (fig_file, sdid, doc_file))
         for c in ("Source_Document_ID", "Publication_ID", "Figure_Number", "Source_File", "Source_Page",
                   "Source_Image", "Source_Image_SHA256", "Observed_Panel_Count",
                   "Inventory_Status", "Panel_Count_Method", "Reviewer_ID",

@@ -92,6 +92,16 @@ for fid, image, rows in LINE_FIGURES:
 # Figure 5 is two named individuals beat by beat: not a summary statistic, and
 # no reader will ever change that. It is declared MANUAL so the panels stay
 # counted rather than quietly absent.
+#
+# AND ITS TWO CURVES ARE SUBJECTS, NOT ARMS. Until v9.2 they were declared
+# `factor="ARM", level="Y01"` against `G_HDT`, whose ARM levels are FLUID and
+# NON_FLUID - so the factor NAMES matched the grid exactly and not one of the
+# cells existed. Nothing caught it, because the only comparison was between the
+# headings: the fluid/non-fluid split in Figure 5 is between the two PANELS, and
+# what varies inside a panel is which person is drawn. These panels are MANUAL,
+# so no value was ever filed under a cell that does not exist - had they been
+# AUTO, every reading would have come back `UNDECLARED_FACTOR_LEVEL` after the
+# raster was opened. The grid below says what the panel actually varies.
 VIEW_CAPTIONS["F397_5"] = (
     "Beat-to-beat heart rate and mean arterial pressure for two individual "
     "subjects (Y01, Y07) during no-fluid and fluid-loading head-down tilt")
@@ -102,7 +112,7 @@ for pid, label, box in (("P5_NOFLUID", "NO_FLUID_HDT", [84, 430, 60, 300]),
         box=box, y_ticks=ticks("100:60;50:290"), y_scale="LINEAR",
         x_scale="LINEAR", panel_mode="MANUAL",
         note="n=1 per curve, beat-to-beat: no summary statistic exists to read",
-        series=[dict(series_id=s, factor="ARM", level=s, marker=shape,
+        series=[dict(series_id=s, factor="SUBJECT", level=s, marker=shape,
                      marker_fill="ANY", note="named individual subject")
                 for s, shape in (("Y01", "CIRCLE"), ("Y07", "SQUARE"))],
         positions=[dict(position_id=t.replace(":", "_"), factor="TIMEPOINT",
@@ -112,7 +122,7 @@ for pid, label, box in (("P5_NOFLUID", "NO_FLUID_HDT", [84, 430, 60, 300]),
                    for o, t in enumerate(HDT)])
     UNITS.append(dict(
         unit_id="U_" + pid, panel_id=pid, figure_view="F397_5",
-        grid_id="G_HDT", panel=label,
+        grid_id="G_P5_SUBJECT", panel=label,
         outcome_name="Heart rate", domain="CV_HEMO", unit="bpm",
         statistic="CONTINUOUS", dispersion_type="NO_ERRORBAR", n_outcome=1,
         n_source="figure", bar_top_definition="NOT_A_BAR",
@@ -134,6 +144,13 @@ PLAN = {
         note="ORCID's fictional demonstration record")],
     "documents": [dict(
         document_id="SD397_MAIN", role="MAIN_ARTICLE", source_file="397.pdf",
+        # NOT_HELD, and it is the true answer: this package ships the five
+        # rasters of publication 397 and not the article they were cut out of.
+        # A digest here would be a claim nobody could check against anything in
+        # the repository, and the run stamp says
+        # `Source_Document_Bytes_Bound=NONE` so the state travels with the
+        # result rather than living in this comment.
+        source_file_sha256="NOT_HELD",
         page_range="full target article", observed_figure_count=5,
         inventory_status="VISUALLY_VERIFIED", figure_count_method="HUMAN_VISUAL",
         reviewer_id="RV_INSPECTOR", inspection_date="2026-08-07",
@@ -143,6 +160,10 @@ PLAN = {
                                            "SESSION": [s for s, _ in SESSIONS]}),
         dict(grid_id="G_HDT", factors={"ARM": ["FLUID", "NON_FLUID"],
                                        "TIMEPOINT": list(HDT)}),
+        # Figure 5 only. The arm is the panel here, and the two curves inside a
+        # panel are the two people the caption names.
+        dict(grid_id="G_P5_SUBJECT", factors={"SUBJECT": ["Y01", "Y07"],
+                                              "TIMEPOINT": list(HDT)}),
     ],
     "reader_configs": [dict(config_id="C_BAR", options={
         "group_window": 75, "threshold": 128, "stem_threshold": 200})],

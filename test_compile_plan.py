@@ -659,6 +659,42 @@ check("and the message names both source figures",
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
+# --------------------------------------------------------------------------
+# a plan's category slots come from the figure, not from the marks
+# --------------------------------------------------------------------------
+# v8.8. `make_plan_323._positions` averaged the x of the bars that WERE read and
+# fitted the rest, which is the reading v8.7 removed from `build_id323`: on 323
+# FIG2 DAP, whose DI19 bar is a mean of zero and draws nothing, fitting five bars
+# as slots 0..4 put the sixth at x=2027 - outside the panel, caught only because
+# `POSITION_OUTSIDE_PANEL` happened to exist. It takes the printed category
+# columns now and REFUSES when the panel does not print the number the grid
+# declares, because a plan is the document that exists to remove guesses.
+import make_plan_323 as MP323                                      # noqa: E402
+
+_LEVELS = ["B-1", "DI7", "DI14", "DI19", "R1", "R5"]
+_CENTRES = [1216.0, 1345.0, 1474.0, 1603.0, 1730.0, 1860.0]
+_placed = MP323._positions(_CENTRES, _LEVELS)
+check("every declared slot is the column the figure printed",
+      [p["x_pixel"] for p in _placed] == [int(round(c)) for c in _CENTRES]
+      and [p["level"] for p in _placed] == _LEVELS
+      and [p["slot_index"] for p in _placed] == list(range(len(_LEVELS))),
+      "%s" % [(p["level"], p["x_pixel"]) for p in _placed])
+
+
+def _refuses(centres):
+    try:
+        MP323._positions(centres, _LEVELS)
+    except SystemExit:
+        return True
+    return False
+
+
+check("a panel that prints no category row is refused, not fitted",
+      _refuses(None), "a plan was written from no category row at all")
+check("  and so is one that prints the wrong number of them",
+      _refuses(_CENTRES[:5]) and _refuses(_CENTRES + [1990.0]),
+      "five or seven columns satisfied a six-level grid")
+
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))
 shutil.rmtree(ROOT, ignore_errors=True)

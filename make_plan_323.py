@@ -44,7 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from bar_reader import colour_masks, read_bar_panel                # noqa: E402
+from bar_reader import (colour_masks, read_bar_panel,             # noqa: E402
+                        x_category_columns)
 
 #: `build_id323.py` runs a whole extraction on import, so it is read as DATA:
 #: everything above `figs=[]` is declaration and nothing below it is. The same
@@ -117,50 +118,25 @@ def _series_blocks(series):
             for name, key in sorted(series.items())]
 
 
-def _positions(bars, levels):
-    """One x per TIMEPOINT: the centre of that timepoint's group of bars.
+def _positions(centres, levels):
+    """One x per category, as the FIGURE prints it.
 
-    The reader groups bars into slots itself and the position manifest declares
-    where each slot is, so the declared x has to be the group's centre rather
-    than any one series' bar - two postures 30 px apart around a centre is the
-    same statement as one bar at the centre, and the tolerance is the reader's
-    group window.
-
-    A slot NO bar was read at still has a place on the axis, and it is the axis
-    that says where: the slots are evenly spaced, so the missing one is fitted
-    from the ones that were read. That is a measurement of the axis, not a guess
-    about the data - the cell stays absent and `run_batch` still reports the
-    level as unread, which is what `build_id323` already reports for FIG2's DAP
-    at R5. A slot declared with no `X_Pixel` at all is `UNSUPPORTED_CAPABILITY`,
-    and leaving the position out entirely would make the axis shorter than the
-    grid rather than making one cell missing from it.
+    `x_category_columns` reads the panel's own category row, so a category that
+    drew no bar still gets its place. The first version of this function averaged
+    the x of the bars that WERE read and fitted the rest - which is the reading
+    that produced the v8.6 defect, and it announced itself immediately: fitting
+    323 FIG2 DAP's five bars as if they were slots 0..4 put the sixth at x=2027,
+    outside the panel, and `POSITION_OUTSIDE_PANEL` caught it.
     """
-    seen = [(order, [float(b["x"]) for b in bars if int(b["order"]) == order])
-            for order in range(len(levels))]
-    known = [(o, sum(xs) / len(xs)) for o, xs in seen if xs]
-    if len(known) >= 2:
-        slope, intercept = np.polyfit([float(o) for o, _ in known],
-                                      [x for _, x in known], 1)
-    else:
-        slope = intercept = None
-    out = []
-    for order, level in enumerate(levels):
-        xs = [x for o, x in known if o == order]
-        if xs:
-            out.append(dict(position_id=level, factor="TIMEPOINT", level=level,
-                            x_pixel=int(round(xs[0])), slot_index=order,
-                            display_order=order, timepoint_label=level))
-        elif slope is None:
-            raise SystemExit("no slot of this panel was read, so the axis "
-                             "cannot be fitted and nothing here may invent it")
-        else:
-            out.append(dict(
-                position_id=level, factor="TIMEPOINT", level=level,
-                x_pixel=int(round(slope * order + intercept)),
-                slot_index=order, display_order=order, timepoint_label=level,
-                note="no bar was read at this slot; its x is fitted from the "
-                     "evenly spaced slots that were"))
-    return out
+    if centres is None or len(centres) != len(levels):
+        raise SystemExit(
+            "BLOCKED: this panel does not print %d categories where a reader can "
+            "find them, and nothing here may invent where they are"
+            % len(levels))
+    return [dict(position_id=level, factor="TIMEPOINT", level=level,
+                 x_pixel=int(round(centre)), slot_index=order,
+                 display_order=order, timepoint_label=level)
+            for order, (level, centre) in enumerate(zip(levels, centres))]
 
 
 def build(raster_root=None):
@@ -202,8 +178,8 @@ def build(raster_root=None):
             uid = "U_" + pid
             rows = ticks_of(masks["dark"], box, len(tick_values))
             y_ticks = [[float(v), float(p)] for v, p in zip(tick_values, rows)]
-            bars = read_bar_panel(masks, box, list(zip(tick_values, rows)),
-                                  fig["series"], baseline_value=0.0)
+            levels = fig["factors"]["TIMEPOINT"]
+            centres = x_category_columns(masks["dark"], box, len(levels))
             panels.append(dict(
                 panel_id=pid, label=name, outcome_label="%s (%s)" % (outcome, unit),
                 target_status="TARGET", disposition="AUTO_DIGITIZE",
@@ -215,10 +191,10 @@ def build(raster_root=None):
                     box=list(box), y_ticks=y_ticks, y_scale="LINEAR",
                     x_scale="LINEAR", baseline=0.0,
                     config_id=configs[0]["config_id"], panel_mode="AUTO",
-                    note="tick rows and group centres measured from %s"
-                         % fig["img"],
+                    note="tick rows and printed category columns measured "
+                         "from %s" % fig["img"],
                     series=_series_blocks(fig["series"]),
-                    positions=_positions(bars, fig["factors"]["TIMEPOINT"]))))
+                    positions=_positions(centres, levels))))
             units.append(dict(
                 unit_id=uid, figure_view=_view_id(fid), grid_id=_grid_id(fig),
                 panel=name,

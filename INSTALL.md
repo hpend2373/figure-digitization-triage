@@ -6884,6 +6884,41 @@ now, which is a continuous axis and not a category one.
     the uniformity gate removed                        1
     (the reader itself refusing) build_id323 BLOCKS, so CI is red
 
+## v8.8 — the plan's slots come from the figure too
+
+`build_id323.py` reads the printed category row since v8.7 and
+`make_plan_323.py` did not: it averaged the x of the bars that WERE read and
+fitted the rest, which is the same reading one layer up. It announced itself the
+first time it met 323 FIG2 DAP - fitting five bars as slots 0..4 put the sixth at
+x=2027, outside the panel, and only `POSITION_OUTSIDE_PANEL` stood between that
+and a plan declaring a slot that does not exist. It takes `x_category_columns`
+now and REFUSES when a panel does not print the number of categories its grid
+declares. `test_compile_plan` pins both halves, and reverting to the averaging
+version fails the two refusals.
+
+**What still stops `pilot_323.py`, exactly.** The plan compiles and the run layer
+accepts it, and two manifest problems are hard rejections rather than flags:
+
+    SOURCE_DOCUMENT_NOT_VERIFIED       the inventory is PENDING
+    SOURCE_FIGURE_COVERAGE_INCOMPLETE  4 visible figures, 2 in the manifest
+
+Both are the v7.7 source-completeness rule working as designed, and neither is
+something this package can clear by itself. The first needs a person to attest
+that they opened the article - the same all-four-or-none environment
+`pilot_397.py` already takes. The second needs Figures 3 and 4 inventoried, and
+their PANEL counts are a human visual count: their captions say phase
+synchronization spectra and PSI values, so `NON_TARGET` is very likely the
+disposition, but how many panels each carries is not readable from a figure list
+and a number invented here would be indistinguishable from one somebody counted.
+
+So `pilot_323.py` is one attestation and one panel count away, not one design
+away. Everything below the inventory is built and tested: 12 panels, 12 units,
+`BAR_COLOR`, `SEM` declared from the methods text, and every category slot taken
+from the printed axis.
+
+    reverted                                          scenarios that fail
+    the plan fits its slots from the bars again        2
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section
@@ -6897,8 +6932,8 @@ now, which is a continuous axis and not a category one.
 
 - `make_plan_323.py` writes a plan and nothing runs it yet. There is no
   `pilot_323.py` and no CI wiring. The P0 that blocked them is closed in v8.7, so
-  what remains is the wiring itself plus `make_plan_323.py` taking its slot grid
-  from `x_category_columns` rather than from the bars it read. What the plan
+  what remains is a human attestation and the panel counts of Figures 3 and 4 -
+  see v8.8, which names both. What the plan
   layer accepts 323 - 12 panels, 12 units, `BAR_COLOR`, `SEM` declared from the
   methods text - so the first real figure to reach a review queue is one fix away
   rather than one design away. Its document inventory is `PENDING` on purpose:

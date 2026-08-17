@@ -4571,6 +4571,109 @@ check("a run whose units never said which panel filled them is refused",
               for p in _blank_fin2["problems"]),
       "%s / %s" % (_blank_fin2["status"],
                    sorted({p["check"] for p in _blank_fin2["problems"]})))
+# THE DATA HALF OF THE SAME PROBLEM (v9.5). `validate_batch_manifests` is not
+# given `grid_definitions` at all, so the check above cannot see a level that no
+# grid declares. A historical producer whose grid is CONTROL/TREATED and whose
+# series says `ARM=PLACEBO` writes values whose `Cell_Key` is `ARM=PLACEBO`: the
+# marks agree with the values, the values agree with the manifests, every hash
+# matches, and there is no arithmetic signature anywhere. Today's grid gate says
+# `UNDECLARED_FACTOR_LEVEL`, and until v9.5 the finalizer never asked it.
+_placebo_dir = _historical(
+    "run_undeclared_level", [dict(PANELS[0])], [dict(UNITS[0])])
+_placebo_mdir = os.path.join(_placebo_dir, "manifests")
+_placebo_series = [dict(r, Factor_Level="PLACEBO") if r["Series_ID"] == "S_BLUE"
+                   else dict(r) for r in SERIES]
+with open(os.path.join(_placebo_mdir, "series_manifest.csv"), "w", newline="",
+          encoding="utf-8") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(BM.series_manifest_columns())
+    for _r in _placebo_series:
+        _w.writerow([_r.get(c, "") for c in BM.series_manifest_columns()])
+# The values the old run wrote, under the cell its own manifests named.
+for _name in ("figure_values_raw.csv", "figure_values_machine_qc.csv"):
+    _path = os.path.join(_placebo_dir, _name)
+    _df = pd.read_csv(_path, dtype=object).fillna("")
+    _df["Cell_Key"] = [k.replace("ARM=CONTROL", "ARM=PLACEBO")
+                       for k in _df["Cell_Key"]]
+    _df.to_csv(_path, index=False)
+# ...and the stamp records what that run produced and validated: the manifests
+# it used and the outputs it wrote. Recomputed, so nothing here is refused for
+# being modified - the whole point is a run that verifies and does not comply.
+_placebo_stamp_path = os.path.join(_placebo_dir, "run_stamp.json")
+_placebo_stamp = json.load(open(_placebo_stamp_path, encoding="utf-8"))
+_placebo_stamp["Manifest_SHA256"]["series"] = RB.frame_sha256(
+    RB.load_manifests(_placebo_mdir)["series"])
+for _name in ("figure_values_raw.csv", "figure_values_machine_qc.csv"):
+    _placebo_stamp["Output_SHA256"][_name] = RB.file_sha256(
+        os.path.join(_placebo_dir, _name))
+with open(_placebo_stamp_path, "w", encoding="utf-8") as _fh:
+    json.dump(_placebo_stamp, _fh, indent=1, sort_keys=True)
+_placebo_fin = FIN.finalize(_placebo_dir, review_path=review(
+    [row(Review_Subject_SHA256=pd.read_csv(
+        os.path.join(_placebo_dir, "review_queue.csv"),
+        dtype=object).fillna("").loc[0, "Review_Subject_SHA256"])],
+    path=os.path.join(_placebo_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a hash-consistent run filing values in a cell no grid declares is refused",
+      _placebo_fin["status"] != "FINALIZED"
+      and any(p["check"] == "RUN_GRID_CONTRACT_INVALID"
+              and "UNDECLARED_FACTOR_LEVEL" in p["detail"]
+              for p in _placebo_fin["problems"]),
+      "%s / %s" % (_placebo_fin["status"],
+                   sorted({p["check"] for p in _placebo_fin["problems"]})))
+check("  and the refusal is charged to the panel whose unit failed today's gate",
+      any(p["where"] == "panel:P1" and p["check"] == "RUN_GRID_CONTRACT_INVALID"
+          for p in _placebo_fin["problems"]),
+      "%s" % [(p["where"], p["check"]) for p in _placebo_fin["problems"]])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_placebo_dir,
+                                      "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_placebo_dir)))
+# AND A UNIT WITH NOTHING LEFT TO LOSE IS NOT CHARGED AGAIN. A run whose own gate
+# refused every value of a unit has nothing in `figure_values_machine_qc.csv` for
+# it, so no approval can turn those values into accepted ones - publication 397 is
+# that run today, every panel QC_FAILED for an unresolved SD/SEM. Charging its
+# panels for failing today's gate as well would put refusals in the problem list
+# naming panels nobody can act on, which is how a problem list stops being read.
+_nothing_dir = _historical("run_nothing_at_risk", [dict(PANELS[0])],
+                          [dict(UNITS[0])])
+with open(os.path.join(_nothing_dir, "manifests", "series_manifest.csv"), "w",
+          newline="", encoding="utf-8") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(BM.series_manifest_columns())
+    for _r in _placebo_series:
+        _w.writerow([_r.get(c, "") for c in BM.series_manifest_columns()])
+_nothing_qc = os.path.join(_nothing_dir, "figure_values_machine_qc.csv")
+_nothing_frame = pd.read_csv(_nothing_qc, dtype=object).fillna("")
+_nothing_frame.iloc[0:0].to_csv(_nothing_qc, index=False)
+_nothing_raw = os.path.join(_nothing_dir, "figure_values_raw.csv")
+_nothing_rawframe = pd.read_csv(_nothing_raw, dtype=object).fillna("")
+_nothing_rawframe["Cell_Key"] = [k.replace("ARM=CONTROL", "ARM=PLACEBO")
+                                 for k in _nothing_rawframe["Cell_Key"]]
+_nothing_rawframe.to_csv(_nothing_raw, index=False)
+_nothing_stamp_path = os.path.join(_nothing_dir, "run_stamp.json")
+_nothing_stamp = json.load(open(_nothing_stamp_path, encoding="utf-8"))
+_nothing_stamp["Manifest_SHA256"]["series"] = RB.frame_sha256(
+    RB.load_manifests(os.path.join(_nothing_dir, "manifests"))["series"])
+for _name in ("figure_values_raw.csv", "figure_values_machine_qc.csv"):
+    _nothing_stamp["Output_SHA256"][_name] = RB.file_sha256(
+        os.path.join(_nothing_dir, _name))
+with open(_nothing_stamp_path, "w", encoding="utf-8") as _fh:
+    json.dump(_nothing_stamp, _fh, indent=1, sort_keys=True)
+_nothing_fin = FIN.finalize(_nothing_dir, review_path=review(
+    [row(Review_Subject_SHA256=pd.read_csv(
+        os.path.join(_nothing_dir, "review_queue.csv"),
+        dtype=object).fillna("").loc[0, "Review_Subject_SHA256"])],
+    path=os.path.join(_nothing_dir, "value_review.csv")),
+    run_date="2026-08-06", today=datetime.date(2026, 8, 6))
+check("a unit whose values the run's own gate refused is not charged twice",
+      not any(p["check"] == "RUN_GRID_CONTRACT_INVALID"
+              for p in _nothing_fin["problems"]),
+      "%s / %s" % (_nothing_fin["status"],
+                   [(p["where"], p["check"]) for p in _nothing_fin["problems"]]))
+check("  and it accepts nothing either way",
+      _nothing_fin["accepted"] == 0, "%s" % _nothing_fin)
+
 # AND THE SAME RUN, UNTOUCHED, STILL FINALIZES. Without this the scenario above
 # only proves the finalizer can refuse something.
 _ok_dir = _historical("run_contract_ok", [dict(PANELS[0])], [dict(UNITS[0])])

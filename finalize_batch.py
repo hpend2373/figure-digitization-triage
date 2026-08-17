@@ -463,6 +463,110 @@ def value_contract_failures(run_dir, frames, machine, flag):
     return withheld
 
 
+def grid_contract_failures(frames, machine, flag):
+    """Panels whose UNITS fail the CURRENT grid gate, re-run on the verified run.
+
+    v9.4 re-ran `validate_batch_manifests` over the verified manifests, which is
+    the source/run-manifest half of the contract. The data half lives in
+    `GE.fig_validate_bundle` - the factor sets, the declared levels, the cell
+    product, the dispersion and transformation rules - and that half was still
+    the version in force when the run was made.
+
+    The gap has no arithmetic signature. A historical producer whose grid
+    declares `ARM = CONTROL | TREATED` and whose series declares `ARM=PLACEBO`
+    writes values whose `Cell_Key` is `ARM=PLACEBO`: the marks agree with the
+    values, the values agree with the manifests they were built from, every hash
+    matches, and `validate_batch_manifests` cannot see it because it is not given
+    `grid_definitions` at all. Today's gate says `UNDECLARED_FACTOR_LEVEL`.
+
+    Three choices make this a check rather than a blunt instrument.
+
+    **The gate is re-run on the RAW values**, which is the frame the runner gave
+    it. Running it on `figure_values_machine_qc.csv` would judge cell coverage
+    against a file the run's own gate had already filtered, so every unit that
+    legitimately lost a cell would come back `FACTORIAL_CELL_MISSING` - a refusal
+    manufactured by the re-check rather than found by it.
+
+    **Only units with something left to lose are withheld.** A unit whose rows
+    all failed the historical gate has nothing in `figure_values_machine_qc.csv`,
+    so no approval can turn its values into accepted ones and there is nothing
+    for this to protect. A unit that DID put values through the old gate and
+    fails today's is exactly the case this exists for.
+
+    **`check_files=False`.** The gate would otherwise look for the rasters the
+    manifests name, and an approval must not depend on a corpus directory the
+    approver does not have. The raster each panel was read from is covered by the
+    review subject.
+    """
+    withheld = set()
+    outputs = (frames or {}).get("frames") or {}
+    raw = outputs.get("figure_values_raw.csv")
+    missing = [k for k in ("figures", "grids", "units", "panels")
+               if (frames or {}).get(k) is None]
+    if raw is None or missing:
+        flag("run", "RUN_NOT_FINALIZABLE",
+             "the verified run does not include %s, so its values cannot be "
+             "re-checked against the current grid contract"
+             % ", ".join(missing + ([] if raw is not None
+                                    else ["figure_values_raw.csv"])))
+        return {"*"}
+    values = pd.DataFrame(
+        [{c: r.get(c, "") for c in GE.fig_values_columns()}
+         for r in raw.to_dict("records")],
+        columns=GE.fig_values_columns())
+    # THE FIGURES FRAME THE RUNNER GAVE THE GATE, rebuilt. `run_batch` fills
+    # `WPD_Project_File` on the figure from the projects its panels wrote before
+    # it calls the gate - an automated run has no human-saved project, so it
+    # saves its own - and `figure_manifest.csv` in the manifest directory has the
+    # column blank. Re-running the gate against the manifest copy therefore
+    # reports `MISSING_PROVENANCE: WPD_Project_File` on every digitized unit of
+    # every healthy run: a refusal invented by the re-check. The projects are
+    # named by the run's own verified value rows, so they are read from there.
+    figures = frames["figures"].copy()
+    if "WPD_Project_File" in figures.columns:
+        unit_figure = {_s(u.get("Unit_ID")): _s(u.get("Figure_ID"))
+                       for _, u in frames["units"].iterrows()}
+        by_figure = {}
+        for row in raw.to_dict("records"):
+            project = _s(row.get("WPD_Project_File"))
+            fig_id = unit_figure.get(_s(row.get("Unit_ID")), "")
+            if project and fig_id and project not in by_figure.get(fig_id, []):
+                by_figure.setdefault(fig_id, []).append(project)
+        figures["WPD_Project_File"] = [
+            (";".join(by_figure.get(_s(r.get("Figure_ID")), []))
+             if BM.blank(r.get("WPD_Project_File")) else r.get("WPD_Project_File"))
+            for _, r in figures.iterrows()]
+    qc = GE.fig_validate_bundle(figures, frames["grids"],
+                                frames["units"], values, kernel=RB.K,
+                                check_files=False)
+    if not len(qc):
+        return withheld
+    blamed = RB._units_named_by(qc, values, frames["units"],
+                               figures_df=figures,
+                               grids_df=frames["grids"])
+    if not blamed:
+        return withheld
+    at_risk = {_s(r.get("Unit_ID")) for r in (
+        machine.to_dict("records") if hasattr(machine, "to_dict")
+        else list(machine or ()))}
+    panels_of_unit = {}
+    for _, panel in frames["panels"].iterrows():
+        panels_of_unit.setdefault(_s(panel.get("Unit_ID")), []).append(
+            _s(panel.get("Panel_ID")))
+    for uid in sorted(blamed):
+        if uid not in at_risk:
+            continue
+        for pid in panels_of_unit.get(uid, []) or ["?"]:
+            flag("panel:%s" % pid, "RUN_GRID_CONTRACT_INVALID",
+                 "%s put values through the gate this run was made with and "
+                 "fails the current one: %s. The values and the manifests agree "
+                 "with each other; what they do not satisfy is the contract this "
+                 "package holds now, so the run needs re-running before its "
+                 "values are approved" % (uid, ", ".join(sorted(blamed[uid]))))
+            withheld.add(pid)
+    return withheld
+
+
 def resolution_copy_failures(rows_by_panel, frames, flag):
     """The run's copies of the resolution rows, checked ONCE and against the run.
 
@@ -2643,6 +2747,16 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
     # A run this module did not produce is the case it exists for, and nothing
     # pins a minimum pipeline version: a run made before a check existed arrives
     # looking complete.
+    # AND THE DATA HALF OF THE CURRENT CONTRACT (v9.5). The manifests were
+    # re-validated during verification; the grid gate is where the factor sets,
+    # the declared levels and the cell product live, and it was still the version
+    # the run was made with.
+    for pid in sorted(grid_contract_failures(verified, machine, flag)):
+        if pid == "*":
+            return stop("RUN_NOT_FINALIZABLE",
+                        "this run's values could not be re-checked against the "
+                        "current grid contract")
+        artifact_types.pop(pid, None)
     for pid in sorted(value_contract_failures(run_dir, verified, machine,
                                               flag)):
         if pid == "*":

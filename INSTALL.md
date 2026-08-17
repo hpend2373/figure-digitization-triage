@@ -7316,6 +7316,64 @@ manifests alone: a future check that needs the corpus would have to be split
 rather than added, or every historical run becomes unfinalizable for want of a
 directory.
 
+*(v9.4's sentence was "a run is finalized under today's contract". It was true of
+the source and run-manifest contract and not of the data contract, which v9.5
+finishes.)*
+
+## v9.5 — and the data half of today's contract
+
+**`validate_batch_manifests` is never given `grid_definitions`.** So the
+re-validation v9.4 added cannot see the one thing a grid is for. A historical
+producer whose grid declares `ARM = CONTROL | TREATED` and whose series declares
+`ARM=PLACEBO` writes values whose `Cell_Key` is `ARM=PLACEBO`: the marks agree
+with the values, the values agree with the manifests they were built from, every
+hash in the run stamp matches, and there is no arithmetic signature anywhere in
+it. The current gate says `UNDECLARED_FACTOR_LEVEL` in one line - and the
+finalizer never asked it. Alongside that code sit `FACTOR_SET_INCONSISTENT`,
+`FACTORIAL_CELL_DUPLICATE`, `DUPLICATE_FACTOR_LEVEL`, `BAD_LEVEL_ORDER`,
+`UNRESOLVED_ERRORBAR_DEFINITION`, `BAD_DISPERSION_TYPE`, `N_INVALID` and the rest
+of the data contract, all of them the version in force when the run was made.
+
+`GE.fig_validate_bundle` now runs again over the verified run, and a unit that
+fails it withholds its panel: `RUN_GRID_CONTRACT_INVALID`. Three choices make it
+a check rather than a blunt instrument, and each of them is a scenario.
+
+**The gate is re-run on the RAW values**, which is the frame the runner gave it.
+Re-running it on `figure_values_machine_qc.csv` would judge cell coverage against
+a file the run's own gate had already filtered, so every unit that legitimately
+lost a cell would come back `FACTORIAL_CELL_MISSING` - a refusal manufactured by
+the re-check rather than found by it.
+
+**Only a unit with something left to lose is charged.** A run whose own gate
+refused every value of a unit has nothing in `figure_values_machine_qc.csv` for
+it, so no approval can turn those values into accepted ones. Publication 397 is
+that run today - every panel QC_FAILED for an unresolved SD/SEM - and charging its
+panels for failing today's gate as well would fill the problem list with refusals
+naming panels nobody can act on, which is how a problem list stops being read.
+
+**The figures frame is rebuilt the way the runner built it.** `run_batch` fills
+`WPD_Project_File` on the figure from the projects its own panels wrote - an
+automated run has no human-saved project, so it saves one - and the copy in the
+manifest directory has that column blank. The first version of this check re-ran
+the gate against the manifest copy and reported `MISSING_PROVENANCE` on every
+digitized unit of every healthy run: it refused two of this suite's own fixtures
+before it refused anything real. The projects are named by the run's own verified
+value rows, so they are read from there.
+
+    reverted                                          scenarios that fail
+    the finalizer's grid re-run removed                  2
+    the at-risk restriction removed                      1
+    the figures-frame rebuild removed                    2
+
+**What this does NOT close.** `check_files=False` here too, for the same reason:
+an approval must not depend on a corpus directory the approver does not have. So
+the re-run gate does not check that the rasters and point files the manifests name
+are on disk - the review subject covers the panel's own raster, and
+`Point_Data_Reference` existence is checked at run time and not again. And the
+same dependency v9.4 introduced now covers the gate as well: a future data-contract
+check that needs the corpus would make every historical run unfinalizable for want
+of a directory, so it would have to be split rather than added.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

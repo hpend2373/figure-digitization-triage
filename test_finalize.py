@@ -3132,6 +3132,14 @@ check("a malformed review file gives both of them the same finding",
       "%s / %s" % (_pf_broken, _fin_broken["status"]))
 check("  and the preflight reports it instead of raising",
       PF.main([_R3_DIR, "--review", _broken, "--inference", _r3_cells]) == 2)
+# AND THE REFUSAL NAMES THE BYTES THAT CAUSED IT, or names none. These bytes
+# WERE read and only the parse failed, so the digest is theirs and is recorded.
+_bad_stamp = json.load(open(os.path.join(_R3_DIR, "finalize_stamp.json"),
+                            encoding="utf-8"))
+check("  and the refusal records the hash of what it could not parse",
+      _bad_stamp["Review_File_SHA256"] == RB.file_sha256(_broken)
+      and len(_bad_stamp["Review_File_SHA256"]) == 64,
+      "%s" % _bad_stamp["Review_File_SHA256"][:16])
 _broken_cells = os.path.join(ROOT, "broken_inference.csv")
 with open(_broken_cells, "w", encoding="utf-8") as _fh:
     _fh.write('Inference_ID,Panel_ID\n"unclosed,quote\n')
@@ -3147,6 +3155,55 @@ check("and so does a malformed per-cell answer file",
       and PF.main([_R3_DIR, "--review", _r3_review,
                    "--inference", _broken_cells]) == 2,
       "%s / %s" % (_pf_bc, _fin_bc["status"]))
+# A FILE THAT COULD NOT BE READ AT ALL HAS NO HASH TO RECORD. v8.4. The refusal
+# branch fell back to `file_sha256_or_blank(path)`, which opens the path a SECOND
+# time - so a read that failed produced a stamp saying REVIEW_FILE_UNREADABLE
+# beside a 64-character digest of bytes this run never saw. It is the same
+# hash-then-reopen shape as everything above, on the audit record rather than on
+# the values, and the same answer: name the bytes you read, or name none.
+_real_open = getattr(FIN, "open", None)
+
+
+def _unreadable_once(target):
+    """Make finalize_batch's own `open` fail on one file, in binary, only."""
+    def hooked(path, *a, **kw):
+        mode = a[0] if a else kw.get("mode", "r")
+        if "b" in mode and os.path.realpath(str(path)) == os.path.realpath(target):
+            raise OSError(5, "Input/output error")
+        return open(path, *a, **kw)
+
+    FIN.open = hooked
+
+    def undo():
+        if _real_open is None:
+            del FIN.open
+        else:
+            FIN.open = _real_open
+
+    return undo
+
+
+_undo_io = _unreadable_once(_r3_review)
+try:
+    _io_fail = FIN.finalize(_R3_DIR, review_path=_r3_review,
+                            inference_review_path=_r3_cells,
+                            run_date="2026-08-06",
+                            today=datetime.date(2026, 8, 6))
+finally:
+    _undo_io()
+_io_stamp = json.load(open(os.path.join(_R3_DIR, "finalize_stamp.json"),
+                           encoding="utf-8"))
+check("a review file the run could not read is refused",
+      _io_fail["status"] != "FINALIZED"
+      and "REVIEW_FILE_UNREADABLE" in {FIN._s(p["check"])
+                                       for p in _io_fail["problems"]},
+      "%s / %s" % (_io_fail["status"],
+                   [p["check"] for p in _io_fail["problems"]]))
+check("  and the stamp names no hash for it, though the path hashes fine now",
+      _io_stamp["Review_File_SHA256"] == ""
+      and len(RB.file_sha256(_r3_review)) == 64,
+      "%r against %s"
+      % (_io_stamp["Review_File_SHA256"], RB.file_sha256(_r3_review)[:16]))
 _answers([_answer(i) for i in _ids3])
 _panel3()
 # INCLUDING THE FUNCTION IT SHARES WITH THE FINALIZER. `finalize` removes the
@@ -3347,12 +3404,41 @@ _artifact_after_verification(
     "INFERENCE_MANIFEST", _blank_manifest_ids, _R3_DIR, _r3_review, _r3_cells)
 
 
-# The RAW_MARKS join is not raced here. Its envelope hash is part of what the
-# panel's approval is bound to, so a swapped marks file is `RUN_ARTIFACT_MODIFIED`
-# before the join is reached - a true refusal, and not the question. The join now
-# reads from the snapshot like the rest, and this fixture cannot tell the two
-# readers apart; INSTALL.md says so rather than a scenario passing for the wrong
-# reason.
+# AND THE RAW MARKS, which v8.2 left unraced on the reasoning that a swapped
+# marks file would be `RUN_ARTIFACT_MODIFIED` before the join was reached. It is
+# not: the swap lands AFTER `verify_run_outputs` has hashed the file, so the
+# artifact check is already satisfied and the join is the only reader left that
+# can see the difference. This fixture is the one that can ask the question -
+# `LINE_MONO_STYLE` is in `MARK_JOIN_REQUIRED`, and every value in it cites a
+# mark.
+def _break_mark_hashes(before):
+    env = json.loads(before.decode("utf-8"))
+    for mark in env.get("marks") or []:
+        mark["Mark_Record_SHA256"] = "d" * 64
+    return json.dumps(env, indent=1, sort_keys=True).encode("utf-8")
+
+
+# FIRST, THAT THE MUTATION IS VISIBLE TO THE JOIN AT ALL. A race whose swapped
+# bytes nothing reads is decoration; this runs the join over a snapshot taken
+# OVER the swapped file and requires it to refuse.
+_mk_before = open(_marks_path, "rb").read()
+try:
+    with open(_marks_path, "wb") as _fh:
+        _fh.write(_break_mark_hashes(_mk_before))
+    _held_mk, _seen_mk = _joined(_rows3)
+finally:
+    with open(_marks_path, "wb") as _fh:
+        _fh.write(_mk_before)
+check("marks whose record hashes were rewritten are refused by the join",
+      _held_mk == {"P1"} and "MARK_RECORD_HASH_MISMATCH" in _seen_mk,
+      "%s" % _seen_mk)
+check("  and the panel this run joins really is one that has to join",
+      _q3.loc[0, "Mark_Type"] in PROV.MARK_JOIN_REQUIRED
+      and all(len(_s) == 64 for _s in _qc3["Mark_Record_SHA256"]),
+      "%s" % _q3.loc[0, "Mark_Type"])
+_artifact_after_verification(
+    "raw marks rewritten after verification join to the bytes that were hashed",
+    "RAW_MARKS", _break_mark_hashes, _R3_DIR, _r3_review, _r3_cells)
 _answers([_answer(i) for i in _ids3])
 _panel3()
 # AND THE RUN STAMP ITSELF, which was the last file still hashed one way and

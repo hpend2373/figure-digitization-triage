@@ -6671,10 +6671,52 @@ to a decoy the moment verification finishes. A mutation that computes the
 address afterwards finds the decoy or nothing; the ledger key finds the bytes
 that were hashed.
 
+## v8.4 — the two recorded gaps, and the hash on a refusal
+
+v8.2 shipped with two readers taking the snapshot and no scenario that would
+notice if either stopped. Both are closed here, and neither needed the fix
+weakened to do it — what each needed was a mutation only that reader can see.
+
+**The geometry route.** `_geometry_route_failures` and `geometry_index_of` read
+the same file, and v8.2's race rewrote `Geometry_Row_SHA256`, which the SECOND
+reader refuses on first — so reverting the first alone was silent. The route
+check compares one column the row hash does not cover: rewrite
+`Auto_Identity_Method` after verification and every row still hashes to the name
+it carries, the index still finds each value's row, and nothing in the run can
+see the difference except the check that asks which route the figure took.
+
+**The raw-mark join.** v8.2 recorded this as unaskable — a swapped marks
+envelope reads as `RUN_ARTIFACT_MODIFIED` before the join. That was wrong, and it
+was wrong for a reason worth writing down: the earlier attempt raced a fixture
+whose reader is `BAR_MONO`, which is not in `MARK_JOIN_REQUIRED` and joins
+nothing, and a second attempt was run against a directory a previous scenario had
+left with a corrupted inference manifest, so the refusal it reported came from
+somewhere else. The swap lands AFTER `verify_run_outputs`, so the artifact check
+is already satisfied and the join is the only reader left. The scenario runs on
+the `LINE_MONO_STYLE` fixture, rewrites every `Mark_Record_SHA256` in the
+envelope, and first proves the mutation is visible at all by running the join
+over a snapshot taken OVER the swapped bytes — a race whose swapped bytes nothing
+reads is decoration.
+
+**And a decision file that could not be read is named by no hash.** The refusal
+branch of `read_decisions` fell back to `RB.file_sha256_or_blank(path)`, which
+opens the path a SECOND time — so a read that failed produced a stamp saying
+`REVIEW_FILE_UNREADABLE` beside a 64-character digest of bytes this run never
+saw, and the digest named whatever the retry found. It is the same
+hash-then-reopen shape as the whole v8.0–v8.3 arc, one level down, on the audit
+record rather than on the values. If the bytes were read and only the PARSE
+failed, `digest` is theirs and is still recorded — that half is kept, and pinned
+by its own scenario. If the read failed, this run has no bytes to name and says
+so.
+
+    reverted                                          scenarios that fail
+    the raw-mark join reopens the artifact path        1
+    the geometry route check reopens the artifact path 1
+    the route the figure took stops being compared     1
+    an unreadable decision file is hashed from the path again  1
+
 ## Still open
 
-- two of the artifact readers have no scenario of their own — see v8.2. Both
-  take the snapshot; neither would be noticed if it stopped
 - `--second` is a qualification check and not a finalization contract. To make
   it one the finalizer would have to take the second file and stamp
   `Second_Inference_Review_File_SHA256`, the second reviewer, the compared count

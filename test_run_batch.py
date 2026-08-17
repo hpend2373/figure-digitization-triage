@@ -4013,6 +4013,17 @@ def _rewrite_column(column, value):
 _artifact_race("a geometry file rewritten as it is hashed decides no route",
                "MONO_BAR_GEOMETRY",
                _rewrite_column("Geometry_Row_SHA256", "e" * 64), 1)
+# AND THE ROUTE CHECK SPECIFICALLY. The geometry file has two readers -
+# `_geometry_route_failures`, which compares each value's `Identity_Method`
+# against the figure's own answer, and `geometry_index_of`, which the value
+# contract uses. v8.2's race changed `Geometry_Row_SHA256`, which the second
+# reader notices first, so reverting the FIRST alone was silent. This swap
+# leaves every row hash alone and changes only `Auto_Identity_Method`: nothing
+# but the route check can see it.
+_artifact_race("a geometry route is checked against the bytes that were hashed",
+               "MONO_BAR_GEOMETRY",
+               _rewrite_column("Auto_Identity_Method", "FIGURE_PROTOTYPE_MATCH"),
+               1)
 _artifact_race("nor does a resolution file rewritten as it is hashed",
                "IDENTITY_RESOLUTION",
                _rewrite_column("Resolved_Fill_Pattern", "SOLID"), 1)

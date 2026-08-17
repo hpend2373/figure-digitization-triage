@@ -269,9 +269,16 @@ def read_decisions(path, columns, flag, where, unreadable, incomplete,
         digest = hashlib.sha256(data).hexdigest()
         df = pd.read_csv(io.BytesIO(data), dtype=object).fillna("")
     except Exception as exc:
+        # AND A BLANK IS THE HONEST ANSWER when the read itself failed. The
+        # fallback here used to be `file_sha256_or_blank(path)`, which opens the
+        # path a SECOND time: a file this run could not read, hashed anyway,
+        # recorded a 64-character digest beside a status saying the decisions
+        # could not be parsed - and the digest named whatever the retry found,
+        # which is by construction not the bytes that caused the refusal. If the
+        # bytes were read and only the parse failed, `digest` is theirs and is
+        # recorded; if the read failed, this run has no bytes to name.
         flag(where, unreadable, "%s: %s" % (type(exc).__name__, exc))
-        return (pd.DataFrame(columns=columns),
-                digest or RB.file_sha256_or_blank(path))
+        return pd.DataFrame(columns=columns), digest
     missing = [c for c in columns if c not in df.columns]
     if missing:
         flag(where, incomplete, ", ".join(missing))

@@ -7434,14 +7434,47 @@ the old hash to match it would be reinstating the thing the check is for.
     the queue subject re-derivation removed              3
     the None-is-blank normalization reverted             1
 
-**What this does NOT close.** The re-derived subject uses the manifest hashes and
-the environment RECORDED IN THE STAMP rather than recomputed from the manifests
-themselves - the manifests are verified against those same recorded hashes a few
+**What this does NOT close.** The re-derived subject uses the manifest
+hashes and the environment RECORDED IN THE STAMP rather than recomputed from the
+manifests themselves - the manifests are verified against those same recorded hashes a few
 lines earlier, so the stamp is not being trusted for their content, but a stamp
 whose `Environment` was never true of any machine is still a stamp this check
 takes at its word. And the artifact ledger's own rows are the subject's artifact
 material: their bytes are verified, and what type each artifact IS remains the
 producer's statement.
+
+## v9.7 — the queue does not decide how much a reviewer has to check
+
+**`Review_Mode` chooses the confirmations an approval must carry, and the queue is
+the producer's file.** `OVERLAY` asks for `Marks_Checked`;
+`BAR_MONO_GEOMETRY_RESOLVED` asks for that plus `Axis_Labels_Checked`,
+`Calibration_Checked` and `Identity_Checked`. The review subject does not cover
+the mode - it hashes the artifacts and the values - so downgrading a geometry
+panel's queue row to `OVERLAY` leaves every fingerprint in the run intact, and an
+approval asserting one thing finalizes a panel whose axis and calibration nobody
+confirmed. Publication 127's pilot is exactly a `BAR_MONO_GEOMETRY_RESOLVED`
+review, so this is the mode the first real reviewer will be working in.
+
+The mode is now re-derived from the run - which artifacts the verified ledger
+holds for the panel, whether the verified `identity_resolution.csv` names it,
+whether its run row has a project - by the same four-way choice `run_batch`
+makes: `QUEUE_REVIEW_MODE_CONTRADICTS_RUN`.
+
+**And one queue row per panel.** `review_mode` and the expected-subject map are
+both dict comprehensions over the queue, so two rows for one panel resolve to
+whichever comes last - and the two rows may declare different modes. That is the
+defect `DUPLICATE_REVIEW` already refuses in the decision file, one file upstream:
+`QUEUE_DUPLICATE_PANEL`. Both orderings are scenarios, because the whole point is
+that row order decides nothing.
+
+    reverted                                          scenarios that fail
+    the mode re-derivation removed                       2
+    the queue duplicate check removed                    2
+
+**What this does NOT close.** The derived mode is only as good as the ledger's
+`Artifact_Type` column, which is the producer's statement about what each verified
+file IS - a run that labels its calibration panel `OVERLAY` derives `OVERLAY` and
+agrees with itself. The bytes are hashed; the type is not derivable from them.
 
 ## Still open
 

@@ -4238,6 +4238,83 @@ _gshort = set(_gled[_gled["Panel_ID"] == "P_SHORT"]["Artifact_Type"])
 _gwant = set(RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"])
 check("  and every artifact the runbook sends them to is in the panel's ledger",
       _gwant <= _gshort, "%s missing" % sorted(_gwant - _gshort))
+
+# THE MODE IS NOT THE PRODUCER'S TO CHOOSE (v9.7). It decides which
+# confirmations an approval must carry - four for this panel, one for OVERLAY -
+# and the review subject does not cover it: the subject hashes the artifacts and
+# the values, so downgrading the queue's `Review_Mode` leaves every fingerprint
+# in the run intact. An approval saying only `Marks_Checked` then finalizes a
+# panel whose axis and calibration nobody confirmed.
+_mode_dir = os.path.join(ROOT, "o_short_mode")
+shutil.rmtree(_mode_dir, ignore_errors=True)
+shutil.copytree(_o2, _mode_dir)
+_mode_queue = os.path.join(_mode_dir, "review_queue.csv")
+_mode_frame = pd.read_csv(_mode_queue, dtype=object).fillna("")
+_mode_frame["Review_Mode"] = ["OVERLAY"] * len(_mode_frame)
+_mode_frame.to_csv(_mode_queue, index=False)
+_mode_stamp_path = os.path.join(_mode_dir, "run_stamp.json")
+_mode_stamp = json.load(open(_mode_stamp_path, encoding="utf-8"))
+_mode_stamp["Output_SHA256"]["review_queue.csv"] = RB.file_sha256(_mode_queue)
+with open(_mode_stamp_path, "w", encoding="utf-8") as _fh:
+    json.dump(_mode_stamp, _fh, indent=1, sort_keys=True)
+_mode_review = os.path.join(_mode_dir, "value_review.csv")
+with open(_mode_review, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_fq2[_fq2["Panel_ID"] == "P_SHORT"].iloc[0][
+            "Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mode_fin = FIN.finalize(_mode_dir, review_path=_mode_review, manifest_dir=_s2,
+                         run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("a queue that downgrades its own review mode is refused",
+      _mode_fin["status"] != "FINALIZED"
+      and any(p["check"] == "QUEUE_REVIEW_MODE_CONTRADICTS_RUN"
+              for p in _mode_fin["problems"]),
+      "%s / %s" % (_mode_fin["status"],
+                   sorted({p["check"] for p in _mode_fin["problems"]})))
+check("  and the refusal names both modes and what each one asks",
+      any("BAR_MONO_GEOMETRY_RESOLVED" in p["detail"]
+          and "Calibration_Checked" in p["detail"]
+          for p in _mode_fin["problems"]
+          if p["check"] == "QUEUE_REVIEW_MODE_CONTRADICTS_RUN"),
+      "%s" % [p["detail"][:90] for p in _mode_fin["problems"]])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_mode_dir, "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_mode_dir)))
+# ONE ROW PER PANEL, IN EITHER ORDER. `review_mode` and the expected-subject map
+# are dict comprehensions over the queue, so two rows for one panel resolve to
+# whichever comes last - and the two rows can declare different modes. Both
+# orders are refused, because a scientific result must not depend on row order.
+for _order, _label in ((["BAR_MONO_GEOMETRY_RESOLVED", "OVERLAY"], "downgrade last"),
+                       (["OVERLAY", "BAR_MONO_GEOMETRY_RESOLVED"], "downgrade first")):
+    _dup_dir = os.path.join(ROOT, "o_short_dup_%s" % _order[0][:4].lower())
+    shutil.rmtree(_dup_dir, ignore_errors=True)
+    shutil.copytree(_o2, _dup_dir)
+    _dup_queue = os.path.join(_dup_dir, "review_queue.csv")
+    _dup_src = pd.read_csv(_dup_queue, dtype=object).fillna("")
+    _dup_row = _dup_src[_dup_src["Panel_ID"] == "P_SHORT"].iloc[0].to_dict()
+    _dup_rows = [dict(_dup_row, Review_Mode=m) for m in _order]
+    pd.DataFrame(_dup_rows, columns=list(_dup_src.columns)).to_csv(
+        _dup_queue, index=False)
+    _dup_stamp_path = os.path.join(_dup_dir, "run_stamp.json")
+    _dup_stamp = json.load(open(_dup_stamp_path, encoding="utf-8"))
+    _dup_stamp["Output_SHA256"]["review_queue.csv"] = RB.file_sha256(_dup_queue)
+    with open(_dup_stamp_path, "w", encoding="utf-8") as _fh:
+        json.dump(_dup_stamp, _fh, indent=1, sort_keys=True)
+    _dup_fin = FIN.finalize(
+        _dup_dir, review_path=_write_review(
+            os.path.join(_dup_dir, "value_review.csv"), ["P_SHORT"]),
+        manifest_dir=_s2, run_date="2026-08-06",
+        today=datetime.date(2026, 8, 8))
+    check("a queue asking about one panel twice is refused (%s)" % _label,
+          _dup_fin["status"] != "FINALIZED"
+          and any(p["check"] == "QUEUE_DUPLICATE_PANEL"
+                  for p in _dup_fin["problems"]),
+          "%s / %s" % (_dup_fin["status"],
+                       sorted({p["check"] for p in _dup_fin["problems"]})))
 # AND THE TEMPLATE ASKS FOR THE IDENTITY. `Identity_Checked` is the one claim in
 # the pipeline with no measurement behind it, and an unanswered template has to
 # name it as missing - otherwise the reviewer who skips it is the reviewer the

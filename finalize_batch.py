@@ -714,6 +714,79 @@ def queue_subject_failures(frames, machine, queue, run_stamp, flag):
     return withheld
 
 
+def queue_mode_failures(frames, queue, flag):
+    """Panels whose queued `Review_Mode` is not the mode this run can support.
+
+    The mode decides WHAT A REVIEWER MUST SAY THEY CHECKED - `Marks_Checked`
+    alone for `OVERLAY`, and `Axis_Labels_Checked` and `Calibration_Checked` as
+    well for the geometry modes, plus `Identity_Checked` where a person named a
+    series the reader could not. So the queue's own `Review_Mode` column decided
+    how much the approval had to assert, and the column is written by the
+    producer. Downgrade a `BAR_MONO_GEOMETRY_RESOLVED` panel to `OVERLAY` and the
+    approval needs one confirmation instead of four - while the values, the
+    artifacts and the review subject are all untouched, because the subject hashes
+    the artifacts and the values and not the queue's opinion of them.
+
+    Re-derived here from the run: which artifacts the verified ledger holds for
+    the panel, whether the verified `identity_resolution.csv` names it, and
+    whether its run row has a project. The same four-way choice `run_batch` makes.
+
+    AND ONE ROW PER PANEL. `review_mode` and `expected` are both built by dict
+    comprehension over the queue, so two rows for one panel resolve to whichever
+    comes last: the same defect the review file refuses as `DUPLICATE_REVIEW`,
+    one file upstream. A scientific result must not depend on CSV row order.
+    """
+    withheld = set()
+    outputs = (frames or {}).get("frames") or {}
+    run_rows = outputs.get("run_manifest.csv")
+    ledger = outputs.get("panel_artifacts.csv")
+    if run_rows is None or ledger is None or queue is None:
+        return withheld                 # queue_subject_failures said so already
+    seen = {}
+    for i, (_, q) in enumerate(queue.iterrows(), 2):
+        pid = _s(q.get("Panel_ID"))
+        if pid in seen:
+            flag("panel:%s" % pid, "QUEUE_DUPLICATE_PANEL",
+                 "the queue asks about %s twice (rows %d and %d). The two rows "
+                 "can declare different review modes, and which one decides what "
+                 "the approval must assert would be a property of row order"
+                 % (pid, seen[pid], i))
+            withheld.add(pid)
+        seen.setdefault(pid, i)
+    types_by_panel = {}
+    for _, art in ledger.iterrows():
+        types_by_panel.setdefault(_s(art.get("Panel_ID")), set()).add(
+            _s(art.get("Artifact_Type")))
+    resolved = set()
+    resolutions = (frames or {}).get("resolutions")
+    if resolutions is not None:
+        resolved = {_s(r.get("Panel_ID")) for _, r in resolutions.iterrows()
+                    if _s(r.get("Panel_ID"))}
+    projects = {_s(r.get("Panel_ID")): _s(r.get("WPD_Project_File"))
+                for _, r in run_rows.iterrows()}
+    for _, q in queue.iterrows():
+        pid = _s(q.get("Panel_ID"))
+        declared = _s(q.get("Review_Mode"))
+        types = types_by_panel.get(pid, set())
+        geometry = bool(types & set(RB.GEOMETRY_ARTIFACT_TYPES))
+        expected = ("BAR_MONO_GEOMETRY_RESOLVED"
+                    if geometry and pid in resolved
+                    else "BAR_MONO_GEOMETRY" if geometry
+                    else "OVERLAY" if "OVERLAY" in types
+                    else "WPD_ONLY" if projects.get(pid) else "")
+        if declared != expected:
+            flag("panel:%s" % pid, "QUEUE_REVIEW_MODE_CONTRADICTS_RUN",
+                 "the queue says %s is reviewed as %s and this run supports %s. "
+                 "The mode decides which confirmations the approval must carry "
+                 "(%s against %s), so a mode the producer wrote is a producer "
+                 "deciding how much a reviewer has to check"
+                 % (pid, declared or "(blank)", expected or "(nothing)",
+                    "/".join(RB.REVIEW_CONFIRMATIONS.get(declared, ())) or "none",
+                    "/".join(RB.REVIEW_CONFIRMATIONS.get(expected, ())) or "none"))
+            withheld.add(pid)
+    return withheld
+
+
 def resolution_copy_failures(rows_by_panel, frames, flag):
     """The run's copies of the resolution rows, checked ONCE and against the run.
 
@@ -2916,6 +2989,11 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
         if pid == "*":
             return stop("RUN_NOT_FINALIZABLE",
                         "this run's review subjects could not be re-derived")
+        artifact_types.pop(pid, None)
+    # AND HOW MUCH THAT APPROVAL HAS TO ASSERT (v9.7). The queue's `Review_Mode`
+    # chooses the confirmation columns the finalizer demands, and the queue is the
+    # producer's file: re-derived from the run's artifacts and resolutions here.
+    for pid in sorted(queue_mode_failures(verified, queue, flag)):
         artifact_types.pop(pid, None)
     for pid in sorted(value_contract_failures(run_dir, verified, machine,
                                               flag)):

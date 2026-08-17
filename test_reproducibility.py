@@ -412,6 +412,29 @@ passed("no scenario is written so that it cannot fail (%d files)"
       % len(glob.glob(os.path.join(HERE, "test_*.py"))))
 
 # --------------------------------------------------------------------------
+# the worked example's cells are the cells the figure prints
+# --------------------------------------------------------------------------
+# v8.7. `id323_figure_values.csv` shipped `323|FIG2|DAP` as B-1, DI7, DI14, DI19,
+# R1 with R5 absent. The figure prints six categories and DI19's mean is zero, so
+# it draws an error bar and NO BAR - and `read_bar_panel`, given no declared
+# slots, numbered what it found by sequence and filed the last two bars one
+# timepoint early. `build_id323.py` now reads the printed categories and passes
+# them, which moves exactly those two cells and nothing else.
+#
+# Pinned on the SHIPPED FILE, because that is what the defect was: reverting the
+# wiring leaves every suite green - `build_id323.py` exits 0 either way - and the
+# only durable evidence is which cells the artifact carries.
+_v323 = list(csv.DictReader(open(os.path.join(HERE, "id323_figure_values.csv"),
+                                 encoding="utf-8")))
+_dap = [r["Cell_Key"] for r in _v323 if r["Unit_ID"] == "323|FIG2|DAP"]
+assert _dap, "the worked example no longer carries 323|FIG2|DAP"
+assert _dap == ["TIMEPOINT=B-1", "TIMEPOINT=DI7", "TIMEPOINT=DI14",
+                "TIMEPOINT=R1", "TIMEPOINT=R5"], (
+    "323|FIG2|DAP's hole belongs at DI19, whose bar is a mean of zero; got %s"
+    % _dap)
+passed("the worked example's zero-mean category is the one left absent")
+
+# --------------------------------------------------------------------------
 # one place says what the package runs today
 # --------------------------------------------------------------------------
 # `verify_documented_status.py` makes README's total agree with the measurement.

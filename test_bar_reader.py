@@ -20,7 +20,8 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from bar_reader import colour_masks, read_bar_panel, runs  # noqa: E402
+from bar_reader import (colour_masks, read_bar_panel, runs,       # noqa: E402
+                        x_category_columns, axis_column)
 from mark_readers import AxisCalibration                     # noqa: E402
 
 FAILURES = []
@@ -518,6 +519,124 @@ for _key in ("BLUE", "GREEN", "foo", "Dark "):
 check("but case-folding turns the ones that name a real mask into it",
       all(_k.strip().casefold() in BR.BUILTIN_MASK_KEYS
           for _k in ("BLUE", "Dark ", "Red")))
+
+# --------------------------------------------------------------------------
+# a category whose bar is not there
+# --------------------------------------------------------------------------
+# v8.7, and it is the case no fixture in this package had. `read_bar_panel`
+# numbers its bars by nearest DECLARED slot when given `x_positions` and by
+# SEQUENCE otherwise, and sequence is right only while every category drew a bar.
+# A mean of zero draws NOTHING - the row shortens instead of leaving a hole, and
+# every bar after the gap inherits the label before it. That filed two cells of
+# `323|FIG2|DAP` one timepoint early for six releases, in the shipped worked
+# example, invisible because every fixture here had all its bars.
+_GAP_IMG = os.path.join(HERE, "fixtures", "zero_mean_category.png")
+_GX0, _GX1, _GY0, _GY1 = 90, 700, 60, 420
+_GLABELS = ("T1", "T2", "T3", "T4", "T5")
+#: The third category's mean IS zero, so it prints a label and no bar.
+_GTRUE = (40.0, 25.0, 0.0, 30.0, 55.0)
+_GTICKS_V = (0, 20, 40, 60)
+
+
+def _gy(value):
+    return _GY1 + (_GY0 - _GY1) * (value / 60.0)
+
+
+_gi = Image.new("RGB", (760, 480), "white")
+_gd = ImageDraw.Draw(_gi)
+_gticks = [(v, int(round(_gy(v)))) for v in _GTICKS_V]
+for _v, _y in _gticks:
+    _gd.line([_GX0 - 14, _y, _GX0 - 4, _y], fill=(0, 0, 0), width=3)
+_gd.line([_GX0, _GY0 - 10, _GX0, _GY1 + 10], fill=(0, 0, 0), width=4)
+_gd.line([_GX0, _GY1, _GX1, _GY1], fill=(0, 0, 0), width=4)
+_GSLOTS = [_GX0 + 70 + 110 * i for i in range(len(_GLABELS))]
+for _i, _val in enumerate(_GTRUE):
+    # THE LABEL IS DRAWN AT EVERY CATEGORY, which is the whole point: the figure
+    # says where its categories are even where it drew no bar.
+    _gd.rectangle([_GSLOTS[_i] - 16, _GY0 + 6, _GSLOTS[_i] + 16, _GY0 + 30],
+                  fill=(0, 0, 0))
+    if _val <= 0:
+        continue
+    _gd.rectangle([_GSLOTS[_i] - 24, int(round(_gy(_val))), _GSLOTS[_i] + 24,
+                   _GY1], fill=(220, 30, 30), outline=(0, 0, 0), width=3)
+_gi.save(_GAP_IMG)
+_gmasks = colour_masks(_gi)
+_GBOX = (_GX0, _GX1, _GY0, _GY1)
+
+check("a category whose mean is zero draws no bar at all",
+      len(read_bar_panel(_gmasks, _GBOX, series={"S": "red"},
+                         y_calibration=AxisCalibration.from_points(_gticks),
+                         baseline_value=0.0, stem_required=False))
+      == len(_GTRUE) - 1,
+      "%d bars for %d categories" % (
+          len(read_bar_panel(_gmasks, _GBOX, series={"S": "red"},
+                             y_calibration=AxisCalibration.from_points(_gticks),
+                             baseline_value=0.0, stem_required=False)),
+          len(_GTRUE)))
+
+_gcats = x_category_columns(_gmasks["dark"], _GBOX, len(_GLABELS))
+check("and the panel still says where all five categories are",
+      _gcats is not None and len(_gcats) == len(_GLABELS)
+      and all(abs(got - want) <= 3 for got, want in zip(_gcats, _GSLOTS)),
+      "%s against %s" % (_gcats, _GSLOTS))
+# NOT THE BARS. Four bars are evenly spaced too - the gap is in the middle, so
+# the run of bars either side of it is not - and a band that read them would
+# return four. Asserted, because a reader that happened to return the bar row
+# would pass every check above.
+check("  and it is the printed categories it read, not the bars it could see",
+      len(_gcats) == 5 and abs((_gcats[3] - _gcats[2])
+                               - (_gcats[1] - _gcats[0])) <= 2,
+      "%s" % _gcats)
+check("a panel that prints no row of categories at all is refused, not guessed",
+      x_category_columns(_gmasks["dark"], _GBOX, 7) is None
+      and x_category_columns(colour_masks(
+          Image.new("RGB", (200, 200), "white"))["dark"],
+          (10, 190, 10, 190), 5) is None)
+# AND AN UNEVEN ROW IS REFUSED TOO, which is what the uniformity gate is for. A
+# panel whose marks are at arbitrary x is not a category axis - it is a
+# continuous one - and returning its five clusters as "the categories" would be
+# this function answering a question it was not asked. Without the gate the
+# best-scoring band still wins, so nothing above notices its absence: this is the
+# only scenario that does.
+_UNEVEN = os.path.join(HERE, "fixtures", "uneven_x_bars.png")
+_ui = Image.new("RGB", (760, 480), "white")
+_ud = ImageDraw.Draw(_ui)
+for _v, _y in _gticks:
+    _ud.line([_GX0 - 14, _y, _GX0 - 4, _y], fill=(0, 0, 0), width=3)
+_ud.line([_GX0, _GY0 - 10, _GX0, _GY1 + 10], fill=(0, 0, 0), width=4)
+_ud.line([_GX0, _GY1, _GX1, _GY1], fill=(0, 0, 0), width=4)
+for _x in (160, 240, 430, 490, 640):
+    _ud.rectangle([_x - 20, int(round(_gy(35.0))), _x + 20, _GY1],
+                  fill=(220, 30, 30), outline=(0, 0, 0), width=3)
+_ui.save(_UNEVEN)
+_umasks = colour_masks(_ui)
+check("  and a row of five marks at arbitrary x is not a category axis",
+      x_category_columns(_umasks["dark"], _GBOX, 5) is None,
+      "%s" % (x_category_columns(_umasks["dark"], _GBOX, 5),))
+
+_gplaced = read_bar_panel(
+    _gmasks, _GBOX, series={"S": "red"},
+    y_calibration=AxisCalibration.from_points(_gticks),
+    baseline_value=0.0, stem_required=False,
+    x_positions={i: x for i, x in enumerate(_gcats)})
+_gorders = {int(b["order"]): round(float(b["mean"]), 1) for b in _gplaced}
+check("with the printed slots declared, the missing category leaves a HOLE",
+      sorted(_gorders) == [0, 1, 3, 4],
+      "orders %s" % sorted(_gorders))
+check("  so no bar after the gap carries the slot before it",
+      all(abs(_gorders[o] - _GTRUE[o]) <= 2.5 for o in _gorders),
+      "%s against %s" % (_gorders, dict(enumerate(_GTRUE))))
+# AND THE SAME PANEL READ BY SEQUENCE GETS IT WRONG, which is what makes the two
+# checks above a regression rather than a description.
+_gshifted = {int(b["order"]): round(float(b["mean"]), 1) for b in read_bar_panel(
+    _gmasks, _GBOX, series={"S": "red"},
+    y_calibration=AxisCalibration.from_points(_gticks),
+    baseline_value=0.0, stem_required=False)}
+check("  and sequence numbering on the same panel files two bars one slot early",
+      sorted(_gshifted) == [0, 1, 2, 3]
+      and abs(_gshifted[2] - _GTRUE[3]) <= 2.5
+      and abs(_gshifted[3] - _GTRUE[4]) <= 2.5,
+      "%s" % _gshifted)
 
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is

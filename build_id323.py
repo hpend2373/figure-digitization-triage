@@ -1,6 +1,6 @@
 import numpy as np, hashlib, pandas as pd, importlib.util as u
 from PIL import Image
-from bar_reader import colour_masks, read_bar_panel, runs
+from bar_reader import colour_masks, read_bar_panel, runs, x_category_columns
 import crosscheck_id323 as X
 import grid_engine as G
 from make_wpd_project import write_project
@@ -57,7 +57,19 @@ for F in FIGS:
     exp=int(np.prod([len(v) for v in F["factors"].values()]))
     for name,box,tv,outcome,unit in F["panels"]:
         tk=list(zip(tv,ticks_of(dark,box,len(tv))))
-        bars=read_bar_panel(masks, box, tk, F["series"], baseline_value=0.0)
+        # THE SLOTS THE FIGURE PRINTS, not the order the bars came back in. A
+        # category whose mean is zero draws no bar, so sequence numbering
+        # shortened the row and filed every later bar one timepoint early - two
+        # cells of FIG2 DAP, where DI19 is an error bar around zero. None here is
+        # a refusal, never a fallback: the grid fitted from the bars that WERE
+        # found is the reading that produced the defect.
+        cats=x_category_columns(dark, box, len(F["factors"]["TIMEPOINT"]))
+        if cats is None:
+            raise SystemExit("BLOCKED: %s %s does not say where its categories "
+                             "are, so no bar can be filed against one"
+                             % (F["fid"], name))
+        bars=read_bar_panel(masks, box, tk, F["series"], baseline_value=0.0,
+                            x_positions={i: x for i, x in enumerate(cats)})
         # R2 is a genuinely independent re-reading: a column scan with a median
         # statistic, not a second call into the same function. Storing it here
         # makes the dual extraction part of the record instead of a side check.

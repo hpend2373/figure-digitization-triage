@@ -34,6 +34,77 @@ def runs(idx, gap=1):
     return out
 
 
+def axis_column(dark, panel_box, coverage=0.6):
+    """The pixel column of the panel's y axis, or None.
+
+    The leftmost column whose ink spans most of the panel's height. Used to keep
+    the category scan below off the axis and its printed label, which are ink at
+    every row and would otherwise read as a seventh category.
+    """
+    x0, x1, y0, y1 = (int(v) for v in panel_box)
+    sub = dark[y0:y1, x0:x1]
+    if not sub.size:
+        return None
+    hits = [x0 + i for i, v in enumerate(sub.sum(axis=0))
+            if v > coverage * sub.shape[0]]
+    return min(hits) if hits else None
+
+
+def x_category_columns(dark, panel_box, count, band=34, step=4, gap=8,
+                       uniformity=0.05):
+    """The x pixel of each printed category on a categorical panel, or None.
+
+    WHY THIS EXISTS. `read_bar_panel` numbers its bars by nearest DECLARED slot
+    when it is given `x_positions` and by SEQUENCE over the runs it found when it
+    is not. Sequence is right only while every category has a visible bar. A bar
+    whose mean is zero draws nothing at all, so the row SHORTENS instead of
+    leaving a hole and every bar after the gap inherits the label before it -
+    which is what happened to `323|FIG2|DAP`, where `DI19` is a printed error bar
+    around a mean of zero and two cells were filed one timepoint early.
+
+    The figure itself has the answer, printed at every category whether or not
+    that category drew a bar. This slides a band down the panel and keeps the one
+    that yields EXACTLY `count` clusters of ink at nearly even spacing: on a panel
+    with a gap the bars cannot produce that and the printed labels can, so the
+    labels win without this having to know which it read.
+
+    NONE RATHER THAN A GUESS. No band that qualifies means the panel does not
+    say where its categories are, and the caller must refuse - a grid fitted from
+    the bars that WERE found is exactly the reading that produced the defect.
+    `uniformity` is the coefficient of variation of the gaps; the twelve panels of
+    publication 323 come in under 0.013, and a row of clusters that is not evenly
+    spaced is not a category axis.
+    """
+    x0, x1, y0, y1 = (int(v) for v in panel_box)
+    axis = axis_column(dark, panel_box)
+    left = (axis + 6) if axis is not None else x0
+    best = None
+    for top in range(y0, max(y0 + 1, y1 - band), step):
+        strip = dark[top:top + band, x0:x1]
+        if not strip.size:
+            continue
+        cols = [x0 + i for i, v in enumerate(strip.sum(axis=0))
+                if v and x0 + i > left]
+        groups = [g for g in runs(cols, gap) if len(g) > 2]
+        if len(groups) != count:
+            continue
+        centres = [(g[0] + g[-1]) / 2.0 for g in groups]
+        gaps = [b - a for a, b in zip(centres, centres[1:])]
+        if not gaps or min(gaps) <= 0:
+            continue
+        mean = sum(gaps) / len(gaps)
+        spread = (sum((g - mean) ** 2 for g in gaps) / len(gaps)) ** 0.5
+        score = spread / mean
+        if score > uniformity:
+            continue
+        span = centres[-1] - centres[0]
+        # The most even row wins, and the widest of equally even rows: a band
+        # that clipped the outermost category is even and short.
+        if best is None or (score, -span) < (best[0], -best[1]):
+            best = (score, span, top, centres)
+    return None if best is None else best[3]
+
+
 #: The three masks this reader was born with, and the only values `Mask_Key`
 #: may take. Lower case, because that is the key `colour_masks` returns - a
 #: manifest saying `Mask_Key=BLUE` used to validate and then raise `KeyError`

@@ -6833,43 +6833,58 @@ the closest - 8 QC problems, 6 of them that one declaration. Steps 4 and 5 stay
 unexercised on a real publication until 127's raster is on disk or a plan exists
 for a publication whose caption states its dispersion, which 323's does.
 
+## v8.7 — the figure says where its categories are
+
+The P0 recorded last release, fixed the way that release decided: by reading the
+printed x axis.
+
+**What was wrong.** `id323_figure_values.csv` shipped `323|FIG2|DAP` as `B-1,
+DI7, DI14, DI19, R1` with `R5` absent. Looking at the figure settles it in a
+second: six categories are printed, and `DI19`'s mean is ZERO - it draws an error
+bar around the axis and no bar at all. `read_bar_panel` numbers its bars by
+nearest DECLARED slot when it is given `x_positions` and by SEQUENCE over the runs
+it found when it is not. `build_id323.py` passed none, so the row did not get a
+hole, it got SHORTER, and the two bars after the gap inherited the labels before
+them. `INSTALL.md`'s open list has named `DI19` since v7.2: the prose was right
+for six releases and the shipped artifact was wrong.
+
+**`bar_reader.x_category_columns`** slides a band down the panel and keeps the one
+that yields EXACTLY the declared number of ink clusters at nearly even spacing.
+That is deliberately not "find the labels": on a panel with a gap the bars CANNOT
+produce an even row of six and the printed labels can, so the labels win without
+the function having to know which it read. `axis_column` keeps the scan off the y
+axis and its rotated label, which are ink at every row and read as one more
+category otherwise. All twelve panels of publication 323 come in under a
+coefficient of variation of 0.013.
+
+**None rather than a guess.** No qualifying band means the panel does not say
+where its categories are, and `build_id323.py` exits BLOCKED instead of falling
+back - a grid fitted from the bars that WERE found is the reading that produced
+the defect. That is also why the last release did not just borrow a sibling
+panel's grid: `P2_PAP` and `P2_SV` share a panel box and their grids differ by
+30 px, so "two panels in one box share an axis" is false on this very figure.
+
+**Three cells move and nothing else does.** Regenerated, the worked example
+differs from the shipped one in exactly `DI19` (now absent), `R1` (now 0.788 ±
+2.719) and `R5` (now 2.974 ± 2.112). Every other value of the twelve units is
+byte-identical, which is the tightest confirmation available that the fix is the
+one the finding described.
+
+**Two of the first three scenarios were decoration, and the harness said so.**
+Reverting the `build_id323` wiring left every suite green, because that script
+exits 0 whichever labels it writes - so the pin is on the SHIPPED FILE's cell
+keys, in `test_reproducibility`, where this package keeps its properties of the
+tree. And removing the uniformity gate changed nothing either: the best-scoring
+band still wins, so the gate only decides whether an UNEVEN row is returned or
+refused, and nothing exercised that. It has a panel of five bars at arbitrary x
+now, which is a continuous axis and not a category one.
+
+    reverted                                          scenarios that fail
+    build_id323 stops passing the printed slots        1
+    the uniformity gate removed                        1
+    (the reader itself refusing) build_id323 BLOCKS, so CI is red
+
 ## Still open
-
-- **P0, and it is a wrong number rather than a missing one.**
-  `id323_figure_values.csv` labels two cells of `323|FIG2|DAP` one timepoint
-  early. It ships `B-1, DI7, DI14, DI19, R1` and reports `R5` absent; the raster
-  puts its five bars at x 1218, 1346, 1474, 1732, 1860 against the six-slot grid
-  1217, 1345, 1474, 1603, 1732, 1859 that `P2_PAP` pins from the identical panel
-  box - so the hole is at 1603, which is `DI19`, and the two values after it
-  belong to `R1` and `R5`. The open list below has said `DI19` since v7.2: the
-  prose was right and the shipped CSV is wrong.
-
-  `bar_reader.read_bar_panel` numbers its bars two ways - by nearest DECLARED
-  slot when given `x_positions`, and otherwise by SEQUENCE over the runs it found.
-  `build_id323.py` passes none, so a bar the reader cannot see does not leave a
-  hole, it shortens the row, and `SESS[b["order"]]` then writes the label of the
-  bar before it. This is the defect class the position manifest,
-  `Position_Assignment` and `Slot_Assignment_Residual_Px` exist for, in this
-  package's own worked example - invisible to every scenario here because no
-  fixture has a panel with a bar missing, and with all six present sequence and
-  position agree.
-
-  Found while building `make_plan_323.py`; verified by passing the declared grid
-  into the same call and changing nothing else, which moves both values and turns
-  the report into `TIMEPOINT=DI19 is declared but never read`.
-
-  **The fix reads the printed x-axis labels** - decided rather than assumed,
-  because where the grid comes FROM is the whole question. The axis says where its
-  own categories are and needs no inference about the data and no assumption about
-  other panels; `ticks_of` already does this for y by scanning beside the axis
-  line, and the x equivalent scans below it. Fitting the gapped panel's own bars
-  fails exactly here - a line through 0,1,2,4,5 read as 0..4 extrapolates the last
-  slot outside the panel box, which is how `POSITION_OUTSIDE_PANEL` surfaced this.
-  Borrowing a sibling panel's grid is what verified the finding and is correct on
-  this figure, but it assumes two panels in one box share an x axis. Remaining:
-  that reader, `build_id323` passing the slots, regenerating
-  `id323_figure_values.csv`, `id323_fig1_figure_values.csv` and the WPD projects,
-  and a scenario whose panel HAS a hole.
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section
   of 10.3389/fphys.2020.00455 reads "The values are given as mean and SEM, besides
@@ -6881,9 +6896,9 @@ for a publication whose caption states its dispersion, which 323's does.
   narrowed by this one rather than rewritten, because it is a record.
 
 - `make_plan_323.py` writes a plan and nothing runs it yet. There is no
-  `pilot_323.py` and no CI wiring, and there should not be until the P0 above is
-  closed: a worked example that reaches a review queue with two cells on the wrong
-  timepoint is worse than none. What the plan does establish is that the run
+  `pilot_323.py` and no CI wiring. The P0 that blocked them is closed in v8.7, so
+  what remains is the wiring itself plus `make_plan_323.py` taking its slot grid
+  from `x_category_columns` rather than from the bars it read. What the plan
   layer accepts 323 - 12 panels, 12 units, `BAR_COLOR`, `SEM` declared from the
   methods text - so the first real figure to reach a review queue is one fix away
   rather than one design away. Its document inventory is `PENDING` on purpose:

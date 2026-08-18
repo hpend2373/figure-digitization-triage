@@ -990,6 +990,147 @@ print()
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
+# --------------------------------------------------------------------------
+# the gridline guard has a margin, and the margin is not scale-invariant
+# --------------------------------------------------------------------------
+# v9.14. `_horizontal_rules` calls a row a rule when its ink spans
+# `_RULE_COVERAGE` of the panel WIDTH, and the ink it is shown is clipped to the
+# DATA SPAN - the declared positions plus one `x_window` of margin either side.
+# So a gridline running the full printed panel can only present `span / width` of
+# it, and `x_window` is a pixel constant while the width is not: a finer render of
+# the same figure widens that margin in PROPORTION and pushes the ceiling down.
+#
+# Under the threshold the gridlines stop being rules. They are perfect solid
+# lines, so each becomes a SOLID candidate at every x, no x has exactly one, and
+# the reader emits NOTHING for the panel - the v7.55 defect returning through the
+# guard's own margin rather than through its absence.
+#
+# THIS IS PINNED, NOT FIXED. Four repairs were tried and each was worse; the
+# fourth put a 10.96 mmHg wrong number where there had been silence. See
+# INSTALL.md v9.14. What these scenarios hold is the arithmetic and the reason.
+
+
+def _scaled_panel(s):
+    """One line panel drawn NATIVELY at scale s - stroke, dashes and rules all
+    scaled. A resample would not do: interpolating a dashed curve destroys the
+    dash gaps the discriminant reads, so it cannot say anything about the reader.
+    """
+    W, H = int(600 * s), int(320 * s)
+    ax0, ax1 = int(60 * s), int(560 * s)
+    ytop, ybot = int(30 * s), int(290 * s)
+    top_v, bot_v = 120.0, 70.0
+    im = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(im)
+
+    def yof(v):
+        return ytop + (ybot - ytop) * (top_v - v) / (top_v - bot_v)
+
+    stroke = max(1, int(round(3 * s)))
+    for v in range(70, 121, 10):
+        d.line([ax0, yof(v), ax1, yof(v)], fill=(0, 0, 0),
+               width=max(1, int(round(s))))
+    d.line([ax0, ytop, ax0, ybot], fill=(0, 0, 0), width=stroke)
+    d.line([ax0, ybot, ax1, ybot], fill=(0, 0, 0), width=stroke)
+    labels = tuple("T%d" % i for i in range(1, 9))
+    solid = (92.0, 99.0, 104.0, 107.0, 105.0, 98.0, 98.5, 100.0)
+    dashed = (86.0, 88.0, 90.0, 92.0, 94.0, 95.0, 94.0, 95.0)
+    xs = [ax0 + (ax1 - ax0) * (i + 0.5) / len(labels) for i in range(len(labels))]
+    d.line([(xs[i], yof(solid[i])) for i in range(len(labels))],
+           fill=(0, 0, 0), width=stroke, joint="curve")
+    dash, gap = max(2, int(round(9 * s))), max(2, int(round(6 * s)))
+    pts = [(xs[i], yof(dashed[i])) for i in range(len(labels))]
+    for a, b in zip(pts, pts[1:]):
+        length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        t = 0.0
+        while t < length:
+            e = min(length, t + dash)
+            d.line([(a[0] + (b[0] - a[0]) * t / length,
+                     a[1] + (b[1] - a[1]) * t / length),
+                    (a[0] + (b[0] - a[0]) * e / length,
+                     a[1] + (b[1] - a[1]) * e / length)],
+                   fill=(0, 0, 0), width=stroke)
+            t = e + gap
+    box = (ax0 + stroke, ax1, ytop, ybot - stroke)
+    cal = MR.AxisCalibration.from_points([(top_v, yof(top_v)), (bot_v, yof(bot_v))])
+    return im, box, cal, dict(zip(labels, xs))
+
+
+_LSERIES = [MR.SeriesSpec("SOLID_S", line_style="SOLID"),
+            MR.SeriesSpec("DASHED_S", line_style="DASHED")]
+
+
+def _read_scaled(s):
+    im, box, cal, xs = _scaled_panel(s)
+    LSM.reset_panel_notes()
+    rows = LSM.read_monochrome_line_panel(
+        im, panel_box=box, x_positions=xs, y_calibration=cal, series=_LSERIES,
+        threshold=150, x_window=10, search_radius=60)
+    return rows, LSM.panel_notes(), LSM.rule_coverage_ceiling(xs, box, 10)
+
+
+#: Measured with `rule_coverage_ceiling`, not asserted from arithmetic done here:
+#: the point is that the number the READER computes is the number that falls.
+_CEILINGS = {}
+for _s in (1.0, 2.0, 3.0, 4.0):
+    _im, _box, _cal, _xs = _scaled_panel(_s)
+    _CEILINGS[_s] = LSM.rule_coverage_ceiling(_xs, _box, 10)
+
+check("the coverage a rule can reach falls as the render gets finer",
+      _CEILINGS[1.0] > _CEILINGS[2.0] > _CEILINGS[3.0] > _CEILINGS[4.0],
+      "%s" % {k: round(v, 4) for k, v in _CEILINGS.items()})
+check("  and it crosses the rule threshold between 2x and 3x",
+      _CEILINGS[2.0] >= LSM._RULE_COVERAGE > _CEILINGS[3.0],
+      "2x %.4f, 3x %.4f, threshold %.2f"
+      % (_CEILINGS[2.0], _CEILINGS[3.0], LSM._RULE_COVERAGE))
+# AND 397 IS NOT NEAR THE EDGE, which is why this was invisible. Its declared
+# positions sit close to the axis ends; what decides the margin is the inset, and
+# an ordinary categorical layout puts its end categories at interval centres.
+check("  while publication 397's own panel clears it comfortably",
+      LSM.rule_coverage_ceiling(
+          {str(i): v for i, v in enumerate(
+              (99.5, 132.5, 165.0, 197.5, 230.5, 263.5,
+               296.5, 329.0, 361.5, 394.5, 427.5, 460.0))},
+          (84, 477, 110, 296), 10) > 0.96)
+
+_rows1, _notes1, _c1 = _read_scaled(1.0)
+check("a panel above the threshold reads its curves and reports nothing wrong",
+      len(_rows1) >= 12 and not _notes1,
+      "%d rows, notes %s" % (len(_rows1), _notes1))
+_rows3, _notes3, _c3 = _read_scaled(3.0)
+check("below the threshold the reader emits nothing at all",
+      _rows3 == [], "%d rows" % len(_rows3))
+# THE WHOLE POINT. Silence is correct; unexplained silence is what hid this.
+check("  and names the reason instead of going quiet",
+      len(_notes3) == 1
+      and _notes3[0].startswith("LINE_RULE_COVERAGE_UNREACHABLE")
+      and ("%.4f" % _c3) in _notes3[0]
+      and ("%.2f" % LSM._RULE_COVERAGE) in _notes3[0],
+      "%s" % _notes3)
+# AND THE NOTE IS THIS PANEL'S. Module state read by a batch over 116
+# publications attributes one panel's diagnosis to the next unless it is cleared.
+LSM.reset_panel_notes()
+check("  and a reset clears it, so the next panel cannot inherit it",
+      LSM.panel_notes() == [])
+# VALUES, WHERE THERE ARE ANY, DO NOT DRIFT. The defect is coverage, not
+# accuracy: between 0.5x and 2x every cell this reader emits is within a
+# millimetre of the drawn truth, which is what makes the silence at 3x a
+# capability limit rather than a wrong answer.
+_TRUTH = {}
+for _i, _l in enumerate(tuple("T%d" % i for i in range(1, 9))):
+    _TRUTH[("SOLID_S", _l)] = (92.0, 99.0, 104.0, 107.0, 105.0, 98.0, 98.5, 100.0)[_i]
+    _TRUTH[("DASHED_S", _l)] = (86.0, 88.0, 90.0, 92.0, 94.0, 95.0, 94.0, 95.0)[_i]
+_worst, _where = 0.0, None
+for _s in (0.5, 0.75, 1.0, 1.5, 2.0):
+    for _r in _read_scaled(_s)[0]:
+        _key = (_r.get("series"), _r.get("x_label"))
+        if _r.get("mean") is None or _key not in _TRUTH:
+            continue
+        _d = abs(float(_r["mean"]) - _TRUTH[_key])
+        if _d > _worst:
+            _worst, _where = _d, (_s, _key)
+check("every cell read between 0.5x and 2x is within 1 mmHg of the drawn truth",
+      _worst <= 1.0, "worst %.2f at %s" % (_worst, _where))
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

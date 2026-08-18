@@ -186,6 +186,72 @@ def _strip_vertical_strokes(mask, min_run=11):
 _RULE_COVERAGE = 0.9
 
 
+def rule_coverage_ceiling(x_positions, panel_box, x_window):
+    """The highest coverage any rule in this panel CAN measure, 0..1.
+
+    `_horizontal_rules` calls a row a rule when its ink spans `_RULE_COVERAGE`
+    of the panel width. But the ink it is shown is clipped to the DATA SPAN -
+    the declared positions plus one `x_window` of margin either side - because a
+    curve exists between its own end points. So a gridline that runs the full
+    width of the printed panel can only ever present `span / width` of it, and
+    that ratio is the ceiling on what any rule can measure here.
+
+    THE CEILING FALLS AS THE RENDER GETS FINER, because `x_window` is in pixels
+    and the panel width is not: the unmasked margin is a fixed number of columns
+    on either side of a span that grows with the rendering, so its SHARE of the
+    panel grows. Measured with this function on one synthetic panel drawn
+    natively at four scales - stroke, dash period and rules all scaled with it:
+
+        1x  0.9215   PASS        3x  0.8947   BELOW 0.9
+        2x  0.9014   PASS        4x  0.8908   BELOW 0.9
+
+    Publication 397 Figure 1 MAP_MEN measures 0.9720 and is not near the edge -
+    its declared positions sit close to the axis ends. What decides the margin is
+    the INSET: a panel whose first and last categories sit at interval centres,
+    which is the ordinary categorical layout, starts near the threshold and
+    crosses it on a finer render.
+
+    Below the threshold the gridlines are no longer rules. They are perfect
+    solid lines, so every one of them becomes a SOLID candidate at every x, the
+    count for SOLID is never one, and the reader emits nothing for the whole
+    panel - the exact defect this guard was written for in v7.55, reappearing
+    through the guard's own margin rather than through its absence.
+
+    Reported rather than repaired. Four fixes were tried and each was worse than
+    the defect; see INSTALL.md. What this function is for is that the margin is
+    now a number a scenario can hold and a run can print, instead of two
+    hundredths nobody had measured.
+    """
+    xs = [float(v) for v in (x_positions.values()
+                             if hasattr(x_positions, "values") else x_positions)]
+    x0, x1, _y0, _y1 = (int(v) for v in panel_box)
+    width = max(1, x1 - x0)
+    if not xs:
+        return 0.0
+    lo = int(min(xs)) - int(x_window)
+    hi = int(max(xs)) + int(x_window)
+    xa, xb = max(x0, lo), min(x1, hi + 1)
+    return max(0.0, (xb - xa) / float(width))
+
+
+#: Why this panel produced nothing, in the order it happened. A reader that
+#: emits no rows is fail-closed and correct to be; a reader that cannot say WHY
+#: leaves `run_batch` reporting "the reader resolved no marks in this panel",
+#: which is where a whole figure's worth of gridlines-read-as-curves hid. Same
+#: shape as `review_overlay._FAILURES`, for the same reason: the return contract
+#: stays a list of rows and the reason still reaches the run manifest.
+_PANEL_NOTES = []
+
+
+def reset_panel_notes():
+    """Forget the previous panel's diagnosis. Called per panel by `run_batch`."""
+    _PANEL_NOTES.clear()
+
+
+def panel_notes():
+    return list(_PANEL_NOTES)
+
+
 def _horizontal_rules(mask, x0, x1, coverage=_RULE_COVERAGE):
     """The gridlines and the frame, as a row mask.
 
@@ -1066,6 +1132,37 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     # every consumer - the overlay, the gate, the finalizer - makes it itself.
     # A derived value that is also stored is two answers to one question.
     out.sort(key=lambda row: (row["series"], row["order"]))
+    # WHY, WHEN THERE IS NOTHING. A panel that emits no rows is fail-closed and
+    # right to be, and `run_batch` routes it to MANUAL_POINT_READ - but with the
+    # detail "the reader resolved no marks in this panel", which is where a whole
+    # figure's worth of gridlines-read-as-curves hid in v7.55 and where the same
+    # thing hides again whenever `rule_coverage_ceiling` falls under
+    # `_RULE_COVERAGE`. The reason is recorded here so the run manifest carries
+    # it; the return contract is unchanged.
+    if not out:
+        ceiling = rule_coverage_ceiling(x_positions, panel_box, x_window)
+        ruled = bool(causes["HORIZONTAL_RULE"].any())
+        if ceiling < _RULE_COVERAGE:
+            _PANEL_NOTES.append(
+                "LINE_RULE_COVERAGE_UNREACHABLE: the declared positions leave a "
+                "margin this panel cannot rule across - any gridline can cover at "
+                "most %.4f of the panel width and a rule is recognised at %.2f, so "
+                "the rules are read as solid curves and every x has more than one "
+                "SOLID candidate. A coarser render or positions closer to the axis "
+                "ends would clear it; widening the threshold would not, and was "
+                "tried" % (ceiling, _RULE_COVERAGE))
+        elif not ruled and len(x_positions) > 1:
+            _PANEL_NOTES.append(
+                "LINE_NO_RULES_FOUND: no row of this panel is inked across %.2f of "
+                "its width, so nothing was removed as furniture (ceiling %.4f). If "
+                "the figure does rule its panel, the ink level or the panel box is "
+                "wrong" % (_RULE_COVERAGE, ceiling))
+        else:
+            _PANEL_NOTES.append(
+                "LINE_NOTHING_SEPARABLE: rules were removed and the ceiling is "
+                "%.4f, and no x left exactly one candidate per declared style - "
+                "the styles found across the panel were %s"
+                % (ceiling, sorted(present) or "none"))
     return out
 
 

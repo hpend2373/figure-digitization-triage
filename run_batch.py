@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.13"
+PIPELINE_VERSION = "9.14"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1537,6 +1537,16 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # Same call for both. They differ in what the reader looks at -
             # marker geometry against stroke pattern - and the manifest has
             # already been checked against the right discriminant for each.
+            #
+            # CLEARED FIRST, so a panel that reads nothing reports ITS OWN
+            # reason and not the previous panel's. `line_style_mono` records why
+            # it emitted nothing; without this the note is module state and a
+            # batch over 116 publications would attribute one panel's diagnosis
+            # to the next - the same defect `review_overlay.reset_failures`
+            # exists for.
+            if mark == "LINE_MONO_STYLE":
+                from line_style_mono import reset_panel_notes
+                reset_panel_notes()
             rows = MR.read_panel(mark, image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
                                  y_calibration=ycal,
@@ -1653,8 +1663,20 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             % (mark, pid, type(exc).__name__, exc)) from exc
 
     if not rows:
+        # THE READER'S OWN REASON, when it has one. "the reader resolved no
+        # marks" is where a figure's worth of gridlines-read-as-curves hid: the
+        # panel was routed to manual with nothing a person could act on, and the
+        # BAR_MONO geometry branch above already learned this lesson from its own
+        # per-row reasons. The line reader records a panel-level note instead,
+        # because when it reads nothing there is no row to carry one.
+        why = "the reader resolved no marks in this panel"
+        if mark == "LINE_MONO_STYLE":
+            from line_style_mono import panel_notes
+            notes = panel_notes()
+            if notes:
+                why = "; ".join(notes)
         return PanelOutcome("MANUAL_POINT_READ", declared=declared,
-                            detail="the reader resolved no marks in this panel",
+                            detail=why,
                             missing=sorted(_all_cells(series_level, position_level)))
 
     # ---- a series that produced nothing while its neighbours did is not an

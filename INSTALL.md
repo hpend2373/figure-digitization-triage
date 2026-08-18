@@ -7847,6 +7847,78 @@ reader stops. And the check only exists where the paper prints a value: a
 scatter with no printed statistic and no declared n still emits whatever the
 points give.
 
+## v9.14 — the gridline guard has a margin, and the margin was never measured
+
+Bars and scatter got six releases of real-figure hardening; the line reader had
+not been looked at since v7.9x, and it is verified on exactly one publication at
+exactly one scale. Asked "does it still hold", it does - and one thing it holds by
+two hundredths turns out not to be scale-invariant.
+
+**What is fine.** `test_line_style_mono` 123 scenarios, `test_mark_readers` 168,
+`forward_test_397_line_style` PASS at 18 of 24 cells with a worst error of 1.65
+mmHg on a 50 mmHg axis, `forward_test_397_line_geometry` PASS on all 12 panels.
+The overlay checked against the ink at 3x: red on the solid curve, blue on the
+dashed, caps where the caps are. The gridline guard from v7.55 is present and was
+itself a real-figure finding.
+
+**What is not.** `_horizontal_rules` calls a row a rule when its ink spans
+`_RULE_COVERAGE` = 0.9 of the panel WIDTH, and the ink it is shown is clipped to
+the DATA SPAN - the declared positions plus one `x_window` of margin either side,
+because a curve exists between its own end points. A gridline running the full
+printed panel can therefore only ever present `span / width` of it. That ratio is
+now measured by `rule_coverage_ceiling`, and on one synthetic panel drawn NATIVELY
+at four scales - stroke, dash period and rules all scaled with it:
+
+    1x  0.9215  PASS        3x  0.8947  BELOW 0.9
+    2x  0.9014  PASS        4x  0.8908  BELOW 0.9
+
+Under the threshold the gridlines stop being rules. They are perfect solid lines,
+so each becomes a SOLID candidate at every x, no x has exactly one, and the reader
+emits NOTHING for the panel - the v7.55 defect returning through the guard's own
+margin rather than through its absence.
+
+**It is the INSET, and scale only erodes it.** `x_window` is a pixel constant and
+the panel width is not, so a finer render grows the unmasked margin's SHARE.
+Publication 397 Figure 1 measures 0.9720 and is nowhere near the edge - its
+declared positions sit close to the axis ends. A panel whose first and last
+categories sit at interval centres, which is the ordinary categorical layout,
+starts near the threshold and crosses it. That is why one publication at one scale
+could not show this.
+
+**PINNED, NOT FIXED, and that is a decision.** Four repairs were tried and each
+was worse than the defect:
+
+    growing the rule mask to its own antialiased edges   no effect at 3x or 4x
+    deriving the stem threshold from stroke width        no effect: 11..40 identical
+    scaling `_column_runs`'s max thickness               no effect: 7..28 identical
+    scoping coverage to the columns actually masked      3x went 0 cells -> 2 cells,
+                                                        one of them 10.96 mmHg wrong
+
+The fourth is why this release does not ship a fix. Turning silence into a wrong
+number is the one direction this package will not trade in, and widening
+`_RULE_COVERAGE` to admit the failing panels is the constant-widening the testing
+rules forbid. The margin is now a number a scenario holds and a run prints.
+
+**And the silence names itself.** A panel that emits no rows is fail-closed and
+right to be; `run_batch` routes it to `MANUAL_POINT_READ`, and the detail read
+"the reader resolved no marks in this panel" - which is exactly where a figure's
+worth of gridlines-read-as-curves hid the first time. `line_style_mono` records
+`LINE_RULE_COVERAGE_UNREACHABLE`, `LINE_NO_RULES_FOUND` or
+`LINE_NOTHING_SEPARABLE` with the measured ceiling in it, cleared per panel, and
+`run_batch` folds it into the reason. Same shape as
+`review_overlay.reset_failures`, for the same reason.
+
+    reverted                                          scenarios that fail
+    the reader stops naming why it read nothing        1
+    run_batch stops folding the note into the reason   1
+    run_batch stops clearing the note per panel        1
+
+**One pin is weaker than the others and is labelled so.** The two `run_batch`
+lines are asserted STRUCTURALLY - the branches that need the calls have them -
+because a behavioural pin needs a run whose LINE_MONO_STYLE panel reads nothing,
+and that manifest fixture does not exist yet. The scenario says this in its own
+comment rather than looking like the stronger thing.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

@@ -7116,6 +7116,66 @@ print()
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
+# --------------------------------------------------------------------------
+# the line reader's reason reaches the run manifest
+# --------------------------------------------------------------------------
+# v9.14. `line_style_mono` records WHY it emitted nothing for a panel, because
+# "the reader resolved no marks in this panel" is where a whole figure's worth of
+# gridlines-read-as-curves hid in v7.55 and where it hides again whenever
+# `rule_coverage_ceiling` falls under `_RULE_COVERAGE`. Two lines in `run_batch`
+# carry it: one clears the note per panel, one folds it into the outcome detail.
+#
+# PINNED STRUCTURALLY, AND SAID SO. This asserts the WIRING - that both calls are
+# in the branches that need them - not the resulting detail string, because a
+# behavioural pin needs a run whose LINE_MONO_STYLE panel reads nothing, and that
+# fixture is a manifest set this file does not have. Recorded in INSTALL.md as the
+# weaker of the two pins rather than left looking like the stronger one.
+import ast as _ast_ln                                              # noqa: E402
+
+_ln_src = open(os.path.join(HERE, "run_batch.py"), encoding="utf-8").read()
+_ln_tree = _ast_ln.parse(_ln_src)
+
+
+def _calls_named(node):
+    out = set()
+    for sub in _ast_ln.walk(node):
+        if isinstance(sub, _ast_ln.Call):
+            f = sub.func
+            if isinstance(f, _ast_ln.Name):
+                out.add(f.id)
+            elif isinstance(f, _ast_ln.Attribute):
+                out.add(f.attr)
+    return out
+
+
+#: The `if` whose test names LINE_MONO_STYLE and whose body dispatches the
+#: reader, and the `if not rows` that decides MANUAL_POINT_READ. Found by shape
+#: rather than by line number, so the scenario survives the file moving.
+_ln_reset, _ln_use = [], []
+for _node in _ast_ln.walk(_ln_tree):
+    if not isinstance(_node, _ast_ln.If):
+        continue
+    src = _ast_ln.get_source_segment(_ln_src, _node) or ""
+    if "LINE_MONO_STYLE" in src and "read_panel" in src:
+        _ln_reset.append(_calls_named(_node))
+    if "MANUAL_POINT_READ" in src and "resolved no marks" in src:
+        _ln_use.append(_calls_named(_node))
+
+check("the LINE_MONO_STYLE branch clears the reader's panel note",
+      any("reset_panel_notes" in c for c in _ln_reset),
+      "branches found %d, calls %s" % (len(_ln_reset), _ln_reset[:1]))
+check("  and the no-marks outcome folds that note into its reason",
+      any("panel_notes" in c for c in _ln_use),
+      "branches found %d, calls %s" % (len(_ln_use), _ln_use[:1]))
+# AND THE READER STILL OFFERS THEM, so this cannot pass against a module that
+# dropped the channel: the wiring and the thing it wires are asserted together.
+import line_style_mono as _LSM_LN                                  # noqa: E402
+
+check("  and the reader offers both halves of that channel",
+      callable(getattr(_LSM_LN, "reset_panel_notes", None))
+      and callable(getattr(_LSM_LN, "panel_notes", None))
+      and callable(getattr(_LSM_LN, "rule_coverage_ceiling", None)))
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

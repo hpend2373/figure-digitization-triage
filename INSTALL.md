@@ -7476,6 +7476,62 @@ that row order decides nothing.
 file IS - a run that labels its calibration panel `OVERLAY` derives `OVERLAY` and
 agrees with itself. The bytes are hashed; the type is not derivable from them.
 
+## v9.8 — an outline is ink the bar runs into
+
+**A real figure read its own error bars as its means, and said nothing.** The
+first pilot outside the two worked examples is publication 177, whose Figure 3 is
+what this pipeline is for: three groups by three test days, a bar and a whisker
+per cell, and a caption that states the dispersion ("Values are means ± SE").
+`BAR_COLOR` read its women/preflight cell as **314 against a printed 205** - 53%
+high, with no refusal and no flag.
+
+The reader takes the end of the series' colour mask as the end of the bar. That
+is the bar's top only while the whisker is drawn in some OTHER colour. Greyscale
+print draws a black bar's error bar in the same ink, and then the end of the mask
+is the whisker's TIP: the reader recovered the real top by looking for a wide row
+within 70 pixels above it, found none 93 pixels away, and fell back to the tip.
+
+The obvious repair - look further - is what the second fixture is for. Widen the
+window and the first wide row above the bar is a SIGNIFICANCE BRACKET, a rule
+belonging to a p value, floating over the panel in the same ink. Its short
+descenders even join two bars into one run, which then reads as a single bar
+whose top is the bracket.
+
+Two rules, and neither is a distance:
+
+    a bar's column carries ink AT THE BASELINE      a bracket floats
+    an outline is ink the fill RUNS INTO            a bracket has white under it
+
+The second is measured rather than chosen: over publication 323's 72 frozen bars
+the run from outline into fill has no unmarked row in 70 of them and exactly one
+in the other two, against more than a hundred for the bracket. Two orders of
+magnitude apart, so the line is two rows.
+
+**And the ink level is the figure's, not the reader's.** `dark` was `mean < 110`,
+tuned on one publication. 177 draws its whiskers at grey 128, so at the default
+they are not ink at all and every cell of the figure came back with no
+dispersion. `threshold` is now declarable for BAR_COLOR as it already was for
+BAR_MONO and the line readers, and `bar_reader.read_bar_colour_panel` is the
+entry point that keeps `READER_OPTIONS`' promise - every option applying to a
+mark type names a parameter of that mark's reader.
+
+    reverted                                          scenarios that fail
+    the outline-connectedness rule removed              4
+    the baseline-anchored columns removed               1
+    the declarable ink threshold ignored                1
+
+Publication 323's 72 frozen values are unchanged, and that is the point of the
+release: `make_whisker_fixture.py` draws the three panels this needed - a
+same-colour whisker, the same with a bracket over it, and a whisker at grey 128 -
+so the rules are pinned by figures rather than by the reader's own last output.
+
+**What this does NOT close.** 177 still does not pass machine QC: ten of its
+eighteen cells now read with means and dispersions that match the print, and two
+panels still lose a series to the antialiased edge of its neighbour. That is a
+colour-separation question and it is next. `x_category_columns`' band/step/gap
+are still DPI-bound, and so is `max_whisker_px` - 177 declares 180 at 600 dpi to
+mean the same distance the default means at 300.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

@@ -675,8 +675,9 @@ def _anything(v):
 #: selects no contours, and both of those used to pass validation and then
 #: produce an empty panel that looked like an unreadable figure.
 READER_OPTIONS = {
-    "threshold":        (_as_int, ("BAR_MONO", "LINE_MONO", "LINE_MONO_STYLE",
-                                   "BOX_VIOLIN"), "threshold", _grey),
+    "threshold":        (_as_int, ("BAR_COLOR", "BAR_MONO", "LINE_MONO",
+                                   "LINE_MONO_STYLE", "BOX_VIOLIN"),
+                         "threshold", _grey),
     "stem_threshold":   (_as_int, ("BAR_MONO",), "stem_threshold", _grey),
     "group_window":     (_as_int, ("BAR_MONO",), "group_window", _positive),
     # Consumed by the RUNNER, not passed to a reader: LINE_COLOR and SCATTER

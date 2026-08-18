@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.7"
+PIPELINE_VERSION = "9.8"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -135,10 +135,10 @@ PIPELINE_CODE_FILES = (
 #: TypeError mid-run - which surfaced as PANEL_GEOMETRY_UNRESOLVED, a message
 #: about the figure for a defect in this table.
 def reader_functions():
-    from bar_reader import read_bar_panel
+    from bar_reader import read_bar_colour_panel
     from line_style_mono import read_monochrome_line_panel
     return {
-        "BAR_COLOR": read_bar_panel,
+        "BAR_COLOR": read_bar_colour_panel,
         # The two-pass geometry reader. It measures a panel and names no
         # series; `measure_bar_mono_figures` calls it before the panel loop and
         # the figure resolves the identities. `read_monochrome_bar_panel` is

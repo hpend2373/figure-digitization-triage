@@ -649,6 +649,63 @@ check("  and sequence numbering on the same panel files two bars one slot early"
       and abs(_gshifted[3] - _GTRUE[4]) <= 2.5,
       "%s" % _gshifted)
 
+print()
+print("a whisker drawn in the bar's own colour, and a bracket floating over it")
+# BOTH ARE THINGS PRINT DOES and neither had a fixture. A colour reader takes
+# the end of the series mask as the end of the bar; when the whisker is another
+# colour that is right, and when it is the SAME colour - greyscale print, every
+# black bar - the end of the mask is the whisker's TIP and the cap is returned
+# as the mean. Publication 177's women/preflight cell read 314 against a printed
+# 205, with no refusal. The bracket is why the obvious repair fails: widen the
+# search and the first wide row above the bar is a significance rule that
+# belongs to a p value. What separates them is that an outline is ink the fill
+# runs into and a bracket has white under it.
+import make_whisker_fixture as WF                                  # noqa: E402
+
+WF.main()
+_wt = json.load(open(os.path.join(HERE, "whisker_fixture_truth.json")))
+_wcal = AxisCalibration.from_points([tuple(p) for p in _wt["ticks"]])
+for _name in ("whisker_fixture.png", "whisker_bracket_fixture.png"):
+    _img = np.asarray(Image.open(os.path.join(HERE, _name)).convert("RGB")).astype(int)
+    _masks = colour_masks(_img, {"S": (_wt["colour"], 25.0)})
+    _bars = read_bar_panel(_masks, tuple(_wt["panel_box"]), y_calibration=_wcal,
+                           series={"S": "S"}, max_whisker_px=250)
+    check("%s: both bars are found, and as two" % _name, len(_bars) == 2,
+          "%d bar(s)" % len(_bars))
+    if len(_bars) != 2:
+        continue
+    for _got, _want in zip(sorted(_bars, key=lambda b: b["x"]), _wt["bars"]):
+        check("  %s/%s: the mean is the bar, not the cap" % (_name[:8], _want["series"]),
+              abs(_got["mean"] - _want["mean"]) <= 0.5,
+              "read %.2f, drawn %.1f (cap sits at %.1f)"
+              % (_got["mean"], _want["mean"], _want["mean"] + _want["dispersion"]))
+        check("  %s/%s: the dispersion is the whisker" % (_name[:8], _want["series"]),
+              _got["dispersion"] is not None
+              and abs(_got["dispersion"] - _want["dispersion"]) <= 0.5,
+              "read %s, drawn %.1f" % (_got["dispersion"], _want["dispersion"]))
+
+# AND THE INK LEVEL IS THE FIGURE'S, NOT THE READER'S. `dark` was `mean < 110`,
+# a number tuned on one publication; publication 177 draws its whiskers at 128,
+# so at the default they are not ink and the figure produced no dispersion at
+# all. The level is declarable now, and this is what declaring it buys.
+_grey_img = np.asarray(Image.open(os.path.join(HERE, "whisker_grey_fixture.png"))
+                       .convert("RGB")).astype(int)
+for _thr, _want in ((None, False), (160, True)):
+    _masks = colour_masks(_grey_img, {"S": (_wt["colour"], 25.0)},
+                          **({} if _thr is None else {"threshold": _thr}))
+    _bars = read_bar_panel(_masks, tuple(_wt["panel_box"]), y_calibration=_wcal,
+                           series={"S": "S"}, max_whisker_px=250)
+    _disp = [b["dispersion"] for b in sorted(_bars, key=lambda b: b["x"])]
+    check("a whisker at grey 128 %s at threshold %s"
+          % ("is read" if _want else "is invisible", _thr or "110 (default)"),
+          all(d is not None for d in _disp) if _want
+          else all(d is None for d in _disp), "%s" % _disp)
+    if _want:
+        check("  and it measures the whisker that was drawn",
+              all(abs(d - b["dispersion"]) <= 0.5
+                  for d, b in zip(_disp, _wt["bars"])),
+              "%s against %s" % (_disp, [b["dispersion"] for b in _wt["bars"]]))
+
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

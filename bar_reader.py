@@ -121,7 +121,7 @@ def x_category_columns(dark, panel_box, count, band=34, step=4, gap=8,
 BUILTIN_MASK_KEYS = ("blue", "red", "dark")
 
 
-def colour_masks(rgb, declared=None):
+def colour_masks(rgb, declared=None, threshold=110):
     """Boolean masks from an RGB uint8 array.
 
     `blue`, `red` and `dark` are the three this reader was born with, tuned on
@@ -140,7 +140,15 @@ def colour_masks(rgb, declared=None):
     out = {
         "blue": (B - R > 50) & (B - G > 40) & (B > 110),
         "red": (R - G > 60) & (R - B > 60) & (R > 110),
-        "dark": a.mean(axis=2) < 110,
+        # WHAT COUNTS AS INK. `dark` is what finds outlines, stems and caps,
+        # and 110 was a number tuned on one publication. Publication 177 draws
+        # its error bars in a grey whose median is 128, so at 110 the whiskers
+        # of a whole figure are invisible: every cell came back NO_VARIANCE
+        # while the bars themselves read cleanly. A greyscale print does not owe
+        # this reader a particular ink level, so the level is declarable
+        # (`threshold`, as BAR_MONO and the line readers already take it) and
+        # 110 stays the default.
+        "dark": a.mean(axis=2) < threshold,
     }
     for name, (colour, tolerance) in (declared or {}).items():
         out[name] = colour_mask(a, colour, tolerance)
@@ -187,6 +195,28 @@ def _covers(mask, px, py, radius=1):
 def _claimed_by_others(others, px, py, radius=1):
     """How many OTHER series masks cover this bar's own ink."""
     return sum(1 for mask in others if _covers(mask, px, py, radius))
+
+
+def read_bar_colour_panel(image, panel_box, declared_colours=None, threshold=110,
+                          ticks=None, series=None, min_bar_px=15,
+                          stem_half_width=3, max_whisker_px=90, stem_required=True,
+                          baseline_value=0.0, y_calibration=None, x_positions=None,
+                          slot_tolerance_px=None):
+    """BAR_COLOR from a RASTER: build the masks at the declared ink level, read.
+
+    `read_bar_panel` is given masks and never sees the image, so the ink level
+    could not be one of its parameters - and `READER_OPTIONS` promises that an
+    option applying to a mark type names a parameter of that mark's reader. This
+    is the function that keeps the promise: every BAR_COLOR option is in its
+    signature, and `run_batch.reader_functions` points here.
+    """
+    masks = colour_masks(image, declared=declared_colours, threshold=threshold)
+    return read_bar_panel(
+        masks, panel_box, ticks=ticks, series=series, min_bar_px=min_bar_px,
+        stem_half_width=stem_half_width, max_whisker_px=max_whisker_px,
+        stem_required=stem_required, baseline_value=baseline_value,
+        y_calibration=y_calibration, x_positions=x_positions,
+        slot_tolerance_px=slot_tolerance_px)
 
 
 def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
@@ -241,7 +271,27 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
         m = np.zeros_like(dark)
         m[y0:y1, x0:x1] = True
         col = masks[key] & m
-        xs = [x for x in range(x0, x1) if col[:, x].any()]
+        # A BAR GROWS FROM THE BASELINE. A significance bracket does not: it is a
+        # rule floating above the bars, drawn in the same ink, and its columns
+        # joined two bars into one run that then read as a single bar whose top
+        # was the bracket. Requiring a column to carry ink AT the baseline is
+        # what a bar is, and it costs a zero-height bar nothing - its error bar
+        # still stands there.
+        # The band has to clear the ZERO LINE, which is drawn over the fill: on
+        # publication 323 a bar's own colour is missing for the few rows the
+        # rule covers, and a band that only looked at those rows found no bar at
+        # all - 107 readings became 81. So the line's own thickness is measured
+        # here (rows near the baseline whose ink spans the panel) and the band
+        # reaches past it.
+        stroke = sum(1 for y in range(max(y0, int(round(zero_row)) - 6),
+                                      min(y1, int(round(zero_row)) + 7))
+                     if dark[y, x0:x1].sum() >= 0.6 * (x1 - x0))
+        reach = stroke + 8
+        band_lo = max(y0, int(round(zero_row)) - reach)
+        band_hi = min(y1, int(round(zero_row)) + reach + 1)
+        anchored = (col[band_lo:band_hi, :].any(axis=0) if band_hi > band_lo
+                    else col[y0:y1, :].any(axis=0))
+        xs = [x for x in range(x0, x1) if col[:, x].any() and anchored[x]]
         # A bar whose value is near the baseline can be split into two colour
         # slivers: its own stroke plus the zero line cover the fill except at the
         # left and right edges. Two fragments of one bar sit far closer together
@@ -268,13 +318,71 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
             fill_top = int(filled.max() if down else filled.min())
             step = 1 if down else -1
 
-            # (1) outline centre, not the fill edge
-            span = range(fill_top, min(dark.shape[0] - 1, fill_top + 70) + 1) if down \
-                else range(max(0, fill_top - 70), fill_top + 1)
-            prof = [(y, int(dark[y, xlo:xhi + 1].sum())) for y in span]
-            wide = [y for y, c in prof if c >= 0.5 * w]
-            groups = runs(wide)
-            outline = (groups[0] if down else groups[-1]) if wide else [fill_top]
+            # (1) outline centre, not the fill edge - and the outline has to be
+            # ink the fill RUNS INTO. The group nearest the fill edge was taken
+            # whatever the gap between them, which is two mistakes in one: a
+            # bracket sixty pixels above a bar was read as its outline, and when
+            # the whisker is the bar's OWN colour the fill edge is the whisker's
+            # tip, with the bar ninety pixels below and no outline in the window
+            # at all. On publication 177 that returned the cap as the mean - 314
+            # against a printed 205 - silently.
+            def _outline_at(anchor):
+                span = (range(anchor, min(dark.shape[0] - 1, anchor + 70) + 1)
+                        if down else range(max(0, anchor - 70), anchor + 1))
+                prof = [(y, int(dark[y, xlo:xhi + 1].sum())) for y in span]
+                wide = [y for y, c in prof if c >= 0.5 * w]
+                if not wide:
+                    return None
+                return runs(wide)[0] if down else runs(wide)[-1]
+
+            # ...AND WITH NO WHITE BETWEEN IT AND THE BAR. Proximity is the
+            # wrong test for this: on a JPEG the topmost pixels of a fill fade
+            # out over several rows, so "within two pixels of the fill edge"
+            # rejected the real outline of nineteen of publication 323's bars
+            # and moved their frozen means by up to 5.5 units. CONNECTEDNESS is
+            # the test that holds - ink all the way from the outline down into
+            # the bar - and it is what the bracket fails. The bracket of
+            # `whisker_bracket_fixture.png` drops a short vertical onto each bar
+            # it spans, so its top row IS the top row of this colour in these
+            # columns and the test above accepts it. What it is not is connected:
+            # a hundred rows of white lie between the bracket's descender and
+            # the whisker below it, and a bar's outline never has white under it.
+            # ANY ink, not this series' colour: a bar's outline stroke is
+            # commonly darker than its fill and so is not in the colour mask at
+            # all. What must be unbroken is the paper being marked, which is
+            # what tells an outline apart from a bracket floating over white.
+            ink = dark[:, xlo:xhi + 1].any(axis=1)
+
+            def _touches_body(g):
+                if body is None:
+                    return True
+                near_g = g[0] if down else g[-1]
+                far_body = body[-1] if down else body[0]
+                lo, hi = sorted((int(near_g), int(far_body)))
+                # MEASURED, not chosen: over publication 323's 72 bars the run
+                # from the outline into the fill has no unmarked row at all in
+                # 70 of them and exactly one in the other two - a JPEG dropping
+                # a single faint row. The bracket of the fixture has more than a
+                # hundred. Two orders of magnitude apart, so two rows is the
+                # line and nothing near it is a judgement call.
+                return int((~ink[lo:hi + 1]).sum()) <= 2
+
+            body_rows = [y for y in range(int(filled.min()), int(filled.max()) + 1)
+                         if col[y, xlo:xhi + 1].sum() >= 0.5 * w]
+            body = max(runs(body_rows), key=len) if body_rows else None
+            outline = _outline_at(fill_top)
+            if outline is not None and not _touches_body(outline):
+                outline = None
+            if outline is None:
+                # The fill edge is not a bar edge. The bar is the WIDE part of
+                # this colour; a whisker is a few pixels across and cannot be.
+                if body is not None:
+                    anchor = body[-1] if down else body[0]
+                    outline = _outline_at(anchor) or [anchor]
+                else:
+                    # Nothing wide anywhere: a bar whose mean is at the baseline
+                    # draws no bar, and its error bar is all there is to read.
+                    outline = [fill_top]
             top_c = (outline[0] + outline[-1]) / 2.0
 
             # (2) a cap counts only if a stem reaches the bar end, on the far

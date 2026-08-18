@@ -1630,17 +1630,19 @@ def read_panel(mark_type, **kwargs):
     if kind == "BOX_VIOLIN":
         return read_box_violin_panel(**kwargs)
     if kind == "BAR_COLOR":
-        from bar_reader import colour_masks, read_bar_panel
+        from bar_reader import read_bar_colour_panel
         image = kwargs.pop("image")
         # `declared_colours` is {Series_ID: (hex, tolerance)}. When it is given,
         # each series gets a mask built from what the manifest says its colour
         # is, instead of choosing between three hard-coded ones tuned on a
         # single publication.
         declared = kwargs.pop("declared_colours", None)
-        masks = colour_masks(
+        threshold = kwargs.pop("threshold", None)
+        return read_bar_colour_panel(
             image.convert("RGB") if isinstance(image, Image.Image) else image,
-            declared=declared)
-        return read_bar_panel(masks=masks, **kwargs)
+            declared_colours=declared,
+            **({} if threshold is None else {"threshold": int(threshold)}),
+            **kwargs)
     raise ValueError("unknown mark type %r; expected %s" % (mark_type, "/".join(MARK_TYPES)))
 
 

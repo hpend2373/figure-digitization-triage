@@ -761,6 +761,14 @@ def panel_manifest_columns():
         "Image_Path",
         # the plot area, in image pixels
         "Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1",
+        # WHERE THE PANEL'S ANNOTATIONS ARE - "x0,x1,y0,y1" boxes separated by
+        # ";", inside the plot area, holding ink that is not data. A journal
+        # prints `r` and `P` inside the axes and the glyphs are marker-sized:
+        # `0` IS a small circle, and no measurement tells them apart. On
+        # publication 177 Figure 4 the four "data points" a scatter panel
+        # returned were letters of "r = 0.91". A declaration can say so and a
+        # measurement cannot, which is why this is a column and not a heuristic.
+        "Annotation_Boxes",
         # where the axes live, so a human re-checking calibration knows where to
         # look and a future tick-finder has somewhere to search
         "Axis_X_Region", "Axis_Y_Region",
@@ -1727,6 +1735,37 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         else:
             flag(line, "MISSING_REQUIRED", "Panel_X0/X1/Y0/Y1")
             box = None
+
+        # AN ANNOTATION BOX IS A CLAIM ABOUT THIS PANEL, so it is checked
+        # against this panel: a box outside the plot area excludes nothing the
+        # reader was going to look at, and a box that swallows the whole panel
+        # excludes the data. Both are declarations somebody wrote by hand while
+        # looking at a figure, and both fail silently - the run reads fewer
+        # marks and says nothing about why.
+        if not blank(r.get("Annotation_Boxes")):
+            seen_ann = set()
+            for chunk in str(r.get("Annotation_Boxes")).split(";"):
+                if not chunk.strip():
+                    continue
+                try:
+                    ann = parse_box(chunk)
+                except ValueError as exc:
+                    flag(line, "BAD_ANNOTATION_BOX", str(exc))
+                    continue
+                if ann in seen_ann:
+                    flag(line, "DUPLICATE_ANNOTATION_BOX",
+                         "%s is declared twice" % (ann,))
+                seen_ann.add(ann)
+                if box is None:
+                    continue
+                if (ann[0] >= box[1] or ann[1] <= box[0]
+                        or ann[2] >= box[3] or ann[3] <= box[2]):
+                    flag(line, "ANNOTATION_BOX_OUTSIDE_PANEL",
+                         "%s does not meet the plot area %s" % (ann, box))
+                elif ((ann[1] - ann[0]) * (ann[3] - ann[2])
+                        >= 0.5 * (box[1] - box[0]) * (box[3] - box[2])):
+                    flag(line, "ANNOTATION_BOX_COVERS_PANEL",
+                         "%s is at least half the plot area %s" % (ann, box))
 
         img = resolve(r.get("Image_Path")) if not blank(r.get("Image_Path")) else None
         if check_files and not blank(r.get("Image_Path")) and img is None:

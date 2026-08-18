@@ -88,6 +88,9 @@ PLAN_KEYS = {
     "panel": ("panel_id", "label", "outcome_label", "target_status",
               "disposition", "reason", "note", "read"),
     "read": ("mark_type", "unit_id", "figure_view", "identity_domain", "box",
+             # where this panel's printed annotations are, as boxes inside the
+             # plot area. The manifest layer checks each one against the panel.
+             "annotation_boxes",
              "y_ticks", "x_ticks", "y_scale", "x_scale", "baseline",
              "config_id", "panel_mode", "association_type",
              "axis_x_region", "axis_y_region", "x_region", "y_region",
@@ -902,6 +905,9 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                 Panel_Label=_s(panel.get("label")) or pid,
                 Mark_Type=_s(read.get("mark_type")).upper(), Image_Path=resolved,
                 Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
+                Annotation_Boxes=";".join(
+                    ",".join(str(int(round(float(v)))) for v in ann)
+                    for ann in (read.get("annotation_boxes") or [])),
                 Axis_X_Region=_s(read.get("axis_x_region")
                                  or read.get("x_region")),
                 Axis_Y_Region=_s(read.get("axis_y_region")

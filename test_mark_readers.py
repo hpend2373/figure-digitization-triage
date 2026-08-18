@@ -1259,6 +1259,72 @@ check("  and every method they emit is one the registry prices",
 
 
 print()
+print("a marker is not a number of pixels, and a printed r is not a marker")
+# THE SAME DRAWING AT TWO SIZES. `read_scatter_panel` decided what a marker is
+# with four absolute numbers - area 12 to 500, bounding box under 35 and over 3 -
+# and none of them is a property of a figure. On publication 177 Figure 4 at 600
+# dpi the markers are about 600 square pixels, so the ceiling rejected EVERY data
+# point and the four "points" that came back were letters of "r = 0.91": r =
+# -0.47 against a printed 0.91. This fixture is the same twelve pairs rendered
+# three times apart, with the statistics printed inside the axes the way a
+# journal prints them.
+import json as _json                                              # noqa: E402
+import make_scatter_fixture as _SF                                # noqa: E402
+
+_SF.main()
+_st = _json.load(open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                    "scatter_fixture_truth.json")))
+_true_r = float(np.corrcoef([p[0] for p in _st["pairs"]],
+                            [p[1] for p in _st["pairs"]])[0, 1])
+_by_scale = {}
+for _name in sorted(_st["renderings"]):
+    _r = _st["renderings"][_name]
+    _im = Image.open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                   _r["file"])).convert("RGB")
+    _xc = AxisCalibration.from_points([tuple(p) for p in _r["x_ticks"]])
+    _yc = AxisCalibration.from_points([tuple(p) for p in _r["y_ticks"]])
+
+    def _read(exclude):
+        return read_scatter_panel(
+            _im, panel_box=tuple(_r["panel_box"]), x_calibration=_xc,
+            y_calibration=_yc,
+            series=[SeriesSpec("S", rgb=None, marker=_st["marker"])],
+            exclude_boxes=exclude)
+
+    _got = _read([_r["annotation_box"]])
+    check("%s: every drawn pair is found and nothing else" % _name,
+          len(_got) == len(_st["pairs"]),
+          "%d marks for %d pairs" % (len(_got), len(_st["pairs"])))
+    # THE TRAP IS REAL, not asserted. Undeclared, the annotation's glyphs are
+    # marks: the reader returns more of them than the figure has points.
+    check("  %s: and the annotation is marks until the panel declares it" % _name,
+          len(_read(None)) > len(_st["pairs"]),
+          "%d marks with the annotation left in" % len(_read(None)))
+    if len(_got) != len(_st["pairs"]):
+        continue
+    _pairs = sorted((p["x_value"], p["y_value"]) for p in _got)
+    _want = sorted(tuple(p) for p in _st["pairs"])
+    # In units of the axis span, so the two renderings are held to one standard.
+    _dx = max(abs(a[0] - b[0]) for a, b in zip(_pairs, _want)) / 3.0
+    _dy = max(abs(a[1] - b[1]) for a, b in zip(_pairs, _want)) / 80.0
+    check("  %s: each pair within 1%% of the axis span" % _name,
+          _dx <= 0.01 and _dy <= 0.01,
+          "x %.4f, y %.4f of the span" % (_dx, _dy))
+    _assoc = summarize_association(_got, "PEARSON_R")["Association_Value"]
+    check("  %s: and the association is the drawn one" % _name,
+          abs(_assoc - _true_r) < 0.01, "%.4f vs %.4f" % (_assoc, _true_r))
+    _by_scale[_name] = (_pairs, _assoc)
+# AND THE TWO AGREE WITH EACH OTHER. This is the scenario the absolute numbers
+# cannot pass: one rendering read 22 marks and the other 4, off one drawing.
+if len(_by_scale) == 2:
+    (_pa, _ra), (_pb, _rb) = _by_scale.values()
+    _worst = max(max(abs(a[0] - b[0]) / 3.0, abs(a[1] - b[1]) / 80.0)
+                 for a, b in zip(_pa, _pb))
+    check("the two renderings of one drawing read the same points",
+          _worst <= 0.01 and abs(_ra - _rb) < 0.01,
+          "worst pair %.4f of the span, r %.4f vs %.4f" % (_worst, _ra, _rb))
+
+print()
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

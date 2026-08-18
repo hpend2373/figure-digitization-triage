@@ -81,6 +81,31 @@ def codes(problems):
     return sorted({p["check"] for p in problems})
 
 
+# THE ANNOTATION BOXES A PANEL DECLARES REACH THE MANIFEST. A scatter panel says
+# where its printed `r` and `P` are, because the glyphs are marker-sized and no
+# measurement separates them from data. A declaration that the compiler drops is
+# worse than none: the plan says the annotation is excluded and the run reads it
+# as points anyway.
+_ann_plan = copy.deepcopy(PLAN)
+_ann_panel = [p for f in _ann_plan["figures"] for p in f["panels"]
+              if p.get("read")][0]
+_ANN_BOX = [_ann_panel["read"]["box"][0] + 5, _ann_panel["read"]["box"][0] + 45,
+            _ann_panel["read"]["box"][2] + 5, _ann_panel["read"]["box"][2] + 35]
+_ann_panel["read"]["annotation_boxes"] = [_ANN_BOX]
+_ann_dir, (_ann_written, _ann_probs) = compile_to("out_annotation", _ann_plan)
+check("a declared annotation box reaches the panel manifest",
+      not _ann_probs
+      and any(row.get("Annotation_Boxes") == ",".join(str(v) for v in _ANN_BOX)
+              for row in csv.DictReader(
+                  open(os.path.join(_ann_dir, "panel_manifest.csv"),
+                       encoding="utf-8"))),
+      "%s" % codes(_ann_probs))
+check("  and a panel that declares none carries an empty column",
+      all("Annotation_Boxes" in row for row in csv.DictReader(
+          open(os.path.join(_ann_dir, "panel_manifest.csv"), encoding="utf-8"))),
+      "the column is missing from the manifest")
+
+
 def _mutated(mutate):
     """A copy of the shipped plan with one thing changed."""
     plan = copy.deepcopy(PLAN)

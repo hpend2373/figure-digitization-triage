@@ -7650,6 +7650,77 @@ Publication 323 is untouched: 107 values, every mean and dispersion identical,
 `crosscheck_id323` AGREEs on all 72. On 177 the two cells lose their dispersion
 and keep their mean, and the other sixteen are unchanged.
 
+## v9.11 — a marker is not a number of pixels, and a printed r is not a marker
+
+**The scatter reader had never been shown a printed scatter.** Every one of its
+scenarios ran on a single synthetic panel: 800 by 520, ten hard-edged blue
+circles, no annotation and no fitted line. That is where `BAR_COLOR` was before
+v9.9, and the first real figure said the same thing.
+
+Publication 177 Figure 4 is on the same page as the bar pilot, is three scatter
+panels, and — the reason it was chosen — **prints its own answer**: `r = 0.91`,
+`r = 0.57`, `r = 0.17`, with n in the caption. The reader returned
+
+    panel A   r = -0.47   against a printed 0.91
+    panel B   r = -0.84   against a printed 0.57
+    panel C   r = -0.08   against a printed 0.17
+
+and in panel A **not one of the four marks it found was a data point.** All four
+were letters of `r = 0.91` and `P < 0.001`.
+
+**A marker is not a number of pixels.** `read_scatter_panel` decided what a
+marker is with four absolute numbers — area between 12 and 500 square pixels,
+bounding box under 35 across and over 3. None of them is a property of a figure;
+they are a marker at one rendering. At 600 dpi 177's markers are 28 to 36 across
+and about 600 square, so the AREA CEILING rejected every data point in the panel
+and left only the annotation. The size is measured off the panel now, through
+the same net the line readers have used since v8.7 — bigger than three pixels,
+smaller than a tenth of the panel, both ratios of the panel — and a candidate is
+kept when its side is near the panel's own marker. `min_marker_area` and
+`max_marker_area` survive as absolute bounds a person may add ON TOP, which is
+what an option is for; they are no longer what the reader falls back on.
+
+**And a printed `r` is not a marker.** A journal prints its statistics inside the
+axes and the glyphs are marker-sized: on 177 Figure 4 they measure 28x44 and
+32x48 against markers of 28x28. There is no measurement that separates them —
+`0` IS a small circle — so this is not something a reader can be made cleverer
+about. It is something the panel declares, like its axes: `Annotation_Boxes` on
+the panel manifest, `annotation_boxes` in the plan, boxes of `x0,x1,y0,y1` inside
+the plot area holding ink that is not data. The manifest layer checks each one
+against the panel it belongs to, because a rectangle typed by hand off a figure
+can miss the plot area or swallow it and both fail silently.
+
+    reverted                                          scenarios that fail
+    the four absolute pixel numbers are back            2
+    the declared annotation is not blanked              2
+    the manifest stops checking the declared boxes      4
+
+`make_scatter_fixture.py` draws twelve pairs TWICE, three times apart in scale,
+with the statistics printed inside the axes. One rendering used to return 22
+marks and the other 4, off one drawing; both now return 12, every pair within 1%
+of the axis span, and the two agree with each other — which is the scenario the
+absolute numbers cannot pass and the reason the fixture is two files.
+
+**What this does NOT close, and it is most of 177 Figure 4.** Three panels, three
+remaining structural failures, each needing its own rule and its own fixture:
+
+    a fitted regression line runs through the cloud and welds every marker into
+    one contour - panel A is a single blob 308 by 279 at 600 dpi and 154 by 141
+    at 300, so this is not a resolution to be turned up
+
+    overlapping markers merge - panel C declares 24 and the reader finds 41, two
+    of them clusters of 104x195 and 68x96
+
+    open markers have no thick core at all, so the primitive that finds a filled
+    circle finds nothing on a ring; `_one_interior_per_marker` is the one that
+    does, and the scatter reader does not use it yet
+
+Until those land a printed scatter goes to a person, and the count audit is what
+sends it there — provided the source declares n. Where it does not, and where
+nothing looks overplotted, an association is still computed from whatever was
+found: on 177 panel B that is r = -0.84 against a printed 0.57, with no flag.
+That hole is named here and not closed here.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

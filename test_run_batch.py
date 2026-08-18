@@ -847,6 +847,28 @@ for _name, _kw, _want in (
         ("a scatter that does not say which association it yields",
          dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Association_Type="")),
          "MISSING_ASSOCIATION_TYPE"),
+        # AN ANNOTATION BOX IS A CLAIM ABOUT A PANEL and is checked against it.
+        # It exists because a journal prints `r` and `P` inside the axes and the
+        # glyphs are marker-sized - `0` IS a small circle - so only a
+        # declaration separates them. A declaration written by hand off a figure
+        # can be wrong in exactly these ways, and every one of them fails
+        # SILENTLY otherwise: the run reads fewer marks and does not say why.
+        ("an annotation box that is inverted",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="600,500,60,120")),
+         "BAD_ANNOTATION_BOX"),
+        ("an annotation box that misses the plot area",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="740,900,60,120")),
+         "ANNOTATION_BOX_OUTSIDE_PANEL"),
+        ("an annotation box that swallows the plot area",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="70,730,40,460")),
+         "ANNOTATION_BOX_COVERS_PANEL"),
+        ("the same annotation box declared twice",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="600,700,60,120;600,700,60,120")),
+         "DUPLICATE_ANNOTATION_BOX"),
         ("an association type on a line panel",
          dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
                             Association_Type="PEARSON_R")),
@@ -1012,6 +1034,13 @@ for _name, _kw, _want in (
 ):
     _got = validate(**_kw)
     check(_name + " is rejected", _want in _got, "got %s" % _got)
+
+# ...AND A CORRECT ONE PASSES. Four refusals with nothing that survives them is
+# a column that can only ever be got wrong.
+_ann_ok = dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                             Annotation_Boxes="600,700,60,120"))
+check("an annotation box inside the plot area validates",
+      not validate(**_ann_ok), "%s" % validate(**_ann_ok))
 
 # `Mask_Key` names one of the reader's three built-in masks and was accepted
 # unchecked. The masks are keyed in lower case, so BLUE - the natural way to

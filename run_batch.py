@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.10"
+PIPELINE_VERSION = "9.11"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -1496,10 +1496,15 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
 
     try:
         if mark == "SCATTER":
+            # The panel says where its annotations are; the manifest layer has
+            # already checked each box meets the plot area and does not swallow
+            # it, so this only has to parse.
+            annotations = [BM.parse_box(chunk) for chunk in
+                           _s(panel.get("Annotation_Boxes")).split(";") if chunk.strip()]
             rows = MR.read_panel("SCATTER", image=image, panel_box=box,
                                  x_calibration=xcal, y_calibration=ycal,
                                  series=_series_specs(series_rows, mark, options),
-                                 **kwargs)
+                                 exclude_boxes=annotations, **kwargs)
         elif mark == "BOX_VIOLIN":
             # The released reader finds boxes at declared x positions and does
             # not tell two overlaid groups apart. The batch layer requires a

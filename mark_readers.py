@@ -376,6 +376,39 @@ def measure_marker_scale(dark, panel_box, x_positions, x_window):
     return float(np.median(per_cell))
 
 
+def measure_scatter_marker_scale(mask, panel_box):
+    """The typical marker side length in a SCATTER panel, in pixels.
+
+    `measure_marker_scale` above answers the same question for a line panel and
+    cannot be used here: it looks in a window around each DECLARED x, and a
+    scatter has no declared x - its x IS data. So the net is cast over the whole
+    panel, and it is the same net: bigger than three pixels, smaller than a
+    tenth of the panel. Both are ratios of the panel, not pixel counts, so they
+    say the same thing at every rendering.
+
+    The median rather than the largest. A line panel takes the largest seed per
+    declared x because there is exactly one marker there; a scatter cell holds
+    the whole cloud, so per-cell maxima do not exist and the median over the
+    blobs is what a panel drawn by one plotting program at one setting gives.
+
+    Returns 0.0 when there is nothing to measure - a panel of one merged blob,
+    or of nothing at all - and the caller then refuses rather than falling back
+    to a number from another rendering.
+    """
+    x0, x1, y0, y1 = (int(v) for v in panel_box)
+    crop = mask[max(0, y0):y1, max(0, x0):x1]
+    if crop.size == 0:
+        return 0.0
+    ceiling = max(8, int((x1 - x0) * _MARKER_SEED_MAX_FRACTION))
+    count, _labels, stats_, _c = cv2.connectedComponentsWithStats(
+        (crop > 0).astype(np.uint8), 8)
+    sides = [float(max(stats_[lab][2], stats_[lab][3]))
+             for lab in range(1, count)
+             if _MARKER_SEED_MIN_PX <= min(stats_[lab][2], stats_[lab][3])
+             and max(stats_[lab][2], stats_[lab][3]) <= ceiling]
+    return float(np.median(sides)) if sides else 0.0
+
+
 def _marker_sized(area, bw, bh, scale, filled=False):
     """Is this blob the size of the markers in this panel?
 
@@ -768,11 +801,32 @@ def point_count_audit(points, expected_n=None):
 
 
 def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
-                       min_area=12, max_area=500):
+                       min_area=None, max_area=None, exclude_boxes=None):
     """Read coloured or a single monochrome scatter series.
 
     Multiple monochrome series require marker-identity routing rather than a
     shared threshold and therefore fail closed here.
+
+    A MARKER IS NOT A NUMBER OF PIXELS. `min_area` and `max_area` used to
+    default to 12 and 500 square pixels, with a bounding box under 35 across
+    beside them, and none of those is a property of a figure - they are a marker
+    at one rendering. On publication 177 Figure 4 at 600 dpi the markers are 28
+    to 36 pixels across and about 600 square, so the ceiling rejected EVERY data
+    point in the panel and what came back was the printed annotation: four
+    letters of "r = 0.91", summarized as r = -0.47. The same drawing at a third
+    of the size returns twenty-two marks instead of four.
+
+    So the size is MEASURED off the panel, exactly as the line readers already
+    measure theirs, and a candidate is kept when its side is near the panel's
+    own marker. The two options remain, because a person who has measured the
+    figure may override, and they are now absolute pixel bounds ON TOP of the
+    ratio rather than instead of it.
+
+    `exclude_boxes` is where the panel says its annotations are. A journal
+    prints `r` and `P` inside the axes and the glyphs are marker-sized - `0` IS
+    a small circle - so no measurement separates them; only a declaration does.
+    Each box is (x0, x1, y0, y1) in raster pixels, and ink inside one is not a
+    mark.
     """
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
     x0, x1, y0, y1 = map(int, panel_box)
@@ -790,6 +844,15 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
             masks[spec.name] = (gray < 150).astype(np.uint8) * 255
         else:
             masks[spec.name] = _rgb_mask(rgb, spec.rgb, spec.tolerance).astype(np.uint8) * 255
+    # WHAT THE PANEL DECLARES IS NOT DATA, blanked once for every series. Doing
+    # it on the mask rather than on the contour list is what makes it also
+    # invisible to the marker scale below: an annotation's glyphs are
+    # marker-sized by construction, so leaving them in would let them vote on
+    # how big a marker is.
+    for box in (exclude_boxes or ()):
+        bx0, bx1, by0, by1 = (int(v) for v in box)
+        for mask in masks.values():
+            mask[max(0, by0):by1, max(0, bx0):bx1] = 0
     for spec in series:
         mask = masks[spec.name]
         others = [m for name, m in masks.items() if name != spec.name]
@@ -797,14 +860,18 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
         opened = cv2.morphologyEx(
             crop, cv2.MORPH_OPEN,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+        scale = measure_scatter_marker_scale(opened, (0, crop.shape[1],
+                                                      0, crop.shape[0]))
         contours, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         points = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            if not (min_area <= area <= max_area):
+            if min_area is not None and area < min_area:
+                continue
+            if max_area is not None and area > max_area:
                 continue
             _, _, bw, bh = cv2.boundingRect(contour)
-            if max(bw, bh) > 35 or min(bw, bh) < 3:
+            if not _marker_sized(area, bw, bh, scale, filled=True):
                 continue
             moment = cv2.moments(contour)
             if moment["m00"] == 0:

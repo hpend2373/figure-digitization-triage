@@ -1,0 +1,41 @@
+{
+ "bars": [
+  {
+   "colour": "#000000",
+   "dispersion": 6.0,
+   "mean": 30.0,
+   "series": "S_BLACK",
+   "x": 175
+  },
+  {
+   "colour": "#b2b2b2",
+   "dispersion": 9.0,
+   "mean": 55.0,
+   "series": "S_LIGHT",
+   "x": 277
+  },
+  {
+   "colour": "#666666",
+   "dispersion": 7.0,
+   "mean": 42.0,
+   "series": "S_MID",
+   "x": 379
+  }
+ ],
+ "panel_box": [
+  93,
+  590,
+  60,
+  460
+ ],
+ "ticks": [
+  [
+   100.0,
+   60.0
+  ],
+  [
+   0.0,
+   460.0
+  ]
+ ]
+}

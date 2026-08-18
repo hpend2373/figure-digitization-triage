@@ -7532,6 +7532,71 @@ colour-separation question and it is next. `x_category_columns`' band/step/gap
 are still DPI-bound, and so is `max_whisker_px` - 177 declares 180 at 600 dpi to
 mean the same distance the default means at 300.
 
+## v9.9 — a bar is a solid block of ink joined to the baseline
+
+**The third group of a greyscale figure was reading everybody else's edges.**
+v9.8 got publication 177's means off its whiskers and left two cells plainly
+wrong: `NE/landing day/nonpresyncopal men` came back **656 pg/ml against a
+printed 380**, and `EPI/landing day` **100 against 24**. Both are the dark grey
+group, and the cause is not the reader's arithmetic — it is what a mask means on
+a page that was rasterised and then JPEG'd.
+
+A three-group palette is `#000000`, `#b2b2b2`, `#666666`. The middle one is 102,
+and 102 is a grey the ramp from black to white passes through, and the ramp from
+light grey to white, and the ringing around every hard edge. So the third
+group's mask marks the other two groups' edges, the baseline rule's own fade,
+the descenders of the significance brackets, and specks of paper where nothing
+is drawn. Every one of them has some pixel near the axis in its column, so `a
+bar grows from the baseline` accepted them all, the fragment-merge rule joined
+them, and one bar came back as a run **540 pixels wide** — three bars and the
+gaps between them — read at the top of whichever bar was tallest.
+
+Narrowing the declared `colour_tolerance` from 25 to 8 was worth doing and did
+not fix it: the fills are one flat value each, so a narrow net is the accurate
+one, and it took the cells read from 10 to 18 — but the smear is *at* 102, not
+near it. What separates a bar from a smear is not how close the colour is.
+
+Three statements, none of them about a publication, a colour or a distance:
+
+    ink not JOINED to the baseline is not part of a bar    dust is not joined
+    a column of the RULE is not a column of a bar          the rule spans the row
+    a run with no ink above the rule needs an error bar    or it is the rule
+
+The third exists because the second would otherwise delete two real readings.
+Publication 323 has bars whose value is zero: `-0.318` and `0.421`, two and three
+rows of colour lying inside the line with a whisker standing on them. A rule-only
+run is a bar when something is drawn on it and the rule's own fade when nothing
+is — which is the same stem test every other whisker gets, not a new one.
+
+    reverted                                          scenarios that fail
+    ink joined to the baseline -> the column test       5
+    the rule's rows count as bar columns again          6
+    a rule-only run kept with no error bar on it        7
+
+**Publication 323 is unchanged: 107 values, every mean and every dispersion
+identical to the digit, and `crosscheck_id323` still AGREEs on all 72 frozen
+bars.** Bar centres move by a pixel on eleven of them, which is the run no longer
+including the furniture beside it; the width of a bar is not a number this
+package records.
+
+`make_greyscale_fixture.py` draws what was needed, and it is a JPEG on purpose.
+Written as a PNG the same drawing has clean edges and none of this happens — the
+trap is in the file format the source is actually in, at quality 80, the
+comfortable end of what a publisher embeds. It also carries a **legend key**
+inside the axes: a solid block of a series' exact colour with no bar under it,
+which is the plainest case there is of ink that is not a bar, and the one the
+join test is for. Reverting that test alone puts the key back in the record as a
+bar at 92.25 on a panel whose tallest bar is 55.
+
+**What this does and does not close for 177.** All eighteen cells now read, each
+with a mean that matches the print and a stem-confirmed dispersion; three pass
+the value gate where none did. The nine remaining problems are all the same
+check, `DISPERSION_IMPLIES_SKEW`, and it is right to fire: the caption gives
+`n = 4`, `6` and `22` by group and a unit carries one `N_Outcome`, so every cell
+is being checked against the total, 32. The gap is the manifest's, not the
+figure's — there is no per-series n field — and the plan says so in `n_source`
+rather than papering over it. That is a schema decision and it is not made here.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

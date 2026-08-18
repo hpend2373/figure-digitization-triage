@@ -197,6 +197,72 @@ def _claimed_by_others(others, px, py, radius=1):
     return sum(1 for mask in others if _covers(mask, px, py, radius))
 
 
+def joined_to_baseline(col, panel_box, band_lo, band_hi):
+    """The part of `col` that is ONE PIECE OF INK reaching the baseline band.
+
+    WHY A COLUMN TEST IS NOT ENOUGH. `read_bar_panel` asks each column whether
+    this colour appears anywhere near the baseline, and keeps the column if it
+    does. On a hard-edged drawing that is the same question as "is this column
+    part of a bar", and on a printed figure it is not.
+
+    A rasterised journal page lays a ramp of intermediate greys along every
+    edge, and a JPEG scatters more of them across the middles. The MIDDLE grey
+    of a three-group palette lands on those ramps: masking #666666 on
+    publication 177 marks the edges of the black bars, the edges of the light
+    grey bars, the fade of the baseline rule and the descenders of the
+    significance brackets. Each of those has SOME pixel near the baseline, so
+    every one of their columns passed, the fragment-merge rule joined them, and
+    the third group's bar came back as a run three bars wide whose top belonged
+    to somebody else - 656 pg/ml against a printed 380, and 100 against 24.
+
+    Dust is not a bar because it is not JOINED to anything: the smear along a
+    neighbour's edge is a scatter of separate specks, and this returns only the
+    connected components that reach the band. Measured on 177's six panels, the
+    three real bars per panel survive at 96-100% of their own bounding box and
+    every smear disappears; before this the same panels produced up to seven
+    candidate runs for one bar.
+
+    Components are grown over ROW RUNS rather than pixels - a few thousand runs
+    against a million pixels - so this costs nothing next to building the mask.
+    """
+    x0, x1, y0, y1 = (int(v) for v in panel_box)
+    parent, rows, prev = {}, {}, []
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for y in range(y0, y1):
+        idx = np.flatnonzero(col[y, x0:x1])
+        cur = []
+        for r in runs((idx + x0).tolist()):
+            key = (y, r[0])
+            parent[key] = key
+            for plo, phi, pkey in prev:
+                # 8-connected: a diagonal touch is still one piece of ink, and
+                # an antialiased edge is exactly one pixel wide per row.
+                if r[0] <= phi + 1 and plo <= r[-1] + 1:
+                    union(pkey, key)
+            cur.append((r[0], r[-1], key))
+        rows[y] = cur
+        prev = cur
+    seeds = {find(k) for y in range(max(y0, band_lo), min(y1, band_hi))
+             for _lo, _hi, k in rows.get(y, ())}
+    out = np.zeros_like(col)
+    for y, cur in rows.items():
+        for lo, hi, key in cur:
+            if find(key) in seeds:
+                out[y, lo:hi + 1] = True
+    return out
+
+
 def read_bar_colour_panel(image, panel_box, declared_colours=None, threshold=110,
                           ticks=None, series=None, min_bar_px=15,
                           stem_half_width=3, max_whisker_px=90, stem_required=True,
@@ -289,23 +355,51 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
         reach = stroke + 8
         band_lo = max(y0, int(round(zero_row)) - reach)
         band_hi = min(y1, int(round(zero_row)) + reach + 1)
-        anchored = (col[band_lo:band_hi, :].any(axis=0) if band_hi > band_lo
-                    else col[y0:y1, :].any(axis=0))
-        xs = [x for x in range(x0, x1) if col[:, x].any() and anchored[x]]
+        col = joined_to_baseline(col, (x0, x1, y0, y1), band_lo, band_hi)
+        # THE RULE ITSELF IS NOT A BAR. Where the baseline is drawn in a bar's
+        # own ink - which it is whenever a group is printed black - the rule
+        # runs across the panel behind the whole row, and a column of it is not
+        # a column of any bar. On `greyscale_group_fixture.png` it welded the y
+        # axis to the first bar: the run came out 132 pixels wide against a
+        # drawn 100, its centre moved 17 pixels off the stem, and the error bar
+        # was lost. So a bar's columns are the columns with ink ABOVE the rule,
+        # whose thickness is the `stroke` measured just above.
+        rule_lo = max(y0, int(round(zero_row)) - stroke)
+        rule_hi = min(y1, int(round(zero_row)) + stroke + 1)
+        outside = col.copy()
+        outside[rule_lo:rule_hi, :] = False
+        xs = [x for x in range(x0, x1) if outside[:, x].any()]
         # A bar whose value is near the baseline can be split into two colour
         # slivers: its own stroke plus the zero line cover the fill except at the
         # left and right edges. Two fragments of one bar sit far closer together
         # than two bars do, so merge across a gap that is small relative to the
         # fragments themselves. Measured on a real figure: fragment gaps 4-16 px
         # against widths 17-29, neighbouring-bar gaps 67-70 against widths ~61.
-        pieces = [r for r in runs(xs, 3) if len(r) >= 8]
-        merged = []
-        for r in pieces:
-            if merged and (r[0] - merged[-1][-1]) < 0.5 * (len(merged[-1]) + len(r)):
-                merged[-1] = merged[-1] + list(range(merged[-1][-1] + 1, r[0])) + r
-            else:
-                merged.append(list(r))
-        for order, rr in enumerate(r for r in merged if len(r) >= min_bar_px):
+        def merge(columns):
+            out_runs = []
+            for r in (p for p in runs(columns, 3) if len(p) >= 8):
+                if out_runs and (r[0] - out_runs[-1][-1]) < 0.5 * (len(out_runs[-1])
+                                                                   + len(r)):
+                    out_runs[-1] = (out_runs[-1]
+                                    + list(range(out_runs[-1][-1] + 1, r[0])) + r)
+                else:
+                    out_runs.append(list(r))
+            return [r for r in out_runs if len(r) >= min_bar_px]
+
+        merged = merge(xs)
+        # ...AND A BAR OF HEIGHT ZERO IS NOTHING BUT THE RULE. Publication 323
+        # has two: `-0.318` and `0.421` on its change-from-zero panels, two and
+        # three rows of colour lying inside the line, each with an error bar
+        # standing on it. Dropping every rule-only run would delete them, and
+        # keeping every one puts back the phantoms. What tells them apart is
+        # what is drawn ON them: a run with no ink above the rule is a bar only
+        # if a stem reaches out of it, which is decided below with the same test
+        # every other bar's whisker gets.
+        flat = [x for x in range(x0, x1)
+                if col[:, x].any() and not outside[:, x].any()]
+        candidates = ([(r, False) for r in merged]
+                      + [(r, True) for r in merge(flat)])
+        for order, (rr, rule_only) in enumerate(candidates):
             xlo, xhi = rr[0], rr[-1]
             w = xhi - xlo + 1
             xc = (xlo + xhi) // 2
@@ -480,7 +574,10 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 own_mask_key=key,
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,
+                _rule_only=rule_only,
             ))
+    out = [d for d in out
+           if not d.pop("_rule_only") or d["Errorbar_Stem_Confirmed"] == "TRUE"]
     out.sort(key=lambda d: (d["series"], d["x"]))
     if x_positions:
         # Identity is declared, never inferred. Each bar goes to the NEAREST

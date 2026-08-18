@@ -20,7 +20,8 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from bar_reader import (colour_masks, read_bar_panel, runs,       # noqa: E402
+from bar_reader import (colour_masks, read_bar_panel,             # noqa: E402
+                        read_bar_colour_panel, runs,
                         x_category_columns, axis_column)
 from mark_readers import AxisCalibration                     # noqa: E402
 
@@ -705,6 +706,54 @@ for _thr, _want in ((None, False), (160, True)):
               all(abs(d - b["dispersion"]) <= 0.5
                   for d, b in zip(_disp, _wt["bars"])),
               "%s against %s" % (_disp, [b["dispersion"] for b in _wt["bars"]]))
+
+print()
+print("three greys on a rasterised page, where the middle one is on every ramp")
+# THE FIXTURES ABOVE ARE DRAWN WITH HARD EDGES and no printed figure is. A
+# rasteriser lays a ramp of intermediate greys along every edge; the MIDDLE grey
+# of a three-group palette lands on it, and the baseline rule is drawn in the
+# first group's own ink. Publication 177 is made of exactly this and returned
+# 656 pg/ml against a printed 380.
+import make_greyscale_fixture as GF                                # noqa: E402
+
+GF.main()
+_gt = json.load(open(os.path.join(HERE, "greyscale_group_fixture_truth.json")))
+_gimg = np.asarray(Image.open(os.path.join(HERE, "greyscale_group_fixture.jpeg"))
+                   .convert("RGB")).astype(int)
+_gcal = AxisCalibration.from_points([tuple(p) for p in _gt["ticks"]])
+_gdec = {b["series"]: (b["colour"], 8.0) for b in _gt["bars"]}
+_gbars = read_bar_colour_panel(
+    _gimg, tuple(_gt["panel_box"]), declared_colours=_gdec, threshold=110,
+    series={b["series"]: b["series"] for b in _gt["bars"]}, y_calibration=_gcal)
+# THREE BARS ARE DRAWN AND THREE COME BACK. A phantom is not one wrong number:
+# an undeclared panel is labelled by counting the runs off left to right, so a
+# fourth run moves every label after it. Each of the three things this release
+# does removes a different phantom, and each phantom carries a y VALUE, which is
+# what the record keeps - the run's width is only how it got there.
+#
+#   the legend key, which is the series' exact colour and no bar             92.25
+#   the baseline rule welded to the y axis, and its own fade                  0.75
+#   the rule's fade standing alone, with no error bar on it                   0.50
+check("the greyscale panel returns one bar per drawn bar", len(_gbars) == 3,
+      "%d: %s" % (len(_gbars), [(b["series"], round(b["mean"], 2))
+                                for b in _gbars]))
+_gwant = {b["series"]: b for b in _gt["bars"]}
+for _got in _gbars:
+    _w = _gwant.get(_got["series"])
+    if _w is None:
+        continue
+    check("  %s: the mean is the bar" % _got["series"],
+          abs(_got["mean"] - _w["mean"]) <= 0.5,
+          "read %.2f, drawn %.1f" % (_got["mean"], _w["mean"]))
+    # AND THE ERROR BAR SURVIVES, which is the failure a correct mean hides. The
+    # first bar's run used to reach from the y axis, along the baseline, into the
+    # bar, and a stem is looked for at the run's CENTRE - which that put well off
+    # the bar. The mean stayed right, because it comes from the widest row; the
+    # dispersion was gone, and a mean with no dispersion cannot be pooled.
+    check("  %s: the error bar is found on it" % _got["series"],
+          _got["dispersion"] is not None
+          and abs(_got["dispersion"] - _w["dispersion"]) <= 0.5,
+          "read %s, drawn %.1f" % (_got["dispersion"], _w["dispersion"]))
 
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is

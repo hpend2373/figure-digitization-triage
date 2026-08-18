@@ -13,6 +13,7 @@ where the two curves touch.
 """
 import collections
 import os
+import re
 import sys
 
 import numpy as np
@@ -1010,10 +1011,16 @@ print()
 # INSTALL.md v9.14. What these scenarios hold is the arithmetic and the reason.
 
 
-def _scaled_panel(s):
+def _scaled_panel(s, spread=None, rules=True):
     """One line panel drawn NATIVELY at scale s - stroke, dashes and rules all
     scaled. A resample would not do: interpolating a dashed curve destroys the
     dash gaps the discriminant reads, so it cannot say anything about the reader.
+
+    `spread` moves the DATA inside the panel instead of changing the rendering:
+    the declared positions cover that fraction of the box, centred, which is what
+    an inset or a legend column does to a real figure. `rules` draws the
+    gridlines or leaves them out. Both default to the v9.14 fixture exactly,
+    because the ceilings that suite measures are properties of this drawing.
     """
     W, H = int(600 * s), int(320 * s)
     ax0, ax1 = int(60 * s), int(560 * s)
@@ -1026,7 +1033,7 @@ def _scaled_panel(s):
         return ytop + (ybot - ytop) * (top_v - v) / (top_v - bot_v)
 
     stroke = max(1, int(round(3 * s)))
-    for v in range(70, 121, 10):
+    for v in (range(70, 121, 10) if rules else ()):
         d.line([ax0, yof(v), ax1, yof(v)], fill=(0, 0, 0),
                width=max(1, int(round(s))))
     d.line([ax0, ytop, ax0, ybot], fill=(0, 0, 0), width=stroke)
@@ -1034,7 +1041,13 @@ def _scaled_panel(s):
     labels = tuple("T%d" % i for i in range(1, 9))
     solid = (92.0, 99.0, 104.0, 107.0, 105.0, 98.0, 98.5, 100.0)
     dashed = (86.0, 88.0, 90.0, 92.0, 94.0, 95.0, 94.0, 95.0)
-    xs = [ax0 + (ax1 - ax0) * (i + 0.5) / len(labels) for i in range(len(labels))]
+    if spread is None:
+        xs = [ax0 + (ax1 - ax0) * (i + 0.5) / len(labels)
+              for i in range(len(labels))]
+    else:
+        lo = ax0 + (ax1 - ax0) * (1.0 - spread) / 2.0
+        hi = ax1 - (ax1 - ax0) * (1.0 - spread) / 2.0
+        xs = [lo + (hi - lo) * i / (len(labels) - 1) for i in range(len(labels))]
     d.line([(xs[i], yof(solid[i])) for i in range(len(labels))],
            fill=(0, 0, 0), width=stroke, joint="curve")
     dash, gap = max(2, int(round(9 * s))), max(2, int(round(6 * s)))
@@ -1059,8 +1072,8 @@ _LSERIES = [MR.SeriesSpec("SOLID_S", line_style="SOLID"),
             MR.SeriesSpec("DASHED_S", line_style="DASHED")]
 
 
-def _read_scaled(s):
-    im, box, cal, xs = _scaled_panel(s)
+def _read_scaled(s, spread=None, rules=True):
+    im, box, cal, xs = _scaled_panel(s, spread=spread, rules=rules)
     LSM.reset_panel_notes()
     rows = LSM.read_monochrome_line_panel(
         im, panel_box=box, x_positions=xs, y_calibration=cal, series=_LSERIES,
@@ -1130,6 +1143,99 @@ for _s in (0.5, 0.75, 1.0, 1.5, 2.0):
             _worst, _where = _d, (_s, _key)
 check("every cell read between 0.5x and 2x is within 1 mmHg of the drawn truth",
       _worst <= 1.0, "worst %.2f at %s" % (_worst, _where))
+
+# ---------------------------------------------------------------------------
+# v9.15  A RULE NOBODY COULD REMOVE, READ AS THE SERIES
+#
+# v9.14 measured the ceiling the clipped mask puts on rule coverage and reported
+# it when the panel emitted nothing. Between 2.5x and 6x this fixture is silent
+# and that note fires. At 8x it is NOT silent: the drawn stroke is 24 px, so
+# `_vertical_strokes` takes both curves away as error-bar stems, the unremoved
+# 120 mmHg gridline is the only candidate left at each x, uniqueness is
+# satisfied, and the reader emitted EIGHT cells of 119.95 mmHg - worst 27.95
+# against the drawn truth - while reporting nothing at all.
+def _gray_of(image):
+    """The reader's own view of the raster, so a scenario measures what it sees."""
+    import cv2
+    return cv2.cvtColor(np.asarray(image.convert("RGB")).astype(np.uint8),
+                        cv2.COLOR_RGB2GRAY)
+
+
+_im8, _box8, _cal8, _xs8 = _scaled_panel(8.0)
+_g8 = _gray_of(_im8)
+_xa8 = max(int(_box8[0]), int(min(_xs8.values())) - 10)
+_xb8 = min(int(_box8[1]), int(max(_xs8.values())) + 11)
+_m8 = np.zeros(_g8.shape, dtype=bool)
+_m8[int(_box8[2]):int(_box8[3]), _xa8:_xb8] = \
+    _g8[int(_box8[2]):int(_box8[3]), _xa8:_xb8] < 150
+_rr8 = LSM.unremovable_rule_rows(_m8, _box8, (_xa8, _xb8))
+check("the rows a rule step cannot reach are found where the ceiling is unreachable",
+      _rr8.any(), "%d rows" % int(_rr8.sum()))
+# AND NOT FOUND WHERE IT CAN. The condition is a PAIR - inked across the span
+# AND not inked across the panel - and dropping the second half makes every
+# gridline in every panel unremovable, which would refuse the reader's own
+# release gate.
+_im1, _box1, _cal1, _xs1 = _scaled_panel(1.0)
+_g1 = _gray_of(_im1)
+_xa1 = max(int(_box1[0]), int(min(_xs1.values())) - 10)
+_xb1 = min(int(_box1[1]), int(max(_xs1.values())) + 11)
+_m1 = np.zeros(_g1.shape, dtype=bool)
+_m1[int(_box1[2]):int(_box1[3]), _xa1:_xb1] = \
+    _g1[int(_box1[2]):int(_box1[3]), _xa1:_xb1] < 150
+check("  and none where the rules are recognised and removed",
+      not LSM.unremovable_rule_rows(_m1, _box1, (_xa1, _xb1)).any(),
+      "%d rows" % int(LSM.unremovable_rule_rows(_m1, _box1, (_xa1, _xb1)).sum()))
+
+_rows8, _notes8, _c8 = _read_scaled(8.0)
+check("a value traced onto an unremovable rule is not emitted",
+      _rows8 == [], "%d rows: %s" % (len(_rows8),
+                                     [round(r["mean"], 2) for r in _rows8]))
+_refusal = [n for n in _notes8 if n.startswith("LINE_VALUE_ON_UNREMOVABLE_RULE")]
+check("  and the refusal is reported, not silent",
+      len(_refusal) == 1 and ("%.4f" % _c8) in _refusal[0], "%s" % _notes8)
+# WHAT WAS REFUSED HAS TO BE FURNITURE. A refusal that cannot show the numbers it
+# dropped is indistinguishable from a reader that stopped working, so the note
+# carries them and this reads them back: every one lands on a gridline of the
+# drawn axis, which is what says the reader was reading the grid.
+_refused = [float(v) for v in
+            re.findall(r"at (-?[0-9]+\.[0-9]+) \(row", _refusal[0] if _refusal else "")]
+check("  and every refused value sits on a drawn gridline",
+      len(_refused) == 8
+      and all(abs(v - round(v / 10.0) * 10.0) < 0.5 for v in _refused),
+      "%s" % _refused)
+
+# THE OVER-REFUSAL THIS DELIBERATELY DOES NOT DO. Data over the middle 70% of a
+# panel - an inset, a legend column, a wide axis label - has the same unreachable
+# ceiling and the same unremovable gridlines, and the reader still emits seven
+# correct cells: the unremoved rules make it MORE conservative, because they are
+# extra SOLID candidates that spoil uniqueness. Refusing the panel on the
+# presence of unremovable rules was the tempting stronger guard and it costs
+# those seven numbers; this scenario is what fails if anybody takes it.
+_rowsC, _notesC, _cC = _read_scaled(1.0, spread=0.7)
+check("a panel whose rules are unremovable still emits the cells it can read",
+      len(_rowsC) >= 6 and _cC < LSM._RULE_COVERAGE,
+      "%d rows, ceiling %.4f" % (len(_rowsC), _cC))
+_worstC = max([abs(float(r["mean"]) - _TRUTH[(r["series"], r["x_label"])])
+               for r in _rowsC if (r["series"], r["x_label"]) in _TRUTH] or [99.0])
+check("  every one within 1 mmHg of the drawn truth, and no refusal claimed",
+      _worstC <= 1.0 and not [n for n in _notesC
+                              if n.startswith("LINE_VALUE_ON_UNREMOVABLE_RULE")],
+      "worst %.2f, notes %s" % (_worstC, _notesC))
+
+# THE ROW, EXACTLY. A tolerance of half the measured stroke was written first and
+# reverting it changed no scenario and no forward test - the value always comes
+# from the middle of the rule's own ink - so it went, and with it the cost of
+# refusing a curve drawn one pixel clear of a gridline.
+_rowvec = np.zeros(200, dtype=bool)
+_rowvec[100:108] = True
+check("a value inside a rule's ink is on the rule",
+      LSM.value_sits_on_rule(_rowvec, 104.0))
+check("  and one drawn a pixel clear of a rule is still the figure's own curve",
+      not LSM.value_sits_on_rule(_rowvec, 99.0)
+      and not LSM.value_sits_on_rule(_rowvec, 108.0),
+      "a tolerance either side would lose both of these")
+check("  and a panel with no unremovable rule refuses nothing",
+      not LSM.value_sits_on_rule(np.zeros(200, dtype=bool), 104.0))
 
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))

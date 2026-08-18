@@ -7919,8 +7919,104 @@ because a behavioural pin needs a run whose LINE_MONO_STYLE panel reads nothing,
 and that manifest fixture does not exist yet. The scenario says this in its own
 comment rather than looking like the stronger thing.
 
+## v9.15 — a rule nobody could remove is not a series
+
+v9.14 measured the ceiling the clipped mask puts on rule coverage and reported it
+when the panel emitted nothing. The report was GATED ON SILENCE, and silence is
+not the dangerous case.
+
+**What was wrong.** The same synthetic panel, drawn natively at 8x, is not silent:
+
+    s          ceiling   reachable   cells   worst error   note
+    0.5 - 2.0  0.9014+   yes         12-14   <= 0.96 mmHg  -
+    2.5 - 6.0  0.8873+   NO          0       -             LINE_RULE_COVERAGE_UNREACHABLE
+    8.0        0.8856    NO          8       27.95 mmHg    NONE AT ALL
+
+All eight cells are `119.95` — the 120 mmHg gridline, read as the SOLID series at
+all eight positions. 8x escapes the silence because there the drawn stroke is 24
+px, so `_vertical_strokes` takes both curves away as error-bar stems, the
+unremoved gridline is the ONLY candidate left at each x, uniqueness is satisfied,
+and the furniture is emitted as data. v9.14's diagnosis was already correct about
+this panel and its own gate stopped it being printed.
+
+**What ships.** `unremovable_rule_rows` names the rows that ARE rules over the
+columns the mask contains and are NOT rules over the panel width — the pair the
+mismatch creates — and a cell whose value sits on one of those rows is refused
+with `LINE_VALUE_ON_UNREMOVABLE_RULE`, which reports the ceiling and every value
+it dropped. `run_batch` now clears the note ONCE PER PANEL in the panel loop and
+folds it into the outcome detail on EVERY exit rather than only on silence.
+
+**What deliberately does NOT ship: refusing the panel.** A panel whose data covers
+the middle 70-80% of its box — an inset, a legend column, a wide y label — has the
+same unreachable ceiling and the same unremovable gridlines, and the reader still
+emits 7 of 16 cells, every one within 0.25 mmHg of the drawn truth. The unremoved
+rules make it MORE conservative, not less: they are extra SOLID candidates that
+spoil uniqueness. Refusing on their presence costs seven correct numbers to
+prevent a wrong one that did not happen. What is refused is the CELL that lands on
+the rule.
+
+**The first end-to-end LINE_MONO_STYLE run in CI.** v9.14 said its two `run_batch`
+lines were pinned structurally because a manifest set with a line panel did not
+exist in `test_run_batch`. It does now: two declared series, only the dashed one
+drawn, data over the middle 70%, one gridline at 100 mmHg, error bars on the
+series the figure draws. Reverting the refusal puts eight rows of
+`99.99999999999997` for `ARM=FLUID;TIMEPOINT=T1..T8` back into
+`figure_values_raw.csv` — a series the figure does not contain. That run marks the
+panel QC_FAILED, but for a DIFFERENT reason (a gridline has no error bar, so those
+cells carry no weight), which is not the same as knowing the numbers are
+furniture, and it leaves them in the file every downstream step reads.
+
+    reverted                                          scenarios that fail
+    the cell-level refusal                            3 reader + 4 batch
+    the pair condition (rules over the span only)      2, incl. one from v7.5x
+    run_batch stops folding the note                   1
+    run_batch clears the note inside the reader again   1
+    refusing the whole panel instead of the cell       2
+    the stroke-derived tolerance -> exact row          NOTHING, so it was removed
+
+The last line is the standing rule applied to this release's own code: an
+unobservable guard is decoration. The tolerance also had a cost — a curve drawn
+one pixel clear of a gridline is at the position it was drawn at, and refusing it
+would lose a cell the figure does contain.
+
+**The release gate is blind to all of this.** `forward_test_397_line_style` passes
+identically before and after (18 of 24 cells, worst 1.65 mmHg) because 397's
+ceiling is 0.9720 and no row of its panel qualifies. One publication at one scale
+cannot show a scale-dependent defect; the scaled fixture is what does.
+
+**Two defects found in the same investigation are recorded, not fixed.** Both are
+in "Still open" with their measured numbers.
+
 ## Still open
 
+- THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`
+  makes a 45-column window; at 3x this fixture's dash period is 27 px of ink and
+  18 px of gap, also 45. The window then sits inside one dash, the scored span is
+  trimmed to the columns that carry ink, the trailing gap leaves the denominator,
+  and the DASHED curve measures duty 1.000 gap 0 with `gaps=()` - a perfect solid.
+  The true solid curve is blinded past `_BLIND_MAX_FOR_SOLID`, declines to name
+  itself, and takes DASHED by elimination: THE TWO SERIES EXCHANGE VALUES, 10.96
+  mmHg apart, which is why v9.14 shipped no fix. Four constants are in the same
+  class - `fit_half=22`, `_vertical_strokes(min_run=11)` (a 12 px STROKE at 4x is
+  removed as an error-bar stem), `_column_runs(max_thickness=7)`, and the rule
+  coverage the mismatch above measures. Scaled by the TRUE factor the fixture reads
+  16 of 16 cells at 4x within 0.26 mmHg, and 13 of 16 at 8x where today's reader
+  answers 27.95 mmHg wrong. Scaled by a factor MEASURED off the raster it does not
+  work: an estimator that strips the rules and takes the median ink run reads 1.67
+  on 397 Figure 1, whose truth is 1.00, because two curves running close together
+  merge into 9-10 px runs - and at 1.67 the release gate drops from 18 cells to 13,
+  the worst error goes 1.65 -> 3.41 mmHg, and it emits numbers at 4:30 and 6:00
+  where the curves are one run of ink and refusal is the correct answer. The route
+  that stays honest is a DECLARED rendering scale (per rendering, not per
+  publication), so 397 stays at exactly 1.00 and nothing about it changes. Not a
+  guess: measured, and written down here rather than shipped
+- THE MISMATCH ITSELF IS STILL THERE. v9.15 refuses the cell that lands on an
+  unremovable rule; it does not make the rule removable. A panel whose data covers
+  the middle 80% of its box emits 7 of 16 cells - the nine it loses are lost to
+  gridline candidates spoiling uniqueness, not to a wrong number. Measuring
+  coverage over the columns the mask actually contains recovers them and is the
+  obvious repair, and it is blocked on the item above: it was tried, and at 3x it
+  turned 0 cells into 2 cells one of which was 10.96 mmHg wrong
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section
   of 10.3389/fphys.2020.00455 reads "The values are given as mean and SEM, besides
   anthropometric data and time intervals which are given as mean and SD", and the

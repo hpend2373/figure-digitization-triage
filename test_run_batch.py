@@ -7091,6 +7091,218 @@ check("and the two halves together are the whole vocabulary",
       | set(BM.HUMAN_IDENTITY_EVIDENCE))
 # REVERT: read the trust order off the tuple. Its last entry is the WEAKEST
 # evidence there is - a reviewer's own reading, with no legend and no sentence
+# --------------------------------------------------------------------------
+# a LINE_MONO_STYLE panel read END TO END, and the reader's reason with it
+# --------------------------------------------------------------------------
+# v9.14 folded the line reader's panel note into the NO-MARKS outcome and pinned
+# that structurally, saying in INSTALL.md that a behavioural pin needed a manifest
+# set this file did not have. This is that manifest set, written because v9.15
+# needs the other case: a panel that emits rows AND refuses some, where a note
+# gated on silence reports neither.
+#
+# The figure declares two series, solid and dashed, and DRAWS ONLY THE DASHED
+# ONE. Its data covers the middle 70% of the panel - an inset, a legend column, a
+# wide y label - so the 100 mmHg gridline is inked across every column of the data
+# span and across only three quarters of the panel width: below recognition, never
+# removed, and the only SOLID candidate at every x. It came out as eight cells of
+# exactly 100.00 mmHg for a series the figure does not contain, and reverting the
+# refusal puts all eight of them back into `figure_values_raw.csv` as
+# ARM=FLUID;TIMEPOINT=T1..T8. The run marks that panel QC_FAILED - but for a
+# DIFFERENT reason, that a gridline has no error bar under it and so carries no
+# weight - which is not the same as knowing the numbers are furniture, and leaves
+# them in the file every downstream step reads.
+print()
+print("a LINE_MONO_STYLE panel whose gridline cannot be removed")
+LSTYLE_IMG = os.path.join(IMAGES, "line_style_inset.png")
+_LS_LABELS = tuple("T%d" % i for i in range(1, 9))
+_LS_TRUTH = (86.0, 88.0, 90.0, 92.0, 94.0, 95.0, 94.0, 95.0)
+_LS_RULE = 100.0
+_LS_SD = 2.0
+_LS_TOP, _LS_BOT = 120.0, 70.0
+_LS_YTOP, _LS_YBOT = 30, 290
+_LS_AX0, _LS_AX1 = 60, 560
+
+
+def _ls_yof(v):
+    return _LS_YTOP + (_LS_YBOT - _LS_YTOP) * (_LS_TOP - v) / (_LS_TOP - _LS_BOT)
+
+
+def _draw_line_style_inset(path, spread=0.7):
+    """One dashed curve, one gridline, and data that stops short of the axes."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    im = Image.new("RGB", (600, 320), "white")
+    d = ImageDraw.Draw(im)
+    d.line([_LS_AX0, _ls_yof(_LS_RULE), _LS_AX1, _ls_yof(_LS_RULE)],
+           fill=(0, 0, 0), width=1)
+    d.line([_LS_AX0, _LS_YTOP, _LS_AX0, _LS_YBOT], fill=(0, 0, 0), width=3)
+    d.line([_LS_AX0, _LS_YBOT, _LS_AX1, _LS_YBOT], fill=(0, 0, 0), width=3)
+    lo = _LS_AX0 + (_LS_AX1 - _LS_AX0) * (1.0 - spread) / 2.0
+    hi = _LS_AX1 - (_LS_AX1 - _LS_AX0) * (1.0 - spread) / 2.0
+    xs = [lo + (hi - lo) * i / (len(_LS_LABELS) - 1)
+          for i in range(len(_LS_LABELS))]
+    pts = [(xs[i], _ls_yof(_LS_TRUTH[i])) for i in range(len(_LS_LABELS))]
+    # ERROR BARS ON THE SERIES THE FIGURE DRAWS. Without them the panel carries no
+    # weight, the runner refuses it as NO_VARIANCE whatever the reader did, and a
+    # scenario about values reaching the output file could not fail. The gridline
+    # has no stem under it, which is the figure being honest: furniture has no
+    # dispersion, so the check that the refusal is what stopped it stays sharp.
+    for i, (x, y) in enumerate(pts):
+        top, bottom = _ls_yof(_LS_TRUTH[i] + _LS_SD), _ls_yof(_LS_TRUTH[i] - _LS_SD)
+        d.line([x, top, x, bottom], fill=(0, 0, 0), width=3)
+        for cap in (top, bottom):
+            d.line([x - 6, cap, x + 6, cap], fill=(0, 0, 0), width=3)
+    for a, b in zip(pts, pts[1:]):
+        length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        t = 0.0
+        while t < length:
+            e = min(length, t + 9)
+            d.line([(a[0] + (b[0] - a[0]) * t / length,
+                     a[1] + (b[1] - a[1]) * t / length),
+                    (a[0] + (b[0] - a[0]) * e / length,
+                     a[1] + (b[1] - a[1]) * e / length)], fill=(0, 0, 0), width=3)
+            t = e + 6
+    im.save(path)
+    return xs
+
+
+_LS_XS = _draw_line_style_inset(LSTYLE_IMG)
+_LS_BOX = (_LS_AX0 + 3, _LS_AX1, _LS_YTOP, _LS_YBOT - 3)
+_LS_STYLES = (("S_SOLID", "FLUID", "SOLID"), ("S_DASHED", "NO_FLUID", "DASHED"))
+_ls_figure = dict(
+    Figure_ID="F_LSTYLE", Publication_ID=1, Figure_Number="FIG6",
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=LSTYLE_IMG,
+    Source_Caption_Verbatim="synthetic solid-versus-dashed line panel",
+    Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(LSTYLE_IMG),
+    WPD_Project_File="", Observed_Panel_Count=1, Worklist_Panel_Count=1,
+    Unlisted_Panels="", Panel_Reconciliation_Status="MATCHED", Note="")
+_ls_source_figure = dict(
+    Source_Figure_ID="SF_LSTYLE", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG6", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=LSTYLE_IMG, Source_Image_SHA256=MR.sha256_of(LSTYLE_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one line axes region")
+_ls_source_panel = dict(
+    Source_Panel_ID="P_LSTYLE", Source_Figure_ID="SF_LSTYLE",
+    Panel_Label="P_LSTYLE", Outcome_Label="Mean arterial pressure",
+    Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+    Disposition_Reason="synthetic line-style fixture", Note="")
+_ls_grids = GRIDS + (
+    [dict(Grid_ID="G_LSTYLE", Factor_Name="ARM", Factor_Level=lv,
+          Level_Order=i, Note="") for i, (_s_, lv, _y_) in enumerate(_LS_STYLES)]
+    + [dict(Grid_ID="G_LSTYLE", Factor_Name="TIMEPOINT", Factor_Level=lv,
+            Level_Order=i, Note="") for i, lv in enumerate(_LS_LABELS)])
+_ls_unit = unit("U_LSTYLE", "G_LSTYLE", "CONTINUOUS", Figure_ID="F_LSTYLE",
+                Panel="U_LSTYLE", Bar_Top_Definition="NOT_A_BAR",
+                Outcome_Variable="Mean arterial pressure", Unit="mmHg",
+                Axis_Calib_Y1_Value=_LS_TOP, Axis_Calib_Y1_Pixel=_ls_yof(_LS_TOP),
+                Axis_Calib_Y2_Value=_LS_BOT, Axis_Calib_Y2_Pixel=_ls_yof(_LS_BOT))
+_ls_panel = panel("P_LSTYLE", "U_LSTYLE", "LINE_MONO_STYLE", LSTYLE_IMG, _LS_BOX,
+                  Figure_ID="F_LSTYLE", Config_ID="",
+                  Axis_Y_Ticks="%g:%g;%g:%g" % (_LS_TOP, _ls_yof(_LS_TOP),
+                                                _LS_BOT, _ls_yof(_LS_BOT)))
+_ls_series = [series("P_LSTYLE", sid, level, Colour_Hex="", Marker_Shape="NONE",
+                     Marker_Fill="", Line_Style=style)
+              for sid, level, style in _LS_STYLES]
+_ls_positions = [
+    dict(Panel_ID="P_LSTYLE", Position_ID=q, X_Pixel=x, Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+         Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+    for i, (q, x) in enumerate(zip(_LS_LABELS, _LS_XS))]
+_lm = write_manifests(
+    os.path.join(ROOT, "m_lstyle"),
+    panels=PANELS + [_ls_panel], series_rows=SERIES + _ls_series,
+    positions=POSITION_ROWS + _ls_positions, units=UNITS + [_ls_unit],
+    figures=FIGURES + [_ls_figure], grids=_ls_grids,
+    source_figures=SOURCE_FIGURES + [_ls_source_figure],
+    source_panels=SOURCE_PANELS + [_ls_source_panel],
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+_lo = os.path.join(ROOT, "o_lstyle")
+_lstat = RB.run_batch(_lm, _lo, file_root=ROOT, run_date="2026-08-06")
+_lr = pd.read_csv(os.path.join(_lo, "run_manifest.csv"), dtype=object).fillna("")
+_lrow = _lr[_lr["Panel_ID"] == "P_LSTYLE"]
+check("the line panel runs end to end from its manifests",
+      _lstat["status"] == "RAN" and len(_lrow), "%s" % _lstat)
+_ldetail = _lrow.iloc[0]["Detail"] if len(_lrow) else ""
+_lstate = _lrow.iloc[0]["Run_State"] if len(_lrow) else ""
+check("  and the run manifest carries the refusal, not just a count",
+      "LINE_VALUE_ON_UNREMOVABLE_RULE" in _ldetail,
+      "state %s, detail %r" % (_lstate, _ldetail))
+# WHAT THE STATE HAS TO BE. The solid series is refused everywhere and the dashed
+# one reads, which is a panel whose series the reader could not separate - so the
+# runner withholds the whole panel and queues it. Before v9.15 the solid series
+# was not silent: it held eight cells of exactly 100.00 mmHg, the panel passed
+# automatically, and those eight numbers reached `figure_values_raw.csv`.
+check("  and the panel is withheld because one declared series went silent",
+      _lstate == "SERIES_IDENTITY_UNRESOLVED", "%s" % _lstate)
+_lv = pd.read_csv(os.path.join(_lo, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_lv = _lv[_lv["Unit_ID"] == "U_LSTYLE"]
+# Compared against the DRAWN gridline value, and the file writes it as
+# 99.99999999999997 - so a string comparison would pass while the number is the
+# rule. The refusal is what keeps it out; nothing downstream would have known.
+check("  and not one gridline value reaches the values file",
+      not [v for v in _lv["Mean"] if abs(float(v) - _LS_RULE) < 0.5],
+      "%s" % sorted(zip(_lv["Cell_Key"], _lv["Mean"])))
+_lq = pd.read_csv(os.path.join(_lo, "manual_queue.csv"), dtype=object).fillna("")
+_lq = _lq[_lq["Panel_ID"] == "P_LSTYLE"]
+check("  and all sixteen declared cells are queued for a person",
+      len(_lq) and _lq.iloc[0]["Missing_Cell_Count"] == "16",
+      "%s" % (list(_lq["Missing_Cell_Count"]) if len(_lq) else "no queue row"))
+
+# THE NOTE IS THIS PANEL'S. `panel_notes` is module state read once per panel by
+# a loop over 116 publications, and it was cleared inside the reader dispatch -
+# which a panel the runner returns before dispatching never reaches. The panel
+# after a line panel was then folded the PREVIOUS panel's diagnosis, with nothing
+# on the row to say the note was not its own. A `Panel_Mode=MANUAL` panel is the
+# case: it is a legitimate manifest row, it returns before any reader runs, and it
+# is the panel a person is about to digitize by hand.
+_ls_manual = dict(_ls_panel, Panel_ID="P_LSTYLE_M", Source_Panel_ID="P_LSTYLE_M",
+                  Unit_ID="U_LSTYLE_M", Panel_Label="P_LSTYLE_M",
+                  Panel_Mode="MANUAL")
+_lm2 = write_manifests(
+    os.path.join(ROOT, "m_lstyle2"),
+    panels=PANELS + [_ls_panel, _ls_manual],
+    series_rows=SERIES + _ls_series + [dict(r, Panel_ID="P_LSTYLE_M")
+                                       for r in _ls_series],
+    positions=POSITION_ROWS + _ls_positions + [dict(r, Panel_ID="P_LSTYLE_M")
+                                               for r in _ls_positions],
+    units=UNITS + [_ls_unit, unit(
+        "U_LSTYLE_M", "G_LSTYLE", "CONTINUOUS", Figure_ID="F_LSTYLE",
+        Panel="U_LSTYLE_M", Bar_Top_Definition="NOT_A_BAR",
+        Outcome_Variable="Mean arterial pressure", Unit="mmHg",
+        Axis_Calib_Y1_Value=_LS_TOP, Axis_Calib_Y1_Pixel=_ls_yof(_LS_TOP),
+        Axis_Calib_Y2_Value=_LS_BOT, Axis_Calib_Y2_Pixel=_ls_yof(_LS_BOT))],
+    figures=FIGURES + [_ls_figure], grids=_ls_grids,
+    source_figures=SOURCE_FIGURES + [dict(_ls_source_figure,
+                                          Observed_Panel_Count=2)],
+    source_panels=SOURCE_PANELS + [_ls_source_panel,
+                                   dict(_ls_source_panel,
+                                        Source_Panel_ID="P_LSTYLE_M",
+                                        Panel_Label="P_LSTYLE_M",
+                                        Panel_Disposition="MANUAL_DIGITIZE")],
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+_lo2 = os.path.join(ROOT, "o_lstyle2")
+_lstat2 = RB.run_batch(_lm2, _lo2, file_root=ROOT, run_date="2026-08-06")
+_lr2 = (pd.read_csv(os.path.join(_lo2, "run_manifest.csv"), dtype=object).fillna("")
+        if os.path.exists(os.path.join(_lo2, "run_manifest.csv"))
+        else pd.DataFrame(columns=["Panel_ID", "Run_State", "Detail"]))
+_l2 = _lr2[_lr2["Panel_ID"] == "P_LSTYLE_M"]
+check("a panel the runner never dispatched inherits no diagnosis",
+      len(_l2) and "LINE_VALUE_ON_UNREMOVABLE_RULE" not in _l2.iloc[0]["Detail"],
+      "%s / %s" % (_lstat2, list(zip(_l2["Run_State"], _l2["Detail"]))
+                   if len(_l2) else "no row for P_LSTYLE_M"))
+# AND THE READER STILL OFFERS THE CHANNEL, so the scenarios above cannot pass
+# against a module that dropped it and a batch layer that stopped asking.
+import line_style_mono as _LSM_LN                                  # noqa: E402
+
+check("  and the reader offers every part of that channel",
+      callable(getattr(_LSM_LN, "reset_panel_notes", None))
+      and callable(getattr(_LSM_LN, "panel_notes", None))
+      and callable(getattr(_LSM_LN, "rule_coverage_ceiling", None))
+      and callable(getattr(_LSM_LN, "unremovable_rule_rows", None))
+      and callable(getattr(_LSM_LN, "value_sits_on_rule", None)))
+
 # behind it - so tuple position says the opposite of the truth.
 check("the trust order is written out, not implied by tuple position",
       BM.IDENTITY_EVIDENCE_RANK["REVIEWER_INSPECTION"]
@@ -7116,66 +7328,6 @@ print()
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
-# --------------------------------------------------------------------------
-# the line reader's reason reaches the run manifest
-# --------------------------------------------------------------------------
-# v9.14. `line_style_mono` records WHY it emitted nothing for a panel, because
-# "the reader resolved no marks in this panel" is where a whole figure's worth of
-# gridlines-read-as-curves hid in v7.55 and where it hides again whenever
-# `rule_coverage_ceiling` falls under `_RULE_COVERAGE`. Two lines in `run_batch`
-# carry it: one clears the note per panel, one folds it into the outcome detail.
-#
-# PINNED STRUCTURALLY, AND SAID SO. This asserts the WIRING - that both calls are
-# in the branches that need them - not the resulting detail string, because a
-# behavioural pin needs a run whose LINE_MONO_STYLE panel reads nothing, and that
-# fixture is a manifest set this file does not have. Recorded in INSTALL.md as the
-# weaker of the two pins rather than left looking like the stronger one.
-import ast as _ast_ln                                              # noqa: E402
-
-_ln_src = open(os.path.join(HERE, "run_batch.py"), encoding="utf-8").read()
-_ln_tree = _ast_ln.parse(_ln_src)
-
-
-def _calls_named(node):
-    out = set()
-    for sub in _ast_ln.walk(node):
-        if isinstance(sub, _ast_ln.Call):
-            f = sub.func
-            if isinstance(f, _ast_ln.Name):
-                out.add(f.id)
-            elif isinstance(f, _ast_ln.Attribute):
-                out.add(f.attr)
-    return out
-
-
-#: The `if` whose test names LINE_MONO_STYLE and whose body dispatches the
-#: reader, and the `if not rows` that decides MANUAL_POINT_READ. Found by shape
-#: rather than by line number, so the scenario survives the file moving.
-_ln_reset, _ln_use = [], []
-for _node in _ast_ln.walk(_ln_tree):
-    if not isinstance(_node, _ast_ln.If):
-        continue
-    src = _ast_ln.get_source_segment(_ln_src, _node) or ""
-    if "LINE_MONO_STYLE" in src and "read_panel" in src:
-        _ln_reset.append(_calls_named(_node))
-    if "MANUAL_POINT_READ" in src and "resolved no marks" in src:
-        _ln_use.append(_calls_named(_node))
-
-check("the LINE_MONO_STYLE branch clears the reader's panel note",
-      any("reset_panel_notes" in c for c in _ln_reset),
-      "branches found %d, calls %s" % (len(_ln_reset), _ln_reset[:1]))
-check("  and the no-marks outcome folds that note into its reason",
-      any("panel_notes" in c for c in _ln_use),
-      "branches found %d, calls %s" % (len(_ln_use), _ln_use[:1]))
-# AND THE READER STILL OFFERS THEM, so this cannot pass against a module that
-# dropped the channel: the wiring and the thing it wires are asserted together.
-import line_style_mono as _LSM_LN                                  # noqa: E402
-
-check("  and the reader offers both halves of that channel",
-      callable(getattr(_LSM_LN, "reset_panel_notes", None))
-      and callable(getattr(_LSM_LN, "panel_notes", None))
-      and callable(getattr(_LSM_LN, "rule_coverage_ceiling", None)))
-
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 if FAILURES:

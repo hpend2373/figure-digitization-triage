@@ -87,12 +87,13 @@ import batch_manifests as BM                                       # noqa: E402
 import grid_engine as GE                                           # noqa: E402
 import kernel as K                                                 # noqa: E402
 import make_wpd_project as WPD                                     # noqa: E402
+import line_style_mono as LINE_STYLE                               # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.14"
+PIPELINE_VERSION = "9.15"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -123,7 +124,10 @@ PIPELINE_CODE_FILES = (
     # `reader_functions()`, so what run_batch binds is the function, and the
     # module never appears in `vars(run_batch)`. The guard now follows the
     # imports each file DECLARES, which is a property of the source rather than
-    # of where an import statement happens to sit.
+    # of where an import statement happens to sit. Since v9.15 this file also
+    # imports the module at the top, for the panel-note channel the loop clears
+    # and folds - which does not make the guard's design any less necessary: the
+    # reader itself is still reached through `reader_functions()`.
     "line_style_mono.py", "provenance.py",
 )
 
@@ -1538,15 +1542,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # marker geometry against stroke pattern - and the manifest has
             # already been checked against the right discriminant for each.
             #
-            # CLEARED FIRST, so a panel that reads nothing reports ITS OWN
-            # reason and not the previous panel's. `line_style_mono` records why
-            # it emitted nothing; without this the note is module state and a
-            # batch over 116 publications would attribute one panel's diagnosis
-            # to the next - the same defect `review_overlay.reset_failures`
-            # exists for.
-            if mark == "LINE_MONO_STYLE":
-                from line_style_mono import reset_panel_notes
-                reset_panel_notes()
+            # The reader's panel note is cleared by the PANEL LOOP, not here:
+            # this branch is only reached once the box parses and the raster
+            # opens, so clearing it here left every earlier exit able to inherit
+            # the previous panel's diagnosis.
             rows = MR.read_panel(mark, image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
                                  y_calibration=ycal,
@@ -1663,20 +1662,15 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             % (mark, pid, type(exc).__name__, exc)) from exc
 
     if not rows:
-        # THE READER'S OWN REASON, when it has one. "the reader resolved no
-        # marks" is where a figure's worth of gridlines-read-as-curves hid: the
-        # panel was routed to manual with nothing a person could act on, and the
-        # BAR_MONO geometry branch above already learned this lesson from its own
-        # per-row reasons. The line reader records a panel-level note instead,
-        # because when it reads nothing there is no row to carry one.
-        why = "the reader resolved no marks in this panel"
-        if mark == "LINE_MONO_STYLE":
-            from line_style_mono import panel_notes
-            notes = panel_notes()
-            if notes:
-                why = "; ".join(notes)
+        # "the reader resolved no marks" is where a figure's worth of
+        # gridlines-read-as-curves hid: the panel was routed to manual with
+        # nothing a person could act on, and the BAR_MONO geometry branch above
+        # learned the same lesson from its own per-row reasons. What the LINE
+        # readers know about a panel is a panel-level note, folded onto whatever
+        # outcome this returns by the panel loop - here, and equally on the exits
+        # that DO produce rows, which is the half v9.14 left out.
         return PanelOutcome("MANUAL_POINT_READ", declared=declared,
-                            detail=why,
+                            detail="the reader resolved no marks in this panel",
                             missing=sorted(_all_cells(series_level, position_level)))
 
     # ---- a series that produced nothing while its neighbours did is not an
@@ -3204,6 +3198,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         pid = _s(panel.get("Panel_ID"))
         unit = units_by_id.get(_s(panel.get("Unit_ID")))
         options = options_by_config.get(_s(panel.get("Config_ID")), {})
+        # THE READER'S PANEL-NOTE CHANNEL, CLEARED HERE FOR EVERY PANEL. It was
+        # cleared inside the LINE_MONO_STYLE dispatch, which is only reached once
+        # the box parses and the raster opens: a line panel whose geometry
+        # refuses would then have been folded the PREVIOUS panel's diagnosis,
+        # over 116 publications, with nothing to say it was not its own.
+        LINE_STYLE.reset_panel_notes()
         try:
             outcome = run_panel(
                 panel, series_by_panel.get(pid, []),
@@ -3227,6 +3227,15 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                         manifest_hashes=manifest_hashes,
                         detail="%s" % exc)
             raise
+        # WHAT THE READER SAID ABOUT THE PANEL, ON EVERY EXIT AND NOT ONLY ON
+        # SILENCE. v9.14 folded these notes in the `if not rows` branch alone,
+        # which is the defect v9.15 fixes one level down: the panel that made the
+        # refusal necessary emitted eight cells and looked healthy. A note about
+        # cells that were refused belongs on the outcome that emitted the others.
+        _notes = LINE_STYLE.panel_notes()
+        if _notes:
+            outcome.detail = "; ".join(
+                ([outcome.detail] if outcome.detail else []) + _notes)
         overlays_by_panel[pid] = (_run_relative(outcome.overlay, output_dir)
                                   if outcome.overlay else "")
         if outcome.inference_crops:

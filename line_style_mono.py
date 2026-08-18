@@ -275,6 +275,76 @@ def _horizontal_rules(mask, x0, x1, coverage=_RULE_COVERAGE):
     return out & mask
 
 
+def unremovable_rule_rows(mask, panel_box, span, coverage=_RULE_COVERAGE):
+    """Rows that ARE rules over the columns this reader can see, and are NOT
+    rules over the panel - so `_horizontal_rules` leaves them in, and a curve
+    tracer is free to trace them.
+
+    The mask is clipped to the declared data span, because a stray pixel of the
+    y-axis half a window away from the first datum dragged a fit by six pixels.
+    Coverage is measured against the PANEL width, because that is what makes a
+    gridline a gridline. Both are right and the pair is not: a rule inked across
+    every column the mask contains measures `span / width` and falls below the
+    threshold whenever the data does not reach the panel's ends. It is then not
+    a rule, not removed, and a perfect solid line with a duty of 1.000 and a gap
+    of 0 - which is exactly what a curve tracer is looking for.
+
+    v9.14 measured the ceiling this puts on coverage and reported it, and that
+    report is gated on the panel emitting NOTHING. The dangerous case is the
+    other one. On the scale fixture drawn natively at 8x:
+
+        ceiling 0.8856, unreachable          8 cells emitted, no note at all
+        every cell 119.95 mmHg               worst 27.95 against the drawn truth
+
+    All eight are the 120 mmHg gridline, read as the SOLID series at all eight
+    positions. Between 2.5x and 6x the same panel is silent and v9.14's note
+    fires; 8x escapes because there the drawn stroke is 24 px, `_vertical_strokes`
+    takes both curves away as error-bar stems, and the gridline is left as the
+    ONLY candidate at each x - so the count is one, uniqueness is satisfied, and
+    the furniture is emitted as data.
+
+    WHAT THIS DOES NOT DO. It does not remove these rows and it does not refuse
+    the panel. A panel whose data covers the middle 80% of its box - an inset, a
+    legend, a wide axis label - has a ceiling of 0.8491 and emits 7 of 16 cells,
+    and all seven are curve values: the unremoved gridlines make the reader MORE
+    conservative, because they are extra SOLID candidates that spoil uniqueness.
+    Refusing that panel would throw away seven correct numbers to prevent a
+    wrong one that never happened. What is refused is a CELL WHOSE VALUE SITS ON
+    ONE OF THESE ROWS, which is the only cell that can be a rule.
+
+    On publication 397 Figure 1 the ceiling is 0.9720, no row qualifies, and the
+    output is unchanged.
+    """
+    x0, x1, _y0, _y1 = (int(v) for v in panel_box)
+    xa, xb = (int(v) for v in span)
+    rows = np.zeros(mask.shape[0], dtype=bool)
+    if xb <= xa:
+        return rows
+    width = max(1, x1 - x0)
+    seen = max(1, xb - xa)
+    inked = mask[:, xa:xb].sum(axis=1)
+    return (inked >= coverage * seen) & (inked < coverage * width)
+
+
+def value_sits_on_rule(rule_rows, y):
+    """Is this value the ink of a rule nobody could remove?
+
+    THE ROW, EXACTLY, with no tolerance either side. A tolerance was written
+    first - a reach of half the stroke the window measured, on the argument that
+    a rule is one row thick at the reference rendering and eight at 8x - and
+    reverting it changed nothing anywhere: every fixture that has an unremovable
+    rule reads its value from the middle of the rule's own ink, so the centre
+    lands inside the block whatever its thickness. An unobservable guard is
+    decoration, and the tolerance had a cost besides: a curve drawn one pixel
+    clear of a gridline is at the position it was drawn at, and refusing it would
+    lose a cell the figure does contain.
+    """
+    if y is None or not len(rule_rows):
+        return False
+    row = int(round(float(y)))
+    return bool(0 <= row < len(rule_rows) and rule_rows[row])
+
+
 def _cap_ink(mask, stems, half_window):
     """The error-bar caps: bounded horizontal runs at the ends of a stem.
 
@@ -911,6 +981,11 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     # Both are ink that is not a datum, and both hide the curve where it
     # crosses them, so both are taken out of the traceable ink AND used to
     # blind the duty accounting.
+    # THE ROWS THE RULE STEP CANNOT REACH, measured before anything traces.
+    # `_horizontal_rules` below removes what it can prove is a rule; this is
+    # what it cannot, and a value that lands on one of these rows is furniture
+    # rather than a datum.
+    unremovable = unremovable_rule_rows(mask, panel_box, (xa, xb))
     stems = _vertical_strokes(mask)
     # NAMED, not unioned away. The union is what blinds the duty accounting;
     # the parts are the only thing that can say whether a gap in the ink is
@@ -1020,6 +1095,10 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                         if s_["style"] == style for g in (s_.get("gaps") or ()))
         dash_gap[style] = float(pooled[len(pooled) // 2]) if pooled else 0.0
     out = []
+    #: Cells this reader traced and then refused because the ink under them is a
+    #: gridline it could not prove was a gridline. Reported as a panel note: a
+    #: refusal nobody can see is the same as the wrong number it replaced.
+    on_rule = []
     for order, (label, x) in enumerate(x_positions.items()):
         xi = int(round(x))
         if label in unresolved:
@@ -1031,6 +1110,14 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
                 continue          # absent here, or two curves of the same style
             candidate = next(c for c in styled if c["style"] == style)
             cy = candidate["y"]
+            # A RULE NOBODY COULD REMOVE IS NOT THIS SERIES. It measures a duty
+            # of 1.000 and a gap of 0, and where the curves have been taken away
+            # as stems it is the only candidate left - so it satisfies every test
+            # uniqueness makes and comes out as data.
+            if value_sits_on_rule(unremovable, cy):
+                on_rule.append((label, spec.name,
+                                float(y_calibration.pixel_to_value(cy)), float(cy)))
+                continue
             whisker, cap_refusal = _bar_extent(mask, xi, cy,
                                   [c["y"] for c in styled if c is not candidate],
                                   half_window=x_window,
@@ -1132,6 +1219,21 @@ def read_monochrome_line_panel(image, panel_box, x_positions, y_calibration,
     # every consumer - the overlay, the gate, the finalizer - makes it itself.
     # A derived value that is also stored is two answers to one question.
     out.sort(key=lambda row: (row["series"], row["order"]))
+    # REPORTED WHETHER OR NOT ANYTHING ELSE CAME OUT. The panel that made this
+    # necessary emitted eight cells and looked healthy; had the refusal been
+    # gated on silence, as v9.14's ceiling note is, it would have replaced eight
+    # wrong numbers with eight absences and said nothing about either.
+    if on_rule:
+        ceiling = rule_coverage_ceiling(x_positions, panel_box, x_window)
+        _PANEL_NOTES.append(
+            "LINE_VALUE_ON_UNREMOVABLE_RULE: %d cell(s) were traced onto a row "
+            "that is inked across every column of the data span but only %.4f of "
+            "the panel width, so the rule step could not recognise it at %.2f and "
+            "did not remove it. Those cells are the gridline, not the series, and "
+            "are refused: %s"
+            % (len(on_rule), ceiling, _RULE_COVERAGE,
+               "; ".join("%s/%s at %.2f (row %.1f)" % (series, label, value, row)
+                         for label, series, value, row in on_rule)))
     # WHY, WHEN THERE IS NOTHING. A panel that emits no rows is fail-closed and
     # right to be, and `run_batch` routes it to MANUAL_POINT_READ - but with the
     # detail "the reader resolved no marks in this panel", which is where a whole

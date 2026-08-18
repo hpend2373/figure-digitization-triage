@@ -7788,6 +7788,65 @@ point per subject per test day, so the point count is about twice that and
 For an association cell `N_Outcome` has to be the number of PAIRS. Nothing in
 the manifest says which of the two it is.
 
+## v9.13 — the paper prints the answer, and the run is held to it
+
+**Publication 177 Figure 4, all three panels, against what the paper printed:**
+
+    panel    pairs   found   count    computed r   printed r   verdict
+    A          10      10    MATCH       0.907        0.91      accepted
+    B          12      12    MATCH       0.561        0.57      accepted
+    C          48      48    MATCH       0.250        0.17      REFUSED
+
+Two things got it there, and the second exists because of the first.
+
+**A slightly overlapping pair is two markers.** The peak-suppression radius -
+how close two seeds may be before the lower is taken for the higher one's noise
+- was 0.8 of a marker, and what that swallows is marks 5 to 10 pixels apart on a
+marker 32 across. Panel A lost one of its ten that way and panel C three of its
+forty-eight. The fixtures could not see it: they read every drawn pair anywhere
+from 0.30 to 0.80. A printed figure can, and its three panels are right across
+0.40 to 0.50 and wrong on either side:
+
+    0.30   10  12  50        0.60   10  12  46
+    0.40   10  12  48        0.70    9  12  46
+    0.50   10  12  48        0.80    9  12  45
+
+0.45 is the middle of that plateau, and `scatter_fixture_overlap.jpeg` now
+carries a pair TEN pixels apart - the separation panel A prints - so the suite
+can tell one setting from the other.
+
+Those counts are also the first independent confirmation of something the last
+release could only assert: 10, 12 and 48 are exactly twice the caption's 5, 6
+and 24, which is what "individual data points from testing preflight and on
+landing day" means. `N_Outcome` on an association cell is the number of PAIRS.
+
+**And a count says how many marks were found, not where they are.** With the
+radius fixed, panel C matches its 48 exactly and still computes 0.25 against a
+printed 0.17: two dozen overlapping rings resolve into the right NUMBER of seeds
+in the wrong places. No count can catch that. What can is the figure itself - a
+panel that prints `r = 0.17` beside its cloud has declared the answer, the same
+way a caption declares what its error bars are. `Association_Value_Printed` on
+the panel manifest, `association_value_printed` in the plan, and a cell whose
+digitized points do not reproduce it goes to a person with both numbers in the
+refusal.
+
+The tolerance is 0.02. A printed value is rounded to two decimals so half a
+hundredth is unavoidable; 177's two readable panels land 0.003 and 0.009 away
+and the one whose cloud the reader cannot resolve lands 0.080 - an order of
+magnitude apart, so nothing sits near the line. Tight is the safe direction,
+because it sends work to a person.
+
+    reverted                                          scenarios that fail
+    the suppression radius goes back to 0.80            1
+    the printed value is not compared with the computed 3
+    the manifest stops checking the printed value       3
+
+**What this does NOT close.** Panel C is still read wrong - it is refused rather
+than corrected, and a cluster of two dozen overlapping rings is where this
+reader stops. And the check only exists where the paper prints a value: a
+scatter with no printed statistic and no declared n still emits whatever the
+points give.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

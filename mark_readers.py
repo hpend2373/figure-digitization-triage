@@ -409,13 +409,25 @@ def measure_scatter_marker_scale(mask, panel_box):
     return float(np.median(sides)) if sides else 0.0
 
 
-#: How deep inside a marker its seed has to be, and how close two seeds may be,
-#: both as fractions of the panel's own marker. A stroke a quarter of a marker's
-#: width cannot hold a seed, which is what removes a fitted line; and two peaks
-#: closer than most of a marker are one marker's noise. Measured on the overlap
-#: fixture at centre gaps of 13 to 39 pixels against a marker 33 across: the same
-#: count at neighbourhoods of 0.6, 0.8 and 1.0, so neither is a knife edge.
-_SEED_DEPTH, _SEED_NEIGHBOURHOOD = 0.25, 0.8
+#: How deep inside a marker its seed has to be, and how close two peaks may be
+#: before the lower is taken for the higher one's noise - both as fractions of
+#: the panel's own marker. A stroke a quarter of a marker wide cannot hold a
+#: seed, which is what removes a fitted line.
+#:
+#: THE NEIGHBOURHOOD IS MEASURED ON A PRINTED FIGURE, because the fixtures
+#: cannot see it: they read every drawn pair at every value from 0.30 to 0.80.
+#: Publication 177 Figure 4 can - its three panels hold 10, 12 and 48 pairs, and
+#: the count is exactly right across 0.40 to 0.50 and wrong on either side:
+#:
+#:      0.30   10  12  50        0.60   10  12  46
+#:      0.40   10  12  48        0.70    9  12  46
+#:      0.50   10  12  48        0.80    9  12  45
+#:
+#: 0.45 is the middle of that plateau. What 0.80 was swallowing is marks 5 to 10
+#: pixels apart on a marker 32 across - slightly overlapping points, which a
+#: printed cloud is full of - and `scatter_fixture_overlap.jpeg` now carries a
+#: pair eight pixels apart so the suite can see it too.
+_SEED_DEPTH, _SEED_NEIGHBOURHOOD = 0.25, 0.45
 
 
 def marker_seeds(mask, scale):
@@ -1207,6 +1219,15 @@ def _kendall_tau_b(x, y):
     z = tau * math.sqrt(9 * n * (n - 1) / (2 * (2 * n + 5)))
     return (float(tau), float(math.erfc(abs(z) / math.sqrt(2.0))),
             "KENDALL_NORMAL_APPROX_N_GT_200")
+
+
+#: How far a digitized association may sit from the one the paper prints before
+#: the panel goes to a person. A printed value is rounded to two decimals, so
+#: half a hundredth is unavoidable; publication 177's two readable panels land
+#: 0.003 and 0.009 away, and the one whose cloud the reader cannot resolve lands
+#: 0.080 - an order of magnitude apart, so the line is between them and nothing
+#: is near it. Tight is the safe direction: it sends work to a person.
+PRINTED_ASSOCIATION_TOLERANCE = 0.02
 
 
 def summarize_association(points, association_type="PEARSON_R"):

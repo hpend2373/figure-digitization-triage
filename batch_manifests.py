@@ -780,6 +780,14 @@ def panel_manifest_columns():
         # instruction, not a finding: the paper says which statistic it reports,
         # and the reader must not pick one by looking at the points.
         "Association_Type",
+        # AND THE VALUE THE PAPER PRINTS FOR IT, where it prints one. A figure
+        # that says `r = 0.91` beside its cloud is declaring the answer, and a
+        # digitized point set that does not reproduce it has not reproduced the
+        # study's point set - which is a thing no count can show. Publication
+        # 177 panel C matches its declared 48 pairs exactly and still computes
+        # 0.25 against a printed 0.17, because a count says nothing about where
+        # the points are. Blank where the paper prints nothing.
+        "Association_Value_Printed",
         "Config_ID", "Panel_Mode", "Note",
     ]
 
@@ -1869,7 +1877,29 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 flag(line, "BAD_ASSOCIATION_TYPE",
                      "Association_Type=%s (expected %s)"
                      % (at, "/".join(SCATTER_ASSOCIATION_TYPES)))
-        elif not blank(r.get("Association_Type")):
+            # THE PRINTED VALUE HAS TO BE ONE THIS STATISTIC CAN TAKE. A
+            # correlation outside [-1, 1] is a transcription slip, and it would
+            # otherwise reach the run and refuse every panel it is on for a
+            # reason nobody could see from the manifest.
+            if not blank(r.get("Association_Value_Printed")):
+                try:
+                    printed = float(str(r.get("Association_Value_Printed")).strip())
+                except ValueError:
+                    flag(line, "BAD_PRINTED_ASSOCIATION",
+                         "Association_Value_Printed=%r is not a number"
+                         % r.get("Association_Value_Printed"))
+                else:
+                    lo = 0.0 if at == "R_SQUARED" else -1.0
+                    if at in ("PEARSON_R", "SPEARMAN_RHO", "KENDALL_TAU",
+                              "R_SQUARED") and not (lo <= printed <= 1.0):
+                        flag(line, "BAD_PRINTED_ASSOCIATION",
+                             "Association_Value_Printed=%s is outside [%g, 1] "
+                             "for Association_Type=%s" % (printed, lo, at))
+        elif not blank(r.get("Association_Value_Printed")):
+            flag(line, "ASSOCIATION_NOT_APPLICABLE",
+                 "Association_Value_Printed is declared on a %s panel, which "
+                 "yields no association" % (mark or "?"))
+        if mark != "SCATTER" and not blank(r.get("Association_Type")):
             flag(line, "ASSOCIATION_TYPE_NOT_APPLICABLE",
                  "Association_Type is set on a %s panel, which yields no "
                  "association" % mark)

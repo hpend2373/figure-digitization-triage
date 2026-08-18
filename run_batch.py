@@ -92,7 +92,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.12"
+PIPELINE_VERSION = "9.13"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -2630,6 +2630,9 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                             detail="a scatter cannot become Statistic_Type=%s"
                                    % statistic)
     association = _upper(panel.get("Association_Type"))
+    printed_association = None
+    if _s(panel.get("Association_Value_Printed")):
+        printed_association = float(_s(panel.get("Association_Value_Printed")))
     sha = file_sha256(image_path)
     # What the paper says this scatter contains. A count the reader can be
     # measured against, rather than one it declares by counting itself.
@@ -2683,6 +2686,23 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         # An association cell has no dispersion of its own: the confidence
         # interval, where the paper gives one, is transcribed rather than read.
         summary["Dispersion_Method"] = "NO_DISPERSION"
+        # AND WHERE THE PAPER PRINTS THE ANSWER, IT IS CHECKED AGAINST IT. A
+        # figure that says `r = 0.91` beside its cloud has declared the value
+        # the point set has to produce, and a digitized set that does not is not
+        # the study's - which the count cannot show. Publication 177 panel C
+        # matches its declared 48 pairs EXACTLY and computes 0.25 against a
+        # printed 0.17, because a count says how many marks were found and
+        # nothing about where they are.
+        if printed_association is not None:
+            gap = abs(float(summary["Association_Value"]) - printed_association)
+            if gap > MR.PRINTED_ASSOCIATION_TOLERANCE:
+                disputed.append(
+                    "%s: the source prints %s = %g and the digitized points give "
+                    "%.4f, a gap of %.4f against a tolerance of %g"
+                    % (sid, association or "the association", printed_association,
+                       summary["Association_Value"], gap,
+                       MR.PRINTED_ASSOCIATION_TOLERANCE))
+                continue
         planned.append((sid, factor, level, mine, summary))
 
     # ---- every refusal, BEFORE a single file is written --------------------

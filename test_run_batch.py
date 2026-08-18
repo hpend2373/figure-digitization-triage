@@ -853,6 +853,22 @@ for _name, _kw, _want in (
         # declaration separates them. A declaration written by hand off a figure
         # can be wrong in exactly these ways, and every one of them fails
         # SILENTLY otherwise: the run reads fewer marks and does not say why.
+        # THE VALUE THE PAPER PRINTS, checked as a declaration before it is
+        # checked against the points. A correlation outside [-1, 1] is a
+        # transcription slip that would otherwise reach the run and refuse
+        # every panel it sits on for a reason invisible from the manifest.
+        ("a printed association that is not a number",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Association_Value_Printed="strong")),
+         "BAD_PRINTED_ASSOCIATION"),
+        ("a printed correlation outside its own range",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Association_Value_Printed="1.4")),
+         "BAD_PRINTED_ASSOCIATION"),
+        ("a printed association on a panel that yields none",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Association_Value_Printed="0.9")),
+         "ASSOCIATION_NOT_APPLICABLE"),
         ("an annotation box that is inverted",
          dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
                             Annotation_Boxes="600,500,60,120")),
@@ -6636,6 +6652,44 @@ for _label, _n, _want in (("with no declared n", "", "MANUAL_POINT_READ"),
               and _scat_rows.iloc[0]["Overplotting_Possible"] == "TRUE",
               "%s" % _scat_rows.to_dict("records"))
 
+
+print("the paper prints the answer, and the run is held to it")
+# A COUNT SAYS HOW MANY MARKS WERE FOUND AND NOTHING ABOUT WHERE THEY ARE.
+# Publication 177 panel C matches its declared 48 pairs EXACTLY and computes
+# r = 0.25 against a printed 0.17, because two dozen overlapping rings resolve
+# into the right NUMBER of seeds in the wrong places. Where the figure prints
+# its own r there is a second declaration to be held to, and it catches what the
+# count cannot. The synthetic panel's pairs give 0.9917.
+for _label, _printed, _want in (
+        ("that agrees with the digitized points", "0.99", "AUTO_PASS"),
+        ("that the digitized points do not reproduce", "0.40",
+         "MANUAL_POINT_READ")):
+    _pdir = os.path.join(ROOT, "printed_%s" % _printed.replace(".", "_"))
+    _pmd = write_manifests(
+        os.path.join(_pdir, "manifests"),
+        panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                      Association_Value_Printed=_printed))
+    RB.run_batch(_pmd, os.path.join(_pdir, "out"), file_root=ROOT,
+                 run_date="2026-08-06")
+    _prun = pd.read_csv(os.path.join(_pdir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _pstate = dict(zip(_prun["Panel_ID"], _prun["Run_State"]))
+    _pdetail = dict(zip(_prun["Panel_ID"], _prun["Detail"]))
+    check("a printed association %s -> %s" % (_label, _want),
+          _pstate.get("P_SCAT") == _want,
+          "%s | %s" % (_pstate.get("P_SCAT"), _pdetail.get("P_SCAT")))
+    if _want == "MANUAL_POINT_READ":
+        # The refusal has to SAY BOTH NUMBERS. "could not be reconciled" sends a
+        # person to a panel with nothing to check against.
+        check("  and the refusal names the printed value and the computed one",
+              "0.4" in _pdetail.get("P_SCAT", "")
+              and "0.99" in _pdetail.get("P_SCAT", ""),
+              "%r" % _pdetail.get("P_SCAT"))
+        _pv = pd.read_csv(os.path.join(_pdir, "out", "figure_values_raw.csv"),
+                          dtype=object).fillna("")
+        check("  and no association was written from it",
+              not len(_pv[_pv["Unit_ID"] == "U_SCAT"]),
+              "%d rows" % len(_pv[_pv["Unit_ID"] == "U_SCAT"]))
 
 print("a run leaves nothing on disk its ledger does not name")
 # The point files were written inside the per-series loop, so a two-series

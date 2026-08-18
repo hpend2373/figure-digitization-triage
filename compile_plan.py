@@ -93,6 +93,8 @@ PLAN_KEYS = {
              "annotation_boxes",
              "y_ticks", "x_ticks", "y_scale", "x_scale", "baseline",
              "config_id", "panel_mode", "association_type",
+             # the value the paper prints beside the cloud, where it prints one
+             "association_value_printed",
              "axis_x_region", "axis_y_region", "x_region", "y_region",
              "note", "series", "positions"),
     "series": ("series_id", "factor", "level", "bar_fill", "marker",
@@ -917,6 +919,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                 Axis_X_Ticks=x_ticks, Axis_Y_Ticks=y_ticks,
                 Baseline_Value=read.get("baseline", ""),
                 Association_Type=_s(read.get("association_type")).upper(),
+                Association_Value_Printed=_s(read.get("association_value_printed")),
                 Config_ID=_s(read.get("config_id")),
                 Panel_Mode=_s(read.get("panel_mode")).upper() or "AUTO",
                 Note=_s(read.get("note"))))

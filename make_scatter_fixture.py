@@ -9,8 +9,8 @@
     scatter_fixture_open.jpeg    with the markers drawn as rings
     scatter_fixture_triangle.jpeg  and as open triangles, whose interiors are a
                                  third of the marker rather than three quarters
-    scatter_fixture_overlap.jpeg one more pair, 22 pixels from its neighbour
-                                 against a marker 33 across
+    scatter_fixture_overlap.jpeg two more pairs, 22 and 10 pixels from their
+                                 neighbours against a marker 33 across
 
 WHY TWO SIZES. `read_scatter_panel` decided what a marker is with four absolute
 numbers - area between 12 and 500 square pixels, bounding box under 35 across
@@ -90,7 +90,14 @@ SCALES = {"small": 1, "large": 3}
 #: as two, whose outlines are one contour.
 VARIANTS = {"line": dict(fitted_line=True),
             "open": dict(open_markers=True),
-            "overlap": dict(extra=[(1.70, 24.6)]),
+            # TWO extra pairs. The first is 22 pixels from its neighbour, which
+            # is two markers a person plainly sees as two. The second is TEN,
+            # which is the separation publication 177 panel A prints between the
+            # two marks a suppression radius of 0.8 of a marker swallowed - and
+            # panel C has three more at 5 to 8. Without a pair that close
+            # nothing in the suite can tell a radius of 0.45 from one of 0.80,
+            # and the fixtures read every drawn pair at either.
+            "overlap": dict(extra=[(1.70, 24.6), (1.88, 32.833)]),
             # AN OPEN TRIANGLE, which is what publication 177 panel B is drawn
             # with. It matters separately from the ring because a triangle
             # encloses far less of its own bounding box: 177's measure 12 across

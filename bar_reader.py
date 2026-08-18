@@ -518,7 +518,20 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                         caps.append(y)
                     elif caps:
                         break
-                cap_c = (caps[0] + caps[-1]) / 2.0 if caps else float(far)
+                # NO CAP MEANS NO DISPERSION. This used to fall back to `far` -
+                # the far end of the stem run - and report it as a cap, under
+                # `DIRECT_CONNECTED_CAP`, which is a claim that a cap was
+                # measured. Two things make it false, and publication 177 has
+                # both. A JPEG can drop four rows out of a stem, and then the
+                # run stops at the hole and its end is the middle of the
+                # whisker: 2.2 pg/ml reported against a printed 6. And a cap can
+                # be printed lighter than the declared ink level, so only the
+                # stem is ink and its end is half a stroke off the truth.
+                # Neither can be told from a bracket's descender without a
+                # constant, and a cell with no dispersion goes to a person -
+                # which is the outcome a figure this reader cannot finish
+                # reading is supposed to have.
+                cap_c = (caps[0] + caps[-1]) / 2.0 if caps else None
 
             out.append(dict(
                 series=sname, order=order, x=xc, bar_width=w,
@@ -552,8 +565,12 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 # exists in the shape it does, because significance glyphs sit
                 # exactly where a cap is and are the same colour. Recorded as
                 # provenance as well as a boolean, so the tier follows it.
-                Dispersion_Method=("DIRECT_CONNECTED_CAP" if stem_ok
-                                   else "NO_DISPERSION" if cap_c is None
+                # THE METHOD DESCRIBES WHAT PRODUCED THE NUMBER, so with no cap
+                # there is no number and no method. Asking about the stem first
+                # let a stem-confirmed bar with no cap say DIRECT_CONNECTED_CAP
+                # beside an empty dispersion.
+                Dispersion_Method=("NO_DISPERSION" if cap_c is None
+                                   else "DIRECT_CONNECTED_CAP" if stem_ok
                                    else "UNSTEMMED_CAP"),
                 # Sampled INSIDE the bar rather than at its top edge: the top is
                 # an outline a neighbouring colour's antialiasing can reach, and

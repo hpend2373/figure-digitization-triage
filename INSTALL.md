@@ -7597,6 +7597,59 @@ is being checked against the total, 32. The gap is the manifest's, not the
 figure's — there is no per-series n field — and the plan says so in `n_source`
 rather than papering over it. That is a schema decision and it is not made here.
 
+## v9.10 — a whisker the reader cannot finish reading is not a dispersion
+
+**Verifying v9.9 found two dispersions that were measured off nothing.** Every
+one of publication 177's eighteen means lands on its own bar - checked not by a
+second reader (two attempts at one reproduced the reader's own traps, which
+proves nothing) but by a predicate asked of the figure at the row each number
+points to: the outline stroke is the ink that is not the fill, and its centre is
+where the claim should sit. Sixteen of the eighteen dispersions land on their
+cap the same way, within 0.6 pixels. Two did not, and both were produced by one
+line:
+
+    cap_c = (caps[0] + caps[-1]) / 2.0 if caps else float(far)
+
+`far` is the far end of the STEM. When no row near it is wide enough to be a
+cap, the reader reported the stem's own end as one - and stamped it
+`Dispersion_Method=DIRECT_CONNECTED_CAP`, which says a cap was measured.
+
+Publication 177 breaks it two ways, and both are ordinary print:
+
+    the cap is grey 215 and the declared ink level is 160, so only the stem is
+    ink. Reported 8.3, off by half a stroke, under a false label.
+
+    a JPEG drops four rows out of the stem. A stem is followed across a gap of
+    two, so the run stops at the hole and its end is the MIDDLE of the whisker.
+    Reported 2.2 pg/ml against a printed 6.
+
+Widening the run-gap to jump the hole is not the fix - that is choosing a
+constant so a cell passes, and the constant is exactly what tells a stem from a
+significance bracket's descender. **No cap means no dispersion.** The cell goes
+to a person, which is what a figure the reader cannot finish reading is supposed
+to produce. The stem stays a separate fact in its own field: something was drawn
+on that bar and the reader saw it; what it could not do is measure where the
+whisker ends.
+
+`Dispersion_Method` is re-ordered with it. Asking about the stem first let a
+stem-confirmed bar with no cap say `DIRECT_CONNECTED_CAP` beside an empty
+dispersion; the method describes what produced the number, so with no number
+there is no method.
+
+    reverted                                          scenarios that fail
+    the stem's end reported as a cap again               8
+    the method asks about the stem first again           4
+
+`make_whisker_fixture.py` draws both: `whisker_pale_cap_fixture.png`, whose cap
+is grey 215, and `whisker_broken_fixture.png`, whose stem is missing four rows in
+the middle. Under v9.9 they read 11.5 and 44.5 against a drawn 12 and 45, and
+4.75 and 21.25 against the same - a number less than half the truth, wearing the
+label that says it was measured.
+
+Publication 323 is untouched: 107 values, every mean and dispersion identical,
+`crosscheck_id323` AGREEs on all 72. On 177 the two cells lose their dispersion
+and keep their mean, and the other sixteen are unchanged.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

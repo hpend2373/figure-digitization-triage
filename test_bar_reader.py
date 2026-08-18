@@ -708,6 +708,55 @@ for _thr, _want in ((None, False), (160, True)):
               "%s against %s" % (_disp, [b["dispersion"] for b in _wt["bars"]]))
 
 print()
+print("a whisker the reader cannot finish reading is not a dispersion")
+# TWO WHISKERS PUBLICATION 177 PRINTS, and until v9.10 both produced a number.
+# When no row near the end of the stem is wide enough to be a cap, the reader
+# took the stem's own far end and reported it under DIRECT_CONNECTED_CAP - a
+# claim that a cap was measured, made where none was seen.
+#
+#   whisker_pale_cap_fixture   the cap is grey 215 and the ink level is 110, so
+#                              only the stem is ink. 177 prints one at 215.
+#                              Read 11.5 and 44.5 against 12 and 45 - half a
+#                              stroke off, and the label was false.
+#   whisker_broken_fixture     four rows of the stem are gone, as a JPEG drops
+#                              them. The stem run stops at the hole and its end
+#                              is the MIDDLE of the whisker: 4.75 and 21.25
+#                              against 12 and 45, a number less than half the
+#                              truth wearing the same label. On 177 that is
+#                              2.2 pg/ml against a printed 6.
+for _name in ("whisker_pale_cap_fixture.png", "whisker_broken_fixture.png"):
+    _img = np.asarray(Image.open(os.path.join(HERE, _name)).convert("RGB")).astype(int)
+    _masks = colour_masks(_img, {"S": (_wt["colour"], 25.0)})
+    _bars = sorted(read_bar_panel(_masks, tuple(_wt["panel_box"]),
+                                  y_calibration=_wcal, series={"S": "S"},
+                                  max_whisker_px=250), key=lambda b: b["x"])
+    check("%s: both bars are still found" % _name, len(_bars) == 2,
+          "%d bar(s)" % len(_bars))
+    for _got, _want in zip(_bars, _wt["bars"]):
+        # THE MEAN IS UNTOUCHED. Refusing the dispersion must not cost the
+        # reading; the bar is as legible as it ever was.
+        check("  %s/%s: the mean is still the bar" % (_name[8:16], _want["series"]),
+              abs(_got["mean"] - _want["mean"]) <= 0.5,
+              "read %.2f, drawn %.1f" % (_got["mean"], _want["mean"]))
+        check("  %s/%s: and no dispersion is invented"
+              % (_name[8:16], _want["series"]),
+              _got["dispersion"] is None,
+              "%s, drawn %.1f" % (_got["dispersion"], _want["dispersion"]))
+        # AND THE METHOD FIELD SAYS SO. Two separate scenarios because they are
+        # two separate defects: one invents a number, the other keeps a label
+        # that says a cap was measured beside a dispersion that is empty.
+        check("  %s/%s: and the method does not claim a cap"
+              % (_name[8:16], _want["series"]),
+              _got["Dispersion_Method"] == "NO_DISPERSION",
+              "%s" % _got["Dispersion_Method"])
+    # THE STEM IS STILL A FACT. Something was drawn on this bar and the reader
+    # saw it; what it could not do is measure where it ends. The two statements
+    # live in two fields and the release does not merge them.
+    check("  %s: the stem is still reported as seen" % _name[8:16],
+          all(b["Errorbar_Stem_Confirmed"] == "TRUE" for b in _bars),
+          "%s" % [b["Errorbar_Stem_Confirmed"] for b in _bars])
+
+print()
 print("three greys on a rasterised page, where the middle one is on every ramp")
 # THE FIXTURES ABOVE ARE DRAWN WITH HARD EDGES and no printed figure is. A
 # rasteriser lays a ramp of intermediate greys along every edge; the MIDDLE grey

@@ -69,8 +69,20 @@ def y_of(value):
 #: ink at all and every cell of the figure came back with no dispersion.
 WHISKER_GREY = "#808080"
 
+#: A CAP LIGHTER THAN THE INK LEVEL. Publication 177 prints one at grey 215
+#: against a figure whose declared level is 160, so the cap is not ink and only
+#: the stem is. The reader used to answer anyway, by calling the stem's own end
+#: a cap - a number about half a stroke off, wearing DIRECT_CONNECTED_CAP.
+PALE_CAP = "#d7d7d7"
 
-def draw(path, bracket=False, whisker=None):
+#: A HOLE IN THE STEM, in rows. 177 has a four-row one at 600 dpi, where the
+#: JPEG dropped the stroke; the stem is 35 rows long and the hole is in the
+#: middle of it. A stem is followed across a gap of two, so this breaks it, the
+#: run stops at the hole, and the far end of the stump is not the cap.
+STEM_HOLE = 4
+
+
+def draw(path, bracket=False, whisker=None, cap_ink=None, hole=0):
     im = Image.new("RGB", (WIDTH, HEIGHT), "white")
     d = ImageDraw.Draw(im)
     d.line((AXIS_X, TOP_Y, AXIS_X, BASELINE_Y), fill="black", width=3)
@@ -84,7 +96,14 @@ def draw(path, bracket=False, whisker=None):
         cap = y_of(mean + disp)
         ink = whisker or FILL
         d.line((xc - STEM_W // 2, cap, xc - STEM_W // 2, top), fill=ink, width=STEM_W)
-        d.line((xc - CAP_W // 2, cap, xc + CAP_W // 2, cap), fill=ink, width=3)
+        d.line((xc - CAP_W // 2, cap, xc + CAP_W // 2, cap),
+               fill=cap_ink or ink, width=3)
+        if hole:
+            # White across the stem, halfway up. Not a gap anybody drew: it is
+            # what a JPEG does to a two-pixel stroke, and the figure still shows
+            # a whisker to a person looking at it.
+            mid = (cap + top) / 2.0
+            d.rectangle((xc - STEM_W, mid, xc + STEM_W, mid + hole), fill="white")
     if bracket:
         # A significance bracket over the two bars: the horizontal rule sits
         # above both whiskers with white under it, and the two short verticals
@@ -116,11 +135,15 @@ def main():
     plain = draw(os.path.join(HERE, "whisker_fixture.png"))
     bracket = draw(os.path.join(HERE, "whisker_bracket_fixture.png"), bracket=True)
     grey = draw(os.path.join(HERE, "whisker_grey_fixture.png"), whisker=WHISKER_GREY)
+    pale = draw(os.path.join(HERE, "whisker_pale_cap_fixture.png"),
+                cap_ink=PALE_CAP)
+    holed = draw(os.path.join(HERE, "whisker_broken_fixture.png"),
+                 hole=STEM_HOLE)
     path = os.path.join(HERE, "whisker_fixture_truth.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(truth(), fh, indent=1, sort_keys=True)
         fh.write("\n")
-    for p in (plain, bracket, grey, path):
+    for p in (plain, bracket, grey, pale, holed, path):
         print(os.path.basename(p))
 
 

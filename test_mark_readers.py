@@ -1274,11 +1274,13 @@ import make_scatter_fixture as _SF                                # noqa: E402
 _SF.main()
 _st = _json.load(open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                                     "scatter_fixture_truth.json")))
-_true_r = float(np.corrcoef([p[0] for p in _st["pairs"]],
-                            [p[1] for p in _st["pairs"]])[0, 1])
 _by_scale = {}
 for _name in sorted(_st["renderings"]):
     _r = _st["renderings"][_name]
+    # Each rendering carries its own pairs: the overlap panel has one more.
+    _want_pairs = [tuple(p) for p in _r["pairs"]]
+    _true_r = float(np.corrcoef([p[0] for p in _want_pairs],
+                                [p[1] for p in _want_pairs])[0, 1])
     _im = Image.open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                                    _r["file"])).convert("RGB")
     _xc = AxisCalibration.from_points([tuple(p) for p in _r["x_ticks"]])
@@ -1293,17 +1295,22 @@ for _name in sorted(_st["renderings"]):
 
     _got = _read([_r["annotation_box"]])
     check("%s: every drawn pair is found and nothing else" % _name,
-          len(_got) == len(_st["pairs"]),
-          "%d marks for %d pairs" % (len(_got), len(_st["pairs"])))
-    # THE TRAP IS REAL, not asserted. Undeclared, the annotation's glyphs are
-    # marks: the reader returns more of them than the figure has points.
-    check("  %s: and the annotation is marks until the panel declares it" % _name,
-          len(_read(None)) > len(_st["pairs"]),
-          "%d marks with the annotation left in" % len(_read(None)))
-    if len(_got) != len(_st["pairs"]):
+          len(_got) == len(_want_pairs),
+          "%d marks for %d pairs" % (len(_got), len(_want_pairs)))
+    # THE TRAP IS REAL, not asserted - where the rendering makes it real. At the
+    # larger scale the annotation's glyphs are marker-sized and the reader
+    # returns eight more marks than the figure has points; at the smaller one
+    # they fall under the marker size and the mask does not hold them. WHICH of
+    # those a page gives depends on the rendering, and the declaration does not,
+    # which is the argument for declaring it.
+    if _r["scale"] > 1:
+        check("  %s: and the annotation is marks until the panel declares it"
+              % _name, len(_read(None)) > len(_want_pairs),
+              "%d marks with the annotation left in" % len(_read(None)))
+    if len(_got) != len(_want_pairs):
         continue
     _pairs = sorted((p["x_value"], p["y_value"]) for p in _got)
-    _want = sorted(tuple(p) for p in _st["pairs"])
+    _want = sorted(_want_pairs)
     # In units of the axis span, so the two renderings are held to one standard.
     _dx = max(abs(a[0] - b[0]) for a, b in zip(_pairs, _want)) / 3.0
     _dy = max(abs(a[1] - b[1]) for a, b in zip(_pairs, _want)) / 80.0
@@ -1313,7 +1320,8 @@ for _name in sorted(_st["renderings"]):
     _assoc = summarize_association(_got, "PEARSON_R")["Association_Value"]
     check("  %s: and the association is the drawn one" % _name,
           abs(_assoc - _true_r) < 0.01, "%.4f vs %.4f" % (_assoc, _true_r))
-    _by_scale[_name] = (_pairs, _assoc)
+    if _name in ("small", "large"):
+        _by_scale[_name] = (_pairs, _assoc)
 # AND THE TWO AGREE WITH EACH OTHER. This is the scenario the absolute numbers
 # cannot pass: one rendering read 22 marks and the other 4, off one drawing.
 if len(_by_scale) == 2:

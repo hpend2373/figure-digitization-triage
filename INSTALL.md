@@ -7721,6 +7721,73 @@ nothing looks overplotted, an association is still computed from whatever was
 found: on 177 panel B that is r = -0.84 against a printed 0.57, with no flag.
 That hole is named here and not closed here.
 
+## v9.12 — a marker is an interior, not an outline
+
+**Publication 177 Figure 4 now reads what the paper printed.**
+
+    panel     printed r     v9.11        v9.12      marks
+    A            0.91       -0.47        0.911          9
+    B            0.57       -0.84        0.561         12
+    C            0.17       -0.08        0.276         45 against a declared 24
+
+Reading a scatter as CONTOURS OF INK - one blob, one mark - is defeated three
+ways by a printed figure, and that row of three panels has all of them.
+
+    A fitted regression line runs THROUGH the cloud and touches every marker it
+    passes, so the ink is one contour. Panel A is a single blob 308 by 279
+    pixels at 600 dpi and 154 by 141 at 300 - the same blob, and not a
+    resolution to be turned up.
+
+    Two markers that touch have one outline between them, and its centroid is a
+    point at neither of them.
+
+    An OPEN marker - a ring or a triangle, which is how a journal draws a second
+    and third group - has no thick middle at all, so the primitive that finds a
+    filled circle finds nothing on it.
+
+**An interior answers all three, because it is what a marker is.** A filled
+marker's interior is a thick core of ink; an open marker's is the white it
+shuts in; a fitted line has neither, being thin and enclosing nothing. Two
+touching markers have two interiors. So the reader takes seeds rather than
+contours, and the centre of each seed is a point.
+
+The seeds are the PEAKS of the distance transform, not the components of a
+threshold above it: at a centre gap of 13 to 31 pixels against a marker 33
+across a threshold gives ONE component where a person plainly sees two markers,
+and the peaks give two. Measured at neighbourhoods of 0.6, 0.8 and 1.0 of the
+marker, the count is the same, so the one chosen is not a knife edge.
+
+**An interior is smaller than its marker**, and holding it to the marker's own
+size window is what made panel B read ONE mark in twelve: 177's triangles leave
+an interior 12 across against a marker of 32. A third is the floor, and it is
+geometry rather than a fitted number - an outline thicker than a third of the
+marker on each side has filled it in and it is not an open marker any more.
+177's triangles sit at 0.375 of theirs; its rings and the fixture's at 0.72.
+
+    reverted                                          scenarios that fail
+    the seeds become components of a threshold          1
+    the enclosed-white family is removed                7
+    an interior is held to the marker's size window     2
+
+`make_scatter_fixture.py` now draws six panels off the same twelve pairs: two
+scales, a fitted line, rings, bold triangles whose interiors are 0.38 of their
+marker as a printed one's are, and one extra pair 22 pixels from its neighbour.
+Every one reads every drawn pair and the association it was drawn from.
+
+**What this does NOT close.** Panel C is a dense cluster of two dozen
+overlapping rings and the reader finds 45 marks in it; `MORE_DETECTED` sends the
+panel to a person, which is the right answer for a cloud whose count a reader
+cannot vouch for. And the count audit still needs the source to declare n:
+where a caption gives none and nothing looks overplotted, an association is
+computed from whatever was found and no flag says so.
+
+**One more thing this pilot found, and it is a declaration and not a reader.**
+177's caption gives n as SUBJECTS - 5, 6 and 24 - while the panels plot one
+point per subject per test day, so the point count is about twice that and
+`Point_Count_Agreement` reads `MORE_DETECTED` even where the reading is right.
+For an association cell `N_Outcome` has to be the number of PAIRS. Nothing in
+the manifest says which of the two it is.
+
 ## Still open
 
 - 323's SD/SEM wording IS resolved, and only 397's is not. The Statistics section

@@ -2,9 +2,15 @@
 
     python3 make_scatter_fixture.py
 
-    scatter_fixture_small.jpeg   the same panel at two scales, 2.5x apart, which
-    scatter_fixture_large.jpeg   is the range between a 150 dpi screenshot and a
-                                 600 dpi render of the same journal page.
+    scatter_fixture_small.jpeg   the same panel at two scales, three times
+    scatter_fixture_large.jpeg   apart, which is the range between a screenshot
+                                 and a 600 dpi render of one journal page.
+    scatter_fixture_line.jpeg    with a fitted regression line through the cloud
+    scatter_fixture_open.jpeg    with the markers drawn as rings
+    scatter_fixture_triangle.jpeg  and as open triangles, whose interiors are a
+                                 third of the marker rather than three quarters
+    scatter_fixture_overlap.jpeg one more pair, 22 pixels from its neighbour
+                                 against a marker 33 across
 
 WHY TWO SIZES. `read_scatter_panel` decided what a marker is with four absolute
 numbers - area between 12 and 500 square pixels, bounding box under 35 across
@@ -29,8 +35,10 @@ way it already declares where its axes are.
 The truth file carries the pairs the drawing was made from, and the annotation
 rectangle at both scales, so a scenario compares against what was drawn.
 
-No fitted line is drawn here. A regression line through the cloud welds every
-marker into one contour, which is a different rule needing a different fixture.
+WHAT THE FOUR VARIANTS ARE FOR is written beside `VARIANTS` below: each is one
+thing a printed scatter has that a synthetic one does not, and each defeats the
+reading of ink by its OUTLINE. Publication 177 Figure 4 has all of them on one
+row of three panels.
 """
 import json
 import os
@@ -56,10 +64,41 @@ PAIRS = [
 
 #: The annotation a journal puts inside the axes, and where it puts it.
 ANNOTATION = ("r = 0.98", "P < 0.001")
-ANN_X, ANN_Y = 330, 120
+ANN_X, ANN_Y = 110, 75
 
 #: The two renderings. Not dpi numbers - a factor, which is what changes.
 SCALES = {"small": 1, "large": 3}
+
+#: THREE MORE PANELS, each drawn from the same pairs at the larger scale and
+#: each holding one thing a printed scatter has that a synthetic one does not.
+#:
+#:  line     a fitted regression line THROUGH the cloud. It touches every marker
+#:           it passes, so the outline of the ink is one contour: publication
+#:           177 panel A is a single blob 308 by 279 pixels at 600 dpi and 154
+#:           by 141 at 300, which is the same blob and not a resolution to turn
+#:           up. Read as contours it is one mark, or none.
+#:  open     the markers are RINGS, which is how a journal draws a second or
+#:           third group. A ring has no thick middle, so the primitive that
+#:           finds a filled circle finds nothing at all on it.
+#:  overlap  two markers close enough to touch. Their outlines are one contour
+#:           and their centroid is a point at neither of them: 177 panel C
+#:           declares 24 and the outline reader found 41, two of those blobs
+#:           104 by 195 and 68 by 96 pixels.
+#:
+#: One pair is added for the overlap panel, 22 pixels from its neighbour at
+#: that scale against a marker 33 across - two markers a person plainly sees
+#: as two, whose outlines are one contour.
+VARIANTS = {"line": dict(fitted_line=True),
+            "open": dict(open_markers=True),
+            "overlap": dict(extra=[(1.70, 24.6)]),
+            # AN OPEN TRIANGLE, which is what publication 177 panel B is drawn
+            # with. It matters separately from the ring because a triangle
+            # encloses far less of its own bounding box: 177's measure 12 across
+            # against a marker of 32, where a ring's interior is 0.72 of its
+            # marker. Held to the MARKER's size window they are all rejected and
+            # the panel reads one mark in twelve.
+            "triangle": dict(open_markers=True, triangle=True)}
+VARIANT_SCALE = 3
 SUPERSAMPLE, BLUR, JPEG_QUALITY = 4, 4.0, 80
 
 
@@ -71,8 +110,10 @@ def y_of(value, s):
     return (BASELINE_Y - (value / Y_MAX) * (BASELINE_Y - TOP_Y)) * s
 
 
-def draw(path, scale):
+def draw(path, scale, open_markers=False, fitted_line=False, extra=(),
+         triangle=False):
     s = scale * SUPERSAMPLE
+    pairs = list(PAIRS) + list(extra)
     im = Image.new("RGB", (WIDTH * scale * SUPERSAMPLE,
                            HEIGHT * scale * SUPERSAMPLE), "white")
     d = ImageDraw.Draw(im)
@@ -86,10 +127,35 @@ def draw(path, scale):
     for v in (0, 20, 40, 60, 80):
         d.line((AXIS_X * s - 14 * s, y_of(v, s), AXIS_X * s, y_of(v, s)),
                fill="black", width=RULE_W * s)
+    if fitted_line:
+        # Least squares through the pairs, drawn from the first x to the last,
+        # in the same ink as the markers - which is what makes it one contour
+        # with every marker it crosses.
+        n = len(pairs)
+        mx = sum(p[0] for p in pairs) / n
+        my = sum(p[1] for p in pairs) / n
+        b = (sum((p[0] - mx) * (p[1] - my) for p in pairs)
+             / sum((p[0] - mx) ** 2 for p in pairs))
+        xa, xb = min(p[0] for p in pairs), max(p[0] for p in pairs)
+        d.line((x_of(xa, s), y_of(my + b * (xa - mx), s),
+                x_of(xb, s), y_of(my + b * (xb - mx), s)),
+               fill="black", width=RULE_W * s)
     r = MARKER_D * s / 2.0
-    for xv, yv in PAIRS:
+    for xv, yv in pairs:
         cx, cy = x_of(xv, s), y_of(yv, s)
-        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill="black")
+        if triangle:
+            # A BOLD outline, because a printed one is: publication 177 panel B
+            # leaves an interior 0.375 of its marker and this stroke leaves
+            # 0.38. A hairline triangle encloses two thirds of its own box and
+            # would not be the case that matters.
+            pts = [(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r), (cx, cy - r)]
+            d.line(pts, fill="black", width=max(1, int(round(0.55 * r))),
+                   joint="curve")
+        elif open_markers:
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), outline="black",
+                      width=max(1, int(round(0.28 * r))))
+        else:
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), fill="black")
     # The statistics, inside the axes, in a type size a journal uses.
     try:
         from PIL import ImageFont
@@ -111,7 +177,7 @@ def annotation_box(scale):
     on the figure would draw it, and still clear of every pair above.
     """
     pad = MARKER_D
-    return [int((ANN_X - pad) * scale), int((RIGHT_X - 2) * scale),
+    return [int((ANN_X - pad) * scale), int((ANN_X + 150) * scale),
             int((ANN_Y - pad) * scale),
             int((ANN_Y + 34 * (len(ANNOTATION) - 1) + 34 + pad) * scale)]
 
@@ -119,10 +185,13 @@ def annotation_box(scale):
 def truth():
     out = {"pairs": [[x, y] for x, y in PAIRS], "marker": "CIRCLE",
            "renderings": {}}
-    for name, scale in SCALES.items():
+    every = dict(SCALES, **{n: VARIANT_SCALE for n in VARIANTS})
+    for name, scale in every.items():
         out["renderings"][name] = {
             "file": "scatter_fixture_%s.jpeg" % name,
             "scale": scale,
+            "pairs": [[x, y] for x, y in
+                      list(PAIRS) + list(VARIANTS.get(name, {}).get("extra", ()))],
             # Inside the axes and clear of the rules, the way a panel box is
             # declared everywhere else in this package.
             "panel_box": [int((AXIS_X + 3) * scale), int(RIGHT_X * scale),
@@ -137,6 +206,8 @@ def truth():
 def main():
     paths = [draw(os.path.join(HERE, "scatter_fixture_%s.jpeg" % name), scale)
              for name, scale in sorted(SCALES.items())]
+    paths += [draw(os.path.join(HERE, "scatter_fixture_%s.jpeg" % name),
+                   VARIANT_SCALE, **kw) for name, kw in sorted(VARIANTS.items())]
     path = os.path.join(HERE, "scatter_fixture_truth.json")
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(truth(), fh, indent=1, sort_keys=True)

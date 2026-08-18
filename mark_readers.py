@@ -409,6 +409,91 @@ def measure_scatter_marker_scale(mask, panel_box):
     return float(np.median(sides)) if sides else 0.0
 
 
+#: How deep inside a marker its seed has to be, and how close two seeds may be,
+#: both as fractions of the panel's own marker. A stroke a quarter of a marker's
+#: width cannot hold a seed, which is what removes a fitted line; and two peaks
+#: closer than most of a marker are one marker's noise. Measured on the overlap
+#: fixture at centre gaps of 13 to 39 pixels against a marker 33 across: the same
+#: count at neighbourhoods of 0.6, 0.8 and 1.0, so neither is a knife edge.
+_SEED_DEPTH, _SEED_NEIGHBOURHOOD = 0.25, 0.8
+
+
+def marker_seeds(mask, scale):
+    """The centre of every marker in a panel, found from marker INTERIORS.
+
+    A MARKER IS AN INTERIOR, NOT AN OUTLINE. Reading the outline - one contour
+    per blob of ink - is what a printed scatter defeats three ways at once, and
+    publication 177 Figure 4 has all three on one row of panels:
+
+        a fitted regression line runs THROUGH the cloud and touches every marker
+        it passes, so the outline of the ink is one contour. Panel A is a single
+        blob 308 by 279 pixels at 600 dpi and 154 by 141 at 300 - the same blob,
+        not a resolution to be turned up.
+
+        two markers that touch have one outline between them, and its centroid
+        is a point at neither of them. Panel C declares 24 and the outline
+        reader found 41, two of those blobs 104 by 195 and 68 by 96.
+
+        an OPEN marker - a ring, which is how a journal draws a second group -
+        has no thick middle at all, so the primitive that finds a filled circle
+        finds nothing on it.
+
+    An interior answers all three. A filled marker's interior is a thick core of
+    ink; an open marker's is the white it encloses; a fitted line has neither,
+    because it is thin and shuts nothing in. Two touching markers have two
+    interiors, so they are two seeds - which is why the peaks of the distance
+    transform are taken rather than the components of a threshold: at a centre
+    gap of 13 to 31 pixels a threshold gives ONE component and the peaks give
+    two, on markers a person plainly sees as two.
+
+    Returns (x, y, method) per marker, in the mask's own coordinates.
+    """
+    out = []
+    if not scale:
+        return out
+    ink = (mask > 0).astype(np.uint8)
+    out.extend(_peaks_of(ink, scale, "FILLED_CORE"))
+    # THE WHITE A MARKER SHUTS IN, and only that: a region touching the crop
+    # border is the page, which is the same test `_one_interior_per_marker`
+    # makes for the line readers. The interiors are measured on their own -
+    # a ring's hole is smaller than the ring - so the peak rule below is held
+    # to the interior's size and not to the marker's.
+    count, labels, stats_, _c = cv2.connectedComponentsWithStats(
+        (ink == 0).astype(np.uint8), 8)
+    holes = np.zeros_like(ink)
+    sides = []
+    for lab in range(1, count):
+        bx, by, bw, bh, _area = stats_[lab]
+        if bx == 0 or by == 0 or bx + bw == ink.shape[1] or by + bh == ink.shape[0]:
+            continue
+        # AN INTERIOR IS SMALLER THAN ITS MARKER, so the marker's own window is
+        # the wrong one to hold it to: at `_MARKER_SIDE_LO` it rejected every
+        # triangle in publication 177 panel B, whose interiors measure 12 across
+        # against a marker of 32. A third is the geometric floor - an outline
+        # thicker than a third of the marker on each side has filled it in and
+        # it is not an open marker any more - and 177's triangles sit at 0.37 of
+        # theirs, its rings and the fixture's at 0.72.
+        if not (scale / 3.0 <= max(bw, bh) <= _MARKER_SIDE_HI * scale):
+            continue
+        holes[labels == lab] = 1
+        sides.append(float(max(bw, bh)))
+    if sides:
+        out.extend(_peaks_of(holes, float(np.median(sides)), "OPEN_INTERIOR"))
+    return out
+
+
+def _peaks_of(mask, scale, method):
+    """Local maxima of the distance transform, one per marker."""
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    side = max(3, int(round(_SEED_NEIGHBOURHOOD * scale)) | 1)
+    peak = ((dist >= cv2.dilate(dist, cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (side, side))) - 1e-6)
+        & (dist >= _SEED_DEPTH * scale)).astype(np.uint8)
+    count, _labels, _stats, centres = cv2.connectedComponentsWithStats(peak, 8)
+    return [(float(centres[lab][0]), float(centres[lab][1]), method)
+            for lab in range(1, count)]
+
+
 def _marker_sized(area, bw, bh, scale, filled=False):
     """Is this blob the size of the markers in this panel?
 
@@ -862,22 +947,24 @@ def read_scatter_panel(image, panel_box, x_calibration, y_calibration, series,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
         scale = measure_scatter_marker_scale(opened, (0, crop.shape[1],
                                                       0, crop.shape[0]))
-        contours, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         points = []
-        for contour in contours:
-            area = cv2.contourArea(contour)
+        for cx, cy, how in marker_seeds(opened, scale):
+            # THIS MARKER'S OWN INK, in a square one marker across around its
+            # seed. Not the contour's area: a contour can hold a fitted line
+            # and every marker on it, and `marker_area_px` is meant to describe
+            # ONE mark. The two options are absolute bounds a person who has
+            # measured the figure may add on top of the measured size, and they
+            # are checked against the same number.
+            half = int(round(0.5 * scale))
+            patch = opened[max(0, int(cy) - half):int(cy) + half + 1,
+                           max(0, int(cx) - half):int(cx) + half + 1]
+            area = float((patch > 0).sum())
             if min_area is not None and area < min_area:
                 continue
             if max_area is not None and area > max_area:
                 continue
-            _, _, bw, bh = cv2.boundingRect(contour)
-            if not _marker_sized(area, bw, bh, scale, filled=True):
-                continue
-            moment = cv2.moments(contour)
-            if moment["m00"] == 0:
-                continue
-            px = x0 + moment["m10"] / moment["m00"]
-            py = y0 + moment["m01"] / moment["m00"]
+            px = x0 + cx
+            py = y0 + cy
             points.append(dict(
                 series=spec.name, point_px_x=float(px), point_px_y=float(py),
                 x_value=x_calibration.pixel_to_value(px),

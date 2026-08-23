@@ -1,0 +1,214 @@
+# The segmentation harness
+
+The whitespace cut (XY-cut) is one rule, and on 187 heterogeneous figures there is
+no single rule that is always right. The harness looks at what the cut PRODUCED,
+finds where that contradicts the figure itself, and repairs it. Every check repairs
+rather than merely flags, and every repair writes why into the `harness` column of
+`proposals.csv` — a harness you cannot check is not a harness.
+
+Nothing here is a per-publication rule. Nothing here decides alone: every repair is
+an additional CANDIDATE, and the tick ladder is still the gate.
+
+## How the cut severs a panel
+
+Every one of these is the same illness: the cut sees only the absence of ink, and
+cannot tell the boundary of a panel from the whitespace INSIDE one.
+
+| How it is severed | What happens | Check |
+|---|---|---|
+| short vertically | the cut lands in the blank rows between the trace and the x axis; the lowest tick labels fall outside the box | `snap_to_spine` |
+| loses its own axis | inside a short box the panel's spine is CLIPPED, so a grid line becomes the longest vertical and the middle of the plot is measured as the axis | `axis_anchor` |
+| cannot place a row | the gap between panel rows is no wider than the gap inside a panel | `broad_slabs` |
+| a piece is torn off | the piece has no axis, fails every panel test, and is DISCARDED | `adopt_orphans` |
+| swallows the caption | a paragraph is just ink, so the box grows down over it | `caption_floor_trim` |
+| the plate as one panel | the figure is offered as one of its own panels | `figure_is_not_a_panel` |
+
+## The checks
+
+**1 `merge_split_panels`** — two pieces of one plot. The test is not "are they close"
+but whether THE BASELINE RUNS UNBROKEN from one into the other. `MERGE_GAP = 28` px,
+vertical overlap 60%, baselines within 4 rows, ≥85% ink across the gap.
+
+**2 `column_siblings`** — a figure is a grid, so a column holding one panel usually
+holds more. Restrict the search to that panel's x range and cut on rows only.
+
+**3 `snap_to_spine`** — a box that stops before its own axis line does is a fragment.
+ADDITIVE: growing is not always right, so both boxes are offered and the ladder picks.
+
+**3b `collapse_same_axis`** (propose.py) — one axis line is one panel. Rows sitting on
+the same spine run and overlapping are collapsed, and the survivor is chosen on what
+was MEASURED: a passing ladder, then more labels, then the larger box.
+
+**4 caption** (`caption.py`) — a figure is a caption and the panels the caption
+describes. That relation is written down rather than inferred, and the cut cannot see
+it. A caption is found by what a caption IS: a band of text with no rule in it, ≥60%
+of the figure's width, ≥55% dense, below every drawn structure (horizontal AND
+vertical rules), **and readable as a caption sentence** — 93 of 187 clips hold one.
+`caption_floor_trim` cuts a box back above it; `figure_is_not_a_panel` refuses a box
+covering ≥75% of the plate in both directions, and only when other boxes remain, and
+records the refusal as a `FIGURE_BOX_REFUSED` row.
+
+**5 `axis_anchor`** — a run touching the top or bottom EDGE of a box is not evidence
+of an axis, it is evidence that the box has cut something. Among the runs ending
+inside the box, the leftmost one in its left 60% is the y axis. Publication 397's
+figure 2 was losing six of eight panels to this.
+
+**6 `broad_slabs`** — where the row cut cannot choose, DON'T CHOOSE. The axes say
+which rows hold a panel, so the break goes at the midpoint of the empty space between
+two of them and the slab takes everything between. Redundancy is two-way `IoU ≥ 0.85`
+— containment is the defect the slab repairs. The mode gate counts panels, not
+candidates, and the count-match term requires `n_ok > 0`: **a segmentation that hits
+the number while every cell refuses the ladder has not found the panels, it has found
+the number.**
+
+**7 `_same_baseline`** — a panel has one x axis. Two boxes standing on one baseline
+row and overlapping in x are one panel however they were measured. Stacked panels
+differ in baseline, side-by-side panels do not overlap in x, and an inset has its own
+baseline — so this is not a nesting test.
+
+**8 `adopt_orphans`** — see below.
+
+## 8. Putting back the piece the cut tore off
+
+    하나의 패널
+      → 막대 그룹 사이·곡선 아래·캡션 위의 빈 공간을 패널 경계로 오인
+      → 왼쪽 조각 + 오른쪽 조각으로 분할
+      → 한쪽만 y축을 보유
+      → 축 없는 조각은 패널 필터에서 탈락
+      → 데이터가 사라지거나 뒤 패널의 이름·축 배정까지 밀림
+
+Publication 345's figure 4 draws four bar groups per panel — Micro, Moon, Mars,
+Earth — and the cut fell in the gap before Earth. The left piece kept the y axis and
+was offered as a panel; the right piece, 38 px of bars with no axis, was discarded.
+The panel was then reported COMPLETE with a quarter of its data outside the box: a
+correct reading of an incomplete plot, which is the worst kind of wrong.
+
+Censusing the discard pile (6,052 blocks over four modes) showed the
+same cut on every side — 1,976 below, 1,909 left, 942 above, 295 right. The right,
+the one first repaired, was the smallest.
+
+### Six statements, not one threshold (`continuity.py`)
+
+"Split where there is white space" has no counterexample: the band between bar groups
+and the gutter between panels are the same white space. So the harness measures
+CONTINUITY instead, split into six independent statements, each recorded:
+
+| # | Statement | How it is measured |
+|---|---|---|
+| 1 | do the two pieces' baselines continue | the crossing gap against **the largest gap already inside this panel's own baseline** |
+| 2 | do they share the same row range | overlap ≥ 0.5 of the union of the box and its axis run, and no more than 12% outside |
+| 3 | does one piece lack an axis but carry data ink | `_has_y_axis` fails ∧ ink ≥ `PLOT_INK_MIN` |
+| 4 | are the marks in the same axis coordinates | ≥60% of columns standing on the baseline, or ≥90% of ink inside the axis band |
+| 5 | do both belong to the same caption | both above the caption floor (unread caption ⇒ unknown, not false) |
+| 6 | is the merged result more consistent | more marks AND the spacing CV no worse |
+
+**Statement 1 is the heart of it.** Measured absolutely, the bar-group gap and the
+panel gutter are the same number — which is why the cut fails. Compared against the
+gaps the panel already contains, they are not: in 345 Fig.4 the crossing gap is 26 px
+and the largest gap inside the panel is 27 px. A break no wider than one the panel
+already holds is not a boundary. **The panel calibrates its own threshold**, and the
+constant disappears.
+
+How they add up: NECESSARY 3 ∧ 2 ∧ (5 not false); EVIDENCE at least one of 1 and 4
+positively saying the two are one plot — proximity alone is never enough; ARBITER 6
+may veto but never adopts on its own. Unknown neither supports nor vetoes.
+
+Adversarially: feeding a real neighbouring panel in as if it were a fragment is
+refused on three independent grounds on the corpus case (1: 108 px against 27;
+2: rows; 3: it has an axis) and on two in the HARDER version, drawn as a fixture in
+`test_continuity.py` — a neighbour occupying the same row band as the panel, where
+statement 2 no longer helps and the refusal rests on 1 and 3 alone. Both are
+scenarios; the easy version was not left standing as the proof.
+
+**Statement 4 is narrower than it reads, and the suite is how that is known.** Its
+`inside` term compares ink in the axis band against ink in the piece, both over the
+piece's own columns — so for any piece whose box lies within the panel's rows it is
+1.0 by construction, and statement 2 has already decided. What it adds is the window
+statement 2 leaves open: a box may reach 12% past the panel's rows and still pass,
+and ink lying IN that overhang — a stray label block below the baseline — is drawn
+against nothing in this plot. That is the case the scenario pins, and it is the only
+one where deleting statement 4 changes an answer.
+
+### Two more things the rule needs
+
+**Ambiguity, not direction.** A block between two stacked panels could be the lower
+edge of one or the title of the other, and ink cannot say which — so a block touching
+more than one panel within a gutter's width is left alone. This is also why the check
+cannot quietly merge two panels.
+
+**An orphan is defined by what it is.** Taking `leaves − keep − extra` is wrong in
+GRID mode, where `keep` comes from the rules rather than the leaves: a real
+neighbouring panel then appeared in the orphan list and was adopted whole.
+
+**Left and right only.** All four sides were tried on the corpus. Above and below cost
+ten ladders to gain nine x readings — what sits there is the panel title and the axis
+title, pulling them in moves the top edge the y label strip is measured from, and
+there is no way to test them. Left and right hold the plot's own data and numerals and
+CAN be tested. Evidence, not symmetry.
+
+## Order
+
+```
+leaves  = everything the cut produced
+keep    = _is_plot ∧ holds_data
+extra   = _has_y_axis ∧ holds_data
+orphans = blocks with no axis of their own
+
+allb = merge_split_panels(keep + extra)            # 1
+allb = allb + column_siblings(allb)                # 2
+allb = adopt_orphans(allb, orphans)                # 8
+allb = caption_floor_trim(allb, CAP_FLOOR)         # 4a
+allb = allb + broad_slabs(allb, CAP_FLOOR, TARGET) # 6
+allb = snap_to_spine(allb)                         # 3   last additive step
+allb = figure_is_not_a_panel(allb, ...)            # 4b  the only removal
+...
+sx   = axis_anchor(box) or spine_and_baseline(box) # 5   just before measuring
+recs = collapse_same_axis(recs)                    # 3b·7 after measuring
+```
+
+Order matters. Step 3 is purely additive and step 2 is not — the column rescan refuses
+a cell overlapping a box already in the list, so offering it a grown box first makes
+it skip the panel it was there to find. Step 4b is last because it is the only step
+that removes. And the mode gate counts what the CUT produced, not what the harness put
+back: counting the adopted piece cost publication 139's figure 3 every one of its modes.
+
+## Revert test
+
+Every round is gated by an environment flag and re-run with it off; the off path must
+reproduce the pre-repair result ROW FOR ROW.
+
+    SNAP=0   checks 3 and 3b        (verified: 40 figures, 155 rows identical)
+    CAP=0    checks 4 and 5         (verified: 12 figures, 50 rows identical)
+    BROAD=0  checks 6 and 7         (verified: 42 figures, 171 rows identical)
+    WIDE=0   check 8
+
+## What is in the repository, and what is not
+
+    axis_reader.py    the measurement core and checks 1, 2, 3, 4a, 4b, 5, 6, 8
+    continuity.py     the six statements and how they add up
+    x_reader.py       tick marks, tick labels and bar centres; statement 6 uses it
+    caption.py        the caption band, by definition rather than by position
+    propose.py        the driver: one proposal row per detected panel
+    test_continuity.py
+
+NOT here: the corpus. `propose.py` reads a worklist, a clip index and a caption
+scan of a particular 187-figure set (`DIG`, `CLIPS`, `CAPS` name them, so it is
+pointable at another), and the figures themselves are publisher rasters and are not
+redistributable. Every number quoted in this document is from that corpus and
+cannot be re-derived from a clone — which is exactly why the judgement is pinned
+against drawn fixtures instead:
+
+    python3 test_continuity.py
+
+47 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
+run at two scales and must give the same verdict at both: nothing in this harness
+is allowed to be a distance in pixels. The two failure directions are drawn
+separately — a fragment REFUSED loses the panel's data silently, a neighbour
+ADOPTED shifts the axis assignment of everything after it — because a suite that
+only proves the first can be passed by adopting everything.
+
+Reading a tick NUMERAL needs tesseract, which the locked environment does not
+install; asked without it, `_ocr_numerals` raises rather than returning no
+numerals, because a ladder silently built from zero numerals is the fail-open shape
+this package refuses everywhere else. Panels, spines, baselines and continuity are
+geometry and call none of it.

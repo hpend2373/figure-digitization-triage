@@ -7987,6 +7987,96 @@ cannot show a scale-dependent defect; the scaled fixture is what does.
 **Two defects found in the same investigation are recorded, not fixed.** Both are
 in "Still open" with their measured numbers.
 
+## The segmentation harness, and the six statements that put a panel back together
+
+`HARNESS.md` is the full document; this is what changed in the package and why it
+is testable at all.
+
+A figure arrives as a raster and has to become panels before anything can be
+measured in it. The whitespace cut that does that is one rule, and one rule is
+wrong on 187 heterogeneous figures in six different ways — a box short of its own
+axis, a box that clipped its spine and measured a grid line instead, a row the cut
+cannot place, a caption swallowed as data, the whole plate offered as one of its
+own panels, and a piece torn off and discarded. Eight checks now look at what the
+cut PRODUCED, find where that contradicts the figure, and repair it. Each is an
+additional CANDIDATE rather than a replacement, each writes its reason into the
+`harness` column, and the tick ladder still gates what is used: **a harness you
+cannot check is not a harness**, and one that decides alone is not a proposal.
+
+**The one that needed a different shape is the eighth.** The cut fell in the gap
+before publication 345 figure 4's Earth bars, kept the left piece because it held
+the y axis, and discarded the right one — 38 px of bars with no axis. The panel was
+then reported COMPLETE with a quarter of its data outside the box, which is a
+correct reading of an incomplete plot and the worst kind of wrong. Censusing the
+discard pile found 6,052 blocks over four modes: 1,976 below, 1,909 left, 942
+above, 295 right.
+
+"Split where there is white space" has no counterexample, because the band between
+two bar GROUPS and the gutter between two PANELS are the same white space. So
+`continuity.py` measures continuity instead, as six statements each recorded
+separately: do the baselines continue, do the pieces share the same rows, does one
+carry data ink but no axis, are the marks in the same coordinates, are both above
+the same caption, is the merged result more regular. NECESSARY is 3 ∧ 2 ∧ (5 not
+false); EVIDENCE is at least one of 1 and 4 — proximity is never the evidence;
+6 may veto and never adopts on its own. An unknown neither supports nor vetoes,
+which is why an unread caption does not refuse.
+
+**Statement 1 is the heart of it and it carries no constant.** The crossing gap is
+compared against the largest gap ALREADY INSIDE this panel's own baseline: 26 px
+against 27 on 345 figure 4. A break no wider than one the panel already holds is
+not a boundary. The panel calibrates its own threshold.
+
+### What the suite adds, and the two things it found
+
+The corpus is not in this repository — the figures are publisher rasters — so
+every number above is unreproducible from a clone. `test_continuity.py` pins the
+judgement against figures drawn with PIL instead: 47 scenarios, no corpus, no OCR,
+no network. Both failure directions are drawn, because a suite that only proves a
+fragment gets put back can be passed by adopting everything:
+
+    a fragment REFUSED    the panel loses data and nothing says so
+    a neighbour ADOPTED   two panels become one and the axis assignment shifts
+
+and the neighbour is drawn in the SAME ROW BAND as the panel. That is the harder
+version: statement 2 stops helping, and the refusal has to come from statement 1
+and statement 3 alone. Every geometric scenario runs at two scales and must give
+the same verdict at both — the fixture's 19 px break at 1x and 38 px at 2x are the
+same figure, and nothing in this harness may be a distance in pixels.
+
+Two things turned up in the writing, both now in the tree:
+
+**Statement 4 is narrower than it reads.** Its `inside` term compares ink in the
+axis band against ink in the piece over the same columns, so for any piece whose
+box lies inside the panel's rows it is 1.0 by construction and statement 2 has
+already decided. It speaks only in the window statement 2 leaves open — a box
+reaching up to 12% past the panel's rows, with ink lying in that overhang. The
+scenario is written on that window, since a scenario anywhere else would have
+passed with statement 4 deleted, and a guard nothing can observe is decoration.
+
+**And OCR became optional, because none of this needs it.** `axis_reader` imported
+`pytesseract` at module level, which put panels, spines, baselines and continuity
+behind a system package that `requirements-lock.txt` does not install. The import
+is soft now. Asked for a tick NUMERAL without it, `_ocr_numerals` RAISES rather
+than returning none: "no numerals here" and "nothing looked" are different answers
+and only one of them is a fact about the figure, and a ladder silently built from
+zero numerals is the fail-open shape this package refuses everywhere else. The
+size floor still answers first — a strip too small to read is refused for being
+too small, not for the backend. Both are scenarios, and the missing backend is
+taken away inside the test rather than looked for, so the count is a property of
+the tree and not of the machine.
+
+    reverted                                          scenarios that fail
+    the self-calibrating gap replaced by a constant    1
+    rows measured against the axis alone               1
+    rows measured against the box alone                1
+    a piece with its own axis still an orphan          4
+    the coordinates always agreeing                    3
+    an unread caption reading as false                 2
+    regularity allowed to veto nothing                 1
+    regularity answering when nothing was added        2
+    proximity accepted as the evidence                 1
+    a missing OCR backend reading as no numerals       1
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

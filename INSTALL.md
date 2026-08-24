@@ -8266,6 +8266,52 @@ pre-filter that cannot state a distance on a plate with a drawn zero line.
 
 3220 core / 3258 full, both verified against the tree.
 
+## Four ways round one gate, and why none of them is in the tree
+
+Publication 475's figure 1 still boxes panels C and E to a third of their width. The
+six statements accept those pieces; the pre-filter never offers them, because it asks
+the panel for the widest gap already in its baseline row and that plate DRAWS a zero
+line - so the row has no gaps, the reach falls back to `ADOPT_GAP`, and the pieces are
+refused before anything is asked. Four ways round it were measured this round and the
+last. All four failed, and all four failed in the same place.
+
+    tried                                        measured
+    reach = the panel's own width                475 fig 1 reaches 6 boxes BY
+                                                 CANCELLING TWO ERRORS - panel A
+                                                 twice, panel C absent - and costs
+                                                 397 fig 1 a panel
+    a panel does not contain another panel       costs 68 fig 2 a panel, changes
+                                                 nothing else
+    adjacency instead of a distance, with a      475 fig 2, which was exactly right,
+    guard for another panel's label strip        is rebuilt WRONG: panel A shrinks
+                                                 from x1=403 to 314 and loses its
+                                                 third bar group, and 397 fig 1 grows
+                                                 one box across BOTH columns
+                                                 (x1 577 -> 1086)
+    criterion 4's foot term widened to           475 fig 2's y label strip scores
+    "crosses the baseline", then to              0.86, then 0.68 - as high as real
+    "inked at the baseline"                      bars
+
+THE COMMON POINT OF FAILURE IS CRITERION 4. Its band term - ink lying between the axis
+top and the baseline - is 1.0 by construction for any piece inside the panel's rows, so
+it accepts whatever the gate lets through. On a six-figure probe, ALL THREE adoptions
+were carried by the band term alone, at a foot share of 0.00. And the foot term cannot
+be widened to take the load, because a column of y numerals has ink above and below any
+row you pick.
+
+So the distance gate is load-bearing precisely because criterion 4 is not. The missing
+primitive is telling a MARK from a LABEL - the same discrimination `cut_through_axis`
+needed and got by subtracting the rule from the band. Until criterion 4 can make it,
+neither the gate nor the criterion may be loosened.
+
+The third row is also a warning about how this harness gets judged. On 475 figure 2 the
+panel count and the ladder count were both unchanged while the boxes moved to the wrong
+places. Counting panels is not checking them, and a sample comparison that only counts
+would have called that experiment neutral.
+
+Nothing in this section is a code change; the two rejected readings of the foot term are
+recorded in `continuity.same_coordinates` so the next reader does not re-derive them.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

@@ -185,6 +185,13 @@ def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
         # false of every bar in publication 475's figure 1, where the bars hang DOWN
         # from zero and their last ink is their far end. A mark stands on the
         # baseline when one of its ends is at it.
+        #
+        # TWO WIDER READINGS WERE TRIED AND MEASURED WORSE, both for the same reason.
+        # "The column CROSSES the baseline" makes publication 475's figure 2's y label
+        # strip score 0.86 - a column of numerals has ink above and below any row you
+        # pick. "The column is INKED AT the baseline" makes the same strip score 0.68,
+        # over the 0.60 the term asks for. Neither can tell a numeral from a bar, so
+        # neither may be loosened until something can.
         if min(abs(int(col[-1]) - by), abs(int(col[0]) - by)) <= BAR_FOOT:
             feet += 1
     if cols == 0:

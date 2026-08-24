@@ -305,6 +305,38 @@ F still refuse their ladders. What is now known about that figure: the pieces AR
 pieces by all six statements, and the only thing standing between them and their
 panels is a pre-filter that cannot state a distance on a plate with a drawn zero line.
 
+## 11. Why the distance gate cannot be loosened yet
+
+Publication 475's figure 1 still boxes panels C and E to a third of their width. The
+six statements accept those pieces; the pre-filter never offers them, because it asks
+the panel for the widest gap already in its baseline row and that plate DRAWS a zero
+line, so the row has no gaps and the reach falls back to the constant. Four ways round
+it were measured. All four failed, and all four failed in the same place.
+
+| tried | what it did | measured |
+|---|---|---|
+| reach = the panel's own width | offers them | 475 fig 1 reaches 6 boxes **by cancelling two errors** — panel A twice, panel C absent; costs 397 fig 1 a panel |
+| a panel does not contain another panel | removes that duplicate | costs 68 fig 2 a panel, changes nothing else |
+| adjacency instead of a distance, plus a guard for label strips | offers them | 475 fig **2**, which was exactly right, is rebuilt wrong — panel A shrinks from x1=403 to 314 and loses its third group; 397 fig 1 grows one box across BOTH columns (x1 577 → 1086) |
+| criterion 4's foot term widened to "crosses the baseline", then to "inked at the baseline" | would let the foot term carry the judgement | 475 fig 2's y label strip scores **0.86**, then **0.68** — as high as real bars |
+
+**The common point of failure is criterion 4.** Its band term — *ink lying between the
+axis top and the baseline* — is 1.0 by construction for any piece inside the panel's
+rows, so it accepts whatever the gate lets through; on a six-figure probe **all three
+adoptions were carried by the band term alone, with a foot share of 0.00.** And the
+foot term cannot be widened to take the load, because a column of y numerals has ink
+above and below any row you pick.
+
+So the distance gate is load-bearing precisely because criterion 4 is not. **The
+missing primitive is telling a MARK from a LABEL** — the same discrimination
+`cut_through_axis` needed and got by subtracting the rule from the band. Until
+criterion 4 can make it, neither the gate nor the criterion may be loosened, and
+475 figure 1's panels C and E stay short.
+
+The third row of that table is also a warning about how this harness is judged: on 475
+figure 2 the panel COUNT and the ladder count were unchanged while the boxes moved to
+the wrong places. Counting panels is not checking them.
+
 ## Order
 
 ```

@@ -327,11 +327,42 @@ adoptions were carried by the band term alone, with a foot share of 0.00.** And 
 foot term cannot be widened to take the load, because a column of y numerals has ink
 above and below any row you pick.
 
-So the distance gate is load-bearing precisely because criterion 4 is not. **The
-missing primitive is telling a MARK from a LABEL** — the same discrimination
-`cut_through_axis` needed and got by subtracting the rule from the band. Until
-criterion 4 can make it, neither the gate nor the criterion may be loosened, and
-475 figure 1's panels C and E stay short.
+So the distance gate is load-bearing precisely because criterion 4 is not.
+
+### And criterion 4 cannot be tightened either
+
+The primitive looked missing — telling a MARK from a LABEL — but geometry already
+states it: **there are no marks left of a spine.** A panel's plot runs from its spine
+to its right edge, so ink on the far side is the label strip by definition, and the
+band term should say nothing there. Applied, it does exactly what it should to the two
+adoptions in question: 475 figure 2's label strips go from adopted to refused,
+`밑변에 선 열 0.00 · 축 범위 안 잉크 1.00 (축 왼쪽이라 증거 아님)`.
+
+**And the figure gets worse.**
+
+| | shipped | band term on the plot side only | ...and the reach widened |
+|---|---|---|---|
+| 475 fig 2 | 6 panels, C at x1=403 | 6 panels, **C at x1=297** — loses its third bar group; E and F shrink too | same |
+| 475 fig 1 | 7 boxes | **8** | **8** |
+| fragment flags (6 figures) | 3 | 4 | 8 |
+| ladders | 35 | 36 | 38 |
+
+Those label-strip adoptions add no ladder. **The wider box they produce is what keeps
+`collapse_same_axis` and the mode score landing on the right geometry afterwards** — so
+the harness is getting 475 figure 2's panels right for a reason that is not the stated
+one, and making the criterion honest removes the accident that was helping. The extra
+ladders in the last two columns are the same trap `mode_score` was written to refuse,
+appearing inside one figure instead of across modes: more boxes, more ladders, worse
+panels.
+
+**So the repair is not in criterion 4.** A panel's box should contain its own label
+strip BY CONSTRUCTION — the way `label_band` already reads numerals left of the spine
+when measuring — rather than by an adoption that criterion 4 then has to justify.
+Growing every box to its own label strip as a definition would retire the left-side
+adoptions, let the band term be restricted to the plot side honestly, and only then let
+the reach be revisited. That is a change to the segmentation, not to the six statements.
+
+475 figure 1's panels C and E stay short until it exists.
 
 The third row of that table is also a warning about how this harness is judged: on 475
 figure 2 the panel COUNT and the ladder count were unchanged while the boxes moved to

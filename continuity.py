@@ -214,6 +214,22 @@ def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
         near = ox1 >= int(sx) - A.LABEL_BAND_MAX - 8
         rows = (min(bottom, oy1) - max(top, oy0)) / max(1, bottom - top)
         labels = near and rows >= 0.80
+    # THE BAND TERM IS VACUOUS AND LOAD-BEARING AT THE SAME TIME, which is the least
+    # comfortable thing measured about this module. `inside` is 1.0 by construction for
+    # any piece lying inside the panel's rows, so on its own it accepts a column of y
+    # numerals as readily as a bar group - publication 475's figure 2 adopts two label
+    # strips on exactly that evidence, at a foot share of 0.00.
+    #
+    # AND REFUSING THEM MAKES THAT FIGURE WORSE. Restricting the term to the plot side
+    # of the spine - there are no marks left of a spine, which is true - shrinks panels
+    # C, E and F on 475 figure 2 (C loses its third bar group, x1 403 -> 297) and takes
+    # 475 figure 1 from seven boxes to eight. Those adoptions add no ladder; the WIDER
+    # BOX they produce is what keeps `collapse_same_axis` and the mode score landing on
+    # the right geometry afterwards. The harness is getting those boxes right for the
+    # wrong reason, and the repair is not here: a panel's box should contain its own
+    # label strip BY CONSTRUCTION, the way `label_band` reads it, rather than by an
+    # adoption this criterion then has to justify. Until it does, the term stays as it
+    # is and this comment is the warning.
     ok = foot_share >= FOOT_SHARE or inside >= INSIDE_SHARE or labels
     return ok, ("밑변에 선 열 %.2f, 축 범위 안 잉크 %.2f%s"
                 % (foot_share, inside, ", 축 라벨 스트립" if labels else ""))

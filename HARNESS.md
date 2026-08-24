@@ -129,6 +129,64 @@ and ink lying IN that overhang — a stray label block below the baseline — is
 against nothing in this plot. That is the case the scenario pins, and it is the only
 one where deleting statement 4 changes an answer.
 
+### The signed bar chart, where the baseline is not at the bottom
+
+Publication 475's figure 2 is six panels of ΔTPR, ΔLVR and ΔCVRi: bars that go UP
+and DOWN from a zero line drawn through the MIDDLE of the panel, while the y axis
+runs on past it to the bottom of the scale. Four things were wrong there at once,
+and every one of them was the same mistake — asking about "the baseline" at the
+foot of the axis, where that figure has no ink at all.
+
+**Criteria 1 and 6 were measuring an empty row.** Both took `run[1] - 1`, the
+bottom of the spine. On panel E that is row 898 and every bar in it stands on row
+786, so criterion 1 answered "this piece has no ink on the baseline row" — a
+refusal that was really an empty measurement — and criterion 6 found zero marks and
+declined. **The heart of the judgement and its arbiter were both silent on all six
+panels.** `baseline_row` now picks between the axis's foot and the baseline the
+reader sees, on the panel alone: a baseline runs most of the panel's width, a bar
+top runs one bar's worth, so the row with more of the panel's own columns inked
+wins. That keeps the reason the foot was chosen in the first place — on a short box
+`spine_and_baseline` answers with a bar top, and a bar top loses this comparison.
+
+**A constant was standing in front of the self-calibrating test.** `ADOPT_GAP` is
+34 px and panel E's third bar group sits 37 px past the box, so the piece was
+refused before any of the six statements were asked — by exactly the kind of fixed
+distance criterion 1 exists to do without. The panel already says how wide its own
+bar-group gaps are: 74 px. That is now the reach, with the old constant kept as the
+FLOOR for panels whose baseline shows no gaps at all. This widens nothing; it stops
+the gate from overruling the test.
+
+**A slab never got an adoption pass.** Adoption is step 8 and the slab is built at
+step 6, so every box the row cut could not place was offered the discarded pieces
+exactly zero times — and panel E's box is a slab. It did not exist when the orphans
+were handed out. The second pass is offered the SLABS ONLY, so nothing that already
+had its turn gets another.
+
+**And `cut_through_axis` was wrong in both directions on the same figure.** It
+missed panel E's severance, because it probes three pixels and the sliced-off group
+is 37 px away across the gap the cut mistook for a boundary; the reach is now the
+panel's own widest baseline gap. And it called panels A, C and F fragments because
+that figure prints its zero line 51 px PAST the plotting area into the gutter with
+no bar anywhere in the overrun — three correct panels demoted out of
+`AUTO_DIGITIZE` for it. **A rule leaving the box is not data leaving the box:** what
+makes a box a fragment is MARKS outside it. Where the box's left edge IS its axis,
+the question is not asked on that side at all — everything there is the label strip
+and the axis title.
+
+Measured on that figure: fragment flags 3 → 0, panel E's box 103–299 → 103–402, six
+ladders before and six after. On an eight-figure sample: 25 flags removed, 5 added
+(all five on 475 figure 1, which really is severed), no panel gained or lost, no
+status changed, 47 ladders before and after.
+
+**Still open there.** Panel E is adopted on criterion 4, not criterion 1: measured
+at the right row the crossing gap is 75 px against a widest internal gap of 74 — a
+one-pixel miss, so the strongest statement abstains and the weakest carries it. And
+475 figure 1 is cut HORIZONTALLY at the zero line into an above-zero and a
+below-zero piece, eleven boxes for six panels; adoption looks left and right only,
+so nothing can put those back. The measurement that closed off up-and-down adoption
+predates `continuity.py` — it was about pulling in TITLES — and criterion 3 now
+separates data ink from a title, so it is worth re-running.
+
 ### Two more things the rule needs
 
 **Ambiguity, not direction.** A block between two stacked panels could be the lower
@@ -200,7 +258,7 @@ against drawn fixtures instead:
 
     python3 test_continuity.py
 
-47 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
+57 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
 run at two scales and must give the same verdict at both: nothing in this harness
 is allowed to be a distance in pixels. The two failure directions are drawn
 separately — a fragment REFUSED loses the panel's data silently, a neighbour

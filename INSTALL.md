@@ -8077,6 +8077,83 @@ the tree and not of the machine.
     proximity accepted as the evidence                 1
     a missing OCR backend reading as no numerals       1
 
+## The baseline is not always at the bottom of the axis
+
+Publication 475's figure 2 draws ΔTPR, ΔLVR and ΔCVRi as bars going UP and DOWN
+from a zero line through the MIDDLE of each panel, with the y axis running on past
+it to the bottom of the scale. Four defects were live on that one figure, and all
+four are the same mistake: asking about "the baseline" at the foot of the axis,
+where that figure has no ink at all.
+
+**Criteria 1 and 6 were measuring an empty row.** Both took `run[1] - 1`. On panel
+E that is row 898 and every bar in it stands on row 786, so criterion 1 answered
+"this piece has no ink on the baseline row" - a refusal that was really an empty
+measurement - and criterion 6 found zero marks and declined to speak. The heart of
+the judgement and its arbiter were both silent on all six panels, and the adoptions
+that did happen there rested on criterion 4 without anyone noticing.
+
+`continuity.baseline_row` now picks between the axis's foot and the baseline the
+reader sees, using the panel alone: a baseline runs most of the panel's width, a
+bar top runs one bar's worth, so the row with more of the panel's own columns inked
+wins. That preserves the reason the foot was chosen originally - on a short box
+`spine_and_baseline` answers with a bar top, and a bar top loses this comparison.
+
+**A constant was standing in front of the self-calibrating test.** `ADOPT_GAP` is
+34 px; panel E's third bar group sits 37 px past the box edge, so the piece was
+refused before any of the six statements were asked - by exactly the kind of fixed
+distance criterion 1 exists to do without. The panel already says how wide its own
+bar-group gaps are: 74 px here. That is the reach now, with the old constant kept
+as the FLOOR where a baseline shows no gaps at all. Nothing was widened; the gate
+stopped overruling the test.
+
+**A slab never got an adoption pass.** Adoption is step 8 and `broad_slabs` builds
+at step 6, so every box the row cut could not place was offered the discarded
+pieces exactly zero times - and panel E's box is a slab. It did not exist when the
+orphans were handed out. The second pass is offered the SLABS ONLY.
+
+**`cut_through_axis` was wrong in both directions at once.** It MISSED panel E: it
+probes three pixels and the sliced-off group is 37 px away, across the gap the cut
+mistook for a boundary, so the severance this check exists to catch went
+unreported. And it CRIED WOLF on panels A, C and F, because that figure prints its
+zero line 51 px past the plotting area into the gutter with no bar anywhere in the
+overrun - three correct panels demoted out of `AUTO_DIGITIZE` for a rule leaving
+the box. A rule leaving the box is not data leaving the box: what makes a box a
+fragment is MARKS outside it. The reach is now the panel's own widest baseline gap,
+the ink out there has to be more than the rule itself, and where the box's left
+edge IS its axis the question is not asked on that side - everything there is the
+label strip and the axis title.
+
+    475 figure 2                    before      after
+    fragment-flagged panels              3          0
+    panel E box                  103-299    103-402
+    ladders                              6          6
+
+    eight-figure sample             before      after
+    fragment flags                      26         12   (25 removed, 5 added)
+    panels / statuses / ladders     52 / -/ 47  52 / same / 47
+
+The five added flags are all on 475 figure 1, which really is severed - eleven
+boxes for six panels.
+
+    reverted                                          scenarios that fail
+    criterion 1 back to the axis's foot                1
+    criterion 6 back to the axis's foot                1
+    the fragment rule back to any ink at three pixels  2
+    any ink outside counting as marks                  1
+    the label strip asked about again                  1
+    the adoption reach back to the constant            1
+
+**Still open on that figure.** Panel E is adopted on criterion 4, not criterion 1:
+measured at the right row the crossing gap is 75 px against a widest internal gap
+of 74 - a one-pixel miss, so the strongest statement abstains and the weakest
+carries it. And 475 figure 1 is cut HORIZONTALLY at the zero line into an
+above-zero and a below-zero piece; adoption looks left and right only, so nothing
+can put those back. The measurement that closed off up-and-down adoption predates
+`continuity.py` - it was about pulling in TITLES - and criterion 3 now separates
+data ink from a title, so it is worth re-running.
+
+3203 core / 3241 full, both verified against the tree.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

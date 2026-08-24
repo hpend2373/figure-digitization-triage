@@ -313,6 +313,109 @@ finally:
     A.pytesseract = _saved
 
 # --------------------------------------------------------------------------
+# A SIGNED BAR CHART. The marks stand on a zero line drawn THROUGH the middle of
+# the panel and the y axis runs on past it to the bottom of the scale. Publication
+# 475's figure 2 is six of these, and on every one of them the two criteria that
+# read "the baseline" were reading a row with no ink in it.
+SPINE2, TOP2, BOT2, ZERO = 60, 40, 240, 140
+
+
+def signed(scale=1, groups=((78, 98, -50), (121, 141, 40), (159, 179, -45)),
+           rule_to=None, box_x1=262, extra=(), title=False):
+    """`rule_to=None` draws NO zero line, which is the case that broke: the printed
+    one on publication 475's figure 2 is lighter than ink, so the only thing on that
+    row is the bars themselves."""
+    s = scale
+    im = Image.new("L", (500 * s, 300 * s), 255)
+    d = ImageDraw.Draw(im)
+    d.rectangle([SPINE2 * s, TOP2 * s, SPINE2 * s + 1 * s, (BOT2 - 4) * s], fill=0)
+    if title:                       # the rotated axis title, left of the label strip
+        d.rectangle([22 * s, 90 * s, 40 * s, 190 * s], fill=0)
+    if rule_to:
+        d.rectangle([SPINE2 * s, ZERO * s, rule_to * s, ZERO * s + 1 * s], fill=0)
+    for x0, x1, h in tuple(groups) + tuple(extra):
+        top, bot = (ZERO + h, ZERO) if h < 0 else (ZERO, ZERO + h)
+        d.rectangle([x0 * s, top * s, x1 * s, bot * s], fill=0)
+    _a, dark = A._dark(im)
+    panel = (SPINE2 * s - 2, box_x1 * s, TOP2 * s, BOT2 * s)
+    return dark, SPINE2 * s, (TOP2 * s, (BOT2 - 4) * s), panel
+
+
+# BAR GROUPS 59 px APART, which is what makes the fixture a test rather than a
+# drawing: the severance below is 40 px, narrower than the panel's own spacing and
+# wider than ADOPT_GAP, so only a panel-calibrated reach can tell it is not a
+# boundary. 475 figure 2's numbers are 74 and 37.
+UP = ((78, 98, -50), (158, 178, -40), (238, 258, -45))
+
+section("7. a signed bar chart: the marks do not stand on the foot of the axis")
+
+for s in (1, 2):
+    dark, sx, run, panel = signed(s, rule_to=262)
+    by = C.baseline_row(dark, panel, sx, run)
+    check("%dx the baseline is the row the bars stand on, not the axis's foot" % s,
+          abs(by - ZERO * s) <= 2 and by != run[1] - 1,
+          "baseline_row=%d, zero=%d, axis foot=%d" % (by, ZERO * s, run[1] - 1))
+
+dark, sx, run, panel = signed(1, groups=UP, extra=((305, 335, -45),))
+orphan = (300, 340, TOP2, BOT2)   # a cut leaf spans the panel's rows
+ok, why = C.baseline_continues(dark, panel, orphan, sx, run)
+check("and the crossing gap is measured there, not reported as an empty row",
+      "간격" in why and "잉크가 없다" not in why, why)
+ok2, why2 = C.more_regular(dark, panel, orphan, sx, run)
+check("the arbiter counts marks there too, instead of finding none",
+      "막대·눈금이 0" not in (why2 or ""), why2)
+
+section("8. a fragment leaves MARKS outside, not a rule")
+
+# A zero line printed 60 px past the plotting area, with nothing drawn in it.
+dark, sx, run, panel = signed(1, rule_to=360, groups=UP)
+by = C.baseline_row(dark, panel, sx, run)
+check("a rule overrunning the box with no mark in it is not a severance",
+      A.cut_through_axis(dark, panel, sx, by) == "",
+      A.cut_through_axis(dark, panel, sx, by))
+
+# The severance itself: a bar group standing 37 px past the box edge, which is
+# where the cut fell. The three-pixel probe that used to ask this lands in white.
+dark, sx, run, panel = signed(1, groups=UP, extra=((305, 335, -45),))
+by = C.baseline_row(dark, panel, sx, run)
+said = A.cut_through_axis(dark, panel, sx, by)
+check("a bar group 43 px past the box edge is a severance", "right of x1" in said, said)
+check("and the three-pixel probe could not have seen it",
+      A.cut_through_axis(dark, panel, sx, by, reach=3) == "",
+      A.cut_through_axis(dark, panel, sx, by, reach=3))
+
+# The label strip is not a mark, and a box whose left edge IS its axis has one.
+# The axis title is ink, it crosses the baseline row, and it is not a mark. Only
+# the box's own left edge can say so: a box that starts AT its spine has the label
+# strip and the title outside it by construction.
+dark, sx, run, panel = signed(1, groups=UP, title=True)
+tight = (int(sx), panel[1], panel[2], panel[3])
+check("no left severance is claimed where the box's left edge is its own spine",
+      "left of x0" not in A.cut_through_axis(
+          dark, tight, sx, C.baseline_row(dark, tight, sx, run)),
+      A.cut_through_axis(dark, tight, sx, C.baseline_row(dark, tight, sx, run)))
+
+section("9. how far is \"touching\": the panel says, not a constant")
+
+dark, sx, run, panel = signed(1, groups=UP, extra=((305, 335, -45),))
+orphan = (300, 340, TOP2, BOT2)   # a cut leaf spans the panel's rows
+gap = orphan[0] - panel[1]
+grown = A.adopt_orphans(dark, [panel], [orphan])
+check("a piece %d px out - past ADOPT_GAP=%d - is still offered to the six"
+      % (gap, A.ADOPT_GAP),
+      gap > A.ADOPT_GAP and any(b[1] >= 335 for b in grown),   # the group ends at 335
+      "gap %d, boxes now %s" % (gap, grown))
+
+# And the reach is not unlimited: the panel's own widest baseline gap is what it
+# is, so a piece beyond that is a neighbour, not a fragment.
+dark, sx, run, panel = signed(1, groups=UP, extra=((430, 460, -45),))
+far = (425, 465, TOP2, BOT2)
+grown = A.adopt_orphans(dark, [panel], [far])
+check("a piece %d px out - past the panel's own widest gap - is not"
+      % (far[0] - panel[1]),
+      all(b[1] < far[0] for b in grown), "boxes now %s" % (grown,))
+
+# --------------------------------------------------------------------------
 print()
 # One line, one format, for the CI guard that checks the documented scenario
 # count against the measured one.

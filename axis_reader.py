@@ -668,6 +668,31 @@ def adopt_orphans(dark, boxes, orphans):
     """
     out = list(boxes)
     taken = collections.Counter()
+
+    # HOW FAR IS "TOUCHING"? A CONSTANT WAS ANSWERING THAT. `ADOPT_GAP` is 34 px and
+    # publication 475's figure 2 slices panel E 37 px from its own third bar group,
+    # so the piece was refused before any of the six statements were asked - by the
+    # very kind of fixed distance criterion 1 exists to do without. The panel already
+    # says how wide its own bar-group gaps are: 74 px here. That is the reach, with
+    # the old constant kept as the FLOOR for panels whose baseline shows no gaps at
+    # all, so this widens nothing - it stops the gate from overruling the test.
+    budget = {}
+    for b in boxes:
+        span = ADOPT_GAP
+        if SELF_GAP:
+            try:
+                an = axis_anchor(dark, b)
+                bsx = an[0] if an is not None else spine_and_baseline(dark, b)[0]
+                brun = spine_run(dark, bsx, b[2], b[3])
+                import continuity as _C
+                bby = _C.baseline_row(dark, b, bsx, brun)
+                row = dark[max(0, bby - 1):bby + 2].any(axis=0)
+                gaps = _row_gaps(row, int(bsx), b[1])
+                span = max(ADOPT_GAP, max(gaps) if gaps else 0)
+            except Exception:
+                span = ADOPT_GAP
+        budget[tuple(b)] = span
+
     for orp in orphans:
         ox0, ox1, oy0, oy1 = orp
         if (ox1 - ox0) < ADOPT_MIN or (oy1 - oy0) < ADOPT_MIN:
@@ -681,9 +706,10 @@ def adopt_orphans(dark, boxes, orphans):
             # corpus and cost ten ladders to gain nine x readings: what sits there is
             # the panel title and the axis title, pulling them in moves the top edge
             # the y label strip is measured from, and there is no way to test them.
-            if ox0 >= x1 and ox0 - x1 <= ADOPT_GAP and vsh >= ADOPT_SHARE:
+            reach = budget.get(tuple(b), ADOPT_GAP)
+            if ox0 >= x1 and ox0 - x1 <= reach and vsh >= ADOPT_SHARE:
                 cands.append((ox0 - x1, "right", b))
-            elif ox1 <= x0 and x0 - ox1 <= ADOPT_GAP and vsh >= ADOPT_SHARE:
+            elif ox1 <= x0 and x0 - ox1 <= reach and vsh >= ADOPT_SHARE:
                 cands.append((x0 - ox1, "left", b))
         if len(cands) != 1:
             continue                      # nobody, or nobody we can be sure about
@@ -836,8 +862,18 @@ def panels(path, loose=False):
     if CAP:
         allb = caption_floor_trim(dark, allb, CAP_FLOOR)
     if BROAD:
-        allb = allb + [c for c in broad_slabs(dark, allb, CAP_FLOOR, FIG_TARGET)
-                       if c not in allb]
+        slabs = [c for c in broad_slabs(dark, allb, CAP_FLOOR, FIG_TARGET)
+                 if c not in allb]
+        allb = allb + slabs
+        # A SLAB NEVER GOT AN ADOPTION PASS. Adoption runs at step 8 and the slab is
+        # built at step 6, so every box the row cut could not place was offered the
+        # discarded pieces exactly zero times. That is how publication 475's figure 2
+        # kept losing panel E's third bar group: the box that ended up being panel E
+        # did not exist yet when the orphans were handed out. The second pass is
+        # OFFERED THE SLABS ONLY, so nothing that already had its turn gets another.
+        if WIDE and WIDE2 and slabs:
+            grown = adopt_orphans(dark, slabs, orphans)
+            allb = allb + [c for c in grown if c not in allb]
     if SNAP:
         allb = snap_to_spine(dark, allb)
     if CAP:
@@ -894,7 +930,34 @@ def baseline_at(dark, box, spine_x):
     return y0 + by
 
 
-def cut_through_axis(dark, box, spine_x, baseline_y, pad=3):
+MARK_FRAG = _os.environ.get("MARKFRAG", "1") != "0"   # harness: a fragment leaves MARKS outside
+SELF_GAP = _os.environ.get("SELFGAP", "1") != "0"     # harness: the panel says how far "touching" is
+WIDE2 = _os.environ.get("WIDE2", "1") != "0"          # harness: the slab gets an adoption pass too
+
+
+def _row_gaps(row, x_from, x_to):
+    """Widths of the empty stretches between inked runs on one row."""
+    xs = [x for x in range(int(x_from), min(len(row), int(x_to))) if row[x]]
+    out, prev = [], None
+    for x in xs:
+        if prev is not None and x - prev > 1:
+            out.append(x - prev - 1)
+        prev = x
+    return out
+
+
+def _marks_outside(dark, box, by, frm, to):
+    """Is there MARK ink outside the box on this side, or only the rule?"""
+    y0, y1 = box[2], box[3]
+    lo, hi = max(0, min(frm, to)), min(dark.shape[1], max(frm, to))
+    if hi - lo < 2:
+        return False
+    band = dark[max(0, y0):min(dark.shape[0], y1), lo:hi]
+    rule = dark[max(0, by - 2):by + 3, lo:hi]
+    return int(band.sum()) - int(rule.sum()) >= PLOT_INK_MIN * band.size
+
+
+def cut_through_axis(dark, box, spine_x, baseline_y, reach=None):
     """Did the segmentation cut THROUGH this panel's own axis lines?
 
     A box is only a panel if its axes end inside it. When the cut lands in the gap
@@ -905,17 +968,52 @@ def cut_through_axis(dark, box, spine_x, baseline_y, pad=3):
     fragments, each with a correct tick ladder read off the shared label column and
     a box a third of the plot wide, which is the worst kind of wrong: right numbers
     on the wrong geometry.
+
+    TWO THINGS WERE WRONG WITH ASKING IT AT THREE PIXELS, and publication 475's
+    figure 2 shows both at once.
+
+    IT MISSED. Panel E's box stops at x=299 and its third bar group stands at
+    337-367 - 37 px away, across a gap the cut mistook for a boundary. A three-pixel
+    probe lands in white and reports a clean panel, which is the exact severance
+    this check exists to catch, going unreported. The reach is now the panel's own
+    widest baseline gap: the piece that was sliced off sits one bar-group gap away,
+    and the panel says how wide that is.
+
+    IT CRIED WOLF. That figure prints its zero line 51 px PAST the plotting area
+    into the gutter, with no bar anywhere in the overrun. Panels A, C and F were
+    called fragments for it and demoted out of AUTO_DIGITIZE. A rule leaving the box
+    is not data leaving the box: what makes a box a fragment is MARKS outside it, so
+    the ink in the overrun now has to be more than the rule itself.
     """
     x0, x1, y0, y1 = box
     h, w = dark.shape
     why = []
     by = int(baseline_y)
+    if reach is None:
+        reach = 3
+        if MARK_FRAG:
+            row = dark[max(0, by - 1):by + 2].any(axis=0)
+            gaps = _row_gaps(row, int(spine_x), x1)
+            reach = max(3, max(gaps) if gaps else 0)
     if 0 <= by < h:
-        if x0 - pad >= 0 and dark[by, max(0, x0 - pad):x0].any():
+        # A PANEL'S MARKS LIVE RIGHT OF ITS SPINE. Where the box's left edge IS the
+        # axis, everything to its left is the y label strip and the axis title -
+        # ink, but never marks - so there is nothing to ask on that side. Asking
+        # anyway called 475 figure 2's panel E a fragment on the left because its
+        # rotated axis title crosses the zero line.
+        at_the_wall = MARK_FRAG and x0 >= int(spine_x) - 4
+        left = dark[max(0, by - 1):by + 2, max(0, x0 - reach):x0].any()
+        if x0 > 0 and left and not at_the_wall and (
+                not MARK_FRAG or _marks_outside(dark, box, by, x0 - reach, x0)):
             why.append("baseline continues left of x0")
-        if x1 + pad <= w and dark[by, x1:min(w, x1 + pad)].any():
+        right = dark[max(0, by - 1):by + 2, x1:min(w, x1 + reach)].any()
+        if x1 < w and right and (not MARK_FRAG
+                                 or _marks_outside(dark, box, by, x1, x1 + reach)):
             why.append("baseline continues right of x1")
-    sx = int(spine_x)
+    # THE SPINE KEEPS ITS THREE PIXELS. A y axis is one line, so ink just above or
+    # below the box IS the axis running on; there is no bar-group gap to reach across
+    # and nothing to mistake for a rule overrun.
+    sx, pad = int(spine_x), 3
     if 0 <= sx < w:
         if y0 - pad >= 0 and dark[max(0, y0 - pad):y0, sx].any():
             why.append("spine continues above y0")

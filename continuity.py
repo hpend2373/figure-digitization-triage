@@ -53,6 +53,39 @@ def _cv(vals):
     return (var ** 0.5) / m
 
 
+def baseline_row(dark, panel, sx, run):
+    """The row the panel's marks stand on, which is not always the axis's bottom.
+
+    A signed bar chart draws its zero line THROUGH the middle of the panel and the
+    bars stand on that, not on the foot of the y axis. Publication 475's figure 2 is
+    six of them: the spine of panel E runs to row 898 and every bar in it stands on
+    row 786, so measuring the baseline at 898 asked about a row with no ink in it at
+    all and answered "this piece has none either" - a refusal that was really an
+    empty measurement. Criterion 1 was doing no work on that whole figure.
+
+    The two candidates are the axis's own foot and the baseline the reader sees, and
+    the panel decides between them WITHOUT looking at the piece: a baseline runs
+    most of the panel's width, a bar top runs one bar's worth. So take the row with
+    more of the panel's own columns inked. That also keeps the reason the foot was
+    chosen in the first place - on a short box `spine_and_baseline` answers with a
+    bar top, and a bar top loses this comparison.
+    """
+    lo, hi = int(sx), int(panel[1])
+    cands = [run[1] - 1]
+    try:
+        import axis_reader as _A
+        cands.append(int(_A.spine_and_baseline(dark, panel)[1]))
+    except Exception:
+        pass
+
+    def width(by):
+        if not (0 <= by < dark.shape[0]) or hi - lo < 1:
+            return -1
+        return int(dark[max(0, by - 1):by + 2, lo:hi].any(axis=0).sum())
+
+    return max(cands, key=width)
+
+
 def baseline_continues(dark, panel, orphan, sx, run):
     """1. 두 조각의 기준선이 이어지는가.
 
@@ -65,7 +98,7 @@ def baseline_continues(dark, panel, orphan, sx, run):
     """
     x0, x1, y0, y1 = panel
     ox0, ox1, _oy0, _oy1 = orphan
-    by = run[1] - 1
+    by = baseline_row(dark, panel, sx, run)
     row = dark[max(0, by - 1):by + 2].any(axis=0)
     if not row[ox0:ox1].any():
         return False, "밑변 행 %d에 조각 쪽 잉크가 없다" % by
@@ -187,7 +220,11 @@ def more_regular(dark, panel, orphan, sx, run):
     Returns None when there are too few marks to speak of regularity, which is common
     and must not be read as a refusal.
     """
-    by = run[1] - 1
+    # THE SAME ROW CRITERION 1 USES. Asking `bar_centres` to find bars standing on
+    # the foot of the y axis finds none at all on a signed bar chart, and criterion 6
+    # then answers "too few marks to speak of regularity" - so the ARBITER was silent
+    # on every panel of publication 475's figure 2, which is six of them.
+    by = baseline_row(dark, panel, sx, run)
     x0, x1, y0, y1 = panel
     ox0, ox1 = orphan[0], orphan[1]
     import x_reader as X

@@ -256,6 +256,55 @@ does not rescue the axis either.
 Both are driver switches, so `test_continuity.py` cannot observe them — it pins
 `figure_ink` and `mode_score` directly, and the corpus revert runs observe the rest.
 
+## 10. What "in this plot's coordinates" is measured on
+
+Criterion 4 was reading three wrong things at once, and publication 475's figure 1
+shows all three. Its bars hang DOWN from a zero line drawn through the middle of each
+panel, and the columns they stand in also carry the column title above and the
+plate's x labels below.
+
+**The row.** Round 9 moved criteria 1 and 6 to the row the marks stand on and left
+this one at the foot of the axis. On that plate the bars stand on row 835 and the
+foot is at 967.
+
+**One end only.** "Standing on the baseline" was written as *the column's last inked
+row is the baseline row*. That is true of a bar that goes UP and false of every bar
+here, whose last ink is its far end. A mark stands on the baseline when EITHER end is
+at it.
+
+**The whole column.** `dark[:, ox0:ox1]` asked where the ink in these columns begins
+and ends anywhere on the plate — which is the title above and the tick labels below.
+The piece's own rows are the question; `inside` had always restricted itself that way
+and the feet term had not.
+
+Together these answered **0.01** for a piece every column of which stands on the
+panel's zero line. Corrected, they answer **1.00**, and the piece is adopted.
+
+Measured on the same 20-figure sample: ladders **82 → 84**, and one figure changes —
+publication 397's figure 1 goes from 7 panels reading 4 ladders to 6 reading 6, both
+short of its 8. Everything else is identical row for row.
+
+### Two repairs measured and NOT kept
+
+**Reaching as far as the panel is wide.** The self-calibrating reach asks the panel
+for the widest gap already in its baseline row, and where the figure DRAWS a zero line
+that row has no gaps at all — so it degenerates to the old constant, which is why 475
+figure 1's pieces are still not offered to the six statements. Bounding the reach by
+the panel's own width offers them, and on the sample it bought one figure — 475 figure
+1 at six boxes for six axes — **by cancelling two errors: panel A returned twice and
+panel C not at all.** It cost publication 397's figure 1 a panel. A count that matches
+because two mistakes agree is the exact thing the count-match rule exists to refuse,
+so the gate stays narrow and the degenerate case stays open.
+
+**A panel does not contain another panel.** Added to `collapse_same_axis` to remove
+the duplicate above; on the sample it cost publication 68's figure 2 a panel and
+changed nothing else. Removed.
+
+So 475 figure 1's panels C and E are still boxed to a third of their width, and D and
+F still refuse their ladders. What is now known about that figure: the pieces ARE
+pieces by all six statements, and the only thing standing between them and their
+panels is a pre-filter that cannot state a distance on a plate with a drawn zero line.
+
 ## Order
 
 ```
@@ -310,7 +359,7 @@ against drawn fixtures instead:
 
     python3 test_continuity.py
 
-68 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
+74 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
 run at two scales and must give the same verdict at both: nothing in this harness
 is allowed to be a distance in pixels. The two failure directions are drawn
 separately — a fragment REFUSED loses the panel's data silently, a neighbour

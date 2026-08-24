@@ -160,17 +160,32 @@ def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
     baseline (a line, a scatter). Ink outside that band is drawn against something
     else - another panel's axis, or nothing at all.
     """
+    # THE THIRD PLACE THIS ROW WAS WRONG. Criteria 1 and 6 were moved to the row the
+    # marks stand on and this one was left at the foot of the axis, where publication
+    # 475's figure 1 has no ink: its bars stand on row 835 and the foot is at 967, so
+    # "how many of this piece's columns stand on the baseline" answered 0.06 for a
+    # piece every bar of which stands on it.
     top, bottom = run
-    by = bottom - 1
+    by = baseline_row(dark, panel, sx if sx is not None else panel[0], run)
     ox0, ox1, oy0, oy1 = orphan
-    sub = dark[:, ox0:ox1]
+    # THE PIECE'S OWN ROWS, not the whole column of the figure. Taking the full height
+    # asked where the ink in these columns starts and ends ANYWHERE on the plate - in
+    # publication 475's figure 1 that is the panel two rows up and the tick labels
+    # below - so a bar hanging off this panel's zero line was measured against
+    # somebody else's ink. `inside` below already restricts itself this way.
+    sub = dark[oy0:oy1, ox0:ox1]
     feet, cols = 0, 0
     for i in range(sub.shape[1]):
-        col = np.where(sub[:, i])[0]
+        col = np.where(sub[:, i])[0] + oy0
         if not len(col):
             continue
         cols += 1
-        if abs(int(col[-1]) - by) <= BAR_FOOT:
+        # EITHER END. "Standing on the baseline" was written as "the column's last
+        # inked row is the baseline row", which is true of a bar that goes UP and
+        # false of every bar in publication 475's figure 1, where the bars hang DOWN
+        # from zero and their last ink is their far end. A mark stands on the
+        # baseline when one of its ends is at it.
+        if min(abs(int(col[-1]) - by), abs(int(col[0]) - by)) <= BAR_FOOT:
             feet += 1
     if cols == 0:
         return False, "조각에 잉크가 없다"

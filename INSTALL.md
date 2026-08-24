@@ -8212,6 +8212,60 @@ policy nothing can import is a policy nothing can test.
 
 3214 core / 3252 full, both verified against the tree.
 
+## Criterion 4 was reading three wrong things at once
+
+Publication 475's figure 1 shows all three. Its bars hang DOWN from a zero line drawn
+through the middle of each panel, and the columns they stand in also carry the column
+title above and the plate's x labels below.
+
+THE ROW. The previous round moved criteria 1 and 6 to the row the marks stand on and
+left this one at the foot of the axis. On that plate the bars stand on row 835 and the
+foot is at 967.
+
+ONE END ONLY. "Standing on the baseline" was written as *the column's last inked row
+is the baseline row*. True of a bar that goes UP; false of every bar here, whose last
+ink is its far end. A mark stands on the baseline when EITHER end is at it.
+
+THE WHOLE COLUMN. `dark[:, ox0:ox1]` asked where the ink in these columns begins and
+ends anywhere on the plate - the title above, the tick labels below. The piece's own
+rows are the question, and `inside` had always restricted itself that way while the
+feet term had not.
+
+Together they answered 0.01 for a piece every column of which stands on the panel's
+zero line. Corrected, they answer 1.00 and the piece is adopted.
+
+On the 20-figure sample: ladders 82 -> 84, and one figure changes - publication 397's
+figure 1 goes from 7 panels reading 4 ladders to 6 reading 6, both short of its 8.
+Everything else identical row for row.
+
+    reverted                                          scenarios that fail
+    criterion 4 back to the axis's foot                2
+    only the last end of a column counted              2
+    the whole column asked about again                 2
+
+TWO REPAIRS MEASURED AND NOT KEPT, recorded here so the next reader does not spend the
+afternoon on them again.
+
+Reaching as far as the panel is wide. The self-calibrating reach asks the panel for
+the widest gap already in its baseline row, and where the figure DRAWS a zero line
+that row has no gaps at all - so it degenerates to the old constant, and 475 figure 1's
+pieces are never offered to the six statements at all. Bounding the reach by the
+panel's own width does offer them, and on the sample it bought exactly one figure -
+475 figure 1 at six boxes for six axes - BY CANCELLING TWO ERRORS: panel A returned
+twice and panel C not at all. It cost publication 397's figure 1 a panel. A count that
+matches because two mistakes agree is what the count-match rule exists to refuse.
+
+A panel does not contain another panel. Added to `collapse_same_axis` to remove that
+duplicate; on the sample it cost publication 68's figure 2 a panel and changed nothing
+else. Removed rather than kept behind a flag.
+
+So 475 figure 1's panels C and E are still boxed to a third of their width, and D and
+F still refuse their ladders. What is now KNOWN about that figure: the pieces are
+pieces by all six statements, and the only thing between them and their panels is a
+pre-filter that cannot state a distance on a plate with a drawn zero line.
+
+3220 core / 3258 full, both verified against the tree.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

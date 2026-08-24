@@ -724,12 +724,19 @@ def adopt_orphans(dark, boxes, orphans):
     taken = collections.Counter()
 
     # HOW FAR IS "TOUCHING"? A CONSTANT WAS ANSWERING THAT. `ADOPT_GAP` is 34 px and
-    # publication 475's figure 2 slices panel E 37 px from its own third bar group,
-    # so the piece was refused before any of the six statements were asked - by the
-    # very kind of fixed distance criterion 1 exists to do without. The panel already
-    # says how wide its own bar-group gaps are: 74 px here. That is the reach, with
-    # the old constant kept as the FLOOR for panels whose baseline shows no gaps at
-    # all, so this widens nothing - it stops the gate from overruling the test.
+    # publication 475's figure 2 slices panel E 37 px from its own third bar group, so
+    # the piece was refused before any of the six statements were asked - by the very
+    # kind of fixed distance criterion 1 exists to do without. The panel already says
+    # how wide its own bar-group gaps are: 74 px there. That is the reach, with the
+    # old constant kept as the FLOOR for panels whose baseline shows no gaps at all.
+    #
+    # THE PANEL'S WIDTH WAS TRIED AS THE REACH AND MEASURED WORSE. Where the figure
+    # draws a zero line the baseline row has no gaps at all, so this degenerates to
+    # the floor - which is why 475 figure 1's pieces are still not offered. Reaching
+    # as far as the panel is wide does offer them, and on a 20-figure sample it bought
+    # one figure (475 fig 1, and by cancelling two errors: panel A returned twice and
+    # panel C not at all) while costing publication 397's figure 1 a panel. The gate
+    # stays narrow and the degenerate case stays open.
     budget = {}
     for b in boxes:
         span = ADOPT_GAP

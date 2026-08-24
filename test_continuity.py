@@ -417,6 +417,8 @@ check("a piece %d px out - past the panel's own widest gap - is not"
       all(b[1] < far[0] for b in grown), "boxes now %s" % (grown,))
 
 # --------------------------------------------------------------------------
+BAR_FOOT_MARGIN = C.BAR_FOOT
+
 section("10. the threshold the figure states, and what it may decide")
 
 # A LIGHT-GREY AXIS. Publication 475's figure 1 draws its left column's y axes at a
@@ -464,7 +466,57 @@ check("a clip of one grey falls back to the shipped threshold",
 check("and a two-level clip does not - it answers between them",
       20 < A.figure_ink(np.asarray(grey_axis(axis=60, page=230))) <= 230)
 
-section("11. a plate shredded into more boxes than it has axes")
+section("11. what \"in this plot's coordinates\" is measured on")
+
+# Bars that hang DOWN from a drawn zero line, in columns that also carry the plate's
+# tick labels further down. Publication 475's figure 1 is exactly this.
+def hanging(scale=1, labels=True):
+    """A piece whose box reaches past the panel's rows, as a cut leaf does: its bars
+    hang below a drawn zero line, the plate's x labels sit under it, and the column
+    title sits above. All three are ink in the same columns, and only one of them is
+    a mark drawn against this panel's axis."""
+    s = scale
+    im = Image.new("L", (500 * s, 400 * s), 255)
+    d = ImageDraw.Draw(im)
+    d.rectangle([SPINE2 * s, TOP2 * s, SPINE2 * s + 1 * s, (BOT2 - 4) * s], fill=0)
+    d.rectangle([SPINE2 * s, ZERO * s, 380 * s, ZERO * s + 1 * s], fill=0)   # zero rule
+    for x0, x1 in ((78, 98), (158, 178), (238, 258)):
+        d.rectangle([x0 * s, ZERO * s, x1 * s, (ZERO + 55) * s], fill=0)     # the panel's
+    for x0, x1 in ((305, 325), (335, 355)):
+        d.rectangle([x0 * s, ZERO * s, x1 * s, (ZERO + 48) * s], fill=0)     # the piece's
+    d.rectangle([300 * s, 5 * s, 360 * s, 25 * s], fill=0)                   # column title
+    if labels:
+        d.rectangle([300 * s, 320 * s, 360 * s, 360 * s], fill=0)            # x labels
+    _a, dark = A._dark(im)
+    return (dark, SPINE2 * s, (TOP2 * s, (BOT2 - 4) * s),
+            (SPINE2 * s - 2, 262 * s, TOP2 * s, BOT2 * s),
+            (300 * s, 360 * s, ZERO * s - 2, 365 * s))
+
+
+dark, sx, run, panel, piece = hanging()
+ok, why = C.same_coordinates(dark, panel, piece, run, sx, "right")
+check("bars hanging below the zero line are in its coordinates", ok is True, why)
+check("and nearly every column of the piece is counted, not one",
+      "1.00" in why or "0.9" in why, why)
+
+# Each of the three things that were being measured instead, one at a time.
+_by = C.baseline_row(dark, panel, sx, run)
+check("the row asked about is the one the marks stand on, not the axis's foot",
+      abs(_by - ZERO) <= 2 and _by != run[1] - 1,
+      "row %d, axis foot %d" % (_by, run[1] - 1))
+col = np.where(dark[piece[2]:piece[3], piece[0] + 8])[0] + piece[2]
+check("a hanging bar's LAST ink is its far end - only its FIRST is on the baseline",
+      abs(int(col[-1]) - _by) > BAR_FOOT_MARGIN and abs(int(col[0]) - _by) <= BAR_FOOT_MARGIN,
+      "first %d last %d baseline %d" % (col[0], col[-1], _by))
+full = np.where(dark[:, piece[0] + 8])[0]
+check("and over the whole column the title above answers first, the labels last",
+      int(full[0]) < TOP2 and int(full[-1]) > _by + 100,
+      "column ink runs %d..%d, baseline %d" % (full[0], full[-1], _by))
+_ok, _why = C.same_coordinates(dark, panel, piece, run, sx, "right")
+check("the band term cannot carry this one - the piece reaches past the panel's rows",
+      "1.00" not in _why.split(",")[-1], _why)
+
+section("12. a plate shredded into more boxes than it has axes")
 
 # The numbers are publication 475 figure 1's: eleven boxes each reading a ladder,
 # against the five the re-inked cut produced, for six recorded axes.

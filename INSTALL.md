@@ -8154,6 +8154,64 @@ data ink from a title, so it is worth re-running.
 
 3203 core / 3241 full, both verified against the tree.
 
+## One number for 187 presses
+
+`INK = 140` decides what is ink. Publication 475's figure 1 draws the y axes of its
+left column at a grey around 155: column x=179 of panel A carries 238 rows of
+continuous axis, of which 140 admits TWO. Three of its six panels therefore have no
+axis at all, the plate comes back as eleven boxes - and the eleven-box reading WON,
+because each fragment read a ladder off the shared label column and `n_ok` is
+unbounded upward. Publication 70's figure 1 is the same illness and comes back with
+nothing at all.
+
+**Otsu is not a replacement for 140, and the corpus is why.** Re-running all 187 at
+the threshold each figure states moves the candidate count on 76 of them and drops
+the figures whose count matches the axes a person recorded from 39 to 35: on a figure
+printed in solid black, 140 is the better answer and Otsu drifts up into the
+anti-aliasing. The measurement that does hold is one-sided - on the 11 figures that
+come back SHORT, Otsu never gives fewer candidates, gives more on 5, reaches the
+recorded count on 3, and exactly ONE already-fine figure would break.
+
+So `figure_ink` is asked as a SECOND QUESTION, of a figure that came up short, through
+the same four modes and the same score, with the ladder still deciding; a figure
+decided that way carries `RE_INKED` in its `harness` column. It returns Otsu PLUS ONE,
+because `_dark` asks `a < INK` and a figure whose axis sits exactly at the split level
+would otherwise be excluded one grey lower - the same failure, reintroduced. A clip of
+one grey has nothing to separate, so it answers with the shipped threshold rather than
+raising into the caller.
+
+**The mode score had to change with it.** A re-inked reading of five panels lost to a
+shredded reading of eleven, because more boxes meant more ladders meant a better
+score. You cannot read more axes than the figure has: `mode_score` now puts distance
+from the human-authored count first and lets ladders break ties inside it. This is the
+existing count-match rule from the other side - that one refuses a segmentation that
+hits the number while every cell refuses the ladder.
+
+Measured on a 20-figure sample, 11 of them the short ones and 9 already working:
+
+    figures closer to the recorded count            7
+    figures further from it                         0
+    ladders read                              75 -> 82
+    figures matching the recorded count        8 -> 9
+    475 Fig.1  panels / ladders / fragments   11/11/8 -> 7/5/1
+
+Three figures that produced NOTHING - 345 Figure 3, 345 Figure 6, 528 Figure 1 - now
+produce panels. Every figure that already worked is unchanged row for row. Still at
+zero: 70 Figure 1 and 533 Figure 2, where the figure's own threshold does not rescue
+the axis either.
+
+    reverted                                          scenarios that fail
+    the count-distance term removed                    1
+    the off-by-one on a strict `<` reintroduced        1
+    a blank clip allowed to raise                      1 (the suite aborts)
+
+`REINK=0` and `NEAR=0` are driver switches, so the suite cannot observe them; it pins
+`figure_ink` and `mode_score` directly and the corpus revert runs observe the rest.
+Both were moved out of `propose.py` into `axis_reader` for exactly that reason - a
+policy nothing can import is a policy nothing can test.
+
+3214 core / 3252 full, both verified against the tree.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

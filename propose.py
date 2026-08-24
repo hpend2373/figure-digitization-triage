@@ -19,6 +19,7 @@ Three things happen here that the shipped proposer does not do.
 Everything emitted is PROPOSED. Nothing here writes a confirmation.
 """
 import csv, os, collections
+import numpy as np
 from PIL import Image
 import axis_reader as A
 import x_reader as X
@@ -46,9 +47,13 @@ if _only:
     _keys = {tuple(t.split("|")) for t in _only.split(";") if t.strip()}
     rows = [r for r in rows if (r["pid"], r["fig"]) in _keys]
 
+REINK = os.environ.get("REINK", "1") != "0"   # harness: the figure states its own ink
+NEAR = os.environ.get("NEAR", "1") != "0"     # harness: you cannot read more axes than the figure has
+
+
 _cache = {}
 def measure(png, img, dark, box, kind):
-    key = (png, box)
+    key = (png, box, A.INK)
     if key in _cache:
         rec = dict(_cache[key]); rec["kind"] = kind; return rec
     rec = dict(x0=box[0], x1=box[1], y0=box[2], y1=box[3], kind=kind)
@@ -165,6 +170,7 @@ for r in rows:
     declared = int((figs.get((r["pid"], r["fig"])) or {}).get("axes") or 0)
     try:
         img = Image.open(p)
+        grey = np.asarray(img.convert("L"))
         _a, dark = A._dark(img)
         area = float(dark.shape[0] * dark.shape[1])
     except Exception as exc:
@@ -177,57 +183,79 @@ for r in rows:
     A.FIG_TARGET = max(len(cap_panels), declared)
     best = None
     figure_refusals = {}
-    for mode in MODES:
-        A.SEVER_MODE = mode
-        try:
-            boxes, _d, loose = A.panels(p, loose=True)
-        except Exception as exc:
-            continue
-        # A MODE THAT SHREDS THE FIGURE CANNOT BE THE RIGHT MODE, and measuring its
-        # cells costs exactly what measuring real ones costs. The selection below
-        # would never pick it - it prefers the count matching the axes I counted by
-        # eye, then fewer panels - so evaluating it is pure cost. GRID can emit 24
-        # cells for a six-panel plate; skipping those took the run from an hour and
-        # three quarters back to half an hour.
-        tags = dict(A.HARNESS_TAG)
-        figure_refusals[mode] = list(A.FIGURE_BOXES)
-        # THE GATE COUNTS WHAT THE CUT PRODUCED, NOT WHAT THE HARNESS PUT BACK.
-        _added = ("EXTENDED_TO_SPINE", "ADOPTED_ORPHAN")
-        n_cut = sum(1 for b in boxes + loose
-                    if not tags.get(tuple(b), "").startswith(_added))
-        if declared and n_cut > 3 * declared:
-            continue
-        cand = [(b, "") for b in boxes] + [(b, "Y_AXIS_ONLY") for b in loose]
-        recs = []
-        for b, kind in cand:
+    # THE SECOND THRESHOLD IS ASKED ONLY OF A FIGURE THAT CAME UP SHORT, and asked
+    # the same way: all four modes, same score, ladder still deciding.
+    inks = [A.INK_DEFAULT]
+    if REINK:
+        _t = A.figure_ink(grey)
+        if _t != A.INK_DEFAULT:
+            inks.append(_t)
+    for ink in inks:
+        A.INK = ink
+        if ink != A.INK_DEFAULT:
+            if best is not None and best[0][0]:
+                break                      # a mode already matched; nothing to ask
+            _a, dark = A._dark(img)
+        for mode in MODES:
+            A.SEVER_MODE = mode
             try:
-                rec = measure(r["png"], img, dark, b, kind)
+                boxes, _d, loose = A.panels(p, loose=True)
             except Exception as exc:
-                rec = dict(x0=b[0], x1=b[1], y0=b[2], y1=b[3], kind=kind,
-                           status="MEASURE_FAILED",
-                           detail="%s: %s" % (type(exc).__name__, exc))
-            if kind == "Y_AXIS_ONLY" and rec.get("status") != "LADDER_OK":
                 continue
-            note = tags.get(tuple(b), "")
-            if rec.get("anchor"):
-                note = (note + " | " if note else "") + rec["anchor"]
-            rec["harness"] = note
-            recs.append(rec)
-        if A.SNAP:
-            recs = collapse_same_axis(dark, recs)
-        n_ok = sum(1 for x in recs if x.get("status") == "LADDER_OK")
-        # A COUNT MATCH THAT READS NOTHING IS NOT EVIDENCE.
-        matched = bool(declared and len(recs) == declared and (n_ok or not A.BROAD))
-        score = (1 if matched else 0, n_ok, -len(recs))
-        if best is None or score > best[0]:
-            best = (score, mode, recs)
+            # A MODE THAT SHREDS THE FIGURE CANNOT BE THE RIGHT MODE, and measuring its
+            # cells costs exactly what measuring real ones costs. The selection below
+            # would never pick it - it prefers the count matching the axes I counted by
+            # eye, then fewer panels - so evaluating it is pure cost. GRID can emit 24
+            # cells for a six-panel plate; skipping those took the run from an hour and
+            # three quarters back to half an hour.
+            tags = dict(A.HARNESS_TAG)
+            figure_refusals[(ink, mode)] = list(A.FIGURE_BOXES)
+            # THE GATE COUNTS WHAT THE CUT PRODUCED, NOT WHAT THE HARNESS PUT BACK.
+            _added = ("EXTENDED_TO_SPINE", "ADOPTED_ORPHAN")
+            n_cut = sum(1 for b in boxes + loose
+                        if not tags.get(tuple(b), "").startswith(_added))
+            if declared and n_cut > 3 * declared:
+                continue
+            cand = [(b, "") for b in boxes] + [(b, "Y_AXIS_ONLY") for b in loose]
+            recs = []
+            for b, kind in cand:
+                try:
+                    rec = measure(r["png"], img, dark, b, kind)
+                except Exception as exc:
+                    rec = dict(x0=b[0], x1=b[1], y0=b[2], y1=b[3], kind=kind,
+                               status="MEASURE_FAILED",
+                               detail="%s: %s" % (type(exc).__name__, exc))
+                if kind == "Y_AXIS_ONLY" and rec.get("status") != "LADDER_OK":
+                    continue
+                note = tags.get(tuple(b), "")
+                if rec.get("anchor"):
+                    note = (note + " | " if note else "") + rec["anchor"]
+                rec["harness"] = note
+                recs.append(rec)
+            if A.SNAP:
+                recs = collapse_same_axis(dark, recs)
+            n_ok = sum(1 for x in recs if x.get("status") == "LADDER_OK")
+            # A COUNT MATCH THAT READS NOTHING IS NOT EVIDENCE.
+            matched = bool(declared and len(recs) == declared and (n_ok or not A.BROAD))
+            score = A.mode_score(matched, n_ok, len(recs), declared, near=NEAR)
+            if os.environ.get("SCOREDEBUG"):
+                print("   ink=%-4s %-6s recs=%-3d n_ok=%-3d matched=%s score=%s"
+                      % (ink, mode, len(recs), n_ok, matched, score))
+            if best is None or score > best[0]:
+                best = (score, mode, recs, ink)
+    A.INK = A.INK_DEFAULT
     if best is None or not best[2]:
         out.append(dict(pid=r["pid"], fig=r["fig"], png=r["png"], panel="", status="NO_PANEL",
                         detail="no mode of the cut produced a block holding an axis"))
         continue
-    score, mode, recs = best
+    score, mode, recs, ink = best
+    ink_note = ("" if ink == A.INK_DEFAULT else
+                "RE_INKED: at the shipped threshold this figure came up short of the "
+                "%d axes recorded for it, so it was cut again at the grey the figure "
+                "itself separates from its paper (%d, not %d)"
+                % (declared, ink, A.INK_DEFAULT))
     # THE REFUSED FIGURE BOX IS STILL REPORTED.
-    for _b, _why in figure_refusals.get(mode, []):
+    for _b, _why in figure_refusals.get((ink, mode), []):
         out.append(dict(pid=r["pid"], fig=r["fig"], png=r["png"], panel="",
                         x0=_b[0], x1=_b[1], y0=_b[2], y1=_b[3],
                         status="FIGURE_BOX_REFUSED", sever_mode=mode,
@@ -240,14 +268,16 @@ for r in rows:
             frag.append(rec["cut_through"])
         if covered < FRAGMENT_AREA_SHARE:
             frag.append("panels cover only %.0f%% of the raster" % (100 * covered))
+        if ink_note:
+            rec["harness"] = (rec.get("harness") + " | " if rec.get("harness") else "") + ink_note
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
-                   sever_mode=mode, declared_axes=declared,
+                   sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),
                    area_share="%.2f" % covered,
                    fragment="; ".join(frag))
         out.append(rec)
 
-cols = ["pid", "fig", "png", "panel", "kind", "sever_mode", "declared_axes",
+cols = ["pid", "fig", "png", "panel", "kind", "sever_mode", "ink", "declared_axes",
         "caption_panels", "caption_row",
         "x0", "x1", "y0", "y1", "spine_x", "baseline_y", "n_labels", "ticks",
         "resid_px", "spacing_cv", "status", "flag", "fragment", "area_share",

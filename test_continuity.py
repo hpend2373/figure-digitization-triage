@@ -33,6 +33,7 @@ without pytesseract, which the last two scenarios pin.
 import os
 import sys
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -414,6 +415,72 @@ grown = A.adopt_orphans(dark, [panel], [far])
 check("a piece %d px out - past the panel's own widest gap - is not"
       % (far[0] - panel[1]),
       all(b[1] < far[0] for b in grown), "boxes now %s" % (grown,))
+
+# --------------------------------------------------------------------------
+section("10. the threshold the figure states, and what it may decide")
+
+# A LIGHT-GREY AXIS. Publication 475's figure 1 draws its left column's y axes at a
+# grey around 155; the shipped threshold of 140 admits two rows of a 238-row line.
+def grey_axis(axis=155, page=250, h=270):
+    """A figure whose STRUCTURE is printed light and whose marks are solid: the axis,
+    its numerals and its gridlines at one grey, the bars in ink. That mixture is what
+    makes the shipped threshold wrong here - it is dark enough for the bars and too
+    dark for everything holding them."""
+    im = Image.new("L", (200, h), page)
+    d = ImageDraw.Draw(im)
+    d.rectangle([60, 10, 61, h - 20], fill=axis)
+    for y in range(30, h - 30, 40):
+        d.rectangle([100, y, 120, y + 24], fill=20)        # marks, in solid ink
+    for y in range(14, h - 20, 24):
+        d.rectangle([40, y, 56, y + 10], fill=axis)        # tick numerals
+        d.rectangle([62, y + 5, 190, y + 5], fill=axis)    # gridlines
+    return im
+
+
+im = grey_axis()
+grey = np.asarray(im.convert("L"))
+t = A.figure_ink(grey)
+check("the figure's own threshold sits above the light-grey axis",
+      140 < t <= 160, "figure_ink=%d" % t)
+
+_saved = A.INK
+A.INK = A.INK_DEFAULT
+_a, d140 = A._dark(im)
+A.INK = t
+_a, dt = A._dark(im)
+A.INK = _saved
+run140 = A._longest_run(d140[:, 60])
+runt = A._longest_run(dt[:, 60])
+check("at the shipped threshold the axis is not there", run140 < A.MIN_AXIS_PX,
+      "longest run %d px" % run140)
+check("at the figure's own threshold the whole axis is", runt >= 200,
+      "longest run %d px" % runt)
+check("and it is the axis that appears, not the page",
+      float(dt.mean()) < 0.35, "ink share %.3f" % float(dt.mean()))
+# A blank crop has nothing to separate. Otsu is undefined there, not merely
+# uninformative, so it answers with the shipped threshold rather than raising.
+check("a clip of one grey falls back to the shipped threshold",
+      A.figure_ink(np.asarray(Image.new("L", (40, 40), 200))) == A.INK_DEFAULT)
+check("and a two-level clip does not - it answers between them",
+      20 < A.figure_ink(np.asarray(grey_axis(axis=60, page=230))) <= 230)
+
+section("11. a plate shredded into more boxes than it has axes")
+
+# The numbers are publication 475 figure 1's: eleven boxes each reading a ladder,
+# against the five the re-inked cut produced, for six recorded axes.
+shredded = A.mode_score(False, 11, 11, 6)
+five = A.mode_score(False, 4, 5, 6)
+check("five boxes near the recorded count beat eleven that are not",
+      five > shredded, "%s vs %s" % (five, shredded))
+check("and with the term off, the eleven win again - the change is observable",
+      A.mode_score(False, 11, 11, 6, near=False)
+      > A.mode_score(False, 4, 5, 6, near=False))
+check("an exact count match still outranks any number of ladders",
+      A.mode_score(True, 1, 6, 6) > A.mode_score(False, 40, 40, 6))
+check("where no count was recorded, ladders decide as before",
+      A.mode_score(False, 11, 11, 0) > A.mode_score(False, 4, 5, 0))
+check("overshooting and undershooting by the same amount rank together",
+      A.mode_score(False, 3, 8, 6)[1] == A.mode_score(False, 3, 4, 6)[1])
 
 # --------------------------------------------------------------------------
 print()

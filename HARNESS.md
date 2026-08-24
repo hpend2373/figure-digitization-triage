@@ -204,6 +204,58 @@ title, pulling them in moves the top edge the y label strip is measured from, an
 there is no way to test them. Left and right hold the plot's own data and numerals and
 CAN be tested. Evidence, not symmetry.
 
+## 9. The threshold the figure states
+
+`INK = 140` is one number for 187 figures printed by 187 different presses, and where
+it is wrong it is not wrong by a little.
+
+Publication 475's figure 1 draws the y axes of its left column at a grey around 155.
+Column x=179 of panel A carries **238 rows of continuous axis, of which 140 admits
+two.** Three of its six panels therefore have no axis at all, the plate comes back as
+eleven boxes, and — because the mode score rewarded ladders without bound — the
+eleven-box reading WON, each fragment reading a ladder off the shared label column.
+Publication 70's figure 1 is the same illness and comes back with nothing.
+
+**Otsu is not a replacement for 140, and the corpus is why.** Re-running all 187 at
+the figure's own threshold moves the candidate count on 76 of them and drops the
+figures whose count matches the axes a person recorded from **39 to 35**: on a figure
+printed in solid black, 140 is the better answer and Otsu drifts up into the
+anti-aliasing. What the corpus says is one-sided instead — on the 11 figures that come
+back SHORT, Otsu never gives fewer candidates, gives more on 5, reaches the recorded
+count on 3, and only ONE already-fine figure would break.
+
+So it is a SECOND QUESTION, asked only of a figure that came up short, through the
+same four modes and the same score, with the ladder still deciding. A figure decided
+that way says so in its `harness` column as `RE_INKED`.
+
+**And the score had to change with it**, because a re-inked reading of five panels
+lost to a shredded reading of eleven. `n_ok` is unbounded upward, so more boxes meant
+more ladders meant a better score. **You cannot read more axes than the figure has:**
+distance from the human-authored count now comes first, and ladders break ties inside
+it. This is the count-match rule from the other side — the existing one refuses a
+segmentation that hits the number while every cell refuses the ladder.
+
+Measured on a 20-figure sample, half of them the short ones and half already working:
+
+| | before | after |
+|---|---|---|
+| figures closer to the recorded count | — | **7** |
+| figures further from it | — | **0** |
+| ladders read | 75 | 82 |
+| figures matching the recorded count exactly | 8 | 9 |
+| 475 Fig.1 panels / ladders / fragment flags | 11 / 11 / 8 | 7 / 5 / 1 |
+
+Three figures that produced **nothing at all** — 345 Figure 3, 345 Figure 6 and 528
+Figure 1 — now produce panels. Every figure that was already working is unchanged row
+for row. Still at zero: 70 Figure 1 and 533 Figure 2, where the figure's own threshold
+does not rescue the axis either.
+
+    REINK=0   the second threshold is never asked
+    NEAR=0    distance from the recorded count is ignored
+
+Both are driver switches, so `test_continuity.py` cannot observe them — it pins
+`figure_ink` and `mode_score` directly, and the corpus revert runs observe the rest.
+
 ## Order
 
 ```
@@ -258,7 +310,7 @@ against drawn fixtures instead:
 
     python3 test_continuity.py
 
-57 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
+68 scenarios, none of which need the corpus, OCR, or a network. The geometric ones
 run at two scales and must give the same verdict at both: nothing in this harness
 is allowed to be a distance in pixels. The two failure directions are drawn
 separately — a fragment REFUSED loses the panel's data silently, a neighbour

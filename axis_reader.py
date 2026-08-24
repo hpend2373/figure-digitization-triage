@@ -27,6 +27,8 @@ except ImportError:        # call none of it, so requiring tesseract to IMPORT t
     pytesseract = None     # would put the whole harness behind a system package.
 
 INK = 140                 # a grey below this is ink
+INK_DEFAULT = 140         # ...and this is what it goes back to; the caller may ask
+                          # a figure that came up short at its OWN threshold instead
 GUTTER_INK = 0.004        # a row/column with less inked fraction than this is empty
 MIN_GUTTER = 8            # a gutter narrower than this is letter spacing
 MIN_BLOCK = 90            # the cut stops recursing below this
@@ -57,6 +59,58 @@ def _dark(path_or_img):
     im = path_or_img if isinstance(path_or_img, Image.Image) else Image.open(path_or_img)
     a = np.asarray(im.convert("L"))
     return a, a < INK
+
+
+def figure_ink(grey):
+    """Otsu's threshold: the grey the FIGURE separates from its paper.
+
+    `INK` is one number for 187 figures printed by 187 different presses, and where
+    it is wrong it is not wrong by a little. Publication 475's figure 1 draws the y
+    axes of its left column at a grey around 155 - 238 rows of continuous axis, of
+    which 140 admits TWO - so three of its six panels have no axis at all and the
+    plate comes back as eleven boxes. Publication 70's figure 1 is the same illness
+    and comes back with nothing.
+
+    NOT A REPLACEMENT FOR THE SHIPPED THRESHOLD, AND THE CORPUS IS WHY. Re-running
+    all 187 at Otsu moves the candidate count on 76 of them and drops the figures
+    whose count matches the axes a person recorded from 39 to 35: on a figure printed
+    in solid black, 140 is the better answer and Otsu drifts up into the anti-aliasing.
+    What the corpus does say is one-sided - on the 11 figures that come back SHORT,
+    Otsu never gives FEWER candidates, gives more on 5, reaches the recorded count on
+    3, and only ONE already-fine figure would break. So it is a SECOND QUESTION, asked
+    only of a figure that came up short, and the ladder still decides.
+    """
+    hist = np.bincount(np.asarray(grey).ravel(), minlength=256).astype(float)
+    total = hist.sum()
+    w = np.cumsum(hist)
+    m = np.cumsum(hist * np.arange(256))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        between = (m[-1] * w / total - m) ** 2 / (w * (total - w))
+    # A CLIP OF ONE GREY HAS NOTHING TO SEPARATE, and Otsu is undefined on it rather
+    # than merely uninformative. A blank crop is a real thing to be handed, so it
+    # answers with the shipped threshold instead of raising into the caller.
+    if not np.isfinite(between).any():
+        return INK_DEFAULT
+    # PLUS ONE, BECAUSE `_dark` ASKS `a < INK`. Otsu returns the level the two
+    # classes split AT, and a figure whose axis is drawn at exactly that level would
+    # be excluded by a strict comparison - which is the whole failure this exists to
+    # repair, reintroduced one grey lower.
+    return int(np.nanargmax(between)) + 1
+
+
+def mode_score(matched, n_ok, n_recs, declared, near=True):
+    """How a segmentation is chosen: count first, then ladders inside that.
+
+    YOU CANNOT READ MORE AXES THAN THE FIGURE HAS. The count-match term already
+    refuses a segmentation that hits the number while every cell refuses the ladder.
+    This is the same statement from the other side: `n_ok` is unbounded upward, so a
+    plate shredded into eleven boxes that each read a ladder outscored the same plate
+    cut into the five it actually has - and publication 475's figure 1 was decided
+    that way, at eleven boxes for six recorded axes. Distance from the human-authored
+    count comes first; ladders break ties inside it.
+    """
+    gap = -abs(n_recs - declared) if (near and declared) else 0
+    return (1 if matched else 0, gap, n_ok, -n_recs)
 
 
 def _longest_run(v):

@@ -133,6 +133,48 @@ class BoxLevelComparison(unittest.TestCase):
         self.assertEqual(moved[0]["width_b"], 246)
         self.assertLess(moved[0]["iou"], 0.70)
 
+    def test_an_added_column_is_not_a_changed_measurement(self):
+        """A change that only ADDS columns must leave the old ones alone, and no
+        count can see whether it did.  Guard: shared_column_diff over the
+        intersection of the two arms' columns."""
+        tmp = tempfile.mkdtemp()
+        boxes = [(31, 403, 28, 322, 148, 307), (533, 904, 33, 322, 650, 305)]
+        base = write_csv(os.path.join(tmp, "b.csv"),
+                         [row("P%02d" % (i + 1), *b) for i, b in enumerate(boxes)])
+        # candidate: same rows, one extra column
+        rows = [row("P%02d" % (i + 1), *b) for i, b in enumerate(boxes)]
+        for r in rows:
+            r["plot_x1"] = r["x1"]
+        with open(os.path.join(tmp, "c.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, HDR + ["plot_x1"])
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        c = H.compare_outputs(base, os.path.join(tmp, "c.csv"))
+        sc = c["per_figure"][0]["shared_columns"]
+        self.assertEqual(sc["mismatched"], {})
+        self.assertEqual(sc["only_in_candidate"], ["plot_x1"])
+        self.assertEqual(c["totals"]["shared_column_mismatches"]["delta"], 0)
+
+        # now move one old column that no count reports, and it must show up
+        rows[0]["ticks"] = "100:80.0"
+        rows[1]["ticks"] = ""
+        with open(os.path.join(tmp, "d.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, HDR + ["plot_x1", "ticks"])
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        base2 = os.path.join(tmp, "b2.csv")
+        with open(base2, "w", newline="") as f:
+            w = csv.DictWriter(f, HDR + ["ticks"])
+            w.writeheader()
+            for i, b in enumerate(boxes):
+                w.writerow(dict(row("P%02d" % (i + 1), *b), ticks=""))
+        c2 = H.compare_outputs(base2, os.path.join(tmp, "d.csv"))
+        self.assertEqual(c2["totals"]["panel_count"]["delta"], 0)
+        self.assertEqual(c2["totals"]["shared_column_mismatches"]["delta"], 1)
+        self.assertIn("ticks", c2["per_figure"][0]["shared_columns"]["mismatched"])
+
     def test_duplicate_boxes_on_one_spine_are_not_two_panels(self):
         """397 Fig. 1 harness-off: eight boxes, but pairs of them stood on the
         same spine.  panel_count said 8 > 6; the axis signature says 4 < 6.

@@ -8550,6 +8550,128 @@ with it. The order that follows from this - experiment harness, then the geometr
 split, then label ownership, then candidate scoring on axis signature rather than box
 area, then vertical fragments whose role is proven to be DATA - is in `HARNESS.md`.
 
+## A panel is three boxes, and the first draft of them was empty
+
+The section above ends by naming the repair as a change of REPRESENTATION rather
+than of threshold: a panel is a plot core, an owned label strip, and an axis
+signature. This is that change, and it is deliberately additive - `propose.py`
+writes eighteen new columns and every old one is untouched.
+
+    plot_x0/x1/y0/y1        where marks are: bars, curves, points, continuity
+    label_x0/x1/y0/y1       what the panel owns on the label side of its axis
+    label_side              LEFT or RIGHT
+    numeral_x0/x1           the tighter strip OCR is pointed at, inside that
+    review_x0/x1/y0/y1      the union - what a person is shown
+    axis_sig, ladder_sig    the physical axis, and the values it read
+    geom_note               why any of the above is blank
+
+### Ownership and OCR are two questions
+
+The first version answered both with `label_band`, and reported NO LABEL STRIP ON
+ANY OF THE TWELVE REAL PANELS it was pointed at. The cause is the same on both
+figures. Publication 475's figure 2, panel E, rows 654-899, the ink left of the
+spine at x=105:
+
+    37-54    the rotated axis title
+    72-94    the numerals
+    102-103  the tick marks
+    105      the spine
+
+`label_band` walks left from x=103, finds the tick marks, meets seven blank
+columns at 95-101, stops, measures a band one pixel wide and refuses it. It never
+reaches the numerals. Publication 345's figure 4 panel F is the same shape: title
+1118-1135, numerals 1141-1157, a tick mark at 1165, spine 1178.
+
+That is not a bug in `label_band`. A strip handed to tesseract has to be tight,
+and its two pixel constants belong to the question "is this a column of digits".
+
+    A tight strip is the right answer to "where do I read digits". It is the
+    wrong answer to "what does this panel own". A panel owns its axis title as
+    much as it owns its numerals - neither is data, both are its own.
+
+So ownership reaches from the axis to the panel's boundary and takes everything
+between; `numeral_band` stays exactly `label_band` and is reported in its own
+columns. A panel whose digits cannot be isolated still has a label box, and the
+two failures are told apart in the output instead of both showing as blank.
+
+On these two figures `numeral_x0` is empty on all twelve panels while every one
+of them reads a ladder - `y_tick_labels` tries several strip geometries and one
+of the others works. Isolating the numeral column from the tick marks is not
+solved here and is not needed for ownership.
+
+### The boundary is the neighbour's EDGE, not its spine
+
+The first draft bounded a left-side strip at the nearest spine to its left. On
+475's figure 2 that gave panel D a label box starting at x=427 - inside panel C,
+which ends at 403. A panel to the left ends at its right-hand edge; stopping at
+its axis hands its whole plot to the panel next door. Bounded at the edge, panel
+D's strip starts at 404. Only a panel that SHARES ROWS with the strip can bound
+it: one stacked above takes nothing away, however close its columns are.
+
+### Reach is the panel's own width
+
+`label_band` defaults to 180 px, which is right for digits at a printed size and
+wrong for ownership: the same figure scanned at twice the resolution would own
+half as much. Ownership reaches `x1 - x0`. Both scenarios in the suite run at two
+scales and must give the same verdict at both.
+
+### Measured to be additive
+
+Two figures, base at `28a74a9`, candidate with this change, `--vary code`, two
+replicates each:
+
+    panel_count               12 -> 12        boxes moved                   0
+    unique_axis_count         12 -> 12        max boundary delta         0 px
+    ladder_pass_count         12 -> 12        SHARED COLUMN MISMATCHES      0
+    fragment_flag_count        0 ->  0        columns only in candidate    18
+
+Both arms replayed byte for byte. `shared_column_mismatches` is the number this
+step was built to make zero: it compares every column BOTH arms wrote, for
+matched axes, and no count can see whether an "additive" change was additive.
+It was added to `harness_compare` for exactly this and has its own scenario.
+
+### The ghost, unstaged
+
+Relaunching that comparison, a `kill` aimed at the wrong process group left the
+previous run's arm alive. It was still writing while the new run worked, into the
+same directory:
+
+    output.rep1.20260825T035452-11326.csv.partial   the orphan
+    output.rep0.20260825T035550-12996.csv.partial   the live run
+
+Under the old scheme both of those are `proposals.csv`. This was not a test; it
+happened while relaunching a job, which is how it happened the first time.
+
+### The suite
+
+`test_panel_geometry.py`, 20 scenarios run at two scales for 38 in total, drawn
+fixtures only. Thirteen guards, thirteen reverts, thirteen red suites:
+
+    label_side decided by ink, not the baseline   -> a sparse plot keeps its side
+    ownership answered by label_band              -> eight scenarios
+    no neighbour bound                            -> the neighbour's far edge
+    a panel above counts as a neighbour           -> rows must overlap
+    reach is a pixel constant again               -> the wide-panel scenario
+    no caption floor clamp                        -> the floor ends the strip
+    right-hand band not implemented               -> the mirror
+    plot core not clamped at the spine            -> two scenarios
+    review box is just the box                    -> the strip outside the box
+    plot core keeps the strip                     -> the strip inside the box
+    axis extent from the box, not the spine run   -> two panels, one signature
+    ladder hash follows pixels, not values        -> identity survives a better read
+    numeral band not reported separately          -> its own cells
+
+Two of those reverts survived the first matrix - the reach constant and the
+numeral cells had no scenario watching them - and two scenarios were written to
+close them.
+
+### What does not use any of this yet
+
+Nothing. `collapse_same_axis` and `mode_score` still rank on box area;
+segmentation still produces one box; the four figures that were wrong are still
+wrong in the same way. This step only makes the next two possible, and it is
+recorded as measured rather than as done.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

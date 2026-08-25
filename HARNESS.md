@@ -473,7 +473,9 @@ the first can be believed.
 
     harness_compare.py       two arms, two staging trees, two manifests, one refusal
                              list, and a per-axis comparison
-    test_harness_compare.py  15 scenarios, no corpus
+    test_harness_compare.py  16 scenarios, no corpus
+    panel_geometry.py        the three boxes and the axis signature, derived
+    test_panel_geometry.py   20 scenarios at two scales, drawn fixtures
 
 Use it for every A/B from here on, including the ones that look too small to need it -
 the change that started this was a single reporting column, and the comparison that
@@ -505,20 +507,20 @@ Recorded as an order rather than a list because each step is what makes the next
 measurable.
 
     1  the experiment harness            done: harness_compare.py
-    2  panel geometry splits in three    plot_box, label_box, review_box, plus the
-                                         axis signature, carried on the proposal row
-                                         alongside x0/x1/y0/y1 rather than instead of
-                                         them, with each consumer naming which box it
-                                         reads
-    3  label ownership                   the strip is DERIVED from the axis - label
-                                         side, vertical overlap with the axis run,
-                                         bounded by the nearest column gutter, the
-                                         caption floor, and any neighbouring spine -
-                                         and left-side orphan adoption comes out.
-                                         Only then can criterion 4's inside term be
-                                         restricted to the plot side, which is the
-                                         change four rounds have now failed to make
-                                         from the other end
+    2  panel geometry splits in three    done: panel_geometry.py. plot_box,
+                                         label_box, numeral_band, review_box and the
+                                         axis signature, written as eighteen NEW
+                                         columns beside x0/x1/y0/y1 and measured to
+                                         change no measurement (zero shared-column
+                                         mismatches across the change)
+    3  label ownership is USED           the strip is already derived (step 2); this
+                                         step is taking left-side orphan adoption OUT
+                                         and letting segmentation rely on ownership
+                                         instead. Only then can criterion 4's inside
+                                         term be restricted to the plot side, which is
+                                         the change four rounds have failed to make
+                                         from the other end. NOT DONE: as of now
+                                         nothing reads the new columns
     4  candidate scoring                 `collapse_same_axis` and `mode_score` stop
                                          using box area as a proxy for a good panel.
                                          A wide box is either a complete panel or a

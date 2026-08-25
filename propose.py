@@ -22,6 +22,7 @@ import csv, os, collections
 import numpy as np
 from PIL import Image
 import axis_reader as A
+import panel_geometry as PG
 import x_reader as X
 
 MODES = ("OFF", "PLAIN", "CAP", "GRID")
@@ -262,6 +263,19 @@ for r in rows:
                         declared_axes=declared, harness=_why, detail=_why))
     harness_hits = sum(1 for x in recs if x.get("harness"))
     covered = sum((x["x1"] - x["x0"]) * (x["y1"] - x["y0"]) for x in recs) / area
+    # THE THREE BOXES ARE DERIVED, NOT DECIDED. `panel_geometry` reads the raster
+    # at the ink the winning mode used - `dark` in scope here belongs to whichever
+    # ink was tried LAST, which is not always the one that won - and writes only
+    # into new columns. Nothing above this line can see any of it.
+    try:
+        A.INK = ink
+        _ga, gdark = A._dark(img)
+    finally:
+        A.INK = A.INK_DEFAULT
+    # THE BOUND IS THE NEIGHBOUR'S EDGE, NOT ITS AXIS. A panel to the left ends
+    # at its right-hand edge; stopping at its spine hands its plot to the panel
+    # next door.
+    others = [(x["x0"], x["x1"], x["y0"], x["y1"]) for x in recs]
     for i, rec in enumerate(sorted(recs, key=lambda x: (x["y0"], x["x0"])), 1):
         frag = []
         if rec.get("cut_through"):
@@ -270,6 +284,19 @@ for r in rows:
             frag.append("panels cover only %.0f%% of the raster" % (100 * covered))
         if ink_note:
             rec["harness"] = (rec.get("harness") + " | " if rec.get("harness") else "") + ink_note
+        if rec.get("spine_x") is not None and rec.get("baseline_y") is not None:
+            try:
+                mine = (rec["x0"], rec["x1"], rec["y0"], rec["y1"])
+                nb = [o for o in others if o != mine]
+                rec.update(PG.as_columns(PG.geometry(
+                    gdark, mine, rec["spine_x"], rec["baseline_y"],
+                    floor=A.CAP_FLOOR, neighbours=nb,
+                    ticks=rec.get("ticks", ""))))
+            except Exception as exc:
+                # A REPORTING COLUMN MAY NOT END A RUN. It may not go quiet
+                # either: an empty cell and no reason is how a column stops
+                # being read.
+                rec["geom_note"] = "GEOMETRY_FAILED: %s: %s" % (type(exc).__name__, exc)
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
                    sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),
@@ -282,7 +309,16 @@ cols = ["pid", "fig", "png", "panel", "kind", "sever_mode", "ink", "declared_axe
         "x0", "x1", "y0", "y1", "spine_x", "baseline_y", "n_labels", "ticks",
         "resid_px", "spacing_cv", "status", "flag", "fragment", "area_share",
         "detail", "x_status", "n_xticks", "n_xlabels", "x_ticks", "x_marks",
-        "n_bars", "bar_centres", "bar_widths", "x_detail", "harness"]
+        "n_bars", "bar_centres", "bar_widths", "x_detail", "harness",
+        # ADDITIVE, and measured to be so. `x0/x1/y0/y1` above stay exactly what
+        # they were - `harness_compare` reports zero shared-column mismatches
+        # across this change - and these say which PART of that box each
+        # consumer should be reading.
+        "plot_x0", "plot_x1", "plot_y0", "plot_y1",
+        "label_x0", "label_x1", "label_y0", "label_y1", "label_side",
+        "numeral_x0", "numeral_x1",
+        "review_x0", "review_x1", "review_y0", "review_y1",
+        "axis_sig", "ladder_sig", "geom_note"]
 with open(os.environ.get("OUT", "proposals.csv"), "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=cols); w.writeheader()
     for rec in out:

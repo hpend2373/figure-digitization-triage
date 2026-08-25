@@ -42,7 +42,8 @@ DEMO_ONLY = "DEMO_ONLY"
 
 # The code the arms differ in.  Hashed individually so a diff report can name
 # the file that moved rather than saying "the tree changed".
-CODE_FILES = ("axis_reader.py", "continuity.py", "propose.py", "x_reader.py", "caption.py")
+CODE_FILES = ("axis_reader.py", "continuity.py", "propose.py", "x_reader.py",
+              "caption.py", "panel_geometry.py")
 
 # Every knob that can change a measurement.  A key absent from the environment
 # is recorded as its default, not omitted, so that "unset" and "set to the
@@ -442,6 +443,29 @@ def match_rows(a, b):
     return pairs, dropped, added
 
 
+def shared_column_diff(pairs):
+    """For matched axes, every column BOTH arms wrote, and where they disagree.
+
+    A change that only adds columns must leave the old ones alone, and there is
+    no way to see that in a count.  Comparing the intersection turns "additive"
+    into a number that can be zero: any old column that moved shows up here with
+    the axis it moved on.
+    """
+    cols, examples = {}, []
+    compared = set()
+    for ra, rb, _d in pairs:
+        shared = set(ra) & set(rb)
+        compared |= shared
+        for k in sorted(shared):
+            if ra[k] != rb[k]:
+                cols[k] = cols.get(k, 0) + 1
+                if len(examples) < 12:
+                    examples.append({"column": k, "axis": [ra["spine_x"], ra["baseline_y"]],
+                                     "base": ra[k], "candidate": rb[k]})
+    return {"columns_compared": len(compared), "mismatched": cols, "examples": examples,
+            "only_in_base": [], "only_in_candidate": []}
+
+
 def box_diff(a_rows, b_rows):
     pairs, dropped, added = match_rows(a_rows, b_rows)
     moved = []
@@ -492,10 +516,17 @@ def compare_outputs(a_csv, b_csv, declared_by_fig=None):
             dec = _int(ra[0].get("declared_axes"))
         if dec is None and rb:
             dec = _int(rb[0].get("declared_axes"))
+        pairs, _dropped, _added = match_rows(ra, rb)
+        shared = shared_column_diff(pairs)
+        shared["only_in_base"] = sorted(set().union(*[set(r) for r in ra]) -
+                                        set().union(*[set(r) for r in rb])) if ra and rb else []
+        shared["only_in_candidate"] = sorted(set().union(*[set(r) for r in rb]) -
+                                             set().union(*[set(r) for r in ra])) if ra and rb else []
         per.append({
             "pid": pid, "fig": fig, "declared": dec,
             "base": metrics(ra, dec), "candidate": metrics(rb, dec),
             "boxes": box_diff(ra, rb),
+            "shared_columns": shared,
         })
     keys = ("panel_count", "unique_axis_count", "duplicate_axis_count",
             "ladder_pass_count", "fragment_flag_count", "foreign_axis_count")
@@ -505,6 +536,9 @@ def compare_outputs(a_csv, b_csv, declared_by_fig=None):
         totals[k]["delta"] = totals[k]["candidate"] - totals[k]["base"]
     totals["boxes_moved"] = {"base": None, "candidate": None,
                              "delta": sum(len(p["boxes"]["moved_boxes"]) for p in per)}
+    totals["shared_column_mismatches"] = {
+        "base": None, "candidate": None,
+        "delta": sum(sum(p["shared_columns"]["mismatched"].values()) for p in per)}
     return {"per_figure": per, "totals": totals,
             "max_boundary_delta_px": max([p["boxes"]["max_boundary_delta_px"] for p in per],
                                          default=0)}
@@ -666,6 +700,17 @@ def render(rep):
     w.append("")
     w.append("  boxes that moved while counts held still: %d (max boundary delta %g px)"
              % (c["totals"]["boxes_moved"]["delta"], c["max_boundary_delta_px"]))
+    added = sorted({col for p in c["per_figure"] for col in p["shared_columns"]["only_in_candidate"]})
+    gone = sorted({col for p in c["per_figure"] for col in p["shared_columns"]["only_in_base"]})
+    if added or gone:
+        w.append("  columns only in candidate: %s" % (", ".join(added) or "none"))
+        w.append("  columns only in base:      %s" % (", ".join(gone) or "none"))
+    mism = {}
+    for p in c["per_figure"]:
+        for k, n in p["shared_columns"]["mismatched"].items():
+            mism[k] = mism.get(k, 0) + n
+    w.append("  shared columns that disagree: %s"
+             % (", ".join("%s x%d" % (k, n) for k, n in sorted(mism.items())) or "none"))
     for p in c["per_figure"]:
         mv = p["boxes"]["moved_boxes"]
         if not (mv or p["boxes"]["added_axes"] or p["boxes"]["dropped_axes"]):

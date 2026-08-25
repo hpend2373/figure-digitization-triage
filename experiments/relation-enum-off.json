@@ -1,0 +1,149 @@
+{
+  "arms": {
+    "baseline": {
+      "code_ref": "tree:a1a47bfe70f4e2c2e508a3c4f863ca88fca55b3ecb6a808015b3a4b5fa73c82a",
+      "hashes": [
+        "385447e2cf8612c774c3dc66760ffbb6efae588986a26a4010d051fd02a323c1",
+        "385447e2cf8612c774c3dc66760ffbb6efae588986a26a4010d051fd02a323c1"
+      ],
+      "output": "/home/claude/geo/verify/run_rel2/baseline/output.rep0.20260825T163731-27276.csv"
+    },
+    "candidate": {
+      "code_ref": "tree:2131b82a5cef334f675821ba06e371e663b34fc01083cb70fc94c1bd4e960f8c",
+      "hashes": [
+        "385447e2cf8612c774c3dc66760ffbb6efae588986a26a4010d051fd02a323c1",
+        "385447e2cf8612c774c3dc66760ffbb6efae588986a26a4010d051fd02a323c1"
+      ],
+      "output": "/home/claude/geo/verify/run_rel2/candidate/output.rep0.20260825T163731-27276.csv"
+    }
+  },
+  "declared_variables": [
+    "code"
+  ],
+  "experiment_id": "relation-enum-off",
+  "manifest_diff": {
+    "code.axis_reader.py": [
+      "b0f4f5531682b04dd54008b2d5b26b015081a3f819823b6e0d945e0c00642731",
+      "a76c5a28a8bab30480cba190d5f1c96de0e15ca9bcc45bdd380a3508b848028f"
+    ],
+    "code.gate_trace.py": [
+      "725a1376a9d8a5dc3fdf70f2cf92d3fd2420805fab07af65260970bd304a860a",
+      "5b9cb6322a2dd7ca8bd1457ace221d793922c15d1b15a358a0c7dc45bcb0b16a"
+    ],
+    "code.propose.py": [
+      "676af103ace12a2afb202e29abe4227731462985751371909451ebb8d25b96ef",
+      "18ebd7d93c21682673b6e864c5557b3c735dfde5e30a65f0612c7fecd3b74823"
+    ],
+    "code.ref": [
+      "tree:a1a47bfe70f4e2c2e508a3c4f863ca88fca55b3ecb6a808015b3a4b5fa73c82a",
+      "tree:2131b82a5cef334f675821ba06e371e663b34fc01083cb70fc94c1bd4e960f8c"
+    ]
+  },
+  "outputs_identical": true,
+  "per_figure": [
+    {
+      "base": {
+        "boxed_area_px": 801508,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "candidate": {
+        "boxed_area_px": 801508,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "declared": 8,
+      "fig": "Figure 4",
+      "pid": "345"
+    },
+    {
+      "base": {
+        "boxed_area_px": 625311,
+        "count_equals_declared": true,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 6
+      },
+      "candidate": {
+        "boxed_area_px": 625311,
+        "count_equals_declared": true,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 6
+      },
+      "declared": 6,
+      "fig": "Fig. 2",
+      "pid": "475"
+    }
+  ],
+  "refusals": [],
+  "run_id": "20260825T163731-27276",
+  "schema": 1,
+  "totals": {
+    "boxes_moved": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "duplicate_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "foreign_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "fragment_flag_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "ladder_pass_count": {
+      "base": 12,
+      "candidate": 12,
+      "delta": 0
+    },
+    "panel_count": {
+      "base": 12,
+      "candidate": 12,
+      "delta": 0
+    },
+    "shared_column_mismatches": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "unique_axis_count": {
+      "base": 12,
+      "candidate": 12,
+      "delta": 0
+    }
+  },
+  "verdict": "DEMO_ONLY"
+}

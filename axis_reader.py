@@ -520,7 +520,119 @@ _CUT_SEQ = [0]
 
 #: harness (reported only): ask the six statements of a piece the distance
 #: prefilter refused, when that piece is the direct cut-sibling of a panel.
-SHADOW_GATE = bool(_os.environ.get("SHADOWGATE"))
+#:
+#: READ THE WAY EVERY OTHER FLAG IN THIS FILE IS READ. `bool(os.environ.get(...))`
+#: turns `SHADOWGATE=0` ON, because "0" is a non-empty string - so the one value a
+#: person would reach for to turn an experiment off was the value that ran it.
+SHADOW_GATE = _os.environ.get("SHADOWGATE", "0") != "0"
+
+
+#: How a piece relates to the panel the harness might attach it to. Reported;
+#: no route acts on it yet. The five are separate because they are separate
+#: REPAIRS - reaching for one rule that covers them all is how a threshold gets
+#: invented.
+OPPOSITE_HALF_UNIQUE = "OPPOSITE_HALF_UNIQUE_PANEL"
+OPPOSITE_HALF_MANY = "OPPOSITE_HALF_MULTIPLE_PANELS"
+SAME_HALF_NESTED = "SAME_HALF_NESTED_PANEL"
+#: BOTH AT ONCE, which is the case that misled the first write-up of this. On
+#: publication 475's figure 1 the piece 99,384,370,664 has a box in the opposite
+#: half (a 72x154 fragment) AND panel C's own box nested inside it. Answering
+#: "opposite" because that test came first named the fragment as the partner and
+#: hid the panel. Two different repairs apply and the pair names neither.
+OPPOSITE_AND_NESTED = "OPPOSITE_AND_NESTED"
+NO_PANEL_DESCENDANT = "NO_SELECTED_PANEL_DESCENDANT"
+LINEAGE_AMBIGUOUS = "CUT_LINEAGE_AMBIGUOUS"
+
+
+def lineage_of(piece):
+    """(status, records) for the cut half this piece came out of.
+
+    EXACT        the piece IS a recorded half
+    CONTAINMENT  it is inside exactly one smallest half
+    AMBIGUOUS    two halves of the same size contain it, and picking either one
+                 by dict order would make the answer depend on insertion order
+    NONE         no recorded half contains it
+
+    The tolerance that makes CONTAINMENT work is the same tolerance that makes
+    AMBIGUOUS possible, so the second is not a hypothetical.
+    """
+    rec = CUT_LINEAGE.get(tuple(piece))
+    if rec is not None:
+        return "EXACT", [rec]
+    ox0, ox1, oy0, oy1 = piece
+    best, hits = None, []
+    for box, r in CUT_LINEAGE.items():
+        bx0, bx1, by0, by1 = box
+        if ox0 >= bx0 - 2 and ox1 <= bx1 + 2 and oy0 >= by0 - 2 and oy1 <= by1 + 2:
+            area = (bx1 - bx0) * (by1 - by0)
+            if best is None or area < best:
+                best, hits = area, [r]
+            elif area == best:
+                hits.append(r)
+    if not hits:
+        return "NONE", []
+    # SAME AREA, DIFFERENT CUTS is the ambiguous case; the same cut recorded from
+    # both sides is not, because either record names the same pair.
+    if len({r["cut_id"] for r in hits}) > 1:
+        return "AMBIGUOUS", hits
+    return "CONTAINMENT", hits[:1]
+
+
+def relation_to(piece, panel):
+    """How `panel` stands to the cut that produced `piece`.
+
+    THE OPPOSITE HALF IS NOT THE ONLY PLACE A PANEL CAN BE. Publication 475's
+    figure 1's panel C sits INSIDE the piece's own region - its selected box is
+    101,268,499,627 and the piece is 99,384,370,664 - so asking only "is the panel
+    in the other half" cannot see it, and the box that relation does find is a
+    fragment that happens to be over there. The first write-up of this called that
+    a partner-ranking problem. It is not: the panel was never in the search space.
+    """
+    status, recs = lineage_of(piece)
+    if status == "AMBIGUOUS":
+        return LINEAGE_AMBIGUOUS, None
+    if status == "NONE":
+        return NO_PANEL_DESCENDANT, None
+    rec = recs[0]
+    px0, px1, py0, py1 = panel
+    sx0, sx1, sy0, sy1 = rec["sibling"]
+    ox0, ox1, oy0, oy1 = piece
+    if px0 >= sx0 - 2 and px1 <= sx1 + 2 and py0 >= sy0 - 2 and py1 <= sy1 + 2:
+        return OPPOSITE_HALF_UNIQUE, rec
+    if px0 >= ox0 - 2 and px1 <= ox1 + 2 and py0 >= oy0 - 2 and py1 <= oy1 + 2:
+        return SAME_HALF_NESTED, rec
+    return NO_PANEL_DESCENDANT, rec
+
+
+def classify_piece(piece, panels):
+    """The one relation this piece has to the whole panel list, as an enum.
+
+    Counting how many panels sit in the opposite half is the difference between
+    "there is a partner" and "there are two and neither is defensible" - and
+    choosing between two by area or discovery order is exactly the kind of
+    tie-break this project keeps having to withdraw.
+    """
+    status, recs = lineage_of(piece)
+    if status == "AMBIGUOUS":
+        return LINEAGE_AMBIGUOUS, [], []
+    if status == "NONE":
+        return NO_PANEL_DESCENDANT, [], []
+    opposite, nested = [], []
+    for p in panels:
+        rel, _rec = relation_to(piece, p)
+        if rel == OPPOSITE_HALF_UNIQUE:
+            opposite.append(tuple(p))
+        elif rel == SAME_HALF_NESTED:
+            nested.append(tuple(p))
+    if opposite and nested:
+        return OPPOSITE_AND_NESTED, opposite, nested
+    if len(opposite) == 1:
+        return OPPOSITE_HALF_UNIQUE, opposite, nested
+    if len(opposite) > 1:
+        return OPPOSITE_HALF_MANY, opposite, nested
+    if nested:
+        return SAME_HALF_NESTED, opposite, nested
+    return NO_PANEL_DESCENDANT, opposite, nested
 
 
 def cut_sibling_of(orphan, panel):
@@ -533,30 +645,28 @@ def cut_sibling_of(orphan, panel):
     statements are for.
 
     Containment, not equality, because the sibling half is usually cut again
-    before it becomes a panel.
+    before it becomes a panel. Only the OPPOSITE-half relation counts here; the
+    nested one is a different repair and `classify_piece` names it.
     """
-    rec = CUT_LINEAGE.get(tuple(orphan))
-    if rec is None:
-        # THE LEAVES ARE TRIMMED BEFORE THEY BECOME ORPHANS, so the piece handed
-        # to the gate is not the half the cut made and its tuple is not a key
-        # here. The first run of this recorded ZERO shadow verdicts for exactly
-        # that reason. The smallest recorded half that contains the piece is the
-        # half it came out of.
-        best = None
-        ox0, ox1, oy0, oy1 = orphan
-        for box, r in CUT_LINEAGE.items():
-            bx0, bx1, by0, by1 = box
-            if ox0 >= bx0 - 2 and ox1 <= bx1 + 2 and oy0 >= by0 - 2 and oy1 <= by1 + 2:
-                area = (bx1 - bx0) * (by1 - by0)
-                if best is None or area < best[0]:
-                    best = (area, r)
-        rec = best[1] if best else None
-    if not rec or rec.get("sibling") is None:
+    rel, rec = relation_to(orphan, panel)
+    return rec if rel == OPPOSITE_HALF_UNIQUE else None
+
+
+def offer_to_shadow_gate(piece, panels):
+    """The panel a shadow verdict may be asked about, or None.
+
+    Only the unambiguous case: exactly one box in the opposite half and no panel
+    nested inside the piece. Everything else is a different repair or is not
+    decidable from the lineage, and asking the gate anyway produces a verdict
+    about the wrong question - which is how the first reading of panel C came out
+    as "the gate refuses it" when the gate had never been shown the panel.
+    """
+    rel, opposite, _nested = classify_piece(piece, panels)
+    if rel != OPPOSITE_HALF_UNIQUE or len(opposite) != 1:
         return None
-    sx0, sx1, sy0, sy1 = rec["sibling"]
-    px0, px1, py0, py1 = panel
-    if px0 >= sx0 - 2 and px1 <= sx1 + 2 and py0 >= sy0 - 2 and py1 <= sy1 + 2:
-        return rec
+    for p in panels:
+        if tuple(p) == opposite[0]:
+            return p
     return None
 
 
@@ -870,7 +980,10 @@ def _shadow_gate(dark, orp, boxes):
     """
     import continuity as C
     ox0, ox1, oy0, oy1 = orp
+    partner = offer_to_shadow_gate(orp, boxes)
     for b in boxes:
+        if partner is None or tuple(b) != tuple(partner):
+            continue
         rec = cut_sibling_of(orp, b)
         if rec is None:
             continue
@@ -987,6 +1100,12 @@ def adopt_orphans(dark, boxes, orphans):
                                            for g, sd, bb in cands),
                        nearest=_nearest_note(orp, boxes, budget))
                 if SHADOW_GATE:
+                    rel, opp, nested = classify_piece(orp, boxes)
+                    _T.add("PIECE_RELATION", orphan=_T.box(orp), relation=rel,
+                           n_opposite=len(opp), n_nested=len(nested),
+                           opposite=";".join(_T.box(b) for b in opp),
+                           nested=";".join(_T.box(b) for b in nested),
+                           lineage=lineage_of(orp)[0])
                     _shadow_gate(dark, orp, boxes)
             continue                      # nobody, or nobody we can be sure about
         gap, side, b = cands[0]

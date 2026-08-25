@@ -54,7 +54,7 @@ NEAR = os.environ.get("NEAR", "1") != "0"     # harness: you cannot read more ax
 # SHADOW: read a ladder off EVERY axis candidate, not just the one the search took,
 # and record all of them. Reported only - production still uses the chosen axis.
 # Separate from TRACE because it pays for OCR per candidate.
-SHADOW = bool(os.environ.get("SHADOW")) and T.ON
+SHADOW = os.environ.get("SHADOW", "0") != "0" and T.ON
 
 
 def _shadow_ladders(img, dark, box, chosen_x):

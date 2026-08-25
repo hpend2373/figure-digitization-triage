@@ -42,14 +42,27 @@ DEMO_ONLY = "DEMO_ONLY"
 
 # The code the arms differ in.  Hashed individually so a diff report can name
 # the file that moved rather than saying "the tree changed".
+# THE FILES AN ARM CAN DIFFER IN. `gate_trace.py` is here even though it decides
+# nothing: it is what turns a run into a conclusion, so a change to it that moves
+# a reported number must move the arm's code reference too.
 CODE_FILES = ("axis_reader.py", "continuity.py", "propose.py", "x_reader.py",
-              "caption.py", "panel_geometry.py")
+              "caption.py", "panel_geometry.py", "gate_trace.py")
 
 # Every knob that can change a measurement.  A key absent from the environment
 # is recorded as its default, not omitted, so that "unset" and "set to the
 # default" compare equal and "unset" and "set to 0" do not.
 ENV_KEYS = ("SNAP", "CAP", "BROAD", "WIDE", "WIDE2", "SELFGAP", "MARKFRAG",
             "REINK", "NEAR", "FIGS", "DIG", "CLIPS", "CAPS")
+
+# THE OBSERVATION FLAGS, RECORDED AS WHETHER THEY WERE ON. `TRACE` names a file,
+# so stamping its value would make two arms differ because they wrote to different
+# paths - which is not the experiment. What matters is whether the arm was
+# observed at all, because a shadow measurement is made of observation.
+DERIVED_ENV = {
+    "TRACE_ENABLED": lambda e: e.get("TRACE", "") not in ("", "0"),
+    "SHADOW_ENABLED": lambda e: e.get("SHADOW", "0") != "0",
+    "SHADOW_GATE_ENABLED": lambda e: e.get("SHADOWGATE", "0") != "0",
+}
 
 # Two boxes from different arms are the same physical axis if their spine and
 # baseline agree to within this.  Not a tuning knob for panel finding - it is
@@ -116,6 +129,27 @@ def acquire_lock(root, run_id):
                 raise LockHeld("run root %s is locked by live pid %d (run %s)"
                                % (root, pid, held.get("run_id")))
             os.unlink(path)          # stale: holder is gone
+
+
+def assert_lock_still_ours(path, run_id):
+    """The lock is inside the run root, so anything that deletes the root deletes
+    the lock - and then a second run walks straight in.
+
+    That happened: an `rm -rf` of the run root between a kill and a relaunch left
+    two comparisons interleaving in one directory, and the first one to reach the
+    candidate arm removed the other's staging out from under it. The tool exists
+    to stop exactly that, and it could not see it, because the thing it checks had
+    been deleted along with everything else.
+    """
+    try:
+        with open(path) as f:
+            held = json.load(f)
+    except Exception:
+        raise LockHeld("the lock file %s is gone - the run root was deleted or "
+                       "another run took it while this one was working" % path)
+    if held.get("run_id") != run_id:
+        raise LockHeld("the lock at %s now belongs to run %s, not %s"
+                       % (path, held.get("run_id"), run_id))
 
 
 def release_lock(path):
@@ -209,7 +243,8 @@ def build_manifest(staging, figures, env, inputs, clips_path, clipdir, code_ref)
                      ref=code_ref),
         "inputs": {n: sha(os.path.join(staging, n)) for n in sorted(inputs)},
         "rasters": raster_hashes(clips_path, figures, clipdir),
-        "env": {k: env.get(k, "<unset>") for k in ENV_KEYS},
+        "env": dict({k: env.get(k, "<unset>") for k in ENV_KEYS},
+                    **{k: fn(env) for k, fn in sorted(DERIVED_ENV.items())}),
         "interpreter": {
             "python": sys.version.split()[0],
             "pillow": _ver("PIL"),
@@ -629,6 +664,7 @@ def main(argv=None):
                     json.dump(man, open(os.path.join(arm_root, "input_manifest.json"), "w"),
                               indent=2, sort_keys=True)
 
+            assert_lock_still_ours(lock, run_id)
             arms[arm] = {"manifest": man, "stamps": stamps, "hashes": hashes,
                          "output": stamps[0]["out_path"]}
             json.dump(stamps, open(os.path.join(arm_root, "run_stamp.json"), "w"), indent=2)

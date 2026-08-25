@@ -36,14 +36,18 @@ import collections
 import csv
 import os
 
-ON = bool(os.environ.get("TRACE"))
-PATH = os.environ.get("TRACE") or "trace.csv"
+#: TRACE names the file to write, so its VALUE is a path and emptiness is the
+#: only sensible off - but "TRACE=0" would then write a file called "0", which is
+#: not what anyone means by it.
+ON = os.environ.get("TRACE", "") not in ("", "0")
+PATH = (os.environ.get("TRACE") if ON else "") or "trace.csv"
 ROWS = []
 CTX = {"pid": "", "fig": "", "png": "", "mode": "", "ink": ""}
 
 #: Kinds, in the order a component meets them.
 KINDS = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
-         "ORPHAN", "GATE", "GATE_WHY", "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
+         "ORPHAN", "PIECE_RELATION", "GATE", "GATE_WHY", "GATE_SHADOW",
+         "GATE_SHADOW_WHY", "POST",
          "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
 
 #: How well defended the axis a row was measured on actually is. REPORTED, never

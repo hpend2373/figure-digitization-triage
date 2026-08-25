@@ -266,8 +266,8 @@ class AxisStatus(unittest.TestCase):
         terminal never mentions - GATE_WHY and SELECTED_PASS were both missing.
         Guard: the KINDS tuple."""
         written = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK",
-                   "AXIS_SHADOW_LADDER", "ORPHAN", "GATE", "GATE_WHY",
-                   "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
+                   "AXIS_SHADOW_LADDER", "ORPHAN", "PIECE_RELATION", "GATE",
+                   "GATE_WHY", "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
                    "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
         self.assertEqual(set(written) - set(T.KINDS), set())
         T.ON = True
@@ -483,6 +483,166 @@ class CutLineage(unittest.TestCase):
         A.SHADOW_GATE = False
         A.adopt_orphans(d, [panel], [piece])
         self.assertEqual([r for r in T.ROWS if r["kind"] == "GATE_SHADOW"], [])
+        RUN[0] += 1
+
+
+class Flags(unittest.TestCase):
+    """The one value a person reaches for to turn an experiment off."""
+
+    def test_zero_turns_the_shadow_flags_off(self):
+        """`bool(os.environ.get("SHADOWGATE"))` is True for "0", because "0" is a
+        non-empty string - so SHADOWGATE=0 RAN the experiment. Guard: the
+        `!= "0"` reads."""
+        for value, want in (("", False), ("0", False), ("1", True), ("yes", True)):
+            self.assertEqual(value not in ("", "0"), want)
+        import importlib, os as _os
+        for env, want in (({}, False), ({"SHADOWGATE": "0"}, False),
+                          ({"SHADOWGATE": "1"}, True)):
+            old = _os.environ.pop("SHADOWGATE", None)
+            try:
+                if env:
+                    _os.environ["SHADOWGATE"] = env["SHADOWGATE"]
+                mod = importlib.reload(A)
+                self.assertEqual(mod.SHADOW_GATE, want,
+                                 "SHADOWGATE=%r read as %r" % (env.get("SHADOWGATE"),
+                                                               mod.SHADOW_GATE))
+            finally:
+                _os.environ.pop("SHADOWGATE", None)
+                if old is not None:
+                    _os.environ["SHADOWGATE"] = old
+        importlib.reload(A)
+        RUN[0] += 1
+
+    def test_trace_zero_does_not_write_a_file_called_zero(self):
+        """TRACE names a path, so its off value is emptiness - but "0" is what a
+        person types, and it must not become a filename."""
+        import importlib, os as _os
+        old = _os.environ.pop("TRACE", None)
+        try:
+            _os.environ["TRACE"] = "0"
+            mod = importlib.reload(T)
+            self.assertFalse(mod.ON)
+            self.assertEqual(mod.PATH, "trace.csv")
+        finally:
+            _os.environ.pop("TRACE", None)
+            if old is not None:
+                _os.environ["TRACE"] = old
+            importlib.reload(T)
+        RUN[0] += 1
+
+
+class PieceRelation(unittest.TestCase):
+    """`classify_piece`: five relations, because they are five repairs."""
+
+    def setUp(self):
+        A.CUT_LINEAGE.clear()
+        A._CUT_SEQ[0] = 0
+
+    def _cut(self, piece, sibling, cut_id=1):
+        A.CUT_LINEAGE[tuple(piece)] = {"cut_id": cut_id, "sibling": tuple(sibling),
+                                       "axis": "col", "gap_lo": 0, "gap_hi": 10,
+                                       "depth": 0}
+
+    def test_one_panel_in_the_opposite_half(self):
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100))
+        rel, opp, nested = A.classify_piece((0, 100, 0, 100),
+                                            [(120, 280, 10, 90), (400, 500, 0, 100)])
+        self.assertEqual(rel, A.OPPOSITE_HALF_UNIQUE)
+        self.assertEqual(opp, [(120, 280, 10, 90)])
+        RUN[0] += 1
+
+    def test_two_panels_in_the_opposite_half_is_not_a_partner(self):
+        """Choosing between them by area or discovery order is the tie-break this
+        project keeps having to withdraw."""
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100))
+        rel, opp, _ = A.classify_piece((0, 100, 0, 100),
+                                       [(120, 190, 10, 90), (200, 280, 10, 90)])
+        self.assertEqual(rel, A.OPPOSITE_HALF_MANY)
+        self.assertEqual(len(opp), 2)
+        RUN[0] += 1
+
+    def test_a_panel_nested_inside_the_piece_is_a_different_repair(self):
+        """Publication 475 figure 1's panel C: its selected box 101,268,499,627 is
+        INSIDE the piece 99,384,370,664. Asking only about the opposite half
+        cannot see it, and the box that question does find is a fragment. The
+        first write-up called that a partner-ranking problem; it is not."""
+        self._cut((99, 384, 370, 664), (400, 700, 370, 664))
+        rel, opp, nested = A.classify_piece((99, 384, 370, 664),
+                                            [(101, 268, 499, 627)])
+        self.assertEqual(rel, A.SAME_HALF_NESTED)
+        self.assertEqual(opp, [])
+        self.assertEqual(nested, [(101, 268, 499, 627)])
+        RUN[0] += 1
+
+    def test_only_the_opposite_half_reaches_the_shadow_gate(self):
+        """The nested relation is a DIFFERENT repair - the piece contains the
+        panel, so a union of the two adds nothing and the residual components
+        inside it are what would have to be found. Offering it to the same gate
+        would produce a verdict about the wrong question.
+        Guard: cut_sibling_of returning only for OPPOSITE_HALF_UNIQUE."""
+        self._cut((99, 384, 370, 664), (400, 700, 370, 664))
+        nested_panel = (101, 268, 499, 627)
+        self.assertIsNone(A.cut_sibling_of((99, 384, 370, 664), nested_panel))
+        opposite_panel = (450, 650, 400, 640)
+        self.assertIsNotNone(A.cut_sibling_of((99, 384, 370, 664), opposite_panel))
+        RUN[0] += 1
+
+    def test_both_relations_at_once_names_neither(self):
+        """475 figure 1's piece 99,384,370,664 has a 72x154 fragment in the
+        opposite half AND panel C's own box nested inside it. Answering
+        "opposite" because that test runs first named the fragment as the partner
+        and hid the panel - which is what the first write-up got wrong.
+        Guard: the `opposite and nested` branch, and offer_to_shadow_gate."""
+        self._cut((99, 384, 370, 664), (400, 700, 370, 664))
+        panels = [(428, 500, 510, 664), (101, 268, 499, 627)]
+        rel, opp, nested = A.classify_piece((99, 384, 370, 664), panels)
+        self.assertEqual(rel, A.OPPOSITE_AND_NESTED)
+        self.assertEqual(opp, [(428, 500, 510, 664)])
+        self.assertEqual(nested, [(101, 268, 499, 627)])
+        self.assertIsNone(A.offer_to_shadow_gate((99, 384, 370, 664), panels),
+                          "the gate was asked about the fragment anyway")
+        RUN[0] += 1
+
+    def test_the_unambiguous_case_is_still_offered(self):
+        """A gate that refuses every pair is not a gate."""
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100))
+        panels = [(120, 280, 10, 90)]
+        self.assertEqual(A.classify_piece((0, 100, 0, 100), panels)[0],
+                         A.OPPOSITE_HALF_UNIQUE)
+        self.assertEqual(tuple(A.offer_to_shadow_gate((0, 100, 0, 100), panels)),
+                         (120, 280, 10, 90))
+        RUN[0] += 1
+
+    def test_no_panel_descends_from_the_lineage_at_all(self):
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100))
+        rel, opp, nested = A.classify_piece((0, 100, 0, 100), [(500, 600, 500, 600)])
+        self.assertEqual(rel, A.NO_PANEL_DESCENDANT)
+        self.assertEqual((opp, nested), ([], []))
+        RUN[0] += 1
+
+    def test_a_piece_with_no_lineage_is_not_guessed_at(self):
+        rel, _, _ = A.classify_piece((7, 8, 9, 10), [(0, 100, 0, 100)])
+        self.assertEqual(rel, A.NO_PANEL_DESCENDANT)
+        self.assertEqual(A.lineage_of((7, 8, 9, 10))[0], "NONE")
+        RUN[0] += 1
+
+    def test_two_halves_of_equal_size_are_ambiguous_not_arbitrary(self):
+        """The tolerance that makes the containment lookup work is the tolerance
+        that makes this possible, so it is not hypothetical - and today the answer
+        would depend on dict insertion order."""
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100), cut_id=1)
+        self._cut((1, 101, 0, 100), (400, 600, 0, 100), cut_id=2)
+        self.assertEqual(A.lineage_of((10, 90, 10, 90))[0], "AMBIGUOUS")
+        rel, _, _ = A.classify_piece((10, 90, 10, 90), [(120, 280, 10, 90)])
+        self.assertEqual(rel, A.LINEAGE_AMBIGUOUS)
+        self.assertIsNone(A.cut_sibling_of((10, 90, 10, 90), (120, 280, 10, 90)))
+        RUN[0] += 1
+
+    def test_an_exact_half_is_not_ambiguous(self):
+        """The piece that IS a recorded half needs no search at all."""
+        self._cut((0, 100, 0, 100), (110, 300, 0, 100), cut_id=1)
+        self._cut((1, 101, 0, 100), (400, 600, 0, 100), cut_id=2)
+        self.assertEqual(A.lineage_of((0, 100, 0, 100))[0], "EXACT")
         RUN[0] += 1
 
 

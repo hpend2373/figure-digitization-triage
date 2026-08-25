@@ -604,6 +604,14 @@ Two things the harness still owes this arm:
     numerals at a residual of 0.03 px while the one it took reads two and
     refuses. See INSTALL.md, "Four axis states, and the axis the search rejected
     reads better".
+    THE RELATION IS AN ENUM, NOT A TEST. Six values, because they are separate
+    repairs: OPPOSITE_HALF_UNIQUE_PANEL, OPPOSITE_HALF_MULTIPLE_PANELS,
+    SAME_HALF_NESTED_PANEL, OPPOSITE_AND_NESTED, NO_SELECTED_PANEL_DESCENDANT,
+    CUT_LINEAGE_AMBIGUOUS. Only the first reaches the shadow gate. Publication
+    475's figure 1's panel C is OPPOSITE_AND_NESTED - its selected box sits INSIDE
+    the piece - so it is a same-half completion question and not a partner-ranking
+    one, which is what the previous round got wrong.
+
     CUT LINEAGE - BUILT. `CUT_LINEAGE` in `axis_reader`, written by `_cut`:
     for each half of a cut, the other half, the axis and the gutter. `SHADOWGATE=1`
     then asks the six statements of every piece the DISTANCE refused whose

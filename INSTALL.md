@@ -9201,6 +9201,104 @@ scenarios pin both halves of that: the trimmed lookup, and the smallest-wins rul
     six statements and pays for geometry. Sharing one flag made Arm A cost forty
     minutes for measurements it did not use.
 
+## A correction: panel C was never in the relation's search space
+
+The previous section said the cut-sibling relation found the wrong partner for
+publication 475's figure 1 panel C, and called that a ranking problem. It is not.
+The coordinates settle it:
+
+    the piece               99,384,370,664
+    panel C's selected box  101,268,499,627
+
+The panel is INSIDE the piece. `cut_sibling_of` asks one question - is the panel
+in the OTHER half of the cut that made this piece - so panel C could never be the
+answer, and the box that question does find (`428,500,510,664`, 72 x 154) is
+simply the only thing over there. The relation was right and the search space was
+wrong.
+
+So the ten refused pieces are not one problem. They are classified now, and the
+five values are five REPAIRS rather than five scores:
+
+    OPPOSITE_HALF_UNIQUE_PANEL      exactly one panel in the other half
+    OPPOSITE_HALF_MULTIPLE_PANELS   two or more, and choosing by area or discovery
+                                    order is the tie-break this project keeps
+                                    having to withdraw
+    SAME_HALF_NESTED_PANEL          the panel is inside the piece
+    OPPOSITE_AND_NESTED             both at once - two repairs apply and the pair
+                                    names neither
+    NO_SELECTED_PANEL_DESCENDANT    no final panel stands in either relation
+    CUT_LINEAGE_AMBIGUOUS           two equal-sized halves contain the piece, so
+                                    the answer would depend on dict order
+
+`OPPOSITE_AND_NESTED` is the value that had to exist. Asking "opposite?" first and
+answering yes is exactly how the fragment got named as C's partner, and only that
+pair is now withheld from the gate - `offer_to_shadow_gate` returns a panel only
+for the unambiguous case.
+
+### The three figures, classified
+
+    475 figure 1   OFF/151    10 refused
+                   6  NO_SELECTED_PANEL_DESCENDANT
+                   3  OPPOSITE_HALF_UNIQUE   -> offered, 1 accepted
+                   1  OPPOSITE_AND_NESTED    -> panel C, not offered
+
+    397 figure 1   OFF/158    11 refused
+                   10 NO_SELECTED_PANEL_DESCENDANT
+                   1  OPPOSITE_AND_NESTED    -> not offered
+                   0 accepted
+
+    475 figure 2   PLAIN/140   7 refused, all NO_SELECTED_PANEL_DESCENDANT
+
+Shadow verdicts fell from 112 to 39 across the three figures, and every one that
+disappeared was a verdict about a pair that names two different repairs. The one
+acceptance is unchanged: `311,383,834,975` into P05, cut 7, a 38 px gutter against
+a reach of 34.
+
+    AND THE "SIX WERE MERGED OR GROWN" CLAIM IS WITHDRAWN. What the trace supports
+    is `NO_SELECTED_PANEL_DESCENDANT`: no final panel stands in either relation to
+    those pieces. WHICH transform lost the lineage - trim, merge, grow, snap, slab,
+    a different mode - is not measured, and saying it was would be the same kind of
+    overreach this file keeps recording. It needs a region-provenance record that
+    survives every transform, which is a bigger change than this one.
+
+## Three harness defects, one of which ran the experiment I turned off
+
+    SHADOWGATE=0 TURNED THE EXPERIMENT ON. `bool(os.environ.get("SHADOWGATE"))` is
+    True for the string "0", so the one value a person reaches for to disable a
+    flag was the value that ran it. `SHADOW` and `TRACE` had the same shape.
+    All three now read the way every other flag in the package reads, and a
+    scenario pins unset, "0" and "1" for each.
+
+    THE MANIFEST DID NOT RECORD WHETHER AN ARM WAS OBSERVED. `ENV_KEYS` had none
+    of the new flags, so an arm run under `SHADOWGATE` and one run without it
+    stamped identically. `TRACE` names a path, so stamping its value would make
+    two arms differ over a filename; what is stamped instead is three derived
+    booleans - `TRACE_ENABLED`, `SHADOW_ENABLED`, `SHADOW_GATE_ENABLED`.
+
+    `gate_trace.py` WAS NOT PART OF AN ARM'S CODE. It decides nothing, and it is
+    what turns a run into a conclusion, so a change to it that moves a reported
+    number has to move the arm's code reference. It is in `CODE_FILES` now, along
+    with `panel_geometry.py`, which had also been missing.
+
+Re-measured against `ae45ece` on two figures, two replicates: 12 -> 12 panels,
+12 -> 12 ladders, 0 boxes moved, 0 shared-column mismatches, outputs
+byte-identical, and the manifest now differs at `code.gate_trace.py` where before
+it could not (`experiments/relation-enum-off.json`).
+
+### And the tool failed to catch me deleting its lock
+
+Between killing a run and relaunching it I ran `rm -rf` on the run root. The lock
+lives inside the root, so it went with it, and two comparisons then interleaved in
+one directory until the second removed the first's staging out from under it:
+
+    FileNotFoundError: run_rel/candidate/input_manifest.json
+
+Which is precisely the failure this whole file was built to prevent, arriving
+through the one door it had left open. `assert_lock_still_ours` is called after
+each arm: the lock must still exist and still name this run. Two scenarios pin it -
+one on the function, one on the driver, where the base arm deletes the lock while
+it runs and the driver has to refuse.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

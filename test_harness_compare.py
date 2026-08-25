@@ -349,6 +349,39 @@ class ComparabilityGate(unittest.TestCase):
         self.assertIsNotNone(rep["comparison"])
         self.assertEqual(rep["comparison"]["totals"]["panel_count"]["delta"], 0)
 
+    def test_the_observation_flags_are_stamped_as_whether_they_were_on(self):
+        """An experiment run under a shadow flag and one run without it are not
+        the same experiment, and the manifest recorded neither. TRACE names a
+        path, so stamping its value would make two arms differ over a filename;
+        what belongs in the manifest is whether the arm was observed.
+        Guard: DERIVED_ENV, merged into the manifest's env block."""
+        tmp = tempfile.mkdtemp()
+        staging = os.path.join(tmp, "s")
+        os.makedirs(staging)
+        for n in H.CODE_FILES:
+            open(os.path.join(staging, n), "w").write("#\n")
+        off = H.build_manifest(staging, set(), {}, {}, "", "", "ref")
+        on = H.build_manifest(staging, set(), {"SHADOWGATE": "1", "TRACE": "t.csv"},
+                              {}, "", "", "ref")
+        self.assertIs(off["env"]["SHADOW_GATE_ENABLED"], False)
+        self.assertIs(off["env"]["TRACE_ENABLED"], False)
+        self.assertIs(on["env"]["SHADOW_GATE_ENABLED"], True)
+        self.assertIs(on["env"]["TRACE_ENABLED"], True)
+        d = H.manifest_diff(off, on)
+        self.assertIn("env.SHADOW_GATE_ENABLED", d)
+        # AND "0" IS OFF. That is the whole reason this exists.
+        zero = H.build_manifest(staging, set(), {"SHADOWGATE": "0", "TRACE": "0"},
+                                {}, "", "", "ref")
+        self.assertIs(zero["env"]["SHADOW_GATE_ENABLED"], False)
+        self.assertIs(zero["env"]["TRACE_ENABLED"], False)
+
+    def test_the_trace_module_is_part_of_the_arm_code(self):
+        """`gate_trace.py` decides nothing and is what turns a run into a
+        conclusion, so a change to it must move the arm's code reference.
+        Guard: CODE_FILES."""
+        self.assertIn("gate_trace.py", H.CODE_FILES)
+        self.assertIn("panel_geometry.py", H.CODE_FILES)
+
     def test_an_unset_flag_and_its_default_are_the_same_input(self):
         """SNAP unset and SNAP=1 produce identical measurements; recording one as
         absent and the other as "1" would refuse a comparison that is valid."""
@@ -371,6 +404,23 @@ class RunRootLock(unittest.TestCase):
         with self.assertRaises(H.LockHeld):
             H.acquire_lock(tmp, "mine")
 
+    def test_a_lock_that_vanished_mid_run_is_fatal(self):
+        """The lock lives inside the run root, so an `rm -rf` of the root deletes
+        it - and this actually happened: two comparisons interleaved in one
+        directory and the first to reach the candidate arm removed the other's
+        staging. Guard: assert_lock_still_ours, called after each arm."""
+        tmp = tempfile.mkdtemp()
+        p = H.acquire_lock(tmp, "mine")
+        H.assert_lock_still_ours(p, "mine")          # the happy case must pass
+        os.remove(p)
+        with self.assertRaises(H.LockHeld):
+            H.assert_lock_still_ours(p, "mine")
+        RUN = None
+        p2 = H.acquire_lock(tmp, "someone-else")
+        with self.assertRaises(H.LockHeld):
+            H.assert_lock_still_ours(p2, "mine")
+        H.release_lock(p2)
+
     def test_a_dead_holder_is_reclaimed(self):
         """A crashed run must not wedge the directory forever."""
         tmp = tempfile.mkdtemp()
@@ -390,6 +440,31 @@ class RunRootLock(unittest.TestCase):
 # and the post-run output re-hash in main().
 
 class ArmProcessDiscipline(unittest.TestCase):
+
+    def test_the_driver_re_checks_the_lock_after_every_arm(self):
+        """A scenario that calls the check directly cannot see whether anything
+        calls it. Here the base arm deletes the lock while it runs - which is what
+        an `rm -rf` of the run root does - and the driver must refuse rather than
+        carry on into the second arm. Guard: the assert_lock_still_ours call in
+        main()."""
+        tmp = tempfile.mkdtemp()
+        b = Tree(tmp, "base", ("""
+            _root = os.path.dirname(os.path.dirname(os.environ["OUT"]))
+            try: os.remove(os.path.join(_root, ".lock"))
+            except OSError: pass
+        """, BASE_ARM))
+        c = Tree(tmp, "cand", BASE_ARM)
+        argv = base_argv(tmp, b.path, c.path, replay=1)
+        root = os.path.join(tmp, "run")
+        try:
+            H.main(argv)
+        except H.LockHeld as exc:
+            self.assertIn("gone", str(exc))
+            return
+        except SystemExit:
+            pass
+        self.fail("the driver carried on with no lock: %s"
+                  % os.listdir(root))
 
     def test_a_crashed_arm_promotes_nothing(self):
         """The half-written file must never become the thing that is compared.

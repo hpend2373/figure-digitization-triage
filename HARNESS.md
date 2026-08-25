@@ -513,30 +513,36 @@ measurable.
                                          columns beside x0/x1/y0/y1 and measured to
                                          change no measurement (zero shared-column
                                          mismatches across the change)
-    3  label ownership is USED           the strip is already derived (step 2); this
-                                         step is taking left-side orphan adoption OUT
-                                         and letting segmentation rely on ownership
-                                         instead. Only then can criterion 4's inside
-                                         term be restricted to the plot side, which is
-                                         the change four rounds have failed to make
-                                         from the other end. NOT DONE: as of now
-                                         nothing reads the new columns
-    4  candidate scoring                 `collapse_same_axis` and `mode_score` stop
-                                         using box area as a proxy for a good panel.
-                                         A wide box is either a complete panel or a
-                                         box that swallowed its neighbour, and area
-                                         cannot tell those apart; axis signature,
-                                         plot coverage and label ownership can
-    5  vertical fragments                above/below adoption was withdrawn because
-                                         it brought panel titles and axis titles in
-                                         as data. With ownership separating those
-                                         out, the question can be asked again - not
-                                         as "allow four directions" but as "attach a
-                                         component whose ROLE is proven DATA,
-                                         whatever direction it lies in". Publication
-                                         475's figure 1, cut at its zero line into an
-                                         upper and a lower half on one spine and one
-                                         baseline, is the case that needs it
+    3  label ownership is USED           BUILT AND REJECTED. `OWN=1` grows the box
+                                         to its owned strip; measured, it loses
+                                         three ladders and gains seven fragment
+                                         flags on two figures. Not in the tree
+    4  candidate scoring                 BUILT AND REJECTED. `RANK=1` ranks on axis
+                                         signature, marks and foreign axes instead
+                                         of box area; measured, it loses two panels
+                                         and gains two flags. Not in the tree
+    5  vertical data fragments           BUILT AND MEASURED AS NOTHING. `VERT=1`
+                                         offers the vertical pair to the same six
+                                         statements; the signed halves of 475
+                                         figure 1 are never offered, because the
+                                         reach is the widest gap in the panel's own
+                                         baseline and a drawn zero line leaves none.
+                                         Not in the tree
+
+    and the term they were all for:      `PLOTSIDE=1` restricts criterion 4's band
+                                         term to the plot side. Counts call it a
+                                         gain (+1 panel, +1 ladder over six
+                                         figures); boxes call it the failure the
+                                         record predicted - 475 figure 2's counts
+                                         do not move and five of its six boxes do,
+                                         panel C from 381 px to 275. Not in the tree
+
+The numbers, the revert test and what they settle are in `INSTALL.md` under "The
+four steps the record called the repair, measured". THE SHORT VERSION: ownership
+can be derived correctly, and widening the ONE box to cover it is not the same
+thing. `_is_plot`, `holds_data`, the fragment-area guard and `collapse_same_axis`
+all measure the whole box, so growing it changes five answers at once. They have
+to read `plot_box` first, one arm at a time.
 
 Step 2 is deliberately additive. Removing `x0/x1/y0/y1` in the same change that
 introduces three boxes would make every downstream difference unattributable, which is

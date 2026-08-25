@@ -8672,6 +8672,141 @@ segmentation still produces one box; the four figures that were wrong are still
 wrong in the same way. This step only makes the next two possible, and it is
 recorded as measured rather than as done.
 
+## The four steps the record called the repair, measured
+
+`HARNESS.md` set out five steps. Step 1 is `harness_compare.py`, step 2 is
+`panel_geometry.py`, and steps 3, 4 and 5 were the ones the record had been
+circling for four rounds:
+
+    3  the panel's box contains its owned label strip, so criterion 4's band term
+       can be restricted to the plot side without costing a bar group
+    4  `collapse_same_axis` and `mode_score` rank on axis signature, marks and
+       foreign axes rather than on box area
+    5  the vertical direction is offered to the same six statements, since a
+       title fails criterion 4 once that term is honest
+
+All three were built, each behind its own flag - `OWN`, `PLOTSIDE`, `RANK`,
+`VERT` - and each was measured. NONE OF THEM IS AN IMPROVEMENT, and none of them
+is in the tree. This section is what was measured, because the code is not here
+to be read.
+
+### The revert test first
+
+Two figures, shipped `599dbb8` against the new tree with all four flags OFF:
+
+    panel_count 12 -> 12, unique_axis_count 12 -> 12, ladder_pass 12 -> 12
+    boxes moved 0, max boundary delta 0 px, shared column mismatches 0
+
+So the four flags are the whole of the difference, and everything below is
+attributable to them rather than to anything that came along for the ride.
+
+### All four together, six figures, two replicates each
+
+                          off    on
+    panel_count            40    40
+    unique_axis_count      40    40
+    ladder_pass_count      36    31      -5
+    fragment_flag_count    11    19      +8
+    foreign_axis_count      2     4      +2
+    boxes moved                  17      max boundary delta 339 px
+
+Panel counts identical, ladders down five, flags up eight. And all six of
+publication 475 figure 2's boxes moved - the figure that was RIGHT before the
+change - at IoU 0.63 to 0.76.
+
+### One flag at a time, on the two figures that were worst
+
+Publication 397 figure 1 and 475 figure 1, against all four off:
+
+    flag                panels   ladders   frag flags   foreign   boxes moved
+    OWN                 13 -> 15  11 -> 8    3 -> 10     0 -> 1        5
+    PLOTSIDE            13 -> 14  11 -> 12   3 -> 4      0 -> 1        1
+    RANK                13 -> 11  11 -> 11   3 -> 5      0 -> 1        2
+    VERT (PLOTSIDE off) no change - see below
+    VERT (PLOTSIDE on)  14 -> 14  12 -> 12   4 -> 4      1 -> 1        0
+
+`OWN` is the one the record predicted would work, and it is the worst of the
+four: three ladders lost and seven new fragment flags. Growing a box to the
+leftmost ink in its axis rows takes in the rotated axis title and whatever else
+stands beside it, and the wider box then trips the guards that measure whether a
+box is a panel. THE STRIP IS NOT THE PROBLEM. The box being one rectangle is.
+
+`VERT` measured as EXACTLY NOTHING twice over, and the first time it was my own
+gate: vertical candidates are only offered while `PLOTSIDE` is on, and the
+attribution run had it off, so that measurement was vacuous. Re-run with the
+gate open it is still nothing - the signed halves of 475 figure 1 are not
+offered at all, because the reach is the widest gap in the panel's own baseline
+and a figure that draws a zero line has no gaps in that row. That is the
+degenerate case already recorded against `SELFGAP`, reached from the other
+direction.
+
+### And the one that looked like an improvement
+
+`PLOTSIDE` alone, six figures:
+
+    panel_count 40 -> 41, ladder_pass 36 -> 37, fragment flags 11 -> 12,
+    foreign axes 2 -> 3, boxes moved 6
+
+Read as counts that is a small gain: one more panel, one more ladder. Read as
+boxes it is the failure the record predicted in the same words four rounds ago.
+Only one figure's counts change at all - 475 figure 1, 7 boxes to 8 for 6
+recorded axes - while 475 figure 2's counts are IDENTICAL and five of its six
+boxes move:
+
+    axis (105, 476)   width 381 -> 275     panel C, its third bar group gone
+    axis (606, 765)   width 366 -> 259
+    axis (105, 786)   width 299 -> 418
+    axis (607, 155)   width 371 -> 332
+    axis (607, 472)   width 433 -> 395
+
+    RULE. A change that trades a box for a count is not an improvement, and the
+    four numbers this project used for a year cannot see the trade. That is what
+    the box-level comparison is for, and this is the first time it has been the
+    thing that decided.
+
+### What this settles
+
+The diagnosis in "Criterion 4 was reading three wrong things at once" was that
+the repair belongs in segmentation, not in the criterion: a panel's box should
+contain its own label strip by construction. That is now built, measured, and
+WRONG AS STATED. Ownership can be derived correctly - `panel_geometry` does it,
+and its columns are in the output - but growing the single box to cover it does
+not reproduce the geometry the accidental adoption was producing. The two are not
+the same widening.
+
+What follows is that the box has to stop being one rectangle for the CONSUMERS
+too, not just in the report:
+
+    `_is_plot`, `holds_data`, the fragment-area guard and `collapse_same_axis`
+    all measure the whole box. Widening it to include the label strip changes
+    every one of those answers at once, which is why `OWN` loses ladders it has
+    no business touching. They have to read `plot_box` first.
+
+That is a change to five call sites, each of which alters a measurement, and
+each of which needs its own arm. It is not this round's work, and guessing at it
+would repeat what this section documents.
+
+### Six approaches, and now ten
+
+The earlier count of rejected approaches to this gate was six. With `OWN`,
+`PLOTSIDE`, `RANK` and `VERT` it is ten, and the four new ones are the first that
+were rejected on BOX-LEVEL evidence rather than on counts. The scenarios written
+for them - fourteen in `test_continuity`, eighteen in `test_panel_geometry`, every
+one paired with a guard and each guard reverted to red - went out of the tree with
+the code they pinned. Two findings from writing them are worth keeping:
+
+- `axis_reader` memoises spine runs and axis anchors under `id(dark)`. In the
+  driver each `dark` lives for a whole figure and that is sound. In a suite that
+  builds a fresh array per scenario, CPython reuses the address of a freed array
+  and the next scenario reads the previous one's cached runs: two scenarios that
+  pass alone fail together. Nothing in the shipped suites hits it today.
+- criterion 4's band term compared `band` over the whole axis run against
+  `whole` over the piece's rows, so the ratio counted the PANEL's ink over the
+  PIECE's and exceeded 1 whenever anything was drawn in the same columns higher
+  up - a panel title 113 rows above the axis top scored 2.44 on a term that asks
+  for 0.90. It is only reachable through the vertical direction, which is not in
+  the tree, so the fix went with it.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

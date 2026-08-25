@@ -42,7 +42,34 @@ ROWS = []
 CTX = {"pid": "", "fig": "", "png": "", "mode": "", "ink": ""}
 
 #: Kinds, in the order a component meets them.
-KINDS = ("AXIS_CANDIDATES", "ORPHAN", "GATE", "POST", "SELECTED")
+KINDS = ("AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER", "ORPHAN",
+         "GATE", "GATE_WHY", "POST", "FRAGMENT_DECISION", "SELECTED_PASS",
+         "SELECTED")
+
+#: How well defended the axis a row was measured on actually is. REPORTED, never
+#: acted on: promoting or demoting a box on this is a change to what the pipeline
+#: returns and belongs to its own arm.
+AXIS_ATTESTED = "AXIS_ATTESTED"            # a candidate whose ladder reads
+AXIS_GEOMETRY_ONLY = "AXIS_GEOMETRY_ONLY"  # looks like an axis, no ladder behind it
+AXIS_FALLBACK_ONLY = "AXIS_FALLBACK"       # no candidate passed; longest vertical
+AXIS_UNRESOLVED = "AXIS_UNRESOLVED"        # every candidate cut by the box's edges
+
+
+def axis_status(n_free, n_clipped, anchored, ladder_ok):
+    """The four states the overlay had been drawing as one blue line.
+
+    `anchored` is whether `_axis_anchor` returned anything at all; when it did
+    not, the spine came from the plain longest-vertical fallback and that is a
+    different fact from a badly chosen candidate. A box whose every candidate is
+    cut by its own edges is the weakest case of all - publication 475's figure 1
+    promotes one to a panel - and it is named so that it can be counted before
+    anything is done about it.
+    """
+    if not anchored:
+        return AXIS_FALLBACK_ONLY
+    if n_free == 0 and n_clipped > 0:
+        return AXIS_UNRESOLVED
+    return AXIS_ATTESTED if ladder_ok else AXIS_GEOMETRY_ONLY
 
 
 def context(**kw):
@@ -85,6 +112,21 @@ def dump(path=None):
         for r in ROWS:
             w.writerow({c: r.get(c, "") for c in cols})
     return path
+
+
+def last(kind, **match):
+    """The most recent row of `kind` matching every given field, or None.
+
+    The SELECTED row is written after the search that produced it, and the two
+    have to be joined on the box. Joining in the reader instead would mean every
+    consumer of the trace re-deriving which pass a row belongs to.
+    """
+    for row in reversed(ROWS):
+        if row.get("kind") != kind:
+            continue
+        if all(str(row.get(k, "")) == str(v) for k, v in match.items()):
+            return row
+    return None
 
 
 def summary():

@@ -598,7 +598,12 @@ Two things the harness still owes this arm:
     a SHADOW column. Each decision row should carry the consumer, the geometry it
     read, the verdict it reached, and the verdict the other geometry would have
     reached - recorded before anything is switched over, so the size of a change
-    is known before it is a change.
+    is known before it is a change. FIRST INSTANCE BUILT: `SHADOW=1` reads a
+    ladder off every axis candidate, not only the one the search took, and on
+    publication 475's figure 1 the candidate the search REJECTED reads six
+    numerals at a residual of 0.03 px while the one it took reads two and
+    refuses. See INSTALL.md, "Four axis states, and the axis the search rejected
+    reads better".
     GATE COUNTERS - BUILT. `gate_trace.py`, driven by `TRACE=path`. It records
     every axis candidate and which was taken, every discarded piece and whether
     it reached the six statements, the six verdicts, and which mode and ink won.

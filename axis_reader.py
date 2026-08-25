@@ -1075,6 +1075,18 @@ def spine_and_baseline(dark, box):
     vruns = [_longest_run(sub[:, x]) for x in range(sub.shape[1])]
     vmax = max(vruns) if vruns else 0
     sx = next((x for x, v in enumerate(vruns) if v >= AXIS_TIE * vmax), 0)
+    if _T.ON:
+        # WHY THIS COLUMN, when the anchor search found nothing to prefer. The
+        # overlay drew this the same blue line as an anchored axis, and on
+        # publication 475's figure 1's panel C that line is the only thing behind
+        # a LADDER_OK - so the trace has to say it came from here.
+        ranked = sorted(((v, x) for x, v in enumerate(vruns) if v > 0), reverse=True)[:6]
+        _T.add("AXIS_FALLBACK", box=_T.box(box), selected_x=x0 + sx,
+               run_len=vruns[sx] if vruns else 0, longest=vmax,
+               tie=AXIS_TIE,
+               reason="leftmost column whose run is >= %.2f of the longest (%d px)"
+                      % (AXIS_TIE, vmax),
+               candidates=";".join("%d:%dpx" % (x0 + x, v) for v, x in ranked))
     return x0 + sx, baseline_at(dark, box, x0 + sx)
 
 

@@ -9017,6 +9017,110 @@ None of the three is in this commit. What is in this commit is the rows that say
 so, and they are checkable: `test_gate_trace.py`, 11 scenarios, each paired with
 one guard, each guard reverted to red.
 
+## Four axis states, and the axis the search rejected reads better
+
+`4397cad` separated a refused ladder from a fragment flag. It did not separate
+these, and it should have: a spine that came from the plain longest-vertical
+fallback, a spine that is a run with no ladder behind it, and a spine whose every
+candidate was cut by the box's own edges were all drawn as the same blue line.
+`gate_trace.axis_status` names them.
+
+    AXIS_ATTESTED        a candidate whose ladder reads
+    AXIS_GEOMETRY_ONLY   looks like an axis, no ladder behind it
+    AXIS_FALLBACK        `_axis_anchor` returned nothing; the spine is the plain
+                         longest vertical, and the trace now records that search's
+                         own candidates and tie rule
+    AXIS_UNRESOLVED      every candidate cut by the box's edges
+
+REPORTED, NEVER ACTED ON. Promoting or demoting a box on this is a change to what
+the pipeline returns, and that is its own arm.
+
+Publication 475's figure 1, selected pass `OFF/151`:
+
+    P01  AXIS_ATTESTED       P05  AXIS_ATTESTED
+    P02  AXIS_ATTESTED       P06  AXIS_ATTESTED
+    P03  AXIS_GEOMETRY_ONLY  P07  AXIS_UNRESOLVED
+    P04  AXIS_FALLBACK
+
+Four of seven boxes have a defended axis. THAT is this figure's number, not
+"seven boxes for six recorded axes".
+
+### Arm B: a ladder read off every candidate, and nothing changed
+
+`SHADOW=1` alongside `TRACE` reads a ladder off EVERY axis candidate a box had,
+not only the one the search took, and records all of them. Production still uses
+the chosen one. On 475 figure 1:
+
+    P03  box 609,967,403,619   production took x=795
+         x=795  free      2 labels   ladder REFUSED   <- chosen
+         x=796  free      1 label    ladder REFUSED
+         x=678  clipped   3 labels   ladder OK    residual 0.03 px   cv 0.0008
+         x=679  clipped   6 labels   ladder OK    residual 0.03 px   cv 0.0012
+
+    P06  box 609,967,738,938   production took x=679
+         x=679  free      3 labels   ladder OK    residual 0.56 px   <- chosen
+         x=796  clipped   2 labels   ladder REFUSED
+
+    P07  box 428,500,834,951   production took x=444
+         x=444  clipped   0 labels   ladder REFUSED   <- chosen
+         x=445  clipped   1 label    ladder REFUSED
+
+    P04  box 101,268,499,627   only the fallback column exists, and it reads a
+         ladder: 3 labels, residual 0.11 px. Panel C is a third of its width.
+
+Read together those four boxes say one thing:
+
+    LADDER VALIDITY DECIDES BOTH P03 AND P06 CORRECTLY. `free` beating `clipped`
+    decides only P06. The preference is a tie-break that had been making the
+    primary-axis choice, and on P03 it chose a short run standing on a bar over
+    the panel's own axis - which reads six numerals at a residual of 0.03 px.
+
+    P07 HAS NO CANDIDATE THAT READS ANYTHING. Under a ladder-first ranking it
+    would have no attested axis at all, which is what should stop it being
+    counted as a seventh panel. `mode_score` uses `len(recs)`, so today it is.
+
+    AND P04 SEPARATES TWO THINGS THAT HAD BEEN ONE. Its `LADDER_OK` means a
+    column of numerals was found beside x=212. It does not mean x=212 is the
+    panel's axis, and it does not mean panel C was found. Ladder correctness is
+    not panel completeness.
+
+None of this is a change to the pipeline. Measured against `4397cad` on two
+figures, two replicates: 12 -> 12 panels, 12 -> 12 ladders, 0 boxes moved, 0
+shared-column mismatches, outputs byte-identical
+(`experiments/trace-round-2-off.json`).
+
+### A contradiction of mine, and the fix
+
+`test_gate_trace.py` said a box whose every candidate is cut by its own edges
+"is a box that contains no axis". The runtime says `pick = free or clipped` and
+returns one. The prose asserted a contract the code does not have, which is the
+decoration problem one level up - a scenario whose docstring is aspirational
+teaches the next reader something false. The scenario now pins what the code
+does, asserts the returned candidate, and names the state `AXIS_UNRESOLVED`;
+what the function SHOULD return is an arm, not a docstring.
+
+Two smaller ones from the same review: `KINDS` was missing `GATE_WHY` and
+`SELECTED_PASS`, so `summary()` never mentioned two kinds the recorder writes -
+a scenario now checks the tuple against the list of kinds actually written. And
+the fragment flag now writes a `FRAGMENT_DECISION` row with the rule, the
+measured value and the threshold, instead of only a sentence on the panel row.
+
+    A SESSION HAZARD WORTH WRITING DOWN. The fallback trace appeared not to fire
+    while its source clearly contained the call. It was a stale `__pycache__`
+    entry: `inspect.getsource` reads the `.py` and proves nothing about what is
+    executing, and the mtime granularity is one second. Any mutation run that
+    edits a module and re-runs a suite within the same second can measure the
+    old bytecode - so the mutation harness now clears `__pycache__` between arms.
+
+### What is still not traced
+
+    the cut's lineage - which two leaves were siblings of one cut, which gutter
+    split them, and which of the pair kept the axis. Without it "this piece is a
+    direct sibling of that panel" cannot be asked, and that is the only
+    structural reason to offer C and E's data past a distance prefilter
+    the fragment-area guard's per-box share, as opposed to the figure-wide one
+    the x reader's own gates
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

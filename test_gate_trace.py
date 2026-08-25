@@ -193,15 +193,27 @@ class AxisCandidates(unittest.TestCase):
         RUN[0] += 1
 
     def test_a_box_with_only_clipped_runs_says_so(self):
-        """A box whose every candidate is cut by its own edges is a box that
-        contains no axis - which is what P07 is. Guard: the clipped fallback
-        branch of `reason`."""
+        """A box whose every candidate is cut by its own edges is the weakest case
+        there is, and the function STILL RETURNS ONE - `pick = free or clipped`.
+        That is what publication 475's figure 1's P07 is.
+
+        THIS SCENARIO PINS WHAT THE CODE DOES, NOT WHAT IT SHOULD DO. An earlier
+        version of this docstring said such a box "contains no axis", which is a
+        contract the runtime does not have: the prose asserted one thing and the
+        function did another, which is the decoration problem one level up. What
+        the box should return instead is a change to the pipeline's output and
+        belongs to its own arm; `gate_trace.AXIS_UNRESOLVED` is the name it is
+        counted under until then.
+        Guard: the clipped fallback branch of `reason`."""
         d = np.zeros((400, 400), dtype=bool)
         d[90:300, 60] = True                # spans the whole box: cut both ends
-        A._axis_anchor(d, (40, 300, 90, 300))
+        got = A._axis_anchor(d, (40, 300, 90, 300))
         row = [r for r in T.ROWS if r["kind"] == "AXIS_CANDIDATES"][0]
         self.assertEqual(row["n_free"], 0)
         self.assertIn("no free run", row["reason"])
+        self.assertEqual(got[0], 60, "the runtime returns the clipped candidate")
+        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=True),
+                         T.AXIS_UNRESOLVED)
         RUN[0] += 1
 
     def test_a_box_with_no_long_run_says_that_instead(self):
@@ -211,6 +223,103 @@ class AxisCandidates(unittest.TestCase):
         row = [r for r in T.ROWS if r["kind"] == "AXIS_CANDIDATES"][0]
         self.assertEqual(row["selected_x"], "")
         self.assertIn("no run long enough", row["reason"])
+        RUN[0] += 1
+
+
+class AxisStatus(unittest.TestCase):
+    """`gate_trace.axis_status`: the four states the overlay drew as one line."""
+
+    def test_no_candidate_at_all_is_not_the_same_as_a_bad_one(self):
+        """Panel C's box: nothing passed the anchor test, so the spine came from
+        the plain longest-vertical fallback. Its LADDER_OK means a ladder could be
+        read off that column, not that the column is the panel's axis.
+        Guard: the `if not anchored` branch."""
+        self.assertEqual(T.axis_status(0, 0, anchored=False, ladder_ok=True),
+                         T.AXIS_FALLBACK_ONLY)
+        self.assertEqual(T.axis_status(3, 1, anchored=False, ladder_ok=True),
+                         T.AXIS_FALLBACK_ONLY)
+        RUN[0] += 1
+
+    def test_clipped_only_outranks_the_ladder(self):
+        """P07 reads no ladder, but a clipped-only box that DID read one is still
+        the weakest case: the ladder says a column of numerals was found beside
+        that vertical, not that the vertical is an axis.
+        Guard: the clipped-only branch coming before the ladder branch."""
+        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=True),
+                         T.AXIS_UNRESOLVED)
+        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=False),
+                         T.AXIS_UNRESOLVED)
+        RUN[0] += 1
+
+    def test_a_free_candidate_is_attested_only_by_its_ladder(self):
+        """The difference between P06 (true axis, ladder reads) and P03 (a run on
+        a bar, ladder refused) is the ladder and nothing else."""
+        self.assertEqual(T.axis_status(2, 2, anchored=True, ladder_ok=True),
+                         T.AXIS_ATTESTED)
+        self.assertEqual(T.axis_status(2, 2, anchored=True, ladder_ok=False),
+                         T.AXIS_GEOMETRY_ONLY)
+        RUN[0] += 1
+
+    def test_every_kind_the_recorder_writes_is_in_KINDS(self):
+        """`summary()` counts by KINDS, so a kind missing from it is a kind the
+        terminal never mentions - GATE_WHY and SELECTED_PASS were both missing.
+        Guard: the KINDS tuple."""
+        written = ("AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
+                   "ORPHAN", "GATE", "GATE_WHY", "POST", "FRAGMENT_DECISION",
+                   "SELECTED_PASS", "SELECTED")
+        self.assertEqual(set(written) - set(T.KINDS), set())
+        T.ON = True
+        T.reset()
+        for k in written:
+            T.add(k)
+        s = T.summary()
+        for k in written:
+            self.assertIn(k, s, "%s is recorded but never summarised" % k)
+        RUN[0] += 1
+
+
+class FallbackAxisIsTraced(unittest.TestCase):
+    """`spine_and_baseline` records why it picked a column, because on 475
+    figure 1's panel C that column is the only thing behind a LADDER_OK."""
+
+    def setUp(self):
+        T.reset()
+        T.context(pid="", fig="", png="", mode="", ink="")
+        self._on = T.ON
+        T.ON = True
+        A._RUN_CACHE.clear()
+        A._ANCHOR_CACHE.clear()
+
+    def tearDown(self):
+        T.ON = self._on
+
+    def test_the_fallback_records_its_candidates_and_its_rule(self):
+        """A scenario asserting only "the fallback was used" cannot see whether
+        the trace says WHICH columns were available or why one won.
+        Guard: the AXIS_FALLBACK row in spine_and_baseline."""
+        d = np.zeros((400, 400), dtype=bool)
+        d[100:300, 150] = True              # 200 px - the longest
+        d[120:280, 90] = True               # 160 px, further left
+        A.spine_and_baseline(d, (60, 300, 90, 320))
+        rows = [r for r in T.ROWS if r["kind"] == "AXIS_FALLBACK"]
+        self.assertTrue(rows, "the fallback wrote no row")
+        row = rows[0]
+        self.assertIn("150:", row["candidates"])
+        self.assertIn("90:", row["candidates"])
+        self.assertIn("leftmost column whose run is", row["reason"])
+        self.assertEqual(row["longest"], 200)
+        RUN[0] += 1
+
+    def test_the_row_names_the_column_that_was_chosen(self):
+        """The tie rule takes the LEFTMOST column within AXIS_TIE of the longest,
+        which is not the longest - and the overlay drew both the same."""
+        d = np.zeros((400, 400), dtype=bool)
+        d[100:300, 150] = True
+        d[100:299, 90] = True               # 1 px shorter, well inside the tie
+        A.spine_and_baseline(d, (60, 300, 90, 320))
+        row = [r for r in T.ROWS if r["kind"] == "AXIS_FALLBACK"][0]
+        self.assertEqual(row["selected_x"], 90)
+        self.assertEqual(row["longest"], 200)
         RUN[0] += 1
 
 

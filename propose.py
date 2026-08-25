@@ -51,6 +51,53 @@ if _only:
 
 REINK = os.environ.get("REINK", "1") != "0"   # harness: the figure states its own ink
 NEAR = os.environ.get("NEAR", "1") != "0"     # harness: you cannot read more axes than the figure has
+# SHADOW: read a ladder off EVERY axis candidate, not just the one the search took,
+# and record all of them. Reported only - production still uses the chosen axis.
+# Separate from TRACE because it pays for OCR per candidate.
+SHADOW = bool(os.environ.get("SHADOW")) and T.ON
+
+
+def _shadow_ladders(img, dark, box, chosen_x):
+    """Read a ladder off every axis candidate this box had, and record them all.
+
+    Production takes the leftmost run that ends inside the box, preferring those
+    over ones clipped by the box edge. On publication 475's figure 1's panel D
+    that preference picks a short vertical standing on a bar over the panel's own
+    axis, which is clipped by the box's bottom edge - and nothing measured whether
+    the rejected candidate would have read better. This measures it and CHANGES
+    NOTHING: what the arm needs first is the evidence that the ranking is wrong.
+    """
+    ac = T.last("AXIS_CANDIDATES", box=T.box(box))
+    fb = T.last("AXIS_FALLBACK", box=T.box(box))
+    cands = []
+    if ac and ac.get("candidates"):
+        for c in str(ac["candidates"]).split(";"):
+            if not c:
+                continue
+            cx, run, cls = c.split(":")
+            cands.append((int(cx), cls, run))
+    if fb and fb.get("selected_x") != "":
+        cands.append((int(fb["selected_x"]), "fallback", ""))
+    seen = set()
+    for cx, cls, run in cands:
+        if cx in seen:
+            continue
+        seen.add(cx)
+        try:
+            cby = A.baseline_at(dark, box, cx)
+            cp = A.y_tick_labels(img, dark, box, cx, cby)
+            cok, cdet, _cf, _cl, cres, ccv = A.ladder(cp)
+        except Exception as exc:
+            T.add("AXIS_SHADOW_LADDER", box=T.box(box), candidate_x=cx,
+                  boundary=cls, run=run, chosen=(cx == chosen_x),
+                  ladder_ok="", n_labels="", detail="%s: %s" % (type(exc).__name__, exc))
+            continue
+        T.add("AXIS_SHADOW_LADDER", box=T.box(box), candidate_x=cx, boundary=cls,
+              run=run, chosen=(cx == chosen_x), baseline_y=cby,
+              n_labels=len(cp), ladder_ok=bool(cok),
+              resid_px=("%.2f" % cres) if cres is not None else "",
+              spacing_cv=("%.4f" % ccv) if ccv is not None else "",
+              detail=cdet)
 
 
 _cache = {}
@@ -69,6 +116,8 @@ def measure(png, img, dark, box, kind):
                         "ends inside it" % sx
     pairs = A.y_tick_labels(img, dark, box, sx, by)
     ok, detail, _f, _l, resid, cv = A.ladder(pairs)
+    if SHADOW:
+        _shadow_ladders(img, dark, box, sx)
     brk = ""
     if ok and pairs:
         lo = min(p[1] for p in pairs); hi = max(p[1] for p in pairs)
@@ -290,8 +339,20 @@ for r in rows:
         frag = []
         if rec.get("cut_through"):
             frag.append(rec["cut_through"])
+            if T.ON:
+                T.add("FRAGMENT_DECISION", panel="P%02d" % i,
+                      box=T.box((rec["x0"], rec["x1"], rec["y0"], rec["y1"])),
+                      rule="CUT_THROUGH_AXIS", measured="", threshold="",
+                      detail=rec["cut_through"])
         if covered < FRAGMENT_AREA_SHARE:
             frag.append("panels cover only %.0f%% of the raster" % (100 * covered))
+            if T.ON:
+                T.add("FRAGMENT_DECISION", panel="P%02d" % i,
+                      box=T.box((rec["x0"], rec["x1"], rec["y0"], rec["y1"])),
+                      rule="FIGURE_COVERAGE", measured="%.4f" % covered,
+                      threshold="%.2f" % FRAGMENT_AREA_SHARE,
+                      detail="all panel boxes together cover %.1f%% of the raster"
+                             % (100 * covered))
         if ink_note:
             rec["harness"] = (rec.get("harness") + " | " if rec.get("harness") else "") + ink_note
         if rec.get("spine_x") is not None and rec.get("baseline_y") is not None:
@@ -308,8 +369,19 @@ for r in rows:
                 # being read.
                 rec["geom_note"] = "GEOMETRY_FAILED: %s: %s" % (type(exc).__name__, exc)
         if T.ON:
+            _ac = T.last("AXIS_CANDIDATES", box=T.box((rec["x0"], rec["x1"],
+                                                       rec["y0"], rec["y1"])))
+            _fb = T.last("AXIS_FALLBACK", box=T.box((rec["x0"], rec["x1"],
+                                                     rec["y0"], rec["y1"])))
             T.add("SELECTED", panel="P%02d" % i, box=T.box((rec["x0"], rec["x1"],
                                                             rec["y0"], rec["y1"])),
+                  axis_status=T.axis_status(
+                      int(_ac["n_free"]) if _ac else 0,
+                      int(_ac["n_clipped"]) if _ac else 0,
+                      bool(_ac and _ac.get("selected_x") != ""),
+                      rec.get("status") == "LADDER_OK"),
+                  axis_from=("anchor" if (_ac and _ac.get("selected_x") != "")
+                             else ("fallback" if _fb else "?")),
                   spine_x=rec.get("spine_x"), baseline_y=rec.get("baseline_y"),
                   status=rec.get("status"), n_labels=rec.get("n_labels"),
                   n_bars=rec.get("n_bars"), fragment="; ".join(frag),

@@ -604,6 +604,15 @@ Two things the harness still owes this arm:
     numerals at a residual of 0.03 px while the one it took reads two and
     refuses. See INSTALL.md, "Four axis states, and the axis the search rejected
     reads better".
+    CUT LINEAGE - BUILT. `CUT_LINEAGE` in `axis_reader`, written by `_cut`:
+    for each half of a cut, the other half, the axis and the gutter. `SHADOWGATE=1`
+    then asks the six statements of every piece the DISTANCE refused whose
+    cut-sibling is a panel, and records the verdict without adopting anything. On
+    publication 475's figure 1 it recovers one piece the reach missed by four
+    pixels and refuses panel C's - because the partner the relation found is a
+    fragment inside the sibling half rather than the panel. See INSTALL.md,
+    "Arm A: the cut remembers its halves".
+
     GATE COUNTERS - BUILT. `gate_trace.py`, driven by `TRACE=path`. It records
     every axis candidate and which was taken, every discarded piece and whether
     it reached the six statements, the six verdicts, and which mode and ink won.

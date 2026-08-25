@@ -15,6 +15,7 @@ guard must turn the scenario red; that check is run each round and its output is
 in `INSTALL.md`.
 """
 import csv
+import inspect
 import io
 import os
 import sys
@@ -264,9 +265,10 @@ class AxisStatus(unittest.TestCase):
         """`summary()` counts by KINDS, so a kind missing from it is a kind the
         terminal never mentions - GATE_WHY and SELECTED_PASS were both missing.
         Guard: the KINDS tuple."""
-        written = ("AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
-                   "ORPHAN", "GATE", "GATE_WHY", "POST", "FRAGMENT_DECISION",
-                   "SELECTED_PASS", "SELECTED")
+        written = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK",
+                   "AXIS_SHADOW_LADDER", "ORPHAN", "GATE", "GATE_WHY",
+                   "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
+                   "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
         self.assertEqual(set(written) - set(T.KINDS), set())
         T.ON = True
         T.reset()
@@ -320,6 +322,167 @@ class FallbackAxisIsTraced(unittest.TestCase):
         row = [r for r in T.ROWS if r["kind"] == "AXIS_FALLBACK"][0]
         self.assertEqual(row["selected_x"], 90)
         self.assertEqual(row["longest"], 200)
+        RUN[0] += 1
+
+
+class CutLineage(unittest.TestCase):
+    """`_cut` remembers which two halves it made, so "these were severed from one
+    another" is recoverable. It was not, at any price."""
+
+    def setUp(self):
+        T.reset()
+        T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._sg = T.ON, A.SHADOW_GATE
+        T.ON = True
+        A.CUT_LINEAGE.clear()
+        A._CUT_SEQ[0] = 0
+        A._RUN_CACHE.clear()
+        A._ANCHOR_CACHE.clear()
+
+    def tearDown(self):
+        T.ON, A.SHADOW_GATE = self._on, self._sg
+
+    def _two_panels(self):
+        """Two blocks with a wide column gutter between them: one cut, two halves,
+        each half a panel with its own axis and bars."""
+        d = np.zeros((300, 620), dtype=bool)
+        for sx in (60, 400):
+            d[40:240, sx] = True                       # a spine
+            d[239, sx:sx + 200] = True                 # a baseline
+            for bx in (90, 150, 210):
+                d[140:239, sx + bx - 60:sx + bx - 40] = True
+        return d
+
+    def test_both_halves_of_one_cut_point_at_each_other(self):
+        """Guard: _remember_cut writing an entry for each half."""
+        out = []
+        A._cut(self._two_panels(), (0, 620, 0, 300), 0, out)
+        self.assertGreaterEqual(len(A.CUT_LINEAGE), 2)
+        pairs = {}
+        for box, rec in A.CUT_LINEAGE.items():
+            pairs.setdefault(rec["cut_id"], []).append((box, rec))
+        for cid, members in pairs.items():
+            self.assertEqual(len(members), 2, "cut %s has %d halves" % (cid, len(members)))
+            (ba, ra), (bb, rb) = members
+            self.assertEqual(ra["sibling"], bb)
+            self.assertEqual(rb["sibling"], ba)
+            self.assertIn(ra["axis"], ("row", "col"))
+            self.assertGreater(ra["gap_hi"] - ra["gap_lo"], 0)
+        RUN[0] += 1
+
+    def _stacked(self):
+        """Two blocks with a wide ROW gutter: the other branch of the same cut."""
+        d = np.zeros((620, 300), dtype=bool)
+        for sy in (40, 380):
+            d[sy:sy + 200, 60] = True
+            d[sy + 199, 60:260] = True
+            for bx in (90, 150, 210):
+                d[sy + 100:sy + 199, bx:bx + 20] = True
+        return d
+
+    def test_a_row_cut_is_remembered_too(self):
+        """Both branches of `_cut` have to write the lineage; a scenario with only
+        a column gutter cannot see the row branch at all."""
+        out = []
+        A._cut(self._stacked(), (0, 300, 0, 620), 0, out)
+        axes = {rec["axis"] for rec in A.CUT_LINEAGE.values()}
+        self.assertIn("row", axes)
+        RUN[0] += 1
+
+    def test_the_cut_is_recorded_as_a_trace_row(self):
+        """A lineage only in memory cannot be read after the run."""
+        out = []
+        A._cut(self._two_panels(), (0, 620, 0, 300), 0, out)
+        cuts = [r for r in T.ROWS if r["kind"] == "CUT"]
+        self.assertTrue(cuts)
+        self.assertIn(cuts[0]["axis"], ("row", "col"))
+        self.assertGreater(int(cuts[0]["gap_px"]), 0)
+        RUN[0] += 1
+
+    def test_a_panel_inside_the_sibling_half_is_a_cut_sibling(self):
+        """Containment, not equality: the sibling half is usually cut again before
+        it becomes a panel. Guard: cut_sibling_of's containment test."""
+        A.CUT_LINEAGE[(0, 100, 0, 100)] = {
+            "cut_id": 1, "sibling": (100, 300, 0, 100), "axis": "col",
+            "gap_lo": 95, "gap_hi": 105, "depth": 0}
+        self.assertIsNotNone(A.cut_sibling_of((0, 100, 0, 100), (120, 280, 10, 90)))
+        self.assertIsNotNone(A.cut_sibling_of((0, 100, 0, 100), (100, 300, 0, 100)))
+        RUN[0] += 1
+
+    def test_a_trimmed_piece_still_finds_the_half_it_came_from(self):
+        """`panels` trims every leaf before offering it as an orphan, so the piece
+        the gate sees is not the half the cut made and its tuple is not a key.
+        The first run of the shadow gate recorded ZERO verdicts for exactly that.
+        Guard: the containment fallback in cut_sibling_of."""
+        A.CUT_LINEAGE[(0, 100, 0, 100)] = {
+            "cut_id": 1, "sibling": (100, 300, 0, 100), "axis": "col",
+            "gap_lo": 95, "gap_hi": 105, "depth": 0}
+        trimmed = (12, 88, 20, 80)
+        self.assertNotIn(trimmed, A.CUT_LINEAGE)
+        rec = A.cut_sibling_of(trimmed, (120, 280, 10, 90))
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["cut_id"], 1)
+        RUN[0] += 1
+
+    def test_the_smallest_containing_half_wins(self):
+        """A piece is inside every ancestor half; the one it came OUT of is the
+        smallest. Taking any of them would make a distant panel a sibling."""
+        A.CUT_LINEAGE[(0, 400, 0, 400)] = {
+            "cut_id": 1, "sibling": (400, 800, 0, 400), "axis": "col",
+            "gap_lo": 395, "gap_hi": 405, "depth": 0}
+        A.CUT_LINEAGE[(0, 100, 0, 100)] = {
+            "cut_id": 2, "sibling": (100, 400, 0, 100), "axis": "col",
+            "gap_lo": 95, "gap_hi": 105, "depth": 1}
+        rec = A.cut_sibling_of((10, 90, 10, 90), (120, 380, 10, 90))
+        self.assertEqual(rec["cut_id"], 2)
+        RUN[0] += 1
+
+    def test_a_panel_outside_the_sibling_half_is_not(self):
+        """The relation has to be able to say no, or it is not a relation."""
+        A.CUT_LINEAGE[(0, 100, 0, 100)] = {
+            "cut_id": 1, "sibling": (100, 300, 0, 100), "axis": "col",
+            "gap_lo": 95, "gap_hi": 105, "depth": 0}
+        self.assertIsNone(A.cut_sibling_of((0, 100, 0, 100), (310, 400, 0, 100)))
+        self.assertIsNone(A.cut_sibling_of((0, 100, 0, 100), (120, 380, 0, 100)))
+        self.assertIsNone(A.cut_sibling_of((7, 7, 7, 7), (0, 1, 0, 1)))
+        RUN[0] += 1
+
+    def test_the_shadow_gate_records_a_verdict_and_adopts_nothing(self):
+        """The whole point is to find out what the gate WOULD have said. If it
+        adopts, it is not a shadow. Guard: _shadow_gate, and adopt_orphans
+        returning its input unchanged for a refused orphan."""
+        d = self._two_panels()
+        panel = (55, 265, 35, 245)
+        piece = (300, 380, 35, 245)
+        A.CUT_LINEAGE[tuple(piece)] = {
+            "cut_id": 9, "sibling": (0, 290, 0, 300), "axis": "col",
+            "gap_lo": 290, "gap_hi": 300, "depth": 0}
+        A.SHADOW_GATE = True
+        before = [tuple(panel)]
+        got = [tuple(b) for b in A.adopt_orphans(d, [panel], [piece])]
+        self.assertEqual(got, before, "the shadow gate adopted something")
+        rows = [r for r in T.ROWS if r["kind"] == "GATE_SHADOW"]
+        self.assertTrue(rows, "no shadow verdict was recorded")
+        self.assertEqual(rows[0]["cut_id"], 9)
+        self.assertIn("c_rows", rows[0])
+        # THE GUARANTEE IS STRUCTURAL, not a promise: the function is never given
+        # the output list, so it has nothing to adopt into. Asserted here because
+        # the day someone passes it in, this is the line that says no.
+        self.assertEqual(list(inspect.signature(A._shadow_gate).parameters),
+                         ["dark", "orp", "boxes"])
+        RUN[0] += 1
+
+    def test_with_the_flag_off_the_shadow_gate_is_not_asked(self):
+        """It costs a `continuity.verdict` per sibling pair, so it is opt-in."""
+        d = self._two_panels()
+        panel = (55, 265, 35, 245)
+        piece = (300, 380, 35, 245)
+        A.CUT_LINEAGE[tuple(piece)] = {
+            "cut_id": 9, "sibling": (0, 290, 0, 300), "axis": "col",
+            "gap_lo": 290, "gap_hi": 300, "depth": 0}
+        A.SHADOW_GATE = False
+        A.adopt_orphans(d, [panel], [piece])
+        self.assertEqual([r for r in T.ROWS if r["kind"] == "GATE_SHADOW"], [])
         RUN[0] += 1
 
 

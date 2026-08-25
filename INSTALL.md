@@ -9121,6 +9121,86 @@ measured value and the threshold, instead of only a sentence on the panel row.
     the fragment-area guard's per-box share, as opposed to the figure-wide one
     the x reader's own gates
 
+## Arm A: the cut remembers its halves, and the gate is asked without a distance
+
+`_cut` kept only its leaves. Which two of them were the halves of ONE cut - the
+single fact that makes a distance unnecessary - was not recoverable downstream at
+any price. `CUT_LINEAGE` keeps it: for each half, the cut's id, the other half,
+the axis, and the gutter it split on. `cut_sibling_of(piece, panel)` then asks the
+only structural question there is - is that panel inside the other half of the cut
+that made this piece - and `SHADOWGATE=1` puts the six statements to every such
+pair the DISTANCE prefilter refused. It adopts nothing: `_shadow_gate` is never
+handed the output list, and a scenario asserts its signature.
+
+Measured against `88dba15` on two figures, two replicates: 12 -> 12 panels,
+12 -> 12 ladders, 0 boxes moved, 0 shared-column mismatches, outputs
+byte-identical (`experiments/arm-a-lineage-off.json`).
+
+### What the gate says when the distance is out of the way
+
+Publication 475's figure 1, selected pass `OFF/151`. Ten pieces were refused
+before the gate. Of those, FOUR have a cut-sibling among the panel boxes:
+
+    piece 311,383,834,975    72x141    cut 7  col  gutter 38 px   GATE ACCEPTS
+        data_no_axis O   rows O (overlap 1.00)   coords O (foot 1.00, band 0.86)
+        baseline X   caption -   regular -
+        NECESSARY(3 and 2 and 5) + EVIDENCE(coords), no veto -> adopt
+    piece 99,384,370,664    285x294    cut 5  col  gutter 44 px   GATE REFUSES
+    piece 142,487,317,341   345x24     cut 4  row  gutter 20 px   GATE REFUSES
+    piece 435,469,961,975    34x14     cut 8  row  gutter 10 px   GATE REFUSES
+
+    397 figure 1   7 shadow verdicts, 0 accepted
+    475 figure 2   no cut-sibling pairs at all, so nothing to say
+
+So the route is sound in the direction that matters: it does not loosen the two
+figures that are already right, and on the figure that is wrong it recovers a
+piece that the reach missed by four pixels. `reach` was 34 and the gutter is 38.
+
+### And it does NOT recover panel C, for a reason worth having
+
+Panel C's missing 285 x 294 block IS a cut sibling - cut 5, a column cut on a
+44 px gutter - so it reached the gate. The gate refused it, and the trace says
+why: the panel the relation paired it with is
+
+    428,500,510,664    72 x 154
+
+which is not panel C's box (`101,268,499,627`). The sibling half had been cut
+again, and the box that survived into `boxes` is a fragment inside it rather than
+the panel. Judged against that fragment, `rows` fails (the piece spans 370-664,
+the fragment 510-664), `coords` reads a foot share of 0.07, and `baseline` sees a
+61 px crossing against an internal maximum of 18.
+
+    SO THE RELATION IS RIGHT AND THE PARTNER IS WRONG. `cut_sibling_of` accepts
+    ANY box contained in the sibling half, and when that half has been cut into
+    several pieces the first one it finds need not be the panel. The next question
+    is not a threshold either: it is how to pick, among the boxes inside the
+    sibling half, the one that IS the panel - most of the half's area, or the one
+    holding the axis, or the one the assignment layer would name.
+
+That is the whole finding. Arm A as specified is necessary and not sufficient, and
+what it is missing is now a named question with a measurement behind it rather
+than a guess.
+
+    SIX OF THE TEN REFUSED PIECES HAVE NO CUT SIBLING AMONG THE PANELS AT ALL,
+    including the three largest (299x286, 285x296, 74x477). Their sibling halves
+    were merged, grown or replaced before the panel list was built, so the lineage
+    points at boxes that no longer exist as panels. Whether to follow the lineage
+    through those transforms is a second question, and it is bigger than this one.
+
+### A bug this found in itself
+
+The first run recorded ZERO shadow verdicts. `panels` trims every leaf before
+offering it as an orphan, so the piece handed to the gate is not the half the cut
+made and its tuple is not a key in the lineage. `cut_sibling_of` now falls back to
+the SMALLEST recorded half that contains the piece - smallest, because a piece is
+inside every ancestor half and the one it came out of is the innermost. Two
+scenarios pin both halves of that: the trimmed lookup, and the smallest-wins rule.
+
+    AND THE LADDER SHADOW MOVED TO ITS OWN FLAG. `SHADOW=1` reads a ladder off
+    every axis candidate and pays for OCR per candidate; `SHADOWGATE=1` asks the
+    six statements and pays for geometry. Sharing one flag made Arm A cost forty
+    minutes for measurements it did not use.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

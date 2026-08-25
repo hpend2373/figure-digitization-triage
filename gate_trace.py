@@ -42,9 +42,9 @@ ROWS = []
 CTX = {"pid": "", "fig": "", "png": "", "mode": "", "ink": ""}
 
 #: Kinds, in the order a component meets them.
-KINDS = ("AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER", "ORPHAN",
-         "GATE", "GATE_WHY", "POST", "FRAGMENT_DECISION", "SELECTED_PASS",
-         "SELECTED")
+KINDS = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
+         "ORPHAN", "GATE", "GATE_WHY", "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
+         "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
 
 #: How well defended the axis a row was measured on actually is. REPORTED, never
 #: acted on: promoting or demoting a box on this is a change to what the pipeline

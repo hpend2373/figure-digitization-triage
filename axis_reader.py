@@ -248,6 +248,25 @@ def _severs_axis(sub, mid, vertical):
                for x in range(w) if sub[mid, x])
 
 
+def _remember_cut(a, b, axis, gap_lo, gap_hi, depth):
+    """Both halves of one cut, each pointing at the other.
+
+    `_cut` threw this away and kept only the leaves, so "these two pieces were
+    severed from one another" - the one fact that makes a distance unnecessary -
+    was not recoverable downstream at any price.
+    """
+    _CUT_SEQ[0] += 1
+    cid = _CUT_SEQ[0]
+    for me, other in ((a, b), (b, a)):
+        CUT_LINEAGE[tuple(me)] = {"cut_id": cid, "sibling": tuple(other),
+                                  "axis": axis, "gap_lo": gap_lo, "gap_hi": gap_hi,
+                                  "depth": depth}
+    if _T.ON:
+        _T.add("CUT", cut_id=cid, axis=axis, depth=depth,
+               gap="%d-%d" % (gap_lo, gap_hi), gap_px=gap_hi - gap_lo,
+               half_a=_T.box(a), half_b=_T.box(b))
+
+
 def _cut(dark, box, depth, out):
     x0, x1, y0, y1 = box
     sub = dark[y0:y1, x0:x1]
@@ -275,14 +294,20 @@ def _cut(dark, box, depth, out):
         if kind == "row":
             if _severs_axis(sub, mid, vertical=False):
                 continue
-            _cut(dark, (x0, x1, y0, y0 + mid), depth + 1, out)
-            _cut(dark, (x0, x1, y0 + mid, y1), depth + 1, out)
+            a = (x0, x1, y0, y0 + mid)
+            b = (x0, x1, y0 + mid, y1)
+            _remember_cut(a, b, "row", y0 + g[0], y0 + g[1], depth)
+            _cut(dark, a, depth + 1, out)
+            _cut(dark, b, depth + 1, out)
             return
         else:
             if _severs_axis(sub, mid, vertical=True):
                 continue
-            _cut(dark, (x0, x0 + mid, y0, y1), depth + 1, out)
-            _cut(dark, (x0 + mid, x1, y0, y1), depth + 1, out)
+            a = (x0, x0 + mid, y0, y1)
+            b = (x0 + mid, x1, y0, y1)
+            _remember_cut(a, b, "col", x0 + g[0], x0 + g[1], depth)
+            _cut(dark, a, depth + 1, out)
+            _cut(dark, b, depth + 1, out)
             return
     out.append(box)
 
@@ -485,6 +510,55 @@ BROAD_CAP = 3             # never offer more than this many slabs per missing pa
 ADOPT_GAP = 34            # px between a panel and the piece the cut sliced off it
 ADOPT_MIN = 8             # a sliver smaller than this is not a piece of a plot
 ADOPT_SHARE = 0.50        # how much of the shorter side the two must share
+
+#: box -> what cut produced it. Written by `_cut`, read by the shadow gate.
+#: NOT a decision: a piece's lineage does not adopt it, it only makes the
+#: question "is this piece the other half of the cut that made that panel?"
+#: askable at all. Cleared per figure by `panels`.
+CUT_LINEAGE = {}
+_CUT_SEQ = [0]
+
+#: harness (reported only): ask the six statements of a piece the distance
+#: prefilter refused, when that piece is the direct cut-sibling of a panel.
+SHADOW_GATE = bool(_os.environ.get("SHADOWGATE"))
+
+
+def cut_sibling_of(orphan, panel):
+    """Is `panel` inside the other half of the cut that produced `orphan`?
+
+    The reach prefilter refuses publication 475's figure 1's own bar groups by
+    ten pixels, and widening the reach was measured and rejected twice. This is
+    the structural question that does not need a distance: the two pieces came
+    out of ONE cut, so whether they are one plot is exactly what the six
+    statements are for.
+
+    Containment, not equality, because the sibling half is usually cut again
+    before it becomes a panel.
+    """
+    rec = CUT_LINEAGE.get(tuple(orphan))
+    if rec is None:
+        # THE LEAVES ARE TRIMMED BEFORE THEY BECOME ORPHANS, so the piece handed
+        # to the gate is not the half the cut made and its tuple is not a key
+        # here. The first run of this recorded ZERO shadow verdicts for exactly
+        # that reason. The smallest recorded half that contains the piece is the
+        # half it came out of.
+        best = None
+        ox0, ox1, oy0, oy1 = orphan
+        for box, r in CUT_LINEAGE.items():
+            bx0, bx1, by0, by1 = box
+            if ox0 >= bx0 - 2 and ox1 <= bx1 + 2 and oy0 >= by0 - 2 and oy1 <= by1 + 2:
+                area = (bx1 - bx0) * (by1 - by0)
+                if best is None or area < best[0]:
+                    best = (area, r)
+        rec = best[1] if best else None
+    if not rec or rec.get("sibling") is None:
+        return None
+    sx0, sx1, sy0, sy1 = rec["sibling"]
+    px0, px1, py0, py1 = panel
+    if px0 >= sx0 - 2 and px1 <= sx1 + 2 and py0 >= sy0 - 2 and py1 <= sy1 + 2:
+        return rec
+    return None
+
 
 _RUN_CACHE = {}
 _ANCHOR_CACHE = {}
@@ -781,6 +855,50 @@ def _nearest_note(orp, boxes, budget):
         for side, (gap, vsh, reach) in sorted(best.items()))
 
 
+def _shadow_gate(dark, orp, boxes):
+    """Ask the six statements of a piece the DISTANCE refused, when the piece is
+    the direct cut-sibling of a panel. Records; adopts nothing.
+
+    The point is to find out whether the gate would have said yes. If it would,
+    the repair is a second route into the gate on structural grounds - not a
+    wider reach, which was measured twice and rejected twice. If it would not,
+    the reach was never the problem and this whole line is closed.
+
+    A REAL NEIGHBOURING PANEL MUST STILL BE REFUSED. That is the other half of
+    the acceptance test: the sibling half of a column cut between two panels
+    contains a panel, and `data_without_axis` is what has to catch it.
+    """
+    import continuity as C
+    ox0, ox1, oy0, oy1 = orp
+    for b in boxes:
+        rec = cut_sibling_of(orp, b)
+        if rec is None:
+            continue
+        x0, x1, y0, y1 = b
+        try:
+            an = axis_anchor(dark, b)
+            sx = an[0] if an is not None else spine_and_baseline(dark, b)[0]
+            run = spine_run(dark, sx, y0, y1)
+        except Exception:
+            run = None
+        if run is None:
+            _T.add("GATE_SHADOW", orphan=_T.box(orp), panel=_T.box(b),
+                   cut_id=rec["cut_id"], cut_axis=rec["axis"],
+                   gap_px=rec["gap_hi"] - rec["gap_lo"],
+                   accepted="", detail="no spine run for the sibling panel")
+            continue
+        side = ("right" if ox0 >= x1 else "left" if ox1 <= x0
+                else "below" if oy0 >= y1 else "above" if oy1 <= y0 else "overlap")
+        ok, tests = C.verdict(dark, b, orp, sx, run, CAP_FLOOR, side)
+        _T.add("GATE_SHADOW", orphan=_T.box(orp), panel=_T.box(b),
+               cut_id=rec["cut_id"], cut_axis=rec["axis"],
+               gap_px=rec["gap_hi"] - rec["gap_lo"], side=side,
+               accepted=bool(ok),
+               **{("c_" + name): _mark(tests[name][0]) for name in tests})
+        _T.add("GATE_SHADOW_WHY", orphan=_T.box(orp), panel=_T.box(b),
+               **{("why_" + name): tests[name][1] for name in tests})
+
+
 def adopt_orphans(dark, boxes, orphans):
     """A block with no axis of its own, touching exactly one panel, is that panel's.
 
@@ -868,6 +986,8 @@ def adopt_orphans(dark, boxes, orphans):
                        candidates=";".join("%s@%dpx:%s" % (sd, g, _T.box(bb))
                                            for g, sd, bb in cands),
                        nearest=_nearest_note(orp, boxes, budget))
+                if SHADOW_GATE:
+                    _shadow_gate(dark, orp, boxes)
             continue                      # nobody, or nobody we can be sure about
         gap, side, b = cands[0]
         x0, x1, y0, y1 = b
@@ -1004,6 +1124,8 @@ def panels(path, loose=False):
     """
     HARNESS_TAG.clear()
     del FIGURE_BOXES[:]
+    CUT_LINEAGE.clear()
+    _CUT_SEQ[0] = 0
     a, dark = _dark(path)
     leaves = []
     _cut(dark, (0, a.shape[1], 0, a.shape[0]), 0, leaves)

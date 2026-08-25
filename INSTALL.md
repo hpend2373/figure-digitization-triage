@@ -8340,6 +8340,54 @@ would have called that experiment neutral.
 Nothing in this section is a code change; the two rejected readings of the foot term are
 recorded in `continuity.same_coordinates` so the next reader does not re-derive them.
 
+## The baseline was a process I thought I had killed
+
+A round of this work compared a fifteen-figure run before and after a change, read
+fragment flags 21 -> 9, and called it a repair. The change touches `cut_through_axis`,
+which fills one reporting column and nothing else - and the PANEL COUNTS moved. That
+cannot happen, and it is the only reason this was caught.
+
+Three identical runs, byte for byte:
+
+    c827263b3a6649ce3aa337a5b3d817ef  det_1.csv
+    c827263b3a6649ce3aa337a5b3d817ef  det_2.csv
+    c827263b3a6649ce3aa337a5b3d817ef  det_3.csv
+
+So the pipeline is deterministic and the code was not what differed. The BEFORE file
+was: an earlier run of the same command, started before `capscan.py` had written
+`captions.csv`, which survived the `pkill` that was supposed to end it and finished
+after its replacement. Every figure whose caption was later found had run without a
+caption floor. The 21 flags, the GRID modes, four `FIGURE_BOX_REFUSED` rows and
+publication 476's figure 1 at three panels were all that, and none of it was real.
+
+Re-measured against a clean baseline, the change is a NO-OP: with the flag on and off
+the fifteen-figure output is byte-identical. It is not in the tree.
+
+    RULE. A comparison is only as good as its baseline, and a baseline is a claim
+    about a process that ran. Re-run it, or stamp the inputs into the output, before
+    reading a difference as a result.
+
+### What the harness is actually worth, measured cleanly
+
+Fifteen figures, harness off against harness on, same inputs, same build:
+
+                     panels   ladders   fragment flags   count == recorded axes
+    no harness           58        50               36                        5
+    harness              71        63               15                        6
+
+### And a correction to the previous section
+
+Publication 397's figure 1 was recorded there as a case where the harness LOSES a
+panel - 7 boxes down to 6, against 8 recorded axes. Judged by the boxes rather than
+the count, it is the opposite. Without the harness that figure returns eight boxes of
+width 54, 54, 100, 100, 129, 129, 195 and 195 px, in duplicate pairs, every one of
+them flagged `panels cover only 8% of the raster`. With it, six boxes of width 464 to
+494 px, every one reading a ladder. Eight fragments are not closer to eight panels
+than six panels are.
+
+That correction is the same mistake this file warned about two sections earlier -
+counting panels is not checking them - made by the person who wrote the warning.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

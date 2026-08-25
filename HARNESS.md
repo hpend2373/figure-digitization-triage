@@ -368,6 +368,36 @@ The third row of that table is also a warning about how this harness is judged: 
 figure 2 the panel COUNT and the ladder count were unchanged while the boxes moved to
 the wrong places. Counting panels is not checking them.
 
+## 12. What the harness is worth, and how the baseline lied
+
+Fifteen figures, harness off against harness on, same build and same inputs:
+
+| | panels | ladders | fragment flags | count == recorded axes |
+|---|---|---|---|---|
+| no harness | 58 | 50 | 36 | 5 |
+| **harness** | **71** | **63** | **15** | **6** |
+
+That table had to be measured twice. The first attempt compared against a BEFORE file
+produced by an earlier run of the same command — one that started before `capscan.py`
+had written `captions.csv`, survived the `pkill` meant to end it, and finished after
+its replacement. Every figure whose caption was found later had run with no caption
+floor at all.
+
+It was caught because a change that touches only a reporting column moved the PANEL
+COUNTS, which cannot happen. Three identical runs came back byte for byte identical,
+so the pipeline is deterministic and the code was not what differed.
+
+> **A comparison is only as good as its baseline, and a baseline is a claim about a
+> process that ran.** Re-run it, or stamp the inputs into the output, before reading a
+> difference as a result.
+
+**And publication 397's figure 1 is not the regression it was recorded as.** Without
+the harness it returns eight boxes — widths 54, 54, 100, 100, 129, 129, 195, 195 px,
+in duplicate pairs, every one flagged `panels cover only 8% of the raster`. With it,
+six boxes of 464–494 px, every one reading a ladder. Eight fragments are not closer to
+eight panels than six panels are. That was the same mistake this document warns about
+one section earlier, made by whoever wrote the warning.
+
 ## Order
 
 ```

@@ -152,6 +152,40 @@ def data_without_axis(dark, orphan):
     return share >= A.PLOT_INK_MIN, "축 없음, 잉크 %.3f" % share
 
 
+def inside_shares(dark, orphan, run):
+    """(legacy, corrected) share of the piece's ink lying in the axis band.
+
+    THE LEGACY NUMBER IS NOT A SHARE. `band` is taken over the whole axis run
+    while `whole` is taken over the piece's rows, so the ratio counts the
+    PANEL's ink over the PIECE's and exceeds 1 whenever anything is drawn in the
+    same columns higher up: a panel title 113 rows above the axis top scores
+    2.44 on a term that asks for 0.90. It is a ratio of two different regions
+    wearing the name of a proportion.
+
+    The corrected number intersects the band with the piece, which is what the
+    criterion's own docstring describes - "it lies BETWEEN the axis top and the
+    baseline" - and is therefore in [0, 1] by construction. `test_continuity`
+    holds it to that.
+
+    BOTH ARE RETURNED AND THE DECISION STILL USES THE LEGACY ONE. Substituting
+    the corrected value changes which pieces are adopted, and the round that
+    tried four such changes at once is written up in `INSTALL.md` under "The
+    four steps the record called the repair, measured". This is the diagnostic
+    that has to exist before that arm can be run; it is not that arm.
+    """
+    top, bottom = run
+    ox0, ox1, oy0, oy1 = orphan
+    whole = dark[oy0:oy1, ox0:ox1]
+    total = float(whole.sum())
+    if not total:
+        return 0.0, 0.0
+    band = dark[max(0, top - 2):bottom + 2, ox0:ox1]
+    legacy = float(band.sum()) / total
+    t2, b2 = max(max(0, top - 2), oy0), min(bottom + 2, oy1)
+    corrected = (float(dark[t2:b2, ox0:ox1].sum()) / total) if b2 > t2 else 0.0
+    return legacy, corrected
+
+
 def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
     """4. 막대·선이 동일한 축 좌표계에 정렬되는가.
 
@@ -197,9 +231,8 @@ def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
     if cols == 0:
         return False, "조각에 잉크가 없다"
     foot_share = feet / cols
-    band = dark[max(0, top - 2):bottom + 2, ox0:ox1]
-    whole = dark[oy0:oy1, ox0:ox1]
-    inside = (float(band.sum()) / float(whole.sum())) if whole.sum() else 0.0
+    legacy, corrected = inside_shares(dark, orphan, run)
+    inside = legacy
     # THE LABEL-STRIP ROUTE IS OFF BY DEFAULT, AND THE CORPUS IS WHY. Counting a
     # numeral column as "in this plot's coordinates" is true - the numerals are drawn
     # against this axis and nothing else - and it saved publication 116's figure 3,
@@ -231,8 +264,9 @@ def same_coordinates(dark, panel, orphan, run, sx=None, side=None):
     # adoption this criterion then has to justify. Until it does, the term stays as it
     # is and this comment is the warning.
     ok = foot_share >= FOOT_SHARE or inside >= INSIDE_SHARE or labels
-    return ok, ("밑변에 선 열 %.2f, 축 범위 안 잉크 %.2f%s"
-                % (foot_share, inside, ", 축 라벨 스트립" if labels else ""))
+    return ok, ("밑변에 선 열 %.2f, 축 범위 안 잉크 %.2f (교집합 %.2f)%s"
+                % (foot_share, inside, corrected,
+                   ", 축 라벨 스트립" if labels else ""))
 
 
 def same_caption(panel, orphan, cap_floor):

@@ -8264,7 +8264,8 @@ F still refuse their ladders. What is now KNOWN about that figure: the pieces ar
 pieces by all six statements, and the only thing between them and their panels is a
 pre-filter that cannot state a distance on a plate with a drawn zero line.
 
-3220 core / 3258 full, both verified against the tree.
+3220 core / 3258 full, both verified against the tree. (History: that is
+what v9.15 ran. The CURRENT pair is the markers in `README.md`.)
 
 ## Four ways round one gate, and why none of them is in the tree
 
@@ -8806,6 +8807,116 @@ the code they pinned. Two findings from writing them are worth keeping:
   up - a panel title 113 rows above the axis top scored 2.44 on a term that asks
   for 0.90. It is only reachable through the vertical direction, which is not in
   the tree, so the fix went with it.
+
+## Two defects found by writing scenarios for a rejected round
+
+Neither is a threshold and neither is in the segmentation argument. Both were
+found while writing the scenarios for `OWN`/`PLOTSIDE`/`RANK`/`VERT`, and both
+outlive that round.
+
+### The memo key could not tell one raster from another
+
+`spine_run` and `axis_anchor` are memoised under `id(dark)`. `id()` is unique
+only while the object is alive, and CPython hands a freed address straight to the
+next allocation. The driver's own pattern, measured on two corpus rasters:
+
+    arrays created 8, distinct ids 2, cross-figure reuses 6
+
+Every figure after the first inherited the previous figure's id. So a cache hit
+after the first figure could be answering about a DIFFERENT RASTER, and had been
+able to since the caches were added.
+
+`figure_key` now registers a weak reference whose callback drops that id's
+entries. The callback runs while the referent is being deallocated, before the
+address can be handed out again. An object weakref cannot hold falls back to the
+old behaviour rather than to an exception - the caches are an optimisation and
+must never be the reason a figure fails to measure.
+
+What it changes, measured against `65a781a`:
+
+    two figures    boxes 12 -> 12, ladders 12 -> 12, boxes moved 0
+                   BUT axis_sig and the label band rows moved on 345 figure 4:
+                   1178:178-330:211 -> 1178:178-333:211, label_y1 330 -> 333
+                   1178:579-727:726 -> 1178:577-727:726, label_y0 579 -> 577
+    six figures    nothing beyond the added diagnostic text
+
+Both are true, and together they say what kind of defect this is: the stale entry
+is always THERE and is only sometimes HIT, because whether it is depends on the
+allocation pattern, which depends on the figure set. That is the worst kind, and
+the reason to fix it rather than to measure whether being wrong is better. The
+thing it moved is `axis_sig` - the identity key the next phase is supposed to
+rest on.
+
+    A NOTE ON THE ROUND BEFORE THIS ONE. The `OWN`/`PLOTSIDE`/`RANK`/`VERT`
+    measurements were made with this defect present in BOTH arms. It is
+    deterministic for a given figure set, and both arms ran the same set in the
+    same order, so the comparisons stand as comparisons. But `OWN` changes the
+    boxes that key `axis_anchor`, so it changes which entries are asked for, and
+    a stale hit could land differently in the two arms. The direction of that
+    result - three ladders lost, seven fragment flags gained - is far larger than
+    anything this could account for, and the conclusion does not move. It is
+    recorded here rather than left for someone to notice.
+
+    A scenario that depends on the allocator handing back the same address is not
+    a scenario, so the suite pins the EVICTION - entries present while the raster
+    lives, gone when it dies, and untouched when a different raster dies - and
+    the collision above is evidence in this file rather than a test.
+
+### Criterion 4's band term was a ratio of two different regions
+
+    band  = dark[axis_top - 2 : axis_bottom + 2, piece_x0 : piece_x1]
+    whole = dark[piece_y0 : piece_y1,            piece_x0 : piece_x1]
+    inside = band.sum() / whole.sum()
+
+The numerator spans the whole axis run and the denominator spans the piece's
+rows, so the value counts the PANEL's ink over the PIECE's. It is not a
+proportion and it is not bounded: a panel title 113 rows above the axis top
+scores 2.44 on a term that asks for 0.90.
+
+`inside_shares(dark, orphan, run)` now returns both readings - the legacy one and
+the intersection, which is what the criterion's own docstring describes and is in
+[0, 1] by construction. Ten fixtures hold it to that range, and one of them is
+required to break the legacy value, so the section cannot quietly stop proving
+anything.
+
+    THE DECISION STILL USES THE LEGACY VALUE, and that is deliberate. Swapping it
+    changes which pieces are adopted, which is an arm of its own - and the round
+    that tried four such changes at once is the section above this one. This is
+    the diagnostic that has to exist before that arm can be run; it is not that
+    arm. It costs five `harness` strings on six figures and moves no box.
+
+### And the experiment is data now, not only sentences
+
+Four rejected approaches are documented in this file as prose because every run
+root was thrown away with the container it ran in. `harness_compare --record ID`
+writes `experiments/ID.json` and `experiments/ID_boxes.csv`: the arms' code and
+input hashes, the flag combination, the replay hashes, the per-figure metrics,
+and one row per box that moved or that exists in only one arm. NO RASTER GOES IN -
+the figures are publisher material, so what is kept is hashes, flags, metrics and
+boxes, and a scenario pins that.
+
+The four rejected approaches predate the recorder and their numbers live only in
+the section above. Everything from here on has a record.
+
+### One more thing `harness_compare` now says out loud
+
+`outputs_identical`. `VERT` was reported as "no effect" twice and the first
+reading was a gate of mine that was shut, so nothing had been evaluated at all.
+"Evaluated and agreed" and "never reached" are not the same result and must not
+print the same. Telling them apart properly needs counters from inside the tree
+under test - candidates discovered, offered, and where each was refused - which
+is the next thing the harness needs. This field is the half that can be measured
+from outside.
+
+### A count that is not wrong
+
+A reader took `3220 core / 3258 full` from this file as the current status and
+compared it with the commit narrative's 3274/3312. Both are correct. The line in
+this file is release history - what was true at v9.15, before `test_harness_compare`
+and `test_panel_geometry` existed - and this file is deliberately never rewritten
+to match today. The CURRENT status is the pair of markers in `README.md`, which
+`verify_documented_status.py` compares against the suites' own reported totals in
+CI, and nothing else in the repository is allowed to claim it.
 
 ## Still open
 

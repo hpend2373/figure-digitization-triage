@@ -224,6 +224,61 @@ class BoxLevelComparison(unittest.TestCase):
         self.assertEqual(c["per_figure"][0]["boxes"]["matched"], 3)
 
 
+class ExperimentRecord(unittest.TestCase):
+    """`--record`: the experiment as rows, not only as sentences."""
+
+    def test_a_recorded_run_carries_the_boxes_that_moved(self):
+        """Four rejected approaches are documented as prose because every run
+        root was thrown away with the container it ran in. Guard: write_record."""
+        tmp = tempfile.mkdtemp()
+        base = write_csv(os.path.join(tmp, "b.csv"), [
+            row("P01", 22, 403, 332, 620, 103, 605),
+            row("P02", 524, 957, 332, 620, 605, 605),
+        ])
+        cand = write_csv(os.path.join(tmp, "c.csv"), [
+            row("P01", 22, 268, 332, 620, 103, 605),
+            row("P03", 700, 957, 700, 900, 720, 890),
+        ])
+        rep = {"run_id": "r", "verdict": H.DEMO_ONLY, "refusals": [],
+               "outputs_identical": False, "declared_variables": ["code"],
+               "manifest_diff": {}, "arms": {},
+               "comparison": H.compare_outputs(base, cand)}
+        cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            paths = H.write_record("exp1", rep)
+            doc = json.load(open(paths[0]))
+            with open(paths[1]) as f:
+                rows = list(csv.DictReader(f))
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(doc["experiment_id"], "exp1")
+        self.assertEqual(doc["verdict"], H.DEMO_ONLY)
+        self.assertTrue(doc["per_figure"])
+        kinds = sorted(r["kind"] for r in rows)
+        self.assertEqual(kinds, ["MOVED", "ONLY_IN_BASE", "ONLY_IN_CANDIDATE"])
+        moved = [r for r in rows if r["kind"] == "MOVED"][0]
+        self.assertEqual(moved["max_boundary_delta_px"], "135.0")
+        self.assertEqual((moved["width_base"], moved["width_candidate"]),
+                         ("381.0", "246.0"))
+
+    def test_the_record_carries_no_raster(self):
+        """The figures are publisher material. What is kept is hashes, flags,
+        metrics and boxes - never pixels, and never a path into a clip store."""
+        tmp = tempfile.mkdtemp()
+        base = write_csv(os.path.join(tmp, "b.csv"), [row("P01", 22, 403, 332, 620, 103, 605)])
+        rep = {"run_id": "r", "verdict": H.DEMO_ONLY, "refusals": [],
+               "comparison": H.compare_outputs(base, base)}
+        cwd = os.getcwd()
+        os.chdir(tmp)
+        try:
+            blob = open(H.write_record("exp2", rep)[0]).read()
+        finally:
+            os.chdir(cwd)
+        for forbidden in ("data:image", "\\x89PNG", "clips/"):
+            self.assertNotIn(forbidden, blob)
+
+
 # ------------------------------------------------------------------ the gate
 # Guard: manifest_diff() and the offending-key filter in main().
 
@@ -371,6 +426,28 @@ class ArmProcessDiscipline(unittest.TestCase):
         self.assertIsNone(rep["comparison"])
         self.assertTrue(any(r.startswith("SURVIVING_PROCESS") for r in rep["refusals"]),
                         rep["refusals"])
+
+    def test_two_arms_that_agree_byte_for_byte_say_so(self):
+        """`VERT` was reported as "no effect" twice, and the first time it was a
+        gate of mine that was shut, so nothing was evaluated at all. Those two
+        results are not the same and the report must not read the same.
+        Guard: the outputs_identical field."""
+        global RUN
+        tmp = tempfile.mkdtemp()
+        b = Tree(tmp, "base", BASE_ARM)
+        rep = run_driver(base_argv(tmp, b.path, b.path, replay=1))
+        self.assertEqual(rep["refusals"], [])
+        self.assertTrue(rep["outputs_identical"])
+
+        tmp2 = tempfile.mkdtemp()
+        b2 = Tree(tmp2, "base", BASE_ARM)
+        c2 = Tree(tmp2, "cand", """
+            rows = ["pid,fig,png,panel,status,fragment,declared_axes,x0,x1,y0,y1,spine_x,baseline_y",
+                    "475,Fig. 2,a.png,P01,LADDER_OK,,6,31,403,28,322,148,307"]
+            open(os.environ["OUT"], "w").write("\\n".join(rows) + "\\n")
+        """)
+        rep2 = run_driver(base_argv(tmp2, b2.path, c2.path, replay=1))
+        self.assertFalse(rep2["outputs_identical"])
 
     def test_an_arm_that_does_not_repeat_itself_is_not_compared(self):
         """Three identical md5s are what proved the pipeline deterministic.  Here

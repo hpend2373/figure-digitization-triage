@@ -513,8 +513,11 @@ check("and over the whole column the title above answers first, the labels last"
       int(full[0]) < TOP2 and int(full[-1]) > _by + 100,
       "column ink runs %d..%d, baseline %d" % (full[0], full[-1], _by))
 _ok, _why = C.same_coordinates(dark, panel, piece, run, sx, "right")
+# ASKED OF THE NUMBER, NOT OF THE STRING. This read `"1.00" not in why.split(",")[-1]`,
+# which stopped meaning what it says the moment the detail gained a second figure.
+_legacy, _corrected = C.inside_shares(dark, piece, run)
 check("the band term cannot carry this one - the piece reaches past the panel's rows",
-      "1.00" not in _why.split(",")[-1], _why)
+      _legacy < C.INSIDE_SHARE, "legacy %.3f, intersection %.3f" % (_legacy, _corrected))
 
 section("12. a plate shredded into more boxes than it has axes")
 
@@ -533,6 +536,55 @@ check("where no count was recorded, ladders decide as before",
       A.mode_score(False, 11, 11, 0) > A.mode_score(False, 4, 5, 0))
 check("overshooting and undershooting by the same amount rank together",
       A.mode_score(False, 3, 8, 6)[1] == A.mode_score(False, 3, 4, 6)[1])
+
+
+section("13. criterion 4's band term is a ratio of two different regions")
+
+# THE NUMBER THAT IS NOT A SHARE. `band` spans the whole axis run and `whole` spans
+# the piece's rows, so the legacy value counts the PANEL's ink over the PIECE's. On a
+# panel title above the axis top it reads 2.44 on a term that asks for 0.90. The
+# intersection is what the criterion's own docstring describes, and is in [0, 1].
+for s in (1, 2):
+    im = Image.new("L", (400 * s, 300 * s), 255)
+    d = ImageDraw.Draw(im)
+    d.rectangle([60 * s, 40 * s, 60 * s, 240 * s], fill=0)
+    for x0, x1 in ((78, 98), (120, 140), (162, 182)):
+        d.rectangle([x0 * s, 100 * s, x1 * s, 140 * s], fill=0)
+        d.rectangle([x0 * s, 141 * s, x1 * s, 170 * s], fill=0)
+    d.rectangle([80 * s, 10 * s, 180 * s, 26 * s], fill=0)          # the panel title
+    _a, dk = A._dark(im)
+    title = (80 * s, 181 * s, 10 * s, 27 * s)
+    _run = (40 * s, 241 * s)
+    legacy, corrected = C.inside_shares(dk, title, _run)
+    check("%dx the legacy share of a title above the axis exceeds 1" % s,
+          legacy > 1.0, "legacy %.3f" % legacy)
+    check("%dx and the intersection share of the same title is 0" % s,
+          corrected == 0.0, "intersection %.3f" % corrected)
+    # THE DECISION IS UNCHANGED, DELIBERATELY. Swapping the value swaps which
+    # pieces are adopted, and that is an arm of its own.
+    ok, why = C.same_coordinates(dk, (58 * s, 200 * s, 40 * s, 140 * s), title,
+                                 _run, 60 * s, "above")
+    check("%dx and the verdict still follows the legacy number" % s, ok is True, why)
+
+# THE INVARIANT, over every fixture in this file that has a panel and a piece.
+_cases = []
+for s in (1, 2):
+    dark, sx, run = figure(s)
+    _cases.append((dark, box(ORPHAN, s), run))
+    _cases.append((dark, box(NEIGHBOUR, s), run))
+    dark, sx, run, panel = signed(s, rule_to=262)
+    _cases.append((dark, (int(300 * s), int(340 * s), int(TOP2 * s), int(BOT2 * s)), run))
+    dark, sx, run, panel = signed(s, rule_to=262, title=True)
+    _cases.append((dark, (int(22 * s), int(41 * s), int(90 * s), int(190 * s)), run))
+    dark, sx, run, piece, panel = hanging(s)
+    _cases.append((dark, piece, run))
+_out = [C.inside_shares(d, o, r)[1] for d, o, r in _cases]
+check("the intersection share is in [0, 1] on all %d fixtures" % len(_out),
+      all(0.0 <= v <= 1.0 for v in _out),
+      "out of range: %s" % [v for v in _out if not 0.0 <= v <= 1.0])
+check("and the legacy share is not, on at least one of them",
+      any(C.inside_shares(d, o, r)[0] > 1.0 for d, o, r in _cases),
+      "no fixture exposes the defect, so this section proves nothing")
 
 # --------------------------------------------------------------------------
 print()

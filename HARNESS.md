@@ -548,16 +548,60 @@ Step 2 is deliberately additive. Removing `x0/x1/y0/y1` in the same change that
 introduces three boxes would make every downstream difference unattributable, which is
 the failure mode this whole section is a reaction to.
 
-### What a gold set would have to record, and why the metrics need one
+### The next arm, and why it is not "make everything read plot_box"
 
-Optimising the automatic table alone can buy `ladder_pass_count` with worse panels -
-fragments each read a ladder off their own label column. Fifteen to twenty figures with
-four human-recorded numbers per panel are enough to stop that:
+`OWN` failed because widening the one box changed five answers at once, and four
+of those five are consumers that have no business seeing a label strip. So the
+next arm moves CONSUMERS, one group at a time, not the box.
 
-    the physical spine x
-    the baseline y
-    the plot's left and right boundary
-    the visible category or group count
+    consumer                        geometry it should read
+    the XY cut and `_is_plot`       the raw candidate box. It runs BEFORE a spine
+                                    is known, so reading `plot_box` here is a
+                                    circular dependency, not a fix. `_is_plot`
+                                    divides the rule fraction by the box's own
+                                    width and height, which is exactly why `OWN`
+                                    turned real panels into non-panels
+    mark detection                  plot_box
+    `holds_data` / `data_without_axis`   plot_box
+    tick numerals and OCR           the numeral band and the spine
+    the calibration ladder          label_box with the spine and axis run
+    the review crop                 review_box
+    panel de-duplication            the axis signature, which is an EQUIVALENCE
+                                    KEY and not a quality score - conflating the
+                                    two is what `RANK` did
+    the fragment-area guard         plot coverage and review coverage as SEPARATE
+                                    figures. `FRAGMENT_AREA_SHARE = 0.25` was
+                                    measured against a single rectangle; applying
+                                    the same number to a smaller denominator is a
+                                    different rule wearing the same constant
 
-Recording those is a human act. Nothing in this package may write them, and no run may
-mark itself as agreeing with them: `DEMO_ONLY` is where the machine stops.
+The first arm is the middle two rows and nothing else: mark detection and the
+component-role tests read `plot_box`, while segmentation, the area guard,
+`collapse_same_axis`, `mode_score` and the adoption reach are untouched. What it
+has to show:
+
+    on figures whose boxes are already right   no box moves, no ladder is lost,
+                                               no declared mark is lost, no new
+                                               foreign axis
+    on figures known to be wrong               declared mark or category coverage
+                                               rises, fragment flags fall
+    on figures with no recorded answer          movement is REPORTED, never called
+                                               an improvement
+
+Those three groups need labels - GOLD, BROKEN, UNKNOWN - per axis, because
+"moved from the shipped box" is a regression on the first group and the whole
+point on the second. Aggregating them into one delta is how a change that trades
+a box for a count gets shipped.
+
+Two things the harness still owes this arm:
+
+    a SHADOW column. Each decision row should carry the consumer, the geometry it
+    read, the verdict it reached, and the verdict the other geometry would have
+    reached - recorded before anything is switched over, so the size of a change
+    is known before it is a change.
+    GATE COUNTERS. Candidates discovered, offered, refused at each of the six
+    statements, accepted, selected. Without them a flag that changes nothing and
+    a flag that never ran read the same, which is how `VERT` was reported as no
+    effect before the gate turned out to be shut.
+
+### What a gold set would have to record

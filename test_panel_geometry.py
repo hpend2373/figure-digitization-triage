@@ -15,6 +15,7 @@ import sys
 import unittest
 
 import ast
+import gc
 import os
 
 import numpy as np
@@ -358,6 +359,66 @@ class Signature(unittest.TestCase):
             lower = G.signature(d, (25 * s, 250 * s, 90 * s, 150 * s), 50 * s, 140 * s)
             self.assertEqual(upper, lower)
             RUN += 1
+
+
+class MemoisedRuns(unittest.TestCase):
+    """`axis_reader.figure_key`: a memo key that cannot outlive its raster."""
+
+    def test_a_rasters_entries_go_when_the_raster_does(self):
+        """`id()` is unique only while the object is alive, and CPython hands a
+        freed address to the next allocation - so an id-keyed cache can answer a
+        question about a live array with a dead one's spine runs. Found by two
+        scenarios that passed alone and failed together.
+        Guard: figure_key's weakref callback."""
+        global RUN
+        d = np.zeros((60, 40), dtype=bool)
+        d[10:55, 5] = True
+        A.spine_run(d, 5, 0, 60)
+        A.axis_anchor(d, (0, 40, 0, 60))
+        key = id(d)
+        self.assertTrue([c for c in A._RUN_CACHE if c[0] == key])
+        self.assertTrue([c for c in A._ANCHOR_CACHE if c[0] == key])
+        self.assertIn(key, A._LIVE_FIGURES)
+        del d
+        gc.collect()
+        self.assertEqual([c for c in A._RUN_CACHE if c[0] == key], [])
+        self.assertEqual([c for c in A._ANCHOR_CACHE if c[0] == key], [])
+        self.assertNotIn(key, A._LIVE_FIGURES)
+        RUN += 1
+
+    def test_a_live_raster_keeps_its_entries(self):
+        """A cache that empties itself is not a cache. The eviction must be tied
+        to the referent's death and to nothing else."""
+        global RUN
+        d = np.zeros((60, 40), dtype=bool)
+        d[10:55, 5] = True
+        first = A.spine_run(d, 5, 0, 60)
+        other = np.zeros((60, 40), dtype=bool)
+        other[10:55, 5] = True
+        A.spine_run(other, 5, 0, 60)
+        del other
+        gc.collect()
+        key = id(d)
+        self.assertTrue([c for c in A._RUN_CACHE if c[0] == key])
+        self.assertEqual(A.spine_run(d, 5, 0, 60), first)
+        RUN += 1
+
+    def test_an_unweakreferenceable_raster_still_measures(self):
+        """The caches are an optimisation and must never be the reason a figure
+        fails to measure, so an object weakref cannot hold falls back to the old
+        behaviour rather than to a TypeError."""
+        global RUN
+        probe = _NoWeakref()
+        self.assertEqual(A.figure_key(probe), id(probe))
+        self.assertNotIn(id(probe), A._LIVE_FIGURES)
+        RUN += 1
+
+
+class _NoWeakref(object):
+    __slots__ = ()
+
+
+_PROBE = _NoWeakref()
 
 
 class Columns(unittest.TestCase):

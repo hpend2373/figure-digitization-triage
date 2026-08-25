@@ -1,0 +1,259 @@
+{
+  "arms": {
+    "baseline": {
+      "code_ref": "tree:88105d39ba02fa9020ff7da6a93f488a520ab4a9e18a398e7479bdc6e46dadf8",
+      "hashes": [
+        "67d0b57ca991644398a5018ec02aa1ac7a592475a4c5bf2f49c2cd28988d7f48"
+      ],
+      "output": "/home/claude/geo/verify/run_diag6/baseline/output.rep0.20260825T094433-17027.csv"
+    },
+    "candidate": {
+      "code_ref": "tree:6ba9103de21fa122493f2eb7148edef2e0b012c1c96c53a89a6890e44178d36b",
+      "hashes": [
+        "f1f5bff93db1b89cf1cc5258ebe1cec79a4970455604c0f80d12f8f1a59b2e9c"
+      ],
+      "output": "/home/claude/geo/verify/run_diag6/candidate/output.rep0.20260825T094433-17027.csv"
+    }
+  },
+  "declared_variables": [
+    "code"
+  ],
+  "experiment_id": "memo-eviction-6fig",
+  "manifest_diff": {
+    "code.axis_reader.py": [
+      "79f8beca790b838d33d85bc3b3e03e29ce7933a6a431c8bf120e8ba0bfcdcb06",
+      "d821b5ebcf996fd35ef655d7512271f71fe78e4b712b93364b473d52b1fefb9d"
+    ],
+    "code.continuity.py": [
+      "8748a7a1e66bf5bddb3458397791122f311eab2f031b5c2ddd9329a7bc4ff1d3",
+      "b2993c7e81b8dc39ed2780e6345656ccafd101a32d817beace965ef93ea45155"
+    ],
+    "code.ref": [
+      "tree:88105d39ba02fa9020ff7da6a93f488a520ab4a9e18a398e7479bdc6e46dadf8",
+      "tree:6ba9103de21fa122493f2eb7148edef2e0b012c1c96c53a89a6890e44178d36b"
+    ]
+  },
+  "outputs_identical": false,
+  "per_figure": [
+    {
+      "base": {
+        "boxed_area_px": 801508,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "candidate": {
+        "boxed_area_px": 801508,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "declared": 8,
+      "fig": "Figure 4",
+      "pid": "345"
+    },
+    {
+      "base": {
+        "boxed_area_px": 807858,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 2,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "candidate": {
+        "boxed_area_px": 807858,
+        "count_equals_declared": false,
+        "declared": 8,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 2,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 6
+      },
+      "declared": 8,
+      "fig": "Fig. 1",
+      "pid": "397"
+    },
+    {
+      "base": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "candidate": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "declared": 6,
+      "fig": "Fig. 1",
+      "pid": "475"
+    },
+    {
+      "base": {
+        "boxed_area_px": 625311,
+        "count_equals_declared": true,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 6
+      },
+      "candidate": {
+        "boxed_area_px": 625311,
+        "count_equals_declared": true,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 6,
+        "panel_count": 6,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 6
+      },
+      "declared": 6,
+      "fig": "Fig. 2",
+      "pid": "475"
+    },
+    {
+      "base": {
+        "boxed_area_px": 1241953,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 2,
+        "panel_count": 3,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 3
+      },
+      "candidate": {
+        "boxed_area_px": 1241953,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 2,
+        "panel_count": 3,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 3
+      },
+      "declared": 6,
+      "fig": "Fig. 1",
+      "pid": "476"
+    },
+    {
+      "base": {
+        "boxed_area_px": 885623,
+        "count_equals_declared": true,
+        "declared": 12,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 2,
+        "fragment_flag_count": 8,
+        "ladder_pass_count": 11,
+        "panel_count": 12,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 12
+      },
+      "candidate": {
+        "boxed_area_px": 885623,
+        "count_equals_declared": true,
+        "declared": 12,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 2,
+        "fragment_flag_count": 8,
+        "ladder_pass_count": 11,
+        "panel_count": 12,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 12
+      },
+      "declared": 12,
+      "fig": "Fig. 2",
+      "pid": "90"
+    }
+  ],
+  "refusals": [],
+  "run_id": "20260825T094433-17027",
+  "schema": 1,
+  "totals": {
+    "boxes_moved": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "duplicate_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "foreign_axis_count": {
+      "base": 2,
+      "candidate": 2,
+      "delta": 0
+    },
+    "fragment_flag_count": {
+      "base": 11,
+      "candidate": 11,
+      "delta": 0
+    },
+    "ladder_pass_count": {
+      "base": 36,
+      "candidate": 36,
+      "delta": 0
+    },
+    "panel_count": {
+      "base": 40,
+      "candidate": 40,
+      "delta": 0
+    },
+    "shared_column_mismatches": {
+      "base": null,
+      "candidate": null,
+      "delta": 5
+    },
+    "unique_axis_count": {
+      "base": 40,
+      "candidate": 40,
+      "delta": 0
+    }
+  },
+  "verdict": "DEMO_ONLY"
+}

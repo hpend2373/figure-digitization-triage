@@ -578,6 +578,10 @@ def main(argv=None):
                     help="times to run each arm; >1 requires byte-identical output")
     ap.add_argument("--cmd", default="python3 propose.py")
     ap.add_argument("--timeout", type=int, default=14400)
+    ap.add_argument("--record", default=None,
+                    help="write experiments/<ID>.json and <ID>_boxes.csv beside this "
+                         "repository, so a rejected approach can be re-checked "
+                         "mechanically instead of re-read as prose")
     a = ap.parse_args(argv)
 
     figures = parse_figures(a.figures)
@@ -663,6 +667,16 @@ def main(argv=None):
                     "OUTPUT_CHANGED_AFTER_RUN: %s output was rewritten after its process exited "
                     "(recorded %s, now %s)" % (arm, arms[arm]["stamps"][0]["out_sha"], now))
 
+        # A FACT THAT SEPARATES TWO VERY DIFFERENT RESULTS. An arm whose output is
+        # byte-identical to the base's changed NOTHING - and "the flag was
+        # evaluated and agreed" and "the flag never reached the code it gates"
+        # look the same from here. `VERT` was reported as no effect twice before
+        # the second reading turned out to be a gate of mine that was shut.
+        # Telling those apart needs counters from inside the tree under test:
+        # candidates discovered, offered, and where each was refused. This line
+        # is the half that can be measured from outside.
+        report["outputs_identical"] = (arms["baseline"]["hashes"][0]
+                                       == arms["candidate"]["hashes"][0])
         if report["refusals"]:
             report["comparison"] = None
         else:
@@ -675,10 +689,82 @@ def main(argv=None):
         release_lock(lock)
 
     path = os.path.join(root, "comparison.json")
-    json.dump(report, open(path, "w"), indent=2, sort_keys=False)
+    with open(path, "w") as f:
+        json.dump(report, f, indent=2, sort_keys=False)
     print(render(report))
     print("\nwritten: %s" % path)
+    if a.record:
+        for p in write_record(a.record, report):
+            print("recorded: %s" % p)
     return 2 if report["refusals"] else 0
+
+
+def write_record(record_id, report):
+    """The experiment as data, next to the prose that interprets it.
+
+    Everything here is derivable from a run root, and every run root so far has
+    been thrown away with the container it ran in - which left four rejected
+    approaches documented only as sentences. A sentence has to be re-read and
+    believed; a row can be re-checked. NO RASTER GOES IN: the figures are
+    publisher material, so what is kept is hashes, flags, metrics and boxes.
+    """
+    out_dir = os.path.join("experiments")
+    os.makedirs(out_dir, exist_ok=True)
+    doc = {
+        "experiment_id": record_id,
+        "schema": SCHEMA,
+        "run_id": report.get("run_id"),
+        "verdict": report.get("verdict"),
+        "refusals": report.get("refusals", []),
+        "outputs_identical": report.get("outputs_identical"),
+        "declared_variables": report.get("declared_variables", []),
+        "manifest_diff": report.get("manifest_diff", {}),
+        "arms": report.get("arms", {}),
+        "totals": (report.get("comparison") or {}).get("totals"),
+        "per_figure": [
+            {k: p[k] for k in ("pid", "fig", "declared", "base", "candidate")}
+            for p in (report.get("comparison") or {}).get("per_figure", [])
+        ],
+    }
+    jpath = os.path.join(out_dir, "%s.json" % record_id)
+    with open(jpath, "w") as f:
+        json.dump(doc, f, indent=2, sort_keys=True)
+    written = [jpath]
+
+    cpath = os.path.join(out_dir, "%s_boxes.csv" % record_id)
+    cols = ["pid", "fig", "declared", "kind", "panel_base", "panel_candidate",
+            "spine_x", "baseline_y", "base_x0", "base_x1", "base_y0", "base_y1",
+            "cand_x0", "cand_x1", "cand_y0", "cand_y1", "width_base",
+            "width_candidate", "max_boundary_delta_px", "iou",
+            "status_base", "status_candidate"]
+    with open(cpath, "w", newline="") as f:
+        w = csv.DictWriter(f, cols)
+        w.writeheader()
+        for p in (report.get("comparison") or {}).get("per_figure", []):
+            for m in p["boxes"]["moved_boxes"]:
+                w.writerow({
+                    "pid": p["pid"], "fig": p["fig"], "declared": p["declared"],
+                    "kind": "MOVED",
+                    "panel_base": m["panel_a"], "panel_candidate": m["panel_b"],
+                    "spine_x": m["axis"][0], "baseline_y": m["axis"][1],
+                    "base_x0": m["box_a"][0], "base_x1": m["box_a"][1],
+                    "base_y0": m["box_a"][2], "base_y1": m["box_a"][3],
+                    "cand_x0": m["box_b"][0], "cand_x1": m["box_b"][1],
+                    "cand_y0": m["box_b"][2], "cand_y1": m["box_b"][3],
+                    "width_base": m["width_a"], "width_candidate": m["width_b"],
+                    "max_boundary_delta_px": m["max_boundary_delta_px"],
+                    "iou": m["iou"],
+                    "status_base": m["status_a"], "status_candidate": m["status_b"]})
+            for kind, key in (("ONLY_IN_BASE", "dropped_axes"),
+                              ("ONLY_IN_CANDIDATE", "added_axes")):
+                for panel, sx, by in p["boxes"][key]:
+                    w.writerow({"pid": p["pid"], "fig": p["fig"],
+                                "declared": p["declared"], "kind": kind,
+                                "panel_base": panel if kind == "ONLY_IN_BASE" else "",
+                                "panel_candidate": panel if kind == "ONLY_IN_CANDIDATE" else "",
+                                "spine_x": sx, "baseline_y": by})
+    written.append(cpath)
+    return written
 
 
 def render(rep):
@@ -691,6 +777,10 @@ def render(rep):
         return "\n".join(lines)
     c = rep["comparison"]
     w = ["COMPARED  (verdict field: %s - this tool reports, it does not judge)" % rep["verdict"], ""]
+    if rep.get("outputs_identical"):
+        w.append("  the two arms produced BYTE-IDENTICAL output. Whether the change was")
+        w.append("  evaluated and agreed, or never reached, cannot be told from here.")
+        w.append("")
     w.append("  %-24s %8s %10s %8s" % ("metric", "base", "candidate", "delta"))
     for k, v in c["totals"].items():
         if v["base"] is None:

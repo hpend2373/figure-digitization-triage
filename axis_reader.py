@@ -42,6 +42,7 @@ FRAME_SPAN = 0.95         # a run longer than this share of the block is the pag
 #: None of the three is right on all 187 figures, which is why the caller tries
 #: all three and keeps the one whose panel count matches the axes I counted by eye.
 SEVER_MODE = "PLAIN"
+import weakref as _weakref
 import os as _os
 SNAP = _os.environ.get("SNAP", "1") != "0"    # harness: offer the box the spine implies
 CAP = _os.environ.get("CAP", "1") != "0"      # harness: the caption is the figure floor
@@ -486,6 +487,38 @@ ADOPT_SHARE = 0.50        # how much of the shorter side the two must share
 
 _RUN_CACHE = {}
 _ANCHOR_CACHE = {}
+#: id(dark) -> a weak reference to that raster, whose death empties its entries.
+_LIVE_FIGURES = {}
+
+
+def figure_key(dark):
+    """A memo key for this raster that cannot outlive the raster.
+
+    `id()` is unique only while the object is alive. CPython hands a freed
+    address straight to the next allocation, so an id-keyed cache can answer a
+    question about a LIVE array with a DEAD one's spine runs. In the driver each
+    `dark` lives for a whole figure and that never happens; in a suite that
+    builds one array per scenario it does, and the symptom is the least useful
+    kind of failure - two scenarios that pass alone and fail together.
+
+    Registering a weak reference whose callback drops that id's entries closes
+    it. The callback runs while the referent is being deallocated, before the
+    address can be handed out again. An object that cannot be weak-referenced
+    falls back to the old behaviour rather than to an exception: the caches are
+    an optimisation and must not be the reason a figure fails to measure.
+    """
+    key = id(dark)
+    if key not in _LIVE_FIGURES:
+        def _forget(_ref, key=key):
+            _LIVE_FIGURES.pop(key, None)
+            for cache in (_RUN_CACHE, _ANCHOR_CACHE):
+                for k in [c for c in cache if c and c[0] == key]:
+                    del cache[k]
+        try:
+            _LIVE_FIGURES[key] = _weakref.ref(dark, _forget)
+        except TypeError:
+            pass
+    return key
 
 
 def _spine_segs(dark, spine_x, min_len=MIN_AXIS_PX):
@@ -504,7 +537,7 @@ def _spine_segs(dark, spine_x, min_len=MIN_AXIS_PX):
 
 def spine_run(dark, spine_x, y0, y1, min_len=MIN_AXIS_PX):
     """The ink run in column `spine_x` that this box is sitting on. Memoised."""
-    key = (id(dark), int(spine_x), min_len)
+    key = (figure_key(dark), int(spine_x), min_len)
     segs = _RUN_CACHE.get(key)
     if segs is None:
         segs = _spine_segs(dark, spine_x, min_len)
@@ -519,7 +552,7 @@ def spine_run(dark, spine_x, y0, y1, min_len=MIN_AXIS_PX):
 
 def axis_anchor(dark, box, min_len=MIN_AXIS_PX):
     """Memoised wrapper around `_axis_anchor`."""
-    key = (id(dark), tuple(box), min_len)
+    key = (figure_key(dark), tuple(box), min_len)
     if key not in _ANCHOR_CACHE:
         if len(_ANCHOR_CACHE) > 20000:
             _ANCHOR_CACHE.clear()

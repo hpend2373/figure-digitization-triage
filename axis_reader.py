@@ -43,6 +43,7 @@ FRAME_SPAN = 0.95         # a run longer than this share of the block is the pag
 #: all three and keeps the one whose panel count matches the axes I counted by eye.
 SEVER_MODE = "PLAIN"
 import weakref as _weakref
+import gate_trace as _T
 import os as _os
 SNAP = _os.environ.get("SNAP", "1") != "0"    # harness: offer the box the spine implies
 CAP = _os.environ.get("CAP", "1") != "0"      # harness: the caption is the figure floor
@@ -593,7 +594,20 @@ def _axis_anchor(dark, box, min_len=MIN_AXIS_PX):
         if s is not None and h - s >= min_len and min(h, y1) - max(s, y0) > need:
             clipped.append((x, s, h))
     pick = free or clipped
-    return min(pick, key=lambda t: t[0]) if pick else None
+    got = min(pick, key=lambda t: t[0]) if pick else None
+    if _T.ON:
+        _T.add("AXIS_CANDIDATES", box=_T.box(box),
+               n_free=len(free), n_clipped=len(clipped),
+               candidates=";".join("%d:%d-%d:%s" % (x, t, b, cls)
+                                   for cls, lst in (("free", free), ("clipped", clipped))
+                                   for x, t, b in lst),
+               selected_x=(got[0] if got else None),
+               selected_run=("%d-%d" % (got[1], got[2])) if got else "",
+               reason=("leftmost of %d free runs" % len(free)) if free else
+                      ("no free run; leftmost of %d clipped" % len(clipped)) if clipped
+                      else "no run long enough",
+               search_to=reach, need_overlap=round(need, 1))
+    return got
 
 
 def caption_floor_trim(dark, boxes, floor):
@@ -729,6 +743,44 @@ def broad_slabs(dark, boxes, floor, target):
     return out
 
 
+def _mark(v):
+    return "O" if v is True else ("X" if v is False else "-")
+
+
+def _nearest_note(orp, boxes, budget):
+    """Why no panel was in reach, on each side, in numbers that can be acted on.
+
+    The prefilter asks two things of a candidate - the gap must be inside the
+    panel's reach AND the two must share `ADOPT_SHARE` of the shorter side - and a
+    refusal that says only "nobody in reach" cannot tell you which one failed.
+    The first version of this note reported the nearest box by DISTANCE, which is
+    always an overlapping one at 0 px, and so said nothing at all.
+    """
+    ox0, ox1, oy0, oy1 = orp
+    best = {}
+    for b in boxes:
+        x0, x1, y0, y1 = b
+        if ox0 >= x1:
+            side, gap = "right", ox0 - x1
+        elif ox1 <= x0:
+            side, gap = "left", x0 - ox1
+        else:
+            side, gap = "overlap", 0
+        vov = max(0, min(y1, oy1) - max(y0, oy0))
+        vsh = vov / max(1, min(y1 - y0, oy1 - oy0))
+        reach = budget.get(tuple(b), ADOPT_GAP)
+        # THE BEST CANDIDATE PER SIDE is the one with the most shared rows, not the
+        # closest: a piece 8 px away that shares nothing is not the near miss.
+        if side not in best or vsh > best[side][1]:
+            best[side] = (gap, vsh, reach)
+    return " | ".join(
+        "%s %dpx share %.2f reach %d%s"
+        % (side, gap, vsh, reach,
+           "" if (gap <= reach and vsh >= ADOPT_SHARE) else
+           (" [gap]" if gap > reach else "") + (" [share]" if vsh < ADOPT_SHARE else ""))
+        for side, (gap, vsh, reach) in sorted(best.items()))
+
+
 def adopt_orphans(dark, boxes, orphans):
     """A block with no axis of its own, touching exactly one panel, is that panel's.
 
@@ -790,6 +842,9 @@ def adopt_orphans(dark, boxes, orphans):
     for orp in orphans:
         ox0, ox1, oy0, oy1 = orp
         if (ox1 - ox0) < ADOPT_MIN or (oy1 - oy0) < ADOPT_MIN:
+            if _T.ON:
+                _T.add("ORPHAN", orphan=_T.box(orp), w=ox1 - ox0, h=oy1 - oy0,
+                       outcome="TOO_SMALL", detail="ADOPT_MIN=%d" % ADOPT_MIN)
             continue
         cands = []
         for b in boxes:
@@ -806,6 +861,13 @@ def adopt_orphans(dark, boxes, orphans):
             elif ox1 <= x0 and x0 - ox1 <= reach and vsh >= ADOPT_SHARE:
                 cands.append((x0 - ox1, "left", b))
         if len(cands) != 1:
+            if _T.ON:
+                _T.add("ORPHAN", orphan=_T.box(orp), w=ox1 - ox0, h=oy1 - oy0,
+                       outcome=("NO_PANEL_IN_REACH" if not cands else "AMBIGUOUS_%d" % len(cands)),
+                       n_candidates=len(cands),
+                       candidates=";".join("%s@%dpx:%s" % (sd, g, _T.box(bb))
+                                           for g, sd, bb in cands),
+                       nearest=_nearest_note(orp, boxes, budget))
             continue                      # nobody, or nobody we can be sure about
         gap, side, b = cands[0]
         x0, x1, y0, y1 = b
@@ -821,10 +883,22 @@ def adopt_orphans(dark, boxes, orphans):
             continue
         import continuity as C
         ok, tests = C.verdict(dark, b, orp, sx, run, CAP_FLOOR, side)
+        if _T.ON:
+            _T.add("ORPHAN", orphan=_T.box(orp), w=ox1 - ox0, h=oy1 - oy0,
+                   outcome="OFFERED", panel=_T.box(b), side=side, gap=gap,
+                   reach=budget.get(tuple(b), ADOPT_GAP))
+            _T.add("GATE", orphan=_T.box(orp), panel=_T.box(b), side=side, gap=gap,
+                   accepted=bool(ok),
+                   **{("c_" + name): _mark(tests[name][0]) for name in tests})
+            _T.add("GATE_WHY", orphan=_T.box(orp), panel=_T.box(b),
+                   **{("why_" + name): tests[name][1] for name in tests})
         if not ok:
             continue
         new = _trim(dark, (min(x0, ox0), max(x1, ox1), min(y0, oy0), max(y1, oy1)))
         if new in out:
+            if _T.ON:
+                _T.add("POST", orphan=_T.box(orp), panel=_T.box(b), grown=_T.box(new),
+                       outcome="DUPLICATE_BOX")
             continue
         # A PANEL DOES NOT CONTAIN ANOTHER PANEL.
         if any(o is not b and (min(new[1], o[1]) - max(new[0], o[0])) *
@@ -832,7 +906,13 @@ def adopt_orphans(dark, boxes, orphans):
                > 0.10 * (o[1] - o[0]) * (o[3] - o[2])
                and min(new[1], o[1]) > max(new[0], o[0])
                and min(new[3], o[3]) > max(new[2], o[2]) for o in boxes):
+            if _T.ON:
+                _T.add("POST", orphan=_T.box(orp), panel=_T.box(b), grown=_T.box(new),
+                       outcome="WOULD_CONTAIN_ANOTHER_PANEL")
             continue
+        if _T.ON:
+            _T.add("POST", orphan=_T.box(orp), panel=_T.box(b), grown=_T.box(new),
+                   outcome="ADOPTED")
         taken[(tuple(b), side)] += 1
         HARNESS_TAG[new] = ("ADOPTED_ORPHAN: the block at %d-%d x %d-%d touches only this "
                             "panel (%s, %d px away) | %s"

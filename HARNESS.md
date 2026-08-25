@@ -599,9 +599,13 @@ Two things the harness still owes this arm:
     read, the verdict it reached, and the verdict the other geometry would have
     reached - recorded before anything is switched over, so the size of a change
     is known before it is a change.
-    GATE COUNTERS. Candidates discovered, offered, refused at each of the six
-    statements, accepted, selected. Without them a flag that changes nothing and
-    a flag that never ran read the same, which is how `VERT` was reported as no
-    effect before the gate turned out to be shut.
+    GATE COUNTERS - BUILT. `gate_trace.py`, driven by `TRACE=path`. It records
+    every axis candidate and which was taken, every discarded piece and whether
+    it reached the six statements, the six verdicts, and which mode and ink won.
+    With the flag unset it is a branch not taken and the output is byte-identical
+    (`experiments/gate-trace-off.json`). The first thing it was pointed at said
+    that on publication 475's figure 1 ten of eleven discarded pieces never
+    reached the six statements at all - see INSTALL.md, "The trace, and what
+    publication 475's figure 1 turned out to be".
 
 ### What a gold set would have to record

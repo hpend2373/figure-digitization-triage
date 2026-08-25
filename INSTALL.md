@@ -8918,6 +8918,105 @@ to match today. The CURRENT status is the pair of markers in `README.md`, which
 `verify_documented_status.py` compares against the suites' own reported totals in
 CI, and nothing else in the repository is allowed to claim it.
 
+## The trace, and what publication 475's figure 1 turned out to be
+
+The overlay for that figure draws one red box for three different failures and
+the footer counts two of them, so the picture says the harness failed and not
+WHERE. Four rounds were spent guessing at that difference. `gate_trace.py` stops
+the guessing: with `TRACE=path` set, `propose.py` writes one row per thing that
+happened to a component.
+
+    AXIS_CANDIDATES   every long vertical the anchor search saw, which one it
+                      took, and why
+    ORPHAN            every piece the cut discarded, and whether it was OFFERED
+                      to the six statements or refused before them
+    GATE / GATE_WHY   the six verdicts, and their sentences, for a piece offered
+    POST              what happened to an accepted piece afterwards
+    SELECTED_PASS     which mode and ink WON - so a reader can filter to it
+    SELECTED          the rows that survived into the proposal
+
+With `TRACE` unset every call is a branch not taken. Measured against `5a11b5f`
+on two figures, two replicates: 12 -> 12 panels, 12 -> 12 ladders, 0 boxes moved,
+**0 shared-column mismatches, outputs byte-identical.** Recorded as
+`experiments/gate-trace-off.json`.
+
+### 475 figure 1, traced
+
+Selected pass `mode=OFF ink=151`, score `(0, -1, 5, -7)`, seven boxes for six
+recorded axes. In that pass the cut discarded eleven pieces:
+
+    reached the six statements       1
+    refused before reaching them    10
+
+So the six statements are not what is failing on this figure. The prefilter is.
+The three largest refused pieces, with the numbers the refusal now carries:
+
+    99,384,370,664    285 x 294 px   left 44px  share 1.00 reach 34 [gap]
+    565,850,373,669   285 x 296 px   right 65px share 1.00 reach 34 [gap]
+    553,852,695,981   299 x 286 px   right 280px share 1.00 reach 34 [gap]
+
+Every one has a PERFECT row overlap and fails only on distance, against a reach
+that has degenerated to the `ADOPT_GAP` floor of 34 px because the figure draws a
+continuous zero line and that row therefore has no gaps to measure. One of them
+misses by 10 px. That is the same degenerate case already recorded against
+`SELFGAP`, and it is why `VERT` measured as nothing: the vertical direction was
+never the thing being refused.
+
+    THE FIRST VERSION OF THAT NOTE SAID NOTHING. It reported the NEAREST panel,
+    which is always an overlapping one at 0 px, so every refusal read
+    "overlap 0 px, share 0.00". A refusal has to name which of the two conditions
+    failed - the gap or the shared rows - or it cannot be acted on.
+
+### And the axis was chosen by a rule nobody had written down as a risk
+
+`_axis_anchor` prefers a run that ends INSIDE the box over one clipped by its
+edge, because a clipped run is evidence the box cut something. On this figure
+that preference is what picks the wrong column:
+
+    P03 (panel D)  4 candidates: x=795 and 796 free (rows 406-515),
+                   x=678 and 679 clipped (rows 513-619).
+                   x=678 IS the panel's own left axis, clipped by the box's
+                   bottom edge - so x=795, a shorter run standing on a bar,
+                   won as "leftmost of the 2 free runs".  LADDER_REFUSED, 2 labels.
+    P06 (panel F)  the same rule, the same shape, and here it picked the true
+                   left axis x=679 over a clipped x=796.  LADDER_OK.
+    P07            0 free candidates, 2 clipped. A vertical cut by BOTH box edges
+                   became a panel axis. A box whose every candidate is cut by its
+                   own edges is a box that contains no axis, and nothing says so.
+    P04 (panel C)  no candidate passed at all, so the spine came from the plain
+                   longest-vertical fallback - a third state the overlay had been
+                   drawing the same as the other two.
+
+So this figure breaks three assumptions at once, and they are not the same
+repair:
+
+    a fragment keeps a trustworthy axis        - P03, P06, P07 say otherwise
+    severed data is inside the self-gap reach  - C and E say otherwise, by 10 px
+    a panel can be recovered from its own box  - the 2x3 repetition says otherwise
+
+### What this settles about the next arm
+
+The arm named in `HARNESS.md` - mark detection and the component-role tests read
+`plot_box` - is still the right FIRST arm, and it is not the arm that fixes this
+figure. Nothing it touches runs before the prefilter that refuses C and E, and
+nothing it touches chooses an axis. Evaluating it against 475 figure 1 would
+score it on work it does not do.
+
+What this figure needs, in the order the trace makes visible:
+
+    1  a box whose only axis candidates are clipped at both edges is not a panel.
+       That is P07, and it is a statement about the candidate, not a threshold
+    2  the axis is a HYPOTHESIS until something supports it - tick marks on one
+       side, a ladder that reads, agreement with the axis column of the other
+       panels in its row. Free-beats-clipped is a tie-break masquerading as that
+    3  the reach is the wrong question for C and E. They already have a valid
+       axis; what is wrong is that the plot belonging to that axis is incomplete.
+       "Is this piece near?" cannot see that. "Is this axis's plot whole?" can
+
+None of the three is in this commit. What is in this commit is the rows that say
+so, and they are checkable: `test_gate_trace.py`, 11 scenarios, each paired with
+one guard, each guard reverted to red.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

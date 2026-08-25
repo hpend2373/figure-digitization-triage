@@ -53,7 +53,8 @@ jobs:
                    test_compile_plan test_corpus_intake \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
-                   test_harness_compare test_panel_geometry; do
+                   test_harness_compare test_panel_geometry \
+                   test_gate_trace; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
@@ -171,7 +172,8 @@ jobs:
                    test_compile_plan test_corpus_intake \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
-                   test_harness_compare test_panel_geometry; do
+                   test_harness_compare test_panel_geometry \
+                   test_gate_trace; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then
               printf '%s\n' "$out"

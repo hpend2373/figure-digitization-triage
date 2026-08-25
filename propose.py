@@ -22,6 +22,7 @@ import csv, os, collections
 import numpy as np
 from PIL import Image
 import axis_reader as A
+import gate_trace as T
 import panel_geometry as PG
 import x_reader as X
 
@@ -178,6 +179,7 @@ for r in rows:
         out.append(dict(pid=r["pid"], fig=r["fig"], png=r["png"], panel="", status="OPEN_FAILED",
                         detail="%s: %s" % (type(exc).__name__, exc)))
         continue
+    T.context(pid=r["pid"], fig=r["fig"], png=r["png"])
     cap = caps.get((r["pid"], r["fig"]), {})
     A.CAP_FLOOR = int(cap["cap_y"]) if cap.get("cap_y") else None
     cap_panels = cap.get("panels") or ""
@@ -199,6 +201,7 @@ for r in rows:
             _a, dark = A._dark(img)
         for mode in MODES:
             A.SEVER_MODE = mode
+            T.context(mode=mode, ink=ink)
             try:
                 boxes, _d, loose = A.panels(p, loose=True)
             except Exception as exc:
@@ -250,6 +253,13 @@ for r in rows:
                         detail="no mode of the cut produced a block holding an axis"))
         continue
     score, mode, recs, ink = best
+    # THE CONTEXT MUST NAME THE PASS THAT WON, not the last one iterated. The first
+    # trace of publication 475's figure 1 labelled its SELECTED rows GRID at ink 151
+    # because that was simply the last combination tried, and the run had chosen OFF
+    # at 140. A trace that mislabels which pass it is describing is worse than none.
+    T.context(mode=mode, ink=ink)
+    if T.ON:
+        T.add("SELECTED_PASS", score=str(score), n_rows=len(recs))
     ink_note = ("" if ink == A.INK_DEFAULT else
                 "RE_INKED: at the shipped threshold this figure came up short of the "
                 "%d axes recorded for it, so it was cut again at the grey the figure "
@@ -297,6 +307,13 @@ for r in rows:
                 # either: an empty cell and no reason is how a column stops
                 # being read.
                 rec["geom_note"] = "GEOMETRY_FAILED: %s: %s" % (type(exc).__name__, exc)
+        if T.ON:
+            T.add("SELECTED", panel="P%02d" % i, box=T.box((rec["x0"], rec["x1"],
+                                                            rec["y0"], rec["y1"])),
+                  spine_x=rec.get("spine_x"), baseline_y=rec.get("baseline_y"),
+                  status=rec.get("status"), n_labels=rec.get("n_labels"),
+                  n_bars=rec.get("n_bars"), fragment="; ".join(frag),
+                  source=(rec.get("harness") or "").split(":")[0])
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
                    sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),
@@ -331,3 +348,6 @@ print("count matched declared axes on %d figures"
       % len({(x["pid"], x["fig"]) for x in out if x["panel"] and x.get("declared_axes")
              and len([y for y in out if y["png"] == x["png"] and y["panel"]]) == x["declared_axes"]}))
 print("fragment-flagged panels:", sum(1 for x in out if x.get("fragment")))
+if T.ON:
+    print(T.summary())
+    print("trace written:", T.dump())

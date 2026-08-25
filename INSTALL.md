@@ -8388,6 +8388,168 @@ than six panels are.
 That correction is the same mistake this file warned about two sections earlier -
 counting panels is not checking them - made by the person who wrote the warning.
 
+## The comparison is now a program, and it refuses
+
+The previous section ends in a rule - re-run the baseline, or stamp the inputs into
+the output, before reading a difference as a result - and a rule that lives only in a
+document is a rule that is followed until the run takes three hours. So it is a file:
+
+    harness_compare.py --base-ref REF_A --candidate-ref REF_B \
+                       --figures "475|Fig. 2;345|Figure 4" \
+                       --out RUN_ROOT --vary code --replay 2
+
+It decides nothing about panels. Its whole job is to make the A/B honest, and every
+guard in it is one clause of the sentence that describes how the last one was not:
+
+    started before captions.csv existed  ->  the input manifest, and the gate that
+                                             refuses to compare arms whose inputs
+                                             differ outside `--vary`
+    survived the pkill                   ->  each arm runs in its own session, and
+                                             anything left alive in its process
+                                             group when it exits is a refusal
+    overwrote the shared output path     ->  there is no shared output path. Each
+                                             replicate writes `output.repN.<run
+                                             id>.csv`, promoted by `os.replace`
+                                             from a `.partial` only on exit 0, and
+                                             re-hashed before the comparison
+    three re-runs were byte-identical    ->  `--replay 2` makes that a
+                                             PRECONDITION rather than a discovery
+
+The refusal codes are the whole interface: `INPUT_MISMATCH`, `NONDETERMINISTIC`,
+`SURVIVING_PROCESS`, `ARM_FAILED`, `NO_OUTPUT`, `OUTPUT_CHANGED_AFTER_RUN`. Any one of
+them and no comparison is written at all. A refused comparison is the product: the
+numbers you were about to read were not measuring what you asked.
+
+### Absent is a value, not a silence
+
+`captions.csv` did not exist when the ghost run started. If a manifest lists only the
+files it found, that fact has nowhere to live - two arms that read different worlds
+produce manifests that agree. So every declared input is hashed, and one that is not
+there hashes to `None`, which is a value that can differ from a hash. The rasters are
+hashed too, but only the ones the selected figures name: hashing the whole clip
+directory would make every unrelated file a reason to refuse.
+
+`--vary` is the other half. The caller declares which manifest keys are the
+experiment - `code`, or `code,env.WIDE2` - and every other difference is fatal. A gate
+that refuses everything refuses the experiment too, so that is a scenario in the suite
+as well.
+
+### Counting is not checking, as a metric table
+
+The four numbers the last section quoted - panels, ladders, fragment flags, count ==
+recorded axes - cannot see the failure that made this necessary: publication 475's
+figure 2 kept its panel count and its ladder count while panel C lost a bar group. So
+the comparison is per axis, not per row:
+
+    panel_count            rows, which is what the old comparison saw
+    unique_axis_count      distinct (spine_x, baseline_y) buckets
+    duplicate_axis_count   rows beyond the first standing on one spine
+    ladder_pass_count
+    fragment_flag_count
+    foreign_axis_count     boxes containing a spine that is not theirs
+    moved_boxes            matched axes whose box moved, with dx0/dx1/dy0/dy1,
+                           the widths either side, and the IoU
+
+A panel's identity is its axis, not its box. A box that shrinks is the same axis
+measured worse; two boxes on one spine are one axis segmented twice. That distinction
+is what publication 397's figure 1 needed and did not have: eight boxes,
+`unique_axis_count` 4, against six boxes with `unique_axis_count` 6. Rows are matched
+across arms by nearest axis rather than by panel number, because `propose.py` numbers
+panels in discovery order and any segmentation change reorders them - matched by
+index, every reorder reads as a moved box.
+
+The report's `verdict` field is the string `DEMO_ONLY`, and it is the only value it
+ever takes. Which arm is right is an attestation, and attestations are human-only.
+
+### The suite, and how each scenario was checked for being decoration
+
+`test_harness_compare.py`, 15 scenarios, no corpus, no network, ~2 s. Each is paired
+with exactly one guard, named in its docstring. Then each guard was reverted in turn
+and the suite re-run:
+
+    box_diff reports no moved boxes              -> test_box_moves_while_every_count_holds_still
+    unique_axis_count = panel_count              -> test_duplicate_boxes_on_one_spine_are_not_two_panels
+    foreign_axis_count always 0                  -> test_a_box_that_swallows_another_spine_is_flagged
+    match rows by index                          -> test_renumbered_panels_are_not_reported_as_moved
+    absent input omitted instead of hashed        -> test_a_file_the_arm_could_not_find_is_recorded_as_a_value
+    no INPUT_MISMATCH refusal                    -> test_an_undeclared_difference_refuses_the_whole_comparison
+    lock ignores whether the holder is alive     -> test_a_live_holder_is_fatal
+    lock never reclaims a stale file             -> test_a_dead_holder_is_reclaimed
+    promote the partial file on failure          -> test_a_crashed_arm_promotes_nothing
+    no survivor scan                             -> test_a_child_the_arm_leaked_is_caught
+    no replay determinism check                  -> test_an_arm_that_does_not_repeat_itself_is_not_compared
+    no post-run output re-hash                   -> test_an_output_rewritten_after_its_run_is_caught
+    tree ref taken over the directory listing    -> test_an_unrelated_file_beside_the_tree_is_not_a_code_change
+
+Thirteen guards, thirteen reverts, thirteen red suites, and no guard without an
+observing scenario. The first draft of the comparability scenarios did not survive this: they
+asserted against hand-built dictionaries, so deleting the refusal loop in the driver
+left them green. They were rewritten to run the driver.
+
+The process-group check is the narrow half of the ghost and is documented as such. A
+child THIS run leaked is in its group and is caught; a process from an earlier session
+is not, and is caught instead by there being no shared path for it to land on and by
+the post-run re-hash.
+
+### The first thing it was pointed at, and what it saw
+
+Two figures, the arms differing only in `WIDE2` - the second adoption pass over the
+slab - declared as `--vary code,env.WIDE2`, two replicates each:
+
+    metric                       base  candidate    delta
+    panel_count                    12         12       +0
+    unique_axis_count              12         12       +0
+    duplicate_axis_count            0          0       +0
+    ladder_pass_count              12         12       +0
+    fragment_flag_count             0          1       +1
+    foreign_axis_count              0          0       +0
+
+    boxes that moved while counts held still: 1 (max boundary delta 103 px)
+    475 Fig. 2, axis (105, 786): (103, 402, 652, 924) -> (103, 299, 652, 924)
+                                 width 299 -> 196, IoU 0.66, LADDER_OK both sides
+
+That axis is publication 475's figure 2 panel E: the panel whose box cut off the 0.01
+group in the first report of this defect. Turning one flag off puts the cut back, and
+EVERY COUNT IN THE OLD COMPARISON STAYS THE SAME. `fragment_flag_count` moves by one,
+which is the only hint the four-number table would have carried, and a hint of one
+flag across two figures is exactly the size of noise that gets read past.
+
+Both arms replayed byte for byte:
+
+    baseline   4511e30e7ab69d786d46fb7b522ed6409bb6fec6c8e070891f9d540c9a594b64  x2
+    candidate  01a0e6b11715a5b90c46d171f1a7af8572fd108353716e4c89a23a49d8086744  x2
+
+and the manifest differed at exactly two keys, `code.ref` and `env.WIDE2`, both
+declared. `inputs.captions.csv` reads `null` in both: the caption scan was lost with a
+container and this run had none. That is a REAL difference from the fifteen-figure
+numbers quoted above, and it is legible in the manifest instead of having to be
+remembered - which is the whole point.
+
+### What this does not do
+
+It does not find a panel. Publication 475's figure 1 still returns seven boxes for six
+axes, 476's figure 1 still refuses two ladders on boxes that are correct, 70's figure 1
+and 533's figure 2 still return nothing. This file only makes the next attempt at those
+measurable - which is the precondition the last four attempts did not have, and the
+reason one of them was reported as a repair.
+
+### The shape the next attempt is expected to take
+
+Recorded here because it is a decision about representation, not a threshold, and the
+four rejected approaches were all thresholds:
+
+    a panel is not one box. It is a plot core, an OWNED label strip, and an axis
+    signature (spine, axis run, baseline, ladder). The label strip is derived from
+    the axis - the side `label_band` already reads from, bounded by the nearest
+    column gutter and the caption floor - not adopted as an orphan by criterion 4.
+
+That is why criterion 4 cannot be made honest on its own: publication 475's figure 2
+is correct BECAUSE a label strip was wrongly adopted and the widened box happened to
+push mode selection the right way. Reject the strip honestly and the bar group goes
+with it. The order that follows from this - experiment harness, then the geometry
+split, then label ownership, then candidate scoring on axis signature rather than box
+area, then vertical fragments whose role is proven to be DATA - is in `HARNESS.md`.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

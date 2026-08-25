@@ -464,3 +464,92 @@ install; asked without it, `_ocr_numerals` raises rather than returning no
 numerals, because a ladder silently built from zero numerals is the fail-open shape
 this package refuses everywhere else. Panels, spines, baselines and continuity are
 geometry and call none of it.
+
+## The experiment harness is not the panel harness
+
+Everything above is the RUNTIME harness: it changes where panels are found. This
+section is about the other one, which changes nothing and exists so that a claim about
+the first can be believed.
+
+    harness_compare.py       two arms, two staging trees, two manifests, one refusal
+                             list, and a per-axis comparison
+    test_harness_compare.py  15 scenarios, no corpus
+
+Use it for every A/B from here on, including the ones that look too small to need it -
+the change that started this was a single reporting column, and the comparison that
+made it look like a repair was three hours of work read in the wrong order.
+
+    python3 harness_compare.py --base-ref HEAD --candidate-ref my-branch --repo . \
+        --figures "475|Fig. 2;345|Figure 4" --out runs/wide2 \
+        --vary code --replay 2
+
+What it refuses on, and why each one exists, is in `INSTALL.md` under "The comparison
+is now a program, and it refuses". The short version: the arms must have read the same
+inputs, each arm must reproduce itself byte for byte, nothing may outlive an arm, and
+the file compared must still hash to what the run produced.
+
+What it reports is per AXIS SIGNATURE - `(spine_x, baseline_y)` - not per row:
+
+    unique_axis_count      how many physical axes were found
+    duplicate_axis_count   how many rows stood on an axis another row already had
+    foreign_axis_count     boxes that contain a spine that is not theirs
+    moved_boxes            same axis, different box: dx0/dx1/dy0/dy1, widths, IoU
+
+`panel_count` is still reported and is still the least informative number in the
+table. Publication 397's figure 1 without the runtime harness has `panel_count` 8 and
+`unique_axis_count` 4; with it, 6 and 6.
+
+## The order the remaining work is in
+
+Recorded as an order rather than a list because each step is what makes the next one
+measurable.
+
+    1  the experiment harness            done: harness_compare.py
+    2  panel geometry splits in three    plot_box, label_box, review_box, plus the
+                                         axis signature, carried on the proposal row
+                                         alongside x0/x1/y0/y1 rather than instead of
+                                         them, with each consumer naming which box it
+                                         reads
+    3  label ownership                   the strip is DERIVED from the axis - label
+                                         side, vertical overlap with the axis run,
+                                         bounded by the nearest column gutter, the
+                                         caption floor, and any neighbouring spine -
+                                         and left-side orphan adoption comes out.
+                                         Only then can criterion 4's inside term be
+                                         restricted to the plot side, which is the
+                                         change four rounds have now failed to make
+                                         from the other end
+    4  candidate scoring                 `collapse_same_axis` and `mode_score` stop
+                                         using box area as a proxy for a good panel.
+                                         A wide box is either a complete panel or a
+                                         box that swallowed its neighbour, and area
+                                         cannot tell those apart; axis signature,
+                                         plot coverage and label ownership can
+    5  vertical fragments                above/below adoption was withdrawn because
+                                         it brought panel titles and axis titles in
+                                         as data. With ownership separating those
+                                         out, the question can be asked again - not
+                                         as "allow four directions" but as "attach a
+                                         component whose ROLE is proven DATA,
+                                         whatever direction it lies in". Publication
+                                         475's figure 1, cut at its zero line into an
+                                         upper and a lower half on one spine and one
+                                         baseline, is the case that needs it
+
+Step 2 is deliberately additive. Removing `x0/x1/y0/y1` in the same change that
+introduces three boxes would make every downstream difference unattributable, which is
+the failure mode this whole section is a reaction to.
+
+### What a gold set would have to record, and why the metrics need one
+
+Optimising the automatic table alone can buy `ladder_pass_count` with worse panels -
+fragments each read a ladder off their own label column. Fifteen to twenty figures with
+four human-recorded numbers per panel are enough to stop that:
+
+    the physical spine x
+    the baseline y
+    the plot's left and right boundary
+    the visible category or group count
+
+Recording those is a human act. Nothing in this package may write them, and no run may
+mark itself as agreeing with them: `DEMO_ONLY` is where the machine stops.

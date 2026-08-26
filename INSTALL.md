@@ -9529,11 +9529,24 @@ finding.
 
 Read alone that says invented boxes carry worse axes. Publication 177's figure 2
 supplies 8 of the 13 `COLUMN_SIBLING` panels, so the picture was drawn - and the
-picture says the ladder fails on ten of its fifteen panels REGARDLESS of how the
-box arrived. It is a five-by-three grid, and it prints its y axis numerals ONCE
-PER ROW. P02, P03, P05, P06 are cut boxes and refuse; P08, P09, P11, P12, P14,
-P15 are invented ones and refuse; P01, P04, P07, P13 are the leftmost of their
-rows and read. The discriminator is the COLUMN, not the origin.
+picture says the ladder fails on ELEVEN of its fifteen panels REGARDLESS of how
+the box arrived. It is a five-by-three grid, and it prints its y axis numerals
+ONCE PER ROW. P02, P03, P05, P06 are cut boxes and refuse; P08, P09, P10, P11,
+P12, P14, P15 are invented ones and refuse; P01, P04, P07, P13 are the leftmost
+of their rows and read. The discriminator is the COLUMN, not the origin.
+
+CORRECTION, and it matters more than a count. The first version of this section
+said TEN and listed ten, leaving out P10 - which was in the data the whole time
+and is the one panel the shared-axis explanation does NOT cover:
+
+    P10  210,439,840,1072  INVENTED  ink 17  no left reader  LADDER_REFUSED
+
+P10 is the LEFTMOST panel of row 4, so nothing to its left can lend it a
+calibration, and 17 inked columns beside its axis is not a blank strip. Row 4 is
+therefore not a shared-axis row with two dependants; it is a row with NO
+provider, and P11 and P12 cannot be explained by the layout either. Writing
+"ten" turned the one real failure on this figure into part of the artefact, which
+is exactly the mistake the section is about.
 
 `AXIS_ATTESTED` is defined as "a candidate whose ladder reads". A panel that
 shares its row's axis therefore cannot be attested however well its box is drawn,
@@ -9591,6 +9604,152 @@ come back was `png/capt.py`, which had never been committed, so every renderer i
 that folder stopped running from a clean checkout. It is committed now. The
 caption scan `captions.csv` was already gone the same way, and is recorded as
 absent rather than quietly missing.
+
+## The owner of a y scale is a row group, not a panel
+
+The correction above is not only a count. If publication 177's figure 2 prints
+its y axis numerals once per row, then the pipeline's assumption - every panel
+carries its own ladder - is wrong about the figure, and no amount of better
+reading fixes it. This round drops that assumption, in the order the review set.
+
+### One value was answering three questions
+
+`axis_status` mixed how the spine was found, whether numerals were read beside
+it, and nothing about whether the box is the whole panel. On a grid figure the
+value it produced was a fact about the LAYOUT: a middle panel with a correct box
+and a correctly anchored spine came back `AXIS_GEOMETRY_ONLY`, which reads as a
+defect in the panel and is not one. Three cells now, and `axis_geometry` does not
+take the ladder as an argument at all - that absence is the fix, and a scenario
+holds it by asserting the signature:
+
+    axis_geometry     ANCHOR_FREE | ANCHOR_CLIPPED | FALLBACK_LONGEST
+                      | GEOMETRY_UNRESOLVED | GEOMETRY_UNOBSERVED
+    calibration       LOCAL_LADDER | NONE            (SHARED_ROW is proposed by
+                                                      the shadow; MANUAL is
+                                                      human-only)
+    panel_completeness  COMPLETE | FRAGMENT | UNKNOWN
+
+`AXIS_ATTESTED` is retired for `LOCAL_LADDER_ATTESTED`, because what it ever
+meant is that a ladder was read beside the axis - which a shared-axis panel
+cannot do however well its box is drawn.
+
+Re-measured on eight figures, 46 panels, the split says what the composite was
+hiding:
+
+    old composite        new axis_geometry      calibration       n
+    AXIS_ATTESTED        ANCHOR_FREE            LOCAL_LADDER     26
+    AXIS_GEOMETRY_ONLY   ANCHOR_FREE            NONE             14
+    AXIS_FALLBACK        GEOMETRY_UNOBSERVED    LOCAL_LADDER      3
+    AXIS_FALLBACK        GEOMETRY_UNOBSERVED    NONE              1
+    AXIS_FALLBACK        FALLBACK_LONGEST       LOCAL_LADDER      1
+    AXIS_UNRESOLVED      ANCHOR_CLIPPED         NONE              1
+
+All fourteen `AXIS_GEOMETRY_ONLY` panels have the STRONGEST geometry available -
+a free anchored run - and simply no numerals printed beside them. And four of the
+five `AXIS_FALLBACK` panels were never fallbacks: no candidate row exists for
+those boxes in the winning pass at all, because the box was produced after the
+anchor search ran. Three of the four read a ladder. `GEOMETRY_UNOBSERVED` exists
+so a join that found nothing stops being reported as a measurement that found
+nothing.
+
+### Y_SCALE_GROUP: proposed, measured, applied to nothing
+
+`YGROUP=1`. Panels are banded by the row overlap of their AXIS RUNS - over the
+runs and not the boxes, because an invented box can be far taller than the axis
+inside it and would pull in the row above - and each band gets one row plus one
+row per member. Three outcomes, none of which needs a tolerance:
+
+    SHARED_ROW_CANDIDATE        exactly one calibration among the members
+    Y_SCALE_GROUP_NO_PROVIDER   no member read a ladder
+    Y_SCALE_GROUP_AMBIGUOUS     two members read DIFFERENT ladders
+
+NO TOLERANCE IS APPLIED TO ANY RESIDUAL, which is the instruction and also the
+only honest option: the distribution does not exist yet. What is recorded per
+member is `overlap_share`, `d_baseline`, `d_axis_top`, `d_axis_bottom`,
+`d_height`, and the TICK ROW SIGNATURE - the row centres of the short marks
+abutting the spine, which is the one piece of evidence a panel with no numerals
+can still offer. The tick window starts at the end of the spine's own measured
+rule rather than at the reported spine column, because `spine_and_baseline`
+returns one column of a rule that may be three wide, and a fixed window taken
+backwards from the wrong end sits inside the rule and makes every row a tick.
+
+Single linkage can chain one row into the next through overlapping middles. That
+is not forbidden - forbidding it needs a tolerance - it is REPORTED, as the
+group's weakest pair (`min_pair_overlap`), so a chained band is visible in the
+output instead of being asserted away.
+
+### What it says about publication 177's figure 2
+
+    G1  SHARED_ROW_CANDIDATE   provider P01   members P01 P02 P03
+    G2  SHARED_ROW_CANDIDATE   provider P04   members P04 P05 P06
+    G3  SHARED_ROW_CANDIDATE   provider P07   members P07 P08 P09
+    G4  Y_SCALE_GROUP_NO_PROVIDER              members P10 P11 P12
+    G5  SHARED_ROW_CANDIDATE   provider P13   members P13 P14 P15
+
+    local ladder providers        4
+    shared-calibration candidates 8
+    currently calibratable panels 12
+    unresolved panels             3
+    unresolved scale groups       1
+    ladder_pass_count             4
+
+`ladder_pass_count = 4` and "12 of 15 panels have a defensible route to a y
+scale" are both true, and the second is the one that describes the figure. Row 4
+is the exception and it is named as one rather than folded into the layout
+explanation.
+
+The residuals for the eight panels a transfer would actually serve are tight:
+`tick_residual_max` 1 to 3 px, `d_baseline` 1 to 3, `d_axis_top` 1 to 16,
+`overlap_share` 1.00 throughout. Measured against EVERY dependant on the eight
+figures - including rows where each panel reads its own numerals and no transfer
+is wanted - the same fields run to 47, 38 and 87. So the distribution separates,
+and it separates WITHOUT a tolerance having been applied, which is the argument
+for building it before deciding rather than after.
+
+    A row where every panel reads its own ladder comes back AMBIGUOUS, and that
+    is not a defect - it means no transfer is needed. Four of the 28 groups are
+    that case. Counting them as problems would count a well-labelled figure as
+    one.
+
+### What is NOT promoted
+
+Nothing writes `SHARED_ROW` into a panel's `calibration` cell. There is no
+transfer, no `a` and `b`, no `Calibration_Source_Panel_ID` in the proposal
+output. `SHARED_ROW_EXACT` and `SHARED_ROW_AFFINE` are named in HARNESS.md as the
+two shapes a transfer could take and neither is built. The gate on building them
+is the metamorphic corpus the review specifies: take figures whose numerals ARE
+repeated on every panel, mask the dependant's labels, transfer from the provider,
+and compare slope, intercept and digitized values against the panel's own
+reading - with negative fixtures for a shared row at two different scales, linear
+against log, an axis break on one side only, a dual axis, an inset, two providers
+that disagree, and a row with no provider. Seven of those exist as drawn
+scenarios already; the corpus experiment does not.
+
+### P10, diagnosed on its own
+
+Row 4 is not a shared-axis row and P10 is not an unreadable one. Every fact the
+review asked for, from `SHADOW=1` on that figure:
+
+    box            210,439,840,1072        origin COLUMN_SIBLING
+    axis_geometry  ANCHOR_FREE             one free candidate at x=239, run 843-1069
+    candidates     1 free, 0 clipped       nothing was rejected in its favour
+    tick rows      842, 917, 993, 1059     four, evenly spaced
+    label ink      15 columns, 14 of them INSIDE the box; leftmost at 179
+    numerals       printed: 4, 3, 2, 1     read: 1, at y=1069.3
+    shadow ladder  "only 1 label(s); 3 needed to check a ladder"
+    completeness   COMPLETE
+
+The geometry is right, the box does not clip the numerals, and the ticks are
+found. **Publication 177's figure 2 labels its fourth row with SINGLE DIGITS -
+4, 3, 2, 1 - and the reader returned one of the four.** The other three panels of
+that column print two and three digit numbers and read three labels each.
+
+So P10 is an OCR round on single-glyph numerals, not a segmentation round and not
+a calibration-transfer round. Which also means row 4's provider is RECOVERABLE:
+if P10 reads its own ladder, G4 becomes a SHARED_ROW_CANDIDATE like the other
+four and the figure's twelve calibratable panels become fifteen. Until then P11
+and P12 must not be calibrated automatically, and sending that row to manual
+calibration is the safe answer.
 
 ## Still open
 

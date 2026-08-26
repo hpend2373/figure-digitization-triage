@@ -1,0 +1,149 @@
+{
+  "arms": {
+    "baseline": {
+      "code_ref": "tree:06eaa07caa9b85b5b46666e51a1ba89dba40008756f9ae1fdc4cf2a773f3a875",
+      "hashes": [
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1",
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1"
+      ],
+      "output": "/home/claude/geo/verify/run_y/baseline/output.rep0.20260826T092524-12689.csv"
+    },
+    "candidate": {
+      "code_ref": "tree:ab75219e9846d77166130ac2397d6881088f663d35e2e39719c61fcd95e7fd6e",
+      "hashes": [
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1",
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1"
+      ],
+      "output": "/home/claude/geo/verify/run_y/candidate/output.rep0.20260826T092524-12689.csv"
+    }
+  },
+  "declared_variables": [
+    "code"
+  ],
+  "experiment_id": "yscale-shadow-off",
+  "manifest_diff": {
+    "code.gate_trace.py": [
+      "58c0f001c41fbe5a9029045d953a8d079e5dc7932815ef635bedafb3b8f09293",
+      "32d3c648ff10271b7bbb819ce8b0db82da63c681a20e95c64924e57df4c57856"
+    ],
+    "code.propose.py": [
+      "933a1a16e3d3b948831400f417b8821c2c84a02d33c7753be785e6a2664f6efc",
+      "6006018dfbe6be993a4cdea2e23d59289a7f29f0a4684d9bf7ae905f894611a2"
+    ],
+    "code.ref": [
+      "tree:06eaa07caa9b85b5b46666e51a1ba89dba40008756f9ae1fdc4cf2a773f3a875",
+      "tree:ab75219e9846d77166130ac2397d6881088f663d35e2e39719c61fcd95e7fd6e"
+    ],
+    "code.y_scale_group.py": [
+      null,
+      "d993223937ee9fb371fb37d875b77ea1372f447a701111cc8cf17081528ec04f"
+    ]
+  },
+  "outputs_identical": true,
+  "per_figure": [
+    {
+      "base": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "candidate": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "declared": 15,
+      "fig": "Fig. 2",
+      "pid": "177"
+    },
+    {
+      "base": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "candidate": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "declared": 6,
+      "fig": "Fig. 1",
+      "pid": "475"
+    }
+  ],
+  "refusals": [],
+  "run_id": "20260826T092524-12689",
+  "schema": 1,
+  "totals": {
+    "boxes_moved": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "duplicate_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "foreign_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "fragment_flag_count": {
+      "base": 2,
+      "candidate": 2,
+      "delta": 0
+    },
+    "ladder_pass_count": {
+      "base": 9,
+      "candidate": 9,
+      "delta": 0
+    },
+    "panel_count": {
+      "base": 22,
+      "candidate": 22,
+      "delta": 0
+    },
+    "shared_column_mismatches": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "unique_axis_count": {
+      "base": 22,
+      "candidate": 22,
+      "delta": 0
+    }
+  },
+  "verdict": "DEMO_ONLY"
+}

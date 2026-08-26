@@ -10,9 +10,12 @@ import capt
 CUT = (22, 120, 70)
 MADE = (200, 120, 10)
 BG, INK, MUTE = (247, 249, 247), (23, 29, 26), (95, 109, 102)
-STATUS = {"AXIS_ATTESTED": (0, 150, 110), "AXIS_GEOMETRY_ONLY": (10, 90, 175),
-          "AXIS_FALLBACK": (200, 120, 10), "AXIS_UNRESOLVED": (168, 52, 43)}
-ORDER = ["AXIS_ATTESTED", "AXIS_GEOMETRY_ONLY", "AXIS_FALLBACK", "AXIS_UNRESOLVED"]
+STATUS = {"ANCHOR_FREE": (0, 150, 110), "ANCHOR_CLIPPED": (10, 90, 175),
+          "FALLBACK_LONGEST": (200, 120, 10),
+          "GEOMETRY_UNRESOLVED": (168, 52, 43),
+          "GEOMETRY_UNOBSERVED": (120, 120, 130)}
+ORDER = ["ANCHOR_FREE", "ANCHOR_CLIPPED", "FALLBACK_LONGEST",
+         "GEOMETRY_UNRESOLVED", "GEOMETRY_UNOBSERVED"]
 MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 
 
@@ -38,7 +41,7 @@ def matrix(trace, out):
         t = collections.Counter()
         for r in subset:
             t[("constructed" if r["constructed"] == "True" else "cut",
-               r["axis_status"] or "?")] += 1
+               r["axis_geometry"] or "?")] += 1
         return t
 
     own = [r for r in sel if r["row_left_reader"] != "True"]
@@ -56,7 +59,7 @@ def matrix(trace, out):
                fill=MUTE)
         x0, cw, rh = 320, 220, 56
         for j, c in enumerate(ORDER):
-            d.text((x0 + j * cw, y), c.replace("AXIS_", ""), font=hf,
+            d.text((x0 + j * cw, y), c, font=hf,
                    fill=STATUS.get(c, MUTE))
         d.text((x0 + len(ORDER) * cw, y), "TOTAL", font=hf, fill=MUTE)
         for i, origin in enumerate(("cut", "constructed")):
@@ -107,7 +110,7 @@ def on_figure(trace, pid, fig, out):
         col = MADE if made else CUT
         d.rectangle([b[0], b[2], b[1] - 1, b[3] - 1], outline=col, width=4)
         txt = "%s  %s  %s" % (r["panel"], "INVENTED" if made else "cut",
-                              (r["axis_status"] or "?").replace("AXIS_", ""))
+                              (r["axis_geometry"] or "?"))
         w = int(f.getlength(txt))
         x = min(b[0] + 5, im.width - w - 14)
         d.rectangle([x, b[2] + 5, x + w + 8, b[2] + 5 + f.size + 6], fill=(255, 255, 255))
@@ -119,7 +122,7 @@ def on_figure(trace, pid, fig, out):
         lines.append("%-4s %-19s %-9s %-16s %-5s %-7s %s"
                      % (r["panel"], r["box"],
                         "INVENTED" if r["constructed"] == "True" else "cut",
-                        (r["axis_status"] or "?").replace("AXIS_", ""),
+                        (r["axis_geometry"] or "?"),
                         r["label_ink_cols"],
                         "yes" if r["row_left_reader"] == "True" else "-",
                         r["status"]))

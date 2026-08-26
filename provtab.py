@@ -2,7 +2,8 @@
 """Selected panels, by how their box was arrived at and how defended its axis is."""
 import collections, csv, sys
 
-ORDER = ["AXIS_ATTESTED", "AXIS_GEOMETRY_ONLY", "AXIS_FALLBACK", "AXIS_UNRESOLVED"]
+ORDER = ["ANCHOR_FREE", "ANCHOR_CLIPPED", "FALLBACK_LONGEST",
+         "GEOMETRY_UNRESOLVED", "GEOMETRY_UNOBSERVED"]
 
 
 def rows_of(path):
@@ -17,7 +18,7 @@ def table(sel):
     tab = collections.Counter()
     for r in sel:
         origin = "constructed" if r["constructed"] == "True" else "cut"
-        tab[(origin, r["axis_status"] or "?")] += 1
+        tab[(origin, r["axis_geometry"] or "?")] += 1
     return tab
 
 
@@ -42,7 +43,7 @@ def main(path):
     print("the constructed boxes:")
     for r in sorted(bad, key=lambda r: (r["pid"], r["fig"], r["panel"])):
         print("  %-5s %-10s %-4s %-19s %-22s %-20s %s"
-              % (r["pid"], r["fig"], r["panel"], r["box"], r["axis_status"],
+              % (r["pid"], r["fig"], r["panel"], r["box"], r["axis_geometry"],
                  r["origin_roots"], r["status"]))
     print()
     per = collections.Counter((r["pid"], r["fig"]) for r in bad)

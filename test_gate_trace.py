@@ -213,8 +213,7 @@ class AxisCandidates(unittest.TestCase):
         self.assertEqual(row["n_free"], 0)
         self.assertIn("no free run", row["reason"])
         self.assertEqual(got[0], 60, "the runtime returns the clipped candidate")
-        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=True),
-                         T.AXIS_UNRESOLVED)
+        self.assertEqual(T.axis_geometry(0, 2, anchored=True), T.ANCHOR_CLIPPED)
         RUN[0] += 1
 
     def test_a_box_with_no_long_run_says_that_instead(self):
@@ -227,38 +226,67 @@ class AxisCandidates(unittest.TestCase):
         RUN[0] += 1
 
 
-class AxisStatus(unittest.TestCase):
-    """`gate_trace.axis_status`: the four states the overlay drew as one line."""
+class ThreeSeparateQuestions(unittest.TestCase):
+    """`axis_status` answered three questions with one value, and on a grid
+    figure the value it gave was about the FIGURE'S LAYOUT.
+
+    Publication 177's figure 2 prints its y axis numerals once per row. A middle
+    panel there has a correct box and a correctly found spine and no numerals
+    beside it, and the composite called that AXIS_GEOMETRY_ONLY - which reads as
+    a defect in the panel. The split is: how the spine was found, where the
+    calibration comes from, whether the box is the whole panel.
+    """
+
+    def test_the_geometry_answer_does_not_depend_on_the_ladder(self):
+        """The ladder is not a parameter of `axis_geometry`, and that absence is
+        the fix. Guard: the signature, and the branches inside it."""
+        self.assertEqual(list(inspect.signature(T.axis_geometry).parameters),
+                         ["n_free", "n_clipped", "anchored", "spine", "observed"])
+        self.assertEqual(T.axis_geometry(2, 2, anchored=True), T.ANCHOR_FREE)
+        self.assertEqual(T.axis_geometry(0, 2, anchored=True), T.ANCHOR_CLIPPED)
+        RUN[0] += 1
 
     def test_no_candidate_at_all_is_not_the_same_as_a_bad_one(self):
         """Panel C's box: nothing passed the anchor test, so the spine came from
-        the plain longest-vertical fallback. Its LADDER_OK means a ladder could be
-        read off that column, not that the column is the panel's axis.
-        Guard: the `if not anchored` branch."""
-        self.assertEqual(T.axis_status(0, 0, anchored=False, ladder_ok=True),
-                         T.AXIS_FALLBACK_ONLY)
-        self.assertEqual(T.axis_status(3, 1, anchored=False, ladder_ok=True),
-                         T.AXIS_FALLBACK_ONLY)
+        the plain longest-vertical fallback. Guard: the `if not anchored` branch."""
+        self.assertEqual(T.axis_geometry(0, 0, anchored=False), T.FALLBACK_LONGEST)
+        self.assertEqual(T.axis_geometry(3, 1, anchored=False), T.FALLBACK_LONGEST)
         RUN[0] += 1
 
-    def test_clipped_only_outranks_the_ladder(self):
-        """P07 reads no ladder, but a clipped-only box that DID read one is still
-        the weakest case: the ladder says a column of numerals was found beside
-        that vertical, not that the vertical is an axis.
-        Guard: the clipped-only branch coming before the ladder branch."""
-        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=True),
-                         T.AXIS_UNRESOLVED)
-        self.assertEqual(T.axis_status(0, 2, anchored=True, ladder_ok=False),
-                         T.AXIS_UNRESOLVED)
+    def test_no_spine_and_no_join_are_two_different_emptinesses(self):
+        """A box with no axis at all, and a box whose candidate row this pass
+        never wrote, are not the same fact - and reporting the second as the
+        first is reporting a failed join as a failed measurement.
+        Guard: the `spine` and `observed` branches."""
+        self.assertEqual(T.axis_geometry(0, 0, anchored=False, spine=False),
+                         T.GEOMETRY_UNRESOLVED)
+        self.assertEqual(T.axis_geometry(3, 0, anchored=True, observed=False),
+                         T.GEOMETRY_UNOBSERVED)
         RUN[0] += 1
 
-    def test_a_free_candidate_is_attested_only_by_its_ladder(self):
-        """The difference between P06 (true axis, ladder reads) and P03 (a run on
-        a bar, ladder refused) is the ladder and nothing else."""
-        self.assertEqual(T.axis_status(2, 2, anchored=True, ladder_ok=True),
-                         T.AXIS_ATTESTED)
-        self.assertEqual(T.axis_status(2, 2, anchored=True, ladder_ok=False),
-                         T.AXIS_GEOMETRY_ONLY)
+    def test_the_calibration_answer_is_where_the_numbers_came_from(self):
+        """LOCAL_LADDER or nothing, from inside one panel. SHARED_ROW needs
+        another panel and is proposed by a shadow; MANUAL needs a person, and
+        nothing in this package may write it."""
+        self.assertEqual(T.calibration_method(True), T.LOCAL_LADDER)
+        self.assertEqual(T.calibration_method(False), T.CALIBRATION_NONE)
+        self.assertNotEqual(T.LOCAL_LADDER, T.SHARED_ROW)
+        RUN[0] += 1
+
+    def test_the_attested_name_says_what_attested_it(self):
+        """`AXIS_ATTESTED` was read as "this axis is good". What it ever meant is
+        that a ladder was read beside it, which a shared-axis panel cannot do
+        however well its box is drawn."""
+        self.assertEqual(T.LOCAL_LADDER_ATTESTED, "LOCAL_LADDER_ATTESTED")
+        self.assertFalse([n for n in dir(T) if n == "AXIS_ATTESTED"],
+                         "the name that conflated the two is still exported")
+        RUN[0] += 1
+
+    def test_completeness_is_the_third_question(self):
+        self.assertEqual(T.completeness([]), T.COMPLETE)
+        self.assertEqual(T.completeness(["cut through the axis"]), T.FRAGMENT)
+        self.assertEqual(T.completeness([], measured=False),
+                         T.COMPLETENESS_UNKNOWN)
         RUN[0] += 1
 
     def test_every_kind_the_recorder_writes_is_in_KINDS(self):
@@ -269,7 +297,8 @@ class AxisStatus(unittest.TestCase):
                    "AXIS_SHADOW_LADDER", "REGION", "ORPHAN", "PIECE_RELATION",
                    "POST_ADOPTION_SHADOW", "GATE",
                    "GATE_WHY", "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
-                   "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
+                   "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED",
+                   "Y_SCALE_GROUP", "Y_SCALE_MEMBER")
         self.assertEqual(set(written) - set(T.KINDS), set())
         T.ON = True
         T.reset()
@@ -1035,7 +1064,7 @@ class AncestorRegionCompletion(unittest.TestCase):
     def test_the_axis_it_measured_against_is_recorded_not_asserted(self):
         """"Against that panel's attested axis" is the requirement, and
         attestation needs a ladder, which needs OCR this must not pay for inside
-        adopt_orphans. So the three inputs axis_status takes are recorded and the
+        adopt_orphans. So the inputs `axis_geometry` takes are recorded and the
         verdict is left to the reader; a row that hid them would be a measurement
         against an unnamed column. Guard: the axis provenance fields."""
         self._run(self._figure())
@@ -1044,9 +1073,9 @@ class AncestorRegionCompletion(unittest.TestCase):
         self.assertNotEqual(s["axis_n_free"], "")
         self.assertNotEqual(s["axis_n_clipped"], "")
         self.assertEqual(
-            T.axis_status(int(s["axis_n_free"]), int(s["axis_n_clipped"]),
-                          s["axis_anchored"], False),
-            T.AXIS_GEOMETRY_ONLY)
+            T.axis_geometry(int(s["axis_n_free"]), int(s["axis_n_clipped"]),
+                            anchored=s["axis_anchored"]),
+            T.ANCHOR_FREE)
         RUN[0] += 1
 
     def test_a_long_diagonal_is_one_component_and_does_not_recurse(self):

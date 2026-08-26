@@ -24,6 +24,7 @@ from PIL import Image
 import axis_reader as A
 import gate_trace as T
 import panel_geometry as PG
+import y_scale_group as YG
 import x_reader as X
 
 MODES = ("OFF", "PLAIN", "CAP", "GRID")
@@ -328,6 +329,9 @@ for r in rows:
                         x0=_b[0], x1=_b[1], y0=_b[2], y1=_b[3],
                         status="FIGURE_BOX_REFUSED", sever_mode=mode,
                         declared_axes=declared, harness=_why, detail=_why))
+    # THE PANELS AS THE Y SCALE GROUP SHADOW NEEDS THEM, filled in as the SELECTED
+    # rows are written and handed over once, after the loop.
+    ygroup = []
     harness_hits = sum(1 for x in recs if x.get("harness"))
     covered = sum((x["x1"] - x["x0"]) * (x["y1"] - x["y0"]) for x in recs) / area
     # THE THREE BOXES ARE DERIVED, NOT DECIDED. `panel_geometry` reads the raster
@@ -406,16 +410,24 @@ for r in rows:
                                             rec["y1"] - rec["y0"])]
             T.add("SELECTED", panel="P%02d" % i, box=T.box((rec["x0"], rec["x1"],
                                                             rec["y0"], rec["y1"])),
-                  axis_status=T.axis_status(
+                  # THREE ORTHOGONAL CELLS, not one composite. The old
+                  # `axis_status` folded the ladder into the geometry answer, and
+                  # on a grid figure that labels its y axis once per row it was
+                  # reporting the LAYOUT as a property of the panel.
+                  axis_geometry=T.axis_geometry(
                       int(_ac["n_free"]) if _ac else 0,
                       int(_ac["n_clipped"]) if _ac else 0,
-                      bool(_ac and _ac.get("selected_x") != ""),
+                      anchored=bool(_ac and _ac.get("selected_x") != ""),
+                      spine=rec.get("spine_x") is not None,
+                      observed=bool(_ac or _fb)),
+                  calibration=T.calibration_method(
                       rec.get("status") == "LADDER_OK"),
-                  axis_from=("anchor" if (_ac and _ac.get("selected_x") != "")
-                             else ("fallback" if _fb else "?")),
+                  panel_completeness=T.completeness(
+                      frag, measured=rec.get("spine_x") is not None),
                   label_ink_cols=_ink_cols, label_ink_from=_ink_from,
                   row_left_panels=len(_left),
                   row_left_reader=any(o.get("status") == "LADDER_OK" for o in _left),
+                  box_origin=(";".join(_roots) or "-"),
                   region_id=_rid, origin_roots=";".join(_roots),
                   constructed=(bool(_rid) and A.constructed(_rid)),
                   origin_chain=";".join(_chain[:6]),
@@ -423,12 +435,35 @@ for r in rows:
                   status=rec.get("status"), n_labels=rec.get("n_labels"),
                   n_bars=rec.get("n_bars"), fragment="; ".join(frag),
                   source=(rec.get("harness") or "").split(":")[0])
+            if YG.ON:
+                _box = (rec["x0"], rec["x1"], rec["y0"], rec["y1"])
+                try:
+                    _run = (A.spine_run(gdark, rec["spine_x"], rec["y0"], rec["y1"])
+                            if rec.get("spine_x") is not None else None)
+                    _side = (PG.label_side(gdark, _box, rec["spine_x"],
+                                           rec["baseline_y"])
+                             if rec.get("baseline_y") is not None else "LEFT")
+                except Exception:
+                    _run, _side = None, "LEFT"
+                ygroup.append({
+                    "label": "P%02d" % i, "box": _box,
+                    "spine": rec.get("spine_x"), "baseline": rec.get("baseline_y"),
+                    "run": tuple(_run) if _run else None, "side": _side,
+                    "ladder_ok": rec.get("status") == "LADDER_OK",
+                    "sha": PG.ladder_hash(rec.get("ticks", "")),
+                    "ticks": YG.tick_rows(gdark, _box, rec["spine_x"], _run, _side)
+                             if (_run and rec.get("spine_x") is not None) else []})
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
                    sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),
                    area_share="%.2f" % covered,
                    fragment="; ".join(frag))
         out.append(rec)
+    # ONE HANDOVER, after every panel of the winning pass has been written. The
+    # group question cannot be answered a panel at a time, and asking it inside
+    # the loop would mean asking it against a half-built list.
+    if T.ON and YG.ON:
+        YG.record(gdark, ygroup)
 
 cols = ["pid", "fig", "png", "panel", "kind", "sever_mode", "ink", "declared_axes",
         "caption_panels", "caption_row",

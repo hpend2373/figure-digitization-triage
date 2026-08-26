@@ -48,33 +48,82 @@ CTX = {"pid": "", "fig": "", "png": "", "mode": "", "ink": ""}
 KINDS = ("CUT", "REGION", "AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
          "ORPHAN", "PIECE_RELATION", "GATE", "GATE_WHY", "GATE_SHADOW",
          "GATE_SHADOW_WHY", "RESIDUAL_SHADOW", "RESIDUAL_COMPONENT",
+         "Y_SCALE_GROUP", "Y_SCALE_MEMBER",
          "POST_ADOPTION_SHADOW", "POST",
          "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
 
-#: How well defended the axis a row was measured on actually is. REPORTED, never
-#: acted on: promoting or demoting a box on this is a change to what the pipeline
-#: returns and belongs to its own arm.
-AXIS_ATTESTED = "AXIS_ATTESTED"            # a candidate whose ladder reads
-AXIS_GEOMETRY_ONLY = "AXIS_GEOMETRY_ONLY"  # looks like an axis, no ladder behind it
-AXIS_FALLBACK_ONLY = "AXIS_FALLBACK"       # no candidate passed; longest vertical
-AXIS_UNRESOLVED = "AXIS_UNRESOLVED"        # every candidate cut by the box's edges
+#: THREE QUESTIONS, THREE ANSWERS. The single `axis_status` mixed them, and on
+#: publication 177's figure 2 the mixture measured the figure's LAYOUT: a panel
+#: whose box and spine are both right, printed in a grid that labels its y axis
+#: once per row, came back as AXIS_GEOMETRY_ONLY - which reads as a defect and is
+#: not one. Reported, never acted on; promoting or demoting a box on any of these
+#: is a change to what the pipeline returns and belongs to its own arm.
+#:
+#: HOW THE SPINE COLUMN WAS ARRIVED AT. Nothing here about numerals.
+ANCHOR_FREE = "ANCHOR_FREE"                  # a run ending inside the box was taken
+ANCHOR_CLIPPED = "ANCHOR_CLIPPED"            # only runs cut by the box's edges existed
+FALLBACK_LONGEST = "FALLBACK_LONGEST"        # no anchor; the plain longest vertical
+GEOMETRY_UNRESOLVED = "GEOMETRY_UNRESOLVED"  # no spine column at all
+GEOMETRY_UNOBSERVED = "GEOMETRY_UNOBSERVED"  # no candidate row for this box in this pass
+
+#: WHERE THE VALUE MAPPING COMES FROM. `SHARED_ROW` is PROPOSED by the
+#: `Y_SCALE_GROUP` shadow and is never written here; `MANUAL` is human-only and
+#: nothing in this package may write it - see PILOT.md.
+LOCAL_LADDER = "LOCAL_LADDER"
+SHARED_ROW = "SHARED_ROW"
+CALIBRATION_NONE = "NONE"
+CALIBRATION_MANUAL = "MANUAL"
+
+#: WHETHER THE BOX IS THE WHOLE PANEL.
+COMPLETE = "COMPLETE"
+FRAGMENT = "FRAGMENT"
+COMPLETENESS_UNKNOWN = "UNKNOWN"
+
+#: The old composite, kept only so that the one attested state has a name that
+#: says what it is attested BY. `AXIS_ATTESTED` was read as "this axis is good".
+LOCAL_LADDER_ATTESTED = "LOCAL_LADDER_ATTESTED"
 
 
-def axis_status(n_free, n_clipped, anchored, ladder_ok):
-    """The four states the overlay had been drawing as one blue line.
+def axis_geometry(n_free, n_clipped, anchored, spine=True, observed=True):
+    """How the spine column was found. INDEPENDENT OF THE LADDER.
 
     `anchored` is whether `_axis_anchor` returned anything at all; when it did
     not, the spine came from the plain longest-vertical fallback and that is a
     different fact from a badly chosen candidate. A box whose every candidate is
-    cut by its own edges is the weakest case of all - publication 475's figure 1
+    cut by its own edges is the weakest case - publication 475's figure 1
     promotes one to a panel - and it is named so that it can be counted before
     anything is done about it.
+
+    THE LADDER IS NOT AN ARGUMENT HERE, and that absence is the whole point of the
+    split: the same geometry must give the same answer whether or not the figure
+    printed numerals beside it. `spine` separates "the fallback answered" from
+    "there is no axis here at all", and `observed` separates both from "this box
+    has no candidate row in this pass" - a join that found nothing, which must not
+    be reported as a measurement that found nothing.
     """
+    if not spine:
+        return GEOMETRY_UNRESOLVED
+    if not observed:
+        return GEOMETRY_UNOBSERVED
     if not anchored:
-        return AXIS_FALLBACK_ONLY
-    if n_free == 0 and n_clipped > 0:
-        return AXIS_UNRESOLVED
-    return AXIS_ATTESTED if ladder_ok else AXIS_GEOMETRY_ONLY
+        return FALLBACK_LONGEST
+    return ANCHOR_FREE if n_free else ANCHOR_CLIPPED
+
+
+def calibration_method(ladder_ok):
+    """Where this panel's value mapping came from.
+
+    Only two of the four values can be reached from inside a single panel:
+    it read its own numerals, or it did not. `SHARED_ROW` needs another panel
+    and is proposed by a shadow; `MANUAL` needs a person.
+    """
+    return LOCAL_LADDER if ladder_ok else CALIBRATION_NONE
+
+
+def completeness(fragment_flags, measured=True):
+    if not measured:
+        return COMPLETENESS_UNKNOWN
+    return FRAGMENT if fragment_flags else COMPLETE
 
 
 def context(**kw):

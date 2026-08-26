@@ -625,6 +625,36 @@ Two things the harness still owes this arm:
     the piece - so it is a same-half completion question and not a partner-ranking
     one, which is what the previous round got wrong.
 
+    THE Y SCALE BELONGS TO A ROW GROUP - PROPOSED, NOT APPLIED. `YGROUP=1`.
+    Panels are banded by the row overlap of their AXIS RUNS; each band names its
+    provider (the one member that read a ladder), its dependants, and the RAW
+    residuals between them - baseline, axis top, axis bottom, height, and the
+    TICK ROW SIGNATURE, which is the only evidence a panel with no numerals can
+    offer. Three outcomes, none needing a tolerance: SHARED_ROW_CANDIDATE,
+    Y_SCALE_GROUP_NO_PROVIDER, Y_SCALE_GROUP_AMBIGUOUS. NO TOLERANCE IS APPLIED
+    TO ANY RESIDUAL and nothing writes SHARED_ROW into a panel's calibration
+    cell. On publication 177's figure 2 it finds four providers, eight
+    shared-calibration candidates, twelve calibratable panels of fifteen, and one
+    row - P10, P11, P12 - with no provider at all.
+
+    THE TWO SHAPES A TRANSFER COULD TAKE, NEITHER BUILT. `SHARED_ROW_EXACT` is
+    provider and target on the same global rows, a = 1 and b = 0. `SHARED_ROW_AFFINE`
+    is provider_y = a * target_y + b, for panels at different vertical offsets or
+    heights. The second must not be automated first. The gate on either is the
+    metamorphic corpus: mask a dependant's labels on a figure that repeats them,
+    transfer, and compare slope, intercept and values against the panel's own
+    reading - with negative fixtures for two scales in one row, linear against
+    log, a one-sided axis break, a dual axis, an inset, two disagreeing
+    providers, and a row with none.
+
+    THREE QUESTIONS, THREE CELLS. `axis_geometry` (how the spine was found - the
+    ladder is not one of its arguments), `calibration` (LOCAL_LADDER or NONE from
+    inside one panel), `panel_completeness`. The old `axis_status` mixed the
+    first two, and on a grid figure the value it produced was a fact about the
+    LAYOUT: fourteen of 46 panels re-measured have the strongest geometry
+    available and no numerals printed beside them. `AXIS_ATTESTED` is retired for
+    `LOCAL_LADDER_ATTESTED`.
+
     BOX PROVENANCE - BUILT. Every SELECTED row now carries `origin_roots` and
     `constructed`, from the DAG: `CUT_HALF` means the box came out of the
     whitespace cut, anything else means a transform invented it. On 25 figures,

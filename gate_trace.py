@@ -45,9 +45,9 @@ ROWS = []
 CTX = {"pid": "", "fig": "", "png": "", "mode": "", "ink": ""}
 
 #: Kinds, in the order a component meets them.
-KINDS = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
+KINDS = ("CUT", "REGION", "AXIS_CANDIDATES", "AXIS_FALLBACK", "AXIS_SHADOW_LADDER",
          "ORPHAN", "PIECE_RELATION", "GATE", "GATE_WHY", "GATE_SHADOW",
-         "GATE_SHADOW_WHY", "POST",
+         "GATE_SHADOW_WHY", "POST_ADOPTION_SHADOW", "POST",
          "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
 
 #: How well defended the axis a row was measured on actually is. REPORTED, never

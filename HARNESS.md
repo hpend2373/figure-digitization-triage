@@ -604,6 +604,19 @@ Two things the harness still owes this arm:
     numerals at a residual of 0.03 px while the one it took reads two and
     refuses. See INSTALL.md, "Four axis states, and the axis the search rejected
     reads better".
+    THE REGION DAG - BUILT. `REGIONS` in `axis_reader`: one entry per box a
+    transform produced, with its transform and parents, written while the trace
+    is on. `fate_of` walks a line forward and names the transforms it went
+    through, which is what turned "six pieces were merged or grown" - a guess
+    that had to be withdrawn - into a measurement: on publication 475's figure 1
+    those six sibling halves went `CUT_HALF;TRIM` and stopped, having failed the
+    plot filter before the candidate list existed.
+
+    THE POST-ADOPTION SHADOW - BUILT. A gate accept is one step. The union
+    production would build is measured for duplication, swallowed panels, foreign
+    axes and spine movement. The ladder is NOT re-read - that costs OCR inside
+    `adopt_orphans` - and spine stability is reported as the proxy it is.
+
     THE RELATION IS AN ENUM, NOT A TEST. Six values, because they are separate
     repairs: OPPOSITE_HALF_UNIQUE_PANEL, OPPOSITE_HALF_MULTIPLE_PANELS,
     SAME_HALF_NESTED_PANEL, OPPOSITE_AND_NESTED, NO_SELECTED_PANEL_DESCENDANT,

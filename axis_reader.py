@@ -260,7 +260,8 @@ def _remember_cut(a, b, axis, gap_lo, gap_hi, depth):
     for me, other in ((a, b), (b, a)):
         CUT_LINEAGE[tuple(me)] = {"cut_id": cid, "sibling": tuple(other),
                                   "axis": axis, "gap_lo": gap_lo, "gap_hi": gap_hi,
-                                  "depth": depth}
+                                  "depth": depth,
+                                  "region": region(me, CUT_HALF, note="cut %d %s" % (cid, axis))}
     if _T.ON:
         _T.add("CUT", cut_id=cid, axis=axis, depth=depth,
                gap="%d-%d" % (gap_lo, gap_hi), gap_px=gap_hi - gap_lo,
@@ -511,6 +512,124 @@ ADOPT_GAP = 34            # px between a panel and the piece the cut sliced off 
 ADOPT_MIN = 8             # a sliver smaller than this is not a piece of a plot
 ADOPT_SHARE = 0.50        # how much of the shorter side the two must share
 
+#: region id -> {box, transform, parents, note}. A box is a VALUE, and several
+#: different regions can have the same value, so provenance cannot be recovered
+#: from coordinates: `trim` that changes nothing, a merge whose result equals one
+#: of its inputs, two modes producing the same rectangle. The DAG is the only
+#: place that knows which transform produced which box from which.
+#:
+#: Written only while the trace is on - it answers questions about a run, and a
+#: run nobody is observing has none to answer.
+REGIONS = {}
+_REGION_SEQ = [0]
+#: box value -> the id most recently registered for it.
+_REGION_AT = {}
+
+CUT_HALF = "CUT_HALF"
+TRIM = "TRIM"
+MERGE = "MERGE"
+COLUMN_SIBLING = "COLUMN_SIBLING"
+ADOPT = "ADOPT"
+CAPTION_TRIM = "CAPTION_TRIM"
+BROAD_SLAB = "BROAD_SLAB"
+SNAP = "SNAP_TO_SPINE"
+RULE_CELL = "RULE_CELL"
+DROPPED = "DROPPED"
+
+
+def region(box, transform, parents=(), note=""):
+    """Register a box as the output of one transform, and return its id.
+
+    Registered even when the transform changed nothing, because "trim left this
+    alone" and "nothing trimmed this" are different histories and only the first
+    one means the box was seen.
+    """
+    if not _T.ON:
+        return None
+    key = tuple(int(v) for v in box)
+    _REGION_SEQ[0] += 1
+    rid = _REGION_SEQ[0]
+    pars = [p for p in parents if p is not None]
+    REGIONS[rid] = {"box": key, "transform": transform, "parents": pars,
+                    "note": note,
+                    "same_box": bool(pars and REGIONS[pars[0]]["box"] == key)
+                    if pars and pars[0] in REGIONS else False}
+    _REGION_AT[key] = rid
+    _T.add("REGION", region_id=rid, box=_T.box(key), transform=transform,
+           parents=";".join(str(p) for p in pars), note=note)
+    return rid
+
+
+def region_at(box):
+    """The id most recently registered for this box value, or None."""
+    return _REGION_AT.get(tuple(int(v) for v in box))
+
+
+def ancestors(rid, seen=None):
+    """Every region this one descends from, itself included."""
+    seen = set() if seen is None else seen
+    if rid is None or rid in seen or rid not in REGIONS:
+        return seen
+    seen.add(rid)
+    for p in REGIONS[rid]["parents"]:
+        ancestors(p, seen)
+    return seen
+
+
+def descends_from(rid, ancestor):
+    return ancestor in ancestors(rid)
+
+
+def descendants(rid):
+    """Every region derived from this one, itself included."""
+    out, frontier = {rid}, [rid]
+    while frontier:
+        cur = frontier.pop()
+        for r, rec in REGIONS.items():
+            if r not in out and cur in rec["parents"]:
+                out.add(r)
+                frontier.append(r)
+    return out
+
+
+def fate_of(rid):
+    """What happened to this region's line, as transforms in the order applied.
+
+    "No final panel descends from this piece's lineage" is a fact about the DAG.
+    WHICH transform lost it is a fact about this list, and until the DAG existed
+    the second question could only be guessed at - which is why the last round
+    said six pieces had been "merged or grown" and then had to withdraw it.
+    """
+    if rid is None:
+        return []
+    seen, out = set(), []
+    for r in sorted(descendants(rid)):
+        t = REGIONS[r]["transform"]
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def origin_transforms(rid):
+    """The transforms on this region's whole history, nearest first.
+
+    "No final panel descends from this piece's lineage" is a fact about the DAG;
+    WHICH transform lost it is a fact about this list, and until the list existed
+    the second question could only be guessed at.
+    """
+    out, seen = [], set()
+    stack = [rid]
+    while stack:
+        r = stack.pop(0)
+        if r is None or r in seen or r not in REGIONS:
+            continue
+        seen.add(r)
+        out.append(REGIONS[r]["transform"])
+        stack.extend(REGIONS[r]["parents"])
+    return out
+
+
 #: box -> what cut produced it. Written by `_cut`, read by the shadow gate.
 #: NOT a decision: a piece's lineage does not adopt it, it only makes the
 #: question "is this piece the other half of the cut that made that panel?"
@@ -602,6 +721,22 @@ def relation_to(piece, panel):
     if px0 >= ox0 - 2 and px1 <= ox1 + 2 and py0 >= oy0 - 2 and py1 <= oy1 + 2:
         return SAME_HALF_NESTED, rec
     return NO_PANEL_DESCENDANT, rec
+
+
+def sibling_fate(piece):
+    """(sibling half's region, the transforms its line went through).
+
+    Reported next to `NO_SELECTED_PANEL_DESCENDANT` so that verdict names a cause
+    instead of standing alone.
+    """
+    status, recs = lineage_of(piece)
+    if status in ("NONE", "AMBIGUOUS") or not recs:
+        return None, []
+    sib = recs[0].get("sibling")
+    rid = region_at(sib) if sib is not None else None
+    if rid is None:
+        rid = recs[0].get("region")
+    return rid, fate_of(rid)
 
 
 def classify_piece(piece, panels):
@@ -965,6 +1100,55 @@ def _nearest_note(orp, boxes, budget):
         for side, (gap, vsh, reach) in sorted(best.items()))
 
 
+def _shadow_post_adoption(dark, orp, panel, boxes, sx):
+    """What production would do NEXT if this piece were adopted, measured.
+
+    A gate accept is a necessary condition and not a repair. Production would
+    build the union box, refuse it if it duplicated an existing box or swallowed
+    another panel, and then measure it - and a union that passes the six
+    statements can still lose the ladder, gain a fragment flag or take in a
+    foreign axis. Recording the accept alone would be claiming the repair on the
+    strength of its first step.
+
+    ADOPTS NOTHING: like `_shadow_gate` it is never handed the output list.
+    """
+    x0, x1, y0, y1 = panel
+    ox0, ox1, oy0, oy1 = orp
+    union = _trim(dark, (min(x0, ox0), max(x1, ox1), min(y0, oy0), max(y1, oy1)))
+    duplicate = any(tuple(o) == tuple(union) for o in boxes)
+    contains = [o for o in boxes
+                if tuple(o) != tuple(panel)
+                and (min(union[1], o[1]) - max(union[0], o[0])) *
+                    (min(union[3], o[3]) - max(union[2], o[2]))
+                    > 0.10 * (o[1] - o[0]) * (o[3] - o[2])
+                and min(union[1], o[1]) > max(union[0], o[0])
+                and min(union[3], o[3]) > max(union[2], o[2])]
+    # THE AXES INSIDE THE UNION THAT ARE NOT ITS OWN.
+    foreign = 0
+    for o in boxes:
+        try:
+            osx = spine_and_baseline(dark, o)[0]
+        except Exception:
+            continue
+        if osx is None or abs(osx - sx) <= 3:
+            continue
+        if union[0] + 2 < osx < union[1] - 2 and \
+                min(union[3], o[3]) > max(union[2], o[2]):
+            foreign += 1
+    before = spine_and_baseline(dark, panel)
+    after = spine_and_baseline(dark, union)
+    _T.add("POST_ADOPTION_SHADOW", orphan=_T.box(orp), panel=_T.box(panel),
+           union=_T.box(union),
+           width_before=x1 - x0, width_after=union[1] - union[0],
+           duplicate=duplicate,
+           contains_another_panel=len(contains),
+           foreign_axes_in_union=foreign,
+           spine_before=before[0] if before else "",
+           spine_after=after[0] if after else "",
+           spine_moved=(before and after and abs(before[0] - after[0]) > 3),
+           would_production_refuse=bool(duplicate or contains))
+
+
 def _shadow_gate(dark, orp, boxes):
     """Ask the six statements of a piece the DISTANCE refused, when the piece is
     the direct cut-sibling of a panel. Records; adopts nothing.
@@ -1003,6 +1187,8 @@ def _shadow_gate(dark, orp, boxes):
         side = ("right" if ox0 >= x1 else "left" if ox1 <= x0
                 else "below" if oy0 >= y1 else "above" if oy1 <= y0 else "overlap")
         ok, tests = C.verdict(dark, b, orp, sx, run, CAP_FLOOR, side)
+        if ok:
+            _shadow_post_adoption(dark, orp, b, boxes, sx)
         _T.add("GATE_SHADOW", orphan=_T.box(orp), panel=_T.box(b),
                cut_id=rec["cut_id"], cut_axis=rec["axis"],
                gap_px=rec["gap_hi"] - rec["gap_lo"], side=side,
@@ -1101,11 +1287,14 @@ def adopt_orphans(dark, boxes, orphans):
                        nearest=_nearest_note(orp, boxes, budget))
                 if SHADOW_GATE:
                     rel, opp, nested = classify_piece(orp, boxes)
+                    _sib_rid, _fate = sibling_fate(orp)
                     _T.add("PIECE_RELATION", orphan=_T.box(orp), relation=rel,
                            n_opposite=len(opp), n_nested=len(nested),
                            opposite=";".join(_T.box(b) for b in opp),
                            nested=";".join(_T.box(b) for b in nested),
-                           lineage=lineage_of(orp)[0])
+                           lineage=lineage_of(orp)[0],
+                           sibling_region=_sib_rid,
+                           sibling_fate=";".join(_fate))
                     _shadow_gate(dark, orp, boxes)
             continue                      # nobody, or nobody we can be sure about
         gap, side, b = cands[0]
@@ -1235,6 +1424,40 @@ def column_siblings(dark, boxes):
     return found
 
 
+def _register_pass(after, before, transform, note=""):
+    """Register what a whole-list transform produced.
+
+    A box that survived unchanged keeps its own history and is registered as a
+    pass-through, so the DAG says the step SAW it. A box that is new is given the
+    boxes it overlaps as parents - which is as much as a list-in list-out
+    transform can honestly report without each one being rewritten to name its
+    own inputs, and the note says so.
+    """
+    if not _T.ON:
+        return
+    old = {tuple(b): region_at(b) for b in before}
+    for b in after:
+        key = tuple(int(v) for v in b)
+        if key in old:
+            region(key, transform, parents=(old[key],), note=note or "unchanged")
+            continue
+        pars = [rid for ob, rid in old.items()
+                if min(ob[1], key[1]) > max(ob[0], key[0])
+                and min(ob[3], key[3]) > max(ob[2], key[2])]
+        region(key, transform, parents=pars,
+               note=note or ("from %d overlapping" % len(pars)))
+    for ob, rid in old.items():
+        if ob not in {tuple(int(v) for v in b) for b in after}:
+            region(ob, DROPPED, parents=(rid,), note="removed by " + transform)
+
+
+def _trim_region(dark, b):
+    """`_trim` with the result registered as a child of the box it trimmed."""
+    out = _trim(dark, b)
+    region(out, TRIM, parents=(region_at(b),))
+    return out
+
+
 def panels(path, loose=False):
     """Candidate plot blocks, largest first. Boxes are (x0, x1, y0, y1).
 
@@ -1245,14 +1468,19 @@ def panels(path, loose=False):
     del FIGURE_BOXES[:]
     CUT_LINEAGE.clear()
     _CUT_SEQ[0] = 0
+    REGIONS.clear()
+    _REGION_AT.clear()
+    _REGION_SEQ[0] = 0
     a, dark = _dark(path)
     leaves = []
     _cut(dark, (0, a.shape[1], 0, a.shape[0]), 0, leaves)
-    leaves = [_trim(dark, b) for b in leaves]
+    leaves = [_trim_region(dark, b) for b in leaves]
     keep = [b for b in leaves if _is_plot(dark, b) and holds_data(dark, b)]
     keep.sort(key=lambda b: (b[1] - b[0]) * (b[3] - b[2]), reverse=True)
     if SEVER_MODE == "GRID":
         keep = [b for b in panels_from_rules(dark) if holds_data(dark, b)]
+        for _c in keep:
+            region(_c, RULE_CELL)
         keep = merge_split_panels(dark, keep)
     if not loose:
         return keep, dark
@@ -1267,18 +1495,28 @@ def panels(path, loose=False):
     # the rules rather than from the leaves - a real neighbouring panel was then in
     # the orphan list and got adopted whole.
     orphans = [b for b in leaves if not (_has_y_axis(dark, b) and holds_data(dark, b))]
+    _before = list(keep + extra)
     allb = merge_split_panels(dark, keep + extra)
+    _register_pass(allb, _before, MERGE)
+    _before = list(allb)
     allb = allb + [c for c in column_siblings(dark, allb) if c not in allb]
+    _register_pass(allb, _before, COLUMN_SIBLING)
     # ADOPTION RUNS AFTER THE COLUMN RESCAN. The rescan is not additive - it refuses a
     # cell overlapping a box already in the list - so widening a box first changes
     # which siblings it finds.
     if WIDE:
+        _before = list(allb)
         allb = adopt_orphans(dark, allb, orphans)
+        _register_pass(allb, _before, ADOPT)
     if CAP:
+        _before = list(allb)
         allb = caption_floor_trim(dark, allb, CAP_FLOOR)
+        _register_pass(allb, _before, CAPTION_TRIM)
     if BROAD:
         slabs = [c for c in broad_slabs(dark, allb, CAP_FLOOR, FIG_TARGET)
                  if c not in allb]
+        for _s in slabs:
+            region(_s, BROAD_SLAB)
         allb = allb + slabs
         # A SLAB NEVER GOT AN ADOPTION PASS. Adoption runs at step 8 and the slab is
         # built at step 6, so every box the row cut could not place was offered the
@@ -1288,12 +1526,18 @@ def panels(path, loose=False):
         # OFFERED THE SLABS ONLY, so nothing that already had its turn gets another.
         if WIDE and WIDE2 and slabs:
             grown = adopt_orphans(dark, slabs, orphans)
+            _before = list(allb)
             allb = allb + [c for c in grown if c not in allb]
+            _register_pass(allb, _before, ADOPT, note="second pass, slabs only")
     if SNAP:
+        _before = list(allb)
         allb = snap_to_spine(dark, allb)
+        _register_pass(allb, _before, SNAP)
     if CAP:
         # LAST, because it is the only step that REMOVES a candidate.
+        _before = list(allb)
         allb = figure_is_not_a_panel(dark, allb, CAP_FLOOR, FIG_TARGET)
+        _register_pass(allb, _before, DROPPED)
     keep = [b for b in allb if _is_plot(dark, b)]
     extra = [b for b in allb if b not in keep and _has_y_axis(dark, b)]
     keep.sort(key=lambda b: (b[1] - b[0]) * (b[3] - b[2]), reverse=True)

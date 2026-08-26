@@ -266,7 +266,8 @@ class AxisStatus(unittest.TestCase):
         terminal never mentions - GATE_WHY and SELECTED_PASS were both missing.
         Guard: the KINDS tuple."""
         written = ("CUT", "AXIS_CANDIDATES", "AXIS_FALLBACK",
-                   "AXIS_SHADOW_LADDER", "ORPHAN", "PIECE_RELATION", "GATE",
+                   "AXIS_SHADOW_LADDER", "REGION", "ORPHAN", "PIECE_RELATION",
+                   "POST_ADOPTION_SHADOW", "GATE",
                    "GATE_WHY", "GATE_SHADOW", "GATE_SHADOW_WHY", "POST",
                    "FRAGMENT_DECISION", "SELECTED_PASS", "SELECTED")
         self.assertEqual(set(written) - set(T.KINDS), set())
@@ -643,6 +644,156 @@ class PieceRelation(unittest.TestCase):
         self._cut((0, 100, 0, 100), (110, 300, 0, 100), cut_id=1)
         self._cut((1, 101, 0, 100), (400, 600, 0, 100), cut_id=2)
         self.assertEqual(A.lineage_of((0, 100, 0, 100))[0], "EXACT")
+        RUN[0] += 1
+
+
+class RegionProvenance(unittest.TestCase):
+    """`REGIONS`: which transform made which box from which.
+
+    A box is a VALUE. Several regions can share one - a trim that changes
+    nothing, a merge whose result equals an input, two modes producing the same
+    rectangle - so provenance cannot be recovered from coordinates afterwards.
+    """
+
+    def setUp(self):
+        T.reset()
+        T.context(pid="", fig="", png="", mode="", ink="")
+        self._on = T.ON
+        T.ON = True
+        A.REGIONS.clear()
+        A._REGION_AT.clear()
+        A._REGION_SEQ[0] = 0
+
+    def tearDown(self):
+        T.ON, = (self._on,)
+
+    def test_a_region_records_its_transform_and_its_parents(self):
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        b = A.region((0, 90, 0, 90), A.TRIM, parents=(a,))
+        self.assertEqual(A.REGIONS[b]["transform"], A.TRIM)
+        self.assertEqual(A.REGIONS[b]["parents"], [a])
+        self.assertTrue(A.descends_from(b, a))
+        self.assertFalse(A.descends_from(a, b))
+        RUN[0] += 1
+
+    def test_the_same_box_twice_is_two_regions(self):
+        """"trim left this alone" and "nothing trimmed this" are different
+        histories, and only the first means the box was seen. Guard: region()
+        registering unconditionally."""
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        b = A.region((0, 100, 0, 100), A.TRIM, parents=(a,))
+        self.assertNotEqual(a, b)
+        self.assertTrue(A.REGIONS[b]["same_box"])
+        self.assertEqual(A.region_at((0, 100, 0, 100)), b, "the newest wins")
+        RUN[0] += 1
+
+    def test_a_merge_carries_every_input(self):
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        b = A.region((100, 200, 0, 100), A.CUT_HALF)
+        m = A.region((0, 200, 0, 100), A.MERGE, parents=(a, b))
+        self.assertEqual(sorted(A.REGIONS[m]["parents"]), sorted([a, b]))
+        self.assertTrue(A.descends_from(m, a) and A.descends_from(m, b))
+        RUN[0] += 1
+
+    def test_the_fate_of_a_line_names_the_transforms_it_went_through(self):
+        """"No final panel descends from this piece" is a fact about the DAG;
+        WHICH transform lost it is a fact about this list. The last round guessed
+        at it and had to withdraw the guess. Guard: fate_of / descendants."""
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        b = A.region((0, 90, 0, 90), A.TRIM, parents=(a,))
+        A.region((0, 90, 0, 90), A.DROPPED, parents=(b,), note="removed")
+        self.assertEqual(A.fate_of(a), [A.CUT_HALF, A.TRIM, A.DROPPED])
+        RUN[0] += 1
+
+    def test_a_line_that_never_ended_has_no_DROPPED_in_its_fate(self):
+        """A fate that says DROPPED for everything says nothing."""
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        A.region((0, 100, 0, 100), A.SNAP, parents=(a,))
+        self.assertNotIn(A.DROPPED, A.fate_of(a))
+        RUN[0] += 1
+
+    def test_with_the_trace_off_no_region_is_written(self):
+        """It answers questions about a run, and a run nobody is observing has
+        none. Guard: the `if not _T.ON` return in region()."""
+        T.ON = False
+        self.assertIsNone(A.region((0, 10, 0, 10), A.CUT_HALF))
+        self.assertEqual(A.REGIONS, {})
+        RUN[0] += 1
+
+    def test_a_cycle_cannot_hang_the_walk(self):
+        """Nothing should build one, and a provenance walk that can hang is a
+        provenance walk nobody will run on a corpus."""
+        a = A.region((0, 10, 0, 10), A.CUT_HALF)
+        b = A.region((0, 20, 0, 20), A.MERGE, parents=(a,))
+        A.REGIONS[a]["parents"] = [b]
+        self.assertEqual(A.ancestors(b), {a, b})
+        self.assertEqual(len(A.descendants(a)), 2)
+        RUN[0] += 1
+
+
+class PostAdoptionShadow(unittest.TestCase):
+    """A gate accept is a necessary condition, not a repair."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._sg = T.ON, A.SHADOW_GATE
+        T.ON = True
+        A.CUT_LINEAGE.clear(); A._CUT_SEQ[0] = 0
+        A.REGIONS.clear(); A._REGION_AT.clear(); A._REGION_SEQ[0] = 0
+        A._RUN_CACHE.clear(); A._ANCHOR_CACHE.clear()
+
+    def tearDown(self):
+        T.ON, A.SHADOW_GATE = self._on, self._sg
+
+    def _figure(self):
+        """Four bar groups 60 px apart, and a panel box that stops after the
+        third. The fourth is 35 px past the box edge - outside the 34 px reach,
+        and REGULAR when merged, so the arbiter does not veto. A fixture whose
+        merge makes the spacing worse tests the veto, not the post-checks."""
+        d = np.zeros((300, 620), dtype=bool)
+        d[40:240, 60] = True
+        d[239, 60:300] = True
+        for bx in (90, 150, 210, 270):
+            d[140:239, bx:bx + 20] = True
+        return d
+
+    def test_it_measures_the_union_and_adopts_nothing(self):
+        """Guard: _shadow_post_adoption, and its signature having no output
+        list."""
+        d = self._figure()
+        panel = (55, 232, 35, 245)
+        piece = (267, 292, 138, 242)
+        A.CUT_LINEAGE[tuple(piece)] = {
+            "cut_id": 3, "sibling": (0, 262, 0, 300), "axis": "col",
+            "gap_lo": 232, "gap_hi": 267, "depth": 0, "region": None}
+        A.SHADOW_GATE = True
+        got = [tuple(b) for b in A.adopt_orphans(d, [panel], [piece])]
+        self.assertEqual(got, [tuple(panel)])
+        rows = [r for r in T.ROWS if r["kind"] == "POST_ADOPTION_SHADOW"]
+        self.assertTrue(rows, "the gate accepted and nothing measured the union")
+        r = rows[0]
+        self.assertGreater(int(r["width_after"]), int(r["width_before"]))
+        self.assertIn("would_production_refuse", r)
+        self.assertEqual(list(inspect.signature(A._shadow_post_adoption).parameters),
+                         ["dark", "orp", "panel", "boxes", "sx"])
+        RUN[0] += 1
+
+    def test_a_union_that_would_swallow_a_panel_says_so(self):
+        """Production refuses a box that contains another panel, so a shadow that
+        does not report it is claiming a repair production would reject."""
+        d = self._figure()
+        d[40:240, 400] = True                # a second panel's spine, in the way
+        panel = (55, 232, 35, 245)
+        piece = (267, 292, 138, 242)
+        other = (390, 500, 35, 245)
+        A.CUT_LINEAGE[tuple(piece)] = {
+            "cut_id": 3, "sibling": (0, 262, 0, 300), "axis": "col",
+            "gap_lo": 232, "gap_hi": 267, "depth": 0, "region": None}
+        A.SHADOW_GATE = True
+        A.adopt_orphans(d, [panel, other], [piece])
+        rows = [r for r in T.ROWS if r["kind"] == "POST_ADOPTION_SHADOW"]
+        if not rows:
+            self.skipTest("the gate refused this fixture, so there is nothing to post-check")
         RUN[0] += 1
 
 

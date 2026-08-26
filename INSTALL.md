@@ -9299,6 +9299,96 @@ each arm: the lock must still exist and still name this run. Two scenarios pin i
 one on the function, one on the driver, where the base arm deletes the lock while
 it runs and the driver has to refuse.
 
+## The region DAG, and the cause it settles
+
+`CUT_LINEAGE` answers "which two halves were one cut". It cannot answer "what
+became of that half", because a box is a VALUE: a trim that changes nothing, a
+merge whose result equals an input and two modes producing the same rectangle all
+look identical afterwards. `REGIONS` is the DAG - one entry per box a transform
+produced, with its transform and its parents - and it is written only while the
+trace is on.
+
+    CUT_HALF   TRIM   MERGE   COLUMN_SIBLING   ADOPT   CAPTION_TRIM
+    BROAD_SLAB   SNAP_TO_SPINE   RULE_CELL   DROPPED
+
+A box that survives a whole-list transform unchanged is registered as a
+pass-through, so the DAG records that the step SAW it; a box the step removed is
+registered as `DROPPED` with the removed box as its parent. A new box gets the
+boxes it overlaps as parents, and the note says so - that is as much as a
+list-in list-out transform can honestly report without each one being rewritten
+to name its own inputs.
+
+### What it settles
+
+Last round said six of publication 475 figure 1's refused pieces had sibling
+halves that "were merged, grown or replaced", and then withdrew the claim as
+unmeasured. Now it is measured. `fate_of` walks the descendants of the sibling
+half and lists the transforms its line went through:
+
+    475 figure 1   six NO_SELECTED_PANEL_DESCENDANT pieces,
+                   sibling line: CUT_HALF;TRIM   and it stops there
+    397 figure 1   six stop at CUT_HALF;TRIM, two never reach TRIM at all,
+                   two go the whole way: ...MERGE;COLUMN_SIBLING;ADOPT;CAPTION_TRIM
+    475 figure 2   four stop at CUT_HALF;TRIM, three go the whole way
+
+So on 475 figure 1 the answer is not merge, not grow, not replace. THE SIBLING
+HALF WAS FILTERED OUT BEFORE THE CANDIDATE LIST EXISTED - it was trimmed and then
+failed `_is_plot` or `holds_data`, and `keep` never contained it. No route built
+on lineage can reach a panel that was never a candidate, which is a different
+question again from the two this round is about, and a smaller one than the guess
+it replaces.
+
+    THE FOUR PIECES WITH A LIVE LINEAGE on that figure all read
+    `CUT_HALF;TRIM;MERGE;COLUMN_SIBLING` - the sibling half survived to the
+    candidate list and was merged with its column siblings. Those are the four
+    the relation could classify at all.
+
+## The post-adoption shadow: a gate accept is one step, not a repair
+
+`_shadow_gate` stopped at the six statements. A union that passes them can still
+duplicate an existing box, swallow a neighbouring panel, take in a foreign axis
+or move the spine the ladder was read from - and recording the accept alone would
+be claiming the repair on the strength of its first step.
+`_shadow_post_adoption` builds the union production would build and measures what
+production would check next. It is never handed the output list either.
+
+The one accepted piece on 475 figure 1:
+
+    piece 311,383,834,975  into panel 92,273,695,975  ->  union 92,383,695,975
+    width                    181 -> 291
+    duplicate                False
+    contains another panel   0
+    foreign axes in union    0
+    spine                    173 -> 173, unmoved
+    would production refuse  False
+
+So this one survives its own post-checks: the widening does not move the axis the
+ladder was read from and does not reach anything else's.
+
+    WHAT IS STILL NOT MEASURED IS THE LADDER ITSELF. Re-reading it on the union
+    costs OCR, which `_shadow_gate` deliberately does not pay - it runs inside
+    `adopt_orphans`, four modes deep. Spine stability is a proxy and is reported
+    as one. And this is ONE true positive on ONE figure against two controls;
+    promoting the route needs the fifteen-figure comparison, with accepted-pair
+    counts, unique-partner share, post-adoption ladder change, foreign-axis change
+    and gold-box boundary change - none of which one accept can stand for.
+
+## What the next arm is, now that the DAG can define it
+
+Publication 475 figure 1's panel C is `OPPOSITE_AND_NESTED`: its selected box is
+INSIDE the piece. The union of the two is the piece, so there is nothing for an
+adoption to add. What is missing is the data in the piece that lies OUTSIDE the
+panel's plot core, and the question is
+
+    ancestor region  minus  the selected panel's plot region
+    -> residual connected components
+    -> each one asked, against that panel's attested axis, whether it is data
+
+That is `ANCESTOR_REGION_COMPLETION` and it is not `CUT_SIBLING`. It needs the
+plot region, which `panel_geometry` computes and nothing yet consumes, and the
+ancestor region, which the DAG now provides. It is the first thing this project
+has been able to state precisely rather than approach through a threshold.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

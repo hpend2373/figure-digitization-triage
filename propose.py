@@ -388,6 +388,15 @@ for r in rows:
             _fb = T.last_in_pass("AXIS_FALLBACK", box=_bx)
             _rid, _roots, _chain = A.provenance_of((rec["x0"], rec["x1"],
                                                     rec["y0"], rec["y1"]))
+            _geom = T.axis_geometry(
+                int(_ac["n_free"]) if _ac else 0,
+                int(_ac["n_clipped"]) if _ac else 0,
+                anchored=bool(_ac and _ac.get("selected_x") != ""),
+                spine=rec.get("spine_x") is not None,
+                observed=bool(_ac or _fb))
+            _calib = T.calibration_method(rec.get("status") == "LADDER_OK")
+            _complete = T.completeness(frag,
+                                       measured=rec.get("spine_x") is not None)
             # IS THERE ANYTHING PRINTED BESIDE THIS AXIS, and does a panel in the
             # same rows to its LEFT read a ladder? A grid figure labels its y axis
             # once per row - publication 177's figure 2 is five rows of three -
@@ -414,16 +423,8 @@ for r in rows:
                   # `axis_status` folded the ladder into the geometry answer, and
                   # on a grid figure that labels its y axis once per row it was
                   # reporting the LAYOUT as a property of the panel.
-                  axis_geometry=T.axis_geometry(
-                      int(_ac["n_free"]) if _ac else 0,
-                      int(_ac["n_clipped"]) if _ac else 0,
-                      anchored=bool(_ac and _ac.get("selected_x") != ""),
-                      spine=rec.get("spine_x") is not None,
-                      observed=bool(_ac or _fb)),
-                  calibration=T.calibration_method(
-                      rec.get("status") == "LADDER_OK"),
-                  panel_completeness=T.completeness(
-                      frag, measured=rec.get("spine_x") is not None),
+                  axis_geometry=_geom, calibration=_calib,
+                  panel_completeness=_complete,
                   label_ink_cols=_ink_cols, label_ink_from=_ink_from,
                   row_left_panels=len(_left),
                   row_left_reader=any(o.get("status") == "LADDER_OK" for o in _left),
@@ -445,14 +446,32 @@ for r in rows:
                              if rec.get("baseline_y") is not None else "LEFT")
                 except Exception:
                     _run, _side = None, "LEFT"
+                # THE ELIGIBILITY INPUTS TRAVEL WITH THE PANEL. `ladder_ok`
+                # alone made a fallback column on a fragment into a provider,
+                # and the three cells that say otherwise were already being
+                # written to the SELECTED row and not handed over.
+                try:
+                    _brk = (A.axis_break(gdark, _box, rec["spine_x"])
+                            if rec.get("spine_x") is not None else None)
+                except Exception:
+                    _brk = None
+                _tr = (YG.tick_runs(gdark, _box, rec["spine_x"], _run, _side)
+                       if (_run and rec.get("spine_x") is not None) else [])
+                _cal = PG.calibration(rec.get("ticks", ""),
+                                      ladder_ok=rec.get("status") == "LADDER_OK",
+                                      axis_break=_brk)
                 ygroup.append({
                     "label": "P%02d" % i, "box": _box,
                     "spine": rec.get("spine_x"), "baseline": rec.get("baseline_y"),
                     "run": tuple(_run) if _run else None, "side": _side,
                     "ladder_ok": rec.get("status") == "LADDER_OK",
-                    "sha": PG.ladder_hash(rec.get("ticks", "")),
-                    "ticks": YG.tick_rows(gdark, _box, rec["spine_x"], _run, _side)
-                             if (_run and rec.get("spine_x") is not None) else []})
+                    "axis_geometry": _geom, "completeness": _complete,
+                    "axis_break": _cal["axis_break"],
+                    "points": _cal["points"],
+                    "value_set_sha": _cal["value_set_sha"],
+                    "calibration_sha": _cal["calibration_sha"],
+                    "ticks": [(t0 + t1) // 2 for t0, t1, _ln in _tr],
+                    "tick_lengths": [ln for _t0, _t1, ln in _tr]})
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
                    sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),

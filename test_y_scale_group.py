@@ -28,10 +28,17 @@ import y_scale_group as Y                                        # noqa: E402
 RUN = [0]
 
 
-def panel(label, box, run, baseline, ladder=False, sha="", ticks=(), spine=None):
+def panel(label, box, run, baseline, ladder=False, sha="", ticks=(), spine=None,
+          geometry="ANCHOR_FREE", completeness="COMPLETE", brk="NONE", points=None,
+          value_sha=None):
+    """One panel as `record` needs it, eligible by default so a scenario about
+    something else does not have to say so."""
     return {"label": label, "box": tuple(box), "run": tuple(run) if run else None,
-            "baseline": baseline, "ladder_ok": ladder, "sha": sha,
-            "ticks": list(ticks), "side": "LEFT",
+            "baseline": baseline, "ladder_ok": ladder,
+            "calibration_sha": sha, "value_set_sha": value_sha or sha,
+            "points": points or [], "ticks": list(ticks), "side": "LEFT",
+            "axis_geometry": geometry, "completeness": completeness,
+            "axis_break": brk,
             "spine": box[0] + 10 if spine is None else spine}
 
 
@@ -61,7 +68,7 @@ class Grouping(unittest.TestCase):
             panel("P03", (410, 600, 20, 120), (25, 115), 115)])
         g = self.groups()
         self.assertEqual(len(g), 1)
-        self.assertEqual(g[0]["status"], Y.SHARED_ROW_CANDIDATE)
+        self.assertEqual(g[0]["status"], Y.ONE_PROVIDER)
         self.assertEqual(g[0]["provider_panel"], "P01")
         self.assertEqual(g[0]["member_panels"], "P01;P02;P03")
         RUN[0] += 1
@@ -118,21 +125,50 @@ class Grouping(unittest.TestCase):
         Y.record(np.zeros((10, 10), dtype=bool), [
             panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa"),
             panel("P02", (210, 400, 20, 120), (25, 115), 115, True, "bbb")])
-        self.assertEqual(self.groups()[0]["status"], Y.AMBIGUOUS)
+        self.assertEqual(self.groups()[0]["status"], Y.MANY_PROVIDERS)
         self.assertEqual(int(self.groups()[0]["n_distinct_calibrations"]), 2)
         RUN[0] += 1
 
-    def test_two_readers_of_the_SAME_ladder_are_not_ambiguous(self):
-        """A figure that repeats its numerals on every panel has as many readers
-        as panels, and calling that ambiguous would refuse the easy case.
-        Guard: the distinctness being over the SHA, not the reader count."""
+    def test_two_readers_are_a_count_and_a_distance_not_a_verdict(self):
+        """`Y_SCALE_GROUP_AMBIGUOUS` was a verdict reached by comparing VALUE-SET
+        hashes, and it was wrong in both directions: two panels printing the same
+        numbers at different rows hashed the same, and one OCR miss made a panel
+        that had not moved hash differently. So the band reports how many
+        eligible providers it has and how far their LINES are apart, and decides
+        nothing. Guard: MANY_PROVIDERS, n_eligible_providers, and
+        cross_provider_max_resid_px."""
+        same = [(100.0, 100.0), (50.0, 200.0), (0.0, 300.0)]
         Y.record(np.zeros((10, 10), dtype=bool), [
-            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa"),
-            panel("P02", (210, 400, 20, 120), (25, 115), 115, True, "aaa")])
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  points=same),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115, True, "bbb",
+                  points=same)])
         g = self.groups()[0]
-        self.assertEqual(g["status"], Y.SHARED_ROW_CANDIDATE)
-        self.assertEqual(int(g["n_readers"]), 2)
-        self.assertEqual(int(g["n_distinct_calibrations"]), 1)
+        self.assertEqual(g["status"], Y.MANY_PROVIDERS)
+        self.assertEqual(int(g["n_eligible_providers"]), 2)
+        self.assertAlmostEqual(float(g["cross_provider_max_resid_px"]), 0.0,
+                               places=6)
+        RUN[0] += 1
+
+    def test_the_same_numbers_at_different_rows_are_two_calibrations(self):
+        """The defect the value-set hash could not see: both panels print
+        0, 50, 100 and they are not the same scale.
+        Guard: calibration_sha covering the (value, pixel) PAIRS."""
+        import panel_geometry as G
+        a = G.calibration("100:100;50:200;0:300", ladder_ok=True)
+        b = G.calibration("100:100;50:250;0:400", ladder_ok=True)
+        self.assertEqual(a["value_set_sha"], b["value_set_sha"])
+        self.assertNotEqual(a["calibration_sha"], b["calibration_sha"])
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True,
+                  a["calibration_sha"], points=a["points"],
+                  value_sha=a["value_set_sha"]),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115, True,
+                  b["calibration_sha"], points=b["points"],
+                  value_sha=b["value_set_sha"])])
+        g = self.groups()[0]
+        self.assertEqual(int(g["n_distinct_calibrations"]), 2)
+        self.assertGreater(float(g["cross_provider_max_resid_px"]), 20)
         RUN[0] += 1
 
     def test_a_member_that_read_a_different_ladder_is_a_conflict(self):
@@ -153,7 +189,7 @@ class Grouping(unittest.TestCase):
         Y.record(np.zeros((10, 10), dtype=bool), [
             panel("P01", (10, 200, 20, 200), (30, 190), 190, True, "aaa"),
             panel("P02", (210, 400, 20, 200), (90, 195), 150)])
-        self.assertEqual(self.groups()[0]["status"], Y.SHARED_ROW_CANDIDATE)
+        self.assertEqual(self.groups()[0]["status"], Y.ONE_PROVIDER)
         m = [r for r in self.members() if r["panel"] == "P02"][0]
         self.assertEqual(int(m["d_baseline"]), -40)
         self.assertEqual(int(m["d_axis_top"]), 60)
@@ -242,10 +278,10 @@ class TickRowSignature(unittest.TestCase):
             Y.record(np.zeros((10, 10), dtype=bool), [prov, log])
             m = [r for r in T.ROWS if r["kind"] == "Y_SCALE_MEMBER"
                  and r["panel"] == "P02"][0]
-            self.assertEqual(r"SHARED_ROW_CANDIDATE",
-                             [r for r in T.ROWS
-                              if r["kind"] == "Y_SCALE_GROUP"][0]["status"])
-            self.assertGreater(int(m["tick_residual_max"]), 0)
+            self.assertEqual([r for r in T.ROWS
+                              if r["kind"] == "Y_SCALE_GROUP"][0]["status"],
+                             Y.ONE_PROVIDER)
+            self.assertGreater(int(m["symmetric_max"]), 0)
             self.assertEqual(int(m["n_ticks"]), 4)
         finally:
             T.ON = self._on
@@ -263,7 +299,9 @@ class TickRowSignature(unittest.TestCase):
                 panel("P02", (300, 520, 20, 200), (30, 190), 188)])
             m = [r for r in T.ROWS if r["kind"] == "Y_SCALE_MEMBER"
                  and r["panel"] == "P02"][0]
-            self.assertEqual(m["tick_residual_max"], "")
+            self.assertEqual(m["symmetric_max"], "")
+            self.assertEqual(int(m["provider_unmatched"]), 2,
+                             "the provider's ticks vanished from the count")
             self.assertEqual(int(m["n_ticks"]), 0)
         finally:
             T.ON = self._on
@@ -274,10 +312,181 @@ class TickRowSignature(unittest.TestCase):
         d2 = np.zeros((240, 900), dtype=bool)
         d2[30:190, 500:502] = True
         for y in (56, 91):
-            d2[y:y + 3, 503:509] = True
+            d2[y:y + 3, 502:509] = True
         d2[188:191, 300:500] = True
         self.assertEqual(Y.tick_rows(d2, (300, 520, 20, 200), 500, (30, 190),
                                      "RIGHT"), [57, 92])
+        RUN[0] += 1
+
+
+class WhatTheBandMayClaim(unittest.TestCase):
+    """The names were stronger than the evidence, and a picture drawn from them
+    read as though a shared scale had been verified."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._y = T.ON, Y.ON
+        T.ON, Y.ON = True, True
+
+    def tearDown(self):
+        T.ON, Y.ON = self._on, self._y
+
+    def group(self):
+        return [r for r in T.ROWS if r["kind"] == "Y_SCALE_GROUP"][0]
+
+    def test_every_band_says_the_transfer_is_unvalidated(self):
+        """Nothing here has been checked against a masked-label corpus, so no row
+        may read as though it had. Guard: the transfer cell."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa"),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115)])
+        self.assertEqual(self.group()["transfer"], Y.TRANSFER_UNVALIDATED)
+        self.assertEqual(self.group()["status"], Y.ONE_PROVIDER)
+        RUN[0] += 1
+
+    def test_a_chained_band_is_labelled_chained(self):
+        """min_pair_overlap was recorded and the status stayed the same, so a
+        chained band and a real row read alike at a glance.
+        Guard: the linkage cell."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 0, 100), (0, 100), 100, True, "aaa"),
+            panel("P02", (210, 400, 0, 100), (50, 150), 150),
+            panel("P03", (410, 600, 0, 100), (100, 200), 200)])
+        self.assertEqual(self.group()["linkage"], Y.LINKAGE_CHAINED)
+        RUN[0] += 1
+
+    def test_a_real_row_is_not_labelled_chained(self):
+        """A flag that fires on everything says nothing."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa"),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115)])
+        self.assertEqual(self.group()["linkage"], Y.LINKAGE_COMPLETE)
+        RUN[0] += 1
+
+
+class ProviderEligibility(unittest.TestCase):
+    """A ladder proves numerals were read beside SOME column."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._y = T.ON, Y.ON
+        T.ON, Y.ON = True, True
+
+    def tearDown(self):
+        T.ON, Y.ON = self._on, self._y
+
+    def test_a_ladder_off_a_fallback_column_may_not_lend_itself(self):
+        """Publication 475's figure 1's panel C reads a ladder off a column no
+        candidate search ever found. Lending that to the rest of its row would
+        spread one unverified axis across three panels.
+        Guard: the axis_geometry clause of eligibility()."""
+        p = panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  geometry="FALLBACK_LONGEST")
+        self.assertEqual(Y.eligibility(p)[0], Y.INELIGIBLE)
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            p, panel("P02", (210, 400, 20, 120), (25, 115), 115)])
+        g = [r for r in T.ROWS if r["kind"] == "Y_SCALE_GROUP"][0]
+        self.assertEqual(g["status"], Y.NO_ELIGIBLE)
+        self.assertEqual(g["provider_panel"], "")
+        self.assertEqual(int(g["n_readers"]), 1)
+        RUN[0] += 1
+
+    def test_a_ladder_on_a_fragment_may_not_lend_itself(self):
+        """Guard: the completeness clause."""
+        p = panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  completeness="FRAGMENT")
+        self.assertEqual(Y.eligibility(p)[0], Y.INELIGIBLE)
+        self.assertIn("box FRAGMENT", "; ".join(Y.eligibility(p)[1]))
+        RUN[0] += 1
+
+    def test_a_broken_axis_may_not_lend_itself(self):
+        """The labels below a break are not on the scale of the labels above it.
+        Guard: the axis_break clause."""
+        p = panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  brk="BROKEN:60-80")
+        self.assertEqual(Y.eligibility(p)[0], Y.INELIGIBLE)
+        RUN[0] += 1
+
+    def test_an_answer_nobody_supplied_is_UNKNOWN_and_not_ELIGIBLE(self):
+        """A default of ELIGIBLE would make every caller that forgets to pass the
+        cells a caller that lends every ladder. Guard: the `not supplied` return."""
+        p = panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa")
+        del p["completeness"]
+        self.assertEqual(Y.eligibility(p)[0], Y.ELIGIBILITY_UNKNOWN)
+        RUN[0] += 1
+
+    def test_a_clean_reader_is_eligible(self):
+        """A gate that refuses everything is not a gate."""
+        p = panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa")
+        self.assertEqual(Y.eligibility(p), (Y.ELIGIBLE, []))
+        RUN[0] += 1
+
+
+class TicksMustTouchTheSpine(unittest.TestCase):
+    """Ink NEAR the spine is not a tick mark."""
+
+    def _fig(self):
+        """A spine, four real ticks, and three things that are not ticks: a
+        numeral stroke in the label column, a significance bracket, and a
+        gridline reaching in from the plot side."""
+        d = np.zeros((300, 400), dtype=bool)
+        d[40:260, 100:102] = True                  # spine, 2 columns
+        for y in (60, 110, 160, 210):
+            d[y:y + 3, 94:100] = True              # ticks, touching
+        d[70:90, 70:74] = True                     # a numeral stroke, detached
+        d[120:124, 60:80] = True                   # a bracket, detached
+        d[240:243, 102:200] = True                 # plot-side ink at another row
+        return d
+
+    def test_only_the_attached_marks_are_ticks(self):
+        """The first version asked whether ANY ink lay in a four-column window
+        and let a numeral stroke, a bracket and the baseline ink in: publication
+        177 figure 2's panel P01 came back with six ticks where the axis has
+        four. Guard: the contiguity walk in tick_runs."""
+        d = self._fig()
+        self.assertEqual(Y.tick_rows(d, (60, 300, 40, 260), 100, (40, 260), "LEFT"),
+                         [61, 111, 161, 211])
+        RUN[0] += 1
+
+    def test_the_length_of_each_mark_is_recorded_and_not_capped(self):
+        """Capping the length needs a constant nobody has measured. The lengths
+        are reported so the distribution can be looked at.
+        Guard: tick_runs returning the length."""
+        d = self._fig()
+        runs = Y.tick_runs(d, (60, 300, 40, 260), 100, (40, 260), "LEFT")
+        self.assertEqual([ln for _a, _b, ln in runs], [6, 6, 6, 6])
+        RUN[0] += 1
+
+    def test_a_one_way_residual_cannot_see_a_missing_tick(self):
+        """P02's three ticks matched P01's six at 1 px, and the three P01 ticks
+        P02 does not have were invisible. Guard: match_ticks reporting both
+        directions and the unmatched counts."""
+        m = Y.match_ticks([37, 112, 188], [36, 111, 187, 248, 253, 261])
+        self.assertEqual(m["target_to_provider_max"], 1)
+        self.assertEqual(m["provider_to_target_max"], 73)
+        self.assertEqual(m["symmetric_max"], 73)
+        self.assertEqual(m["tick_match_count"], 3)
+        self.assertEqual(m["provider_unmatched"], 3)
+        self.assertEqual(m["target_unmatched"], 0)
+        RUN[0] += 1
+
+    def test_the_pairing_is_one_to_one(self):
+        """Two target ticks may not both claim the same provider tick and be
+        counted as two matches."""
+        m = Y.match_ticks([100, 101], [100])
+        self.assertEqual(m["tick_match_count"], 1)
+        self.assertEqual(m["target_unmatched"], 1)
+        RUN[0] += 1
+
+    def test_the_line_residual_is_the_only_tolerance_free_comparison(self):
+        """Where the target's values would land on the provider's line, against
+        where the target read them. Guard: line_residual."""
+        prov = {"points": [(100.0, 100.0), (50.0, 200.0), (0.0, 300.0)]}
+        same = {"points": [(75.0, 150.0)]}
+        off = {"points": [(75.0, 180.0)]}
+        self.assertAlmostEqual(Y.line_residual(same, prov), 0.0, places=6)
+        self.assertAlmostEqual(Y.line_residual(off, prov), 30.0, places=6)
+        self.assertIsNone(Y.line_residual(same, {"points": [(1.0, 1.0)]}))
         RUN[0] += 1
 
 

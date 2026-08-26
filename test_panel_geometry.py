@@ -560,6 +560,69 @@ class IsThereAnythingPrintedBesideTheAxis(unittest.TestCase):
         RUN += 1
 
 
+class WhatACalibrationIs(unittest.TestCase):
+    """`ladder_hash` hashes the VALUES. A calibration is the mapping."""
+
+    def test_the_scale_check_is_the_ladders_own_check_and_not_an_assumption(self):
+        """`axis_reader.ladder` checks constant value-per-pixel, so a ladder that
+        PASSED is a linearity check that was actually run - and a ladder that was
+        refused says nothing about the scale. Claiming LINEAR for both would make
+        a log axis read as checked. Guard: the `ladder_ok and len >= 3` test."""
+        global RUN
+        ok = G.calibration("100:100;50:200;0:300", ladder_ok=True)
+        no = G.calibration("100:100;50:200;0:300", ladder_ok=False)
+        two = G.calibration("100:100;0:300", ladder_ok=True)
+        self.assertEqual(ok["scale_type"], "LINEAR_CHECKED")
+        self.assertEqual(no["scale_type"], "UNKNOWN")
+        self.assertEqual(two["scale_type"], "UNKNOWN")
+        # and it is part of the identity, not a note beside it
+        self.assertNotEqual(ok["calibration_sha"], no["calibration_sha"])
+        RUN += 1
+
+    def test_the_fit_residual_separates_a_line_from_a_log_axis(self):
+        """Three points always fit A line; the residual is what says whether they
+        fit a STRAIGHT one. Guard: fit_line's residual."""
+        global RUN
+        line = G.calibration("100:100;50:200;0:300", ladder_ok=True)
+        log = G.calibration("100:100;10:200;1:300", ladder_ok=True)
+        self.assertLess(line["fit_residual_px"], 0.01)
+        self.assertGreater(log["fit_residual_px"], 20)
+        self.assertAlmostEqual(line["slope"], -0.5, places=6)
+        RUN += 1
+
+    def test_an_axis_break_is_part_of_the_identity(self):
+        """The labels below a break are not on the scale of the labels above it,
+        so two panels whose points agree and whose breaks do not are not one
+        calibration."""
+        global RUN
+        a = G.calibration("100:100;50:200;0:300", ladder_ok=True)
+        b = G.calibration("100:100;50:200;0:300", ladder_ok=True,
+                          axis_break=(150, 160))
+        self.assertEqual(a["axis_break"], "NONE")
+        self.assertEqual(b["axis_break"], "BROKEN:150-160")
+        self.assertNotEqual(a["calibration_sha"], b["calibration_sha"])
+        RUN += 1
+
+    def test_one_missing_label_does_not_move_the_line(self):
+        """The other direction of the value-hash defect: an OCR miss changes the
+        value set of a panel whose mapping did not move, and the line is what a
+        transfer would use."""
+        global RUN
+        full = G.calibration("100:100;50:200;0:300", ladder_ok=True)
+        miss = G.calibration("100:100;0:300", ladder_ok=True)
+        self.assertNotEqual(full["value_set_sha"], miss["value_set_sha"])
+        self.assertAlmostEqual(full["slope"], miss["slope"], places=6)
+        RUN += 1
+
+    def test_a_ladder_with_one_point_has_no_line_and_says_so(self):
+        global RUN
+        one = G.calibration("100:100", ladder_ok=False)
+        self.assertIsNone(one["slope"])
+        self.assertIsNone(one["fit_residual_px"])
+        self.assertEqual(one["n_points"], 1)
+        RUN += 1
+
+
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))

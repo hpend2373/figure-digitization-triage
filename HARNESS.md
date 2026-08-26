@@ -630,12 +630,18 @@ Two things the harness still owes this arm:
     provider (the one member that read a ladder), its dependants, and the RAW
     residuals between them - baseline, axis top, axis bottom, height, and the
     TICK ROW SIGNATURE, which is the only evidence a panel with no numerals can
-    offer. Three outcomes, none needing a tolerance: SHARED_ROW_CANDIDATE,
-    Y_SCALE_GROUP_NO_PROVIDER, Y_SCALE_GROUP_AMBIGUOUS. NO TOLERANCE IS APPLIED
-    TO ANY RESIDUAL and nothing writes SHARED_ROW into a panel's calibration
-    cell. On publication 177's figure 2 it finds four providers, eight
-    shared-calibration candidates, twelve calibratable panels of fifteen, and one
-    row - P10, P11, P12 - with no provider at all.
+    offer. Statuses named down to what the evidence
+    supports: ROW_BAND_ONE_PROVIDER, ROW_BAND_MANY_PROVIDERS,
+    ROW_BAND_NO_PROVIDER, ROW_BAND_NO_ELIGIBLE_PROVIDER, with `linkage` (COMPLETE
+    or CHAINED) and `transfer` (UNVALIDATED, the only value this package may
+    write) as separate cells. `SHARED_ROW_CANDIDATE` claimed a shared scale had
+    been found and is retired; so is `Y_SCALE_GROUP_AMBIGUOUS`, which was a
+    verdict reached by comparing value-set hashes - replaced by a COUNT and a
+    measured distance between the providers' lines. NO TOLERANCE IS APPLIED TO ANY
+    RESIDUAL and nothing writes SHARED_ROW into a panel's calibration cell. On
+    publication 177's figure 2: four panels calibrated by their own ladder, eight
+    UNVALIDATED transfer candidates, and one row - P10, P11, P12 - with no
+    provider at all.
 
     THE TWO SHAPES A TRANSFER COULD TAKE, NEITHER BUILT. `SHARED_ROW_EXACT` is
     provider and target on the same global rows, a = 1 and b = 0. `SHARED_ROW_AFFINE`

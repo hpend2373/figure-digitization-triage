@@ -1,0 +1,149 @@
+{
+  "arms": {
+    "baseline": {
+      "code_ref": "tree:ab75219e9846d77166130ac2397d6881088f663d35e2e39719c61fcd95e7fd6e",
+      "hashes": [
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1",
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1"
+      ],
+      "output": "/home/claude/geo/verify/run_y2/baseline/output.rep0.20260826T133109-29530.csv"
+    },
+    "candidate": {
+      "code_ref": "tree:400c4bf3b09171ea9e9e18ee0c91840484e96e41a7802064cda1ec67af66d8bc",
+      "hashes": [
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1",
+        "46396ce9231d9935dbef3c527d8a791bdcbf554b2c8807206afe5e832973a5f1"
+      ],
+      "output": "/home/claude/geo/verify/run_y2/candidate/output.rep0.20260826T133109-29530.csv"
+    }
+  },
+  "declared_variables": [
+    "code"
+  ],
+  "experiment_id": "calibration-evidence-off",
+  "manifest_diff": {
+    "code.panel_geometry.py": [
+      "85ca31d619f613460e14f5c078659be84195eb164fb799914b59c4476ec1d0f5",
+      "17040a1a6231136975ac8f39450a109b7c535ffe6988de9dfd2f773ddb638174"
+    ],
+    "code.propose.py": [
+      "6006018dfbe6be993a4cdea2e23d59289a7f29f0a4684d9bf7ae905f894611a2",
+      "978ae91d57500d9c6daddf015700e8335b704109a4c7b2056399cadd1729fe6f"
+    ],
+    "code.ref": [
+      "tree:ab75219e9846d77166130ac2397d6881088f663d35e2e39719c61fcd95e7fd6e",
+      "tree:400c4bf3b09171ea9e9e18ee0c91840484e96e41a7802064cda1ec67af66d8bc"
+    ],
+    "code.y_scale_group.py": [
+      "d993223937ee9fb371fb37d875b77ea1372f447a701111cc8cf17081528ec04f",
+      "e9560b255a60b282bfc307a79e0b90a0270b49ea7b62b83454c5a49e095ba8fe"
+    ]
+  },
+  "outputs_identical": true,
+  "per_figure": [
+    {
+      "base": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "candidate": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "declared": 15,
+      "fig": "Fig. 2",
+      "pid": "177"
+    },
+    {
+      "base": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "candidate": {
+        "boxed_area_px": 465618,
+        "count_equals_declared": false,
+        "declared": 6,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 5,
+        "panel_count": 7,
+        "unique_axes_equals_declared": false,
+        "unique_axis_count": 7
+      },
+      "declared": 6,
+      "fig": "Fig. 1",
+      "pid": "475"
+    }
+  ],
+  "refusals": [],
+  "run_id": "20260826T133109-29530",
+  "schema": 1,
+  "totals": {
+    "boxes_moved": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "duplicate_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "foreign_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "fragment_flag_count": {
+      "base": 2,
+      "candidate": 2,
+      "delta": 0
+    },
+    "ladder_pass_count": {
+      "base": 9,
+      "candidate": 9,
+      "delta": 0
+    },
+    "panel_count": {
+      "base": 22,
+      "candidate": 22,
+      "delta": 0
+    },
+    "shared_column_mismatches": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "unique_axis_count": {
+      "base": 22,
+      "candidate": 22,
+      "delta": 0
+    }
+  },
+  "verdict": "DEMO_ONLY"
+}

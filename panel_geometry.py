@@ -294,6 +294,84 @@ def ladder_hash(ticks):
     return hashlib.sha256("|".join(vals).encode()).hexdigest()[:12]
 
 
+def ladder_points(ticks):
+    """[(value, pixel)] in the order the reader produced them."""
+    out = []
+    for t in (ticks or "").split(";"):
+        if ":" not in t:
+            continue
+        v, px = t.split(":", 1)
+        try:
+            out.append((float(v), float(px)))
+        except ValueError:
+            continue
+    return out
+
+
+def fit_line(points):
+    """(slope, intercept, max_residual_px) for value = slope * pixel + intercept.
+
+    Least squares by hand: there is no scipy in this package, and two points of a
+    ladder are a line without one. `slope` is VALUE PER PIXEL, which is what a
+    calibration is; the residual is in PIXELS, because a residual in value units
+    cannot be compared between two panels measuring different quantities.
+    """
+    n = len(points)
+    if n < 2:
+        return None, None, None
+    sx = sum(px for _v, px in points)
+    sy = sum(v for v, _px in points)
+    sxx = sum(px * px for _v, px in points)
+    sxy = sum(v * px for v, px in points)
+    den = n * sxx - sx * sx
+    if den == 0:
+        return None, None, None
+    slope = (n * sxy - sx * sy) / den
+    inter = (sy - slope * sx) / n
+    if slope == 0:
+        return slope, inter, None
+    resid = max(abs(px - (v - inter) / slope) for v, px in points)
+    return slope, inter, resid
+
+
+def calibration(ticks, ladder_ok=False, axis_break=None):
+    """Everything that makes one panel's y mapping what it is.
+
+    `ladder_hash` HASHES THE VALUES ONLY, and that is not a calibration. Two
+    panels printing 0, 50, 100 with those values at different rows have the same
+    value set and different mappings, and a group that compares them on the value
+    hash calls them one scale. The other direction is as bad: one OCR miss changes
+    the value set of a panel whose mapping did not move.
+
+    So there are two hashes and they are named for what they cover:
+
+        value_set_sha    the numbers the reader returned, order preserved
+        calibration_sha  the ordered (value, pixel) PAIRS, the point count, the
+                         scale check and the axis-break state
+
+    `scale_type` is LINEAR_CHECKED only when the ladder passed, because what
+    `axis_reader.ladder` checks IS constant value-per-pixel - a log axis fails it.
+    A refused ladder says nothing about the scale, and UNKNOWN is the answer.
+    """
+    pts = ladder_points(ticks)
+    slope, inter, resid = fit_line(pts)
+    scale = "LINEAR_CHECKED" if (ladder_ok and len(pts) >= 3) else "UNKNOWN"
+    brk = "NONE" if axis_break is None else ("BROKEN:%d-%d" % tuple(axis_break))
+    body = "|".join("%g@%.1f" % (v, px) for v, px in pts)
+    cal = "%s#n=%d#%s#%s" % (body, len(pts), scale, brk)
+    return {
+        "points": pts,
+        "n_points": len(pts),
+        "slope": slope,
+        "intercept": inter,
+        "fit_residual_px": resid,
+        "scale_type": scale,
+        "axis_break": brk,
+        "value_set_sha": ladder_hash(ticks),
+        "calibration_sha": hashlib.sha256(cal.encode()).hexdigest()[:12],
+    }
+
+
 def geometry(dark, box, spine_x, baseline_y, floor=None, neighbours=(),
              ticks=""):
     """plot_box, label_box, numeral_band, review_box and the signature.

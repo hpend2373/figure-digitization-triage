@@ -9751,6 +9751,111 @@ four and the figure's twelve calibratable panels become fifteen. Until then P11
 and P12 must not be calibrated automatically, and sending that row to manual
 calibration is the safe answer.
 
+## Four things the row-group shadow was claiming and could not
+
+The last round's picture read as though a shared y scale had been verified on
+publication 177's figure 2. It had not, and four separate mechanisms were
+overstating it. Each is closed here; none of them changes what the pipeline
+returns.
+
+### 1. The summary added the proposals to the facts
+
+    currently calibratable panels 12
+
+Four panels on that figure have a calibration. The other eight had a PROPOSAL
+against an unvalidated transfer, and adding the two produced a number that reads
+as twelve calibrated panels. The lines are now separate, and the picture is amber
+rather than green - green is reserved for a transfer that has passed a corpus:
+
+    actually calibrated panels (local ladder)
+    shadow transfer candidates (UNVALIDATED)
+    conditionally calibratable after review
+    unresolved panels
+    bands with no eligible provider
+
+### 2. The calibration hash hashed the numbers, not the mapping
+
+`ladder_hash` covers the VALUES a ladder read, and the group was comparing
+providers on it. Both of its answers were wrong in a knowable way:
+
+    0 at 300px, 50 at 200px, 100 at 100px
+    0 at 400px, 50 at 250px, 100 at 100px
+
+are one hash and two calibrations - and one OCR miss changes the hash of a panel
+whose mapping has not moved. `panel_geometry.calibration` now returns two:
+`value_set_sha` over the numbers, and `calibration_sha` over the ordered
+(value, pixel) PAIRS with the point count, the scale check and the axis-break
+state. It also returns slope, intercept and the fit residual in PIXELS.
+
+`scale_type` is `LINEAR_CHECKED` only when the ladder passed with three or more
+points, because what `axis_reader.ladder` checks IS constant value-per-pixel - a
+log axis fails it - and a refused ladder says nothing about the scale.
+
+`Y_SCALE_GROUP_AMBIGUOUS` is retired rather than repaired. Deciding whether two
+providers are one scale needs a tolerance; the band now reports
+`n_eligible_providers` and `cross_provider_max_resid_px` - how far the second
+provider's points sit from the first's line - and decides nothing.
+
+### 3. The tick residual was one-way, so a missing tick was invisible
+
+    provider P01  36 111 187 248 253 261
+    target   P02  37 112 188          -> old residual: 1 px
+
+Three of the provider's marks have no counterpart in the target at all, and a
+one-way nearest-neighbour distance cannot see that. `match_ticks` pairs mutual
+nearest neighbours - one to one, and needing no skip penalty, which a dynamic
+program would have needed and which would have been a constant - and reports
+`tick_match_count`, `target_unmatched`, `provider_unmatched`,
+`target_to_provider_max`, `provider_to_target_max`, `symmetric_max` and
+`matched_max`. The same pair now reads `symmetric_max 73` with three provider
+ticks unmatched.
+
+`line_residual_px` is added beside them: where the target's own values would land
+on the provider's line against where the target read them. It is the only
+comparison of two calibrations that needs no tolerance, and on one of these pairs
+it reads 295.7 px.
+
+### 4. A tick was ink near the spine, and a provider was any panel that read
+
+`tick_runs` walks OUTWARD from the spine rule's own edge and stops at the first
+blank column, with one stroke of slack - `RULE_MAX_W`, the constant that already
+means "a rule is 1 to 4 columns" - because strict adjacency was measured and it
+dropped two of P01's four real ticks to an antialiased column. Lengths are
+RECORDED per mark, never capped: `tick_lengths` beside `ticks`, so a 1 px mark
+and a 6 px one stop counting alike.
+
+And `eligibility` decides whether a reader may lend its ladder at all. A ladder
+proves numerals were read beside SOME column; it does not prove the column is the
+panel's axis, that the box is whole, or that the axis is unbroken. Refused when
+`axis_geometry` is FALLBACK_LONGEST, GEOMETRY_UNOBSERVED or GEOMETRY_UNRESOLVED,
+when the box is a FRAGMENT, or when the axis is broken - and UNKNOWN, never
+ELIGIBLE, when the cells were not supplied.
+
+### What the gate does to the figure it was built on
+
+    G1  ROW_BAND_ONE_PROVIDER            P01 lends;  P02 P03 are candidates
+    G2  ROW_BAND_NO_ELIGIBLE_PROVIDER    P04 reads a ladder and may NOT lend it
+    G3  ROW_BAND_NO_ELIGIBLE_PROVIDER    P07 reads a ladder and may NOT lend it
+    G4  ROW_BAND_NO_PROVIDER             nobody reads: P10, P11, P12
+    G5  ROW_BAND_NO_ELIGIBLE_PROVIDER    P13 reads a ladder and may NOT lend it
+
+**Three of the four providers are ineligible, all for the same reason:
+`GEOMETRY_UNOBSERVED`.** No candidate row exists for those boxes in the winning
+pass - `column_siblings` and the transforms after it produce boxes AFTER the
+anchor search has run, so their axis column was never checked by it. Their spine
+came from the plain longest-vertical fallback.
+
+So last round's "eight shared-calibration candidates" is really TWO, and the
+figure's honest state is: one panel calibrated and lending, two candidates
+against an unvalidated transfer, and twelve panels whose y scale has no
+defensible route at all yet. That is a worse number than the one before it and it
+is the one the evidence supports.
+
+It also names the next repair precisely, and it is not about calibration: RUN THE
+ANCHOR SEARCH ON THE FINAL BOX LIST. Three panels of five on this figure have
+never had their axis column examined by the search that exists to examine it.
+That changes what the pipeline returns and belongs to its own arm.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

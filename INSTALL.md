@@ -9389,6 +9389,94 @@ plot region, which `panel_geometry` computes and nothing yet consumes, and the
 ancestor region, which the DAG now provides. It is the first thing this project
 has been able to state precisely rather than approach through a threshold.
 
+## ANCESTOR_REGION_COMPLETION, measured - and the premise it falsifies
+
+Built as designed, `RESIDUAL=1`, shadow only: `_shadow_residual` is never handed
+the output list, the box list comes back unchanged, and with the flag off every
+call is a branch not taken. Five statements per blob, all five required:
+
+    plot_side         on the side of the spine the marks are on
+    no_own_axis       no thin, long vertical rule of its own
+    shares_axis_rows  beside the axis run, not above or below it
+    no_foreign_spine  no other panel's spine in its columns
+    above_caption     not in the caption
+
+`no_own_axis` is `_rules`, not `_has_y_axis`. The second asks for a vertical run
+covering `AXIS_RUN` of the box's OWN height, and a single bar is exactly that, so
+every bar in the residual would have reported itself as carrying an axis. A spine
+is thin: 1 to 4 columns, `RULE_MIN_LEN` long.
+
+### What it found on publication 475 figure 1
+
+The piece is `99,384,370,664`, panel C is `101,268,499,627`, and the plot core the
+subtraction uses is `212,268,499,627`. Fifty-six components, thirty-one of them
+larger than `ADOPT_MIN` in both directions, and ONE passes:
+
+    349,384,510,630   491 px   DATA        the 0.005 box plot, whole
+    311,348,448,512   350 px   refused     axis rows        (share 0.031)
+    191,214,375,400   278 px   refused     plot side, axis rows
+    198,210,649,664   132 px   refused     plot side, axis rows
+    ... 27 more, 24 of which are refused by `shares_axis_rows`
+
+The blobs ARE the missing data - the picture shows the second and third box-plot
+groups sitting outside a panel box drawn around the first - and the clause doing
+almost all of the refusing is `shares_axis_rows`. Which is where the row stops
+being about panel C and starts being about its axis.
+
+### The summary row refuses to let that pass unnamed
+
+    axis_anchored=False   axis_n_free=0   axis_n_clipped=0
+    spine_x=212           axis_run=510-575
+
+`_axis_anchor` found NO candidate at all - not a clipped one, not a bad one - so
+the spine is the plain longest-vertical fallback, and the run it reports is 65 px
+of a 128 px box. `shares_axis_rows` asks for `ADOPT_SHARE` of the shorter side
+against THAT window, so a 64 px box plot 60 px away scores 0.031 and is refused.
+This is why the axis provenance is recorded beside the verdicts instead of being
+asserted: without those three numbers the round would have read as "the residual
+completion refuses the data", and what it actually says is "the residual
+completion was measured against a column nothing attested".
+
+### And the name is wrong, which the DAG is what proves
+
+    ancestor_region 33  ->  panel_region 59   descends = False
+
+Region 33 is the piece, `TRIM` of `CUT_HALF` 9. Region 59 is panel C's box, and
+its provenance line reads `COLUMN_SIBLING, parents (none), from 0 overlapping`:
+the box overlaps NOTHING in the list `column_siblings` was handed. Panel C's box
+was not cut out of the piece and was not derived from any region at all - it was
+CONSTRUCTED from the other panels' column geometry to fill a slot.
+
+So the piece is not the panel's ancestor. The containment that `classify_piece`
+reports is geometric, established from `CUT_LINEAGE`, and the DAG says there is no
+genealogy behind it. `ANCESTOR_REGION_COMPLETION` names a relation this figure
+does not have, and the honest name for what was measured is
+`ENCLOSING_PIECE_COMPLETION`. The field that says so is in every summary row, and
+it was put there to be read rather than to be right.
+
+That also explains the fallback axis: a box nobody found from ink has no reason to
+have an axis in it. The two facts are one fact.
+
+### What this closes and what it opens
+
+CLOSED: completion is not blocked by the components being hard to find. They are
+found, they are the right ones, and the geometry is not the problem.
+
+OPEN, and now in the order the measurement puts them:
+
+1. Panel C's box is a `column_siblings` construction with a fallback axis. Until
+   that box is either attested or withdrawn, every measurement inside it inherits
+   an unattested column - including this one.
+2. `shares_axis_rows` measured against `spine_run` is measured against whatever
+   the axis search returned. Against an `AXIS_ATTESTED` spine it is the right
+   question; against `AXIS_FALLBACK` it is a coin.
+3. The piece stops at x=384 and the figure's third group starts at x=680. Even a
+   perfect completion of this piece recovers two groups of three.
+
+None of this is a threshold, and none of it was reachable before the trace, the
+relation enum and the DAG were in place - which is the argument for having built
+them in that order.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

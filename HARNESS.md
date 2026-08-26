@@ -625,6 +625,18 @@ Two things the harness still owes this arm:
     the piece - so it is a same-half completion question and not a partner-ranking
     one, which is what the previous round got wrong.
 
+    THE RESIDUAL COMPLETION - BUILT. `RESIDUAL=1`. For a piece that CONTAINS a
+    panel, the panel's plot core is subtracted from the piece, the remaining ink
+    is split into connected components, and each one is asked five statements
+    against that panel's axis: plot side, no thin rule of its own, beside the
+    axis run, no foreign spine in its columns, not in the caption. Records;
+    adopts nothing. On publication 475's figure 1 it finds the missing box-plot
+    groups and then reports that the axis it measured them against is a fallback
+    with ZERO candidates - and that the DAG says the panel does not descend from
+    the piece at all, because `column_siblings` CONSTRUCTED that box from 0
+    overlapping parents. See INSTALL.md, "ANCESTOR_REGION_COMPLETION, measured -
+    and the premise it falsifies".
+
     CUT LINEAGE - BUILT. `CUT_LINEAGE` in `axis_reader`, written by `_cut`:
     for each half of a cut, the other half, the axis and the gutter. `SHADOWGATE=1`
     then asks the six statements of every piece the DISTANCE refused whose

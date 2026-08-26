@@ -497,20 +497,23 @@ class Flags(unittest.TestCase):
         for value, want in (("", False), ("0", False), ("1", True), ("yes", True)):
             self.assertEqual(value not in ("", "0"), want)
         import importlib, os as _os
-        for env, want in (({}, False), ({"SHADOWGATE": "0"}, False),
-                          ({"SHADOWGATE": "1"}, True)):
-            old = _os.environ.pop("SHADOWGATE", None)
-            try:
-                if env:
-                    _os.environ["SHADOWGATE"] = env["SHADOWGATE"]
-                mod = importlib.reload(A)
-                self.assertEqual(mod.SHADOW_GATE, want,
-                                 "SHADOWGATE=%r read as %r" % (env.get("SHADOWGATE"),
-                                                               mod.SHADOW_GATE))
-            finally:
-                _os.environ.pop("SHADOWGATE", None)
-                if old is not None:
-                    _os.environ["SHADOWGATE"] = old
+        # EVERY shadow flag, not just the one that was caught: the next one added
+        # with `bool(os.environ.get(...))` is the same defect a round later.
+        for name, attr in (("SHADOWGATE", "SHADOW_GATE"),
+                           ("RESIDUAL", "RESIDUAL_SHADOW")):
+            for value, want in ((None, False), ("0", False), ("1", True)):
+                old = _os.environ.pop(name, None)
+                try:
+                    if value is not None:
+                        _os.environ[name] = value
+                    mod = importlib.reload(A)
+                    self.assertEqual(getattr(mod, attr), want,
+                                     "%s=%r read as %r" % (name, value,
+                                                           getattr(mod, attr)))
+                finally:
+                    _os.environ.pop(name, None)
+                    if old is not None:
+                        _os.environ[name] = old
         importlib.reload(A)
         RUN[0] += 1
 
@@ -794,6 +797,280 @@ class PostAdoptionShadow(unittest.TestCase):
         rows = [r for r in T.ROWS if r["kind"] == "POST_ADOPTION_SHADOW"]
         if not rows:
             self.skipTest("the gate refused this fixture, so there is nothing to post-check")
+        RUN[0] += 1
+
+
+class AncestorRegionCompletion(unittest.TestCase):
+    """The piece CONTAINS the panel, so an adoption has nothing to add.
+
+    Publication 475's figure 1 selects 101,268,499,627 inside the piece
+    99,384,370,664. The union of the two IS the piece. What is missing is the ink
+    inside the piece that the panel's plot core does not cover, and every
+    scenario here is about one of the five statements that ink has to answer.
+    """
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._rs, self._sg = T.ON, A.RESIDUAL_SHADOW, A.SHADOW_GATE
+        self._floor = A.CAP_FLOOR
+        T.ON = True
+        A.RESIDUAL_SHADOW, A.SHADOW_GATE = True, False
+        A.CUT_LINEAGE.clear(); A._CUT_SEQ[0] = 0
+        A.REGIONS.clear(); A._REGION_AT.clear(); A._REGION_SEQ[0] = 0
+        A._RUN_CACHE.clear(); A._ANCHOR_CACHE.clear()
+
+    def tearDown(self):
+        T.ON, A.RESIDUAL_SHADOW, A.SHADOW_GATE = self._on, self._rs, self._sg
+        A.CAP_FLOOR = self._floor
+
+    PANEL = (100, 250, 100, 300)
+    PIECE = (95, 400, 90, 330)
+
+    def _figure(self):
+        """A panel with its spine, baseline, two bars and a column of numerals,
+        and one 60x90 block of data 20 px past the panel's right edge - inside
+        the piece, outside the panel."""
+        d = np.zeros((400, 500), dtype=bool)
+        d[110:291, 110] = True              # the spine
+        d[288:291, 110:246] = True          # the baseline
+        d[200:290, 130:150] = True          # a bar
+        d[180:290, 170:190] = True          # a bar
+        d[200:211, 90:106] = True           # numerals, on the label side
+        d[210:290, 270:330] = True          # the residual block
+        return d
+
+    def _run(self, d, boxes=None, piece=None):
+        piece = piece or self.PIECE
+        A.CUT_LINEAGE[tuple(piece)] = {
+            "cut_id": 1, "sibling": (400, 500, 90, 330), "axis": "col",
+            "gap_lo": 395, "gap_hi": 400, "depth": 0, "region": None}
+        out = A.adopt_orphans(d, list(boxes or [self.PANEL]), [piece])
+        return [tuple(b) for b in out]
+
+    def _components(self, panel=None):
+        """Only the rows about ONE panel. A figure with two nested panels writes
+        a component row per panel per blob, and a dict keyed on the blob alone
+        silently reports the last panel's verdict for the first panel's."""
+        want = T.box(panel or self.PANEL)
+        return {r["component"]: r for r in T.ROWS
+                if r["kind"] == "RESIDUAL_COMPONENT" and r["panel"] == want}
+
+    def _summary(self, panel=None):
+        want = T.box(panel or self.PANEL)
+        rows = [r for r in T.ROWS
+                if r["kind"] == "RESIDUAL_SHADOW" and r["panel"] == want]
+        self.assertTrue(rows, "the nested piece was never measured")
+        return rows[-1]
+
+    def test_it_measures_the_residual_and_adopts_nothing(self):
+        """Guard: _shadow_residual, and its signature having no output list."""
+        got = self._run(self._figure())
+        self.assertEqual(got, [self.PANEL], "a shadow changed the output")
+        s = self._summary()
+        self.assertEqual(s["plot_box"], "110,250,100,300")
+        self.assertEqual(int(s["n_data"]), 1)
+        self.assertIn("270,330,210,290", self._components())
+        self.assertEqual(list(inspect.signature(A._shadow_residual).parameters),
+                         ["dark", "orp", "panel", "boxes"])
+        RUN[0] += 1
+
+    def test_with_the_flag_off_nothing_is_measured(self):
+        """A shadow that runs unasked is a cost the pipeline did not consent to.
+
+        WITH THE OTHER SHADOW ON, which is the only arrangement that tests this
+        guard. Turning both off skips the whole block on its outer condition and
+        leaves the inner `RESIDUAL_SHADOW and` untested - decoration that the
+        mutation matrix caught on its first pass.
+        Guard: the `RESIDUAL_SHADOW and` in the inner condition."""
+        A.RESIDUAL_SHADOW, A.SHADOW_GATE = False, True
+        self._run(self._figure())
+        self.assertEqual([r for r in T.ROWS if r["kind"].startswith("RESIDUAL")], [])
+        self.assertTrue([r for r in T.ROWS if r["kind"] == "PIECE_RELATION"],
+                        "the fixture never reached the shadows at all")
+        RUN[0] += 1
+
+    def test_the_relation_row_is_written_for_this_flag_too(self):
+        """A residual measurement whose relation is not in the trace cannot be
+        told from a gate refusal afterwards. SHADOW_GATE is off in this class, so
+        the row can only come from the other half of the condition.
+        Guard: `if SHADOW_GATE or RESIDUAL_SHADOW`."""
+        self._run(self._figure())
+        rows = [r for r in T.ROWS if r["kind"] == "PIECE_RELATION"]
+        self.assertTrue(rows)
+        self.assertEqual(rows[-1]["relation"], A.SAME_HALF_NESTED)
+        RUN[0] += 1
+
+    def test_the_plot_core_is_subtracted_and_not_the_box(self):
+        """The panel's box carries its numerals; its plot core does not. Blanking
+        the box would hide the strip and call the hiding a measurement.
+        Guard: _residual_components blanking plot_box."""
+        self._run(self._figure())
+        comps = self._components()
+        self.assertIn("95,106,200,211", comps, "the label strip was blanked too")
+        self.assertNotIn("130,150,200,290", comps, "a bar inside the plot survived")
+        RUN[0] += 1
+
+    def test_a_blob_on_the_label_side_is_not_data(self):
+        """The numerals are ink the panel already owns.
+        Guard: the plot_side clause."""
+        self._run(self._figure())
+        r = self._components()["95,106,200,211"]
+        self.assertEqual(r["c_plot_side"], "X")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_a_blob_carrying_its_own_rule_is_not_data(self):
+        """A residual block with a spine of its own is another panel, and the
+        repair for that is not completion. `_has_y_axis` cannot say so - it asks
+        for a run covering 45% of the blob's OWN height, which every single bar
+        is - so the test is `_rules`: 1 to 4 columns wide, RULE_MIN_LEN long.
+        Guard: the no_own_axis clause."""
+        d = self._figure()
+        d[180:300, 280] = True             # 120 px of thin vertical rule
+        self._run(d)
+        r = self._components()["270,330,180,300"]
+        self.assertEqual(r["c_no_own_axis"], "X")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_a_blob_beside_nothing_is_not_data(self):
+        """The panel title sits above the axis run and shares no rows with it.
+        Guard: the shares_axis_rows clause."""
+        d = self._figure()
+        d[210:290, 270:330] = False
+        d[92:106, 270:330] = True          # a strip above the axis run
+        self._run(d)
+        r = self._components()["270,330,92,106"]
+        self.assertEqual(r["c_shares_axis_rows"], "X")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_a_blob_holding_another_panels_spine_is_not_data(self):
+        """Completing this panel with the next panel's axis in the block is how a
+        repair swallows a panel. Guard: the no_foreign_spine clause."""
+        d = self._figure()
+        d[210:290, 270:330] = False
+        # One block STRADDLING the neighbour's spine without touching it: two
+        # bars bridged above the spine's top. Touching would merge the spine into
+        # the component and the rule clause would refuse it first, which is a
+        # scenario about the other clause.
+        d[210:290, 270:291] = True
+        d[210:290, 310:331] = True
+        d[210:216, 270:331] = True
+        d[230:301, 300] = True             # the neighbour's spine
+        d[297:301, 300:390] = True
+        other = (295, 390, 220, 310)
+        self._run(d, boxes=[self.PANEL, other])
+        r = self._components()["270,331,210,290"]
+        self.assertEqual(r["c_no_foreign_spine"], "X")
+        self.assertEqual((r["c_plot_side"], r["c_no_own_axis"],
+                          r["c_shares_axis_rows"], r["c_above_caption"]),
+                         ("O", "O", "O", "O"), "another clause did the refusing")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_the_neighbouring_panel_is_not_this_panels_missing_data(self):
+        """Its spine sits on its own left edge, so a strict `cx0 < fx` let the
+        whole neighbouring panel come back as a component to complete this one
+        with. Guard: the inclusive left bound."""
+        d = self._figure()
+        d[210:290, 270:330] = False
+        d[230:301, 300] = True
+        d[297:301, 300:390] = True
+        other = (295, 390, 220, 310)
+        self._run(d, boxes=[self.PANEL, other])
+        r = self._components()["300,390,230,301"]
+        self.assertEqual(r["c_no_foreign_spine"], "X")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_a_blob_in_the_caption_is_not_data(self):
+        """No panel contains the caption; a completion that reaches into it is
+        reading the caption as marks. Guard: the above_caption clause."""
+        d = self._figure()
+        d[210:290, 270:330] = False
+        # BESIDE THE AXIS RUN AND BELOW THE FLOOR AT ONCE. A blob under the whole
+        # plot fails the row clause first, so the caption clause is never the
+        # thing refusing it - which is what the mutation matrix said about the
+        # first version of this fixture.
+        d[255:285, 270:330] = True
+        A.CAP_FLOOR = 250
+        self._run(d)
+        r = self._components()["270,330,255,285"]
+        self.assertEqual(r["c_above_caption"], "X")
+        self.assertEqual((r["c_plot_side"], r["c_no_own_axis"],
+                          r["c_shares_axis_rows"], r["c_no_foreign_spine"]),
+                         ("O", "O", "O", "O"), "another clause did the refusing")
+        self.assertEqual(r["is_data"], False)
+        RUN[0] += 1
+
+    def test_a_speck_is_counted_and_not_recorded(self):
+        """Scanner dirt would otherwise be one trace row per speck, and a trace
+        nobody can read answers nothing. Guard: the ADOPT_MIN filter."""
+        d = self._figure()
+        for x in range(340, 380, 6):
+            d[210:213, x:x + 3] = True     # 3x3 specks
+        self._run(d)
+        s = self._summary()
+        self.assertGreaterEqual(int(s["n_too_small"]), 6)
+        self.assertNotIn("340,343,210,213", self._components())
+        RUN[0] += 1
+
+    def test_the_opposite_half_alone_never_reaches_it(self):
+        """A piece whose panel is in the OTHER half is the adoption question and
+        already has a shadow. Running both on it would produce two verdicts about
+        two different repairs and no way to tell which one a row is about.
+        Guard: the `rel in (SAME_HALF_NESTED, OPPOSITE_AND_NESTED)` filter."""
+        d = self._figure()
+        far = (0, 60, 90, 330)             # 40 px from the panel: past the reach
+        A.CUT_LINEAGE[far] = {
+            "cut_id": 2, "sibling": (60, 500, 90, 330), "axis": "col",
+            "gap_lo": 60, "gap_hi": 100, "depth": 0, "region": None}
+        A.adopt_orphans(d, [self.PANEL], [far])
+        self.assertEqual([r for r in T.ROWS if r["kind"] == "RESIDUAL_SHADOW"], [])
+        self.assertEqual([r for r in T.ROWS if r["kind"] == "PIECE_RELATION"][-1]
+                         ["relation"], A.OPPOSITE_HALF_UNIQUE)
+        RUN[0] += 1
+
+    def test_the_axis_it_measured_against_is_recorded_not_asserted(self):
+        """"Against that panel's attested axis" is the requirement, and
+        attestation needs a ladder, which needs OCR this must not pay for inside
+        adopt_orphans. So the three inputs axis_status takes are recorded and the
+        verdict is left to the reader; a row that hid them would be a measurement
+        against an unnamed column. Guard: the axis provenance fields."""
+        self._run(self._figure())
+        s = self._summary()
+        self.assertEqual(s["axis_anchored"], True)
+        self.assertNotEqual(s["axis_n_free"], "")
+        self.assertNotEqual(s["axis_n_clipped"], "")
+        self.assertEqual(
+            T.axis_status(int(s["axis_n_free"]), int(s["axis_n_clipped"]),
+                          s["axis_anchored"], False),
+            T.AXIS_GEOMETRY_ONLY)
+        RUN[0] += 1
+
+    def test_a_long_diagonal_is_one_component_and_does_not_recurse(self):
+        """A scatter plot's fitted line is one mark. A recursive flood fill meets
+        Python's recursion limit on it, on a figure nobody would call unusual.
+        Guard: the explicit stack in _components."""
+        d = np.zeros((400, 400), dtype=bool)
+        for i in range(350):
+            d[20 + i, 20 + i] = True
+        comps = A._components(d)
+        self.assertEqual(len(comps), 1)
+        self.assertEqual(comps[0][:4], (20, 370, 20, 370))
+        self.assertEqual(comps[0][4], 350)
+        RUN[0] += 1
+
+    def test_two_blobs_a_gap_apart_are_two_components(self):
+        """A completion that merges every blob into one has measured nothing.
+        Guard: the neighbour walk in _components."""
+        d = np.zeros((100, 100), dtype=bool)
+        d[10:30, 10:30] = True
+        d[10:30, 40:60] = True
+        comps = sorted(A._components(d))
+        self.assertEqual([c[:4] for c in comps],
+                         [(10, 30, 10, 30), (40, 60, 10, 30)])
         RUN[0] += 1
 
 

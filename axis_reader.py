@@ -645,6 +645,15 @@ _CUT_SEQ = [0]
 #: person would reach for to turn an experiment off was the value that ran it.
 SHADOW_GATE = _os.environ.get("SHADOWGATE", "0") != "0"
 
+#: harness (reported only): ANCESTOR_REGION_COMPLETION. For a piece that CONTAINS
+#: the panel, measure the ink inside the piece that the panel's plot core does not
+#: cover. Same reading rule as every other flag - "0" is off.
+RESIDUAL_SHADOW = _os.environ.get("RESIDUAL", "0") != "0"
+
+#: 8-connected, because a diagonal line of a scatter plot is one mark and
+#: 4-connectivity would report it as one component per pixel.
+RESIDUAL_CONNECTIVITY = 8
+
 
 #: How a piece relates to the panel the harness might attach it to. Reported;
 #: no route acts on it yet. The five are separate because they are separate
@@ -1198,6 +1207,184 @@ def _shadow_gate(dark, orp, boxes):
                **{("why_" + name): tests[name][1] for name in tests})
 
 
+def _components(mask, connectivity=RESIDUAL_CONNECTIVITY):
+    """[(x0, x1, y0, y1, n_px)] - one entry per connected blob of True.
+
+    Hand-rolled, because there is no scipy in this package, and ITERATIVE,
+    because a recursive flood fill over a 300x300 slab of a scanned figure meets
+    Python's recursion limit on the first long diagonal streak of ink.
+    """
+    h, w = mask.shape
+    seen = np.zeros((h, w), dtype=bool)
+    if connectivity == 8:
+        steps = ((-1, -1), (-1, 0), (-1, 1), (0, -1),
+                 (0, 1), (1, -1), (1, 0), (1, 1))
+    else:
+        steps = ((-1, 0), (0, -1), (0, 1), (1, 0))
+    out = []
+    for sy in range(h):
+        if not mask[sy].any():
+            continue
+        for sx in range(w):
+            if not mask[sy, sx] or seen[sy, sx]:
+                continue
+            seen[sy, sx] = True
+            stack = [(sy, sx)]
+            # y0 IS THE SEED ROW and is never revised: the scan is top-down, so
+            # any pixel of this blob in an earlier row would already have been
+            # seen and this seed would not be one.
+            x0 = x1 = sx
+            y0 = y1 = sy
+            n = 0
+            while stack:
+                y, x = stack.pop()
+                n += 1
+                if x < x0:
+                    x0 = x
+                elif x > x1:
+                    x1 = x
+                if y > y1:
+                    y1 = y
+                for dy, dx in steps:
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            out.append((x0, x1 + 1, y0, y1 + 1, n))
+    return out
+
+
+def _residual_components(dark, ancestor, plot_box):
+    """The ink inside `ancestor` that the panel's plot core does not cover.
+
+    The subtraction is of the PLOT core and not of the panel's box: the box
+    carries the panel's own numerals and its rotated axis title, and blanking
+    those as well would hide nothing but furniture, while blanking the box
+    would be the same subtraction with a different name only where the strip
+    happened to fall outside it.
+    """
+    ax0, ax1, ay0, ay1 = (int(v) for v in ancestor)
+    mask = dark[ay0:ay1, ax0:ax1].copy()
+    px0, px1, py0, py1 = (int(v) for v in plot_box)
+    lo_x, hi_x = max(ax0, px0) - ax0, min(ax1, px1) - ax0
+    lo_y, hi_y = max(ay0, py0) - ay0, min(ay1, py1) - ay0
+    if hi_x > lo_x and hi_y > lo_y:
+        mask[lo_y:hi_y, lo_x:hi_x] = False
+    return [(x0 + ax0, x1 + ax0, y0 + ay0, y1 + ay0, n)
+            for x0, x1, y0, y1, n in _components(mask)]
+
+
+def _shadow_residual(dark, orp, panel, boxes):
+    """ANCESTOR_REGION_COMPLETION, measured. Records; adopts nothing.
+
+    The nested relation is not the adoption problem wearing another hat. The
+    piece CONTAINS the panel - publication 475's figure 1 selects
+    101,268,499,627 inside the piece 99,384,370,664 - so the union of the two is
+    the piece and there is nothing for an adoption to add. What is missing is
+    the ink inside the piece that lies OUTSIDE the panel's plot core, and the
+    question each blob of it has to answer is whether it is data:
+
+        plot_side         it is on the side of the spine the marks are on
+        no_own_axis       it carries no thin, long vertical rule of its own
+        shares_axis_rows  it sits BESIDE the axis run, not above or below it
+        no_foreign_spine  no other panel's spine runs through its columns
+        above_caption     it is not in the caption
+
+    ATTESTATION IS NOT ASSERTED HERE. The reviewer's wording is "against that
+    panel's attested axis", and attestation needs a ladder, which needs OCR -
+    which this must not pay for inside `adopt_orphans`. So the axis provenance
+    is RECORDED instead of judged: `axis_anchored`, `axis_n_free` and
+    `axis_n_clipped` are the three inputs `gate_trace.axis_status` takes, and
+    the fourth - whether the ladder read - is the AXIS_SHADOW_LADDER row for the
+    same box when the run was made with SHADOW=1. A verdict measured against a
+    fallback column is then visibly a verdict measured against a fallback
+    column, rather than silently one.
+
+    NEVER HANDED THE OUTPUT LIST, like the other two shadows; the scenario
+    asserts that from the signature.
+    """
+    import panel_geometry as G
+    px0, px1, py0, py1 = (int(v) for v in panel)
+    an = None
+    try:
+        an = axis_anchor(dark, panel)
+        sb = spine_and_baseline(dark, panel)
+        sx = an[0] if an is not None else sb[0]
+        by = sb[1]
+        run = spine_run(dark, sx, py0, py1)
+    except Exception:
+        sx = by = run = None
+    if sx is None or by is None or run is None:
+        _T.add("RESIDUAL_SHADOW", orphan=_T.box(orp), panel=_T.box(panel),
+               detail="no spine run for the nested panel")
+        return
+    side = G.label_side(dark, panel, sx, by)
+    others = [b for b in boxes if tuple(b) != tuple(panel)]
+    geo = G.geometry(dark, panel, sx, by, floor=CAP_FLOOR, neighbours=others)
+    plot = geo["plot_box"]
+
+    # THE OTHER PANELS' SPINES, so a blob that is really the next panel's axis
+    # cannot be counted as this panel's missing data.
+    foreign_x = []
+    for o in others:
+        try:
+            osx = spine_and_baseline(dark, o)[0]
+        except Exception:
+            continue
+        if osx is not None and abs(int(osx) - int(sx)) > 3:
+            foreign_x.append(int(osx))
+
+    comps = _residual_components(dark, orp, plot)
+    measured = too_small = is_data_n = 0
+    for cx0, cx1, cy0, cy1, npx in comps:
+        if (cx1 - cx0) < ADOPT_MIN or (cy1 - cy0) < ADOPT_MIN:
+            too_small += 1
+            continue
+        measured += 1
+        comp = (cx0, cx1, cy0, cy1)
+        plot_side = (cx0 >= sx) if side == G.LEFT else (cx1 <= sx)
+        # A SPINE IS THIN AND LONG, and `_has_y_axis` is the wrong instrument
+        # here: it asks for a vertical run covering AXIS_RUN of the box's OWN
+        # height, and a single bar is exactly that - so every bar in the residual
+        # would report itself as carrying an axis. `_rules` asks the question
+        # that separates them: 1-4 columns wide and RULE_MIN_LEN long.
+        no_own_axis = not _rules(dark, comp, vertical=True)
+        vov = max(0, min(run[1], cy1) - max(run[0], cy0))
+        vsh = vov / max(1, min(run[1] - run[0], cy1 - cy0))
+        shares = vsh >= ADOPT_SHARE
+        # HALF-OPEN, AND INCLUSIVE ON THE LEFT. A strict `cx0 < fx` let the one
+        # component that IS the neighbouring panel - its spine sitting exactly on
+        # its own left edge - come back as this panel's missing data.
+        no_foreign = not any(cx0 <= fx < cx1 for fx in foreign_x)
+        above_cap = CAP_FLOOR is None or cy1 <= int(CAP_FLOOR)
+        ok = plot_side and no_own_axis and shares and no_foreign and above_cap
+        is_data_n += 1 if ok else 0
+        _T.add("RESIDUAL_COMPONENT", orphan=_T.box(orp), panel=_T.box(panel),
+               component=_T.box(comp), ink_px=npx,
+               w=cx1 - cx0, h=cy1 - cy0, is_data=bool(ok),
+               row_share=round(vsh, 3),
+               c_plot_side=_mark(plot_side), c_no_own_axis=_mark(no_own_axis),
+               c_shares_axis_rows=_mark(shares),
+               c_no_foreign_spine=_mark(no_foreign),
+               c_above_caption=_mark(above_cap))
+
+    prid, orid = region_at(panel), region_at(orp)
+    cand = _T.last("AXIS_CANDIDATES", box=_T.box(panel))
+    lb = geo["label_box"]
+    _T.add("RESIDUAL_SHADOW", orphan=_T.box(orp), panel=_T.box(panel),
+           plot_box=_T.box(plot), label_box=_T.box(lb) if lb else "",
+           label_side=side, spine_x=int(sx), baseline_y=int(by),
+           axis_run="%d-%d" % (run[0], run[1]),
+           axis_anchored=an is not None,
+           axis_n_free=(cand or {}).get("n_free", ""),
+           axis_n_clipped=(cand or {}).get("n_clipped", ""),
+           ancestor_region=orid, panel_region=prid,
+           panel_descends_from_piece=(descends_from(prid, orid)
+                                      if (prid and orid) else ""),
+           n_components=len(comps), n_measured=measured,
+           n_too_small=too_small, n_data=is_data_n)
+
+
 def adopt_orphans(dark, boxes, orphans):
     """A block with no axis of its own, touching exactly one panel, is that panel's.
 
@@ -1285,7 +1472,10 @@ def adopt_orphans(dark, boxes, orphans):
                        candidates=";".join("%s@%dpx:%s" % (sd, g, _T.box(bb))
                                            for g, sd, bb in cands),
                        nearest=_nearest_note(orp, boxes, budget))
-                if SHADOW_GATE:
+                if SHADOW_GATE or RESIDUAL_SHADOW:
+                    # THE ROW THAT SAYS WHICH SHADOW APPLIES, written for either
+                    # flag: a residual measurement whose relation is not in the
+                    # trace cannot be told from a gate refusal after the fact.
                     rel, opp, nested = classify_piece(orp, boxes)
                     _sib_rid, _fate = sibling_fate(orp)
                     _T.add("PIECE_RELATION", orphan=_T.box(orp), relation=rel,
@@ -1295,7 +1485,14 @@ def adopt_orphans(dark, boxes, orphans):
                            lineage=lineage_of(orp)[0],
                            sibling_region=_sib_rid,
                            sibling_fate=";".join(_fate))
-                    _shadow_gate(dark, orp, boxes)
+                    if SHADOW_GATE:
+                        _shadow_gate(dark, orp, boxes)
+                    # THE NESTED RELATION IS A DIFFERENT REPAIR, and only the
+                    # panels actually nested in this piece are asked about.
+                    if RESIDUAL_SHADOW and rel in (SAME_HALF_NESTED,
+                                                   OPPOSITE_AND_NESTED):
+                        for _p in nested:
+                            _shadow_residual(dark, orp, _p, boxes)
             continue                      # nobody, or nobody we can be sure about
         gap, side, b = cands[0]
         x0, x1, y0, y1 = b

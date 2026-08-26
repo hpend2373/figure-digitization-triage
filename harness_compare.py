@@ -62,6 +62,7 @@ DERIVED_ENV = {
     "TRACE_ENABLED": lambda e: e.get("TRACE", "") not in ("", "0"),
     "SHADOW_ENABLED": lambda e: e.get("SHADOW", "0") != "0",
     "SHADOW_GATE_ENABLED": lambda e: e.get("SHADOWGATE", "0") != "0",
+    "RESIDUAL_ENABLED": lambda e: e.get("RESIDUAL", "0") != "0",
 }
 
 # Two boxes from different arms are the same physical axis if their spine and

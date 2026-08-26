@@ -25,6 +25,7 @@ import axis_reader as A
 import gate_trace as T
 import panel_geometry as PG
 import y_scale_group as YG
+import tick_ocr as TO
 import x_reader as X
 
 MODES = ("OFF", "PLAIN", "CAP", "GRID")
@@ -472,6 +473,20 @@ for r in rows:
                     "calibration_sha": _cal["calibration_sha"],
                     "ticks": [(t0 + t1) // 2 for t0, t1, _ln in _tr],
                     "tick_lengths": [ln for _t0, _t1, ln in _tr]})
+                # A SECOND ROUTE TO THE LADDER, asked per tick instead of per
+                # strip, and asked of every panel rather than only the ones that
+                # failed - a route tried only where the first one lost cannot be
+                # compared with it. Records; changes nothing.
+                if TO.ON:
+                    try:
+                        TO.record(img, gdark, "P%02d" % i, _box, rec["spine_x"],
+                                  _side, _run,
+                                  [(t0 + t1) // 2 for t0, t1, _ln in _tr],
+                                  ink=ink)
+                    except Exception as exc:
+                        T.add("TICK_OCR_LADDER", panel="P%02d" % i,
+                              box=T.box(_box), outcome="FAILED",
+                              detail="%s: %s" % (type(exc).__name__, exc))
         rec.update(pid=r["pid"], fig=r["fig"], png=r["png"], panel="P%02d" % i,
                    sever_mode=mode, ink=ink, declared_axes=declared,
                    caption_panels=cap_panels, caption_row=(A.CAP_FLOOR if A.CAP_FLOOR else ""),

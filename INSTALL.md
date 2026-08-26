@@ -9856,6 +9856,101 @@ ANCHOR SEARCH ON THE FINAL BOX LIST. Three panels of five on this figure have
 never had their axis column examined by the search that exists to examine it.
 That changes what the pipeline returns and belongs to its own arm.
 
+## Tick-anchored OCR: built, measured, and it recovers nothing
+
+Publication 177's figure 2 row 4 is labelled 4, 3, 2, 1 and the strip reader
+returned one of the four. Everything else about that panel is right - box,
+spine, four tick marks, fourteen of fifteen inked label columns inside the box -
+so the review's diagnosis was that the question is being asked wrong: one OCR
+attempt over a 226 px strip, where it should be one attempt per TICK.
+
+Built as specified. `TICKOCR=1`, shadow only, never handed the proposal list.
+Per tick: a crop centred on that tick and bounded by half the SMALLEST measured
+gap to its neighbours, at 4x, 6x and 8x, in greyscale and binarised, with
+tesseract asked to read one line, one word, or one character. Every attempt that
+produced a number is kept with its confidence, scale, rendering and psm.
+
+Then `axis_reader.ladder` decides - the same monotone-and-constant-step test
+every ladder here has to pass - over every combination of one read value per row.
+**The progression may only CHOOSE among values that were read.** A row that read
+nothing stays empty and is never filled from the sequence; a value off the line
+is refused, not snapped onto it; and `allow_subset=False`, because a contiguous
+subset would quietly drop a misread row while its tick kept the wrong number.
+Two combinations that both form a ladder are refused rather than tie-broken.
+
+### The result, on six figures and 32 panels
+
+    both routes read          3
+    tick-anchored ONLY        0
+    strip reader ONLY        10
+    neither                  19
+
+**It recovers nothing.** Not P10, which is the panel it was built for.
+
+The diagnosis is specific and it is not about OCR. Run against the raster the
+WINNING PASS produced, P10's four tick rows come out at 842, 917, 993 and 1059,
+and the crop centred on 1059 misses the glyph: its candidates are 4, 7 and 5, and
+no combination of 4, 3, 2 and one of those forms a ladder. Run at the shipped ink
+the same panel's ticks fall at 843, 917, 992 and 1068 and all four digits read -
+`4:843 3:917 2:992 1:1068`, a clean ladder.
+
+The pass's ink is the reason. Publication 177's figure 2 wins on PLAIN at ink 173
+because `REINK` re-cut it when it came up short of its declared fifteen axes -
+a SEGMENTATION decision - and at 173 the single digits erode and the tick runs
+shift. Adding the shipped threshold to the binarisation sweep (both are
+already-measured numbers; neither is new) took P10 from three rows read to four,
+and it still refuses, because the tick ROW moved and the crop moved with it.
+
+    the segmentation pass chooses the raster
+    the raster chooses where the ticks are
+    the tick chooses where the crop is
+    the crop chooses whether the glyph reads
+
+So the next thing to try is not a better reader. It is to detect the ticks and
+read the labels on a raster chosen for READING, independent of the one the cut
+chose - which is a real change with a real risk, because the tick rows are what
+`Y_SCALE_GROUP` compares panels on, and two rasters would mean two signatures.
+
+### Why it is kept
+
+Nothing is promoted. With `TICKOCR` unset every call is a branch not taken and
+the output is byte-identical (`experiments/tick-ocr-off.json`). What it buys is
+the diagnosis above, which no amount of reasoning about the strip reader would
+have produced, and a route that already reads four of five labels on panels the
+strip reader also reads - so the failure is narrow and named rather than general.
+
+FOUR ROUNDS OF THIS PROJECT MEASURED WORSE AND WERE WITHDRAWN. This one measures
+worse and is kept as a shadow, which is a different decision and rests on the
+flag: a shadow that changes nothing costs the corpus nothing, and the alternative
+is deleting the instrument that produced the only precise account of why the
+panel fails.
+
+## The mutation harness moves into the repository, because it failed
+
+`mutate.py`. The matrix is what decides which guards in this package are real,
+and it had been a script in `/tmp` with no lock, no declared baseline and a
+restore that only ran on the happy path. All three failed in one round:
+
+    two copies were started over one tree; the first was still restoring when the
+      second applied its mutation
+    a run killed by a timeout left `SCALES = (3,)` in `tick_ocr.py`
+    the next matrix took that leftover as its baseline and reported one guard
+      unobserved and another observed by a scenario failing for a third reason
+
+So: a LOCK, refused rather than waited on, because two matrices over one tree is
+not a slower run but a wrong answer. A DECLARED HASH per file in the matrix
+itself - the only check that can see a leftover, since a hash taken at start-up
+would take the leftover AS the baseline - with `--stamp` to write it. And RESTORE
+ON SIGNAL, because the way it actually died was a kill.
+
+A per-mutation re-check of the hash was written too, and removed: the restore in
+the `finally` repairs any drift a suite could cause before the next mutation reads
+it, so reverting the check turned nothing red. Decoration by this package's own
+rule, and it is the lock that guards the hazard.
+
+`test_mutate.py` holds the three failures as scenarios, including a kill mid-run
+that must leave the tree clean and the lock gone.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

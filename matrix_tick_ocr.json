@@ -1,0 +1,94 @@
+{
+ "suites": [
+  "test_tick_ocr.py"
+ ],
+ "files": {
+  "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f"
+ },
+ "mutations": [
+  {
+   "name": "the progression fills an empty row",
+   "file": "tick_ocr.py",
+   "old": "    usable = [(r, per_row[r]) for r in rows if per_row.get(r)]",
+   "new": "    usable = [(r, per_row.get(r) or [0.0]) for r in rows]"
+  },
+  {
+   "name": "the ladder check is relaxed to monotone",
+   "file": "tick_ocr.py",
+   "old": "        ok = A.ladder(pairs, allow_subset=False)[0]",
+   "new": "        ok = all(a[0] > b[0] for a, b in zip(pairs, pairs[1:]))"
+  },
+  {
+   "name": "subsets are allowed, so a misread is dropped",
+   "file": "tick_ocr.py",
+   "old": "        ok = A.ladder(pairs, allow_subset=False)[0]",
+   "new": "        ok = A.ladder(pairs, allow_subset=True)[0]"
+  },
+  {
+   "name": "ties are broken instead of refused",
+   "file": "tick_ocr.py",
+   "old": "    if len(distinct) > 1:\n        return [], (\"%d different combinations of the values read form a ladder, \"\n                    \"so the axis is not determined by what was read\"\n                    % len(distinct))",
+   "new": "    if False:\n        pass"
+  },
+  {
+   "name": "the MIN_LABELS floor is dropped",
+   "file": "tick_ocr.py",
+   "old": "    if len(usable) < A.MIN_LABELS:",
+   "new": "    if len(usable) < 1:"
+  },
+  {
+   "name": "the crop height is a constant",
+   "file": "tick_ocr.py",
+   "old": "    half = (min(gaps) // 2) if gaps else reach",
+   "new": "    half = reach"
+  },
+  {
+   "name": "the crop ignores the label side",
+   "file": "tick_ocr.py",
+   "old": "    if side == \"LEFT\":\n        left, right = max(0, int(spine_x) - reach), max(0, int(spine_x))\n    else:\n        left, right = min(w, int(spine_x) + 1), min(w, int(spine_x) + 1 + reach)",
+   "new": "    left, right = max(0, int(spine_x) - reach), max(0, int(spine_x))"
+  },
+  {
+   "name": "agreeing attempts each count as a candidate",
+   "file": "tick_ocr.py",
+   "old": "    return sorted(best.values(), key=lambda t: -t[2])",
+   "new": "    return sorted(cands, key=lambda t: -t[2])"
+  },
+  {
+   "name": "best_per_value keeps the worst confidence",
+   "file": "tick_ocr.py",
+   "old": "        if v not in best or c > best[v][2]:",
+   "new": "        if v not in best or c < best[v][2]:"
+  },
+  {
+   "name": "the binarisation uses a fixed threshold",
+   "file": "tick_ocr.py",
+   "old": "                    Image.fromarray(np.where(arr <= t, 0, 255).astype(\"uint8\"))))",
+   "new": "                    Image.fromarray(np.where(arr <= 128, 0, 255).astype(\"uint8\"))))"
+  },
+  {
+   "name": "the flag read becomes bool()",
+   "file": "tick_ocr.py",
+   "old": "ON = os.environ.get(\"TICKOCR\", \"0\") != \"0\"",
+   "new": "ON = bool(os.environ.get(\"TICKOCR\", \"0\"))"
+  },
+  {
+   "name": "an empty row is silently skipped",
+   "file": "tick_ocr.py",
+   "old": "        T.add(\"TICK_OCR\", panel=label, tick_row=y, box=T.box(cb),\n              outcome=(READ if keep else NO_CANDIDATE),",
+   "new": "        if not keep:\n            continue\n        T.add(\"TICK_OCR\", panel=label, tick_row=y, box=T.box(cb),\n              outcome=(READ if keep else NO_CANDIDATE),"
+  },
+  {
+   "name": "only one magnification is tried",
+   "file": "tick_ocr.py",
+   "old": "SCALES = (4, 6, 8)",
+   "new": "SCALES = (3,)"
+  },
+  {
+   "name": "only the pass's own ink is tried",
+   "file": "tick_ocr.py",
+   "old": "    out = [int(ink)]\n    if int(ink) != int(A.INK_DEFAULT):\n        out.append(int(A.INK_DEFAULT))\n    return out",
+   "new": "    return [int(ink)]"
+  }
+ ]
+}

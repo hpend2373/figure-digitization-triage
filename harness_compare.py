@@ -47,7 +47,7 @@ DEMO_ONLY = "DEMO_ONLY"
 # a reported number must move the arm's code reference too.
 CODE_FILES = ("axis_reader.py", "continuity.py", "propose.py", "x_reader.py",
               "caption.py", "panel_geometry.py", "gate_trace.py",
-              "y_scale_group.py")
+              "y_scale_group.py", "tick_ocr.py")
 
 # Every knob that can change a measurement.  A key absent from the environment
 # is recorded as its default, not omitted, so that "unset" and "set to the
@@ -65,6 +65,7 @@ DERIVED_ENV = {
     "SHADOW_GATE_ENABLED": lambda e: e.get("SHADOWGATE", "0") != "0",
     "RESIDUAL_ENABLED": lambda e: e.get("RESIDUAL", "0") != "0",
     "YGROUP_ENABLED": lambda e: e.get("YGROUP", "0") != "0",
+    "TICKOCR_ENABLED": lambda e: e.get("TICKOCR", "0") != "0",
 }
 
 # Two boxes from different arms are the same physical axis if their spine and

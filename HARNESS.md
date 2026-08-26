@@ -625,6 +625,53 @@ Two things the harness still owes this arm:
     the piece - so it is a same-half completion question and not a partner-ranking
     one, which is what the previous round got wrong.
 
+    TICK-ANCHORED OCR - BUILT, MEASURED, AND IT RECOVERS NOTHING. `TICKOCR=1`.
+    One crop per tick instead of one per strip, at 4x/6x/8x, greyscale and
+    binarised at both the pass's ink and the shipped one, with the progression
+    allowed only to CHOOSE among values that were read - never to fill a gap,
+    never to snap a value into line, and `allow_subset=False` so a misread row
+    cannot be dropped while its tick keeps the wrong number. On six figures and
+    32 panels: 3 read by both routes, 0 by this one alone, 10 by the strip reader
+    alone. The diagnosis is not about OCR: the segmentation pass chooses the
+    raster, the raster moves the tick rows, and the crop moves with them - P10
+    reads 4/3/2/1 cleanly at the shipped ink and refuses at the ink its winning
+    pass chose. Kept as a shadow because it is the instrument that produced that
+    account; promoted to nothing.
+
+    THE MUTATION HARNESS IS `mutate.py`, IN THE REPOSITORY. It decides which
+    guards here are real, and as a script in /tmp it had no lock, no declared
+    baseline and a restore that only ran on the happy path - all three failed in
+    one round, and a matrix came out measuring a leftover mutation as its
+    baseline. Now: a lock refused rather than waited on, a declared per-file hash
+    in the matrix (`--stamp` writes it), and restore on SIGTERM. `matrix_*.json`
+    holds a round's mutations beside the code they revert.
+
+    A CALIBRATION IS THE MAPPING, NOT THE NUMBERS. Two hashes: `value_set_sha`
+    over the numbers the reader returned, and `calibration_sha` over the ordered
+    (value, pixel) PAIRS plus the point count, the scale check and the axis-break
+    state. The first alone was wrong in both directions - two panels printing
+    0/50/100 at different rows hashed the same, and one OCR miss changed the hash
+    of a panel whose mapping had not moved. `panel_geometry.calibration` also
+    reports slope, intercept and the fit residual in PIXELS, which is the only
+    comparison of two calibrations that needs no tolerance.
+
+    A TICK IS INK CONNECTED TO THE SPINE. The first tick detector asked whether
+    any ink lay in a four-column window and let a numeral stroke, a significance
+    bracket and the ink around the baseline in - publication 177 figure 2's panel
+    P01 reported six ticks where its axis has four. `tick_runs` walks outward from
+    the rule's own edge and stops at the first blank column, with one stroke of
+    slack, and RECORDS each mark's length rather than capping it: P01's six read
+    6, 5, 7, 1, 1, 6 - the two spurious ones are single pixels. Comparison is
+    mutual-nearest-neighbour in BOTH directions with the unmatched counted on each
+    side, because a one-way residual cannot see a missing tick.
+
+    A LADDER IS NOT A LICENCE TO LEND IT. `eligibility` refuses a reader whose
+    spine came from the fallback, whose box is a FRAGMENT, or whose axis is
+    broken, and answers UNKNOWN rather than ELIGIBLE when the cells were not
+    supplied. On publication 177's figure 2 it refuses three of the four
+    providers, all for GEOMETRY_UNOBSERVED - their boxes are produced after the
+    anchor search runs, so their axis column was never examined by it.
+
     THE Y SCALE BELONGS TO A ROW GROUP - PROPOSED, NOT APPLIED. `YGROUP=1`.
     Panels are banded by the row overlap of their AXIS RUNS; each band names its
     provider (the one member that read a ladder), its dependants, and the RAW

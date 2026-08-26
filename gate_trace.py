@@ -134,6 +134,24 @@ def last(kind, **match):
     return None
 
 
+def last_in_pass(kind, **match):
+    """`last`, restricted to the pass the CONTEXT names.
+
+    `last` matches on the fields it is given and nothing else, so a box value
+    that two modes both produced is joined to whichever mode wrote it LAST -
+    which is the last one iterated, not the one that won. The SELECTED row's
+    axis status was being read that way: the row said OFF because the context
+    said OFF, and the candidate count behind it could have come from GRID. The
+    same defect as the mislabelled SELECTED rows, one join further down.
+
+    Every context field that is set is part of the match, `png` and `fig`
+    included: two figures in one run share mode and ink, and can share a box.
+    """
+    ctx = {k: v for k, v in CTX.items() if v != ""}
+    ctx.update(match)
+    return last(kind, **ctx)
+
+
 def summary():
     """Counts per kind and per outcome, for a person reading a terminal."""
     if not ROWS:

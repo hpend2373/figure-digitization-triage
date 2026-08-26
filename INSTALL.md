@@ -9477,6 +9477,121 @@ None of this is a threshold, and none of it was reachable before the trace, the
 relation enum and the DAG were in place - which is the argument for having built
 them in that order.
 
+## Where the boxes came from, on 25 figures - and the reading the picture refused
+
+The last round ended by saying panel C's box was a `column_siblings` construction
+with a fallback axis, and that until such a box is attested or withdrawn every
+measurement inside it inherits an unattested column. That is one figure. This
+round asks how often it happens, and the asking needed two joins fixed first.
+
+### Two joins were naming the wrong pass
+
+`gate_trace.last` matches on the fields it is handed and nothing else, so the
+axis candidates behind a SELECTED row were joined by BOX ALONE - and the row that
+wins is written after the mode loop has moved on. 475 figure 1 wins on OFF and
+ends on GRID; a box both modes produced was joined to GRID's candidates under
+OFF's name. `last_in_pass` merges the whole context into the match, `png` and
+`fig` included, because two figures in one run share mode and ink and can share a
+box value.
+
+`REGIONS` had the same shape of defect one structure over: `panels()` clears the
+DAG per call, so after the loop it holds the LOSING pass's provenance.
+`snapshot_regions` / `restore_regions` keep one per pass and put back the
+winner's. Both are the mislabelled-SELECTED defect again, and both were found by
+looking for it rather than by being surprised.
+
+### What the DAG says about the boxes
+
+`roots_of(rid)` returns the transforms of a region's PARENTLESS ancestors.
+`CUT_HALF` is the honest root: the box came out of the whitespace cut. Anything
+else means a transform INVENTED the box. `constructed` is written as "not every
+root is CUT_HALF" rather than as a list of the transforms that count, because the
+list is what gets forgotten when the next transform is added.
+
+Twenty-five figures, 91 selected panels:
+
+    roots                    n
+    CUT_HALF                57
+    COLUMN_SIBLING          13
+    BROAD_SLAB              12
+    RULE_CELL                5
+    BROAD_SLAB;CUT_HALF      4
+
+**34 of 91 selected panels - 37% - sit in a box no cut produced, on 12 of the 25
+figures.** That number was not measurable before this round, and it is the
+finding.
+
+### The first reading of the table, and why it is wrong
+
+    ALL 91          ATTESTED  GEOMETRY_ONLY  FALLBACK  UNRESOLVED   n   ladder
+    cut                   43              9         2           3  57   47/57
+    constructed           18             10         5           1  34   23/34
+
+Read alone that says invented boxes carry worse axes. Publication 177's figure 2
+supplies 8 of the 13 `COLUMN_SIBLING` panels, so the picture was drawn - and the
+picture says the ladder fails on ten of its fifteen panels REGARDLESS of how the
+box arrived. It is a five-by-three grid, and it prints its y axis numerals ONCE
+PER ROW. P02, P03, P05, P06 are cut boxes and refuse; P08, P09, P11, P12, P14,
+P15 are invented ones and refuse; P01, P04, P07, P13 are the leftmost of their
+rows and read. The discriminator is the COLUMN, not the origin.
+
+`AXIS_ATTESTED` is defined as "a candidate whose ladder reads". A panel that
+shares its row's axis therefore cannot be attested however well its box is drawn,
+and a table that does not hold those apart is measuring the figure's layout.
+
+### So the strip is measured: is there anything printed to read
+
+`panel_geometry.label_ink` counts inked columns where numerals sit - over the
+AXIS RUN and not the box, within `LABEL_BAND_MAX` of the spine, skipping the
+`RULE_MAX_W` columns the tick marks occupy. On 177 figure 2 the two populations
+are not close: the four panels that read measure 32, 32, 29, 28, and the panels
+with a bare spine measure 2, 3, 3, 3, 3, 4.
+
+Across the corpus, of the 21 refused ladders **8 have four or fewer inked columns
+beside the axis** - refusals of a blank strip, which is the figure's layout and
+not a failure. NOTHING TURNS THE COUNT INTO A VERDICT: the values run
+2, 3, 4, 16, 17, 18, 20, 22, 24, 26, 27, 32, 34, 48, 56, and any line drawn
+through that is a constant nobody measured. The count is reported, and so is
+`row_left_reader` - whether a panel in the same rows to the left reads a ladder -
+which is structural and needs no threshold at all.
+
+    NO LEFT READER  ATTESTED  GEOMETRY_ONLY  FALLBACK  UNRESOLVED   n   ladder
+    cut                   29              4         2           2  37   33/37
+    constructed           15              6         4           0  25   19/25
+
+    by root, same subset
+    CUT_HALF              29              4         2           2  37   33/37
+    BROAD_SLAB             5              3         2           0  10    7/10
+    COLUMN_SIBLING         2              3         2           0   7    4/7
+    BROAD_SLAB;CUT_HALF    4              0         0           0   4    4/4
+    RULE_CELL              4              0         0           0   4    4/4
+
+The gap narrows and the per-transform rows are 4, 4, 7 and 10 panels wide. NO
+RANKING OF THE TRANSFORMS IS SUPPORTED AT THESE NUMBERS, and the round does not
+make one. What survives is the 37%, the fact that it is now visible per panel,
+and the fact that the first reading of it was an artefact that a picture caught.
+
+### And panel C is still panel C
+
+    475 Fig. 1  P04  101,268,499,627  INVENTED  AXIS_FALLBACK  ink 23 from x=207
+                                      no left reader           LADDER_OK
+
+Its strip is not blank - 23 inked columns, five pixels from the spine - and its
+ladder reads. Its box covers one of the panel's three box-plot groups. So the
+shared-axis explanation does not cover it, and the previous round's reading of it
+stands unchanged.
+
+### Two losses worth recording
+
+The container was reclaimed mid-round and the working directory went with it.
+Everything through `2f481aa` was pushed, so the code came back from the
+repository and the restored container reproduced the recorded output hash
+`c8e073ad...` exactly - which is what `experiments/*.json` is for. What did NOT
+come back was `png/capt.py`, which had never been committed, so every renderer in
+that folder stopped running from a clean checkout. It is committed now. The
+caption scan `captions.csv` was already gone the same way, and is recorded as
+absent rather than quietly missing.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

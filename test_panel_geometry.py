@@ -83,6 +83,23 @@ def left_axis_figure(s, sparse_plot=False, title=True):
     return d
 
 
+def shared_axis_figure(s):
+    """The SECOND panel of a row in a grid figure: spine, tick marks, bars - and
+    no numerals, because the figure prints them once per row.
+
+    Publication 177's figure 2 is five rows of three drawn exactly this way, and
+    ten of its fifteen panels refuse the ladder for want of anything to read.
+    """
+    d = canvas(300 * s, 200 * s)
+    rect(d, 50 * s, 50 * s, 40 * s, 140 * s)          # spine
+    for row in (45, 90, 135):
+        rect(d, 47 * s, 50 * s, row * s, row * s + 2 * s)   # tick marks only
+    rect(d, 50 * s, 250 * s, 140 * s, 140 * s)        # baseline
+    for bx in (70, 110, 150, 190):
+        rect(d, bx * s, bx * s + 20 * s, 60 * s, 140 * s)
+    return d
+
+
 def wide_axis_figure(s):
     """The same panel, printed wide: the axis title lies 240s px from the spine.
 
@@ -464,6 +481,82 @@ class Columns(unittest.TestCase):
         self.assertIn("geom_note", existing,
                       "the failure column has to be written too, or a geometry "
                       "that failed is indistinguishable from one that found nothing")
+        RUN += 1
+
+
+class IsThereAnythingPrintedBesideTheAxis(unittest.TestCase):
+    """`label_ink` is not "can OCR read it" - it is "is there anything to read".
+
+    THIS MEASURE IS NOT SCALE FREE and is the second place in this module where a
+    pixel constant survives, after the band walk. It inherits `LABEL_BAND_MAX`
+    and `RULE_MAX_W` from `axis_reader`, and `RULE_MAX_W` is what keeps a tick
+    mark from counting as a numeral - so at 3x, where a tick mark is 9 px of ink
+    and the exclusion is still 4 columns, part of the tick is counted. That is
+    recorded below as a scenario rather than left for someone to discover, and it
+    is why nothing in the pipeline turns this count into a verdict.
+    """
+
+    def test_numerals_beside_the_axis_are_ink_and_tick_marks_are_not(self):
+        """The whole point: publication 177's figure 2 refuses ten ladders and
+        nine of them have nothing printed beside them. Counting that as a failed
+        reading counts the figure's own layout as a defect.
+        Guard: the RULE_MAX_W exclusion."""
+        global RUN
+        d = left_axis_figure(1)
+        cols, near = G.label_ink(d, (25, 250, 35, 150), 50, 140)
+        self.assertGreater(cols, 0)
+        self.assertEqual(near, 40)
+        bare = shared_axis_figure(1)
+        self.assertEqual(G.label_ink(bare, (25, 250, 35, 150), 50, 140), (0, None))
+        RUN += 1
+
+    def test_at_three_times_the_tick_mark_is_counted_and_that_is_known(self):
+        """A pixel constant against a scaled figure. Written down, because the
+        alternative is a number that quietly means something else at 3x."""
+        global RUN
+        bare = shared_axis_figure(3)
+        cols, _near = G.label_ink(bare, (75, 750, 105, 450), 150, 420)
+        self.assertGreater(cols, 0, "the constant stopped being a constant")
+        RUN += 1
+
+    def test_the_neighbouring_panel_is_not_this_panels_numerals(self):
+        """LABEL_BAND_MAX bounds the window; without it the strip runs left until
+        it hits the panel next door and every panel in a row reports numerals."""
+        global RUN
+        d = wide_axis_figure(1)                # numerals at 230-240, spine at 250
+        self.assertGreater(G.label_ink(d, (200, 450, 35, 150), 250, 140)[0], 0)
+        # The box reaches to x=100; the window stops LABEL_BAND_MAX from the
+        # spine, at x=190. Ink at 120-130 is the panel next door's business and
+        # a window taken from the box's own edge would count it.
+        far = canvas(500, 200)
+        rect(far, 120, 130, 45, 135)
+        rect(far, 250, 250, 40, 140)
+        rect(far, 250, 450, 140, 140)
+        self.assertEqual(G.label_ink(far, (100, 450, 35, 150), 250, 140), (0, None))
+        RUN += 1
+
+    def test_it_is_measured_over_the_axis_run_and_not_the_box(self):
+        """The x axis title sits below the run. It is not a y numeral, and a
+        window taken from the box's rows would count it."""
+        global RUN
+        d = shared_axis_figure(1)
+        rect(d, 20, 45, 160, 170)              # an x axis title, below the run
+        self.assertEqual(G.label_ink(d, (25, 250, 35, 180), 50, 140), (0, None))
+        RUN += 1
+
+    def test_the_mirror_measures_the_side_its_axis_faces(self):
+        global RUN
+        d = right_axis_figure(1)
+        cols, near = G.label_ink(d, (40, 275, 35, 150), 250, 140)
+        self.assertGreater(cols, 0)
+        self.assertEqual(near, 260)
+        RUN += 1
+
+    def test_a_run_too_short_to_measure_is_empty_and_not_an_error(self):
+        """A reporting column may not end a run."""
+        global RUN
+        d = left_axis_figure(1)
+        self.assertEqual(G.label_ink(d, (25, 250, 100, 102), 50, 140), (0, None))
         RUN += 1
 
 

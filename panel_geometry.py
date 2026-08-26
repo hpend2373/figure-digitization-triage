@@ -194,6 +194,46 @@ def label_strip(dark, box, spine_x, baseline_y, side=None, floor=None,
     return (sx, max(cols), top, bottom)
 
 
+def label_ink(dark, box, spine_x, baseline_y, side=None, floor=None):
+    """(inked columns, nearest inked column to the spine) where numerals sit.
+
+    NOT "can OCR read it" - "is there anything there to read". A grid figure
+    prints its y axis numerals ONCE PER ROW and leaves the other panels a bare
+    spine with tick marks: publication 177's figure 2 is five rows of three, and
+    ten of its fifteen panels refuse the ladder because there is nothing printed
+    beside them. Counting that as a failed reading is counting the figure's own
+    layout as a defect, and it is what made the first draft of the provenance
+    table read as "invented boxes have worse axes".
+
+    Three bounds, all of them constants this file already has a use for:
+
+        the AXIS RUN, not the box  - the x axis title sits below the run and is
+                                     not a y numeral
+        LABEL_BAND_MAX from spine  - past that is the neighbouring panel
+        RULE_MAX_W beside it       - a tick mark is 1 to 4 columns of the axis
+                                     itself, and every panel has them
+    """
+    x0, x1, y0, y1 = (int(v) for v in box)
+    side = side or label_side(dark, box, spine_x, baseline_y)
+    top, bottom = axis_extent(dark, box, spine_x)
+    top, bottom = max(top, y0), min(bottom, y1)
+    if floor is not None:
+        bottom = min(bottom, int(floor))
+    if bottom - top < 4:
+        return 0, None
+    sx = int(spine_x)
+    if side == LEFT:
+        lo = max(0, sx - A.LABEL_BAND_MAX)
+        hi = max(lo, sx - A.RULE_MAX_W)
+    else:
+        lo = min(dark.shape[1], sx + A.RULE_MAX_W + 1)
+        hi = min(dark.shape[1], sx + A.LABEL_BAND_MAX + 1)
+    cols = [x for x in range(lo, hi) if dark[top:bottom, x].any()]
+    if not cols:
+        return 0, None
+    return len(cols), (max(cols) if side == LEFT else min(cols))
+
+
 def numeral_band(dark, box, spine_x, baseline_y, side=None, floor=None,
                  max_reach=180):
     """The tight strip OCR is pointed at, inside the owned one, or None.

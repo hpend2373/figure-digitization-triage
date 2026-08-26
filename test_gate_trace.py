@@ -1074,6 +1074,141 @@ class AncestorRegionCompletion(unittest.TestCase):
         RUN[0] += 1
 
 
+class WhichPassAJoinBelongsTo(unittest.TestCase):
+    """The SELECTED row names the winning pass. So must everything joined to it."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on = T.ON; T.ON = True
+
+    def tearDown(self):
+        T.ON = self._on
+
+    def test_last_takes_the_last_pass_and_last_in_pass_takes_this_one(self):
+        """475 figure 1 wins on OFF and ends on GRID. `last` matches on the
+        fields it is given and nothing else, so the axis candidates behind an
+        OFF row could be GRID's - the mislabelled-SELECTED defect, one join
+        further down. Guard: the CTX merge in last_in_pass."""
+        T.context(pid="475", fig="Fig. 1", png="a.png", mode="OFF", ink=140)
+        T.add("AXIS_CANDIDATES", box="1,2,3,4", n_free=3)
+        T.context(mode="GRID", ink=151)
+        T.add("AXIS_CANDIDATES", box="1,2,3,4", n_free=0)
+        T.context(mode="OFF", ink=140)
+        self.assertEqual(T.last("AXIS_CANDIDATES", box="1,2,3,4")["n_free"], 0)
+        self.assertEqual(T.last_in_pass("AXIS_CANDIDATES", box="1,2,3,4")["n_free"], 3)
+        RUN[0] += 1
+
+    def test_two_figures_in_one_run_are_two_passes(self):
+        """They share mode and ink, and they can share a box value. A join on the
+        pass alone would hand one figure the other's axis.
+        Guard: every set context field being part of the match."""
+        T.context(pid="475", fig="Fig. 1", png="a.png", mode="OFF", ink=140)
+        T.add("AXIS_CANDIDATES", box="1,2,3,4", n_free=7)
+        T.context(pid="397", fig="Fig. 1", png="b.png")
+        T.add("AXIS_CANDIDATES", box="1,2,3,4", n_free=1)
+        T.context(pid="475", fig="Fig. 1", png="a.png")
+        self.assertEqual(T.last_in_pass("AXIS_CANDIDATES", box="1,2,3,4")["n_free"], 7)
+        RUN[0] += 1
+
+    def test_a_pass_that_wrote_nothing_joins_to_nothing(self):
+        """A join that falls back to another pass when its own is empty is worse
+        than an empty cell: it reports a number for a measurement never made."""
+        T.context(pid="475", fig="Fig. 1", png="a.png", mode="GRID", ink=151)
+        T.add("AXIS_CANDIDATES", box="1,2,3,4", n_free=0)
+        T.context(mode="OFF", ink=140)
+        self.assertIsNone(T.last_in_pass("AXIS_CANDIDATES", box="1,2,3,4"))
+        RUN[0] += 1
+
+
+class BoxProvenance(unittest.TestCase):
+    """Whether a panel's box was cut out of the figure or invented."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on = T.ON; T.ON = True
+        A.REGIONS.clear(); A._REGION_AT.clear(); A._REGION_SEQ[0] = 0
+
+    def tearDown(self):
+        T.ON = self._on
+
+    def test_a_cut_line_is_rooted_at_the_cut(self):
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        b = A.region((0, 90, 0, 90), A.TRIM, parents=(a,))
+        c = A.region((0, 90, 0, 90), A.CAPTION_TRIM, parents=(b,))
+        self.assertEqual(A.roots_of(c), [A.CUT_HALF])
+        self.assertFalse(A.constructed(c))
+        RUN[0] += 1
+
+    def test_a_box_no_ink_was_asked_about_says_so(self):
+        """Publication 475's figure 1's panel C: `column_siblings` produced it
+        from 0 overlapping parents, so it was drawn from the other panels'
+        geometry rather than found. Guard: roots_of."""
+        c = A.region((200, 300, 0, 100), A.COLUMN_SIBLING, note="from 0 overlapping")
+        d = A.region((200, 300, 0, 100), A.ADOPT, parents=(c,))
+        self.assertEqual(A.roots_of(d), [A.COLUMN_SIBLING])
+        self.assertTrue(A.constructed(d))
+        RUN[0] += 1
+
+    def test_a_transform_nobody_listed_still_counts_as_constructed(self):
+        """Written as "not every root is CUT_HALF" and not as a list of the
+        transforms that count, because the transform added next round is the one
+        that would be missing from the list and its boxes would report as cut out
+        of the figure. Guard: the `!= CUT_HALF` test."""
+        t = A.region((0, 10, 0, 10), A.TRIM, note="orphaned line")
+        self.assertTrue(A.constructed(t))
+        RUN[0] += 1
+
+    def test_a_box_with_two_lines_reports_both_roots(self):
+        """A merge of a cut piece and a constructed one is neither, and naming it
+        by whichever root was found first is the tie-break this project keeps
+        having to withdraw."""
+        a = A.region((0, 100, 0, 100), A.CUT_HALF)
+        c = A.region((90, 200, 0, 100), A.COLUMN_SIBLING)
+        m = A.region((0, 200, 0, 100), A.MERGE, parents=(a, c))
+        self.assertEqual(A.roots_of(m), [A.COLUMN_SIBLING, A.CUT_HALF])
+        self.assertTrue(A.constructed(m))
+        RUN[0] += 1
+
+    def test_a_box_the_dag_never_saw_is_empty_and_not_an_error(self):
+        """A reporting column may not end a run, and every panel measured before
+        the DAG existed - every panel, when the trace is off - is a box the DAG
+        never saw. Guard: the `rid not in REGIONS` return in ancestors(); a
+        second check inside provenance_of was tried and removed, because
+        reverting it turned nothing red."""
+        self.assertEqual(A.provenance_of((1, 2, 3, 4)), (None, [], []))
+        A.region((0, 100, 0, 100), A.CUT_HALF)
+        A.REGIONS[999] = {"box": (0, 1, 0, 1), "transform": A.TRIM,
+                          "parents": [4242], "note": "", "same_box": False}
+        self.assertEqual(A.roots_of(999), [])
+        RUN[0] += 1
+
+    def test_the_snapshot_survives_the_next_pass(self):
+        """`panels()` clears the DAG per call and the winning pass is almost
+        never the last one iterated, so reading REGIONS after the mode loop reads
+        the LOSER'S provenance under the winner's name.
+        Guard: snapshot_regions / restore_regions."""
+        won = A.region((0, 100, 0, 100), A.CUT_HALF)
+        snap = A.snapshot_regions()
+        A.REGIONS.clear(); A._REGION_AT.clear(); A._REGION_SEQ[0] = 0
+        A.region((0, 100, 0, 100), A.COLUMN_SIBLING)
+        self.assertTrue(A.constructed(A.region_at((0, 100, 0, 100))))
+        A.restore_regions(snap)
+        self.assertEqual(A.region_at((0, 100, 0, 100)), won)
+        self.assertFalse(A.constructed(won))
+        RUN[0] += 1
+
+    def test_the_snapshot_is_a_copy_and_not_a_view(self):
+        """A snapshot that aliases the live dict is not a snapshot, and the
+        aliasing only shows up on the pass that adds a region."""
+        A.region((0, 100, 0, 100), A.CUT_HALF)
+        snap = A.snapshot_regions()
+        A.region((0, 50, 0, 50), A.COLUMN_SIBLING)
+        self.assertEqual(len(snap[0]), 1)
+        A.restore_regions(snap)
+        self.assertEqual(len(A.REGIONS), 1)
+        RUN[0] += 1
+
+
 if __name__ == "__main__":
     loaded = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(loaded)

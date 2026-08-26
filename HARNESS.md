@@ -625,6 +625,16 @@ Two things the harness still owes this arm:
     the piece - so it is a same-half completion question and not a partner-ranking
     one, which is what the previous round got wrong.
 
+    BOX PROVENANCE - BUILT. Every SELECTED row now carries `origin_roots` and
+    `constructed`, from the DAG: `CUT_HALF` means the box came out of the
+    whitespace cut, anything else means a transform invented it. On 25 figures,
+    34 of 91 selected panels sit in an invented box. The row also carries
+    `label_ink_cols` - is there anything printed beside this axis to read - and
+    `row_left_reader`, because a grid figure prints its y numerals once per row
+    and 8 of the corpus's 21 refused ladders are refusals of a blank strip.
+    Reported; no threshold turns either into a verdict. See INSTALL.md, "Where
+    the boxes came from, on 25 figures".
+
     THE RESIDUAL COMPLETION - BUILT. `RESIDUAL=1`. For a piece that CONTAINS a
     panel, the panel's plot core is subtracted from the piece, the remaining ink
     is split into connected components, and each one is asked five statements

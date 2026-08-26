@@ -630,6 +630,73 @@ def origin_transforms(rid):
     return out
 
 
+def constructed(rid):
+    """Does this region's line reach anything other than the whitespace cut?
+
+    Written as "not every root is CUT_HALF" and not as a list of the transforms
+    that count, because the list would have to be kept in step with every
+    transform added later, and the one that got forgotten would silently report
+    its boxes as cut out of the figure. `column_siblings`, `broad_slabs` and
+    `panels_from_rules` all INVENT boxes; so would the next one.
+    """
+    roots = roots_of(rid)
+    return bool(roots) and any(t != CUT_HALF for t in roots)
+
+
+def roots_of(rid):
+    """The transforms of this region's PARENTLESS ancestors, sorted.
+
+    `CUT_HALF` is the honest root: the box came out of the whitespace cut. Any
+    other root means the transform invented the box rather than deriving it, and
+    `_register_pass` says so at the time ("from 0 overlapping") - but that note is
+    on one region, and what a reader of the SELECTED row needs is the answer for
+    the whole line.
+    """
+    out = set()
+    for r in ancestors(rid):
+        if not REGIONS[r]["parents"]:
+            out.add(REGIONS[r]["transform"])
+    return sorted(out)
+
+
+def provenance_of(box):
+    """(region id, roots, chain) for a box VALUE, or (None, [], []).
+
+    The chain is `origin_transforms`, nearest first. Both are reported; neither
+    is acted on. A panel that turns out to be a construction is not thereby wrong
+    - `column_siblings` exists because the cut misses panels - it is a panel whose
+    box no ink was asked about, which is a different thing from a panel that was
+    found.
+    """
+    rid = region_at(box)
+    # NO GUARD FOR THE MISSING BOX. `ancestors` and `origin_transforms` already
+    # answer emptily for an id the DAG does not hold, and a second check in front
+    # of them was decoration: reverting it changed no scenario, which is the test
+    # this project applies to a guard before keeping it.
+    return rid, roots_of(rid), origin_transforms(rid)
+
+
+def snapshot_regions():
+    """The DAG as it stands, for one pass, so a later pass cannot overwrite it.
+
+    `panels()` clears the DAG per call, and the mode loop calls it once per mode
+    and ink. The winning pass is almost never the last one iterated - 475 figure 1
+    wins on OFF and ends on GRID - so reading `REGIONS` after the loop reads the
+    LOSER'S provenance under the winner's name. This is the same defect as the
+    mislabelled SELECTED rows, one structure over.
+    """
+    return (dict(REGIONS), dict(_REGION_AT), _REGION_SEQ[0])
+
+
+def restore_regions(snap):
+    if not snap:
+        return
+    regions, at, seq = snap
+    REGIONS.clear(); REGIONS.update(regions)
+    _REGION_AT.clear(); _REGION_AT.update(at)
+    _REGION_SEQ[0] = seq
+
+
 #: box -> what cut produced it. Written by `_cut`, read by the shadow gate.
 #: NOT a decision: a piece's lineage does not adopt it, it only makes the
 #: question "is this piece the other half of the cut that made that panel?"

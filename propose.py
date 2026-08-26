@@ -235,6 +235,10 @@ for r in rows:
     A.FIG_TARGET = max(len(cap_panels), declared)
     best = None
     figure_refusals = {}
+    # THE DAG BELONGS TO A PASS. `panels()` clears it per call, so after the loop
+    # it holds whatever the LAST mode produced - and 475 figure 1 wins on OFF and
+    # ends on GRID. Kept per pass and put back for the one that won.
+    region_snap = {}
     # THE SECOND THRESHOLD IS ASKED ONLY OF A FIGURE THAT CAME UP SHORT, and asked
     # the same way: all four modes, same score, ladder still deciding.
     inks = [A.INK_DEFAULT]
@@ -263,6 +267,8 @@ for r in rows:
             # three quarters back to half an hour.
             tags = dict(A.HARNESS_TAG)
             figure_refusals[(ink, mode)] = list(A.FIGURE_BOXES)
+            if T.ON:
+                region_snap[(ink, mode)] = A.snapshot_regions()
             # THE GATE COUNTS WHAT THE CUT PRODUCED, NOT WHAT THE HARNESS PUT BACK.
             _added = ("EXTENDED_TO_SPINE", "ADOPTED_ORPHAN")
             n_cut = sum(1 for b in boxes + loose
@@ -308,7 +314,9 @@ for r in rows:
     # at 140. A trace that mislabels which pass it is describing is worse than none.
     T.context(mode=mode, ink=ink)
     if T.ON:
-        T.add("SELECTED_PASS", score=str(score), n_rows=len(recs))
+        A.restore_regions(region_snap.get((ink, mode)))
+        T.add("SELECTED_PASS", score=str(score), n_rows=len(recs),
+              n_regions=len(A.REGIONS))
     ink_note = ("" if ink == A.INK_DEFAULT else
                 "RE_INKED: at the shipped threshold this figure came up short of the "
                 "%d axes recorded for it, so it was cut again at the grey the figure "
@@ -369,10 +377,33 @@ for r in rows:
                 # being read.
                 rec["geom_note"] = "GEOMETRY_FAILED: %s: %s" % (type(exc).__name__, exc)
         if T.ON:
-            _ac = T.last("AXIS_CANDIDATES", box=T.box((rec["x0"], rec["x1"],
-                                                       rec["y0"], rec["y1"])))
-            _fb = T.last("AXIS_FALLBACK", box=T.box((rec["x0"], rec["x1"],
-                                                     rec["y0"], rec["y1"])))
+            _bx = T.box((rec["x0"], rec["x1"], rec["y0"], rec["y1"]))
+            # IN THIS PASS. The context already names the winning mode and ink;
+            # the join behind these two rows has to name it as well.
+            _ac = T.last_in_pass("AXIS_CANDIDATES", box=_bx)
+            _fb = T.last_in_pass("AXIS_FALLBACK", box=_bx)
+            _rid, _roots, _chain = A.provenance_of((rec["x0"], rec["x1"],
+                                                    rec["y0"], rec["y1"]))
+            # IS THERE ANYTHING PRINTED BESIDE THIS AXIS, and does a panel in the
+            # same rows to its LEFT read a ladder? A grid figure labels its y axis
+            # once per row - publication 177's figure 2 is five rows of three -
+            # and ten of its fifteen panels refuse the ladder because nothing is
+            # printed beside them. Both are REPORTED as measured; no threshold
+            # turns them into a verdict, because the counts run 2, 3, 13, 15, 24,
+            # 30 and any line drawn through that is a constant nobody measured.
+            _ink_cols, _ink_from = 0, None
+            if rec.get("spine_x") is not None and rec.get("baseline_y") is not None:
+                try:
+                    _ink_cols, _ink_from = PG.label_ink(
+                        gdark, (rec["x0"], rec["x1"], rec["y0"], rec["y1"]),
+                        rec["spine_x"], rec["baseline_y"], floor=A.CAP_FLOOR)
+                except Exception:
+                    _ink_cols, _ink_from = "", ""
+            _left = [o for o in recs
+                     if o is not rec and o["x1"] <= rec["x0"]
+                     and (min(o["y1"], rec["y1"]) - max(o["y0"], rec["y0"]))
+                     >= A.ADOPT_SHARE * min(o["y1"] - o["y0"],
+                                            rec["y1"] - rec["y0"])]
             T.add("SELECTED", panel="P%02d" % i, box=T.box((rec["x0"], rec["x1"],
                                                             rec["y0"], rec["y1"])),
                   axis_status=T.axis_status(
@@ -382,6 +413,12 @@ for r in rows:
                       rec.get("status") == "LADDER_OK"),
                   axis_from=("anchor" if (_ac and _ac.get("selected_x") != "")
                              else ("fallback" if _fb else "?")),
+                  label_ink_cols=_ink_cols, label_ink_from=_ink_from,
+                  row_left_panels=len(_left),
+                  row_left_reader=any(o.get("status") == "LADDER_OK" for o in _left),
+                  region_id=_rid, origin_roots=";".join(_roots),
+                  constructed=(bool(_rid) and A.constructed(_rid)),
+                  origin_chain=";".join(_chain[:6]),
                   spine_x=rec.get("spine_x"), baseline_y=rec.get("baseline_y"),
                   status=rec.get("status"), n_labels=rec.get("n_labels"),
                   n_bars=rec.get("n_bars"), fragment="; ".join(frag),

@@ -148,14 +148,14 @@ check("  and one pointed at another panel's axis is refused too",
 _A_POINT = dict(Series_ID=sorted(_axis_of)[0], point_px_x=400.0, point_px_y=300.0,
                 Identity_Method="FIXTURE_DECLARED")
 try:
-    AG.stamp_points([_A_POINT], _axis_of, AXES, "Y_LEFT", PANEL, IMAGE_SHA)
+    AG.stamp_points([_A_POINT], SERIES, AXES, "Y_LEFT", PANEL, IMAGE_SHA)
     _xrole = ""
 except ValueError as exc:
     _xrole = "%s" % exc
 check("  and stamping against a Y axis as if it were X is refused",
       AG.X_WRONG_DIMENSION in _xrole, "%r" % (_xrole,))
 try:
-    AG.stamp_points([_A_POINT], _axis_of, _other + [
+    AG.stamp_points([_A_POINT], SERIES, _other + [
         dict(AXES[0], Axis_ID="X_P2", Panel_ID="OTHER")], "X_P2", PANEL, IMAGE_SHA)
     _xpanel = ""
 except ValueError as exc:
@@ -169,7 +169,7 @@ POINTS = [dict(Series_ID=sid, series=sid, point_px_x=cx, point_px_y=cy,
                Identity_Method="FIXTURE_DECLARED")
           for sid, spec in sorted(R["series"].items())
           for cx, cy in spec["centres"]]
-STAMPED = AG.stamp_points(POINTS, _axis_of, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
+STAMPED = AG.stamp_points(POINTS, SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
 
 print()
 print("what reading a series on the wrong axis costs, measured")
@@ -178,7 +178,8 @@ print("what reading a series on the wrong axis costs, measured")
 # the two differ by the ratio the fixture was drawn with.
 _wrong = AG.stamp_points(
     [p for p in POINTS if _axis_of[p["Series_ID"]] == "Y_RIGHT"],
-    {sid: "Y_LEFT" for sid in _axis_of}, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
+    [dict(Series_ID=sid, Axis_ID="Y_LEFT") for sid in _axis_of], AXES,
+    "X_BOTTOM", PANEL, IMAGE_SHA)
 _right = [r for r in STAMPED if r["Axis_ID"] == "Y_RIGHT"]
 _ratio = [w["y_value"] / r["y_value"] for w, r in zip(_wrong, _right)]
 check("the right-hand series on the left calibration is wrong by 0.3 to 0.4x",
@@ -195,12 +196,12 @@ check("all %d points are calibrated and hashed" % len(POINTS),
           for r in STAMPED), "%d of %d" % (
           sum(1 for r in STAMPED if r["Point_Record_SHA256"]), len(STAMPED)))
 check("  and every one of them re-derives from its own pixel",
-      AG.verify_points(STAMPED, AXES, "X_BOTTOM", PANEL, IMAGE_SHA) == [],
-      "%r" % (AG.verify_points(STAMPED, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[:3],))
+      AG.verify_points(STAMPED, SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA) == [],
+      "%r" % (AG.verify_points(STAMPED, SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[:3],))
 # A POINT WHOSE SERIES NAMES NO AXIS IS NOT CALIBRATED AT ALL. Not calibrated
 # against a default: a value on an unknown scale is what this module exists to
 # prevent.
-_orphan = AG.stamp_points([dict(POINTS[0], Series_ID="S_UNKNOWN")], _axis_of,
+_orphan = AG.stamp_points([dict(POINTS[0], Series_ID="S_UNKNOWN")], SERIES,
                           AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[0]
 check("  a point whose series has no axis gets no value and no hash",
       _orphan["y_value"] is None and not _orphan["Point_Record_SHA256"]
@@ -213,7 +214,7 @@ print("a recalibrated axis moves the hashes of ITS points and no others")
 # each scale, so a change to one scale must be visible on exactly half.
 _moved = [AXES[0], AXES[1],
           dict(AXES[2], Calibration_Points=[[20, 449], [90, 61]])]
-_after = AG.stamp_points(POINTS, _axis_of, _moved, "X_BOTTOM", PANEL, IMAGE_SHA)
+_after = AG.stamp_points(POINTS, SERIES, _moved, "X_BOTTOM", PANEL, IMAGE_SHA)
 _left_same = all(a["Point_Record_SHA256"] == b["Point_Record_SHA256"]
                  for a, b in zip(STAMPED, _after) if a["Axis_ID"] == "Y_LEFT")
 _right_moved = all(a["Point_Record_SHA256"] != b["Point_Record_SHA256"]
@@ -235,10 +236,10 @@ _TWIN_SAME = [AXES[0],
               dict(AXES[2], Axis_ID="Y_B", Unit="beats/min",
                    Calibration_Points=R["left_y_ticks"])]
 _one = dict(POINTS[0], Series_ID="S")
-_on_a = AG.stamp_points([_one], {"S": "Y_A"}, _TWIN_SAME, "X_BOTTOM", PANEL,
-                        IMAGE_SHA)[0]
-_on_b = AG.stamp_points([_one], {"S": "Y_B"}, _TWIN_SAME, "X_BOTTOM", PANEL,
-                        IMAGE_SHA)[0]
+_on_a = AG.stamp_points([_one], [dict(Series_ID="S", Axis_ID="Y_A")], _TWIN_SAME,
+                        "X_BOTTOM", PANEL, IMAGE_SHA)[0]
+_on_b = AG.stamp_points([_one], [dict(Series_ID="S", Axis_ID="Y_B")], _TWIN_SAME,
+                        "X_BOTTOM", PANEL, IMAGE_SHA)[0]
 check("two axes with the same numbers still hash their points apart",
       _on_a["Point_Record_SHA256"] != _on_b["Point_Record_SHA256"]
       and abs(_on_a["y_value"] - _on_b["y_value"]) < 1e-9,
@@ -342,7 +343,7 @@ _a = next(i for i, r in enumerate(_swap) if r["Series_ID"] == _left_series[0])
 _b = next(i for i, r in enumerate(_swap) if r["Series_ID"] == _left_series[1])
 _swap[_a]["Series_ID"], _swap[_b]["Series_ID"] = (_swap[_b]["Series_ID"],
                                                   _swap[_a]["Series_ID"])
-_bad = dict(AG.verify_points(_swap, AXES, "X_BOTTOM", PANEL, IMAGE_SHA))
+_bad = dict(AG.verify_points(_swap, SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA))
 check("swapping two same-axis points' series refuses both of them",
       _a in _bad and _b in _bad
       and all("hash does not cover" in _bad[i] for i in (_a, _b))
@@ -354,21 +355,26 @@ _ROUTED = dict(Series_ID=_left_series[0], point_px_x=400.0, point_px_y=300.0,
                Identity_Method="MEASURED_MARKER_SHAPE_FILL", shape="CIRCLE",
                fill="OPEN", third_harmonic=0.041, interior_ink=0.07,
                shape_threshold=0.061, fill_threshold=0.684,
-               Original_Component_ID=7, Foreign_Ink_Fraction=0.0)
-_stamped_one = AG.stamp_points([_ROUTED], _axis_of, AXES, "X_BOTTOM", PANEL,
+               Original_Component_ID=7, Foreign_Ink_Fraction=0.0,
+               marker_scale_px=34.0, side_px=37.0, aspect=1.028,
+               size_ratio=1.088, off_centre_ink=0.041,
+               off_centre_threshold=0.25, off_centre_margin=0.209,
+               Marker_Validity_Status="SINGLE_MARKER")
+_stamped_one = AG.stamp_points([_ROUTED], SERIES, AXES, "X_BOTTOM", PANEL,
                                IMAGE_SHA)[0]
 check("  a routed point's evidence hash covers all ten measurements",
       sorted(AG.routing_evidence(_ROUTED)) == sorted(AG.ROUTING_EVIDENCE)
       and AG.routing_evidence(_ROUTED)["Shape_Margin"] is not None
-      and AG.verify_points([_stamped_one], AXES, "X_BOTTOM", PANEL,
+      and AG.verify_points([_stamped_one], SERIES, AXES, "X_BOTTOM", PANEL,
                            IMAGE_SHA) == [],
       "%r" % (AG.routing_evidence(_ROUTED),))
 _lied = dict(_stamped_one, fill="FILLED")
 check("  and rewriting the fill after the stamp is caught",
-      [m for _i, m in AG.verify_points([_lied], AXES, "X_BOTTOM", PANEL,
+      [m for _i, m in AG.verify_points([_lied], SERIES, AXES, "X_BOTTOM", PANEL,
                                        IMAGE_SHA)] == [
           "routing evidence does not hash to what it carries"],
-      "%r" % (AG.verify_points([_lied], AXES, "X_BOTTOM", PANEL, IMAGE_SHA),))
+      "%r" % (AG.verify_points([_lied], SERIES, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA),))
 # A POINT NOTHING ROUTED still has an evidence hash, and it is the hash of ten
 # Nones - which is a different hash from any measured mark's, and that is the
 # distinction it exists to make.
@@ -376,6 +382,147 @@ check("  a declared point hashes as having no evidence, not as having none neede
       AG.routing_evidence_sha256(dict(Series_ID="S", point_px_x=1, point_px_y=1))
       != AG.routing_evidence_sha256(_ROUTED),
       "a fixture declaration and a measured mark hash the same evidence")
+
+print()
+print("a merged blob cannot be laundered into a point")
+# THE MUTATION THE REVIEW ASKED FOR, on a REAL record: take the blob
+# `marker_routing` refused as MARKER_MERGED on twin_scatter_s3, clear the
+# refusal, give it a series and an identity method, and stamp it honestly - both
+# hashes recomputed, nothing left inconsistent. Before the marker-validity
+# fields were in the evidence, that record verified clean: the numbers that made
+# the blob invalid were not covered by anything.
+from PIL import Image                                             # noqa: E402
+import marker_routing as MRT                                      # noqa: E402
+_S3 = DOC["renderings"]["s3"]
+_ROUTE = MRT.route(
+    Image.open(os.path.join(HERE, _S3["file"])).convert("RGB"), _S3["panel_box"],
+    [dict(id=sid, shape=spec["shape"], fill=spec["fill"])
+     for sid, spec in sorted(_S3["series"].items())])
+_MERGED = [r for r in _ROUTE["records"] if r["refusal"] == "MARKER_MERGED"][0]
+
+
+def _laundered(**edits):
+    p = dict(_MERGED)
+    p.update(Series_ID=_left_series[0],
+             Identity_Method="MEASURED_MARKER_SHAPE_FILL", refusal="")
+    p.update(edits)
+    rec = AG.stamp_points([p], SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[0]
+    return AG.verify_points([rec], SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
+
+
+check("the blob route refused as merged still verifies as not one marker",
+      [m for _i, m in _laundered()]
+      and AG.NOT_ONE_MARKER in _laundered()[0][1]
+      and "%.4f" % _MERGED["off_centre_ink"] in _laundered()[0][1],
+      "%r" % (_laundered(),))
+# AND EDITING THE WORD IS NOT ENOUGH. `Marker_Validity_Status` is re-derived
+# from the two numbers beside it rather than read.
+check("  claiming SINGLE_MARKER over the same numbers is still refused",
+      AG.NOT_ONE_MARKER
+      in _laundered(Marker_Validity_Status="SINGLE_MARKER")[0][1],
+      "%r" % (_laundered(Marker_Validity_Status="SINGLE_MARKER"),))
+# AND EDITING ONE NUMBER LEAVES THE OTHER TWO DISAGREEING.
+check("  and shrinking the off-centre ink alone leaves the margin wrong",
+      "is not" in _laundered(Marker_Validity_Status="SINGLE_MARKER",
+                             off_centre_ink=0.04)[0][1],
+      "%r" % (_laundered(Marker_Validity_Status="SINGLE_MARKER",
+                         off_centre_ink=0.04),))
+check("  the evidence covers all eight marker-validity fields",
+      set(("Marker_Scale_Px", "Side_Px", "Aspect", "Size_Ratio",
+           "Off_Centre_Ink", "Off_Centre_Threshold", "Off_Centre_Margin",
+           "Marker_Validity_Status")) <= set(AG.ROUTING_EVIDENCE)
+      and AG.routing_evidence(_MERGED)["Off_Centre_Ink"] is not None,
+      "%r" % (sorted(AG.ROUTING_EVIDENCE),))
+# A ROUTED MARK THAT REALLY WAS ONE MARKER PASSES, so the check is not simply
+# refusing everything that carries evidence.
+_good = [r for r in _ROUTE["records"] if r["Series_ID"]][0]
+_good_rec = AG.stamp_points(
+    [dict(_good, Series_ID=_left_series[0])], SERIES, AXES, "X_BOTTOM", PANEL,
+    IMAGE_SHA)[0]
+check("  and a mark that was one marker verifies clean",
+      AG.verify_points([_good_rec], SERIES, AXES, "X_BOTTOM", PANEL,
+                       IMAGE_SHA) == [],
+      "%r" % (AG.verify_points([_good_rec], SERIES, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA),))
+
+print()
+print("and the axis a point cites is checked where the stamp is made")
+# `series_axis` REFUSED A SERIES POINTED AT THE X AXIS AND NOTHING MADE ANYONE
+# CALL IT. `stamp_points` took an `axis_of` mapping and believed it, so
+# `{"S1": "X_BOTTOM"}` stamped every point with the x calibration used as the y
+# scale - hashed, and verified clean. The mapping is now derived here from the
+# series manifest, which is the only thing that closes the path.
+import inspect                                                    # noqa: E402
+check("stamp_points takes the series manifest, not an axis mapping",
+      list(inspect.signature(AG.stamp_points).parameters)[:2]
+      == ["points", "series_rows"],
+      "%r" % (list(inspect.signature(AG.stamp_points).parameters),))
+_x_declared = [dict(Series_ID=sid, Axis_ID="X_BOTTOM") for sid in _axis_of]
+_on_x = AG.stamp_points(POINTS[:1], _x_declared, AXES, "X_BOTTOM", PANEL,
+                        IMAGE_SHA)[0]
+check("  a series declared on the x axis gets no value and no hash",
+      _on_x["y_value"] is None and not _on_x["Point_Record_SHA256"]
+      and _on_x["refusal"] == AG.WRONG_DIMENSION,
+      "%r" % ({k: _on_x[k] for k in ("y_value", "refusal")},))
+# AND THE RECORD IS CHECKED TOO, because a record can be written past
+# `stamp_points` altogether. Here the point is re-hashed AS IF the x axis were
+# its y axis - every hash self-consistent - and the verifier still refuses.
+_XCAL = AG.calibrations(AXES)["X_BOTTOM"]
+_XREC = AG.axis_records(AXES)["X_BOTTOM"]
+_forged = dict(STAMPED[0], Axis_ID="X_BOTTOM", Axis_Record_SHA256=_XREC,
+               y_value=_XCAL.pixel_to_value(float(STAMPED[0]["point_px_y"])))
+_forged["Point_Record_SHA256"] = AG.point_record_sha256(
+    _forged, "X_BOTTOM", _XCAL, _XCAL, PANEL, IMAGE_SHA, axis_record=_XREC,
+    x_axis_record=_XREC,
+    routing_evidence_hash=_forged["Routing_Evidence_SHA256"])
+check("  a record re-hashed onto the x axis is refused by role, not by hash",
+      [m for _i, m in AG.verify_points([_forged], SERIES, AXES, "X_BOTTOM",
+                                       PANEL, IMAGE_SHA)]
+      and AG.WRONG_DIMENSION in AG.verify_points(
+          [_forged], SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[0][1],
+      "%r" % (AG.verify_points([_forged], SERIES, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA),))
+# AND MOVING A POINT TO THE OTHER Y AXIS - a real Y axis on this panel, so the
+# role check passes - disagrees with what its series is declared on.
+_YR = AG.calibrations(AXES)["Y_RIGHT"]
+_YRREC = AG.axis_records(AXES)["Y_RIGHT"]
+_left_point = [r for r in STAMPED if r["Axis_ID"] == "Y_LEFT"][0]
+_moved_axis = dict(_left_point, Axis_ID="Y_RIGHT", Axis_Record_SHA256=_YRREC,
+                   y_value=_YR.pixel_to_value(float(_left_point["point_px_y"])))
+_moved_axis["Point_Record_SHA256"] = AG.point_record_sha256(
+    _moved_axis, "Y_RIGHT", _YR, AG.calibrations(AXES)["X_BOTTOM"], PANEL,
+    IMAGE_SHA, axis_record=_YRREC,
+    x_axis_record=AG.axis_records(AXES)["X_BOTTOM"],
+    routing_evidence_hash=_moved_axis["Routing_Evidence_SHA256"])
+check("  and one moved to the panel's OTHER y axis disagrees with its series",
+      "declared on Y_LEFT" in AG.verify_points(
+          [_moved_axis], SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[0][1],
+      "%r" % (AG.verify_points([_moved_axis], SERIES, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA),))
+# AND THE VALUE METHOD IS IN THE HASH AND RE-CHECKED. A scatter point is its
+# marker's centre; a record saying otherwise is describing a different reading.
+_vm = dict(STAMPED[0], Value_Method="BAR_TOP")
+_vm["Point_Record_SHA256"] = AG.point_record_sha256(
+    _vm, _vm["Axis_ID"], CALS[_vm["Axis_ID"]], CALS["X_BOTTOM"], PANEL,
+    IMAGE_SHA, axis_record=RECS[_vm["Axis_ID"]],
+    x_axis_record=RECS["X_BOTTOM"],
+    routing_evidence_hash=_vm["Routing_Evidence_SHA256"])
+# TWO DIFFERENT FAILURES, and the message says which. Edited WITHOUT re-stamping
+# it is the hash that catches it, which is what putting Value_Method inside the
+# hash buys; edited WITH a fresh stamp it is the policy - a routed scatter point
+# is its marker's centre - that catches it.
+_vm_unstamped = dict(STAMPED[0], Value_Method="BAR_TOP")
+check("an edited Value_Method breaks the point hash",
+      [m for _i, m in AG.verify_points([_vm_unstamped], SERIES, AXES,
+                                       "X_BOTTOM", PANEL, IMAGE_SHA)]
+      == ["hash does not cover this point"],
+      "%r" % (AG.verify_points([_vm_unstamped], SERIES, AXES, "X_BOTTOM",
+                               PANEL, IMAGE_SHA),))
+check("  and a re-hashed Value_Method is still refused",
+      any("Value_Method" in m for _i, m in AG.verify_points(
+          [_vm], SERIES, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)),
+      "%r" % (AG.verify_points([_vm], SERIES, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA),))
 
 print()
 print("the set hash is a set")
@@ -397,18 +544,18 @@ print("and the counts reach the row somebody reads")
 # AN r OVER NINETEEN POINTS IS SILENT ABOUT THE ELEVEN MARKS THE READER NEVER
 # SAW. `marker_routing.route` counts them; without this step the count stops at
 # the reader and the association row reads like a complete cloud.
-_counts = dict(Expected_Point_Count=30, Detected_Point_Count=19,
-               Routed_Point_Count=16, Unresolved_Point_Count=3,
-               Point_Count_Agreement="POINT_COUNT_DISAGREES")
+_counts = dict(Expected_Point_Count=30, Candidate_Mark_Record_Count=19,
+               Routed_Point_Count=16, Unresolved_Candidate_Count=3,
+               Candidate_Count_Agreement="CANDIDATE_COUNT_DISAGREES")
 _with = AG.with_completeness(_assoc[_sid], _counts)
 check("an association can carry the reader's completeness counts",
       all(_with[k] == v for k, v in _counts.items())
       and _with["Association_Value"] == _assoc[_sid]["Association_Value"],
       "%r" % ({k: _with[k] for k in _counts},))
 check("  and says nothing rather than AGREES when nobody counted the page",
-      _assoc[_sid]["Point_Count_Agreement"] == ""
+      _assoc[_sid]["Candidate_Count_Agreement"] == ""
       and _assoc[_sid]["Expected_Point_Count"] is None,
-      "%r" % (_assoc[_sid]["Point_Count_Agreement"],))
+      "%r" % (_assoc[_sid]["Candidate_Count_Agreement"],))
 
 print()
 print("and none of it could be finalized, which is right for a fixture")

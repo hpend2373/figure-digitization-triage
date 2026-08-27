@@ -126,6 +126,13 @@ FILLS = ("OPEN", "FILLED")
 REFUSALS = ("NOT_A_MARKER", "MARKER_MERGED", "MARKER_SHAPE_UNRESOLVED",
             "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED")
 
+#: What `Candidate_Count_Agreement` may say. The agreeing value is named for
+#: what it is worth: the candidate count matches what a person counted and no
+#: candidate is unresolved, which is NECESSARY for completeness and nowhere near
+#: sufficient - one missed marker and one admitted glyph agree just as well.
+COUNT_AGREES = "COUNT_AGREES_NOT_COMPLETENESS"
+COUNT_DISAGREES = "CANDIDATE_COUNT_DISAGREES"
+
 #: The panel's declaration is wrong, so no mark on it can be routed. Raised
 #: rather than recorded: a refusal per mark would say "this mark's class is not
 #: declared" thirty times over a declaration that names one class twice.
@@ -489,66 +496,122 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None, foot=None):
 
 
 def match_one_to_one(records, truth, tol):
-    """{record index: truth index}, each used at most once.
+    """{record index: truth index}: a MINIMUM-COST MAXIMUM matching.
 
-    ONE RECORD MAY NOT ANSWER FOR TWO MARKS. Nearest-truth scoring let it, and
-    that is exactly how a record sitting between two marks of one series scored
-    as a hit: the nearer of the two was its answer and the other was simply
-    absent from the count. Here every pair within `tol` is a candidate edge,
-    greedy over increasing distance takes the obvious pairs first, and an
-    augmenting pass raises the matching to maximum cardinality so a greedy
-    choice cannot leave a matchable mark unmatched. What is left over is the two
-    kinds of error a fixture can show: a record no mark explains (invented) and
-    a mark no record found (missed).
+    ONE RECORD MAY NOT ANSWER FOR TWO MARKS, and among the matchings that pair
+    the most marks, the one that pairs them CLOSEST is the answer. The first
+    version of this stopped at maximum cardinality - greedy, then augmenting
+    paths - and cardinality alone does not pin the answer down: where two
+    series' markers sit close together, two matchings of equal size exist and
+    the augmenting order decides which, so a record can be handed the slightly
+    farther of two truths and the right/wrong counts move with an implementation
+    detail. A scorer that judges a reader must not be weaker than the reader.
+
+    So: successive shortest augmenting paths on the residual graph, which yields
+    a minimum-cost flow at every flow value it passes through and therefore a
+    minimum total distance at the maximum cardinality it stops at. No scipy -
+    Bellman-Ford over a graph of a few dozen nodes.
+
+    THE TIE-BREAK IS IN THE COST rather than in the traversal order. Distances
+    become integers at 1e-6, multiplied up to leave room for an index term
+    `i * R + j` underneath, so no two candidate edges cost the same and the
+    optimum is unique: among matchings of equal total distance, the one whose
+    record and truth indices are smallest wins, the same way every time.
     """
-    cand = sorted((((t[1] - x["point_px_x"]) ** 2
-                    + (t[2] - x["point_px_y"]) ** 2) ** 0.5, i, j)
-                  for i, x in enumerate(records) for j, t in enumerate(truth))
-    cand = [e for e in cand if e[0] <= tol]
-    edges = {}
-    for _d, i, j in cand:
-        edges.setdefault(i, []).append(j)
-    of_rec, of_truth = {}, {}
-    for _d, i, j in cand:
-        if i not in of_rec and j not in of_truth:
-            of_rec[i], of_truth[j] = j, i
+    L, R = len(records), len(truth)
+    if not L or not R:
+        return {}
+    span = L * R + 1
+    edges_of = {}
+    for i, x in enumerate(records):
+        for j, t in enumerate(truth):
+            d = ((t[1] - x["point_px_x"]) ** 2
+                 + (t[2] - x["point_px_y"]) ** 2) ** 0.5
+            if d <= tol:
+                edges_of.setdefault(i, []).append(
+                    (j, int(round(d * 1e6)) * span + i * R + j))
+    if not edges_of:
+        return {}
 
-    def augment(i, seen):
-        for j in edges.get(i, ()):
-            if j in seen:
-                continue
-            seen.add(j)
-            if j not in of_truth or augment(of_truth[j], seen):
-                of_rec[i], of_truth[j] = j, i
-                return True
-        return False
-    for i in range(len(records)):
-        if i not in of_rec:
-            augment(i, set())
-    return of_rec
+    # S = 0, left i -> 1 + i, right j -> 1 + L + j, T = 1 + L + R
+    n = L + R + 2
+    T = n - 1
+    graph = [[] for _ in range(n)]
+
+    def arc(u, v, cap, cost):
+        graph[u].append([v, cap, cost, len(graph[v])])
+        graph[v].append([u, 0, -cost, len(graph[u]) - 1])
+    for i in range(L):
+        arc(0, 1 + i, 1, 0)
+    for j in range(R):
+        arc(1 + L + j, T, 1, 0)
+    for i in sorted(edges_of):
+        for j, cost in sorted(edges_of[i]):
+            arc(1 + i, 1 + L + j, 1, cost)
+
+    INF = float("inf")
+    while True:
+        dist = [INF] * n
+        prev = [None] * n
+        dist[0] = 0
+        for _ in range(n):
+            changed = False
+            for u in range(n):
+                if dist[u] == INF:
+                    continue
+                for k, e in enumerate(graph[u]):
+                    v, cap, cost, _rev = e
+                    if cap > 0 and dist[u] + cost < dist[v]:
+                        dist[v] = dist[u] + cost
+                        prev[v] = (u, k)
+                        changed = True
+            if not changed:
+                break
+        if dist[T] == INF:
+            break
+        v = T
+        while v != 0:
+            u, k = prev[v]
+            graph[u][k][1] -= 1
+            graph[v][graph[u][k][3]][1] += 1
+            v = u
+    out = {}
+    for i in range(L):
+        for v, cap, _cost, _rev in graph[1 + i]:
+            if 1 + L <= v < 1 + L + R and cap == 0:
+                out[i] = v - 1 - L
+    return out
 
 
 def _counts(records, expected_points):
-    """How many marks were seen, routed and refused - and whether that is all.
+    """How many CANDIDATE records this panel produced, and how many were routed.
 
-    A GALLERY TABLE THAT SHOWS ONLY WHAT WAS ROUTED IS A TABLE THAT CANNOT BE
-    WRONG. Twenty routed marks reads as success whether thirty or twenty-one
-    were drawn, and the marks that never became a record at all - swallowed by a
-    neighbour, shaved away by the opening - are invisible. These four counts
-    travel with every route, and the fifth says whether they add up to what
-    somebody counted on the page.
+    THESE COUNT RECORDS, NOT MARKS ON THE PAGE, and the names say so. A reader
+    has no truth to match against - `Detected_Point_Count` was the old name and
+    it read as "marks found", which is a claim about the figure that nothing
+    here can make: an unresolved component is counted the same as a real marker,
+    and a mark the opening swallowed is counted nowhere at all. The fixture
+    suite scores against a drawing and has its own, differently named columns.
+
+    `Candidate_Count_Agreement` IS NOT A COMPLETENESS PROOF and is not allowed
+    to read like one. Missing one real marker while admitting one glyph gives
+    the same total, so the strongest verdict it can reach says only that the
+    count lines up and nothing is unresolved - the rest is a person looking at
+    the overlay.
     """
     marks = [r for r in records if r.get("refusal") != "NOT_A_MARKER"]
     routed = [r for r in marks if r.get("Series_ID")]
-    out = dict(Detected_Point_Count=len(marks),
+    unresolved = len(marks) - len(routed)
+    out = dict(Candidate_Mark_Record_Count=len(marks),
                Routed_Point_Count=len(routed),
-               Unresolved_Point_Count=len(marks) - len(routed),
+               Unresolved_Candidate_Count=unresolved,
                Expected_Point_Count=(None if expected_points is None
                                      else int(expected_points)),
-               Point_Count_Agreement="")
+               Candidate_Count_Agreement="")
     if expected_points is not None:
-        out["Point_Count_Agreement"] = ("AGREES" if len(marks) == int(expected_points)
-                                        else "POINT_COUNT_DISAGREES")
+        out["Candidate_Count_Agreement"] = (
+            COUNT_AGREES if (len(marks) == int(expected_points)
+                             and unresolved == 0) else COUNT_DISAGREES)
     return out
 
 
@@ -641,6 +704,22 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
             # marker was drawn at. `off_centre_ink` is the same question asked
             # of the ink instead of its box, and it separates by 2.5x.
             geo["refusal"] = "MARKER_MERGED"
+        # THE VALIDITY VERDICT, ON THE RECORD, WITH THE NUMBERS BEHIND IT.
+        # It is not enough that `route` refused this blob: a downstream artifact
+        # carries records, and a record that says only `refusal=""` can be given
+        # a Series_ID by anything that can write the field. The scale the window
+        # was measured against, the blob's own side, aspect and size ratio, the
+        # off-centre fraction, the threshold it was compared with and the signed
+        # margin between them all travel, so a verifier can re-derive the
+        # verdict instead of believing it.
+        geo["marker_scale_px"] = float(scale)
+        geo["off_centre_threshold"] = float(OFF_CENTRE)
+        geo["off_centre_margin"] = round(float(OFF_CENTRE)
+                                         - float(geo["off_centre_ink"]), 4)
+        geo["Marker_Validity_Status"] = (
+            "NOT_A_MARKER" if geo["refusal"] == "NOT_A_MARKER"
+            else "MERGED_COMPONENT" if geo["refusal"] == "MARKER_MERGED"
+            else "SINGLE_MARKER")
         seen.append(geo)
 
     kept = [g for g in seen if not g["refusal"]]

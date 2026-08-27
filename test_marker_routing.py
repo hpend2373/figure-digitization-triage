@@ -96,10 +96,20 @@ def routed(name):
             right += 1
         else:
             wrong += 1
+    # THE FIXTURE'S COLUMNS ARE NOT THE READER'S COLUMNS, and they are named
+    # apart. These count MARKS ON A DRAWING WHOSE ANSWER IS KNOWN, matched
+    # one-to-one; `route` counts CANDIDATE RECORDS and can do no better, because
+    # a reader has no truth to match against. Sharing the name `detected`
+    # between them put an unresolved glyph and a real marker in one column.
     return dict(out=out, drawn=r["total_points"], marker=r["marker_diameter_px"],
-                scale=scale, detected=len(pair), missing=r["total_points"] - len(pair),
-                marks=len(marks), right=right, wrong=wrong, refused=refused,
-                invented=invented, fill_right=fill_right, fill_wrong=fill_wrong,
+                scale=scale,
+                Truth_Matched_Point_Count=len(pair),
+                Truth_Missed_Point_Count=r["total_points"] - len(pair),
+                Candidate_Mark_Record_Count=len(marks),
+                Candidate_Unresolved_Count=refused,
+                Candidate_Invented_Count=invented,
+                right=right, wrong=wrong,
+                fill_right=fill_right, fill_wrong=fill_wrong,
                 assigned=sum(1 for x in out["records"] if x["Series_ID"]),
                 refusals=sorted({x["refusal"] for x in out["records"] if x["refusal"]}))
 
@@ -115,57 +125,153 @@ check("the measured scale is the drawn marker, at every rendering",
       "%r" % {n: (R[n]["marker"], R[n]["scale"]) for n in sorted(R)})
 
 print()
-print("every mark is accounted for: drawn, detected, routed, refused, missing")
-# A TABLE THAT SHOWS ONLY WHAT WAS ROUTED CANNOT BE WRONG. These six columns are
-# the whole answer for a rendering, and the first thing asked of them is that
-# they add up - a record is routed right, routed wrong, or refused, and a drawn
-# mark is detected or missing.
-check("the six columns add up at every rendering",
-      all(R[n]["right"] + R[n]["wrong"] + R[n]["refused"] + R[n]["invented"]
-          == R[n]["marks"]
-          and R[n]["detected"] + R[n]["missing"] == R[n]["drawn"] for n in R),
-      "%r" % {n: (R[n]["right"], R[n]["wrong"], R[n]["refused"],
-                  R[n]["invented"], R[n]["marks"]) for n in sorted(R)})
-check("  19, 20 and 21 of 30 marks are detected at 11, 22 and 33 px",
-      [R[n]["detected"] for n in SCALED] == [19, 20, 21],
-      "%r" % {n: R[n]["detected"] for n in SCALED})
+print("every mark is accounted for, in two differently named sets of columns")
+# A TABLE THAT SHOWS ONLY WHAT WAS ROUTED CANNOT BE WRONG. The fixture's columns
+# count MARKS ON THE DRAWING, matched one-to-one; `route`'s columns count
+# CANDIDATE RECORDS, which is all a reader can count. Both have to add up, and
+# they add up to different totals - which is why they no longer share a name.
+check("the candidate columns add up at every rendering",
+      all(R[n]["right"] + R[n]["wrong"] + R[n]["Candidate_Unresolved_Count"]
+          + R[n]["Candidate_Invented_Count"]
+          == R[n]["Candidate_Mark_Record_Count"] for n in R),
+      "%r" % {n: (R[n]["right"], R[n]["wrong"],
+                  R[n]["Candidate_Unresolved_Count"],
+                  R[n]["Candidate_Invented_Count"],
+                  R[n]["Candidate_Mark_Record_Count"]) for n in sorted(R)})
+check("  and the truth columns add up to what was drawn",
+      all(R[n]["Truth_Matched_Point_Count"] + R[n]["Truth_Missed_Point_Count"]
+          == R[n]["drawn"] for n in R),
+      "%r" % {n: (R[n]["Truth_Matched_Point_Count"],
+                  R[n]["Truth_Missed_Point_Count"], R[n]["drawn"])
+              for n in sorted(R)})
+# AND THE TWO ARE NOT THE SAME NUMBER, which is the whole reason for the split.
+# At 3 px there are 28 candidate records and 11 drawn marks behind them.
+check("  the two totals differ where a reader admits what is not a marker",
+      R["micro"]["Candidate_Mark_Record_Count"] == 28
+      and R["micro"]["Truth_Matched_Point_Count"] == 11,
+      "%r" % ((R["micro"]["Candidate_Mark_Record_Count"],
+               R["micro"]["Truth_Matched_Point_Count"]),))
+check("  19, 20 and 21 of 30 drawn marks are matched at 11, 22 and 33 px",
+      [R[n]["Truth_Matched_Point_Count"] for n in SCALED] == [19, 20, 21],
+      "%r" % {n: R[n]["Truth_Matched_Point_Count"] for n in SCALED})
 # AND THE MARKS IT NEVER SAW ARE COUNTED, which is the column a gallery hides.
-check("  and the 11, 10 and 9 it never saw are counted as missing",
-      [R[n]["missing"] for n in SCALED] == [11, 10, 9],
-      "%r" % {n: R[n]["missing"] for n in SCALED})
+check("  and the 11, 10 and 9 it never saw are counted as missed",
+      [R[n]["Truth_Missed_Point_Count"] for n in SCALED] == [11, 10, 9],
+      "%r" % {n: R[n]["Truth_Missed_Point_Count"] for n in SCALED})
 check("  no record is invented at any rendering",
-      all(R[n]["invented"] == 0 for n in R),
-      "%r" % {n: R[n]["invented"] for n in sorted(R)})
+      all(R[n]["Candidate_Invented_Count"] == 0 for n in R),
+      "%r" % {n: R[n]["Candidate_Invented_Count"] for n in sorted(R)})
 # THE COUNTS TRAVEL WITH THE ROUTE, not just with this suite: a caller that
-# never scores against a fixture still gets told how many marks became records
-# and how many of those could not be routed.
-check("  route reports the same counts it was scored on",
-      all(R[n]["out"]["Detected_Point_Count"] == R[n]["marks"]
+# never scores against a fixture still gets told how many candidate records the
+# panel produced and how many of those could not be routed.
+check("  route reports candidate counts, and calls them candidates",
+      all(R[n]["out"]["Candidate_Mark_Record_Count"]
+          == R[n]["Candidate_Mark_Record_Count"]
           and R[n]["out"]["Routed_Point_Count"] == R[n]["right"] + R[n]["wrong"]
-          and R[n]["out"]["Unresolved_Point_Count"] == R[n]["refused"]
-          for n in R),
-      "%r" % {n: (R[n]["out"]["Detected_Point_Count"],
+          and R[n]["out"]["Unresolved_Candidate_Count"]
+          == R[n]["Candidate_Unresolved_Count"]
+          for n in R)
+      and "Detected_Point_Count" not in R["s3"]["out"],
+      "%r" % {n: (R[n]["out"]["Candidate_Mark_Record_Count"],
                   R[n]["out"]["Routed_Point_Count"]) for n in sorted(R)})
 check("  and disagrees with a declared point count when it should",
-      all(R[n]["out"]["Point_Count_Agreement"] == "POINT_COUNT_DISAGREES"
+      all(R[n]["out"]["Candidate_Count_Agreement"] == MRT.COUNT_DISAGREES
           for n in R),
-      "%r" % {n: R[n]["out"]["Point_Count_Agreement"] for n in sorted(R)})
+      "%r" % {n: R[n]["out"]["Candidate_Count_Agreement"] for n in sorted(R)})
 _r3 = DOC["renderings"]["s3"]
-_agree = MRT.route(Image.open(os.path.join(HERE, _r3["file"])).convert("RGB"),
-                   _r3["panel_box"],
-                   [dict(id=s, shape=p["shape"], fill=p["fill"])
-                    for s, p in sorted(_r3["series"].items())],
-                   expected_points=R["s3"]["marks"])
-check("  and agrees when the declared count is the count it found",
-      _agree["Point_Count_Agreement"] == "AGREES",
-      "%r" % (_agree["Point_Count_Agreement"],))
+
+
+def _route_s3(**kw):
+    return MRT.route(Image.open(os.path.join(HERE, _r3["file"])).convert("RGB"),
+                     _r3["panel_box"],
+                     [dict(id=s, shape=p["shape"], fill=p["fill"])
+                      for s, p in sorted(_r3["series"].items())], **kw)
+
+
+# THE AGREEING VERDICT IS NAMED FOR WHAT IT IS WORTH. Even at s3, where the
+# candidate count equals what a person would count, three candidates are
+# unresolved - so the count alone does not agree, and the name of the value that
+# would say so still refuses to say "complete".
+_agree = _route_s3(expected_points=R["s3"]["Candidate_Mark_Record_Count"])
+check("  a matching count with unresolved candidates still disagrees",
+      _agree["Candidate_Count_Agreement"] == MRT.COUNT_DISAGREES
+      and _agree["Unresolved_Candidate_Count"] == 3,
+      "%r" % (_agree["Candidate_Count_Agreement"],))
+check("  and the agreeing verdict says it is not a completeness proof",
+      MRT.COUNT_AGREES == "COUNT_AGREES_NOT_COMPLETENESS"
+      and MRT._counts([dict(refusal="", Series_ID="A"),
+                       dict(refusal="", Series_ID="B")],
+                      2)["Candidate_Count_Agreement"] == MRT.COUNT_AGREES,
+      "%r" % (MRT.COUNT_AGREES,))
 check("  a route asked for no expected count says so rather than agreeing",
-      MRT.route(Image.open(os.path.join(HERE, _r3["file"])).convert("RGB"),
-                _r3["panel_box"],
-                [dict(id=s, shape=p["shape"], fill=p["fill"])
-                 for s, p in sorted(_r3["series"].items())]
-                )["Point_Count_Agreement"] == "",
+      _route_s3()["Candidate_Count_Agreement"] == "",
       "an absent expected count read as agreement")
+
+print()
+print("the scorer is minimum-cost, not merely maximum-cardinality")
+# A SCORER THAT JUDGES A READER MUST NOT BE WEAKER THAN THE READER. Greedy over
+# increasing distance plus augmenting paths reaches maximum cardinality and
+# stops there - and where two matchings pair the same number of marks it takes
+# whichever the augmenting order happened to build. Here both matchings pair
+# two, and they disagree about WHICH record is which mark, which is exactly the
+# right/wrong distinction the fixture exists to measure.
+_REC = [dict(point_px_x=0.0, point_px_y=0.0), dict(point_px_x=4.0, point_px_y=0.0)]
+_TRU = [("S_P", 3.0, 0.0), ("S_Q", 5.0, 0.0)]
+
+
+def _greedy_then_augment(records, truth, tol):
+    """What the previous scorer did, kept here so the difference is visible."""
+    cand = sorted((((t[1] - x["point_px_x"]) ** 2
+                    + (t[2] - x["point_px_y"]) ** 2) ** 0.5, i, j)
+                  for i, x in enumerate(records) for j, t in enumerate(truth))
+    cand = [e for e in cand if e[0] <= tol]
+    edges = {}
+    for _d, i, j in cand:
+        edges.setdefault(i, []).append(j)
+    of_rec, of_truth = {}, {}
+    for _d, i, j in cand:
+        if i not in of_rec and j not in of_truth:
+            of_rec[i], of_truth[j] = j, i
+
+    def augment(i, seen):
+        for j in edges.get(i, ()):
+            if j in seen:
+                continue
+            seen.add(j)
+            if j not in of_truth or augment(of_truth[j], seen):
+                of_rec[i], of_truth[j] = j, i
+                return True
+        return False
+    for i in range(len(records)):
+        if i not in of_rec:
+            augment(i, set())
+    return of_rec
+
+
+def _total(pairing):
+    return sum(abs(_TRU[j][1] - _REC[i]["point_px_x"])
+               for i, j in pairing.items())
+
+
+_mincost = MRT.match_one_to_one(_REC, _TRU, 6.0)
+_greedy = _greedy_then_augment(_REC, _TRU, 6.0)
+check("both scorers pair two marks and they disagree about which",
+      len(_mincost) == len(_greedy) == 2 and _mincost != _greedy,
+      "%r vs %r" % (_mincost, _greedy))
+check("  and the minimum-cost pairing is the closer one, 4.0 against 6.0",
+      abs(_total(_mincost) - 4.0) < 1e-9 and abs(_total(_greedy) - 6.0) < 1e-9,
+      "%.3f vs %.3f" % (_total(_mincost), _total(_greedy)))
+# AND IT IS THE SAME ANSWER EVERY TIME. The tie-break lives in the cost - the
+# index term underneath the distance - so equal-distance optima are ordered
+# rather than left to the traversal.
+_tie = MRT.match_one_to_one(
+    [dict(point_px_x=0.0, point_px_y=0.0), dict(point_px_x=0.0, point_px_y=0.0)],
+    [("A", 1.0, 0.0), ("B", -1.0, 0.0)], 4.0)
+check("  a perfectly symmetric tie resolves the same way every time",
+      _tie == {0: 0, 1: 1}
+      and all(MRT.match_one_to_one(_REC, _TRU, 6.0) == _mincost
+              for _ in range(5)),
+      "%r" % (_tie,))
 
 print()
 print("a blob holding two markers is refused, not reported at neither")

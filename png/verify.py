@@ -1092,10 +1092,17 @@ def routed_twin():
         # AND THE MARKS NO RECORD FOUND, which is the column a gallery hides.
         missed = [truth[j] for j in range(len(truth))
                   if j not in set(pair.values())]
+        # THE FIXTURE'S COLUMNS, NAMED APART FROM THE READER'S. These count
+        # marks on a drawing whose answer is known; `route`'s own counts are
+        # candidate RECORDS and cannot be more than that.
         rows.append(dict(name=name, marker=r["marker_diameter_px"],
                          drawn=r["total_points"], scale=scale, right=right,
-                         wrong=wrong, refused=refused, invented=invented,
-                         detected=len(pair), missing=len(missed),
+                         wrong=wrong,
+                         Candidate_Unresolved_Count=refused,
+                         Candidate_Invented_Count=invented,
+                         Candidate_Mark_Record_Count=len(recs),
+                         Truth_Matched_Point_Count=len(pair),
+                         Truth_Missed_Point_Count=len(missed),
                          shape=out["shape_split"]["separates"],
                          fill=out["fill_split"]["separates"],
                          refusals=dict(_c.Counter(
@@ -1131,14 +1138,18 @@ def routed_twin():
         px, py = M(cx, cy)
         d.line([px - 12, py - 12, px + 12, py + 12], fill=MISSED, width=4)
         d.line([px - 12, py + 12, px + 12, py - 12], fill=MISSED, width=4)
-    lines = ["%-8s %6s %6s %8s %6s %5s %7s %8s %6s %5s"
-             % ("render", "marker", "drawn", "detected", "right", "wrong",
-                "refused", "invented", "missing", "shape/fill")]
+    lines = ["%-8s %6s %6s %8s %7s %6s %5s %7s %8s %6s %s"
+             % ("render", "marker", "drawn", "matched", "missed", "cands",
+                "right", "wrong", "unresolv", "invent", "shape/fill")]
     for row in rows:
-        lines.append("%-8s %6d %6d %8d %6d %5d %7d %8d %6d   %s/%s"
+        lines.append("%-8s %6d %6d %8d %7d %6d %5d %7d %8d %6d   %s/%s"
                      % (row["name"], row["marker"], row["drawn"],
-                        row["detected"], row["right"], row["wrong"],
-                        row["refused"], row["invented"], row["missing"],
+                        row["Truth_Matched_Point_Count"],
+                        row["Truth_Missed_Point_Count"],
+                        row["Candidate_Mark_Record_Count"],
+                        row["right"], row["wrong"],
+                        row["Candidate_Unresolved_Count"],
+                        row["Candidate_Invented_Count"],
                         "yes" if row["shape"] else "NO",
                         "yes" if row["fill"] else "NO"))
     lines.append("")
@@ -1147,10 +1158,14 @@ def routed_twin():
             "%s %d" % (k.replace("MARKER_", ""), v)
             for k, v in sorted(row["refusals"].items())) or "-"))
     lines += ["",
-              "채점은 1:1 매칭이다. 이전의 최근접 매칭은 한 record 가 두 마크를",
-              "대신할 수 있어서, 두 마크 사이에 앉은 record 가 가까운 쪽으로",
-              "정답 처리되고 나머지 한 개는 표에서 사라졌다. 같은 코드가 실제로는",
-              "네 개를 오분류하고 있었고 표에는 한 개만 보였다.",
+              "채점은 최소비용 최대 1:1 매칭이다. 최근접 매칭은 한 record 가 두",
+              "마크를 대신할 수 있었고, 최대 카디널리티만 맞추는 매칭은 같은 크기의",
+              "매칭 중 어느 것을 고를지 augmenting 순서에 맡겼다. 채점기가 reader",
+              "보다 약하면 안 된다.",
+              "",
+              "matched/missed 는 그려진 마크를 1:1 로 맞춘 수이고, cands 이하는",
+              "reader 가 낸 candidate record 수다. 서로 다른 모집단이므로 이름을",
+              "분리했다 — route() 는 Candidate_Mark_Record_Count 를 반환한다.",
               "",
               "off_centre_ink 가 그 네 개를 거절한다 — 자기 centroid 에서 마커",
               "반지름보다 멀리 있는 잉크의 비율. 단일 마크 0.000~0.101, 마커 두",

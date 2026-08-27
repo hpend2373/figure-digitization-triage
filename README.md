@@ -113,11 +113,11 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3296 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3337 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3314 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3355 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 280 -->
 
-3296 scenarios on main after v9.15 under `requirements-lock.txt`, and 3337 with
+3314 scenarios on main after v9.15 under `requirements-lock.txt`, and 3355 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs
@@ -136,10 +136,10 @@ not redistributable. `test_bar_reader` (24), `test_integration` (17),
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
-3576 and 3617. Every raster is pinned there by SHA-256, so a file that is not
+3594 and 3635. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at 3296/3337 rather than red for a reason it cannot fix.
+no secret is green at 3314/3355 rather than red for a reason it cannot fix.
 
 Both are verified in a clean room with scipy blocked — the statistics are
 hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every
@@ -314,7 +314,11 @@ Both are held to `twin_scatter_*.jpeg`, a drawing this repository carries whose
 every marker's series and centre is declared, and both refuse per mark rather
 than per panel: 16, 17 and 18 of 30 marks routed at 11, 22 and 33 px with **no
 misroutes at any rendering**, everything refused at 5 px and 3 px, and the marks
-it never saw counted in the same table as the ones it did. Publication 464
+it never saw counted in the same table as the ones it did — scored by a
+minimum-cost maximum matching, because a scorer that judges a reader must not be
+weaker than the reader. Every point's hash covers whose it is, which axis it was
+read on, and the eighteen measurements the routing rested on, so a blob refused
+as two markers cannot be given a series name and re-stamped into a value. Publication 464
 Figure 2 is still a refusal and stays one — nothing here is in `run_batch`, no
 plan grain declares an axis manifest, and `MEASURED_MARKER_SHAPE_FILL` is not in
 the provenance registry, so no value can reach a pool through this path.

@@ -264,20 +264,42 @@ def _calibration_record(cal):
 #: What `marker_routing` decided about a mark, and how close the decision was.
 #: A point whose value re-derives from its pixel is not thereby a point of the
 #: series it is filed under: the series came from a shape and a fill measured
-#: against two thresholds, and none of that was in the hash. These are the ten
-#: numbers a person would have to re-measure to disagree.
-ROUTING_EVIDENCE = ("Marker_Shape", "Marker_Fill", "Third_Harmonic",
+#: against two thresholds, and none of that was in the hash.
+#:
+#: AND THE FIRST EIGHT ARE ABOUT WHETHER THIS BLOB WAS ONE MARKER AT ALL. They
+#: were missing, and their absence left the most important verdict of the whole
+#: reader outside the hash: `off_centre_ink > OFF_CENTRE` is what refuses a blob
+#: holding two markers, and a producer could clear the refusal, write a
+#: Series_ID, re-stamp every hash, and nothing downstream measured the number
+#: that made the blob invalid. `verify_points` now re-derives the verdict from
+#: these rather than believing `Marker_Validity_Status`.
+ROUTING_EVIDENCE = ("Marker_Scale_Px", "Side_Px", "Aspect", "Size_Ratio",
+                    "Off_Centre_Ink", "Off_Centre_Threshold",
+                    "Off_Centre_Margin", "Marker_Validity_Status",
+                    "Marker_Shape", "Marker_Fill", "Third_Harmonic",
                     "Interior_Ink", "Shape_Split", "Fill_Split", "Shape_Margin",
                     "Fill_Margin", "Component_ID", "Foreign_Ink_Fraction")
 
 #: Where each of those lives on a `marker_routing.route` record.
-_EVIDENCE_FROM = {"Marker_Shape": "shape", "Marker_Fill": "fill",
+_EVIDENCE_FROM = {"Marker_Scale_Px": "marker_scale_px", "Side_Px": "side_px",
+                  "Aspect": "aspect", "Size_Ratio": "size_ratio",
+                  "Off_Centre_Ink": "off_centre_ink",
+                  "Off_Centre_Threshold": "off_centre_threshold",
+                  "Off_Centre_Margin": "off_centre_margin",
+                  "Marker_Validity_Status": "Marker_Validity_Status",
+                  "Marker_Shape": "shape", "Marker_Fill": "fill",
                   "Third_Harmonic": "third_harmonic",
                   "Interior_Ink": "interior_ink",
                   "Shape_Split": "shape_threshold",
                   "Fill_Split": "fill_threshold",
                   "Component_ID": "Original_Component_ID",
                   "Foreign_Ink_Fraction": "Foreign_Ink_Fraction"}
+
+#: The one status under which a point may carry a measured series.
+SINGLE_MARKER = "SINGLE_MARKER"
+#: What `verify_points` says when the evidence on a routed point says the blob
+#: it came from was not one marker.
+NOT_ONE_MARKER = "MARKER_NOT_ONE_MARKER"
 
 
 def routing_evidence(point):
@@ -294,6 +316,9 @@ def routing_evidence(point):
         out[key] = point.get(src) if src else None
     for margin, value, split in (("Shape_Margin", "Third_Harmonic", "Shape_Split"),
                                  ("Fill_Margin", "Interior_Ink", "Fill_Split")):
+        # `Off_Centre_Margin` is NOT computed here - it comes off the record, so
+        # that a producer who edits it disagrees with `Off_Centre_Threshold`
+        # minus `Off_Centre_Ink` and `verify_points` can say so.
         if out[value] is None or out[split] is None:
             out[margin] = None
         else:
@@ -324,6 +349,7 @@ def point_record_sha256(point, axis_id, y_calibration, x_calibration, panel_id,
          "point_px_y": round(float(point["point_px_y"]), 4),
          "Series_ID": _s(point.get("Series_ID")),
          "Identity_Method": _s(point.get("Identity_Method")),
+         "Value_Method": _s(point.get("Value_Method")),
          "Axis_ID": _s(axis_id),
          "Panel_ID": _s(panel_id),
          "Image_SHA256": _s(image_sha256),
@@ -335,23 +361,33 @@ def point_record_sha256(point, axis_id, y_calibration, x_calibration, panel_id,
         sort_keys=True, default=float).encode("utf-8")).hexdigest()
 
 
-def stamp_points(points, axis_of, axes, x_axis_id, panel_id, image_sha256):
+def stamp_points(points, series_rows, axes, x_axis_id, panel_id, image_sha256):
     """Every point calibrated against ITS OWN axis, with its own hash.
 
-    `axis_of` maps Series_ID to Axis_ID; `axes` is the manifest, from which both
-    the calibrations and the axis records are derived here rather than passed in
-    - a caller holding a `cals` dict that no longer matches the manifest it came
-    from is a way for a point to cite an axis row it was not read under.
+    IT TOOK AN `axis_of` MAPPING AND TRUSTED IT. `series_axis` checked that a
+    series named a Y axis on this panel, and then nothing made a caller go
+    through `series_axis`: hand this function `{"S1": "X_BOTTOM"}` directly and
+    every point was stamped with the x calibration used as the y scale, hashed,
+    and verified clean. The check has to live where the stamp is made, so the
+    mapping is DERIVED here from the series manifest rather than accepted.
 
-    A point whose series names no axis is not calibrated at all - it comes back
-    with its pixel, its refusal, and no value, because a value on an unknown
-    scale is the thing this module exists to prevent.
+    `series_rows` is that manifest - `[{"Series_ID": ..., "Axis_ID": ...}, ...]`.
+    `axes` is the axis manifest, from which both the calibrations and the axis
+    records are derived here as well: a caller holding a `cals` dict that no
+    longer matches the manifest it came from is another way for a point to cite
+    an axis row it was not read under.
+
+    A point whose series names no axis, or names one that is not a Y axis on
+    this panel, is not calibrated at all - it comes back with its pixel, its
+    refusal, and no value, because a value on an unknown scale is the thing this
+    module exists to prevent.
     """
     cals = calibrations(axes)
     records = axis_records(axes)
     xrow = _x_axis(axes, x_axis_id, panel_id)
     xcal = cals[_s(xrow["Axis_ID"])]
     xrec = records[_s(xrow["Axis_ID"])]
+    axis_of, refused = series_axis(series_rows, axes, panel_id=panel_id)
     out = []
     for p in points:
         sid = _s(p.get("Series_ID")) or _s(p.get("series"))
@@ -360,7 +396,8 @@ def stamp_points(points, axis_of, axes, x_axis_id, panel_id, image_sha256):
         rec["Series_ID"] = sid
         if not axis:
             rec.update(Axis_ID="", x_value=None, y_value=None,
-                       Point_Record_SHA256="", refusal=UNKNOWN_AXIS)
+                       Point_Record_SHA256="",
+                       refusal=refused.get(sid, UNKNOWN_AXIS))
             out.append(rec)
             continue
         ycal = cals[axis]
@@ -369,11 +406,11 @@ def stamp_points(points, axis_of, axes, x_axis_id, panel_id, image_sha256):
             Axis_Record_SHA256=records[axis],
             X_Axis_ID=_s(xrow["Axis_ID"]),
             X_Axis_Record_SHA256=xrec,
-            Routing_Evidence_SHA256=routing_evidence_sha256(p),
             x_value=xcal.pixel_to_value(float(p["point_px_x"])),
             y_value=ycal.pixel_to_value(float(p["point_px_y"])),
             Value_Method="MARKER_CENTER",
             refusal="")
+        rec["Routing_Evidence_SHA256"] = routing_evidence_sha256(rec)
         rec["Point_Record_SHA256"] = point_record_sha256(
             rec, axis, ycal, xcal, panel_id, image_sha256,
             axis_record=records[axis], x_axis_record=xrec,
@@ -457,12 +494,12 @@ def association_over_points(records, association_type="PEARSON_R",
     summary["Point_Record_SHA256_List"] = [_s(r.get("Point_Record_SHA256"))
                                            for r in records]
     summary["Expected_Point_Count"] = None
-    summary["Detected_Point_Count"] = len(records)
+    summary["Candidate_Mark_Record_Count"] = len(records)
     summary["Routed_Point_Count"] = sum(1 for r in records
                                         if _s(r.get("Series_ID")))
-    summary["Unresolved_Point_Count"] = sum(1 for r in records
-                                            if not _s(r.get("Series_ID")))
-    summary["Point_Count_Agreement"] = ""
+    summary["Unresolved_Candidate_Count"] = sum(1 for r in records
+                                                if not _s(r.get("Series_ID")))
+    summary["Candidate_Count_Agreement"] = ""
     return summary
 
 
@@ -475,21 +512,33 @@ def with_completeness(summary, counts):
     them; this is how the count travels the last step.
     """
     out = dict(summary)
-    for key in ("Expected_Point_Count", "Detected_Point_Count",
-                "Routed_Point_Count", "Unresolved_Point_Count",
-                "Point_Count_Agreement"):
+    for key in ("Expected_Point_Count", "Candidate_Mark_Record_Count",
+                "Routed_Point_Count", "Unresolved_Candidate_Count",
+                "Candidate_Count_Agreement"):
         if key in counts:
             out[key] = counts[key]
     return out
 
 
-def verify_points(records, axes, x_axis_id, panel_id, image_sha256):
-    """Which points no longer hash to what they carry, and which lost a value."""
+def verify_points(records, series_rows, axes, x_axis_id, panel_id, image_sha256):
+    """Everything about these points that does not follow from what they carry.
+
+    THE HASH IS NOT THE ONLY CHECK, because a producer who edits a record can
+    re-stamp every hash on it. Three things are re-derived rather than believed:
+    the axis a point cites has to BE a Y axis on this panel and the one its
+    series is declared on, the value has to follow from the pixel under that
+    axis' calibration, and the routing evidence has to be consistent with the
+    series the point carries - a blob whose own recorded off-centre ink is over
+    its own recorded threshold was not one marker, whatever the refusal field
+    was later set to.
+    """
     cals = calibrations(axes)
     recs = axis_records(axes)
+    by_id = {_s(r.get("Axis_ID")): r for r in axes}
     xrow = _x_axis(axes, x_axis_id, panel_id)
     xcal = cals[_s(xrow["Axis_ID"])]
     xrec = recs[_s(xrow["Axis_ID"])]
+    declared, _refused = series_axis(series_rows, axes, panel_id=panel_id)
     out = []
     for i, r in enumerate(records):
         axis = _s(r.get("Axis_ID"))
@@ -498,6 +547,28 @@ def verify_points(records, axes, x_axis_id, panel_id, image_sha256):
             continue
         if axis not in cals:
             out.append((i, "axis %s is not in this manifest" % axis))
+            continue
+        # THE AXIS' ROLE, RE-DERIVED HERE. `series_axis` refuses a series that
+        # names the x axis, and a record can be written past `series_axis`: this
+        # is the same question asked of the record itself.
+        row = by_id[axis]
+        if _s(row.get("Dimension")).upper() != "Y":
+            out.append((i, "%s: %s is a %s axis"
+                        % (WRONG_DIMENSION, axis,
+                           _s(row.get("Dimension")).upper() or "dimensionless")))
+            continue
+        if _s(row.get("Panel_ID")) != _s(panel_id):
+            out.append((i, "%s: %s belongs to panel %s"
+                        % (WRONG_PANEL, axis, _s(row.get("Panel_ID")))))
+            continue
+        said = declared.get(_s(r.get("Series_ID")))
+        if said is None:
+            out.append((i, "%s: %s is not a series of this panel"
+                        % (UNKNOWN_AXIS, _s(r.get("Series_ID")))))
+            continue
+        if said != axis:
+            out.append((i, "this point is read on %s and its series is declared "
+                           "on %s" % (axis, said)))
             continue
         want = point_record_sha256(r, axis, cals[axis], xcal, panel_id,
                                    image_sha256, axis_record=recs[axis],
@@ -514,6 +585,10 @@ def verify_points(records, axes, x_axis_id, panel_id, image_sha256):
             # evidence still on the record.
             out.append((i, "routing evidence does not hash to what it carries"))
             continue
+        bad = marker_validity(r)
+        if bad:
+            out.append((i, bad))
+            continue
         ycal = cals[axis]
         for key, cal, pixel in (("x_value", xcal, "point_px_x"),
                                 ("y_value", ycal, "point_px_y")):
@@ -521,4 +596,40 @@ def verify_points(records, axes, x_axis_id, panel_id, image_sha256):
                 out.append((i, "no %s" % key))
             elif abs(cal.pixel_to_value(float(r[pixel])) - float(r[key])) > 1e-6:
                 out.append((i, "%s does not follow from %s" % (key, pixel)))
+        if _s(r.get("Value_Method")) != "MARKER_CENTER":
+            out.append((i, "Value_Method=%r; a routed scatter point is its "
+                           "marker's centre" % _s(r.get("Value_Method"))))
     return out
+
+
+def marker_validity(record):
+    """Why this record's own evidence says its blob was not one marker, or "".
+
+    RE-DERIVED, NOT READ. `Marker_Validity_Status` is a word and the two numbers
+    beside it are the measurement: a producer that clears a refusal, writes a
+    Series_ID and re-stamps every hash has to also make `Off_Centre_Ink` smaller
+    than `Off_Centre_Threshold` and keep `Off_Centre_Margin` equal to their
+    difference - at which point it is no longer editing a field, it is claiming
+    a measurement that a raster can be held against.
+    """
+    ev = routing_evidence(record)
+    ink, cut = ev["Off_Centre_Ink"], ev["Off_Centre_Threshold"]
+    if ink is None or cut is None:
+        # NOTHING MEASURED THIS. A fixture's declaration or a person's click
+        # carries no marker evidence at all, and that is not a contradiction -
+        # it is what `Identity_Method` is for.
+        return ""
+    if float(ink) > float(cut):
+        return ("%s: off-centre ink %.4f is over this panel's own %.4f, so the "
+                "component this point came from held more than one marker"
+                % (NOT_ONE_MARKER, float(ink), float(cut)))
+    if ev["Off_Centre_Margin"] is not None \
+            and abs(float(ev["Off_Centre_Margin"])
+                    - (float(cut) - float(ink))) > 1e-6:
+        return ("%s: the recorded margin %.4f is not %.4f minus %.4f"
+                % (NOT_ONE_MARKER, float(ev["Off_Centre_Margin"]),
+                   float(cut), float(ink)))
+    if _s(ev["Marker_Validity_Status"]) != SINGLE_MARKER:
+        return ("%s: Marker_Validity_Status=%r"
+                % (NOT_ONE_MARKER, _s(ev["Marker_Validity_Status"])))
+    return ""

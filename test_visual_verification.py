@@ -208,10 +208,22 @@ check("  the routed picture is drawn from the same run the numbers come from",
 # record is a gallery of successes: nine of thirty at s3 never became one, and
 # the picture carries them as crosses or it is flattering the reader.
 check("    and the picture accounts for every drawn mark",
-      all(row["detected"] + row["missing"] == row["drawn"]
-          and len(row["missed"]) == row["missing"] for row in G8["rows"])
-      and [_by[n]["missing"] for n in ("s1", "s2", "s3")] == [11, 10, 9],
-      "%r" % {n: (_by[n]["detected"], _by[n]["missing"]) for n in sorted(_by)})
+      all(row["Truth_Matched_Point_Count"] + row["Truth_Missed_Point_Count"]
+          == row["drawn"]
+          and len(row["missed"]) == row["Truth_Missed_Point_Count"]
+          for row in G8["rows"])
+      and [_by[n]["Truth_Missed_Point_Count"]
+           for n in ("s1", "s2", "s3")] == [11, 10, 9],
+      "%r" % {n: (_by[n]["Truth_Matched_Point_Count"],
+                  _by[n]["Truth_Missed_Point_Count"]) for n in sorted(_by)})
+# AND ITS COLUMNS ARE NOT THE READER'S COLUMNS. A gallery that prints candidate
+# records under a heading that reads "found" is the same flattery in a table.
+check("    and its truth columns are named apart from route's candidate counts",
+      all("detected" not in row and "Candidate_Mark_Record_Count" in row
+          for row in G8["rows"])
+      and _by["micro"]["Candidate_Mark_Record_Count"]
+      > _by["micro"]["Truth_Matched_Point_Count"],
+      "%r" % (sorted(G8["rows"][0]),))
 
 print()
 _rasters = all(RR.check("397_fig%d.jpeg" % n)[0] for n in (1, 3))

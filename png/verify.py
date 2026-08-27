@@ -48,6 +48,33 @@ def truth(figure):
     raise SystemExit("%s carries no readings for %s" % (TRUTH_PATH, figure))
 
 
+def axis_topology(figure):
+    """How many panels a figure has, and how many y calibrations it NEEDS.
+
+    Two questions that one field was answering. `declared_axes` in the corpus is
+    a PANEL count, and G6 was comparing it with the number of panels the
+    proposer cut and calling the axes accounted for - on a figure that prints
+    two y scales over one panel. Finding the box is not having the axes.
+    """
+    import json
+    doc = json.load(open(TRUTH_PATH, encoding="utf-8"))
+    for row in doc.get("axis_topology", []):
+        if row["figure"] == figure:
+            return row
+    raise SystemExit("%s carries no axis topology for %s" % (TRUTH_PATH, figure))
+
+
+def corpus_route(pid, fig):
+    """What the worklist decided about this figure, read from the worklist."""
+    import csv
+    root = corpus_root() or ROOT
+    for row in csv.DictReader(open(os.path.join(root, "dig201.csv"),
+                                   encoding="utf-8")):
+        if row.get("pid") == pid and row.get("fig") == fig:
+            return row
+    raise SystemExit("dig201.csv carries no row for %s %s" % (pid, fig))
+
+
 def segmentation_gold(figure):
     """The boxes, spines and ladders a known-good cut produced, and how close
     a run has to be to them."""
@@ -801,6 +828,15 @@ def scatter_real(props):
     for p in shortcut:
         cx, cy = M(p["point_px_x"], p["point_px_y"])
         d.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], outline=BAD, width=2)
+    topo = axis_topology("464|Fig. 2")
+    route = corpus_route("464", "Fig. 2")
+    # THE FOUR NUMBERS, KEPT APART. `declared_axes` is a PANEL count and was
+    # being read as an axis count, so "one panel found, one declared" said the
+    # axes were accounted for on a figure that prints two.
+    physical = len(rows)
+    observed_axes = int(topo["observed_y_axes"])
+    resolved_axes = 1 if prop.get("ticks") else 0
+    auto_series = 0 if refusal else 4
     lines = [
         "the reader, asked for the four series this figure draws:",
         "  ValueError: %s" % refusal,
@@ -819,14 +855,28 @@ def scatter_real(props):
         "  r = %.3f, P = %.2f 이다. 이것이 fail-closed 가 막는 것이다."
         % (assoc["Association_Value"], assoc["P_Value"]),
         "",
-        "the segmentation side, on the same figure:",
-        "  panels found              %d, and the corpus declares %s axis(es)"
-        % (len(rows), prop["declared_axes"]),
-        "  the ladder it read        %s" % prop["ticks"],
-        "  ladder residual           %s px" % prop["resid_px"],
-        "  the RIGHT axis            no ladder: the figure prints a second y",
-        "                            scale and nothing here has a vocabulary",
-        "                            for one",
+        "the segmentation side, and the four numbers it answers:",
+        "  physical panels found      %d" % physical,
+        "  y axes the figure prints   %d (left 10-35, right 20-90)" % observed_axes,
+        "  y calibrations resolved    %d — %s" % (resolved_axes, prop["ticks"]),
+        "  ladder residual            %s px" % prop["resid_px"],
+        "  automatic point series     %d of 4" % auto_series,
+        "",
+        "  FINDING THE BOX IS NOT HAVING THE AXES. The panel count and the axis",
+        "  count were one field: one panel found against one declared axis read",
+        "  as complete, on a figure whose right-hand scale has no ladder and no",
+        "  vocabulary in this package to hold one.",
+        "",
+        "terminal route             %s" % topo["terminal_route"],
+        "  because                  %s" % ", ".join(topo["terminal_causes"]),
+        "  the worklist agrees      route %s, target_axes %s"
+        % (route.get("route_norm"), route.get("target_axes")),
+        "  by hand that means       two analysis views over one source panel:",
+        "                           %s on the left calibration, %s on the right,"
+        % (", ".join(topo["series_by_axis"]["LEFT"]),
+           ", ".join(topo["series_by_axis"]["RIGHT"])),
+        "                           one shared x, an association per series and",
+        "                           never one cloud",
     ]
     view = capt.below(
         view, "464 Fig. 2 — 실제 4계열 흑백 산점도: 거절과, 거절이 막는 것",
@@ -838,7 +888,13 @@ def scatter_real(props):
                 assoc=assoc["Association_Value"], p=assoc["P_Value"],
                 area_median=areas[len(areas) // 2],
                 x_max_read=max(xs), x_axis_max=max(v for v, _px in xladder),
-                panels=len(rows), declared_axes=int(prop["declared_axes"] or 0),
+                physical_panels=physical, observed_y_axes=observed_axes,
+                resolved_y_calibrations=resolved_axes,
+                automatic_point_series=auto_series,
+                terminal_route=topo["terminal_route"],
+                terminal_causes=list(topo["terminal_causes"]),
+                worklist_route=route.get("route_norm"),
+                worklist_target_axes=int(route.get("target_axes") or 0),
                 residual=float(prop["resid_px"]))
 
 

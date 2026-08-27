@@ -461,5 +461,30 @@
     }
    ]
   }
+ ],
+ "axis_topology": [
+  {
+   "figure": "464|Fig. 2",
+   "clip": "clips/ID464__fig2.png",
+   "physical_panels": 1,
+   "observed_y_axes": 2,
+   "observed_y_axes_note": "ONE PANEL, TWO Y SCALES. Total peripheral resistance is printed up the left at 10-35 and a splanchnic vascular resistance index up the right at 20-90, against one shared x axis. Counted by eye, like every other number in this file, and recorded because the two questions - how many panels were cut, how many y calibrations the figure needs - had been answered by one field. A run that finds the single panel box is not a run that has the axes.",
+   "series_by_axis": {
+    "LEFT": [
+     "OPEN_CIRCLE",
+     "FILLED_CIRCLE"
+    ],
+    "RIGHT": [
+     "OPEN_TRIANGLE",
+     "FILLED_TRIANGLE"
+    ]
+   },
+   "terminal_route": "MANUAL_WPD_TWIN_AXIS",
+   "terminal_causes": [
+    "SCATTER_MONO_MULTISERIES_UNSUPPORTED",
+    "SECONDARY_Y_AXIS_UNRESOLVED"
+   ],
+   "terminal_route_note": "The two causes are the gallery's names for two findings this pipeline has no run-state for, because this figure never enters a plan: the corpus routes it DIGITIZE_TWIN_AXIS with target_axes = 0 and no manifest is ever compiled for it. They are written here so the answer to 'why is there no automatic value' and the answer to 'what would a person do' are the same record. Digitizing it by hand means two analysis views over one source panel - the circles against the left calibration, the triangles against the right - sharing the x calibration, with an association per series and never one cloud."
+  }
  ]
 }

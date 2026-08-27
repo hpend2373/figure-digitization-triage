@@ -55,7 +55,7 @@ def done():
 
 
 #: The truth file this suite was written against.
-TRUTH_SHA256 = "2e4f82709675ff1f3951d6d405dd84e9a9932c8e0bc1e6e61f866374e24eae5b"
+TRUTH_SHA256 = "ab39f67d96db38a768bba770edfe8b25de18ed99745f7d5afe447863a8f4cacb"
 
 import verify as V                                                # noqa: E402
 
@@ -311,13 +311,33 @@ check("  and it reads ink past the end of the x axis",
 check("  and reports no association where the figure shows two steep ones",
       abs(G6["assoc"]) < 0.05 and G6["p"] > 0.5,
       "r = %.3f, P = %.2f" % (G6["assoc"], G6["p"]))
-# ONE LADDER ON A TWO-AXIS FIGURE. The right-hand scale gets none, and nothing
-# in this package has a vocabulary for a second y axis, so no value from this
-# figure is offered for digitizing by either route.
-check("  the proposer reads one ladder, on a figure that prints two y scales",
-      (G6["panels"], G6["declared_axes"]) == (1, 1) and G6["residual"] <= 0.5,
-      "%d panel(s), %d declared, residual %.2f px"
-      % (G6["panels"], G6["declared_axes"], G6["residual"]))
+# FINDING THE BOX IS NOT HAVING THE AXES. This asserted `panels == 1` against
+# `declared_axes == 1` and called the axes accounted for - but `declared_axes`
+# is a PANEL count, and this figure prints two y scales over one panel. One
+# field was answering two questions, and the shape of the answer was "complete".
+check("  one physical panel, and the figure prints two y scales over it",
+      (G6["physical_panels"], G6["observed_y_axes"]) == (1, 2),
+      "%d panel(s), %d y axis(es)"
+      % (G6["physical_panels"], G6["observed_y_axes"]))
+check("  of which one calibration is resolved, at a sub-pixel residual",
+      G6["resolved_y_calibrations"] == 1 and G6["residual"] <= 0.5,
+      "%d resolved, residual %.2f px"
+      % (G6["resolved_y_calibrations"], G6["residual"]))
+check("  and no series is read automatically, so nothing is offered",
+      G6["automatic_point_series"] == 0,
+      "%d series" % G6["automatic_point_series"])
+# THE TERMINAL STATE, PINNED. Not "it skipped": a route, and the two findings
+# that produced it, so "why is there no automatic value" and "what does a person
+# do" are one record. The worklist reached the same place independently.
+check("  the terminal route is MANUAL_WPD_TWIN_AXIS, and names both causes",
+      G6["terminal_route"] == "MANUAL_WPD_TWIN_AXIS"
+      and G6["terminal_causes"] == ["SCATTER_MONO_MULTISERIES_UNSUPPORTED",
+                                    "SECONDARY_Y_AXIS_UNRESOLVED"],
+      "%s %r" % (G6["terminal_route"], G6["terminal_causes"]))
+check("    and the worklist routed it the same way, at target_axes 0",
+      (G6["worklist_route"], G6["worklist_target_axes"])
+      == ("DIGITIZE_TWIN_AXIS", 0),
+      "%s, target_axes %d" % (G6["worklist_route"], G6["worklist_target_axes"]))
 
 print()
 print("the pictures themselves")

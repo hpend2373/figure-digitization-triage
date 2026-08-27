@@ -38,3 +38,12 @@ clips201.csv
 captions.csv
 clips/
 proposals.csv
+
+# THE GALLERY'S OWN OUTPUT. `png/verify.py` writes these on every run and most
+# of them are crops of publisher figures. A GLOB, because the gallery grows: the
+# four were named by hand in v9.16 and the fifth and sixth would have been
+# tracked the moment they were drawn - and worse, this block was dropped
+# entirely when the publisher-path block above was shipped over it, which is why
+# `test_reproducibility` checks the INDEX and not this file.
+# `png/E1_provenance_matrix.png` is a table with no figure in it and stays.
+png/G*.png

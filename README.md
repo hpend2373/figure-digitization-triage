@@ -90,7 +90,8 @@ Every test file is a standalone script:
 3440 scenarios on main after v9.15 under `requirements-lock.txt`, and 3481 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
-its three reading scenarios where tesseract is not. **CI runs both**, in two
+its three glyph-reading scenarios where tesseract is not. `intake-full` installs
+both explicitly and records both versions in its log. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
 runner image: `core` removes poppler-utils and the Python backends before it
 starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A

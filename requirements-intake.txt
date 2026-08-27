@@ -24,3 +24,11 @@
 # inheriting from whatever `ubuntu-latest` happens to ship.
 pdfminer.six==20251230
 pypdf==3.17.4
+# TESSERACT IS THE SAME KIND OF BACKEND AS POPPLER, and `test_tick_ocr` has
+# three scenarios that read real glyphs. Without it they SKIP - three scenarios
+# that ran nowhere but a developer's machine, which is what the two-profile
+# count exists to make visible. The apt package `tesseract-ocr` is the other
+# half and cannot be pinned here; `intake-full` installs it explicitly and
+# records `tesseract --version` in its log, for the same reason it records
+# `pdftotext -v`.
+pytesseract==0.3.13

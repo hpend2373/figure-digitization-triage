@@ -153,7 +153,11 @@ jobs:
       - name: install the pinned environment and the intake backends
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y poppler-utils
+          # TESSERACT IS A BACKEND LIKE POPPLER. `test_tick_ocr` has three
+          # scenarios that read real glyphs, and without it they skip - three
+          # scenarios that never run in CI, which is the shape this loop's own
+          # count check exists to catch.
+          sudo apt-get install -y poppler-utils tesseract-ocr
           python -m pip install -r requirements-lock.txt -r requirements-intake.txt
       # poppler is not a Python package and cannot be pinned in a requirements
       # file. Recorded, so a runner image that changes it is visible in the log
@@ -161,6 +165,7 @@ jobs:
       - name: record the backends this count belongs to
         run: |
           pdftotext -v 2>&1 | head -1
+          tesseract --version 2>&1 | head -1
           python -c "import importlib.metadata as m; print('pdfminer.six', m.version('pdfminer.six')); print('pypdf', m.version('pypdf'))"
       - name: suite
         run: |

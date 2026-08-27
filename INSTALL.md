@@ -10033,6 +10033,22 @@ against log, a one-sided axis break, a dual axis, an inset, two disagreeing
 providers, a row with none - are drawn scenarios and were already in place; what
 this adds is the positive corpus they were waiting on.
 
+### And three scenarios that ran nowhere but a laptop
+
+The count check went red twice more, and both were the same fact arriving in two
+profiles: `test_tick_ocr`'s three glyph-reading scenarios need tesseract, and
+NEITHER CI job installed it. `pytesseract` was in no requirements file at all, so
+the OCR path had never run in CI in this package's history - the scenarios
+skipped, the totals were three short, and the markers I had written by hand were
+the only place the difference showed.
+
+Tesseract is the same kind of backend as poppler, so it is installed the same
+way: `tesseract-ocr` in `intake-full`'s apt step, `pytesseract==0.3.13` in
+`requirements-intake.txt`, and `tesseract --version` recorded in the job log
+beside `pdftotext -v`. The alternative was to lower the marker to the measured
+3478 and leave three scenarios running on one machine, which is the shape the
+check exists to refuse.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

@@ -441,6 +441,42 @@ assert _VDS.SKIPPED in ci_text, (
     "verify_documented_status reads" % _VDS.SKIPPED)
 passed("the workflow, the skip note and the guard spell the same two tokens")
 
+# AND NO PUBLISHER FIGURE IS TRACKED. `raster_root.roots()` searches the package
+# directory on purpose - a developer who has the originals should be able to drop
+# them beside the code and work - and that is exactly the path by which ten of
+# them came to be tracked in a public repository, one `git add -A` at a time.
+# `.gitignore` is the first line and can be overridden with `git add -f`; this is
+# the second, and it is the one that runs in CI.
+#
+# TRACKED, not present: forbidding the FILES would forbid the working copy the
+# fallback exists for. What may not happen is that the index carries one.
+_forbidden_paths = sorted(
+    set(_RRT.RASTERS) | set(_RRT.CORPUS_FILES) | {"captions.csv"}
+    | {l.strip() for l in
+       open(os.path.join(HERE, "history", "purge-paths.txt"), encoding="utf-8")
+       if l.strip()} if os.path.exists(
+        os.path.join(HERE, "history", "purge-paths.txt"))
+    else set(_RRT.RASTERS) | set(_RRT.CORPUS_FILES) | {"captions.csv"})
+_index = subprocess.run(["git", "ls-files"], cwd=HERE,
+                        capture_output=True, text=True)
+if _index.returncode == 0:
+    _tracked = set(_index.stdout.splitlines())
+    _back = sorted(p for p in _forbidden_paths
+                   if p in _tracked
+                   or any(t == p or t.startswith(p.rstrip("/") + "/")
+                          for t in _tracked))
+    assert not _back, (
+        "these are tracked again: %s. They are publisher figures or the corpus "
+        "index; the history was rewritten once to get them out" % _back)
+    passed("no publisher figure or corpus file is in the index (%d paths checked)"
+           % len(_forbidden_paths))
+else:
+    # A TARBALL HAS NO INDEX, so there is nothing to be wrong. Counted anyway:
+    # the alternative is a scenario count that depends on whether the tree came
+    # from `git clone` or from a release archive, and the count is compared
+    # against a number in README that names two environments, not four.
+    passed("no publisher figure or corpus file is in the index (no index here)")
+
 # No scenario may be written so that it cannot fail. Two were: a caption check
 # ending `... or True`, which passed whatever the picture contained, and an
 # `all(... or True ...)` inside a figure-isolation check. Both looked like

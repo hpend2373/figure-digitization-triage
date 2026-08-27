@@ -38,6 +38,10 @@ FRAGMENT_AREA_SHARE = 0.25   # panels covering less than this of the raster are 
 DIG = os.environ.get("DIG", "dig201.csv")        # pid, fig, declared axis count
 CLIPS = os.environ.get("CLIPS", "clips201.csv")  # pid, fig, png, status
 CAPS = os.environ.get("CAPS", "captions.csv")    # written by capscan.py
+# AND WHERE THE CLIPS THEMSELVES ARE. This was the literal "clips", resolved
+# against whatever the working directory happened to be - so a caller that had
+# the corpus somewhere else got `OPEN_FAILED` rows and an exit code of 0.
+CLIP_ROOT = os.environ.get("CLIP_ROOT", "clips")
 
 figs = {(r["pid"], r["fig"]): r for r in csv.DictReader(open(DIG))}
 # THE FIGURE'S OWN STATEMENT OF ITS PANELS, read once by `capscan.py`.
@@ -219,7 +223,7 @@ def collapse_same_axis(dark, recs):
 
 out = []
 for r in rows:
-    p = os.path.join("clips", r["png"])
+    p = os.path.join(CLIP_ROOT, r["png"])
     declared = int((figs.get((r["pid"], r["fig"])) or {}).get("axes") or 0)
     try:
         img = Image.open(p)

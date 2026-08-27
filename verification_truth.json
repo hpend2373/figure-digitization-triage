@@ -1,0 +1,236 @@
+{
+ "schema": "fdt.verification_truth/1",
+ "what_this_is": "Approximate values read off the printed marks BY EYE, recorded so the gallery in png/verify.py can be judged against something other than itself. They were hardcoded in that file, which made the comparison unauditable: a reader whose output drifted could be made to agree by editing the numbers it is compared with, in the same file, in the same commit. Here they are data, and test_visual_verification.py pins this file's SHA-256 - so changing a truth value and changing the declared hash are one diff a reviewer can see.",
+ "what_this_is_not": "NOT an attestation and NOT a confirmation. Nobody has signed these and no reviewer identity is recorded; they are one person's approximate reading to about half a printed unit, which is why the tolerances they are used with are stated beside them rather than inferred. A run that agrees with this file is reproducible, not correct.",
+ "status": "UNATTESTED_APPROXIMATE",
+ "figures": [
+  {
+   "figure": "397|FIG3",
+   "raster": "397_fig3.jpeg",
+   "mark_type": "BAR_MONO",
+   "unit": "mmHg",
+   "axis_span": 100.0,
+   "tolerance": 2.0,
+   "tolerance_why": "an eye reading of a bar top against 20 mmHg gridlines is good to about half a printed unit; 2 mmHg on a 100 mmHg axis is that, doubled, and is not a claim about the reader's accuracy",
+   "cells": [
+    {
+     "panel": "MEN",
+     "series": "FLUID",
+     "x": "PRE",
+     "value": 97
+    },
+    {
+     "panel": "MEN",
+     "series": "FLUID",
+     "x": "POST",
+     "value": 123
+    },
+    {
+     "panel": "MEN",
+     "series": "NON_FLUID",
+     "x": "PRE",
+     "value": 96
+    },
+    {
+     "panel": "MEN",
+     "series": "NON_FLUID",
+     "x": "POST",
+     "value": 113
+    },
+    {
+     "panel": "WOMEN",
+     "series": "FLUID",
+     "x": "PRE",
+     "value": 88
+    },
+    {
+     "panel": "WOMEN",
+     "series": "FLUID",
+     "x": "POST",
+     "value": 110
+    },
+    {
+     "panel": "WOMEN",
+     "series": "NON_FLUID",
+     "x": "PRE",
+     "value": 92
+    },
+    {
+     "panel": "WOMEN",
+     "series": "NON_FLUID",
+     "x": "POST",
+     "value": 104
+    }
+   ]
+  },
+  {
+   "figure": "397|FIG1",
+   "raster": "397_fig1.jpeg",
+   "mark_type": "LINE_MONO",
+   "unit": "mmHg",
+   "axis_span": 50.0,
+   "tolerance": 2.0,
+   "tolerance_why": "two black curves on a 10 mmHg gridline pitch, one of them dashed and both crossing; half a gridline is 5 mmHg and this is well inside it",
+   "cells": [
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "0:30",
+     "value": 92.5
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "1:00",
+     "value": 99.5
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "1:30",
+     "value": 104.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "2:00",
+     "value": 107.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "2:30",
+     "value": 105.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "3:00",
+     "value": 98.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "3:30",
+     "value": 98.5
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "4:00",
+     "value": 100.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "4:30",
+     "value": 97.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "5:00",
+     "value": 98.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "5:30",
+     "value": 99.0
+    },
+    {
+     "panel": "MAP",
+     "series": "FLUID",
+     "x": "6:00",
+     "value": 98.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "0:30",
+     "value": 89.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "1:00",
+     "value": 91.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "1:30",
+     "value": 92.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "2:00",
+     "value": 94.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "2:30",
+     "value": 96.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "3:00",
+     "value": 96.5
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "3:30",
+     "value": 95.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "4:00",
+     "value": 95.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "4:30",
+     "value": 96.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "5:00",
+     "value": 96.0
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "5:30",
+     "value": 96.5
+    },
+    {
+     "panel": "MAP",
+     "series": "NO_FLUID",
+     "x": "6:00",
+     "value": 98.0
+    }
+   ]
+  }
+ ],
+ "panel_counts": [
+  {
+   "figure": "475|Fig. 2",
+   "clip": "ID475__fig2.png",
+   "axes_counted_by_eye": 6,
+   "note": "six panels, two drug columns by three outcome rows"
+  },
+  {
+   "figure": "349|Figure 3",
+   "clip": "ID349__fig3.png",
+   "axes_counted_by_eye": 5,
+   "note": "five outcomes, each one panel; the sixth cell of the grid is the legend"
+  }
+ ]
+}

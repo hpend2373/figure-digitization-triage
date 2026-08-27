@@ -14,12 +14,27 @@ scenario-counts.tsv
 # tracked, every clean run of the suite leaves the tree dirty with a deletion.
 mono_line_fixture.png
 
-# THE GALLERY DRAWS ON PUBLISHER FIGURES, and what it writes is a crop of one.
-# `png/verify.py` puts G1-G4 back into the tree every time it runs, and a
-# `git add -A` after that run is exactly how ten rasters and eleven PNGs came to
-# be tracked in a public repository in the first place. The pictures are
-# deliverables, not records: run the gallery, look at them, do not commit them.
-png/G1_read_397fig3.png
-png/G2_read_397fig1.png
-png/G3_segment_475fig2.png
-png/G4_segment_349fig3.png
+# THE PUBLISHER FIGURES, WHICH THIS REPOSITORY MUST NEVER TRACK AGAIN.
+# `raster_root.roots()` searches the package directory on purpose - a developer
+# who has the originals should be able to drop them beside the code and work -
+# and that is also the path by which ten of them came to be tracked in a public
+# repository. Every name below is a key of `raster_root.RASTERS` or an input to
+# `propose.py`; `test_reproducibility` asserts that none of them is in
+# `git ls-files`, because a .gitignore can be overridden with `git add -f`.
+323_p5_fig2.jpeg
+397_fig1.jpeg
+397_fig2.jpeg
+397_fig3.jpeg
+397_fig4.jpeg
+397_fig5.jpeg
+ID386_Fig2_publisher_898x1662.png
+fixtures/id323_fig1.jpeg
+id323_fig1.tar
+id323_fig2.tar
+# The 187-figure corpus: the worklist, the clip index, the caption scan and the
+# clips themselves. All publisher figures or metadata about them.
+dig201.csv
+clips201.csv
+captions.csv
+clips/
+proposals.csv

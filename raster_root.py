@@ -61,7 +61,22 @@ RASTERS = {
         "5eab5e206a0e9c4bbd978b1b6808267a6c15ad338542c3829ace4afb4bb4aea7",
     "id323_fig2.tar":
         "252b4da65b43c6d6813aa12af6ecee04bfc2a9d73e6196a1992b8ec72e3c1785",
+    # THE TWO CORPUS CLIPS THE GALLERY SEGMENTS. Also publisher figures, and
+    # pinned for the same reason as the rest: `png/verify.py` asserts that the
+    # proposer cuts six panels out of one and five out of the other, and those
+    # are claims about particular renderings. A clip of the same figure at
+    # another dpi cuts differently and would make the assertion say nothing.
+    "clips/ID475__fig2.png":
+        "7b8b1e62211c1e4ae4803d47f950faa9fc3c2bb5e7ccfa5103c3c106bfff412b",
+    "clips/ID349__fig3.png":
+        "4677b20b7b9b9da5018316e95484a893c55c676d7cd6d66fa2411f25419e2d46",
 }
+
+#: The corpus tables the proposer reads, and the `clips/` directory beside them.
+#: NOT pinned by hash: the worklist and the clip index are edited as the review
+#: proceeds, and a hash on a working file would refuse the corpus for being
+#: current. The two clips the gallery actually asserts against ARE pinned, above.
+CORPUS_FILES = ("dig201.csv", "clips201.csv", "clips")
 
 
 def roots(extra=""):
@@ -124,6 +139,24 @@ def check(name, extra=""):
 #: suite's output, so it has to be something no sentence would produce by
 #: accident, and it has to live here rather than being spelled twice.
 ABSENT_TOKEN = "FDT_RASTER_ABSENT"
+
+
+def corpus_note(*names):
+    """The same answer, for the corpus this repository also does not carry.
+
+    The ten files above are pinned by hash because a wrong one returns a
+    plausible number. The 187-figure corpus cannot be pinned that way - it is a
+    worklist, a clip index and 340 clips, and the clips are publisher figures
+    too - but its absence has to read the same to the CI loop, or a suite that
+    skips for want of it reports a bare 0 and is refused as a suite that fell
+    out of the loop.
+    """
+    return ("SKIP [%s]: %s not on this machine. The corpus - its worklist "
+            "(`dig201.csv`), its clip index (`clips201.csv`) and the `clips/` "
+            "directory - is publisher figures and their metadata, and this "
+            "repository carries none of it. `propose.py` names the first two in "
+            "`DIG` and `CLIPS` so it can be pointed at a checkout that has them."
+            % (ABSENT_TOKEN, ", ".join(names)))
 
 
 def skip_note(name):

@@ -1,0 +1,145 @@
+{
+  "arms": {
+    "baseline": {
+      "code_ref": "tree:6f90bd6a6ccc1f56bafc2d6a839333176e4d4d4d56c044b206d7013e402b7c3d",
+      "hashes": [
+        "da4f193e61618c5ea7dd10074e61bb3d34ced189084da0a4736e79334e2c5331",
+        "da4f193e61618c5ea7dd10074e61bb3d34ced189084da0a4736e79334e2c5331"
+      ],
+      "output": "/home/claude/geo/verify/run_x/baseline/output.rep0.20260827T012605-14292.csv"
+    },
+    "candidate": {
+      "code_ref": "tree:8d07623cc8d21cccb50b7e2875f2e6368653639dcc42a593e51a8c5df5356a08",
+      "hashes": [
+        "da4f193e61618c5ea7dd10074e61bb3d34ced189084da0a4736e79334e2c5331",
+        "da4f193e61618c5ea7dd10074e61bb3d34ced189084da0a4736e79334e2c5331"
+      ],
+      "output": "/home/claude/geo/verify/run_x/candidate/output.rep0.20260827T012605-14292.csv"
+    }
+  },
+  "declared_variables": [
+    "code"
+  ],
+  "experiment_id": "transfer-check-off",
+  "manifest_diff": {
+    "code.gate_trace.py": [
+      "ec125b168d56f77ffcce59c9fc1a6e61b16b22a8b27c3f5e0f63d8822f69a709",
+      "42c74fe20d6b64545fdc3efca0b17ec0a41262ee51bfbdd6f18bb7462c0b974e"
+    ],
+    "code.ref": [
+      "tree:6f90bd6a6ccc1f56bafc2d6a839333176e4d4d4d56c044b206d7013e402b7c3d",
+      "tree:8d07623cc8d21cccb50b7e2875f2e6368653639dcc42a593e51a8c5df5356a08"
+    ],
+    "code.y_scale_group.py": [
+      "9e2a81b2be072e821109d1030d5bf9d56090e1608712796be2185154a70f22e2",
+      "85149e613b66ff88033ca69eff57c0f249cd9199670aafaf5171ee76dc176dac"
+    ]
+  },
+  "outputs_identical": true,
+  "per_figure": [
+    {
+      "base": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "candidate": {
+        "boxed_area_px": 939119,
+        "count_equals_declared": true,
+        "declared": 15,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 1,
+        "ladder_pass_count": 4,
+        "panel_count": 15,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 15
+      },
+      "declared": 15,
+      "fig": "Fig. 2",
+      "pid": "177"
+    },
+    {
+      "base": {
+        "boxed_area_px": 313391,
+        "count_equals_declared": true,
+        "declared": 4,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 4,
+        "panel_count": 4,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 4
+      },
+      "candidate": {
+        "boxed_area_px": 313391,
+        "count_equals_declared": true,
+        "declared": 4,
+        "duplicate_axis_count": 0,
+        "foreign_axis_count": 0,
+        "fragment_flag_count": 0,
+        "ladder_pass_count": 4,
+        "panel_count": 4,
+        "unique_axes_equals_declared": true,
+        "unique_axis_count": 4
+      },
+      "declared": 4,
+      "fig": "Fig. 1",
+      "pid": "36"
+    }
+  ],
+  "refusals": [],
+  "run_id": "20260827T012605-14292",
+  "schema": 1,
+  "totals": {
+    "boxes_moved": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "duplicate_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "foreign_axis_count": {
+      "base": 0,
+      "candidate": 0,
+      "delta": 0
+    },
+    "fragment_flag_count": {
+      "base": 1,
+      "candidate": 1,
+      "delta": 0
+    },
+    "ladder_pass_count": {
+      "base": 8,
+      "candidate": 8,
+      "delta": 0
+    },
+    "panel_count": {
+      "base": 19,
+      "candidate": 19,
+      "delta": 0
+    },
+    "shared_column_mismatches": {
+      "base": null,
+      "candidate": null,
+      "delta": 0
+    },
+    "unique_axis_count": {
+      "base": 19,
+      "candidate": 19,
+      "delta": 0
+    }
+  },
+  "verdict": "DEMO_ONLY"
+}

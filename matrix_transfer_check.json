@@ -1,0 +1,40 @@
+{
+ "suites": [
+  "test_y_scale_group.py"
+ ],
+ "mutations": [
+  {
+   "name": "the transfer error is not normalised",
+   "file": "y_scale_group.py",
+   "old": "        \"transfer_max_rel\": (max(errs) / span) if span else None,",
+   "new": "        \"transfer_max_rel\": max(errs),"
+  },
+  {
+   "name": "an unfittable target is not caught",
+   "file": "y_scale_group.py",
+   "old": "    if not ps or not ts:\n        return None",
+   "new": "    if not ps:\n        return None"
+  },
+  {
+   "name": "the pair is restricted to the eligible provider",
+   "file": "y_scale_group.py",
+   "old": "                if a is b or not (a[\"ladder_ok\"] and b[\"ladder_ok\"]):",
+   "new": "                if a is b or not (a[\"ladder_ok\"] and b[\"ladder_ok\"]) \\\n                        or b[\"eligibility\"] != ELIGIBLE:"
+  },
+  {
+   "name": "only one direction is recorded",
+   "file": "y_scale_group.py",
+   "old": "        for a in band:\n            for b in band:",
+   "new": "        for a in band:\n            for b in band[band.index(a) + 1:]:"
+  },
+  {
+   "name": "the slope error is dropped",
+   "file": "y_scale_group.py",
+   "old": "        \"slope_rel_err\": abs(ps - ts) / abs(ts) if ts else None,",
+   "new": "        \"slope_rel_err\": None,"
+  }
+ ],
+ "files": {
+  "y_scale_group.py": "1f23f8e513d51c57c16a3f7aa3049305230ac0c75a8fa1b6ea0b1919941bd1ce"
+ }
+}

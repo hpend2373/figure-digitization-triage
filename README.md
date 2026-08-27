@@ -84,10 +84,10 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3432 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3473 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3440 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3481 -->
 
-3432 scenarios on main after v9.15 under `requirements-lock.txt`, and 3473 with
+3440 scenarios on main after v9.15 under `requirements-lock.txt`, and 3481 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three reading scenarios where tesseract is not. **CI runs both**, in two

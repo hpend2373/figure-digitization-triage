@@ -490,6 +490,118 @@ class TicksMustTouchTheSpine(unittest.TestCase):
         RUN[0] += 1
 
 
+class TheMetamorphicPair(unittest.TestCase):
+    """The transfer test needs no masking: the corpus already holds bands where
+    both panels read their own ladder, and those pairs carry ground truth."""
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._y = T.ON, Y.ON
+        T.ON, Y.ON = True, True
+
+    def tearDown(self):
+        T.ON, Y.ON = self._on, self._y
+
+    def checks(self):
+        return [r for r in T.ROWS if r["kind"] == "TRANSFER_CHECK"]
+
+    def test_two_panels_on_one_scale_transfer_with_no_error(self):
+        """The case the whole idea rests on. Guard: transfer_error."""
+        pts = [(100.0, 100.0), (50.0, 200.0), (0.0, 300.0)]
+        got = Y.transfer_error({"points": pts}, {"points": pts})
+        self.assertAlmostEqual(got["transfer_max_abs"], 0.0, places=6)
+        self.assertAlmostEqual(got["transfer_max_rel"], 0.0, places=6)
+        self.assertAlmostEqual(got["slope_rel_err"], 0.0, places=6)
+        RUN[0] += 1
+
+    def test_two_scales_in_one_band_are_measured_and_not_refused(self):
+        """A band is a geometric relation. Whether it implies one y scale is the
+        question the distribution is being built to answer, so the disagreement
+        is a NUMBER here, not a verdict."""
+        target = {"points": [(4.0, 100.0), (3.0, 200.0), (2.0, 300.0)]}
+        source = {"points": [(100.0, 100.0), (50.0, 200.0), (0.0, 300.0)]}
+        got = Y.transfer_error(target, source)
+        self.assertGreater(got["transfer_max_rel"], 10)
+        self.assertNotIn("verdict", got)
+        RUN[0] += 1
+
+    def test_the_error_is_normalised_by_the_targets_own_range(self):
+        """A panel in mmHg and one in l/min/m2 cannot be put in one distribution
+        on absolute error. Guard: the division by the target's span."""
+        small = {"points": [(4.0, 100.0), (2.0, 300.0)]}
+        big = {"points": [(400.0, 100.0), (200.0, 300.0)]}
+        off_small = {"points": [(4.2, 100.0), (2.2, 300.0)]}
+        off_big = {"points": [(420.0, 100.0), (220.0, 300.0)]}
+        a = Y.transfer_error(small, off_small)
+        b = Y.transfer_error(big, off_big)
+        self.assertAlmostEqual(a["transfer_max_rel"], b["transfer_max_rel"],
+                               places=6)
+        self.assertNotAlmostEqual(a["transfer_max_abs"], b["transfer_max_abs"])
+        RUN[0] += 1
+
+    def test_a_panel_with_one_point_has_no_line_and_no_error(self):
+        """Zero error against nothing is the strongest possible agreement
+        reported for no evidence."""
+        self.assertIsNone(Y.transfer_error({"points": [(1.0, 1.0)]},
+                                           {"points": [(1.0, 1.0), (2.0, 2.0)]}))
+        RUN[0] += 1
+
+    def test_both_directions_are_recorded(self):
+        """A -> B and B -> A are different measurements: the normalisation is by
+        the TARGET's range, so the pair is not symmetric."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  points=[(100.0, 100.0), (0.0, 300.0)]),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115, True, "bbb",
+                  points=[(4.0, 100.0), (2.0, 300.0)])])
+        pairs = {(r["target"], r["source"]) for r in self.checks()}
+        self.assertEqual(pairs, {("P01", "P02"), ("P02", "P01")})
+        RUN[0] += 1
+
+    def test_the_pair_carries_the_evidence_a_ladderless_target_would_have(self):
+        """`same_calibration` cannot license a transfer: a pair whose
+        calibrations agree is a pair that both READ, and needs no transfer. What
+        a target with no ladder still has is its tick signature and its geometry,
+        so those travel on the same row and the corpus can be asked whether they
+        predict the error. Guard: the match_ticks and geometry fields."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  points=[(100.0, 100.0), (0.0, 300.0)], ticks=[30, 60, 90]),
+            panel("P02", (210, 400, 20, 120), (26, 116), 116, True, "bbb",
+                  points=[(4.0, 100.0), (2.0, 300.0)], ticks=[31, 61])])
+        r = [x for x in self.checks() if x["target"] == "P02"][0]
+        self.assertEqual(int(r["tick_match_count"]), 2)
+        self.assertEqual(int(r["provider_unmatched"]), 1)
+        self.assertEqual(int(r["symmetric_max"]), 29)
+        self.assertEqual(int(r["d_baseline"]), 1)
+        self.assertEqual(int(r["d_axis_top"]), 1)
+        RUN[0] += 1
+
+    def test_a_band_where_only_one_panel_reads_has_no_pair(self):
+        """No ground truth, no metamorphic test. The pair is what makes it one."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  points=[(100.0, 100.0), (0.0, 300.0)]),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115)])
+        self.assertEqual(self.checks(), [])
+        RUN[0] += 1
+
+    def test_the_pair_is_not_restricted_to_the_eligible_provider(self):
+        """The question is what the BAND RELATION implies. Eligibility is a
+        separate question about lending, and filtering on it here would measure
+        the gate instead of the relation."""
+        Y.record(np.zeros((10, 10), dtype=bool), [
+            panel("P01", (10, 200, 20, 120), (25, 115), 115, True, "aaa",
+                  points=[(100.0, 100.0), (0.0, 300.0)],
+                  geometry="FALLBACK_LONGEST"),
+            panel("P02", (210, 400, 20, 120), (25, 115), 115, True, "bbb",
+                  points=[(4.0, 100.0), (2.0, 300.0)])])
+        rows = self.checks()
+        self.assertEqual(len(rows), 2)
+        self.assertIn("INELIGIBLE", {r["source_eligibility"] for r in rows})
+        RUN[0] += 1
+
+
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))

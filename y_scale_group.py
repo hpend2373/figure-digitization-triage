@@ -284,6 +284,50 @@ def line_residual(target, provider):
     return max(abs(px - (v - inter) / slope) for v, px in tp)
 
 
+def transfer_error(target, provider):
+    """What a SHARED_ROW transfer would get WRONG, in the target's own units.
+
+    THE METAMORPHIC TEST NEEDS NO MASKING. The corpus already contains row bands
+    where BOTH panels read their own ladder, and those pairs carry their own
+    ground truth: transfer the provider's line onto the target's tick pixels, and
+    compare with what the target actually read there. If "one row band" implied
+    "one y scale", the error would be zero.
+
+    Reported in two forms, because neither alone is comparable across figures:
+
+        max_abs   the largest disagreement in the target's own units
+        max_rel   the same, over the target's own value RANGE - dimensionless,
+                  so a panel measuring mmHg and one measuring l/min/m2 can be put
+                  in the same distribution
+
+    NO VERDICT. A tolerance on `max_rel` is exactly the constant this whole line
+    of work is waiting on, and it is what the distribution is being built to
+    decide.
+    """
+    import panel_geometry as G
+    tp, pp = target.get("points") or [], provider.get("points") or []
+    # NO LENGTH TEST OF ITS OWN. `fit_line` answers None for anything it cannot
+    # fit, and a second check in front of it was tried and reverted nothing -
+    # decoration, by this package's rule.
+    if not tp or not pp:
+        return None
+    ps, pi, _r = G.fit_line(pp)
+    ts, ti, _r2 = G.fit_line(tp)
+    if not ps or not ts:
+        return None
+    errs = [abs((ps * px + pi) - v) for v, px in tp]
+    lo = min(v for v, _px in tp)
+    hi = max(v for v, _px in tp)
+    span = abs(hi - lo)
+    return {
+        "transfer_max_abs": max(errs),
+        "transfer_max_rel": (max(errs) / span) if span else None,
+        "target_span": span,
+        "slope_rel_err": abs(ps - ts) / abs(ts) if ts else None,
+        "intercept_diff": pi - ti,
+    }
+
+
 def _residuals(target, provider):
     """Every difference, unrounded, and no verdict about any of them."""
     tr, pr = target["run"], provider["run"]
@@ -381,11 +425,47 @@ def record(dark, panels):
                                             p.get("tick_lengths") or [])}
             if provider is not None and p is not provider:
                 row.update(_residuals(p, provider))
+                te = transfer_error(p, provider)
+                if te:
+                    row.update(te)
                 if p["ladder_ok"] and p.get("calibration_sha") \
                         and provider.get("calibration_sha") \
                         and p["calibration_sha"] != provider["calibration_sha"]:
                     row["conflict"] = DISAGREES
             T.add("Y_SCALE_MEMBER", **row)
+        # THE METAMORPHIC PAIRS: every ORDERED pair in the band where both read
+        # their own ladder, so the transfer has a ground truth to be wrong
+        # against. Not restricted to the provider - the question is what the BAND
+        # RELATION implies, and eligibility is a separate question about lending.
+        for a in band:
+            for b in band:
+                if a is b or not (a["ladder_ok"] and b["ladder_ok"]):
+                    continue
+                te = transfer_error(a, b)
+                if te is None:
+                    continue
+                # AND THE EVIDENCE A TARGET WITHOUT A LADDER WOULD STILL HAVE.
+                # `same_calibration` cannot license a transfer - a pair whose
+                # calibrations agree is a pair that both read, and needs none.
+                # The tick signature and the geometry ARE available when the
+                # target reads nothing, so they are carried on the same row and
+                # the question becomes whether they predict the error.
+                tm = match_ticks(a["ticks"], b["ticks"])
+                T.add("TRANSFER_CHECK", group_id=gid, target=a["label"],
+                      source=b["label"], status=status,
+                      target_box=T.box(a["box"]), source_box=T.box(b["box"]),
+                      source_eligibility=b["eligibility"],
+                      overlap_share=round(_overlap_share(a["run"], b["run"]), 3),
+                      same_calibration=(a.get("calibration_sha")
+                                        == b.get("calibration_sha")),
+                      d_baseline=(None if a["baseline"] is None
+                                  or b["baseline"] is None
+                                  else int(a["baseline"]) - int(b["baseline"])),
+                      d_axis_top=(None if not (a["run"] and b["run"])
+                                  else int(a["run"][0]) - int(b["run"][0])),
+                      d_axis_bottom=(None if not (a["run"] and b["run"])
+                                     else int(a["run"][1]) - int(b["run"][1])),
+                      **dict(tm, **te))
         groups.append((gid, status, [p["label"] for p in band],
                        (provider or {}).get("label", "")))
     return groups

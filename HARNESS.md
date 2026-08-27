@@ -690,6 +690,17 @@ Two things the harness still owes this arm:
     UNVALIDATED transfer candidates, and one row - P10, P11, P12 - with no
     provider at all.
 
+    THE METAMORPHIC CORPUS - RUN, AND IT REFUSES THE BAND RELATION. No masking
+    was needed: the corpus already holds row bands where BOTH panels read their
+    own ladder, and every ordered pair is its own ground truth. 18 figures, 77
+    panels, 38 pairs: only 42% transfer within 1% of the target's own range, a
+    quarter are off by more than 10%, and the worst is 8.8x the target's whole
+    axis. `overlap_share`, which is what the bands are built on, predicts nothing;
+    `provider_unmatched` - source ticks the target has none of - separates the
+    better half from the worse by a factor of 900, and it is available exactly
+    when the target reads nothing. So the next grouping is on the tick signature,
+    not the row overlap, and no tolerance is cut from 38 pairs.
+
     THE TWO SHAPES A TRANSFER COULD TAKE, NEITHER BUILT. `SHARED_ROW_EXACT` is
     provider and target on the same global rows, a = 1 and b = 0. `SHARED_ROW_AFFINE`
     is provider_y = a * target_y + b, for panels at different vertical offsets or

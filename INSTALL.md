@@ -9963,6 +9963,76 @@ sentence rather than left to be rediscovered.
 The local suite was green when the round was pushed, which is precisely why the
 check is not a local one.
 
+## The metamorphic corpus, and what it says about transferring a calibration
+
+The gate on promoting `SHARED_ROW` was a masked-label corpus: take figures whose
+numerals ARE repeated on every panel, hide one panel's labels, transfer from the
+provider, and compare against that panel's own reading. **No masking is needed.**
+The corpus already contains row bands where BOTH panels read their own ladder,
+and every such ordered pair carries its own ground truth: fit the source's
+(value, pixel) line, evaluate it at the target's own tick pixels, and compare
+with what the target actually read there.
+
+`TRANSFER_CHECK`, one row per ordered pair. The error is reported twice, because
+neither form is comparable alone: `transfer_max_abs` in the target's own units,
+and `transfer_max_rel` over the target's own value RANGE - dimensionless, so a
+panel in mmHg and one in l/min/m2 go into one distribution.
+
+### 18 figures, 77 panels, 38 ordered pairs
+
+    transfer_max_rel   min 0.0003   q1 0.0004   med 0.019   q3 0.359   max 8.8
+
+    within 0.001 : 12 of 38 (32%)
+    within 0.01  : 16 of 38 (42%)
+    within 0.05  : 28 of 38 (74%)
+    within 1.0   : 34 of 38 (89%)
+
+**"One row band" does not imply "one y scale".** Fewer than half the pairs
+transfer within one per cent of the target's own range, a quarter are off by more
+than ten per cent, and the worst - publication 36's figure 1, P03 from P04 - is
+wrong by **8.8 times the target's entire axis**. Had `SHARED_ROW` been promoted on
+the band relation, that is the number it would have written into a panel.
+
+The `calibration_sha` split is exact on this sample:
+
+    calibrations agree (8 pairs)   median rel 0.0003   max 0.0
+    calibrations differ (30)       median rel 0.022    max 8.8
+
+which vindicates hashing the (value, pixel) PAIRS rather than the values - and is
+useless as a licence, because a pair whose calibrations agree is a pair that both
+READ and needs no transfer.
+
+### So: is there a signal a ladderless target would still have?
+
+That is the question that decides the line, and the pair rows carry the answer.
+Split each field at its median and compare the transfer error of the better half
+against the worse:
+
+    field                better half   worse half
+    provider_unmatched      0.0004        0.359     <- source ticks the target has none of
+    matched_max             0.0004        0.045
+    symmetric_max           0.0004        0.028
+    d_axis_top              0.0004        0.022
+    d_baseline              0.022         0.008     <- no signal, and inverted
+    overlap_share           0.017         0.022     <- no signal
+
+**The tick signature predicts the transfer error; the row overlap does not.**
+`provider_unmatched` - how many of the source's tick marks have no counterpart in
+the target - separates the two halves by a factor of 900, and it is pure geometry:
+available exactly when the target reads nothing, which is the case a transfer is
+for. `overlap_share`, which is what `bands()` groups on, separates nothing.
+
+That is the finding, and it is also the reason nothing is promoted here. Thirty
+-eight pairs is not a distribution to cut a tolerance from, and the field that
+would carry it was not the one the grouping is built on. The next round's work is
+named by it: group on the tick signature rather than on the row overlap, measure
+the same pairs again, and only then ask what threshold the distribution supports.
+
+The seven negative fixtures the review asked for - two scales in one row, linear
+against log, a one-sided axis break, a dual axis, an inset, two disagreeing
+providers, a row with none - are drawn scenarios and were already in place; what
+this adds is the positive corpus they were waiting on.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

@@ -18,6 +18,7 @@ OK = (0, 150, 110)
 EYEC = (10, 90, 175)
 BAD = (168, 52, 43)
 AXIS = (176, 108, 12)
+MUTED = (128, 128, 128)
 #: ONE COLOUR PER REVIEW TIER, and the tier is `provenance.review_tier`'s, not a
 #: judgment made here. G2 painted all eighteen of its cells the same green while
 #: the package priced two of them R0, nine R1 and seven R4 - and R4 is not
@@ -1031,6 +1032,118 @@ def HEIGHT_OF(rendering):
     return int(rendering["panel_box"][3] + 70 * rendering["scale"])
 
 
+def routed_twin():
+    """The router's answer drawn on the fixture: routed marks, and refusals.
+
+    `marker_routing.route` establishes what the panel's own distributions
+    support and refuses the rest per mark. This is that, on the drawing whose
+    every marker's series is known - so a wrong colour is visible rather than
+    plausible.
+    """
+    import json
+    import collections as _c
+    import marker_routing as MRT
+    doc = json.load(open(os.path.join(ROOT, "twin_scatter_truth.json"),
+                         encoding="utf-8"))
+    SERIES_COLOUR = {"L_OPEN_CIRCLE": (0, 150, 110),
+                     "L_FILLED_CIRCLE": (95, 145, 35),
+                     "R_OPEN_TRIANGLE": (10, 90, 175),
+                     "R_FILLED_TRIANGLE": (120, 60, 170)}
+    rows = []
+    for name in sorted(doc["renderings"]):
+        r = doc["renderings"][name]
+        path = os.path.join(ROOT, r["file"])
+        if not os.path.exists(path):
+            import make_twin_scatter_fixture as TSF
+            TSF.main()
+        im = Image.open(path).convert("RGB")
+        series = [dict(id=sid, shape=spec["shape"], fill=spec["fill"])
+                  for sid, spec in sorted(r["series"].items())]
+        out = MRT.route(im, r["panel_box"], series)
+        scale = out["marker_scale_px"] or 1.0
+        truth = [(sid, cx, cy) for sid, spec in sorted(r["series"].items())
+                 for cx, cy in spec["centres"]]
+        right = wrong = 0
+        marks = []
+        for rec in out["records"]:
+            near = min(truth, key=lambda t: (t[1] - rec["point_px_x"]) ** 2
+                       + (t[2] - rec["point_px_y"]) ** 2)
+            far = (((near[1] - rec["point_px_x"]) ** 2
+                    + (near[2] - rec["point_px_y"]) ** 2) ** 0.5 > 0.6 * scale)
+            if rec["Series_ID"]:
+                if not far and near[0] == rec["Series_ID"]:
+                    right += 1
+                    marks.append((rec, "RIGHT", near[0]))
+                else:
+                    wrong += 1
+                    marks.append((rec, "WRONG", near[0]))
+            else:
+                marks.append((rec, rec["refusal"], near[0]))
+        rows.append(dict(name=name, marker=r["marker_diameter_px"],
+                         drawn=r["total_points"], scale=scale, right=right,
+                         wrong=wrong,
+                         shape=out["shape_split"]["separates"],
+                         fill=out["fill_split"]["separates"],
+                         refusals=dict(_c.Counter(
+                             x["refusal"] for x in out["records"] if x["refusal"])),
+                         marks=marks, rendering=r))
+
+    show = [row for row in rows if row["name"] == "s3"][0]
+    r = show["rendering"]
+    im, M = zoom(Image.open(os.path.join(ROOT, r["file"])).convert("RGB"),
+                 (0, int(r["panel_box"][1] + 130 * r["scale"]),
+                  0, int(r["panel_box"][3] + 70 * r["scale"])), 1)
+    d = ImageDraw.Draw(im)
+    bx0, by0 = M(r["panel_box"][0], r["panel_box"][2])
+    bx1, by1 = M(r["panel_box"][1], r["panel_box"][3])
+    d.rectangle([bx0, by0, bx1, by1], outline=AXIS, width=3)
+    for rec, verdict, want in show["marks"]:
+        px, py = M(rec["point_px_x"], rec["point_px_y"])
+        if verdict == "RIGHT":
+            col = SERIES_COLOUR.get(rec["Series_ID"], OK)
+            d.ellipse([px - 17, py - 17, px + 17, py + 17], outline=col, width=4)
+        elif verdict == "WRONG":
+            d.ellipse([px - 19, py - 19, px + 19, py + 19], outline=BAD, width=5)
+            chip(d, (px + 22, py - 12), "→ %s" % rec["Series_ID"], BAD,
+                 im.width, size=15)
+        else:
+            d.ellipse([px - 13, py - 13, px + 13, py + 13], outline=MUTED,
+                      width=3)
+            chip(d, (px + 16, py - 10), verdict.replace("MARKER_", ""), MUTED,
+                 im.width, size=13)
+    lines = ["%-8s %7s %6s %8s %8s %7s %6s %s"
+             % ("render", "marker", "drawn", "routed", "misrouted", "shape",
+                "fill", "refused")]
+    for row in rows:
+        lines.append("%-8s %7d %6d %8d %8d %7s %6s %s"
+                     % (row["name"], row["marker"], row["drawn"], row["right"],
+                        row["wrong"], "yes" if row["shape"] else "NO",
+                        "yes" if row["fill"] else "NO",
+                        ", ".join("%s %d" % (k.replace("MARKER_", ""), v)
+                                  for k, v in sorted(row["refusals"].items()))))
+    lines += ["",
+              "shape는 방사 프로파일의 3차 harmonic 으로 가른다 — 회귀선이 마커를",
+              "가로질러도 움직이지 않는 유일한 측정. circularity·corner count·bbox",
+              "extent 세 개는 모두 실패했고 record 에 남아 있다.",
+              "",
+              "5 px 와 3 px 에서는 split 이 서지 않아 아무것도 라우팅하지 않는다.",
+              "11 px 에서는 split 이 서고 두 마크가 경계에 앉아 개별 거절된다.",
+              "overlap 의 오분류 1개는 고치지 않고 틀린 채로 고정했다 — 고치는 규칙이",
+              "렌더링당 정상 마크 5~13개를 버렸다."]
+    im = capt.below(
+        im, "합성 twin-axis 산점도를 실제로 라우팅한 결과 (s3, 33 px)", lines,
+        keys=[(SERIES_COLOUR["L_OPEN_CIRCLE"], "L_OPEN_CIRCLE", False),
+              (SERIES_COLOUR["L_FILLED_CIRCLE"], "L_FILLED_CIRCLE", False),
+              (SERIES_COLOUR["R_OPEN_TRIANGLE"], "R_OPEN_TRIANGLE", False),
+              (SERIES_COLOUR["R_FILLED_TRIANGLE"], "R_FILLED_TRIANGLE", False),
+              (BAD, "misrouted", False), (MUTED, "refused, per mark", False)])
+    out_png = os.path.join(HERE, "G8_routed_twin.png")
+    im.save(out_png)
+    return dict(out=out_png, rows=[{k: v for k, v in row.items()
+                                    if k not in ("marks", "rendering")}
+                                   for row in rows])
+
+
 #: What the segmentation half needs, and what this repository does not carry.
 CORPUS = RR.CORPUS_FILES
 #: The clips the segmentation scenarios assert against, pinned in raster_root.
@@ -1126,6 +1239,7 @@ if __name__ == "__main__":
     # to the publisher figures still gets a picture out of this file.
     print(scatter_fixtures()["out"])
     print(twin_scatter_fixtures()["out"])
+    print(routed_twin()["out"])
     print((bars_397() or {}).get("out") or "SKIPPED G1")
     print((lines_397() or {}).get("out") or "SKIPPED G2")
     FIGURES = (("475", "Fig. 2", "G3_segment_475fig2.png",

@@ -195,6 +195,16 @@ check("    while no rendering's shortcut IS any series' correlation",
                            for v in _T[n]["series_r"].values()), 4)
               for n in sorted(_T)})
 
+# AND THE ROUTER'S ANSWER, DRAWN. `test_marker_routing` asserts the numbers;
+# this asserts that the picture is of those numbers and not of some other run.
+G8 = V.routed_twin()
+_by = {row["name"]: row for row in G8["rows"]}
+check("  the routed picture is drawn from the same run the numbers come from",
+      (_by["s3"]["right"], _by["s3"]["wrong"]) == (20, 0)
+      and (_by["overlap"]["right"], _by["overlap"]["wrong"]) == (22, 1)
+      and _by["micro"]["right"] == _by["tiny"]["right"] == 0,
+      "%r" % {n: (_by[n]["right"], _by[n]["wrong"]) for n in sorted(_by)})
+
 print()
 _rasters = all(RR.check("397_fig%d.jpeg" % n)[0] for n in (1, 3))
 def stop_here(note, extra):
@@ -403,7 +413,7 @@ print()
 print("the pictures themselves")
 for _name in ("G1_read_397fig3.png", "G2_read_397fig1.png",
               "G5_scatter_fixtures.png", "G6_scatter_464fig2.png",
-              "G7_twin_scatter.png"):
+              "G7_twin_scatter.png", "G8_routed_twin.png"):
     _p = os.path.join(HERE, "png", _name)
     check("%s was written" % _name,
           os.path.exists(_p) and os.path.getsize(_p) > 50000,

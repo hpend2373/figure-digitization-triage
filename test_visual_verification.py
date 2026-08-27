@@ -200,10 +200,18 @@ check("    while no rendering's shortcut IS any series' correlation",
 G8 = V.routed_twin()
 _by = {row["name"]: row for row in G8["rows"]}
 check("  the routed picture is drawn from the same run the numbers come from",
-      (_by["s3"]["right"], _by["s3"]["wrong"]) == (20, 0)
-      and (_by["overlap"]["right"], _by["overlap"]["wrong"]) == (22, 1)
+      (_by["s3"]["right"], _by["s3"]["wrong"]) == (18, 0)
+      and (_by["overlap"]["right"], _by["overlap"]["wrong"]) == (19, 0)
       and _by["micro"]["right"] == _by["tiny"]["right"] == 0,
       "%r" % {n: (_by[n]["right"], _by[n]["wrong"]) for n in sorted(_by)})
+# AND IT SHOWS THE MARKS IT NEVER FOUND. A gallery that draws only what became a
+# record is a gallery of successes: nine of thirty at s3 never became one, and
+# the picture carries them as crosses or it is flattering the reader.
+check("    and the picture accounts for every drawn mark",
+      all(row["detected"] + row["missing"] == row["drawn"]
+          and len(row["missed"]) == row["missing"] for row in G8["rows"])
+      and [_by[n]["missing"] for n in ("s1", "s2", "s3")] == [11, 10, 9],
+      "%r" % {n: (_by[n]["detected"], _by[n]["missing"]) for n in sorted(_by)})
 
 print()
 _rasters = all(RR.check("397_fig%d.jpeg" % n)[0] for n in (1, 3))

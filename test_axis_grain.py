@@ -77,6 +77,47 @@ check("  and a Y axis declared on the BOTTOM is refused",
           AG.validate_axes([dict(AXES[1], Side="BOTTOM")])),
       "%r" % (AG.validate_axes([dict(AXES[1], Side="BOTTOM")]),))
 
+print()
+print("a LOG10 axis is fitted as a log, and was not")
+# THREE DECADES AT EQUAL PIXEL SPACING. On a log axis the middle tick is 10; on
+# the straight line that `calibrations` used to fit through the same points it
+# is 50.5, and nothing complained, because two points fit any straight line
+# exactly and the residual of a three-point fit was never looked at either.
+_DECADE = [AXES[0],
+           dict(Axis_ID="Y_LOG", Panel_ID=PANEL, Dimension="Y", Side="LEFT",
+                Unit="pg/mL", Scale="LOG10",
+                Calibration_Points=[[1, 400], [10, 300], [100, 200]])]
+_log = AG.calibrations(_DECADE)["Y_LOG"]
+check("the middle of 1-10-100 at equal spacing reads 10, not 50.5",
+      abs(_log.pixel_to_value(300) - 10.0) < 1e-6,
+      "%.4f" % _log.pixel_to_value(300))
+check("  and the fit is a log fit, with no residual over three decades",
+      _log.scale == "LOG" and _log.max_residual < 1e-9,
+      "%r %.3g" % (_log.scale, _log.max_residual))
+# REVERT: declare the same axis LINEAR, which is what `calibrations` did to
+# every axis whatever its manifest said. The middle decade then reads 37.0 from
+# three ticks and 50.5 from the two end ticks - both published without a murmur,
+# the second with a residual of exactly zero.
+_lin = AG.calibrations([AXES[0], dict(_DECADE[1], Scale="LINEAR")])["Y_LOG"]
+_lin2 = AG.calibrations([AXES[0], dict(_DECADE[1], Scale="LINEAR",
+                                       Calibration_Points=[[1, 400], [100, 200]])
+                         ])["Y_LOG"]
+check("  declared LINEAR the same ticks read 37.0 there, and 50.5 from two",
+      abs(_lin.pixel_to_value(300) - 37.0) < 1e-6
+      and abs(_lin2.pixel_to_value(300) - 50.5) < 1e-6
+      and _lin2.max_residual < 1e-9,
+      "%.4f / %.4f" % (_lin.pixel_to_value(300), _lin2.pixel_to_value(300)))
+check("  a LOG10 axis calibrated at zero is refused before the fit",
+      any("not a number" in p for p in AG.validate_axes(
+          [dict(_DECADE[1], Calibration_Points=[[0, 400], [100, 200]])])),
+      "%r" % (AG.validate_axes(
+          [dict(_DECADE[1], Calibration_Points=[[0, 400], [100, 200]])]),))
+check("  and a calibration point that is not finite is refused",
+      any("finite" in p for p in AG.validate_axes(
+          [dict(AXES[1], Calibration_Points=[[10, 450], [float("nan"), 60]])])),
+      "%r" % (AG.validate_axes(
+          [dict(AXES[1], Calibration_Points=[[10, 450], [float("nan"), 60]])]),))
+
 _axis_of, _refused = AG.series_axis(SERIES, AXES)
 check("every series names an axis the manifest declares",
       _axis_of and not _refused, "%r %r" % (_axis_of, _refused))
@@ -87,13 +128,48 @@ check("  and one naming an axis nobody declared is refused too",
       AG.series_axis([dict(Series_ID="S", Axis_ID="Y_MIDDLE")], AXES)[1]
       == {"S": AG.FOREIGN_AXIS},
       "%r" % (AG.series_axis([dict(Series_ID="S", Axis_ID="Y_MIDDLE")], AXES)[1],))
+# EXISTING IS NOT BEING THE RIGHT AXIS. The manifest holds the x axis too, and a
+# series pointed at X_BOTTOM used to validate cleanly while every y value came
+# off the horizontal scale - the exact failure the module was written to stop,
+# reached through the front door.
+check("  a series pointed at the X axis is refused by role",
+      AG.series_axis([dict(Series_ID="S", Axis_ID="X_BOTTOM")], AXES)[1]
+      == {"S": AG.WRONG_DIMENSION},
+      "%r" % (AG.series_axis([dict(Series_ID="S", Axis_ID="X_BOTTOM")], AXES)[1],))
+_other = AXES + [dict(Axis_ID="Y_LEFT_P2", Panel_ID="OTHER", Dimension="Y",
+                      Side="LEFT", Unit="mmHg", Scale="LINEAR",
+                      Calibration_Points=R["left_y_ticks"])]
+check("  and one pointed at another panel's axis is refused too",
+      AG.series_axis([dict(Series_ID="S", Axis_ID="Y_LEFT_P2")], _other,
+                     panel_id=PANEL)[1] == {"S": AG.WRONG_PANEL},
+      "%r" % (AG.series_axis([dict(Series_ID="S", Axis_ID="Y_LEFT_P2")], _other,
+                             panel_id=PANEL)[1],))
+# AND THE X AXIS ITSELF IS CHECKED, not taken on trust from its name.
+_A_POINT = dict(Series_ID=sorted(_axis_of)[0], point_px_x=400.0, point_px_y=300.0,
+                Identity_Method="FIXTURE_DECLARED")
+try:
+    AG.stamp_points([_A_POINT], _axis_of, AXES, "Y_LEFT", PANEL, IMAGE_SHA)
+    _xrole = ""
+except ValueError as exc:
+    _xrole = "%s" % exc
+check("  and stamping against a Y axis as if it were X is refused",
+      AG.X_WRONG_DIMENSION in _xrole, "%r" % (_xrole,))
+try:
+    AG.stamp_points([_A_POINT], _axis_of, _other + [
+        dict(AXES[0], Axis_ID="X_P2", Panel_ID="OTHER")], "X_P2", PANEL, IMAGE_SHA)
+    _xpanel = ""
+except ValueError as exc:
+    _xpanel = "%s" % exc
+check("  as is one belonging to another panel",
+      AG.X_WRONG_PANEL in _xpanel, "%r" % (_xpanel,))
 
 CALS = AG.calibrations(AXES)
+RECS = AG.axis_records(AXES)
 POINTS = [dict(Series_ID=sid, series=sid, point_px_x=cx, point_px_y=cy,
                Identity_Method="FIXTURE_DECLARED")
           for sid, spec in sorted(R["series"].items())
           for cx, cy in spec["centres"]]
-STAMPED = AG.stamp_points(POINTS, _axis_of, CALS, "X_BOTTOM", PANEL, IMAGE_SHA)
+STAMPED = AG.stamp_points(POINTS, _axis_of, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
 
 print()
 print("what reading a series on the wrong axis costs, measured")
@@ -102,7 +178,7 @@ print("what reading a series on the wrong axis costs, measured")
 # the two differ by the ratio the fixture was drawn with.
 _wrong = AG.stamp_points(
     [p for p in POINTS if _axis_of[p["Series_ID"]] == "Y_RIGHT"],
-    {sid: "Y_LEFT" for sid in _axis_of}, CALS, "X_BOTTOM", PANEL, IMAGE_SHA)
+    {sid: "Y_LEFT" for sid in _axis_of}, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)
 _right = [r for r in STAMPED if r["Axis_ID"] == "Y_RIGHT"]
 _ratio = [w["y_value"] / r["y_value"] for w, r in zip(_wrong, _right)]
 check("the right-hand series on the left calibration is wrong by 0.3 to 0.4x",
@@ -119,13 +195,13 @@ check("all %d points are calibrated and hashed" % len(POINTS),
           for r in STAMPED), "%d of %d" % (
           sum(1 for r in STAMPED if r["Point_Record_SHA256"]), len(STAMPED)))
 check("  and every one of them re-derives from its own pixel",
-      AG.verify_points(STAMPED, CALS, "X_BOTTOM", PANEL, IMAGE_SHA) == [],
-      "%r" % (AG.verify_points(STAMPED, CALS, "X_BOTTOM", PANEL, IMAGE_SHA)[:3],))
+      AG.verify_points(STAMPED, AXES, "X_BOTTOM", PANEL, IMAGE_SHA) == [],
+      "%r" % (AG.verify_points(STAMPED, AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[:3],))
 # A POINT WHOSE SERIES NAMES NO AXIS IS NOT CALIBRATED AT ALL. Not calibrated
 # against a default: a value on an unknown scale is what this module exists to
 # prevent.
 _orphan = AG.stamp_points([dict(POINTS[0], Series_ID="S_UNKNOWN")], _axis_of,
-                          CALS, "X_BOTTOM", PANEL, IMAGE_SHA)[0]
+                          AXES, "X_BOTTOM", PANEL, IMAGE_SHA)[0]
 check("  a point whose series has no axis gets no value and no hash",
       _orphan["y_value"] is None and not _orphan["Point_Record_SHA256"]
       and _orphan["refusal"] == AG.UNKNOWN_AXIS,
@@ -135,8 +211,8 @@ print()
 print("a recalibrated axis moves the hashes of ITS points and no others")
 # THE PROPERTY A TWIN-AXIS FIGURE NEEDS MOST: half its points are read under
 # each scale, so a change to one scale must be visible on exactly half.
-_moved = AG.calibrations([AXES[0], AXES[1],
-                          dict(AXES[2], Calibration_Points=[[20, 449], [90, 61]])])
+_moved = [AXES[0], AXES[1],
+          dict(AXES[2], Calibration_Points=[[20, 449], [90, 61]])]
 _after = AG.stamp_points(POINTS, _axis_of, _moved, "X_BOTTOM", PANEL, IMAGE_SHA)
 _left_same = all(a["Point_Record_SHA256"] == b["Point_Record_SHA256"]
                  for a, b in zip(STAMPED, _after) if a["Axis_ID"] == "Y_LEFT")
@@ -158,11 +234,10 @@ _TWIN_SAME = [AXES[0],
                    Calibration_Points=R["left_y_ticks"]),
               dict(AXES[2], Axis_ID="Y_B", Unit="beats/min",
                    Calibration_Points=R["left_y_ticks"])]
-_same_cals = AG.calibrations(_TWIN_SAME)
 _one = dict(POINTS[0], Series_ID="S")
-_on_a = AG.stamp_points([_one], {"S": "Y_A"}, _same_cals, "X_BOTTOM", PANEL,
+_on_a = AG.stamp_points([_one], {"S": "Y_A"}, _TWIN_SAME, "X_BOTTOM", PANEL,
                         IMAGE_SHA)[0]
-_on_b = AG.stamp_points([_one], {"S": "Y_B"}, _same_cals, "X_BOTTOM", PANEL,
+_on_b = AG.stamp_points([_one], {"S": "Y_B"}, _TWIN_SAME, "X_BOTTOM", PANEL,
                         IMAGE_SHA)[0]
 check("two axes with the same numbers still hash their points apart",
       _on_a["Point_Record_SHA256"] != _on_b["Point_Record_SHA256"]
@@ -214,6 +289,126 @@ except ValueError as exc:
     _nov = "%s" % exc
 check("  as is one over a point that carries no value",
       "different cloud" in _nov, "%r" % (_nov,))
+
+print()
+print("and so is an association over two series that share one axis")
+# THE AXIS RULE IS ARITHMETIC; THIS ONE IS NOT. The open circles and the filled
+# circles are both read on Y_LEFT, so an r over the two together computes
+# perfectly and answers about neither group. It was computed, and nothing said
+# so: `Series_ID` simply held two values in a column nobody joined on.
+_left = [r for r in STAMPED if r["Axis_ID"] == "Y_LEFT"]
+_left_series = sorted({r["Series_ID"] for r in _left})
+try:
+    AG.association_over_points(_left)
+    _two = ""
+except ValueError as exc:
+    _two = "%s" % exc
+check("two series on one axis are refused, and the codes name both",
+      AG.MULTIPLE_SERIES in _two and len(_left_series) == 2
+      and all(sid in _two for sid in _left_series),
+      "%r" % (_two,))
+_decl = {"Aggregation_Method": "POOLED_ACROSS_SERIES",
+         "Aggregation_Series_IDs": ", ".join(_left_series),
+         "Aggregation_Justification":
+             "both series are the same subjects before and after tilt"}
+_pooled = AG.association_over_points(_left, aggregation=_decl)
+check("  a caller that declares the pooling gets it, with the reason attached",
+      all(_pooled[c] == _decl[c] for c in AG.AGGREGATION_COLUMNS)
+      and _pooled["N_Pairs"] == len(_left) and _pooled["Series_ID"] == "",
+      "%r" % ({c: _pooled[c] for c in AG.AGGREGATION_COLUMNS},))
+# A DECLARATION THAT DOES NOT MATCH THE CLOUD IS NOT A DECLARATION. Naming one
+# series and handing over two is how a pooling gets waved through by a form.
+try:
+    AG.association_over_points(_left, aggregation=dict(
+        _decl, Aggregation_Series_IDs=_left_series[0]))
+    _mis = ""
+except ValueError as exc:
+    _mis = "%s" % exc
+check("  and one naming the wrong series is refused",
+      AG.MULTIPLE_SERIES in _mis and "the points are" in _mis, "%r" % (_mis,))
+check("  a single-series association still names its series",
+      _assoc[_sid]["Series_ID"] == _sid
+      and all(_assoc[_sid][c] == "" for c in AG.AGGREGATION_COLUMNS),
+      "%r" % (_assoc[_sid]["Series_ID"],))
+
+print()
+print("the point hash covers whose the point is, not only where it is")
+# THE MUTATION. Swap `Series_ID` between two points read on the SAME axis and
+# change nothing else: the pixels, the values, the calibration and the axis are
+# all untouched, so the first version of this hash still verified both and two
+# clouds had quietly exchanged a member each.
+_swap = [dict(r) for r in STAMPED]
+_a = next(i for i, r in enumerate(_swap) if r["Series_ID"] == _left_series[0])
+_b = next(i for i, r in enumerate(_swap) if r["Series_ID"] == _left_series[1])
+_swap[_a]["Series_ID"], _swap[_b]["Series_ID"] = (_swap[_b]["Series_ID"],
+                                                  _swap[_a]["Series_ID"])
+_bad = dict(AG.verify_points(_swap, AXES, "X_BOTTOM", PANEL, IMAGE_SHA))
+check("swapping two same-axis points' series refuses both of them",
+      _a in _bad and _b in _bad
+      and all("hash does not cover" in _bad[i] for i in (_a, _b))
+      and len(_bad) == 2,
+      "%r" % (sorted(_bad.items())[:4],))
+# AND THE ROUTING EVIDENCE IS RE-MEASURED FROM THE RECORD, so a producer that
+# rewrites a mark's shape and re-stamps the point does not get a clean bill.
+_ROUTED = dict(Series_ID=_left_series[0], point_px_x=400.0, point_px_y=300.0,
+               Identity_Method="MEASURED_MARKER_SHAPE_FILL", shape="CIRCLE",
+               fill="OPEN", third_harmonic=0.041, interior_ink=0.07,
+               shape_threshold=0.061, fill_threshold=0.684,
+               Original_Component_ID=7, Foreign_Ink_Fraction=0.0)
+_stamped_one = AG.stamp_points([_ROUTED], _axis_of, AXES, "X_BOTTOM", PANEL,
+                               IMAGE_SHA)[0]
+check("  a routed point's evidence hash covers all ten measurements",
+      sorted(AG.routing_evidence(_ROUTED)) == sorted(AG.ROUTING_EVIDENCE)
+      and AG.routing_evidence(_ROUTED)["Shape_Margin"] is not None
+      and AG.verify_points([_stamped_one], AXES, "X_BOTTOM", PANEL,
+                           IMAGE_SHA) == [],
+      "%r" % (AG.routing_evidence(_ROUTED),))
+_lied = dict(_stamped_one, fill="FILLED")
+check("  and rewriting the fill after the stamp is caught",
+      [m for _i, m in AG.verify_points([_lied], AXES, "X_BOTTOM", PANEL,
+                                       IMAGE_SHA)] == [
+          "routing evidence does not hash to what it carries"],
+      "%r" % (AG.verify_points([_lied], AXES, "X_BOTTOM", PANEL, IMAGE_SHA),))
+# A POINT NOTHING ROUTED still has an evidence hash, and it is the hash of ten
+# Nones - which is a different hash from any measured mark's, and that is the
+# distinction it exists to make.
+check("  a declared point hashes as having no evidence, not as having none needed",
+      AG.routing_evidence_sha256(dict(Series_ID="S", point_px_x=1, point_px_y=1))
+      != AG.routing_evidence_sha256(_ROUTED),
+      "a fixture declaration and a measured mark hash the same evidence")
+
+print()
+print("the set hash is a set")
+# IT WAS OVER THE ORDERED LIST WITH `Set` IN ITS NAME. Component labelling is
+# what decides the order, so the same reader on the same figure could produce
+# two set hashes and disagree with itself about a cloud it had read correctly.
+_rev = AG.association_over_points(list(reversed(_by_series[_sid])))
+check("reversing the cloud leaves the set hash alone",
+      _rev["Point_Set_SHA256"] == _assoc[_sid]["Point_Set_SHA256"],
+      "%s vs %s" % (_rev["Point_Set_SHA256"][:12],
+                    _assoc[_sid]["Point_Set_SHA256"][:12]))
+check("  and the ordered citation still records the order it was given",
+      _rev["Point_Record_SHA256_List"]
+      == list(reversed(_assoc[_sid]["Point_Record_SHA256_List"])),
+      "the ordered list did not follow the order")
+
+print()
+print("and the counts reach the row somebody reads")
+# AN r OVER NINETEEN POINTS IS SILENT ABOUT THE ELEVEN MARKS THE READER NEVER
+# SAW. `marker_routing.route` counts them; without this step the count stops at
+# the reader and the association row reads like a complete cloud.
+_counts = dict(Expected_Point_Count=30, Detected_Point_Count=19,
+               Routed_Point_Count=16, Unresolved_Point_Count=3,
+               Point_Count_Agreement="POINT_COUNT_DISAGREES")
+_with = AG.with_completeness(_assoc[_sid], _counts)
+check("an association can carry the reader's completeness counts",
+      all(_with[k] == v for k, v in _counts.items())
+      and _with["Association_Value"] == _assoc[_sid]["Association_Value"],
+      "%r" % ({k: _with[k] for k in _counts},))
+check("  and says nothing rather than AGREES when nobody counted the page",
+      _assoc[_sid]["Point_Count_Agreement"] == ""
+      and _assoc[_sid]["Expected_Point_Count"] is None,
+      "%r" % (_assoc[_sid]["Point_Count_Agreement"],))
 
 print()
 print("and none of it could be finalized, which is right for a fixture")

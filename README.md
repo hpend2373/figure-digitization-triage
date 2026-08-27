@@ -113,11 +113,11 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3262 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3303 -->
-<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 279 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3296 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3337 -->
+<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 280 -->
 
-3262 scenarios on main after v9.15 under `requirements-lock.txt`, and 3303 with
+3296 scenarios on main after v9.15 under `requirements-lock.txt`, and 3337 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs
@@ -128,18 +128,18 @@ starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
 count that depends on what `ubuntu-latest` happens to ship is not a property of
 this repository.
 
-Those two numbers are what a **fresh clone** runs. A further 279 of them need
+Those two numbers are what a **fresh clone** runs. A further 280 of them need
 the publisher figures, which this repository does not carry and cannot: they are
 not redistributable. `test_bar_reader` (24), `test_integration` (17),
 `test_compile_plan` (197), `test_reproducibility` (5) and
-`test_visual_verification` (36) skip those sections
+`test_visual_verification` (37) skip those sections
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
-3541 and 3582. Every raster is pinned there by SHA-256, so a file that is not
+3576 and 3617. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at 3262/3303 rather than red for a reason it cannot fix.
+no secret is green at 3296/3337 rather than red for a reason it cannot fix.
 
 Both are verified in a clean room with scipy blocked — the statistics are
 hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every
@@ -306,6 +306,18 @@ and writes ten accepted values, worst mean 0.0057 and worst CI half-width
 0.0133 against 2.776 × the printed SEM. Unattested, `run_batch` deletes its own
 output and stamps `DEMO_OUTPUT_REFUSED` — a demonstration identity cannot stand
 behind a poolable value.
+
+**The twin-axis scatter reader exists and is not wired in.** `marker_routing`
+tells four monochrome series apart by marker shape and fill, and `axis_grain`
+lets one panel carry two y scales with every point saying which it was read on.
+Both are held to `twin_scatter_*.jpeg`, a drawing this repository carries whose
+every marker's series and centre is declared, and both refuse per mark rather
+than per panel: 16, 17 and 18 of 30 marks routed at 11, 22 and 33 px with **no
+misroutes at any rendering**, everything refused at 5 px and 3 px, and the marks
+it never saw counted in the same table as the ones it did. Publication 464
+Figure 2 is still a refusal and stays one — nothing here is in `run_batch`, no
+plan grain declares an axis manifest, and `MEASURED_MARKER_SHAPE_FILL` is not in
+the provenance registry, so no value can reach a pool through this path.
 
 Open work: publication 386 Figures 3–4, and five cells of publication 323 that
 need a human reading.

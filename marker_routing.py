@@ -36,10 +36,7 @@ on `twin_scatter_micro.jpeg` - markers 3 px across - the open triangles reach a
 HIGHER interior ink ratio than the filled ones, no split exists, and every mark
 comes back with its shape and `MARKER_FILL_UNRESOLVED`.
 
-## The shape axis does not separate yet, and this file says so
-
-Three discriminants have been measured on this fixture family and none of them
-splits CIRCLE from TRIANGLE:
+## The shape axis, and the three discriminants that failed first
 
     circularity     of the marker's ink cut out of the chain it sits in. Comes
                     back HIGHER for triangles (0.56-0.62) than for discs
@@ -52,15 +49,28 @@ splits CIRCLE from TRIANGLE:
                     opening that removed the line rounded the triangles:
                     circles 0.65-0.78 against triangles 0.55-0.78.
 
-So `route` refuses the shape of every mark on these renderings, and NOTHING is
-misrouted - the scored comparison against the fixture's own centres is 0 wrong
-at every rendering. That is the state `test_marker_routing.py` pins. The day a
-fourth discriminant works, the scenario that says "the shape axis does not
-separate" fails and has to be changed on purpose, which is the point of pinning
-a negative.
+The fourth - the third harmonic of the radial profile - works, and it works
+because it is not taken on the outline at all. All four stay on every record:
+they are what the next attempt would otherwise have to measure again.
 
-The FILL axis does separate, and by the panel's own gap: interior ink 0.05-0.46
-for rings against 0.85-0.93 for discs at s3, and no split at all at 3 px.
+## Is this blob ONE marker? The question a bounding box cannot answer
+
+    off_centre_ink  how much of a blob's ink lies further than one marker RADIUS
+                    from its own centroid. A circle and a triangle are convex
+                    and fit inside a disc of their own diameter, so for one
+                    marker this is blur: 0.000-0.100 over every rendering that
+                    resolves. For a blob holding TWO markers the centroid is
+                    between them and each marker's outer half is outside it:
+                    0.345-0.587.
+
+THIS REPLACED `SIZE_HI = 1.75`, which was a bounding-box ratio, and the fixture
+family says why: nine blobs across it hold two drawn marks each at box ratios of
+1.44 to 1.85, and six of those are under 1.75. Every one produced a record whose
+POSITION was at neither marker - a point where nothing was drawn, carrying a
+plausible fill under a series name, which for a scatter is a wrong value rather
+than a missing one. One of them, on `twin_scatter_overlap.jpeg`, was also under
+the wrong heading. The ink answers what the box could not, and the constant it
+needs sits 2.5x above the worst single mark and 1.4x below the best pair.
 
 ## What a refusal is worth
 
@@ -77,16 +87,37 @@ import cv2
 import numpy as np
 from PIL import Image
 
-#: How far from the panel's own marker size a component may be and still be one.
+#: Below this fraction of the panel's own marker size a component is not one.
 #: A ratio, not a pixel count.
-SIZE_LO, SIZE_HI = 0.55, 1.75
-#: Beyond this, one component holds more than one marker.
-MERGED_AREA = 2.0
+#:
+#: THERE IS NO UPPER BOUND ANY MORE. `SIZE_HI = 1.75` was the merged-pair test
+#: and it was removed rather than tightened: a bounding box is the wrong
+#: measurement for "is this one marker", because two markers a little more than
+#: half a marker apart give a box of 1.5 and a centroid at neither. `OFF_CENTRE`
+#: asks the same question of the ink. Setting SIZE_HI to infinity after
+#: `off_centre_ink` was in place broke no scenario, and a guard whose removal
+#: breaks nothing is decoration.
+SIZE_LO = 0.55
 #: The middle of a marker, as a fraction of its side. Small enough that a ring's
 #: stroke does not reach it at the sizes a journal prints.
 INTERIOR = 0.28
 #: A component this much longer than it is tall is a rule or a curve, not a mark.
 ASPECT = 1.8
+#: How much of a mark's ink may lie outside a marker-sized disc at its own
+#: centroid. A circle and a triangle are both convex and both fit inside a disc
+#: of their own diameter, so for ONE marker this is blur and quantization only;
+#: for a blob holding TWO markers the centroid is between them and each marker's
+#: far half is outside. Measured over all six renderings of
+#: `twin_scatter_*.jpeg`: single marks 0.000-0.100 at every scale that resolves,
+#: blobs holding two marks 0.345-0.587. A quarter is between them by a factor of
+#: 2.5 on one side and 1.4 on the other.
+#:
+#: THIS IS THE TEST THAT CATCHES A CLOSE PAIR AND `SIZE_HI` DID NOT. Two markers
+#: whose centres are 0.55 of a marker apart give a bounding box 1.5 markers wide
+#: - under `SIZE_HI` - and a centroid at neither of them, and the record that
+#: came out carried a plausible fill under a series name at a position no marker
+#: was drawn at.
+OFF_CENTRE = 0.25
 
 SHAPES = ("CIRCLE", "TRIANGLE")
 FILLS = ("OPEN", "FILLED")
@@ -94,6 +125,27 @@ FILLS = ("OPEN", "FILLED")
 #: Every answer this module gives that is not a series.
 REFUSALS = ("NOT_A_MARKER", "MARKER_MERGED", "MARKER_SHAPE_UNRESOLVED",
             "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED")
+
+#: The panel's declaration is wrong, so no mark on it can be routed. Raised
+#: rather than recorded: a refusal per mark would say "this mark's class is not
+#: declared" thirty times over a declaration that names one class twice.
+DUPLICATE_DECLARATION = "DUPLICATE_MARKER_CLASS_DECLARATION"
+
+# MARKER_OVERLAP_CONTAMINATED WAS ASKED FOR AND IS NOT HERE, and the reason is
+# geometry rather than effort. The refusal would fire when another component's
+# ink sits inside this mark's fill window AND removing it changes the OPEN/
+# FILLED verdict. The fill window is a square of half-side `INTERIOR` = 0.28 of
+# a marker at the mark's centroid, so its farthest corner is 0.40 of a marker
+# out; `fill_holes` has already turned this mark into a SOLID footprint of its
+# own diameter, which covers everything within 0.50 of a marker. So any ink
+# inside the window is inside this mark's own footprint and belongs to its own
+# component - two markers close enough to contaminate are close enough to be
+# one component, and `MARKER_MERGED` is the refusal that catches them.
+#
+# The two scores and the neighbour list are measured on every mark anyway, and
+# `test_marker_routing.py` PINS THE NEGATIVE: no mark's fill window holds
+# foreign ink at any rendering. The day that scenario fails, this refusal has to
+# be written, and it will fail on purpose rather than silently.
 
 # A PROXIMITY RULE WAS HERE AND WAS REMOVED. It refused any mark with another
 # blob within 0.75 of a marker, to stop a touching neighbour's ink being
@@ -311,7 +363,28 @@ def radial_third_harmonic(filled, cx, cy, scale, rays=72):
     return float(abs(spectrum[3]) / abs(spectrum[0]))
 
 
-def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
+def footprint_labels(own, kopen):
+    """Which marker each pixel of ink belongs to, the shaved rim included.
+
+    The opening that removes the regression lines also shaves each marker's rim,
+    so `own` - the opened labelling - is smaller than the marker. Dilating it
+    back by the opening's own kernel recovers the rim; a pixel that SURVIVED the
+    opening keeps its own label rather than a neighbour's, so where two markers
+    touch each keeps the ink that is actually its own.
+
+    A pixel no marker claims stays 0, and that is the distinction the
+    contamination rule rests on: a regression line crossing a ring's middle is
+    ink nobody owns, while a neighbouring disc sitting in it is ink that belongs
+    to a component with an ID.
+    """
+    lab = own.astype(np.int32)
+    dil = cv2.dilate(lab.astype(np.uint16),
+                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                               (kopen, kopen))).astype(np.int32)
+    return np.where(lab > 0, lab, dil)
+
+
+def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None, foot=None):
     """The evidence one opened component carries about its class."""
     pad = max(2, int(round(scale * 0.25)))
     y0 = max(0, blob["y"] - pad)
@@ -329,6 +402,18 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
     # of the chain, and nothing separated. The opened blob says where this
     # marker is; dilating it back by the opening's own kernel recovers the ink
     # the opening shaved off, corners included, and nothing else.
+    # HOW MUCH OF THIS BLOB'S INK IS NOT WITHIN ONE MARKER OF ITS OWN CENTROID.
+    # On the OPENED component, which is the one that has no regression line in
+    # it: the line would put ink far from the centre on a mark that is perfectly
+    # single. A marker is convex and fits inside a disc of its own diameter, so
+    # for one marker this is blur; for two it is each marker's outer half.
+    sel = (own[y0:y1, x0:x1] == blob["label"])
+    if sel.any():
+        yy, xx = np.nonzero(sel)
+        far = np.hypot(xx + x0 - blob["cx"], yy + y0 - blob["cy"]) > scale / 2.0
+        off_centre = float(far.mean())
+    else:                                                     # pragma: no cover
+        off_centre = 0.0
     grown = cv2.dilate((own == blob["label"]).astype(np.uint8)[y0:y1, x0:x1],
                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kopen, kopen)))
     piece = np.logical_and(closed[y0:y1, x0:x1] > 0, grown > 0).astype(np.uint8)
@@ -341,20 +426,32 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
     perimeter = cv2.arcLength(contour, True)
     filled = cv2.contourArea(contour)
     inner = max(1, int(round(scale * INTERIOR)))
-    # MEASURED ON THIS MARKER'S OWN INK, not on the page. Read off the greyscale
-    # it included whatever a TOUCHING neighbour had put inside this marker's
-    # middle: on the overlap rendering an open circle came back at 0.825 against
-    # a 0.606 boundary and was routed as filled. `piece` is this blob's ink and
-    # nothing else's, so a neighbour cannot fill a ring any more.
-    # ON THE RAW MASK. Cutting it to THIS blob's ink was tried - a touching
-    # neighbour puts its own disc inside a ring's middle, and one mark on the
-    # overlap rendering was routed as filled because of it - and then reverted:
-    # once `MARK_MARGIN` refused marks sitting on the boundary, removing the
-    # neighbour's ink changed nothing that any scenario could see. A guard whose
-    # removal breaks no test is decoration, and this file would rather carry the
-    # measurement than the code. (NOT the hole-filled mask: there every ring's
-    # middle is already black and the fill axis collapses to 1.0 for everything.)
-    patch = raw[cy - inner:cy + inner + 1, cx - inner:cx + inner + 1]
+    # THE FILL IS READ ON THE RAW MASK, in a window at this marker's centre.
+    # (NOT the hole-filled mask: there every ring's middle is already black and
+    # the fill axis collapses to 1.0 for everything.)
+    #
+    # WHOSE INK IS IN THAT WINDOW IS THE QUESTION, and it is answered rather
+    # than assumed. Cutting the window down to this blob's own ink was tried and
+    # reverted - it silently changed the measurement on every mark to fix one -
+    # so instead the window is read twice: once as it stands, and once with only
+    # the ink this component owns. Both scores travel on the record, with the
+    # neighbours that put ink there and how much. `route` refuses the mark only
+    # when the two scores DISAGREE about OPEN vs FILLED, which is the only case
+    # in which the contamination changed an answer.
+    ry0, ry1 = max(0, cy - inner), min(raw.shape[0], cy + inner + 1)
+    rx0, rx1 = max(0, cx - inner), min(raw.shape[1], cx + inner + 1)
+    patch = raw[ry0:ry1, rx0:rx1]
+    ink = patch > 0
+    if foot is not None:
+        fpatch = foot[ry0:ry1, rx0:rx1]
+        own_ink = np.logical_and(ink, fpatch == blob["label"])
+        foreign = np.logical_and(ink, np.logical_and(fpatch > 0,
+                                                     fpatch != blob["label"]))
+        neighbours = sorted(int(v) for v in np.unique(fpatch[foreign]))
+    else:                                                     # pragma: no cover
+        own_ink, foreign, neighbours = ink, np.zeros_like(ink), []
+    window_score = float(ink.mean()) if ink.size else 0.0
+    own_score = float(own_ink.mean()) if ink.size else 0.0
     side = float(max(blob["w"], blob["h"]))
     short = float(max(1, min(blob["w"], blob["h"])))
     return dict(point_px_x=float(blob["cx"]), point_px_y=float(blob["cy"]),
@@ -365,7 +462,19 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
                 circularity=round((4.0 * math.pi * filled / perimeter ** 2)
                                   if perimeter else 0.0, 4),
                 corners=int(len(cv2.approxPolyDP(contour, 0.045 * perimeter, True))),
-                interior_ink=round(float(patch.mean()) if patch.size else 0.0, 4),
+                interior_ink=round(window_score, 4),
+                # THE SEVEN CONTAMINATION FIELDS. Recorded on every mark, not
+                # only on the ones that get refused: "no neighbour put ink in
+                # this marker's middle" is a measurement somebody can check,
+                # and a mark that WAS refused has to be able to say why in
+                # numbers rather than by naming a rule.
+                Original_Component_ID=int(blob["label"]),
+                Neighbour_Component_IDs=neighbours,
+                Foreign_Ink_Pixels_In_Fill_ROI=int(foreign.sum()),
+                Foreign_Ink_Fraction=round(
+                    float(foreign.sum()) / patch.size if patch.size else 0.0, 4),
+                Fill_Score_Window=round(window_score, 4),
+                Fill_Score_Own_Component=round(own_score, 4),
                 aspect=round(side / short, 3),
                 size_ratio=round(side / scale, 3) if scale else 0.0,
                 # THE THIRD DISCRIMINANT TRIED, and the third that does not
@@ -374,50 +483,119 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
                 # triangles: circles 0.65-0.78 against triangles 0.55-0.78 on
                 # `twin_scatter_s3.jpeg`. Recorded, not used.
                 bbox_extent=round(blob["area"] / float(max(1, blob["w"] * blob["h"])), 4),
+                off_centre_ink=round(off_centre, 4),
                 third_harmonic=radial_third_harmonic(closed, cx, cy, scale),
                 ink_px=int(piece.sum()))
 
 
-def _geometry(mask, comp, labels, grey, scale):
-    """The evidence one component carries about being a marker of some class."""
-    sub = (labels[comp["y"]:comp["y"] + comp["h"],
-                  comp["x"]:comp["x"] + comp["w"]] == comp["label"])
-    contours, _ = cv2.findContours(sub.astype(np.uint8), cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-    contour = max(contours, key=cv2.contourArea)
-    perimeter = cv2.arcLength(contour, True)
-    filled = cv2.contourArea(contour)
-    circularity = (4.0 * math.pi * filled / (perimeter ** 2)) if perimeter else 0.0
-    corners = len(cv2.approxPolyDP(contour, 0.045 * perimeter, True))
-    side = max(comp["w"], comp["h"])
-    inner = max(1, int(round(side * INTERIOR)))
-    cx, cy = int(round(comp["x"] + comp["w"] / 2.0)), int(round(comp["y"] + comp["h"] / 2.0))
-    patch = grey[cy - inner:cy + inner + 1, cx - inner:cx + inner + 1]
-    interior = float((patch < 128).mean()) if patch.size else 0.0
-    return dict(point_px_x=cx + 0.0, point_px_y=cy + 0.0, side_px=side,
-                area_px=comp["area"], enclosed_px=float(filled),
-                circularity=round(circularity, 4), corners=int(corners),
-                interior_ink=round(interior, 4),
-                aspect=round(float(max(comp["w"], comp["h"]))
-                             / max(1, min(comp["w"], comp["h"])), 3),
-                size_ratio=round(side / scale, 3) if scale else 0.0)
+def match_one_to_one(records, truth, tol):
+    """{record index: truth index}, each used at most once.
+
+    ONE RECORD MAY NOT ANSWER FOR TWO MARKS. Nearest-truth scoring let it, and
+    that is exactly how a record sitting between two marks of one series scored
+    as a hit: the nearer of the two was its answer and the other was simply
+    absent from the count. Here every pair within `tol` is a candidate edge,
+    greedy over increasing distance takes the obvious pairs first, and an
+    augmenting pass raises the matching to maximum cardinality so a greedy
+    choice cannot leave a matchable mark unmatched. What is left over is the two
+    kinds of error a fixture can show: a record no mark explains (invented) and
+    a mark no record found (missed).
+    """
+    cand = sorted((((t[1] - x["point_px_x"]) ** 2
+                    + (t[2] - x["point_px_y"]) ** 2) ** 0.5, i, j)
+                  for i, x in enumerate(records) for j, t in enumerate(truth))
+    cand = [e for e in cand if e[0] <= tol]
+    edges = {}
+    for _d, i, j in cand:
+        edges.setdefault(i, []).append(j)
+    of_rec, of_truth = {}, {}
+    for _d, i, j in cand:
+        if i not in of_rec and j not in of_truth:
+            of_rec[i], of_truth[j] = j, i
+
+    def augment(i, seen):
+        for j in edges.get(i, ()):
+            if j in seen:
+                continue
+            seen.add(j)
+            if j not in of_truth or augment(of_truth[j], seen):
+                of_rec[i], of_truth[j] = j, i
+                return True
+        return False
+    for i in range(len(records)):
+        if i not in of_rec:
+            augment(i, set())
+    return of_rec
 
 
-def route(image, panel_box, series, threshold=150, exclude_boxes=()):
+def _counts(records, expected_points):
+    """How many marks were seen, routed and refused - and whether that is all.
+
+    A GALLERY TABLE THAT SHOWS ONLY WHAT WAS ROUTED IS A TABLE THAT CANNOT BE
+    WRONG. Twenty routed marks reads as success whether thirty or twenty-one
+    were drawn, and the marks that never became a record at all - swallowed by a
+    neighbour, shaved away by the opening - are invisible. These four counts
+    travel with every route, and the fifth says whether they add up to what
+    somebody counted on the page.
+    """
+    marks = [r for r in records if r.get("refusal") != "NOT_A_MARKER"]
+    routed = [r for r in marks if r.get("Series_ID")]
+    out = dict(Detected_Point_Count=len(marks),
+               Routed_Point_Count=len(routed),
+               Unresolved_Point_Count=len(marks) - len(routed),
+               Expected_Point_Count=(None if expected_points is None
+                                     else int(expected_points)),
+               Point_Count_Agreement="")
+    if expected_points is not None:
+        out["Point_Count_Agreement"] = ("AGREES" if len(marks) == int(expected_points)
+                                        else "POINT_COUNT_DISAGREES")
+    return out
+
+
+def fill_verdict(value, split, want_fills):
+    """OPEN, FILLED, or "" for a mark whose fill this panel cannot establish.
+
+    Pulled out of `route` because the SAME question has to be asked twice of
+    every mark - once of the window as it stands and once of the window with
+    only this component's ink - and a contamination that changes the answer is
+    only a contamination if both answers come from one rule.
+    """
+    if len(want_fills) == 1:
+        return sorted(want_fills)[0]
+    if not split.separates or not _clear(value, split):
+        return ""
+    return "FILLED" if value >= split.threshold else "OPEN"
+
+
+def route(image, panel_box, series, threshold=150, exclude_boxes=(),
+          expected_points=None):
     """One record per component: a Series_ID, or the reason there is none.
 
     `series` is the panel's DECLARATION - the (shape, fill) pairs it says it
     contains, as `mark_readers.SeriesSpec`s or as dicts. A class the panel did
     not declare is refused rather than invented.
+
+    `expected_points`, when a person has counted the marks on the panel, turns
+    the counts this returns into an agreement or a disagreement. Without it the
+    counts are still reported and `Point_Count_Agreement` is left empty, because
+    "as many as it found" is not a check.
     """
     declared = {}
     for spec in series:
         shape = getattr(spec, "marker", None) or spec.get("shape")
         fill = getattr(spec, "fill", None) or spec.get("fill")
         name = getattr(spec, "name", None) or spec.get("id")
-        declared[(str(shape).upper(), str(fill).upper())] = name
+        key = (str(shape).upper(), str(fill).upper())
+        if key in declared:
+            # TWO SERIES DECLARED WITH THE SAME MARKER. `declared` is a dict, so
+            # the second silently won and every mark of both series was routed
+            # to whichever name came last - a whole series published under
+            # another series' heading, from a typo in a manifest.
+            raise ValueError(
+                "%s: %s and %s are both declared as %s %s; nothing on this "
+                "panel can be routed by marker shape and fill"
+                % (DUPLICATE_DECLARATION, declared[key], name, key[1], key[0]))
+        declared[key] = name
     x0, x1, y0, y1 = (int(v) for v in panel_box)
     grey = np.asarray((image.convert("L") if isinstance(image, Image.Image)
                        else Image.fromarray(image).convert("L"))).astype(int)
@@ -432,28 +610,39 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
         # NO SCALE, NO ROUTING. Every window below is a fraction of the panel's
         # own marker, and a panel that shows none has nothing to measure it on.
         return dict(marker_scale_px=0.0, shape_split=Split(None, 0, 0, False)._asdict(),
-                    fill_split=Split(None, 0, 0, False)._asdict(), records=[])
+                    fill_split=Split(None, 0, 0, False)._asdict(), records=[],
+                    **_counts([], expected_points))
     blobs, closed, _opened, own = marker_blobs(mask, scale)
+    # WHOSE INK IS WHERE, once for the panel. Every mark's fill window is then
+    # read twice against it - as it stands, and with only its own component's
+    # ink - which is what makes a touching neighbour a measurement instead of a
+    # suspicion.
+    foot = footprint_labels(own, KOPEN[0])
     seen = []
     for blob in blobs:
         geo = _at_blob(blob, closed, grey, scale, own=own, kopen=KOPEN[0],
-                       raw=mask)
+                       raw=mask, foot=foot)
         if geo is None:
             continue
         geo["refusal"] = ""
         side = geo["side_px"]
         if side < SIZE_LO * scale or geo["aspect"] > ASPECT:
             geo["refusal"] = "NOT_A_MARKER"
-        elif side > SIZE_HI * scale:
+        elif geo["off_centre_ink"] > OFF_CENTRE:
             # TWO MARKERS THE OPENING COULD NOT SEPARATE, because they touch
             # each other rather than a line. Their centroid is at neither, so
             # the pair is refused and the panel keeps every other mark.
+            #
+            # THE TEST USED TO BE `side > SIZE_HI * scale` WITH SIZE_HI = 1.75,
+            # and a bounding box cannot see this: the fixture's touching pair is
+            # 1.5 markers wide and eight more blobs across the family are 1.44
+            # to 1.68, all of them under 1.75, all of them holding two drawn
+            # marks, and every one of them produced a record at a position no
+            # marker was drawn at. `off_centre_ink` is the same question asked
+            # of the ink instead of its box, and it separates by 2.5x.
             geo["refusal"] = "MARKER_MERGED"
         seen.append(geo)
 
-    # AND NO MARK IS MEASURED WITH ANOTHER INSIDE ITS WINDOW. Pairwise, before
-    # either split is asked for: a polluted interior would otherwise join the
-    # distribution the fill threshold is derived from.
     kept = [g for g in seen if not g["refusal"]]
     # THE PANEL'S OWN TWO SPLITS. Asked for only where the declaration needs
     # them: a panel of one shape has nothing to separate.
@@ -490,15 +679,16 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
             # the high side of the panel's own split is the triangles.
             shape = ("TRIANGLE" if geo["third_harmonic"] >= shape_split.threshold
                      else "CIRCLE")
-        if len(want_fills) == 1:
-            fill = sorted(want_fills)[0]
-        elif not fill_split.separates or not _clear(geo["interior_ink"],
-                                                    fill_split):
-            fill = ""
+        fill = fill_verdict(geo["Fill_Score_Window"], fill_split, want_fills)
+        if not fill:
             geo["refusal"] = geo["refusal"] or "MARKER_FILL_UNRESOLVED"
-        else:
-            fill = ("FILLED" if geo["interior_ink"] >= fill_split.threshold
-                    else "OPEN")
+        # THE SAME QUESTION, ASKED OF THIS COMPONENT'S INK ALONE, so that a
+        # contamination is a measurement rather than a suspicion. It comes back
+        # equal on every mark of every rendering - see the note by `REFUSALS`
+        # for why that is geometry and not luck - and the suite pins it.
+        own_fill = fill_verdict(geo["Fill_Score_Own_Component"], fill_split,
+                                want_fills)
+        geo["Classification_Changes_When_Foreign_Removed"] = bool(own_fill != fill)
         geo["shape"] = shape
         geo["fill"] = fill
         geo["shape_threshold"] = shape_split.threshold
@@ -516,9 +706,11 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
         geo["Series_ID"] = name
         geo["Identity_Method"] = "MEASURED_MARKER_SHAPE_FILL"
     for geo in seen:
+        geo.setdefault("Classification_Changes_When_Foreign_Removed", False)
         geo.setdefault("shape", "")
         geo.setdefault("fill", "")
         geo.setdefault("Series_ID", "")
         geo.setdefault("Identity_Method", "")
     return dict(marker_scale_px=scale, shape_split=shape_split._asdict(),
-                fill_split=fill_split._asdict(), records=seen)
+                fill_split=fill_split._asdict(), records=seen,
+                **_counts(seen, expected_points))

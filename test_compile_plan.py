@@ -69,8 +69,31 @@ if not os.path.exists(PLAN_PATH):
 with open(PLAN_PATH, encoding="utf-8") as fh:
     PLAN = json.load(fh)
 
+# EVERY SCENARIO IN THIS FILE COMPILES THE SHIPPED PLAN, and the shipped plan
+# names five publisher rasters. This repository is public and does not carry
+# them, so the whole file SKIPS when they are absent rather than crashing two
+# hundred lines down inside `compile_to`.
+#
+# CI SUPPLIES THEM through `FDT_RASTER_ROOT`, so the scenario count this file
+# contributes there is unchanged. A clone without the rasters runs fewer
+# scenarios and says so, which is the honest answer for a tree that cannot see
+# the figures.
+import raster_root as _RR                                        # noqa: E402
+_plan_rasters = sorted({f["image"] for f in PLAN["figures"]})
+_absent_rasters = [r for r in _plan_rasters if not _RR.check(r)[0]]
+if _absent_rasters:
+    print(_RR.skip_note(_absent_rasters[0]))
+    print("FDT_SCENARIOS_RUN=0")
+    raise SystemExit(0)
+# THE PLAN'S FILE ROOT IS WHERE THE RASTERS TURNED OUT TO BE, not where this
+# file sits. CI fetches them into a directory of its own and points
+# `FDT_RASTER_ROOT` at it, so a `file_root` hardcoded to HERE reports
+# SOURCE_FILE_NOT_FOUND for all five and the whole file dies on the first
+# scenario. When the rasters are beside the code the two are the same directory.
+FILE_ROOT = os.path.dirname(_RR.check(_plan_rasters[0])[0])
 
-def compile_to(name, plan=None, file_root=HERE):
+
+def compile_to(name, plan=None, file_root=FILE_ROOT):
     out = os.path.join(ROOT, name)
     shutil.rmtree(out, ignore_errors=True)
     return out, CP.compile_plan(plan if plan is not None else copy.deepcopy(PLAN),
@@ -165,7 +188,7 @@ print("the compiled manifests are the pilot's, value for value")
 # work, running it has to land on the same numbers - and if it does not, the
 # plan is missing something the compiler cannot know.
 _ODIR = os.path.join(ROOT, "o_plan")
-_summary = RB.run_batch(MDIR, _ODIR, file_root=HERE, run_date="2026-08-07")
+_summary = RB.run_batch(MDIR, _ODIR, file_root=FILE_ROOT, run_date="2026-08-07")
 check("the compiled batch runs", _summary["status"] == "RAN", "%s" % _summary)
 check("with the pilot's panel count", _summary["panels"] == 26, "%s" % _summary)
 # 36, not the 48 the old BAR_MONO reader produced. Three panels of Figure 4 -
@@ -452,11 +475,11 @@ check("  and a level the grid does not declare in ANY case is still refused",
           CP.validate_plan(_mutated(lambda p: [
               sp.update(level="placebo")
               for sp in _auto_panels(p, "FIG1")[0]["read"]["series"]]),
-              file_root=HERE)),
+              file_root=FILE_ROOT)),
       "%s" % codes(CP.validate_plan(_mutated(lambda p: [
           sp.update(level="placebo")
           for sp in _auto_panels(p, "FIG1")[0]["read"]["series"]]),
-          file_root=HERE)))
+          file_root=FILE_ROOT)))
 
 print()
 print("the plan says which document its figures came out of")
@@ -506,7 +529,7 @@ _claimed, (_w, _probs) = compile_to("m_doc_claimed", plan=_p)
 check("a plan may state a digest without the compiler looking for the file",
       not _probs, "%s" % codes(_probs))
 _claimed_run = RB.run_batch(_claimed, os.path.join(ROOT, "o_doc_claimed"),
-                            file_root=HERE, run_date="2026-08-07")
+                            file_root=FILE_ROOT, run_date="2026-08-07")
 check("  and the run refuses it, because the run is what can look",
       _claimed_run["status"] == "MANIFEST_REJECTED"
       and "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _claimed_run["detail"],
@@ -684,7 +707,7 @@ for _path in _paths_seen:
             continue
         _probed += 1
         try:
-            CP.validate_plan(_p, file_root=HERE)
+            CP.validate_plan(_p, file_root=FILE_ROOT)
         except Exception as exc:                                # pragma: no cover
             _raised.append(("%s = %r" % (".".join(map(str, _path)), _wrong),
                             "%s: %s" % (type(exc).__name__, exc)))
@@ -697,8 +720,8 @@ check("and the probe really covered the nested structure",
 # A validator that reports everything by reporting nothing specific would pass
 # the property above. The plan itself must still come out clean.
 check("and the untouched plan still validates",
-      not CP.validate_plan(copy.deepcopy(PLAN), file_root=HERE),
-      "%s" % codes(CP.validate_plan(copy.deepcopy(PLAN), file_root=HERE)))
+      not CP.validate_plan(copy.deepcopy(PLAN), file_root=FILE_ROOT),
+      "%s" % codes(CP.validate_plan(copy.deepcopy(PLAN), file_root=FILE_ROOT)))
 
 
 _missing = copy.deepcopy(PLAN)
@@ -723,7 +746,7 @@ print("a plan key nothing reads is refused, with a suggestion")
 _typo = copy.deepcopy(PLAN)
 _read = _typo["figures"][0]["panels"][0]["read"]
 _read["axis_x_regionn"] = "1,2,3,4"
-_probs = CP.validate_plan(_typo, file_root=HERE)
+_probs = CP.validate_plan(_typo, file_root=FILE_ROOT)
 check("a near-miss key is PLAN_UNKNOWN_KEY",
       any(p["check"] == "PLAN_UNKNOWN_KEY" for p in _probs), "%s" % _probs[:2])
 check("and the message names the key it meant",
@@ -737,22 +760,22 @@ for _where, _obj in (("a reviewer", lambda p: p["reviewers"][0]),
     _obj(_bad)["notes"] = "not a key"
     check("%s with an unknown key is refused too" % _where,
           any(p["check"] == "PLAN_UNKNOWN_KEY"
-              for p in CP.validate_plan(_bad, file_root=HERE)),
-          "%s" % CP.validate_plan(_bad, file_root=HERE)[:2])
+              for p in CP.validate_plan(_bad, file_root=FILE_ROOT)),
+          "%s" % CP.validate_plan(_bad, file_root=FILE_ROOT)[:2])
 # The canonical spelling and its alias may both appear only if they agree.
 _alias = copy.deepcopy(PLAN)
 _alias["figures"][0]["panels"][0]["read"]["axis_x_region"] = "1,2,3,4"
 _alias["figures"][0]["panels"][0]["read"]["x_region"] = "9,9,9,9"
 check("two spellings of one field that disagree is PLAN_ALIAS_CONFLICT",
       any(p["check"] == "PLAN_ALIAS_CONFLICT"
-          for p in CP.validate_plan(_alias, file_root=HERE)),
-      "%s" % CP.validate_plan(_alias, file_root=HERE)[:2])
+          for p in CP.validate_plan(_alias, file_root=FILE_ROOT)),
+      "%s" % CP.validate_plan(_alias, file_root=FILE_ROOT)[:2])
 _canon = copy.deepcopy(PLAN)
 _canon["figures"][0]["panels"][0]["read"]["axis_x_region"] = "1,2,3,4"
 check("and the canonical spelling alone compiles",
-      not [p for p in CP.validate_plan(_canon, file_root=HERE)
+      not [p for p in CP.validate_plan(_canon, file_root=FILE_ROOT)
            if p["check"] in ("PLAN_UNKNOWN_KEY", "PLAN_ALIAS_CONFLICT")],
-      "%s" % [p for p in CP.validate_plan(_canon, file_root=HERE)][:2])
+      "%s" % [p for p in CP.validate_plan(_canon, file_root=FILE_ROOT)][:2])
 
 
 # The allowlist stops a key NOBODY reads from arriving. It says nothing about a
@@ -839,7 +862,7 @@ _read0["series"][0]["colour_tolerance"] = "17"
 _read0["positions"][0]["slot_index"] = 7
 _read0["positions"][0]["display_order"] = 9
 _bdir = os.path.join(ROOT, "bound")
-CP.compile_plan(_bound, _bdir, file_root=HERE, run_date="2026-08-11")
+CP.compile_plan(_bound, _bdir, file_root=FILE_ROOT, run_date="2026-08-11")
 _units = _rows(os.path.join(_bdir, "unit_manifest.csv"))
 _serieses = _rows(os.path.join(_bdir, "series_manifest.csv"))
 _poss = _rows(os.path.join(_bdir, "position_manifest.csv"))
@@ -870,15 +893,15 @@ _wrong = copy.deepcopy(PLAN)
 _wrong["figures"][0]["image_sha256"] = "0" * 64
 check("a declared image_sha256 that does not match the file is refused",
       any(p["check"] == "PLAN_IMAGE_SHA256_MISMATCH"
-          for p in CP.validate_plan(_wrong, file_root=HERE)),
-      "%s" % CP.validate_plan(_wrong, file_root=HERE)[:2])
+          for p in CP.validate_plan(_wrong, file_root=FILE_ROOT)),
+      "%s" % CP.validate_plan(_wrong, file_root=FILE_ROOT)[:2])
 _right = copy.deepcopy(PLAN)
 _right["figures"][0]["image_sha256"] = MR.sha256_of(
-    os.path.realpath(os.path.join(HERE, _right["figures"][0]["image"])))
+    os.path.realpath(os.path.join(FILE_ROOT, _right["figures"][0]["image"])))
 check("and the right one compiles",
-      not [p for p in CP.validate_plan(_right, file_root=HERE)
+      not [p for p in CP.validate_plan(_right, file_root=FILE_ROOT)
            if p["check"] == "PLAN_IMAGE_SHA256_MISMATCH"],
-      "%s" % CP.validate_plan(_right, file_root=HERE)[:2])
+      "%s" % CP.validate_plan(_right, file_root=FILE_ROOT)[:2])
 
 # REVERT: drop the source-figure boundary on `figure_view`. `Identity_Domain_ID`
 # was split out of this field precisely because they answer different questions;
@@ -887,7 +910,7 @@ check("and the right one compiles",
 # downstream agrees with itself.
 _span = copy.deepcopy(PLAN)
 _span["figures"][1]["panels"][0]["read"]["figure_view"] = _VIEW
-_spanp = CP.validate_plan(_span, file_root=HERE)
+_spanp = CP.validate_plan(_span, file_root=FILE_ROOT)
 check("one figure_view over two source figures is refused",
       any(p["check"] == "PLAN_FIGURE_VIEW_SPANS_SOURCE_FIGURES" for p in _spanp),
       "%s" % _spanp[:2])
@@ -954,9 +977,23 @@ check("  and so is one that prints the wrong number of them",
 _e2e = os.path.join(ROOT, "e2e_323")
 _e2e_plan = os.path.join(_e2e, "plan_323.json")
 os.makedirs(_e2e, exist_ok=True)
-_e2e_ok = True
+# ID 323'S TWO FIGURES ARE PUBLISHER RASTERS and this repository is public, so
+# the tree does not carry them. The end-to-end section SKIPS when they are
+# absent - and the skip is visible in this file's scenario count, which is the
+# mechanism that keeps a green run from reading like a complete one.
+import raster_root as _RR                                        # noqa: E402
+_e2e_ok = bool(_RR.check("fixtures/id323_fig1.jpeg")[0]
+               and _RR.check("323_p5_fig2.jpeg")[0])
+if not _e2e_ok:
+    print(_RR.skip_note("fixtures/id323_fig1.jpeg"))
+# 323'S OWN ROOT, not 397's and not HERE. `build` joins the plan's relative
+# image path onto whatever root it is handed and opens the result, so handing it
+# the package directory while the rasters are somewhere else is a crash, not a
+# skip.
+_323_ROOT = (os.path.dirname(_RR.check("323_p5_fig2.jpeg")[0]) if _e2e_ok
+             else HERE)
 try:
-    _plan323 = MP323.build(HERE)
+    _plan323 = MP323.build(_323_ROOT) if _e2e_ok else None
     with open(_e2e_plan, "w", encoding="utf-8") as _fh:
         json.dump(_plan323, _fh, indent=1, sort_keys=True)
 except SystemExit as _exc:                                   # pragma: no cover
@@ -971,16 +1008,16 @@ if _e2e_ok:
           % (len(_plan323["figures"]), len(_plan323["units"])))
     # AND ITS TWO FACTOR GRAINS AGREE, which is the check added above applied to
     # the plan that motivated it rather than to a mutation of another one.
-    _e2e_probs = CP.validate_plan(copy.deepcopy(_plan323), file_root=HERE)
+    _e2e_probs = CP.validate_plan(copy.deepcopy(_plan323), file_root=_323_ROOT)
     check("  and the plan layer accepts it, factor grains included",
           not _e2e_probs, "%s" % codes(_e2e_probs))
     _e2e_m = os.path.join(_e2e, "manifests")
     _e2e_out = os.path.join(_e2e, "out")
     _w323, _probs323 = CP.compile_plan(copy.deepcopy(_plan323), _e2e_m,
-                                       file_root=HERE, run_date="2026-08-17")
+                                       file_root=_323_ROOT, run_date="2026-08-17")
     check("  and compiles to a manifest set with no problems",
           not _probs323 and _w323, "%s" % codes(_probs323))
-    _sum323 = RB.run_batch(_e2e_m, _e2e_out, file_root=HERE,
+    _sum323 = RB.run_batch(_e2e_m, _e2e_out, file_root=_323_ROOT,
                            run_date="2026-08-17")
     # 102 = Figure 1's 72 (6 panels x 6 timepoints x 2 postures) plus Figure 2's
     # 30. Figure 2 contributed ZERO until the series factor was declared in the

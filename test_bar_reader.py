@@ -185,69 +185,81 @@ check("a bar thinner than its outline is dropped, not guessed",
 
 
 # ------------------------------------------------------------ real fixture
-print("frozen real figure - ID 323 Figure 1, six panels")
-cfg = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_panels.json")))
-exp = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_expected.json")))
-img = os.path.join(HERE, "fixtures/id323_fig1.jpeg")
-sha = hashlib.sha256(open(img, "rb").read()).hexdigest()
-check("fixture image is the one the expected values were read from",
-      sha == exp["image_sha256"], sha[:16])
+# ------------------------------------------------------------ real fixture
+# ID 323 FIGURE 1 IS A PUBLISHER FIGURE and this repository is public, so the
+# raster is not carried here. The section SKIPS when it is absent - loudly, and
+# with the count moving, which is what the two scenario-count markers are for -
+# and runs unchanged when `FDT_RASTER_ROOT` points at it. What must not happen
+# is the section quietly passing on a file that is not the one the expected
+# values were read from, which the pinned hash below still refuses.
+import raster_root as _RR                                        # noqa: E402
+_id323 = _RR.check("fixtures/id323_fig1.jpeg")[0]
+if not _id323:
+    print(_RR.skip_note("fixtures/id323_fig1.jpeg"))
+else:
+    print("frozen real figure - ID 323 Figure 1, six panels")
+    cfg = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_panels.json")))
+    exp = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_expected.json")))
+    img = _id323
+    sha = hashlib.sha256(open(img, "rb").read()).hexdigest()
+    check("fixture image is the one the expected values were read from",
+          sha == exp["image_sha256"], sha[:16])
 
-masks = colour_masks(Image.open(img).convert("RGB"))
-dark = masks["dark"]
+    masks = colour_masks(Image.open(img).convert("RGB"))
+    dark = masks["dark"]
 
 
-def find_ticks(box, n):
-    x0, x1, y0, y1 = box
-    sub = dark[y0:y1, x0:x1]
-    h = sub.shape[0]
-    ax = min(x0 + i for i, v in enumerate(sub.sum(axis=0)) if v > 0.6 * h)
-    sl = dark[y0:y1, max(0, ax - 20):ax - 2]
-    tr = [y0 + i for i, v in enumerate(sl) if v.sum() >= 2]
-    return [round((r[0] + r[-1]) / 2, 1) for r in runs(tr, 4)]
+    def find_ticks(box, n):
+        x0, x1, y0, y1 = box
+        sub = dark[y0:y1, x0:x1]
+        h = sub.shape[0]
+        ax = min(x0 + i for i, v in enumerate(sub.sum(axis=0)) if v > 0.6 * h)
+        sl = dark[y0:y1, max(0, ax - 20):ax - 2]
+        tr = [y0 + i for i, v in enumerate(sl) if v.sum() >= 2]
+        return [round((r[0] + r[-1]) / 2, 1) for r in runs(tr, 4)]
 
 
-got = {}
-for p in cfg["panels"]:
-    cen = find_ticks(p["box"], len(p["tick_values"]))
-    check("%s: all %d y ticks detected" % (p["name"], len(p["tick_values"])),
-          len(cen) == len(p["tick_values"]), "got %d" % len(cen))
-    if len(cen) != len(p["tick_values"]):
-        continue
-    bars = read_bar_panel(masks, tuple(p["box"]), list(zip(p["tick_values"], cen)),
-                          cfg["series"])
-    check("%s: 12 bars (6 sessions x 2 conditions)" % p["name"], len(bars) == 12,
-          "got %d" % len(bars))
-    check("%s: calibration residual under 0.2 units" % p["name"],
-          bars and bars[0]["calib_max_resid"] < 0.2,
-          "%.3f" % (bars[0]["calib_max_resid"] if bars else -1))
-    for b in bars:
-        got[(p["name"], b["series"], cfg["sessions"][b["order"]])] = b
+    got = {}
+    for p in cfg["panels"]:
+        cen = find_ticks(p["box"], len(p["tick_values"]))
+        check("%s: all %d y ticks detected" % (p["name"], len(p["tick_values"])),
+              len(cen) == len(p["tick_values"]), "got %d" % len(cen))
+        if len(cen) != len(p["tick_values"]):
+            continue
+        bars = read_bar_panel(masks, tuple(p["box"]), list(zip(p["tick_values"], cen)),
+                              cfg["series"])
+        check("%s: 12 bars (6 sessions x 2 conditions)" % p["name"], len(bars) == 12,
+              "got %d" % len(bars))
+        check("%s: calibration residual under 0.2 units" % p["name"],
+              bars and bars[0]["calib_max_resid"] < 0.2,
+              "%.3f" % (bars[0]["calib_max_resid"] if bars else -1))
+        for b in bars:
+            got[(p["name"], b["series"], cfg["sessions"][b["order"]])] = b
 
-dm = dd = 0.0
-for row in exp["values"]:
-    b = got.get((row["panel"], row["series"], row["session"]))
-    if b is None:
-        check("missing bar %s/%s/%s" % (row["panel"], row["series"], row["session"]), False)
-        continue
-    dm = max(dm, abs(b["mean"] - row["mean"]))
-    if row["dispersion"] is not None and b["dispersion"] is not None:
-        dd = max(dd, abs(b["dispersion"] - row["dispersion"]))
-# The frozen values are stored to 3 dp, so half of the last digit is the exact
-# tolerance: anything larger is a real change in the reader, not rounding.
-TOL = 5e-4
-check("all 72 means reproduce the frozen values", dm <= TOL, "max delta %.6f" % dm)
-check("all 72 dispersions reproduce the frozen values", dd <= TOL, "max delta %.6f" % dd)
-check("every bar of the real figure is stem-confirmed",
-      all(b["Errorbar_Stem_Confirmed"] == "TRUE" for b in got.values()))
-check("PAP is present on screen although the worklist omitted it",
-      any(k[0] == "PAP" for k in got) and cfg["unlisted_panels"] == "PAP")
-check("observed panel count exceeds the worklist count",
-      cfg["observed_panel_count"] > cfg["worklist_panel_count"])
+    dm = dd = 0.0
+    for row in exp["values"]:
+        b = got.get((row["panel"], row["series"], row["session"]))
+        if b is None:
+            check("missing bar %s/%s/%s" % (row["panel"], row["series"], row["session"]), False)
+            continue
+        dm = max(dm, abs(b["mean"] - row["mean"]))
+        if row["dispersion"] is not None and b["dispersion"] is not None:
+            dd = max(dd, abs(b["dispersion"] - row["dispersion"]))
+    # The frozen values are stored to 3 dp, so half of the last digit is the exact
+    # tolerance: anything larger is a real change in the reader, not rounding.
+    TOL = 5e-4
+    check("all 72 means reproduce the frozen values", dm <= TOL, "max delta %.6f" % dm)
+    check("all 72 dispersions reproduce the frozen values", dd <= TOL, "max delta %.6f" % dd)
+    check("every bar of the real figure is stem-confirmed",
+          all(b["Errorbar_Stem_Confirmed"] == "TRUE" for b in got.values()))
+    check("PAP is present on screen although the worklist omitted it",
+          any(k[0] == "PAP" for k in got) and cfg["unlisted_panels"] == "PAP")
+    check("observed panel count exceeds the worklist count",
+          cfg["observed_panel_count"] > cfg["worklist_panel_count"])
 
-print()
+    print()
 
-# ---------------------------------------------------- declared anchors, not pitch
+    # ---------------------------------------------------- declared anchors, not pitch
 print("a bar goes to the position the manifest declared, or to none")
 # The slot code used to rebuild its own spacing: global min/max of the detected
 # bars for the pitch, each series' own leftmost bar for the origin. Two silent

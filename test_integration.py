@@ -54,9 +54,23 @@ def emit_blank_template(path):
 
 
 def build_rows():
-    """Read ID 323 Figure 1 and fill the shipped template."""
+    """Read ID 323 Figure 1 and fill the shipped template.
+
+    ID 323 FIGURE 1 IS A PUBLISHER FIGURE and this repository is public, so the
+    raster is not carried here. Everything downstream of this function is about
+    the TEMPLATE, not about that figure, so when the raster is absent the whole
+    file skips rather than testing the template against rows it could not build.
+    """
+    import raster_root as RR
+    img = RR.check("fixtures/id323_fig1.jpeg")[0]
+    if not img:
+        print(RR.skip_note("fixtures/id323_fig1.jpeg"))
+        # THE CHECKS THAT ALREADY RAN STILL COUNT. Printing 0 here would report
+        # that nothing was tested, when the template scenarios above this line
+        # were - and the CI loop takes this number as the file's whole answer.
+        print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
+        raise SystemExit(0 if not FAILURES else 1)
     cfg = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_panels.json")))
-    img = os.path.join(HERE, "fixtures/id323_fig1.jpeg")
     sha = hashlib.sha256(open(img, "rb").read()).hexdigest()
     masks = colour_masks(Image.open(img).convert("RGB"))
     dark = masks["dark"]

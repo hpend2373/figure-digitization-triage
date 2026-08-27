@@ -10049,6 +10049,64 @@ beside `pdftotext -v`. The alternative was to lower the marker to the measured
 3478 and leave three scenarios running on one machine, which is the shape the
 check exists to refuse.
 
+## The repository said private and GitHub said public
+
+    private    = false
+    visibility = public
+
+while README.md's second paragraph read "Private research repository. It
+contains publisher figure rasters from three publications (323, 386, 397)...
+They are not licensed for redistribution." Both statements were in the tree for
+its whole history, and nothing checked one against the other: a claim in a file
+is not a setting on a server.
+
+The rasters are gone from the tree and from its history, along with every
+rendered overlay that carried one - eleven PNGs, including the four verification
+figures added the round before this one. `png/E1_provenance_matrix.png` stays: it
+is a table.
+
+### What replaces them
+
+`raster_root.py` pins each file by SHA-256 and answers three ways:
+
+    ABSENT   SKIP, exit 0, naming the file. A run that cannot see the figure has
+             nothing to say about it, and a SILENT skip is the dishonest answer -
+             which is why every skip prints and every count moves.
+    WRONG    a raster that IS present and hashes differently is REFUSED. This is
+             the case the old check could not reach at all, and it is the one
+             that returns a plausible number for the wrong picture.
+    PRESENT  everything runs exactly as before.
+
+CI fetches them from a private source when `FDT_RASTER_SOURCE` and
+`FDT_RASTER_TOKEN` are set, so the documented counts are the counts of a tree
+that can see the figures. Without the secrets the suites still pass and run 3242
+core scenarios instead of 3440 - the absence is in the number, not hidden by it.
+
+### Two guards this moved, and one it strengthened
+
+`pilot_397.py` checked its rasters BEFORE the attestation gate, so an incomplete
+attestation exited 0 as a SKIP instead of 2 as a BLOCK. Who vouches for a run is
+not a question about which files exist, and the order is now attestation first.
+`test_reproducibility` caught it, because that guard has a scenario behind it.
+
+That same scenario used to assert `exit 2 + "BLOCKED"` on a missing raster, with
+the argument that "a suite that never opened a figure reports the same green as
+one that read every cell correctly". The argument survives; the mechanism could
+not, because absent is now the normal state. It is replaced by two halves - the
+skip must NAME the raster, and a decoy raster with the wrong bytes must make the
+forward test FAIL - and the second half is a check the old one never had.
+
+An explicit path argument is now an instruction rather than a hint: a caller who
+names a file and is handed a different one has been answered about the wrong
+figure.
+
+### What is still owed
+
+The private raster source is wired but not created: `FDT_RASTER_SOURCE` and
+`FDT_RASTER_TOKEN` are unset, so CI currently runs the reduced count. Until they
+exist, `test_compile_plan`'s 197 scenarios and the pilot's attestation run are
+skipped in CI, and that is the whole plan-compile end-to-end path.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

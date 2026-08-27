@@ -17,6 +17,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # THE PUBLISHER RASTERS ARE NOT IN THIS REPOSITORY. It is public and they
+      # are not redistributable. When `FDT_RASTER_SOURCE` names a private
+      # repository and `FDT_RASTER_TOKEN` can read it, the figures are fetched
+      # into a directory outside the tree and `FDT_RASTER_ROOT` points there, so
+      # the suites and the worked examples run at full coverage. Without the
+      # secret every raster-dependent section SKIPS and says so, and the
+      # scenario counts fall - which is why the count check is the thing that
+      # notices, rather than a green run that read nothing.
+      - name: fetch the publisher rasters, if this runner is allowed to
+        env:
+          FDT_RASTER_SOURCE: ${{ secrets.FDT_RASTER_SOURCE }}
+          FDT_RASTER_TOKEN: ${{ secrets.FDT_RASTER_TOKEN }}
+        run: |
+          if [ -z "$FDT_RASTER_SOURCE" ] || [ -z "$FDT_RASTER_TOKEN" ]; then
+            echo "no raster source configured; raster-dependent sections will SKIP"
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:$FDT_RASTER_TOKEN@github.com/$FDT_RASTER_SOURCE" \
+            "$RUNNER_TEMP/rasters"
+          echo "FDT_RASTER_ROOT=$RUNNER_TEMP/rasters" >> "$GITHUB_ENV"
+          echo "rasters fetched from $FDT_RASTER_SOURCE"
       - name: install the pinned environment
         run: python -m pip install -r requirements-lock.txt
       # AND TAKE AWAY WHAT THE IMAGE HAPPENED TO SHIP. `test_corpus_intake`
@@ -78,7 +100,15 @@ jobs:
               echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
               exit 1
             fi
-            printf '%s.py\t%s\n' "$t" "$markers" >> scenario-counts.tsv
+            # A SUITE THAT SKIPS ITS WHOLE FILE reports 0, and a zero is
+            # refused downstream unless the suite said why. `FDT_RASTER_ABSENT`
+            # is `raster_root.ABSENT_TOKEN`; `test_reproducibility` asserts this
+            # string and that one are the same.
+            skipped=""
+            if printf '%s\n' "$out" | grep -q 'FDT_RASTER_ABSENT'; then
+              skipped="RASTER_SKIPPED"
+            fi
+            printf '%s.py\t%s\t%s\n' "$t" "$markers" "$skipped" >> scenario-counts.tsv
           done
 
       # The number in README is a claim about this package, and it followed the
@@ -86,7 +116,12 @@ jobs:
       # tree ran 2282. A status line nobody can trust is worse than none.
       - name: the documented status is the measured status
         run: |
-          python verify_documented_status.py --profile core \
+          # THE FIGURES ARE PART OF THE ENVIRONMENT, like poppler. The fetch
+          # step above sets FDT_RASTER_ROOT when, and only when, this runner
+          # was given the secret; declaring it here is what makes a fetch that
+          # silently did nothing red instead of green at a fork's total.
+          if [ -n "${FDT_RASTER_ROOT:-}" ]; then R=present; else R=absent; fi
+          python verify_documented_status.py --profile core --rasters "$R" \
             scenario-counts.tsv README.md run_batch.py
       - name: forward tests and worked examples
         run: |
@@ -150,6 +185,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # THE PUBLISHER RASTERS ARE NOT IN THIS REPOSITORY. It is public and they
+      # are not redistributable. When `FDT_RASTER_SOURCE` names a private
+      # repository and `FDT_RASTER_TOKEN` can read it, the figures are fetched
+      # into a directory outside the tree and `FDT_RASTER_ROOT` points there, so
+      # the suites and the worked examples run at full coverage. Without the
+      # secret every raster-dependent section SKIPS and says so, and the
+      # scenario counts fall - which is why the count check is the thing that
+      # notices, rather than a green run that read nothing.
+      - name: fetch the publisher rasters, if this runner is allowed to
+        env:
+          FDT_RASTER_SOURCE: ${{ secrets.FDT_RASTER_SOURCE }}
+          FDT_RASTER_TOKEN: ${{ secrets.FDT_RASTER_TOKEN }}
+        run: |
+          if [ -z "$FDT_RASTER_SOURCE" ] || [ -z "$FDT_RASTER_TOKEN" ]; then
+            echo "no raster source configured; raster-dependent sections will SKIP"
+            exit 0
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:$FDT_RASTER_TOKEN@github.com/$FDT_RASTER_SOURCE" \
+            "$RUNNER_TEMP/rasters"
+          echo "FDT_RASTER_ROOT=$RUNNER_TEMP/rasters" >> "$GITHUB_ENV"
+          echo "rasters fetched from $FDT_RASTER_SOURCE"
       - name: install the pinned environment and the intake backends
         run: |
           sudo apt-get update -qq
@@ -193,7 +250,15 @@ jobs:
               echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
               exit 1
             fi
-            printf '%s.py\t%s\n' "$t" "$markers" >> scenario-counts.tsv
+            # A SUITE THAT SKIPS ITS WHOLE FILE reports 0, and a zero is
+            # refused downstream unless the suite said why. `FDT_RASTER_ABSENT`
+            # is `raster_root.ABSENT_TOKEN`; `test_reproducibility` asserts this
+            # string and that one are the same.
+            skipped=""
+            if printf '%s\n' "$out" | grep -q 'FDT_RASTER_ABSENT'; then
+              skipped="RASTER_SKIPPED"
+            fi
+            printf '%s.py\t%s\t%s\n' "$t" "$markers" "$skipped" >> scenario-counts.tsv
           done
 
       # And the intake suite specifically, so a regression that removes the PDF
@@ -213,5 +278,10 @@ jobs:
 
       - name: the documented status is the measured status
         run: |
-          python verify_documented_status.py --profile full \
+          # THE FIGURES ARE PART OF THE ENVIRONMENT, like poppler. The fetch
+          # step above sets FDT_RASTER_ROOT when, and only when, this runner
+          # was given the secret; declaring it here is what makes a fetch that
+          # silently did nothing red instead of green at a fork's total.
+          if [ -n "${FDT_RASTER_ROOT:-}" ]; then R=present; else R=absent; fi
+          python verify_documented_status.py --profile full --rasters "$R" \
             scenario-counts.tsv README.md run_batch.py

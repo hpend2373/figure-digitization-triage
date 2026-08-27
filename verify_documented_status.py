@@ -1,7 +1,7 @@
 """The documented status is the measured status, or CI is red.
 
     python3 verify_documented_status.py --profile {core|full} \
-        COUNTS.tsv README.md run_batch.py
+        --rasters {absent|present} COUNTS.tsv README.md run_batch.py
 
 Every commit that adds a scenario moves the suite total, and the number in
 `README.md` followed by hand. It was wrong: the tree ran 2282 scenarios while
@@ -56,6 +56,34 @@ So the environment is an ARGUMENT, and each profile has its own marker:
     --profile core   <!-- CURRENT_SCENARIO_COUNT_CORE: N -->   lock file only
     --profile full   <!-- CURRENT_SCENARIO_COUNT_FULL: N -->   + intake backends
 
+## And the publisher figures are the second environment argument
+
+The rasters are not in this repository and cannot be: they are publisher
+figures. Four suites SKIP whole sections without them, so the total moves again
+- and this time it moves between two runs of the SAME profile, because a fork
+has no `FDT_RASTER_SOURCE` secret and this repository's own CI does.
+
+Two markers per profile would be four numbers for one tree. Instead the markers
+stay what a FRESH PUBLIC CLONE runs - the state a reader is in - and one more
+marker says how much of the suite that reader cannot run:
+
+    <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: N -->
+
+    --rasters absent    expected = the profile marker            (a clone, a fork)
+    --rasters present   expected = the profile marker + N        (CI with the secret)
+
+The third number is worth printing on its own account: it is the size of the
+part of this suite that nobody without the figures can check.
+
+A suite whose WHOLE file is raster-gated reports 0, and "a suite that reports 0
+passes" is refused above for a good reason: the usual cause is a suite that fell
+out of the loop. The two are told apart by MEASUREMENT, not by a list kept here:
+the CI loop looks for `raster_root.ABSENT_TOKEN` in the suite's own output and
+appends a third column saying it skipped. So a zero is allowed only from a suite
+that said, in that run, which figure it could not see - and a suite that says so
+in a run declaring `--rasters present` is a fetch that half-worked, which is
+refused too.
+
 CI runs both, in two jobs that install what their profile names rather than
 inheriting it. `core` REMOVES poppler-utils and the two Python backends before
 it starts: a count that depends on what the runner image happens to ship is not
@@ -94,23 +122,42 @@ STATUS_LINE = {
     "full": re.compile(r"([0-9]{3,6})\s+with\s+the\s+intake\s+backends"),
 }
 
+RASTER_MARKER = re.compile(
+    r"<!--\s*CURRENT_SCENARIO_COUNT_RASTER_ONLY:\s*([0-9]+)\s*-->")
+#: The same sentence rule as the totals: the marker cannot move on its own.
+RASTER_LINE = re.compile(r"([0-9]{1,6})\s+of\s+them\s+need\s+the\s+"
+                         r"publisher\s+figures")
+
+RASTERS = ("absent", "present")
+
+
+#: The third column the CI loop writes for a suite that printed
+#: `raster_root.ABSENT_TOKEN`. Spelled here and in the workflow, and
+#: `test_reproducibility` asserts the two are the same string.
+SKIPPED = "RASTER_SKIPPED"
+
 
 def read_counts(path):
-    """{suite: count} from the TSV the CI loop appended to."""
-    out = {}
+    """({suite: count}, {suites that skipped for want of a raster})."""
+    out, skipped = {}, set()
     with open(path, encoding="utf-8") as fh:
         for number, line in enumerate(fh, 1):
             line = line.rstrip("\n")
             if not line.strip():
                 continue
             parts = line.split("\t")
-            if len(parts) != 2 or not parts[1].isdigit():
-                raise SystemExit("%s:%d is not SUITE<TAB>COUNT: %r"
-                                 % (path, number, line))
+            if len(parts) not in (2, 3) or not parts[1].isdigit():
+                raise SystemExit("%s:%d is not SUITE<TAB>COUNT[<TAB>%s]: %r"
+                                 % (path, number, SKIPPED, line))
+            if len(parts) == 3 and parts[2] not in ("", SKIPPED):
+                raise SystemExit("%s:%d has a third column that is neither "
+                                 "empty nor %r: %r" % (path, number, SKIPPED, line))
             if parts[0] in out:
                 raise SystemExit("%s:%d reports %s twice" % (path, number, parts[0]))
             out[parts[0]] = int(parts[1])
-    return out
+            if len(parts) == 3 and parts[2] == SKIPPED:
+                skipped.add(parts[0])
+    return out, skipped
 
 
 def pipeline_version(path):
@@ -129,7 +176,8 @@ def pipeline_version(path):
     raise SystemExit("%s: no PIPELINE_VERSION assignment at module level" % path)
 
 
-def problems_with(counts, readme, version, package_dir, profile):
+def problems_with(counts, readme, version, package_dir, profile,
+                  rasters="absent", skipped=()):
     """Everything wrong, as sentences. Empty means the documentation is true."""
     out = []
     total = sum(counts.values())
@@ -146,22 +194,59 @@ def problems_with(counts, readme, version, package_dir, profile):
     if extra:
         out.append("the counts file names %d file(s) that are not in the "
                    "package: %s" % (len(extra), ", ".join(extra)))
-    zero = sorted(s for s, n in counts.items() if n == 0)
+    skipped = set(skipped)
+    # A ZERO IS ALLOWED ONLY FROM A SUITE THAT SAID WHY. `test_compile_plan` is
+    # raster-gated end to end: every one of its scenarios compiles the shipped
+    # plan, and without the five figures there is nothing to compile. It reports
+    # 0 and names the file it could not open.
+    zero = sorted(s for s, n in counts.items() if n == 0 and s not in skipped)
     if zero:
-        out.append("%s reported 0 scenarios. A suite that runs nothing passes; "
-                   "that is what this catches" % ", ".join(zero))
+        out.append("%s reported 0 scenarios and did not say a publisher figure "
+                   "was missing. A suite that runs nothing passes; that is what "
+                   "this catches" % ", ".join(zero))
+    if rasters == "present" and skipped:
+        # THE FETCH THAT HALF-WORKED. The clone step succeeded, the root is set,
+        # and one file is not under it - so those sections SKIP and the total is
+        # short by exactly the amount nobody would notice.
+        out.append("%s could not find a publisher figure in a run that declares "
+                   "them present. The root is set and something is not under it"
+                   % ", ".join(sorted(skipped)))
+
+    raster_hits = RASTER_MARKER.findall(readme)
+    if len(raster_hits) != 1:
+        out.append("README carries %d CURRENT_SCENARIO_COUNT_RASTER_ONLY "
+                   "marker(s); it needs exactly one" % len(raster_hits))
+        raster_only = None
+    else:
+        raster_only = int(raster_hits[0])
+        raster_said = RASTER_LINE.findall(readme)
+        if len(raster_said) != 1:
+            out.append("README carries %d sentence(s) saying how many scenarios "
+                       "need the publisher figures; it needs exactly one"
+                       % len(raster_said))
+        elif int(raster_said[0]) != raster_only:
+            out.append("the sentence reads %s scenarios needing the publisher "
+                       "figures and the marker says %d"
+                       % (raster_said[0], raster_only))
 
     hits = count_marker(profile).findall(readme)
+    # THE MARKER IS WHAT A CLONE RUNS. This run may be a run that can see the
+    # figures, and then it runs the marker's scenarios AND the raster-only ones.
+    expected = None
+    if len(hits) == 1 and raster_only is not None:
+        expected = int(hits[0]) + (raster_only if rasters == "present" else 0)
     if len(hits) != 1:
         out.append("README carries %d CURRENT_SCENARIO_COUNT_%s marker(s); it "
                    "needs exactly one" % (len(hits), profile.upper()))
-    elif int(hits[0]) != total:
+    elif expected is not None and expected != total:
         # WHICH DIRECTION it missed by is the diagnosis, and the wrong one
         # sends the next person to edit the marker.
-        out.append("README says CURRENT_SCENARIO_COUNT_%s: %s and the %s suites "
+        out.append("README says CURRENT_SCENARIO_COUNT_%s: %s, the publisher "
+                   "figures are %s so %d were expected, and the %s suites "
                    "reported %d. %s"
-                   % (profile.upper(), hits[0], profile, total,
-                      "A suite has lost scenarios" if total < int(hits[0]) else
+                   % (profile.upper(), hits[0], rasters, expected, profile,
+                      total,
+                      "A suite has lost scenarios" if total < expected else
                       "A suite has gained scenarios, or this environment runs "
                       "more than the %s profile installs" % profile))
 
@@ -180,11 +265,15 @@ def problems_with(counts, readme, version, package_dir, profile):
     else:
         said = sentences[0]
         said_count = said[0] if isinstance(said, tuple) else said
-        if int(said_count) != total:
-            out.append("the %s status sentence reads %s scenarios and the tree "
-                       "is %d. Updating the marker and leaving the prose behind "
+        said_total = (int(said_count)
+                      + (raster_only if rasters == "present" and raster_only
+                         else 0))
+        if said_total != total:
+            out.append("the %s status sentence reads %s scenarios (%d with "
+                       "the publisher figures, which are %s) and the tree is "
+                       "%d. Updating the marker and leaving the prose behind "
                        "is the same defect one level down"
-                       % (profile, said_count, total))
+                       % (profile, said_count, said_total, rasters, total))
         if isinstance(said, tuple) and said[1] != version:
             out.append("the %s status sentence reads v%s and the runner says %s"
                        % (profile, said[1], version))
@@ -194,37 +283,51 @@ def problems_with(counts, readme, version, package_dir, profile):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     profile = "core"
-    if argv[:1] == ["--profile"] and len(argv) > 1:
-        profile, argv = argv[1], argv[2:]
-    if profile not in PROFILES or len(argv) != 3:
+    rasters = "absent"
+    while len(argv) > 1 and argv[0] in ("--profile", "--rasters"):
+        if argv[0] == "--profile":
+            profile, argv = argv[1], argv[2:]
+        else:
+            rasters, argv = argv[1], argv[2:]
+    if profile not in PROFILES or rasters not in RASTERS or len(argv) != 3:
         print("usage: verify_documented_status.py [--profile core|full] "
-              "COUNTS.tsv README.md run_batch.py")
+              "[--rasters absent|present] COUNTS.tsv README.md run_batch.py")
         return 2
     counts_path, readme_path, source_path = argv
     package_dir = os.path.dirname(os.path.abspath(readme_path)) or "."
 
-    counts = read_counts(counts_path)
+    counts, skipped = read_counts(counts_path)
     readme = open(readme_path, encoding="utf-8").read()
     version = pipeline_version(source_path)
     total = sum(counts.values())
-    problems = problems_with(counts, readme, version, package_dir, profile)
+    problems = problems_with(counts, readme, version, package_dir, profile,
+                             rasters=rasters, skipped=skipped)
 
     if problems:
-        print("DOCUMENTED STATUS DOES NOT MATCH THE TREE (profile: %s)" % profile)
+        print("DOCUMENTED STATUS DOES NOT MATCH THE TREE (profile: %s, "
+              "publisher figures: %s)" % (profile, rasters))
         for problem in problems:
             print("  - %s" % problem)
         print()
         print("what README should carry for this profile:")
         print("    <!-- CURRENT_PIPELINE_VERSION: %s -->" % version)
-        print("    <!-- CURRENT_SCENARIO_COUNT_%s: %d -->" % (profile.upper(), total))
+        # THE MARKER IS THE CLONE'S NUMBER. Printing this run's total when this
+        # run could see the figures would talk the next person into writing the
+        # number a fork cannot reach.
+        raster_hits = RASTER_MARKER.findall(readme)
+        _only = int(raster_hits[0]) if len(raster_hits) == 1 else 0
+        print("    <!-- CURRENT_SCENARIO_COUNT_%s: %d -->"
+              % (profile.upper(),
+                 total - (_only if rasters == "present" else 0)))
         print()
         print("what each suite reported:")
         for suite in sorted(counts):
             print("    %-30s %5d" % (suite, counts[suite]))
         return 1
 
-    print("documented status matches the tree (%s): %d scenarios across %d "
-          "suites, pipeline v%s" % (profile, total, len(counts), version))
+    print("documented status matches the tree (%s, publisher figures %s): %d "
+          "scenarios across %d suites, pipeline v%s"
+          % (profile, rasters, total, len(counts), version))
     return 0
 
 

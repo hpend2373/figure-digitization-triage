@@ -88,9 +88,14 @@ import mark_readers as MR                                        # noqa: E402
 import line_style_mono as LSM                                    # noqa: E402
 
 path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "397_fig1.jpeg")
-if not os.path.exists(path):
-    print("SKIP: %s is not on disk" % path, file=sys.stderr)
+# A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC. Absent is a SKIP; present
+# and not the render these coordinates were measured on is a failure.
+import raster_root as RR                                          # noqa: E402
+path, _note = RR.check("397_fig1.jpeg")
+if not path:
+    print(RR.skip_note("397_fig1.jpeg"))
     raise SystemExit(0)
+print(_note)
 
 #: Measured by hand off the rendering: the gridlines at 120 and 70 mmHg lie on
 #: rows 76 and 296, the category ticks on columns 83 to 476, and the twelve

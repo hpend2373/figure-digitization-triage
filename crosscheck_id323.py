@@ -32,10 +32,15 @@ TOL_DISP_PX = 2.5
 
 
 def load():
+    import raster_root as RR
+    path, note = RR.check("fixtures/id323_fig1.jpeg")
+    if not path:
+        print(RR.skip_note("fixtures/id323_fig1.jpeg"))
+        raise SystemExit(0)
+    print(note)
     cfg = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_panels.json")))
     exp = json.load(open(os.path.join(HERE, "fixtures/id323_fig1_expected.json")))
-    a = np.asarray(Image.open(os.path.join(HERE, "fixtures/id323_fig1.jpeg"))
-                   .convert("RGB")).astype(int)
+    a = np.asarray(Image.open(path).convert("RGB")).astype(int)
     return cfg, exp, a
 
 

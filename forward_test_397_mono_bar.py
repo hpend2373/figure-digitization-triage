@@ -29,9 +29,22 @@ path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
 # incomplete, not that this run has nothing to do. Exiting 0 on a missing input
 # is the worst available answer: a suite that never opened a figure reports the
 # same green as one that read every cell correctly.
-if not os.path.exists(path):
-    print("BLOCKED: publisher raster not found: %s" % path, file=sys.stderr)
-    raise SystemExit(2)
+# THE RASTER IS A PUBLISHER FIGURE AND THIS REPOSITORY IS PUBLIC, so it is not
+# carried here. Absent is a SKIP and not a failure; present-but-different is a
+# failure, because coordinates measured on one render return a plausible number
+# on another. `raster_root.py` holds the pinned hash.
+import raster_root as RR                                          # noqa: E402
+# AN EXPLICIT PATH IS AN INSTRUCTION, not a hint: a caller who names a file and
+# is handed a different one has been answered about the wrong figure.
+_want = sys.argv[1] if len(sys.argv) > 1 else ""
+if _want and not os.path.exists(_want):
+    print(RR.skip_note('397_fig3.jpeg'))
+    raise SystemExit(0)
+path, _note = RR.check('397_fig3.jpeg', extra=os.path.dirname(_want) if _want else "")
+if not path:
+    print(RR.skip_note('397_fig3.jpeg'))
+    raise SystemExit(0)
+print(_note)
 
 SPECS = [MR.SeriesSpec("FLUID", bar_fill="SOLID"),
          MR.SeriesSpec("NON_FLUID", bar_fill="HATCHED")]

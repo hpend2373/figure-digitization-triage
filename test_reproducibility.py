@@ -50,31 +50,65 @@ passed("clean-room import without scipy")
 
 # A script that cannot find its input has two honest answers and one dishonest
 # one. It can say so and stop, or it can be told the input is genuinely optional
-# - but it must not exit 0, because a suite that never opened a figure then
-# reports the same green as one that read every cell correctly. Only
-# `forward_test_real_monochrome.py` got this right; the other two shipped a
-# SKIP, and the pilot's SKIP sat below the code that hashes the rasters, so it
-# could not even reach the exit it was wrong about.
+# - but it must not exit 0 SILENTLY, because a suite that never opened a figure
+# then reports the same green as one that read every cell correctly.
+#
+# THE CONTRACT CHANGED WHEN THE RASTERS LEFT THE REPOSITORY. This tree is public
+# and the publisher figures are not redistributable, so ABSENT is now the normal
+# state and exiting 2 on it would make every run red. What replaces the old
+# check is stronger than it was, and it is two halves:
+#
+#   ABSENT  -> exit 0, and the output must NAME the raster it could not find.
+#              A silent skip is still the dishonest answer.
+#   WRONG   -> a raster that IS present and does not hash to the one the
+#              coordinates were measured on must FAIL. That is the case the old
+#              check could not reach at all, and it is the one that returns a
+#              plausible number for the wrong picture.
+#
+# The absence is visible in the SCENARIO COUNTS as well: `test_bar_reader` runs
+# 121 with the ID 323 raster and 97 without it, and `verify_documented_status`
+# refuses a README that claims either number while the tree runs the other.
 import tempfile                                                     # noqa: E402
 
 ABSENT = os.path.join(HERE, "fixtures", "definitely_missing.png")
 NOWHERE = os.path.join(tempfile.gettempdir(), "fdt_no_rasters_here")
-for label, argv in (
+_env = dict(os.environ)
+_env["FDT_RASTER_ROOT"] = NOWHERE
+for label, argv, raster in (
         ("forward_test_real_monochrome.py",
-         ["forward_test_real_monochrome.py", ABSENT]),
+         ["forward_test_real_monochrome.py", ABSENT],
+         "ID386_Fig2_publisher_898x1662.png"),
         ("forward_test_397_mono_bar.py",
-         ["forward_test_397_mono_bar.py", ABSENT]),
+         ["forward_test_397_mono_bar.py", ABSENT], "397_fig3.jpeg"),
         ("pilot_397.py",
-         ["pilot_397.py", os.path.join(NOWHERE, "out"), NOWHERE])):
+         ["pilot_397.py", os.path.join(NOWHERE, "out"), NOWHERE],
+         "397_fig1.jpeg")):
     argv = [os.path.join(HERE, argv[0])] + argv[1:]
-    missing = subprocess.run([sys.executable] + argv, capture_output=True, text=True)
-    assert missing.returncode == 2, (
-        "%s with a missing raster must be BLOCKED (exit 2), got %d\n%s%s"
-        % (label, missing.returncode, missing.stdout, missing.stderr))
-    assert "BLOCKED" in (missing.stdout + missing.stderr), (
-        "%s exited 2 without saying which raster is missing\n%s%s"
-        % (label, missing.stdout, missing.stderr))
-    passed("missing raster BLOCKS %s" % label)
+    missing = subprocess.run([sys.executable] + argv, capture_output=True,
+                             text=True, env=_env)
+    out = missing.stdout + missing.stderr
+    assert missing.returncode == 0, (
+        "%s with a missing raster must SKIP (exit 0), got %d\n%s"
+        % (label, missing.returncode, out))
+    assert "SKIP" in out and raster in out, (
+        "%s skipped without naming the raster it could not find\n%s"
+        % (label, out))
+    passed("a missing raster SKIPS %s, and says which one" % label)
+
+# AND THE HALF THE OLD CHECK COULD NOT REACH.
+_decoy = tempfile.mkdtemp(prefix="fdt_decoy_")
+with open(os.path.join(_decoy, "397_fig3.jpeg"), "wb") as _fh:
+    _fh.write(b"not the figure these coordinates were measured on")
+_denv = dict(os.environ)
+_denv["FDT_RASTER_ROOT"] = _decoy
+_wrongrun = subprocess.run(
+    [sys.executable, os.path.join(HERE, "forward_test_397_mono_bar.py")],
+    capture_output=True, text=True, env=_denv)
+assert _wrongrun.returncode != 0, (
+    "a raster that is not the one the coordinates were measured on was "
+    "MEASURED instead of refused\n%s%s"
+    % (_wrongrun.stdout, _wrongrun.stderr))
+passed("a raster whose hash does not match is refused, not measured")
 
 
 # --------------------------------------------------------------------------
@@ -116,37 +150,49 @@ for label, partial in (
     assert "partial attestation" in r.stderr, r.stderr
     passed("partial attestation BLOCKS the pilot (%s)" % label)
 
-full = run_pilot(FULL, "fdt_attested")
-assert full.returncode == 0, "a full attestation must run\n%s%s" % (full.stdout, full.stderr)
-assert "[ATTESTED]" in full.stdout, full.stdout
-attested = json.load(open(os.path.join(tempfile.gettempdir(), "fdt_attested",
-                                       "run_stamp.json")))
-assert attested["Run_Mode"] == "ATTESTED", attested
-registry = list(csv.DictReader(open(os.path.join(
-    tempfile.gettempdir(), "fdt_attested", "manifests",
-    "reviewer_registry.csv"), encoding="utf-8")))
-assert registry[0]["Reviewer_Name"] == FULL["FDT_REVIEWER_NAME"], registry
-assert registry[0]["Reviewer_Contact"] == FULL["FDT_REVIEWER_ORCID"], registry
-# The dates were hardcoded to 2026-08-07, which is a false record on every run
-# after the day it was written.
-assert registry[0]["Registration_Date"] == FULL["FDT_REGISTRATION_DATE"], registry
-figures = list(csv.DictReader(open(os.path.join(
-    tempfile.gettempdir(), "fdt_attested", "manifests",
-    "source_figure_manifest.csv"), encoding="utf-8")))
-assert {r["Inspection_Date"] for r in figures} == {FULL["FDT_INSPECTION_DATE"]}, figures
-passed("a full attestation runs as ATTESTED with the given dates")
+# THE PILOT NEEDS ITS FIVE PUBLISHER RASTERS to reach an attestation at all, and
+# this repository does not carry them. The BLOCK scenarios above do not - a
+# partial attestation is refused before any figure is opened, which is the order
+# this round had to fix - so only the sections that actually RUN the pilot are
+# conditional. CI supplies the rasters through FDT_RASTER_ROOT and runs them.
+import raster_root as _RR                                        # noqa: E402
+_pilot_rasters = all(_RR.check("397_fig%d.jpeg" % n)[0] for n in range(1, 6))
+if not _pilot_rasters:
+    print(_RR.skip_note("397_fig1.jpeg"))
+    print("  the pilot's ATTESTED / DEMO_ONLY / approval-gate scenarios need it")
 
-demo = run_pilot({}, "fdt_demo")
-assert demo.returncode == 0, "%s%s" % (demo.stdout, demo.stderr)
-assert "[DEMO_ONLY]" in demo.stdout, demo.stdout
-demo_stamp = json.load(open(os.path.join(tempfile.gettempdir(), "fdt_demo",
+if _pilot_rasters:
+  full = run_pilot(FULL, "fdt_attested")
+  assert full.returncode == 0, "a full attestation must run\n%s%s" % (full.stdout, full.stderr)
+  assert "[ATTESTED]" in full.stdout, full.stdout
+  attested = json.load(open(os.path.join(tempfile.gettempdir(), "fdt_attested",
                                          "run_stamp.json")))
-assert demo_stamp["Run_Mode"] == "DEMO_ONLY", demo_stamp
-assert demo_stamp["Values_Accepted"] == 0, demo_stamp
-demo_dir = os.path.join(tempfile.gettempdir(), "fdt_demo")
-assert not os.path.exists(os.path.join(demo_dir, "figure_values_accepted.csv")), (
-    "a DEMO_ONLY run left an accepted file")
-passed("no attestation runs as DEMO_ONLY with zero accepted")
+  assert attested["Run_Mode"] == "ATTESTED", attested
+  registry = list(csv.DictReader(open(os.path.join(
+      tempfile.gettempdir(), "fdt_attested", "manifests",
+      "reviewer_registry.csv"), encoding="utf-8")))
+  assert registry[0]["Reviewer_Name"] == FULL["FDT_REVIEWER_NAME"], registry
+  assert registry[0]["Reviewer_Contact"] == FULL["FDT_REVIEWER_ORCID"], registry
+  # The dates were hardcoded to 2026-08-07, which is a false record on every run
+  # after the day it was written.
+  assert registry[0]["Registration_Date"] == FULL["FDT_REGISTRATION_DATE"], registry
+  figures = list(csv.DictReader(open(os.path.join(
+      tempfile.gettempdir(), "fdt_attested", "manifests",
+      "source_figure_manifest.csv"), encoding="utf-8")))
+  assert {r["Inspection_Date"] for r in figures} == {FULL["FDT_INSPECTION_DATE"]}, figures
+  passed("a full attestation runs as ATTESTED with the given dates")
+
+  demo = run_pilot({}, "fdt_demo")
+  assert demo.returncode == 0, "%s%s" % (demo.stdout, demo.stderr)
+  assert "[DEMO_ONLY]" in demo.stdout, demo.stdout
+  demo_stamp = json.load(open(os.path.join(tempfile.gettempdir(), "fdt_demo",
+                                           "run_stamp.json")))
+  assert demo_stamp["Run_Mode"] == "DEMO_ONLY", demo_stamp
+  assert demo_stamp["Values_Accepted"] == 0, demo_stamp
+  demo_dir = os.path.join(tempfile.gettempdir(), "fdt_demo")
+  assert not os.path.exists(os.path.join(demo_dir, "figure_values_accepted.csv")), (
+      "a DEMO_ONLY run left an accepted file")
+  passed("no attestation runs as DEMO_ONLY with zero accepted")
 
 # --------------------------------------------------------------------------
 # the approval gate, end to end
@@ -364,6 +410,25 @@ unrun = sorted(s for s in pilots if s not in ci_text)
 assert not unrun, "CI does not run the worked examples: %s" % unrun
 passed("CI runs every worked example in the package (%d)" % len(pilots))
 
+# THE TWO STRINGS THE CI LOOP AND THE GUARD HAVE TO AGREE ON. A suite whose
+# whole file is raster-gated reports 0, and a 0 is refused unless that run says
+# the suite named a missing figure. The saying is a token printed by
+# `raster_root.skip_note` and grepped by the workflow; the recording is a column
+# value the workflow writes and `verify_documented_status` reads. Neither can be
+# checked by running the guard - both live in a YAML file - so they are checked
+# by comparing the literals with the constants they are copies of. Change either
+# constant without the workflow and every raster-gated zero becomes a red CI run
+# whose message is about a suite falling out of the loop.
+import raster_root as _RRT                                          # noqa: E402
+import verify_documented_status as _VDS                             # noqa: E402
+assert _RRT.ABSENT_TOKEN in ci_text, (
+    "the workflow does not look for raster_root.ABSENT_TOKEN (%s), so a suite "
+    "that skips its whole file reports a bare 0" % _RRT.ABSENT_TOKEN)
+assert _VDS.SKIPPED in ci_text, (
+    "the workflow does not write %s, which is the column "
+    "verify_documented_status reads" % _VDS.SKIPPED)
+passed("the workflow, the skip note and the guard spell the same two tokens")
+
 # No scenario may be written so that it cannot fail. Two were: a caption check
 # ending `... or True`, which passed whatever the picture contained, and an
 # `all(... or True ...)` inside a figure-isolation check. Both looked like
@@ -453,7 +518,11 @@ import re                                                          # noqa: E402
 
 _readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
 _current = set(re.findall(r"<!-- CURRENT_SCENARIO_COUNT_\w+: (\d+) -->", _readme))
-assert len(_current) == 2, "README should carry two profile totals: %s" % _current
+# THREE: the two profile totals a clone runs, and the raster-only count that
+# separates a fork from CI. They are exempt from the sweep below because they
+# are the current status and are measured every run; a fourth marker appearing
+# here means a number was added that nothing measures.
+assert len(_current) == 3, "README should carry three count markers: %s" % _current
 _FOUR = re.compile(r"(?<![.\d])(\d{4})(?![.\d])")
 _VERSION = re.compile(r"\bv\d+\.\d+\b")
 _stale = []
@@ -490,11 +559,21 @@ _usage = V_DOC.__doc__ or ""
 # top says - a guard that cannot fail, which the first draft of this check was.
 _call = _usage.split("python3 verify_documented_status.py", 1)
 assert len(_call) == 2, "the docstring shows no invocation"
-assert "--profile" in _call[1][:80], (
+assert "--profile" in _call[1][:120], (
     "the invocation the docstring shows does not pass --profile: %r"
-    % _call[1][:80].strip())
+    % _call[1][:120].strip())
+# AND THE SECOND ENVIRONMENT ARGUMENT, for the same reason the first is here.
+# `--rasters` decides which of two totals this run is judged against, so an
+# invocation line that omits it teaches the reader the wrong command.
+assert "--rasters" in _call[1][:120], (
+    "the invocation the docstring shows does not pass --rasters: %r"
+    % _call[1][:120].strip())
 _named = set(re.findall(r"CURRENT_SCENARIO_COUNT_?\w*", _usage))
+# The markers the code actually reads, read OFF the code: the per-profile ones
+# it builds by name and the raster-only one it holds as a pattern.
 _real = {"CURRENT_SCENARIO_COUNT_%s" % p.upper() for p in V_DOC.PROFILES}
+_real |= set(re.findall(r"CURRENT_SCENARIO_COUNT_?\w*",
+                        V_DOC.RASTER_MARKER.pattern))
 _ghosts = sorted(n for n in _named if n not in _real)
 assert not _ghosts, ("the docstring names markers the code does not read: %s"
                      % ", ".join(_ghosts))

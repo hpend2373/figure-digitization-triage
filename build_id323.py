@@ -41,8 +41,13 @@ FIGS=[dict(fid="323|FIG1", img="fixtures/id323_fig1.jpeg", page=4, num="FIGURE 1
             ("SV",(1090,1950,1120,1569),[0,-10,-20,-30,-40],"Change of stroke volume","%")])]
 figs=[];grids=[];units=[];vals=[];rep=[]
 for F in FIGS:
-    sha=hashlib.sha256(open(F["img"],'rb').read()).hexdigest()
-    im=Image.open(F["img"]).convert('RGB'); masks=colour_masks(im); dark=masks["dark"]
+    # A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC. Absent is a SKIP.
+    import raster_root as RR
+    _p, _n = RR.check(F["img"])
+    if not _p:
+        print(RR.skip_note(F["img"])); raise SystemExit(0)
+    sha=hashlib.sha256(open(_p,'rb').read()).hexdigest()
+    im=Image.open(_p).convert('RGB'); masks=colour_masks(im); dark=masks["dark"]
     tar=f"id323_fig{F['page']-3}.tar"; wpd_axes=[]; wpd_sets=[]
     figs.append(dict(Figure_ID=F["fid"], Publication_ID=323,
       Source_File="323_10.3389_fphys.2020.00455.pdf", Source_Page=F["page"], Source_Image=F["img"],
@@ -129,7 +134,11 @@ for F in FIGS:
               Verification_Status="RECONCILED" if m2 is not None else "",
               Reconciliation_Note=("Two raster readers reconciled to their midpoint"
                                    if m2 is not None else "")))
-    write_project(tar, F["img"], wpd_axes, wpd_sets)
+    # THE RESOLVED PATH, not the plan's relative one. The project embeds the
+    # raster's BASENAME either way, so the tar is byte-identical - but a
+    # relative path only opens when the figure is beside the code, and the
+    # whole point of `raster_root` is that it need not be.
+    write_project(tar, _p, wpd_axes, wpd_sets)
 
 def fr(rows,cols): return pd.DataFrame([{c:d.get(c,"") for c in cols} for d in rows],columns=cols)
 Fd,Gd,Ud,Vd=(fr(figs,G.fig_figure_columns()),fr(grids,G.fig_grid_columns()),

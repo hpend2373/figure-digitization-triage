@@ -74,9 +74,18 @@ def measure_panel(spec):
 
 
 def builtin_specs():
-    """Every real or synthetic monochrome bar panel the package ships."""
-    specs = [
-        dict(tag="397_fig3_P3_MEN", path=os.path.join(HERE, "397_fig3.jpeg"),
+    """Every real or synthetic monochrome bar panel the package can see.
+
+    THE 397 PANELS ARE A PUBLISHER FIGURE and this repository is public, so the
+    raster is not carried here: they are included when `raster_root` resolves it
+    and left out when it does not, the same way the synthetic fixture below is
+    included only when its truth file is present. A spec pointing at a file that
+    is not there is not a spec, it is a crash two hundred lines later.
+    """
+    import raster_root as RR
+    _f3 = RR.check("397_fig3.jpeg")[0]
+    specs = [] if not _f3 else [
+        dict(tag="397_fig3_P3_MEN", path=_f3,
              box=[118, 480, 90, 470], ticks=[[150.0, 101.0], [50.0, 465.0]],
              anchors={"PRE": 187, "POST": 390}, fills=["SOLID", "HATCHED"],
              group_window=75, baseline=50.0, identity_domain_id="397_fig3"),
@@ -86,7 +95,7 @@ def builtin_specs():
         # cells, which is why the production reader takes geometry per panel -
         # and why measuring only the first panel here would have left the
         # prototype's version of that mistake undetected.
-        dict(tag="397_fig3_P3_WOMEN", path=os.path.join(HERE, "397_fig3.jpeg"),
+        dict(tag="397_fig3_P3_WOMEN", path=_f3,
              box=[620, 1010, 88, 466], ticks=[[150.0, 95.0], [50.0, 460.0]],
              anchors={"PRE": 720, "POST": 920}, fills=["SOLID", "HATCHED"],
              group_window=75, baseline=50.0, identity_domain_id="397_fig3"),

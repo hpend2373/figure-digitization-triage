@@ -25,9 +25,19 @@ CANDIDATES = (os.path.join(HERE, "ID386_Fig2_publisher_898x1662.png"),
               "/Users/minyeop/Downloads/ID386_Fig2_publisher_898x1662.png")
 path = sys.argv[1] if len(sys.argv) > 1 else next(
     (p for p in CANDIDATES if os.path.exists(p)), CANDIDATES[0])
-if not os.path.exists(path):
-    print("BLOCKED: publisher raster not found: %s" % path, file=sys.stderr)
-    raise SystemExit(2)
+# A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC.
+import raster_root as RR                                          # noqa: E402
+# AN EXPLICIT PATH IS AN INSTRUCTION, not a hint: a caller who names a file and
+# is handed a different one has been answered about the wrong figure.
+_want = sys.argv[1] if len(sys.argv) > 1 else ""
+if _want and not os.path.exists(_want):
+    print(RR.skip_note('ID386_Fig2_publisher_898x1662.png'))
+    raise SystemExit(0)
+path, _note = RR.check('ID386_Fig2_publisher_898x1662.png', extra=os.path.dirname(_want) if _want else "")
+if not path:
+    print(RR.skip_note("ID386_Fig2_publisher_898x1662.png"))
+    raise SystemExit(0)
+print(_note)
 
 image = Image.open(path).convert("RGB")
 x_positions = dict(zip(

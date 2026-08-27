@@ -41,7 +41,7 @@ VERSION = "9.9"
 
 
 def package(counts=None, readme=None, version=VERSION, suites=None,
-            directory=None):
+            directory=None, skipped=None):
     """A miniature package: some suites, a README, a runner, a counts file."""
     directory = directory or tempfile.mkdtemp(prefix="pkg_", dir=ROOT)
     for name in (suites if suites is not None else SUITES):
@@ -51,27 +51,35 @@ def package(counts=None, readme=None, version=VERSION, suites=None,
         '# PIPELINE_VERSION = "0.2" in a comment must not count either\n'
         'PIPELINE_VERSION = "%s"\n' % version)
     counts = SUITES if counts is None else counts
+    skipped = set(skipped or ())
     with open(os.path.join(directory, "counts.tsv"), "w", encoding="utf-8") as fh:
         for suite, number in counts.items():
-            fh.write("%s\t%s\n" % (suite, number))
+            fh.write("%s\t%s\t%s\n"
+                     % (suite, number, V.SKIPPED if suite in skipped else ""))
     total = sum(int(v) for v in counts.values() if str(v).isdigit())
     open(os.path.join(directory, "README.md"), "w", encoding="utf-8").write(
         readme if readme is not None else default_readme(total, total + 38, version))
     return directory
 
 
-def default_readme(core, full, version=VERSION):
+#: The scenarios a fixture package can only run where the publisher figures are.
+RASTER_ONLY = 7
+
+
+def default_readme(core, full, version=VERSION, raster_only=RASTER_ONLY):
     return ("# pkg\n\n"
             "<!-- CURRENT_PIPELINE_VERSION: %s -->\n"
             "<!-- CURRENT_SCENARIO_COUNT_CORE: %d -->\n"
-            "<!-- CURRENT_SCENARIO_COUNT_FULL: %d -->\n\n"
+            "<!-- CURRENT_SCENARIO_COUNT_FULL: %d -->\n"
+            "<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: %d -->\n\n"
             "%d scenarios on main after v%s under `requirements-lock.txt`, and "
-            "%d with the intake backends.\n" % (version, core, full, core,
-                                                version, full))
+            "%d with the intake backends. A further %d of them need the "
+            "publisher figures.\n" % (version, core, full, raster_only, core,
+                                      version, full, raster_only))
 
 
-def run(directory, profile="core"):
-    return V.main(["--profile", profile,
+def run(directory, profile="core", rasters="absent"):
+    return V.main(["--profile", profile, "--rasters", rasters,
                    os.path.join(directory, "counts.tsv"),
                    os.path.join(directory, "README.md"),
                    os.path.join(directory, "run_batch.py")])
@@ -80,8 +88,9 @@ def run(directory, profile="core"):
 def refuses(name, **kw):
     """The guard must return non-zero for this package."""
     profile = kw.pop("profile", "core")
+    rasters = kw.pop("rasters", "absent")
     directory = package(**kw)
-    check(name, run(directory, profile) == 1)
+    check(name, run(directory, profile, rasters) == 1)
 
 
 print("a tree that agrees with itself passes, in both profiles")
@@ -100,6 +109,71 @@ check("and the full environment is NOT judged against the core marker",
       run(_full, "core") == 1)
 check("nor the core environment against the full one",
       run(_core, "full") == 1)
+
+print()
+print("and the publisher figures are the second environment argument")
+# THE MARKER IS WHAT A CLONE RUNS, so a run that can see the figures runs the
+# marker's scenarios AND the raster-only ones. Before this, CI with the secret
+# and CI without it could not both be green against one README, and the repair
+# on offer was to write down the number a fork cannot reach.
+_with = package(counts={"test_alpha.py": 100 + RASTER_ONLY, "test_beta.py": 44},
+                readme=_README)
+check("a run that fetched the figures is judged against marker + raster-only",
+      run(_with, "core", "present") == 0)
+check("  and the same tree without them is judged against the marker alone",
+      run(_core, "core", "absent") == 0)
+# THE FETCH THAT SILENTLY DID NOTHING. The workflow says `--rasters present`
+# because a secret was configured; if the clone step then failed open, every
+# raster section SKIPs and the total is the clone's. That is the case this
+# argument exists to catch, and it is invisible to a check that only sums.
+check("a run that declares the figures and ran none of their scenarios is refused",
+      run(_core, "core", "present") == 1)
+check("  and one that ran them without declaring them is refused too",
+      run(_with, "core", "absent") == 1)
+refuses("a README with no raster-only marker",
+        readme=default_readme(144, 182).replace(
+            "<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: %d -->\n" % RASTER_ONLY, ""))
+refuses("the raster-only prose left behind when its marker moved",
+        readme=default_readme(144, 182).replace(
+            "A further %d of them" % RASTER_ONLY, "A further 999 of them"))
+check("an unknown --rasters value is refused rather than treated as absent",
+      V.main(["--profile", "core", "--rasters", "maybe",
+              os.path.join(_core, "counts.tsv"),
+              os.path.join(_core, "README.md"),
+              os.path.join(_core, "run_batch.py")]) == 2)
+
+print()
+print("a suite may report zero, but only by saying which figure it could not see")
+# `test_compile_plan` is raster-gated end to end: every scenario in it compiles
+# the shipped plan against five publisher figures. Without them it reports 0 -
+# and "a suite that reports 0 passes" is refused, correctly, because the usual
+# cause is a suite that fell out of the loop. The two are told apart by what the
+# suite SAID, recorded by the CI loop, not by a list of exceptions.
+_gated = default_readme(100, 138)
+_zero_said = package(counts={"test_alpha.py": 100, "test_beta.py": 0},
+                     readme=_gated, skipped={"test_beta.py"})
+_zero_silent = package(counts={"test_alpha.py": 100, "test_beta.py": 0},
+                       readme=_gated)
+check("a zero from a suite that named the missing figure is accepted",
+      run(_zero_said, "core", "absent") == 0)
+check("  and a zero from a suite that said nothing is still refused",
+      run(_zero_silent, "core", "absent") == 1)
+# THE FETCH THAT HALF-WORKED: the secret is set, the clone succeeded, and one
+# file is not under the root. Every section that needs it SKIPs and the total is
+# short by exactly the amount nobody would notice.
+_short = package(counts={"test_alpha.py": 100 + RASTER_ONLY, "test_beta.py": 44},
+                 readme=_README, skipped={"test_beta.py"})
+check("a run that declares the figures present and skipped one is refused",
+      run(_short, "core", "present") == 1)
+_third = tempfile.mkdtemp(prefix="third_", dir=ROOT)
+package(directory=_third)
+open(os.path.join(_third, "counts.tsv"), "w", encoding="utf-8").write(
+    "test_alpha.py\t100\tMAYBE\ntest_beta.py\t44\t\n")
+try:
+    _ok = run(_third) != 0
+except SystemExit:
+    _ok = True
+check("a third column that is neither empty nor the token is refused", _ok)
 
 print()
 print("the five that were checked by hand when the guard was written")

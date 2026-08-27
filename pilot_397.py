@@ -50,13 +50,6 @@ RASTERS = sys.argv[2] if len(sys.argv) > 2 else HERE
 # `sha256_of` two hundred lines earlier, and a guard that can only run once its
 # subject has already crashed is decoration. Ahead of the first open, and
 # exiting 2 rather than 0, it says which files are absent and stops.
-FIGURE_RASTERS = tuple("397_fig%d.jpeg" % n for n in range(1, 6))
-_absent = [f for f in FIGURE_RASTERS
-           if not os.path.exists(os.path.join(RASTERS, f))]
-if _absent:
-    print("BLOCKED: publisher rasters not found in %s: %s"
-          % (RASTERS, ", ".join(_absent)), file=sys.stderr)
-    raise SystemExit(2)
 
 # --------------------------------------------------------------------------
 # who stands behind this run
@@ -93,6 +86,35 @@ if _given and len(_given) < len(ATTESTATION_ENV):
                               ", ".join(k for k in ATTESTATION_ENV if not _env[k])),
           file=sys.stderr)
     raise SystemExit(2)
+
+# THE RASTERS ARE CHECKED AFTER THE ATTESTATION, and the order is the point. A
+# partial attestation is BLOCKED whether or not the figures are on this machine:
+# who vouches for a run is not a question about which files exist, and putting
+# the raster check first made an incomplete attestation exit 0 as a SKIP - which
+# `test_reproducibility` caught, because that guard has a scenario behind it.
+FIGURE_RASTERS = tuple("397_fig%d.jpeg" % n for n in range(1, 6))
+# THEY ARE PUBLISHER FIGURES AND THIS REPOSITORY IS PUBLIC, so the tree does not
+# carry them. Absent is a SKIP - a worked example that cannot see its figures has
+# nothing to work - and a raster whose hash does not match is still a failure.
+import raster_root as RR                                          # noqa: E402
+# AN EXPLICIT RASTER DIRECTORY IS AN INSTRUCTION. When argv named one, only it
+# counts: falling back to the package directory answers about figures the caller
+# did not point at.
+_explicit = len(sys.argv) > 2
+_found = {}
+for _f in FIGURE_RASTERS:
+    if _explicit:
+        _p = os.path.join(RASTERS, _f)
+        _p = _p if os.path.exists(_p) else ""
+        _n = ""
+    else:
+        _p, _n = RR.check(_f, extra=RASTERS)
+    if not _p:
+        print(RR.skip_note(_f))
+        raise SystemExit(0)
+    _found[_f] = _p
+RASTERS = os.path.dirname(_found[FIGURE_RASTERS[0]])
+print("rasters verified in %s" % RASTERS)
 
 if _given:
     RUN_MODE = "ATTESTED"

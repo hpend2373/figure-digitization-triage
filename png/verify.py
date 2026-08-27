@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE); sys.path.insert(0, ROOT)
 import capt
+import raster_root as RR
 
 OK = (0, 150, 110)
 EYEC = (10, 90, 175)
@@ -47,7 +48,11 @@ def axis_marks(d, cal, box, ticks, limit):
 
 def bars_397():
     import mark_readers as MR
-    path = os.path.join(ROOT, "397_fig3.jpeg")
+    # A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC.
+    path = RR.check("397_fig3.jpeg")[0]
+    if not path:
+        print(RR.skip_note("397_fig3.jpeg"))
+        return ""
     SPECS = [MR.SeriesSpec("FLUID", bar_fill="SOLID"),
              MR.SeriesSpec("NON_FLUID", bar_fill="HATCHED")]
     PANELS = (
@@ -118,7 +123,11 @@ def bars_397():
 def lines_397():
     import mark_readers as MR
     import line_style_mono as LSM
-    path = os.path.join(ROOT, "397_fig1.jpeg")
+    # A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC.
+    path = RR.check("397_fig1.jpeg")[0]
+    if not path:
+        print(RR.skip_note("397_fig1.jpeg"))
+        return ""
     CAL = MR.AxisCalibration.from_points([(120.0, 76.0), (70.0, 296.0)])
     LABELS = ("0:30", "1:00", "1:30", "2:00", "2:30", "3:00",
               "3:30", "4:00", "4:30", "5:00", "5:30", "6:00")
@@ -231,8 +240,8 @@ def segmentation(props, pid, fig, out, title):
 
 
 if __name__ == "__main__":
-    print(bars_397())
-    print(lines_397())
+    print(bars_397() or "SKIPPED G1")
+    print(lines_397() or "SKIPPED G2")
     print(segmentation("/tmp/pX2.csv", "475", "Fig. 2",
                        os.path.join(HERE, "G3_segment_475fig2.png"),
                        "475 Fig. 2: 잘라낸 패널과 각 패널이 읽은 눈금"))

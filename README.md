@@ -97,10 +97,11 @@ defect in a reader stops the batch rather than arriving in somebody's queue as
 ## Running it
 
     pip install -r requirements-lock.txt     # the versions results were produced on
-    python3 pilot_397.py                     # the worked example, publication 397
+    export FDT_RASTER_ROOT=/where/the/figures/are   # see below; without it the
+    python3 pilot_397.py                     # pilot SKIPs and says which file
 
-    python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root .
-    python3 run_batch.py MANIFEST_DIR OUT --file-root .
+    python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root "$FDT_RASTER_ROOT"
+    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT"
     python3 finalize_batch.py OUT --template # then fill in the decisions
     python3 finalize_batch.py OUT
 

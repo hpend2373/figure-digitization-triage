@@ -143,8 +143,19 @@ jobs:
       - name: the plan compiles and runs to the pilot's numbers
         run: |
           set -e
-          python compile_plan.py plan_397.json /tmp/m --file-root . --date 2026-08-07
-          python run_batch.py /tmp/m /tmp/o --file-root . --date 2026-08-07
+          # THE COMMAND-LINE PATH NEEDS THE FIGURES, and this repository does
+          # not carry them. Without a root, `compile_plan` is RIGHT to refuse -
+          # SOURCE_FILE_NOT_FOUND on all five - and a red here would be CI
+          # reporting the deliberate absence of a file as a defect. The root is
+          # where the fetch step put them, asked for by name rather than assumed
+          # to be the checkout: `--file-root .` was this step's whole bug.
+          root="$(python -c 'import raster_root as RR, os; p=RR.check("397_fig1.jpeg")[0]; print(os.path.dirname(p) if p else "")')"
+          if [ -z "$root" ]; then
+            python -c 'import raster_root as RR; print(RR.skip_note("397_fig1.jpeg"))'
+            exit 0
+          fi
+          python compile_plan.py plan_397.json /tmp/m --file-root "$root" --date 2026-08-07
+          python run_batch.py /tmp/m /tmp/o --file-root "$root" --date 2026-08-07
           python - <<'PY'
           import json
           stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))

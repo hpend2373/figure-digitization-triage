@@ -15,8 +15,25 @@ BG, INK, MUTE = (247, 249, 247), (23, 29, 26), (95, 109, 102)
 
 
 def kr(s, bold=True):
-    """Noto Sans CJK, index 1 - the Korean face inside the collection."""
-    return ImageFont.truetype(CJK if bold else CJKR, s, index=1)
+    """Noto Sans CJK, index 1 - the Korean face inside the collection.
+
+    RAISES WITH THE PACKAGE NAME when the face is not installed. The captions in
+    this gallery are Korean and DejaVu draws Hangul as empty boxes, so falling
+    back to it would produce a picture that renders and says nothing - the
+    fail-open shape this package refuses everywhere else. CI hit this the first
+    time the gallery ran there: `OSError: cannot open resource`, four frames deep
+    inside PIL, with nothing naming the font.
+    """
+    path = CJK if bold else CJKR
+    try:
+        return ImageFont.truetype(path, s, index=1)
+    except OSError as exc:
+        raise SystemExit(
+            "%s is not on this machine, and the captions in this gallery are "
+            "Korean: DejaVu draws Hangul as empty boxes, so there is no "
+            "fallback that says anything. Install it - on Debian/Ubuntu "
+            "`apt-get install fonts-noto-cjk` - and re-run. (%s)"
+            % (path, exc))
 
 
 def mono(s):

@@ -99,6 +99,7 @@ defect in a reader stops the batch rather than arriving in somebody's queue as
 ## Running it
 
     pip install -r requirements-lock.txt     # the versions results were produced on
+    apt-get install fonts-noto-cjk           # the gallery's captions are Korean
     export FDT_RASTER_ROOT=/where/the/figures/are   # see below; without it the
     python3 pilot_397.py                     # pilot SKIPs and says which file
 

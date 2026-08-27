@@ -13,3 +13,13 @@ scenario-counts.tsv
 # It slipped into v7.50 because the suite happened to be mid-run at `git add`;
 # tracked, every clean run of the suite leaves the tree dirty with a deletion.
 mono_line_fixture.png
+
+# THE GALLERY DRAWS ON PUBLISHER FIGURES, and what it writes is a crop of one.
+# `png/verify.py` puts G1-G4 back into the tree every time it runs, and a
+# `git add -A` after that run is exactly how ten rasters and eleven PNGs came to
+# be tracked in a public repository in the first place. The pictures are
+# deliverables, not records: run the gallery, look at them, do not commit them.
+png/G1_read_397fig3.png
+png/G2_read_397fig1.png
+png/G3_segment_475fig2.png
+png/G4_segment_349fig3.png

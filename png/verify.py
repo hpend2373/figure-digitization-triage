@@ -47,14 +47,29 @@ def axis_marks(d, cal, box, ticks, limit):
 
 
 def bars_397():
+    """397 Fig. 3 read by the PRODUCTION BAR_MONO path, in its two passes.
+
+    This drew `read_monochrome_bar_panel` for one round, which is not what
+    `run_batch` dispatches. That reader decides which bar is which INSIDE one
+    panel, from an absolute fill density against bands measured on a single
+    figure; the released path measures the geometry with the identity left open
+    (`identity_status: NOT_CALIBRATED`, empty `resolved_fill_pattern`) and then
+    names the fills across the whole figure in
+    `mono_bar_geometry.fill_identities_by_figure`. A gallery that shows the
+    easier path shows a picture nobody's run produces.
+    """
     import mark_readers as MR
+    import mono_bar_geometry as MONO_GEOMETRY
     # A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC.
     path = RR.check("397_fig3.jpeg")[0]
     if not path:
         print(RR.skip_note("397_fig3.jpeg"))
         return ""
-    SPECS = [MR.SeriesSpec("FLUID", bar_fill="SOLID"),
-             MR.SeriesSpec("NON_FLUID", bar_fill="HATCHED")]
+    # THE FIGURE'S LEGEND, which is a declaration and not a measurement: it says
+    # this figure prints two fills and what each MEANS. Which bar carries which
+    # is what the second pass answers, off the figure's own ink.
+    LEGEND = {"SOLID": "FLUID", "HATCHED": "NON_FLUID"}
+    FIGURE = "397|FIG3"
     PANELS = (
         dict(name="MEN", box=(118, 480, 90, 470), ticks=[(150, 101), (50, 465)],
              x={"PRE": 187, "POST": 390},
@@ -69,11 +84,31 @@ def bars_397():
     SC = 2
     im, M = zoom(raw, (100, 1060, 60, 520), SC)
     d = ImageDraw.Draw(im)
-    lines, errs = [], []
-    lines.append("%-6s %-10s %-5s %8s %8s %7s %6s %s"
-                 % ("panel", "series", "x", "read", "by eye", "diff", "sd", "stem"))
+
+    # PASS ONE: every panel measured, nothing named.
+    measured = []
     for p in PANELS:
         cal = MR.AxisCalibration.from_points(p["ticks"])
+        rows = MR.read_monochrome_bar_geometry(
+            raw, p["box"], p["x"], cal, sorted(LEGEND),
+            baseline_value=50.0, group_window=75,
+            panel_id="%s|%s" % (FIGURE, p["name"]),
+            identity_domain_id=FIGURE, figure_id=FIGURE)
+        measured.append((p, cal, rows))
+    unnamed = sum(1 for _p, _c, rows in measured for r in rows
+                  if r["identity_status"] == "NOT_CALIBRATED")
+    # PASS TWO: the fills named once, across the whole figure.
+    MONO_GEOMETRY.fill_identities_by_figure(
+        [r for _p, _c, rows in measured for r in rows])
+
+    lines, errs = [], []
+    resolved = stems = 0
+    lines.append("%-6s %-9s %-5s %-8s %8s %8s %7s %6s %s"
+                 % ("panel", "series", "x", "fill", "read", "by eye", "diff",
+                    "sd", "stem"))
+    for p, cal, rows in measured:
+        upx = abs((p["ticks"][1][0] - p["ticks"][0][0])
+                  / float(p["ticks"][1][1] - p["ticks"][0][1]))
         bx0, by0 = M(p["box"][0], p["box"][2])
         bx1, by1 = M(p["box"][1], p["box"][3])
         d.rectangle([bx0, by0, bx1, by1], outline=AXIS, width=2)
@@ -81,38 +116,55 @@ def bars_397():
             _x, ry = M(p["box"][0], row)
             d.line([(bx0 - 40, ry), (bx1, ry)], fill=AXIS, width=1)
             chip(d, (bx0 - 46, ry - 12), "%g" % value, AXIS, im.width, size=15)
-        rows = MR.read_monochrome_bar_panel(
-            raw, panel_box=p["box"], x_positions=p["x"], y_calibration=cal,
-            series=SPECS, baseline_value=50.0, group_window=75)
         for r in rows:
-            key = (r["series"], r["x_label"])
-            eye = p["eye"][key]
-            errs.append(abs(r["mean"] - eye))
-            py = cal.pixel_of(r["mean"]) if hasattr(cal, "pixel_of") else None
-            if py is None:
-                lo, hi = p["ticks"][0], p["ticks"][1]
-                py = lo[1] + (r["mean"] - lo[0]) * (hi[1] - lo[1]) / (hi[0] - lo[0])
-            px = p["x"][r["x_label"]] + (0 if r["series"] == "FLUID" else 34)
-            cx, cy = M(px, py)
-            d.line([(cx - 30, cy), (cx + 30, cy)], fill=OK, width=3)
-            # FLUID's chips go left of its bar, NON_FLUID's right of its own, so
-            # the two series of one group cannot print over each other.
-            side = -1 if r["series"] == "FLUID" else 1
+            fill = r["resolved_fill_pattern"]
+            named = r["identity_status"] == "RESOLVED" and fill in LEGEND
+            resolved += bool(named)
+            series = LEGEND.get(fill, "?")
+            key = (series, r["group"])
+            eye = p["eye"].get(key)
+            cap = next((x for x in (r.get("remote") or [])
+                        if x["kind"] == "ERRORBAR_CAP"), None)
+            stems += cap is not None
+            sd = "----" if cap is None else "%.1f" % (cap["distance_px"] * upx)
+            # THE BAR IT ACTUALLY MEASURED, not a nominal x. `footprint_px_image`
+            # is where the ink was; drawing on the declared centre would hide a
+            # reader that answered about the neighbouring bar.
+            fx0, fx1 = r["footprint_px_image"]
+            py = cal.value_to_pixel(r["value"])
+            cx, cy = M((fx0 + fx1) / 2.0, py)
+            col = OK if named else BAD
+            d.line([(cx - 30, cy), (cx + 30, cy)], fill=col, width=3)
+            side = -1 if r["slot"] == 0 else 1
             ox = cx - 96 if side < 0 else cx + 34
-            chip(d, (ox, cy - 34), "read %.1f" % r["mean"], OK, im.width, size=16)
-            chip(d, (ox, cy - 12), "eye  %d" % eye, EYEC, im.width, size=16)
-            lines.append("%-6s %-10s %-5s %8.1f %8d %7.1f %6s %s"
-                         % (p["name"], r["series"], r["x_label"], r["mean"], eye,
-                            abs(r["mean"] - eye),
-                            "----" if r["dispersion"] is None
-                            else "%.1f" % r["dispersion"],
-                            r["Errorbar_Stem_Confirmed"]))
+            below = chip(d, (ox, cy - 34), "read %.1f" % r["value"], col,
+                         im.width, size=16)
+            if eye is None:
+                chip(d, (ox, cy - 34 + below), "no eye cell", BAD, im.width, size=16)
+            else:
+                errs.append(abs(r["value"] - eye))
+                chip(d, (ox, cy - 12), "eye  %d" % eye, EYEC, im.width, size=16)
+            lines.append("%-6s %-9s %-5s %-8s %8.1f %8s %7s %6s %s"
+                         % (p["name"], series, r["group"], fill or "-", r["value"],
+                            "-" if eye is None else "%d" % eye,
+                            "-" if eye is None else "%.1f" % abs(r["value"] - eye),
+                            sd, "TRUE" if cap is not None else "FALSE"))
+    declared = sum(len(p["eye"]) for p in PANELS)
+    total = sum(len(rows) for _p, _c, rows in measured)
+    # COUNTED FROM THE ROWS. Every one of these four numbers was a literal in
+    # this caption for one round - "8 of 8" printed whatever the reader did.
     lines += ["",
-              "cells read               %d of 8" % len(errs),
-              "worst vs the eye reading %.2f mmHg on a 100 mmHg axis" % max(errs),
-              "error bars stem-confirmed 8 of 8"]
-    im = capt.below(im, "397 Fig. 3: 실제로 읽어낸 값과 사람이 눈으로 읽은 값",
-                    lines, keys=[(OK, "read by the pipeline", False),
+              "bars measured             %d, against %d declared cells" % (total, declared),
+              "unnamed after pass one    %d of %d" % (unnamed, total),
+              "named by the figure's own fills %d of %d" % (resolved, total),
+              "compared with an eye reading    %d" % len(errs),
+              "worst vs the eye reading  %s"
+              % ("-" if not errs else
+                 "%.2f mmHg on a 100 mmHg axis" % max(errs)),
+              "error bars stem-confirmed %d of %d" % (stems, total)]
+    im = capt.below(im, "397 Fig. 3: released BAR_MONO 2-pass — 읽은 값과 눈으로 읽은 값",
+                    lines, keys=[(OK, "read, and named by the figure's fills", False),
+                                 (BAD, "measured but not named", False),
                                  (EYEC, "read by eye", False),
                                  (AXIS, "the ticks it was calibrated on", False)])
     out = os.path.join(HERE, "G1_read_397fig3.png")
@@ -176,10 +228,15 @@ def lines_397():
                  "%.1f" % r["mean"], OK, im.width, size=14)
             lines.append("%-9s %-5s %8.1f %8.1f %7.2f"
                          % (s, lab, r["mean"], eye, abs(r["mean"] - eye)))
+    # COUNTED, NOT WRITTEN DOWN. `24` and `50 mmHg` were literals here: a
+    # reader that stopped emitting a cell would have printed "24 of 24" and a
+    # recalibration would have printed the old span.
+    declared = sum(len(v) for v in EYE.values())
+    span = abs(120.0 - 70.0)
     lines += ["",
-              "cells read     %d of 24, %d REFUSED where the two curves are one"
-              " run of ink" % (len(errs), 24 - len(errs)),
-              "worst vs eye   %.2f mmHg on a 50 mmHg axis" % max(errs),
+              "cells read     %d of %d, %d REFUSED where the two curves are one"
+              " run of ink" % (len(errs), declared, declared - len(errs)),
+              "worst vs eye   %.2f mmHg on a %g mmHg axis" % (max(errs), span),
               "",
               "거절한 칸은 빨간 원. 읽지 못한 것을 추측하지 않는다."]
     im = capt.below(im, "397 Fig. 1: 겹친 두 곡선 - 읽은 것과 거절한 것", lines,
@@ -239,12 +296,35 @@ def segmentation(props, pid, fig, out, title):
     return out
 
 
+def proposals_for(keys, out_csv):
+    """Run the proposer over just these figures, and return the CSV it wrote.
+
+    This read `/tmp/pX2.csv` - a file left behind by a corpus run on one
+    machine. Two pictures in this gallery could therefore not be regenerated
+    from a fresh checkout, which makes them illustrations rather than output.
+    The proposer takes 90 seconds on two figures, so there is no reason for the
+    dependency to exist: it is run here, on the clips this repository carries.
+    """
+    import subprocess
+    env = dict(os.environ, FIGS=";".join("%s|%s" % k for k in keys), OUT=out_csv)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "propose.py")],
+                       cwd=ROOT, env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("propose.py failed:\n%s%s" % (r.stdout, r.stderr))
+    print(r.stdout.strip().splitlines()[0])
+    return out_csv
+
+
 if __name__ == "__main__":
+    import tempfile
     print(bars_397() or "SKIPPED G1")
     print(lines_397() or "SKIPPED G2")
-    print(segmentation("/tmp/pX2.csv", "475", "Fig. 2",
-                       os.path.join(HERE, "G3_segment_475fig2.png"),
-                       "475 Fig. 2: 잘라낸 패널과 각 패널이 읽은 눈금"))
-    print(segmentation("/tmp/pX2.csv", "349", "Figure 3",
-                       os.path.join(HERE, "G4_segment_349fig3.png"),
-                       "349 Fig. 3: 잘라낸 패널과 각 패널이 읽은 눈금"))
+    FIGURES = (("475", "Fig. 2", "G3_segment_475fig2.png",
+                "475 Fig. 2: 잘라낸 패널과 각 패널이 읽은 눈금"),
+               ("349", "Figure 3", "G4_segment_349fig3.png",
+                "349 Fig. 3: 잘라낸 패널과 각 패널이 읽은 눈금"))
+    props = proposals_for([(pid, fig) for pid, fig, _o, _t in FIGURES],
+                          os.path.join(tempfile.mkdtemp(prefix="fdt_props_"),
+                                       "proposals.csv"))
+    for pid, fig, name, title in FIGURES:
+        print(segmentation(props, pid, fig, os.path.join(HERE, name), title))

@@ -21,7 +21,7 @@ present and hashes differently is REFUSED rather than measured, because
 coordinates taken on one render return a plausible number on another.
 
 The scenario counts below are what a **clone of this repository** runs, and a
-further 240 need the figures. CI fetches them from a private source when
+further 243 need the figures. CI fetches them from a private source when
 `FDT_RASTER_SOURCE` and `FDT_RASTER_TOKEN` are set on the repository, and passes
 `--rasters present` to the documentation guard only in a job that actually
 fetched them — so a fork with no secret is green at its own total rather than
@@ -109,11 +109,11 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3213 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3254 -->
-<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 240 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3210 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3251 -->
+<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 243 -->
 
-3213 scenarios on main after v9.15 under `requirements-lock.txt`, and 3254 with
+3210 scenarios on main after v9.15 under `requirements-lock.txt`, and 3251 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs
@@ -124,17 +124,17 @@ starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
 count that depends on what `ubuntu-latest` happens to ship is not a property of
 this repository.
 
-Those two numbers are what a **fresh clone** runs. A further 240 of them need
+Those two numbers are what a **fresh clone** runs. A further 243 of them need
 the publisher figures, which this repository does not carry and cannot: they are
 not redistributable. `test_bar_reader` (24), `test_integration` (17),
-`test_compile_plan` (197) and `test_reproducibility` (2) skip those sections
+`test_compile_plan` (197) and `test_reproducibility` (5) skip those sections
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
 3453 and 3494. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at 3213/3254 rather than red for a reason it cannot fix.
+no secret is green at 3210/3251 rather than red for a reason it cannot fix.
 
 Both are verified in a clean room with scipy blocked — the statistics are
 hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every

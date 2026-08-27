@@ -210,17 +210,25 @@ def sh(*argv):
                           text=True)
 
 
+# AND THIS SECTION READS WHAT THAT RUN WROTE, so it is gated by the same
+# condition. It was not, and CI found it: the directory is a fixed path under
+# /tmp, so a machine that had ever run the pilot WITH the figures kept one - and
+# these two scenarios then passed against an output no run in that session had
+# produced. On a clean runner the same code asserts a directory that does not
+# exist. A scenario that reads a fixed temporary path can pass for a reason that
+# has nothing to do with the tree it is testing.
 att_dir = os.path.join(tempfile.gettempdir(), "fdt_attested")
-assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv")), (
-    "run_batch wrote an accepted file; only finalize_batch may")
-assert os.path.exists(os.path.join(att_dir, "figure_values_machine_qc.csv"))
-assert os.path.exists(os.path.join(att_dir, "review_queue.csv"))
-passed("run_batch stops at machine QC and writes a review queue")
+if _pilot_rasters:
+  assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv")), (
+      "run_batch wrote an accepted file; only finalize_batch may")
+  assert os.path.exists(os.path.join(att_dir, "figure_values_machine_qc.csv"))
+  assert os.path.exists(os.path.join(att_dir, "review_queue.csv"))
+  passed("run_batch stops at machine QC and writes a review queue")
 
-empty = sh(FIN, att_dir)
-assert empty.returncode == 1 and "NOTHING_APPROVED" in empty.stdout, empty.stdout
-assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv"))
-passed("an unreviewed run finalizes to nothing")
+  empty = sh(FIN, att_dir)
+  assert empty.returncode == 1 and "NOTHING_APPROVED" in empty.stdout, empty.stdout
+  assert not os.path.exists(os.path.join(att_dir, "figure_values_accepted.csv"))
+  passed("an unreviewed run finalizes to nothing")
 
 
 # --------------------------------------------------------------------------
@@ -243,10 +251,14 @@ assert set(env["Libraries"]) == {"numpy", "pandas", "PIL", "cv2"}, env
 assert all(v and v != "unknown" for v in env["Libraries"].values()), env
 passed("the runner can describe its own environment")
 
-stamp = json.load(open(os.path.join(att_dir, "run_stamp.json")))
-assert stamp.get("Environment", {}).get("Python"), stamp
-assert stamp["Environment"]["Libraries"]["numpy"] == env["Libraries"]["numpy"], stamp
-passed("and every run stamp carries it")
+# THE STAMP IS THE PILOT'S, so this one is gated too. The property - a run
+# records what it ran on - is not about publisher figures, but the only run
+# stamp this file has is the one the pilot wrote.
+if _pilot_rasters:
+  stamp = json.load(open(os.path.join(att_dir, "run_stamp.json")))
+  assert stamp.get("Environment", {}).get("Python"), stamp
+  assert stamp["Environment"]["Libraries"]["numpy"] == env["Libraries"]["numpy"], stamp
+  passed("and every run stamp carries it")
 
 LOCK = os.path.join(HERE, "requirements-lock.txt")
 assert os.path.exists(LOCK), "requirements-lock.txt is not in the package"

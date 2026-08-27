@@ -95,6 +95,14 @@ FILLS = ("OPEN", "FILLED")
 REFUSALS = ("NOT_A_MARKER", "MARKER_MERGED", "MARKER_SHAPE_UNRESOLVED",
             "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED")
 
+# A PROXIMITY RULE WAS HERE AND WAS REMOVED. It refused any mark with another
+# blob within 0.75 of a marker, to stop a touching neighbour's ink being
+# measured as this marker's fill. Setting its threshold to zero broke no
+# scenario: once `MARK_MARGIN` refuses marks sitting on the boundary, the marks
+# the proximity rule caught were already being refused for the right reason. An
+# unobservable guard is decoration, so it is gone and this comment is what
+# remains of it.
+
 Split = collections.namedtuple("Split", "threshold between within separates")
 
 #: How far apart two clusters' means must be, in units of their pooled spread,
@@ -104,6 +112,15 @@ Split = collections.namedtuple("Split", "threshold between within separates")
 #: available for it, and it is written here rather than inside `_split` so it can
 #: be argued about.
 SEPARATION = 2.0
+
+#: How far from the boundary a single mark must sit, as a fraction of the
+#: distance between the two clusters' means, before its class is called
+#: established. The panel's split can hold while ONE mark sits on the line:
+#: at an 11 px marker one circle's third harmonic (0.0956) is above the lowest
+#: triangle's (0.0911), and without this it was routed to the wrong series - a
+#: plausible number under the wrong heading, which is the one outcome worse than
+#: a missing one. The split is the panel's question; this is each mark's.
+MARK_MARGIN = 0.15
 
 #: The opening kernel `marker_blobs` last used, so `_at_blob` can dilate a blob
 #: back by exactly it. A module-level cell rather than a parameter threaded
@@ -144,6 +161,13 @@ def _split(values):
     index, threshold, between, within = best
     return Split(round(float(threshold), 4), round(float(between), 4),
                  round(float(within), 4), bool(index >= SEPARATION))
+
+
+def _clear(value, split):
+    """Is this mark far enough from the boundary to be called?"""
+    if split.threshold is None or not split.between:
+        return True
+    return abs(float(value) - split.threshold) >= MARK_MARGIN * abs(split.between)
 
 
 def _components(mask):
@@ -236,7 +260,58 @@ def marker_blobs(mask, scale):
     return out, closed, opened, labels
 
 
-def _at_blob(blob, closed, grey, scale, own=None, kopen=3):
+def radial_third_harmonic(filled, cx, cy, scale, rays=72):
+    """How three-cornered this mark's outline is, ignoring what crosses it.
+
+    THE FOURTH DISCRIMINANT, and the first that works. The three before it all
+    failed on the same thing: a regression line crosses the marker, and every
+    measurement taken on the marker's OUTLINE (circularity, vertex count) or on
+    a line-free approximation of it (the opened blob's bbox extent) is either
+    ruined by the line's stubs or by the opening that removed them.
+
+    A radial profile is not taken on the outline. Walk out from the centre along
+    `rays` directions and record where the ink stops; a disc gives a constant
+    radius, a triangle gives one with three lobes. The line contributes at the
+    TWO angles where it leaves, and a spike at two angles spreads its energy
+    evenly over every harmonic - while a triangle puts its energy specifically
+    at order three. So the magnitude of the third harmonic over the mean
+    separates them and the line does not get a say:
+
+        s3   circles up to 0.087, triangles from 0.091
+        s2   circles up to 0.080, triangles from 0.091
+        s1   circles up to 0.096, triangles from 0.091   <- one circle crosses
+
+    The overlap at 11 px is real and is why this is still fed through the
+    panel's own two-means split rather than compared with a number: one mark on
+    the wrong side of a threshold is what a split with a separation index
+    survives and a constant does not.
+    """
+    radii = []
+    for k in range(rays):
+        theta = 2.0 * math.pi * k / rays
+        dx, dy = math.cos(theta), math.sin(theta)
+        last = 0.0
+        step = 0.5
+        while step < 0.85 * scale:
+            x, y = int(round(cx + step * dx)), int(round(cy + step * dy))
+            if 0 <= y < filled.shape[0] and 0 <= x < filled.shape[1] \
+                    and filled[y, x]:
+                last = step
+                step += 0.5
+            else:
+                break
+        radii.append(last)
+    arr = np.array(radii, dtype=float)
+    middle = float(np.median(arr[arr > 0])) if (arr > 0).any() else 0.0
+    if middle <= 0:
+        return None
+    spectrum = np.fft.rfft(arr / middle)
+    if len(spectrum) <= 3 or abs(spectrum[0]) < 1e-9:
+        return None
+    return float(abs(spectrum[3]) / abs(spectrum[0]))
+
+
+def _at_blob(blob, closed, grey, scale, own=None, kopen=3, raw=None):
     """The evidence one opened component carries about its class."""
     pad = max(2, int(round(scale * 0.25)))
     y0 = max(0, blob["y"] - pad)
@@ -266,16 +341,31 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3):
     perimeter = cv2.arcLength(contour, True)
     filled = cv2.contourArea(contour)
     inner = max(1, int(round(scale * INTERIOR)))
-    patch = grey[cy - inner:cy + inner + 1, cx - inner:cx + inner + 1]
+    # MEASURED ON THIS MARKER'S OWN INK, not on the page. Read off the greyscale
+    # it included whatever a TOUCHING neighbour had put inside this marker's
+    # middle: on the overlap rendering an open circle came back at 0.825 against
+    # a 0.606 boundary and was routed as filled. `piece` is this blob's ink and
+    # nothing else's, so a neighbour cannot fill a ring any more.
+    # ON THE RAW MASK. Cutting it to THIS blob's ink was tried - a touching
+    # neighbour puts its own disc inside a ring's middle, and one mark on the
+    # overlap rendering was routed as filled because of it - and then reverted:
+    # once `MARK_MARGIN` refused marks sitting on the boundary, removing the
+    # neighbour's ink changed nothing that any scenario could see. A guard whose
+    # removal breaks no test is decoration, and this file would rather carry the
+    # measurement than the code. (NOT the hole-filled mask: there every ring's
+    # middle is already black and the fill axis collapses to 1.0 for everything.)
+    patch = raw[cy - inner:cy + inner + 1, cx - inner:cx + inner + 1]
     side = float(max(blob["w"], blob["h"]))
     short = float(max(1, min(blob["w"], blob["h"])))
     return dict(point_px_x=float(blob["cx"]), point_px_y=float(blob["cy"]),
+                box=[int(blob["x"]), int(blob["x"] + blob["w"]),
+                     int(blob["y"]), int(blob["y"] + blob["h"])],
                 side_px=side, area_px=int(blob["area"]),
                 enclosed_px=float(filled),
                 circularity=round((4.0 * math.pi * filled / perimeter ** 2)
                                   if perimeter else 0.0, 4),
                 corners=int(len(cv2.approxPolyDP(contour, 0.045 * perimeter, True))),
-                interior_ink=round(float((patch < 128).mean()) if patch.size else 0.0, 4),
+                interior_ink=round(float(patch.mean()) if patch.size else 0.0, 4),
                 aspect=round(side / short, 3),
                 size_ratio=round(side / scale, 3) if scale else 0.0,
                 # THE THIRD DISCRIMINANT TRIED, and the third that does not
@@ -284,6 +374,7 @@ def _at_blob(blob, closed, grey, scale, own=None, kopen=3):
                 # triangles: circles 0.65-0.78 against triangles 0.55-0.78 on
                 # `twin_scatter_s3.jpeg`. Recorded, not used.
                 bbox_extent=round(blob["area"] / float(max(1, blob["w"] * blob["h"])), 4),
+                third_harmonic=radial_third_harmonic(closed, cx, cy, scale),
                 ink_px=int(piece.sum()))
 
 
@@ -345,7 +436,8 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
     blobs, closed, _opened, own = marker_blobs(mask, scale)
     seen = []
     for blob in blobs:
-        geo = _at_blob(blob, closed, grey, scale, own=own, kopen=KOPEN[0])
+        geo = _at_blob(blob, closed, grey, scale, own=own, kopen=KOPEN[0],
+                       raw=mask)
         if geo is None:
             continue
         geo["refusal"] = ""
@@ -359,15 +451,20 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
             geo["refusal"] = "MARKER_MERGED"
         seen.append(geo)
 
+    # AND NO MARK IS MEASURED WITH ANOTHER INSIDE ITS WINDOW. Pairwise, before
+    # either split is asked for: a polluted interior would otherwise join the
+    # distribution the fill threshold is derived from.
     kept = [g for g in seen if not g["refusal"]]
     # THE PANEL'S OWN TWO SPLITS. Asked for only where the declaration needs
     # them: a panel of one shape has nothing to separate.
     want_shapes = {s for s, _f in declared}
     want_fills = {f for _s, f in declared}
-    # REPORTED AND NOT USED, on the corner count - the least bad of the three
-    # candidates and still not good enough. Here so the next attempt can see
-    # what the panel's own distribution looked like.
-    shape_split = (_split([g["corners"] for g in kept])
+    # ON THE THIRD HARMONIC of the radial profile, which is the one measurement
+    # of these four that a line crossing the marker cannot move. The other three
+    # stay on every record: they are what the next attempt would have had to
+    # re-measure otherwise.
+    shape_split = (_split([g["third_harmonic"] for g in kept
+                           if g["third_harmonic"] is not None])
                    if len(want_shapes) > 1 else Split(None, 0.0, 0.0, True))
     fill_split = (_split([g["interior_ink"] for g in kept])
                   if len(want_fills) > 1 else Split(None, 0.0, 0.0, True))
@@ -379,19 +476,24 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=()):
         # small sizes and a triangle to three at every size that resolves.
         if len(want_shapes) == 1:
             shape = sorted(want_shapes)[0]
-        else:
-            # NO DISCRIMINANT THIS MODULE TRUSTS. Three were measured on the
-            # fixture and the best of them assigns a third of the marks to the
-            # wrong shape - 12 right and 6 wrong of 18 at `twin_scatter_s1`,
-            # 14 and 6 at s3 - which is worse than refusing, because a wrong
-            # series is a plausible number under the wrong heading. The three
-            # measurements are on every record so the next attempt starts from
-            # data. `shape_split` is computed and reported and NOT used.
+        elif geo["third_harmonic"] is None or not shape_split.separates:
             shape = ""
             geo["refusal"] = "MARKER_SHAPE_UNRESOLVED"
+        elif not _clear(geo["third_harmonic"], shape_split):
+            # THE PANEL SEPARATES AND THIS MARK DOES NOT. Refused on its own,
+            # which is the difference between a reader that answers about a
+            # figure and one that answers about every mark on it.
+            shape = ""
+            geo["refusal"] = "MARKER_SHAPE_UNRESOLVED"
+        else:
+            # A TRIANGLE PUTS ITS ENERGY AT ORDER THREE and a disc does not, so
+            # the high side of the panel's own split is the triangles.
+            shape = ("TRIANGLE" if geo["third_harmonic"] >= shape_split.threshold
+                     else "CIRCLE")
         if len(want_fills) == 1:
             fill = sorted(want_fills)[0]
-        elif not fill_split.separates:
+        elif not fill_split.separates or not _clear(geo["interior_ink"],
+                                                    fill_split):
             fill = ""
             geo["refusal"] = geo["refusal"] or "MARKER_FILL_UNRESOLVED"
         else:

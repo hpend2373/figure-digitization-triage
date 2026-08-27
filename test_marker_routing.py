@@ -9,16 +9,19 @@ state it is actually in, which is half done -
 
     the marker SCALE is measured off the panel and tracks the rendering
     the marks are FOUND, with the regression lines that join them removed
-    the FILL axis is established, and is exactly right at 11 px and above
-    the SHAPE axis is NOT established, and every mark is refused for it
+    the FILL axis is established, on this marker's own ink
+    the SHAPE axis is established by the radial third harmonic, which is the
+      fourth discriminant tried and the first that a regression line crossing
+      the marker cannot move
 
-- because a module that assigns a third of the marks to the wrong shape is worse
-than one that refuses: a wrong series is a plausible number under the wrong
-heading, and nothing downstream can tell it from a right one.
+and it routes 16, 18 and 20 of 30 marks at 11, 22 and 33 px with NO misroutes,
+refuses everything at 5 px and 3 px, and gets exactly one mark wrong on the
+rendering where two markers touch. That one is pinned as wrong rather than fixed:
+the fix refuses five to thirteen legitimate marks per rendering.
 
-TWO NEGATIVES ARE PINNED ON PURPOSE. "The shape axis does not separate" and "no
-series is assigned on a two-shape panel" are scenarios, so the day a fourth
-discriminant works they FAIL and have to be changed deliberately. A capability
+THE TWO NEGATIVES THIS FILE USED TO PIN - "the shape axis does not separate" and
+"no series is assigned" - are gone, which is what they were for. They failed the
+moment the fourth discriminant worked and were changed on purpose. A capability
 that arrives silently is one nobody reviewed.
 
 Every number below was measured on `twin_scatter_*.jpeg`, which this repository
@@ -80,9 +83,22 @@ def routed(name):
             fill_right += 1
         else:
             fill_wrong += 1
+    right = wrong = 0
+    for x in out["records"]:
+        if not x["Series_ID"]:
+            continue
+        tf, ts, cx, cy = min(truth, key=lambda t: (t[2] - x["point_px_x"]) ** 2
+                             + (t[3] - x["point_px_y"]) ** 2)
+        near = ((cx - x["point_px_x"]) ** 2 + (cy - x["point_px_y"]) ** 2) ** 0.5
+        want = next((sid for sid, spec in sorted(DOC["renderings"][name]["series"].items())
+                     if [cx, cy] in [list(c) for c in spec["centres"]]), "")
+        if near <= 0.6 * scale and want == x["Series_ID"]:
+            right += 1
+        else:
+            wrong += 1
     return dict(out=out, drawn=r["total_points"], marker=r["marker_diameter_px"],
                 scale=scale, found=found, fill_right=fill_right,
-                fill_wrong=fill_wrong,
+                fill_wrong=fill_wrong, right=right, wrong=wrong,
                 assigned=sum(1 for x in out["records"] if x["Series_ID"]),
                 refusals=sorted({x["refusal"] for x in out["records"] if x["refusal"]}))
 
@@ -113,41 +129,60 @@ check("  and two marks that touch each other are refused, not split",
 
 print()
 print("the fill axis is established by the panel's own distribution")
-check("every fill is right at 11, 22 and 33 px",
+check("every fill is right at 22 and 33 px",
       all(R[n]["fill_wrong"] == 0 and R[n]["fill_right"] >= 18
-          for n in ("s1", "s2", "s3")),
-      "%r" % {n: (R[n]["fill_right"], R[n]["fill_wrong"]) for n in ("s1", "s2", "s3")})
-# WHERE IT STARTS TO FAIL, measured rather than assumed. At 5 px the split still
-# passes and three of seventeen marks take the wrong side of it: the test says
-# two classes and the assignment is not perfect. Pinned so a tightening of
-# `SEPARATION` can be argued against a number.
-check("  at 5 px the split still passes and 3 of 17 fills are wrong",
-      (R["tiny"]["fill_right"], R["tiny"]["fill_wrong"]) == (14, 3),
-      "%d right, %d wrong" % (R["tiny"]["fill_right"], R["tiny"]["fill_wrong"]))
-check("  and at 3 px there is no split at all, so no fill is claimed",
-      not R["micro"]["out"]["fill_split"]["separates"]
-      and R["micro"]["fill_right"] == R["micro"]["fill_wrong"] == 0,
+          for n in ("s2", "s3")),
+      "%r" % {n: (R[n]["fill_right"], R[n]["fill_wrong"]) for n in ("s2", "s3")})
+# AT 11 PX TWO MARKS SIT ON THE BOUNDARY and are refused individually. The panel
+# still separates; those two do not, and `MARK_MARGIN` is what tells the two
+# questions apart. Before it, one of them was routed to the wrong series.
+check("  at 11 px two marks sit on the fill boundary and are refused alone",
+      R["s1"]["fill_wrong"] == 0
+      and "MARKER_FILL_UNRESOLVED" in R["s1"]["refusals"],
+      "%d wrong, refusals %r" % (R["s1"]["fill_wrong"], R["s1"]["refusals"]))
+check("  and at 3 px there is no fill split at all",
+      not R["micro"]["out"]["fill_split"]["separates"],
       "%r" % (R["micro"]["out"]["fill_split"],))
 
 print()
-print("the shape axis is NOT established, and nothing is assigned without it")
-# Three discriminants measured, none usable: circularity of the marker's ink cut
-# out of the chain it sits in comes back higher for triangles than for discs;
-# the corner count is a continuum from 3 to 7; the bbox extent of the opened
-# blob overlaps because the opening rounds the triangles. The best of them puts
-# a third of the marks in the wrong shape.
-check("every mark is refused for its shape on a two-shape panel",
-      all("MARKER_SHAPE_UNRESOLVED" in R[n]["refusals"] for n in R),
-      "%r" % {n: R[n]["refusals"] for n in sorted(R)})
-check("  so no series is assigned, on any rendering",
-      all(R[n]["assigned"] == 0 for n in R),
-      "%r" % {n: R[n]["assigned"] for n in sorted(R)})
-# AND THE EVIDENCE IS ON THE RECORD, so the next attempt starts from data.
-_rec = [x for x in R["s3"]["out"]["records"] if x["refusal"] == "MARKER_SHAPE_UNRESOLVED"]
-check("  and every refused mark still carries the three measurements tried",
-      bool(_rec) and all(set(("circularity", "corners", "bbox_extent")) <= set(x)
-                         for x in _rec),
-      "%r" % (sorted(_rec[0]) if _rec else None))
+print("the shape axis, by the radial third harmonic")
+# THE FOURTH DISCRIMINANT. Circularity, corner count and bbox extent all failed
+# on the same thing - a regression line crosses the marker - and a radial profile
+# is not taken on the outline: a triangle puts its energy at order three while a
+# line's exit spikes spread theirs over every harmonic.
+check("the shape axis separates at 11 px and above",
+      all(R[n]["out"]["shape_split"]["separates"] for n in ("s1", "s2", "s3")),
+      "%r" % {n: R[n]["out"]["shape_split"]["separates"]
+              for n in ("s1", "s2", "s3")})
+check("  and does not at 5 px or 3 px, where nothing is routed",
+      not R["tiny"]["out"]["shape_split"]["separates"]
+      and not R["micro"]["out"]["shape_split"]["separates"]
+      and R["tiny"]["assigned"] == R["micro"]["assigned"] == 0,
+      "%r" % {n: (R[n]["out"]["shape_split"]["separates"], R[n]["assigned"])
+              for n in ("tiny", "micro")})
+check("  and every routed mark still carries all four measurements",
+      all(set(("circularity", "corners", "bbox_extent", "third_harmonic"))
+          <= set(x) for x in R["s3"]["out"]["records"]),
+      "%r" % (sorted(R["s3"]["out"]["records"][0]),))
+
+print()
+print("what it routes, and what it gets wrong")
+check("16, 18 and 20 marks routed at 11, 22 and 33 px, and none misrouted",
+      (R["s1"]["right"], R["s2"]["right"], R["s3"]["right"]) == (16, 18, 20)
+      and R["s1"]["wrong"] == R["s2"]["wrong"] == R["s3"]["wrong"] == 0,
+      "%r" % {n: (R[n]["right"], R[n]["wrong"]) for n in ("s1", "s2", "s3")})
+# ONE KNOWN MISROUTE, PINNED AS ONE. On the overlap rendering a marker of the
+# touching pair keeps its own blob, and part of its partner sits inside the
+# window its fill is measured in: an open circle reads 0.83 against a 0.63
+# boundary and is routed as filled. Refusing marks whose BOXES nearly touch
+# fixes it and costs five to thirteen legitimate marks per rendering, which is
+# the wrong trade - so it stays wrong, and it stays counted.
+check("  and the overlap rendering routes 22 with exactly one misroute",
+      (R["overlap"]["right"], R["overlap"]["wrong"]) == (22, 1),
+      "%d right, %d wrong" % (R["overlap"]["right"], R["overlap"]["wrong"]))
+check("  two marks that touch each other are refused, not split",
+      "MARKER_MERGED" in R["overlap"]["refusals"],
+      "%r" % (R["overlap"]["refusals"],))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % PASSED[0])

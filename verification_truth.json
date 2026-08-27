@@ -146,77 +146,78 @@
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "0:30",
      "value": 89.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "1:00",
      "value": 91.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "1:30",
      "value": 92.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "2:00",
      "value": 94.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "2:30",
      "value": 96.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "3:00",
      "value": 96.5
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "3:30",
      "value": 95.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "4:00",
      "value": 95.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "4:30",
      "value": 96.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "5:00",
      "value": 96.0
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "5:30",
      "value": 96.5
     },
     {
      "panel": "MAP",
-     "series": "NO_FLUID",
+     "series": "NON_FLUID",
      "x": "6:00",
      "value": 98.0
     }
-   ]
+   ],
+   "series_names_note": "NON_FLUID, not NO_FLUID: the names here are the plan's, because the values these are compared with come out of a run of that plan. They were the reader-call's own names while the gallery called the reader directly, and nine of the eighteen cells silently failed to join the moment it started reading the artifact instead."
   }
  ],
  "panel_counts": [
@@ -231,6 +232,234 @@
    "clip": "ID349__fig3.png",
    "axes_counted_by_eye": 5,
    "note": "five outcomes, each one panel; the sixth cell of the grid is the legend"
+  }
+ ],
+ "segmentation_gold_what_this_is": "The boxes, spines and tick ladders the proposer cut on two hash-pinned clips, recorded so a change to them is a failing scenario. The scenarios before this section asserted only the panel COUNT and that every panel read a ladder - and the proposer CHOOSES its segmentation mode by matching the count a person made, so that assertion is not independent of the thing it checks. An earlier harness run had the count and the ladders unchanged while a box moved and took a third bar group out of the panel: exactly the regression a count cannot see.",
+ "segmentation_gold_tolerances": {
+  "boundary_px": 2,
+  "spine_px": 2,
+  "box_iou": 0.98,
+  "why": "the clip is pinned by SHA-256 so the cut is deterministic and exact equality would pass today - but a deliberate improvement to the segmenter should be reviewable as a small residual rather than arriving as a wall of unequal integers. A boundary that moves more than two pixels is a different panel."
+ },
+ "segmentation_gold": [
+  {
+   "figure": "475|Fig. 2",
+   "panels": [
+    {
+     "panel": "P01",
+     "box": [
+      31,
+      403,
+      28,
+      322
+     ],
+     "spine_x": 105,
+     "tick_values": [
+      20.0,
+      10.0,
+      0.0,
+      -10.0,
+      -20.0,
+      -30.0
+     ],
+     "axis_sig": "105:56-302:154"
+    },
+    {
+     "panel": "P02",
+     "box": [
+      533,
+      904,
+      33,
+      322
+     ],
+     "spine_x": 607,
+     "tick_values": [
+      20.0,
+      10.0,
+      0.0,
+      -10.0,
+      -20.0,
+      -30.0
+     ],
+     "axis_sig": "607:58-303:155"
+    },
+    {
+     "panel": "P03",
+     "box": [
+      22,
+      403,
+      332,
+      620
+     ],
+     "spine_x": 105,
+     "tick_values": [
+      300.0,
+      200.0,
+      100.0,
+      0.0,
+      -100.0,
+      -200.0,
+      -300.0
+     ],
+     "axis_sig": "105:355-599:476"
+    },
+    {
+     "panel": "P04",
+     "box": [
+      524,
+      957,
+      332,
+      620
+     ],
+     "spine_x": 607,
+     "tick_values": [
+      300.0,
+      200.0,
+      100.0,
+      -100.0,
+      -200.0,
+      -300.0
+     ],
+     "axis_sig": "607:349-594:472"
+    },
+    {
+     "panel": "P05",
+     "box": [
+      538,
+      904,
+      638,
+      892
+     ],
+     "spine_x": 606,
+     "tick_values": [
+      0.8,
+      0.6,
+      0.4,
+      0.2,
+      0.0,
+      -0.2,
+      -0.4,
+      -0.6,
+      -0.8
+     ],
+     "axis_sig": "606:643-888:765"
+    },
+    {
+     "panel": "P06",
+     "box": [
+      103,
+      402,
+      652,
+      924
+     ],
+     "spine_x": 105,
+     "tick_values": [
+      0.8,
+      0.6,
+      0.4,
+      0.2,
+      0.0,
+      -0.2,
+      -0.4,
+      -0.6,
+      -0.8
+     ],
+     "axis_sig": "105:654-899:786"
+    }
+   ]
+  },
+  {
+   "figure": "349|Figure 3",
+   "panels": [
+    {
+     "panel": "P01",
+     "box": [
+      879,
+      1191,
+      71,
+      340
+     ],
+     "spine_x": 968,
+     "tick_values": [
+      80.0,
+      60.0,
+      40.0,
+      20.0
+     ],
+     "axis_sig": "968:103-311:91"
+    },
+    {
+     "panel": "P02",
+     "box": [
+      483,
+      795,
+      93,
+      340
+     ],
+     "spine_x": 572,
+     "tick_values": [
+      80.0,
+      60.0,
+      40.0,
+      20.0
+     ],
+     "axis_sig": "572:103-311:112"
+    },
+    {
+     "panel": "P03",
+     "box": [
+      91,
+      406,
+      96,
+      340
+     ],
+     "spine_x": 183,
+     "tick_values": [
+      80.0,
+      60.0,
+      40.0,
+      20.0
+     ],
+     "axis_sig": "183:103-311:310"
+    },
+    {
+     "panel": "P04",
+     "box": [
+      483,
+      795,
+      405,
+      710
+     ],
+     "spine_x": 570,
+     "tick_values": [
+      100.0,
+      80.0,
+      60.0,
+      40.0,
+      20.0
+     ],
+     "axis_sig": "570:455-680:420"
+    },
+    {
+     "panel": "P05",
+     "box": [
+      91,
+      406,
+      418,
+      710
+     ],
+     "spine_x": 183,
+     "tick_values": [
+      60.0,
+      50.0,
+      40.0,
+      30.0,
+      20.0,
+      10.0
+     ],
+     "axis_sig": "183:455-680:435"
+    }
+   ]
   }
  ]
 }

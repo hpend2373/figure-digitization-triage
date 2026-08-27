@@ -48,6 +48,18 @@ def truth(figure):
     raise SystemExit("%s carries no readings for %s" % (TRUTH_PATH, figure))
 
 
+def segmentation_gold(figure):
+    """The boxes, spines and ladders a known-good cut produced, and how close
+    a run has to be to them."""
+    import json
+    doc = json.load(open(TRUTH_PATH, encoding="utf-8"))
+    for row in doc.get("segmentation_gold", []):
+        if row["figure"] == figure:
+            return row["panels"], doc["segmentation_gold_tolerances"]
+    raise SystemExit("%s carries no segmentation gold for %s"
+                     % (TRUTH_PATH, figure))
+
+
 def panel_count(figure):
     """The number of axes counted by eye on one corpus figure."""
     import json
@@ -56,6 +68,16 @@ def panel_count(figure):
         if row["figure"] == figure:
             return int(row["axes_counted_by_eye"])
     raise SystemExit("%s carries no panel count for %s" % (TRUTH_PATH, figure))
+
+
+def _box_iou(a, b):
+    """Intersection over union of two (x0, x1, y0, y1) boxes."""
+    ix = max(0, min(a[1], b[1]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[2], b[2]))
+    inter = ix * iy
+    area = ((a[1] - a[0]) * (a[3] - a[2]) + (b[1] - b[0]) * (b[3] - b[2])
+            - inter)
+    return (inter / float(area)) if area else 0.0
 
 
 def zoom(im, crop, scale):
@@ -221,118 +243,222 @@ def bars_397():
                 worst=max(errs) if errs else None, tolerance=TOL)
 
 
-def lines_397():
+def pipeline_run(out_dir=None):
+    """Compile the 397 plan and run it, the way a person does. Returns the dir.
+
+    G2 USED TO READ THE READER'S RETURN VALUE. That catches a reader that writes
+    a method its own ink does not support, and nothing else: a producer that
+    re-stamps a mark after measuring it, a field lost in serialisation, a value
+    joined to the wrong mark, a stale `Method_Attestation_SHA256` - none of them
+    exists in memory. The artifact does, so this runs the pipeline and the panel
+    below is drawn from `raw/<panel>_marks.json` read back off disk.
+    """
+    import subprocess
+    import tempfile
+    root = os.path.dirname(RR.check("397_fig1.jpeg")[0])
+    base = out_dir or tempfile.mkdtemp(prefix="fdt_g2_")
+    man, out = os.path.join(base, "manifests"), os.path.join(base, "out")
+    for argv in ([sys.executable, os.path.join(ROOT, "compile_plan.py"),
+                  os.path.join(ROOT, "plan_397.json"), man,
+                  "--file-root", root, "--date", "2026-08-07"],
+                 [sys.executable, os.path.join(ROOT, "run_batch.py"), man, out,
+                  "--file-root", root, "--date", "2026-08-07"]):
+        r = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit("%s failed:\n%s%s"
+                             % (os.path.basename(argv[1]), r.stdout, r.stderr))
+    return out
+
+
+#: The panel of 397 Figure 1 this gallery draws, as the plan names it.
+G2_PANEL = "P1_MAP_MEN"
+
+#: The artifact schema this gallery can read, taken from the producer rather
+#: than spelled again here.
+import run_batch as _RB_FOR_SCHEMA                                # noqa: E402
+RB_SCHEMA = _RB_FOR_SCHEMA.MARK_DATA_SCHEMA
+
+
+def lines_397(run_dir=None):
+    """397 Fig. 1, drawn from the mark artifact the run WROTE.
+
+    Every number and every tier below comes off `raw/P1_MAP_MEN_marks.json` and
+    `figure_values_raw.csv`, joined by `Mark_Record_SHA256`, with both hashes
+    recomputed from the persisted envelope before anything is believed. What
+    that adds over reading the reader's return value is the producer: a mark
+    re-stamped after measurement, a field lost in serialisation, a value joined
+    to a mark it was not made from, an attestation that no longer covers the
+    methods beside it.
+    """
+    import csv
+    import json
     import mark_readers as MR
-    import line_style_mono as LSM
-    # A PUBLISHER FIGURE, AND THIS REPOSITORY IS PUBLIC.
+    import provenance as PV
+    import run_batch as RB
     path = RR.check("397_fig1.jpeg")[0]
     if not path:
         print(RR.skip_note("397_fig1.jpeg"))
         return {}
-    CAL = MR.AxisCalibration.from_points([(120.0, 76.0), (70.0, 296.0)])
+    out = run_dir or pipeline_run()
+    envelope = json.load(open(os.path.join(out, "raw", "%s_marks.json" % G2_PANEL),
+                              encoding="utf-8"))
+    if envelope.get("schema") != RB.MARK_DATA_SCHEMA:
+        raise SystemExit("%s wrote %s and this gallery reads %s"
+                         % (G2_PANEL, envelope.get("schema"), RB.MARK_DATA_SCHEMA))
+    values = [r for r in csv.DictReader(
+        open(os.path.join(out, "figure_values_raw.csv"), encoding="utf-8"))
+        if r.get("Mark_Record_SHA256")]
+    by_hash = {}
+    for row in values:
+        by_hash.setdefault(row["Mark_Record_SHA256"], []).append(row)
+
     LABELS = ("0:30", "1:00", "1:30", "2:00", "2:30", "3:00",
               "3:30", "4:00", "4:30", "5:00", "5:30", "6:00")
-    XS = (99.5, 132.5, 165.0, 197.5, 230.5, 263.5,
-          296.5, 329.0, 361.5, 394.5, 427.5, 460.0)
-    BOX = (84, 477, 110, 296)
     EYES, TOL, SPAN, UNIT = truth("397|FIG1")
     EYE = {s: tuple(EYES[("MAP", s, lab)] for lab in LABELS)
-           for s in ("FLUID", "NO_FLUID")}
-    rows = LSM.read_monochrome_line_panel(
-        Image.open(path), panel_box=BOX, x_positions=dict(zip(LABELS, XS)),
-        y_calibration=CAL,
-        series=[MR.SeriesSpec("FLUID", line_style="SOLID"),
-                MR.SeriesSpec("NO_FLUID", line_style="DASHED")],
-        threshold=150, x_window=10, search_radius=60)
+           for s in ("FLUID", "NON_FLUID")}
+    CAL = MR.calibration_from_record(envelope["Y_Calibration"])
+    box = tuple(envelope["Panel_Box"])
+
+    got, broken, disagreed = {}, [], []
+    disp_tiers = collections.Counter()
+    for mark in envelope["marks"]:
+        label = str(mark.get("x_label") or "").replace("_", ":")
+        key = (str(mark.get("series")), label)
+        # THE TWO HASHES, RECOMPUTED FROM THE PERSISTED ENVELOPE. A producer
+        # that re-stamped a mark after measuring it agrees with itself; it does
+        # not agree with the bytes it wrote.
+        want_record = RB.mark_record_sha256(
+            {k: v for k, v in mark.items()
+             if k not in ("Mark_Record_SHA256", "Method_Attestation_SHA256")},
+            envelope)
+        want_method = RB.method_attestation_sha256(mark, want_record)
+        if mark.get("Mark_Record_SHA256") != want_record:
+            broken.append((key, "MARK_RECORD_SHA256 does not cover these bytes"))
+            continue
+        if mark.get("Method_Attestation_SHA256") != want_method:
+            broken.append((key, "METHOD_ATTESTATION_SHA256 does not cover these "
+                                "methods"))
+            continue
+        rows = by_hash.get(want_record) or []
+        if len(rows) != 1:
+            broken.append((key, "%d value rows join to this mark" % len(rows)))
+            continue
+        got[key] = (mark, rows[0])
+
     raw = Image.open(path).convert("RGB")
     SC = 3
     im, M = zoom(raw, (60, 500, 60, 320), SC)
     d = ImageDraw.Draw(im)
-    bx0, by0 = M(BOX[0], BOX[2]); bx1, by1 = M(BOX[1], BOX[3])
+    bx0, by0 = M(box[0], box[2])
+    bx1, by1 = M(box[1], box[3])
     d.rectangle([bx0, by0, bx1, by1], outline=AXIS, width=2)
-    for value, row in ((120.0, 76.0), (70.0, 296.0)):
-        _x, ry = M(BOX[0], row)
+    ticks = [(120.0, CAL.value_to_pixel(120.0)), (70.0, CAL.value_to_pixel(70.0))]
+    for value, row in ticks:
+        _x, ry = M(box[0], row)
         d.line([(bx0 - 60, ry), (bx1, ry)], fill=AXIS, width=1)
         chip(d, (bx0 - 66, ry - 12), "%g" % value, AXIS, im.width, size=15)
-    # THE PACKAGE'S OWN PRICE FOR EACH CELL, and not the reader's word for it.
-    # `review_tier` was fed the reader's OWN `Identity_Method` and `Value_Method`,
-    # so the colours were the reader's self-report: a regression that wrote a
-    # cheaper method would have been believed by the picture and by the tier
-    # function alike. The pipeline has a verifier for exactly this -
-    # `expected_line_style_methods` re-derives both from the mark's recorded
-    # evidence, and `evidence_failure` is what run_batch uses to refuse a value
-    # whose methods its own ink does not support. The tier drawn below is the
-    # VERIFIED one, and a cell where the two disagree is drawn as a failure
-    # rather than coloured by either.
-    import provenance as PV
-    CONTEXT = {"Y_Calibration": MR._calibration_record(CAL)}
-    MARK_TYPE = "LINE_MONO_STYLE"
-    got = {(r["series"], r["x_label"]): r for r in rows}
+
+    XS = dict(zip(LABELS, (99.5, 132.5, 165.0, 197.5, 230.5, 263.5,
+                           296.5, 329.0, 361.5, 394.5, 427.5, 460.0)))
     errs, lines = [], []
     tiers = collections.Counter()
-    disagreed = []
     lines.append("%-9s %-5s %7s %7s %6s %-30s %-26s %-5s %s"
                  % ("series", "x", "value", "by eye", "diff",
                     "how it was named (re-derived)",
-                    "where the number came from", "tier", "reader agrees"))
-    for si, s in enumerate(("FLUID", "NO_FLUID")):
-        for lab, x, eye in zip(LABELS, XS, EYE[s]):
-            r = got.get((s, lab))
-            py = 76.0 + (eye - 120.0) * (296.0 - 76.0) / (70.0 - 120.0)
-            cx, cy = M(x, py)
-            if r is None:
+                    "where the number came from", "tier", "artifact agrees"))
+    for si, sname in enumerate(("FLUID", "NON_FLUID")):
+        for lab, eye in zip(LABELS, EYE[sname]):
+            pair = got.get((sname, lab))
+            py = CAL.value_to_pixel(eye)
+            cx, cy = M(XS[lab], py)
+            if pair is None:
                 d.ellipse([cx - 14, cy - 14, cx + 14, cy + 14], outline=BAD, width=4)
-                chip(d, (cx - 34, cy + 18 + 22 * si), "REFUSED", BAD, im.width, size=14)
+                chip(d, (cx - 34, cy + 18 + 22 * si), "NO VALUE", BAD, im.width,
+                     size=14)
                 lines.append("%-9s %-5s %7s %7.1f %6s %-30s %-26s %-5s %s"
-                             % (s, lab, "NONE", eye, "-", "-", "no value emitted",
-                                "-", "-"))
+                             % (sname, lab, "NONE", eye, "-", "-",
+                                "no value emitted", "-", "-"))
                 tiers["NO_VALUE"] += 1
                 continue
-            # RE-DERIVED FROM THE MARK, then compared with what the mark claims.
-            verdict = PV.expected_line_style_methods(r, CONTEXT)
-            claimed = {k: r.get(k, "") for k in
-                       ("Identity_Method", "Value_Method", "Dispersion_Method")}
-            code, detail = PV.evidence_failure(MARK_TYPE, r, claimed, CONTEXT)
+            mark, value_row = pair
+            # RE-DERIVED FROM THE PERSISTED MARK, and compared with what the
+            # persisted VALUE ROW claims - which is the row a finalizer would
+            # price.
+            verdict = PV.expected_line_style_methods(mark, envelope)
+            # TWO COMPARISONS, NOT ONE. Against the MARK's own methods, because
+            # a producer that re-stamped a mark and recomputed its attestation
+            # agrees with itself and with every hash - and its own ink still
+            # does not support what it now says. And mark against VALUE ROW,
+            # because the two are written in different files and only one of
+            # them is what a finalizer prices.
+            #
+            # The first draft compared the evidence with the VALUE ROW alone,
+            # and a mark doctored on disk - Value_Method rewritten,
+            # Method_Attestation_SHA256 recomputed over it - went through with
+            # nothing to say. That is the whole reason for reading the artifact.
+            claimed_mark = {k: mark.get(k, "") for k in
+                            ("Identity_Method", "Value_Method",
+                             "Dispersion_Method")}
+            claimed_value = {k: value_row.get(k, "") for k in
+                             ("Identity_Method", "Value_Method",
+                              "Dispersion_Method")}
+            code, detail = PV.evidence_failure("LINE_MONO_STYLE", mark,
+                                               claimed_mark, envelope)
+            if not code and claimed_mark != claimed_value:
+                code = "MARK_AND_VALUE_DISAGREE"
+                detail = "; ".join(
+                    "%s: the mark says %s and the value row says %s"
+                    % (f, claimed_mark[f] or "nothing",
+                       claimed_value[f] or "nothing")
+                    for f in sorted(claimed_mark)
+                    if claimed_mark[f] != claimed_value[f])
+            claimed = claimed_value
             v_identity = verdict.expected.get("Identity_Method", "")
             v_value = verdict.expected.get("Value_Method", "")
-            tier = PV.review_tier(v_identity, v_value)
-            agrees = not code and tier == PV.review_tier(
-                claimed["Identity_Method"], claimed["Value_Method"])
+            v_disp = verdict.expected.get("Dispersion_Method", "")
+            verified_row = dict(value_row)
+            verified_row.update(Identity_Method=v_identity, Value_Method=v_value,
+                                Dispersion_Method=v_disp)
+            tier = PV.row_tier(verified_row)
+            disp_tiers[PV.dispersion_tier(
+                v_disp, any(str(verified_row.get(f, "") or "").strip()
+                            not in ("", "None")
+                            for f in PV.DISPERSION_VALUE_FIELDS))] += 1
+            agrees = not code and tier == PV.row_tier(value_row)
             if not agrees:
-                disagreed.append((s, lab, code or "TIER_DIFFERS", detail))
+                disagreed.append((sname, lab, code or "TIER_DIFFERS", detail))
             tiers[tier] += 1
             col = BAD if not agrees else TIER_COLOUR.get(tier, BAD)
-            ry = 76.0 + (r["mean"] - 120.0) * (296.0 - 76.0) / (70.0 - 120.0)
-            errs.append(abs(r["mean"] - eye))
-            rx, ryc = M(x, ry)
+            mean = float(value_row["Mean"])
+            errs.append(abs(mean - eye))
+            rx, ryc = M(XS[lab], CAL.value_to_pixel(mean))
             d.line([(rx - 12, ryc), (rx + 12, ryc)], fill=col, width=3)
-            # A CELL THE REVIEW GATE WILL NOT TAKE gets a ring as well as the
-            # colour: it has a number, which is exactly why it needs saying.
             if tier not in PV.FINALIZABLE_TIERS:
-                d.ellipse([rx - 15, ryc - 15, rx + 15, ryc + 15], outline=col, width=3)
+                d.ellipse([rx - 15, ryc - 15, rx + 15, ryc + 15], outline=col,
+                          width=3)
             chip(d, (rx - 26, ryc - 26 if si == 0 else ryc + 8),
-                 "%.1f %s%s" % (r["mean"], tier, "" if agrees else " !"),
-                 col, im.width, size=14)
+                 "%.1f %s%s" % (mean, tier, "" if agrees else " !"), col,
+                 im.width, size=14)
             lines.append("%-9s %-5s %7.1f %7.1f %6.2f %-30s %-26s %-5s %s"
-                         % (s, lab, r["mean"], eye, abs(r["mean"] - eye),
+                         % (sname, lab, mean, eye, abs(mean - eye),
                             v_identity or "?", v_value or "?", tier,
                             "yes" if agrees else (code or "tier differs")))
-    # COUNTED, NOT WRITTEN DOWN. `24` and `50 mmHg` were literals here: a
-    # reader that stopped emitting a cell would have printed "24 of 24" and a
-    # recalibration would have printed the old span.
+
     declared = len(EYES)
-    span = SPAN
     eligible = sum(n for t, n in tiers.items() if t in PV.FINALIZABLE_TIERS)
     blocked = sum(n for t, n in tiers.items()
                   if t not in PV.FINALIZABLE_TIERS and t != "NO_VALUE")
-    # NOT "READ" AND NOT "FINALIZABLE". Seven of these carry
-    # NONLOCAL_INTERPOLATION or EXTRAPOLATED_CURVE_INK - a number was EMITTED,
-    # and calling it "read" says the ink was there. And the eleven that clear the
-    # method gate are not finalizable either: this publication does not say
-    # whether its error bars are SD or SEM, so `pilot_397` ends every run with
-    # Values_Accepted=0 and no reader can fix that. What the method tier decides
-    # is ELIGIBILITY, one gate of several.
+    stamp = json.load(open(os.path.join(out, "run_stamp.json"), encoding="utf-8"))
     lines += ["",
+              "read back from      %s" % os.path.join("raw",
+                                                      "%s_marks.json" % G2_PANEL),
+              "schema              %s" % envelope["schema"],
+              "marks persisted     %d, both hashes recomputed from these bytes"
+              % len(envelope["marks"]),
+              "joined to values    %d by Mark_Record_SHA256, %d broken"
+              % (len(got), len(broken)),
+              "",
               "declared cells               %d" % declared,
               "values emitted               %d" % len(errs),
               "no value emitted             %d, where the two curves are one run"
@@ -340,38 +466,48 @@ def lines_397():
               "method-eligible (R0-R3)      %d" % eligible,
               "method-blocked estimates     %d, R4: a number exists and the "
               "method gate refuses it" % blocked,
-              "accepted by the pipeline     0 — 397 does not say whether its "
-              "error bars are SD or SEM",
+              "accepted by this run         %s — 397 does not say whether its "
+              "error bars are SD or SEM" % stamp.get("Values_Accepted"),
+              "dispersion axis, on its own  " + "  ".join(
+                  "%s %d" % (t, disp_tiers[t]) for t in PV.TIERS if disp_tiers[t]),
               "by verified tier             " + "  ".join(
                   "%s %d" % (t, tiers[t]) for t in PV.TIERS if tiers[t]),
-              "reader's methods re-derived  %d of %d agree"
+              "artifact's methods re-derived %d of %d agree"
               % (len(errs) - len(disagreed), len(errs)),
               "worst vs eye                 %.2f %s on a %g %s axis, tolerance %g"
-              % (max(errs), UNIT, span, UNIT, TOL)]
+              % (max(errs), UNIT, SPAN, UNIT, TOL)]
+    if broken:
+        lines += ["", "THE ARTIFACT DOES NOT HOLD TOGETHER:"]
+        lines += ["  %s %s  %s" % (k[0], k[1], why) for k, why in broken]
     if disagreed:
         lines += ["", "THE MARK'S EVIDENCE DOES NOT SUPPORT ITS OWN METHODS:"]
-        lines += ["  %s %s  %s  %s" % (a, b, c, d[:70]) for a, b, c, d in disagreed]
+        lines += ["  %s %s  %s  %s" % (a, b, c, e[:70]) for a, b, c, e in disagreed]
     lines += ["",
               "값이 없는 칸은 빨간 원. 고리를 두른 칸은 숫자는 있으나 R4로 방법"
-              " 게이트가 거절한다. 등급은 reader의 자기 신고가 아니라 mark 증거에서"
-              " 다시 유도한 것이다."]
+              " 게이트가 거절한다. 등급은 reader 의 자기 신고가 아니라 디스크에"
+              " 기록된 mark 증거에서 다시 유도한 것이다."]
     keys = [(TIER_COLOUR[t], "%s  %d cell(s)%s"
              % (t, tiers[t], "" if t in PV.FINALIZABLE_TIERS else " — method-blocked"),
              False) for t in PV.TIERS if tiers[t]]
-    im = capt.below(im, "397 Fig. 1: 겹친 두 곡선 — 방출된 값과 증거에서 다시 유도한 등급",
+    im = capt.below(im, "397 Fig. 1: 기록된 mark artifact 에서 되읽은 값과 등급",
                     lines,
-                    keys=keys + [(BAD, "no value emitted, or evidence disagrees",
-                                  False),
+                    keys=keys + [(BAD, "no value emitted, or the artifact "
+                                       "disagrees", False),
                                  (AXIS, "calibration ticks", False)])
-    out = os.path.join(HERE, "G2_read_397fig1.png")
-    im.save(out)
-    return dict(out=out, declared=declared, emitted=len(errs),
+    out_png = os.path.join(HERE, "G2_read_397fig1.png")
+    im.save(out_png)
+    return dict(out=out_png, declared=declared, emitted=len(errs),
                 eligible=eligible, blocked=blocked, disagreed=disagreed,
+                broken=broken, joined=len(got),
+                persisted=len(envelope["marks"]), schema=envelope["schema"],
+                accepted=int(stamp.get("Values_Accepted") or 0),
+                read_values=int(stamp.get("Values_Read") or 0),
+                qc_passed=int(stamp.get("Values_Machine_QC_Passed") or 0),
                 no_value=sorted(k for k in
-                               ((s, lab) for s in ("FLUID", "NO_FLUID")
-                                for lab in LABELS) if k not in
-                               {(r["series"], r["x_label"]) for r in rows}),
-                tiers=dict(tiers), worst=max(errs), tolerance=TOL)
+                                ((s, lab) for s in ("FLUID", "NON_FLUID")
+                                 for lab in LABELS) if k not in got),
+                tiers=dict(tiers), dispersion_tiers=dict(disp_tiers),
+                worst=max(errs), tolerance=TOL)
 
 
 def segmentation(props, pid, fig, out, title):
@@ -421,12 +557,55 @@ def segmentation(props, pid, fig, out, title):
     lines += ["",
               "panels found %d   ladders read %d   declared axes %s"
               % (len(rows), nok, rows[0].get("declared_axes") or "?")]
+    # AND AGAINST THE CUT A KNOWN-GOOD RUN MADE. The count is not an independent
+    # check: the proposer picks its segmentation mode BY matching the count a
+    # person made. A box can move, keep the count and the ladder, and take a bar
+    # group out of the panel with it - which is what happened once.
+    gold, tol = segmentation_gold("%s|%s" % (pid, fig))
+    by_name = {r["panel"]: r for r in rows}
+    drift, geometry = [], []
+    for want in gold:
+        got = by_name.get(want["panel"])
+        if got is None:
+            drift.append("%s: the run cut no such panel" % want["panel"])
+            continue
+        box = [int(got["x0"]), int(got["x1"]), int(got["y0"]), int(got["y1"])]
+        edges = [abs(a - b) for a, b in zip(box, want["box"])]
+        spine = abs(int(float(got["spine_x"])) - int(want["spine_x"]))
+        ticks = [float(t.split(":")[0]) for t in got["ticks"].split(";") if t]
+        iou = _box_iou(box, want["box"])
+        geometry.append(dict(panel=want["panel"], worst_edge=max(edges),
+                             spine=spine, iou=iou))
+        if max(edges) > tol["boundary_px"]:
+            drift.append("%s: a boundary moved %d px (%r vs %r)"
+                         % (want["panel"], max(edges), box, want["box"]))
+        if spine > tol["spine_px"]:
+            drift.append("%s: the spine moved %d px" % (want["panel"], spine))
+        if iou < tol["box_iou"]:
+            drift.append("%s: box IoU %.4f" % (want["panel"], iou))
+        if ticks != [float(v) for v in want["tick_values"]]:
+            drift.append("%s: the ladder reads %r and the gold says %r"
+                         % (want["panel"], ticks, want["tick_values"]))
+    foreign = sorted(set(by_name) - {w["panel"] for w in gold})
+    if foreign:
+        drift.append("the run cut panels the gold does not name: %s"
+                     % ", ".join(foreign))
+    lines += ["",
+              "against the recorded cut: %d panel(s), worst boundary %s px, "
+              "worst spine %s px, lowest IoU %s"
+              % (len(gold),
+                 max([g["worst_edge"] for g in geometry] or [0]),
+                 max([g["spine"] for g in geometry] or [0]),
+                 "%.4f" % min([g["iou"] for g in geometry] or [1.0]))]
+    if drift:
+        lines += ["THE CUT MOVED:"] + ["  " + d for d in drift]
     im = capt.below(im, title, lines,
                     keys=[(OK, "ladder read", False), (BAD, "no ladder", False),
                           (AXIS, "the spine it found", False),
                           (EYEC, "each numeral it read, at its row", False)])
     im.save(out)
     return dict(out=out, panels=len(rows), ladders=nok,
+                drift=drift, geometry=geometry,
                 declared_axes=int(rows[0].get("declared_axes") or 0),
                 counted_by_eye=panel_count("%s|%s" % (pid, fig)),
                 statuses=sorted({r["status"] for r in rows}))

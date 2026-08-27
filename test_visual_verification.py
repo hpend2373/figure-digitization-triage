@@ -55,7 +55,7 @@ def done():
 
 
 #: The truth file this suite was written against.
-TRUTH_SHA256 = "2424e511e5d2e21701e07b7ce212ca2dded51d0747355e0a6c048235ccbf3fbc"
+TRUTH_SHA256 = "2e4f82709675ff1f3951d6d405dd84e9a9932c8e0bc1e6e61f866374e24eae5b"
 
 import verify as V                                                # noqa: E402
 
@@ -182,8 +182,21 @@ check("  and every error bar was confirmed by its own stem",
       "%d of %d" % (G1["stem_confirmed"], G1["cells"]))
 
 print()
-print("397 Fig. 1, two overlapping curves: what was emitted, and how far it goes")
-G2 = V.lines_397()
+print("397 Fig. 1, read back from the mark artifact the run wrote")
+_RUN = V.pipeline_run()
+G2 = V.lines_397(_RUN)
+# THE PRODUCER IS IN THE CHAIN NOW. Reading the reader's return value catches a
+# reader that writes a method its own ink does not support and nothing else: a
+# mark re-stamped after measurement, a field lost in serialisation, a value
+# joined to a mark it was not made from, a stale attestation - none of those
+# exists in memory.
+check("the panel's marks were read back from %s" % V.RB_SCHEMA,
+      G2["schema"] == V.RB_SCHEMA, "%r" % (G2["schema"],))
+check("  and both hashes recompute from the bytes on disk",
+      G2["broken"] == [], "%r" % (G2["broken"][:3],))
+check("  and every persisted mark joins to exactly one value row",
+      G2["joined"] == G2["persisted"] == 18,
+      "%d joined, %d persisted" % (G2["joined"], G2["persisted"]))
 # EMITTED, NOT READ. Seven of these eighteen carry NONLOCAL_INTERPOLATION or
 # EXTRAPOLATED_CURVE_INK: a number left the reader and the ink at that x did
 # not produce it. "Read" is a claim about the figure; "emitted" is a fact about
@@ -196,8 +209,8 @@ check("18 of the 24 declared cells emitted a value",
 # guessing which curve it had.
 check("  and the six with no value are exactly the cells where the curves merge",
       G2["no_value"] == [("FLUID", "4:30"), ("FLUID", "5:00"), ("FLUID", "6:00"),
-                         ("NO_FLUID", "4:30"), ("NO_FLUID", "5:00"),
-                         ("NO_FLUID", "6:00")],
+                         ("NON_FLUID", "4:30"), ("NON_FLUID", "5:00"),
+                         ("NON_FLUID", "6:00")],
       "%r" % (G2["no_value"],))
 check("  the provenance mix is the one this figure produces",
       G2["tiers"] == {"R0": 2, "R1": 9, "R4": 7, "NO_VALUE": 6},
@@ -206,6 +219,17 @@ check("  the provenance mix is the one this figure produces",
 # This publication does not say whether its error bars are SD or SEM, so nothing
 # on it is ever accepted - which the scenario below measures rather than asserts
 # from this comment.
+# AND THE THIRD AXIS IS PRICED, not dropped. The tiers above come from
+# `provenance.row_tier`, which is the row-shaped question - identity, value AND
+# dispersion - and not from `review_tier`, which prices the MEAN alone. The
+# gallery used the latter, so a cell whose SPREAD was reconstructed would have
+# shown the tier of one whose spread was read. Every cell this reader emits is
+# R0 on that axis today; pinning the distribution is what makes the first
+# UNSTEMMED_CAP or RESTORED_MASKED_CAP arrive as a failing scenario rather than
+# as a quiet change to a mixed number.
+check("  the dispersion axis is priced too, and is R0 on all eighteen",
+      G2["dispersion_tiers"] == {"R0": 18},
+      "%r" % (G2["dispersion_tiers"],))
 check("  eleven clear the method gate (R0-R3) and seven are R4 estimates",
       (G2["eligible"], G2["blocked"]) == (11, 7),
       "%d eligible, %d blocked" % (G2["eligible"], G2["blocked"]))
@@ -215,33 +239,20 @@ check("  eleven clear the method gate (R0-R3) and seven are R4 estimates",
 # claims, which is what `run_batch` does before it will keep a value. A
 # regression that wrote a cheaper method would otherwise be believed by the
 # picture and by `review_tier` alike.
-check("  and every mark's own evidence re-derives the methods it claims",
+check("  and the persisted mark's evidence re-derives the methods beside it",
       G2["disagreed"] == [], "%r" % (G2["disagreed"],))
 check("  every cell that emitted a value agrees with the eye inside the tolerance",
       G2["worst"] <= G2["tolerance"],
       "worst %.2f > %.2f" % (G2["worst"], G2["tolerance"]))
 
-# WHERE THESE NUMBERS ACTUALLY STOP. Neither figure contributes an accepted
-# value, and no method tier says so: 397's dispersion definition is unresolved,
-# so machine QC passes nothing and the finalizer has nothing to accept. Measured
-# by running the worked example, because a gallery that implied eleven usable
-# numbers would be overstating the same way "read" did.
-import json as _json                                              # noqa: E402
-import subprocess as _sp                                          # noqa: E402
-import tempfile as _tf                                            # noqa: E402
-_pdir = os.path.join(_tf.mkdtemp(prefix="fdt_vv_pilot_"), "out")
-_p = _sp.run([sys.executable, os.path.join(HERE, "pilot_397.py"), _pdir],
-             capture_output=True, text=True)
-_stamp = (_json.load(open(os.path.join(_pdir, "run_stamp.json"), encoding="utf-8"))
-          if os.path.exists(os.path.join(_pdir, "run_stamp.json")) else {})
-check("  and the pipeline accepts none of them, on either figure",
-      _p.returncode == 0 and _stamp.get("Values_Read", 0) > 0
-      and _stamp.get("Values_Machine_QC_Passed", -1) == 0
-      and _stamp.get("Values_Accepted", -1) == 0,
-      "exit %d, %r" % (_p.returncode,
-                       {k: _stamp.get(k) for k in
-                        ("Values_Read", "Values_Machine_QC_Passed",
-                         "Values_Accepted")}))
+# WHERE THESE NUMBERS ACTUALLY STOP - off the same run's stamp, not off a
+# second one. 397 does not say whether its error bars are SD or SEM, so machine
+# QC passes nothing and the finalizer has nothing to accept. A gallery that
+# implied eleven usable numbers would be overstating the same way "read" did.
+check("  and the run that produced them accepted none, on either figure",
+      G2["read_values"] > 0 and G2["qc_passed"] == 0 and G2["accepted"] == 0,
+      "read %d, qc %d, accepted %d"
+      % (G2["read_values"], G2["qc_passed"], G2["accepted"]))
 
 print()
 print("the segmentation half: panels found, and the ladder each one read")
@@ -266,6 +277,15 @@ if True:
         check("  and every one of them read a validated tick ladder",
               _r["ladders"] == _r["panels"] and _r["statuses"] == ["LADDER_OK"],
               "%d ladders, statuses %r" % (_r["ladders"], _r["statuses"]))
+        # AND THE CUT IS THE CUT. The two scenarios above are not independent of
+        # each other or of the proposer: it CHOOSES its segmentation mode by
+        # matching the panel count a person made, so a count that agrees is
+        # partly a fit. A box can move, keep the count and keep the ladder, and
+        # take a bar group out of the panel with it - which is what happened
+        # once. This is boundary, spine, IoU and tick values against a recorded
+        # good cut, and the residuals are printed on the picture.
+        check("  and every box, spine and ladder is where the recorded cut put it",
+              not _r["drift"], "%s" % "; ".join(_r["drift"][:3]))
 
 print()
 print("464 Fig. 2: a real four-series monochrome scatter")

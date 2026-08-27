@@ -196,7 +196,15 @@ def bars_397():
               % ("-" if not errs else
                  "%.2f %s on a %g %s axis, tolerance %g"
                  % (max(errs), UNIT, SPAN, UNIT, TOL)),
-              "error bars stem-confirmed %d of %d" % (stems, total)]
+              "error bars stem-confirmed %d of %d" % (stems, total),
+              # AND WHERE THEY STOP. Eight bars agreeing with the eye is not
+              # eight usable numbers: this publication does not say whether its
+              # error bars are SD or SEM, so machine QC passes nothing on it and
+              # the finalizer has nothing to accept. `test_visual_verification`
+              # measures that by running the worked example rather than taking
+              # this line's word for it.
+              "accepted by the pipeline  0 — 397 does not say whether its error "
+              "bars are SD or SEM, and no reader can fix that"]
     im = capt.below(im, "397 Fig. 3: released BAR_MONO 2-pass — 읽은 값과 눈으로 읽은 값",
                     lines, keys=[(OK, "read, and named by the figure's fills", False),
                                  (BAD, "measured but not named", False),
@@ -246,16 +254,27 @@ def lines_397():
         _x, ry = M(BOX[0], row)
         d.line([(bx0 - 60, ry), (bx1, ry)], fill=AXIS, width=1)
         chip(d, (bx0 - 66, ry - 12), "%g" % value, AXIS, im.width, size=15)
-    # THE PACKAGE'S OWN PRICE FOR EACH CELL. Every colour and every count below
-    # comes from `provenance.review_tier`; this file decides nothing about what a
-    # method is worth.
+    # THE PACKAGE'S OWN PRICE FOR EACH CELL, and not the reader's word for it.
+    # `review_tier` was fed the reader's OWN `Identity_Method` and `Value_Method`,
+    # so the colours were the reader's self-report: a regression that wrote a
+    # cheaper method would have been believed by the picture and by the tier
+    # function alike. The pipeline has a verifier for exactly this -
+    # `expected_line_style_methods` re-derives both from the mark's recorded
+    # evidence, and `evidence_failure` is what run_batch uses to refuse a value
+    # whose methods its own ink does not support. The tier drawn below is the
+    # VERIFIED one, and a cell where the two disagree is drawn as a failure
+    # rather than coloured by either.
     import provenance as PV
+    CONTEXT = {"Y_Calibration": MR._calibration_record(CAL)}
+    MARK_TYPE = "LINE_MONO_STYLE"
     got = {(r["series"], r["x_label"]): r for r in rows}
     errs, lines = [], []
     tiers = collections.Counter()
-    lines.append("%-9s %-5s %7s %7s %6s %-30s %-26s %s"
-                 % ("series", "x", "read", "by eye", "diff",
-                    "how it was named", "where the number came from", "tier"))
+    disagreed = []
+    lines.append("%-9s %-5s %7s %7s %6s %-30s %-26s %-5s %s"
+                 % ("series", "x", "value", "by eye", "diff",
+                    "how it was named (re-derived)",
+                    "where the number came from", "tier", "reader agrees"))
     for si, s in enumerate(("FLUID", "NO_FLUID")):
         for lab, x, eye in zip(LABELS, XS, EYE[s]):
             r = got.get((s, lab))
@@ -264,13 +283,25 @@ def lines_397():
             if r is None:
                 d.ellipse([cx - 14, cy - 14, cx + 14, cy + 14], outline=BAD, width=4)
                 chip(d, (cx - 34, cy + 18 + 22 * si), "REFUSED", BAD, im.width, size=14)
-                lines.append("%-9s %-5s %7s %7.1f %6s %-30s %-26s %s"
-                             % (s, lab, "REFUSED", eye, "-", "-", "no cell emitted", "-"))
-                tiers["REFUSED"] += 1
+                lines.append("%-9s %-5s %7s %7.1f %6s %-30s %-26s %-5s %s"
+                             % (s, lab, "NONE", eye, "-", "-", "no value emitted",
+                                "-", "-"))
+                tiers["NO_VALUE"] += 1
                 continue
-            tier = PV.review_tier(r["Identity_Method"], r["Value_Method"])
+            # RE-DERIVED FROM THE MARK, then compared with what the mark claims.
+            verdict = PV.expected_line_style_methods(r, CONTEXT)
+            claimed = {k: r.get(k, "") for k in
+                       ("Identity_Method", "Value_Method", "Dispersion_Method")}
+            code, detail = PV.evidence_failure(MARK_TYPE, r, claimed, CONTEXT)
+            v_identity = verdict.expected.get("Identity_Method", "")
+            v_value = verdict.expected.get("Value_Method", "")
+            tier = PV.review_tier(v_identity, v_value)
+            agrees = not code and tier == PV.review_tier(
+                claimed["Identity_Method"], claimed["Value_Method"])
+            if not agrees:
+                disagreed.append((s, lab, code or "TIER_DIFFERS", detail))
             tiers[tier] += 1
-            col = TIER_COLOUR.get(tier, BAD)
+            col = BAD if not agrees else TIER_COLOUR.get(tier, BAD)
             ry = 76.0 + (r["mean"] - 120.0) * (296.0 - 76.0) / (70.0 - 120.0)
             errs.append(abs(r["mean"] - eye))
             rx, ryc = M(x, ry)
@@ -280,44 +311,67 @@ def lines_397():
             if tier not in PV.FINALIZABLE_TIERS:
                 d.ellipse([rx - 15, ryc - 15, rx + 15, ryc + 15], outline=col, width=3)
             chip(d, (rx - 26, ryc - 26 if si == 0 else ryc + 8),
-                 "%.1f %s" % (r["mean"], tier), col, im.width, size=14)
-            lines.append("%-9s %-5s %7.1f %7.1f %6.2f %-30s %-26s %s"
+                 "%.1f %s%s" % (r["mean"], tier, "" if agrees else " !"),
+                 col, im.width, size=14)
+            lines.append("%-9s %-5s %7.1f %7.1f %6.2f %-30s %-26s %-5s %s"
                          % (s, lab, r["mean"], eye, abs(r["mean"] - eye),
-                            r["Identity_Method"], r["Value_Method"], tier))
+                            v_identity or "?", v_value or "?", tier,
+                            "yes" if agrees else (code or "tier differs")))
     # COUNTED, NOT WRITTEN DOWN. `24` and `50 mmHg` were literals here: a
     # reader that stopped emitting a cell would have printed "24 of 24" and a
     # recalibration would have printed the old span.
     declared = len(EYES)
     span = SPAN
-    finalizable = sum(n for t, n in tiers.items() if t in PV.FINALIZABLE_TIERS)
+    eligible = sum(n for t, n in tiers.items() if t in PV.FINALIZABLE_TIERS)
+    blocked = sum(n for t, n in tiers.items()
+                  if t not in PV.FINALIZABLE_TIERS and t != "NO_VALUE")
+    # NOT "READ" AND NOT "FINALIZABLE". Seven of these carry
+    # NONLOCAL_INTERPOLATION or EXTRAPOLATED_CURVE_INK - a number was EMITTED,
+    # and calling it "read" says the ink was there. And the eleven that clear the
+    # method gate are not finalizable either: this publication does not say
+    # whether its error bars are SD or SEM, so `pilot_397` ends every run with
+    # Values_Accepted=0 and no reader can fix that. What the method tier decides
+    # is ELIGIBILITY, one gate of several.
     lines += ["",
-              "cells read     %d of %d, %d REFUSED where the two curves are one"
-              " run of ink" % (len(errs), declared, declared - len(errs)),
-              "worst vs eye   %.2f %s on a %g %s axis, tolerance %g"
-              % (max(errs), UNIT, span, UNIT, TOL),
-              "by review tier " + "  ".join(
+              "declared cells               %d" % declared,
+              "values emitted               %d" % len(errs),
+              "no value emitted             %d, where the two curves are one run"
+              " of ink" % (declared - len(errs)),
+              "method-eligible (R0-R3)      %d" % eligible,
+              "method-blocked estimates     %d, R4: a number exists and the "
+              "method gate refuses it" % blocked,
+              "accepted by the pipeline     0 — 397 does not say whether its "
+              "error bars are SD or SEM",
+              "by verified tier             " + "  ".join(
                   "%s %d" % (t, tiers[t]) for t in PV.TIERS if tiers[t]),
-              "finalizable    %d of the %d read; %d carry a number the review "
-              "gate will not take" % (finalizable, len(errs),
-                                      len(errs) - finalizable),
-              "",
-              "거절한 칸은 빨간 원 — 숫자가 없다. 고리를 두른 칸은 숫자는 있지만"
-              " R4라서 확정 대상이 아니다."]
+              "reader's methods re-derived  %d of %d agree"
+              % (len(errs) - len(disagreed), len(errs)),
+              "worst vs eye                 %.2f %s on a %g %s axis, tolerance %g"
+              % (max(errs), UNIT, span, UNIT, TOL)]
+    if disagreed:
+        lines += ["", "THE MARK'S EVIDENCE DOES NOT SUPPORT ITS OWN METHODS:"]
+        lines += ["  %s %s  %s  %s" % (a, b, c, d[:70]) for a, b, c, d in disagreed]
+    lines += ["",
+              "값이 없는 칸은 빨간 원. 고리를 두른 칸은 숫자는 있으나 R4로 방법"
+              " 게이트가 거절한다. 등급은 reader의 자기 신고가 아니라 mark 증거에서"
+              " 다시 유도한 것이다."]
     keys = [(TIER_COLOUR[t], "%s  %d cell(s)%s"
-             % (t, tiers[t], "" if t in PV.FINALIZABLE_TIERS else " — not finalizable"),
+             % (t, tiers[t], "" if t in PV.FINALIZABLE_TIERS else " — method-blocked"),
              False) for t in PV.TIERS if tiers[t]]
-    im = capt.below(im, "397 Fig. 1: 겹친 두 곡선 — 읽은 값과 그 값이 받은 등급", lines,
-                    keys=keys + [(BAD, "REFUSED, no cell", False),
+    im = capt.below(im, "397 Fig. 1: 겹친 두 곡선 — 방출된 값과 증거에서 다시 유도한 등급",
+                    lines,
+                    keys=keys + [(BAD, "no value emitted, or evidence disagrees",
+                                  False),
                                  (AXIS, "calibration ticks", False)])
     out = os.path.join(HERE, "G2_read_397fig1.png")
     im.save(out)
-    return dict(out=out, declared=declared, read=len(errs),
-                refused=sorted(k for k in
+    return dict(out=out, declared=declared, emitted=len(errs),
+                eligible=eligible, blocked=blocked, disagreed=disagreed,
+                no_value=sorted(k for k in
                                ((s, lab) for s in ("FLUID", "NO_FLUID")
                                 for lab in LABELS) if k not in
                                {(r["series"], r["x_label"]) for r in rows}),
-                tiers=dict(tiers), finalizable=finalizable,
-                worst=max(errs), tolerance=TOL)
+                tiers=dict(tiers), worst=max(errs), tolerance=TOL)
 
 
 def segmentation(props, pid, fig, out, title):

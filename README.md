@@ -21,7 +21,7 @@ present and hashes differently is REFUSED rather than measured, because
 coordinates taken on one render return a plausible number on another.
 
 The scenario counts below are what a **clone of this repository** runs, and a
-further 261 need the figures. CI fetches them from a private source when
+further 263 need the figures. CI fetches them from a private source when
 `FDT_RASTER_SOURCE` and `FDT_RASTER_TOKEN` are set on the repository, and passes
 `--rasters present` to the documentation guard only in a job that actually
 fetched them — so a fork with no secret is green at its own total rather than
@@ -114,7 +114,7 @@ Every test file is a standalone script:
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
 <!-- CURRENT_SCENARIO_COUNT_CORE: 3211 -->
 <!-- CURRENT_SCENARIO_COUNT_FULL: 3252 -->
-<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 261 -->
+<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 263 -->
 
 3211 scenarios on main after v9.15 under `requirements-lock.txt`, and 3252 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
@@ -127,15 +127,15 @@ starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
 count that depends on what `ubuntu-latest` happens to ship is not a property of
 this repository.
 
-Those two numbers are what a **fresh clone** runs. A further 261 of them need
+Those two numbers are what a **fresh clone** runs. A further 263 of them need
 the publisher figures, which this repository does not carry and cannot: they are
 not redistributable. `test_bar_reader` (24), `test_integration` (17),
 `test_compile_plan` (197), `test_reproducibility` (5) and
-`test_visual_verification` (18) skip those sections
+`test_visual_verification` (20) skip those sections
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
-3472 and 3513. Every raster is pinned there by SHA-256, so a file that is not
+3474 and 3515. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
 no secret is green at 3211/3252 rather than red for a reason it cannot fix.

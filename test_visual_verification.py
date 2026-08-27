@@ -141,30 +141,66 @@ check("  and every error bar was confirmed by its own stem",
       "%d of %d" % (G1["stem_confirmed"], G1["cells"]))
 
 print()
-print("397 Fig. 1, two overlapping curves: what was read, and what it is worth")
+print("397 Fig. 1, two overlapping curves: what was emitted, and how far it goes")
 G2 = V.lines_397()
-check("18 of the 24 declared cells were read",
-      (G2["read"], G2["declared"]) == (18, 24),
-      "%d of %d" % (G2["read"], G2["declared"]))
+# EMITTED, NOT READ. Seven of these eighteen carry NONLOCAL_INTERPOLATION or
+# EXTRAPOLATED_CURVE_INK: a number left the reader and the ink at that x did
+# not produce it. "Read" is a claim about the figure; "emitted" is a fact about
+# the run, and only the second one is this suite's to assert.
+check("18 of the 24 declared cells emitted a value",
+      (G2["emitted"], G2["declared"]) == (18, 24),
+      "%d of %d" % (G2["emitted"], G2["declared"]))
 # THE SIX ARE NOT AN ARBITRARY SIX. They are where the solid and dashed curves
 # are one run of ink, and a reader that started answering there would be
 # guessing which curve it had.
-check("  and the six it refused are exactly the cells where the curves merge",
-      G2["refused"] == [("FLUID", "4:30"), ("FLUID", "5:00"), ("FLUID", "6:00"),
-                        ("NO_FLUID", "4:30"), ("NO_FLUID", "5:00"),
-                        ("NO_FLUID", "6:00")],
-      "%r" % (G2["refused"],))
+check("  and the six with no value are exactly the cells where the curves merge",
+      G2["no_value"] == [("FLUID", "4:30"), ("FLUID", "5:00"), ("FLUID", "6:00"),
+                         ("NO_FLUID", "4:30"), ("NO_FLUID", "5:00"),
+                         ("NO_FLUID", "6:00")],
+      "%r" % (G2["no_value"],))
 check("  the provenance mix is the one this figure produces",
-      G2["tiers"] == {"R0": 2, "R1": 9, "R4": 7, "REFUSED": 6},
+      G2["tiers"] == {"R0": 2, "R1": 9, "R4": 7, "NO_VALUE": 6},
       "%r" % (G2["tiers"],))
-# ELEVEN, NOT EIGHTEEN. The gallery painted all eighteen the same green for a
-# round, which read as eighteen usable numbers.
-check("  so eleven of the eighteen are finalizable and seven are not",
-      G2["finalizable"] == 11,
-      "%d finalizable" % G2["finalizable"])
-check("  every cell it did read agrees with the eye inside the tolerance",
+# ELEVEN METHOD-ELIGIBLE, NOT ELEVEN FINALIZABLE. The method tier is ONE gate.
+# This publication does not say whether its error bars are SD or SEM, so nothing
+# on it is ever accepted - which the scenario below measures rather than asserts
+# from this comment.
+check("  eleven clear the method gate (R0-R3) and seven are R4 estimates",
+      (G2["eligible"], G2["blocked"]) == (11, 7),
+      "%d eligible, %d blocked" % (G2["eligible"], G2["blocked"]))
+# AND THE TIERS ARE NOT THE READER'S WORD FOR IT. `png/verify.py` re-derives
+# both methods from each mark's own recorded evidence through
+# `provenance.expected_line_style_methods` and compares them with what the mark
+# claims, which is what `run_batch` does before it will keep a value. A
+# regression that wrote a cheaper method would otherwise be believed by the
+# picture and by `review_tier` alike.
+check("  and every mark's own evidence re-derives the methods it claims",
+      G2["disagreed"] == [], "%r" % (G2["disagreed"],))
+check("  every cell that emitted a value agrees with the eye inside the tolerance",
       G2["worst"] <= G2["tolerance"],
       "worst %.2f > %.2f" % (G2["worst"], G2["tolerance"]))
+
+# WHERE THESE NUMBERS ACTUALLY STOP. Neither figure contributes an accepted
+# value, and no method tier says so: 397's dispersion definition is unresolved,
+# so machine QC passes nothing and the finalizer has nothing to accept. Measured
+# by running the worked example, because a gallery that implied eleven usable
+# numbers would be overstating the same way "read" did.
+import json as _json                                              # noqa: E402
+import subprocess as _sp                                          # noqa: E402
+import tempfile as _tf                                            # noqa: E402
+_pdir = os.path.join(_tf.mkdtemp(prefix="fdt_vv_pilot_"), "out")
+_p = _sp.run([sys.executable, os.path.join(HERE, "pilot_397.py"), _pdir],
+             capture_output=True, text=True)
+_stamp = (_json.load(open(os.path.join(_pdir, "run_stamp.json"), encoding="utf-8"))
+          if os.path.exists(os.path.join(_pdir, "run_stamp.json")) else {})
+check("  and the pipeline accepts none of them, on either figure",
+      _p.returncode == 0 and _stamp.get("Values_Read", 0) > 0
+      and _stamp.get("Values_Machine_QC_Passed", -1) == 0
+      and _stamp.get("Values_Accepted", -1) == 0,
+      "exit %d, %r" % (_p.returncode,
+                       {k: _stamp.get(k) for k in
+                        ("Values_Read", "Values_Machine_QC_Passed",
+                         "Values_Accepted")}))
 
 print()
 print("the segmentation half: panels found, and the ladder each one read")

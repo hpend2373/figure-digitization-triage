@@ -9951,6 +9951,18 @@ rule, and it is the lock that guards the hazard.
 `test_mutate.py` holds the three failures as scenarios, including a kill mid-run
 that must leave the tree clean and the lock gone.
 
+### The count that CI caught
+
+`74e6b44` went red on the one check that exists for exactly this: README claimed
+3435 core scenarios and the core profile ran 3432. `test_tick_ocr` has three
+scenarios that read real glyphs, and the `core` job strips the Python backends -
+so they skip there and run in `intake-full`, which is the same shape as
+`test_corpus_intake`'s PDF sections and is now said out loud in the README
+sentence rather than left to be rediscovered.
+
+The local suite was green when the round was pushed, which is precisely why the
+check is not a local one.
+
 ## Still open
 
 - THE DUTY WINDOW IS A PIXEL CONSTANT AND A DASH PERIOD IS NOT. `fit_half=22`

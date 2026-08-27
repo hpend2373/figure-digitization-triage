@@ -136,6 +136,66 @@ check("  and the printed statistics are marks until the panel declares them",
               for n in sorted(_R)})
 
 print()
+print("the twin-axis four-series fixture: a capability this package does not have")
+G7 = V.twin_scatter_fixtures()
+_T = G7["by_name"]
+_SIZED = [n for n in _T if n != "micro"]
+# THE DRAWING IS WHERE IT SAYS IT IS. A fixture whose declared centres are not
+# inked is worse than none: every scenario a future reader passes against it
+# would be measuring the generator's arithmetic.
+check("every declared marker centre is inked, at every usable rendering",
+      all(not _T[n]["missing"] for n in _SIZED),
+      "%r" % {n: _T[n]["missing"][:1] for n in _SIZED if _T[n]["missing"]})
+# AND AT 3 PX THE INK ITSELF GOES. An open marker that thin does not survive the
+# render at all - which is a different finding from "the fill cannot be told",
+# and the reason `micro` is excluded from the line above rather than fixed.
+check("  and at 3 px some open markers leave no ink above the threshold",
+      bool(_T["micro"]["missing"]),
+      "%d missing" % len(_T["micro"]["missing"]))
+# WHERE THE EVIDENCE FOR open/filled RUNS OUT, measured off the ink rather than
+# declared by the generator. The interior ink ratio of the most-filled ring must
+# stay below the least-filled disc for a threshold to exist at all.
+check("  open and filled separate by interior ink down to 5 px",
+      all(_T[n]["separates"] for n in _SIZED),
+      "%r" % {n: (_T[n]["open_max"], _T[n]["filled_min"]) for n in _SIZED})
+check("  and at 3 px they do not, so the fill must be refused and not guessed",
+      not _T["micro"]["separates"],
+      "open max %.3f, filled min %.3f"
+      % (_T["micro"]["open_max"], _T["micro"]["filled_min"]))
+check("  the reader refuses the four series at every rendering",
+      all(G7["refusals"][n] == "multiple monochrome scatter series need "
+                               "explicit marker routing" for n in G7["refusals"]),
+      "%r" % (G7["refusals"],))
+# TWO CALIBRATIONS, DELIBERATELY DIFFERENT. A fixture whose axes happened to
+# share a scale would let a reader that ignores the right-hand one pass.
+check("  and its two y calibrations differ by a factor of 2.8",
+      abs(_T["s3"]["right_slope"] / _T["s3"]["left_slope"] - 2.8) < 0.05,
+      "%.3f" % (_T["s3"]["right_slope"] / _T["s3"]["left_slope"]))
+# THE SHORTCUT IS A FUNCTION OF THE RENDERING, not of the figure: 26 marks at
+# one scale and 82 at another, off ONE drawing of 30 points, and no r near any
+# series' own.
+_counts = sorted(_T[n]["shortcut"] for n in _T)
+check("  the one-series shortcut returns 26 to 82 marks for one 30-point drawing",
+      (min(_counts), max(_counts)) == (26, 82),
+      "%r" % (_counts,))
+# AND ITS CORRELATION MOVES WITH THE PAGE SIZE. -0.653 to -0.804 off ONE
+# drawing: a reading of a figure that changes when the figure is rendered larger
+# is not a reading of the figure. NOT asserted as "far from every series' r" -
+# at the 5 px rendering it lands 0.046 from L_FILLED_CIRCLE's -0.850, which is
+# the more useful lesson: a plausible number is not a measured one, and nothing
+# about the shortcut's output says which it is.
+_rs = [_T[n]["shortcut_r"] for n in _T]
+check("    and its correlation moves 0.15 across renderings of one drawing",
+      max(_rs) - min(_rs) > 0.10,
+      "%r" % {n: round(_T[n]["shortcut_r"], 3) for n in sorted(_T)})
+check("    while no rendering's shortcut IS any series' correlation",
+      all(min(abs(_T[n]["shortcut_r"] - v)
+              for v in _T[n]["series_r"].values()) > 0.01 for n in _T),
+      "%r" % {n: round(min(abs(_T[n]["shortcut_r"] - v)
+                           for v in _T[n]["series_r"].values()), 4)
+              for n in sorted(_T)})
+
+print()
 _rasters = all(RR.check("397_fig%d.jpeg" % n)[0] for n in (1, 3))
 def stop_here(note, extra):
     """The scenarios above ran; the ones below need what is not here."""
@@ -342,7 +402,8 @@ check("    and the worklist routed it the same way, at target_axes 0",
 print()
 print("the pictures themselves")
 for _name in ("G1_read_397fig3.png", "G2_read_397fig1.png",
-              "G5_scatter_fixtures.png", "G6_scatter_464fig2.png"):
+              "G5_scatter_fixtures.png", "G6_scatter_464fig2.png",
+              "G7_twin_scatter.png"):
     _p = os.path.join(HERE, "png", _name)
     check("%s was written" % _name,
           os.path.exists(_p) and os.path.getsize(_p) > 50000,

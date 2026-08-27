@@ -898,6 +898,139 @@ def scatter_real(props):
                 residual=float(prop["resid_px"]))
 
 
+def twin_scatter_fixtures():
+    """The twin-axis four-series fixture, and what the CURRENT reader does with it.
+
+    A capability this package does not have, drawn so that the day it does the
+    answer is already known. What can be checked today is the refusal, the two
+    calibrations, and the EVIDENCE a future reader would have to gate on -
+    measured off the ink here rather than declared by the generator, so the
+    separation is an independent statement about the drawing.
+    """
+    import json
+    import numpy as np
+    import mark_readers as MR
+    doc = json.load(open(os.path.join(ROOT, "twin_scatter_truth.json"),
+                         encoding="utf-8"))
+    rows, refusals = [], {}
+    for name in sorted(doc["renderings"]):
+        r = doc["renderings"][name]
+        path = os.path.join(ROOT, r["file"])
+        if not os.path.exists(path):
+            import make_twin_scatter_fixture as TSF
+            TSF.main()
+        im = Image.open(path).convert("RGB")
+        grey = np.asarray(im.convert("L")).astype(int)
+        d = r["marker_diameter_px"]
+        xcal = MR.AxisCalibration.from_points([tuple(p) for p in r["x_ticks"]])
+        lcal = MR.AxisCalibration.from_points([tuple(p) for p in r["left_y_ticks"]])
+        rcal = MR.AxisCalibration.from_points([tuple(p) for p in r["right_y_ticks"]])
+        # EVERY DECLARED CENTRE IS INKED, and how much of the marker's middle is
+        # ink. `inner` is a fixed fraction of the marker, so the measurement is
+        # the same question at every scale.
+        inner = max(1, int(round(d * 0.28)))
+        by_fill = {"OPEN": [], "FILLED": []}
+        missing = []
+        for sid, spec in sorted(r["series"].items()):
+            for (cx, cy) in spec["centres"]:
+                x, y = int(round(cx)), int(round(cy))
+                patch = grey[y - inner:y + inner + 1, x - inner:x + inner + 1]
+                if not patch.size:
+                    missing.append((sid, cx, cy))
+                    continue
+                ratio = float((patch < 128).mean())
+                by_fill[spec["fill"]].append(ratio)
+                near = grey[y - d // 2:y + d // 2 + 1, x - d // 2:x + d // 2 + 1]
+                if not near.size or (near < 128).sum() == 0:
+                    missing.append((sid, cx, cy))
+        four = [MR.SeriesSpec(sid, marker=spec["shape"], fill=spec["fill"])
+                for sid, spec in sorted(r["series"].items())]
+        refusal = ""
+        try:
+            MR.read_scatter_panel(im, panel_box=tuple(r["panel_box"]),
+                                  x_calibration=xcal, y_calibration=lcal,
+                                  series=four)
+        except ValueError as exc:
+            refusal = "%s" % exc
+        refusals[name] = refusal
+        shortcut = MR.read_scatter_panel(
+            im, panel_box=tuple(r["panel_box"]), x_calibration=xcal,
+            y_calibration=lcal,
+            series=[MR.SeriesSpec("ONE", rgb=None, marker="CIRCLE")])
+        assoc = MR.summarize_association(shortcut, "PEARSON_R")
+        rows.append(dict(
+            name=name, scale=r["scale"], marker=d, drawn=r["total_points"],
+            missing=missing,
+            open_max=max(by_fill["OPEN"]) if by_fill["OPEN"] else None,
+            filled_min=min(by_fill["FILLED"]) if by_fill["FILLED"] else None,
+            separates=(bool(by_fill["OPEN"]) and bool(by_fill["FILLED"])
+                       and max(by_fill["OPEN"]) < min(by_fill["FILLED"])),
+            refusal=refusal, shortcut=len(shortcut),
+            shortcut_r=assoc["Association_Value"],
+            series_r={sid: spec["pearson_r"]
+                      for sid, spec in sorted(r["series"].items())},
+            left_slope=lcal.slope, right_slope=rcal.slope))
+
+    show = doc["renderings"]["s3"]
+    im, M = zoom(Image.open(os.path.join(ROOT, show["file"])).convert("RGB"),
+                 (0, WIDTH_OF(show), 0, HEIGHT_OF(show)), 1)
+    d = ImageDraw.Draw(im)
+    bx0, by0 = M(show["panel_box"][0], show["panel_box"][2])
+    bx1, by1 = M(show["panel_box"][1], show["panel_box"][3])
+    d.rectangle([bx0, by0, bx1, by1], outline=AXIS, width=3)
+    for sid, spec in sorted(show["series"].items()):
+        col = OK if spec["axis"] == "LEFT" else EYEC
+        for cx, cy in spec["centres"]:
+            px, py = M(cx, cy)
+            d.ellipse([px - 15, py - 15, px + 15, py + 15], outline=col, width=3)
+    s3 = [row for row in rows if row["name"] == "s3"][0]
+    lines = ["%-8s %5s %7s %7s %9s %9s %10s %9s"
+             % ("render", "scale", "marker", "drawn", "open max", "filled min",
+                "separates", "shortcut")]
+    for row in rows:
+        lines.append("%-8s %5d %7d %7d %9s %9s %10s %9d"
+                     % (row["name"], row["scale"], row["marker"], row["drawn"],
+                        "-" if row["open_max"] is None else "%.3f" % row["open_max"],
+                        "-" if row["filled_min"] is None else "%.3f" % row["filled_min"],
+                        "yes" if row["separates"] else "NO", row["shortcut"]))
+    lines += ["",
+              "the reader, asked for the four series drawn here:",
+              "  ValueError: %s" % s3["refusal"],
+              "",
+              "the two y calibrations are different, which is the point:",
+              "  left %.4f units/px, right %.4f units/px, ratio %.2f"
+              % (s3["left_slope"], s3["right_slope"],
+                 s3["right_slope"] / s3["left_slope"]),
+              "",
+              "the one-series shortcut on s3:",
+              "  %d marks for %d drawn, r = %.3f" % (s3["shortcut"], s3["drawn"],
+                                                     s3["shortcut_r"]),
+              "  the four series were drawn at " + ", ".join(
+                  "%.3f" % v for _k, v in sorted(s3["series_r"].items())),
+              "  — 하나의 cloud 로 합치면 어느 계열의 값도 아니게 된다",
+              "",
+              "이 픽스처를 읽는 리더는 아직 없다. 오늘 고정하는 것은 거절과,",
+              "미래의 리더가 근거로 삼아야 할 증거의 크기다.",
+              "open/filled 는 3 px 에서 분리되지 않으므로 추정하지 말고 거절해야 한다."]
+    im = capt.below(
+        im, "합성 twin-axis 4계열 흑백 산점도: 아직 자동으로 읽지 않는 것",
+        lines, keys=[(OK, "drawn on the LEFT calibration", False),
+                     (EYEC, "drawn on the RIGHT calibration", False),
+                     (AXIS, "the panel box the fixture declares", False)])
+    out = os.path.join(HERE, "G7_twin_scatter.png")
+    im.save(out)
+    return dict(out=out, rows=rows, refusals=refusals,
+                by_name={row["name"]: row for row in rows})
+
+
+def WIDTH_OF(rendering):
+    return int(rendering["panel_box"][1] + 120 * rendering["scale"])
+
+
+def HEIGHT_OF(rendering):
+    return int(rendering["panel_box"][3] + 70 * rendering["scale"])
+
+
 #: What the segmentation half needs, and what this repository does not carry.
 CORPUS = RR.CORPUS_FILES
 #: The clips the segmentation scenarios assert against, pinned in raster_root.
@@ -992,6 +1125,7 @@ if __name__ == "__main__":
     # THE ONE PANEL A FRESH CLONE CAN DRAW, first, so a reader with no access
     # to the publisher figures still gets a picture out of this file.
     print(scatter_fixtures()["out"])
+    print(twin_scatter_fixtures()["out"])
     print((bars_397() or {}).get("out") or "SKIPPED G1")
     print((lines_397() or {}).get("out") or "SKIPPED G2")
     FIGURES = (("475", "Fig. 2", "G3_segment_475fig2.png",

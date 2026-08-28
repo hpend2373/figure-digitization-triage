@@ -258,8 +258,20 @@ METHOD_CONTRACT = {
                  ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER"),
                  ("HUMAN_RESOLUTION", "BAR_OUTLINE_CENTER")},
     "BOX_VIOLIN": {("DECLARED_SINGLE_SERIES", "BOX_GEOMETRY")},
+    # AND THE ROUTED PATH, WHICH WAS MISSING. A SCATTER panel that carries an
+    # axis manifest is read by `scatter_points.read_routed_scatter_panel`: the
+    # series are told apart by measuring each marker's shape and fill, and the
+    # value is still an association over the point set. That pair was never
+    # added here, so every value a routed panel produced would have been
+    # withheld at finalization with "SCATTER cannot produce
+    # MEASURED_MARKER_SHAPE_FILL" - a reader wired through the runner, the
+    # artifact, the hashes and the gate, and not through the one table that says
+    # what it is allowed to have produced. Found by writing the finalizer
+    # scenario for the routed gate, which is the scenario that had been missing
+    # too.
     "SCATTER": {("MEASURED_COLOUR", "POINT_CLOUD_ASSOCIATION"),
-                ("DECLARED_SINGLE_SERIES", "POINT_CLOUD_ASSOCIATION")},
+                ("DECLARED_SINGLE_SERIES", "POINT_CLOUD_ASSOCIATION"),
+                ("MEASURED_MARKER_SHAPE_FILL", "POINT_CLOUD_ASSOCIATION")},
 }
 
 

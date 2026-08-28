@@ -226,6 +226,29 @@ check("    and its truth columns are named apart from route's candidate counts",
       "%r" % (sorted(G8["rows"][0]),))
 
 print()
+print("the same panel at two grains, drawn")
+# THE PICTURE OF THE v9.16 CHANGE, and it needs no publisher figure: the panel
+# is drawn by `make_split_grain_fixture.py`, so this runs in a fresh clone.
+# A caption saying "the panel-wide split misroutes five marks" is a claim; the
+# left-hand pane is those five marks, circled, on the figure they are on.
+G9 = V.grain_confounded()
+_g9 = {p["mode"]: p for p in G9["panes"]}
+check("the picture shows the panel-wide rule misrouting five marks",
+      (_g9["CURRENT_GLOBAL"]["right"], _g9["CURRENT_GLOBAL"]["wrong"]) == (20, 5),
+      "%r" % (_g9["CURRENT_GLOBAL"],))
+check("  and the shipped rule getting all twenty-five right beside it",
+      (_g9["SHAPE_CONDITIONED"]["right"],
+       _g9["SHAPE_CONDITIONED"]["wrong"]) == (25, 0),
+      "%r" % (_g9["SHAPE_CONDITIONED"],))
+# AND THE PANEL'S OWN THRESHOLD IS IN THE PICTURE, not only the groups'. A
+# reviewer looking at this has to be able to see which line the old rule drew.
+check("    and both grains' thresholds are printed under it",
+      G9["panel_fill_split"]["separates"]
+      and all(G9["fill_groups"][s]["split"]["separates"]
+              for s in ("CIRCLE", "TRIANGLE")),
+      "%r" % (G9["panel_fill_split"],))
+
+print()
 _rasters = all(RR.check("397_fig%d.jpeg" % n)[0] for n in (1, 3))
 def stop_here(note, extra):
     """The scenarios above ran; the ones below need what is not here."""
@@ -468,7 +491,8 @@ print()
 print("the pictures themselves")
 for _name in ("G1_read_397fig3.png", "G2_read_397fig1.png",
               "G5_scatter_fixtures.png", "G6_scatter_464fig2.png",
-              "G7_twin_scatter.png", "G8_routed_twin.png"):
+              "G7_twin_scatter.png", "G8_routed_twin.png",
+              "G9_grain_confounded.png"):
     _p = os.path.join(HERE, "png", _name)
     check("%s was written" % _name,
           os.path.exists(_p) and os.path.getsize(_p) > 50000,

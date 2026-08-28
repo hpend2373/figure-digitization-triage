@@ -306,6 +306,29 @@ check("  and none is both, which would be a contract contradicting itself",
 check("  and a reserved method still has a tier, so it is priced when it lands",
       all(P.dispersion_tier(m) in P.TIERS for m in P.RESERVED_METHODS
           if m in P.DISPERSION_METHODS))
+# THE SAME QUESTION ON THE IDENTITY SIDE, WHICH NOTHING WAS ASKING. v9.16.
+# `MEASURED_MARKER_SHAPE_FILL` was priced R0, emitted by the routed scatter
+# reader, carried through the artifact and the hashes and checked by the
+# finalizer's own gate - and it was in no reader's `METHOD_CONTRACT`, so the
+# first routed value to reach finalization would have been withheld for a method
+# its reader had in fact produced. The dispersion side has had this check since
+# v7.72; the identity side is the half that was not asked.
+_id_producible = {i for pairs in P.METHOD_CONTRACT.values() for i, _v in pairs}
+#: Identities that reach a value row without a reader emitting one: a person's
+#: resolution, and the human confirmations the ladder prices but no reader can
+#: reach. Named rather than subtracted silently.
+_ID_NOT_FROM_A_READER = {"HUMAN_RESOLUTION", "SOURCE_TRANSCRIBED"}
+check("every identity method is producible by some reader, or named as not",
+      set(P.IDENTITY_METHODS) - _id_producible <= (_ID_NOT_FROM_A_READER
+                                                   | set(P.RESERVED_METHODS)),
+      "%s" % sorted(set(P.IDENTITY_METHODS) - _id_producible
+                    - _ID_NOT_FROM_A_READER - set(P.RESERVED_METHODS)))
+check("  and the routed scatter's identity is one of them",
+      not P.contract_failure("SCATTER", "MEASURED_MARKER_SHAPE_FILL",
+                             "POINT_CLOUD_ASSOCIATION")
+      and P.identity_tier("MEASURED_MARKER_SHAPE_FILL") == "R0",
+      "%r" % (P.contract_failure("SCATTER", "MEASURED_MARKER_SHAPE_FILL",
+                                 "POINT_CLOUD_ASSOCIATION"),))
 
 print()
 print("an occlusion cause this registry cannot name is a defect, not a tier")

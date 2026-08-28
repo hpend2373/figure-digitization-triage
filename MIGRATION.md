@@ -264,3 +264,85 @@ approval nobody can verify.
 
 Runs whose candidate rows have no empty cells are unaffected, and every run
 produced by v9.6 or later re-derives exactly.
+
+
+# v9.16: the fill is decided inside the shape, so routed point files change shape
+
+## Why
+
+`marker_routing.route` asked two questions of a monochrome scatter: a SHAPE
+split over every mark's radial third harmonic, and a FILL split over every
+mark's interior ink. Both were taken over the WHOLE PANEL, and the second one
+should not have been.
+
+Interior ink is read in a window at the mark's centroid. A ring encloses white;
+a triangle inscribed in the same box puts two of its own edges through that
+window. So a panel drawing rings, discs, hollow triangles and solid triangles
+has four bands in one distribution, not two — measured on `twin_scatter_s3.jpeg`
+and matched one-to-one against what was drawn:
+
+    CIRCLE   OPEN     0.048 - 0.295
+    TRIANGLE OPEN     0.333 - 0.510
+    TRIANGLE FILLED   0.857 - 0.932
+    CIRCLE   FILLED   1.000
+
+A panel-wide split pools those into two clusters, so the spread it scores as one
+cluster's is two clusters'. On every rendering this repository carried before
+v9.16 the largest gap was still the one between OPEN and FILLED, so the grain
+was wrong in principle and right in every observed case.
+`split_grain_confounded.jpeg` is the case where it is wrong in fact: its open
+triangles are printed with the heavier outline journals use, the largest pooled
+gap then falls between the two OPEN classes, and the panel-wide rule calls all
+five open triangles FILLED and routes them to the filled-triangle series. Asked
+inside each measured shape the same panel is right about all twenty-five marks.
+
+Three candidates were compared in one harness (`compare_split_grain.py`) before
+anything changed. Relaxing the minimum class size — the reading of publication
+464 Figure 2 as "the floor is too high" — is the only rule that invents a class
+on `split_grain_outlier.jpeg`, where one fill class was drawn and two marks are
+crossed by a rule. Adding an absolute support of three refuses classes the
+existing fixture routes and gives three different answers to one drawing at
+three scales. Conditioning on the shape reaches wrong = 0 and leaves every
+`twin_scatter` rendering answering exactly as it did.
+
+## What changed
+
+| | before | v9.16 |
+|---|---|---|
+| the fill split | one, over the whole panel | one per RESOLVED shape, over that shape's marks |
+| the panel-wide split | what routed every mark | recorded as a diagnostic, routes nothing |
+| a shape declared with ONE fill | named from the manifest and stamped `MEASURED_MARKER_SHAPE_FILL` | refused `MARKER_FILL_DECLARED_NOT_MEASURED` |
+| `_split` on identical values | separated, with `between = 0.0` | one class |
+| `Routing_Evidence_SHA256` | 18 fields | 29 — the group's threshold, spread, counts, floor, verdict and this mark's margin |
+| `scatter_points.csv` | 33 columns | 44 |
+| SCATTER's `METHOD_CONTRACT` | no routed pair | `MEASURED_MARKER_SHAPE_FILL/POINT_CLOUD_ASSOCIATION` |
+
+## What changed for a run you already have
+
+**Every `scatter_points.csv` written before v9.16 is refused.** Its rows carry
+neither the eleven group columns nor the hashes over them, so
+`Routing_Evidence_SHA256` and `Point_Record_SHA256` both differ and
+`scatter_points.verify_artifact` reports every row. There is no back-fill and
+there deliberately cannot be one: the group a mark's fill was decided in is a
+measurement over the OTHER marks of its shape, and a script that recomputed it
+from a stored row would be inventing the evidence the columns exist to carry.
+Re-run the panel.
+
+**A panel whose axis manifest declares one fill for a shape now reads nothing on
+that shape.** Before v9.16 those marks were named from the manifest and carried
+an identity method whose name says the ink decided. What they need is a
+provenance method that says "shape measured, fill declared" with its own
+reviewer contract and its own verifier; until that exists they are refused.
+A panel that declares two fills per shape is unaffected.
+
+**Values from a routed panel finalize for the first time.** The pair
+`MEASURED_MARKER_SHAPE_FILL/POINT_CLOUD_ASSOCIATION` was missing from
+`provenance.METHOD_CONTRACT["SCATTER"]`, so any routed value reaching
+`method_contract_failures` would have been withheld for a method its reader had
+in fact produced. Nothing had reached it: the finalizer's scatter gate was
+called by `method_contract_failures` and exercised by no scenario, which is why
+removing that call broke nothing. Both are fixed here, and both have a scenario
+that dies when they are reverted.
+
+Panels with no `axis_manifest.csv` do not take the routed reader at all and are
+byte-for-byte unaffected.

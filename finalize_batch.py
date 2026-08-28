@@ -2000,6 +2000,11 @@ def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
         a point in it was measured on a blob its OWN evidence says held more
           than one marker, which `axis_grain.marker_validity` re-derives from
           the numbers rather than reading the status word
+        a point's fill contradicts the split it says named it - since v9.16 the
+          fill is decided inside the mark's own measured shape, and the group's
+          threshold, spread and this mark's margin from it are on the row, so
+          `marker_validity` re-derives that verdict too rather than reading
+          `Marker_Fill`
 
     Blank on the evidence side is a contradiction here too: a point file that
     exists for this panel and says nothing about how its marks were named is a

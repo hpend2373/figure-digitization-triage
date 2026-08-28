@@ -893,6 +893,77 @@ check("  and one point disagreeing is enough, whatever the record says",
 _held_p, _seen_p = _point_check("MEASURED_COLOUR", ["MEASURED_COLOUR"] * 3)
 check("  while a cloud that agrees with itself and with the row is accepted",
       not _held_p and not _seen_p, "%s" % _seen_p)
+# AND THE SAME FROM THE ROUTED-SCATTER SIDE, THROUGH THE CALLER. The geometry
+# and point-cloud gates below are exercised by calling them directly, and
+# `_scatter_route_failures` was too - so removing its line from
+# `method_contract_failures` broke no scenario and the gate was wired by nothing
+# a test could see. This one goes in the front door: a value claiming
+# MEASURED_MARKER_SHAPE_FILL, a point file whose own group evidence contradicts
+# the fill it carries, and the contract check that has to notice.
+_scatter_dir = os.path.join(OUT, "scatter_gate")
+os.makedirs(_scatter_dir, exist_ok=True)
+_SCATTER_ROW = {
+    "Panel_ID": "P1", "Series_ID": "S_OPEN", "Axis_ID": "Y_LEFT",
+    "X_Axis_ID": "X_BOTTOM", "point_px_x": "100.0", "point_px_y": "200.0",
+    "x_value": "1.0", "y_value": "2.0",
+    "Identity_Method": "MEASURED_MARKER_SHAPE_FILL",
+    "Value_Method": "MARKER_CENTER",
+    "Marker_Scale_Px": "31.0", "Side_Px": "31.0", "Aspect": "1.0",
+    "Size_Ratio": "1.0", "Off_Centre_Ink": "0.02",
+    "Off_Centre_Threshold": "0.25", "Off_Centre_Margin": "0.23",
+    "Marker_Validity_Status": "SINGLE_MARKER", "Marker_Shape": "CIRCLE",
+    "Marker_Fill": "OPEN", "Third_Harmonic": "0.01", "Interior_Ink": "0.05",
+    "Shape_Split": "0.1", "Fill_Split": "0.3588", "Shape_Margin": "0.09",
+    "Fill_Margin": "0.3088", "Component_ID": "3",
+    "Foreign_Ink_Fraction": "0.0",
+    "Fill_Conditioning_Shape": "CIRCLE", "Fill_Group_N": "16",
+    "Fill_Group_Low_N": "12", "Fill_Group_High_N": "4",
+    "Fill_Group_Threshold": "0.5984", "Fill_Group_Between": "0.9",
+    "Fill_Group_Within": "0.04", "Fill_Group_Separation_Index": "20.6222",
+    "Fill_Group_Minimum_Allowed": "4", "Fill_Group_Separates": "TRUE",
+    "Fill_Group_Margin": "0.5484",
+}
+
+
+def _scatter_gate(**over):
+    """`method_contract_failures` over one routed point, as finalize calls it."""
+    row = dict(_SCATTER_ROW, **over)
+    path = os.path.join(_scatter_dir, "scatter_points.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(row))
+        w.writeheader()
+        w.writerow(row)
+    seen = []
+    held = FIN.method_contract_failures(
+        pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
+                           Identity_Method="MEASURED_MARKER_SHAPE_FILL",
+                           Value_Method="POINT_CLOUD_ASSOCIATION",
+                           Dispersion_Method="NO_DISPERSION",
+                           Identity_Source="AUTO", Resolution_ID="")]),
+        pd.DataFrame([dict(Panel_ID="P1", Mark_Type="SCATTER")]),
+        pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="SCATTER_POINTS",
+                           Artifact_Path="scatter_gate/scatter_points.csv")]),
+        OUT, lambda w_, c, d: seen.append(c), frames=_verified(OUT))
+    return held, seen
+
+
+_held_s, _seen_s = _scatter_gate()
+check("a routed point whose own group evidence supports its fill is accepted",
+      not _held_s and "METHOD_CONTRADICTS_GEOMETRY" not in _seen_s, "%s" % _seen_s)
+# THE FILL FLIPPED AND NOTHING ELSE. Every number on the row still agrees with
+# every other; what disagrees is the CLASS, and only re-deriving it from the
+# group's own threshold says so.
+_held_s, _seen_s = _scatter_gate(Marker_Fill="FILLED")
+check("  and a fill its own group's threshold contradicts is withheld",
+      _held_s == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _seen_s,
+      "%r %s" % (_held_s, _seen_s))
+# AND THE GROUP THAT NEVER SEPARATED. A class from a split the panel did not
+# establish is a name with no measurement under it.
+_held_s, _seen_s = _scatter_gate(Fill_Group_Separates="FALSE")
+check("  and a class from a group that did not separate is withheld too",
+      _held_s == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _seen_s,
+      "%r %s" % (_held_s, _seen_s))
+
 # THE SAME FROM THE GEOMETRY SIDE.
 _geo_seen = []
 _held_g = FIN._geometry_route_failures(

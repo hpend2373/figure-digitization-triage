@@ -124,7 +124,30 @@ FILLS = ("OPEN", "FILLED")
 
 #: Every answer this module gives that is not a series.
 REFUSALS = ("NOT_A_MARKER", "MARKER_MERGED", "MARKER_SHAPE_UNRESOLVED",
-            "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED")
+            "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED",
+            "MARKER_FILL_DECLARED_NOT_MEASURED")
+
+#: THE PANEL DECLARES ONE FILL FOR THIS MARK'S SHAPE, so there is nothing for
+#: the ink to choose between and the fill on the record would be the
+#: declaration's word. `Identity_Method` says MEASURED_MARKER_SHAPE_FILL, which
+#: is a claim that both halves came off the figure, so this mark is refused
+#: instead of stamped with a method it does not satisfy.
+#:
+#: WHAT IT COSTS AND WHY IT IS STILL RIGHT. Such a mark's SHAPE was measured and
+#: is enough to name its series; what is missing is a provenance method that
+#: says so - "shape measured, fill declared" - with its own reviewer contract
+#: and its own verifier. Registering one is a round of its own; naming a
+#: declaration a measurement is a wrong value now.
+FILL_NOT_MEASURED = "MARKER_FILL_DECLARED_NOT_MEASURED"
+
+#: The per-shape fill evidence every kept mark carries, so a reviewer can
+#: re-derive the verdict from the row instead of believing it.
+GROUP_EVIDENCE = ("Fill_Conditioning_Shape", "Fill_Group_N",
+                  "Fill_Group_Low_N", "Fill_Group_High_N",
+                  "Fill_Group_Threshold", "Fill_Group_Between",
+                  "Fill_Group_Within", "Fill_Group_Separation_Index",
+                  "Fill_Group_Minimum_Allowed", "Fill_Group_Separates",
+                  "Fill_Group_Margin")
 
 #: What `Candidate_Count_Agreement` may say. The agreeing value is named for
 #: what it is worth: the candidate count matches what a person counted and no
@@ -212,7 +235,27 @@ def _split(values):
         if min(len(lo), len(hi)) < max(2, len(xs) // 4):
             continue
         spread = lo.std() + hi.std()
-        index = (hi.mean() - lo.mean()) / spread if spread > 1e-9 else float("inf")
+        gap = hi.mean() - lo.mean()
+        # A POOLED SPREAD OF ZERO IS NOT AN INFINITE SEPARATION unless the two
+        # means differ. `index = gap / spread` with `spread == 0` was returning
+        # `inf` for BOTH cases, and the one it got wrong is a set whose values
+        # are all THE SAME NUMBER: every cut has gap 0 and spread 0, the first
+        # scores `inf`, `separates` comes back True with `between = 0.0`,
+        # `_clear` waves every mark through because there is no `between` to
+        # measure a margin against, and the panel routes all of them to
+        # whichever series is on the high side. One class read as two, and the
+        # marks that were never distinguished published under a series name.
+        #
+        # It survived because a whole panel's interior ink is never one value.
+        # `split_grain_tiny.jpeg` has four circles at a 5 px marker that all
+        # read exactly 1.0, and asking the fill question of the circles alone -
+        # which is what this round measured - is a set of four identical
+        # numbers. The defect was reachable before that and nothing had reached
+        # it.
+        if spread > 1e-9:
+            index = gap / spread
+        else:
+            index = float("inf") if gap > 1e-9 else 0.0
         if best is None or index > best[0]:
             best = (index, (lo[-1] + hi[0]) / 2.0, hi.mean() - lo.mean(), spread)
     if best is None:
@@ -227,6 +270,83 @@ def _clear(value, split):
     if split.threshold is None or not split.between:
         return True
     return abs(float(value) - split.threshold) >= MARK_MARGIN * abs(split.between)
+
+
+def separation_index(split):
+    """The index behind a `Split`, which the namedtuple stores as two numbers."""
+    between, within = float(split.between), float(split.within)
+    if within > 1e-9:
+        return round(between / within, 4)
+    return float("inf") if between > 1e-9 else 0.0
+
+
+def fill_group(values):
+    """The fill question asked of ONE SHAPE'S marks, with its whole working.
+
+    THE INTERIOR-INK AXIS IS NOT A PURE FILL AXIS AND THE FIXTURE SAYS SO. The
+    window is a square at the mark's centroid, and a ring encloses white while a
+    triangle inscribed in the same box puts two of its own edges through it.
+    Measured on `twin_scatter_s3.jpeg`, matched one-to-one against what was
+    drawn:
+
+        CIRCLE   OPEN     0.048 - 0.295
+        TRIANGLE OPEN     0.333 - 0.510
+        TRIANGLE FILLED   0.857 - 0.932
+        CIRCLE   FILLED   1.000
+
+    Four bands. A panel-wide split pools them into two, so the spread it scores
+    as one cluster's is two clusters' - and on `split_grain_confounded.jpeg`,
+    where the open triangles are printed with the heavier outline journals do
+    use, the largest gap in the pooled set falls BETWEEN THE TWO OPEN CLASSES.
+    The panel-wide rule takes it and calls all five open triangles FILLED: five
+    marks published under another series' name. Asked inside each shape the same
+    panel is right about every one of its twenty-five marks.
+
+    Returns the `Split` and the numbers a reviewer needs to check it.
+    """
+    n = len(values)
+    floor = max(2, n // 4)
+    split = _split(values)
+    low = sum(1 for v in values if split.threshold is not None
+              and float(v) < split.threshold)
+    return dict(split=split, n=n, minimum=floor,
+                low_n=(low if split.threshold is not None else 0),
+                high_n=(n - low if split.threshold is not None else 0),
+                index=separation_index(split))
+
+
+def _group_evidence(group, value):
+    """`GROUP_EVIDENCE` for one mark, or blanks where no group asked."""
+    if group is None:
+        return dict.fromkeys(GROUP_EVIDENCE, None)
+    split = group["split"]
+    index = group["index"]
+    return {"Fill_Conditioning_Shape": group["shape"],
+            "Fill_Group_N": int(group["n"]),
+            "Fill_Group_Low_N": int(group["low_n"]),
+            "Fill_Group_High_N": int(group["high_n"]),
+            "Fill_Group_Threshold": split.threshold,
+            "Fill_Group_Between": float(split.between),
+            "Fill_Group_Within": float(split.within),
+            # A JSON DOCUMENT CANNOT CARRY `Infinity` AND HAVE A READER AGREE
+            # WITH IT. The index is infinite exactly when the within-spread is
+            # zero and the means differ, which is a real and perfectly separated
+            # group; it travels as the string so the hash over it is stable.
+            "Fill_Group_Separation_Index": ("INFINITE" if index == float("inf")
+                                            else round(float(index), 4)),
+            "Fill_Group_Minimum_Allowed": int(group["minimum"]),
+            # A WORD RATHER THAN A BOOL, because this field has to survive a
+            # round trip through a CSV a person may have opened. `True` written
+            # to a cell comes back as the string "True", and the evidence hash
+            # is taken over whatever the row carries: a producer's bool and a
+            # reader's string are different documents and every re-read row
+            # would fail its own hash. `Marker_Validity_Status` is a word for
+            # the same reason.
+            "Fill_Group_Separates": ("TRUE" if split.separates else "FALSE"),
+            "Fill_Group_Margin": (None if (value is None
+                                           or split.threshold is None)
+                                  else round(abs(float(value)
+                                                 - float(split.threshold)), 6))}
 
 
 def _components(mask):
@@ -622,9 +742,16 @@ def fill_verdict(value, split, want_fills):
     every mark - once of the window as it stands and once of the window with
     only this component's ink - and a contamination that changes the answer is
     only a contamination if both answers come from one rule.
+
+    IT USED TO RETURN THE DECLARED FILL WHERE ONLY ONE WAS DECLARED, on the
+    reasoning that there is nothing to choose between. That is true and it is
+    not a measurement: the mark then travelled with `Marker_Fill` set from a
+    manifest and `Identity_Method = MEASURED_MARKER_SHAPE_FILL` beside it, and
+    nothing downstream could tell that half of that name was a declaration. The
+    branch is gone rather than guarded, so no path through this module can turn
+    a declared fill into a measured one; `route` refuses such a mark with
+    `FILL_NOT_MEASURED` before asking.
     """
-    if len(want_fills) == 1:
-        return sorted(want_fills)[0]
     if not split.separates or not _clear(value, split):
         return ""
     return "FILLED" if value >= split.threshold else "OPEN"
@@ -727,6 +854,12 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
     # them: a panel of one shape has nothing to separate.
     want_shapes = {s for s, _f in declared}
     want_fills = {f for _s, f in declared}
+    #: {SHAPE: the fills this panel declares FOR THAT SHAPE}. The fill question
+    #: is asked once per shape, so which fills are on the table is a property of
+    #: the shape and not of the panel.
+    fills_of = {}
+    for shape_key, fill_key in declared:
+        fills_of.setdefault(shape_key, set()).add(fill_key)
     # ON THE THIRD HARMONIC of the radial profile, which is the one measurement
     # of these four that a line crossing the marker cannot move. The other three
     # stay on every record: they are what the next attempt would have had to
@@ -734,9 +867,15 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
     shape_split = (_split([g["third_harmonic"] for g in kept
                            if g["third_harmonic"] is not None])
                    if len(want_shapes) > 1 else Split(None, 0.0, 0.0, True))
+    # THE PANEL-WIDE FILL SPLIT IS STILL TAKEN, and it is no longer what routes
+    # anything. It stays because a reviewer holding a row has to be able to see
+    # the difference between what the panel said and what this mark's shape
+    # said - a conditioned verdict that disagrees with the panel is the
+    # interesting case, and a diagnostic that was removed cannot be looked at.
     fill_split = (_split([g["interior_ink"] for g in kept])
                   if len(want_fills) > 1 else Split(None, 0.0, 0.0, True))
 
+    # PASS ONE: THE SHAPE, which is what the groups are made of.
     for geo in kept:
         # CIRCLE is the rounder side of the panel's own circularity split, and
         # a triangle's corner count is checked against it rather than believed
@@ -758,20 +897,46 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
             # the high side of the panel's own split is the triangles.
             shape = ("TRIANGLE" if geo["third_harmonic"] >= shape_split.threshold
                      else "CIRCLE")
-        fill = fill_verdict(geo["Fill_Score_Window"], fill_split, want_fills)
-        if not fill:
-            geo["refusal"] = geo["refusal"] or "MARKER_FILL_UNRESOLVED"
-        # THE SAME QUESTION, ASKED OF THIS COMPONENT'S INK ALONE, so that a
-        # contamination is a measurement rather than a suspicion. It comes back
-        # equal on every mark of every rendering - see the note by `REFUSALS`
-        # for why that is geometry and not luck - and the suite pins it.
-        own_fill = fill_verdict(geo["Fill_Score_Own_Component"], fill_split,
-                                want_fills)
-        geo["Classification_Changes_When_Foreign_Removed"] = bool(own_fill != fill)
         geo["shape"] = shape
-        geo["fill"] = fill
         geo["shape_threshold"] = shape_split.threshold
+
+    # PASS TWO: THE FILL, ASKED INSIDE EACH RESOLVED SHAPE. A mark whose shape
+    # is unresolved is in no group and is asked nothing: a fill without a shape
+    # names no class, and answering half the question is how a mark ends up
+    # under a heading nobody measured.
+    groups = {}
+    for shape in sorted(want_shapes):
+        mine = [g for g in kept if g["shape"] == shape and not g["refusal"]]
+        group = fill_group([g["interior_ink"] for g in mine])
+        group["shape"] = shape
+        group["declared_fills"] = sorted(fills_of.get(shape, ()))
+        groups[shape] = group
+
+    for geo in kept:
+        shape = geo["shape"]
+        group = groups.get(shape) if shape else None
+        fills = fills_of.get(shape, set())
         geo["fill_threshold"] = fill_split.threshold
+        geo.update(_group_evidence(group, geo.get("interior_ink")))
+        if geo["refusal"]:
+            fill, own_fill = "", ""
+        elif len(fills) == 1:
+            # ONE FILL DECLARED FOR THIS SHAPE. See `FILL_NOT_MEASURED`.
+            fill, own_fill = "", ""
+            geo["refusal"] = FILL_NOT_MEASURED
+        else:
+            fill = fill_verdict(geo["Fill_Score_Window"], group["split"], fills)
+            # THE SAME QUESTION, ASKED OF THIS COMPONENT'S INK ALONE, so that a
+            # contamination is a measurement rather than a suspicion. It comes
+            # back equal on every mark of every rendering - see the note by
+            # `REFUSALS` for why that is geometry and not luck - and the suite
+            # pins it.
+            own_fill = fill_verdict(geo["Fill_Score_Own_Component"],
+                                    group["split"], fills)
+            if not fill:
+                geo["refusal"] = "MARKER_FILL_UNRESOLVED"
+        geo["Classification_Changes_When_Foreign_Removed"] = bool(own_fill != fill)
+        geo["fill"] = fill
         if geo["refusal"]:
             geo["Series_ID"] = ""
             geo["Identity_Method"] = ""
@@ -790,6 +955,14 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
         geo.setdefault("fill", "")
         geo.setdefault("Series_ID", "")
         geo.setdefault("Identity_Method", "")
+        geo.setdefault("shape_threshold", shape_split.threshold)
+        geo.setdefault("fill_threshold", fill_split.threshold)
+        for column in GROUP_EVIDENCE:
+            geo.setdefault(column, None)
     return dict(marker_scale_px=scale, shape_split=shape_split._asdict(),
-                fill_split=fill_split._asdict(), records=seen,
-                **_counts(seen, expected_points))
+                fill_split=fill_split._asdict(),
+                fill_groups={s: dict(g, split=dict(g["split"]._asdict()),
+                                     index=("INFINITE" if g["index"] == float("inf")
+                                            else g["index"]))
+                             for s, g in sorted(groups.items())},
+                records=seen, **_counts(seen, expected_points))

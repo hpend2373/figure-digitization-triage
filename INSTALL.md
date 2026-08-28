@@ -7987,6 +7987,112 @@ cannot show a scale-dependent defect; the scaled fixture is what does.
 **Two defects found in the same investigation are recorded, not fixed.** Both are
 in "Still open" with their measured numbers.
 
+## v9.16 — the fill axis is not a panel-wide axis
+
+The routed scatter reader told four monochrome series apart by measuring a
+marker's SHAPE and its FILL, and it asked both questions of the whole panel at
+once. The shape question is right that way. The fill question is not, and this
+release is the measurement that says so.
+
+**What was wrong.** Interior ink is read in a window at the mark's centroid, and
+a hollow triangle's window is not a hollow circle's: a ring encloses white while
+a triangle inscribed in the same box puts two of its own edges through it.
+Measured on `twin_scatter_s3.jpeg`, matched one-to-one against what was drawn:
+
+    CIRCLE   OPEN     0.048 - 0.295
+    TRIANGLE OPEN     0.333 - 0.510
+    TRIANGLE FILLED   0.857 - 0.932
+    CIRCLE   FILLED   1.000
+
+Four bands, not two. A panel-wide split pools them, so the spread it scores as
+one cluster's is two clusters'. On every rendering the repository carried, the
+largest gap was STILL between OPEN and FILLED — the grain was wrong in principle
+and right in every observed case, which is the shape of defect a fixture family
+has to be extended to reach.
+
+**The fixture that reaches it.** `split_grain_confounded.jpeg` prints its open
+triangles with the heavier outline journals use, so their interior ink rises to
+0.52-0.62 while fifteen open circles sit near 0.05. The largest pooled gap is
+then between the two OPEN classes; the panel-wide rule takes it, calls all five
+open triangles FILLED, and routes them to the filled-triangle series. Five values
+under another series' name, each with a plausible number on the right axis.
+Asked inside each measured shape the same panel is right about all twenty-five.
+
+**Three candidates, one harness, before anything changed.**
+
+    candidate            right  wrong  false split  twin routed  scale invariant
+    CURRENT_GLOBAL         172      5            0           70  yes
+    RELAXED_GLOBAL         183      7            1           70  yes
+    SHAPE_CONDITIONED      169      0            0           70  yes
+    DECLARATION_AWARE      139      0            0           56  NO
+
+`RELAXED_GLOBAL` is the reading of publication 464 Figure 2 as "the minimum class
+size is too high", and it is the only rule that invents a class: on
+`split_grain_outlier.jpeg`, where one fill class was drawn and two marks are
+crossed by a rule, it names both of them. `DECLARATION_AWARE` adds an absolute
+support of three and refuses classes the existing fixture routes — at 11 and 22
+px the circle group holds seven marks, five of them open, so it gives three
+different answers to one drawing at three scales.
+
+**What ships.** The fill split is taken inside each RESOLVED shape. The
+panel-wide split is still taken and still recorded, because a reviewer holding a
+row has to be able to see the line the old rule drew. Eleven columns travel on
+every mark — the group's threshold, spread, counts, floor, verdict and this
+mark's own margin from it — inside `Routing_Evidence_SHA256` and therefore inside
+`Point_Record_SHA256`, and `axis_grain.fill_group_validity` re-derives the class
+from them rather than reading `Marker_Fill`.
+
+**A shape declared with one fill is refused, not stamped.** `fill_verdict` used
+to return the single declared fill on the reasoning that there is nothing to
+choose between. True, and not a measurement: the mark travelled with
+`Identity_Method = MEASURED_MARKER_SHAPE_FILL` beside a fill that came from a
+manifest. The branch is gone rather than guarded. What such a mark needs is a
+method that says "shape measured, fill declared", with its own reviewer contract
+and its own verifier; that is a round of its own and it is in "Still open".
+
+**A latent defect in `_split`, found by asking the question per shape.** With
+`spread == 0` the index was `inf` for BOTH a perfectly separated pair of tight
+clusters AND a set whose values are all the same number. The second returned
+`separates=True` with `between = 0.0`, `_clear` waved every mark through because
+there was no `between` to measure a margin against, and the panel routed all of
+them to whichever series was on the high side. One class read as two. It was
+reachable before this release and nothing had reached it; `split_grain_tiny.jpeg`
+has four circles at a 5 px marker that all read exactly 1.0.
+
+**Two half-wirings closed.** `MEASURED_MARKER_SHAPE_FILL` was priced R0, emitted
+by the routed reader, carried through the artifact and the hashes and checked by
+the finalizer's own gate — and it was in no reader's `METHOD_CONTRACT`, so the
+first routed value to reach finalization would have been withheld for a method
+its reader had in fact produced. And `_scatter_route_failures` was called by
+`method_contract_failures` and exercised by no scenario: removing that call broke
+nothing. Both now have a scenario that dies when they are reverted, and
+`test_provenance` asks the producible-or-reserved question on the identity side
+that it has asked on the dispersion side since v7.72.
+
+    reverted                                            scenario that fails
+    conditional grouping -> panel-wide grouping         confounded routes 25/0
+    the two shapes' thresholds swapped                  confounded routes 25/0
+    the conditioning-shape check in the verifier        a re-stamped shape
+    the eleven group columns off ROUTING_EVIDENCE       they are in the hash
+    one column off the evidence mapping                 the round trip hash
+    current_evidence_failures returns []                an edited measurement
+    the finalizer's scatter gate call                   a contradicted fill
+    the minimum class size -> two                       outlier invents a class
+    the zero-spread branch                              identical values split
+    marker_validity skipping the group check            the gate's entry point
+    the single-fill refusal -> name it from the manifest one_fill's triangles
+    the routed pair off METHOD_CONTRACT                 producible-or-reserved
+
+**464 Figure 2 is still negative, and this release does not change that.** Its
+clip is a publisher figure the repository does not carry and it was not on the
+machine this round ran on, so nothing here re-measures it and
+`forward_test_464_scatter.py` is untouched. What the round could measure is the
+paper's own Figure 2 re-rendered from the publisher PDF at five resolutions —
+a different rendering, so it pins nothing — and there the four bands are the
+same four, with the open circles and open triangles making up one pooled low
+cluster exactly as the clip's 0.11-0.54 band does. That is corroboration, not a
+measurement of the clip, and it is written down as such.
+
 ## The segmentation harness, and the six statements that put a panel back together
 
 `HARNESS.md` is the full document; this is what changed in the package and why it

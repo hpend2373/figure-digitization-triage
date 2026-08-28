@@ -130,7 +130,7 @@ for t in test_*.py; do python3 "$t"; done
 (`full − 41`). 굳이 재보려면 `PYTHONPATH`에 import를 막는 `sitecustomize.py`를 두고
 PATH에서 `pdftotext`를 뺍니다.
 
-### 3.3 전체 스위트 러너 (27개)
+### 3.3 전체 스위트 러너 (28개)
 
 ```bash
 set -e
@@ -145,7 +145,7 @@ for t in test_reproducibility test_kernel test_grid_engine \
          test_harness_compare test_panel_geometry \
          test_gate_trace test_y_scale_group test_tick_ocr \
          test_visual_verification test_marker_routing \
-         test_axis_grain test_scatter_points \
+         test_axis_grain test_scatter_points test_split_grain \
          test_mutate; do
   out="$(python3 "$t.py" 2>&1)" || { printf '%s\n' "$out" | tail -25; exit 1; }
   m="$(printf '%s\n' "$out" | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p')"
@@ -169,10 +169,10 @@ python3 verify_documented_status.py --profile full --rasters present /tmp/counts
 README 마커를 고치지 않고 시나리오를 추가하면 여기서 빨간불이 납니다. **0은 그 스위트가
 `FDT_RASTER_ABSENT`를 출력했을 때만 허용**됩니다.
 
-### 3.5 현재 숫자 (커밋 `51cd5c6`)
+### 3.5 현재 숫자 (커밋 `v9.16`)
 
 ```
-CORE 3348   FULL 3389   RASTER_ONLY 286     래스터 포함: 3634 / 3675     27 suites
+CORE 3399   FULL 3440   RASTER_ONLY 286     래스터 포함: 3685 / 3726     28 suites
 raster-only 내역: test_bar_reader 24, test_integration 17, test_compile_plan 198,
                   test_reproducibility 5, test_visual_verification 42
 ```
@@ -244,19 +244,24 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
   (본문은 30분 평균 SEM, Fig 3/4 캡션은 3분 평균이라 SD/SEM이 논문에 없음 → 저자 문의 대기).
 - **LINE_MONO_STYLE**: Fig 1·2의 두-검은-곡선 패널 12개 전부 읽힘. 독립 눈 판독 대비
   24셀 중 18셀이 50 mmHg 축에서 1.65 mmHg 이내, 나머지 6개는 거절(곡선이 한 덩어리인 지점).
-- **Beckers 2007**: 표와 대조 가능한 ladder 완주. Attested면 10개 값 accept,
-  Unattested면 `run_batch`가 자기 출력을 지우고 `DEMO_OUTPUT_REFUSED`.
+- **Beckers 2007**: `forward_test_beckers_dpi`는 다섯 렌더링 × 10셀 전부 표 대비 0.01
+  이내로 통과합니다. 다만 `pilot_beckers.py`(ladder 완주)는 **지금 컴파일되지 않습니다** —
+  아래 "남은 작업" 참조.
 - **twin-axis scatter**: `marker_routing` + `axis_grain` + `scatter_points`가
   파이프라인에 배선 완료. `axis_manifest.csv`(optional)가 스위치.
   fixture에서 11/22/33 px에 16·17·18개 라우팅, **오분류 0**.
 
 ### 열려 있는 결정 (사람이 답해야 하는 것)
 
-1. **`marker_routing._split`의 최소 클래스 크기(전체의 1/4)** — 464 Fig. 2가 여기서 막힙니다.
-   interior ink 분포의 가장 뚜렷한 절단이 25|6, index 2.702(필요값 2.0)인데
-   6/31이 1/4 미만이라 규칙이 그 절단을 거부하고, 허용되는 최선이 24|7의 1.858입니다.
-   **31개 중 6개짜리가 outlier인가, 그림이 실제로 그린 네 계열 중 작은 쪽인가.**
-   이 결정이 나면 464가 양성 forward test가 됩니다. (`forward_test_464_scatter.py`가 측정 출력)
+1. **~~`_split`의 최소 클래스 크기~~ → v9.16에서 질문 자체가 바뀌었습니다.**
+   측정해 보니 interior ink는 두 무리가 아니라 네 무리(CIRCLE/TRIANGLE × OPEN/FILLED)였고,
+   25|6의 낮은 무리는 "열린 원 + 열린 삼각형"이 섞인 것이었습니다. 1.858이라는 낮은 index는
+   최소 클래스 규칙 탓이 아니라 **shape 효과가 within-spread를 부풀린 것**입니다. 그래서
+   상수를 낮추는 대신 fill split을 shape별로 나눴습니다 — `split_grain_confounded`에서
+   패널 단위 규칙은 5개를 오라우팅하고 shape 조건부는 25/25 정답입니다.
+   **남은 사람 결정**: (a) 한 shape에 fill이 하나만 선언된 경우 — 지금은 거부하고 있고,
+   "shape는 측정, fill은 선언"이라는 provenance method를 등록할지. (b) 464를 양성으로
+   승격하려면 **핀된 클립 + 사람이 만든 marker truth 파일**이 필요합니다.
 2. IQR→SD 변환 정책, 이중축 배정, dispersion 없는 셀 처리, ID475 Fig 6/7 이중 계수.
 3. `source_document`의 page-range 정책, bivariate group summary 통계.
 4. `main` 브랜치 보호 설정.
@@ -268,6 +273,10 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
 - 등록된 사람 R2/R3 리뷰.
 
 ### 남은 작업 (에이전트가 할 수 있는 것)
+- **`pilot_beckers.py`가 v9.1/v9.2 plan 스키마를 따라가지 못해 컴파일 실패** —
+  `1f43daa`(8/11)가 마지막 수정이고 `PLAN_UNIT_NAMES_NO_PANEL`(f3942f2),
+  `PLAN_DOCUMENT_BYTES_UNDECLARED`(62d38cf)는 8/17에 들어왔습니다. 출판사 PDF가
+  있을 때만 도는 스크립트라 CI는 영원히 SKIP — 드리프트가 보이지 않았습니다.
 
 - negative gold case: 475 Fig.1 `PANEL_TOPOLOGY_REVIEW_REQUIRED`,
   177 Fig.2 `Y_SCALE_GROUP_NO_PROVIDER`, merged cell NO_VALUE/R4.
@@ -283,6 +292,6 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
 > `/home/claude/geo/verify`이고 회수되면 Mac HEAD에서 `git archive`로 복원합니다.
 > 코퍼스(`/home/claude/geo/clips`, `dig201.csv`, `clips201.csv`)와 출판사 래스터
 > (`/tmp/rg1`)는 배포 불가라 git에 없고 컨테이너에만 있습니다 — 없으면 관련 구간은
-> SKIP됩니다. 테스트는 스위트 27개를 두 arm(래스터 유/무)으로 돌리고
+> SKIP됩니다. 테스트는 스위트 28개를 두 arm(래스터 유/무)으로 돌리고
 > `verify_documented_status.py`로 README 숫자를 검증합니다. push는 컨테이너에서 못 하고
 > Mac을 경유합니다. 답변은 한국어로, 에이전트는 어떤 attestation도 하지 않습니다.

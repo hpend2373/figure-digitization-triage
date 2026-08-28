@@ -1190,6 +1190,133 @@ def routed_twin():
                                    for row in rows])
 
 
+def grain_confounded():
+    """The same panel routed twice: fill asked of the panel, and asked per shape.
+
+    THE PICTURE OF THE ROUND THAT ADDED IT. `split_grain_confounded.jpeg` draws
+    fifteen open circles near zero interior ink, five open triangles printed
+    with the heavier outline journals use, four filled triangles and four filled
+    circles. The largest gap in the POOLED distribution is then between the two
+    OPEN classes, so the panel-wide split takes it and calls every open triangle
+    FILLED - five marks under another series' name, each of them a number a
+    reviewer would have had no reason to doubt.
+
+    Asked inside each measured shape the same panel is right about all
+    twenty-five. Left is what the reader did before v9.16 and right is what it
+    does now, drawn from the same run rather than described.
+    """
+    import json
+    import marker_routing as MRT
+    import compare_split_grain as CSG
+    truth = os.path.join(ROOT, "split_grain_truth.json")
+    if not os.path.exists(truth):                                 # pragma: no cover
+        import make_split_grain_fixture as MSG
+        MSG.main()
+    doc = json.load(open(truth, encoding="utf-8"))
+    r = doc["renderings"]["confounded"]
+    path = os.path.join(ROOT, r["file"])
+    if not os.path.exists(path):                                  # pragma: no cover
+        import make_split_grain_fixture as MSG
+        MSG.main()
+    series = [dict(id=d["Series_ID"], shape=d["Marker_Shape"],
+                   fill=d["Marker_Fill"]) for d in r["declared"]]
+    truth_pairs = [(sid, cx, cy) for sid, s in sorted(r["series"].items())
+                   for cx, cy in s["centres"]]
+    image = Image.open(path).convert("RGB")
+    out = MRT.route(image, r["panel_box"], series)
+    recs = [x for x in out["records"] if x["refusal"] != "NOT_A_MARKER"]
+    scale = out["marker_scale_px"] or 1.0
+    pair = MRT.match_one_to_one(recs, truth_pairs, 0.6 * scale)
+    panes = []
+    for mode, title in (("CURRENT_GLOBAL", "패널 전체 fill split (v9.15까지)"),
+                        ("SHAPE_CONDITIONED", "shape 안에서 fill split (v9.16)")):
+        got, _splits, _unstable = CSG.assign(out["records"], series, mode)
+        right = wrong = refused = 0
+        marks = []
+        for k, rec in enumerate(recs):
+            i = out["records"].index(rec)
+            name = got.get(i, ("", "", ""))[1]
+            j = pair.get(k)
+            if not name:
+                refused += 1
+                marks.append((rec, "REFUSED", ""))
+            elif j is not None and truth_pairs[j][0] == name:
+                right += 1
+                marks.append((rec, "RIGHT", name))
+            else:
+                wrong += 1
+                marks.append((rec, "WRONG", name))
+        panes.append(dict(mode=mode, title=title, right=right, wrong=wrong,
+                          refused=refused, marks=marks))
+    tiles = []
+    for pane in panes:
+        im, M = zoom(image, (r["panel_box"][0] - 8, r["panel_box"][1] + 8,
+                             r["panel_box"][2] - 8, r["panel_box"][3] + 8), 1)
+        d = ImageDraw.Draw(im)
+        for rec, verdict, name in pane["marks"]:
+            px, py = M(rec["point_px_x"], rec["point_px_y"])
+            if verdict == "RIGHT":
+                d.ellipse([px - 17, py - 17, px + 17, py + 17],
+                          outline=(0, 150, 110), width=4)
+            elif verdict == "WRONG":
+                d.ellipse([px - 20, py - 20, px + 20, py + 20], outline=BAD,
+                          width=6)
+                # LEFT OF THE MARK WHERE THERE IS NO ROOM ON THE RIGHT. All
+                # five of this fixture's misroutes are in its top right corner,
+                # and a label clipped by the frame is a label nobody can read.
+                label = "→ %s" % name
+                at = (px + 24 if px + 24 + 9 * len(label) < im.width
+                      else px - 24 - 9 * len(label), py - 12)
+                chip(d, at, label, BAD, im.width, size=15)
+            else:
+                d.ellipse([px - 13, py - 13, px + 13, py + 13], outline=MUTED,
+                          width=3)
+        tiles.append(capt.below(
+            im, pane["title"],
+            ["right %d   wrong %d   refused %d"
+             % (pane["right"], pane["wrong"], pane["refused"])]))
+    width = sum(t.width for t in tiles)
+    height = max(t.height for t in tiles)
+    board = Image.new("RGB", (width, height), "white")
+    x = 0
+    for t in tiles:
+        board.paste(t, (x, 0))
+        x += t.width
+    groups = out["fill_groups"]
+    lines = ["패널 전체 interior ink 는 두 무리가 아니라 네 무리다:",
+             "  CIRCLE  OPEN  ~0.05    TRIANGLE OPEN  ~0.55",
+             "  TRIANGLE FILLED ~0.88  CIRCLE  FILLED ~1.00",
+             "",
+             "속이 빈 삼각형의 fill 창에는 자기 변이 들어오고, 속이 빈 원의 창은",
+             "비어 있다. 두 분포를 한 데 모으면 가장 큰 간격이 OPEN 두 무리",
+             "사이에 생기고, 패널 단위 split 은 그 자리를 잘라 열린 삼각형 5 개를",
+             "FILLED 로 부른다 — 다른 계열 이름 아래 놓인 값 5 개.",
+             ""]
+    for shape in sorted(groups):
+        g = groups[shape]
+        lines.append("%-9s n=%-3d threshold %-8s separates=%s  index %s  "
+                     "최소 class %d"
+                     % (shape, g["n"],
+                        g["split"]["threshold"], g["split"]["separates"],
+                        g["index"], g["minimum"]))
+    lines += ["",
+              "패널 전체 threshold %s (진단용으로 계속 기록한다). 각 마크의 행에는"
+              % out["fill_split"]["threshold"],
+              "자기 그룹의 threshold·spread·개수·최소 class·자기 margin 이 함께",
+              "남아, 검토자가 판정을 믿지 않고 다시 유도할 수 있다."]
+    board = capt.below(
+        board, "같은 패널, 두 가지 grain — 어느 분포에 대고 fill 을 묻는가",
+        lines,
+        keys=[((0, 150, 110), "routed right", False),
+              (BAD, "misrouted", False), (MUTED, "refused", False)])
+    out_png = os.path.join(HERE, "G9_grain_confounded.png")
+    board.save(out_png)
+    return dict(out=out_png, panes=[{k: v for k, v in p.items() if k != "marks"}
+                                    for p in panes],
+                fill_groups=groups,
+                panel_fill_split=out["fill_split"])
+
+
 #: What the segmentation half needs, and what this repository does not carry.
 CORPUS = RR.CORPUS_FILES
 #: The clips the segmentation scenarios assert against, pinned in raster_root.

@@ -273,12 +273,27 @@ def _calibration_record(cal):
 #: Series_ID, re-stamp every hash, and nothing downstream measured the number
 #: that made the blob invalid. `verify_points` now re-derives the verdict from
 #: these rather than believing `Marker_Validity_Status`.
+#: AND THE LAST ELEVEN ARE THE GROUP THE FILL WAS DECIDED IN. `Fill_Split` is
+#: the PANEL'S threshold and it is no longer what named this mark: since v9.16
+#: the fill question is asked inside the mark's own measured shape, because the
+#: interior-ink window of a hollow triangle is not a hollow circle's and a
+#: panel-wide split pools two distributions into one. A row carrying only the
+#: panel's threshold could not be checked against the verdict it was given -
+#: the margin would be measured from the wrong line - so the group's own
+#: threshold, spread, counts, floor and this mark's margin from it all travel,
+#: and `Fill_Conditioning_Shape` says which group asked.
 ROUTING_EVIDENCE = ("Marker_Scale_Px", "Side_Px", "Aspect", "Size_Ratio",
                     "Off_Centre_Ink", "Off_Centre_Threshold",
                     "Off_Centre_Margin", "Marker_Validity_Status",
                     "Marker_Shape", "Marker_Fill", "Third_Harmonic",
                     "Interior_Ink", "Shape_Split", "Fill_Split", "Shape_Margin",
-                    "Fill_Margin", "Component_ID", "Foreign_Ink_Fraction")
+                    "Fill_Margin", "Component_ID", "Foreign_Ink_Fraction",
+                    "Fill_Conditioning_Shape", "Fill_Group_N",
+                    "Fill_Group_Low_N", "Fill_Group_High_N",
+                    "Fill_Group_Threshold", "Fill_Group_Between",
+                    "Fill_Group_Within", "Fill_Group_Separation_Index",
+                    "Fill_Group_Minimum_Allowed", "Fill_Group_Separates",
+                    "Fill_Group_Margin")
 
 #: Where each of those lives on a `marker_routing.route` record.
 _EVIDENCE_FROM = {"Marker_Scale_Px": "marker_scale_px", "Side_Px": "side_px",
@@ -294,6 +309,18 @@ _EVIDENCE_FROM = {"Marker_Scale_Px": "marker_scale_px", "Side_Px": "side_px",
                   "Fill_Split": "fill_threshold",
                   "Component_ID": "Original_Component_ID",
                   "Foreign_Ink_Fraction": "Foreign_Ink_Fraction"}
+#: THE GROUP FIELDS CARRY THEIR OWN NAMES on the record, so the mapping is the
+#: identity - written out rather than special-cased, because `evidence_record`
+#: reads `_EVIDENCE_FROM` to put a CSV row back under the reader's names and a
+#: column missing from this dict comes back as None on every row. That was the
+#: fail-open `scatter_points.evidence_record` exists to have fixed once.
+for _column in ("Fill_Conditioning_Shape", "Fill_Group_N", "Fill_Group_Low_N",
+                "Fill_Group_High_N", "Fill_Group_Threshold",
+                "Fill_Group_Between", "Fill_Group_Within",
+                "Fill_Group_Separation_Index", "Fill_Group_Minimum_Allowed",
+                "Fill_Group_Separates", "Fill_Group_Margin"):
+    _EVIDENCE_FROM[_column] = _column
+del _column
 
 #: The one status under which a point may carry a measured series.
 SINGLE_MARKER = "SINGLE_MARKER"
@@ -632,4 +659,59 @@ def marker_validity(record):
     if _s(ev["Marker_Validity_Status"]) != SINGLE_MARKER:
         return ("%s: Marker_Validity_Status=%r"
                 % (NOT_ONE_MARKER, _s(ev["Marker_Validity_Status"])))
+    return fill_group_validity(record)
+
+
+#: What `verify_points` says when a routed point's own fill evidence does not
+#: support the class it carries.
+NOT_A_GROUP = "MARKER_FILL_GROUP_DOES_NOT_SUPPORT_THIS_CLASS"
+
+
+def fill_group_validity(record):
+    """Why this record's own group evidence does not name its fill, or "".
+
+    RE-DERIVED, NOT READ, for the same reason `marker_validity` re-derives the
+    merged-blob verdict. Since v9.16 a mark's fill comes from a split taken over
+    ITS OWN SHAPE'S marks, so three things have to hold on the row: the group
+    said it separates, the recorded margin is the distance from the recorded
+    threshold to the recorded ink, and the side of the threshold the ink falls
+    on is the fill the row carries. A producer that writes FILLED on a mark
+    whose ink is under its own group's threshold is claiming a measurement the
+    row itself contradicts.
+
+    A row with no group evidence at all - a fixture's declaration, a person's
+    click - says nothing here, exactly as `marker_validity` says nothing about
+    a record that measured no off-centre ink.
+    """
+    ev = routing_evidence(record)
+    threshold = ev["Fill_Group_Threshold"]
+    ink = ev["Interior_Ink"]
+    if threshold is None or ink is None:
+        return ""
+    if _s(ev["Fill_Group_Separates"]).upper() != "TRUE":
+        return ("%s: Fill_Group_Separates=%r, so this panel established no fill "
+                "split inside %s" % (NOT_A_GROUP,
+                                     _s(ev["Fill_Group_Separates"]),
+                                     _s(ev["Fill_Conditioning_Shape"]) or "?"))
+    margin = ev["Fill_Group_Margin"]
+    if margin is None or abs(float(margin)
+                             - abs(float(ink) - float(threshold))) > 1e-6:
+        return ("%s: the recorded group margin %r is not the distance from "
+                "%.6f to %.6f" % (NOT_A_GROUP, margin, float(ink),
+                                  float(threshold)))
+    want = "FILLED" if float(ink) >= float(threshold) else "OPEN"
+    if _s(ev["Marker_Fill"]) and _s(ev["Marker_Fill"]) != want:
+        return ("%s: interior ink %.6f is %s its own group's threshold %.6f, "
+                "which is %s, and the row says %s"
+                % (NOT_A_GROUP, float(ink),
+                   "at or over" if want == "FILLED" else "under",
+                   float(threshold), want, _s(ev["Marker_Fill"])))
+    # THE SHAPE THE GROUP WAS TAKEN OVER HAS TO BE THIS MARK'S SHAPE. Without
+    # this a row could carry the circles' threshold under a triangle's shape and
+    # every arithmetic check above would still pass.
+    if _s(ev["Fill_Conditioning_Shape"]) != _s(ev["Marker_Shape"]):
+        return ("%s: the fill was decided in the %r group and this mark's "
+                "shape is %r" % (NOT_A_GROUP,
+                                 _s(ev["Fill_Conditioning_Shape"]),
+                                 _s(ev["Marker_Shape"])))
     return ""

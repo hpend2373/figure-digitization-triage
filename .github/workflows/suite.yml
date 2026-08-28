@@ -86,6 +86,7 @@ jobs:
                    test_gate_trace test_y_scale_group test_tick_ocr \
                    test_visual_verification test_marker_routing \
                    test_axis_grain test_scatter_points \
+                   test_split_grain \
                    test_mutate; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
@@ -264,6 +265,7 @@ jobs:
                    test_gate_trace test_y_scale_group test_tick_ocr \
                    test_visual_verification test_marker_routing \
                    test_axis_grain test_scatter_points \
+                   test_split_grain \
                    test_mutate; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then

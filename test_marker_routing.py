@@ -297,18 +297,27 @@ check("  and the gap between the two is at least threefold",
 check("  two marks that touch each other are refused, not split",
       all("MARKER_MERGED" in R[n]["refusals"] for n in SCALED + ("overlap",)),
       "%r" % {n: R[n]["refusals"] for n in SCALED + ("overlap",)})
-# REVERT: OFF_CENTRE to 1.0, which is the guard switched off. Four marks across
-# the family are then routed to the wrong series - one at 22 px, one at 33 px and
-# two on the overlap rendering - which is what this guard is for and what the
-# nearest-truth scorer could not see.
+# REVERT: OFF_CENTRE to 1.0, which is the guard switched off. Six marks across
+# the family are then routed to the wrong series - one at 11 px, one at 22 px,
+# one at 33 px and three on the overlap rendering - which is what this guard is
+# for and what the nearest-truth scorer could not see.
+#
+# IT WAS FOUR UNTIL THE FILL QUESTION WAS ASKED PER SHAPE. A merged blob has the
+# ink of two markers in its middle, so its interior ink lands where neither
+# marker's does; pooled with every other mark on the panel that reading was
+# often outside the split's reach and the blob came back FILL_UNRESOLVED, which
+# counted as a refusal rather than a misroute. Asked inside its own shape's
+# group the same blob sits inside a tighter distribution and gets an answer -
+# a wrong one, because the blob is not one marker. The guard's removal is more
+# visible than it was, not less.
 _was = MRT.OFF_CENTRE
 try:
     MRT.OFF_CENTRE = 1.0
     _off = {n: routed(n) for n in SCALED + ("overlap",)}
 finally:
     MRT.OFF_CENTRE = _was
-check("  without it four marks across the family are misrouted",
-      sum(_off[n]["wrong"] for n in _off) == 4
+check("  without it six marks across the family are misrouted",
+      sum(_off[n]["wrong"] for n in _off) == 6
       and all(R[n]["wrong"] == 0 for n in _off),
       "%r" % {n: (_off[n]["right"], _off[n]["wrong"]) for n in sorted(_off)})
 

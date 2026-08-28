@@ -1,0 +1,2304 @@
+{
+ "renderings": {
+  "confounded": {
+   "case": "confounded",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_confounded.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       330.37,
+       681.69
+      ],
+      [
+       479.23,
+       754.3
+      ],
+      [
+       580.8,
+       799.1
+      ],
+      [
+       722.61,
+       870.17
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.204,
+       16.997
+      ],
+      [
+       2.828,
+       14.67
+      ],
+      [
+       3.936,
+       13.234
+      ],
+      [
+       5.483,
+       10.956
+      ]
+     ],
+     "pearson_r": -0.999777,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       304.52,
+       182.4
+      ],
+      [
+       393.8,
+       197.63
+      ],
+      [
+       458.98,
+       204.52
+      ],
+      [
+       557.33,
+       304.45
+      ],
+      [
+       631.31,
+       295.56
+      ],
+      [
+       753.96,
+       348.54
+      ],
+      [
+       825.73,
+       316.9
+      ],
+      [
+       912.73,
+       366.29
+      ],
+      [
+       990.46,
+       426.38
+      ],
+      [
+       1076.81,
+       446.2
+      ],
+      [
+       1193.78,
+       495.37
+      ],
+      [
+       1264.27,
+       448.97
+      ]
+     ],
+     "drawn": 12,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.922,
+       33.0
+      ],
+      [
+       1.896,
+       32.512
+      ],
+      [
+       2.607,
+       32.291
+      ],
+      [
+       3.68,
+       29.088
+      ],
+      [
+       4.487,
+       29.373
+      ],
+      [
+       5.825,
+       27.675
+      ],
+      [
+       6.608,
+       28.689
+      ],
+      [
+       7.557,
+       27.106
+      ],
+      [
+       8.405,
+       25.18
+      ],
+      [
+       9.347,
+       24.545
+      ],
+      [
+       10.623,
+       22.969
+      ],
+      [
+       11.392,
+       24.456
+      ]
+     ],
+     "pearson_r": -0.968311,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       302.77,
+       352.37
+      ],
+      [
+       402.6,
+       410.55
+      ],
+      [
+       524.33,
+       467.91
+      ],
+      [
+       672.83,
+       532.78
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       0.903,
+       69.146
+      ],
+      [
+       1.992,
+       63.925
+      ],
+      [
+       3.32,
+       58.777
+      ],
+      [
+       4.94,
+       52.956
+      ]
+     ],
+     "pearson_r": -0.997957,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       894.3,
+       157.65
+      ],
+      [
+       962.87,
+       160.36
+      ],
+      [
+       1072.5,
+       271.01
+      ],
+      [
+       1155.46,
+       266.65
+      ],
+      [
+       1281.5,
+       315.43
+      ]
+     ],
+     "drawn": 5,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       7.356,
+       86.621
+      ],
+      [
+       8.104,
+       86.378
+      ],
+      [
+       9.3,
+       76.448
+      ],
+      [
+       10.205,
+       76.839
+      ],
+      [
+       11.58,
+       72.461
+      ]
+     ],
+     "pearson_r": -0.945758,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 25,
+   "what": "the largest gap in the pooled interior ink is between the two OPEN classes, so a panel-wide split calls the open triangles FILLED",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
+  "imbalanced": {
+   "case": "imbalanced",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_imbalanced.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       861.85,
+       523.29
+      ],
+      [
+       926.66,
+       577.83
+      ],
+      [
+       967.82,
+       602.41
+      ],
+      [
+       1029.14,
+       655.33
+      ],
+      [
+       1096.79,
+       688.96
+      ],
+      [
+       1151.7,
+       661.98
+      ],
+      [
+       1216.78,
+       717.2
+      ],
+      [
+       1252.72,
+       719.16
+      ]
+     ],
+     "drawn": 8,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       7.002,
+       22.074
+      ],
+      [
+       7.709,
+       20.326
+      ],
+      [
+       8.158,
+       19.538
+      ],
+      [
+       8.827,
+       17.842
+      ],
+      [
+       9.565,
+       16.764
+      ],
+      [
+       10.164,
+       17.629
+      ],
+      [
+       10.874,
+       15.859
+      ],
+      [
+       11.266,
+       15.796
+      ]
+     ],
+     "pearson_r": -0.954478,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       299.2,
+       244.8
+      ],
+      [
+       346.41,
+       252.32
+      ],
+      [
+       380.88,
+       252.07
+      ],
+      [
+       432.76,
+       338.99
+      ],
+      [
+       471.9,
+       323.95
+      ],
+      [
+       536.71,
+       366.89
+      ],
+      [
+       574.57,
+       330.48
+      ],
+      [
+       620.58,
+       370.07
+      ],
+      [
+       661.65,
+       419.64
+      ],
+      [
+       707.21,
+       431.5
+      ],
+      [
+       769.08,
+       470.84
+      ],
+      [
+       806.3,
+       420.61
+      ]
+     ],
+     "drawn": 12,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.864,
+       31.0
+      ],
+      [
+       1.379,
+       30.759
+      ],
+      [
+       1.755,
+       30.767
+      ],
+      [
+       2.321,
+       27.981
+      ],
+      [
+       2.748,
+       28.463
+      ],
+      [
+       3.455,
+       27.087
+      ],
+      [
+       3.868,
+       28.254
+      ],
+      [
+       4.37,
+       26.985
+      ],
+      [
+       4.818,
+       25.396
+      ],
+      [
+       5.315,
+       25.016
+      ],
+      [
+       5.99,
+       23.755
+      ],
+      [
+       6.396,
+       25.365
+      ]
+     ],
+     "pearson_r": -0.944742,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       889.9,
+       419.23
+      ],
+      [
+       994.77,
+       477.41
+      ],
+      [
+       1122.55,
+       534.77
+      ],
+      [
+       1278.48,
+       599.63
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       7.308,
+       63.146
+      ],
+      [
+       8.452,
+       57.925
+      ],
+      [
+       9.846,
+       52.777
+      ],
+      [
+       11.547,
+       46.956
+      ]
+     ],
+     "pearson_r": -0.997964,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       306.35,
+       179.94
+      ],
+      [
+       365.48,
+       175.96
+      ],
+      [
+       462.0,
+       279.92
+      ],
+      [
+       534.14,
+       268.88
+      ],
+      [
+       645.7,
+       310.98
+      ],
+      [
+       719.49,
+       291.54
+      ]
+     ],
+     "drawn": 6,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.942,
+       84.621
+      ],
+      [
+       1.587,
+       84.978
+      ],
+      [
+       2.64,
+       75.648
+      ],
+      [
+       3.427,
+       76.639
+      ],
+      [
+       4.644,
+       72.861
+      ],
+      [
+       5.449,
+       74.605
+      ]
+     ],
+     "pearson_r": -0.878853,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 30,
+   "what": "four real classes at 12/8/6/4; every one of them routes",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
+  "micro": {
+   "case": "micro",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_micro.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     450.0
+    ],
+    [
+     35,
+     60.0
+    ]
+   ],
+   "marker_diameter_px": 4,
+   "panel_box": [
+    112,
+    660,
+    60,
+    449
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     450.0
+    ],
+    [
+     90,
+     60.0
+    ]
+   ],
+   "scale": 1,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       183.33,
+       278.4
+      ],
+      [
+       302.5,
+       317.4
+      ],
+      [
+       421.67,
+       287.76
+      ],
+      [
+       540.83,
+       353.28
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.6,
+       21.0
+      ],
+      [
+       4.2,
+       18.5
+      ],
+      [
+       6.8,
+       20.4
+      ],
+      [
+       9.4,
+       16.2
+      ]
+     ],
+     "pearson_r": -0.745754,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       151.25,
+       114.6
+      ],
+      [
+       265.83,
+       169.2
+      ],
+      [
+       385.0,
+       134.88
+      ],
+      [
+       504.17,
+       192.6
+      ]
+     ],
+     "drawn": 4,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.9,
+       31.5
+      ],
+      [
+       3.4,
+       28.0
+      ],
+      [
+       6.0,
+       30.2
+      ],
+      [
+       8.6,
+       26.5
+      ]
+     ],
+     "pearson_r": -0.738318,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       165.0,
+       204.86
+      ],
+      [
+       284.17,
+       235.5
+      ],
+      [
+       495.0,
+       216.0
+      ],
+      [
+       614.17,
+       260.57
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.2,
+       64.0
+      ],
+      [
+       3.8,
+       58.5
+      ],
+      [
+       8.4,
+       62.0
+      ],
+      [
+       11.0,
+       54.0
+      ]
+     ],
+     "pearson_r": -0.704311,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       220.0,
+       82.29
+      ],
+      [
+       339.17,
+       112.93
+      ],
+      [
+       458.33,
+       93.43
+      ],
+      [
+       577.5,
+       138.0
+      ]
+     ],
+     "drawn": 4,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       2.4,
+       86.0
+      ],
+      [
+       5.0,
+       80.5
+      ],
+      [
+       7.6,
+       84.0
+      ],
+      [
+       10.2,
+       76.0
+      ]
+     ],
+     "pearson_r": -0.780171,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 16,
+   "what": "the sparse drawing at a 4 px marker",
+   "x_ticks": [
+    [
+     0,
+     110.0
+    ],
+    [
+     12,
+     660.0
+    ]
+   ]
+  },
+  "one_fill": {
+   "case": "one_fill",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_one_fill.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       825.18,
+       492.09
+      ],
+      [
+       895.86,
+       551.09
+      ],
+      [
+       940.87,
+       580.14
+      ],
+      [
+       1007.69,
+       637.48
+      ],
+      [
+       1081.48,
+       675.58
+      ],
+      [
+       1141.43,
+       653.05
+      ],
+      [
+       1212.38,
+       712.74
+      ],
+      [
+       1251.62,
+       719.16
+      ]
+     ],
+     "drawn": 8,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       6.602,
+       23.074
+      ],
+      [
+       7.373,
+       21.183
+      ],
+      [
+       7.864,
+       20.252
+      ],
+      [
+       8.593,
+       18.414
+      ],
+      [
+       9.398,
+       17.193
+      ],
+      [
+       10.052,
+       17.915
+      ],
+      [
+       10.826,
+       16.002
+      ],
+      [
+       11.254,
+       15.796
+      ]
+     ],
+     "pearson_r": -0.965868,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       300.94,
+       213.6
+      ],
+      [
+       364.47,
+       232.48
+      ],
+      [
+       411.58,
+       243.55
+      ],
+      [
+       481.25,
+       341.83
+      ],
+      [
+       534.33,
+       338.15
+      ],
+      [
+       620.49,
+       392.41
+      ],
+      [
+       672.1,
+       367.35
+      ],
+      [
+       734.07,
+       418.27
+      ]
+     ],
+     "drawn": 8,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.883,
+       32.0
+      ],
+      [
+       1.576,
+       31.395
+      ],
+      [
+       2.09,
+       31.04
+      ],
+      [
+       2.85,
+       27.89
+      ],
+      [
+       3.429,
+       28.008
+      ],
+      [
+       4.369,
+       26.269
+      ],
+      [
+       4.932,
+       27.072
+      ],
+      [
+       5.608,
+       25.44
+      ]
+     ],
+     "pearson_r": -0.954857,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       332.93,
+       157.65
+      ],
+      [
+       422.67,
+       168.32
+      ],
+      [
+       573.56,
+       286.92
+      ],
+      [
+       684.75,
+       290.53
+      ],
+      [
+       860.02,
+       347.27
+      ],
+      [
+       973.68,
+       342.49
+      ],
+      [
+       1092.58,
+       391.21
+      ],
+      [
+       1219.72,
+       480.45
+      ]
+     ],
+     "drawn": 8,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.232,
+       86.621
+      ],
+      [
+       2.211,
+       85.664
+      ],
+      [
+       3.857,
+       75.02
+      ],
+      [
+       5.07,
+       74.696
+      ],
+      [
+       6.982,
+       69.604
+      ],
+      [
+       8.222,
+       70.033
+      ],
+      [
+       9.519,
+       65.661
+      ],
+      [
+       10.906,
+       57.652
+      ]
+     ],
+     "pearson_r": -0.969299,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 24,
+   "what": "circles are declared open and filled and both are drawn; triangles are declared FILLED only",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
+  "outlier": {
+   "case": "outlier",
+   "contaminated": [
+    [
+     303.6,
+     213.6
+    ],
+    [
+     385.55,
+     239.71
+    ]
+   ],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    }
+   ],
+   "file": "split_grain_outlier.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       303.6,
+       213.6
+      ],
+      [
+       385.55,
+       239.71
+      ],
+      [
+       445.13,
+       254.44
+      ],
+      [
+       535.33,
+       397.02
+      ],
+      [
+       603.08,
+       390.0
+      ],
+      [
+       715.64,
+       468.04
+      ],
+      [
+       781.37,
+       429.72
+      ],
+      [
+       861.12,
+       502.89
+      ],
+      [
+       932.25,
+       590.68
+      ],
+      [
+       1011.45,
+       623.13
+      ],
+      [
+       1118.88,
+       695.92
+      ],
+      [
+       1183.33,
+       637.33
+      ],
+      [
+       1274.53,
+       747.31
+      ]
+     ],
+     "drawn": 13,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.912,
+       32.0
+      ],
+      [
+       1.806,
+       31.163
+      ],
+      [
+       2.456,
+       30.691
+      ],
+      [
+       3.44,
+       26.121
+      ],
+      [
+       4.179,
+       26.346
+      ],
+      [
+       5.407,
+       23.845
+      ],
+      [
+       6.124,
+       25.073
+      ],
+      [
+       6.994,
+       22.728
+      ],
+      [
+       7.77,
+       19.914
+      ],
+      [
+       8.634,
+       18.874
+      ],
+      [
+       9.806,
+       16.541
+      ],
+      [
+       10.509,
+       18.419
+      ],
+      [
+       11.504,
+       14.894
+      ]
+     ],
+     "pearson_r": -0.980517,
+     "shape": "CIRCLE"
+    }
+   },
+   "total_points": 13,
+   "what": "ONE shape and one fill class were drawn; two marks are crossed by a rule and read high. A second class here is invented",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
+  "overlap": {
+   "case": "overlap",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_overlap.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       861.85,
+       523.29
+      ],
+      [
+       926.66,
+       577.83
+      ],
+      [
+       967.82,
+       602.41
+      ],
+      [
+       1029.14,
+       655.33
+      ],
+      [
+       1096.79,
+       688.96
+      ],
+      [
+       1151.7,
+       661.98
+      ],
+      [
+       1216.78,
+       717.2
+      ],
+      [
+       1252.72,
+       719.16
+      ],
+      [
+       315.7,
+       244.8
+      ]
+     ],
+     "drawn": 9,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       7.002,
+       22.074
+      ],
+      [
+       7.709,
+       20.326
+      ],
+      [
+       8.158,
+       19.538
+      ],
+      [
+       8.827,
+       17.842
+      ],
+      [
+       9.565,
+       16.764
+      ],
+      [
+       10.164,
+       17.629
+      ],
+      [
+       10.874,
+       15.859
+      ],
+      [
+       11.266,
+       15.796
+      ],
+      [
+       1.044,
+       31.0
+      ]
+     ],
+     "pearson_r": -0.99024,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       299.2,
+       244.8
+      ],
+      [
+       346.41,
+       252.32
+      ],
+      [
+       380.88,
+       252.07
+      ],
+      [
+       432.76,
+       338.99
+      ],
+      [
+       471.9,
+       323.95
+      ],
+      [
+       536.71,
+       366.89
+      ],
+      [
+       574.57,
+       330.48
+      ],
+      [
+       620.58,
+       370.07
+      ],
+      [
+       661.65,
+       419.64
+      ],
+      [
+       707.21,
+       431.5
+      ],
+      [
+       769.08,
+       470.84
+      ],
+      [
+       806.3,
+       420.61
+      ]
+     ],
+     "drawn": 12,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.864,
+       31.0
+      ],
+      [
+       1.379,
+       30.759
+      ],
+      [
+       1.755,
+       30.767
+      ],
+      [
+       2.321,
+       27.981
+      ],
+      [
+       2.748,
+       28.463
+      ],
+      [
+       3.455,
+       27.087
+      ],
+      [
+       3.868,
+       28.254
+      ],
+      [
+       4.37,
+       26.985
+      ],
+      [
+       4.818,
+       25.396
+      ],
+      [
+       5.315,
+       25.016
+      ],
+      [
+       5.99,
+       23.755
+      ],
+      [
+       6.396,
+       25.365
+      ]
+     ],
+     "pearson_r": -0.944742,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       889.9,
+       419.23
+      ],
+      [
+       994.77,
+       477.41
+      ],
+      [
+       1122.55,
+       534.77
+      ],
+      [
+       1278.48,
+       599.63
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       7.308,
+       63.146
+      ],
+      [
+       8.452,
+       57.925
+      ],
+      [
+       9.846,
+       52.777
+      ],
+      [
+       11.547,
+       46.956
+      ]
+     ],
+     "pearson_r": -0.997964,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       306.35,
+       179.94
+      ],
+      [
+       365.48,
+       175.96
+      ],
+      [
+       462.0,
+       279.92
+      ],
+      [
+       534.14,
+       268.88
+      ],
+      [
+       645.7,
+       310.98
+      ],
+      [
+       719.49,
+       291.54
+      ]
+     ],
+     "drawn": 6,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.942,
+       84.621
+      ],
+      [
+       1.587,
+       84.978
+      ],
+      [
+       2.64,
+       75.648
+      ],
+      [
+       3.427,
+       76.639
+      ],
+      [
+       4.644,
+       72.861
+      ],
+      [
+       5.449,
+       74.605
+      ]
+     ],
+     "pearson_r": -0.878853,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 31,
+   "what": "the imbalanced drawing with a filled circle touching an open one",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
+  "shape_blind": {
+   "case": "shape_blind",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_shape_blind.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     450.0
+    ],
+    [
+     35,
+     60.0
+    ]
+   ],
+   "marker_diameter_px": 7,
+   "panel_box": [
+    112,
+    660,
+    60,
+    449
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     450.0
+    ],
+    [
+     90,
+     60.0
+    ]
+   ],
+   "scale": 1,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       412.59,
+       246.05
+      ],
+      [
+       447.93,
+       275.55
+      ],
+      [
+       470.43,
+       290.07
+      ],
+      [
+       503.85,
+       318.74
+      ],
+      [
+       540.74,
+       337.79
+      ],
+      [
+       570.72,
+       326.53
+      ],
+      [
+       606.19,
+       356.37
+      ],
+      [
+       625.81,
+       359.58
+      ]
+     ],
+     "drawn": 8,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       6.602,
+       23.074
+      ],
+      [
+       7.373,
+       21.183
+      ],
+      [
+       7.864,
+       20.252
+      ],
+      [
+       8.593,
+       18.414
+      ],
+      [
+       9.398,
+       17.193
+      ],
+      [
+       10.052,
+       17.915
+      ],
+      [
+       10.826,
+       16.002
+      ],
+      [
+       11.254,
+       15.796
+      ]
+     ],
+     "pearson_r": -0.965868,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       150.47,
+       106.8
+      ],
+      [
+       182.23,
+       116.24
+      ],
+      [
+       205.79,
+       121.78
+      ],
+      [
+       240.62,
+       170.92
+      ],
+      [
+       267.16,
+       169.08
+      ],
+      [
+       310.25,
+       196.2
+      ],
+      [
+       336.05,
+       183.68
+      ],
+      [
+       367.03,
+       209.14
+      ]
+     ],
+     "drawn": 8,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.883,
+       32.0
+      ],
+      [
+       1.576,
+       31.395
+      ],
+      [
+       2.09,
+       31.04
+      ],
+      [
+       2.85,
+       27.89
+      ],
+      [
+       3.429,
+       28.008
+      ],
+      [
+       4.369,
+       26.269
+      ],
+      [
+       4.932,
+       27.072
+      ],
+      [
+       5.608,
+       25.44
+      ]
+     ],
+     "pearson_r": -0.954857,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       166.47,
+       78.83
+      ],
+      [
+       211.34,
+       84.16
+      ],
+      [
+       286.78,
+       143.46
+      ],
+      [
+       342.38,
+       145.27
+      ],
+      [
+       430.01,
+       173.63
+      ],
+      [
+       486.84,
+       171.24
+      ],
+      [
+       546.29,
+       195.6
+      ],
+      [
+       609.86,
+       240.22
+      ]
+     ],
+     "drawn": 8,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.232,
+       86.621
+      ],
+      [
+       2.211,
+       85.664
+      ],
+      [
+       3.857,
+       75.02
+      ],
+      [
+       5.07,
+       74.696
+      ],
+      [
+       6.982,
+       69.604
+      ],
+      [
+       8.222,
+       70.033
+      ],
+      [
+       9.519,
+       65.661
+      ],
+      [
+       10.906,
+       57.652
+      ]
+     ],
+     "pearson_r": -0.969299,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 24,
+   "what": "an 8 px marker: the FILL separates and the SHAPE does not, so every mark is refused even though half its class is established",
+   "x_ticks": [
+    [
+     0,
+     110.0
+    ],
+    [
+     12,
+     660.0
+    ]
+   ]
+  },
+  "tiny": {
+   "case": "tiny",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_tiny.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     450.0
+    ],
+    [
+     35,
+     60.0
+    ]
+   ],
+   "marker_diameter_px": 5,
+   "panel_box": [
+    112,
+    660,
+    60,
+    449
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     450.0
+    ],
+    [
+     90,
+     60.0
+    ]
+   ],
+   "scale": 1,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       183.33,
+       278.4
+      ],
+      [
+       302.5,
+       317.4
+      ],
+      [
+       421.67,
+       287.76
+      ],
+      [
+       540.83,
+       353.28
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.6,
+       21.0
+      ],
+      [
+       4.2,
+       18.5
+      ],
+      [
+       6.8,
+       20.4
+      ],
+      [
+       9.4,
+       16.2
+      ]
+     ],
+     "pearson_r": -0.745754,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       151.25,
+       114.6
+      ],
+      [
+       265.83,
+       169.2
+      ],
+      [
+       385.0,
+       134.88
+      ],
+      [
+       504.17,
+       192.6
+      ]
+     ],
+     "drawn": 4,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.9,
+       31.5
+      ],
+      [
+       3.4,
+       28.0
+      ],
+      [
+       6.0,
+       30.2
+      ],
+      [
+       8.6,
+       26.5
+      ]
+     ],
+     "pearson_r": -0.738318,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       165.0,
+       204.86
+      ],
+      [
+       284.17,
+       235.5
+      ],
+      [
+       495.0,
+       216.0
+      ],
+      [
+       614.17,
+       260.57
+      ]
+     ],
+     "drawn": 4,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.2,
+       64.0
+      ],
+      [
+       3.8,
+       58.5
+      ],
+      [
+       8.4,
+       62.0
+      ],
+      [
+       11.0,
+       54.0
+      ]
+     ],
+     "pearson_r": -0.704311,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       220.0,
+       82.29
+      ],
+      [
+       339.17,
+       112.93
+      ],
+      [
+       458.33,
+       93.43
+      ],
+      [
+       577.5,
+       138.0
+      ]
+     ],
+     "drawn": 4,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       2.4,
+       86.0
+      ],
+      [
+       5.0,
+       80.5
+      ],
+      [
+       7.6,
+       84.0
+      ],
+      [
+       10.2,
+       76.0
+      ]
+     ],
+     "pearson_r": -0.780171,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 16,
+   "what": "the sparse drawing at a 5 px marker",
+   "x_ticks": [
+    [
+     0,
+     110.0
+    ],
+    [
+     12,
+     660.0
+    ]
+   ]
+  }
+ },
+ "what_this_is": "Eight monochrome scatters drawn to test the GRAIN of the fill split rather than its threshold. Every marker's series, axis, shape, fill and centre is declared, and each case names the answer a correct reader reaches.",
+ "why": "Interior ink is measured in a window at the mark's centroid, and a hollow triangle puts its own edges through that window while a ring encloses white. The panel-wide fill split therefore pools four bands and scores the spread of two of them as one cluster's. `confounded` is the case where that costs a wrong answer rather than a weaker index."
+}

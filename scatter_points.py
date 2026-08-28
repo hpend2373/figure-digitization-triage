@@ -19,17 +19,22 @@ none of those measurements fit in a file whose per-point columns are
 
 So a value read this way could be published with its identity route named and
 nothing on disk able to disagree. This file is the disagreement: every point
-carries the eighteen measurements `marker_routing` decided on, the axis it was
-read against, and three hashes binding them together.
+carries the twenty-nine measurements `marker_routing` decided on - the marker's
+own geometry, the shape split, and the fill group of its own shape - the axis it
+was read against, and three hashes binding them together.
 
 ## THREE DIFFERENT CHECKS, AND ONLY THE THIRD LOOKS AT THE FIGURE
 
     verify_artifact            the file against ITSELF - every hash covers what
                                it carries, every value follows from its pixel
-                               under the axis it cites, and no point sits under
-                               a series the manifest does not put on that axis.
+                               under the axis it cites, no two rows are one
+                               point, and no point sits under a series the
+                               manifest does not put on that axis.
     axis_grain.verify_points   the same, at the record level, plus the marker
-                               validity the routing rested on.
+                               validity the routing rested on AND whether this
+                               marker's evidence names this series at all -
+                               `expected_route`, which is what makes a swapped
+                               `Series_ID` a finding rather than a re-stamp.
     current_evidence_failures  the file against THE RASTER. The panel is routed
                                again, now, and each row's recorded evidence is
                                compared with what the ink says today.
@@ -85,6 +90,26 @@ MARK_MISSING = "ROUTED_MARK_MISSING_FROM_ARTIFACT"
 #: Two rows are the same point. A file holding a mark twice is a cloud with a
 #: member the figure drew once, and an association over it is not the figure's.
 DUPLICATE_POINT = "DUPLICATE_POINT_RECORD"
+
+#: WHAT THE EVIDENCE CONCLUDES, as opposed to what it measures. Neither is in
+#: `ROUTING_EVIDENCE` - they are the answer, not the working - so the column loop
+#: below would never have compared them with the raster. A `Series_ID` swapped
+#: between two points on the SAME axis kept every measurement true and moved the
+#: numbers under each other's headings.
+ROUTE_COLUMNS = ("Series_ID", "Identity_Method")
+
+#: PANEL-WIDE NUMBERS NO ROW'S ROUTE RESTS ON, since v9.16. They stay on the row
+#: and inside its hash - a reviewer needs to see the line the old grain drew, and
+#: an unhashed column is one a producer may edit quietly - and they are compared
+#: with the raster under THEIR OWN CODE. A rendering that moves the PANEL's
+#: threshold without moving this mark's own group has not made this row's ROUTE
+#: stale, and calling that `ROUTING_EVIDENCE_DOES_NOT_MATCH_THE_INK` puts a
+#: number nothing read in the same sentence as the numbers everything read.
+PANEL_DIAGNOSTICS = ("Fill_Split", "Fill_Margin")
+#: A panel-wide diagnostic has moved and the row's own route has not. Reported,
+#: because dropping the comparison would leave a hashed column no re-measurement
+#: ever looks at; named apart, because it is not a reason to doubt the value.
+DIAGNOSTIC_STALE = "PANEL_DIAGNOSTIC_DOES_NOT_MATCH_THE_INK"
 
 #: How far a re-routed centroid may sit from a recorded one and still be the
 #: same mark, as a fraction of the panel's own marker. Not a pixel count: the
@@ -181,8 +206,14 @@ def evidence_record(row):
     rec = dict(row)
     for column in AG.ROUTING_EVIDENCE:
         source = AG._EVIDENCE_FROM.get(column)
-        if source is not None:
-            rec[source] = _number(row.get(column))
+        if source is None:
+            continue
+        # A WORD'S BLANK IS "" AND A NUMBER'S IS None, and a CSV spells both the
+        # same way. Running a word through `_number` turned "" into None, so a
+        # mark named by its shape alone - whose `Marker_Fill` is "" because
+        # nothing measured it - hashed differently on the way back in.
+        rec[source] = (_s(row.get(column)) if column in AG.TEXT_EVIDENCE
+                       else _number(row.get(column)))
     return rec
 
 
@@ -394,22 +425,54 @@ def current_evidence_failures(rows, image, panel_box, series, threshold=150,
         mark = of_row.get(i)
         if mark is None:
             continue
-        # THE GROUP THAT NAMED THIS ROW, asked of the panel as it stands now.
-        # The shape axis is still a panel-wide question and the fill axis is
-        # not, which is the whole of v9.16 said once more here.
+        # THE GROUP THAT NAMED THIS ROW, asked of the panel as it stands now -
+        # and ONLY the gate this mark's own method rests on. A mark named by its
+        # SHAPE alone did not consult a fill split, and a shape drawn with one
+        # fill usually has no fill split to consult: requiring one of every row
+        # refused the shape-only routes v9.17 had just made honest.
         shape = _s(mark.get("shape")) or _s(row.get("Fill_Conditioning_Shape"))
         group = (out.get("fill_groups") or {}).get(shape)
         group_ok = bool(group and group["split"]["separates"])
-        if not out["shape_split"]["separates"] or not group_ok:
+        method = _s(mark.get("Identity_Method"))
+        needs_shape = method in ("MEASURED_MARKER_SHAPE_FILL",
+                                 "MEASURED_MARKER_SHAPE")
+        needs_fill = method in ("MEASURED_MARKER_SHAPE_FILL",
+                                "MEASURED_MARKER_FILL")
+        if (needs_shape and not out["shape_split"]["separates"]) \
+                or (needs_fill and not group_ok):
             found.append((i, SPLIT_GONE,
-                          "this panel now separates shape=%s, and the %s fill "
-                          "group %s"
-                          % (out["shape_split"]["separates"], shape or "?",
+                          "this row was named by %s; the panel now separates "
+                          "shape=%s and the %s fill group %s"
+                          % (method or "an unnamed method",
+                             out["shape_split"]["separates"], shape or "?",
                              "separates" if group_ok else "does not")))
             continue
+        # AND WHOSE MARK IS IT NOW. `Series_ID` and `Identity_Method` are not
+        # routing evidence - they are what the evidence CONCLUDES - so the
+        # comparison below would never have reached them, and a same-axis swap
+        # sat behind exactly that gap.
         wrong = []
+        for column in ROUTE_COLUMNS:
+            if _s(row.get(column)) != _s(mark.get(column)):
+                wrong.append("%s recorded %r, the ink routes this mark to %r"
+                             % (column, _s(row.get(column)),
+                                _s(mark.get(column))))
         want = AG.routing_evidence(mark)
+        drifted = []
         for column in AG.ROUTING_EVIDENCE:
+            if column in PANEL_DIAGNOSTICS:
+                # A PANEL-WIDE NUMBER THIS ROW'S ROUTE DOES NOT REST ON.
+                # Compared, and reported under its own code below.
+                said = _number(row.get(column))
+                got = want.get(column)
+                if isinstance(said, (int, float)) and isinstance(got, (int, float)):
+                    if abs(float(said) - float(got)) > 1e-4:
+                        drifted.append("%s recorded %s, the ink says %.4f"
+                                       % (column, said, float(got)))
+                elif _s(said) != _s(got):
+                    drifted.append("%s recorded %r, the ink says %r"
+                                   % (column, _s(said), _s(got)))
+                continue
             said = _number(row.get(column))
             got = want.get(column)
             if isinstance(said, (int, float)) and isinstance(got, (int, float)):
@@ -421,4 +484,6 @@ def current_evidence_failures(rows, image, panel_box, series, threshold=150,
                              % (column, _s(said), _s(got)))
         if wrong:
             found.append((i, EVIDENCE_STALE, "; ".join(wrong)))
+        elif drifted:
+            found.append((i, DIAGNOSTIC_STALE, "; ".join(drifted)))
     return found

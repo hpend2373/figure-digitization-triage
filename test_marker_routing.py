@@ -261,17 +261,48 @@ check("both scorers pair two marks and they disagree about which",
 check("  and the minimum-cost pairing is the closer one, 4.0 against 6.0",
       abs(_total(_mincost) - 4.0) < 1e-9 and abs(_total(_greedy) - 6.0) < 1e-9,
       "%.3f vs %.3f" % (_total(_mincost), _total(_greedy)))
-# AND IT IS THE SAME ANSWER EVERY TIME. The tie-break lives in the cost - the
-# index term underneath the distance - so equal-distance optima are ordered
-# rather than left to the traversal.
-_tie = MRT.match_one_to_one(
-    [dict(point_px_x=0.0, point_px_y=0.0), dict(point_px_x=0.0, point_px_y=0.0)],
-    [("A", 1.0, 0.0), ("B", -1.0, 0.0)], 4.0)
+# AND IT IS THE SAME ANSWER EVERY TIME, WHATEVER ORDER THE ROWS ARRIVE IN.
+# The index term underneath the distance orders equal-cost EDGES, and that is
+# not enough to order equal-cost MATCHINGS: in a symmetric two-by-two both
+# pairings sum to the same secondary total, so the answer was decided by the
+# caller's row order. A scorer reading a fixture always passes the same order; a
+# VERIFIER is handed rows off a CSV somebody may have sorted, and this function
+# is now both. So both sides are canonicalised by position first.
+# FOUR DISTINCT POINTS AND A REAL TIE. Two records on a line and two marks
+# symmetrically above and below it: all four distances are the same, so both
+# matchings cost the same and the secondary index term costs the same too. A
+# configuration where the two records share a coordinate would NOT show this -
+# every pairing gives the same coordinate multiset there, which is a scenario
+# that cannot fail.
+_SYM = [dict(point_px_x=0.0, point_px_y=0.0), dict(point_px_x=2.0, point_px_y=0.0)]
+_SYMT = [("A", 1.0, 1.0), ("B", 1.0, -1.0)]
+
+
+def _paired(records, truth):
+    """The pairing as COORDINATES, which is what has to be order-invariant."""
+    got = MRT.match_one_to_one(records, truth, 4.0)
+    return sorted((records[i]["point_px_x"], truth[j][2])
+                  for i, j in got.items())
+
+
 check("  a perfectly symmetric tie resolves the same way every time",
-      _tie == {0: 0, 1: 1}
+      _paired(_SYM, _SYMT) == _paired(_SYM[::-1], _SYMT)
+      == _paired(_SYM, _SYMT[::-1]) == _paired(_SYM[::-1], _SYMT[::-1])
       and all(MRT.match_one_to_one(_REC, _TRU, 6.0) == _mincost
               for _ in range(5)),
-      "%r" % (_tie,))
+      "%r vs %r" % (_paired(_SYM, _SYMT), _paired(_SYM[::-1], _SYMT)))
+# AND THE SAME OF THE ASYMMETRIC CASE, where the answer is not a tie at all:
+# reversing the input must not move which record answers for which mark.
+def _paired_x(records, truth):
+    got = MRT.match_one_to_one(records, truth, 6.0)
+    return sorted((records[i]["point_px_x"], truth[j][1])
+                  for i, j in got.items())
+
+
+check("    and reversing either side changes no pairing anywhere",
+      _paired_x(_REC, _TRU) == _paired_x(_REC[::-1], _TRU)
+      == _paired_x(_REC, _TRU[::-1]),
+      "%r vs %r" % (_paired_x(_REC, _TRU), _paired_x(_REC[::-1], _TRU)))
 
 print()
 print("a blob holding two markers is refused, not reported at neither")

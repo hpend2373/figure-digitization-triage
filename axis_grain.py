@@ -322,6 +322,132 @@ for _column in ("Fill_Conditioning_Shape", "Fill_Group_N", "Fill_Group_Low_N",
     _EVIDENCE_FROM[_column] = _column
 del _column
 
+#: A point's SERIES does not follow from the marker evidence beside it.
+#:
+#: THE HOLE THIS CLOSES. Every other check on a routed point asks whether the
+#: point is consistent WITH ITSELF: the pixel gives the value under the axis it
+#: cites, the hashes cover what they carry, the marker evidence hashes to its own
+#: digest, the fill agrees with its own group's threshold. None of them asked the
+#: one question the whole reader exists to answer - does this MARKER mean this
+#: SERIES? So two points on the SAME axis could have their `Series_ID` swapped,
+#: every hash re-derived, the association recomputed over the file just made, and
+#: nothing disagreed: both rows had a real marker's evidence, both re-derived
+#: their value, and the numbers were published under each other's headings. On a
+#: twin-axis panel that is the cheapest wrong answer there is, because the two
+#: series share a calibration and the values stay in range.
+ROUTE_NOT_DERIVED = "SERIES_DOES_NOT_FOLLOW_FROM_MARKER_EVIDENCE"
+
+
+def declared_markers(series_rows, panel_id=None):
+    """({(SHAPE, FILL): Series_ID}, {SHAPE: fills}) for one panel, or (None, None).
+
+    `(None, None)` when NO row of the manifest declares a marker shape: such a
+    panel was never read by the routed reader, so there is nothing to hold a
+    point's route to and saying so is not the same as passing it.
+    """
+    rows = [r for r in series_rows
+            if panel_id is None or _s(r.get("Panel_ID")) in ("", _s(panel_id))]
+    declared, fills_of = {}, {}
+    for r in rows:
+        shape = _s(r.get("Marker_Shape")).upper()
+        fill = _s(r.get("Marker_Fill")).upper()
+        # `ANY` IS THE MANIFEST'S WAY OF SAYING "NOT THIS". A colour panel
+        # declares `Marker_Shape=CIRCLE, Marker_Fill=ANY` because its series are
+        # told apart by a hex value and the marker is furniture; reading that as
+        # a marker declaration would hold a colour-routed point to a marker route
+        # nobody claimed.
+        if not shape or not fill or "ANY" in (shape, fill):
+            continue
+        declared[(shape, fill)] = _s(r.get("Series_ID"))
+        fills_of.setdefault(shape, set()).add(fill)
+    if not declared:
+        return None, None
+    return declared, fills_of
+
+
+def expected_route(record, series_rows, panel_id=None):
+    """(Series_ID, Identity_Method) this record's OWN evidence supports, or (None, None).
+
+    Derived from the marker evidence on the record and the panel's DECLARATION,
+    and from nothing the record says about itself: `Series_ID` and
+    `Identity_Method` are exactly the two fields a producer would edit, so they
+    are the two this may not read.
+
+        MEASURED_MARKER_SHAPE_FILL   the (shape, fill) pair names one series
+        MEASURED_MARKER_SHAPE        the shape names one series, and the fill was
+                                     never in question for it
+        MEASURED_MARKER_FILL         one shape on the panel, so the fill names it
+        DECLARED_SINGLE_SERIES       one series, and nothing measured names it
+
+    `(None, None)` means THERE IS NOTHING TO DERIVE FROM - the record measured no
+    marker, or the manifest declares none. Both are ordinary: a fixture's
+    declaration and a person's click carry no marker evidence, and a colour panel
+    declares no shape. `route_failure` is what turns a derivable route that
+    DISAGREES into a finding.
+    """
+    import marker_routing as MRT
+    ev = routing_evidence(record)
+    shape = _s(ev["Marker_Shape"]).upper()
+    fill = _s(ev["Marker_Fill"]).upper()
+    declared, fills_of = declared_markers(series_rows, panel_id)
+    if declared is None or (not shape and not fill):
+        return None, None
+    if shape not in fills_of:
+        return "", MRT.identity_method(len(fills_of) > 1, False)
+    fills = fills_of[shape]
+    method = MRT.identity_method(len(fills_of) > 1, len(fills) > 1)
+    if len(fills) > 1:
+        return (declared.get((shape, fill), "") if fill else ""), method
+    # THE FILL IS NOT WHAT NAMES IT. `route` leaves such a mark's fill blank
+    # because nothing measured it, so a record carrying one is claiming a
+    # measurement its own method says was not made - and the empty expected
+    # series below is what says so.
+    if fill:
+        return "", method
+    return declared.get((shape, sorted(fills)[0]), ""), method
+
+
+def route_failure(record, series_rows, panel_id=None):
+    """Why this record's Series_ID or Identity_Method is not what its evidence says.
+
+    RE-DERIVED, NOT READ, like `marker_validity` and `fill_group_validity`. The
+    difference is what it re-derives: those two ask whether the measurements on
+    the record are consistent with each other, and this asks the question the
+    reader exists to answer - does this MARKER mean this SERIES on this panel?
+    Without it two points on the same axis could have their `Series_ID` swapped,
+    every hash re-derived, and nothing in this package disagreed.
+    """
+    want_series, want_method = expected_route(record, series_rows, panel_id)
+    if want_series is None:
+        return ""
+    ev = routing_evidence(record)
+    shape = _s(ev["Marker_Shape"]) or "(no shape)"
+    fill = _s(ev["Marker_Fill"]) or "(no measured fill)"
+    got_series = _s(record.get("Series_ID"))
+    if not want_series:
+        return ("%s: no series of this panel is a %s %s, and the record says %s"
+                % (ROUTE_NOT_DERIVED, fill, shape, got_series or "nothing"))
+    if got_series != want_series:
+        return ("%s: a %s %s on this panel is %s, and the record says %s"
+                % (ROUTE_NOT_DERIVED, fill, shape, want_series,
+                   got_series or "nothing"))
+    got_method = _s(record.get("Identity_Method"))
+    if got_method != want_method:
+        return ("%s: this panel's declaration makes the route %s and the record "
+                "claims %s" % (ROUTE_NOT_DERIVED, want_method,
+                               got_method or "nothing"))
+    return ""
+
+
+#: THE EVIDENCE COLUMNS THAT ARE WORDS, not numbers. Their blank is the empty
+#: string and it has to survive a round trip through a CSV: `_number("")` is
+#: None, and a record whose `Marker_Fill` was "" - which is what a mark named by
+#: its SHAPE alone carries, because nothing measured its fill - came back None
+#: and hashed to a different digest than the file it was read from. One blank per
+#: column, and for these it is "".
+TEXT_EVIDENCE = ("Marker_Validity_Status", "Marker_Shape", "Marker_Fill",
+                 "Fill_Conditioning_Shape", "Fill_Group_Separates")
+
 #: The one status under which a point may carry a measured series.
 SINGLE_MARKER = "SINGLE_MARKER"
 #: What `verify_points` says when the evidence on a routed point says the blob
@@ -613,6 +739,14 @@ def verify_points(records, series_rows, axes, x_axis_id, panel_id, image_sha256)
             out.append((i, "routing evidence does not hash to what it carries"))
             continue
         bad = marker_validity(r)
+        if bad:
+            out.append((i, bad))
+            continue
+        # AND DOES THIS MARKER MEAN THIS SERIES. Re-derived from the evidence and
+        # the declaration; the two fields a producer would edit are the two this
+        # does not read. Without it a same-axis `Series_ID` swap passed every
+        # check in this package.
+        bad = route_failure(r, series_rows, panel_id)
         if bad:
             out.append((i, bad))
             continue

@@ -169,10 +169,10 @@ python3 verify_documented_status.py --profile full --rasters present /tmp/counts
 README 마커를 고치지 않고 시나리오를 추가하면 여기서 빨간불이 납니다. **0은 그 스위트가
 `FDT_RASTER_ABSENT`를 출력했을 때만 허용**됩니다.
 
-### 3.5 현재 숫자 (커밋 `v9.17`)
+### 3.5 현재 숫자 (커밋 `v9.18`)
 
 ```
-CORE 3417   FULL 3458   RASTER_ONLY 286     래스터 포함: 3703 / 3744     28 suites
+CORE 3427   FULL 3468   RASTER_ONLY 286     래스터 포함: 3713 / 3754     28 suites
 raster-only 내역: test_bar_reader 24, test_integration 17, test_compile_plan 198,
                   test_reproducibility 5, test_visual_verification 42
 ```
@@ -274,6 +274,11 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
 - 등록된 사람 R2/R3 리뷰.
 
 ### 남은 작업 (에이전트가 할 수 있는 것)
+- **durable group evidence 2-grain 설계** — `scatter_marker_candidates.csv`(거절 포함 모든
+  candidate) + `scatter_fill_groups.csv`(shape 그룹 1행, 참여 candidate 해시 목록), 각 point가
+  `Candidate_Record_SHA256`·`Fill_Group_Record_SHA256`를 참조. 그러면 래스터를 다시 열지 않고도
+  group split을 재유도할 수 있습니다. 지금은 `current_evidence_failures`가 래스터를 여는 것으로
+  막고 있어 P0는 아닙니다.
 - **group evidence 11개는 point artifact만으로 재계산되지 않습니다** — `scatter_points.csv`는
   routed point만 담아서 group의 N·분포·cut을 복원할 수 없습니다. 별도 grain
   (`scatter_fill_groups.csv` + 각 point가 참조하는 `Fill_Group_Record_SHA256`)이 필요합니다.

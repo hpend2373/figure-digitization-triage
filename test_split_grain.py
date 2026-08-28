@@ -261,7 +261,7 @@ check("a shape declared with one fill is named by its shape, and says so",
                       for x in _tri}),))
 check("  and it carries no fill group, because none was asked",
       all(x["Fill_Group_Threshold"] is None
-          and x["Fill_Conditioning_Shape"] is None for x in _tri),
+          and x["Fill_Conditioning_Shape"] == "" for x in _tri),
       "%r" % (sorted({(x["Fill_Conditioning_Shape"], x["Fill_Group_Threshold"])
                       for x in _tri}),))
 check("  the circles on the same panel measured both, and say that instead",
@@ -331,11 +331,11 @@ check("the fill separates, the shape does not, and nothing is routed",
       and _b["refusals"] == ["MARKER_SHAPE_UNRESOLVED"],
       "%r" % (_b["refusals"],))
 check("  and a mark with no shape is in no group and carries no group evidence",
-      all(x["Fill_Conditioning_Shape"] is None
+      all(x["Fill_Conditioning_Shape"] == ""
           and x["Fill_Group_Threshold"] is None
           for x in _b["out"]["records"]
           if x["Marker_Validity_Status"] == "SINGLE_MARKER"),
-      "%r" % (sorted({x["Fill_Conditioning_Shape"]
+      "%r" % (sorted({str(x["Fill_Conditioning_Shape"])
                       for x in _b["out"]["records"]}),))
 
 print()

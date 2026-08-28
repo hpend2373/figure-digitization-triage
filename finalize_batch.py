@@ -1426,7 +1426,8 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag,
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag,
                                       artifacts=artifacts)
     withheld |= _scatter_route_failures(machine, ledger_rows, run_dir, flag,
-                                        artifacts=artifacts)
+                                        artifacts=artifacts,
+                                        series=(frames or {}).get("series"))
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
                                         flag, panel_expectations(frames),
                                         artifacts=artifacts)
@@ -1987,7 +1988,7 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag,
 
 
 def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
-                            artifacts=None):
+                            artifacts=None, series=None):
     """Routed scatter values whose point file does not support the route claimed.
 
     THE SAME SHAPE AS THE GEOMETRY GATE, and for the same reason. A value that
@@ -2066,6 +2067,17 @@ def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
         # the names the reader wrote. Handed the row straight, it sees eighteen
         # blanks and says "nothing measured this" - a pass.
         bad = [AG.marker_validity(SP.evidence_record(p)) for p in points]
+        # AND DOES THIS MARKER MEAN THIS SERIES. `marker_validity` asks whether
+        # the measurements agree with each other; this asks whether they name
+        # the series the row is filed under, which is the question a swapped
+        # `Series_ID` answers wrongly while every other check agrees.
+        if series is not None:
+            rows_of = (series.to_dict("records") if hasattr(series, "to_dict")
+                       else list(series))
+            mine = [r for r in rows_of if _s(r.get("Panel_ID")) == pid]
+            if mine:
+                bad += [AG.route_failure(SP.evidence_record(p), mine, pid)
+                        for p in points]
         bad = [b for b in bad if b]
         if bad:
             flag(where, "METHOD_CONTRADICTS_GEOMETRY",

@@ -8172,6 +8172,95 @@ its verdict follows the count it observed. A non-zero count would still not make
 it positive: that needs a human-reviewed marker truth file bound to the clip's
 SHA-256.
 
+## v9.18 — does this marker mean this series?
+
+Every check on a routed point asked whether the point was consistent WITH ITSELF.
+The pixel gives the value under the axis it cites; the hashes cover what they
+carry; the marker evidence hashes to its own digest; the fill agrees with its own
+group's threshold. Not one of them asked the question the reader exists to
+answer, and a review found it by reading rather than by running.
+
+**Two points on the same axis, with their series swapped.**
+
+    Series_ID     L_OPEN_CIRCLE  ->  L_FILLED_CIRCLE
+    Marker_Shape  CIRCLE             CIRCLE
+    Marker_Fill   OPEN               OPEN
+
+Re-derive both hashes, recompute the association over the file you just made and
+the file hash over that, and nothing in this package disagreed. Both rows carried
+a real marker's evidence; both re-derived their value from their own pixel under
+a calibration they were entitled to. On a twin-axis panel this is the cheapest
+wrong answer there is, because two series on one axis share a calibration and the
+values stay in range. The same hole let a row claim a WIDER identity method than
+its panel supports - a provenance tier resting on evidence never gathered.
+
+`axis_grain.expected_route` now derives both from the marker evidence and the
+manifest, and from nothing the record says about itself:
+
+    MEASURED_MARKER_SHAPE_FILL   the (shape, fill) pair names one series
+    MEASURED_MARKER_SHAPE        the shape names one series
+    MEASURED_MARKER_FILL         one shape on the panel, so the fill names it
+    DECLARED_SINGLE_SERIES       one series, and nothing measured names it
+
+It is consulted in all three places a routed point is checked - `verify_points`,
+`current_evidence_failures` and the finalizer's scatter gate - and the raster
+comparison now covers `Series_ID` and `Identity_Method` as well, which are what
+the evidence CONCLUDES rather than what it measures.
+
+**A shape-only route was being asked for a fill split it never consulted.** A
+shape declared with ONE fill is named by its shape; its marks are all one fill,
+so that shape's interior ink is one cluster. `current_evidence_failures` demanded
+a separating fill group of EVERY row, which refused exactly the routes v9.17 had
+just made honest. The gate a row must pass is now chosen by the method that named
+it. And a group with one declared fill no longer reports a split at all: two-means
+will happily cut a tight single cluster - eight filled triangles at 0.853 to
+0.914 split 4|4 on a gap of 0.036 and score over the separation this package
+requires - and calling that a split is one class read as two on a panel where
+nobody asked.
+
+**A panel-wide diagnostic is not a reason to doubt a value.** Since v9.16 nothing
+routes on `Fill_Split`, and a rendering that moves it without moving this mark's
+own group has not made the row stale. It is still compared, under
+`PANEL_DIAGNOSTIC_DOES_NOT_MATCH_THE_INK`, so a hashed column is not one no
+re-measurement ever looks at - and it is no longer said in the same sentence as
+the numbers the route rests on.
+
+**The matcher's tie-break ordered EDGES, not MATCHINGS.** In a symmetric
+two-by-two both pairings cost the same and the secondary index term costs the
+same too, so the answer was decided by whatever order the caller passed its rows
+in. That is fine for a scorer reading a fixture and not fine for a VERIFIER
+handed rows off a CSV somebody may have sorted - and since v9.17 this function is
+both. Both sides are canonicalised by position first. The scenario that catches
+it needs FOUR DISTINCT POINTS: two records sharing a coordinate give the same
+coordinate multiset under either pairing, which is a scenario that cannot fail.
+
+**One blank per column.** `Marker_Fill` is `""` on a mark named by its shape
+alone, and `_number("")` is `None`, so such a row hashed differently on the way
+back in from the file it was written to. `axis_grain.TEXT_EVIDENCE` names the
+columns whose blank is the empty string.
+
+    reverted                                          scenario that fails
+    route_failure returns nothing                     the same-axis swap
+    verify_points skips the route check                the same-axis swap
+    the finalizer gate skips it                        the swap, through the gate
+    the raster ignores Series_ID/Identity_Method       the swap, on the ink
+    the split gate ignores the method                  the shape-only route
+    the matcher is not canonicalised                   the four-point tie
+    the text blank goes back to None                   the round-trip hash
+    a one-fill shape keeps its split                   one_fill's triangle group
+    ANY read as a marker declaration                   the colour panel's gate
+    no panel diagnostics                               the diagnostic's own code
+
+**Still open, and deliberately not built here.** The eleven group columns are not
+re-derivable from the point file alone - it holds only ROUTED points, so a
+group's N and distribution cannot be rebuilt from it, and re-opening the raster
+is what closes that today. The shape that would make the durable evidence
+self-supporting is two grains rather than one: `scatter_marker_candidates.csv`,
+every candidate whether routed or refused, and `scatter_fill_groups.csv`, one row
+per shape group citing the candidates it was taken over, with each point citing a
+`Candidate_Record_SHA256` and a `Fill_Group_Record_SHA256`. That is a schema
+round of its own.
+
 ## The segmentation harness, and the six statements that put a panel back together
 
 `HARNESS.md` is the full document; this is what changed in the package and why it

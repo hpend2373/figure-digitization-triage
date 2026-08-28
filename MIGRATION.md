@@ -421,3 +421,71 @@ grain this package no longer uses, and **the clip has not been measured under th
 per-shape grain**. A non-zero routed count would still not make it a positive
 forward test — that needs a human-reviewed marker truth file bound to the clip's
 SHA-256, and there is none.
+
+# v9.18: does this marker mean this series?
+
+## Why
+
+Every check on a routed point asked whether the point was consistent WITH
+ITSELF. The pixel gives the value under the axis it cites; the hashes cover what
+they carry; the marker evidence hashes to its own digest; the fill agrees with
+its own group's threshold. Not one of them asked the question the reader exists
+to answer.
+
+So two points on the SAME axis could have their `Series_ID` swapped:
+
+    Series_ID     L_OPEN_CIRCLE  ->  L_FILLED_CIRCLE
+    Marker_Shape  CIRCLE             CIRCLE
+    Marker_Fill   OPEN               OPEN
+
+re-derive both hashes, recompute the association and the file hash, and nothing
+in this package disagreed. Both rows carried a real marker's evidence, both
+re-derived their value from their own pixel, and the numbers were published under
+each other's headings. On a twin-axis panel that is the cheapest wrong answer
+there is, because two series on one axis share a calibration and the values stay
+in range.
+
+The same hole let a row claim a WIDER identity method than its panel supports —
+a provenance tier resting on evidence that was never gathered.
+
+## What changed
+
+| | v9.17 | v9.18 |
+|---|---|---|
+| a point's `Series_ID` | believed | re-derived by `axis_grain.expected_route` from the marker evidence and the manifest |
+| a point's `Identity_Method` | believed | the same |
+| where that is checked | nowhere | `verify_points`, `current_evidence_failures` and the finalizer's scatter gate |
+| the raster comparison | `ROUTING_EVIDENCE` only | and `Series_ID`/`Identity_Method`, which are what the evidence CONCLUDES |
+| `SPLIT_GONE` | every row needed both splits | only the splits this row's own method rests on |
+| a shape declared with one fill | its group still reported a split | no split: there is no fill question, and two-means will cut a tight single cluster |
+| `Fill_Split` / `Fill_Margin` drift | `ROUTING_EVIDENCE_DOES_NOT_MATCH_THE_INK` | `PANEL_DIAGNOSTIC_DOES_NOT_MATCH_THE_INK` — reported, and not confused with the route |
+| `match_one_to_one` | tie-break ordered EDGES | both sides canonicalised by position, so the pairing is invariant to row order |
+| `Marker_Fill` on a shape-only route | `""` in memory, `None` after a CSV round trip | one blank per column: `AG.TEXT_EVIDENCE` keeps words as words |
+
+## What changed for a run you already have
+
+**A v9.17 `scatter_points.csv` still verifies** — no column moved and no hash
+changed shape. What changes is that a file whose `Series_ID` does not follow from
+its own marker evidence is now refused, which is the point.
+
+**A shape-only route that v9.17 wrote and then refused now passes.** A shape
+declared with one fill has no fill split to establish, and `current_evidence_failures`
+was demanding one of every row. If a v9.17 run came back
+`THE_PANEL_NO_LONGER_SEPARATES` on every point of such a shape, re-run it.
+
+**`Marker_Shape=ANY` or `Marker_Fill=ANY` declares no marker.** A colour panel
+says `Marker_Fill=ANY` because its series are told apart by a hex value; reading
+that as a marker declaration would hold a colour-routed point to a marker route
+nobody claimed. Such panels are not route-checked, and are unaffected.
+
+## Still open, and deliberately not built here
+
+The eleven group columns are still not re-derivable from the point file alone:
+`scatter_points.csv` holds only ROUTED points, so a group's N and distribution
+cannot be rebuilt from it, and re-opening the raster is what closes that today.
+The shape that would make the durable evidence self-supporting is two grains
+rather than one — `scatter_marker_candidates.csv`, every candidate whether routed
+or refused, and `scatter_fill_groups.csv`, one row per shape group citing the
+candidates it was taken over — with each point citing a
+`Candidate_Record_SHA256` and a `Fill_Group_Record_SHA256`. That is a schema
+round of its own and it is written down rather than half-built.

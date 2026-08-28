@@ -925,7 +925,24 @@ _SCATTER_ROW = {
 }
 
 
-def _scatter_gate(claimed="MEASURED_MARKER_SHAPE_FILL", ledger=True, **over):
+#: A ROUTED-SCATTER SERIES MANIFEST for P1, so the gate has a declaration to
+#: hold a point's route to. The run's own P1 is a colour panel - `Marker_Fill`
+#: is `ANY` there, which declares no marker at all - and a gate handed that has
+#: nothing to check, which is right and is not a test of the check.
+_SCATTER_SERIES = [
+    dict(Panel_ID="P1", Series_ID="S_OPEN", Marker_Shape="CIRCLE",
+         Marker_Fill="OPEN", Axis_ID="Y_LEFT", Colour_Hex=""),
+    dict(Panel_ID="P1", Series_ID="S_FILLED", Marker_Shape="CIRCLE",
+         Marker_Fill="FILLED", Axis_ID="Y_LEFT", Colour_Hex=""),
+    dict(Panel_ID="P1", Series_ID="S_TRI_OPEN", Marker_Shape="TRIANGLE",
+         Marker_Fill="OPEN", Axis_ID="Y_RIGHT", Colour_Hex=""),
+    dict(Panel_ID="P1", Series_ID="S_TRI_FILLED", Marker_Shape="TRIANGLE",
+         Marker_Fill="FILLED", Axis_ID="Y_RIGHT", Colour_Hex=""),
+]
+
+
+def _scatter_gate(claimed="MEASURED_MARKER_SHAPE_FILL", ledger=True,
+                  series_rows=None, **over):
     """`method_contract_failures` over one routed point, as finalize calls it."""
     row = dict(_SCATTER_ROW, **over)
     path = os.path.join(_scatter_dir, "scatter_points.csv")
@@ -946,7 +963,9 @@ def _scatter_gate(claimed="MEASURED_MARKER_SHAPE_FILL", ledger=True, **over):
                      if ledger else
                      [], columns=["Panel_ID", "Artifact_Type",
                                   "Artifact_Path"]),
-        OUT, lambda w_, c, d: seen.append(c), frames=_verified(OUT))
+        OUT, lambda w_, c, d: seen.append(c),
+        frames=(dict(_verified(OUT), series=pd.DataFrame(series_rows))
+                if series_rows else _verified(OUT)))
     return held, seen
 
 
@@ -970,6 +989,18 @@ check("  and a class from a group that did not separate is withheld too",
 # MEASURED_MARKER_FILL on a panel of one declared shape and MEASURED_MARKER_SHAPE
 # on a shape declared with one fill; a gate that knew only the third name would
 # have taken those two on trust, with no point file at all behind them.
+# AND WHETHER THIS MARKER MEANS THIS SERIES, through the gate. Handed a panel
+# whose manifest actually declares markers, the finalizer re-derives the route
+# from the evidence instead of reading the row's own answer.
+_held_s, _seen_s = _scatter_gate(series_rows=_SCATTER_SERIES)
+check("  a routed point whose marker names its series passes the gate",
+      not _held_s and "METHOD_CONTRADICTS_GEOMETRY" not in _seen_s, "%s" % _seen_s)
+_held_s, _seen_s = _scatter_gate(series_rows=_SCATTER_SERIES,
+                                 Series_ID="S_FILLED")
+check("    and one filed under the other series on the same axis is withheld",
+      _held_s == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _seen_s,
+      "%r %s" % (_held_s, _seen_s))
+
 for _claimed in ("MEASURED_MARKER_FILL", "MEASURED_MARKER_SHAPE"):
     _held_s, _seen_s = _scatter_gate(claimed=_claimed, ledger=False,
                                      Identity_Method=_claimed)

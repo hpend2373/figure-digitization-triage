@@ -21,20 +21,31 @@ setting, and how many pixels that is depends on how the page was rendered. So
 the size window is measured off the panel - the median side of its own
 near-square components - exactly as the line readers measure their stroke.
 
-Shape and fill are decided the same way, by the PANEL'S OWN distribution:
+Shape and fill are both decided by A DISTRIBUTION THE PANEL ITSELF PRODUCES,
+and since v9.16 they are not decided by the SAME distribution:
 
-    circularity   a disc and a triangle sit at different values, and a panel
-                  drawing both has a bimodal set
-    interior ink  a ring's middle is white and a disc's is black, and a panel
-                  drawing both has a bimodal set
+    shape   the radial third harmonic, over every mark on the panel. A triangle
+            is a triangle whatever else is drawn, so this question is panel-wide.
+    fill    the interior ink of the marks OF ONE MEASURED SHAPE. A ring encloses
+            white and a hollow triangle puts its own edges through the window at
+            its centroid, so a panel drawing both has FOUR bands in one set and
+            the panel-wide spread it would score is two clusters', not one's.
+            `split_grain_confounded.jpeg` is the case where that costs five
+            marks published under another series' name.
 
-`_split` finds the largest gap in a sorted set and compares it with the largest
-gap WITHIN either side of it. A real bimodal split has a between-gap wider than
-any within-gap; a single blurred cluster does not. That test is scale-free, needs
-no constant, and is the whole reason this module can refuse instead of guessing:
-on `twin_scatter_micro.jpeg` - markers 3 px across - the open triangles reach a
+`_split` is a 1-D two-means: it takes the cut that maximises the distance between
+the two group means over their pooled spread. THE LARGEST GAP WAS THE FIRST
+STATISTIC TRIED AND IT WAS WRONG TWICE - see the note on `_split` itself - and a
+separation index is scale-free, needs no constant beyond `SEPARATION`, and is the
+whole reason this module can refuse instead of guessing: on
+`twin_scatter_micro.jpeg` - markers 3 px across - the open triangles reach a
 HIGHER interior ink ratio than the filled ones, no split exists, and every mark
 comes back with its shape and `MARKER_FILL_UNRESOLVED`.
+
+WHAT IS MEASURED IS WHAT THE METHOD MAY CLAIM. A panel of one declared shape did
+not measure a shape, and a shape declared with one fill did not measure a fill;
+`identity_method` picks the registered name that matches, so a point's
+`Identity_Method` is a claim the evidence beside it supports.
 
 ## The shape axis, and the three discriminants that failed first
 
@@ -336,7 +347,12 @@ def fill_group(values):
 def _group_evidence(group, value):
     """`GROUP_EVIDENCE` for one mark, or blanks where no group asked."""
     if group is None:
-        return dict.fromkeys(GROUP_EVIDENCE, None)
+        # THE TEXT COLUMNS BLANK AS "", the numbers as None: one blank per
+        # column, so a row read back off a CSV hashes to what was written.
+        blank = dict.fromkeys(GROUP_EVIDENCE, None)
+        blank["Fill_Conditioning_Shape"] = ""
+        blank["Fill_Group_Separates"] = ""
+        return blank
     split = group["split"]
     index = group["index"]
     return {"Fill_Conditioning_Shape": group["shape"],
@@ -655,10 +671,27 @@ def match_one_to_one(records, truth, tol):
     `i * R + j` underneath, so no two candidate edges cost the same and the
     optimum is unique: among matchings of equal total distance, the one whose
     record and truth indices are smallest wins, the same way every time.
+
+    AND THE INDICES ARE CANONICAL, NOT THE CALLER'S. `i * R + j` breaks ties
+    between EDGES and not between MATCHINGS: in a symmetric two-by-two both
+    pairings sum to `R + 1`, so the answer was decided by whatever order the
+    caller happened to pass its rows in. That is fine for a scorer reading a
+    fixture in a fixed order and not fine for a VERIFIER, which is handed rows
+    off a CSV somebody may have sorted. So both sides are sorted by position
+    first and the answer is mapped back: the same two point sets now pair the
+    same way whatever order they arrive in.
     """
     L, R = len(records), len(truth)
     if not L or not R:
         return {}
+    left = sorted(range(L), key=lambda i: (records[i]["point_px_x"],
+                                           records[i]["point_px_y"], i))
+    right = sorted(range(R), key=lambda j: (truth[j][1], truth[j][2],
+                                            str(truth[j][0]), j))
+    if left != list(range(L)) or right != list(range(R)):
+        got = match_one_to_one([records[i] for i in left],
+                               [truth[j] for j in right], tol)
+        return {left[i]: right[j] for i, j in got.items()}
     span = L * R + 1
     edges_of = {}
     for i, x in enumerate(records):
@@ -929,6 +962,17 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
         group = fill_group([g["interior_ink"] for g in mine])
         group["shape"] = shape
         group["declared_fills"] = sorted(fills_of.get(shape, ()))
+        if len(group["declared_fills"]) < 2:
+            # A SHAPE WITH ONE DECLARED FILL HAS NO FILL QUESTION, so it has no
+            # answer either. Two-means will happily cut a tight single cluster -
+            # eight filled triangles at 0.853 to 0.914 split 4|4 on a gap of
+            # 0.036 and score over the separation this package requires - and
+            # reporting that as a split is one class read as two, on a panel
+            # where nobody asked. The distribution stays on the group for a
+            # reviewer; the verdict does not.
+            group["split"] = Split(None, 0.0, 0.0, False)
+            group["low_n"] = group["high_n"] = 0
+            group["index"] = 0.0
         groups[shape] = group
 
     for geo in kept:

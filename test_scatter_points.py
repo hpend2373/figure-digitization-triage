@@ -361,6 +361,111 @@ check("  and the raster check asks each row's OWN shape group, not the panel",
       "%r" % ([(c, d[:70]) for _i, c, d in SP.current_evidence_failures(
           _gg_rows, _gg_image, _GG["panel_box"], _gg_series)][:3],))
 
+# AND A SHAPE-ONLY ROUTE IS NOT ASKED FOR A FILL SPLIT IT NEVER CONSULTED. A
+# shape declared with ONE fill is named by its shape; its marks are all one fill,
+# so that shape's interior ink is one cluster and its group does NOT separate -
+# correctly. A check that demanded a fill split of every row refused exactly the
+# routes v9.17 had just made honest.
+_OF = json.load(open(os.path.join(HERE, "split_grain_truth.json"),
+                     encoding="utf-8"))["renderings"]["one_fill"]
+_of_image = Image.open(os.path.join(HERE, _OF["file"])).convert("RGB")
+_of_series = [dict(Panel_ID="P_OF", Series_ID=d["Series_ID"], Colour_Hex="",
+                   Colour_Tolerance="", Mask_Key="",
+                   Marker_Shape=d["Marker_Shape"], Marker_Fill=d["Marker_Fill"],
+                   Line_Style="", Bar_Fill_Pattern="", Axis_ID=d["Axis_ID"],
+                   Factor_Name="SERIES", Factor_Level=d["Series_ID"], Note="")
+              for d in _OF["declared"]]
+_of_axes = [dict(Axis_ID="X_BOTTOM", Panel_ID="P_OF", Dimension="X",
+                 Side="BOTTOM", Unit="cm H2O", Scale="LINEAR",
+                 Calibration_Points=_ticks(_OF["x_ticks"]), Note=""),
+            dict(Axis_ID="Y_LEFT", Panel_ID="P_OF", Dimension="Y", Side="LEFT",
+                 Unit="mmHg/L/min", Scale="LINEAR",
+                 Calibration_Points=_ticks(_OF["left_y_ticks"]), Note=""),
+            dict(Axis_ID="Y_RIGHT", Panel_ID="P_OF", Dimension="Y",
+                 Side="RIGHT", Unit="index", Scale="LINEAR",
+                 Calibration_Points=_ticks(_OF["right_y_ticks"]), Note="")]
+_of_points, _of_meta = SP.read_routed_scatter_panel(
+    _of_image, _OF["panel_box"], _of_series, RB._axis_manifest(_of_axes),
+    "P_OF", RB.file_sha256(os.path.join(HERE, _OF["file"])), "X_BOTTOM")
+_of_rows = SP.artifact_rows(_of_points)
+_of_methods = {r["Identity_Method"] for r in _of_rows}
+check("a shape-only route is written, and its own shape group does not separate",
+      _of_methods == {"MEASURED_MARKER_SHAPE", "MEASURED_MARKER_SHAPE_FILL"}
+      and not _of_meta["fill_groups"]["TRIANGLE"]["split"]["separates"]
+      and _of_meta["fill_groups"]["CIRCLE"]["split"]["separates"]
+      and all(not r["Marker_Fill"] for r in _of_rows
+              if r["Identity_Method"] == "MEASURED_MARKER_SHAPE"),
+      "%r, triangle group %r"
+      % (sorted(_of_methods),
+         _of_meta["fill_groups"]["TRIANGLE"]["split"]["separates"]))
+check("  and neither the raster check nor the file's verifier refuses it",
+      SP.current_evidence_failures(_of_rows, _of_image, _OF["panel_box"],
+                                   _of_series) == []
+      and SP.verify_artifact(_of_rows, _of_series,
+                             RB._axis_manifest(_of_axes), "P_OF",
+                             RB.file_sha256(os.path.join(HERE,
+                                                         _OF["file"]))) == [],
+      "%r" % ([(c, d[:70]) for _i, c, d in SP.current_evidence_failures(
+          _of_rows, _of_image, _OF["panel_box"], _of_series)][:2],))
+
+# DOES THIS MARKER MEAN THIS SERIES. Every check above asks whether the row is
+# consistent WITH ITSELF - hashes, arithmetic, the fill against its own group -
+# and none of them asked the question the reader exists to answer. Two points on
+# the SAME axis with their Series_ID swapped kept every measurement true: both
+# rows sat on a real marker, both re-derived their value from their own pixel
+# under a calibration they were entitled to, and the numbers were published
+# under each other's headings.
+_a = next(i for i, r in enumerate(ROWS) if r["Series_ID"] == "L_OPEN_CIRCLE")
+_b = next(i for i, r in enumerate(ROWS) if r["Series_ID"] == "L_FILLED_CIRCLE")
+_swapped = [dict(r) for r in ROWS]
+_swapped[_a]["Series_ID"], _swapped[_b]["Series_ID"] = \
+    _swapped[_b]["Series_ID"], _swapped[_a]["Series_ID"]
+_swapped = _restamp(_swapped)
+check("two same-axis points with their series swapped are refused by the file",
+      ROWS[_a]["Axis_ID"] == ROWS[_b]["Axis_ID"]
+      and sum(1 for why in SP.verify_artifact(
+          _swapped, SERIES_ROWS, RB._axis_manifest(AXIS_ROWS), PANEL, SHA)
+          if AG.ROUTE_NOT_DERIVED in why) == 2,
+      "%r" % (SP.verify_artifact(_swapped, SERIES_ROWS,
+                                 RB._axis_manifest(AXIS_ROWS), PANEL, SHA)[:1],))
+check("  and the raster says the same, from the marks it routes now",
+      {c for _i, c, _d in SP.current_evidence_failures(
+          _swapped, IM, R["panel_box"], SERIES_ROWS)} == {SP.EVIDENCE_STALE}
+      and len(SP.current_evidence_failures(_swapped, IM, R["panel_box"],
+                                           SERIES_ROWS)) == 2,
+      "%r" % ([(i, c) for i, c, _d in SP.current_evidence_failures(
+          _swapped, IM, R["panel_box"], SERIES_ROWS)],))
+# AND THE METHOD IS DERIVED, NOT READ. A row claiming a narrower method than its
+# panel supports is claiming its series was named by less evidence than it was;
+# a wider one claims more. Both are a provenance tier resting on a fiction.
+_inflated = _restamp([dict(ROWS[0], Identity_Method="MEASURED_MARKER_SHAPE")]
+                     + [dict(r) for r in ROWS[1:]])
+check("  a point claiming a method its panel does not support is refused",
+      any(AG.ROUTE_NOT_DERIVED in why for why in SP.verify_artifact(
+          _inflated, SERIES_ROWS, RB._axis_manifest(AXIS_ROWS), PANEL, SHA)),
+      "%r" % (SP.verify_artifact(_inflated, SERIES_ROWS,
+                                 RB._axis_manifest(AXIS_ROWS), PANEL, SHA)[:1],))
+# AND THE DERIVATION IS A FUNCTION OF THE DECLARATION, not of the row.
+check("  the expected route comes off the evidence and the manifest alone",
+      AG.expected_route(SP.evidence_record(dict(ROWS[_a])), SERIES_ROWS, PANEL)
+      == ("L_OPEN_CIRCLE", "MEASURED_MARKER_SHAPE_FILL")
+      and AG.expected_route(dict(Series_ID="X"), SERIES_ROWS, PANEL)
+      == (None, None),
+      "%r" % (AG.expected_route(SP.evidence_record(dict(ROWS[_a])),
+                                SERIES_ROWS, PANEL),))
+
+# A PANEL-WIDE DIAGNOSTIC IS NOT A REASON TO DOUBT A VALUE. Since v9.16 nothing
+# routes on `Fill_Split`; a rendering that moves it without moving this mark's
+# own group has not made the row stale, and saying EVIDENCE_STALE would put a
+# number nothing read beside the numbers everything read.
+_diag = _restamp([dict(ROWS[0], Fill_Split="0.1234", Fill_Margin="0.5")]
+                 + [dict(r) for r in ROWS[1:]])
+_diag_ev = SP.current_evidence_failures(_diag, IM, R["panel_box"], SERIES_ROWS)
+check("a moved panel diagnostic is reported, and reported apart",
+      [c for _i, c, _d in _diag_ev] == [SP.DIAGNOSTIC_STALE]
+      and set(SP.PANEL_DIAGNOSTICS) <= set(AG.ROUTING_EVIDENCE),
+      "%r" % ([(i, c) for i, c, _d in _diag_ev],))
+
 print()
 print("what the runner refuses, and says why")
 _no_axis = [dict(r, Axis_ID="") for r in SERIES_ROWS]

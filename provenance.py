@@ -64,6 +64,15 @@ IDENTITY_METHODS = {
     "MEASURED_COLOUR": "R0",
     "MEASURED_MARKER_SHAPE": "R0",
     "MEASURED_MARKER_FILL": "R0",
+    # BOTH AT ONCE, on a panel that needs both to tell four series apart. R0 for
+    # the same reason as the two above - the shape and the fill were measured
+    # off this mark's own ink - but it is a separate token rather than either of
+    # them, because what it claims is stronger: not "this marker is a triangle"
+    # but "this marker is a triangle AND it is open AND the panel's own
+    # distribution separated both, by a margin this mark cleared". A panel that
+    # establishes only one of the two axes routes nothing, so a value can never
+    # arrive here having measured half of what the name says.
+    "MEASURED_MARKER_SHAPE_FILL": "R0",
     "MEASURED_LINE_STYLE": "R0",
     "MEASURED_FILL_RELATION": "R0",
     # a declaration, not a measurement - and no competing identity to get wrong

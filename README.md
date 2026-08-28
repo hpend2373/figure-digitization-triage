@@ -113,11 +113,11 @@ Every test file is a standalone script:
     for t in test_*.py; do python3 "$t"; done
 
 <!-- CURRENT_PIPELINE_VERSION: 9.15 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3314 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3355 -->
-<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 280 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3348 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3389 -->
+<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 
-3314 scenarios on main after v9.15 under `requirements-lock.txt`, and 3355 with
+3348 scenarios on main after v9.15 under `requirements-lock.txt`, and 3389 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs
@@ -128,18 +128,18 @@ starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
 count that depends on what `ubuntu-latest` happens to ship is not a property of
 this repository.
 
-Those two numbers are what a **fresh clone** runs. A further 280 of them need
+Those two numbers are what a **fresh clone** runs. A further 286 of them need
 the publisher figures, which this repository does not carry and cannot: they are
 not redistributable. `test_bar_reader` (24), `test_integration` (17),
-`test_compile_plan` (197), `test_reproducibility` (5) and
-`test_visual_verification` (37) skip those sections
+`test_compile_plan` (198), `test_reproducibility` (5) and
+`test_visual_verification` (42) skip those sections
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
-3594 and 3635. Every raster is pinned there by SHA-256, so a file that is not
+3634 and 3675. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at 3314/3355 rather than red for a reason it cannot fix.
+no secret is green at 3348/3389 rather than red for a reason it cannot fix.
 
 Both are verified in a clean room with scipy blocked — the statistics are
 hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every
@@ -307,21 +307,32 @@ and writes ten accepted values, worst mean 0.0057 and worst CI half-width
 output and stamps `DEMO_OUTPUT_REFUSED` — a demonstration identity cannot stand
 behind a poolable value.
 
-**The twin-axis scatter reader exists and is not wired in.** `marker_routing`
-tells four monochrome series apart by marker shape and fill, and `axis_grain`
-lets one panel carry two y scales with every point saying which it was read on.
-Both are held to `twin_scatter_*.jpeg`, a drawing this repository carries whose
-every marker's series and centre is declared, and both refuse per mark rather
-than per panel: 16, 17 and 18 of 30 marks routed at 11, 22 and 33 px with **no
-misroutes at any rendering**, everything refused at 5 px and 3 px, and the marks
-it never saw counted in the same table as the ones it did — scored by a
-minimum-cost maximum matching, because a scorer that judges a reader must not be
-weaker than the reader. Every point's hash covers whose it is, which axis it was
-read on, and the eighteen measurements the routing rested on, so a blob refused
-as two markers cannot be given a series name and re-stamped into a value. Publication 464
-Figure 2 is still a refusal and stays one — nothing here is in `run_batch`, no
-plan grain declares an axis manifest, and `MEASURED_MARKER_SHAPE_FILL` is not in
-the provenance registry, so no value can reach a pool through this path.
+**The twin-axis scatter reader is wired in, and 464 Figure 2 is still a
+refusal.** `marker_routing` tells four monochrome series apart by marker shape
+and fill, `axis_grain` lets one panel carry two y scales with every point saying
+which it was read on, and `scatter_points` is the durable file the pair leaves
+behind. A panel declares its scales in `axis_manifest.csv` — one row per printed
+axis, optional, absent for every batch in the corpus but the twin-axis ones —
+and a series names the one it sits on; the runner then routes the marks,
+calibrates each point against **its own** axis, and writes `scatter_points.csv`
+carrying the eighteen measurements the routing rested on. `finalize_batch` holds
+every value claiming `MEASURED_MARKER_SHAPE_FILL` against that file, and a point
+whose own recorded evidence says its blob held more than one marker is withheld
+however the status column reads.
+
+Three checks, and only one of them opens the figure: the file against itself,
+the file against the manifest, and the file against **the raster** —
+`current_evidence_failures` routes the panel again and compares. That last one
+is the only check a producer with an editor cannot satisfy.
+
+On the fixture it routes 16, 17 and 18 of 30 marks at 11, 22 and 33 px with no
+misroutes, scored by a minimum-cost maximum matching. On the real figure it does
+not read: 464 Figure 2's shape axis separates at index 4.33 and its fill axis
+does not, because the plainest cut in the interior-ink distribution puts six of
+thirty-one marks in the smaller class and the router refuses a class under a
+quarter. `forward_test_464_scatter.py` prints that measurement and changes no
+constant to make the figure read — whether six of thirty-one is an outlier or
+the smaller of four drawn series is a question for a person.
 
 Open work: publication 386 Figures 3–4, and five cells of publication 323 that
 need a human reading.

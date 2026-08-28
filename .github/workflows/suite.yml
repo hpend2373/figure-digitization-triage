@@ -85,7 +85,7 @@ jobs:
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \
                    test_visual_verification test_marker_routing \
-                   test_axis_grain \
+                   test_axis_grain test_scatter_points \
                    test_mutate; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
@@ -140,6 +140,7 @@ jobs:
                    forward_test_real_monochrome \
                    forward_test_beckers_geometry forward_test_beckers_dpi \
                    forward_test_397_line_style forward_test_397_line_geometry \
+                   forward_test_464_scatter \
                    pilot_397 pilot_beckers; do
             echo "--- $s"
             python "$s.py"
@@ -262,7 +263,7 @@ jobs:
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \
                    test_visual_verification test_marker_routing \
-                   test_axis_grain \
+                   test_axis_grain test_scatter_points \
                    test_mutate; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then

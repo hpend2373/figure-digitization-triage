@@ -799,6 +799,11 @@ def series_manifest_columns():
         "Colour_Hex", "Colour_Tolerance", "Mask_Key",
         # monochrome readers
         "Marker_Shape", "Marker_Fill", "Line_Style", "Bar_Fill_Pattern",
+        # WHICH SCALE THIS SERIES WAS READ ON, for the panels whose y axis is a
+        # grain of its own. Blank everywhere else, and blank means "the panel's
+        # own ladder" - the answer that was always implied and could not be
+        # contradicted, because there was nothing to contradict it with.
+        "Axis_ID",
         # what the series MEANS - this is what reaches the Cell_Key
         "Factor_Name", "Factor_Level", "Note",
     ]
@@ -953,6 +958,32 @@ def identity_resolution_columns():
     ]
 
 
+def axis_manifest_columns():
+    """One row per printed SCALE, which `panel_manifest` cannot hold.
+
+    A panel row carries `Axis_Y_Ticks` and `Axis_Y_Scale` - one ladder, singular
+    - and a figure that prints two y scales over one drawing has no way to say
+    so: either it becomes two pretend panels, or the second scale is lost and
+    every series on it is published against the first. Both are a wrong number
+    rather than a missing one, which is the trade this package refuses.
+
+    So the axis becomes its own grain, and a series names the axis it was read
+    on. `Calibration_Points` is `value:pixel;value:pixel`, the same spelling as
+    `Axis_Y_Ticks`, so a person moving a ladder from one file to the other is
+    not also translating it.
+
+    OPTIONAL, AND THAT IS NOT A SOFTENING. A panel with one y axis says so on
+    its own row exactly as before; this file exists for the panels that cannot.
+    Making it mandatory would put an empty axis manifest in every batch
+    directory in the corpus, which is how a required file becomes one nobody
+    reads.
+    """
+    return [
+        "Axis_ID", "Panel_ID", "Dimension", "Side", "Unit", "Scale",
+        "Calibration_Points", "Note",
+    ]
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -960,6 +991,7 @@ BATCH_TEMPLATES = (
     ("source_panel_inventory", source_panel_inventory_columns),
     ("panel_manifest", panel_manifest_columns),
     ("series_manifest", series_manifest_columns),
+    ("axis_manifest", axis_manifest_columns),
     ("position_manifest", position_manifest_columns),
     ("reader_config", reader_config_columns),
     ("identity_resolution", identity_resolution_columns),
@@ -1289,7 +1321,7 @@ def check_identity_resolution(resolutions, panels, series, flag,
 
 def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
-                             reviewers=None, resolutions=None,
+                             reviewers=None, resolutions=None, axes=None,
                              requested_run_mode=None,
                              file_root=".", check_files=True):
     """Reject an unrunnable batch before a single raster is opened.
@@ -1312,7 +1344,10 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         source_panels = pd.DataFrame()
     if reviewers is None:
         reviewers = pd.DataFrame()
+    if axes is None:
+        axes = pd.DataFrame(columns=axis_manifest_columns())
     frames = (("reviewers", reviewers, reviewer_registry_columns()),
+              ("axes", axes, axis_manifest_columns()),
               ("source_documents", source_documents, source_document_manifest_columns()),
               ("source_figures", source_figures, source_figure_manifest_columns()),
               ("source_panels", source_panels, source_panel_inventory_columns()),
@@ -1903,6 +1938,68 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             flag(line, "ASSOCIATION_TYPE_NOT_APPLICABLE",
                  "Association_Type is set on a %s panel, which yields no "
                  "association" % mark)
+
+    # ---------------------------------------------------------------- axes
+    # A SECOND Y SCALE OVER ONE DRAWING, or nothing. The rules live in
+    # `axis_grain.validate_axes` - two axes of one dimension on one panel must
+    # be on different sides, a scale needs two distinct calibration points, a
+    # LOG10 axis cannot be calibrated through zero - because the reader and the
+    # verifier both hold points to them and a second copy here would be a second
+    # opinion about the same file.
+    axis_rows, axis_by_id = [], {}
+    for i, r in axes.iterrows():
+        line = "axis:%d" % (i + 2)
+        pid = str(r.get("Panel_ID", "")).strip()
+        aid = str(r.get("Axis_ID", "")).strip()
+        if aid in axis_by_id:
+            flag(line, "DUPLICATE_AXIS_ID",
+                 "Axis_ID=%s is declared twice; a point citing it cannot say "
+                 "which scale it was read on" % aid)
+            continue
+        if pid and pid not in panel_mark:
+            flag(line, "AXIS_PANEL_UNKNOWN",
+                 "Panel_ID=%s is not in panel_manifest.csv" % pid)
+            continue
+        try:
+            points = [[float(v), float(px)] for v, px in
+                      (chunk.split(":") for chunk in
+                       str(r.get("Calibration_Points", "") or "").split(";")
+                       if chunk.strip())]
+        except ValueError:
+            flag(line, "BAD_AXIS_CALIBRATION",
+                 "Calibration_Points=%r is not value:pixel;value:pixel"
+                 % r.get("Calibration_Points"))
+            continue
+        row = dict(Axis_ID=aid, Panel_ID=pid,
+                   Dimension=str(r.get("Dimension", "") or "").strip(),
+                   Side=str(r.get("Side", "") or "").strip(),
+                   Unit=str(r.get("Unit", "") or "").strip(),
+                   Scale=str(r.get("Scale", "") or "").strip(),
+                   Calibration_Points=points)
+        axis_by_id[aid] = row
+        axis_rows.append((line, row))
+    if axis_rows:
+        import axis_grain as AG
+        for line, row in axis_rows:
+            for why in AG.validate_axes([row]):
+                flag(line, "BAD_AXIS_ROW", why.split(": ", 1)[-1])
+        by_panel = {}
+        for _line, row in axis_rows:
+            by_panel.setdefault(row["Panel_ID"], []).append(row)
+        for pid_, rows_ in sorted(by_panel.items()):
+            for why in AG.validate_axes(rows_):
+                if "cannot be told apart" in why or "used twice" in why:
+                    flag("panel:%s" % pid_, "AXIS_PANEL_AMBIGUOUS",
+                         why.split(": ", 1)[-1])
+            if not any(r["Dimension"].upper() == "X" for r in rows_):
+                # A y grain with no x grain is half a panel: the points' x
+                # values would come off the panel row's ladder and their y
+                # values off this file, and nothing would say the two were
+                # read on one drawing.
+                flag("panel:%s" % pid_, "AXIS_MANIFEST_INCOMPLETE",
+                     "this panel declares %d axis row(s) and none of them is "
+                     "the x axis; a panel whose y scales live here reads its x "
+                     "here too" % len(rows_))
 
     # -------------------------------------------------------------- series
     # How many series each panel declares, before any reader sees it. Needed

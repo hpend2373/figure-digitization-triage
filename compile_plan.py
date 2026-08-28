@@ -859,6 +859,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                                   Note=_s(g.get("note"))))
 
     source_figures, source_panels, panels, series, positions = [], [], [], [], []
+    axes = []
     image_of_panel, ticks_of_panel, view_panels = {}, {}, {}
 
     for figure in plan["figures"]:
@@ -933,8 +934,22 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                     Marker_Fill=_s(sp.get("marker_fill")).upper(),
                     Line_Style=_s(sp.get("line_style")).upper(),
                     Bar_Fill_Pattern=_s(sp.get("bar_fill")).upper(),
+                    Axis_ID=_s(sp.get("axis_id")),
                     Factor_Name=_s(sp.get("factor")).upper(),
                     Factor_Level=_s(sp.get("level")), Note=_s(sp.get("note"))))
+            # ONE ROW PER PRINTED SCALE. A plan that declares none compiles an
+            # empty axis manifest, which is what every publication in the corpus
+            # but the twin-axis ones produces - the file exists so the batch's
+            # shape does not depend on whether a figure needed it.
+            for ax in read.get("axes") or []:
+                axes.append(dict(
+                    Axis_ID=_s(ax.get("axis_id")), Panel_ID=pid,
+                    Dimension=_s(ax.get("dimension")).upper(),
+                    Side=_s(ax.get("side")).upper(),
+                    Unit=_s(ax.get("unit")),
+                    Scale=_s(ax.get("scale")).upper() or "LINEAR",
+                    Calibration_Points=_ticks_text(ax.get("ticks") or []),
+                    Note=_s(ax.get("note"))))
             for order, pp in enumerate(read.get("positions") or []):
                 positions.append(dict(
                     Panel_ID=pid, Position_ID=_s(pp.get("position_id")),
@@ -1072,6 +1087,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         ("unit_manifest", unit_rows, GE.fig_unit_columns()),
         ("panel_manifest", panels, BM.panel_manifest_columns()),
         ("series_manifest", series, BM.series_manifest_columns()),
+        ("axis_manifest", axes, BM.axis_manifest_columns()),
         ("position_manifest", positions, BM.position_manifest_columns()),
         ("reader_config", configs, BM.reader_config_columns()),
     )

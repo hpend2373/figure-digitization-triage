@@ -33,6 +33,15 @@ Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        rather than guessed. It is hashed into the stamp either
                        way, so adding one later changes the fingerprint every
                        approval is bound to.
+
+                       axis_manifest.csv is OPTIONAL. One row per printed
+                       SCALE, for the panels that print more than one y axis
+                       over a single drawing - a panel row can hold one ladder
+                       and a figure with a left scale at 10-35 and a right one
+                       at 20-90 has two. A series then names the axis it was
+                       read on. Absent means the panel's own Axis_Y_Ticks is
+                       the only scale, which is true of every batch in the
+                       corpus but the twin-axis ones.
 Output (OUTPUT_DIR):   figure_values_machine_qc.csv <- passed the gate; NOT poolable
                        review_queue.csv            <- one row per panel a person
                                                       must now look at
@@ -108,6 +117,13 @@ PIPELINE_VERSION = "9.15"
 PIPELINE_CODE_FILES = (
     "run_batch.py", "batch_manifests.py", "grid_engine.py", "kernel.py",
     "mark_readers.py", "mono_bar_geometry.py", "bar_reader.py",
+    # THE TWIN-AXIS SCATTER PATH. `axis_grain` is reached through
+    # `batch_manifests`, which validates an axis manifest against it;
+    # `marker_routing` and `scatter_points` are reached from the SCATTER branch
+    # of `run_panel`. All three measure, so all three are in the stamp: a run
+    # whose marker routing changed and whose stamp did not would be two
+    # different readings under one hash.
+    "axis_grain.py", "marker_routing.py", "scatter_points.py",
     "make_wpd_project.py", "review_overlay.py", "finalize_batch.py",
     "compile_plan.py",
     # BOTH ADDED IN v7.54, BOTH PRODUCTION SINCE v7.44 AND v7.53. The reader
@@ -200,6 +216,11 @@ MANIFEST_FILES = {
 #: waiting for one either way.
 OPTIONAL_MANIFEST_FILES = {
     "resolutions": "identity_resolution.csv",
+    # A SECOND Y SCALE OVER ONE PANEL, for the figures that print one. A panel
+    # with a single y axis says so on its own row exactly as before, so this
+    # file is absent for every batch in the corpus but the twin-axis ones - and
+    # a required file that is empty in 116 directories is a file nobody reads.
+    "axes": "axis_manifest.csv",
 }
 
 RUN_MANIFEST_COLUMNS = [
@@ -579,6 +600,15 @@ class ManifestLoadError(Exception):
     """
 
 
+#: The columns an absent optional manifest comes back with. Keyed rather than
+#: hard-coded, because there are two of them now and the first one's columns
+#: were spelled into the loader - which is how an absent second file would have
+#: come back with `identity_resolution`'s columns and failed its schema check
+#: with a message about the wrong file.
+_OPTIONAL_COLUMNS = {"resolutions": lambda: BM.identity_resolution_columns(),
+                     "axes": lambda: BM.axis_manifest_columns()}
+
+
 def load_manifests(directory):
     out, missing, broken = {}, [], []
     for key, name in MANIFEST_FILES.items():
@@ -597,7 +627,7 @@ def load_manifests(directory):
             # the same shape whether the file was there or not - a `KeyError` on
             # `Resolution_ID` for the batches that need no resolutions is the
             # bug an optional manifest invites.
-            out[key] = pd.DataFrame(columns=BM.identity_resolution_columns())
+            out[key] = pd.DataFrame(columns=_OPTIONAL_COLUMNS[key]())
             continue
         try:
             out[key] = pd.read_csv(path, dtype=object).fillna("")
@@ -703,7 +733,13 @@ class PanelOutcome(object):
 #: from. The four CSVs were hashed and re-checked; these were not, so the
 #: picture a reviewer approved could be swapped for a different picture after
 #: they approved it and the finalizer had nothing to say.
-PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA")
+#: The routed scatter's durable point file, in the ledger under its own type so
+#: the finalizer can find it the way it finds the geometry file - by type,
+#: never by a path computed now.
+SP_ARTIFACT_TYPE = "SCATTER_POINTS"
+
+PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA",
+                        SP_ARTIFACT_TYPE)
 #: `Artifact_Reference` names the row an artifact belongs to when one artifact
 #: is not enough on its own. It exists for `IDENTITY_EVIDENCE`: the finalizer has
 #: to re-derive "every file-backed resolution has its evidence here", and the
@@ -1427,10 +1463,96 @@ def _panel_artifacts(raw_marks=(), point_data=(), project=None, overlay=None):
     return out
 
 
+def _routed_scatter(panel, series_rows, axes, image, box, image_path, kwargs,
+                    annotations):
+    """Route a monochrome scatter and calibrate every point against its own axis.
+
+    Returns `{"points": [...], "meta": {...}}` or `{"refusal": "..."}`. The
+    points come back in the shape `_scatter_outcome` groups by - `series`, plus
+    the area and overlap columns `point_count_audit` reads - with their values
+    already computed, because a twin-axis panel has no single y calibration for
+    anything downstream to apply.
+
+    A PANEL WITH NO X AXIS IN THE MANIFEST IS REFUSED HERE rather than defaulted
+    to the panel row's ladder. The whole point of the grain is that a point says
+    which scale it was read on, and half the answer coming from another file is
+    the ambiguity it was built to remove; the manifest layer refuses such a
+    manifest too, so this is the second of two.
+    """
+    import scatter_points as SP
+    x_axes = [a for a in axes if a["Dimension"] == "X"]
+    if len(x_axes) != 1:
+        return dict(refusal="this panel's axis manifest declares %d x axes; a "
+                            "point cloud is read on exactly one"
+                            % len(x_axes))
+    declared = [dict(Series_ID=_s(r.get("Series_ID")),
+                     Marker_Shape=_upper(r.get("Marker_Shape")),
+                     Marker_Fill=_upper(r.get("Marker_Fill")),
+                     Axis_ID=_s(r.get("Axis_ID")))
+                for r in series_rows]
+    unnamed = [d["Series_ID"] for d in declared if not d["Axis_ID"]]
+    if unnamed:
+        return dict(refusal="this panel declares an axis manifest and %s names "
+                            "no Axis_ID; on a panel with more than one scale a "
+                            "series that does not say which it is on cannot be "
+                            "calibrated" % ", ".join(sorted(unnamed)))
+    try:
+        points, meta = SP.read_routed_scatter_panel(
+            image, box, declared, axes, _s(panel.get("Panel_ID")),
+            file_sha256(image_path), x_axes[0]["Axis_ID"],
+            threshold=kwargs.get("threshold", 150) or 150,
+            exclude_boxes=annotations)
+    except ValueError as exc:
+        return dict(refusal="%s" % exc)
+    # A POINT THAT WAS NOT CALIBRATED IS NOT A POINT. `stamp_points` returns it
+    # with its pixel, its refusal and no value - because a series whose axis is
+    # not a Y axis of this panel has no scale to be read on - and a value row
+    # built from it would be a number with no arithmetic behind it. They are
+    # dropped here, and where that leaves nothing the panel is refused NAMING
+    # THE REASON rather than reported as an empty read.
+    refused = sorted({_s(p.get("refusal")) for p in points if p.get("refusal")})
+    points = [p for p in points if not p.get("refusal")]
+    if not points:
+        return dict(refusal="every routed mark was refused a scale: %s"
+                            % (", ".join(refused) or "no series named an axis "
+                               "this panel declares"))
+    for p in points:
+        # THE COLUMNS THE AUDIT READS, under the names it reads them by. It
+        # counts distinct pixels and looks for a blob too big to be one marker;
+        # the routed reader has already refused those as MARKER_MERGED, so this
+        # is a second net rather than the first.
+        p["series"] = p.get("Series_ID")
+        p["marker_area_px"] = p.get("area_px")
+        p["mask_overlap"] = 0
+    return dict(points=points, meta=meta, axes=axes, refused=refused,
+                x_axis_id=x_axes[0]["Axis_ID"], series=declared)
+
+
+def _axis_manifest(axis_rows):
+    """The panel's axis rows as `axis_grain` takes them, ticks parsed.
+
+    `Calibration_Points` is spelled `value:pixel;value:pixel` in the file, the
+    same as `Axis_Y_Ticks`, so a person moving a ladder between the two is not
+    also translating it. The manifest layer has already refused a row that does
+    not parse, so this only has to parse.
+    """
+    out = []
+    for r in axis_rows or ():
+        out.append(dict(
+            Axis_ID=_s(r.get("Axis_ID")), Panel_ID=_s(r.get("Panel_ID")),
+            Dimension=_upper(r.get("Dimension")), Side=_upper(r.get("Side")),
+            Unit=_s(r.get("Unit")), Scale=_upper(r.get("Scale")) or "LINEAR",
+            Calibration_Points=[[float(v), float(px)] for v, px in
+                                (chunk.split(":") for chunk in
+                                 _s(r.get("Calibration_Points")).split(";")
+                                 if chunk.strip())]))
+    return out
+
+
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
               file_root=".", project_dir=None, review_dir=None, geometry=None,
               geometry_refusal=None, resolutions=(), inference_dir=None,
-              config_rows=()):
+              config_rows=(), axis_rows=(), output_dir=None):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -1497,6 +1619,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             % (pid, type(exc).__name__, exc)) from exc
 
     kwargs = _reader_kwargs(options, mark)
+    #: What the routed reader established, or None where the panel read the way
+    #: it always did. Set inside the dispatch and read at the outcome, which are
+    #: two hundred lines apart.
+    routed = None
 
     try:
         if mark == "SCATTER":
@@ -1505,10 +1631,25 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             # it, so this only has to parse.
             annotations = [BM.parse_box(chunk) for chunk in
                            _s(panel.get("Annotation_Boxes")).split(";") if chunk.strip()]
-            rows = MR.read_panel("SCATTER", image=image, panel_box=box,
-                                 x_calibration=xcal, y_calibration=ycal,
-                                 series=_series_specs(series_rows, mark, options),
-                                 exclude_boxes=annotations, **kwargs)
+            axes = _axis_manifest(axis_rows)
+            if axes:
+                # THE AXIS MANIFEST IS THE SWITCH. A panel whose y scale is a
+                # grain of its own is a panel `read_scatter_panel` cannot read -
+                # it takes ONE y calibration - so the routed reader takes it
+                # instead, tells the series apart by marker shape and fill, and
+                # calibrates each point against the axis its series names. A
+                # panel with no axis rows reads exactly as before.
+                routed = _routed_scatter(panel, series_rows, axes, image, box,
+                                         resolved, kwargs, annotations)
+                if routed.get("refusal"):
+                    return PanelOutcome("NOT_CONVERTIBLE", declared=declared,
+                                        detail=routed["refusal"])
+                rows = routed["points"]
+            else:
+                rows = MR.read_panel("SCATTER", image=image, panel_box=box,
+                                     x_calibration=xcal, y_calibration=ycal,
+                                     series=_series_specs(series_rows, mark, options),
+                                     exclude_boxes=annotations, **kwargs)
         elif mark == "BOX_VIOLIN":
             # The released reader finds boxes at declared x positions and does
             # not tell two overlaid groups apart. The batch layer requires a
@@ -1692,7 +1833,8 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     if mark == "SCATTER":
         return _scatter_outcome(rows, panel, series_level, series_factor, unit,
                                 statistic, resolved, xcal, ycal, raw_dir, declared,
-                                project_dir, review_dir=review_dir, box=box)
+                                project_dir, review_dir=review_dir, box=box,
+                                routed=routed, output_dir=output_dir)
 
     # ---- relabel reader output with the DECLARED identity before it becomes a
     # ---- value row. The reader never learns what a series means.
@@ -2637,8 +2779,18 @@ def _jsonable(rows):
 
 def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic,
                      image_path, xcal, ycal, raw_dir, declared, project_dir=None,
-                     review_dir=None, box=None):
-    """A scatter yields one association per series, each with its point file."""
+                     review_dir=None, box=None, routed=None, output_dir=None):
+    """A scatter yields one association per series, each with its point file.
+
+    `routed` is what `_routed_scatter` established, or None for a panel with one
+    y axis. Where it is given, two things change and nothing else does: each
+    series' point file is written under the calibration of ITS OWN axis rather
+    than the panel's, and the panel leaves a `scatter_points.csv` carrying the
+    eighteen measurements the routing rested on. Every gate below - the count
+    audit, the printed association, the three-point floor, the all-or-nothing
+    refusal - applies to both, because none of them is about how the series were
+    told apart.
+    """
     pid = _s(panel.get("Panel_ID"))
     unit_id = _s(panel.get("Unit_ID"))
     if statistic and statistic != "ASSOCIATION":
@@ -2757,22 +2909,76 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
             detail="no series reached three points: " + "; ".join(short),
             missing=all_scatter_cells)
 
+    # EACH SERIES ON ITS OWN SCALE, where the panel has more than one. The point
+    # writer re-derives every value from its own pixel before it writes, so
+    # handing it the panel's single calibration for a twin-axis panel would not
+    # write a wrong file - it would refuse to write at all, which is the right
+    # failure and the wrong place for it.
+    cal_of = {}
+    if routed:
+        import axis_grain as AG
+        cals = AG.calibrations(routed["axes"])
+        axis_of, _refused = AG.series_axis(routed["series"], routed["axes"],
+                                           panel_id=pid)
+        cal_of = {sid: cals[axis] for sid, axis in axis_of.items()}
+        xcal = cals[routed["x_axis_id"]]
     records, raw_files = [], []
     for sid, factor, level, mine, summary in planned:
         cell_key = GE.fig_cell_key({factor: level})
         path = os.path.join(raw_dir, "%s_%s_points.json" % (pid, sid))
         MR.write_point_data(mine, path, unit_id=unit_id, cell_key=cell_key,
                             source_image=image_path, image_sha256=sha,
-                            x_calibration=xcal, y_calibration=ycal,
+                            x_calibration=xcal,
+                            y_calibration=cal_of.get(sid, ycal),
                             panel_id=pid, reader="SCATTER")
         raw_files.append(path)
-        records.extend(MR.to_value_records(
+        made = MR.to_value_records(
             [summary], "ASSOCIATION", unit_id,
-            cell_levels={factor: level}, point_data_reference=path))
+            cell_levels={factor: level}, point_data_reference=path)
+        # THE RESIDUAL OF THE CALIBRATION THIS SERIES WAS READ UNDER, set here
+        # where `sid` is in scope. Set in the loop below instead, it came off
+        # the panel's single `ycal` for every series - so a right-hand series
+        # carried the left-hand ladder's residual, which is exactly the
+        # confusion the axis grain exists to end.
+        cal = cal_of.get(sid)
+        if cal is not None:
+            for record in made:
+                record["Calibration_Max_Residual"] = float(
+                    getattr(cal, "max_residual", 0.0))
+        records.extend(made)
     if ycal is not None:
         for record in records:
             record.setdefault("Calibration_Max_Residual",
                               float(getattr(ycal, "max_residual", 0.0)))
+    # THE PANEL'S OWN ROUTED-POINT FILE, written once, read back and verified
+    # before anybody is asked to look at the overlay. `write_point_data` records
+    # a cloud; this records how each mark's SERIES was decided - eighteen
+    # measurements, two thresholds and the margin this mark cleared them by -
+    # which is the evidence the finalizer holds a routed value's identity route
+    # against.
+    point_artifact = None
+    if routed and output_dir:
+        import scatter_points as SP
+        point_artifact = os.path.join(output_dir, "scatter_points.csv")
+        rows_out = SP.artifact_rows(
+            [p for _s_, _f_, _l_, mine, _sum_ in planned for p in mine])
+        existing = []
+        if os.path.exists(point_artifact):
+            with open(point_artifact, encoding="utf-8") as fh:
+                existing = list(csv.DictReader(fh))
+        with open(point_artifact, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh,
+                                    fieldnames=list(SP.POINT_ARTIFACT_COLUMNS))
+            writer.writeheader()
+            writer.writerows(existing + rows_out)
+        with open(point_artifact, encoding="utf-8") as fh:
+            back = [r for r in csv.DictReader(fh)
+                    if _s(r.get("Panel_ID")) == pid]
+        bad = SP.verify_artifact(back, routed["series"], routed["axes"], pid, sha)
+        if bad:
+            raise InternalReaderError(
+                "scatter_points.csv does not verify for panel %s: %s"
+                % (pid, "; ".join(bad[:3])))
     project = None
     if project_dir:
         project = write_panel_project(
@@ -2806,7 +3012,9 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                         # hashes that string as a path any more.
                         artifacts=_panel_artifacts(point_data=raw_files,
                                                    project=project,
-                                                   overlay=overlay),
+                                                   overlay=overlay)
+                        + ([(SP_ARTIFACT_TYPE, point_artifact)]
+                           if point_artifact else []),
                         with_dispersion=len(records))
 
 
@@ -2835,6 +3043,9 @@ CANONICAL_OUTPUTS = (
     # check, so an approval could be given against a picture of a different
     # measurement.
     "mono_bar_geometry.csv",
+    # THE ROUTED SCATTER'S POINT FILE. Same reason as the geometry file above: a
+    # stale one beside fresh values passes every existence check there is.
+    "scatter_points.csv",
     "source_panel_coverage.csv",
 )
 CANONICAL_DIRS = ("raw", "projects", "review", "geometry-review",
@@ -3064,7 +3275,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         units=m["units"], source_documents=m["source_documents"],
         source_figures=m["source_figures"],
         source_panels=m["source_panels"], reviewers=m["reviewers"],
-        resolutions=m.get("resolutions"),
+        resolutions=m.get("resolutions"), axes=m.get("axes"),
         requested_run_mode=requested_run_mode,
         file_root=file_root,
         check_files=check_files)
@@ -3122,11 +3333,13 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     cfg_hash = BM.config_hash(m["configs"])
     units_by_id = {_s(u.get("Unit_ID")): u for _, u in m["units"].iterrows()}
 
-    series_by_panel, positions_by_panel = {}, {}
+    series_by_panel, positions_by_panel, axes_by_panel = {}, {}, {}
     for _, r in m["series"].iterrows():
         series_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
     for _, r in m["positions"].iterrows():
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    for _, r in m.get("axes", pd.DataFrame()).iterrows():
+        axes_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
 
     values, run_rows = [], []
     # A panel gets exactly one queue entry, keyed so a later pass revises it
@@ -3215,7 +3428,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 geometry=geometry_rows_by_panel.get(pid),
                 geometry_refusal=geometry_refusals.get(pid),
                 resolutions=resolutions_by_panel.get(pid, ()),
-                inference_dir=inference_dir)
+                inference_dir=inference_dir,
+                axis_rows=axes_by_panel.get(pid, ()),
+                output_dir=output_dir)
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by

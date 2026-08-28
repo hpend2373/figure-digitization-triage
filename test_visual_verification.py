@@ -429,6 +429,41 @@ check("    and the worklist routed it the same way, at target_axes 0",
       == ("DIGITIZE_TWIN_AXIS", 0),
       "%s, target_axes %d" % (G6["worklist_route"], G6["worklist_target_axes"]))
 
+# AND THE ROUTED READER ON THE SAME REAL PANEL, which is the forward test the
+# whole twin-axis capability was built for. It is a NEGATIVE, and it is negative
+# for one number rather than a shrug: the shape axis separates comfortably and
+# the fill axis does not, because the plainest cut in the interior-ink
+# distribution puts six of thirty-one marks in the smaller class and `_split`
+# refuses a class under a quarter. Widening that constant so this figure reads
+# is the move this package refuses everywhere else, so the measurement is pinned
+# and the decision is left where it belongs.
+import forward_test_464_scatter as F464                          # noqa: E402
+_464 = F464.measure(_props)
+check("the routed reader finds 33 candidate marks on 464 Fig. 2",
+      (_464["candidates"], _464["routed"]) == (33, 0),
+      "%d candidates, %d routed" % (_464["candidates"], _464["routed"]))
+check("  its shape axis separates at index 4.33, and its fill axis does not",
+      _464["shape_separates"] and not _464["fill_separates"]
+      and abs(_464["shape_index"] - 4.327) < 0.01
+      and abs(_464["fill_index"] - 1.858) < 0.01,
+      "shape %.3f, fill %.3f" % (_464["shape_index"], _464["fill_index"]))
+check("    so every mark comes back MARKER_FILL_UNRESOLVED, and none is routed",
+      _464["refusals"].get("MARKER_FILL_UNRESOLVED") == 31
+      and _464["routed"] == 0,
+      "%r" % (_464["refusals"],))
+# THE ONE NUMBER THE DECISION TURNS ON, pinned so it cannot move quietly.
+check("  the plainest cut is 25|6 at index 2.70 and the rule refuses it",
+      _464["fill_cuts"]["largest"] == (2.7021, 25, 6)
+      and _464["fill_cuts"]["admissible"] == (1.8582, 24, 7)
+      and _464["fill_cuts"]["minimum_cluster"] == 7,
+      "%r" % (_464["fill_cuts"],))
+check("    which is above the separation this package requires",
+      _464["fill_cuts"]["largest"][0] > _464["separation_required"]
+      > _464["fill_cuts"]["admissible"][0],
+      "%.3f > %.1f > %.3f" % (_464["fill_cuts"]["largest"][0],
+                              _464["separation_required"],
+                              _464["fill_cuts"]["admissible"][0]))
+
 print()
 print("the pictures themselves")
 for _name in ("G1_read_397fig3.png", "G2_read_397fig1.png",

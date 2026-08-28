@@ -31,6 +31,7 @@ import compile_plan as CP                                          # noqa: E402
 import grid_engine as GE                                            # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import run_batch as RB                                             # noqa: E402
+import batch_manifests as BM                                       # noqa: E402
 
 ROOT = tempfile.mkdtemp(prefix="fdt_plan_")
 FAILURES, RAN = [], []
@@ -136,14 +137,25 @@ def _mutated(mutate):
     return plan
 
 
-print("one plan compiles to eleven manifests")
+print("one plan compiles to twelve manifests")
 MDIR, (written, problems) = compile_to("m_ok")
 check("the shipped plan compiles clean", not problems, "%s" % problems[:3])
 check("and writes every manifest the runner demands",
-      set(os.path.basename(p) for p in written.values())
-      == set(RB.MANIFEST_FILES.values()),
+      set(RB.MANIFEST_FILES.values())
+      <= set(os.path.basename(p) for p in written.values()),
       "%s" % sorted(set(RB.MANIFEST_FILES.values())
-                    ^ set(os.path.basename(p) for p in written.values())))
+                    - set(os.path.basename(p) for p in written.values())))
+# AND THE OPTIONAL ONE, WRITTEN EMPTY RATHER THAN LEFT OUT. A plan that
+# declares no second y axis still compiles an `axis_manifest.csv` with its
+# header: the batch's SHAPE does not then depend on whether some figure in it
+# needed a second scale, and a person adding one later edits a file that exists.
+_axis_path = os.path.join(MDIR, "axis_manifest.csv")
+_axis_rows = list(csv.DictReader(open(_axis_path, encoding="utf-8")))
+check("  and the optional axis manifest too, with its header and no rows",
+      os.path.exists(_axis_path) and _axis_rows == []
+      and list(csv.reader(open(_axis_path, encoding="utf-8")))[0]
+      == BM.axis_manifest_columns(),
+      "%r" % (list(csv.reader(open(_axis_path, encoding="utf-8")))[:1],))
 
 _figures = pd.read_csv(os.path.join(MDIR, "source_figure_manifest.csv"), dtype=object)
 check("the raster hash is read off the file, not taken from the plan",

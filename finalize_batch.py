@@ -1425,6 +1425,8 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag,
                                          artifacts=artifacts)
     withheld |= _point_route_failures(machine, ledger_rows, run_dir, flag,
                                       artifacts=artifacts)
+    withheld |= _scatter_route_failures(machine, ledger_rows, run_dir, flag,
+                                        artifacts=artifacts)
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
                                         flag, panel_expectations(frames),
                                         artifacts=artifacts)
@@ -1981,6 +1983,86 @@ def _point_route_failures(machine, ledger_rows, run_dir, flag,
                  "every point in it says %s"
                  % (identity, said or "(blank)", sole))
             withheld.add(_s(row.get("Run_Panel_ID")))
+    return withheld
+
+
+def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
+                            artifacts=None):
+    """Routed scatter values whose point file does not support the route claimed.
+
+    THE SAME SHAPE AS THE GEOMETRY GATE, and for the same reason. A value that
+    says its series was named by measuring a marker's shape and fill is claiming
+    an R0 identity - the tier that can be finalized - and the file that recorded
+    those measurements is in this run's ledger. Three ways the claim fails:
+
+        the panel has no point file at all, so nothing measured anything
+        the file's own points name a different route
+        a point in it was measured on a blob its OWN evidence says held more
+          than one marker, which `axis_grain.marker_validity` re-derives from
+          the numbers rather than reading the status word
+
+    Blank on the evidence side is a contradiction here too: a point file that
+    exists for this panel and says nothing about how its marks were named is a
+    claim with no evidence, and reading silence as consent is the fail-open the
+    geometry gate closed first.
+    """
+    import axis_grain as AG
+    import scatter_points as SP
+    withheld = set()
+    by_panel = {}
+    for _, art in ledger_rows.iterrows():
+        if _s(art.get("Artifact_Type")) != "SCATTER_POINTS":
+            continue
+        path, blob = artifact_data(run_dir, art, artifacts)
+        if path is None or blob is None:
+            continue
+        try:
+            for row in csv.DictReader(io.StringIO(blob.decode("utf-8"))):
+                by_panel.setdefault(_s(row.get("Panel_ID")), []).append(row)
+        except Exception as exc:
+            flag("run", "METHOD_NOT_POSSIBLE_FOR_READER",
+                 "the routed scatter point file could not be read, so no "
+                 "marker route can be checked against it (%s: %s)"
+                 % (type(exc).__name__, exc))
+    rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
+            else list(machine or ()))
+    for row in rows:
+        identity = _s(row.get("Identity_Method"))
+        pid = _s(row.get("Run_Panel_ID"))
+        points = by_panel.get(pid)
+        if identity != "MEASURED_MARKER_SHAPE_FILL" and points is None:
+            continue
+        where = "%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")))
+        if identity == "MEASURED_MARKER_SHAPE_FILL" and not points:
+            flag(where, "METHOD_CONTRADICTS_GEOMETRY",
+                 "the value says this series was named by measuring its "
+                 "marker's shape and fill, and this run wrote no routed point "
+                 "file for panel %s. The measurements that route rests on are "
+                 "not on disk" % (pid or "it"))
+            withheld.add(pid)
+            continue
+        if not points:
+            continue
+        said = sorted({_s(p.get("Identity_Method")) for p in points})
+        if said != [identity]:
+            flag(where, "METHOD_CONTRADICTS_GEOMETRY",
+                 "the value says the figure named this series by %s and the "
+                 "routed point file this run wrote says %s"
+                 % (identity or "nothing",
+                    ", ".join(x or "nothing" for x in said)))
+            withheld.add(pid)
+            continue
+        # THROUGH `evidence_record`, because a CSV row spells the evidence in
+        # the column names a person reads and `marker_validity` re-derives from
+        # the names the reader wrote. Handed the row straight, it sees eighteen
+        # blanks and says "nothing measured this" - a pass.
+        bad = [AG.marker_validity(SP.evidence_record(p)) for p in points]
+        bad = [b for b in bad if b]
+        if bad:
+            flag(where, "METHOD_CONTRADICTS_GEOMETRY",
+                 "a point behind this value came off a blob its own recorded "
+                 "evidence says was not one marker: %s" % bad[0])
+            withheld.add(pid)
     return withheld
 
 

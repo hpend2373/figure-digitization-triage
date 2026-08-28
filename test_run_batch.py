@@ -7023,7 +7023,11 @@ _am_missing = [f for f in RB.CANONICAL_OUTPUTS
                             # panel, and on the cleanup list regardless: a
                             # previous run's geometry file left beside this
                             # run's numbers is the thing that must not survive.
-                            "mono_bar_geometry.csv")
+                            "mono_bar_geometry.csv",
+                            # And the same for the routed scatter's point file,
+                            # written only where a panel declares an axis
+                            # manifest.
+                            "scatter_points.csv")
                and not os.path.exists(os.path.join(_am_out, f))]
 check("  and every canonical output a completed run owns is on disk",
       not _am_missing, "%s" % _am_missing)

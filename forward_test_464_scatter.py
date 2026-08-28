@@ -11,37 +11,40 @@ regression line through each cloud. `read_scatter_panel` refuses it, and asked
 instead for ONE monochrome series the same panel returns 247 marks and
 r = 0.008 where both clouds fall steeply.
 
-WHAT THE ROUTED READER DOES WITH IT, on the clip this corpus carries:
+WHAT v9.15 MEASURED ON THE CLIP, and it is history rather than a current result:
 
     marker scale measured                13 px off the panel's own components
     candidate marks                      33, of which 6 are not markers
-    the SHAPE axis                       SEPARATES, index 4.33
-    the FILL axis                        does NOT, and this is the whole finding
+    the SHAPE axis                       SEPARATED, index 4.33
+    the PANEL-WIDE FILL axis             did NOT: 25 marks between 0.11 and
+                                         0.54, six between 0.78 and 1.00, and
+                                         `_split` declined the 25|6 cut because
+                                         six of thirty-one is under a quarter.
+                                         The best cut it would take was 24|7 at
+                                         1.858, under the 2.0 required.
     marks routed                         0
-    every mark's answer                  MARKER_FILL_UNRESOLVED
 
-So this is a NEGATIVE forward test, and it is negative for a reason that is one
-number rather than a shrug. The interior-ink distribution of these 31 marks has
-a plain gap: 25 of them between 0.11 and 0.54, six between 0.78 and 1.00. Split
-there and the separation index is 2.70, comfortably over the 2.0 this package
-requires. `marker_routing._split` will not take that cut, because it refuses a
-cluster holding fewer than a quarter of the marks - "an outlier is not a class" -
-and six of thirty-one is under a quarter. The best cut it will take is 24/7,
-which scores 1.858, and 1.858 is under 2.0, so the panel establishes no fill
-split and every mark is refused.
+THAT WAS A RESULT ABOUT A GRAIN THIS PACKAGE NO LONGER USES. v9.16 asks the fill
+question inside each measured SHAPE, because the interior-ink window of a hollow
+triangle is not a hollow circle's and a panel-wide split pools two distributions
+into one - which is exactly what a low band running from 0.11 to 0.54 looks like.
+The 25 in that band are open circles AND open triangles together, and their
+combined spread is what held the index at 1.858.
 
-    THE QUESTION THIS PUTS TO A PERSON, and does not answer: is a class holding
-    six of thirty-one marks an outlier, or is it the smaller of four series a
-    figure actually drew? On `twin_scatter_*.jpeg` the four series are 10, 8, 6
-    and 6 of 30, so the fixture's own smallest class is a fifth - and the fixture
-    never exercised the rule, because its FILL classes are 16 and 14. A real
-    four-series panel with unequal groups is where the quarter bites.
+So the honest statement of 464 Figure 2's status is:
 
-Nothing here changes that constant to make this figure read. Widening a guard so
-a wanted answer appears is the move this package refuses everywhere else, and
-the measurement above is what the decision should be made on rather than the
-wish. Until it is made, 464 Figure 2 stays a refusal - and the refusal is now
-per mark, with the evidence recorded, instead of a panel nobody could look at.
+    under v9.15's panel-wide grain     negative, for a reason that was one number
+    under v9.16's per-shape grain      NOT MEASURED
+
+and this script does not guess which way it will go. It prints the panel-wide
+diagnostic AND each shape's own group, and its verdict follows the routed count
+it actually observed. Promoting 464 to a positive forward test needs more than a
+non-zero count in any case: `png/verify.py` and this package's own rules ask for
+a human-reviewed marker truth file bound to the clip's SHA-256, and there is
+none.
+
+Nothing here changes a constant to make this figure read. Widening a guard so a
+wanted answer appears is the move this package refuses everywhere else.
 
 `PROPOSALS_CSV` is `propose.py` output holding a panel row for 464|Fig. 2. With
 no argument the proposer is run over the corpus clip, which takes about a
@@ -137,9 +140,8 @@ def proposals(out_csv=None, root=None):
 
 
 def measure(props_csv, root=None):
-    """Every number this forward test pins, off the real clip."""
+    """Every number this forward test reports, off the real clip."""
     from PIL import Image
-    import marker_routing as MRT
     rows = [r for r in csv.DictReader(open(props_csv, encoding="utf-8"))
             if r.get("panel") and r["pid"] == "464" and r["fig"] == "Fig. 2"]
     if not rows:                                              # pragma: no cover
@@ -149,12 +151,36 @@ def measure(props_csv, root=None):
            int(prop["plot_y0"]), int(prop["plot_y1"]))
     image = Image.open(os.path.join(root or corpus_root() or HERE,
                                     CLIP)).convert("RGB")
+    return measure_panel(image, box)
+
+
+def measure_panel(image, box):
+    """The same numbers off ANY rendering of this panel, so the reporting path
+    can be exercised on a figure this repository is allowed to hold."""
+    import marker_routing as MRT
     declared = [dict(id=s["Series_ID"], shape=s["Marker_Shape"],
                      fill=s["Marker_Fill"]) for s in SERIES]
     out = MRT.route(image, box, declared)
     marks = [r for r in out["records"] if r["refusal"] != "NOT_A_MARKER"]
     fill_values = [r["interior_ink"] for r in marks
                    if r["refusal"] in ("", "MARKER_FILL_UNRESOLVED")]
+    # THE GROUPS THE READER ACTUALLY ROUTES ON, since v9.16. Reporting only the
+    # panel-wide split would be reporting a diagnostic as if it were the verdict
+    # - which is what this script did for one release.
+    groups = {}
+    for shape, g in sorted((out.get("fill_groups") or {}).items()):
+        kept = [r for r in marks
+                if r.get("shape") == shape
+                and r.get("Marker_Validity_Status") == "SINGLE_MARKER"]
+        groups[shape] = dict(
+            n=g["n"], low_n=g["low_n"], high_n=g["high_n"],
+            threshold=g["split"]["threshold"],
+            separates=bool(g["split"]["separates"]), index=g["index"],
+            minimum=g["minimum"],
+            interior_ink=sorted(round(float(r["interior_ink"]), 4)
+                                for r in kept),
+            cuts=_best_cuts([r["interior_ink"] for r in kept])
+            if len(kept) >= 4 else None)
     return dict(
         panel_box=box,
         marker_scale_px=out["marker_scale_px"],
@@ -163,11 +189,19 @@ def measure(props_csv, root=None):
         unresolved=out["Unresolved_Candidate_Count"],
         refusals=dict(collections.Counter(r["refusal"] for r in out["records"]
                                           if r["refusal"])),
+        by_series=dict(collections.Counter(r["Series_ID"] for r in marks
+                                           if r.get("Series_ID"))),
+        unresolved_by_reason=dict(collections.Counter(
+            r["refusal"] for r in marks if r["refusal"])),
+        identity_methods=sorted({r["Identity_Method"] for r in marks
+                                 if r.get("Identity_Method")}),
         shape_separates=bool(out["shape_split"]["separates"]),
         shape_index=round(_index(out["shape_split"]), 4),
         fill_separates=bool(out["fill_split"]["separates"]),
         fill_index=round(_index(out["fill_split"]), 4),
         fill_cuts=_best_cuts(fill_values),
+        groups=groups,
+        declared_series=[s["Series_ID"] for s in SERIES],
         separation_required=MRT.SEPARATION)
 
 
@@ -180,7 +214,11 @@ def main():                                                   # pragma: no cover
               "repository; this forward test needs the corpus")
         return
     props = sys.argv[1] if len(sys.argv) > 1 else proposals(root=root)
-    m = measure(props, root=root)
+    report(measure(props, root=root))
+
+
+def report(m):                                                # pragma: no cover
+    """Everything the measurement says, and a verdict that follows from it."""
     print("464 Figure 2, routed on %s" % CLIP)
     print("  panel box                %r" % (m["panel_box"],))
     print("  marker scale             %.0f px, measured off the panel"
@@ -193,18 +231,58 @@ def main():                                                   # pragma: no cover
     print("  fill axis separates      %s, index %.3f (needs %.1f)"
           % (m["fill_separates"], m["fill_index"], m["separation_required"]))
     cuts = m["fill_cuts"]
-    print("  the fill distribution    %d marks; the plainest cut is %d|%d at "
-          "index %.3f" % (cuts["n"], cuts["largest"][1], cuts["largest"][2],
-                          cuts["largest"][0]))
-    print("  the cut _split may take  %d|%d at index %.3f, because a class must "
-          "hold at least %d" % (cuts["admissible"][1], cuts["admissible"][2],
-                                cuts["admissible"][0], cuts["minimum_cluster"]))
+    if cuts["largest"] and cuts["admissible"]:
+        print("  the pooled distribution  %d marks; the plainest cut is %d|%d "
+              "at index %.3f" % (cuts["n"], cuts["largest"][1],
+                                 cuts["largest"][2], cuts["largest"][0]))
+        print("  the cut _split may take  %d|%d at index %.3f, because a class "
+              "must hold at least %d"
+              % (cuts["admissible"][1], cuts["admissible"][2],
+                 cuts["admissible"][0], cuts["minimum_cluster"]))
+    # AND THE GROUPS THE READER ROUTES ON. The panel-wide numbers above are a
+    # diagnostic; these are the verdict.
     print()
-    print("  So the panel does not establish its fill axis and routes nothing.")
-    print("  The question this leaves for a person: is a class holding %d of %d"
-          % (cuts["largest"][2], cuts["n"]))
-    print("  marks an outlier, or the smaller of four series the figure drew?")
-    print("  Nothing here changes the constant to make the answer come out.")
+    print("  the fill question, asked inside each measured shape:")
+    for shape, g in sorted(m["groups"].items()):
+        print("    %-9s n=%-3d %-4s index %-8s threshold %-8s (min class %d)"
+              % (shape, g["n"], "yes" if g["separates"] else "NO",
+                 g["index"], g["threshold"], g["minimum"]))
+        if g["cuts"] and g["cuts"]["largest"] and g["cuts"]["admissible"]:
+            print("              plainest %d|%d at %.3f; admissible %d|%d at "
+                  "%.3f"
+                  % (g["cuts"]["largest"][1], g["cuts"]["largest"][2],
+                     g["cuts"]["largest"][0], g["cuts"]["admissible"][1],
+                     g["cuts"]["admissible"][2], g["cuts"]["admissible"][0]))
+    print()
+    print("  routed, by series        %r" % (m["by_series"] or "nothing",))
+    print("  unresolved, by reason    %r" % (m["unresolved_by_reason"] or {},))
+    print("  identity methods         %r" % (m["identity_methods"] or [],))
+    print()
+    # THE VERDICT FOLLOWS THE COUNT. It used to be a sentence printed whatever
+    # happened, written when the panel-wide grain was the grain and left behind
+    # when it stopped being - so a run that routed marks would still have said
+    # the panel routes nothing.
+    if not m["routed"]:
+        print("  NEGATIVE: this panel routes nothing. %s"
+              % ("no shape group establishes a fill split"
+                 if not any(g["separates"] for g in m["groups"].values())
+                 else "the shape axis does not separate"
+                 if not m["shape_separates"]
+                 else "every mark was refused for a reason above"))
+    else:
+        missing = [s for s in m["declared_series"] if s not in m["by_series"]]
+        print("  %d of %d candidate marks routed, across %d of the four "
+              "declared series." % (m["routed"], m["candidates"],
+                                    len(m["by_series"])))
+        if missing:
+            print("  %s produced no point." % ", ".join(missing))
+        print()
+        print("  THIS IS NOT A POSITIVE FORWARD TEST AND MUST NOT BE READ AS ONE.")
+        print("  A routed count is not an accuracy: there is no human-reviewed")
+        print("  marker truth for this clip, bound to its SHA-256, so nothing")
+        print("  here can say how many of these are RIGHT. Until that file")
+        print("  exists the only claims this script makes are the counts, the")
+        print("  split evidence and the refusal reasons above.")
 
 
 if __name__ == "__main__":                                    # pragma: no cover

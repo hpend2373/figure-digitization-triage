@@ -925,7 +925,7 @@ _SCATTER_ROW = {
 }
 
 
-def _scatter_gate(**over):
+def _scatter_gate(claimed="MEASURED_MARKER_SHAPE_FILL", ledger=True, **over):
     """`method_contract_failures` over one routed point, as finalize calls it."""
     row = dict(_SCATTER_ROW, **over)
     path = os.path.join(_scatter_dir, "scatter_points.csv")
@@ -936,13 +936,16 @@ def _scatter_gate(**over):
     seen = []
     held = FIN.method_contract_failures(
         pd.DataFrame([dict(Run_Panel_ID="P1", Unit_ID="U1", Cell_Key="c",
-                           Identity_Method="MEASURED_MARKER_SHAPE_FILL",
+                           Identity_Method=claimed,
                            Value_Method="POINT_CLOUD_ASSOCIATION",
                            Dispersion_Method="NO_DISPERSION",
                            Identity_Source="AUTO", Resolution_ID="")]),
         pd.DataFrame([dict(Panel_ID="P1", Mark_Type="SCATTER")]),
         pd.DataFrame([dict(Panel_ID="P1", Artifact_Type="SCATTER_POINTS",
-                           Artifact_Path="scatter_gate/scatter_points.csv")]),
+                           Artifact_Path="scatter_gate/scatter_points.csv")]
+                     if ledger else
+                     [], columns=["Panel_ID", "Artifact_Type",
+                                  "Artifact_Path"]),
         OUT, lambda w_, c, d: seen.append(c), frames=_verified(OUT))
     return held, seen
 
@@ -963,6 +966,16 @@ _held_s, _seen_s = _scatter_gate(Fill_Group_Separates="FALSE")
 check("  and a class from a group that did not separate is withheld too",
       _held_s == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _seen_s,
       "%r %s" % (_held_s, _seen_s))
+# EVERY ROUTED IDENTITY, NOT ONLY THE WIDEST ONE. v9.17 stamps
+# MEASURED_MARKER_FILL on a panel of one declared shape and MEASURED_MARKER_SHAPE
+# on a shape declared with one fill; a gate that knew only the third name would
+# have taken those two on trust, with no point file at all behind them.
+for _claimed in ("MEASURED_MARKER_FILL", "MEASURED_MARKER_SHAPE"):
+    _held_s, _seen_s = _scatter_gate(claimed=_claimed, ledger=False,
+                                     Identity_Method=_claimed)
+    check("  %s with no point file is withheld too" % _claimed,
+          _held_s == {"P1"} and "METHOD_CONTRADICTS_GEOMETRY" in _seen_s,
+          "%r %s" % (_held_s, _seen_s))
 
 # THE SAME FROM THE GEOMETRY SIDE.
 _geo_seen = []

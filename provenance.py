@@ -269,9 +269,17 @@ METHOD_CONTRACT = {
     # what it is allowed to have produced. Found by writing the finalizer
     # scenario for the routed gate, which is the scenario that had been missing
     # too.
+    # AND ALL THREE ROUTED IDENTITIES, not only the widest one. Which axis the
+    # ink actually decided depends on the panel's declaration: a panel of one
+    # shape and two fills measures the FILL, a shape declared with a single fill
+    # is named by its SHAPE, and the four-class case measures both. v9.16
+    # registered only the last and stamped it on all of them, which is a
+    # provenance claim wider than the evidence.
     "SCATTER": {("MEASURED_COLOUR", "POINT_CLOUD_ASSOCIATION"),
                 ("DECLARED_SINGLE_SERIES", "POINT_CLOUD_ASSOCIATION"),
-                ("MEASURED_MARKER_SHAPE_FILL", "POINT_CLOUD_ASSOCIATION")},
+                ("MEASURED_MARKER_SHAPE_FILL", "POINT_CLOUD_ASSOCIATION"),
+                ("MEASURED_MARKER_FILL", "POINT_CLOUD_ASSOCIATION"),
+                ("MEASURED_MARKER_SHAPE", "POINT_CLOUD_ASSOCIATION")},
 }
 
 

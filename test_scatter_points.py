@@ -218,11 +218,15 @@ check("  an edited measurement is caught by re-measuring, not by a hash",
       "%r" % (_ev[:1],))
 _moved = [dict(r) for r in ROWS]
 _moved[1]["point_px_x"] = str(float(_moved[1]["point_px_x"]) + 60)
+# TWO FINDINGS, NOT ONE, SINCE v9.17. The moved row has no mark under it AND the
+# mark it was moved off is still routed with no row carrying it. Before the
+# one-to-one matching only the first was said, which is the half of the story a
+# producer who moves a point rather than inventing one relies on.
+_moved_ev = SP.current_evidence_failures(_moved, IM, R["panel_box"], SERIES_ROWS)
 check("  a point moved to where no marker is has no mark to agree with",
-      [c for _i, c, _d in SP.current_evidence_failures(
-          _moved, IM, R["panel_box"], SERIES_ROWS)] == [SP.NO_MARK_NOW],
-      "%r" % (SP.current_evidence_failures(_moved, IM, R["panel_box"],
-                                           SERIES_ROWS)[:1],))
+      {c for _i, c, _d in _moved_ev} == {SP.NO_MARK_NOW, SP.MARK_MISSING}
+      and [i for i, c, _d in _moved_ev if c == SP.NO_MARK_NOW] == [1],
+      "%r" % ([(i, c) for i, c, _d in _moved_ev][:3],))
 # AND A PANEL THAT NO LONGER SEPARATES IS NOT A ROW THAT IS WRONG. The 3 px
 # rendering of the same drawing establishes neither split, so every row's class
 # rests on ground that is gone - which is a different sentence from "this
@@ -235,6 +239,127 @@ check("  and a rendering that no longer separates says so, not 'wrong'",
       "%r" % ({c for _i, c, _d in SP.current_evidence_failures(
           ROWS, Image.open(os.path.join(HERE, _MICRO["file"])).convert("RGB"),
           _MICRO["panel_box"], SERIES_ROWS)},))
+
+# THE FILE AND THE RASTER HAVE TO BE THE SAME SET, NOT MERELY COMPATIBLE. Until
+# v9.17 each row was matched to its own nearest current mark, independently: a
+# producer could DROP one mark and DUPLICATE another, re-stamp both rows, rebuild
+# the association and the file hash, and every check in this package agreed. Both
+# rows sat on a real marker, both hashed, and the association was computed over a
+# cloud the figure does not contain.
+_ROUTED_NOW = [x for x in
+               __import__("marker_routing").route(
+                   IM, R["panel_box"],
+                   [dict(id=r["Series_ID"], shape=r["Marker_Shape"],
+                         fill=r["Marker_Fill"]) for r in SERIES_ROWS])["records"]
+               if x.get("Series_ID")]
+
+
+def _restamp(rows):
+    """Re-derive every hash on these rows, the way a forging producer would."""
+    axes = RB._axis_manifest(AXIS_ROWS)
+    cals = AG.calibrations(axes)
+    recs = AG.axis_records(axes)
+    out = []
+    for row in rows:
+        rec = SP.evidence_record(dict(row))
+        for key in ("point_px_x", "point_px_y", "x_value", "y_value"):
+            rec[key] = float(row[key])
+        axis = row["Axis_ID"]
+        ev = AG.routing_evidence_sha256(rec)
+        rec["Routing_Evidence_SHA256"] = ev
+        new = dict(row, Routing_Evidence_SHA256=ev)
+        new["Point_Record_SHA256"] = AG.point_record_sha256(
+            rec, axis, cals[axis], cals[row["X_Axis_ID"]], PANEL, SHA,
+            axis_record=recs[axis], x_axis_record=recs[row["X_Axis_ID"]],
+            routing_evidence_hash=ev)
+        out.append(new)
+    return out
+
+
+# A,B -> A,A. One mark's row copied over another's, every hash rebuilt.
+_dup = _restamp([dict(ROWS[0]), dict(ROWS[0])] + [dict(r) for r in ROWS[2:]])
+_dup_ev = SP.current_evidence_failures(_dup, IM, R["panel_box"], SERIES_ROWS)
+check("  a row duplicated over another, with every hash rebuilt, is refused",
+      SP.DUPLICATE_POINT in {c for _i, c, _d in _dup_ev},
+      "%r" % ([(c, d[:60]) for _i, c, d in _dup_ev][:3],))
+check("    and the file's own verifier catches the duplicate too",
+      any(SP.DUPLICATE_POINT in why for why in SP.verify_artifact(
+          _dup, SERIES_ROWS, RB._axis_manifest(AXIS_ROWS), PANEL, SHA)),
+      "%r" % (SP.verify_artifact(_dup, SERIES_ROWS,
+                                 RB._axis_manifest(AXIS_ROWS), PANEL, SHA)[:2],))
+# A,B -> A. One mark simply dropped. Every remaining row is true; the SET is not.
+_dropped = _restamp([dict(r) for r in ROWS[1:]])
+_drop_ev = SP.current_evidence_failures(_dropped, IM, R["panel_box"], SERIES_ROWS)
+# ONE MARK CANNOT ANSWER FOR TWO ROWS, and the MATCHING is what says so. An
+# extra row at a real mark's pixel leaves no mark over, so nothing is missing,
+# and a verifier that lets every row find its own nearest mark finds one for
+# both of them and passes. Under the one-to-one matching the second row has no
+# UNCLAIMED mark and is refused - which is the finding that survives when the
+# hash the duplicate check reads has been rewritten.
+_extra = _restamp([dict(r) for r in ROWS]
+                  + [dict(ROWS[0],
+                          x_value=str(float(ROWS[0]["x_value"]) + 1e-9))])
+_extra_ev = SP.current_evidence_failures(_extra, IM, R["panel_box"], SERIES_ROWS)
+check("  an extra row at a mark another row already claims is refused",
+      SP.NO_MARK_NOW in {c for _i, c, _d in _extra_ev}
+      and SP.MARK_MISSING not in {c for _i, c, _d in _extra_ev},
+      "%r" % ([(i, c) for i, c, _d in _extra_ev][:3],))
+check("    and it says the mark was already claimed, not that none is there",
+      any(c == SP.NO_MARK_NOW and "unclaimed" in d for _i, c, d in _extra_ev),
+      "%r" % ([d for _i, c, d in _extra_ev if c == SP.NO_MARK_NOW][:1],))
+check("  a routed mark the file leaves out is named, not passed over",
+      SP.MARK_MISSING in {c for _i, c, _d in _drop_ev},
+      "%r" % ([(c, d[:60]) for _i, c, d in _drop_ev][:3],))
+check("    and the finding says which pixel the raster still routes",
+      any(c == SP.MARK_MISSING and "(" in d for _i, c, d in _drop_ev),
+      "%r" % ([d for _i, c, d in _drop_ev if c == SP.MARK_MISSING][:1],))
+# AND THE HONEST FILE STILL PASSES, which is what makes the two findings above
+# a check rather than a refusal of everything.
+check("    while the file as written is a one-to-one set with the raster",
+      SP.current_evidence_failures(ROWS, IM, R["panel_box"], SERIES_ROWS) == [],
+      "%r" % (SP.current_evidence_failures(ROWS, IM, R["panel_box"],
+                                           SERIES_ROWS)[:2],))
+
+# AND THE SPLIT IT ASKS ABOUT IS THE ONE THAT NAMED THE ROW. Since v9.16 a mark's
+# fill comes from its own SHAPE's split; `split_grain_group_only.jpeg` is a panel
+# where the panel-wide split does NOT separate and both shape groups do. A
+# verifier still asking the panel-wide question rejects all thirty rows of a
+# perfectly good file.
+_GG = json.load(open(os.path.join(HERE, "split_grain_truth.json"),
+                     encoding="utf-8"))["renderings"]["group_only"]
+_gg_image = Image.open(os.path.join(HERE, _GG["file"])).convert("RGB")
+_gg_series = [dict(Panel_ID="P_GG", Series_ID=d["Series_ID"], Colour_Hex="",
+                   Colour_Tolerance="", Mask_Key="",
+                   Marker_Shape=d["Marker_Shape"], Marker_Fill=d["Marker_Fill"],
+                   Line_Style="", Bar_Fill_Pattern="", Axis_ID=d["Axis_ID"],
+                   Factor_Name="SERIES", Factor_Level=d["Series_ID"], Note="")
+              for d in _GG["declared"]]
+_gg_axes = [dict(Axis_ID="X_BOTTOM", Panel_ID="P_GG", Dimension="X",
+                 Side="BOTTOM", Unit="cm H2O", Scale="LINEAR",
+                 Calibration_Points=_ticks(_GG["x_ticks"]), Note=""),
+            dict(Axis_ID="Y_LEFT", Panel_ID="P_GG", Dimension="Y", Side="LEFT",
+                 Unit="mmHg/L/min", Scale="LINEAR",
+                 Calibration_Points=_ticks(_GG["left_y_ticks"]), Note=""),
+            dict(Axis_ID="Y_RIGHT", Panel_ID="P_GG", Dimension="Y", Side="RIGHT",
+                 Unit="index", Scale="LINEAR",
+                 Calibration_Points=_ticks(_GG["right_y_ticks"]), Note="")]
+_gg_sha = RB.file_sha256(os.path.join(HERE, _GG["file"]))
+_gg_points, _gg_meta = SP.read_routed_scatter_panel(
+    _gg_image, _GG["panel_box"], _gg_series, RB._axis_manifest(_gg_axes),
+    "P_GG", _gg_sha, "X_BOTTOM")
+_gg_rows = SP.artifact_rows(_gg_points)
+check("a panel whose only splits are per-shape writes a file that verifies",
+      len(_gg_rows) == 30
+      and not _gg_meta["fill_split"]["separates"]
+      and all(_gg_meta["fill_groups"][s]["split"]["separates"]
+              for s in ("CIRCLE", "TRIANGLE")),
+      "%d rows, panel split %r"
+      % (len(_gg_rows), _gg_meta["fill_split"]["separates"]))
+check("  and the raster check asks each row's OWN shape group, not the panel",
+      SP.current_evidence_failures(_gg_rows, _gg_image, _GG["panel_box"],
+                                   _gg_series) == [],
+      "%r" % ([(c, d[:70]) for _i, c, d in SP.current_evidence_failures(
+          _gg_rows, _gg_image, _GG["panel_box"], _gg_series)][:3],))
 
 print()
 print("what the runner refuses, and says why")

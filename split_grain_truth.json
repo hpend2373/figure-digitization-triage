@@ -317,6 +317,379 @@
     ]
    ]
   },
+  "group_only": {
+   "case": "group_only",
+   "contaminated": [],
+   "declared": [
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_OPEN_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_LEFT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "CIRCLE",
+     "Series_ID": "L_FILLED_CIRCLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "OPEN",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_OPEN_TRIANGLE"
+    },
+    {
+     "Axis_ID": "Y_RIGHT",
+     "Marker_Fill": "FILLED",
+     "Marker_Shape": "TRIANGLE",
+     "Series_ID": "R_FILLED_TRIANGLE"
+    }
+   ],
+   "file": "split_grain_group_only.jpeg",
+   "left_y_ticks": [
+    [
+     10,
+     900.0
+    ],
+    [
+     35,
+     120.0
+    ]
+   ],
+   "marker_diameter_px": 30,
+   "panel_box": [
+    224,
+    1320,
+    120,
+    898
+   ],
+   "right_y_ticks": [
+    [
+     20,
+     900.0
+    ],
+    [
+     90,
+     120.0
+    ]
+   ],
+   "scale": 2,
+   "series": {
+    "L_FILLED_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       770.27,
+       492.09
+      ],
+      [
+       862.86,
+       566.69
+      ],
+      [
+       922.35,
+       611.34
+      ],
+      [
+       1009.98,
+       684.28
+      ],
+      [
+       1106.51,
+       737.98
+      ],
+      [
+       1185.25,
+       731.05
+      ],
+      [
+       1278.2,
+       806.34
+      ]
+     ],
+     "drawn": 7,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       6.003,
+       23.074
+      ],
+      [
+       7.013,
+       20.683
+      ],
+      [
+       7.662,
+       19.252
+      ],
+      [
+       8.618,
+       16.914
+      ],
+      [
+       9.671,
+       15.193
+      ],
+      [
+       10.53,
+       15.415
+      ],
+      [
+       11.544,
+       13.002
+      ]
+     ],
+     "pearson_r": -0.980096,
+     "shape": "CIRCLE"
+    },
+    "L_OPEN_CIRCLE": {
+     "axis": "LEFT",
+     "centres": [
+      [
+       304.7,
+       182.4
+      ],
+      [
+       415.71,
+       233.29
+      ],
+      [
+       502.15,
+       276.94
+      ],
+      [
+       622.33,
+       401.92
+      ]
+     ],
+     "drawn": 4,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.924,
+       33.0
+      ],
+      [
+       2.135,
+       31.369
+      ],
+      [
+       3.078,
+       29.97
+      ],
+      [
+       4.389,
+       25.964
+      ]
+     ],
+     "pearson_r": -0.975628,
+     "shape": "CIRCLE"
+    },
+    "R_FILLED_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       340.27,
+       442.94
+      ],
+      [
+       428.18,
+       482.89
+      ],
+      [
+       540.01,
+       522.11
+      ],
+      [
+       680.9,
+       568.01
+      ],
+      [
+       780.45,
+       532.03
+      ],
+      [
+       909.88,
+       594.03
+      ],
+      [
+       980.01,
+       600.5
+      ],
+      [
+       1113.38,
+       681.61
+      ],
+      [
+       1227.42,
+       689.51
+      ]
+     ],
+     "drawn": 9,
+     "fill": "FILLED",
+     "pairs": [
+      [
+       1.312,
+       61.018
+      ],
+      [
+       2.271,
+       57.433
+      ],
+      [
+       3.491,
+       53.913
+      ],
+      [
+       5.028,
+       49.794
+      ],
+      [
+       6.114,
+       53.023
+      ],
+      [
+       7.526,
+       47.459
+      ],
+      [
+       8.291,
+       46.878
+      ],
+      [
+       9.746,
+       39.599
+      ],
+      [
+       10.99,
+       38.89
+      ]
+     ],
+     "pearson_r": -0.967371,
+     "shape": "TRIANGLE"
+    },
+    "R_OPEN_TRIANGLE": {
+     "axis": "RIGHT",
+     "centres": [
+      [
+       308.37,
+       136.13
+      ],
+      [
+       367.58,
+       131.11
+      ],
+      [
+       469.97,
+       222.04
+      ],
+      [
+       544.32,
+       210.74
+      ],
+      [
+       664.03,
+       246.67
+      ],
+      [
+       740.12,
+       227.92
+      ],
+      [
+       819.96,
+       256.72
+      ],
+      [
+       905.57,
+       321.54
+      ],
+      [
+       986.43,
+       323.36
+      ],
+      [
+       1107.52,
+       369.41
+      ],
+      [
+       1175.72,
+       324.94
+      ],
+      [
+       1272.88,
+       386.43
+      ]
+     ],
+     "drawn": 12,
+     "fill": "OPEN",
+     "pairs": [
+      [
+       0.964,
+       88.552
+      ],
+      [
+       1.61,
+       89.003
+      ],
+      [
+       2.727,
+       80.843
+      ],
+      [
+       3.538,
+       81.857
+      ],
+      [
+       4.844,
+       78.632
+      ],
+      [
+       5.674,
+       80.315
+      ],
+      [
+       6.545,
+       77.73
+      ],
+      [
+       7.479,
+       71.913
+      ],
+      [
+       8.361,
+       71.75
+      ],
+      [
+       9.682,
+       67.617
+      ],
+      [
+       10.426,
+       71.608
+      ],
+      [
+       11.486,
+       66.09
+      ]
+     ],
+     "pearson_r": -0.959335,
+     "shape": "TRIANGLE"
+    }
+   },
+   "total_points": 32,
+   "what": "the PANEL-WIDE fill split does not separate and BOTH shape groups do; every one of the thirty marks routes",
+   "x_ticks": [
+    [
+     0,
+     220.0
+    ],
+    [
+     12,
+     1320.0
+    ]
+   ]
+  },
   "imbalanced": {
    "case": "imbalanced",
    "contaminated": [],
@@ -2299,6 +2672,6 @@
    ]
   }
  },
- "what_this_is": "Eight monochrome scatters drawn to test the GRAIN of the fill split rather than its threshold. Every marker's series, axis, shape, fill and centre is declared, and each case names the answer a correct reader reaches.",
+ "what_this_is": "Nine monochrome scatters drawn to test the GRAIN of the fill split rather than its threshold. Every marker's series, axis, shape, fill and centre is declared, and each case names the answer a correct reader reaches.",
  "why": "Interior ink is measured in a window at the mark's centroid, and a hollow triangle puts its own edges through that window while a ring encloses white. The panel-wide fill split therefore pools four bands and scores the spread of two of them as one cluster's. `confounded` is the case where that costs a wrong answer rather than a weaker index."
 }

@@ -64,6 +64,7 @@ import axis_grain as AG                                           # noqa: E402
 import compare_split_grain as CSG                                 # noqa: E402
 import diagnose_marker_split as D                                 # noqa: E402
 import marker_routing as MRT                                      # noqa: E402
+import provenance as PROV                                         # noqa: E402
 import scatter_points as SP                                       # noqa: E402
 
 FAILURES, PASSED = [], [0]
@@ -242,23 +243,52 @@ check("  and dropping the floor to two invents one and names two marks with it",
       "%r" % (collections.Counter(v[1] for v in _rel.values() if v[1]),))
 
 print()
-print("a declaration is not a measurement")
+print("the identity method names the axis the ink actually decided")
+# v9.16 STAMPED `MEASURED_MARKER_SHAPE_FILL` ON EVERY ROUTED MARK, and refused a
+# shape declared with one fill outright. Both were wider than the evidence: on a
+# panel of ONE declared shape the shape came off the manifest, and a shape with
+# one declared fill is named by the shape alone - which was measured. v9.17 uses
+# the registry's own narrower names, and the refusal is gone because it was the
+# right answer to the wrong question.
 _f = R["one_fill"]
 _tri = [x for x in _f["out"]["records"] if x.get("shape") == "TRIANGLE"
         and x["Marker_Validity_Status"] == "SINGLE_MARKER"]
-check("a shape declared with one fill is refused, not stamped with it",
-      bool(_tri) and all(x["refusal"] == MRT.FILL_NOT_MEASURED
-                         and not x["Series_ID"] and not x["Identity_Method"]
+check("a shape declared with one fill is named by its shape, and says so",
+      bool(_tri) and all(x["Identity_Method"] == "MEASURED_MARKER_SHAPE"
+                         and x["Series_ID"] == "R_FILLED_TRIANGLE"
                          and not x["fill"] for x in _tri),
-      "%r" % (sorted({(x["refusal"], x["fill"], x["Identity_Method"])
+      "%r" % (sorted({(x["Identity_Method"], x["fill"], x["Series_ID"])
                       for x in _tri}),))
-check("  and the circles on the same panel, which declare two, still route",
-      _f["right"] == 16 and _f["wrong"] == 0,
+check("  and it carries no fill group, because none was asked",
+      all(x["Fill_Group_Threshold"] is None
+          and x["Fill_Conditioning_Shape"] is None for x in _tri),
+      "%r" % (sorted({(x["Fill_Conditioning_Shape"], x["Fill_Group_Threshold"])
+                      for x in _tri}),))
+check("  the circles on the same panel measured both, and say that instead",
+      _f["right"] == 24 and _f["wrong"] == 0
+      and {x["Identity_Method"] for x in _f["out"]["records"]
+           if x.get("shape") == "CIRCLE" and x["Series_ID"]}
+      == {"MEASURED_MARKER_SHAPE_FILL"},
       "%d right, %d wrong" % (_f["right"], _f["wrong"]))
+# AND A PANEL OF ONE DECLARED SHAPE MEASURED ONLY THE FILL. `outlier` declares
+# circles open and filled and nothing else, so its shape axis is a manifest
+# column - which is what the method has to say.
+check("  a panel of one declared shape claims the fill and not the shape",
+      MRT.identity_method(False, True) == "MEASURED_MARKER_FILL"
+      and MRT.identity_method(True, False) == "MEASURED_MARKER_SHAPE"
+      and MRT.identity_method(True, True) == "MEASURED_MARKER_SHAPE_FILL"
+      and MRT.identity_method(False, False) == "DECLARED_SINGLE_SERIES",
+      "%r" % (MRT.IDENTITY_BY_EVIDENCE,))
+check("    and every one of the four is a pair SCATTER may produce",
+      all(not PROV.contract_failure("SCATTER", m, "POINT_CLOUD_ASSOCIATION")
+          for m in MRT.IDENTITY_BY_EVIDENCE.values()),
+      "%r" % ([m for m in MRT.IDENTITY_BY_EVIDENCE.values()
+               if PROV.contract_failure("SCATTER", m,
+                                        "POINT_CLOUD_ASSOCIATION")],))
 # REVERT: `fill_verdict` returning the single declared fill, which is the branch
-# that was removed. Every triangle is then named from the manifest and carries
-# `MEASURED_MARKER_SHAPE_FILL` beside a fill nothing measured.
-check("  the removed branch would have named all eight from the manifest",
+# that was removed in v9.16. Every triangle would then carry a FILL nothing
+# measured, and - with v9.17's method table - the wider method beside it.
+check("  the removed branch would have put a measured fill on all eight",
       sum(1 for x in _tri
           if CSG.verdict_before(x["Fill_Score_Window"],
                                 MRT.Split(None, 0.0, 0.0, False),
@@ -267,6 +297,29 @@ check("  the removed branch would have named all eight from the manifest",
                         if CSG.verdict_before(x["Fill_Score_Window"],
                                               MRT.Split(None, 0.0, 0.0, False),
                                               {"FILLED"})), len(_tri)))
+
+print()
+print("the panel whose only splits are per-shape")
+_go = R["group_only"]
+check("the panel-wide split does not separate and both shape groups do",
+      not _go["out"]["fill_split"]["separates"]
+      and all(_go["out"]["fill_groups"][s]["split"]["separates"]
+              for s in ("CIRCLE", "TRIANGLE")),
+      "panel %r, groups %r"
+      % (_go["out"]["fill_split"]["separates"],
+         {s: _go["out"]["fill_groups"][s]["split"]["separates"]
+          for s in ("CIRCLE", "TRIANGLE")}))
+check("  and all thirty of its marks route, none of them wrong",
+      (_go["right"], _go["wrong"]) == (30, 0),
+      "%d right, %d wrong" % (_go["right"], _go["wrong"]))
+# REVERT: the panel-wide grain. Nothing routes at all - which is the cost of the
+# old grain stated as a number rather than as an argument.
+_gw, _gs, _gu = CSG.assign(_go["out"]["records"], _go["series"],
+                           "CURRENT_GLOBAL")
+check("  under the panel-wide rule the same figure routes nothing",
+      sum(1 for v in _gw.values() if v[1]) == 0 and not _gs[""].separates,
+      "%d routed under the panel-wide split"
+      % sum(1 for v in _gw.values() if v[1]))
 
 print()
 print("a fill without a shape names no class")
@@ -418,10 +471,19 @@ for _name in CSG.CANDIDATES:
              _tot[_name]["false_split"], _tot[_name]["twin"]))
 check("only the two conditioned rules reach wrong = 0",
       _tot["CURRENT_GLOBAL"]["wrong"] == 5
-      and _tot["RELAXED_GLOBAL"]["wrong"] == 7
+      and _tot["RELAXED_GLOBAL"]["wrong"] == 19
       and _tot["SHAPE_CONDITIONED"]["wrong"] == 0
       and _tot["DECLARATION_AWARE"]["wrong"] == 0,
       "%r" % ({k: v["wrong"] for k, v in sorted(_tot.items())},))
+# AND THE ADOPTED RULE IS NOT PAYING FOR IT IN REFUSALS EITHER. It routes more
+# marks than the rule it replaced, on the same fourteen renderings - which is
+# not why it was adopted and is worth having said, because "wrong 0" is cheap
+# for a reader that refuses everything.
+check("  and it routes MORE than the rule it replaced, not fewer",
+      _tot["SHAPE_CONDITIONED"]["right"] > _tot["CURRENT_GLOBAL"]["right"]
+      and _tot["SHAPE_CONDITIONED"]["right"]
+      > _tot["DECLARATION_AWARE"]["right"],
+      "%r" % ({k: v["right"] for k, v in sorted(_tot.items())},))
 check("  relaxing the floor is the only rule that invents a class",
       _tot["RELAXED_GLOBAL"]["false_split"] == 1
       and all(_tot[k]["false_split"] == 0 for k in CSG.CANDIDATES

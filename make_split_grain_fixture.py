@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Seven monochrome scatters drawn to ask ONE question: is fill a panel-wide axis?
+"""Nine monochrome scatters drawn to ask ONE question: is fill a panel-wide axis?
 
     python3 make_split_grain_fixture.py
 
     split_grain_imbalanced.jpeg     four classes at 12/8/6/4, all four real
+    split_grain_group_only.jpeg     the panel-wide split fails, both shape
+                                    groups separate, and all thirty route
     split_grain_confounded.jpeg     the global interior-ink gap falls between two
                                     SHAPES, not between two FILLS
     split_grain_outlier.jpeg        one fill class and three contaminated marks
@@ -50,6 +52,10 @@ replacement has to be argued from a case where it is wrong - so
 
 ## What each rendering is for
 
+  group_only    the panel-wide fill split does NOT separate and each shape's
+                own split does. The whole point of the grain, on one drawing:
+                a reader that asks the panel gets nothing, a reader that asks
+                the shape gets all thirty marks right.
   imbalanced    12/8/6/4. The four classes are real and unequal, and the answer
                 is that all of them route. A minimum-class rule that fires here
                 is refusing a class the figure drew.
@@ -203,6 +209,20 @@ CASES = {
                  pairs=_cloud(7.2, 11.4, 86.0, 74.0, 5, 4.5, 2.6)),
             dict(id="R_FILLED_TRIANGLE", axis="RIGHT", shape="TRIANGLE",
                  fill="FILLED", pairs=_cloud(0.8, 4.8, 68.0, 56.0, 4, 4.5, 3.9))]),
+    "group_only": dict(
+        marker_d=MARKER_D, scale=2,
+        what="the PANEL-WIDE fill split does not separate and BOTH shape "
+             "groups do; every one of the thirty marks routes",
+        series=[
+            dict(id="L_OPEN_CIRCLE", axis="LEFT", shape="CIRCLE", fill="OPEN",
+                 pairs=_cloud(0.8, 4.4, 33.0, 27.0, 4, 1.4, 0.0)),
+            dict(id="L_FILLED_CIRCLE", axis="LEFT", shape="CIRCLE",
+                 fill="FILLED", pairs=_cloud(6.0, 11.4, 22.0, 13.0, 7, 1.4, 1.3)),
+            dict(id="R_OPEN_TRIANGLE", axis="RIGHT", shape="TRIANGLE",
+                 fill="OPEN", stroke=1.0 / 4.0,
+                 pairs=_cloud(0.8, 11.4, 88.0, 66.0, 12, 4.0, 2.6)),
+            dict(id="R_FILLED_TRIANGLE", axis="RIGHT", shape="TRIANGLE",
+                 fill="FILLED", pairs=_cloud(1.2, 11.0, 60.0, 40.0, 9, 4.0, 3.9))]),
     "outlier": dict(
         marker_d=MARKER_D, scale=2, blot=2,
         what="ONE shape and one fill class were drawn; two marks are crossed by "
@@ -414,7 +434,7 @@ def rendering(name):
 def truth():
     return {
         "what_this_is":
-            "Eight monochrome scatters drawn to test the GRAIN of the fill "
+            "Nine monochrome scatters drawn to test the GRAIN of the fill "
             "split rather than its threshold. Every marker's series, axis, "
             "shape, fill and centre is declared, and each case names the answer "
             "a correct reader reaches.",

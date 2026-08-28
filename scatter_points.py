@@ -59,7 +59,18 @@ POINT_ARTIFACT_COLUMNS = (
 
 #: The artifact type this file is registered under in a run's ledger.
 ARTIFACT_TYPE = "SCATTER_POINTS"
-#: What a routed point's identity is called. Registered in `provenance`.
+#: WHAT A ROUTED POINT'S IDENTITY MAY BE CALLED, and it is not one name. Which
+#: method a mark carries depends on which axis the panel's DECLARATION made
+#: measurable: both, the fill alone (one declared shape), or the shape alone (a
+#: shape declared with one fill). See `marker_routing.identity_method`.
+#:
+#: These three REQUIRE this file. `DECLARED_SINGLE_SERIES` - a panel of one
+#: series, where nothing was measured to name anything - does not, and is
+#: produced by the unrouted reader as well.
+IDENTITY_METHODS = ("MEASURED_MARKER_SHAPE_FILL", "MEASURED_MARKER_FILL",
+                    "MEASURED_MARKER_SHAPE")
+#: The method a four-class twin-axis panel produces, kept as a name because it
+#: is the one the worked examples and the gallery talk about.
 IDENTITY_METHOD = "MEASURED_MARKER_SHAPE_FILL"
 
 #: A row's recorded evidence disagrees with the panel routed again now.
@@ -68,6 +79,12 @@ EVIDENCE_STALE = "ROUTING_EVIDENCE_DOES_NOT_MATCH_THE_INK"
 NO_MARK_NOW = "NO_MARK_AT_THIS_PIXEL_NOW"
 #: The panel no longer establishes the split this row's class rests on.
 SPLIT_GONE = "THE_PANEL_NO_LONGER_SEPARATES"
+#: THE RASTER ROUTES A MARK THIS FILE DOES NOT CARRY. Not the same finding as a
+#: row with no mark under it: every row can be true and the SET still be wrong.
+MARK_MISSING = "ROUTED_MARK_MISSING_FROM_ARTIFACT"
+#: Two rows are the same point. A file holding a mark twice is a cloud with a
+#: member the figure drew once, and an association over it is not the figure's.
+DUPLICATE_POINT = "DUPLICATE_POINT_RECORD"
 
 #: How far a re-routed centroid may sit from a recorded one and still be the
 #: same mark, as a fraction of the panel's own marker. Not a pixel count: the
@@ -190,6 +207,23 @@ def verify_artifact(rows, series, axes, panel_id, image_sha256):
         return ["these %d rows name %d x axes (%s); one panel has one"
                 % (len(rows), len(xs), ", ".join(x or "nothing" for x in xs))]
     x_axis_id = xs[0]
+    # TWO ROWS THAT ARE THE SAME POINT. Checked HERE as well as against the
+    # raster, because it needs no figure: a file carrying one mark twice is
+    # wrong about itself, and `current_evidence_failures` is the check a caller
+    # can skip when it does not have the image.
+    counted = {}
+    for i, row in enumerate(rows):
+        key = _s(row.get("Point_Record_SHA256"))
+        if not key:
+            continue
+        if key in counted:
+            problems.append("row %d: %s - this row is row %d again, and a "
+                            "cloud cannot hold one mark twice"
+                            % (i, DUPLICATE_POINT, counted[key]))
+        else:
+            counted[key] = i
+    if problems:
+        return problems
     records = []
     for i, row in enumerate(rows):
         rec = dict(row)
@@ -252,12 +286,18 @@ def current_evidence_failures(rows, image, panel_box, series, threshold=150,
     stamp them, and pass every other verifier in this package. Routing the panel
     again and comparing is the check that cannot be satisfied by writing.
 
-    Three kinds of finding, and they are different acts:
+    Five kinds of finding, and they are different acts:
 
-        NO_MARK_AT_THIS_PIXEL_NOW      a row's pixel has no routed mark within a
-                                       quarter of a marker. The point was
+        DUPLICATE_POINT_RECORD         two rows are the same point. Found before
+                                       the raster is consulted at all: a file
+                                       holding one mark twice is wrong about
+                                       itself.
+        NO_MARK_AT_THIS_PIXEL_NOW      a row's pixel has no candidate mark within
+                                       a quarter of a marker. The point was
                                        invented, or the image is not the one it
                                        was read on.
+        ROUTED_MARK_MISSING_FROM_...   the raster routes a mark this file does
+                                       not carry.
         THE_PANEL_NO_LONGER_SEPARATES  the split a row's class rests on does not
                                        hold on this raster. Nothing about the
                                        row is provably wrong; the ground it
@@ -265,9 +305,39 @@ def current_evidence_failures(rows, image, panel_box, series, threshold=150,
         ROUTING_EVIDENCE_DOES_NOT_...  the mark is there and its measurements
                                        are not the ones recorded.
 
-    Returns a list of `(row index, code, detail)`. It does NOT raise: a run on a
-    different OpenCV can move a third harmonic in the fourth decimal, and the
-    caller is the one that knows whether that matters.
+    ## A SET, NOT A BAG OF INDEPENDENT ROWS. v9.17.
+
+    Until v9.17 each row found its own nearest current mark, on its own. Nothing
+    asked whether ONE mark had answered for TWO rows, and nothing asked whether a
+    mark the raster routes had a row at all - so a producer could drop mark B,
+    write mark A's row twice, re-derive both hashes, recompute the association
+    over the file it had just made and the file hash over that, and every check
+    in this package agreed with it. Both rows sat on a real marker. The cloud was
+    not the figure's.
+
+    So the rows and the currently routed marks are matched ONE-TO-ONE, by the
+    same minimum-cost maximum matching the fixture scorer is judged with -
+    `marker_routing.match_one_to_one` - and both sides' leftovers are findings.
+
+    ## THE SPLIT IT ASKS ABOUT IS THE ONE THAT NAMED THE ROW. v9.17.
+
+    Since v9.16 a mark's fill comes from the split taken inside ITS OWN measured
+    shape, and this function was still asking whether the PANEL-WIDE fill split
+    holds - the v9.15 grain, left behind. `split_grain_group_only.jpeg` is the
+    panel that shows what that costs: its panel-wide split does not separate and
+    both of its shape groups do, so a perfectly good thirty-row file came back
+    thirty times `THE_PANEL_NO_LONGER_SEPARATES`. The question is now asked of
+    the group named on the row.
+
+    Matching is done against every SINGLE_MARKER candidate rather than against
+    the routed ones only, for the same reason: when a group stops separating its
+    marks stop being routed, and a row would then be told "there is no mark here"
+    when the mark is there and it is the GROUND that went.
+
+    Returns a list of `(row index, code, detail)`; a finding about the panel
+    rather than about one row carries `None` for the index. It does NOT raise: a
+    run on a different OpenCV can move a third harmonic in the fourth decimal,
+    and the caller is the one that knows whether that matters.
     """
     declared = [dict(id=_s(r.get("Series_ID")),
                      shape=_s(r.get("Marker_Shape")).upper(),
@@ -276,30 +346,66 @@ def current_evidence_failures(rows, image, panel_box, series, threshold=150,
     out = MRT.route(image, panel_box, declared, threshold=threshold,
                     exclude_boxes=exclude_boxes)
     scale = out["marker_scale_px"] or 1.0
-    now = [r for r in out["records"] if r.get("Series_ID")]
+    # EVERY MARK THE PANEL STILL SAYS IS ONE MARKER, not only the routed ones.
+    candidates = [r for r in out["records"]
+                  if _s(r.get("Marker_Validity_Status")) == AG.SINGLE_MARKER]
+    routed_now = [r for r in candidates if r.get("Series_ID")]
     found = []
+    seen = {}
+    for i, row in enumerate(rows):
+        key = _s(row.get("Point_Record_SHA256"))
+        if key and key in seen:
+            found.append((i, DUPLICATE_POINT,
+                          "this row is row %d again: one mark cannot be two "
+                          "points of a cloud" % seen[key]))
+        elif key:
+            seen[key] = i
+    placed = []
     for i, row in enumerate(rows):
         try:
-            px = float(row["point_px_x"])
-            py = float(row["point_px_y"])
+            placed.append(dict(point_px_x=float(row["point_px_x"]),
+                               point_px_y=float(row["point_px_y"]), _row=i))
         except (KeyError, TypeError, ValueError):
             found.append((i, NO_MARK_NOW, "the row carries no pixel"))
+    # ONE MARK, ONE ROW. `match_one_to_one` is the scorer this package holds its
+    # own reader to; a verifier weaker than that scorer is a verifier a producer
+    # can sit between.
+    truth = [(j, r["point_px_x"], r["point_px_y"])
+             for j, r in enumerate(candidates)]
+    pairs = MRT.match_one_to_one(placed, truth, SAME_MARK * scale)
+    of_row = {placed[k]["_row"]: candidates[truth[j][0]]
+              for k, j in pairs.items()}
+    for k, entry in enumerate(placed):
+        if k in pairs:
             continue
-        near = [r for r in now
-                if ((r["point_px_x"] - px) ** 2
-                    + (r["point_px_y"] - py) ** 2) ** 0.5 <= SAME_MARK * scale]
-        if not near:
-            found.append((i, NO_MARK_NOW,
-                          "no routed mark within %.1f px of (%.1f, %.1f)"
-                          % (SAME_MARK * scale, px, py)))
+        found.append((entry["_row"], NO_MARK_NOW,
+                      "no unclaimed mark within %.1f px of (%.1f, %.1f)"
+                      % (SAME_MARK * scale, entry["point_px_x"],
+                         entry["point_px_y"])))
+    matched = {id(candidates[truth[j][0]]) for j in pairs.values()}
+    for r in routed_now:
+        if id(r) not in matched:
+            found.append((None, MARK_MISSING,
+                          "the raster routes %s at (%.1f, %.1f) and no row of "
+                          "this file carries it"
+                          % (_s(r.get("Series_ID")) or "a mark",
+                             r["point_px_x"], r["point_px_y"])))
+    for i, row in enumerate(rows):
+        mark = of_row.get(i)
+        if mark is None:
             continue
-        mark = min(near, key=lambda r: (r["point_px_x"] - px) ** 2
-                   + (r["point_px_y"] - py) ** 2)
-        if not out["shape_split"]["separates"] or not out["fill_split"]["separates"]:
+        # THE GROUP THAT NAMED THIS ROW, asked of the panel as it stands now.
+        # The shape axis is still a panel-wide question and the fill axis is
+        # not, which is the whole of v9.16 said once more here.
+        shape = _s(mark.get("shape")) or _s(row.get("Fill_Conditioning_Shape"))
+        group = (out.get("fill_groups") or {}).get(shape)
+        group_ok = bool(group and group["split"]["separates"])
+        if not out["shape_split"]["separates"] or not group_ok:
             found.append((i, SPLIT_GONE,
-                          "this panel now separates shape=%s fill=%s"
-                          % (out["shape_split"]["separates"],
-                             out["fill_split"]["separates"])))
+                          "this panel now separates shape=%s, and the %s fill "
+                          "group %s"
+                          % (out["shape_split"]["separates"], shape or "?",
+                             "separates" if group_ok else "does not")))
             continue
         wrong = []
         want = AG.routing_evidence(mark)

@@ -8093,6 +8093,85 @@ same four, with the open circles and open triangles making up one pooled low
 cluster exactly as the clip's 0.11-0.54 band does. That is corroboration, not a
 measurement of the clip, and it is written down as such.
 
+## v9.17 — the point file and the raster have to be the same set
+
+v9.16 moved the fill question inside each measured shape. Three things it shipped
+were narrower than they read, and a review found all three by reading the code
+rather than by running it.
+
+**The raster check was row-by-row, not set-to-set.** `current_evidence_failures`
+gave each row its own nearest current mark. Nothing asked whether one mark had
+answered for two rows; nothing asked whether a mark the raster routes had a row
+at all. A producer could drop mark B, write mark A's row twice, re-derive both
+hashes, recompute the association over the file it had just made and the file
+hash over that, and every check in this package agreed with it — both rows sat on
+a real marker, and the cloud was not the figure's. The rows and the current marks
+are now matched ONE-TO-ONE by `marker_routing.match_one_to_one`, the same
+minimum-cost maximum matching this package scores its own reader with, and both
+sides' leftovers are findings: `ROUTED_MARK_MISSING_FROM_ARTIFACT` and
+`DUPLICATE_POINT_RECORD`.
+
+**The check was still asking the panel-wide split.** v9.16 routed on
+`fill_groups[shape]` and left `SPLIT_GONE` reading `fill_split["separates"]`.
+`split_grain_group_only.jpeg` is the panel that shows the cost — its panel-wide
+split does not separate, both shape groups do, thirty of its thirty-two marks
+route correctly, and the verifier rejected every row of a good file. It is also
+the fixture that states the grain change as a number rather than an argument:
+
+    rule                    routed on split_grain_group_only
+    panel-wide (v9.15)      0 of 32
+    per-shape  (v9.16)      30 of 32, none wrong
+
+**The identity method was the widest one that fit.** Every routed mark carried
+`MEASURED_MARKER_SHAPE_FILL`, including on a panel of ONE declared shape where
+the shape came off the manifest. A method's name is a claim about what was
+measured and R0 is the tier that can be finalized, so v9.17 picks the registered
+method that matches the evidence:
+
+    shapes measured   fills measured   Identity_Method
+    yes               yes              MEASURED_MARKER_SHAPE_FILL
+    yes               no               MEASURED_MARKER_SHAPE
+    no                yes              MEASURED_MARKER_FILL
+    no                no               DECLARED_SINGLE_SERIES
+
+All four are now pairs SCATTER may produce, and the finalizer's scatter gate is
+keyed on the family rather than on one name — without that, a value claiming
+`MEASURED_MARKER_FILL` with no point file behind it would have gone through.
+
+**And v9.16's refusal is gone, because it answered the wrong question.** A shape
+declared with a single fill was refused `MARKER_FILL_DECLARED_NOT_MEASURED` on
+the grounds that its fill was a declaration. True, and its SHAPE was measured and
+is enough to name it — there is only one series with that marker. Such a mark now
+routes as `MEASURED_MARKER_SHAPE` with `Marker_Fill` blank, which is both safe
+and true. On the fourteen renderings the harness runs, the adopted rule now
+routes MORE than the rule it replaced (207 against 172) with wrong still 0.
+
+**What the round did NOT do.** The eleven group columns are still not
+re-derivable from the point file alone: `scatter_points.csv` holds only ROUTED
+points, so a group's N and its distribution cannot be reconstructed from it, and
+`current_evidence_failures` re-opening the raster is what closes that. A separate
+`scatter_fill_groups.csv` grain, with each point citing a
+`Fill_Group_Record_SHA256`, is the shape that would make the durable evidence
+self-supporting. It is recorded in "Still open" rather than half-built.
+
+    reverted                                          scenario that fails
+    the one-to-one matching                           an extra row on one mark
+    the duplicate check in verify_artifact            the duplicate's own row
+    the missing-mark report                           a mark the file omits
+    SPLIT_GONE back to the panel-wide split           group_only's thirty rows
+    identity always MEASURED_MARKER_SHAPE_FILL        one_fill's triangles
+    the gate keyed on one identity name               FILL with no point file
+    the narrow pairs off METHOD_CONTRACT              the four-pair check
+
+**464 Figure 2 is not "still negative" — it is NOT MEASURED under this grain.**
+The pinned clip is a publisher figure this repository does not carry and it was
+not on the machine either round ran on. `forward_test_464_scatter.py` printed a
+fixed conclusion written for the panel-wide grain; it now reports the panel-wide
+diagnostic, each shape's group, routed-by-series and unresolved-by-reason, and
+its verdict follows the count it observed. A non-zero count would still not make
+it positive: that needs a human-reviewed marker truth file bound to the clip's
+SHA-256.
+
 ## The segmentation harness, and the six statements that put a panel back together
 
 `HARNESS.md` is the full document; this is what changed in the package and why it

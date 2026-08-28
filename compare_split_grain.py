@@ -183,16 +183,16 @@ def assign(records, series, mode):
             split = splits.get(shape, MRT.Split(None, 0.0, 0.0, False))
             fills = fills_by_shape.get(shape, [])
             if len(fills) == 1:
-                # ONE FILL DECLARED FOR THIS SHAPE. `fill_verdict` would return
-                # it, because there is nothing to choose between - and calling
-                # that MEASURED_MARKER_SHAPE_FILL puts a declaration's word
-                # inside a method whose name says the ink decided.
-                #
-                # AND THE SPLIT THIS GROUP WOULD HAVE HAD IS NOT CONSULTED, so
-                # it is not scored either: counting a split nothing reads as a
-                # false split would charge a rule for an answer it never gave.
+                # ONE FILL DECLARED FOR THIS SHAPE, so the SHAPE names the mark
+                # and the fill is not consulted at all. The mark routes and its
+                # identity method says which axis decided it - see
+                # `marker_routing.identity_method`. The split this group would
+                # have had is not read, so it is not scored either: charging a
+                # rule with a false split it never made would be scoring an
+                # answer nobody gave.
                 splits[shape] = MRT.Split(None, 0.0, 0.0, False)
-                out[i] = ("", "", "ONE_FILL_DECLARED")
+                out[i] = ("", names.get((shape, sorted(fills)[0]), ""),
+                          "SHAPE_NAMES_IT")
                 continue
         if not shape and len(fills_by_shape) > 1:
             out[i] = ("", "", "SHAPE_UNRESOLVED")

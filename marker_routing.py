@@ -124,21 +124,39 @@ FILLS = ("OPEN", "FILLED")
 
 #: Every answer this module gives that is not a series.
 REFUSALS = ("NOT_A_MARKER", "MARKER_MERGED", "MARKER_SHAPE_UNRESOLVED",
-            "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED",
-            "MARKER_FILL_DECLARED_NOT_MEASURED")
+            "MARKER_FILL_UNRESOLVED", "MARKER_CLASS_NOT_DECLARED")
 
-#: THE PANEL DECLARES ONE FILL FOR THIS MARK'S SHAPE, so there is nothing for
-#: the ink to choose between and the fill on the record would be the
-#: declaration's word. `Identity_Method` says MEASURED_MARKER_SHAPE_FILL, which
-#: is a claim that both halves came off the figure, so this mark is refused
-#: instead of stamped with a method it does not satisfy.
+#: WHICH DISCRIMINANT ACTUALLY NAMED THE MARK, and therefore which registered
+#: identity method the point may carry. v9.16 stamped
+#: `MEASURED_MARKER_SHAPE_FILL` on every routed mark, and on a panel of ONE
+#: declared shape that was an overstatement: the shape came off the manifest and
+#: only the fill was read from the ink. The name of a method is a claim about
+#: what was measured, and R0 is the tier that can be finalized, so the claim has
+#: to be the narrow true one rather than the widest one that fits.
 #:
-#: WHAT IT COSTS AND WHY IT IS STILL RIGHT. Such a mark's SHAPE was measured and
-#: is enough to name its series; what is missing is a provenance method that
-#: says so - "shape measured, fill declared" - with its own reviewer contract
-#: and its own verifier. Registering one is a round of its own; naming a
-#: declaration a measurement is a wrong value now.
-FILL_NOT_MEASURED = "MARKER_FILL_DECLARED_NOT_MEASURED"
+#: A shape declared with a SINGLE fill is named by its shape alone - there is
+#: only one series with that marker - so `MEASURED_MARKER_SHAPE` is what such a
+#: mark gets, and its `Marker_Fill` stays blank because nothing measured it.
+#: v9.16 refused those marks instead; refusing was safe and this is both safe
+#: and true, and it uses a method the registry already carries.
+IDENTITY_BY_EVIDENCE = {
+    (True, True): "MEASURED_MARKER_SHAPE_FILL",
+    (True, False): "MEASURED_MARKER_SHAPE",
+    (False, True): "MEASURED_MARKER_FILL",
+    (False, False): "DECLARED_SINGLE_SERIES",
+}
+
+
+def identity_method(shape_measured, fill_measured):
+    """The registered method for what this panel's declaration made measurable.
+
+    `shape_measured` is "this panel declares more than one shape, so the shape
+    axis was asked of the ink"; `fill_measured` is the same question for the
+    fill, INSIDE this mark's own shape. Neither is a claim that the answer was
+    confident - a mark whose split did not separate is refused before it gets
+    here - it is a claim about which axis was consulted at all.
+    """
+    return IDENTITY_BY_EVIDENCE[(bool(shape_measured), bool(fill_measured))]
 
 #: The per-shape fill evidence every kept mark carries, so a reviewer can
 #: re-derive the verdict from the row instead of believing it.
@@ -749,8 +767,9 @@ def fill_verdict(value, split, want_fills):
     manifest and `Identity_Method = MEASURED_MARKER_SHAPE_FILL` beside it, and
     nothing downstream could tell that half of that name was a declaration. The
     branch is gone rather than guarded, so no path through this module can turn
-    a declared fill into a measured one; `route` refuses such a mark with
-    `FILL_NOT_MEASURED` before asking.
+    a declared fill into a measured one; `route` never asks this question of a
+    shape whose fills it does not have two of, and stamps such a mark with
+    `MEASURED_MARKER_SHAPE` - the method that says the shape decided it.
     """
     if not split.separates or not _clear(value, split):
         return ""
@@ -917,13 +936,18 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
         group = groups.get(shape) if shape else None
         fills = fills_of.get(shape, set())
         geo["fill_threshold"] = fill_split.threshold
-        geo.update(_group_evidence(group, geo.get("interior_ink")))
+        # A SHAPE WHOSE FILL WAS NEVER IN QUESTION HAS NO GROUP EVIDENCE. The
+        # split would be computed over marks nothing was choosing between, and a
+        # threshold on the row would be a measurement nobody made.
+        geo.update(_group_evidence(group if len(fills) > 1 else None,
+                                   geo.get("interior_ink")))
         if geo["refusal"]:
             fill, own_fill = "", ""
         elif len(fills) == 1:
-            # ONE FILL DECLARED FOR THIS SHAPE. See `FILL_NOT_MEASURED`.
+            # ONE FILL DECLARED FOR THIS SHAPE, so the fill is not what tells
+            # this mark from the others and it is left BLANK: the ink did not
+            # decide it. What did decide it is on `Identity_Method` below.
             fill, own_fill = "", ""
-            geo["refusal"] = FILL_NOT_MEASURED
         else:
             fill = fill_verdict(geo["Fill_Score_Window"], group["split"], fills)
             # THE SAME QUESTION, ASKED OF THIS COMPONENT'S INK ALONE, so that a
@@ -941,14 +965,15 @@ def route(image, panel_box, series, threshold=150, exclude_boxes=(),
             geo["Series_ID"] = ""
             geo["Identity_Method"] = ""
             continue
-        name = declared.get((shape, fill))
+        name = declared.get((shape, fill or (sorted(fills)[0] if fills else "")))
         if name is None:
             geo["refusal"] = "MARKER_CLASS_NOT_DECLARED"
             geo["Series_ID"] = ""
             geo["Identity_Method"] = ""
             continue
         geo["Series_ID"] = name
-        geo["Identity_Method"] = "MEASURED_MARKER_SHAPE_FILL"
+        geo["Identity_Method"] = identity_method(len(want_shapes) > 1,
+                                                 len(fills) > 1)
     for geo in seen:
         geo.setdefault("Classification_Changes_When_Foreign_Removed", False)
         geo.setdefault("shape", "")

@@ -2035,10 +2035,14 @@ def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
         identity = _s(row.get("Identity_Method"))
         pid = _s(row.get("Run_Panel_ID"))
         points = by_panel.get(pid)
-        if identity != "MEASURED_MARKER_SHAPE_FILL" and points is None:
+        # ALL THREE ROUTED IDENTITIES, not only the widest. Since v9.17 a panel
+        # of one declared shape stamps MEASURED_MARKER_FILL and a shape declared
+        # with one fill stamps MEASURED_MARKER_SHAPE; a gate that knew only the
+        # third name would have let the other two through with no point file.
+        if identity not in SP.IDENTITY_METHODS and points is None:
             continue
         where = "%s/%s" % (_s(row.get("Unit_ID")), _s(row.get("Cell_Key")))
-        if identity == "MEASURED_MARKER_SHAPE_FILL" and not points:
+        if identity in SP.IDENTITY_METHODS and not points:
             flag(where, "METHOD_CONTRADICTS_GEOMETRY",
                  "the value says this series was named by measuring its "
                  "marker's shape and fill, and this run wrote no routed point "

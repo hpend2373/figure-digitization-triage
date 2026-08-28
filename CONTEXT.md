@@ -169,10 +169,10 @@ python3 verify_documented_status.py --profile full --rasters present /tmp/counts
 README 마커를 고치지 않고 시나리오를 추가하면 여기서 빨간불이 납니다. **0은 그 스위트가
 `FDT_RASTER_ABSENT`를 출력했을 때만 허용**됩니다.
 
-### 3.5 현재 숫자 (커밋 `v9.16`)
+### 3.5 현재 숫자 (커밋 `v9.17`)
 
 ```
-CORE 3399   FULL 3440   RASTER_ONLY 286     래스터 포함: 3685 / 3726     28 suites
+CORE 3417   FULL 3458   RASTER_ONLY 286     래스터 포함: 3703 / 3744     28 suites
 raster-only 내역: test_bar_reader 24, test_integration 17, test_compile_plan 198,
                   test_reproducibility 5, test_visual_verification 42
 ```
@@ -189,7 +189,7 @@ pilot_397  pilot_beckers
 
 ### 3.7 갤러리 (그림으로 확인)
 
-`png/verify.py`가 G1~G8을 그립니다. 캡션이 한국어라 **Noto CJK가 필수**입니다
+`png/verify.py`가 G1~G9를 그립니다. 캡션이 한국어라 **Noto CJK가 필수**입니다
 (`apt-get install fonts-noto-cjk`) — 없으면 `png/capt.py`가 패키지 이름을 대며 raise합니다.
 DejaVu로 폴백하지 않습니다(두부 글자가 나오므로).
 
@@ -253,15 +253,16 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
 
 ### 열려 있는 결정 (사람이 답해야 하는 것)
 
-1. **~~`_split`의 최소 클래스 크기~~ → v9.16에서 질문 자체가 바뀌었습니다.**
-   측정해 보니 interior ink는 두 무리가 아니라 네 무리(CIRCLE/TRIANGLE × OPEN/FILLED)였고,
-   25|6의 낮은 무리는 "열린 원 + 열린 삼각형"이 섞인 것이었습니다. 1.858이라는 낮은 index는
-   최소 클래스 규칙 탓이 아니라 **shape 효과가 within-spread를 부풀린 것**입니다. 그래서
-   상수를 낮추는 대신 fill split을 shape별로 나눴습니다 — `split_grain_confounded`에서
-   패널 단위 규칙은 5개를 오라우팅하고 shape 조건부는 25/25 정답입니다.
-   **남은 사람 결정**: (a) 한 shape에 fill이 하나만 선언된 경우 — 지금은 거부하고 있고,
-   "shape는 측정, fill은 선언"이라는 provenance method를 등록할지. (b) 464를 양성으로
-   승격하려면 **핀된 클립 + 사람이 만든 marker truth 파일**이 필요합니다.
+1. **~~`_split`의 최소 클래스 크기~~ → v9.16/v9.17에서 질문 자체가 바뀌었습니다.**
+   interior ink는 두 무리가 아니라 네 무리(CIRCLE/TRIANGLE × OPEN/FILLED)였고, 25|6의
+   낮은 무리는 "열린 원 + 열린 삼각형"이 섞인 것이었습니다. 그래서 상수를 낮추는 대신
+   fill split을 shape별로 나눴고(v9.16), identity method도 실제 측정한 축에 맞췄습니다(v9.17).
+   **남은 사람 결정**: 464를 양성으로 승격하려면 **핀된 클립 + 사람이 만든 marker truth
+   파일**(클립 SHA-256에 결박)이 필요합니다. routed count가 0이 아니어도 그것만으로는
+   양성이 아닙니다.
+1-b. **464는 "음성"이 아니라 v9.16 이후 grain으로 아직 측정되지 않았습니다.** v9.15
+   panel-wide grain에서의 음성 결과가 마지막 측정치입니다. 클립이 있는 환경에서
+   `forward_test_464_scatter.py`를 한 번 돌리는 것이 다음 할 일입니다.
 2. IQR→SD 변환 정책, 이중축 배정, dispersion 없는 셀 처리, ID475 Fig 6/7 이중 계수.
 3. `source_document`의 page-range 정책, bivariate group summary 통계.
 4. `main` 브랜치 보호 설정.
@@ -273,6 +274,10 @@ CI는 `suite`(core)와 `intake-full` 두 job. 래스터 시크릿
 - 등록된 사람 R2/R3 리뷰.
 
 ### 남은 작업 (에이전트가 할 수 있는 것)
+- **group evidence 11개는 point artifact만으로 재계산되지 않습니다** — `scatter_points.csv`는
+  routed point만 담아서 group의 N·분포·cut을 복원할 수 없습니다. 별도 grain
+  (`scatter_fill_groups.csv` + 각 point가 참조하는 `Fill_Group_Record_SHA256`)이 필요합니다.
+  지금은 `current_evidence_failures`가 래스터를 다시 열어 막고 있어 P0는 아닙니다.
 - **`pilot_beckers.py`가 v9.1/v9.2 plan 스키마를 따라가지 못해 컴파일 실패** —
   `1f43daa`(8/11)가 마지막 수정이고 `PLAN_UNIT_NAMES_NO_PANEL`(f3942f2),
   `PLAN_DOCUMENT_BYTES_UNDECLARED`(62d38cf)는 8/17에 들어왔습니다. 출판사 PDF가

@@ -346,3 +346,78 @@ that dies when they are reverted.
 
 Panels with no `axis_manifest.csv` do not take the routed reader at all and are
 byte-for-byte unaffected.
+
+
+# v9.17: the point file and the raster have to be the same SET
+
+## Why
+
+Three things v9.16 shipped were narrower than they read.
+
+**The raster check compared row by row.** `current_evidence_failures` found each
+row's own nearest current mark, independently. Nothing asked whether ONE mark had
+answered for TWO rows, and nothing asked whether a mark the raster routes had a
+row at all. So a producer could drop mark B, write mark A's row twice, re-derive
+both hashes, recompute the association over the file it had just made and the
+file hash over that — and every check in this package agreed. Both rows sat on a
+real marker. The cloud was not the figure's.
+
+**The check asked the panel-wide split.** v9.16 moved routing to a per-shape fill
+split and left `SPLIT_GONE` reading `fill_split["separates"]` — the grain it had
+just replaced. `split_grain_group_only.jpeg` is the panel that shows the cost:
+its panel-wide split does not separate, both of its shape groups do, thirty marks
+route correctly, and the verifier rejected all thirty rows.
+
+**The identity method was the widest one that fit.** Every routed mark carried
+`MEASURED_MARKER_SHAPE_FILL`, including on a panel of ONE declared shape, where
+the shape came off the manifest and only the fill was read from the ink. A
+method's name is a claim about what was measured and R0 is the tier that can be
+finalized, so the claim has to be the narrow true one.
+
+## What changed
+
+| | v9.16 | v9.17 |
+|---|---|---|
+| rows against current marks | each row's nearest, independently | minimum-cost maximum ONE-TO-ONE matching |
+| a mark the file omits | not looked for | `ROUTED_MARK_MISSING_FROM_ARTIFACT` |
+| two rows that are one point | not looked for | `DUPLICATE_POINT_RECORD`, in the raster check AND in `verify_artifact` |
+| matching population | routed marks only | every `SINGLE_MARKER` candidate, so a lost group reads as `SPLIT_GONE` and not as `NO_MARK_NOW` |
+| `THE_PANEL_NO_LONGER_SEPARATES` | panel-wide fill split | the row's own shape group |
+| identity, one shape / two fills | `MEASURED_MARKER_SHAPE_FILL` | `MEASURED_MARKER_FILL` |
+| identity, shape declared with one fill | refused `MARKER_FILL_DECLARED_NOT_MEASURED` | `MEASURED_MARKER_SHAPE`, `Marker_Fill` blank |
+| identity, one series | refused | `DECLARED_SINGLE_SERIES` |
+| SCATTER's `METHOD_CONTRACT` | one routed pair | all four |
+| the finalizer's scatter gate | keyed on one identity name | keyed on `scatter_points.IDENTITY_METHODS` |
+
+## What changed for a run you already have
+
+**A v9.16 `scatter_points.csv` still verifies, and its rows may now carry a
+different method.** The columns and hashes are unchanged, so an existing file is
+not refused by this release — but a panel of one declared shape re-run under
+v9.17 writes `MEASURED_MARKER_FILL` where it wrote `MEASURED_MARKER_SHAPE_FILL`,
+and the value rows built from it change with it. Both are R0 and both are in
+SCATTER's contract, so nothing is withheld either way; the difference is what the
+row claims, which is the point.
+
+**A shape declared with one fill now produces points where v9.16 produced
+none.** Those marks are named by a shape the ink was measured on, and their
+`Marker_Fill` is blank because nothing measured it. If you have a v9.16 run whose
+panel came back with `MARKER_FILL_DECLARED_NOT_MEASURED` on every mark of a
+shape, re-run it.
+
+**A file that omitted or duplicated a point is now refused.** No back-fill: the
+fix is to re-run the panel, because the missing point's evidence was never
+written down.
+
+Panels with no `axis_manifest.csv` are still byte-for-byte unaffected.
+
+## 464 Figure 2
+
+`forward_test_464_scatter.py` no longer prints a fixed conclusion. It reports the
+panel-wide diagnostic, each shape's own group, the routed count by series and the
+unresolved count by reason, and its verdict follows the count it observed. Its
+docstring says what is true: v9.15 measured a negative on the pinned clip under a
+grain this package no longer uses, and **the clip has not been measured under the
+per-shape grain**. A non-zero routed count would still not make it a positive
+forward test — that needs a human-reviewed marker truth file bound to the clip's
+SHA-256, and there is none.

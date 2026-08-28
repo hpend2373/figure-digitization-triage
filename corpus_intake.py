@@ -48,12 +48,25 @@ method column says `HUMAN_VISUAL`, and a proposed count is a number a tired
 person clicks past. The draft carries the figure's bounding box so a contact
 sheet can show the picture, and the count comes from the person looking at it.
 
+**What this still does not find.** Two backends can agree about how much text
+a document holds and disagree about whether a caption is in it: publications
+147 and 563 hand pdfminer their body's cross-references to Figure 4 and Fig. 6
+but not those figures' own captions, at a text volume of 1.00, so the volume
+check has nothing to catch. Finding them means reading every document twice and
+reporting the disagreement, which is a walk that costs twice as much and is not
+this one. And publication 554 prints "Fig.l." with a lower-case L; both readers
+report the letter, because the letter is what the file contains, and a rule
+that read it as a 1 would read every "Fig. a" as a number. Those three figures
+are missing on purpose, and the row that would have carried them is absent
+rather than wrong.
+
 The PDF backend is optional, like `cv2` elsewhere in this package: `pdfminer.six`
 if it is installed, `pdftotext -bbox-layout` from poppler if it is not, and a
 refusal naming both if neither is. Which one ran is recorded per row, because a
 caption box from one is not necessarily a caption box from the other.
 """
 import argparse
+import collections
 import csv
 import hashlib
 import os
@@ -73,7 +86,8 @@ DRAFT_COLUMNS = (
     "Draft_ID", "Source_Document_ID", "Source_File", "Source_File_SHA256",
     "Page", "Page_Raster", "Page_Raster_SHA256", "Figure_Crop",
     "Crop_Quality_Status",
-    "Figure_Number", "Caption_Text", "Caption_BBox", "Figure_BBox",
+    "Figure_Number", "Figure_Label_Raw", "Label_Repeats_In_Document",
+    "Caption_Text", "Caption_BBox", "Figure_BBox",
     "Extraction_Method", "Confidence", "Confidence_Reason",
     "Human_Verification_Status", "Verified_By", "Verified_At",
     "Observed_Panel_Count", "Note",
@@ -136,6 +150,10 @@ TEXT_BACKEND_STATUSES = (
     "ZERO_CAPTION_CANDIDATES",
     # a scan, or not a PDF. Needs a page render and a person.
     "NO_TEXT_LAYER",
+    # the backend returned a fraction of the text an independent reader sees.
+    # NOT the same as a document with no captions, and filing it as one says
+    # the document was read when it was not.
+    "TEXT_EXTRACTION_INCOMPLETE",
     # nothing is installed that can read a PDF. Needs an install, not a person.
     "BACKEND_UNAVAILABLE",
     # a full text that is not a page image at all: JATS XML or plain text.
@@ -161,6 +179,7 @@ REQUIRED_ACTIONS = (
     "CHECK_CAPTION_STYLE",        # read fine, proposed nothing
     "RENDER_AND_INVENTORY_BY_EYE",  # a real PDF with no text layer
     "INSTALL_A_PDF_BACKEND",      # nothing to read with
+    "RETRY_WITH_OTHER_BACKEND",   # this backend did not read the document
     "OBTAIN_PUBLISHER_FIGURE",    # the captions are here and the pictures are not
     "INVESTIGATE",                # it is not a document, or it broke
 )
@@ -176,6 +195,7 @@ REQUIRED_ACTIONS = (
 STATUS_ACTION = {
     "ZERO_CAPTION_CANDIDATES": ("CHECK_CAPTION_STYLE",),
     "NO_TEXT_LAYER": ("RENDER_AND_INVENTORY_BY_EYE",),
+    "TEXT_EXTRACTION_INCOMPLETE": ("RETRY_WITH_OTHER_BACKEND",),
     "BACKEND_UNAVAILABLE": ("INSTALL_A_PDF_BACKEND",),
     "NO_RASTER_SOURCE": ("OBTAIN_PUBLISHER_FIGURE",),
     "INTAKE_FAILED": ("INVESTIGATE",),
@@ -217,6 +237,52 @@ CAPTION_RE = re.compile(
     r"^\s*(?:Fig(?:ure)?\.?|FIG(?:URE)?\.?|图|圖)\s*"
     r"([0-9]{1,2}[A-Za-z]?)\b[\s.:–-]*(.*)",
     re.S)
+
+#: Characters XML 1.0 cannot carry. poppler copies a page's own control bytes
+#: straight into `-bbox-layout` output, and one of them makes ElementTree
+#: refuse the whole document - which took the poppler backend out on 27 of this
+#: corpus's 90 PDFs, silently, because the caller only saw "could not be read".
+#: Dropping them changes no caption: they are bytes no reader can render.
+XML_FORBIDDEN = re.compile(
+    "[^\x09\x0a\x0d\x20-퟿-�\U00010000-\U0010ffff]")
+
+#: A caption's own label carries no panel letter. "Fig. 3." is a caption;
+#: "Fig. 3C shows ..." is a sentence pointing INTO a figure, and the ten
+#: suffixed labels the first walk produced were all of the second kind - every
+#: one of them a body sentence, none a caption. Rejecting the suffix removed
+#: those ten across the corpus and cost no caption anywhere.
+PANEL_SUFFIX_RE = re.compile(r"^[0-9]{1,2}[A-Za-z]$")
+
+#: A figure the document itself files in a separate series. Nature's Extended
+#: Data figures are numbered from one alongside the main figures, so folding
+#: them into `FIG<n>` puts two different pictures on one identifier - which is
+#: exactly what happened to publication 13, where Extended Data Fig. 1 and
+#: Fig. 1 both became FIG1.
+EXTENDED_RE = re.compile(
+    r"^\s*(?:Extended\s+Data|Supplement(?:ary|al)?|Online\s+Resource)\s+"
+    r"(?:Fig(?:ure)?\.?|FIG(?:URE)?\.?)\s*([0-9]{1,2}[A-Za-z]?)\b"
+    r"[\s.:–-]*(.*)", re.S | re.I)
+
+#: How a figure identifier is spelled, per series. The prefix is the document's
+#: own word for the series, never this module's guess.
+FIGURE_SERIES = (("EXTFIG", EXTENDED_RE), ("FIG", CAPTION_RE))
+
+
+def figure_identifier(label):
+    """(identifier, number, series, body) for a label, or None if unreadable.
+
+    Returns None rather than a number when the label does not parse. There is
+    no fallback: an identifier this module invented is indistinguishable in the
+    file from one it read, and a wrong figure number is worse than a missing
+    one.
+    """
+    for prefix, pattern in FIGURE_SERIES:
+        match = pattern.match(label or "")
+        if match:
+            return ("%s%s" % (prefix, match.group(1).upper()),
+                    match.group(1), prefix,
+                    " ".join(match.group(2).split()))
+    return None
 
 #: Below this a row is still a draft, but the contact sheet should put it first.
 LOW_CONFIDENCE = 0.6
@@ -408,7 +474,7 @@ def _pdfminer_blocks(path):
 def _poppler_blocks(path):
     xml = subprocess.run(["pdftotext", "-bbox-layout", path, "-"],
                          capture_output=True, text=True, check=True).stdout
-    root = ET.fromstring(xml)
+    root = ET.fromstring(XML_FORBIDDEN.sub("", xml))
     ns = {"x": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
     out = []
     tag = (lambda name: "{%s}%s" % (ns["x"], name)) if ns else (lambda name: name)
@@ -428,22 +494,71 @@ def _poppler_blocks(path):
     return out
 
 
+#: Below this share of the text an independent reader finds, the backend has
+#: not read the document. Chosen from the corpus rather than from the failures:
+#: across the ninety PDFs the walk read, every document a backend handled
+#: properly landed between 0.92 and 1.07, and the three it did not landed at
+#: 0.027, 0.034 and 0.042. The floor sits in a gap spanning more than an order
+#: of magnitude, so no plausible value here changes which documents it catches.
+#:
+#: MEASURED IN CHARACTERS, never in captions. A check keyed on how many figures
+#: came out is a check that keeps lowering itself until the figures appear,
+#: which is the failure this module exists to refuse.
+TEXT_VOLUME_FLOOR = 0.5
+
+
+def independent_text_volume(path):
+    """Characters a second, simpler reader finds in the PDF - 0 if it cannot.
+
+    Deliberately not one of the two block backends: this needs no geometry, and
+    the bbox reader is the one whose output can be malformed. `pdftotext` with
+    no arguments is the least this machine can be asked to agree with.
+    """
+    try:
+        out = subprocess.run(["pdftotext", "-layout", path, "-"],
+                             capture_output=True, text=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return len(" ".join(out.split()))
+
+
 def caption_candidates(blocks):
-    """The blocks that open with a figure label, as (page, number, text, bbox).
+    """The lines that open with a figure label, as (page, number, text, bbox).
 
     One row per label. A caption printed twice on a page - a running header, a
-    cross-reference in the body that happens to start a block - produces two
+    cross-reference in the body that happens to start a line - produces two
     candidates, and `draft_rows` scores both down rather than picking.
+
+    A caption opens a LINE. It does not always open the BLOCK it lands in: a
+    two-column page hands pdfminer a block whose first line is the end of the
+    body text and whose fourth is "Fig. 3. Mean changes ...". Matching the
+    block's first line only lost five real captions across ninety papers, and
+    three publications came back as "no figures" for it.
+
+    Matching every line instead needs the panel-suffix rule beside it, or the
+    body's own cross-references walk in: line matching ALONE added twenty-two
+    labels of which seventeen were "Fig. 1A", "Fig. 2B" pointing into a figure
+    from a sentence. With both rules the corpus gains five captions and loses
+    the ten suffixed rows it should never have had.
     """
     out = []
     for page, x0, y0, x1, y1, text in blocks:
-        match = CAPTION_RE.match(text)
-        if not match:
-            continue
-        out.append(dict(page=page, number=match.group(1),
-                        text=" ".join(text.split()),
-                        bbox=(x0, y0, x1, y1),
-                        body=" ".join(match.group(2).split())))
+        lines = text.splitlines() or [text]
+        for offset, line in enumerate(lines):
+            match = CAPTION_RE.match(line)
+            if not match:
+                continue
+            if PANEL_SUFFIX_RE.match(match.group(1)):
+                continue
+            out.append(dict(page=page, number=match.group(1),
+                            text=" ".join(line.split()),
+                            bbox=(x0, y0, x1, y1),
+                            # The block this line sits in. Zero means the
+                            # caption opens the block and the bbox is its own;
+                            # anything else means the bbox is the enclosing
+                            # block and is wider than the caption.
+                            line_offset=offset,
+                            body=" ".join(match.group(2).split())))
     return out
 
 
@@ -566,6 +681,19 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             # the sheet shows them differently.
             "Crop_Quality_Status": "NO_CROP",
             "Figure_Number": "FIG%s" % candidate["number"],
+            # The words the page actually prints, kept beside the identifier
+            # this module derived from them, so a wrong derivation is visible
+            # without going back to the PDF.
+            "Figure_Label_Raw": candidate["text"][:60],
+            # A NUMBER THAT REPEATS IS NOT AN IDENTIFIER. An edited volume
+            # prints "Fig. 1" once per chapter - publication 437 does it 66
+            # times - and twenty-one documents in this corpus reuse at least
+            # one number. Counting distinct numbers silently merged 156 rows
+            # into their first occurrence; a consumer that reads this column
+            # cannot make that mistake without ignoring it.
+            "Label_Repeats_In_Document": (
+                "%d" % labels[candidate["number"]]
+                if labels[candidate["number"]] > 1 else ""),
             "Caption_Text": candidate["text"],
             "Caption_BBox": _bbox_text(candidate["bbox"]),
             "Figure_BBox": _bbox_text(figure_bbox(candidate, blocks)),
@@ -1023,9 +1151,25 @@ def _sourceless_rows(path, document_id, digest, figures):
     row says that in `Crop_Quality_Status`, where every other row says it too.
     """
     rows = []
-    for i, (label, caption) in enumerate(figures, start=1):
-        match = CAPTION_RE.match(label or caption or "")
-        number = match.group(1) if match else str(i)
+    seen = collections.Counter()
+    read = []
+    for label, caption in figures:
+        # The LABEL, and only the label. Falling through to the caption finds
+        # "Figure 2 shows ..." inside a caption's own prose and files the row
+        # under that number instead of its own.
+        got = figure_identifier(label)
+        read.append(got)
+        if got:
+            seen[got[0]] += 1
+    for i, ((label, caption), got) in enumerate(zip(figures, read), start=1):
+        # NO FALLBACK NUMBER. This used to be `str(i)` - the figure's position
+        # in the file - and publication 13 is what that costs: ten Extended
+        # Data figures whose labels the regex could not read were numbered by
+        # where they happened to sit, so Extended Data Fig. 3 became FIG5 and
+        # Extended Data Fig. 1 collided with Fig. 1. Both carried
+        # Confidence 1.00 and the reason "the document marks this up as a
+        # figure", which is precisely what had not happened.
+        identifier = got[0] if got else ""
         rows.append({
             "Draft_ID": "%s_D%03d" % (document_id, i),
             "Source_Document_ID": document_id,
@@ -1033,12 +1177,20 @@ def _sourceless_rows(path, document_id, digest, figures):
             "Source_File_SHA256": digest,
             "Page": "", "Page_Raster": "", "Page_Raster_SHA256": "",
             "Figure_Crop": "", "Crop_Quality_Status": "NO_CROP",
-            "Figure_Number": "FIG%s" % number,
+            "Figure_Number": identifier,
+            "Figure_Label_Raw": label or "",
+            "Label_Repeats_In_Document": ("%d" % seen[identifier]
+                                          if identifier and seen[identifier] > 1
+                                          else ""),
             "Caption_Text": caption,
             "Caption_BBox": "", "Figure_BBox": "",
             "Extraction_Method": "JATS_FIGURE_ELEMENTS",
-            "Confidence": "1.00",
-            "Confidence_Reason": "the document marks this up as a figure",
+            "Confidence": "1.00" if identifier else "0.00",
+            "Confidence_Reason": (
+                "the document marks this up as a figure" if identifier else
+                "the document marks this up as a figure but its label %r does "
+                "not parse as one; a person has to supply the number"
+                % (label or "")),
             "Human_Verification_Status": DRAFT_PENDING,
             "Verified_By": "", "Verified_At": "",
             "Observed_Panel_Count": "",
@@ -1138,6 +1290,20 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
                       failure or "%d page(s) and no text block on any of them"
                       % pages,
                       Text_Block_Count=0, Caption_Candidate_Count=0)
+    # A BACKEND THAT READ ALMOST NOTHING has not read the document, and until
+    # now nothing here noticed: three publications came back with 3% of their
+    # text and were filed ZERO_CAPTION_CANDIDATES, whose sentence is "read
+    # fine, proposed nothing". That sentence was false, and a person sorting on
+    # it went looking at caption styles for a document nobody had read.
+    got = sum(len(" ".join(b[5].split())) for b in blocks)
+    independent = independent_text_volume(path)
+    share = (got / independent) if independent else None
+    if share is not None and share < TEXT_VOLUME_FLOOR:
+        return refuse("TEXT_EXTRACTION_INCOMPLETE",
+                      "%s returned %d characters where an independent reader "
+                      "sees %d (%.0f%%); this document has not been read"
+                      % (method, got, independent, 100 * share),
+                      Text_Block_Count=len(blocks), Caption_Candidate_Count=0)
     rows = draft_rows(path, document_id, backend=method, page_rasters=rasters,
                       blocks=blocks)
     low = sum(1 for r in rows if float(r["Confidence"]) < LOW_CONFIDENCE)

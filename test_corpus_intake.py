@@ -1024,6 +1024,252 @@ check("a rejected candidate leaves no row and no complaint",
       not _rows_out and not _probs, "%s %s" % (_rows_out, _probs))
 
 print()
+print("v9.20 the label a document prints, and whether it was read at all")
+
+# ---------------------------------------------------------------- the label
+_ident = CI.figure_identifier
+check("a plain caption label reads as its own number",
+      _ident("Fig. 3. Mean changes") == ("FIG3", "3", "FIG", "Mean changes"),
+      "%s" % (_ident("Fig. 3. Mean changes"),))
+check("Extended Data is a series of its own, not a renumbering",
+      _ident("Extended Data Fig. 1")[0] == "EXTFIG1",
+      "%s" % (_ident("Extended Data Fig. 1"),))
+check("so Extended Data Fig. 1 and Fig. 1 do not collide",
+      _ident("Extended Data Fig. 1")[0] != _ident("Fig. 1")[0])
+check("a supplementary figure lands in the same separate series",
+      _ident("Supplementary Figure 2")[0] == "EXTFIG2")
+check("a label that does not parse yields nothing, not a guess",
+      _ident("Scheme A") is None and _ident("") is None)
+
+# ------------------------------------------- a caption opens a line, not a block
+_mid = [(4, 10.0, 10.0, 300.0, 200.0,
+         "before and after bed rest in nine subjects.\n"
+         "Fig. 3. Mean changes in plasma volume after two weeks.")]
+_hit = CI.caption_candidates(_mid)
+check("a caption is found when its block starts with something else",
+      [h["number"] for h in _hit] == ["3"], "%s" % ([h["number"] for h in _hit],))
+check("and the row records that the box is the block, not the caption",
+      _hit and _hit[0]["line_offset"] == 1, "%s" % (_hit,))
+_top = [(4, 10.0, 10.0, 300.0, 200.0, "Fig. 3. Mean changes in plasma volume.")]
+check("a caption that does open its block still reports offset zero",
+      CI.caption_candidates(_top)[0]["line_offset"] == 0)
+
+# --------------------------------------------------- a panel letter is not a caption
+_panel = [(4, 10.0, 10.0, 300.0, 90.0,
+           "Figure 4A depicts plasma norepinephrine levels before flight.")]
+check("a label with a panel letter is not taken as a caption",
+      CI.caption_candidates(_panel) == [], "%s" % CI.caption_candidates(_panel))
+_plain = [(4, 10.0, 10.0, 300.0, 90.0,
+           "Figure 4 depicts plasma norepinephrine levels before flight.")]
+check("and the same line without the letter still is - the rule is the "
+      "suffix, not the sentence",
+      [h["number"] for h in CI.caption_candidates(_plain)] == ["4"])
+check("a two-digit number is not mistaken for a panel letter",
+      [h["number"] for h in CI.caption_candidates(
+          [(1, 0.0, 0.0, 9.0, 9.0, "Figure 12. Something.")])] == ["12"])
+
+# A LETTER IS NOT A DIGIT, even when the page clearly meant one. Publication
+# 554 prints its first caption as "Fig.l." - a lower-case L where the 1 should
+# be - and both automatic readers agree on the letter, because that is what is
+# in the file. Reading it as a 1 would mean reading every "Fig. a", "Fig. l"
+# and "Fig. I" as a number too, and there is no way to be right about which.
+# The figure stays missing and a person supplies it.
+check("a label whose number is a letter is refused, not guessed",
+      CI.caption_candidates(
+          [(5, 0.0, 0.0, 9.0, 9.0, "Fig.l. Mean changes in time and frequency")])
+      == [])
+check("and the same caption with a real digit reads",
+      [h["number"] for h in CI.caption_candidates(
+          [(5, 0.0, 0.0, 9.0, 9.0, "Fig.1. Mean changes in time and frequency")])]
+      == ["1"])
+
+# ------------------------------------------------- XML the page broke, not poppler
+check("a control character the page carried does not take out the reader",
+      CI.XML_FORBIDDEN.sub("", "<a>x\x0cy</a>") == "<a>xy</a>",
+      "%r" % CI.XML_FORBIDDEN.sub("", "<a>x\x0cy</a>"))
+check("and ordinary text survives it untouched",
+      CI.XML_FORBIDDEN.sub("", "<a>Fig. 1\u00a0caption</a>")
+      == "<a>Fig. 1\u00a0caption</a>")
+
+
+class _PopplerSaying(object):
+    """poppler, handing back the bytes a real page carried.
+
+    Twenty-seven of this corpus's ninety PDFs make `pdftotext -bbox-layout`
+    emit a control character straight from the page into its XML. XML 1.0
+    cannot carry one, so ElementTree refused the whole document and the
+    backend came back "could not be read" - on a third of the corpus, with no
+    sign that the fault was in the transport rather than the paper.
+    """
+
+    def __init__(self, xml):
+        self.xml = xml
+
+    def __enter__(self):
+        self.real = CI.subprocess.run
+        outer = self
+
+        def fake(args, **kw):
+            class R(object):
+                stdout = outer.xml
+                returncode = 0
+            return R()
+        CI.subprocess.run = fake
+        return self
+
+    def __exit__(self, *exc):
+        CI.subprocess.run = self.real
+
+
+_XML = ("<doc><page width='600' height='800'><block>"
+        "<line><word xMin='10' yMin='20' xMax='60' yMax='30'>Fig.</word>"
+        "<word xMin='62' yMin='20' xMax='70' yMax='30'>1.\x0c</word>"
+        "<word xMin='72' yMin='20' xMax='140' yMax='30'>Caption</word>"
+        "</line></block></page></doc>")
+with _PopplerSaying(_XML):
+    try:
+        _pb = CI._poppler_blocks("/tmp/whatever.pdf")
+        _pb_err = ""
+    except Exception as _e:
+        _pb, _pb_err = None, "%s: %s" % (type(_e).__name__, _e)
+check("a page's own control character does not take the poppler reader out",
+      _pb is not None, _pb_err)
+check("and the caption on that page still reads",
+      _pb and CI.caption_candidates(_pb)
+      and CI.caption_candidates(_pb)[0]["number"] == "1", "%s" % (_pb,))
+
+with _PopplerSaying(_XML.replace("1.\x0c", "1.")):
+    _clean = CI._poppler_blocks("/tmp/whatever.pdf")
+check("the same page without the control character reads identically - the "
+      "strip removed a transport byte, not a word",
+      _clean and _pb and [b[5] for b in _clean] == [b[5] for b in _pb],
+      "%s vs %s" % (_clean, _pb))
+
+# ------------------------------------------ whether the backend read the document
+check("the floor is a share of the text, not a count of captions",
+      0.0 < CI.TEXT_VOLUME_FLOOR < 1.0, "%s" % CI.TEXT_VOLUME_FLOOR)
+check("a backend that read almost nothing has its own status",
+      "TEXT_EXTRACTION_INCOMPLETE" in CI.TEXT_BACKEND_STATUSES)
+check("and that status sends a person to the other backend, not to captions",
+      CI.STATUS_ACTION["TEXT_EXTRACTION_INCOMPLETE"]
+      == ("RETRY_WITH_OTHER_BACKEND",))
+check("every status still maps to an action in the vocabulary",
+      all(a in CI.REQUIRED_ACTIONS
+          for acts in CI.STATUS_ACTION.values() for a in acts))
+check("a missing reader reports no volume rather than raising",
+      CI.independent_text_volume(os.path.join(ROOT, "does_not_exist.pdf")) == 0)
+
+# ------------------------------------------------- a JATS label is never invented
+_ext = [("Extended Data Fig. 1", "The environment."),
+        ("Extended Data Fig. 2", "The biosamples."),
+        ("Fig. 1", "Multi-omic changes."),
+        ("Fig. 2", "Virome-wide antibody analysis."),
+        ("Extended Data Fig. 3", "Paper-based assay.")]
+_srows = CI._sourceless_rows("/tmp/x.xml", "SD9", "deadbeef", _ext)
+_nums = [r["Figure_Number"] for r in _srows]
+check("Extended Data figures keep their own numbers in their own series",
+      _nums == ["EXTFIG1", "EXTFIG2", "FIG1", "FIG2", "EXTFIG3"], "%s" % _nums)
+check("so the third Extended Data figure is not numbered by its position",
+      _srows[4]["Figure_Number"] != "FIG5")
+check("and no two figures in the document share an identifier",
+      len(set(_nums)) == len(_nums))
+_bad = CI._sourceless_rows("/tmp/x.xml", "SD9", "deadbeef",
+                           [("Scheme A", "Not a numbered figure.")])
+check("an unreadable label produces no number at all",
+      _bad[0]["Figure_Number"] == "", "%r" % _bad[0]["Figure_Number"])
+check("it is not numbered by where it sits in the file",
+      _bad[0]["Figure_Number"] not in ("FIG1", "1"))
+check("and it does not claim the document marked it up",
+      _bad[0]["Confidence"] == "0.00"
+      and "does not parse" in _bad[0]["Confidence_Reason"],
+      "%s %s" % (_bad[0]["Confidence"], _bad[0]["Confidence_Reason"]))
+check("the label the document printed is kept beside the number",
+      _bad[0]["Figure_Label_Raw"] == "Scheme A"
+      and _srows[0]["Figure_Label_Raw"] == "Extended Data Fig. 1")
+check("a caption's own prose cannot supply the number the label lacks",
+      CI._sourceless_rows("/tmp/x.xml", "SD9", "d",
+                          [("", "Figure 7 shows the relationship.")]
+                          )[0]["Figure_Number"] == "")
+
+# ------------------------------------------------ a number that repeats is marked
+_dup = CI._sourceless_rows("/tmp/x.xml", "SD9", "d",
+                           [("Fig. 1", "Chapter one."), ("Fig. 1", "Chapter two."),
+                            ("Fig. 2", "Only once.")])
+check("a figure number used twice in one document says so on both rows",
+      [r["Label_Repeats_In_Document"] for r in _dup] == ["2", "2", ""],
+      "%s" % [r["Label_Repeats_In_Document"] for r in _dup])
+check("the column is in the schema, so a reader cannot miss it",
+      "Label_Repeats_In_Document" in CI.DRAFT_COLUMNS
+      and "Figure_Label_Raw" in CI.DRAFT_COLUMNS)
+
+if not _BACKEND:
+    print("  SKIP the v9.20 document scenarios: %s" % _NO_BACKEND)
+else:
+    print()
+    print("v9.20 through the whole document path")
+    _lines = [[(72, 700, "Body text about the study design and its subjects."),
+               (72, 300, "Figure 1 Mean arterial pressure before spaceflight.")],
+              [(72, 600, "Figure 2A shows the left panel of the second figure."),
+               (72, 400, "Figure 3 Heart rate response to standing upright.")]]
+    _p2 = minimal_pdf(os.path.join(ROOT, "v920.pdf"), _lines)
+    _r2 = CI.draft_rows(_p2, "SD920")
+    _n2 = sorted(r["Figure_Number"] for r in _r2)
+    check("the panel reference does not become a figure row",
+          _n2 == ["FIG1", "FIG3"], "%s" % _n2)
+    check("every drafted row carries the words the page printed",
+          all(r["Figure_Label_Raw"] for r in _r2))
+    check("a document whose numbers are all distinct marks no repeat",
+          all(r["Label_Repeats_In_Document"] == "" for r in _r2))
+
+    _dupdoc = minimal_pdf(os.path.join(ROOT, "v920dup.pdf"),
+                          [[(72, 600, "Figure 1 First chapter opening figure.")],
+                           [(72, 600, "Figure 1 Second chapter opening figure.")]])
+    _rd = CI.draft_rows(_dupdoc, "SD921")
+    check("a number printed once per chapter is marked on every row it names",
+          [r["Label_Repeats_In_Document"] for r in _rd] == ["2", "2"],
+          "%s" % [r["Label_Repeats_In_Document"] for r in _rd])
+    check("and the rows stay separate rather than collapsing to one",
+          len(_rd) == 2 and len({r["Draft_ID"] for r in _rd}) == 2)
+
+    _out920 = tempfile.mkdtemp(prefix="fdt_v920_", dir=ROOT)
+    _rows920, _led920 = CI.intake_document(_p2, "SD922", _out920)
+    check("a document the backend read properly is not called incomplete",
+          _led920["Text_Backend_Status"] == "TEXT_LAYER_OK",
+          "%s %s" % (_led920["Text_Backend_Status"], _led920["Detail"]))
+
+    class _Blind(object):
+        """A backend that returns a little text where there is a lot."""
+        def __enter__(self):
+            self.real = CI.text_blocks
+            CI.text_blocks = lambda path, backend=None: [
+                (1, 0.0, 0.0, 9.0, 9.0, "a b")]
+            return self
+        def __exit__(self, *exc):
+            CI.text_blocks = self.real
+
+    with _Blind():
+        _out_b = tempfile.mkdtemp(prefix="fdt_v920b_", dir=ROOT)
+        _rb, _lb = CI.intake_document(_p2, "SD923", _out_b)
+    check("a backend that returned 3% of the text is not filed as read",
+          _lb["Text_Backend_Status"] == "TEXT_EXTRACTION_INCOMPLETE",
+          "%s" % _lb["Text_Backend_Status"])
+    check("it is not filed as a document with no captions",
+          _lb["Text_Backend_Status"] != "ZERO_CAPTION_CANDIDATES")
+    check("and it sends a person to the other backend",
+          _lb["Required_Action"] == "RETRY_WITH_OTHER_BACKEND",
+          "%s" % _lb["Required_Action"])
+    check("the ledger says how little came out",
+          "characters" in _lb["Detail"], "%s" % _lb["Detail"])
+
+    _empty = minimal_pdf(os.path.join(ROOT, "v920none.pdf"),
+                         [[(72, 600, "Body text with no figure label at all.")]])
+    _out_z = tempfile.mkdtemp(prefix="fdt_v920z_", dir=ROOT)
+    _rz, _lz = CI.intake_document(_empty, "SD924", _out_z)
+    check("a document that really was read and has no captions still says so",
+          _lz["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
+          "%s %s" % (_lz["Text_Backend_Status"], _lz["Detail"]))
+
+print()
 print("the schema the rest of the package will read")
 import batch_manifests as BM                                    # noqa: E402
 _emitted = CI.inventory_rows(_confirmed, reviewer_ids={"RV_1"},

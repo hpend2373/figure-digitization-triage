@@ -21,7 +21,7 @@ present and hashes differently is REFUSED rather than measured, because
 coordinates taken on one render return a plausible number on another.
 
 The scenario counts below are what a **clone of this repository** runs, and a
-further 279 need the figures. CI fetches them from a private source when
+further 286 need the figures. CI fetches them from a private source when
 `FDT_RASTER_SOURCE` and `FDT_RASTER_TOKEN` are set on the repository, and passes
 `--rasters present` to the documentation guard only in a job that actually
 fetched them — so a fork with no secret is green at its own total rather than

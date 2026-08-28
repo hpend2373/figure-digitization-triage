@@ -102,7 +102,7 @@ import mono_bar_geometry as MONO_GEOMETRY                          # noqa: E402
 import provenance as PROV                                          # noqa: E402
 import review_overlay as OVERLAY                                   # noqa: E402
 
-PIPELINE_VERSION = "9.18"
+PIPELINE_VERSION = "9.19"
 #: Every file whose contents can change a number this pipeline writes down.
 #: Hashed together into `Pipeline_Code_SHA256` and stamped on the run, so a
 #: value that moved between two batches can be attributed to the code that
@@ -737,9 +737,15 @@ class PanelOutcome(object):
 #: the finalizer can find it the way it finds the geometry file - by type,
 #: never by a path computed now.
 SP_ARTIFACT_TYPE = "SCATTER_POINTS"
+#: THE TWO GRAINS UNDER THE POINT FILE. A point file holds only ROUTED points,
+#: so the marks a fill split REFUSED - the ones that made the group what it is -
+#: are exactly the ones it cannot carry, and a group's N and distribution could
+#: never be rebuilt from it. These two can be, and a point cites both by hash.
+SP_CANDIDATE_TYPE = "SCATTER_MARKER_CANDIDATES"
+SP_GROUP_TYPE = "SCATTER_FILL_GROUPS"
 
 PANEL_ARTIFACT_TYPES = ("OVERLAY", "WPD_PROJECT", "RAW_MARKS", "POINT_DATA",
-                        SP_ARTIFACT_TYPE)
+                        SP_ARTIFACT_TYPE, SP_CANDIDATE_TYPE, SP_GROUP_TYPE)
 #: `Artifact_Reference` names the row an artifact belongs to when one artifact
 #: is not enough on its own. It exists for `IDENTITY_EVIDENCE`: the finalizer has
 #: to re-derive "every file-backed resolution has its evidence here", and the
@@ -2957,8 +2963,43 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
     # which is the evidence the finalizer holds a routed value's identity route
     # against.
     point_artifact = None
+    candidate_artifact = group_artifact = None
     if routed and output_dir:
         import scatter_points as SP
+        # THE TWO GRAINS FIRST, because the point file cites them. Each is
+        # appended to across a run's panels exactly as the point file is, and
+        # each is read back and verified before this panel is allowed to pass.
+        for name, columns, made in (
+                ("scatter_marker_candidates.csv", SP.CANDIDATE_COLUMNS,
+                 routed["meta"].get("candidate_rows") or []),
+                ("scatter_fill_groups.csv", SP.GROUP_COLUMNS,
+                 routed["meta"].get("group_rows") or [])):
+            path = os.path.join(output_dir, name)
+            prior = []
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    prior = list(csv.DictReader(fh))
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(columns))
+                w.writeheader()
+                w.writerows(prior + [{k: ("" if r.get(k) is None else r[k])
+                                      for k in columns} for r in made])
+            if name.startswith("scatter_marker"):
+                candidate_artifact = path
+            else:
+                group_artifact = path
+        with open(candidate_artifact, encoding="utf-8") as fh:
+            cands_back = [r for r in csv.DictReader(fh)
+                          if _s(r.get("Panel_ID")) == pid]
+        with open(group_artifact, encoding="utf-8") as fh:
+            groups_back = [r for r in csv.DictReader(fh)
+                           if _s(r.get("Panel_ID")) == pid]
+        bad = (SP.verify_candidates(cands_back)
+               + SP.verify_groups(groups_back, cands_back))
+        if bad:
+            raise InternalReaderError(
+                "the routed scatter's candidate and group files do not verify "
+                "for panel %s: %s" % (pid, "; ".join(bad[:3])))
         point_artifact = os.path.join(output_dir, "scatter_points.csv")
         rows_out = SP.artifact_rows(
             [p for _s_, _f_, _l_, mine, _sum_ in planned for p in mine])
@@ -2974,7 +3015,9 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
         with open(point_artifact, encoding="utf-8") as fh:
             back = [r for r in csv.DictReader(fh)
                     if _s(r.get("Panel_ID")) == pid]
-        bad = SP.verify_artifact(back, routed["series"], routed["axes"], pid, sha)
+        bad = (SP.verify_artifact(back, routed["series"], routed["axes"], pid,
+                                  sha)
+               + SP.verify_citations(back, cands_back, groups_back))
         if bad:
             raise InternalReaderError(
                 "scatter_points.csv does not verify for panel %s: %s"
@@ -3013,6 +3056,9 @@ def _scatter_outcome(points, panel, series_level, series_factor, unit, statistic
                         artifacts=_panel_artifacts(point_data=raw_files,
                                                    project=project,
                                                    overlay=overlay)
+                        + ([(SP_CANDIDATE_TYPE, candidate_artifact),
+                            (SP_GROUP_TYPE, group_artifact)]
+                           if candidate_artifact else [])
                         + ([(SP_ARTIFACT_TYPE, point_artifact)]
                            if point_artifact else []),
                         with_dispersion=len(records))
@@ -3046,6 +3092,8 @@ CANONICAL_OUTPUTS = (
     # THE ROUTED SCATTER'S POINT FILE. Same reason as the geometry file above: a
     # stale one beside fresh values passes every existence check there is.
     "scatter_points.csv",
+    # And the two grains beneath it, for the same reason.
+    "scatter_marker_candidates.csv", "scatter_fill_groups.csv",
     "source_panel_coverage.csv",
 )
 CANONICAL_DIRS = ("raw", "projects", "review", "geometry-review",

@@ -508,6 +508,11 @@ def point_record_sha256(point, axis_id, y_calibration, x_calibration, panel_id,
          "Image_SHA256": _s(image_sha256),
          "Axis_Record_SHA256": _s(axis_record),
          "X_Axis_Record_SHA256": _s(x_axis_record),
+         # THE TWO GRAINS UNDER THIS POINT. Inside the hash, or a producer could
+         # re-point a row at another candidate or another group and leave every
+         # other digest standing.
+         "Candidate_Record_SHA256": _s(point.get("Candidate_Record_SHA256")),
+         "Fill_Group_Record_SHA256": _s(point.get("Fill_Group_Record_SHA256")),
          "Routing_Evidence_SHA256": _s(routing_evidence_hash),
          "X_Calibration": _calibration_record(x_calibration),
          "Y_Calibration": _calibration_record(y_calibration)},

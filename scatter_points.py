@@ -59,8 +59,46 @@ POINT_ARTIFACT_COLUMNS = (
     "Identity_Method", "Value_Method",
 ) + AG.ROUTING_EVIDENCE + (
     "Image_SHA256", "Axis_Record_SHA256", "X_Axis_Record_SHA256",
+    # THE TWO GRAINS UNDER THIS ONE, cited by hash. A point file holds only
+    # ROUTED points, so a fill group's N and distribution can never be rebuilt
+    # from it: the marks that were refused AT the fill boundary - the ones that
+    # made the group what it is - are exactly the ones it does not carry. Until
+    # v9.19 the only thing that could re-derive a group was re-opening the
+    # raster, and a finalizer handed an artifact bundle and no figure had to
+    # take the group's own word for it.
+    "Candidate_Record_SHA256", "Fill_Group_Record_SHA256",
     "Routing_Evidence_SHA256", "Point_Record_SHA256",
 )
+
+#: WHAT A CANDIDATE MARK MEASURED ABOUT ITSELF - the routing evidence minus the
+#: group's numbers and minus the panel-wide diagnostics. The group is taken OVER
+#: these marks, so a candidate hash that covered the group's answer would make
+#: the two grains cite each other in a circle.
+CANDIDATE_EVIDENCE = tuple(c for c in AG.ROUTING_EVIDENCE
+                           if c not in MRT.GROUP_EVIDENCE
+                           and c not in ("Fill_Split", "Fill_Margin"))
+
+#: One row per CANDIDATE mark, routed or refused. `NOT_A_MARKER` records are
+#: furniture and are not candidates - the same population `route` counts as
+#: `Candidate_Mark_Record_Count`.
+CANDIDATE_COLUMNS = (
+    ("Panel_ID", "Candidate_Index", "point_px_x", "point_px_y", "Refusal")
+    + CANDIDATE_EVIDENCE + ("Image_SHA256", "Candidate_Record_SHA256"))
+
+#: One row per SHAPE GROUP the fill question was asked of, citing every
+#: candidate it was taken over. This is what makes the split re-derivable from
+#: the files alone: the cited candidates carry their own interior ink, so the
+#: threshold, the spread and the verdict can be recomputed and compared.
+GROUP_COLUMNS = (
+    "Panel_ID", "Fill_Conditioning_Shape", "Declared_Fills", "Fill_Group_N",
+    "Fill_Group_Low_N", "Fill_Group_High_N", "Fill_Group_Threshold",
+    "Fill_Group_Between", "Fill_Group_Within", "Fill_Group_Separation_Index",
+    "Fill_Group_Minimum_Allowed", "Fill_Group_Separates",
+    "Candidate_Record_SHA256_List", "Image_SHA256", "Fill_Group_Record_SHA256")
+
+#: The two artifact types the grains are registered under.
+CANDIDATE_ARTIFACT_TYPE = "SCATTER_MARKER_CANDIDATES"
+GROUP_ARTIFACT_TYPE = "SCATTER_FILL_GROUPS"
 
 #: The artifact type this file is registered under in a run's ledger.
 ARTIFACT_TYPE = "SCATTER_POINTS"
@@ -90,6 +128,12 @@ MARK_MISSING = "ROUTED_MARK_MISSING_FROM_ARTIFACT"
 #: Two rows are the same point. A file holding a mark twice is a cloud with a
 #: member the figure drew once, and an association over it is not the figure's.
 DUPLICATE_POINT = "DUPLICATE_POINT_RECORD"
+#: A group's numbers do not follow from the candidates it says it was taken over.
+GROUP_NOT_DERIVED = "FILL_GROUP_DOES_NOT_FOLLOW_FROM_ITS_CANDIDATES"
+#: A point cites a group or a candidate that is not in the bundle, or one whose
+#: numbers are not the ones on the point.
+GROUP_NOT_CITED = "POINT_CITES_A_GROUP_THIS_RUN_DID_NOT_WRITE"
+CANDIDATE_NOT_CITED = "POINT_CITES_A_CANDIDATE_THIS_RUN_DID_NOT_WRITE"
 
 #: WHAT THE EVIDENCE CONCLUDES, as opposed to what it measures. Neither is in
 #: `ROUTING_EVIDENCE` - they are the answer, not the working - so the column loop
@@ -146,6 +190,22 @@ def read_routed_scatter_panel(image, panel_box, series, axes, panel_id,
                     exclude_boxes=exclude_boxes,
                     expected_points=expected_points)
     routed = [r for r in out["records"] if r.get("Series_ID")]
+    # EACH POINT CITES THE CANDIDATE IT CAME FROM AND THE GROUP THAT NAMED IT,
+    # by hash and before the stamp, so both are inside `Point_Record_SHA256`.
+    cands = candidate_rows(out["records"], panel_id, image_sha256)
+    groups = group_rows(out, cands, panel_id, image_sha256)
+    by_pixel = {(round(float(c["point_px_x"]), 4),
+                 round(float(c["point_px_y"]), 4)): c for c in cands}
+    by_shape = {_s(g["Fill_Conditioning_Shape"]): g for g in groups}
+    for r in routed:
+        cand = by_pixel.get((round(float(r["point_px_x"]), 4),
+                             round(float(r["point_px_y"]), 4)))
+        r["Candidate_Record_SHA256"] = (_s(cand["Candidate_Record_SHA256"])
+                                        if cand else "")
+        shape = _s(r.get("Fill_Conditioning_Shape"))
+        group = by_shape.get(shape) if shape else None
+        r["Fill_Group_Record_SHA256"] = (_s(group["Fill_Group_Record_SHA256"])
+                                         if group else "")
     stamped = AG.stamp_points(routed, series, axes, x_axis_id, panel_id,
                               image_sha256)
     # WHICH PANEL AND WHICH IMAGE, ON THE ROW. Both are inside
@@ -160,6 +220,8 @@ def read_routed_scatter_panel(image, panel_box, series, axes, panel_id,
     meta["Refusals"] = sorted({r["refusal"] for r in out["records"]
                                if r["refusal"]})
     meta["records"] = out["records"]
+    meta["candidate_rows"] = cands
+    meta["group_rows"] = groups
     return stamped, meta
 
 
@@ -292,6 +354,248 @@ def _number(value):
         return float(text) if ("." in text or "e" in text.lower()) else int(text)
     except ValueError:
         return text
+
+
+def candidate_evidence(record):
+    """The mark's own measurements, under the names the FILE spells them."""
+    ev = AG.routing_evidence(record)
+    return {c: ev.get(c) for c in CANDIDATE_EVIDENCE}
+
+
+def candidate_record_sha256(record, panel_id, image_sha256):
+    """Over one mark's pixel, its refusal and what it measured about itself."""
+    ev = candidate_evidence(record)
+    return hashlib.sha256(json.dumps(
+        {"Panel_ID": _s(panel_id), "Image_SHA256": _s(image_sha256),
+         "point_px_x": round(float(record["point_px_x"]), 4),
+         "point_px_y": round(float(record["point_px_y"]), 4),
+         "Refusal": _s(record.get("refusal")),
+         "evidence": {k: (None if ev[k] is None else
+                          (float(ev[k]) if isinstance(ev[k], (int, float))
+                           and not isinstance(ev[k], bool) else _s(ev[k])))
+                      for k in sorted(ev)}},
+        sort_keys=True, default=float).encode("utf-8")).hexdigest()
+
+
+def candidate_rows(records, panel_id, image_sha256):
+    """One row per candidate mark, routed or refused, in the order routed found them."""
+    out = []
+    for i, r in enumerate(x for x in records
+                          if _s(x.get("refusal")) != "NOT_A_MARKER"):
+        ev = candidate_evidence(r)
+        row = dict(Panel_ID=panel_id, Candidate_Index=i,
+                   point_px_x=round(float(r["point_px_x"]), 4),
+                   point_px_y=round(float(r["point_px_y"]), 4),
+                   Refusal=_s(r.get("refusal")), Image_SHA256=image_sha256,
+                   Candidate_Record_SHA256=candidate_record_sha256(
+                       r, panel_id, image_sha256))
+        for column in CANDIDATE_EVIDENCE:
+            row[column] = "" if ev.get(column) is None else ev[column]
+        out.append(row)
+    return out
+
+
+def group_members(candidates, shape):
+    """The candidate rows a shape's fill question was asked over.
+
+    RE-DERIVED FROM THE FILE, not remembered. `route` takes the group over the
+    marks that were ONE MARKER and whose shape came out as this one - a mark
+    whose shape is unresolved carries no shape and is in no group - and both of
+    those are columns on the candidate row.
+    """
+    return [c for c in candidates
+            if _s(c.get("Marker_Validity_Status")) == AG.SINGLE_MARKER
+            and _s(c.get("Marker_Shape")) == _s(shape)]
+
+
+def fill_group_record_sha256(row):
+    """Over the group's numbers AND the candidates it was taken over."""
+    return hashlib.sha256(json.dumps(
+        {k: _s(row.get(k)) for k in GROUP_COLUMNS
+         if k != "Fill_Group_Record_SHA256"},
+        sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def group_rows(meta, candidates, panel_id, image_sha256):
+    """One row per shape group, citing the candidate hashes it rests on."""
+    out = []
+    for shape, g in sorted((meta.get("fill_groups") or {}).items()):
+        members = group_members(candidates, shape)
+        row = dict(
+            Panel_ID=panel_id, Fill_Conditioning_Shape=shape,
+            Declared_Fills="/".join(g.get("declared_fills") or ()),
+            Fill_Group_N=int(g["n"]), Fill_Group_Low_N=int(g["low_n"]),
+            Fill_Group_High_N=int(g["high_n"]),
+            Fill_Group_Threshold=("" if g["split"]["threshold"] is None
+                                  else g["split"]["threshold"]),
+            Fill_Group_Between=float(g["split"]["between"]),
+            Fill_Group_Within=float(g["split"]["within"]),
+            Fill_Group_Separation_Index=g["index"],
+            Fill_Group_Minimum_Allowed=int(g["minimum"]),
+            Fill_Group_Separates=("TRUE" if g["split"]["separates"] else "FALSE"),
+            Candidate_Record_SHA256_List=";".join(
+                sorted(_s(c["Candidate_Record_SHA256"]) for c in members)),
+            Image_SHA256=image_sha256)
+        row["Fill_Group_Record_SHA256"] = fill_group_record_sha256(row)
+        out.append(row)
+    return out
+
+
+def verify_candidates(rows):
+    """What is wrong with the candidate file, read back as strings."""
+    problems = []
+    seen = {}
+    for i, row in enumerate(rows):
+        rec = evidence_record(dict(row))
+        rec["point_px_x"] = _number(row.get("point_px_x"))
+        rec["point_px_y"] = _number(row.get("point_px_y"))
+        rec["refusal"] = _s(row.get("Refusal"))
+        if rec["point_px_x"] is None or rec["point_px_y"] is None:
+            problems.append("candidate %d: no pixel" % i)
+            continue
+        want = candidate_record_sha256(rec, _s(row.get("Panel_ID")),
+                                       _s(row.get("Image_SHA256")))
+        if want != _s(row.get("Candidate_Record_SHA256")):
+            problems.append("candidate %d: hash does not cover this mark" % i)
+            continue
+        key = _s(row.get("Candidate_Record_SHA256"))
+        if key in seen:
+            problems.append("candidate %d: %s - this mark is candidate %d again"
+                            % (i, DUPLICATE_POINT, seen[key]))
+        else:
+            seen[key] = i
+    return problems
+
+
+def verify_groups(groups, candidates):
+    """Every group's numbers, RE-DERIVED from the candidates it cites.
+
+    THIS IS WHAT THE POINT FILE COULD NOT DO. A fill group is a statistic over
+    the marks of one shape, INCLUDING the ones the split then refused, and a file
+    of routed points does not carry those. Handed both grains, a finalizer with
+    no figure can recompute the threshold, the spread and the verdict and say
+    whether the group it is being asked to trust is the one those marks make.
+    """
+    problems = []
+    by_hash = {_s(c.get("Candidate_Record_SHA256")): c for c in candidates}
+    for i, row in enumerate(groups):
+        cited = [h for h in _s(row.get("Candidate_Record_SHA256_List")).split(";")
+                 if h]
+        missing = [h for h in cited if h not in by_hash]
+        if missing:
+            problems.append("group %d: %s - it cites %d candidate(s) this file "
+                            "does not carry" % (i, GROUP_NOT_DERIVED,
+                                                len(missing)))
+            continue
+        shape = _s(row.get("Fill_Conditioning_Shape"))
+        members = group_members(list(by_hash.values()), shape)
+        if sorted(cited) != sorted(_s(c["Candidate_Record_SHA256"])
+                                   for c in members):
+            problems.append(
+                "group %d: %s - the %s marks in the candidate file are %d and "
+                "this group cites %d"
+                % (i, GROUP_NOT_DERIVED, shape or "(no shape)", len(members),
+                   len(cited)))
+            continue
+        values = [_number(by_hash[h].get("Interior_Ink")) for h in cited]
+        if any(v is None for v in values):
+            problems.append("group %d: %s - a cited candidate carries no "
+                            "interior ink" % (i, GROUP_NOT_DERIVED))
+            continue
+        got = MRT.fill_group(values)
+        if len(_s(row.get("Declared_Fills")).split("/")) < 2 \
+                and _s(row.get("Declared_Fills")):
+            got["split"] = MRT.Split(None, 0.0, 0.0, False)
+            got["low_n"] = got["high_n"] = 0
+            got["index"] = 0.0
+        want = dict(
+            Fill_Group_N=int(got["n"]), Fill_Group_Low_N=int(got["low_n"]),
+            Fill_Group_High_N=int(got["high_n"]),
+            Fill_Group_Threshold=("" if got["split"].threshold is None
+                                  else got["split"].threshold),
+            Fill_Group_Between=float(got["split"].between),
+            Fill_Group_Within=float(got["split"].within),
+            Fill_Group_Separation_Index=got["index"],
+            Fill_Group_Minimum_Allowed=int(got["minimum"]),
+            Fill_Group_Separates=("TRUE" if got["split"].separates else "FALSE"))
+        for key, value in sorted(want.items()):
+            said, mine = _number(row.get(key)), value
+            if isinstance(said, (int, float)) and isinstance(mine, (int, float)):
+                if abs(float(said) - float(mine)) > 1e-4:
+                    problems.append("group %d: %s - %s says %s and these %d "
+                                    "marks give %s"
+                                    % (i, GROUP_NOT_DERIVED, key, said,
+                                       len(values), mine))
+            elif _s(said) != _s(mine):
+                problems.append("group %d: %s - %s says %r and these %d marks "
+                                "give %r" % (i, GROUP_NOT_DERIVED, key,
+                                             _s(said), len(values), _s(mine)))
+        if fill_group_record_sha256(row) != _s(row.get("Fill_Group_Record_SHA256")):
+            problems.append("group %d: hash does not cover this group" % i)
+    return problems
+
+
+def verify_citations(rows, candidates, groups):
+    """Every point's two citations: the candidate it came from, the group that named it."""
+    problems = []
+    by_c = {_s(c.get("Candidate_Record_SHA256")): c for c in candidates}
+    by_g = {_s(g.get("Fill_Group_Record_SHA256")): g for g in groups}
+    for i, row in enumerate(rows):
+        chash = _s(row.get("Candidate_Record_SHA256"))
+        cand = by_c.get(chash)
+        if cand is None:
+            problems.append("row %d: %s (%s)" % (i, CANDIDATE_NOT_CITED,
+                                                 chash[:12] or "nothing"))
+        else:
+            for column in CANDIDATE_EVIDENCE + ("point_px_x", "point_px_y"):
+                said, mine = _number(row.get(column)), _number(cand.get(column))
+                if isinstance(said, (int, float)) and isinstance(mine, (int, float)):
+                    if abs(float(said) - float(mine)) > 1e-4:
+                        problems.append("row %d: %s - %s is %s on the point and "
+                                        "%s on the candidate it cites"
+                                        % (i, CANDIDATE_NOT_CITED, column,
+                                           said, mine))
+                elif _s(said) != _s(mine):
+                    problems.append("row %d: %s - %s is %r on the point and %r "
+                                    "on the candidate it cites"
+                                    % (i, CANDIDATE_NOT_CITED, column,
+                                       _s(said), _s(mine)))
+        ghash = _s(row.get("Fill_Group_Record_SHA256"))
+        if not ghash:
+            # A MARK NAMED BY ITS SHAPE ALONE CITES NO GROUP, because none was
+            # asked. Its `Fill_Conditioning_Shape` is blank for the same reason.
+            if _s(row.get("Fill_Conditioning_Shape")):
+                problems.append("row %d: %s - it names a conditioning shape and "
+                                "cites no group" % (i, GROUP_NOT_CITED))
+            continue
+        group = by_g.get(ghash)
+        if group is None:
+            problems.append("row %d: %s (%s)" % (i, GROUP_NOT_CITED,
+                                                 ghash[:12]))
+            continue
+        if _s(group.get("Fill_Conditioning_Shape")) \
+                != _s(row.get("Fill_Conditioning_Shape")):
+            problems.append("row %d: %s - the group it cites is the %s group and "
+                            "this mark is a %s"
+                            % (i, GROUP_NOT_CITED,
+                               _s(group.get("Fill_Conditioning_Shape")),
+                               _s(row.get("Fill_Conditioning_Shape"))))
+            continue
+        for column in MRT.GROUP_EVIDENCE:
+            if column in ("Fill_Conditioning_Shape", "Fill_Group_Margin"):
+                continue
+            said, mine = _number(row.get(column)), _number(group.get(column))
+            if isinstance(said, (int, float)) and isinstance(mine, (int, float)):
+                if abs(float(said) - float(mine)) > 1e-4:
+                    problems.append("row %d: %s - %s is %s on the point and %s "
+                                    "in the group it cites"
+                                    % (i, GROUP_NOT_CITED, column, said, mine))
+            elif _s(said) != _s(mine):
+                problems.append("row %d: %s - %s is %r on the point and %r in "
+                                "the group it cites"
+                                % (i, GROUP_NOT_CITED, column, _s(said),
+                                   _s(mine)))
+    return problems
 
 
 def point_file_sha256(rows):

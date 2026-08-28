@@ -489,3 +489,68 @@ or refused, and `scatter_fill_groups.csv`, one row per shape group citing the
 candidates it was taken over — with each point citing a
 `Candidate_Record_SHA256` and a `Fill_Group_Record_SHA256`. That is a schema
 round of its own and it is written down rather than half-built.
+
+
+# v9.19: the group is re-derivable from the marks it was taken over
+
+## Why
+
+A fill group is a statistic over the marks of ONE SHAPE — including the ones the
+split then refused. `scatter_points.csv` holds only ROUTED points, so the marks
+that made the group what it is are exactly the ones it cannot carry, and seven
+columns on every point could not be recomputed from the bundle:
+
+    Fill_Group_N          Fill_Group_Between        Fill_Group_Minimum_Allowed
+    Fill_Group_Low_N      Fill_Group_Within
+    Fill_Group_High_N     Fill_Group_Separation_Index
+
+Re-opening the raster closed that, and a finalizer handed an artifact set and no
+figure had to take the group's own word for its threshold. `split_grain_outlier`
+is the measurement: its fill split is taken over THIRTEEN marks and refuses every
+one of them, so that panel's point file is EMPTY.
+
+## What changed
+
+Two grains under the point file, and a point cites both by hash.
+
+| file | one row per | what it carries |
+|---|---|---|
+| `scatter_marker_candidates.csv` | candidate mark, routed or refused | its pixel, its refusal, and the sixteen measurements it made about itself, under `Candidate_Record_SHA256` |
+| `scatter_fill_groups.csv` | shape group | N, low/high, threshold, between, within, index, floor, verdict, and the sorted `Candidate_Record_SHA256` list it was taken over, under `Fill_Group_Record_SHA256` |
+
+`scatter_points.csv` gains `Candidate_Record_SHA256` and
+`Fill_Group_Record_SHA256`, both inside `Point_Record_SHA256`.
+
+The chain is then
+
+    raster -> candidate marks -> the shape's fill group -> routed point -> value
+
+and three new checks walk it: `verify_candidates` (each mark's own hash),
+`verify_groups` (the group's numbers RE-DERIVED from the candidates it cites, and
+the membership re-derived from their own columns rather than read off the
+group's list) and `verify_citations` (each point's two citations, and that the
+group it cites is the one whose numbers it carries). The runner runs all three
+before a panel passes; the finalizer's scatter gate runs them on the ledger's
+artifacts. Re-opening the raster stays the strongest check and is no longer the
+only one.
+
+## What changed for a run you already have
+
+**Every `scatter_points.csv` written before v9.19 is refused.** Two columns are
+new and both are inside `Point_Record_SHA256`, so every point hash differs. There
+is no back-fill: the candidate rows a group was taken over were never written
+down, and inventing them is precisely what the grain exists to prevent. Re-run
+the panel.
+
+**A run whose ledger has a point file and no grains is withheld** where its
+points cite a group. That is the state every pre-v9.19 run is in.
+
+## And the pilot that could not compile
+
+`pilot_beckers.py` had not followed the plan schema since v9.1 and v9.2. It runs
+only when the publisher PDF is on disk, so CI — which has never had it — never
+compiled its plan, and the drift was invisible for seventeen releases. The plan
+is now a module of its own, `plan_beckers.py`, and `test_compile_plan.py`
+compiles it over a placeholder raster ABOVE that suite's own raster gate. A plan
+is a declaration; its shape can be checked without the figure it is a plan about,
+and now it is, in every job.

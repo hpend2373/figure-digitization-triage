@@ -8261,6 +8261,81 @@ per shape group citing the candidates it was taken over, with each point citing 
 `Candidate_Record_SHA256` and a `Fill_Group_Record_SHA256`. That is a schema
 round of its own.
 
+## v9.19 — the group is re-derivable from the marks it was taken over
+
+Three rounds of review closed the routing questions. This one closes the last
+thing the durable evidence could not do on its own.
+
+A fill group is a statistic over the marks of ONE SHAPE, and that includes the
+ones the split then REFUSED. `scatter_points.csv` holds only routed points, so
+the marks that made the group what it is are exactly the ones it cannot carry:
+`Fill_Group_N`, the two side counts, `Between`, `Within`, the index and the floor
+were on every point and recomputable from none of them. Re-opening the raster
+closed that, and a finalizer handed an artifact set and no figure had to take the
+group's own word for its threshold.
+
+`split_grain_outlier.jpeg` is the measurement rather than the argument: its fill
+split is taken over THIRTEEN marks and refuses every one of them, so that panel's
+point file is EMPTY. No file of routed points could ever hold the population that
+group was computed from.
+
+**Two grains under the point file.** `scatter_marker_candidates.csv` carries one
+row per candidate mark, routed or refused, with its pixel, its refusal and the
+sixteen measurements it made about itself, under `Candidate_Record_SHA256`.
+`scatter_fill_groups.csv` carries one row per shape group with its numbers and
+the sorted list of candidate hashes it was taken over, under
+`Fill_Group_Record_SHA256`. A point cites both, inside its own hash. The chain is
+
+    raster -> candidate marks -> the shape's fill group -> routed point -> value
+
+and each arrow has a check. `verify_groups` RE-DERIVES the split from the cited
+candidates' interior ink, and re-derives the MEMBERSHIP from those candidates'
+own columns rather than reading the group's list - a merged blob given a shape
+cannot be added to a group it was not in, because the marks the split was taken
+over are the ones that were ONE MARKER with that shape, and both are columns.
+
+**The candidate hash deliberately does not cover the group's answer.** The group
+is taken over the candidates; a candidate hash that covered it would make the two
+grains cite each other in a circle. `CANDIDATE_EVIDENCE` is the routing evidence
+minus the group's numbers and minus the panel-wide diagnostics.
+
+**And the pilot that could not compile.** `pilot_beckers.py` had not followed the
+plan schema since v9.1 and v9.2 - `PLAN_UNIT_NAMES_NO_PANEL` and
+`PLAN_DOCUMENT_BYTES_UNDECLARED` both landed while nothing was looking. It runs
+only when the publisher PDF is on disk, so CI has never compiled its plan and the
+drift was invisible for seventeen releases. Fixing the two fields was the small
+half; the large half is that the plan was built INSIDE the script's own
+refusal-without-the-figure. It is now `plan_beckers.py`, a module, and
+`test_compile_plan.py` compiles it over a placeholder raster ABOVE that suite's
+raster gate - so the check runs in the core job, which has never had a publisher
+figure and never will. That suite reports 3 rather than 0 without the rasters
+now, which is the honest count for a tree that can still check a declaration.
+
+Two more things the run turned up while wiring it: the document's
+`source_file` was named by basename while the file sat elsewhere, so the first
+run that ever got past the compiler was rejected `SOURCE_DOCUMENT_FILE_NOT_FOUND`
+- the article is now copied beside its own rendering, because a plan that names a
+path outside its corpus is a plan nobody else can run - and the script was
+reading `summary["panels"]` on a run that had been rejected before those keys
+existed.
+
+    reverted                                          scenario that fails
+    points cite no candidate                          the runner's own read-back
+    verify_groups does not re-derive                  a moved group threshold
+    the runner writes no grains                       the suite's setup
+    the finalizer ignores the grains                  a value on a thinned bundle
+    group membership ignores marker validity          a merged blob smuggled in
+    candidates exclude the refused marks              outlier's thirteen
+    the plan drops source_file_sha256                 the pilot's plan compiles
+    the plan drops the unit's panel_id                the same
+
+**What is left is not software.** 464 Figure 2's status under this grain needs
+the pinned clip, which is a publisher figure this repository does not carry and
+which was on none of the machines these four rounds ran on; promoting it needs a
+human-reviewed marker truth file bound to that clip's SHA-256. The private raster
+repository and its two CI secrets, the branch protection, and the registered R2
+and R3 reviews are all things only a person with the account can do.
+
 ## The segmentation harness, and the six statements that put a panel back together
 
 `HARNESS.md` is the full document; this is what changed in the package and why it

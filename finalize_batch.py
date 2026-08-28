@@ -2014,21 +2014,26 @@ def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
     """
     import axis_grain as AG
     import scatter_points as SP
+    SP_CANDIDATES = SP.CANDIDATE_ARTIFACT_TYPE
+    SP_GROUPS = SP.GROUP_ARTIFACT_TYPE
     withheld = set()
-    by_panel = {}
+    by_panel, cands_of, groups_of = {}, {}, {}
     for _, art in ledger_rows.iterrows():
-        if _s(art.get("Artifact_Type")) != "SCATTER_POINTS":
+        kind = _s(art.get("Artifact_Type"))
+        target = {"SCATTER_POINTS": by_panel,
+                  SP_CANDIDATES: cands_of, SP_GROUPS: groups_of}.get(kind)
+        if target is None:
             continue
         path, blob = artifact_data(run_dir, art, artifacts)
         if path is None or blob is None:
             continue
         try:
             for row in csv.DictReader(io.StringIO(blob.decode("utf-8"))):
-                by_panel.setdefault(_s(row.get("Panel_ID")), []).append(row)
+                target.setdefault(_s(row.get("Panel_ID")), []).append(row)
         except Exception as exc:
             flag("run", "METHOD_NOT_POSSIBLE_FOR_READER",
-                 "the routed scatter point file could not be read, so no "
-                 "marker route can be checked against it (%s: %s)"
+                 "a routed scatter file could not be read, so no marker route "
+                 "can be checked against it (%s: %s)"
                  % (type(exc).__name__, exc))
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
             else list(machine or ()))
@@ -2083,6 +2088,29 @@ def _scatter_route_failures(machine, ledger_rows, run_dir, flag,
             flag(where, "METHOD_CONTRADICTS_GEOMETRY",
                  "a point behind this value came off a blob its own recorded "
                  "evidence says was not one marker: %s" % bad[0])
+            withheld.add(pid)
+            continue
+        # AND THE GROUP THAT NAMED THEM, RE-DERIVED FROM THE MARKS IT WAS TAKEN
+        # OVER. Until v9.19 nothing but re-opening the raster could do this: a
+        # point file carries only ROUTED points, so the marks a fill split
+        # refused - the ones that made the group what it is - were not in the
+        # bundle at all, and a finalizer handed an artifact set had to take the
+        # group's own word for its threshold.
+        cands, groups = cands_of.get(pid), groups_of.get(pid)
+        if cands is None or groups is None:
+            if any(_s(p.get("Fill_Group_Record_SHA256")) for p in points):
+                flag(where, "METHOD_CONTRADICTS_GEOMETRY",
+                     "these points cite a fill group and this run registered no "
+                     "%s / %s file for panel %s, so the split that named them "
+                     "cannot be re-derived" % (SP_CANDIDATES, SP_GROUPS, pid))
+                withheld.add(pid)
+            continue
+        why = (SP.verify_candidates(cands) + SP.verify_groups(groups, cands)
+               + SP.verify_citations(points, cands, groups))
+        if why:
+            flag(where, "METHOD_CONTRADICTS_GEOMETRY",
+                 "the fill group behind this value does not follow from the "
+                 "marks it says it was taken over: %s" % why[0])
             withheld.add(pid)
     return withheld
 

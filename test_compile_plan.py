@@ -29,6 +29,7 @@ sys.path.insert(0, HERE)
 
 import compile_plan as CP                                          # noqa: E402
 import grid_engine as GE                                            # noqa: E402
+from PIL import Image                                              # noqa: E402
 import mark_readers as MR                                          # noqa: E402
 import run_batch as RB                                             # noqa: E402
 import batch_manifests as BM                                       # noqa: E402
@@ -79,13 +80,62 @@ with open(PLAN_PATH, encoding="utf-8") as fh:
 # contributes there is unchanged. A clone without the rasters runs fewer
 # scenarios and says so, which is the honest answer for a tree that cannot see
 # the figures.
+print()
+print("the Beckers pilot's plan compiles, with or without the figure")
+# THE COVERAGE GAP THIS CLOSES. `pilot_beckers.py` refuses to run without the
+# publisher PDF - correctly - and its plan was built inside that refusal, so CI
+# has never compiled it. It drifted seventeen releases behind this compiler:
+# `PLAN_UNIT_NAMES_NO_PANEL` (v9.1) and `PLAN_DOCUMENT_BYTES_UNDECLARED` (v9.2)
+# both landed while nothing was looking, and the package's one worked example to
+# POOLING_ELIGIBLE could not compile at all. A plan is a DECLARATION and its
+# shape can be checked without the figure it is a plan about.
+import plan_beckers as PB                                         # noqa: E402
+_pb_work = tempfile.mkdtemp(prefix="fdt_planbeckers_")
+_pb_raster = os.path.join(_pb_work, "page-3.png")
+Image.new("RGB", (2400, 3000), "white").save(_pb_raster)
+_pb_pdf = os.path.join(_pb_work, "BF02919461.pdf")
+with open(_pb_pdf, "wb") as _fh:
+    _fh.write(b"%PDF-1.4 placeholder\n")
+_pb_plan = PB.build_plan(
+    os.path.basename(_pb_pdf), MR.sha256_of(_pb_pdf), _pb_raster,
+    MR.sha256_of(_pb_raster),
+    dict(reviewer_id="RV_INSPECTOR", name="Josiah Carberry",
+         record_type="DEMO_IDENTITY", contact_type="ORCID",
+         contact="0000-0002-1825-0097", registered_by="Josiah Carberry",
+         registration_date="2026-08-11", human_attestation="DEMO_ONLY",
+         note="ORCID's fictional demonstration record"),
+    "2026-08-11")
+_pb_out = os.path.join(_pb_work, "manifests")
+_pb_paths, _pb_problems = CP.compile_plan(_pb_plan, _pb_out,
+                                          file_root=_pb_work,
+                                          run_date="2026-08-11")
+check("the pilot's plan carries every field this compiler asks for",
+      _pb_problems == [],
+      "%r" % ([p.get("check") for p in _pb_problems][:3],))
+# AND THE TWO CHECKS IT WAS BEHIND, NAMED. A scenario that only says "no
+# problems" would pass again the day a third check lands and nobody compiles it.
+check("  including the document's bytes and the unit's panel, by name",
+      _pb_plan["documents"][0].get("source_file_sha256")
+      and all(u.get("panel_id") for u in _pb_plan["units"]),
+      "%r" % ([(u.get("unit_id"), u.get("panel_id"))
+               for u in _pb_plan["units"]],))
+check("  and it compiles to a manifest set the batch layer accepts",
+      bool(_pb_paths) and os.path.exists(os.path.join(_pb_out,
+                                                      "panel_manifest.csv")),
+      "%r" % (sorted(os.listdir(_pb_out)) if os.path.isdir(_pb_out) else None,))
+
 import raster_root as _RR                                        # noqa: E402
 _plan_rasters = sorted({f["image"] for f in PLAN["figures"]})
 _absent_rasters = [r for r in _plan_rasters if not _RR.check(r)[0]]
 if _absent_rasters:
     print(_RR.skip_note(_absent_rasters[0]))
-    print("FDT_SCENARIOS_RUN=0")
-    raise SystemExit(0)
+    # THE SCENARIOS ABOVE THIS GATE NEED NO FIGURE and are counted. They used to
+    # be none, so the count printed here was the literal 0; the pilot's plan is
+    # a DECLARATION and compiling it needs nothing but the compiler, which is
+    # exactly why it was able to drift seventeen releases without CI noticing.
+    print("FDT_SCENARIOS_RUN=%d" % len(RAN))
+    print("%d scenarios run" % len(RAN))
+    raise SystemExit(1 if FAILURES else 0)
 # THE PLAN'S FILE ROOT IS WHERE THE RASTERS TURNED OUT TO BE, not where this
 # file sits. CI fetches them into a directory of its own and points
 # `FDT_RASTER_ROOT` at it, so a `file_root` hardcoded to HERE reports

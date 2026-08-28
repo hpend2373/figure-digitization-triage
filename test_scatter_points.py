@@ -136,6 +136,15 @@ _drawn = {sid: [p[1] for p in spec["pairs"]]
           for sid, spec in sorted(R["series"].items())}
 ART = os.path.join(OUT, "scatter_points.csv")
 ROWS = list(csv.DictReader(open(ART, encoding="utf-8")))
+#: The candidate and group grains THE RUNNER WROTE, read back off disk like
+#: everything else here, so the gate is handed the marks a fill split refused as
+#: well as the ones it named.
+CANDS = [r for r in csv.DictReader(
+    open(os.path.join(OUT, "scatter_marker_candidates.csv"), encoding="utf-8"))
+    if r["Panel_ID"] == PANEL]
+GROUPS = [r for r in csv.DictReader(
+    open(os.path.join(OUT, "scatter_fill_groups.csv"), encoding="utf-8"))
+    if r["Panel_ID"] == PANEL]
 _by_axis = {}
 for row in ROWS:
     _by_axis.setdefault(row["Axis_ID"], []).append(float(row["y_value"]))
@@ -467,6 +476,116 @@ check("a moved panel diagnostic is reported, and reported apart",
       "%r" % ([(i, c) for i, c, _d in _diag_ev],))
 
 print()
+print("the group is re-derivable from the marks it was taken over")
+# THE GRAIN THE POINT FILE COULD NOT HOLD. A fill group is a statistic over the
+# marks of one shape INCLUDING the ones the split then refused, and a file of
+# routed points does not carry those - so until v9.19 nothing but re-opening the
+# raster could say whether a group's threshold was the one its marks make.
+check("the runner writes a candidate row for every mark, routed or refused",
+      len(CANDS) > len(ROWS)
+      and {r["Refusal"] for r in CANDS} > {""}
+      and all(r["Candidate_Record_SHA256"] for r in CANDS),
+      "%d candidates for %d points, refusals %r"
+      % (len(CANDS), len(ROWS), sorted({r["Refusal"] for r in CANDS})))
+check("  and one group row per shape, citing the candidates it rests on",
+      len(GROUPS) == 2
+      and all(len(g["Candidate_Record_SHA256_List"].split(";"))
+              == int(g["Fill_Group_N"]) for g in GROUPS),
+      "%r" % ([(g["Fill_Conditioning_Shape"], g["Fill_Group_N"]) for g in GROUPS],))
+check("  every group's numbers follow from those candidates, with no figure",
+      SP.verify_candidates(CANDS) == []
+      and SP.verify_groups(GROUPS, CANDS) == [],
+      "%r" % ((SP.verify_candidates(CANDS)
+               + SP.verify_groups(GROUPS, CANDS))[:2],))
+check("  and every point cites a candidate and a group that are in the bundle",
+      SP.verify_citations(ROWS, CANDS, GROUPS) == [],
+      "%r" % (SP.verify_citations(ROWS, CANDS, GROUPS)[:2],))
+# THE THRESHOLD MOVED AND THE MARKS DID NOT. This is the edit the point file
+# could not see: every routed point still agrees with the group it cites,
+# because the producer moved both.
+_g_moved = [dict(g) for g in GROUPS]
+_g_moved[0]["Fill_Group_Threshold"] = "0.4000"
+_g_moved[0]["Fill_Group_Record_SHA256"] = SP.fill_group_record_sha256(_g_moved[0])
+check("a group whose threshold its own marks do not give is refused",
+      any(SP.GROUP_NOT_DERIVED in why
+          for why in SP.verify_groups(_g_moved, CANDS)),
+      "%r" % (SP.verify_groups(_g_moved, CANDS)[:1],))
+# AND A CANDIDATE THE GROUP CITES CANNOT BE DROPPED TO MAKE IT LOOK BETTER.
+_cited0 = GROUPS[0]["Candidate_Record_SHA256_List"].split(";")[0]
+_c_thinned = [c for c in CANDS if c["Candidate_Record_SHA256"] != _cited0]
+check("  and a candidate file missing a mark the group cites is refused",
+      len(_c_thinned) == len(CANDS) - 1
+      and any(SP.GROUP_NOT_DERIVED in why
+              for why in SP.verify_groups(GROUPS, _c_thinned)),
+      "%r" % (SP.verify_groups(GROUPS, _c_thinned)[:1],))
+# AND THE REASON THE GRAIN EXISTS, AS A MEASUREMENT. On `split_grain_outlier`
+# the fill split is taken over THIRTEEN marks and refuses every one of them, so
+# the point file for that panel is EMPTY. No file of routed points could ever
+# carry the marks that group was computed from; the candidate file does.
+_OU = json.load(open(os.path.join(HERE, "split_grain_truth.json"),
+                     encoding="utf-8"))["renderings"]["outlier"]
+_ou_image = Image.open(os.path.join(HERE, _OU["file"])).convert("RGB")
+_ou_series = [dict(Panel_ID="P_OU", Series_ID=d["Series_ID"], Colour_Hex="",
+                   Colour_Tolerance="", Mask_Key="",
+                   Marker_Shape=d["Marker_Shape"], Marker_Fill=d["Marker_Fill"],
+                   Line_Style="", Bar_Fill_Pattern="", Axis_ID=d["Axis_ID"],
+                   Factor_Name="SERIES", Factor_Level=d["Series_ID"], Note="")
+              for d in _OU["declared"]]
+_ou_axes = [dict(Axis_ID="X_BOTTOM", Panel_ID="P_OU", Dimension="X",
+                 Side="BOTTOM", Unit="cm H2O", Scale="LINEAR",
+                 Calibration_Points=_ticks(_OU["x_ticks"]), Note=""),
+            dict(Axis_ID="Y_LEFT", Panel_ID="P_OU", Dimension="Y", Side="LEFT",
+                 Unit="mmHg/L/min", Scale="LINEAR",
+                 Calibration_Points=_ticks(_OU["left_y_ticks"]), Note="")]
+_ou_points, _ou_meta = SP.read_routed_scatter_panel(
+    _ou_image, _OU["panel_box"], _ou_series, RB._axis_manifest(_ou_axes),
+    "P_OU", RB.file_sha256(os.path.join(HERE, _OU["file"])), "X_BOTTOM")
+_ou_c = _ou_meta["candidate_rows"]
+_ou_g = _ou_meta["group_rows"]
+check("a group whose every mark was refused still has its marks on disk",
+      _ou_points == []
+      and [int(g["Fill_Group_N"]) for g in _ou_g] == [13]
+      and SP.verify_groups(_ou_g, _ou_c) == [],
+      "%d points, group N %r"
+      % (len(_ou_points), [g["Fill_Group_N"] for g in _ou_g]))
+# AND A BLOB THAT WAS NOT ONE MARKER CANNOT BE SMUGGLED INTO A GROUP. A merged
+# component carries no shape - `route` never resolved one for it - so a forger
+# has to write one on, and the group is taken over the marks that were ONE
+# MARKER. Both halves of that are columns, and the membership is re-derived from
+# them rather than read off the group's own list.
+_merged = [c for c in CANDS if c["Refusal"] == "MARKER_MERGED"]
+_forged = dict(_merged[0], Marker_Shape="CIRCLE")
+_forged["Candidate_Record_SHA256"] = SP.candidate_record_sha256(
+    dict(SP.evidence_record(dict(_forged)),
+         point_px_x=float(_forged["point_px_x"]),
+         point_px_y=float(_forged["point_px_y"]),
+         refusal=_forged["Refusal"]),
+    _forged["Panel_ID"], _forged["Image_SHA256"])
+_g_padded = [dict(g) for g in GROUPS]
+_circle = next(i for i, g in enumerate(_g_padded)
+               if g["Fill_Conditioning_Shape"] == "CIRCLE")
+_g_padded[_circle]["Candidate_Record_SHA256_List"] = ";".join(sorted(
+    _g_padded[_circle]["Candidate_Record_SHA256_List"].split(";")
+    + [_forged["Candidate_Record_SHA256"]]))
+_g_padded[_circle]["Fill_Group_Record_SHA256"] = SP.fill_group_record_sha256(
+    _g_padded[_circle])
+check("  and a merged blob given a shape cannot join the group it was not in",
+      bool(_merged)
+      and any("in the candidate file are" in why
+              for why in SP.verify_groups(_g_padded, CANDS + [_forged])),
+      "%r" % (SP.verify_groups(_g_padded, CANDS + [_forged])[:1],))
+
+# AND A POINT CANNOT BE RE-POINTED AT ANOTHER GROUP.
+_p_moved = [dict(r) for r in ROWS]
+_other_group = [g for g in GROUPS
+                if g["Fill_Conditioning_Shape"]
+                != _p_moved[0]["Fill_Conditioning_Shape"]][0]
+_p_moved[0]["Fill_Group_Record_SHA256"] = _other_group["Fill_Group_Record_SHA256"]
+check("  and a point re-pointed at the other shape's group is refused",
+      any(SP.GROUP_NOT_CITED in why
+          for why in SP.verify_citations(_p_moved, CANDS, GROUPS)),
+      "%r" % (SP.verify_citations(_p_moved, CANDS, GROUPS)[:1],))
+print()
 print("what the runner refuses, and says why")
 _no_axis = [dict(r, Axis_ID="") for r in SERIES_ROWS]
 _r1 = RB.run_panel(PANEL_ROW, _no_axis, [], {}, UNIT_ROW, RAW, file_root=HERE,
@@ -496,20 +615,35 @@ print("and the finalizer holds a routed value against the file that measured it"
 import io                                                         # noqa: E402
 
 
-def _gate(rows, values):
-    said = []
+def _csv_bytes(rows, columns):
     blob = io.StringIO()
-    w = csv.DictWriter(blob, fieldnames=list(SP.POINT_ARTIFACT_COLUMNS))
+    w = csv.DictWriter(blob, fieldnames=list(columns), extrasaction="ignore")
     w.writeheader()
-    w.writerows(rows)
-    ledger = BM.pd.DataFrame([dict(Artifact_Type=SP.ARTIFACT_TYPE,
-                                   Artifact_Path="scatter_points.csv",
+    w.writerows([{k: ("" if r.get(k) is None else r[k]) for k in columns}
+                 for r in rows])
+    return blob.getvalue().encode("utf-8")
+
+
+def _gate(rows, values, cands=None, groups=None, series_rows=None):
+    said = []
+    bundle = [(SP.ARTIFACT_TYPE, "scatter_points.csv", rows,
+               SP.POINT_ARTIFACT_COLUMNS)]
+    if cands is not None:
+        bundle.append((SP.CANDIDATE_ARTIFACT_TYPE,
+                       "scatter_marker_candidates.csv", cands,
+                       SP.CANDIDATE_COLUMNS))
+    if groups is not None:
+        bundle.append((SP.GROUP_ARTIFACT_TYPE, "scatter_fill_groups.csv",
+                       groups, SP.GROUP_COLUMNS))
+    ledger = BM.pd.DataFrame([dict(Artifact_Type=kind, Artifact_Path=name,
                                    SHA256="", Panel_ID=PANEL,
-                                   Artifact_Reference="")])
+                                   Artifact_Reference="")
+                              for kind, name, _r, _c in bundle])
+    blobs = {FIN.artifact_key(ledger.iloc[i]): _csv_bytes(rows_, cols)
+             for i, (_k, _n, rows_, cols) in enumerate(bundle)}
     held = FIN._scatter_route_failures(
         values, ledger, OUT, lambda w_, c, d: said.append((c, d)),
-        artifacts={FIN.artifact_key(ledger.iloc[0]):
-                   blob.getvalue().encode("utf-8")})
+        artifacts=blobs, series=series_rows)
     return held, said
 
 
@@ -524,9 +658,22 @@ check("the gate is called from the finalizer's method contract",
 
 _ok_value = dict(Unit_ID="U_TWIN", Cell_Key="SERIES=L_OPEN_CIRCLE",
                  Run_Panel_ID=PANEL, Identity_Method=SP.IDENTITY_METHOD)
-_held, _said = _gate(ROWS, [_ok_value])
+_held, _said = _gate(ROWS, [_ok_value], CANDS, GROUPS)
 check("a routed value whose point file agrees is not withheld",
       not _held and not _said, "%r %r" % (_held, _said))
+# AND THE FINALIZER IS WHERE THAT MATTERS. A bundle with no grains under it
+# cannot re-derive the split, and a value resting on one is withheld.
+_held_g, _said_g = _gate(ROWS, [_ok_value], _c_thinned, GROUPS)
+check("the finalizer withholds a value whose group its marks do not give",
+      _held_g == {PANEL}
+      and any("does not follow from the marks" in d for _c, d in _said_g),
+      "%r %r" % (_held_g, [c for c, _d in _said_g]))
+_held_g, _said_g = _gate(ROWS, [_ok_value])
+check("  and one whose run registered no grains at all",
+      _held_g == {PANEL}
+      and any("cannot be re-derived" in d for _c, d in _said_g),
+      "%r %r" % (_held_g, [c for c, _d in _said_g]))
+
 # A VALUE CLAIMING THE ROUTE WITH NO FILE BEHIND IT.
 _held, _said = _gate([], [_ok_value])
 check("  one claiming the route with no point file is withheld",

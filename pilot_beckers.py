@@ -93,8 +93,6 @@ T_CRITICAL_N5 = 2.776
 MEAN_TOLERANCE = 0.01
 SEM_TOLERANCE = 0.02
 
-SESSIONS = [("L-30", -30), ("R+1", 1), ("R+4", 4), ("R+9", 9), ("R+25", 25)]
-
 # --------------------------------------------------------------------------
 # who says so
 # --------------------------------------------------------------------------
@@ -137,6 +135,14 @@ else:
 # the page, rendered once
 # --------------------------------------------------------------------------
 WORK = tempfile.mkdtemp(prefix="fdt_beckers_")
+# THE DOCUMENT LIVES BESIDE ITS RENDERING. `source_file` is resolved under the
+# run's file root, and the article this plan is about was being named by
+# basename while sitting somewhere else entirely - so the first run that ever
+# got past the compiler was rejected `SOURCE_DOCUMENT_FILE_NOT_FOUND`. Copied
+# rather than referenced by absolute path: a plan that names a path outside its
+# own corpus is a plan nobody else can run.
+import shutil                                                     # noqa: E402
+shutil.copyfile(pdf, os.path.join(WORK, os.path.basename(pdf)))
 stem = os.path.join(WORK, "page")
 subprocess.run(["pdftoppm", "-r", "300", "-f", "3", "-l", "3", "-png", pdf, stem],
                check=True, capture_output=True)
@@ -147,91 +153,16 @@ if not RASTER:
     raise SystemExit(0)
 
 # --------------------------------------------------------------------------
-# what is on it - measured by hand on this rendering, declared here
+# what is on it - measured by hand on this rendering, declared in `plan_beckers`
 # --------------------------------------------------------------------------
-PANELS = [
-    dict(pid="P_APEN_SUPINE", fig="SF_BECKERS_F1", view="F_APEN_SUPINE",
-         number="FIG1", label="Fig 1", posture="SUPINE", grid="G_SUPINE",
-         unit_id="U_APEN_SUPINE",
-         box=[305, 1176, 2021, 2744], ticks=[[1.3, 2019.5], [0.2, 2746.0]],
-         y_region="182,302,2009,2756", x_region="302,1179,2746,2866",
-         xs=[459.5, 601.0, 741.5, 881.5, 1024.0],
-         caption="Fig. 1: Evolution of ApEn (mean +/- 95% confidence interval) "
-                 "in supine position up to 25 days after return to earth."),
-    dict(pid="P_APEN_STANDING", fig="SF_BECKERS_F2", view="F_APEN_STANDING",
-         number="FIG2", label="Fig 2", posture="STANDING", grid="G_STANDING",
-         unit_id="U_APEN_STANDING",
-         box=[1449, 2254, 2051, 2718], ticks=[[1.3, 2049.5], [0.2, 2720.0]],
-         y_region="1326,1446,2039,2730", x_region="1446,2257,2720,2840",
-         xs=[1591.0, 1721.5, 1851.5, 1981.5, 2113.0],
-         caption="Fig. 2: Evolution of ApEn (mean +/- 95% confidence interval) "
-                 "in standing position up to 25 days after return to earth."),
-]
-
-PLAN = {
-    "schema": "figure-digitization-triage/extraction-plan/1",
-    "publication_id": "PUB_BECKERS2007",
-    "reviewers": [REVIEWER],
-    "documents": [dict(
-        document_id="SD_BECKERS", role="MAIN_ARTICLE",
-        source_file=os.path.basename(pdf), page_range="98-101",
-        observed_figure_count=2, inventory_status="VISUALLY_VERIFIED",
-        figure_count_method="HUMAN_VISUAL", reviewer_id="RV_INSPECTOR",
-        inspection_date=INSPECTION_DATE,
-        note="Beckers 2007, Microgravity Sci Technol XIX-5/6, 98-101")],
-    "grids": [dict(grid_id=p["grid"],
-                   factors={"SESSION": [s for s, _d in SESSIONS],
-                            "POSTURE": [p["posture"]]},
-                   note="one posture at five sessions") for p in PANELS],
-    "reader_configs": [dict(config_id="C_APEN", options=dict(
-        threshold=170, x_window=18, whisker_search_px=280,
-        marker_half_height=8, stem_px=4))],
-    "figure_views": {p["view"]: dict(caption=p["caption"],
-                                     note="one panel, one series, five sessions")
-                     for p in PANELS},
-    "figures": [dict(
-        source_figure_id=p["fig"], document_id="SD_BECKERS",
-        figure_number=p["number"], source_file=os.path.basename(pdf),
-        source_page=3, image=RASTER,
-        image_sha256=MR.sha256_of(RASTER),
-        observed_panel_count=1, inventory_status="VISUALLY_VERIFIED",
-        panel_count_method="HUMAN_VISUAL", reviewer_id="RV_INSPECTOR",
-        inspection_date=INSPECTION_DATE, caption=p["caption"],
-        panels=[dict(
-            panel_id=p["pid"], label=p["label"],
-            outcome_label="ApEn %s" % p["posture"].lower(),
-            target_status="TARGET", disposition="AUTO_DIGITIZE",
-            reason="the figure is the only source of these means at these "
-                   "sessions",
-            read=dict(
-                mark_type="LINE_MONO", unit_id=p["unit_id"],
-                figure_view=p["view"], box=p["box"], y_ticks=p["ticks"],
-                y_scale="LINEAR", x_scale="LINEAR", config_id="C_APEN",
-                axis_y_region=p["y_region"], axis_x_region=p["x_region"],
-                series=[dict(series_id="S_APEN", factor="POSTURE",
-                             level=p["posture"], marker="ANY",
-                             marker_fill="OPEN")],
-                positions=[dict(position_id="%s_%d" % (p["number"], i),
-                                factor="SESSION", level=level,
-                                x_pixel=x, timepoint_label=level,
-                                timepoint_days=days)
-                           for i, ((level, days), x)
-                           in enumerate(zip(SESSIONS, p["xs"]))]))])
-        for p in PANELS],
-    "units": [dict(
-        unit_id=p["unit_id"], figure_view=p["view"], grid_id=p["grid"],
-        panel=p["label"], outcome_name="Approximate entropy of RR intervals",
-        domain="AUTONOMIC", unit="dimensionless", statistic="CONTINUOUS",
-        dispersion_type="CI95", n_outcome=5, n_source="TEXT_METHODS",
-        bar_top_definition="MARKER_CENTER", errorbar_stem_confirmed="TRUE",
-        errorbar_source="CAPTION", grid_rule="FULL", value_scale="RATIO",
-        # ApEn is a bounded, roughly symmetric index and the paper analyses it
-        # untransformed - it prints means and SEMs of the index itself.
-        analysis_transformation="UNTRANSFORMED",
-        distribution_shape="SYMMETRIC", transformation_source="",
-        note="caption states mean +/- 95% confidence interval",
-        x_calibration=[[0, p["xs"][0]], [4, p["xs"][-1]]]) for p in PANELS],
-}
+# THE PLAN IS A MODULE OF ITS OWN so that CI can compile it without the figure.
+# It was built inside this script's own refusal-without-the-PDF, so nothing ever
+# compiled it and it drifted seventeen releases behind `compile_plan`.
+import plan_beckers as PB                                         # noqa: E402
+PANELS = PB.PANELS
+SESSIONS = PB.SESSIONS
+PLAN = PB.build_plan(os.path.basename(pdf), MR.sha256_of(pdf), RASTER,
+                     MR.sha256_of(RASTER), REVIEWER, INSPECTION_DATE)
 
 PLAN_PATH = os.path.join(WORK, "plan_beckers.json")
 with open(PLAN_PATH, "w", encoding="utf-8") as fh:
@@ -249,10 +180,13 @@ if plan_problems:
         print("  %s" % (problem,))
     raise SystemExit("the plan does not compile")
 summary = RB.run_batch(MANIFESTS, OUT, file_root=WORK, run_date=RUN_DATE)
+if summary["status"] == "MANIFEST_REJECTED":
+    print("manifests rejected: %s" % summary.get("detail", ""), file=sys.stderr)
+    raise SystemExit(1)
 passed = int(summary.get("machine_qc", summary.get("machine_qc_passed", 0)))
-print("  run: %s | %s | panels %d | read %d | machine QC passed %d"
+print("  run: %s | %s | panels %s | read %s | machine QC passed %d"
       % (summary["status"], summary.get("run_mode", RUN_MODE),
-         summary["panels"], summary["values"], passed))
+         summary.get("panels", "?"), summary.get("values", "?"), passed))
 
 failures = []
 if RUN_MODE == "DEMO_ONLY":

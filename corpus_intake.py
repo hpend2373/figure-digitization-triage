@@ -108,7 +108,15 @@ DRAFT_STATUSES = (DRAFT_PENDING, "CONFIRMED", "REJECTED")
 #: bounding box wrong. It is a ROUTING fact: show the whole page instead, so
 #: the person confirming sees the figure rather than a strip of white with the
 #: figure just outside it.
-CROP_QUALITY_STATUSES = ("ACCEPTABLE", "THIN_CROP", "NO_CROP")
+CROP_QUALITY_STATUSES = ("ACCEPTABLE", "THIN_CROP", "EDGE_CLIPPED", "NO_CROP")
+
+#: Anything darker than this is ink on a printed page. Used only to find where
+#: a crop's own edges fall relative to the drawing, never to measure anything.
+_INK_LEVEL = 235
+
+#: A side edge with at least this share of its pixels inked is running THROUGH
+#: the figure rather than around it. One stray mark on a border is not a cut.
+_EDGE_INK_SHARE = 0.06
 
 #: As a fraction of the PAGE, so it means the same thing at any DPI and on any
 #: paper size.
@@ -601,13 +609,88 @@ def _confidence(candidate, same_label, blocks):
     return max(0.0, round(score, 2)), "; ".join(reasons)
 
 
-def figure_bbox(candidate, blocks, page_size=None):
+#: How near the top or bottom of a page furniture sits, as a share of height.
+#: A running head and a folio live in the margins; a caption does not.
+_FURNITURE_MARGIN = 0.12
+
+#: How many of a document's pages a block has to repeat on to count as
+#: furniture. Two is too few - a two-page paper's every block would qualify -
+#: and this is a share, so it holds for a four-page letter and a 374-page book.
+_FURNITURE_SHARE = 0.5
+
+_DIGITS = re.compile(r"\d+")
+
+
+def _furniture_key(text):
+    """A block's text with its numbers flattened.
+
+    "H842" and "H843" are the same running head with the folio in it, and
+    "649" and "651" are the same page number. Comparing the text as printed
+    finds neither, so every page's furniture looks unique and none of it is
+    excluded - which is how a footer that spans the page came to set the
+    horizontal edge of thirteen figure boxes.
+    """
+    return _DIGITS.sub("#", " ".join(str(text).split())).lower()
+
+
+def page_furniture(blocks, pages=None):
+    """The blocks that are running heads, feet and folios, as a set of ids.
+
+    Identified by REPETITION, not by content: a block whose flattened text
+    appears in a margin on at least half the document's pages is furniture,
+    whatever it says and whatever language it is in.
+
+    These are excluded from BOUNDARY arithmetic only. They stay in the block
+    list, they stay in `Text_Block_Count`, and a caption printed inside one
+    would still be found - removing them from the evidence would be editing
+    the document to make a box come out right.
+    """
+    numbers = sorted({b[0] for b in blocks})
+    total = len(pages or numbers) or 1
+    if total < 3:
+        # Too few pages for repetition to mean anything.
+        return set()
+    height = max((b[4] for b in blocks), default=0.0) or 1.0
+
+    # ONE definition of "in a margin", used to collect the repeats and to
+    # decide the answer. Written twice, the two copies drift: reverting either
+    # one on its own leaves the other still filtering, and a mutation that
+    # deletes half the guard passes every scenario.
+    def in_margin(block):
+        return (block[4] <= _FURNITURE_MARGIN * height
+                or block[2] >= (1.0 - _FURNITURE_MARGIN) * height)
+
+    seen = collections.defaultdict(set)
+    for b in blocks:
+        if in_margin(b):
+            seen[_furniture_key(b[5])].add(b[0])
+    repeated = {k for k, ps in seen.items()
+                if len(ps) >= max(2, _FURNITURE_SHARE * total)}
+    return {id(b) for b in blocks
+            if _furniture_key(b[5]) in repeated and in_margin(b)}
+
+
+def figure_bbox(candidate, blocks, page_size=None, furniture=None):
     """The page region the caption most likely labels: the gap above it.
 
     A caption sits under its figure in this literature, so the region is
     bounded by the caption's top and by whatever text block is next above it.
     This is a LOOK HERE for a contact sheet, not a crop anybody measures from -
     the geometry a reader uses comes from the plan, measured on a raster.
+
+    Two things this does NOT do, because the audit showed both go wrong:
+
+    It does not let a running head or a folio set an edge. Those span the page,
+    so they overlap every caption, and the horizontal union then reaches across
+    the gutter into the next figure - which is where ten of the fifteen failed
+    crops came from, with `Downloaded from journals.physiology.org` and `H842`
+    holding the pen.
+
+    It does not stop at the nearest block above. An axis title, a tick number
+    and a panel letter all arrive as text blocks INSIDE the figure, and
+    stopping at the first one cuts the figure off above the caption - four of
+    the fifteen. The walk passes short, narrow blocks and stops at a paragraph
+    or at another caption, which is where a different figure's region begins.
     """
     page, top = candidate["page"], candidate["bbox"][1]
     cx0, cx1 = candidate["bbox"][0], candidate["bbox"][2]
@@ -624,16 +707,51 @@ def figure_bbox(candidate, blocks, page_size=None):
     def overlaps(block):
         return min(cx1, block[3]) - max(cx0, block[1]) > 0
 
-    same_page = [b for b in blocks if b[0] == page]
+    skip = page_furniture(blocks) if furniture is None else furniture
+    same_page = [b for b in blocks if b[0] == page and id(b) not in skip]
+    if not same_page:
+        return None
     column = [b for b in same_page if overlaps(b)] or same_page
-    above = [b for b in column if b[4] <= top]
-    lower_edge = max((b[4] for b in above), default=0.0)
+    above = sorted([b for b in column if b[4] <= top], key=lambda b: -b[4])
+    lower_edge = interior_floor(above, cx1 - cx0)
     left = min([b[1] for b in column] or [0.0])
     right = max([b[3] for b in column]
                 or [page_size[0] if page_size else 0.0])
     if lower_edge >= top:
         return None
     return (left, lower_edge, right, top)
+
+
+#: A block this short is a label, not a sentence: an axis title, a tick value,
+#: a panel letter, a legend key. Measured against the corpus's captions, which
+#: run to hundreds of characters.
+_INTERIOR_MAX_CHARS = 28
+
+#: And this narrow, against the caption's own width, is a label too. Both have
+#: to hold: a long stacked axis title is narrow, a paragraph's last line is
+#: short, and stopping at either would cut the figure.
+_INTERIOR_MAX_WIDTH_SHARE = 0.55
+
+
+def interior_floor(above, caption_width):
+    """How far above the caption the figure's region reaches.
+
+    `above` is the blocks over the caption, nearest first. The walk passes the
+    ones that read as parts of a figure and stops at the first that reads as
+    the document's text - or at another caption, because the region above THAT
+    belongs to a different figure and crossing into it is how a crop comes to
+    hold two.
+    """
+    width = max(float(caption_width), 1.0)
+    for block in above:
+        text = " ".join(str(block[5]).split())
+        if CAPTION_RE.match(text) or EXTENDED_RE.match(text):
+            return block[4]
+        narrow = (block[3] - block[1]) <= _INTERIOR_MAX_WIDTH_SHARE * width
+        short = len(text) <= _INTERIOR_MAX_CHARS
+        if not (narrow or short):
+            return block[4]
+    return 0.0
 
 
 def draft_rows(path, document_id, backend=None, page_rasters=None,
@@ -783,8 +901,78 @@ def crop_figure(row, page_raster, out_path, pdf_page_size=None, pad=8):
     bottom = min(image.height, int(y1 * sy) + pad)
     if right - left < 8 or bottom - top < 8:
         return None
-    image.crop((left, top, right, bottom)).save(out_path)
+    cut = image.crop((left, top, right, bottom))
+    # THE EDGE TEST GOES HERE, before the border is trimmed. Afterwards ink
+    # lies against every side by construction, and the question - does the
+    # drawing run off the box - has no answer left in the file.
+    _LAST_CROP_CLIPPED[out_path] = _ink_touches_side(cut)
+    cut = trim_outer_margin(cut)
+    if cut.width < 8 or cut.height < 8:
+        return None
+    cut.save(out_path)
     return out_path
+
+
+#: Whether the box cut through the drawing, recorded as the crop was made.
+#: A dict rather than a return value because `crop_figure` returns a path to
+#: every caller in the package and a tuple would be a silent change at each.
+_LAST_CROP_CLIPPED = {}
+
+
+def _ink_touches_side(image, share=_EDGE_INK_SHARE):
+    try:
+        import numpy as np
+    except Exception:                                   # pragma: no cover
+        return False
+    ink = np.asarray(image.convert("L"), dtype=np.uint8) < _INK_LEVEL
+    if ink.size == 0 or ink.shape[1] < 2:
+        return False
+    return bool(ink[:, 0].mean() >= share or ink[:, -1].mean() >= share)
+
+
+def crop_and_grade(row, page_raster, out_path, pdf_page_size=None):
+    """(crop path, quality) for one row - the crop and what it is worth.
+
+    `EDGE_CLIPPED` is the fifth verdict and the reason this pair exists. A box
+    narrower than the figure produces a crop that LOOKS like a figure: it is
+    tall, it is full of ink, and `crop_quality` calls it ACCEPTABLE while a
+    third of the picture is off the side. Somebody counting panels on it counts
+    what is there and writes down a number that is wrong for the figure. The
+    contact sheet shows the whole page for these instead, with the caption
+    marked - a person can always find the figure on its own page.
+    """
+    made = crop_figure(row, page_raster, out_path,
+                       pdf_page_size=pdf_page_size)
+    clipped = _LAST_CROP_CLIPPED.pop(out_path, False)
+    if not made:
+        return "", "NO_CROP"
+    quality = crop_quality(made, page_raster)
+    if quality == "ACCEPTABLE" and clipped:
+        return made, "EDGE_CLIPPED"
+    return made, quality
+
+
+def trim_outer_margin(image):
+    """The same picture with its blank border removed - and nothing else.
+
+    From the OUTSIDE in, only. A figure's interior white space is its own: two
+    panels side by side are separated by a gap that looks exactly like the gap
+    between two figures, and a rule that closed on the largest block of ink
+    would keep one panel of a multi-panel figure and drop the rest. Cutting
+    only the contiguous blank border cannot do that.
+    """
+    try:
+        import numpy as np
+    except Exception:                                   # pragma: no cover
+        return image
+    grey = image.convert("L")
+    ink = np.asarray(grey, dtype=np.uint8) < _INK_LEVEL
+    if not ink.any():
+        return image
+    rows = np.flatnonzero(ink.any(axis=1))
+    cols = np.flatnonzero(ink.any(axis=0))
+    return image.crop((int(cols[0]), int(rows[0]),
+                       int(cols[-1]) + 1, int(rows[-1]) + 1))
 
 
 def crop_quality(crop_path, page_raster, fraction=_THIN_CROP_FRACTION):
@@ -1318,12 +1506,12 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
         sizes = page_sizes(path, rasters=rasters)
         for row in rows:
             raster = rasters.get(row["Page"], "")
-            made = crop_figure(
+            made, quality = crop_and_grade(
                 row, raster,
                 os.path.join(crop_dir, "%s.png" % row["Draft_ID"]),
                 pdf_page_size=sizes.get(row["Page"]))
             row["Figure_Crop"] = (os.path.relpath(made, out_dir) if made else "")
-            row["Crop_Quality_Status"] = crop_quality(made, raster)
+            row["Crop_Quality_Status"] = quality
     # And the action depends on whether there is a PICTURE to confirm against.
     # A contact sheet with no image on it asks a person to agree with a
     # bounding box, which is the thing rendering exists to stop.

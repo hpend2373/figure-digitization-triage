@@ -1202,6 +1202,208 @@ check("the column is in the schema, so a reader cannot miss it",
       "Label_Repeats_In_Document" in CI.DRAFT_COLUMNS
       and "Figure_Label_Raw" in CI.DRAFT_COLUMNS)
 
+
+print()
+print("v9.21 what may set the edge of a figure's box")
+
+# --------------------------------------------------- running heads and folios
+def _paged(n, text, y, x0=40.0, x1=560.0):
+    return (n, x0, y, x1, y + 10.0, text)
+
+_doc = []
+for _p in range(1, 7):
+    _doc.append(_paged(_p, "Downloaded from journals.physiology.org", 12.0))
+    _doc.append(_paged(_p, "H84%d" % _p, 780.0, 40.0, 60.0))
+    _doc.append(_paged(_p, "A paragraph of body text sitting in the "
+                           "left column of the page.", 200.0, 44.0, 300.0))
+_furn = CI.page_furniture(_doc)
+check("a header repeated on every page is furniture",
+      all(id(b) in _furn for b in _doc if "Downloaded" in b[5]))
+check("a folio is furniture even though its digits differ per page",
+      all(id(b) in _furn for b in _doc if b[5].startswith("H84")),
+      "%d of 6" % sum(1 for b in _doc if b[5].startswith("H84")
+                      and id(b) in _furn))
+check("body text is not furniture, however ordinary it looks",
+      not any(id(b) in _furn for b in _doc if "paragraph" in b[5]))
+check("the flattening is what finds a folio, not a list of words",
+      CI._furniture_key("H842") == CI._furniture_key("H843")
+      and CI._furniture_key("Fig. 1") != CI._furniture_key("Table 1"))
+check("a document too short for repetition to mean anything has none",
+      CI.page_furniture([_paged(1, "Header", 12.0),
+                         _paged(2, "Header", 12.0)]) == set())
+# The fixture needs a page tall enough for a middle to exist: with one block
+# the page IS that block, and its only line sits in both margins at once.
+_mid = []
+for _p in range(1, 7):
+    _mid.append(_paged(_p, "Repeated mid-page line", 400.0))
+    _mid.append(_paged(_p, "Top of the page", 20.0))
+    _mid.append(_paged(_p, "Foot of the page", 780.0))
+check("a repeated line in the MIDDLE of the page is not furniture",
+      not any(id(b) in CI.page_furniture(_mid)
+              for b in _mid if "mid-page" in b[5]))
+check("while the repeated lines in its margins are",
+      all(id(b) in CI.page_furniture(_mid)
+          for b in _mid if "Top of" in b[5] or "Foot of" in b[5]))
+
+# a page-spanning footer used to drag the box across the gutter
+_two_col = [
+    _paged(4, "Downloaded from journals.physiology.org", 12.0, 40.0, 560.0),
+    _paged(4, "Fig. 1. Left column caption for the first figure.",
+           400.0, 44.0, 290.0),
+    _paged(4, "Fig. 2. Right column caption for the second figure.",
+           400.0, 310.0, 556.0),
+]
+for _p in (1, 2, 3, 5, 6):
+    _two_col.append(_paged(_p, "Downloaded from journals.physiology.org", 12.0,
+                           40.0, 560.0))
+_c1 = [c for c in CI.caption_candidates(_two_col) if c["number"] == "1"][0]
+_box1 = CI.figure_bbox(_c1, _two_col)
+check("a caption's box stays in its own column when a footer spans the page",
+      _box1 is not None and _box1[2] <= 300.0,
+      "%s" % (_box1,))
+_box1_furn = CI.figure_bbox(_c1, _two_col, furniture=set())
+check("and with the footer left in, it reaches the other column - so the "
+      "exclusion is what holds the edge",
+      _box1_furn is not None and _box1_furn[2] > 300.0, "%s" % (_box1_furn,))
+
+# ----------------------------------------- what stops the walk up the page
+_cap = 250.0
+check("an axis title does not stop the walk", CI.interior_floor(
+      [(1, 50.0, 300.0, 90.0, 310.0, "Heart rate")], _cap) == 0.0)
+check("a tick value does not stop the walk", CI.interior_floor(
+      [(1, 50.0, 300.0, 70.0, 310.0, "40")], _cap) == 0.0)
+check("a panel letter does not stop the walk", CI.interior_floor(
+      [(1, 50.0, 300.0, 62.0, 310.0, "B")], _cap) == 0.0)
+_para = (1, 44.0, 300.0, 290.0, 330.0,
+         "A full paragraph of the article's body text, which is both wide "
+         "and long and is where the figure's region ends.")
+check("a paragraph stops it", CI.interior_floor([_para], _cap) == 330.0)
+check("another caption stops it, because that region is a different figure",
+      CI.interior_floor(
+          [(1, 44.0, 300.0, 290.0, 330.0, "Fig. 4. Another caption.")],
+          _cap) == 330.0)
+check("the walk passes the labels and stops at the paragraph behind them",
+      CI.interior_floor(
+          [(1, 50.0, 380.0, 90.0, 390.0, "Heart rate"),
+           (1, 50.0, 360.0, 70.0, 370.0, "40"),
+           _para], _cap) == 330.0)
+check("with nothing above it the region runs to the top of the page",
+      CI.interior_floor([], _cap) == 0.0)
+check("a long block that is narrow is still a label, not a paragraph",
+      CI.interior_floor(
+          [(1, 50.0, 300.0, 90.0, 310.0,
+            "Mean arterial pressure during the tilt protocol")], _cap) == 0.0)
+check("a wide block that is short is still a label",
+      CI.interior_floor([(1, 44.0, 300.0, 290.0, 310.0, "mmHg")], _cap) == 0.0)
+
+# ...and through figure_bbox, because that is where the walk is called from
+_fig = [(4, 44.0, 500.0, 290.0, 520.0,
+         "Fig. 1. Mean arterial pressure before and after spaceflight."),
+        (4, 60.0, 300.0, 100.0, 312.0, "Heart rate"),
+        (4, 60.0, 280.0, 80.0, 292.0, "40"),
+        (4, 44.0, 120.0, 290.0, 180.0,
+         "A full paragraph of the article's body text above the figure, "
+         "wide and long, which is where this figure's region ends.")]
+_fc = [c for c in CI.caption_candidates(_fig) if c["number"] == "1"][0]
+_fbox = CI.figure_bbox(_fc, _fig)
+check("the box reaches past the axis labels to the paragraph above them",
+      _fbox is not None and abs(_fbox[1] - 180.0) < 0.01,
+      "%s" % (_fbox,))
+check("and stopping at the nearest block instead would cut the figure off "
+      "just above its caption",
+      max(b[4] for b in _fig if b[4] <= _fc["bbox"][1]) == 312.0)
+
+# ------------------------------------------- what the crop itself can be told
+try:
+    from PIL import Image as _PIL
+    import numpy as _np
+    _IMAGING = True
+except Exception as _e:                                 # pragma: no cover
+    _IMAGING = False
+    print("  SKIP the crop-image scenarios: %s" % _e)
+
+if _IMAGING:
+    def _canvas(w, h, marks):
+        im = _PIL.new("L", (w, h), 255)
+        px = im.load()
+        for (x0, y0, x1, y1) in marks:
+            for x in range(x0, x1):
+                for y in range(y0, y1):
+                    px[x, y] = 0
+        return im
+
+    _bordered = _canvas(100, 100, [(30, 30, 70, 70)])
+    _trimmed = CI.trim_outer_margin(_bordered)
+    check("a blank border is trimmed away",
+          _trimmed.size == (40, 40), "%s" % (_trimmed.size,))
+
+    # two panels with a gap: the gap is the FIGURE's, not a boundary
+    _panels = _canvas(100, 60, [(10, 10, 40, 50), (60, 10, 90, 50)])
+    _pt = CI.trim_outer_margin(_panels)
+    check("an interior gap between two panels is kept, not closed on one",
+          _pt.size == (80, 40), "%s" % (_pt.size,))
+    check("and the gap is still white inside the trimmed picture",
+          _np.asarray(_pt.convert("L"))[:, 35:45].min() == 255)
+
+    check("ink lying against a side means the box cut the drawing",
+          CI._ink_touches_side(_canvas(60, 60, [(0, 5, 40, 55)])))
+    check("a picture with white margins is not called clipped",
+          not CI._ink_touches_side(_canvas(60, 60, [(10, 10, 50, 50)])))
+    check("one stray mark on the border is not a cut",
+          not CI._ink_touches_side(_canvas(60, 60, [(0, 0, 1, 2)])))
+
+    _cq = tempfile.mkdtemp(prefix="fdt_crop_", dir=ROOT)
+    _page = os.path.join(_cq, "page.png")
+    _canvas(200, 400, [(20, 20, 180, 380)]).save(_page)
+    _clipped_png = os.path.join(_cq, "clipped.png")
+    _canvas(120, 300, [(0, 10, 110, 290)]).save(_clipped_png)
+    check("crop_quality alone still calls a clipped crop acceptable - which "
+          "is why the pair exists",
+          CI.crop_quality(_clipped_png, _page) == "ACCEPTABLE")
+    check("EDGE_CLIPPED is in the vocabulary the ledger checks against",
+          "EDGE_CLIPPED" in CI.CROP_QUALITY_STATUSES)
+
+    _row = {"Figure_BBox": "10,10,110,290", "Draft_ID": "D1"}
+    _out = os.path.join(_cq, "made.png")
+    _made, _q = CI.crop_and_grade(_row, _page, _out, pdf_page_size=(200, 400))
+    check("a box that cuts the drawing is graded EDGE_CLIPPED, not ACCEPTABLE",
+          _q == "EDGE_CLIPPED", "%s" % _q)
+    _page2 = os.path.join(_cq, "page2.png")
+    _canvas(200, 400, [(60, 60, 140, 340)]).save(_page2)
+    _row2 = {"Figure_BBox": "20,20,180,380", "Draft_ID": "D2"}
+    _made2, _q2 = CI.crop_and_grade(_row2, _page2,
+                                    os.path.join(_cq, "made2.png"),
+                                    pdf_page_size=(200, 400))
+    check("a box with room around the drawing is still ACCEPTABLE - the test "
+          "does not fail everything",
+          _q2 == "ACCEPTABLE", "%s" % _q2)
+    check("a row with no box gets no crop and no grade",
+          CI.crop_and_grade({"Figure_BBox": ""}, _page2,
+                            os.path.join(_cq, "made3.png"),
+                            pdf_page_size=(200, 400)) == ("", "NO_CROP"))
+
+    # ...and the trim has to happen on the way to the FILE, not merely be
+    # available as a function: a box far larger than its drawing must not
+    # reach the sheet as a picture that is mostly white.
+    _page4 = os.path.join(_cq, "page4.png")
+    _canvas(200, 400, [(80, 150, 120, 250)]).save(_page4)
+    _made4, _q4 = CI.crop_and_grade({"Figure_BBox": "20,20,180,380",
+                                     "Draft_ID": "D4"}, _page4,
+                                    os.path.join(_cq, "made4.png"),
+                                    pdf_page_size=(200, 400))
+    _sz = _PIL.open(_made4).size if _made4 else None
+    check("the saved crop is the drawing, not the box it was cut from",
+          _sz == (40, 100), "%s" % (_sz,))
+
+    _sheet = os.path.join(_cq, "sheet.html")
+    CI.contact_sheet(_sheet, [dict(_sheet_row("D1", 0.9, ""),
+                                   Crop_Quality_Status="EDGE_CLIPPED",
+                                   Figure_Crop="made.png",
+                                   Page_Raster="page.png")], root=_cq)
+    _html = io.open(_sheet, encoding="utf-8").read()
+    check("a clipped crop sends the reader to the whole page instead",
+          "whole page shown" in _html and "EDGE_CLIPPED" in _html)
+
 if not _BACKEND:
     print("  SKIP the v9.20 document scenarios: %s" % _NO_BACKEND)
 else:

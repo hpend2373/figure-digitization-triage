@@ -1471,6 +1471,83 @@ else:
           _lz["Text_Backend_Status"] == "ZERO_CAPTION_CANDIDATES",
           "%s %s" % (_lz["Text_Backend_Status"], _lz["Detail"]))
 
+    # THE WALK TAKES THE REMEDY IT NAMES. A ledger row reading "retry with the
+    # other backend" that nobody acts on leaves the figures out of the draft:
+    # the first corpus run lost twelve figures across three publications that
+    # way, and a hand-run second pass found every one.
+    class _BlindOnce(object):
+        """A declared backend that reads almost nothing; the other is fine."""
+        def __enter__(self):
+            self.real = CI.text_blocks
+            def fake(path, backend=None):
+                if backend == "PDFMINER_TEXT_BLOCKS":
+                    return [(1, 0.0, 0.0, 9.0, 9.0, "a b")]
+                return self.real(path, backend=backend)
+            CI.text_blocks = fake
+            return self
+        def __exit__(self, *exc):
+            CI.text_blocks = self.real
+
+    with _BlindOnce():
+        _out_r = tempfile.mkdtemp(prefix="fdt_v921r_", dir=ROOT)
+        _rr, _lr = CI.intake_document(_p2, "SD925", _out_r,
+                                      backend="PDFMINER_TEXT_BLOCKS")
+    check("a document the declared backend could not read is read by the other",
+          _lr["Text_Backend_Status"] == "TEXT_LAYER_OK" and len(_rr) > 0,
+          "%s / %d rows" % (_lr["Text_Backend_Status"], len(_rr)))
+    check("and the ledger says the switch happened and why",
+          "was used instead" in _lr["Detail"], "%s" % _lr["Detail"])
+    check("every row records the backend that actually read it",
+          all(r["Extraction_Method"] == _lr["Text_Backend"] for r in _rr),
+          "%s vs %s" % ({r["Extraction_Method"] for r in _rr},
+                        _lr["Text_Backend"]))
+
+    class _BlindBoth(object):
+        def __enter__(self):
+            self.real = CI.text_blocks
+            CI.text_blocks = lambda path, backend=None: [
+                (1, 0.0, 0.0, 9.0, 9.0, "a b")]
+            return self
+        def __exit__(self, *exc):
+            CI.text_blocks = self.real
+
+    with _BlindBoth():
+        _out_n = tempfile.mkdtemp(prefix="fdt_v921n_", dir=ROOT)
+        _rn, _ln = CI.intake_document(_p2, "SD926", _out_n)
+    check("when neither backend reads it, the document is still refused",
+          _ln["Text_Backend_Status"] == "TEXT_EXTRACTION_INCOMPLETE",
+          "%s" % _ln["Text_Backend_Status"])
+    check("and the refusal names what the second one managed too",
+          "did no better" in _ln["Detail"], "%s" % _ln["Detail"])
+
+    # AND THE SWITCH IS NOT DECIDED BY WHAT COMES OUT OF IT. Here the other
+    # backend finds a CAPTION where the declared one found none, and still
+    # reads almost none of the page. A rule that switched on captions would
+    # take it and file a one-figure inventory for a twenty-thousand-character
+    # document; the volume rule refuses both and says so.
+    class _CaptionBait(object):
+        def __enter__(self):
+            self.real = CI.text_blocks
+            def fake(path, backend=None):
+                if backend == "PDFMINER_TEXT_BLOCKS":
+                    return [(1, 0.0, 0.0, 9.0, 9.0, "a b")]
+                return [(1, 0.0, 0.0, 90.0, 20.0,
+                         "Fig. 1. A caption and nothing else on the page.")]
+            CI.text_blocks = fake
+            return self
+        def __exit__(self, *exc):
+            CI.text_blocks = self.real
+
+    with _CaptionBait():
+        _out_c = tempfile.mkdtemp(prefix="fdt_v921c_", dir=ROOT)
+        _rc, _lc = CI.intake_document(_p2, "SD927", _out_c,
+                                      backend="PDFMINER_TEXT_BLOCKS")
+    check("a backend offering a caption but no text does not win the switch",
+          _lc["Text_Backend_Status"] == "TEXT_EXTRACTION_INCOMPLETE",
+          "%s (%d rows)" % (_lc["Text_Backend_Status"], len(_rc)))
+    check("and no draft row is written from it",
+          not _rc, "%s" % [r["Figure_Number"] for r in _rc])
+
 print()
 print("the schema the rest of the package will read")
 import batch_manifests as BM                                    # noqa: E402

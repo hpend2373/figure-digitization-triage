@@ -1453,7 +1453,7 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
                       "the file is not a PDF, a JATS full text or plain text")
     pages = page_count(path)
     base["Page_Count"] = pages or ""
-    method = backend
+    method, retry_note = backend, ""
     try:
         method = method or _default_backend()
     except BackendUnavailable as exc:
@@ -1487,11 +1487,38 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
     independent = independent_text_volume(path)
     share = (got / independent) if independent else None
     if share is not None and share < TEXT_VOLUME_FLOOR:
-        return refuse("TEXT_EXTRACTION_INCOMPLETE",
-                      "%s returned %d characters where an independent reader "
-                      "sees %d (%.0f%%); this document has not been read"
-                      % (method, got, independent, 100 * share),
-                      Text_Block_Count=len(blocks), Caption_Candidate_Count=0)
+        # THE LEDGER SAID "retry with the other backend", and a remedy the
+        # walk names but does not take is a remedy nobody takes: the first
+        # corpus run left three publications' twelve figures out of the draft
+        # while a second, hand-run pass recovered every one of them. So the
+        # walk takes it, and records WHICH backend read the document in every
+        # row's `Extraction_Method` - a caption box from one is not a caption
+        # box from the other, and the file has to say which.
+        #
+        # The switch is decided on TEXT VOLUME, before a caption is looked at.
+        # It cannot become "try backends until the figures appear".
+        other = ("POPPLER_BBOX_LAYOUT" if method == "PDFMINER_TEXT_BLOCKS"
+                 else "PDFMINER_TEXT_BLOCKS")
+        declared, retried = method, None
+        try:
+            retried = text_blocks(path, backend=other)
+        except Exception:
+            retried = None
+        got_other = sum(len(" ".join(b[5].split())) for b in (retried or []))
+        if retried and independent and got_other / independent >= TEXT_VOLUME_FLOOR:
+            base["Text_Backend"] = method = other
+            blocks = retried
+            retry_note = ("%s returned %.0f%% of the text an independent "
+                          "reader sees, so %s was used instead"
+                          % (declared, 100 * share, other))
+        else:
+            return refuse(
+                "TEXT_EXTRACTION_INCOMPLETE",
+                "%s returned %d characters where an independent reader sees "
+                "%d (%.0f%%), and %s did no better (%d); this document has "
+                "not been read"
+                % (method, got, independent, 100 * share, other, got_other),
+                Text_Block_Count=len(blocks), Caption_Candidate_Count=0)
     rows = draft_rows(path, document_id, backend=method, page_rasters=rasters,
                       blocks=blocks)
     low = sum(1 for r in rows if float(r["Confidence"]) < LOW_CONFIDENCE)
@@ -1519,7 +1546,7 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
                             Text_Backend_Status="TEXT_LAYER_OK",
                             Required_Action=RENDER_ACTION.get(
                                 render_status, "RENDER_CONTACT_SHEET"),
-                            **base)
+                            Detail=retry_note, **base)
 
 
 def page_sizes(path, rasters=None):

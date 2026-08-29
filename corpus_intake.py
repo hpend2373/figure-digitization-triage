@@ -276,6 +276,37 @@ EXTENDED_RE = re.compile(
 FIGURE_SERIES = (("EXTFIG", EXTENDED_RE), ("FIG", CAPTION_RE))
 
 
+#: A line that opens like a caption but whose number will not parse. The label
+#: is one to three characters that are not a number - publication 554 prints
+#: its first caption as "Fig.l." with a lower-case L, and BOTH readers report
+#: the letter, because the letter is what the file holds. Reading it as a 1
+#: would read every "Fig. a" as a number too.
+#:
+#: What was wrong was not refusing the number. It was dropping the CAPTION with
+#: it: the figure vanished from the draft, and the sheet had nothing to show a
+#: person who could have settled it in a second by looking at the page.
+UNREADABLE_LABEL_RE = re.compile(
+    r"^\s*(?:Fig(?:ure)?\.?|FIG(?:URE)?\.?|图|圖)\s*"
+    r"([^\s.:;,]{1,3})[.\s:]\s*(.*)", re.S)
+
+#: Below this the line is a fragment - "Fig." on its own, a header - and not a
+#: caption anybody could confirm.
+_UNREADABLE_MIN_BODY = 20
+
+
+def unreadable_label(line):
+    """(token, body) when a line opens like a caption but has no number."""
+    if CAPTION_RE.match(line) or EXTENDED_RE.match(line):
+        return None
+    match = UNREADABLE_LABEL_RE.match(line or "")
+    if not match:
+        return None
+    token, body = match.group(1), " ".join(match.group(2).split())
+    if token.isdigit() or len(body) < _UNREADABLE_MIN_BODY:
+        return None
+    return (token, body)
+
+
 def figure_identifier(label):
     """(identifier, number, series, body) for a label, or None if unreadable.
 
@@ -555,10 +586,20 @@ def caption_candidates(blocks):
         for offset, line in enumerate(lines):
             match = CAPTION_RE.match(line)
             if not match:
+                # A caption whose number will not parse is still a caption, and
+                # dropping it took publication 554's first figure out of the
+                # draft entirely. It comes through with no number and says so.
+                bad = unreadable_label(line)
+                if bad:
+                    out.append(dict(page=page, number="", readable=False,
+                                    text=" ".join(line.split()),
+                                    bbox=(x0, y0, x1, y1),
+                                    line_offset=offset, token=bad[0],
+                                    body=bad[1]))
                 continue
             if PANEL_SUFFIX_RE.match(match.group(1)):
                 continue
-            out.append(dict(page=page, number=match.group(1),
+            out.append(dict(page=page, number=match.group(1), readable=True,
                             text=" ".join(line.split()),
                             bbox=(x0, y0, x1, y1),
                             # The block this line sits in. Zero means the
@@ -779,11 +820,19 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
     # out at full confidence.
     labels = {}
     for candidate in candidates:
-        labels[candidate["number"]] = labels.get(candidate["number"], 0) + 1
+        if candidate.get("readable", True):
+            labels[candidate["number"]] = labels.get(candidate["number"], 0) + 1
     digest = file_sha256(path)
     rows = []
     for i, candidate in enumerate(candidates, start=1):
-        score, why = _confidence(candidate, labels[candidate["number"]], blocks)
+        if candidate.get("readable", True):
+            score, why = _confidence(candidate, labels[candidate["number"]],
+                                     blocks)
+        else:
+            score, why = 0.0, (
+                "the line opens like a caption but its number reads as %r, "
+                "which is not a number; a person has to supply it"
+                % candidate.get("token", ""))
         raster = (page_rasters or {}).get(candidate["page"], "")
         rows.append({
             "Draft_ID": "%s_D%03d" % (document_id, i),
@@ -798,7 +847,8 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             # row whose picture is a strip of white are different problems and
             # the sheet shows them differently.
             "Crop_Quality_Status": "NO_CROP",
-            "Figure_Number": "FIG%s" % candidate["number"],
+            "Figure_Number": ("FIG%s" % candidate["number"]
+                              if candidate.get("readable", True) else ""),
             # The words the page actually prints, kept beside the identifier
             # this module derived from them, so a wrong derivation is visible
             # without going back to the PDF.
@@ -810,8 +860,8 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             # into their first occurrence; a consumer that reads this column
             # cannot make that mistake without ignoring it.
             "Label_Repeats_In_Document": (
-                "%d" % labels[candidate["number"]]
-                if labels[candidate["number"]] > 1 else ""),
+                "%d" % labels.get(candidate["number"], 0)
+                if labels.get(candidate["number"], 0) > 1 else ""),
             "Caption_Text": candidate["text"],
             "Caption_BBox": _bbox_text(candidate["bbox"]),
             "Figure_BBox": _bbox_text(figure_bbox(candidate, blocks)),
@@ -825,6 +875,60 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             "Note": "",
         })
     return rows
+
+
+def second_opinion_rows(path, document_id, method, blocks, rows, rasters=None):
+    """Draft rows for captions only the OTHER backend found.
+
+    Never replaces what the chosen backend read: these are additions, each one
+    saying which reader saw it and carrying no confidence, because two tools
+    disagreeing about a caption is exactly the case a person has to settle.
+    """
+    other = ("POPPLER_BBOX_LAYOUT" if method == "PDFMINER_TEXT_BLOCKS"
+             else "PDFMINER_TEXT_BLOCKS")
+    try:
+        alt = text_blocks(path, backend=other)
+    except Exception:
+        return []
+    have = {(r["Page"], r["Figure_Number"]) for r in rows}
+    digest = rows[0]["Source_File_SHA256"] if rows else file_sha256(path)
+    extra, seen = [], set()
+    for candidate in caption_candidates(alt):
+        if not candidate.get("readable", True):
+            continue
+        key = (candidate["page"], "FIG%s" % candidate["number"])
+        if key in have or key in seen:
+            continue
+        seen.add(key)
+        raster = (rasters or {}).get(candidate["page"], "")
+        extra.append({
+            "Draft_ID": "%s_S%03d" % (document_id, len(extra) + 1),
+            "Source_Document_ID": document_id,
+            "Source_File": os.path.basename(path),
+            "Source_File_SHA256": digest,
+            "Page": candidate["page"],
+            "Page_Raster": raster,
+            "Page_Raster_SHA256": file_sha256(raster) if raster else "",
+            "Figure_Crop": "", "Crop_Quality_Status": "NO_CROP",
+            "Figure_Number": "FIG%s" % candidate["number"],
+            "Figure_Label_Raw": candidate["text"][:60],
+            "Label_Repeats_In_Document": "",
+            "Caption_Text": candidate["text"],
+            "Caption_BBox": _bbox_text(candidate["bbox"]),
+            "Figure_BBox": _bbox_text(figure_bbox(candidate, alt)),
+            "Extraction_Method": other,
+            "Confidence": "0.00",
+            "Confidence_Reason": (
+                "only %s found this caption; %s did not, and two readers "
+                "disagreeing about a caption is for a person to settle"
+                % (other, method)),
+            "Human_Verification_Status": DRAFT_PENDING,
+            "Verified_By": "", "Verified_At": "",
+            "Observed_Panel_Count": "",
+            "Note": "found by the second reader, not by the one this document "
+                    "was read with",
+        })
+    return extra
 
 
 def render_pages(path, out_dir, dpi=150, first=None, last=None):
@@ -1521,6 +1625,18 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
                 Text_Block_Count=len(blocks), Caption_Candidate_Count=0)
     rows = draft_rows(path, document_id, backend=method, page_rasters=rasters,
                       blocks=blocks)
+    # TWO READERS CAN AGREE ABOUT THE TEXT AND DISAGREE ABOUT THE CAPTIONS.
+    # Publication 563 hands pdfminer a block holding just "Fig." with the
+    # number in the next one, at a text volume of 1.00, so the volume check has
+    # nothing to catch and Fig. 6 simply was not in the draft. Reading with the
+    # other backend as well and keeping what only IT saw costs a second read
+    # and stops a figure disappearing between two tools that both work.
+    #
+    # The extra rows are marked, not trusted: they carry the backend that found
+    # them and a confidence of zero, so the sheet blocks them and a person
+    # settles each one against the page.
+    rows.extend(second_opinion_rows(path, document_id, method, blocks, rows,
+                                    rasters))
     low = sum(1 for r in rows if float(r["Confidence"]) < LOW_CONFIDENCE)
     base.update(Text_Block_Count=len(blocks), Caption_Candidate_Count=len(rows),
                 Low_Confidence_Count=low)

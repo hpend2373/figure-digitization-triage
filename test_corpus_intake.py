@@ -518,16 +518,95 @@ else:
     _real_blocks = CI.text_blocks
 
     def _counted(path, backend=None):
-        _parses.append(path)
+        _parses.append((path, backend))
         return _real_blocks(path, backend=backend)
 
     CI.text_blocks = _counted
     try:
-        CI.intake_document(_pdfs[0], "ONCE", os.path.join(ROOT, "once"))
+        _, _once_led = CI.intake_document(_pdfs[0], "ONCE",
+                                          os.path.join(ROOT, "once"))
     finally:
         CI.text_blocks = _real_blocks
-    check("a document's text layer is read exactly once",
-          _parses.count(_pdfs[0]) == 1, "%d parses" % _parses.count(_pdfs[0]))
+    _chosen = _once_led["Text_Backend"]
+    check("the backend a document is read with is parsed exactly once",
+          sum(1 for p, b in _parses
+              if p == _pdfs[0] and b == _chosen) == 1,
+          "%s" % [b for p, b in _parses if p == _pdfs[0]])
+    # The SECOND reader is a different backend, deliberately: two of them can
+    # agree about how much text a page holds and disagree about whether a
+    # caption is in it. What it may not do is break the walk, so it swallows
+    # its own failures.
+    _other = ("POPPLER_BBOX_LAYOUT" if _chosen == "PDFMINER_TEXT_BLOCKS"
+              else "PDFMINER_TEXT_BLOCKS")
+    check("and the other backend is asked once, for a second opinion",
+          sum(1 for p, b in _parses if p == _pdfs[0] and b == _other) <= 1,
+          "%s" % [b for p, b in _parses if p == _pdfs[0]])
+
+    def _explodes(path, backend=None):
+        if backend == _other:
+            raise RuntimeError("the second reader fell over")
+        return _real_blocks(path, backend=backend)
+
+    CI.text_blocks = _explodes
+    try:
+        _br, _bl2 = CI.intake_document(_pdfs[0], "ONCE2",
+                                       os.path.join(ROOT, "once2"))
+    finally:
+        CI.text_blocks = _real_blocks
+    check("a second reader that falls over does not take the document with it",
+          _bl2["Text_Backend_Status"] == "TEXT_LAYER_OK" and len(_br) > 0,
+          "%s / %d rows" % (_bl2["Text_Backend_Status"], len(_br)))
+
+    # WHAT THE SECOND READER IS FOR. pdfminer hands publication 563's page a
+    # block holding only "Fig." with the number in the next one; poppler reads
+    # the caption whole. Text volume is 1.00 either way, so nothing else here
+    # notices, and Fig. 6 was simply absent from the draft.
+    # Both readers get the SAME body text, so the volume check has nothing to
+    # act on - otherwise the fixture triggers the backend switch instead of
+    # the disagreement it is meant to test.
+    _body = [(1, 40.0, 100.0, 300.0, 260.0,
+              "Body text of the article, long enough that both readers agree "
+              "about how much of this page they can see, which is the whole "
+              "point: the volume check must have nothing to say here. " * 6)]
+    _split = _body + [(1, 40.0, 300.0, 60.0, 312.0, "Fig."),
+                      (1, 62.0, 300.0, 300.0, 312.0,
+                       "6. Individual and group mean changes in pressure.")]
+    _whole = _body + [(1, 40.0, 300.0, 300.0, 312.0,
+                       "Fig. 6. Individual and group mean changes in "
+                       "pressure.")]
+    check("the reader that splits the label finds no caption",
+          CI.caption_candidates(_split) == [])
+    check("and the one that does not, finds it",
+          [c["number"] for c in CI.caption_candidates(_whole)] == ["6"])
+
+    class _Disagree(object):
+        def __enter__(self):
+            self.real = CI.text_blocks
+            CI.text_blocks = lambda path, backend=None: (
+                _split if backend == "PDFMINER_TEXT_BLOCKS" else _whole)
+            return self
+        def __exit__(self, *exc):
+            CI.text_blocks = self.real
+
+    with _Disagree():
+        _out_d = tempfile.mkdtemp(prefix="fdt_v923_", dir=ROOT)
+        _rd2, _ld2 = CI.intake_document(_pdfs[0], "SD928", _out_d,
+                                        backend="PDFMINER_TEXT_BLOCKS")
+    check("the fixture did not trip the backend switch - the disagreement is "
+          "what is being tested",
+          _ld2["Text_Backend"] == "PDFMINER_TEXT_BLOCKS",
+          "%s: %s" % (_ld2["Text_Backend"], _ld2["Detail"][:60]))
+    _found = [r for r in _rd2 if r["Figure_Number"] == "FIG6"]
+    check("a caption only the second reader sees still reaches the draft",
+          len(_found) == 1, "%s" % [r["Figure_Number"] for r in _rd2])
+    check("it says which reader found it, and which did not",
+          _found and _found[0]["Extraction_Method"] == "POPPLER_BBOX_LAYOUT"
+          and "did not" in _found[0]["Confidence_Reason"],
+          "%s" % (_found[0] if _found else None))
+    check("and it carries no confidence, so nothing downstream trusts it",
+          _found and _found[0]["Confidence"] == "0.00")
+    check("a caption both readers see is not added twice",
+          len([r for r in _rd2 if r["Figure_Number"] == "FIG6"]) == 1)
     # And the count in the ledger is the one `page_count` gives, whatever that
     # is on this machine - checked by making it say something no text layer
     # could.
@@ -1074,10 +1153,30 @@ check("a two-digit number is not mistaken for a panel letter",
 # in the file. Reading it as a 1 would mean reading every "Fig. a", "Fig. l"
 # and "Fig. I" as a number too, and there is no way to be right about which.
 # The figure stays missing and a person supplies it.
-check("a label whose number is a letter is refused, not guessed",
+_letter = CI.caption_candidates(
+    [(5, 0.0, 0.0, 9.0, 9.0,
+      "Fig.l. Mean changes in time and frequency domain analysis")])
+check("a label whose number is a letter gets no number - none is guessed",
+      len(_letter) == 1 and _letter[0]["number"] == "", "%s" % (_letter,))
+check("but the caption is not dropped, because a person can settle it by "
+      "looking at the page",
+      _letter and _letter[0]["readable"] is False
+      and "Mean changes" in _letter[0]["text"])
+check("a bare 'Fig.' fragment is not made into a row",
+      CI.caption_candidates([(5, 0.0, 0.0, 9.0, 9.0, "Fig.")]) == [])
+check("a numbered caption is unaffected and still carries its number",
+      [c["number"] for c in CI.caption_candidates(
+          [(5, 0.0, 0.0, 9.0, 9.0,
+            "Fig. 1. Mean changes in time and frequency domain analysis")])]
+      == ["1"])
+check("a short tail after an unreadable label is a fragment, not a caption",
       CI.caption_candidates(
-          [(5, 0.0, 0.0, 9.0, 9.0, "Fig.l. Mean changes in time and frequency")])
-      == [])
+          [(5, 0.0, 0.0, 9.0, 9.0, "Fig.l. Mean")]) == [],
+      "%s" % CI.caption_candidates([(5, 0.0, 0.0, 9.0, 9.0, "Fig.l. Mean")]))
+check("and a caption-length tail after the same label is kept",
+      len(CI.caption_candidates(
+          [(5, 0.0, 0.0, 9.0, 9.0,
+            "Fig.l. Mean changes in time and frequency domain")])) == 1)
 check("and the same caption with a real digit reads",
       [h["number"] for h in CI.caption_candidates(
           [(5, 0.0, 0.0, 9.0, 9.0, "Fig.1. Mean changes in time and frequency")])]
@@ -1201,6 +1300,18 @@ check("a figure number used twice in one document says so on both rows",
 check("the column is in the schema, so a reader cannot miss it",
       "Label_Repeats_In_Document" in CI.DRAFT_COLUMNS
       and "Figure_Label_Raw" in CI.DRAFT_COLUMNS)
+
+# ...and the row that reaches the file carries no number either. The token is
+# the page's own characters, not a figure number, and writing "FIGl" would put
+# an identifier in the draft that no figure answers to.
+_unread = CI.draft_rows.__wrapped__ if hasattr(CI.draft_rows, "__wrapped__") \
+    else CI.draft_rows
+_ur = [c for c in CI.caption_candidates(
+    [(3, 40.0, 200.0, 300.0, 214.0,
+      "Fig.l. Mean changes (Mean+-SE) in time and frequency domain analysis")])]
+check("the unreadable candidate reaches draft_rows with an empty number",
+      _ur and _ur[0]["number"] == "" and _ur[0]["token"] == "l",
+      "%s" % (_ur,))
 
 
 print()
@@ -1422,6 +1533,23 @@ else:
           all(r["Figure_Label_Raw"] for r in _r2))
     check("a document whose numbers are all distinct marks no repeat",
           all(r["Label_Repeats_In_Document"] == "" for r in _r2))
+
+    # THE ROW, not just the candidate. Writing "FIGl" would put an identifier
+    # in the draft that no figure in the paper answers to - the same class of
+    # defect as numbering a figure by its position in the file.
+    _lpdf = minimal_pdf(os.path.join(ROOT, "letter.pdf"),
+                        [[(72, 600, "Fig.l. Mean changes in time and "
+                                    "frequency domain analysis of R-R.")]])
+    _lr = CI.draft_rows(_lpdf, "SDL")
+    check("a caption whose number is a letter becomes a row with NO number",
+          len(_lr) == 1 and _lr[0]["Figure_Number"] == "",
+          "%s" % [r["Figure_Number"] for r in _lr])
+    check("the row keeps the words the page printed",
+          _lr and "Mean changes" in _lr[0]["Caption_Text"])
+    check("and says why it has no number",
+          _lr and _lr[0]["Confidence"] == "0.00"
+          and "not a number" in _lr[0]["Confidence_Reason"],
+          "%s" % (_lr[0]["Confidence_Reason"] if _lr else None))
 
     _dupdoc = minimal_pdf(os.path.join(ROOT, "v920dup.pdf"),
                           [[(72, 600, "Figure 1 First chapter opening figure.")],

@@ -115,6 +115,27 @@ check("regions_on answers with the labels on that page only",
       "%s" % sorted(T.regions_on("516", "4")))
 check("and nothing for a page that has none",
       T.regions_on("516", "99") == {})
+check("the fixture covers the pages both audits ruled on, not a handful",
+      len(T.VISUAL_VERDICT) >= 18, "%d" % len(T.VISUAL_VERDICT))
+check("and it is not lopsided - a threshold cannot be fitted to one side",
+      3 <= sum(1 for v in T.VISUAL_VERDICT.values() if v == "WRONG")
+      <= len(T.VISUAL_VERDICT) - 3,
+      "%s" % sorted(T.VISUAL_VERDICT.values()))
+check("more than one publication is represented on each side",
+      len({k[0] for k, v in T.VISUAL_VERDICT.items() if v == "OK"}) >= 3
+      and len({k[0] for k, v in T.VISUAL_VERDICT.items()
+               if v == "WRONG"}) >= 3)
+
+# A SCORE IS NOT A VERDICT. A figure nobody has judged is measured, never
+# decided: manufacturing the judgement the harness exists to reproduce is the
+# one way it could go quietly wrong again.
+_unjudged = [k for k in T.FIGURE_REGIONS if k not in T.VISUAL_VERDICT]
+check("figures with no recorded verdict exist and are kept separate",
+      len(_unjudged) > 0, "%s" % _unjudged)
+check("calibration is computed only over the judged ones",
+      R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged]) 
+      == [(k, v, "not scored") for k, v in sorted(T.VISUAL_VERDICT.items())],
+      "%d" % len(R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % PASSED[0])

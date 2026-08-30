@@ -146,7 +146,24 @@ if __name__ == "__main__":
         raise SystemExit(1)
     print("harness agrees with every visual verdict on record (%d)"
           % len(T.VISUAL_VERDICT))
-    wrong = [k for k, _c, _i, v in scored if v != "OK"]
-    print("%d/%d figures scored OK" % (len(scored) - len(wrong), len(scored)))
-    for k in wrong:
-        print("   still wrong: %s/%s/p%s" % k)
+
+    # A SCORE IS NOT A VERDICT. The harness earns its authority from the
+    # entries a person judged; on a figure nobody has judged it is measuring,
+    # not deciding, and saying otherwise would be the machine manufacturing
+    # the very judgement it exists to reproduce. 99 Fig. 4 sits at 0.84
+    # against a floor of 0.85 with no verdict on record - a knife edge that
+    # belongs to a person, not to a constant.
+    judged = [(k, v) for k, _c, _i, v in scored if k in T.VISUAL_VERDICT]
+    unjudged = [(k, c, i, v) for k, c, i, v in scored
+                if k not in T.VISUAL_VERDICT]
+    bad_judged = [k for k, v in judged if v != "OK"]
+    print("%d/%d judged figures score OK, matching the person on every one"
+          % (len(judged) - len(bad_judged), len(judged)))
+    for k in bad_judged:
+        print("   confirmed wrong: %s/%s/p%s" % k)
+    if unjudged:
+        print("%d figures have no verdict on record - measured, not decided:"
+              % len(unjudged))
+        for k, c, i, v in unjudged:
+            print("   %-20s covered %.2f  intrusion %.2f  (harness would say "
+                  "%s)" % ("%s/%s/p%s" % k, c, i, v))

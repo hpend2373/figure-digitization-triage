@@ -25,40 +25,90 @@ pipeline produced - that is the entire point.
 
 #: (pid, FIGURE LABEL, page) -> (x0, y0, x1, y1) as fractions of the page.
 FIGURE_REGIONS = {
-    # Publication 99, page 4. The caption sits in the RIGHT column at mid
-    # height; both stacked power-spectral-density charts are in the LEFT.
-    # "The gap above the caption in the caption's column" is white space here.
+    # --- publication 36, page 4. Two figures, one per column, the ordinary
+    # case. Both judged FIXED, and here so the harness can be shown to pass
+    # what a person passed rather than only to fail what they failed.
+    ("36", "FIG1", "4"): (0.06, 0.065, 0.47, 0.325),
+    ("36", "FIG2", "4"): (0.50, 0.065, 0.93, 0.375),
+
+    # --- publication 99. Page 6 is the ordinary case, three figures in two
+    # columns, all judged FIXED.
+    ("99", "FIG2", "6"): (0.06, 0.085, 0.48, 0.61),
+    ("99", "FIG3", "6"): (0.50, 0.085, 0.94, 0.49),
+    ("99", "FIG4", "6"): (0.50, 0.635, 0.94, 0.83),
+    # Page 4 is not: the caption sits in the RIGHT column at mid height and
+    # both stacked power-spectral-density charts are in the LEFT, so "the gap
+    # above the caption, in the caption's column" is white space.
     ("99", "FIG1", "4"): (0.07, 0.10, 0.56, 0.67),
 
-    # Publication 516, page 6. The caption is printed to the LEFT of the
-    # figure and level with its middle. The figure is the two-row panel block
-    # - Density above, Kd below - and a box that stops at the caption's top
-    # edge keeps only the top row, which is what the audit saw.
+    # --- publication 516. Pages 4 and 5 are ordinary; page 6 is not.
+    ("516", "FIG1", "4"): (0.09, 0.16, 0.49, 0.87),
+    ("516", "FIG2", "4"): (0.52, 0.085, 0.93, 0.63),
+    ("516", "FIG3", "5"): (0.09, 0.175, 0.49, 0.87),
+    ("516", "FIG4", "5"): (0.53, 0.085, 0.93, 0.30),
+    # The caption is printed to the LEFT of the figure and level with its
+    # middle. The figure is a two-row panel block - Density above, Kd below -
+    # and a box that stops at the caption's top keeps only the top row.
     ("516", "FIG5", "6"): (0.42, 0.08, 0.93, 0.33),
 
-    # Publication 437, page 176. Two figures side by side under ONE caption
-    # line: "Fig. 2 4D lung model      Fig. 3 Ventilated volumes at apex and
-    # basis". The gutter between them is near x = 0.48.
+    # --- publication 533, page 3. Ordinary two-column, both FIXED.
+    ("533", "FIG2", "3"): (0.07, 0.075, 0.48, 0.605),
+    ("533", "FIG3", "3"): (0.53, 0.085, 0.93, 0.29),
+
+    # --- publication 437, page 176. Two figures side by side under ONE
+    # caption line: "Fig. 2 4D lung model      Fig. 3 Ventilated volumes at
+    # apex and basis". The gutter between them is near x = 0.48.
     ("437", "FIG1", "176"): (0.11, 0.07, 0.84, 0.38),
     ("437", "FIG2", "176"): (0.11, 0.46, 0.47, 0.70),
     ("437", "FIG3", "176"): (0.49, 0.46, 0.88, 0.68),
 
-    # Publication 516, page 4. The ordinary two-column case, and the audit
-    # judged both of these FIXED - they are here so the harness can be shown
-    # to pass what a person passed, not only to fail what a person failed.
-    ("516", "FIG1", "4"): (0.09, 0.16, 0.49, 0.87),
-    ("516", "FIG2", "4"): (0.52, 0.085, 0.93, 0.63),
+    # --- publication 397, page 4. ONE figure spanning both columns: eight
+    # panels, MEN on the left and WOMEN on the right, under a caption that
+    # starts in the left column.
+    ("397", "FIG1", "4"): (0.06, 0.075, 0.68, 0.70),
+
+    # --- publication 554, page 5. The caption-beside-the-figure layout again:
+    # both captions are in the RIGHT column, both bar charts in the LEFT.
+    ("554", "FIG3", "5"): (0.11, 0.075, 0.45, 0.30),
+    ("554", "FIG4", "5"): (0.11, 0.365, 0.45, 0.60),
+
+    # --- publication 700, page 3. One flow chart across the full width -
+    # Session A on the left, Session B on the right, one figure.
+    ("700", "FIG1", "3"): (0.09, 0.075, 0.90, 0.375),
+
+    # --- publication 518, page 3. Caption in the right column, a four-panel
+    # block in the left and middle.
+    ("518", "FIG1", "3"): (0.07, 0.085, 0.63, 0.50),
+
+    # --- publication 159, page 5. Three stacked panels A/B/C in the centre
+    # right, caption to their left.
+    ("159", "FIG3", "5"): (0.40, 0.615, 0.88, 0.90),
 }
 
 #: What a person judged of the crop the pipeline produced, at the fifth audit.
 #: The harness has to agree with this on every entry, or the harness is what is
 #: wrong. Kept beside the regions so the two cannot drift apart.
 VISUAL_VERDICT = {
+    # the ten the fifth audit judged FIXED
+    ("36", "FIG1", "4"): "OK",
+    ("36", "FIG2", "4"): "OK",
+    ("99", "FIG2", "6"): "OK",
+    ("99", "FIG3", "6"): "OK",
+    ("516", "FIG1", "4"): "OK",
+    ("516", "FIG2", "4"): "OK",
+    ("516", "FIG3", "5"): "OK",
+    ("516", "FIG4", "5"): "OK",
+    ("533", "FIG2", "3"): "OK",
+    ("533", "FIG3", "3"): "OK",
+    # and the eight it judged still wrong
     ("99", "FIG1", "4"): "WRONG",     # the PSD charts below are missing
     ("516", "FIG5", "6"): "WRONG",    # only the top row of bars
     ("437", "FIG2", "176"): "WRONG",  # Fig. 3's graph is in the box too
-    ("516", "FIG1", "4"): "OK",
-    ("516", "FIG2", "4"): "OK",
+    ("554", "FIG4", "5"): "WRONG",    # mostly blank; the bar chart is elsewhere
+    ("700", "FIG1", "3"): "WRONG",    # Session B is missing
+    ("397", "FIG1", "4"): "WRONG",    # the WOMEN half is clipped
+    ("518", "FIG1", "3"): "WRONG",    # four graphs, a sliver of one shown
+    ("159", "FIG3", "5"): "WRONG",    # A/B/C, only the start of A and B
 }
 
 

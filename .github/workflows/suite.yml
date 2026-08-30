@@ -79,7 +79,7 @@ jobs:
                    test_bar_reader test_mark_readers test_mono_bar \
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
-                   test_compile_plan test_corpus_intake \
+                   test_compile_plan test_corpus_intake test_sheet_blocks \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
@@ -258,7 +258,7 @@ jobs:
                    test_bar_reader test_mark_readers test_mono_bar \
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
-                   test_compile_plan test_corpus_intake \
+                   test_compile_plan test_corpus_intake test_sheet_blocks \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
@@ -295,9 +295,19 @@ jobs:
       - name: the intake suite ran its PDF sections
         run: |
           set -e
+          # ONE NUMBER, ONE PLACE - and this was not it. This literal sat at
+          # 149 through four rounds that added 102 scenarios to the suite, so
+          # the job that exists to prove the PDF sections ran was the job that
+          # went red for them running. The count now comes from README, beside
+          # every other count this repository publishes, and
+          # `verify_documented_status.py` is what keeps THAT honest.
+          want="$(sed -nE 's/^<!-- CURRENT_INTAKE_FULL_SCENARIOS: ([0-9]+) -->$/\1/p' README.md)"
+          test -n "$want" || { echo "README carries no CURRENT_INTAKE_FULL_SCENARIOS marker"; exit 1; }
           got="$(awk -F'\t' '$1 == "test_corpus_intake.py" {print $2}' scenario-counts.tsv)"
-          test "$got" = "149" || {
-            echo "test_corpus_intake reported $got with the backends installed, expected 149"
+          test "$got" = "$want" || {
+            echo "test_corpus_intake reported $got with the backends installed;"
+            echo "README says CURRENT_INTAKE_FULL_SCENARIOS: $want."
+            echo "If the suite legitimately grew, update the marker in README."
             exit 1
           }
           ! grep -q "SKIP the PDF adapter" <(python test_corpus_intake.py) || {

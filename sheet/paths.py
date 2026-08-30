@@ -31,3 +31,5 @@ REPO = _p("FDT_REPO", "/home/claude/geo/verify")
 PAGES = _p("FDT_PAGES", os.path.join(DRAFT, "pages"))
 #: Source documents, listed one absolute path per line.
 STAGED = _p("FDT_STAGED", "/tmp/wl/staged_paths.txt")
+#: The worklist-to-document map the crop harness reads to find a pid's PDF.
+CROSSCHECK = _p("FDT_CROSSCHECK", "/tmp/intake/crosscheck.json")

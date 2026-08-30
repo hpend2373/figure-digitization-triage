@@ -23,8 +23,10 @@ these scenarios are about the two properties that made the old one useless:
 Reads no files: the pages are publisher PDFs and cannot be published, but the
 geometry and the arithmetic can be, and they are what goes wrong.
 """
+import csv
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "sheet"))
@@ -132,8 +134,33 @@ check("more than one publication is represented on each side",
 _unjudged = [k for k in T.FIGURE_REGIONS if k not in T.VISUAL_VERDICT]
 check("figures with no recorded verdict exist and are kept separate",
       len(_unjudged) > 0, "%s" % _unjudged)
+# THE HARNESS READS THE DRAFT. It used to call `figure_bbox` itself, on
+# whatever backend the machine happened to default to, so it graded a box the
+# shipped draft may never have held: publication 437's Fig. 3 came back
+# "NO_BOX" for four rounds while the draft had carried the row since v9.23,
+# found by the second reader after pdfminer merged that caption into the line
+# above.
+_dir = tempfile.mkdtemp(prefix="fdt_truth_")
+with open(os.path.join(_dir, "figure_intake_draft.csv"), "w",
+          encoding="utf-8") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(["Source_Document_ID", "Figure_Number", "Page", "Figure_BBox"])
+    _w.writerow(["DOC", "FIG1", "4", "10,20,110,220"])
+    _w.writerow(["DOC", "FIG2", "4", ""])
+    _w.writerow(["DOC", "FIG3", "4", "5,5,50,50"])
+    _w.writerow(["DOC", "FIG3", "4", "999,999,1000,1000"])
+_boxes = R.draft_boxes(_dir)
+check("a box in the draft is what gets graded",
+      _boxes[("DOC", "FIG1", "4")] == "10,20,110,220", "%s" % _boxes)
+check("a row with no box contributes none",
+      ("DOC", "FIG2", "4") not in _boxes)
+check("the first row for a figure wins, so a later duplicate cannot displace it",
+      _boxes[("DOC", "FIG3", "4")] == "5,5,50,50")
+check("the box is scaled to the page, not left in points",
+      R.box_for.__doc__ and "fractions" in R.box_for.__doc__)
+
 check("calibration is computed only over the judged ones",
-      R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged]) 
+      R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])
       == [(k, v, "not scored") for k, v in sorted(T.VISUAL_VERDICT.items())],
       "%d" % len(R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])))
 

@@ -61,22 +61,40 @@ def page_size(path, page):
     return (max(b[3] for b in bl), max(b[4] for b in bl))
 
 
-def box_for(path, page, label):
-    """The pipeline's box for one figure, as fractions of the page."""
+def draft_boxes(draft_dir):
+    """{(document, label, page): "x0,y0,x1,y1"} straight out of the draft.
+
+    READ, NOT RECOMPUTED. The harness used to call `figure_bbox` itself, on
+    whatever backend `_default_backend` picks - so it graded a box the shipped
+    draft may never have contained. Publication 437's Fig. 3 came back
+    "NO_BOX" for four rounds that way, while the draft had held the row since
+    v9.23: the second reader found the caption, pdfminer had merged it into
+    the line above, and the harness only ever asked pdfminer.
+
+    A harness has to measure the artifact that ships.
+    """
+    out = {}
+    with io.open(os.path.join(draft_dir, "figure_intake_draft.csv"),
+                 encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            key = (row["Source_Document_ID"], row["Figure_Number"],
+                   row["Page"])
+            if row.get("Figure_BBox"):
+                out.setdefault(key, row["Figure_BBox"])
+    return out
+
+
+def box_for(path, page, label, boxes, document):
+    """The DRAFT's box for one figure, as fractions of the page."""
     size = page_size(path, page)
-    if not size:
+    raw = boxes.get((document, label, str(page)))
+    if not size or not raw:
         return None
-    for c in CI.caption_candidates(blocks_for(path)):
-        if c["page"] != page or not c.get("readable", True):
-            continue
-        if "FIG" + c["number"].upper() != label:
-            continue
-        b = CI.figure_bbox(c, blocks_for(path))
-        if not b:
-            return None
-        return (b[0] / size[0], b[1] / size[1],
-                b[2] / size[0], b[3] / size[1])
-    return None
+    try:
+        x0, y0, x1, y1 = [float(v) for v in raw.split(",")]
+    except ValueError:
+        return None
+    return (x0 / size[0], y0 / size[1], x1 / size[0], y1 / size[1])
 
 
 def verdict(cov, intr):
@@ -87,7 +105,7 @@ def verdict(cov, intr):
     return "OK"
 
 
-def score(source_of):
+def score(source_of, document_of, boxes):
     """[(key, covered, intrusion, verdict)] for every figure with a truth box."""
     out = []
     for (pid, label, page) in sorted(T.FIGURE_REGIONS):
@@ -97,7 +115,7 @@ def score(source_of):
         truth = T.FIGURE_REGIONS[(pid, label, page)]
         others = [b for (p, l, g), b in T.FIGURE_REGIONS.items()
                   if p == pid and g == page and l != label]
-        box = box_for(path, int(page), label)
+        box = box_for(path, int(page), label, boxes, document_of(pid))
         if box is None:
             out.append(((pid, label, page), 0.0, 0.0, "NO_BOX"))
             continue
@@ -130,7 +148,13 @@ if __name__ == "__main__":
         r = by_pid.get(pid)
         return src.get(r["file"]) if r else None
 
-    scored = score(source_of)
+    boxes = draft_boxes(PATHS.DRAFT)
+
+    def document_of(pid):
+        r = by_pid.get(pid)
+        return r["doc"] if r else ""
+
+    scored = score(source_of, document_of, boxes)
     print("%-22s %9s %9s  %s" % ("figure", "covered", "intrusion", "verdict"))
     for key, cov, intr, v in scored:
         print("%-22s %8.2f %9.2f  %s"

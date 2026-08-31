@@ -286,6 +286,53 @@ def write_all_or_nothing(specs):
     return [p for _t, p in staged]
 
 
+def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None):
+    """The whole write protocol, in one place, so both writers share one.
+
+    ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
+    annotate, guard, number, serialise - and the parts CI could see were the
+    pieces, not the order they were called in. Every defect that reached the
+    tables lived in that order: ids minted before the guard so a rerun died on
+    its own previous output, a field added for the guard reaching the CSV
+    writer, one table written before another failed. None of them are visible
+    in a function that is only ever run as a no-op.
+
+    `tables` is [(label, path, fieldnames, existing, intended, key, value)].
+    `assign_ids(label, existing, intended)` fills whatever ordinals the file
+    uses, and is called ONLY after the guard has said to write - an ordinal
+    minted earlier is a claim on a row that may never be written.
+
+    Returns (verdict, written_paths).
+    """
+    verdict_tables = [(label, existing, intended, kf, vf)
+                      for label, _p, _f, existing, intended, kf, vf in tables]
+    may = guard(name, verdict_tables, receipt_dir)
+    if not may:
+        return _last_verdict(receipt_dir, name), []
+    if archive:
+        os.makedirs(archive, exist_ok=True)
+        for label, path, _f, _e, _i, _k, _v in tables:
+            if os.path.exists(path):
+                with io.open(path, encoding='utf-8-sig') as fh:
+                    io.open(os.path.join(archive, os.path.basename(path)), 'w',
+                            encoding='utf-8').write(fh.read())
+    if assign_ids:
+        for label, _p, _f, existing, intended, _k, _v in tables:
+            assign_ids(label, existing, intended)
+    written = write_all_or_nothing(
+        [(path, fieldnames, existing + intended)
+         for _l, path, fieldnames, existing, intended, _k, _v in tables])
+    return 'WRITE', written
+
+
+def _last_verdict(receipt_dir, name):
+    path = os.path.join(receipt_dir, '%s_idempotency.json' % name)
+    try:
+        return json.load(io.open(path, encoding='utf-8'))['verdict']
+    except Exception:
+        return 'UNKNOWN'
+
+
 def state_of(missing, identical, conflict, dup_existing, dup_intended):
     if conflict or dup_existing or dup_intended:
         return CONFLICT

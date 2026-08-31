@@ -50,6 +50,7 @@
     ]
   },
   "supplements": {
+    "_what": "Everything about the SOURCE PUBLICATIONS that the writers need: the supplement filenames, the sentences quoted from their footnotes, the headings printed in their tables, and the per-record constants that describe the study rather than the pipeline.",
     "sources": {
       "REC_ID": "REC_ID_supp_tables.docx"
     },
@@ -59,7 +60,95 @@
     "stratum_headers": {
       "Printed heading in the supplement table": "the label this pipeline uses for it"
     },
-    "comparator_placeholder": "NOT_STATED_IN_SUPPLEMENT_REQUIRES_HUMAN_CONFIRMATION"
+    "comparator_placeholder": "NOT_STATED_IN_SUPPLEMENT_REQUIRES_HUMAN_CONFIRMATION",
+    "r0856_table_order": [
+      "FIRST_EXPOSURE_CLASS",
+      "SECOND_EXPOSURE_CLASS"
+    ],
+    "row_templates": {
+      "REC_ID": {
+        "study_id": "REPLACE",
+        "year": "REPLACE",
+        "study_design": "REPLACE",
+        "analysis_stream": "REPLACE",
+        "synthesis_readiness": "REPLACE",
+        "source_status": "REPLACE",
+        "population_subgroup": "REPLACE",
+        "comparator_definition": "REPLACE",
+        "comparator_type": "REPLACE",
+        "exposure_timing": "REPLACE",
+        "outcome_name": {
+          "__varies__": [
+            "Median PSA at diagnosis, ng/ml (IQR)",
+            "Median PSA at pre-treatment, ng/ml (IQR)",
+            "Median age at pre-treatment, years (IQR)",
+            "Time to CRPC from hormone therapy, months (IQR)"
+          ]
+        },
+        "outcome_domain": "REPLACE",
+        "outcome_definition": {
+          "__varies__": [
+            "Median PSA at diagnosis, ng/ml (IQR)",
+            "Median PSA at pre-treatment, ng/ml (IQR)",
+            "Median age at pre-treatment, years (IQR)",
+            "Time to CRPC from hormone therapy, months (IQR)"
+          ]
+        },
+        "notes": "REPLACE",
+        "_exposure_classes": [
+          "descriptive cohort"
+        ]
+      }
+    },
+    "r1040": {
+      "_what": "Per-row-type vocabulary for a record whose rows are not all the same shape.",
+      "effect_base": {
+        "exposure_class": "REPLACE",
+        "comparator_definition": "REPLACE",
+        "comparator_type": "REPLACE",
+        "outcome_name": "REPLACE",
+        "outcome_domain": "REPLACE",
+        "outcome_definition": "REPLACE"
+      },
+      "arms": {
+        "reference": "REPLACE",
+        "index": "REPLACE"
+      },
+      "arm_row_prefixes": {
+        "reference": "REPLACE",
+        "index": "REPLACE"
+      },
+      "index_block_heading": "REPLACE",
+      "descriptive_exposure_class": "REPLACE"
+    },
+    "labels": {
+      "_what": "Strings taken from the supplements' own printing.",
+      "r1040_block_suffixes": [
+        "REPLACE",
+        "REPLACE"
+      ],
+      "r1040_etable7_ref": "REPLACE",
+      "r1040_etable1_scope": "REPLACE",
+      "r0855_variant": "REPLACE",
+      "r0855_page_ref": "REPLACE"
+    }
   },
-  "_field_rule": "Every column the writer must reproduce belongs here. A field omitted comes back empty, and the guard then reports the rows it already wrote as a conflict - which is how source_status was found missing."
+  "_field_rule": "Every column the writer must reproduce belongs here. A field omitted comes back empty, and the guard then reports the rows it already wrote as a conflict - which is how source_status was found missing.",
+  "row_templates_field_list": [
+    "_exposure_classes",
+    "analysis_stream",
+    "comparator_definition",
+    "comparator_type",
+    "exposure_timing",
+    "notes",
+    "outcome_definition",
+    "outcome_domain",
+    "outcome_name",
+    "population_subgroup",
+    "source_status",
+    "study_design",
+    "study_id",
+    "synthesis_readiness",
+    "year"
+  ]
 }

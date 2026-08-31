@@ -83,6 +83,13 @@ def vacuous_scenarios():
             elif isinstance(node, ast.Assert):
                 tested = [node.test]
             for expression in tested:
+                # A BARE CONSTANT IS THE SAME DEFECT WITHOUT THE `or`.
+                # `check("...", True)` is not a BoolOp and slipped through the
+                # first version of this scan - written, of course, in the
+                # commit that added the scan.
+                if isinstance(expression, ast.Constant):
+                    out.append('%s:%d' % (os.path.basename(path),
+                                          expression.lineno))
                 for line in _short_circuits(expression):
                     out.append('%s:%d' % (os.path.basename(path), line))
     return out

@@ -103,24 +103,26 @@ def assign_ids(_label, existing, intended):
 # order of a write is where the defects were, and a writer that has already
 # run never reaches it.
 print('재실행 안전성 점검:')
-if '--write' in sys.argv:
-    verdict, written = rowkey.run_writer(
-        'figure_printed_numbers',
-        [('effects_text_long', p, cols, rows, out,
-          rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE)],
-        RECEIPTS, assign_ids=assign_ids, assignable={'effect_row_id'},
-        journal_path=os.path.join(RECEIPTS,
-                                  'figure_printed_numbers_journal.json'))
-    may = verdict == 'WRITE'
-    if may:
-        json.dump([[r.get(c, '') for c in cols] for r in out],
-                  io.open(os.path.join(RECEIPTS, 'figure_rows.json'), 'w',
-                          encoding='utf-8'), ensure_ascii=False)
-else:
-    may = rowkey.guard('figure_printed_numbers',
-                       [('effects_text_long', rows, out,
-                         rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE)],
-                       RECEIPTS)
+write = '--write' in sys.argv
+verdict, written = rowkey.run_writer(
+    'figure_printed_numbers',
+    [('effects_text_long', p, cols, rows, out,
+      rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE)],
+    RECEIPTS,
+    assign_ids=assign_ids if write else None,
+    assignable={'effect_row_id'},
+    journal_path=os.path.join(RECEIPTS, 'figure_printed_numbers_journal.json'),
+    lock_path=bundle_paths.write_lock(),
+    attest={'writer_code_sha256': rowkey.file_digest(os.path.abspath(__file__)),
+            'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
+            'sources': {os.path.basename(v): rowkey.file_digest(
+                os.path.join(BASE, v)) for v in digests}},
+    dry_run=not write)
+may = verdict == 'WRITE'
+if may:
+    json.dump([[r.get(c, '') for c in cols] for r in out],
+              io.open(os.path.join(RECEIPTS, 'figure_rows.json'), 'w',
+                      encoding='utf-8'), ensure_ascii=False)
 
 print('전사 대상 %d행%s' % (len(out), '' if may else ' (가드가 쓰기를 막았습니다)'))
 print('비교군이 없어 보류한 값 %d건' % len(INPUTS['figure_pending']['printed_values']))

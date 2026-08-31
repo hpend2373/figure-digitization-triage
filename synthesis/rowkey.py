@@ -229,6 +229,52 @@ def receipt_verdicts(receipt_dir, expected):
     return out
 
 
+def attestation_problems(receipt, expected):
+    """What in this receipt no longer describes the tree. [] means it holds.
+
+    A RECEIPT THAT RECORDS ONLY ITS VERDICT IS A STRING. The verdict was the
+    only thing anyone read, so deleting the attestation, or changing the code,
+    the inputs or the files it was reached from, left an old
+    ALREADY_PRESENT_NO_WRITE reading as proof of a rerun that never happened.
+    Recording it and checking it are two different pieces of work, and only the
+    first was done.
+
+    `expected` carries whatever the caller can recompute now:
+    protocol_sha256, writer_code_sha256, study_inputs_sha256, sources
+    ({name: sha}), tables ({label: file_sha256}). A key absent from `expected`
+    is not checked; a key present and different is named.
+    """
+    att = (receipt or {}).get('attestation')
+    if not att:
+        return [('RECEIPT_ATTESTATION_MISSING', 'no attestation recorded')]
+    core, caller = att.get('core', {}), att.get('caller', {})
+    out = []
+    for key, code, where in (
+            ('protocol_sha256', 'RECEIPT_PROTOCOL_STALE', core),
+            ('writer_code_sha256', 'RECEIPT_WRITER_CODE_STALE', caller),
+            ('study_inputs_sha256', 'RECEIPT_STUDY_INPUTS_STALE', caller)):
+        want = expected.get(key)
+        if want is None:
+            continue
+        got = where.get(key)
+        if got != want:
+            out.append((code, '%s recorded %s, tree has %s'
+                        % (key, (got or '(absent)')[:12], want[:12])))
+    for name, want in (expected.get('sources') or {}).items():
+        got = (caller.get('sources') or {}).get(name)
+        if got != want:
+            out.append(('RECEIPT_SOURCE_STALE',
+                        '%s recorded %s, tree has %s'
+                        % (name, (got or '(absent)')[:12], want[:12])))
+    for label, want in (expected.get('tables') or {}).items():
+        got = (core.get('tables') or {}).get(label, {}).get('file_sha256')
+        if got != want:
+            out.append(('RECEIPT_TABLE_STALE',
+                        '%s recorded %s, tree has %s'
+                        % (label, (got or '(absent)')[:12], want[:12])))
+    return out
+
+
 def unclean_reruns(verdicts):
     """The writers whose rerun is not proven harmless. Empty means all are."""
     return sorted(n for n, v in verdicts.items() if v != CLEAN_RERUN)
@@ -393,10 +439,17 @@ class Locked(Exception):
 class _Lock(object):
     """Exclusive for the whole transaction, guard to final replace.
 
-    Two processes reading the same tables both see them empty and both are told
+    Two processes reading the same tables both see them empty and are both told
     to WRITE; the second then appends what the first has already written. The
     guard cannot see that, because each is telling the truth about the moment
     it looked.
+
+    HELD WITH `flock`, NOT BY THE FILE'S EXISTENCE. An O_EXCL lock file has to
+    be DELETED to be released, and the filesystem this runs against refuses
+    deletes - so the first writer to take one could never give it back, and
+    every later run failed with "another writer holds it" pointing at a process
+    that had finished. `flock` is released when the descriptor closes, whatever
+    the filesystem permits, and a leftover lock file holds nothing.
     """
 
     def __init__(self, path):
@@ -406,22 +459,26 @@ class _Lock(object):
     def __enter__(self):
         if not self.path:
             return self
+        import fcntl
+        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            # ONLY this one means another writer. A permission error or a
-            # missing parent directory reported as contention would send a
-            # person looking for a process that is not there.
-            raise Locked('another writer holds %s; if no writer is running, '
-                         'that file is left over from one that was killed and '
-                         'can be removed by hand' % self.path)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self.fd)
+            self.fd = None
+            raise Locked('another writer holds %s' % self.path)
+        os.ftruncate(self.fd, 0)
         os.write(self.fd, ('%d\n' % os.getpid()).encode('ascii'))
         return self
 
     def __exit__(self, *exc):
         if self.fd is not None:
-            os.close(self.fd)
-            os.remove(self.path)
+            import fcntl
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            finally:
+                os.close(self.fd)
+                self.fd = None
         return False
 
 

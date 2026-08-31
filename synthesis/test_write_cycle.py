@@ -350,6 +350,37 @@ check("a changed file gives a different hash, or the binding is decorative",
 check("and changed rows give a different rows hash",
       K.rows_digest([row(1)], COLS) != K.rows_digest([row(2)], COLS))
 
+# RECORDING IT AND CHECKING IT ARE TWO DIFFERENT PIECES OF WORK. Only the
+# first was done: the verdict string was all anyone read, so deleting the
+# attestation or changing what it was reached from left an old clean verdict
+# reading as proof of a rerun that never happened.
+_receipt = json.load(io.open(os.path.join(TMP, 'att_idempotency.json'),
+                             encoding='utf-8'))
+_now = {'protocol_sha256': _a.get('protocol_sha256'),
+        'tables': {'a': _a.get('tables', {}).get('a', {}).get('file_sha256')},
+        'study_inputs_sha256': 'abc'}
+check("a receipt that still describes the tree has no problems",
+      K.attestation_problems(_receipt, _now) == [],
+      "%s" % K.attestation_problems(_receipt, _now))
+check("a receipt with no attestation at all is a problem",
+      [c for c, _d in K.attestation_problems({'verdict': 'x'}, _now)]
+      == ['RECEIPT_ATTESTATION_MISSING'])
+for _key, _code in (('protocol_sha256', 'RECEIPT_PROTOCOL_STALE'),
+                    ('study_inputs_sha256', 'RECEIPT_STUDY_INPUTS_STALE')):
+    check("a changed %s is named" % _key,
+          _code in [c for c, _d in
+                    K.attestation_problems(_receipt, dict(_now, **{_key: 'z' * 64}))])
+check("a changed table file is named",
+      'RECEIPT_TABLE_STALE' in
+      [c for c, _d in K.attestation_problems(
+          _receipt, dict(_now, tables={'a': 'z' * 64}))])
+check("a changed source artifact is named",
+      'RECEIPT_SOURCE_STALE' in
+      [c for c, _d in K.attestation_problems(
+          _receipt, dict(_now, sources={'supp.docx': 'z' * 64}))])
+check("what the caller does not know about is not judged",
+      K.attestation_problems(_receipt, {}) == [])
+
 # --------------------------------------------------- one writer at a time
 # Two processes reading the same tables both see them empty and are both told
 # to WRITE; the second then appends what the first has already written. The
@@ -367,12 +398,23 @@ except K.Locked:
 check("a second writer is refused while the lock is held", raised)
 check("and it wrote nothing", read(L) == [])
 held.__exit__()
-check("the lock is released afterwards", not os.path.exists(LOCK))
+# RELEASED BY CLOSING, NOT BY DELETING. The file stays; what matters is that
+# the next writer can take it - which an O_EXCL lock could not do on a
+# filesystem that refuses deletes.
+_retaken = False
+_again = K._Lock(LOCK)
+try:
+    _again.__enter__()
+    _retaken = True
+finally:
+    _again.__exit__()
+check("the lock can be taken again once it is released", _retaken)
 check("and the writer runs once it is free",
       K.run_writer('locked', [('a', L, COLS, [], [row(1)], KEY, VALUE)], TMP,
                    assign_ids=number, assignable={'row_id'},
                    lock_path=LOCK)[0] == 'WRITE')
-check("leaving no lock behind", not os.path.exists(LOCK))
+check("and a writer runs to completion while holding it",
+      read(L) != [])
 
 # ------------------------------- rollback when the first file was brand new
 # A DESTINATION THAT DID NOT EXIST HAS NO BACKUP TO RESTORE. The rollback

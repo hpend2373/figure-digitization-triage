@@ -704,6 +704,14 @@ def main():
         assignable={'effect_row_id', 'count_id', 'parent_effect_key'},
         journal_path=os.path.join(bundle_paths.receipt_dir(),
                                   'integrate_supplements_journal.json'),
+        lock_path=bundle_paths.write_lock(),
+        attest={'writer_code_sha256': rowkey.file_digest(
+                    os.path.abspath(__file__)),
+                'study_inputs_sha256': rowkey.file_digest(
+                    bundle_paths.STUDY_INPUTS),
+                'sources': {f: sha(os.path.join(SUPP, f))
+                            for f in sorted(os.listdir(SUPP))
+                            if f.startswith(('R0855', 'R0856', 'R1040'))}},
         assign_ids=assign_ids if write else None,
         archive=arch if write else None,
         dry_run=not write)

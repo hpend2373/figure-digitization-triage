@@ -14,8 +14,12 @@ BASE = os.environ.get('FDT_BUNDLE') or os.path.abspath(
 
 #: Publisher-derived values and quoted text. Deliberately absent from the
 #: published tree; `study_inputs.example.json` shows the shape.
+#: ONE HOME, like the receipts. This resolved beside whichever copy of this
+#: module was imported, so the writers found the file and the final manifest -
+#: importing its own copy from another directory - found nothing and reported
+#: every receipt as stale against an empty hash.
 STUDY_INPUTS = os.environ.get('FDT_STUDY_INPUTS') or os.path.join(
-    HERE, 'study_inputs.json')
+    BASE, 'outputs', 'supplement_integration_2026-08-30', 'study_inputs.json')
 
 
 def study_inputs():
@@ -47,3 +51,14 @@ def receipt_dir():
     """
     os.makedirs(RECEIPTS, exist_ok=True)
     return RECEIPTS
+
+
+def write_lock():
+    """ONE lock for every writer that touches these tables.
+
+    A lock per writer serialises a writer against itself and leaves two
+    different writers free to interleave on the same file - which is the case
+    that loses rows, because each replaces the whole table from the snapshot it
+    read.
+    """
+    return os.path.join(BASE, '.synthesis-write.lock')

@@ -259,6 +259,44 @@ if os.path.exists(p):
 #: then reported CONSISTENT while saying nothing about that writer at all.
 EXPECTED_WRITERS = ('integrate_supplements', 'figure_printed_numbers')
 R['idempotency'] = rowkey.receipt_verdicts(sup, EXPECTED_WRITERS)
+# AND THE VERDICT IS CHECKED AGAINST WHAT IT WAS REACHED FROM. Reading the
+# verdict string alone let an old clean receipt stand for a rerun that never
+# happened - change the writer, the inputs or the tables and nothing noticed.
+_WRITER_FILE = {'integrate_supplements': 'integrate_supplements.py',
+                'figure_printed_numbers': 'figure_printed_numbers.py'}
+_expected = {
+    'protocol_sha256': rowkey.file_digest(
+        os.path.join(os.path.dirname(os.path.abspath(rowkey.__file__)),
+                     'rowkey.py')),
+    'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
+    'tables': {
+        'effects_text_long': rowkey.file_digest(
+            os.path.join(BASE, 'effect_extraction_text_long.csv')),
+        'extraction_counts_long': rowkey.file_digest(
+            os.path.join(BASE, 'extraction_counts_long.csv'))},
+}
+R['receipt_attestation'] = {}
+for _name in EXPECTED_WRITERS:
+    _path = os.path.join(sup, '%s_idempotency.json' % _name)
+    try:
+        _receipt = json.load(io.open(_path, encoding='utf-8'))
+    except Exception:
+        _receipt = {}
+    _want = dict(_expected)
+    _here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         _WRITER_FILE[_name])
+    if os.path.exists(_here):
+        _want['writer_code_sha256'] = rowkey.file_digest(_here)
+    # a writer that touches one table is not judged against the other
+    _want['tables'] = {k: v for k, v in _expected['tables'].items()
+                       if k in ((_receipt.get('attestation') or {})
+                                .get('core', {}).get('tables') or {})}
+    _found = rowkey.attestation_problems(_receipt, _want)
+    R['receipt_attestation'][_name] = [{'code': c, 'detail': d}
+                                       for c, d in _found]
+    for code, detail in _found:
+        fail('%s: %s - %s' % (_name, code, detail))
+
 _unclean = rowkey.unclean_reruns(R['idempotency'])
 if _unclean:
     fail('a rerun is unproven or would append for: %s (%s)'

@@ -113,6 +113,7 @@ verdict, written = rowkey.run_writer(
     assignable={'effect_row_id'},
     journal_path=os.path.join(RECEIPTS, 'figure_printed_numbers_journal.json'),
     lock_path=bundle_paths.write_lock(),
+    read_digests={'effects_text_long': rowkey.file_digest(p)},
     attest={'writer_code_sha256': rowkey.file_digest(os.path.abspath(__file__)),
             'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
             'sources': {os.path.basename(v): rowkey.file_digest(

@@ -485,7 +485,7 @@ class _Lock(object):
 def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                journal_path=None, replace=None, relations=(),
                assignable=None, dry_run=False, lock_path=None,
-               attest=None):
+               attest=None, read_digests=None):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -511,6 +511,24 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
     # used to do this itself and discard what it found, so a duplicated or
     # dangling parent arrived at the guard as an ordinary unmatched key.
     with _Lock(lock_path):
+        # THE SNAPSHOT WAS TAKEN OUTSIDE THE LOCK. A caller reads the tables,
+        # builds its rows, and only then asks to write; another writer can
+        # finish in between, and this one would replace the whole table from a
+        # picture taken before that - dropping rows it never saw. The lock
+        # alone does not close it, because the read happened before the lock.
+        # What the caller read is compared with what is there now, inside it.
+        stale = [label for label, path, _f, _e, _i, _k, _v in tables
+                 if (read_digests or {}).get(label) is not None
+                 and (read_digests or {})[label] != file_digest(path)]
+        if stale:
+            os.makedirs(receipt_dir, exist_ok=True)
+            json.dump({'verdict': 'STALE_EXISTING_SNAPSHOT',
+                       'stale_tables': stale},
+                      io.open(os.path.join(receipt_dir,
+                                           '%s_idempotency.json' % name), 'w',
+                              encoding='utf-8'), indent=2)
+            print('  판정: STALE_EXISTING_SNAPSHOT (%s)' % ', '.join(stale))
+            return 'STALE_EXISTING_SNAPSHOT', []
         return _run_writer(name, tables, receipt_dir, assign_ids, archive,
                            journal_path, replace, relations, assignable,
                            dry_run, attest)

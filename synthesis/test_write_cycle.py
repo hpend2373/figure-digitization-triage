@@ -472,6 +472,33 @@ check("and that file still holds one row, unedited",
       len(read(EXIST)) == 1 and read(EXIST)[0]['effect_point'] == '1.0',
       '%s' % read(EXIST))
 
+# --------------------------------- the snapshot was taken outside the lock
+# A caller reads the tables, builds its rows, and only then asks to write.
+# Another writer can finish in between, and this one would replace the whole
+# table from a picture taken before that - dropping rows it never saw. The lock
+# does not close it, because the read happened before the lock was taken.
+SNAP = fresh('snap.csv', [dict(row(1), row_id='s-001')])
+_read_at = K.file_digest(SNAP)
+_snapshot_rows = read(SNAP)
+# somebody else writes in the meantime
+fresh('snap.csv', [dict(row(1), row_id='s-001'), dict(row(2), row_id='s-002')])
+verdict, written = K.run_writer(
+    'snap', [('a', SNAP, COLS, _snapshot_rows, [row(3)], KEY, VALUE)], TMP,
+    assign_ids=number, assignable={'row_id'}, read_digests={'a': _read_at})
+check("a snapshot older than the file is refused",
+      verdict == 'STALE_EXISTING_SNAPSHOT', verdict)
+check("and the other writer's row is still there",
+      len(read(SNAP)) == 2, "%d" % len(read(SNAP)))
+check("a snapshot that still matches is allowed through",
+      K.run_writer('snap2',
+                   [('a', SNAP, COLS, read(SNAP), [row(3)], KEY, VALUE)], TMP,
+                   assign_ids=number, assignable={'row_id'},
+                   read_digests={'a': K.file_digest(SNAP)})[0] == 'WRITE')
+check("and a caller that records no digest is not judged on one",
+      K.run_writer('snap3',
+                   [('a', fresh('snap3.csv'), COLS, [], [row(4)], KEY, VALUE)],
+                   TMP, assign_ids=number, assignable={'row_id'})[0] == 'WRITE')
+
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])
 ARCH = os.path.join(TMP, 'archive')

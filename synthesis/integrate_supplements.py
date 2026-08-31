@@ -705,6 +705,11 @@ def main():
         journal_path=os.path.join(bundle_paths.receipt_dir(),
                                   'integrate_supplements_journal.json'),
         lock_path=bundle_paths.write_lock(),
+        read_digests={
+            'effects_text_long': rowkey.file_digest(
+                os.path.join(BASE, 'effect_extraction_text_long.csv')),
+            'extraction_counts_long': rowkey.file_digest(
+                os.path.join(BASE, 'extraction_counts_long.csv'))},
         attest={'writer_code_sha256': rowkey.file_digest(
                     os.path.abspath(__file__)),
                 'study_inputs_sha256': rowkey.file_digest(

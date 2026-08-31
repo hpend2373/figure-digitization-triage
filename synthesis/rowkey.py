@@ -251,25 +251,33 @@ def writable(rows, fieldnames):
     return [{c: r.get(c, '') for c in fieldnames} for r in rows]
 
 
-def write_all_or_nothing(specs):
-    """Write several CSVs, or leave every one of them as it was.
+def write_all_or_nothing(specs, replace=None, journal_path=None):
+    """Write several files, or leave every one of them as it was.
 
-    `specs` is [(path, fieldnames, rows)]. Each file is written beside itself
-    and moved into place only after all of them have been written, so a failure
-    partway through - a schema mismatch, a full disk, an interrupt - leaves the
-    whole set at the previous state rather than one table ahead of another.
-    That in-between state is the one the guard cannot describe: it is neither
-    "has not happened" nor "has happened".
+    THE FIRST VERSION WAS NOT WHAT ITS NAME SAID. It staged every file and then
+    moved them into place one after another, with the failure handling on the
+    STAGING loop only - so a failure on the second move left the first file
+    replaced and the second one old: exactly the mixed state this module exists
+    to prevent, produced by the function named after preventing it.
+
+    Now the previous contents are copied aside first, each move is `os.replace`,
+    and a failure part way through puts back every file already replaced. A
+    journal records the transaction, so an interrupted run is visible afterwards
+    rather than silent.
+
+    What this still does not promise, named rather than implied: a process
+    killed between two replaces cannot restore anything, and the recovery can
+    itself fail. A generation directory with one pointer swap would make the
+    commit a single act; this is robust to exceptions, not to `kill -9`.
     """
     import csv as _csv
-    import shutil as _shutil
-    staged, opened = [], []
+    import hashlib
+    import shutil
+    replace = replace or os.replace
+    staged, opened, backups, replaced = [], [], {}, []
     try:
         for path, fieldnames, rows in specs:
             tmp = path + '.writing'
-            # Recorded BEFORE the write, not after: the file that fails is the
-            # one whose half-written temp would otherwise be left behind, and
-            # it is never the one already in `staged`.
             opened.append(tmp)
             with io.open(tmp, 'w', encoding='utf-8', newline='') as fh:
                 w = _csv.DictWriter(fh, fieldnames=list(fieldnames))
@@ -281,12 +289,51 @@ def write_all_or_nothing(specs):
             if os.path.exists(tmp):
                 os.remove(tmp)
         raise
-    for tmp, path in staged:
-        _shutil.move(tmp, path)
+
+    for _tmp, path in staged:
+        if os.path.exists(path):
+            backups[path] = path + '.previous'
+            shutil.copy2(path, backups[path])
+    if journal_path:
+        json.dump({'state': 'COMMITTING', 'files': [p for _t, p in staged]},
+                  io.open(journal_path, 'w', encoding='utf-8'), indent=2)
+    try:
+        for tmp, path in staged:
+            replace(tmp, path)
+            replaced.append(path)
+    except Exception:
+        for path in replaced:
+            if path in backups and os.path.exists(backups[path]):
+                os.replace(backups[path], path)
+        for tmp, _p in staged:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        for backup in backups.values():
+            if os.path.exists(backup):
+                os.remove(backup)
+        if journal_path:
+            json.dump({'state': 'ABORTED_ROLLED_BACK'},
+                      io.open(journal_path, 'w', encoding='utf-8'), indent=2)
+        raise
+    for backup in backups.values():
+        if os.path.exists(backup):
+            os.remove(backup)
+    if journal_path:
+        digests = {}
+        for _t, path in staged:
+            h = hashlib.sha256()
+            with open(path, 'rb') as fh:
+                for chunk in iter(lambda: fh.read(65536), b''):
+                    h.update(chunk)
+            digests[path] = h.hexdigest()
+        json.dump({'state': 'COMMITTED', 'files': [p for _t, p in staged],
+                   'sha256': digests},
+                  io.open(journal_path, 'w', encoding='utf-8'), indent=2)
     return [p for _t, p in staged]
 
 
-def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None):
+def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
+               journal_path=None, replace=None):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -321,7 +368,8 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None):
             assign_ids(label, existing, intended)
     written = write_all_or_nothing(
         [(path, fieldnames, existing + intended)
-         for _l, path, fieldnames, existing, intended, _k, _v in tables])
+         for _l, path, fieldnames, existing, intended, _k, _v in tables],
+        replace=replace, journal_path=journal_path)
     return 'WRITE', written
 
 

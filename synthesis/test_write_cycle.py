@@ -374,6 +374,62 @@ check("and the writer runs once it is free",
                    lock_path=LOCK)[0] == 'WRITE')
 check("leaving no lock behind", not os.path.exists(LOCK))
 
+# ------------------------------- rollback when the first file was brand new
+# A DESTINATION THAT DID NOT EXIST HAS NO BACKUP TO RESTORE. The rollback
+# restored what it had copied aside and silently skipped the rest, so a first
+# file created by the first replace stayed behind when the second failed. Both
+# production tables already exist, which is why nothing had noticed.
+NEWDEST = os.path.join(TMP, 'brand_new.csv')
+OLDDEST = fresh('already_there.csv', [dict(row(1), row_id='o-001')])
+before_old = read(OLDDEST)
+moves2 = []
+
+
+def fail_second(src, dst):
+    moves2.append(dst)
+    if len(moves2) == 2:
+        raise OSError('injected failure on the second replace')
+    os.replace(src, dst)
+
+
+raised = False
+try:
+    K.run_writer('newdest',
+                 [('new', NEWDEST, COLS, [], [row(2)], KEY, VALUE),
+                  ('old', OLDDEST, COLS, read(OLDDEST), [row(3)], KEY, VALUE)],
+                 TMP, assign_ids=number, assignable={'row_id'},
+                 replace=fail_second)
+except OSError:
+    raised = True
+check("a failure on the second replace raises, with the first file new", raised)
+check("and the file that did not exist does not exist again",
+      not os.path.exists(NEWDEST), "%s" % os.path.exists(NEWDEST))
+check("while the one that did is unchanged", read(OLDDEST) == before_old)
+check("and nothing is left staged", 
+      not [f for f in os.listdir(TMP) if f.endswith(('.writing', '.previous'))])
+
+# ------------------------------------ the rows already on file are not the
+# callback's either, and it is handed them.
+EXIST = fresh('existing.csv', [dict(row(1), row_id='x-001')])
+
+
+def edits_existing(_label, existing, intended):
+    intended[0]['row_id'] = 'x-002'
+    existing[0]['effect_point'] = '999'
+
+
+raised = False
+try:
+    K.run_writer('edits', [('a', EXIST, COLS, read(EXIST), [row(2)],
+                            KEY, VALUE)], TMP, assign_ids=edits_existing,
+                 assignable={'row_id'})
+except K.SchemaError:
+    raised = True
+check("a callback that edits a row already on file is refused", raised)
+check("and that file still holds one row, unedited",
+      len(read(EXIST)) == 1 and read(EXIST)[0]['effect_point'] == '1.0',
+      '%s' % read(EXIST))
+
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])
 ARCH = os.path.join(TMP, 'archive')

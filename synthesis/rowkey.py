@@ -317,9 +317,15 @@ def write_all_or_nothing(specs, replace=None, journal_path=None):
             replace(tmp, path)
             replaced.append(path)
     except Exception:
+        # A DESTINATION THAT DID NOT EXIST HAS NO BACKUP TO RESTORE, and
+        # leaving it is not "as it was": the first file being new was the case
+        # the rollback silently skipped, so a failure on the second commit left
+        # a file behind that had never been there.
         for path in replaced:
             if path in backups and os.path.exists(backups[path]):
                 os.replace(backups[path], path)
+            elif path not in backups and os.path.exists(path):
+                os.remove(path)
         for tmp, _p in staged:
             if os.path.exists(tmp):
                 os.remove(tmp)
@@ -520,8 +526,19 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
         allowed = set(assignable or ASSIGNABLE_FIELDS)
         before = {label: _snapshot(intended, allowed)
                   for label, _p, _f, _e, intended, _k, _v in tables}
+        # THE ROWS ALREADY ON FILE ARE NOT THE CALLBACK'S EITHER, and it is
+        # handed them. Nothing in them may move - they were not judged as
+        # something to write, they are what is already there, and they go back
+        # out with the new rows.
+        before_existing = {label: _snapshot(existing, set())
+                           for label, _p, _f, existing, _i, _k, _v in tables}
         for label, _p, _f, existing, intended, _k, _v in tables:
             assign_ids(label, existing, intended)
+        for label, _p, _f, existing, _i, _k, _v in tables:
+            if _snapshot(existing, set()) != before_existing[label]:
+                raise SchemaError(
+                    'assign_ids changed a row already on file in %s; the rows '
+                    'it is given to read are not its to edit' % label)
         for label, _p, _f, _e, intended, _k, _v in tables:
             if _snapshot(intended, allowed) != before[label]:
                 raise SchemaError(

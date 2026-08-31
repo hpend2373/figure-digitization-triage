@@ -33,6 +33,7 @@ import io
 import os
 import re
 import subprocess
+import tempfile
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -110,13 +111,24 @@ def main():
             "suite that is neither run in CI nor declared bundle-dependent is "
             "a suite nobody counts" % (found, declared))
 
+    pycache_prefix = tempfile.mkdtemp(prefix="fdt-pyc-")
     for name in CI_SUITES:
         path = os.path.join(HERE, name + ".py")
         if not os.path.exists(path):
             problems.append("%s is declared CI-runnable and is not here" % name)
             continue
+        # A SUITE MUST BE RUN FROM ITS SOURCE, NOT FROM A CACHE. The tree
+        # lives on a mount whose mtime does not always move when a file's
+        # contents do, and Python trusts mtime and size to decide whether a
+        # __pycache__ entry is current. A stale entry there made a suite
+        # report failures its source does not have - and would just as
+        # readily hide failures its source does have. Compiling into a
+        # throwaway prefix means what runs is what is on disk.
+        env = dict(os.environ)
+        env["PYTHONPYCACHEPREFIX"] = pycache_prefix
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         run = subprocess.run([sys.executable, path], cwd=HERE,
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, env=env)
         if run.returncode != 0:
             problems.append("%s exited %d" % (name, run.returncode))
             continue

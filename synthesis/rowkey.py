@@ -359,7 +359,7 @@ def _snapshot(rows, assignable):
 
 def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                journal_path=None, replace=None, relations=(),
-               assignable=None):
+               assignable=None, dry_run=False):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -408,6 +408,13 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
     may = guard(name, verdict_tables, receipt_dir)
     if not may:
         return _last_verdict(receipt_dir, name), []
+    # ONE PATH, INCLUDING THE ONE THAT DOES NOT WRITE. A dry run used to call
+    # `guard` directly and skip this function, so every check that lives here -
+    # the parent resolution above all - never ran on the path a person actually
+    # invokes while watching the output. Against the real tables that reported
+    # 44 counts as missing: an artefact of parents nobody had resolved.
+    if dry_run:
+        return 'WRITE_WOULD_PROCEED', []
     if archive:
         os.makedirs(archive, exist_ok=True)
         for label, path, _f, _e, _i, _k, _v in tables:

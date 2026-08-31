@@ -245,7 +245,7 @@ if len(R['figure_transcribed_rows']) != 4:
          % len(R['figure_transcribed_rows']))
 
 # --------------------------------------------------------- refusals, guards
-sup = os.path.join(BASE, 'outputs', 'supplement_integration_2026-08-30', 'logs')
+sup = bundle_paths.receipt_dir()
 for name, key in (('integration.json', 'refused_values'),):
     p = os.path.join(sup, name)
     if os.path.exists(p):

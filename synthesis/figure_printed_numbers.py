@@ -79,8 +79,9 @@ for spec in INPUTS['figure_rows']:
 
 # The held estimates are recorded where a reviewer will see them, with their
 # printed values intact, so that "not extracted" never means "not seen".
+RECEIPTS = bundle_paths.receipt_dir()
 json.dump(INPUTS['figure_pending'],
-          io.open(os.path.join(HERE, 'logs', 'R1087_coexposure_pending.json'),
+          io.open(os.path.join(RECEIPTS, 'R1087_coexposure_pending.json'),
                   'w', encoding='utf-8'), indent=2, ensure_ascii=False)
 
 def assign_ids(_label, existing, intended):
@@ -107,17 +108,19 @@ if '--write' in sys.argv:
         'figure_printed_numbers',
         [('effects_text_long', p, cols, rows, out,
           rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE)],
-        os.path.join(HERE, 'logs'), assign_ids=assign_ids)
+        RECEIPTS, assign_ids=assign_ids, assignable={'effect_row_id'},
+        journal_path=os.path.join(RECEIPTS,
+                                  'figure_printed_numbers_journal.json'))
     may = verdict == 'WRITE'
     if may:
         json.dump([[r.get(c, '') for c in cols] for r in out],
-                  io.open(os.path.join(HERE, 'logs', 'figure_rows.json'), 'w',
+                  io.open(os.path.join(RECEIPTS, 'figure_rows.json'), 'w',
                           encoding='utf-8'), ensure_ascii=False)
 else:
     may = rowkey.guard('figure_printed_numbers',
                        [('effects_text_long', rows, out,
                          rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE)],
-                       os.path.join(HERE, 'logs'))
+                       RECEIPTS)
 
 print('전사 대상 %d행%s' % (len(out), '' if may else ' (가드가 쓰기를 막았습니다)'))
 print('비교군이 없어 보류한 값 %d건' % len(INPUTS['figure_pending']['printed_values']))

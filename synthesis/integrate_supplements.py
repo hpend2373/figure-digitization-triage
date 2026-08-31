@@ -650,7 +650,6 @@ def main():
         out.pop('_anchor_of', None)
     for out in new_ct:
         out['parent_effect_key'] = _parent.get(out.pop('_anchor', None), '')
-    rowkey.annotate_parents(ct_rows, ef_rows)
 
     # ONE PROTOCOL, SHARED. The order of a write - annotate, guard, number,
     # serialise - is where every defect that reached these tables lived, and
@@ -693,22 +692,21 @@ def main():
     by_key = {}
     print('재실행 안전성 점검:')
     arch = os.path.join(BASE, 'archive', 'pre_supplement_integration_' + TODAY)
+    write = '--write' in sys.argv
     verdict, written = rowkey.run_writer(
         'integrate_supplements',
         [('effects_text_long', os.path.join(BASE, 'effect_extraction_text_long.csv'),
           ef_cols, ef_rows, new_ef, rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE),
          ('extraction_counts_long', os.path.join(BASE, 'extraction_counts_long.csv'),
           ct_cols, ct_rows, new_ct, rowkey.COUNT_KEY, rowkey.COUNT_VALUE)],
-        os.path.join(OUT, 'logs'),
-        assign_ids=assign_ids if '--write' in sys.argv else None,
-        archive=arch if '--write' in sys.argv else None
-    ) if '--write' in sys.argv else (
-        rowkey.guard('integrate_supplements',
-                     [('effects_text_long', ef_rows, new_ef,
-                       rowkey.EFFECT_KEY, rowkey.EFFECT_VALUE),
-                      ('extraction_counts_long', ct_rows, new_ct,
-                       rowkey.COUNT_KEY, rowkey.COUNT_VALUE)],
-                     os.path.join(OUT, 'logs')) and 'WRITE' or 'DRY_RUN', [])
+        bundle_paths.receipt_dir(),
+        relations=[('extraction_counts_long', 'effects_text_long')],
+        assignable={'effect_row_id', 'count_id', 'parent_effect_key'},
+        journal_path=os.path.join(bundle_paths.receipt_dir(),
+                                  'integrate_supplements_journal.json'),
+        assign_ids=assign_ids if write else None,
+        archive=arch if write else None,
+        dry_run=not write)
     dry = verdict != 'WRITE'
     receipt = {'date': TODAY, 'dry_run': dry, 'parsed_effect_rows': counts,
                'new_effect_rows': len(new_ef), 'new_count_rows': len(new_ct),
@@ -725,9 +723,9 @@ def main():
                                           for r in new_ef],
                    'extraction_counts_long': [[r.get(c, '') for c in ct_cols]
                                               for r in new_ct]},
-                  io.open(os.path.join(OUT, 'logs', 'new_rows.json'), 'w',
+                  io.open(os.path.join(bundle_paths.receipt_dir(), 'new_rows.json'), 'w',
                           encoding='utf-8'), ensure_ascii=False)
-    json.dump(receipt, io.open(os.path.join(OUT, 'logs', 'integration.json'), 'w',
+    json.dump(receipt, io.open(os.path.join(bundle_paths.receipt_dir(), 'integration.json'), 'w',
                                encoding='utf-8'), indent=2, ensure_ascii=False)
     print(json.dumps(receipt, indent=2, ensure_ascii=False))
 

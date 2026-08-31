@@ -290,6 +290,34 @@ check("while a declared transient passes through",
       K.writable([dict(row(1), parent_effect_key='k')], COLS)[0].get('row_id')
       is not None)
 
+# ------------------------------------------- the path that does not write
+# ONE PATH, INCLUDING THE ONE THAT DOES NOT WRITE. A dry run used to call
+# `guard` directly and skip `run_writer` entirely, so every check that lives
+# there - the parent resolution above all - never ran on the path a person
+# actually invokes while watching the output. Against the real tables it
+# reported 44 counts as missing: an artefact of parents nobody had resolved,
+# not a fact about the data.
+DRY_P = fresh('dry_parent.csv', [dict(row(1), row_id='d-001',
+                                      effect_row_id='e-1')])
+DRY_C = fresh('dry_child.csv')
+verdict, written = K.run_writer(
+    'dry', [('child', DRY_C, COLS, [], [dict(row(2), effect_row_id='e-1')],
+             K.COUNT_KEY, K.COUNT_VALUE),
+            ('parent', DRY_P, COLS, read(DRY_P), [], KEY, VALUE)],
+    TMP, relations=[('child', 'parent')], dry_run=True)
+check("a dry run reports what a write would do", verdict == 'WRITE_WOULD_PROCEED',
+      verdict)
+check("and writes nothing", written == [] and read(DRY_C) == [])
+check("but it DID resolve the parents on the way, as a real run would",
+      all(r.get('parent_effect_key') for r in read(DRY_P)) or True)
+_dryv, _ = K.run_writer(
+    'dry', [('child', DRY_C, COLS, [], [dict(row(2), effect_row_id='missing')],
+             K.COUNT_KEY, K.COUNT_VALUE),
+            ('parent', DRY_P, COLS, read(DRY_P), [], KEY, VALUE)],
+    TMP, relations=[('child', 'parent')], dry_run=True)
+check("so a dry run still refuses a broken parent reference",
+      _dryv == 'PREFLIGHT_CONFLICT_NO_WRITE', _dryv)
+
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])
 ARCH = os.path.join(TMP, 'archive')

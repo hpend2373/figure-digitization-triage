@@ -27,3 +27,23 @@ def study_inputs():
             'the repository. See study_inputs.example.json for its shape, or\n'
             'set FDT_STUDY_INPUTS to point at your own copy.' % STUDY_INPUTS)
     return json.load(io.open(STUDY_INPUTS, encoding='utf-8'))
+
+
+#: WHERE THE RECEIPTS LIVE, for the writers AND for whatever reads them.
+#: The writers wrote beside their own file and the final manifest read under
+#: the bundle, and `FDT_BUNDLE` moves only the second - so running the shipped
+#: writers and then the manifest could have the manifest reading a receipt from
+#: a different run in a different tree and calling it proof of this one.
+RECEIPTS = os.environ.get('FDT_SYNTHESIS_RECEIPTS') or os.path.join(
+    BASE, 'outputs', 'supplement_integration_2026-08-30', 'logs')
+
+
+def receipt_dir():
+    """The one receipt directory, created if it is not there.
+
+    Git does not carry an empty directory, so a fresh clone had no `logs/` and
+    the figure writer failed on its first write - before the guard it was
+    supposed to reach.
+    """
+    os.makedirs(RECEIPTS, exist_ok=True)
+    return RECEIPTS

@@ -208,9 +208,75 @@ check("and each is scaled by its OWN page size",
       and abs(R.box_for(_two[("DOC_B", "FIG1", "4")])[0][0] - 0.5) < 1e-6,
       "%s / %s" % (R.box_for(_two[("DOC_A", "FIG1", "4")])[0],
                    R.box_for(_two[("DOC_B", "FIG1", "4")])[0]))
-check("the harness opens no PDF to do any of this",
-      "corpus_intake" not in open(
-          os.path.join(HERE, "sheet", "regress_crop.py"), encoding="utf-8").read())
+# THE HARNESS OPENS NO PDF. Not "finds the right one" - opens none at all, so
+# there is no file to resolve and no basename to collide.
+_SRC = open(os.path.join(HERE, "sheet", "regress_crop.py"),
+            encoding="utf-8").read()
+check("the harness imports no PDF reader",
+      "import corpus_intake" not in _SRC and "pdfminer" not in _SRC
+      and "pypdf" not in _SRC)
+check("and reads no staged source list",
+      "STAGED" not in _SRC)
+
+# THE SAME POINTS OVER A DIFFERENT DENOMINATOR ARE A DIFFERENT FRACTION. Two
+# rows can carry an identical Figure_BBox and disagree about the page - one
+# read from a MediaBox, one from `pdfinfo` on a document whose pages are not
+# all the same size - and comparing the boxes alone let file order choose which
+# denominator won.
+_geo_conflict = _draft([
+    ["DOC", "FIG1", "4", "61.2,0,306.0,396.0", "612", "792", "PYPDF_MEDIABOX"],
+    ["DOC", "FIG1", "4", "61.2,0,306.0,396.0", "595", "842", "PDFINFO_UNIFORM"]])
+check("one box and two page sizes is ambiguous, not first-wins",
+      R.box_for(_geo_conflict[("DOC", "FIG1", "4")])[1] == R.AMBIGUOUS)
+
+# A PAGE HAS ONE SIZE. Even where each figure's own rows agree, two figures on
+# one page that disagree about how big it is cannot both be right.
+_page_split = _draft([
+    ["DOC", "FIG1", "4", "10,10,100,100", "612", "792", "PYPDF_MEDIABOX"],
+    ["DOC", "FIG2", "4", "10,10,100,100", "595", "842", "PYPDF_MEDIABOX"]])
+check("two figures disagreeing about their shared page are both held",
+      R.box_for(_page_split[("DOC", "FIG1", "4")])[1] == R.UNTRUSTED
+      and R.box_for(_page_split[("DOC", "FIG2", "4")])[1] == R.UNTRUSTED)
+check("and a page whose rows agree is untouched by that rule",
+      R.box_for(_draft([
+          ["DOC", "FIG1", "4", "10,10,100,100", "612", "792", "PYPDF_MEDIABOX"],
+          ["DOC", "FIG2", "4", "20,20,200,200", "612", "792", "PYPDF_MEDIABOX"]
+      ])[("DOC", "FIG1", "4")])[1] == "OK")
+
+# A SIZE NOTHING MEASURED IS NOT A SIZE. UNKNOWN is what `page_geometry`
+# returns when all three ways failed; writing plausible numbers beside it would
+# make the harness score against a guess.
+check("a page size no backend actually read is not scored against",
+      R.box_for(_draft([["DOC", "FIG1", "4", "10,10,100,100",
+                         "612", "792", "UNKNOWN"]])[("DOC", "FIG1", "4")])[1]
+      == R.UNTRUSTED)
+check("and only the three real methods are trusted",
+      set(R.TRUSTED_METHODS)
+      == {"PYPDF_MEDIABOX", "PDFMINER_LAYOUT", "PDFINFO_UNIFORM"})
+
+# A BOX OUTSIDE ITS OWN PAGE IS A COORDINATE SYSTEM MISMATCH, not a crop.
+# Normalising it yields a fraction above 1.0, which reads like an answer.
+for _label, _bbox in (("wider than the paper", "10,10,900,100"),
+                      ("taller than the paper", "10,10,100,900"),
+                      ("starting left of the paper", "-5,10,100,100"),
+                      ("inverted in x", "300,10,100,100"),
+                      ("inverted in y", "10,300,100,100")):
+    check("a box %s is not scored" % _label,
+          R.box_for(_draft([["DOC", "FIG1", "4", _bbox, "612", "792",
+                             "PYPDF_MEDIABOX"]])[("DOC", "FIG1", "4")])[1]
+          == R.UNTRUSTED, _bbox)
+check("a box that exactly fills the page is still scored",
+      R.box_for(_draft([["DOC", "FIG1", "4", "0,0,612,792", "612", "792",
+                         "PYPDF_MEDIABOX"]])[("DOC", "FIG1", "4")])[1] == "OK")
+check("a page size that is not a number is missing, not untrusted",
+      R.box_for(_draft([["DOC", "FIG1", "4", "10,10,100,100", "", "",
+                         "PYPDF_MEDIABOX"]])[("DOC", "FIG1", "4")])[1]
+      == R.NO_PAGE_SIZE)
+check("and a non-finite page size is refused too",
+      R.box_for(_draft([["DOC", "FIG1", "4", "10,10,100,100", "nan", "792",
+                         "PYPDF_MEDIABOX"]])[("DOC", "FIG1", "4")])[1]
+      == R.NO_PAGE_SIZE)
+
 
 check("calibration is computed only over the judged ones",
       R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])

@@ -378,6 +378,15 @@ else:
                    Extraction_Method="PDFMINER_TEXT_BLOCKS", Confidence="1.00",
                    Confidence_Reason="", Human_Verification_Status="PENDING",
                    Verified_By="", Verified_At="", Observed_Panel_Count="",
+                   # A STAND-IN MUST LOOK LIKE A ROW THE WRITER COULD PRODUCE.
+                   # This fixture stands in for a draft on a machine with no
+                   # PDF backend, and it omitted the crop verdict and the page
+                   # size - so it kept passing the readers after the writer
+                   # started filling both, and the profile that runs it was
+                   # the only one that would have caught either going missing.
+                   Crop_Quality_Status="NO_CROP",
+                   Page_Width_Pt="612.00", Page_Height_Pt="792.00",
+                   Page_Geometry_Method="PYPDF_MEDIABOX",
                    Note="")]
 
 
@@ -1688,6 +1697,45 @@ check("every column source_figure_manifest requires is produced",
 check("and nothing else, so a column added there is a visible failure here",
       not [c for c in _emitted if c not in BM.source_figure_manifest_columns()],
       "%s" % [c for c in _emitted if c not in BM.source_figure_manifest_columns()])
+
+# ------------------------------------------- a blank crop status is a problem
+# THE READ SIDE HAD THE SAME HOLE THE SHEET GATE HAD. `draft_problems` skipped
+# an empty status, so a draft edited by hand or by another tool could carry a
+# blank status, CONFIRMED beside it, and a panel count - and reach the source
+# figure manifest. The walk writes a status on every row, NO_CROP included, so
+# a blank is never the honest answer.
+_blank = [{"Source_Document_ID": "D", "Draft_ID": "D-0001",
+           "Crop_Quality_Status": "", "Human_Verification_Status": "CONFIRMED",
+           "Observed_Panel_Count": "3", "Figure_Number": "FIG1", "Page": "1"}]
+_codes = [c for _d, c, _m in CI.draft_problems(_blank)]
+# AND THE WALK NEVER WRITES ONE. The column used to be filled only by the crop
+# step, so a run with no renderer - which is the entire core profile - left it
+# empty on every row. Closing the reader without fixing the writer would have
+# made every core-profile draft invalid; NO_CROP is what "there is no page
+# image" means, and it is now what such a row says.
+_norender = os.path.join(ROOT, "norender")
+os.makedirs(_norender, exist_ok=True)
+_nr_pdf = os.path.join(_norender, "nr.pdf")
+minimal_pdf(_nr_pdf, [[(60, 700, "Fig. 1 a caption with no renderer behind it")]])
+_nr_rows, _ = CI.intake_document(_nr_pdf, "NR", os.path.join(_norender, "out"))
+if not _nr_rows:
+    print("  SKIP the no-renderer status scenario: no text backend")
+else:
+    check("a walk with no renderer still writes a crop verdict",
+          all(r["Crop_Quality_Status"] in CI.CROP_QUALITY_STATUSES
+              for r in _nr_rows),
+          "%s" % [r["Crop_Quality_Status"] for r in _nr_rows])
+
+check("a blank crop status is reported, not skipped",
+      "CROP_QUALITY_UNKNOWN" in _codes, "%s" % _codes)
+_ok = [dict(_blank[0], Crop_Quality_Status="ACCEPTABLE")]
+check("and a real status is not reported",
+      "CROP_QUALITY_UNKNOWN" not in [c for _d, c, _m in CI.draft_problems(_ok)])
+check("every status the walk may write passes that check",
+      all("CROP_QUALITY_UNKNOWN" not in
+          [c for _d, c, _m in CI.draft_problems(
+              [dict(_blank[0], Crop_Quality_Status=q)])]
+          for q in CI.CROP_QUALITY_STATUSES))
 
 # ---------------------------------------------------- the page's own size
 # THE DENOMINATOR IS THE PAPER, NOT THE PRINTING. The crop harness normalised

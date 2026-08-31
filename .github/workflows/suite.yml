@@ -79,12 +79,11 @@ jobs:
           # files run here. They are also the two that matter most: the route
           # gate and the append guard are what stand between a rerun and a
           # silently doubled effect table.
-          for t in test_route_gate test_rowkey; do
-            out="$(cd synthesis && python3 "$t.py")"
-            echo "$out"
-            echo "$out" | grep -q '^all scenarios passed$' \
-              || { echo "SUITE FAILED: $t"; exit 1; }
-          done
+          # Not a grep for the last line: that catches a suite that fails and
+          # not a suite that VANISHES. This runs them, requires exactly one
+          # count marker each, refuses a count of zero, checks that every
+          # test file here is classified, and compares the total to the README.
+          python3 synthesis/verify_synthesis_status.py
 
       - name: suite
         run: |

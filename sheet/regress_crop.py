@@ -47,6 +47,21 @@ INTRUSION_CEILING = 0.15
 #: two different boxes. Both are measured as nothing and reported as such.
 NO_PAGE_SIZE = "NO_PAGE_SIZE"
 AMBIGUOUS = "AMBIGUOUS_DRAFT_BOX"
+#: The page the draft recorded cannot be trusted: the method is not one of the
+#: three that read a real MediaBox, the numbers are not finite and positive, or
+#: two rows on the same page disagree about how big it is. Distinct from
+#: NO_PAGE_SIZE, which means nobody wrote one down at all - "not recorded" and
+#: "recorded wrongly" are different problems and a person fixes them
+#: differently.
+UNTRUSTED = "PAGE_GEOMETRY_UNTRUSTED"
+
+#: The ways the intake's `page_geometry` can read a real page box. Anything
+#: else - UNKNOWN above all - is a size nothing measured.
+TRUSTED_METHODS = ("PYPDF_MEDIABOX", "PDFMINER_LAYOUT", "PDFINFO_UNIFORM")
+
+
+def _finite(v):
+    return v == v and v not in (float("inf"), float("-inf"))
 
 
 def draft_rows(draft_dir):
@@ -62,16 +77,24 @@ def draft_rows(draft_dir):
     resolved to whichever the staged list mentioned last - one publication's
     box scored against another's page, with a number at the end and no error.
 
-    Now nothing here opens a PDF. The draft records `Page_Width_Pt` and
-    `Page_Height_Pt`; a row without them is not scored.
+    Now nothing here opens a PDF.
 
-    A KEY CLAIMED TWICE IS NOT A TIE TO BREAK. The same label can appear on a
-    page as a caption and again as a cross-reference, two backends can propose
-    different boxes, and one line can carry two captions. Taking the first row
-    made the answer depend on file order. Identical boxes collapse; different
-    boxes are marked AMBIGUOUS_DRAFT_BOX and a person is shown both.
+    A KEY CLAIMED TWICE IS NOT A TIE TO BREAK. The same label can appear as a
+    caption and again as a cross-reference, two backends can propose different
+    boxes, and one line can carry two captions. Taking the first row made the
+    answer depend on file order.
+
+    AND THE BOX IS ONLY HALF THE ROW. Two rows can carry the same
+    `Figure_BBox` and different page sizes - one read from a MediaBox, one from
+    `pdfinfo` on a mixed-size document - and the same points over a different
+    denominator is a different fraction. Comparing the boxes alone let file
+    order pick the denominator instead. The whole geometry is the signature.
+
+    A PAGE HAS ONE SIZE. Rows that share a document and a page must agree about
+    it; where they do not, every figure on that page is held rather than scored
+    against a size that is right for at most one of them.
     """
-    out = {}
+    out, by_page = {}, {}
     with io.open(os.path.join(draft_dir, "figure_intake_draft.csv"),
                  encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
@@ -79,18 +102,25 @@ def draft_rows(draft_dir):
                 continue
             key = (row["Source_Document_ID"], row["Figure_Number"],
                    row["Page"])
-            entry = {"box": row["Figure_BBox"],
-                     "w": row.get("Page_Width_Pt", ""),
-                     "h": row.get("Page_Height_Pt", ""),
-                     "method": row.get("Page_Geometry_Method", ""),
+            geometry = (row.get("Page_Width_Pt", ""),
+                        row.get("Page_Height_Pt", ""),
+                        row.get("Page_Geometry_Method", ""))
+            entry = {"box": row["Figure_BBox"], "w": geometry[0],
+                     "h": geometry[1], "method": geometry[2],
                      "candidates": [row["Figure_BBox"]]}
+            by_page.setdefault((key[0], key[2]), set()).add(geometry)
             seen = out.get(key)
             if seen is None:
                 out[key] = entry
-            elif seen["box"] != entry["box"]:
+            elif (seen["box"], seen["w"], seen["h"], seen["method"]) != (
+                    entry["box"],) + geometry:
                 seen["status"] = AMBIGUOUS
                 if entry["box"] not in seen["candidates"]:
                     seen["candidates"].append(entry["box"])
+    for key, entry in out.items():
+        if len(by_page.get((key[0], key[2]), ())) > 1 and "status" not in entry:
+            entry["status"] = UNTRUSTED
+            entry["detail"] = "두 행이 같은 쪽에 서로 다른 페이지 크기를 적었습니다"
     return out
 
 
@@ -98,20 +128,34 @@ def box_for(entry):
     """The draft's box as fractions of the page the DRAFT recorded.
 
     Returns (box, status). The box is None whenever it cannot be trusted, and
-    the status says which kind of untrustworthy it is.
+    the status says which kind of untrustworthy it is. Nothing is scored on a
+    page whose size was guessed, and nothing is scored on a box that does not
+    lie inside its own page - a box wider than the paper is not a crop, it is a
+    coordinate system mismatch, and normalising it would produce a number that
+    looks like an answer.
     """
-    if entry.get("status") == AMBIGUOUS:
-        return None, AMBIGUOUS
+    if entry.get("status") in (AMBIGUOUS, UNTRUSTED):
+        return None, entry["status"]
+    # NOT RECORDED comes before RECORDED BY NOTHING: a blank cell is the more
+    # basic fact, and the two send a person to different places - one to the
+    # walk that failed to write the size, one to the document whose size no
+    # backend could read.
     try:
         w, h = float(entry["w"]), float(entry["h"])
     except (TypeError, ValueError):
         return None, NO_PAGE_SIZE
-    if w <= 0 or h <= 0:
+    if not (_finite(w) and _finite(h)) or w <= 0 or h <= 0:
         return None, NO_PAGE_SIZE
+    if entry.get("method") not in TRUSTED_METHODS:
+        return None, UNTRUSTED
     try:
         x0, y0, x1, y1 = [float(v) for v in entry["box"].split(",")]
     except ValueError:
         return None, "NO_BOX"
+    if not all(_finite(v) for v in (x0, y0, x1, y1)):
+        return None, "NO_BOX"
+    if not (0 <= x0 < x1 <= w and 0 <= y0 < y1 <= h):
+        return None, UNTRUSTED
     return (x0 / w, y0 / h, x1 / w, y1 / h), "OK"
 
 

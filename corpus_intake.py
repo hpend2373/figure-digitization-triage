@@ -48,17 +48,24 @@ method column says `HUMAN_VISUAL`, and a proposed count is a number a tired
 person clicks past. The draft carries the figure's bounding box so a contact
 sheet can show the picture, and the count comes from the person looking at it.
 
-**What this still does not find.** Two backends can agree about how much text
-a document holds and disagree about whether a caption is in it: publications
-147 and 563 hand pdfminer their body's cross-references to Figure 4 and Fig. 6
-but not those figures' own captions, at a text volume of 1.00, so the volume
-check has nothing to catch. Finding them means reading every document twice and
-reporting the disagreement, which is a walk that costs twice as much and is not
-this one. And publication 554 prints "Fig.l." with a lower-case L; both readers
-report the letter, because the letter is what the file contains, and a rule
-that read it as a 1 would read every "Fig. a" as a number. Those three figures
-are missing on purpose, and the row that would have carried them is absent
-rather than wrong.
+**What the second reader found, and what it still does not.** Two backends can
+agree about how much text a document holds and disagree about whether a caption
+is in it: publications 147 and 563 hand pdfminer their body's cross-references
+to Figure 4 and Fig. 6 but not those figures' own captions, at a text volume of
+1.00, so the volume check has nothing to catch. That is why `second_opinion_rows`
+exists - the walk now reads with the OTHER backend as well and carries what only
+it saw, at a confidence of 0.00 so nothing counts from it without a person.
+Publication 563's caption came back that way in v9.23.
+
+This paragraph used to say that reading twice "is a walk that costs twice as
+much and is not this one". It is this one now, and leaving the old sentence in
+place is how a later session re-argues its way back to a design that was
+already replaced.
+
+Still missing on purpose: publication 554 prints "Fig.l." with a lower-case L,
+and both readers report the letter, because the letter is what the file
+contains and a rule that read it as a 1 would read every "Fig. a" as a number.
+That figure has no row rather than a wrong one.
 
 The PDF backend is optional, like `cv2` elsewhere in this package: `pdfminer.six`
 if it is installed, `pdftotext -bbox-layout` from poppler if it is not, and a
@@ -881,6 +888,20 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
             "Observed_Panel_Count": "",
             "Note": "",
         })
+    # EVERY ROW LEAVES HERE COMPLETE. Two columns used to be filled somewhere
+    # downstream and so were blank whenever that step did not run:
+    # `Crop_Quality_Status` only inside the crop step, which needs a renderer,
+    # so the entire core profile wrote drafts with an empty verdict; and the
+    # page size not at all, which is why the crop harness measured the text on
+    # the page instead. NO_CROP is what "there is no page image" means, and the
+    # page size is read here once for the document.
+    sizes, geometry_method = page_geometry(path, rasters=page_rasters)
+    for row in rows:
+        row.setdefault("Crop_Quality_Status", "NO_CROP")
+        w, h = sizes.get(row["Page"], (0, 0))
+        row["Page_Width_Pt"] = ("%.2f" % w) if w else ""
+        row["Page_Height_Pt"] = ("%.2f" % h) if h else ""
+        row["Page_Geometry_Method"] = geometry_method if w else "UNKNOWN"
     return rows
 
 
@@ -1280,7 +1301,14 @@ def draft_problems(rows):
             out.append((did, "DRAFT_ID_DUPLICATE", did))
         seen.add(did)
         quality = str(row.get("Crop_Quality_Status", "")).strip().upper()
-        if quality and quality not in CROP_QUALITY_STATUSES:
+        # A BLANK IS NOT AN EXEMPTION. This read `if quality and ...`, so an
+        # empty cell was the one value that could not be wrong - and a draft
+        # edited outside the sheet, or written by another tool, could carry
+        # `Crop_Quality_Status=""` with `CONFIRMED` beside it and reach
+        # `inventory_rows` as a source figure. Every row the walk writes gets a
+        # status, NO_CROP included for the ones with no page image at all, so
+        # there is no case a blank is the honest answer to.
+        if quality not in CROP_QUALITY_STATUSES:
             out.append((did, "CROP_QUALITY_UNKNOWN",
                         "%r is not %s" % (quality,
                                           "/".join(CROP_QUALITY_STATUSES))))
@@ -1656,12 +1684,7 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
     # and text stops short of the paper on every side; the harness that scores
     # these boxes was doing exactly that, normalising by the extent of the last
     # line on the page instead of by the page.
-    sizes, geometry_method = page_geometry(path, rasters=rasters)
-    for row in rows:
-        w, h = sizes.get(row["Page"], (0, 0))
-        row["Page_Width_Pt"] = ("%.2f" % w) if w else ""
-        row["Page_Height_Pt"] = ("%.2f" % h) if h else ""
-        row["Page_Geometry_Method"] = geometry_method if w else "UNKNOWN"
+    sizes = page_sizes(path, rasters=rasters)
 
     if rasters:
         os.makedirs(crop_dir, exist_ok=True)

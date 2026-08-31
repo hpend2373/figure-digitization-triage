@@ -275,6 +275,11 @@ _expected = {
         'extraction_counts_long': rowkey.file_digest(
             os.path.join(BASE, 'extraction_counts_long.csv'))},
 }
+#: The files each writer leaves beside the tables, named here so that a
+#: sidecar nobody attested is a failure rather than a silence.
+_SIDECARS = {'integrate_supplements': ('new_rows.json',),
+             'figure_printed_numbers': ('figure_rows.json',
+                                        'R1087_coexposure_pending.json')}
 R['receipt_attestation'] = {}
 for _name in EXPECTED_WRITERS:
     _path = os.path.join(sup, '%s_idempotency.json' % _name)
@@ -292,6 +297,14 @@ for _name in EXPECTED_WRITERS:
                        if k in ((_receipt.get('attestation') or {})
                                 .get('core', {}).get('tables') or {})}
     _found = rowkey.attestation_problems(_receipt, _want)
+    # AND THE FILES WRITTEN BESIDE THE TABLES ARE CHECKED TOO. The tables
+    # commit together; the JSON sidecars are a plain dump after the fact, and
+    # one of them used to be dumped before the guard had spoken. Nothing tied
+    # them to the run that was supposed to have produced them, so this
+    # manifest counted refusals and held estimates out of files that might
+    # have been left by an earlier run.
+    _found += rowkey.sidecar_problems(
+        _receipt, {f: os.path.join(sup, f) for f in _SIDECARS[_name]})
     R['receipt_attestation'][_name] = [{'code': c, 'detail': d}
                                        for c, d in _found]
     for code, detail in _found:

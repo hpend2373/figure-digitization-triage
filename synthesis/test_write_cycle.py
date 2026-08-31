@@ -123,6 +123,38 @@ check("and no ordinal is minted either - an id claims a row that may not exist",
 check("the files are exactly as they were",
       (read(A), read(B)) == before)
 
+# A CLEAN RERUN STILL HAS TO HAND BACK THE ORDINALS. Nothing stamps the
+# caller's rows when no write happens, so anything built from them afterwards -
+# the sidecar the workbook step applies - carried blanks where the table has
+# ids. The guard has just proven every row is on file; reading its id is not
+# minting one.
+_rerun = [row(1), row(2)]
+_v, _w = K.run_writer(
+    'cycle', [('a', A, COLS, read(A), _rerun, KEY, VALUE),
+              ('b', B, COLS, read(B), [row(3)], KEY, VALUE)], TMP,
+    assign_ids=number, assignable={'row_id'})
+check("a clean rerun hands back the ids the rows have on file",
+      all(r.get('row_id') for r in _rerun)
+      and {r['row_id'] for r in _rerun} == {r['row_id'] for r in read(A)},
+      "%s" % [r.get('row_id') for r in _rerun])
+check("without minting one or writing anything",
+      (_v, _w, NUMBERED) == (K.CLEAN_RERUN, [], []),
+      "%s %s %s" % (_v, _w, NUMBERED))
+check("still a no-op on the files",
+      (read(A), read(B)) == before)
+# AN ORDINAL IS A POSITION IN A FILE, NOT SOMETHING A CALLER BRINGS. It is
+# left out of the comparison by design, so a row that arrives carrying a
+# different one is still the same row - and the file is what says where it is.
+_E = fresh('e.csv', [dict(row(5), effect_row_id='e-777')])
+_brought = dict(row(5), effect_row_id='caller-made-this')
+_v = K.run_writer('brought',
+                  [('e', _E, COLS, read(_E), [_brought], KEY, VALUE)], TMP,
+                  assignable={'effect_row_id'})[0]
+check("a row that arrived with another ordinal is still a clean rerun",
+      _v == K.CLEAN_RERUN, _v)
+check("and comes back carrying the ordinal the file has",
+      _brought['effect_row_id'] == 'e-777', _brought['effect_row_id'])
+
 # -------------------------------------------------------------- phase three
 C = fresh('c.csv', [dict(row(1), row_id='c-001')])
 D = fresh('d.csv')
@@ -396,6 +428,48 @@ check("and says it even when the caller can recompute nothing",
 check("the scheme this run writes is the one it checks for",
       'RECEIPT_DIGEST_SCHEME_STALE'
       not in [c for c, _d in K.attestation_problems(_receipt, _now)])
+
+# --- the files written beside the tables -------------------------------------
+# THE TABLES COMMIT TOGETHER; THE SIDECARS DO NOT. new_rows.json is what the
+# workbook step applies, and one of them is written before the guard has even
+# spoken. A file left by an earlier run reads as this one's output unless
+# something ties it to the run.
+
+_side = os.path.join(TMP, 'side')
+os.makedirs(_side, exist_ok=True)
+_payload = {'rows': [['a', '1'], ['b', '2']], 'cols': ['k', 'v']}
+_sp = os.path.join(_side, 'new_rows.json')
+json.dump(_payload, io.open(_sp, 'w', encoding='utf-8'), ensure_ascii=False)
+K.attest_sidecars(_side, 'sc', {'new_rows.json': _payload})
+_att = json.load(io.open(os.path.join(_side, 'sc_idempotency.json'),
+                         encoding='utf-8'))
+check("the receipt records what the sidecar it wrote contains",
+      _att['sidecars']['new_rows.json'] == K.json_digest(_payload))
+check("a sidecar that is the payload the receipt attested passes",
+      K.sidecar_problems(_att, {'new_rows.json': _sp}) == [],
+      "%s" % K.sidecar_problems(_att, {'new_rows.json': _sp}))
+json.dump(_payload, io.open(_sp, 'w', encoding='utf-8'), indent=2)
+check("indentation is not a change, because the payload is what is compared",
+      K.sidecar_problems(_att, {'new_rows.json': _sp}) == [])
+json.dump({'rows': [['a', '9']], 'cols': ['k', 'v']},
+          io.open(_sp, 'w', encoding='utf-8'))
+check("a sidecar left by another run is named, not believed",
+      [c for c, _d in K.sidecar_problems(_att, {'new_rows.json': _sp})]
+      == ['SIDECAR_STALE'])
+io.open(_sp, 'w', encoding='utf-8').write('{not json')
+check("a sidecar that will not parse is a problem, not an exception",
+      [c for c, _d in K.sidecar_problems(_att, {'new_rows.json': _sp})]
+      == ['SIDECAR_UNREADABLE'])
+check("an attested sidecar that is not there is named",
+      [c for c, _d in K.sidecar_problems(
+          _att, {'new_rows.json': os.path.join(_side, 'gone.json')})]
+      == ['SIDECAR_MISSING'])
+check("a sidecar the receipt never named is not silently accepted",
+      [c for c, _d in K.sidecar_problems({'verdict': 'WRITE'},
+                                         {'new_rows.json': _sp})]
+      == ['SIDECAR_NOT_ATTESTED'])
+check("a receipt that records none of them names every one",
+      len(K.sidecar_problems({}, {'a.json': _sp, 'b.json': _sp})) == 2)
 
 # --------------------------------------------------- one writer at a time
 # Two processes reading the same tables both see them empty and are both told

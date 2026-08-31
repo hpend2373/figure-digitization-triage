@@ -77,12 +77,7 @@ for spec in INPUTS['figure_rows']:
     d['source_sha256'] = digests[src]
     out.append(d)
 
-# The held estimates are recorded where a reviewer will see them, with their
-# printed values intact, so that "not extracted" never means "not seen".
 RECEIPTS = bundle_paths.receipt_dir()
-json.dump(INPUTS['figure_pending'],
-          io.open(os.path.join(RECEIPTS, 'R1087_coexposure_pending.json'),
-                  'w', encoding='utf-8'), indent=2, ensure_ascii=False)
 
 def assign_ids(_label, existing, intended):
     seq = {}
@@ -120,10 +115,28 @@ verdict, written = rowkey.run_writer(
                 os.path.join(BASE, v)) for v in digests}},
     dry_run=not write)
 may = verdict == 'WRITE'
-if may:
-    json.dump([[r.get(c, '') for c in cols] for r in out],
-              io.open(os.path.join(RECEIPTS, 'figure_rows.json'), 'w',
-                      encoding='utf-8'), ensure_ascii=False)
+# THE SIDECARS BELONG TO THE VERDICT. The held estimates used to be dumped
+# before the guard had spoken, so a run the guard refused still left a file
+# that read as its output. Both are written only on a verdict that says the
+# tables are what this run means them to be, and both are then recorded in
+# the receipt - see `rowkey.attest_sidecars`.
+if may or verdict == rowkey.CLEAN_RERUN:
+    # The ordinals are in `out` either way: minted here on a write, read back
+    # off the file on a clean rerun. So this run can say what the sidecars
+    # must contain whether or not it is the run that wrote them.
+    _side = {'figure_rows.json': [[r.get(c, '') for c in cols] for r in out],
+             # The held estimates are recorded where a reviewer will see them,
+             # with their printed values intact, so that "not extracted" never
+             # means "not seen".
+             'R1087_coexposure_pending.json': INPUTS['figure_pending']}
+    if may:
+        json.dump(_side['figure_rows.json'],
+                  io.open(os.path.join(RECEIPTS, 'figure_rows.json'), 'w',
+                          encoding='utf-8'), ensure_ascii=False)
+    json.dump(INPUTS['figure_pending'],
+              io.open(os.path.join(RECEIPTS, 'R1087_coexposure_pending.json'),
+                      'w', encoding='utf-8'), indent=2, ensure_ascii=False)
+    rowkey.attest_sidecars(RECEIPTS, 'figure_printed_numbers', _side)
 
 print('전사 대상 %d행%s' % (len(out), '' if may else ' (가드가 쓰기를 막았습니다)'))
 print('비교군이 없어 보류한 값 %d건' % len(INPUTS['figure_pending']['printed_values']))

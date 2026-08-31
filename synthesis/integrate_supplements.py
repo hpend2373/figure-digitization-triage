@@ -732,12 +732,25 @@ def main():
                                      if f.startswith(('R0855', 'R0856', 'R1040'))}}
     if written:
         receipt['archived_to'] = 'archive/pre_supplement_integration_' + TODAY
-        json.dump({'effects_text_long': [[r.get(c, '') for c in ef_cols]
+    # WHAT THE WORKBOOK STEP APPLIES IS RECORDED IN THIS RUN'S RECEIPT.
+    # new_rows.json is written outside the table transaction, and nothing tied
+    # it to the run that produced it: a file left by an earlier run would have
+    # been appended to the workbook while the CSVs said something else. The
+    # ordinals are in the rows either way - minted here on a write, read back
+    # off the files on a clean rerun - so this run can say what the file must
+    # contain whether or not it is the run that wrote it.
+    if written or verdict == rowkey.CLEAN_RERUN:
+        new_rows = {'effects_text_long': [[r.get(c, '') for c in ef_cols]
                                           for r in new_ef],
-                   'extraction_counts_long': [[r.get(c, '') for c in ct_cols]
-                                              for r in new_ct]},
-                  io.open(os.path.join(bundle_paths.receipt_dir(), 'new_rows.json'), 'w',
-                          encoding='utf-8'), ensure_ascii=False)
+                    'extraction_counts_long': [[r.get(c, '') for c in ct_cols]
+                                               for r in new_ct]}
+        if written:
+            json.dump(new_rows,
+                      io.open(os.path.join(bundle_paths.receipt_dir(), 'new_rows.json'), 'w',
+                              encoding='utf-8'), ensure_ascii=False)
+        rowkey.attest_sidecars(bundle_paths.receipt_dir(),
+                               'integrate_supplements',
+                               {'new_rows.json': new_rows})
     json.dump(receipt, io.open(os.path.join(bundle_paths.receipt_dir(), 'integration.json'), 'w',
                                encoding='utf-8'), indent=2, ensure_ascii=False)
     print(json.dumps(receipt, indent=2, ensure_ascii=False))

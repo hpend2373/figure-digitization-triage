@@ -476,6 +476,83 @@ def rows_digest(rows, fields):
     return h.hexdigest()
 
 
+def json_digest(payload):
+    """sha256 of a JSON payload, canonically.
+
+    The object in memory and the file it was written to have to give the same
+    number, or indentation would read as a changed sidecar. Same scheme tag
+    and same serialisation as rows_digest, for the same reason.
+    """
+    import hashlib
+    return hashlib.sha256(
+        (ROWS_DIGEST_SCHEME + json.dumps(payload, ensure_ascii=False,
+                                         sort_keys=True,
+                                         separators=(',', ':')))
+        .encode('utf-8')).hexdigest()
+
+
+def sidecar_problems(receipt, files):
+    """Sidecars on disk that are not the ones this receipt's run produced.
+
+    A SIDECAR IS OUTSIDE THE TRANSACTION. The tables commit together or not at
+    all, but the JSON files beside them - the rows handed to the workbook
+    step, the held estimates handed to a reviewer - are written by a plain
+    dump after it, or in one case before it. Nothing tied them to the run that
+    was supposed to have produced them, so a file left by an earlier run, or
+    one written while the guard was refusing to write at all, read as this
+    run's output to everything downstream.
+
+    The writer records each payload's digest in its receipt, via
+    `attest_sidecars`, after writing the files. Here the file on disk is
+    parsed and digested the same way and compared, so a sidecar that does not
+    belong to this receipt is named rather than believed.
+
+    `files` is {name recorded in the attestation: path on disk}.
+    """
+    recorded = (receipt or {}).get('sidecars') or {}
+    out = []
+    for name, path in sorted(files.items()):
+        want = recorded.get(name)
+        if want is None:
+            out.append(('SIDECAR_NOT_ATTESTED',
+                        '%s is expected and the receipt does not name it'
+                        % name))
+            continue
+        if not os.path.exists(path):
+            out.append(('SIDECAR_MISSING',
+                        '%s is attested and is not on disk' % name))
+            continue
+        try:
+            got = json_digest(json.load(io.open(path, encoding='utf-8')))
+        except ValueError as exc:
+            out.append(('SIDECAR_UNREADABLE', '%s: %s' % (name, exc)))
+            continue
+        if got != want:
+            out.append(('SIDECAR_STALE', '%s recorded %s, disk has %s'
+                        % (name, want[:12], got[:12])))
+    return out
+
+
+def attest_sidecars(receipt_dir, name, payloads):
+    """Record in this writer's receipt what the sidecars it wrote contain.
+
+    AFTER THE FILES, NOT BEFORE. Part of what a sidecar carries - an ordinal
+    minted during the write - does not exist until the write has happened, so
+    there is nothing to attest beforehand. If the process dies between the
+    file and this amendment, the sidecar is unattested, and an unattested
+    sidecar is reported as a problem rather than accepted: the gap fails
+    closed.
+    """
+    # MERGED, NOT REPLACED. A rerun rewrites only the sidecars it has content
+    # for; an ordinal minted by the run that actually wrote the tables is not
+    # in this run's hands. Replacing the map would drop the entry for a file
+    # that is still there and still correct, and an unattested file reads as a
+    # problem.
+    keep = _read_receipt(receipt_dir, name).get('sidecars') or {}
+    keep.update({k: json_digest(v) for k, v in payloads.items()})
+    _amend_receipt(receipt_dir, name, {'sidecars': keep})
+
+
 class Locked(Exception):
     """Another writer holds the lock."""
 
@@ -628,7 +705,31 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
     attestation = {'core': attestation, 'caller': dict(attest or {})}
     _amend_receipt(receipt_dir, name, {'attestation': attestation})
     if not may:
-        return _last_verdict(receipt_dir, name), []
+        verdict = _last_verdict(receipt_dir, name)
+        # THE CALLER'S ROWS SHOULD CARRY THE IDS THEY HAVE ON FILE. On a write
+        # `assign_ids` stamps them; on a clean rerun nothing does, so a caller
+        # that builds anything from those rows afterwards - a sidecar handed
+        # to the workbook step, a receipt - writes blanks where the table has
+        # ordinals, and the two disagree for a reason that is not a defect in
+        # either. The guard has just proven every intended row is already on
+        # file under its natural key, so the ordinal is there to be read.
+        # Reading it is not minting one.
+        if verdict == CLEAN_RERUN and assignable:
+            for _l, _p, _f, existing, intended, kf, _v in tables:
+                index = {}
+                for r in existing:
+                    index.setdefault(key_of(r, kf), r)
+                for r in intended:
+                    match = index.get(key_of(r, kf))
+                    for f in assignable:
+                        # Unconditionally: an ordinal is a position in a
+                        # file, and it is left out of the comparison for that
+                        # reason. Whatever a caller brought under that name is
+                        # not a competing claim, so there is nothing to
+                        # arbitrate - the file says where the row is.
+                        if match and f in match:
+                            r[f] = match[f]
+        return verdict, []
     # ONE PATH, INCLUDING THE ONE THAT DOES NOT WRITE. A dry run used to call
     # `guard` directly and skip this function, so every check that lives here -
     # the parent resolution above all - never ran on the path a person actually
@@ -676,12 +777,17 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
     return 'WRITE', written
 
 
+def _read_receipt(receipt_dir, name):
+    try:
+        return json.load(io.open(os.path.join(
+            receipt_dir, '%s_idempotency.json' % name), encoding='utf-8'))
+    except Exception:
+        return {}
+
+
 def _amend_receipt(receipt_dir, name, extra):
     path = os.path.join(receipt_dir, '%s_idempotency.json' % name)
-    try:
-        d = json.load(io.open(path, encoding='utf-8'))
-    except Exception:
-        d = {}
+    d = _read_receipt(receipt_dir, name)
     d.update(extra)
     os.makedirs(receipt_dir, exist_ok=True)
     json.dump(d, io.open(path, 'w', encoding='utf-8'), indent=2,

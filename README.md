@@ -137,6 +137,14 @@ starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
 count that depends on what `ubuntu-latest` happens to ship is not a property of
 this repository.
 
+**The core number is CI's measurement, not a local one.** A machine that
+strips the three backends by hand is not the core profile - it is that
+machine minus three backends, and the two differed by three scenarios when
+this was last checked. Whichever way such a gap points, the runner that
+declares the profile is the one that measures it. A local run is a smoke
+test; the marker is what stops either side asserting a count it did not
+run.
+
 Those two numbers are what a **fresh clone** runs. A further 286 of them need
 the publisher figures, which this repository does not carry and cannot: they are
 not redistributable. `test_bar_reader` (24), `test_integration` (17),

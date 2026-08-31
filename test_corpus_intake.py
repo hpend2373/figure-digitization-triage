@@ -1689,6 +1689,55 @@ check("and nothing else, so a column added there is a visible failure here",
       not [c for c in _emitted if c not in BM.source_figure_manifest_columns()],
       "%s" % [c for c in _emitted if c not in BM.source_figure_manifest_columns()])
 
+# ---------------------------------------------------- the page's own size
+# THE DENOMINATOR IS THE PAPER, NOT THE PRINTING. The crop harness normalised
+# every box by the extent of the text on the page, because that was the only
+# page size anything had written down. Text stops short of the paper on all
+# four sides, so a 612 x 792 page whose last line ends at x=280 came back 54%
+# too narrow, and every fraction computed from it was inflated - enough, at a
+# threshold of 0.85, to turn a clipped crop into a passing one.
+#
+# The fixture makes the two answers impossible to confuse: the MediaBox is
+# 612 x 792 and every glyph sits inside roughly 300 x 400.
+check("the draft has somewhere to record the page's own size",
+      all(c in CI.DRAFT_COLUMNS for c in
+          ("Page_Width_Pt", "Page_Height_Pt", "Page_Geometry_Method")),
+      "%s" % [c for c in CI.DRAFT_COLUMNS if c.startswith("Page_")])
+
+_GEO = os.path.join(ROOT, "geometry")
+os.makedirs(_GEO, exist_ok=True)
+_geo_pdf = os.path.join(_GEO, "corner.pdf")
+minimal_pdf(_geo_pdf, [[(60, 700, "Fig. 1 a caption in the top left corner"),
+                        (60, 660, "and a second line, no wider than the first")]])
+_grows, _gled = CI.intake_document(_geo_pdf, "GEO", os.path.join(_GEO, "out"))
+if not _grows:
+    print("  SKIP the page-geometry scenarios: no text backend read the fixture")
+else:
+    _g = _grows[0]
+    check("the recorded page width is the MediaBox, not the text",
+          _g["Page_Width_Pt"] == "612.00", _g["Page_Width_Pt"])
+    check("and the height likewise",
+          _g["Page_Height_Pt"] == "792.00", _g["Page_Height_Pt"])
+    check("the way it was read is recorded beside it",
+          _g["Page_Geometry_Method"] in ("PYPDF_MEDIABOX", "PDFMINER_LAYOUT",
+                                         "PDFINFO_UNIFORM"),
+          _g["Page_Geometry_Method"])
+    # AND THE TWO ANSWERS REALLY DIFFER on this fixture, or the scenarios above
+    # would pass against a page whose text happens to fill it.
+    _blocks = [b for b in CI.text_blocks(_geo_pdf) if b[0] == _g["Page"]]
+    _tw = max(b[3] for b in _blocks)
+    _th = max(b[4] for b in _blocks)
+    check("the text really does stop well short of the paper",
+          _tw < 400 and _th < 500, "text extent %.0f x %.0f" % (_tw, _th))
+    check("so the recorded size cannot have come from the text",
+          float(_g["Page_Width_Pt"]) > _tw + 100
+          and float(_g["Page_Height_Pt"]) > _th + 100,
+          "page %s x %s vs text %.0f x %.0f"
+          % (_g["Page_Width_Pt"], _g["Page_Height_Pt"], _tw, _th))
+
+check("a document whose size cannot be read says so rather than guessing",
+      CI.page_geometry(os.path.join(_GEO, "not-a-pdf")) == ({}, "UNKNOWN"))
+
 print()
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is

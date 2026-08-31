@@ -85,6 +85,13 @@ if HERE not in sys.path:
 DRAFT_COLUMNS = (
     "Draft_ID", "Source_Document_ID", "Source_File", "Source_File_SHA256",
     "Page", "Page_Raster", "Page_Raster_SHA256", "Figure_Crop",
+    # THE PAGE'S OWN SIZE, WRITTEN DOWN. A consumer that has to work out
+    # how big the page was ends up measuring the text on it, and text
+    # stops short of the paper on every side - a 612x792 page whose last
+    # line ends at x=500 comes back 22% too narrow, which moves every
+    # fraction computed from it. The backend knows the MediaBox; this
+    # carries it, and says which way it was read.
+    "Page_Width_Pt", "Page_Height_Pt", "Page_Geometry_Method",
     "Crop_Quality_Status",
     "Figure_Number", "Figure_Label_Raw", "Label_Repeats_In_Document",
     "Caption_Text", "Caption_BBox", "Figure_BBox",
@@ -1644,9 +1651,20 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
         return refuse("ZERO_CAPTION_CANDIDATES",
                       "%d text blocks and no block opens with a figure label"
                       % len(blocks))
+    # THE PAGE'S SIZE TRAVELS WITH THE ROW, whether or not a crop was made.
+    # A consumer that has to work it out later has only the text to measure,
+    # and text stops short of the paper on every side; the harness that scores
+    # these boxes was doing exactly that, normalising by the extent of the last
+    # line on the page instead of by the page.
+    sizes, geometry_method = page_geometry(path, rasters=rasters)
+    for row in rows:
+        w, h = sizes.get(row["Page"], (0, 0))
+        row["Page_Width_Pt"] = ("%.2f" % w) if w else ""
+        row["Page_Height_Pt"] = ("%.2f" % h) if h else ""
+        row["Page_Geometry_Method"] = geometry_method if w else "UNKNOWN"
+
     if rasters:
         os.makedirs(crop_dir, exist_ok=True)
-        sizes = page_sizes(path, rasters=rasters)
         for row in rows:
             raster = rasters.get(row["Page"], "")
             made, quality = crop_and_grade(
@@ -1665,42 +1683,57 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
                             Detail=retry_note, **base)
 
 
-def page_sizes(path, rasters=None):
-    """{page: (width_pt, height_pt)} so a crop can be scaled to its raster.
+def page_geometry(path, rasters=None):
+    """({page: (width_pt, height_pt)}, method) - the sizes AND how they were read.
 
-    Tried three ways, because the fallback was a guess: `image.width / 612.0`
-    assumes US Letter, and this corpus is largely A4 (595 x 842 pt), so a crop
-    on a poppler-only machine came out scaled by 1.03 in x and 1.09 in y - off
-    by most of a caption's height at the bottom of a page. pypdf and pdfminer
-    read the MediaBox; poppler's `pdfinfo` prints it; and failing all three the
-    caller is told nothing rather than told Letter.
+    The method travels with the numbers because the three ways are not equally
+    trustworthy and the fourth outcome is "not known". `pdfinfo` reports one
+    size for the whole document, so a file with a mixed page size is right only
+    by luck; a reader who can see PDFINFO_UNIFORM in the draft can weigh that,
+    and a reader handed a bare number cannot.
     """
-    try:
-        from pypdf import PdfReader
-        return {n: (float(p.mediabox.width), float(p.mediabox.height))
-                for n, p in enumerate(PdfReader(path).pages, start=1)}
-    except Exception:
-        pass
-    try:
-        from pdfminer.high_level import extract_pages
-        return {n: (float(layout.width), float(layout.height))
-                for n, layout in enumerate(extract_pages(path), start=1)}
-    except Exception:
-        pass
-    from shutil import which
-    if which("pdfinfo"):
+    for method, fn in (("PYPDF_MEDIABOX", _sizes_pypdf),
+                       ("PDFMINER_LAYOUT", _sizes_pdfminer),
+                       ("PDFINFO_UNIFORM", lambda p: _sizes_pdfinfo(p, rasters))):
         try:
-            out = subprocess.run(["pdfinfo", path], capture_output=True,
-                                 text=True, check=True).stdout
-            for line in out.splitlines():
-                if line.startswith("Page size:"):
-                    parts = line.split(":", 1)[1].split()
-                    w, h = float(parts[0]), float(parts[2])
-                    pages = page_count(path) or len(rasters or {}) or 1
-                    return {n: (w, h) for n in range(1, pages + 1)}
+            got = fn(path)
         except Exception:
-            pass
+            got = None
+        if got:
+            return got, method
+    return {}, "UNKNOWN"
+
+
+def _sizes_pypdf(path):
+    from pypdf import PdfReader
+    return {n: (float(p.mediabox.width), float(p.mediabox.height))
+            for n, p in enumerate(PdfReader(path).pages, start=1)}
+
+
+def _sizes_pdfminer(path):
+    from pdfminer.high_level import extract_pages
+    return {n: (float(layout.width), float(layout.height))
+            for n, layout in enumerate(extract_pages(path), start=1)}
+
+
+def _sizes_pdfinfo(path, rasters=None):
+    from shutil import which
+    if not which("pdfinfo"):
+        return {}
+    out = subprocess.run(["pdfinfo", path], capture_output=True,
+                         text=True, check=True).stdout
+    for line in out.splitlines():
+        if line.startswith("Page size:"):
+            parts = line.split(":", 1)[1].split()
+            w, h = float(parts[0]), float(parts[2])
+            pages = page_count(path) or len(rasters or {}) or 1
+            return {n: (w, h) for n in range(1, pages + 1)}
     return {}
+
+
+def page_sizes(path, rasters=None):
+    """{page: (width_pt, height_pt)}, for callers that do not need the method."""
+    return page_geometry(path, rasters=rasters)[0]
 
 
 def document_sheet(path, ledger, rows_by_document, out_dir, title=""):

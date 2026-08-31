@@ -34,8 +34,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import crop_truth as T                                            # noqa: E402
 import paths as PATHS                                             # noqa: E402
-sys.path.insert(0, PATHS.REPO)
-import corpus_intake as CI                                        # noqa: E402
 
 #: A crop holding less than this of its figure has clipped it. Chosen so the
 #: two boxes a person passed clear it and the three they failed do not; the
@@ -45,56 +43,76 @@ COVERED_FLOOR = 0.85
 #: A crop holding more than this of a DIFFERENT figure has merged them.
 INTRUSION_CEILING = 0.15
 
-_blocks = {}
+#: A draft row whose page size was never recorded, or whose key is claimed by
+#: two different boxes. Both are measured as nothing and reported as such.
+NO_PAGE_SIZE = "NO_PAGE_SIZE"
+AMBIGUOUS = "AMBIGUOUS_DRAFT_BOX"
 
 
-def blocks_for(path):
-    if path not in _blocks:
-        _blocks[path] = CI.text_blocks(path)
-    return _blocks[path]
+def draft_rows(draft_dir):
+    """{(document, label, page): entry} straight out of the shipped draft.
 
+    READ, NOT RECOMPUTED, AND THAT NOW INCLUDES THE PAGE. An earlier harness
+    called `figure_bbox` itself and graded a box the draft may never have held;
+    v9.27 fixed that by reading `Figure_BBox`. But it still opened the PDF for
+    one more thing - the page size - and worked it out from the text on the
+    page, which is not the page: text stops short of the paper, so every
+    fraction came out inflated. Opening the PDF at all also meant finding it,
+    and it was found by BASENAME, so two documents both called `fulltext.pdf`
+    resolved to whichever the staged list mentioned last - one publication's
+    box scored against another's page, with a number at the end and no error.
 
-def page_size(path, page):
-    bl = [b for b in blocks_for(path) if b[0] == page]
-    if not bl:
-        return None
-    return (max(b[3] for b in bl), max(b[4] for b in bl))
+    Now nothing here opens a PDF. The draft records `Page_Width_Pt` and
+    `Page_Height_Pt`; a row without them is not scored.
 
-
-def draft_boxes(draft_dir):
-    """{(document, label, page): "x0,y0,x1,y1"} straight out of the draft.
-
-    READ, NOT RECOMPUTED. The harness used to call `figure_bbox` itself, on
-    whatever backend `_default_backend` picks - so it graded a box the shipped
-    draft may never have contained. Publication 437's Fig. 3 came back
-    "NO_BOX" for four rounds that way, while the draft had held the row since
-    v9.23: the second reader found the caption, pdfminer had merged it into
-    the line above, and the harness only ever asked pdfminer.
-
-    A harness has to measure the artifact that ships.
+    A KEY CLAIMED TWICE IS NOT A TIE TO BREAK. The same label can appear on a
+    page as a caption and again as a cross-reference, two backends can propose
+    different boxes, and one line can carry two captions. Taking the first row
+    made the answer depend on file order. Identical boxes collapse; different
+    boxes are marked AMBIGUOUS_DRAFT_BOX and a person is shown both.
     """
     out = {}
     with io.open(os.path.join(draft_dir, "figure_intake_draft.csv"),
                  encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
+            if not row.get("Figure_BBox"):
+                continue
             key = (row["Source_Document_ID"], row["Figure_Number"],
                    row["Page"])
-            if row.get("Figure_BBox"):
-                out.setdefault(key, row["Figure_BBox"])
+            entry = {"box": row["Figure_BBox"],
+                     "w": row.get("Page_Width_Pt", ""),
+                     "h": row.get("Page_Height_Pt", ""),
+                     "method": row.get("Page_Geometry_Method", ""),
+                     "candidates": [row["Figure_BBox"]]}
+            seen = out.get(key)
+            if seen is None:
+                out[key] = entry
+            elif seen["box"] != entry["box"]:
+                seen["status"] = AMBIGUOUS
+                if entry["box"] not in seen["candidates"]:
+                    seen["candidates"].append(entry["box"])
     return out
 
 
-def box_for(path, page, label, boxes, document):
-    """The DRAFT's box for one figure, as fractions of the page."""
-    size = page_size(path, page)
-    raw = boxes.get((document, label, str(page)))
-    if not size or not raw:
-        return None
+def box_for(entry):
+    """The draft's box as fractions of the page the DRAFT recorded.
+
+    Returns (box, status). The box is None whenever it cannot be trusted, and
+    the status says which kind of untrustworthy it is.
+    """
+    if entry.get("status") == AMBIGUOUS:
+        return None, AMBIGUOUS
     try:
-        x0, y0, x1, y1 = [float(v) for v in raw.split(",")]
+        w, h = float(entry["w"]), float(entry["h"])
+    except (TypeError, ValueError):
+        return None, NO_PAGE_SIZE
+    if w <= 0 or h <= 0:
+        return None, NO_PAGE_SIZE
+    try:
+        x0, y0, x1, y1 = [float(v) for v in entry["box"].split(",")]
     except ValueError:
-        return None
-    return (x0 / size[0], y0 / size[1], x1 / size[0], y1 / size[1])
+        return None, "NO_BOX"
+    return (x0 / w, y0 / h, x1 / w, y1 / h), "OK"
 
 
 def verdict(cov, intr):
@@ -105,23 +123,23 @@ def verdict(cov, intr):
     return "OK"
 
 
-def score(source_of, document_of, boxes):
+def score(document_of, entries):
     """[(key, covered, intrusion, verdict)] for every figure with a truth box."""
     out = []
     for (pid, label, page) in sorted(T.FIGURE_REGIONS):
-        path = source_of(pid)
-        if not path:
+        entry = entries.get((document_of(pid), label, page))
+        if entry is None:
+            out.append(((pid, label, page), 0.0, 0.0, "NO_BOX"))
+            continue
+        box, status = box_for(entry)
+        if box is None:
+            out.append(((pid, label, page), 0.0, 0.0, status))
             continue
         truth = T.FIGURE_REGIONS[(pid, label, page)]
         others = [b for (p, l, g), b in T.FIGURE_REGIONS.items()
                   if p == pid and g == page and l != label]
-        box = box_for(path, int(page), label, boxes, document_of(pid))
-        if box is None:
-            out.append(((pid, label, page), 0.0, 0.0, "NO_BOX"))
-            continue
-        out.append(((pid, label, page), T.covered(box, truth),
-                    T.intrusion(box, others), verdict(T.covered(box, truth),
-                                                     T.intrusion(box, others))))
+        cov, intr = T.covered(box, truth), T.intrusion(box, others)
+        out.append(((pid, label, page), cov, intr, verdict(cov, intr)))
     return out
 
 
@@ -139,22 +157,19 @@ def calibrate(scored):
 
 
 if __name__ == "__main__":
+    # NO PDF IS OPENED HERE. The staged-path list is gone with it: it was
+    # keyed by basename, and two documents named `fulltext.pdf` resolved to
+    # whichever line came last, so one publication's box could be scored
+    # against another publication's page and still produce a number.
     rows = json.load(io.open(PATHS.CROSSCHECK, encoding="utf-8"))
     by_pid = {r["pid"]: r for r in rows}
-    src = {l.strip().rsplit("/", 1)[-1]: l.strip()
-           for l in io.open(PATHS.STAGED, encoding="utf-8") if l.strip()}
-
-    def source_of(pid):
-        r = by_pid.get(pid)
-        return src.get(r["file"]) if r else None
-
-    boxes = draft_boxes(PATHS.DRAFT)
+    entries = draft_rows(PATHS.DRAFT)
 
     def document_of(pid):
         r = by_pid.get(pid)
         return r["doc"] if r else ""
 
-    scored = score(source_of, document_of, boxes)
+    scored = score(document_of, entries)
     print("%-22s %9s %9s  %s" % ("figure", "covered", "intrusion", "verdict"))
     for key, cov, intr, v in scored:
         print("%-22s %8.2f %9.2f  %s"

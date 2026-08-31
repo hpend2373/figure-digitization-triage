@@ -116,9 +116,39 @@ for status in ("EDGE_CLIPPED", "THIN_CROP", "NO_CROP"):
                             BR.figure_key("1", "FIG1", "2")) != "")
 check("every uncountable crop verdict has a message",
       all(v.strip() for v in BR.UNCOUNTABLE_CROPS.values()))
-check("an unknown crop verdict does not silently block",
+# A GATE THAT PASSES WHAT IT CANNOT READ IS NOT A GATE. This scenario used to
+# assert the opposite - that an unrecognised status fell through to countable -
+# which pinned the fail-open in place. The status column is a closed set, so
+# anything outside it is a value this rule does not understand, and the honest
+# answer to a value it does not understand is no.
+check("an unknown crop verdict is blocked, not waved through",
       BR.blocked_reason(row(Crop_Quality_Status="SOMETHING_NEW"),
+                        BR.figure_key("1", "FIG1", "2")) != "")
+check("an empty crop verdict is blocked too",
+      BR.blocked_reason(row(Crop_Quality_Status=""),
+                        BR.figure_key("1", "FIG1", "2")) != "")
+check("the refusal names the value it could not read",
+      "SOMETHING_NEW" in BR.blocked_reason(
+          row(Crop_Quality_Status="SOMETHING_NEW"),
+          BR.figure_key("1", "FIG1", "2")))
+check("and ACCEPTABLE still passes, or the gate blocks everything",
+      BR.blocked_reason(row(Crop_Quality_Status=BR.COUNTABLE_CROP),
                         BR.figure_key("1", "FIG1", "2")) == "")
+# THE SET THIS GATE KNOWS IS THE SET THE INTAKE WRITES. A status added upstream
+# without a rule here would be blocked - safe - but silently, so this fails
+# loudly instead.
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+try:
+    import corpus_intake as _CI
+    check("every status the intake can write has a rule here",
+          set(_CI.CROP_QUALITY_STATUSES)
+          == {BR.COUNTABLE_CROP} | set(BR.UNCOUNTABLE_CROPS),
+          "intake %s vs rules %s" % (sorted(_CI.CROP_QUALITY_STATUSES),
+                                     sorted({BR.COUNTABLE_CROP}
+                                            | set(BR.UNCOUNTABLE_CROPS))))
+except ImportError:
+    print("  SKIP the intake status cross-check: corpus_intake did not import")
 
 # ------------------------------------------------------- two rows, one picture
 _shared = BR.shared_crop_map({"A": "d1", "B": "d1", "C": "d2"})

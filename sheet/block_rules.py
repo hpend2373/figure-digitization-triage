@@ -38,6 +38,9 @@ STILL_WRONG = {
 }
 
 #: Crop verdicts a person cannot count from, and what to tell them.
+#: The one status that means the picture can be counted from.
+COUNTABLE_CROP = "ACCEPTABLE"
+
 UNCOUNTABLE_CROPS = {
     "EDGE_CLIPPED": ("크롭이 그림을 자르고 있습니다 — 가장자리에 잉크가 걸립니다. "
                      "전체 페이지를 보고 세야 합니다."),
@@ -88,10 +91,20 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None):
     if str(row.get("Confidence", "")).strip() == "0.00":
         return ("기계가 스스로 신뢰도 0으로 표시한 행입니다 — %s"
                 % (row.get("Confidence_Reason") or "사유 없음"))
+    # THE CROP STATUS IS A CLOSED SET, so anything outside it is a value this
+    # gate does not understand - and a gate that lets through what it cannot
+    # read is not a gate. Listing only the dangerous statuses meant an empty
+    # cell, a typo, or a status added upstream tomorrow all counted as safe.
+    # `corpus_intake.CROP_QUALITY_STATUSES` is the set; ACCEPTABLE is the only
+    # member that means "a person can count from this picture".
     status = str(row.get("Crop_Quality_Status", "")).strip()
+    if status == COUNTABLE_CROP:
+        return ""
     if status in UNCOUNTABLE_CROPS:
         return UNCOUNTABLE_CROPS[status]
-    return ""
+    return ("크롭 상태를 해석할 수 없어 막았습니다 (%s) — 아는 상태는 %s 뿐입니다."
+            % (status or "빈 값",
+               ", ".join([COUNTABLE_CROP] + sorted(UNCOUNTABLE_CROPS))))
 
 
 def shared_crop_map(digest_of_row):

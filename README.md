@@ -120,11 +120,11 @@ Every test file is a standalone script:
 나머지는 코퍼스가 있어야 실행됩니다. 코퍼스는 재배포할 수 없으므로 추정치와 인용문은
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
-<!-- CURRENT_PIPELINE_VERSION: 9.27 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3576 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3647 -->
+<!-- CURRENT_PIPELINE_VERSION: 9.28 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3591 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3667 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
-<!-- CURRENT_INTAKE_FULL_SCENARIOS: 251 -->
+<!-- CURRENT_INTAKE_FULL_SCENARIOS: 258 -->
 
 3576 scenarios on main after v9.27 under `requirements-lock.txt`, and 3647 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,

@@ -140,24 +140,77 @@ check("figures with no recorded verdict exist and are kept separate",
 # "NO_BOX" for four rounds while the draft had carried the row since v9.23,
 # found by the second reader after pdfminer merged that caption into the line
 # above.
-_dir = tempfile.mkdtemp(prefix="fdt_truth_")
-with open(os.path.join(_dir, "figure_intake_draft.csv"), "w",
-          encoding="utf-8") as _fh:
-    _w = csv.writer(_fh)
-    _w.writerow(["Source_Document_ID", "Figure_Number", "Page", "Figure_BBox"])
-    _w.writerow(["DOC", "FIG1", "4", "10,20,110,220"])
-    _w.writerow(["DOC", "FIG2", "4", ""])
-    _w.writerow(["DOC", "FIG3", "4", "5,5,50,50"])
-    _w.writerow(["DOC", "FIG3", "4", "999,999,1000,1000"])
-_boxes = R.draft_boxes(_dir)
+COLS = ["Source_Document_ID", "Figure_Number", "Page", "Figure_BBox",
+        "Page_Width_Pt", "Page_Height_Pt", "Page_Geometry_Method"]
+
+
+def _draft(rows):
+    d = tempfile.mkdtemp(prefix="fdt_truth_")
+    with open(os.path.join(d, "figure_intake_draft.csv"), "w",
+              encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(COLS)
+        for r in rows:
+            w.writerow(r)
+    return R.draft_rows(d)
+
+
+_e = _draft([["DOC", "FIG1", "4", "61.2,79.2,306.0,396.0", "612", "792", "PYPDF_MEDIABOX"],
+             ["DOC", "FIG2", "4", "", "612", "792", "PYPDF_MEDIABOX"]])
 check("a box in the draft is what gets graded",
-      _boxes[("DOC", "FIG1", "4")] == "10,20,110,220", "%s" % _boxes)
-check("a row with no box contributes none",
-      ("DOC", "FIG2", "4") not in _boxes)
-check("the first row for a figure wins, so a later duplicate cannot displace it",
-      _boxes[("DOC", "FIG3", "4")] == "5,5,50,50")
-check("the box is scaled to the page, not left in points",
-      R.box_for.__doc__ and "fractions" in R.box_for.__doc__)
+      _e[("DOC", "FIG1", "4")]["box"] == "61.2,79.2,306.0,396.0", "%s" % _e)
+check("a row with no box contributes none", ("DOC", "FIG2", "4") not in _e)
+
+# THE DENOMINATOR IS THE PAGE THE DRAFT RECORDED. The harness used to work the
+# page size out from the text on it, and text stops short of the paper: this
+# box is exactly a tenth-to-half of a 612 x 792 page, and against a text extent
+# of, say, 306 x 396 it would read as half-to-whole.
+_box, _st = R.box_for(_e[("DOC", "FIG1", "4")])
+check("the box is scaled by the page the draft wrote down", _st == "OK", _st)
+check("and the fractions are the page's, not the printing's",
+      _box and abs(_box[0] - 0.1) < 1e-6 and abs(_box[2] - 0.5) < 1e-6,
+      "%s" % (_box,))
+
+_missing = _draft([["DOC", "FIG1", "4", "10,20,110,220", "", "", "UNKNOWN"]])
+check("a row whose page size was never read is not scored",
+      R.box_for(_missing[("DOC", "FIG1", "4")])[1] == R.NO_PAGE_SIZE)
+_zero = _draft([["DOC", "FIG1", "4", "10,20,110,220", "0", "792", "UNKNOWN"]])
+check("and neither is one whose page has no width",
+      R.box_for(_zero[("DOC", "FIG1", "4")])[1] == R.NO_PAGE_SIZE)
+
+# A KEY CLAIMED TWICE IS NOT A TIE TO BREAK.
+_same = _draft([["DOC", "FIG3", "4", "5,5,50,50", "612", "792", "PYPDF_MEDIABOX"],
+                ["DOC", "FIG3", "4", "5,5,50,50", "612", "792", "PYPDF_MEDIABOX"]])
+check("the same box proposed twice is one box",
+      R.box_for(_same[("DOC", "FIG3", "4")])[1] == "OK")
+_diff = _draft([["DOC", "FIG3", "4", "5,5,50,50", "612", "792", "PYPDF_MEDIABOX"],
+                ["DOC", "FIG3", "4", "9,9,99,99", "612", "792", "PYPDF_MEDIABOX"]])
+check("two different boxes for one figure are AMBIGUOUS, not first-wins",
+      R.box_for(_diff[("DOC", "FIG3", "4")])[1] == R.AMBIGUOUS)
+check("and both candidates are kept for a person to look at",
+      sorted(_diff[("DOC", "FIG3", "4")]["candidates"])
+      == ["5,5,50,50", "9,9,99,99"],
+      "%s" % _diff[("DOC", "FIG3", "4")]["candidates"])
+check("the ambiguous row is measured as nothing, not scored",
+      R.box_for(_diff[("DOC", "FIG3", "4")])[0] is None)
+
+# TWO DOCUMENTS MAY SHARE A FILENAME. The harness used to find the PDF by
+# basename, so `a/fulltext.pdf` and `b/fulltext.pdf` collapsed to whichever the
+# staged list named last, and one publication's box was scored against the
+# other's page. Nothing here opens a PDF at all now; the document id is the
+# join, and it is in the draft.
+_two = _draft([["DOC_A", "FIG1", "4", "61.2,0,122.4,79.2", "612", "792", "PYPDF_MEDIABOX"],
+               ["DOC_B", "FIG1", "4", "297.5,0,595.0,84.2", "595", "842", "PYPDF_MEDIABOX"]])
+check("two documents keep their own boxes even under one filename",
+      len(_two) == 2)
+check("and each is scaled by its OWN page size",
+      abs(R.box_for(_two[("DOC_A", "FIG1", "4")])[0][0] - 0.1) < 1e-6
+      and abs(R.box_for(_two[("DOC_B", "FIG1", "4")])[0][0] - 0.5) < 1e-6,
+      "%s / %s" % (R.box_for(_two[("DOC_A", "FIG1", "4")])[0],
+                   R.box_for(_two[("DOC_B", "FIG1", "4")])[0]))
+check("the harness opens no PDF to do any of this",
+      "corpus_intake" not in open(
+          os.path.join(HERE, "sheet", "regress_crop.py"), encoding="utf-8").read())
 
 check("calibration is computed only over the judged ones",
       R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])

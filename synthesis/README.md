@@ -17,7 +17,7 @@
 기계는 공개하고 원료는 두고 갑니다. `crop_truth.py`가 좌표만 담아 공개될 수 있었던 것과
 같은 선입니다 — 다만 여기서는 값 자체가 출판사의 것이라 반대편으로 갈라집니다.
 
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 147 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 158 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 

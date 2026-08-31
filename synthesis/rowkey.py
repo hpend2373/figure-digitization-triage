@@ -249,6 +249,14 @@ def attestation_problems(receipt, expected):
         return [('RECEIPT_ATTESTATION_MISSING', 'no attestation recorded')]
     core, caller = att.get('core', {}), att.get('caller', {})
     out = []
+    # THE SCHEME COMES FIRST BECAUSE IT EXPLAINS THE REST. Row digests written
+    # under a different serialisation are not comparable, so saying so once
+    # beats naming every table as stale for a reason that is not theirs.
+    scheme = core.get('rows_digest_scheme')
+    if scheme != ROWS_DIGEST_SCHEME:
+        out.append(('RECEIPT_DIGEST_SCHEME_STALE',
+                    'row digests recorded under %s, this is %s'
+                    % (scheme or '(absent)', ROWS_DIGEST_SCHEME)))
     for key, code, where in (
             ('protocol_sha256', 'RECEIPT_PROTOCOL_STALE', core),
             ('writer_code_sha256', 'RECEIPT_WRITER_CODE_STALE', caller),
@@ -421,14 +429,50 @@ def file_digest(path):
     return h.hexdigest()
 
 
+#: Bumped when the serialisation below changes. An attestation carries it, so
+#: a receipt written under one scheme cannot be silently compared with a digest
+#: computed under another - the mismatch is a mismatch, and says so.
+ROWS_DIGEST_SCHEME = "fdt-rows-digest-2"
+
+
+def _cell(v):
+    """A value as the file will carry it.
+
+    csv.DictWriter writes str(v) and writes None as the empty field, and
+    everything read back is text. A digest that distinguishes 1 from "1", or
+    None from "", disagrees with the file it is supposed to stand for: a rerun
+    that parsed a column slightly differently would read as a changed table
+    while the bytes on disk are identical.
+    """
+    return '' if v is None else str(v)
+
+
 def rows_digest(rows, fields):
-    """sha256 of the rows a writer intends, under the fields that matter."""
+    """sha256 of the rows a writer intends, under the fields that matter.
+
+    CANONICAL, NOT repr(). repr's output is a property of the running
+    interpreter - container reprs, str/unicode prefixes, float formatting -
+    and this digest goes into a receipt that a later run, on a later
+    interpreter, is expected to reproduce. `sorted(r.items())` also fixed only
+    the key order inside one row while leaving the rest to repr.
+
+    The stream is the scheme name, the field list as a JSON array, then one
+    JSON object per row with sorted keys. No length framing: a JSON array and
+    a JSON object cannot be confused for one another or split differently, so
+    the concatenation has exactly one reading. Row order is part of the digest
+    on purpose - it is part of the file.
+    """
     import hashlib
     h = hashlib.sha256()
+
+    def feed(obj):
+        h.update(json.dumps(obj, ensure_ascii=False, sort_keys=True,
+                            separators=(',', ':')).encode('utf-8'))
+
+    h.update(ROWS_DIGEST_SCHEME.encode('utf-8'))
+    feed(list(fields))
     for r in rows:
-        h.update(repr(sorted((k, v) for k, v in r.items()
-                             if not k.startswith('_'))).encode('utf-8'))
-    h.update(repr(tuple(fields)).encode('utf-8'))
+        feed({k: _cell(v) for k, v in r.items() if not k.startswith('_')})
     return h.hexdigest()
 
 
@@ -567,6 +611,11 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
         'generated': __import__('datetime').datetime.now().isoformat(
             timespec='seconds'),
         'protocol_sha256': file_digest(os.path.abspath(__file__)),
+        # WHICH SERIALISATION THE ROW DIGESTS BELOW ARE IN. Without it a
+        # receipt written under an older scheme compares as a changed table,
+        # and the reader has no way to tell that apart from rows that really
+        # moved.
+        'rows_digest_scheme': ROWS_DIGEST_SCHEME,
         'tables': {label: {'file_sha256': file_digest(path),
                            'intended_rows_sha256': rows_digest(intended, fields),
                            'intended_rows': len(intended),

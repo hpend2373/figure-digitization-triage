@@ -381,6 +381,22 @@ check("a changed source artifact is named",
 check("what the caller does not know about is not judged",
       K.attestation_problems(_receipt, {}) == [])
 
+# THE SCHEME IS PART OF WHAT A DIGEST MEANS. rows_digest changed from repr()
+# to canonical JSON; a receipt written before that carries numbers computed a
+# different way, and comparing them would name every table stale for a reason
+# that is not the tables'.
+_old_scheme = json.loads(json.dumps(_receipt))
+_old_scheme['attestation']['core'].pop('rows_digest_scheme', None)
+check("a receipt whose row digests are in an older serialisation says so",
+      'RECEIPT_DIGEST_SCHEME_STALE'
+      in [c for c, _d in K.attestation_problems(_old_scheme, _now)])
+check("and says it even when the caller can recompute nothing",
+      'RECEIPT_DIGEST_SCHEME_STALE'
+      in [c for c, _d in K.attestation_problems(_old_scheme, {})])
+check("the scheme this run writes is the one it checks for",
+      'RECEIPT_DIGEST_SCHEME_STALE'
+      not in [c for c, _d in K.attestation_problems(_receipt, _now)])
+
 # --------------------------------------------------- one writer at a time
 # Two processes reading the same tables both see them empty and are both told
 # to WRITE; the second then appends what the first has already written. The

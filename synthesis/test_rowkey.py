@@ -397,6 +397,37 @@ check("leaving no half-written file behind either",
       not [f for f in os.listdir(TMP) if f.endswith('.writing')],
       "%s" % [f for f in os.listdir(TMP) if f.endswith('.writing')])
 
+
+# --- the digest a receipt carries -------------------------------------------
+# THE DIGEST STANDS FOR THE FILE. Whatever two row sets the CSV writer would
+# turn into the same bytes must digest the same, and whatever it would write
+# differently must not. Under repr() that held by accident.
+
+_F = ['a', 'b']
+check("key order inside a row does not change the digest",
+      K.rows_digest([{'a': '1', 'b': '2'}], _F)
+      == K.rows_digest([dict([('b', '2'), ('a', '1')])], _F))
+check("None and the empty string digest the same, as csv writes them",
+      K.rows_digest([{'a': None, 'b': '2'}], _F)
+      == K.rows_digest([{'a': '', 'b': '2'}], _F))
+check("a number and its text digest the same, as csv writes them",
+      K.rows_digest([{'a': 1, 'b': '2'}], _F)
+      == K.rows_digest([{'a': '1', 'b': '2'}], _F))
+check("a transient underscore field is not part of it",
+      K.rows_digest([{'a': '1', 'b': '2', '_parent': 'x'}], _F)
+      == K.rows_digest([{'a': '1', 'b': '2'}], _F))
+check("a changed value changes it",
+      K.rows_digest([{'a': '1', 'b': '2'}], _F)
+      != K.rows_digest([{'a': '1', 'b': '3'}], _F))
+check("the field list is part of it",
+      K.rows_digest([{'a': '1', 'b': '2'}], _F)
+      != K.rows_digest([{'a': '1', 'b': '2'}], ['b', 'a']))
+check("row order is part of it, because it is part of the file",
+      K.rows_digest([{'a': '1', 'b': '2'}, {'a': '3', 'b': '4'}], _F)
+      != K.rows_digest([{'a': '3', 'b': '4'}, {'a': '1', 'b': '2'}], _F))
+check("the digest is a hex sha256 and not an interpreter repr",
+      len(K.rows_digest([{'a': '1', 'b': '2'}], _F)) == 64)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print('FDT_SCENARIOS_RUN=%d' % N[0])

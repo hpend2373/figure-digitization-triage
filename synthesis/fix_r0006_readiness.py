@@ -14,7 +14,7 @@ disagreed with every other artifact about what kind of evidence this is, and
 nothing in QC noticed. A gate for exactly that disagreement is added
 separately.
 """
-import csv, io, os, re, shutil, zipfile
+import csv, io, os, re, shutil, sys, zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bundle_paths

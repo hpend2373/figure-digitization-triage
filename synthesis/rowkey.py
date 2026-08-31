@@ -39,10 +39,34 @@ import io, json, os
 EFFECT_KEY = ('rec_id', 'source_sha256', 'source_page_ref',
               'population_subgroup', 'exposure_definition', 'outcome_name',
               'outcome_timepoint', 'analysis_variant', 'effect_measure')
-#: What must also agree before an existing row counts as the same row.
+#: WHAT MUST ALSO AGREE IS DERIVED, NOT LISTED. A hand-written list of eight
+#: fields left out `derivation_method` - and that is the field whose wrong
+#: value, on 52 rows, counted baseline medians and IQRs as reported effect
+#: estimates in this very pipeline. The guard would have called the wrong row
+#: and the corrected row identical and reported the rerun as a clean no-op,
+#: leaving the misclassification in place. A list of what matters will always
+#: be missing whatever nobody thought of; what a writer controls is everything
+#: it emits except the parts that belong to someone or something else.
+#:
+#: Kept as constants for callers that want the old narrow comparison, but
+#: `guard` derives the payload by subtraction.
 EFFECT_VALUE = ('effect_point', 'effect_ci_low', 'effect_ci_high', 'ci_level',
                 'n_exposed', 'events_exposed', 'synthesis_readiness',
-                'analysis_stream')
+                'analysis_stream', 'derivation_method')
+
+#: An ordinal is a position, not a value: it changes when rows are renumbered
+#: and says nothing about whether the row is the same fact.
+ORDINAL_FIELDS = ('effect_row_id', 'count_id', 'draft_id', 'descriptive_id')
+#: A timestamp of the run, not of the evidence.
+NONDETERMINISTIC_FIELDS = ('ai_correction_date',)
+#: A PERSON'S, AND SO NOT THE WRITER'S TO REPRODUCE. A reviewer confirming a
+#: row must not turn the next rerun into a conflict.
+HUMAN_OWNED_FIELDS = (
+    'human_confirmed', 'verified_by', 'verified_at', 'pool_eligible',
+    'candidate_after_human_confirmation', 'human_gate',
+    'extraction_consensus_status', 'extractor1_initials',
+    'extractor2_initials', 'extraction_date_initial',
+    'extraction_date_consensus', 'discrepancy_note', 'reviewer_initials')
 
 #: A count is not free-standing: it is a number read beside one estimate, so
 #: the estimate it was read beside is part of what it is. Without a parent the
@@ -51,9 +75,9 @@ EFFECT_VALUE = ('effect_point', 'effect_ci_low', 'effect_ci_high', 'ci_level',
 #: did the same.
 #:
 #: THE PARENT IS NAMED SEMANTICALLY, NOT BY ITS ORDINAL. `effect_row_id` is a
-#: position, which is exactly why it is absent from EFFECT_KEY - and a writer
-#: cannot know it before the rows are numbered, so a guard keyed on it compares
-#: a blank against a filled cell and reports a table it wrote itself as empty.
+#: position, which is why it is absent from EFFECT_KEY - and a writer cannot
+#: know it before the rows are numbered, so a guard keyed on it compares a
+#: blank against a filled cell and reports a table it wrote itself as empty.
 #: `annotate_parents` fills `parent_effect_key` from whichever the row has.
 COUNT_KEY = ('rec_id', 'source_sha256', 'source_page_ref',
              'parent_effect_key', 'quantity', 'group_role', 'population_scope')
@@ -69,17 +93,68 @@ def annotate_parents(count_rows, effect_rows):
     so they can be compared at all. Rows with neither get an empty parent,
     which is still a value the key can compare.
     """
-    by_id = {}
+    by_id, twice = {}, set()
     for e in effect_rows:
         rid = (e.get('effect_row_id') or '').strip()
-        if rid:
-            by_id[rid] = str(key_of(e, EFFECT_KEY))
-    for c in count_rows:
-        if c.get('parent_effect_key'):
+        if not rid:
             continue
-        c['parent_effect_key'] = by_id.get(
-            (c.get('effect_row_id') or '').strip(), '')
-    return count_rows
+        if rid in by_id:
+            # THE SAME LAST-WRITE-WINS THIS FILE JUST REMOVED ELSEWHERE. An
+            # ordinal reused by two estimates cannot resolve to one parent, and
+            # picking the later row would make a count's identity depend on
+            # file order.
+            twice.add(rid)
+        by_id[rid] = str(key_of(e, EFFECT_KEY))
+    problems = []
+    for c in count_rows:
+        rid = (c.get('effect_row_id') or '').strip()
+        stated = c.get('parent_effect_key')
+        if rid and rid in twice:
+            problems.append(('DUPLICATE_EFFECT_ROW_ID', rid))
+            c['parent_effect_key'] = '?%s' % rid
+            continue
+        resolved = by_id.get(rid) if rid else ''
+        if rid and resolved is None:
+            # NAMED A PARENT THAT IS NOT THERE. Silently blanking it made the
+            # count look parentless, which is a different and lesser problem.
+            problems.append(('UNKNOWN_PARENT_EFFECT_ROW_ID', rid))
+            c['parent_effect_key'] = '?%s' % rid
+            continue
+        if stated and resolved and stated != resolved:
+            problems.append(('PARENT_EFFECT_KEY_MISMATCH', rid))
+            c['parent_effect_key'] = '?%s' % rid
+            continue
+        if not stated:
+            c['parent_effect_key'] = resolved or ''
+    return problems
+
+
+def payload_fields(rows, key_fields):
+    """Everything the writer controls: what it emits, minus what is not its own.
+
+        every field the intended rows carry
+      - the natural key            (already compared, and compared as identity)
+      - ordinals                   (a position, not a value)
+      - non-deterministic fields   (the run's clock, not the evidence's)
+      - human-owned fields         (a reviewer's confirmation must not turn the
+                                    next rerun into a conflict)
+      - transient fields (_leading underscore)
+
+    Derived rather than listed, because a list of what matters is always
+    missing whatever nobody thought of - which is how `derivation_method`, the
+    field that decides whether a row is an effect estimate or a descriptor,
+    stayed outside the comparison.
+    """
+    out, seen = [], set()
+    skip = (set(key_fields) | set(ORDINAL_FIELDS) | set(NONDETERMINISTIC_FIELDS)
+            | set(HUMAN_OWNED_FIELDS))
+    for r in rows:
+        for f in r:
+            if f in seen or f in skip or f.startswith('_'):
+                continue
+            seen.add(f)
+            out.append(f)
+    return tuple(out)
 
 
 def key_of(row, fields):
@@ -158,6 +233,10 @@ def guard(name, tables, receipt_dir):
     """
     report, states = {}, []
     for label, existing, intended, kf, vf in tables:
+        # The caller's value list is a floor, not the contract: whatever the
+        # writer emits beyond it is still the writer's to reproduce.
+        vf = tuple(vf) + tuple(f for f in payload_fields(intended, kf)
+                               if f not in vf)
         miss, same, conf = compare(existing, intended, kf, vf)
         dup_e = duplicates(existing, kf)
         dup_i = duplicates(intended, kf)

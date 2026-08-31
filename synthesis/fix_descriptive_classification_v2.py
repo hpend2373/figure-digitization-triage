@@ -23,7 +23,7 @@ ALSO FIXED: text_extraction_summary!B26 still counts over rows 2:1609 - the
 workbook's last row before the 2026-08-30 append - so it silently ignores every
 row added that day. Its ranges are extended like its neighbours' already were.
 """
-import csv, io, os, re, shutil, zipfile
+import csv, io, os, re, shutil, sys, zipfile
 import xml.sax.saxutils as SU
 
 HERE = os.path.dirname(os.path.abspath(__file__))

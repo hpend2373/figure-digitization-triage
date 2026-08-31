@@ -32,7 +32,8 @@
       "source_transcription": "EXAMPLE - replace",
       "source_reported_measure": "OR",
       "discrepancy_flag": "yes  # set when the figure disagrees with itself, e.g. column header vs axis label",
-      "notes": "EXAMPLE - replace"
+      "notes": "EXAMPLE - replace",
+      "source_status": "REPLACE  # e.g. ARCHIVED_LOCAL_SOURCE"
     }
   ],
   "figure_pending": {
@@ -59,5 +60,6 @@
       "Printed heading in the supplement table": "the label this pipeline uses for it"
     },
     "comparator_placeholder": "NOT_STATED_IN_SUPPLEMENT_REQUIRES_HUMAN_CONFIRMATION"
-  }
+  },
+  "_field_rule": "Every column the writer must reproduce belongs here. A field omitted comes back empty, and the guard then reports the rows it already wrote as a conflict - which is how source_status was found missing."
 }

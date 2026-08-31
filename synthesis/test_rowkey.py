@@ -45,6 +45,7 @@ def eff(rid, sha, ref, expo, out, variant, meas, point, low='', high='',
             'analysis_variant': variant, 'effect_measure': meas,
             'effect_point': point, 'effect_ci_low': low, 'effect_ci_high': high,
             'ci_level': '95', 'n_exposed': '', 'events_exposed': '',
+            'derivation_method': 'reported',
             'synthesis_readiness': 'QUANTITATIVE_CANDIDATE',
             'analysis_stream': 'S1_incidence', 'effect_row_id': 'IGNORED'}
 
@@ -99,11 +100,35 @@ check("a count read beside a different estimate is a different count",
 check("and the parent is named by its key, not by its ordinal",
       "R1-T001" not in str(K.key_of(_c1, K.COUNT_KEY))
       and "drug A" in str(K.key_of(_c1, K.COUNT_KEY)))
-check("a parent named by key already is left alone",
-      K.annotate_parents([dict(_c1, parent_effect_key="MINE")],
-                         [_p1])[0]["parent_effect_key"] == "MINE")
+_kept = [dict(_c1, parent_effect_key=str(K.key_of(_p1, K.EFFECT_KEY)))]
+check("a parent named by key already, and matching, is left alone",
+      K.annotate_parents(_kept, [_p1]) == []
+      and _kept[0]["parent_effect_key"] == str(K.key_of(_p1, K.EFFECT_KEY)))
+_orphan = [{'rec_id': 'R1'}]
 check("a count with no parent at all still gets a comparable value",
-      K.annotate_parents([{'rec_id': 'R1'}], [_p1])[0]["parent_effect_key"] == "")
+      K.annotate_parents(_orphan, [_p1]) == []
+      and _orphan[0]["parent_effect_key"] == "")
+
+# ---- A PARENT REFERENCE IS CHECKED, NOT TRUSTED
+# The same last-write-wins this file removed from the route index lived on
+# here: two estimates sharing an ordinal resolved to whichever came last.
+_dupe_parent = [dict(_p1), dict(_p2, effect_row_id='R1-T001')]
+_c = [dict(_c1)]
+check("an ordinal used by two estimates is reported, not resolved",
+      [code for code, _ in K.annotate_parents(_c, _dupe_parent)]
+      == ['DUPLICATE_EFFECT_ROW_ID'])
+check("and such a count gets a parent that matches nothing",
+      _c[0]['parent_effect_key'].startswith('?'))
+_missing = [dict(_c1, effect_row_id='R1-T404')]
+check("a parent that is not in the table is reported, not blanked",
+      [code for code, _ in K.annotate_parents(_missing, [_p1])]
+      == ['UNKNOWN_PARENT_EFFECT_ROW_ID'])
+_mismatch = [dict(_c1, parent_effect_key='SOMETHING ELSE')]
+check("a stated parent key that contradicts its ordinal is reported",
+      [code for code, _ in K.annotate_parents(_mismatch, [_p1, _p2])]
+      == ['PARENT_EFFECT_KEY_MISMATCH'])
+check("a real table resolves with no problems at all",
+      K.annotate_parents([dict(_c1), dict(_c2)], [_p1, _p2]) == [])
 check("and the same count under a different stratum likewise",
       K.key_of({'rec_id': 'R1', 'effect_row_id': 'T', 'quantity': 'n',
                 'group_role': 'all', 'population_scope': 'age 57-60'},
@@ -130,6 +155,59 @@ check('키는 같은데 값이 다르면 충돌이다',
 check('충돌은 파일에 있는 값과 쓰려던 값을 둘 다 들고 온다',
       conf and conf[0][0]['effect_point'] == '1.10'
       and conf[0][1]['effect_point'] == '1.99')
+
+# ---- WHAT THE WRITER MUST REPRODUCE IS DERIVED, NOT LISTED
+# The listed eight left out `derivation_method`, and that is the field whose
+# wrong value on 52 rows counted baseline medians as reported effect estimates
+# here. The guard would have called the wrong row and the corrected row
+# identical and reported a clean no-op.
+_desc = dict(A, derivation_method='reported')
+_desc_fixed = dict(A, derivation_method='reported descriptive statistic')
+
+
+def verdict_of(name, tables):
+    """The receipt's verdict, not just whether the guard said no.
+
+    `guard` returns False for BOTH a conflict and a clean no-op, so asserting
+    `is False` cannot tell the two apart - a scenario written that way passes
+    whether the code works or not, which is how the first version of these
+    checks survived a mutation that reverted the whole payload rule.
+    """
+    K.guard(name, tables, TMP)
+    return json.load(open(os.path.join(TMP, "%s_idempotency.json" % name),
+                          encoding="utf-8"))["verdict"]
+
+
+check("a row that differs only in derivation_method is a conflict",
+      verdict_of("t_deriv", [("a", [_desc], [_desc_fixed], K.EFFECT_KEY,
+                              K.EFFECT_VALUE)]) == "CONFLICT_NO_WRITE")
+check("and so is one that differs in a field nobody thought to list",
+      verdict_of("t_notes", [("a", [dict(A, notes='')],
+                              [dict(A, notes='changed')], K.EFFECT_KEY,
+                              K.EFFECT_VALUE)]) == "CONFLICT_NO_WRITE")
+check("the payload is everything emitted, minus key, ordinal, clock and person",
+      set(K.payload_fields([dict(A, notes='x', human_confirmed='no',
+                                 ai_correction_date='2026-08-30',
+                                 _transient='t')], K.EFFECT_KEY))
+      == {'effect_point', 'effect_ci_low', 'effect_ci_high', 'ci_level',
+          'n_exposed', 'events_exposed', 'synthesis_readiness',
+          'analysis_stream', 'derivation_method', 'notes'},
+      "%s" % sorted(K.payload_fields([dict(A, notes='x', human_confirmed='no',
+                                           ai_correction_date='2026-08-30',
+                                           _transient='t')], K.EFFECT_KEY)))
+
+# AND WHAT IS NOT THE WRITER'S STAYS OUT. A reviewer confirming a row, or a
+# renumbering, or the clock, must not turn the next rerun into a conflict - a
+# guard that cried wolf on a human confirmation would be turned off.
+for _label, _field, _value in (("a reviewer's confirmation", 'human_confirmed', 'yes'),
+                               ("a pooling permission", 'pool_eligible', 'yes'),
+                               ("a renumbering", 'effect_row_id', 'R1-T999'),
+                               ("the run's clock", 'ai_correction_date', '2099-01-01')):
+    check("%s leaves the rerun a clean no-op" % _label,
+          verdict_of("t_ok_%s" % _field,
+                     [("a", [dict(A, **{_field: _value})], [A],
+                       K.EFFECT_KEY, K.EFFECT_VALUE)])
+          == "ALREADY_PRESENT_NO_WRITE", _field)
 
 # ---- the verdicts the writers act on
 check('아무것도 없으면 쓴다',

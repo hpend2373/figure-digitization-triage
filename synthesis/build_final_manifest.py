@@ -186,6 +186,16 @@ R['route_gate'] = {
 if _route_findings:
     fail('%d effect rows disagree with the route screening gave their record'
          % len(_route_findings))
+# A CONTRADICTION IN SCREENING IS A FAILURE EVEN WITH NOTHING EXTRACTED YET.
+# `findings` walks effect rows, so a record screening rules on twice, in two
+# different ways, produced no finding at all while it had no rows - and the
+# receipt recorded the ambiguity in a list nothing checked. The contract is
+# that neither route is authoritative; a record in that state is not a record
+# a later run may quietly extract against whichever line it reads last.
+if R['route_gate']['ambiguous_screening_routes']:
+    fail('screening rules twice, differently, on %d record(s): %s'
+         % (len(R['route_gate']['ambiguous_screening_routes']),
+            ', '.join(R['route_gate']['ambiguous_screening_routes'])))
 
 # ------------------------------------------------------------ source corpus
 rec = dictrows('source_corpus_receipt.csv')

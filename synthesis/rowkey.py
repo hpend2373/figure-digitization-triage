@@ -234,20 +234,35 @@ def unclean_reruns(verdicts):
     return sorted(n for n, v in verdicts.items() if v != CLEAN_RERUN)
 
 
+#: Fields this module adds so both sides can be compared, which no file has a
+#: column for. Anything ELSE a row carries that its file does not is schema
+#: drift, not a transient.
+ALLOWED_TRANSIENT_FIELDS = ('parent_effect_key',)
+
+
+class SchemaError(Exception):
+    """A row carries a field its file has no column for."""
+
+
 def writable(rows, fieldnames):
-    """Rows restricted to the file's own columns, in the file's own order.
+    """Rows restricted to the file's own columns - and no silent losses.
 
-    THE GUARD DOES NOT SEE THE WRITE. `parent_effect_key` is a field this
-    module ADDS so that both sides can name a parent the same way; it is not a
-    column of the CSV. Handing such a row straight to `csv.DictWriter` raises
-    `ValueError: dict contains fields not in fieldnames` - and the writer that
-    hit it had already written its first table, so the failure landed exactly
-    where nothing was watching: between two outputs, in the write branch a
-    clean no-op never enters.
-
-    Anything the file does not have a column for is dropped here; anything the
-    file has and the row does not becomes empty.
+    THE FIRST VERSION DROPPED WHATEVER DID NOT FIT, which fixed the crash it
+    was written for and opened a quieter one: add a provenance column to a
+    writer, forget the CSV schema, and the field disappears between the guard
+    and the disk. The first run looks like a success, the evidence is not on
+    disk, and the disagreement surfaces on some later rerun as a conflict
+    nobody can explain. Known transients are dropped; anything else raises
+    before a single file is touched. A leading underscore is this package's
+    mark for a field that never leaves memory.
     """
+    allowed = set(fieldnames) | set(ALLOWED_TRANSIENT_FIELDS)
+    for r in rows:
+        extra = sorted(f for f in set(r) - allowed if not f.startswith('_'))
+        if extra:
+            raise SchemaError(
+                'row carries %s, which its file has no column for; add the '
+                'column or declare the field transient' % ', '.join(extra))
     return [{c: r.get(c, '') for c in fieldnames} for r in rows]
 
 
@@ -332,8 +347,19 @@ def write_all_or_nothing(specs, replace=None, journal_path=None):
     return [p for _t, p in staged]
 
 
+#: Fields `assign_ids` may set. Everything else the guard has already ruled on.
+ASSIGNABLE_FIELDS = set(ORDINAL_FIELDS) | {'parent_effect_key'}
+
+
+def _snapshot(rows, assignable):
+    return [tuple(sorted((k, v) for k, v in r.items()
+                         if k not in assignable and not k.startswith('_')))
+            for r in rows]
+
+
 def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
-               journal_path=None, replace=None):
+               journal_path=None, replace=None, relations=(),
+               assignable=None):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -351,6 +377,32 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
 
     Returns (verdict, written_paths).
     """
+    # THE PARENT REFERENCE IS RESOLVED FIRST, AND THE ORDER MATTERS. A count
+    # names its parent by ordinal on file and by semantic key before it is
+    # written; both sides have to become the same thing BEFORE any key is
+    # computed from them, or rows differing only by an unresolved parent
+    # collapse and read as duplicates that are not there. The supplement writer
+    # used to do this itself and discard what it found, so a duplicated or
+    # dangling parent arrived at the guard as an ordinary unmatched key.
+    by_label = {label: (existing, intended)
+                for label, _p, _f, existing, intended, _k, _v in tables}
+    problems = []
+    for child, parent in relations:
+        c_existing, c_intended = by_label[child]
+        p_existing, p_intended = by_label[parent]
+        problems += annotate_parents(c_existing, p_existing + p_intended)
+        problems += annotate_parents(c_intended, p_existing + p_intended)
+    if problems:
+        os.makedirs(receipt_dir, exist_ok=True)
+        json.dump({'verdict': 'PREFLIGHT_CONFLICT_NO_WRITE',
+                   'preflight_problems': [list(x) for x in problems]},
+                  io.open(os.path.join(receipt_dir, '%s_idempotency.json' % name),
+                          'w', encoding='utf-8'), indent=2, ensure_ascii=False)
+        for code, detail in problems[:5]:
+            print('  전처리 거부  %-30s %s' % (code, detail))
+        print('  판정: PREFLIGHT_CONFLICT_NO_WRITE')
+        return 'PREFLIGHT_CONFLICT_NO_WRITE', []
+
     verdict_tables = [(label, existing, intended, kf, vf)
                       for label, _p, _f, existing, intended, kf, vf in tables]
     may = guard(name, verdict_tables, receipt_dir)
@@ -364,8 +416,20 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                     io.open(os.path.join(archive, os.path.basename(path)), 'w',
                             encoding='utf-8').write(fh.read())
     if assign_ids:
+        # A CALLBACK MAY SET AN ORDINAL AND NOTHING ELSE. It runs after the
+        # guard, so anything else it changes is a change to a row already
+        # judged - written without ever being compared against what is on file.
+        allowed = set(assignable or ASSIGNABLE_FIELDS)
+        before = {label: _snapshot(intended, allowed)
+                  for label, _p, _f, _e, intended, _k, _v in tables}
         for label, _p, _f, existing, intended, _k, _v in tables:
             assign_ids(label, existing, intended)
+        for label, _p, _f, _e, intended, _k, _v in tables:
+            if _snapshot(intended, allowed) != before[label]:
+                raise SchemaError(
+                    'assign_ids changed a field of %s that the guard had '
+                    'already judged; only %s may be assigned'
+                    % (label, ', '.join(sorted(allowed))))
     written = write_all_or_nothing(
         [(path, fieldnames, existing + intended)
          for _l, path, fieldnames, existing, intended, _k, _v in tables],

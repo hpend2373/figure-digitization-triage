@@ -45,7 +45,7 @@ def check(name, ok, detail=''):
         FAIL.append(name)
 
 
-COLS = ['row_id', 'rec_id', 'source_sha256', 'source_page_ref',
+COLS = ['row_id', 'effect_row_id', 'rec_id', 'source_sha256', 'source_page_ref',
         'population_subgroup', 'exposure_definition', 'outcome_name',
         'outcome_timepoint', 'analysis_variant', 'effect_measure',
         'effect_point', 'human_confirmed']
@@ -97,7 +97,7 @@ new_a, new_b = [row(1), row(2)], [row(3)]
 del NUMBERED[:]
 verdict, written = K.run_writer(
     'cycle', [('a', A, COLS, [], new_a, KEY, VALUE),
-              ('b', B, COLS, [], new_b, KEY, VALUE)], TMP, assign_ids=number)
+              ('b', B, COLS, [], new_b, KEY, VALUE)], TMP, assign_ids=number, assignable={'row_id'})
 check("nothing written yet, so it writes", verdict == 'WRITE', verdict)
 check("and both files receive their rows",
       len(read(A)) == 2 and len(read(B)) == 1,
@@ -114,7 +114,7 @@ del NUMBERED[:]
 verdict, written = K.run_writer(
     'cycle', [('a', A, COLS, read(A), [row(1), row(2)], KEY, VALUE),
               ('b', B, COLS, read(B), [row(3)], KEY, VALUE)], TMP,
-    assign_ids=number)
+    assign_ids=number, assignable={'row_id'})
 check("written already, so it is a no-op",
       verdict == 'ALREADY_PRESENT_NO_WRITE', verdict)
 check("nothing is written on a no-op", written == [])
@@ -129,7 +129,7 @@ D = fresh('d.csv')
 verdict, written = K.run_writer(
     'cycle', [('c', C, COLS, read(C), [row(1)], KEY, VALUE),
               ('d', D, COLS, [], [row(9)], KEY, VALUE)], TMP,
-    assign_ids=number)
+    assign_ids=number, assignable={'row_id'})
 check("one table done and another empty writes nothing",
       verdict == 'CONFLICT_NO_WRITE', verdict)
 check("and the empty one stays empty", read(D) == [])
@@ -154,7 +154,7 @@ raised = False
 try:
     K.run_writer('cycle', [('e', E, COLS, read(E), [row(2)], KEY, VALUE),
                            ('f', MISSING, COLS, [], [row(3)], KEY, VALUE)],
-                 TMP, assign_ids=number)
+                 TMP, assign_ids=number, assignable={'row_id'})
 except (OSError, IOError):
     raised = True
 check("a staging failure on the second file raises", raised)
@@ -184,7 +184,7 @@ raised = False
 try:
     K.run_writer('cycle', [('g', G, COLS, read(G), [row(3)], KEY, VALUE),
                            ('h', H, COLS, read(H), [row(4)], KEY, VALUE)],
-                 TMP, assign_ids=number, journal_path=JOURNAL,
+                 TMP, assign_ids=number, assignable={'row_id'}, journal_path=JOURNAL,
                  replace=flaky_replace)
 except OSError:
     raised = True
@@ -203,17 +203,98 @@ check("the journal says the transaction was rolled back",
 
 # (c) a clean commit records itself, so an interrupted run is visible
 K.run_writer('cycle', [('g', G, COLS, read(G), [row(5)], KEY, VALUE)],
-             TMP, assign_ids=number, journal_path=JOURNAL)
+             TMP, assign_ids=number, assignable={'row_id'}, journal_path=JOURNAL)
 _j = json.load(io.open(JOURNAL, encoding='utf-8'))
 check("a clean commit leaves a COMMITTED journal", _j['state'] == 'COMMITTED')
 check("with a hash of what it wrote", bool(list(_j['sha256'].values())[0]))
 check("and the row really is there now", len(read(G)) == 2)
 
+# ------------------------------------------- the checks before any of that
+# A PARENT REFERENCE IS RESOLVED AND CHECKED BEFORE A ROW IS NUMBERED OR
+# WRITTEN. The supplement writer used to call annotate_parents itself and
+# discard what it returned, so a dangling or duplicated parent arrived at the
+# guard as an ordinary unmatched key.
+PARENT = fresh('parent.csv', [dict(row(1), row_id='p-001', effect_row_id='x-1'),
+                              dict(row(2), row_id='p-002', effect_row_id='x-1')])
+CHILD = fresh('child.csv')
+verdict, written = K.run_writer(
+    'cycle', [('child', CHILD, COLS, [], [dict(row(3), effect_row_id='x-1')],
+               K.COUNT_KEY, K.COUNT_VALUE),
+              ('parent', PARENT, COLS, read(PARENT), [], KEY, VALUE)],
+    TMP, relations=[('child', 'parent')], assign_ids=number,
+    assignable={'row_id'})
+check("an ordinal used by two parents stops the transaction before it starts",
+      verdict == 'PREFLIGHT_CONFLICT_NO_WRITE', verdict)
+check("and nothing is written", written == [] and read(CHILD) == [])
+_pre = json.load(io.open(os.path.join(TMP, 'cycle_idempotency.json'),
+                         encoding='utf-8'))
+check("the receipt names what the preflight found",
+      any(x[0] == 'DUPLICATE_EFFECT_ROW_ID' for x in _pre['preflight_problems']),
+      "%s" % _pre['preflight_problems'][:2])
+
+DANGLING = fresh('dangling.csv')
+ONE = fresh('one.csv', [dict(row(1), row_id='p-001', effect_row_id='x-9')])
+verdict, _w = K.run_writer(
+    'cycle', [('child', DANGLING, COLS, [],
+               [dict(row(3), effect_row_id='nowhere')],
+               K.COUNT_KEY, K.COUNT_VALUE),
+              ('parent', ONE, COLS, read(ONE), [], KEY, VALUE)],
+    TMP, relations=[('child', 'parent')], assign_ids=number,
+    assignable={'row_id'})
+check("a parent that is not in the table stops it too",
+      verdict == 'PREFLIGHT_CONFLICT_NO_WRITE'
+      and any(x[0] == 'UNKNOWN_PARENT_EFFECT_ROW_ID' for x in
+              json.load(io.open(os.path.join(TMP, 'cycle_idempotency.json'),
+                                encoding='utf-8'))['preflight_problems']),
+      verdict)
+check("a sound parent reference passes the preflight and writes",
+      K.run_writer('cycle',
+                   [('child', fresh('ok.csv'), COLS, [],
+                     [dict(row(3), effect_row_id='x-9')],
+                     K.COUNT_KEY, K.COUNT_VALUE),
+                    ('parent', ONE, COLS, read(ONE), [], KEY, VALUE)],
+                   TMP, relations=[('child', 'parent')], assign_ids=number,
+                   assignable={'row_id'})[0] == 'WRITE')
+
+# A CALLBACK MAY SET AN ORDINAL AND NOTHING ELSE.
+MEDDLED = fresh('meddled.csv')
+
+
+def meddling(_label, _existing, intended):
+    intended[0]['row_id'] = 'm-001'
+    intended[0]['effect_point'] = '999'
+
+
+raised = False
+try:
+    K.run_writer('cycle', [('m', MEDDLED, COLS, [], [row(1)], KEY, VALUE)], TMP,
+                 assign_ids=meddling, assignable={'row_id'})
+except K.SchemaError:
+    raised = True
+check("a callback that changes a judged field is refused", raised)
+check("and its file is not written", read(MEDDLED) == [])
+
+# A FIELD THE FILE HAS NO COLUMN FOR IS DRIFT, NOT A TRANSIENT.
+DRIFT = fresh('drift.csv')
+raised = False
+try:
+    K.run_writer('cycle', [('d', DRIFT, COLS, [],
+                            [dict(row(1), new_provenance_field='x')],
+                            KEY, VALUE)], TMP, assign_ids=number,
+                 assignable={'row_id'})
+except K.SchemaError:
+    raised = True
+check("an undeclared extra field stops the write", raised)
+check("before its file is touched", read(DRIFT) == [])
+check("while a declared transient passes through",
+      K.writable([dict(row(1), parent_effect_key='k')], COLS)[0].get('row_id')
+      is not None)
+
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])
 ARCH = os.path.join(TMP, 'archive')
 K.run_writer('cycle', [('g', G, COLS, read(G), [row(2)], KEY, VALUE)], TMP,
-             assign_ids=number, archive=ARCH)
+             assign_ids=number, assignable={'row_id'}, archive=ARCH)
 check("the previous file is archived before it is replaced",
       os.path.exists(os.path.join(ARCH, 'g.csv'))
       and len(read(os.path.join(ARCH, 'g.csv'))) == 1)

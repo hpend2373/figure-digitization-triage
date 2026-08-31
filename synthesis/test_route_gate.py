@@ -82,6 +82,32 @@ check('올바른 기록은 같은 배치 안에서도 조용하다',
                       row('OBS1', 'QUANTITATIVE_CANDIDATE', 'S1_incidence', 'E2')],
                      ROUTES)) == 1)
 
+# A RECORD RULED ON TWICE, DIFFERENTLY, HAS NO RULING. The index used to be a
+# plain dictionary, so the LAST screening line for a record decided what every
+# effect row of it had to say - file-order authority, one table over from the
+# thing this gate exists to catch.
+_DUP_SAME = G.route_index(SCREEN + [dict(SCREEN[0])])
+check("a record ruled on twice the same way still has its route",
+      G.findings([row('MR1', 'MR_SEPARATE',
+                      'S4_mendelian_randomization_separate')], _DUP_SAME) == [])
+_DUP_DIFF = G.route_index(SCREEN + [{'rec_id': 'MR1',
+                                     'synthesis_readiness': 'QUANTITATIVE_CANDIDATE',
+                                     'audit_v2_stream': 'S1_incidence'}])
+_hit = G.findings([row('MR1', 'MR_SEPARATE',
+                       'S4_mendelian_randomization_separate')], _DUP_DIFF)
+check("a record ruled on twice, differently, is ambiguous",
+      [f[1] for f in _hit] == [G.AMBIGUOUS], '%s' % _hit)
+check("and the row is not also judged against one of the two routes",
+      len(_hit) == 1, '%s' % _hit)
+check("a row that matches neither route is still only reported as ambiguous",
+      [f[1] for f in G.findings([row('MR1', 'SOMETHING_ELSE', 'S9')],
+                                _DUP_DIFF)] == [G.AMBIGUOUS])
+check("the other records are unaffected by one record's ambiguity",
+      G.findings([row('OBS1', 'QUANTITATIVE_CANDIDATE', 'S1_incidence')],
+                 _DUP_DIFF) == [])
+check("the message says screening is what disagrees",
+      _hit and 'Screening' in _hit[0][2] and 'MR1' in _hit[0][2])
+
 print()
 print('FDT_SCENARIOS_RUN=%d' % N[0])
 print('%d scenarios run' % N[0])

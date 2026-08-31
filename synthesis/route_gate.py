@@ -25,13 +25,36 @@ PAIRS = (('synthesis_readiness', 'synthesis_readiness', 'effect_readiness_mismat
          ('audit_v2_stream', 'analysis_stream', 'effect_stream_mismatch'))
 
 
+#: Screening itself disagrees about this record's route, so no route of its is
+#: authoritative and none of its rows can be judged against one.
+AMBIGUOUS = "screening_route_ambiguous"
+
+
 def route_index(screening_rows, id_field='rec_id'):
-    """{rec_id: {screening column: value}} for the records screening ruled on."""
+    """{rec_id: route} for the records screening ruled on, once.
+
+    A RECORD RULED ON TWICE, DIFFERENTLY, HAS NO RULING. This built a plain
+    dictionary, so a second row for the same record simply overwrote the first
+    and the LAST line of the file decided what every effect row of that record
+    had to say. Reorder the file and the requirement changes - which is the
+    same file-order authority this gate exists to catch one table over.
+
+    Rows that agree collapse; rows that disagree mark the record ambiguous, and
+    `findings` then reports that rather than measuring anything against a route
+    that screening does not actually assert.
+    """
     out = {}
     for s in screening_rows:
         rid = str(s.get(id_field) or '')
-        if rid:
-            out[rid] = s
+        if not rid:
+            continue
+        route = {c: str(s.get(c) or '') for c, _e, _code in PAIRS}
+        seen = out.get(rid)
+        if seen is None:
+            out[rid] = dict(route, _status='OK')
+        elif any(seen.get(c) != route[c] for c in route):
+            out[rid] = dict(seen, _status=AMBIGUOUS,
+                            _other={c: route[c] for c in route})
     return out
 
 
@@ -52,6 +75,11 @@ def findings(effect_rows, routes, id_field='rec_id'):
     for r in effect_rows:
         want = routes.get(str(r.get(id_field) or ''))
         if not want:
+            continue
+        if want.get('_status') == AMBIGUOUS:
+            out.append((r.get('effect_row_id'), AMBIGUOUS,
+                        'Screening rules on %s twice with different routes; '
+                        'neither is authoritative.' % r.get(id_field)))
             continue
         for scol, ecol, code in PAIRS:
             a, b = str(want.get(scol) or ''), str(r.get(ecol) or '')

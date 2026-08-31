@@ -16,6 +16,7 @@ and disagreeing tables die.
 
 Writes only into a temporary directory.
 """
+import json
 import os
 import shutil
 import sys
@@ -36,8 +37,10 @@ def check(name, ok, detail=''):
         FAIL.append(name)
 
 
-def eff(rid, sha, ref, expo, out, variant, meas, point, low='', high=''):
+def eff(rid, sha, ref, expo, out, variant, meas, point, low='', high='',
+        subgroup='whole cohort', timepoint=''):
     return {'rec_id': rid, 'source_sha256': sha, 'source_page_ref': ref,
+            'population_subgroup': subgroup, 'outcome_timepoint': timepoint,
             'exposure_definition': expo, 'outcome_name': out,
             'analysis_variant': variant, 'effect_measure': meas,
             'effect_point': point, 'effect_ci_low': low, 'effect_ci_high': high,
@@ -62,6 +65,52 @@ check('노출이 다르면 다른 행이다',
 check('같은 값이라도 원본 파일이 다르면 다른 행이다',
       K.key_of(A, K.EFFECT_KEY) != K.key_of(dict(A, source_sha256='sha2'),
                                             K.EFFECT_KEY))
+
+# THE KEY MUST SEE WHAT MAKES TWO ROWS TWO ROWS. Both of these were found by
+# the duplicate check against the real table: 93 keys claimed twice, none of
+# them actually a duplicate - race-stratified rows and survival percentages at
+# different timepoints, which the key could not tell apart and so called one
+# row. A key that cannot separate them lets a rerun overwrite one with another.
+check("a different population subgroup is a different row",
+      K.key_of(A, K.EFFECT_KEY)
+      != K.key_of(dict(A, population_subgroup='Black participants'),
+                  K.EFFECT_KEY))
+check("a different outcome timepoint is a different row",
+      K.key_of(A, K.EFFECT_KEY)
+      != K.key_of(dict(A, outcome_timepoint='24 months'), K.EFFECT_KEY))
+# THE PARENT IS NAMED SEMANTICALLY. A count on file points at its parent by
+# ordinal; a count about to be written cannot, because the ordinals do not
+# exist yet. `annotate_parents` puts both on the same footing - without it the
+# guard compared a blank against a filled cell and reported a table the writer
+# had already written as empty.
+_p1 = eff('R1', 'sha1', 'Table 2', 'drug A', 'outcome X', 'adjusted', 'HR',
+          '1.10')
+_p1['effect_row_id'] = 'R1-T001'
+_p2 = eff('R1', 'sha1', 'Table 2', 'drug B', 'outcome X', 'adjusted', 'HR',
+          '0.80')
+_p2['effect_row_id'] = 'R1-T002'
+_c1 = {'rec_id': 'R1', 'effect_row_id': 'R1-T001', 'quantity': 'n',
+       'group_role': 'all', 'population_scope': 'x'}
+_c2 = {'rec_id': 'R1', 'effect_row_id': 'R1-T002', 'quantity': 'n',
+       'group_role': 'all', 'population_scope': 'x'}
+K.annotate_parents([_c1, _c2], [_p1, _p2])
+check("a count read beside a different estimate is a different count",
+      K.key_of(_c1, K.COUNT_KEY) != K.key_of(_c2, K.COUNT_KEY))
+check("and the parent is named by its key, not by its ordinal",
+      "R1-T001" not in str(K.key_of(_c1, K.COUNT_KEY))
+      and "drug A" in str(K.key_of(_c1, K.COUNT_KEY)))
+check("a parent named by key already is left alone",
+      K.annotate_parents([dict(_c1, parent_effect_key="MINE")],
+                         [_p1])[0]["parent_effect_key"] == "MINE")
+check("a count with no parent at all still gets a comparable value",
+      K.annotate_parents([{'rec_id': 'R1'}], [_p1])[0]["parent_effect_key"] == "")
+check("and the same count under a different stratum likewise",
+      K.key_of({'rec_id': 'R1', 'effect_row_id': 'T', 'quantity': 'n',
+                'group_role': 'all', 'population_scope': 'age 57-60'},
+               K.COUNT_KEY)
+      != K.key_of({'rec_id': 'R1', 'effect_row_id': 'T', 'quantity': 'n',
+                   'group_role': 'all', 'population_scope': 'age 61-65'},
+                  K.COUNT_KEY))
 
 # ---- the three outcomes
 miss, same, conf = K.compare([], [A, B], K.EFFECT_KEY, K.EFFECT_VALUE)
@@ -99,6 +148,61 @@ check('여러 표 중 하나만 충돌해도 전체를 막는다',
       K.guard('t_multi', [('a', [], [B], K.EFFECT_KEY, K.EFFECT_VALUE),
                           ('b', [drifted], [A], K.EFFECT_KEY, K.EFFECT_VALUE)],
               TMP) is False)
+
+# ---- THE VERDICT IS OVER ALL THE TABLES AT ONCE
+# One output finished and another untouched came back WRITE, and appending then
+# wrote the finished table a second time. A run either has not happened or has
+# happened; anything between is a question.
+check("one table done and another empty is a conflict, not a write",
+      K.guard("t_mixed", [("effects", [A], [A], K.EFFECT_KEY, K.EFFECT_VALUE),
+                          ("counts", [], [B], K.EFFECT_KEY, K.EFFECT_VALUE)],
+              TMP) is False)
+check("and the receipt names each table's state",
+      json.load(open(os.path.join(TMP, "t_mixed_idempotency.json"),
+                     encoding="utf-8"))["table_states"]
+      == {"effects": K.IDENTICAL, "counts": K.EMPTY})
+check("empty beside partial is a conflict too",
+      K.guard("t_ep", [("a", [], [A], K.EFFECT_KEY, K.EFFECT_VALUE),
+                       ("b", [A], [A, B], K.EFFECT_KEY, K.EFFECT_VALUE)],
+              TMP) is False)
+check("identical beside conflict is a conflict",
+      K.guard("t_ic", [("a", [A], [A], K.EFFECT_KEY, K.EFFECT_VALUE),
+                       ("b", [drifted], [A], K.EFFECT_KEY, K.EFFECT_VALUE)],
+              TMP) is False)
+check("all empty is still a write",
+      K.guard("t_ee", [("a", [], [A], K.EFFECT_KEY, K.EFFECT_VALUE),
+                       ("b", [], [B], K.EFFECT_KEY, K.EFFECT_VALUE)],
+              TMP) is True)
+check("all identical is still a clean no-op",
+      K.guard("t_ii", [("a", [A], [A], K.EFFECT_KEY, K.EFFECT_VALUE),
+                       ("b", [B], [B], K.EFFECT_KEY, K.EFFECT_VALUE)],
+              TMP) is False)
+check("and that no-op says so rather than reporting a conflict",
+      json.load(open(os.path.join(TMP, "t_ii_idempotency.json"),
+                     encoding="utf-8"))["verdict"] == "ALREADY_PRESENT_NO_WRITE")
+
+# ---- A KEY THAT APPEARS TWICE IS AN ERROR WHEREVER IT SITS
+# In a table of effect estimates headed for meta-analysis the same estimate
+# twice is double weight, not a harmless repeat. Collapsing it hides the
+# second; choosing one hides whichever was not chosen.
+check("the same natural key twice is found",
+      K.duplicates([A, dict(A, effect_row_id="OTHER")], K.EFFECT_KEY)
+      == [K.key_of(A, K.EFFECT_KEY)])
+check("distinct rows are not duplicates",
+      K.duplicates([A, B], K.EFFECT_KEY) == [])
+check("a duplicate already on file blocks the write",
+      K.guard("t_dupe_file",
+              [("a", [A, dict(A, effect_point="1.99")], [A],
+                K.EFFECT_KEY, K.EFFECT_VALUE)], TMP) is False)
+check("even when one of the two on file matches exactly",
+      json.load(open(os.path.join(TMP, "t_dupe_file_idempotency.json"),
+                     encoding="utf-8"))["a"]["duplicate_keys_on_file"] != [])
+check("a writer that would emit the same row twice blocks itself",
+      K.guard("t_dupe_new", [("a", [], [A, dict(A, effect_row_id="X")],
+                              K.EFFECT_KEY, K.EFFECT_VALUE)], TMP) is False)
+check("and the receipt says which side the duplicate is on",
+      json.load(open(os.path.join(TMP, "t_dupe_new_idempotency.json"),
+                     encoding="utf-8"))["a"]["duplicate_keys_intended"] != [])
 
 # ---- the receipt exists and names the verdict
 import json                                                     # noqa: E402

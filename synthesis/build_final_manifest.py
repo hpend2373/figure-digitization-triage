@@ -164,6 +164,29 @@ for f in ('extractor1_initials', 'extractor2_initials', 'rob_overall'):
     if set(gates['extraction_' + f]) - {''}:
         fail('%s has been filled in; that field is a person\'s' % f)
 
+# ------------------------------------------------------- the route gate itself
+# THE FUNCTION CI VERIFIES IS THE FUNCTION THIS RECEIPT RUNS. The bundle's
+# qc_extraction carries the same rule, and two copies of a rule drift: the
+# public CI could stay green while the gate the bundle actually uses changed.
+# So the receipt calls the public one directly, and if the two ever disagree
+# this fails on the difference rather than on nobody noticing.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import route_gate
+
+_routes = route_gate.route_index(dictrows('fulltext_screening.tsv'))
+_route_findings = route_gate.findings(eff, _routes)
+R['route_gate'] = {
+    'records_with_a_route': len(_routes),
+    'ambiguous_screening_routes': sorted(
+        rid for rid, v in _routes.items()
+        if v.get('_status') == route_gate.AMBIGUOUS),
+    'findings': [{'effect_row_id': a, 'code': b, 'detail': c}
+                 for a, b, c in _route_findings[:20]],
+    'finding_count': len(_route_findings)}
+if _route_findings:
+    fail('%d effect rows disagree with the route screening gave their record'
+         % len(_route_findings))
+
 # ------------------------------------------------------------ source corpus
 rec = dictrows('source_corpus_receipt.csv')
 listed = {r['source_path'] for r in rec if r['source_path']}

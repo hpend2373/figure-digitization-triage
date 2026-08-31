@@ -777,6 +777,11 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
     return 'WRITE', written
 
 
+def read_receipt(receipt_dir, name):
+    """A writer's receipt as a dict, {} if it is not there or not readable."""
+    return _read_receipt(receipt_dir, name)
+
+
 def _read_receipt(receipt_dir, name):
     try:
         return json.load(io.open(os.path.join(

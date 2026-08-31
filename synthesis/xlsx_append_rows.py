@@ -18,6 +18,9 @@ uses (an x: prefix, t="str" for text and t="n" for numbers), and the sheet's
 table range is extended to take them in.
 """
 import io, json, os, re, shutil, sys, zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rowkey
 import xml.sax.saxutils as SU
 
 NUM = re.compile(r'^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$')
@@ -124,7 +127,24 @@ if __name__ == '__main__':
     here = os.path.dirname(os.path.abspath(__file__))
     base = os.path.abspath(os.path.join(here, '..', '..'))
     wbp = os.path.join(base, 'extraction_form_RASi_PCa.xlsx')
-    new = json.load(io.open(os.path.join(here, 'logs', 'new_rows.json'),
+    # THIS FILE MUTATES THE WORKBOOK FROM A FILE IT DID NOT WRITE. new_rows.json
+    # is produced by the CSV writer in a separate run; nothing here could tell
+    # this run's rows from ones left by an earlier one, and appending the wrong
+    # set to a workbook is not something a later check can undo. The writer
+    # records the payload in its receipt, so the two are compared before a byte
+    # of the workbook is touched, and a mismatch stops rather than guesses.
+    logs = os.path.join(here, 'logs')
+    problems = rowkey.sidecar_problems(
+        rowkey.read_receipt(logs, 'integrate_supplements'),
+        {'new_rows.json': os.path.join(logs, 'new_rows.json')})
+    if problems:
+        for code, detail in problems:
+            print('  %-24s %s' % (code, detail))
+        raise SystemExit(
+            'new_rows.json is not the file integrate_supplements attested; '
+            'the workbook is untouched. Re-run integrate_supplements, or '
+            'find out which run left this one.')
+    new = json.load(io.open(os.path.join(logs, 'new_rows.json'),
                             encoding='utf-8'))
     bak = os.path.join(base, 'archive', 'pre_supplement_integration_2026-08-30',
                        'extraction_form_RASi_PCa.xlsx')

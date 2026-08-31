@@ -112,6 +112,14 @@ Every test file is a standalone script:
 
     for t in test_*.py; do python3 "$t"; done
 
+## synthesis/
+
+같은 규율을 두 번째 파이프라인에 적용한 하네스입니다. 이 저장소가 그림에서 값을 읽는
+쪽이라면, `synthesis/`는 이미 추출된 값이 워크북·CSV·영수증 사이에서 어긋나지 않는지를
+지킵니다. 데이터를 읽지 않는 두 모듈(`route_gate.py`, `rowkey.py`)이 CI에서 돌고,
+나머지는 코퍼스가 있어야 실행됩니다. 코퍼스는 재배포할 수 없으므로 추정치와 인용문은
+저장소에 없습니다 — `synthesis/README.md`를 보세요.
+
 <!-- CURRENT_PIPELINE_VERSION: 9.27 -->
 <!-- CURRENT_SCENARIO_COUNT_CORE: 3576 -->
 <!-- CURRENT_SCENARIO_COUNT_FULL: 3647 -->

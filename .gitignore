@@ -47,3 +47,16 @@ proposals.csv
 # `test_reproducibility` checks the INDEX and not this file.
 # `png/E1_provenance_matrix.png` is a table with no figure in it and stays.
 png/G*.png
+
+# THE SYNTHESIS INPUTS, WHICH ARE THE PUBLICATIONS' CONTENT AND NOT THIS
+# PIPELINE'S. `synthesis/` ships the machinery; the estimates it writes, the
+# covariate sentences quoted from each paper and the article filenames live in
+# a file the corpus holder keeps. `study_inputs.example.json` is the shape.
+# Kept here as a second fence: the intended home for the real file is outside
+# this tree, named by FDT_STUDY_INPUTS.
+synthesis/study_inputs.json
+
+# Run artifacts of the synthesis scripts - receipts, manifests and staged rows
+# computed FROM the private corpus, so they carry it.
+synthesis/logs/
+synthesis/FINAL_MANIFEST.json

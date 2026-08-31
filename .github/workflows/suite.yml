@@ -71,6 +71,21 @@ jobs:
           PY
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
+      - name: synthesis suites
+        run: |
+          set -e
+          # The synthesis harness lives beside the corpus it guards, and the
+          # corpus cannot be published - so only the two modules that read no
+          # files run here. They are also the two that matter most: the route
+          # gate and the append guard are what stand between a rerun and a
+          # silently doubled effect table.
+          for t in test_route_gate test_rowkey; do
+            out="$(cd synthesis && python3 "$t.py")"
+            echo "$out"
+            echo "$out" | grep -q '^all scenarios passed$' \
+              || { echo "SUITE FAILED: $t"; exit 1; }
+          done
+
       - name: suite
         run: |
           set -e

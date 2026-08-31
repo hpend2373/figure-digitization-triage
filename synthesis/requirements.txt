@@ -1,0 +1,20 @@
+# Runtime for the supplement integration and figure transcription scripts.
+# Verified on the machine that produced the 2026-08-30 rows.
+#
+# xlrd is the one that is NOT present in a default Python install and is easy
+# to miss: it is needed ONLY to read R0855's legacy .xls supplements, and
+# xlrd 2.x reads .xls exclusively (it dropped .xlsx support), so a newer
+# version is not a substitute for openpyxl.
+#
+#   python3 -m pip install -r requirements.txt
+#
+# If xlrd cannot be installed, convert the four R0855 files first and point the
+# script at the results - LibreOffice is present on this machine and does it
+# without a Python dependency:
+#
+#   soffice --headless --convert-to xlsx --outdir <dir> source_supplements/R0855_*.xls
+#
+python-docx==1.2.0
+xlrd==2.0.2
+openpyxl==3.1.5
+pandas==2.3.3

@@ -1,0 +1,63 @@
+{
+  "_what_this_is": "Values and quoted text taken from the source publications. NOT in the repository: the corpus is not redistributable, so this file is yours to write. Every key below is required; the values here are invented.",
+  "_how_to_use": "Copy to study_inputs.json beside the scripts, or point FDT_STUDY_INPUTS at your own path.",
+  "_provenance_rule": "Each figure_rows entry should be checked against the rendered source page before it is written, not copied from a routing queue. A queue is a plan; the page is the evidence.",
+  "figure_rows": [
+    {
+      "rec_id": "REC_ID",
+      "study_id": "REPLACE",
+      "year": "YYYY",
+      "study_design": "REPLACE",
+      "analysis_stream": "YOUR_STREAM_TOKEN",
+      "synthesis_readiness": "YOUR_READINESS_TOKEN",
+      "source_local_path": "REPLACE",
+      "population_subgroup": "EXAMPLE - replace",
+      "exposure_class": "REPLACE",
+      "exposure_definition": "EXAMPLE - replace",
+      "comparator_definition": "EXAMPLE - replace",
+      "comparator_type": "your_comparator_type_token",
+      "exposure_timing": "REPLACE",
+      "outcome_name": "REPLACE",
+      "outcome_domain": "REPLACE",
+      "outcome_definition": "EXAMPLE - replace",
+      "effect_measure": "OR",
+      "effect_point": "0.00",
+      "effect_ci_low": "0.00",
+      "effect_ci_high": "0.00",
+      "ci_level": "95",
+      "effect_adjusted": "adjusted",
+      "adjustment_covariates": "EXAMPLE - replace",
+      "analysis_variant": "EXAMPLE - replace",
+      "source_page_ref": "EXAMPLE - replace",
+      "source_transcription": "EXAMPLE - replace",
+      "source_reported_measure": "OR",
+      "discrepancy_flag": "yes  # set when the figure disagrees with itself, e.g. column header vs axis label",
+      "notes": "EXAMPLE - replace"
+    }
+  ],
+  "figure_pending": {
+    "rec_id": "REPLACE",
+    "source_page_ref": "REPLACE",
+    "why_not_extracted": "Why these printed values were NOT made effect rows. An unstated comparator belongs here: the number is real but the contrast it expresses is unknown, and a guessed comparator is worse than a held value.",
+    "printed_values": [
+      {
+        "exposure_group": "REPLACE",
+        "aOR": "0.00",
+        "ci99_low": "0.00",
+        "ci99_high": "0.00"
+      }
+    ]
+  },
+  "supplements": {
+    "sources": {
+      "REC_ID": "REC_ID_supp_tables.docx"
+    },
+    "adjustment_text": {
+      "REC_ID": "the covariate sentence as the paper's own footnote prints it"
+    },
+    "stratum_headers": {
+      "Printed heading in the supplement table": "the label this pipeline uses for it"
+    },
+    "comparator_placeholder": "NOT_STATED_IN_SUPPLEMENT_REQUIRES_HUMAN_CONFIRMATION"
+  }
+}

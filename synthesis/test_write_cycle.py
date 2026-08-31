@@ -300,16 +300,23 @@ check("while a declared transient passes through",
 DRY_P = fresh('dry_parent.csv', [dict(row(1), row_id='d-001',
                                       effect_row_id='e-1')])
 DRY_C = fresh('dry_child.csv')
+DRY_CHILD_ROW = dict(row(2), effect_row_id='e-1')
 verdict, written = K.run_writer(
-    'dry', [('child', DRY_C, COLS, [], [dict(row(2), effect_row_id='e-1')],
+    'dry', [('child', DRY_C, COLS, [], [DRY_CHILD_ROW],
              K.COUNT_KEY, K.COUNT_VALUE),
             ('parent', DRY_P, COLS, read(DRY_P), [], KEY, VALUE)],
     TMP, relations=[('child', 'parent')], dry_run=True)
 check("a dry run reports what a write would do", verdict == 'WRITE_WOULD_PROCEED',
       verdict)
 check("and writes nothing", written == [] and read(DRY_C) == [])
-check("but it DID resolve the parents on the way, as a real run would",
-      all(r.get('parent_effect_key') for r in read(DRY_P)) or True)
+# THE ASSERTION THAT USED TO END IN `or True`, WHICH MADE IT PASS ON ANY CODE
+# AT ALL - written into the very commit whose message says a scenario that
+# cannot fail is not a scenario. It also watched the wrong table: the parent
+# is what a child resolves AGAINST, so the resolved key belongs on the child.
+check("the child's parent really was resolved on the way through",
+      DRY_CHILD_ROW.get('parent_effect_key')
+      == str(K.key_of(read(DRY_P)[0], K.EFFECT_KEY)),
+      "%r" % DRY_CHILD_ROW.get('parent_effect_key'))
 _dryv, _ = K.run_writer(
     'dry', [('child', DRY_C, COLS, [], [dict(row(2), effect_row_id='missing')],
              K.COUNT_KEY, K.COUNT_VALUE),
@@ -326,8 +333,10 @@ AT = fresh('attest.csv')
 K.run_writer('att', [('a', AT, COLS, [], [row(1)], KEY, VALUE)], TMP,
              assign_ids=number, assignable={'row_id'}, dry_run=True,
              attest={'study_inputs_sha256': 'abc'})
-_a = json.load(io.open(os.path.join(TMP, 'att_idempotency.json'),
+_r = json.load(io.open(os.path.join(TMP, 'att_idempotency.json'),
                        encoding='utf-8')).get('attestation', {})
+_a = _r.get('core', {})
+_c = _r.get('caller', {})
 check("the receipt records which protocol reached the verdict",
       len(_a.get('protocol_sha256', '')) == 64)
 check("and the hash of each file it judged against",
@@ -335,7 +344,7 @@ check("and the hash of each file it judged against",
 check("and a hash of the rows it intended to write",
       len(_a.get('tables', {}).get('a', {}).get('intended_rows_sha256', '')) == 64)
 check("and whatever the caller attests to as well",
-      _a.get('study_inputs_sha256') == 'abc')
+      _c.get('study_inputs_sha256') == 'abc')
 check("a changed file gives a different hash, or the binding is decorative",
       K.file_digest(AT) != K.file_digest(fresh('attest2.csv', [row(1)])))
 check("and changed rows give a different rows hash",

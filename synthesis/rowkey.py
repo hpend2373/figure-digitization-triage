@@ -402,7 +402,10 @@ class _Lock(object):
             return self
         try:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except OSError:
+        except FileExistsError:
+            # ONLY this one means another writer. A permission error or a
+            # missing parent directory reported as contention would send a
+            # person looking for a process that is not there.
             raise Locked('another writer holds %s; if no writer is running, '
                          'that file is left over from one that was killed and '
                          'can be removed by hand' % self.path)
@@ -489,8 +492,10 @@ def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
                            'existing_rows': len(existing)}
                    for label, path, fields, existing, intended, _k, _v in tables},
     }
-    if attest:
-        attestation.update(attest)
+    # THE CALLER'S CLAIMS SIT BESIDE THE CORE ONES, NOT OVER THEM. A caller
+    # that happened to pass `protocol_sha256` or `tables` would otherwise
+    # overwrite what this function measured with what it asserts.
+    attestation = {'core': attestation, 'caller': dict(attest or {})}
     _amend_receipt(receipt_dir, name, {'attestation': attestation})
     if not may:
         return _last_verdict(receipt_dir, name), []

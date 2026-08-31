@@ -124,4 +124,17 @@ missing으로 나온다, 이 커밋은 못 고쳤다"고 적었습니다. **그 
 
     pip install -r requirements.txt
     python3 test_route_gate.py && python3 test_rowkey.py     # 데이터 불필요
+    python3 test_write_cycle.py                             # 데이터 불필요
     FDT_BUNDLE=... python3 build_final_manifest.py           # 번들 필요
+
+### 네트워크 마운트에서 돌린다면
+
+    PYTHONPYCACHEPREFIX=/tmp/pyc python3 test_write_cycle.py
+
+파일 내용이 바뀌어도 mtime이 따라 움직이지 않는 마운트가 있고, Python은 mtime과
+크기로 `__pycache__` 항목이 최신인지 판단합니다. 2026-08-31에 실제로 이것이
+`rowkey`의 이전 버전을 물고 돌아, 소스에는 있는 가드가 없는 것처럼 시나리오 2개가
+로컬에서만 죽었습니다. 반대 방향 — **없는 가드를 있는 것처럼 초록으로 보고하는 것** —
+도 똑같이 쉽습니다. `verify_synthesis_status.py`는 각 스위트를 버려지는 캐시
+디렉터리에 컴파일해 돌리므로 이 함정에서 자유롭고, 손으로 돌릴 때는 위처럼 하세요.
+CI는 새 체크아웃에서 컴파일하므로 해당되지 않습니다.

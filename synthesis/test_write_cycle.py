@@ -140,27 +140,74 @@ check("the receipt says which table is in which state",
       "%s" % _rep['table_states'])
 
 # --------------------------------------------------------------- phase four
-E, F = fresh('e.csv'), fresh('f.csv')
+# THE FIRST VERSION OF THIS PHASE NEVER REACHED THE WRITE. It passed a list
+# whose __iter__ raised, and `guard` iterates the intended rows before any file
+# is touched - so the exception came out of the guard, the assertions about
+# rollback passed because nothing had been written, and `write_all_or_nothing`
+# still had no scenario for the thing it is named after. The two below fail
+# INSIDE the write: one while staging, one while replacing.
+
+# (a) staging: the second file's directory does not exist.
+E = fresh('e.csv', [dict(row(1), row_id='e-001')])
+MISSING = os.path.join(TMP, 'no-such-dir', 'f.csv')
+raised = False
+try:
+    K.run_writer('cycle', [('e', E, COLS, read(E), [row(2)], KEY, VALUE),
+                           ('f', MISSING, COLS, [], [row(3)], KEY, VALUE)],
+                 TMP, assign_ids=number)
+except (OSError, IOError):
+    raised = True
+check("a staging failure on the second file raises", raised)
+check("and the first file still holds only its original row",
+      len(read(E)) == 1, "%d" % len(read(E)))
+check("no half-written file is left beside either",
+      not [f for f in os.listdir(TMP) if f.endswith('.writing')],
+      "%s" % [f for f in os.listdir(TMP) if f.endswith('.writing')])
+
+# (b) commit: every file stages, and the SECOND replace fails. This is the one
+# that used to leave the first table new and the second old.
+G = fresh('g.csv', [dict(row(1), row_id='g-001')])
+H = fresh('h.csv', [dict(row(2), row_id='h-001')])
+before_g, before_h = read(G), read(H)
+JOURNAL = os.path.join(TMP, 'journal.json')
+moves = []
 
 
-class Boom(list):
-    def __iter__(self):
-        raise RuntimeError('failure part way through')
+def flaky_replace(src, dst):
+    moves.append(dst)
+    if len(moves) == 2:
+        raise OSError('injected failure on the second replace')
+    os.replace(src, dst)
 
 
 raised = False
 try:
-    K.run_writer('cycle', [('e', E, COLS, [], [row(1)], KEY, VALUE),
-                           ('f', F, COLS, [], Boom(), KEY, VALUE)], TMP,
-                 assign_ids=number)
-except RuntimeError:
+    K.run_writer('cycle', [('g', G, COLS, read(G), [row(3)], KEY, VALUE),
+                           ('h', H, COLS, read(H), [row(4)], KEY, VALUE)],
+                 TMP, assign_ids=number, journal_path=JOURNAL,
+                 replace=flaky_replace)
+except OSError:
     raised = True
-check("a failure part way through raises", raised)
-check("and the FIRST table is untouched, not left one ahead of the other",
-      read(E) == [], "%s" % read(E))
-check("no half-written file is left behind",
-      not [f for f in os.listdir(TMP) if f.endswith('.writing')],
-      "%s" % [f for f in os.listdir(TMP) if f.endswith('.writing')])
+check("a failure on the SECOND replace raises", raised)
+check("the first file is put back, not left one commit ahead",
+      read(G) == before_g, "%s" % read(G))
+check("and the second is untouched", read(H) == before_h)
+check("no temporary or backup file survives",
+      not [f for f in os.listdir(TMP)
+           if f.endswith(('.writing', '.previous'))],
+      "%s" % [f for f in os.listdir(TMP)
+              if f.endswith(('.writing', '.previous'))])
+check("the journal says the transaction was rolled back",
+      json.load(io.open(JOURNAL, encoding='utf-8'))['state']
+      == 'ABORTED_ROLLED_BACK')
+
+# (c) a clean commit records itself, so an interrupted run is visible
+K.run_writer('cycle', [('g', G, COLS, read(G), [row(5)], KEY, VALUE)],
+             TMP, assign_ids=number, journal_path=JOURNAL)
+_j = json.load(io.open(JOURNAL, encoding='utf-8'))
+check("a clean commit leaves a COMMITTED journal", _j['state'] == 'COMMITTED')
+check("with a hash of what it wrote", bool(list(_j['sha256'].values())[0]))
+check("and the row really is there now", len(read(G)) == 2)
 
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])

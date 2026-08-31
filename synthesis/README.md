@@ -17,7 +17,7 @@
 기계는 공개하고 원료는 두고 갑니다. `crop_truth.py`가 좌표만 담아 공개될 수 있었던 것과
 같은 선입니다 — 다만 여기서는 값 자체가 출판사의 것이라 반대편으로 갈라집니다.
 
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 97 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 105 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 
@@ -25,7 +25,7 @@
 |---|---|
 | `route_gate.py` · `test_route_gate.py` | 기록의 **경로**를 스크리닝이 정하면 그 기록의 모든 효과행이 같은 경로를 달아야 합니다. 스크리닝이 한 기록을 두 번 다르게 판정하면 어느 쪽도 권위가 없습니다. 18 시나리오 |
 | `rowkey.py` · `test_rowkey.py` | 추가 작업의 재실행 가드. 여러 출력의 상태가 서로 다르면 전체를 막고, 같은 자연키가 두 번이면 거부합니다. 비교 대상은 손으로 고르지 않고 유도합니다. 쓰기는 전부 아니면 전무이고, 선언된 writer의 영수증이 없으면 실패입니다. 63 시나리오 |
-| `test_write_cycle.py` | **쓰기의 네 단계** — 최초 쓰기, 재실행 no-op, 한 표만 채워진 상태, 중간 실패. 16 시나리오 |
+| `test_write_cycle.py` | **쓰기의 네 단계** — 최초 쓰기, 재실행 no-op, 한 표만 채워진 상태, 그리고 **staging 중 실패와 replace 중 실패**. 24 시나리오 |
 | `verify_synthesis_status.py` | 위 숫자가 트리와 맞는지. 파일 집합·정확히 한 개의 카운트 표시·0 거부·합계 대조 |
 
 CI는 마지막 줄만 grep하지 않습니다. `verify_synthesis_status.py`가 여기 있는

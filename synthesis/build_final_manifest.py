@@ -156,10 +156,21 @@ for field in ('extractor1_initials', 'extractor2_initials', 'rob_overall',
     gates['extraction_' + field] = dict(collections.Counter(
         '' if v is None else str(v) for v in vals))
 R['human_gates'] = gates
+# EVERY TABLE A PERSON COULD HAVE SIGNED, NOT JUST THE ONE WE LOOKED AT. This
+# checked the effect table and the study sheet and left the count table and the
+# screening table unguarded, so a `human_confirmed=yes` written into a count
+# row - kept consistent between CSV and workbook, so the sync check stayed
+# quiet - passed the whole receipt. A gate that covers some of the tables
+# reports on some of the tables.
+for _label, _dist, _n in (('effect', gates['effect_human_confirmed'], len(eff)),
+                          ('count', gates['count_human_confirmed'], len(cnt)),
+                          ('screening', gates['screening_human_confirmed'],
+                           None)):
+    if set(_dist) - {'no'}:
+        fail('human_confirmed is not "no" on every %s row: %s'
+             % (_label, _dist))
 if gates['effect_pool_eligible'] != {'no': len(eff)}:
     fail('pool_eligible is not "no" on every effect row')
-if set(gates['effect_human_confirmed']) - {'no'}:
-    fail('human_confirmed is not "no" on every effect row')
 for f in ('extractor1_initials', 'extractor2_initials', 'rob_overall'):
     if set(gates['extraction_' + f]) - {''}:
         fail('%s has been filled in; that field is a person\'s' % f)
@@ -172,6 +183,7 @@ for f in ('extractor1_initials', 'extractor2_initials', 'rob_overall'):
 # this fails on the difference rather than on nobody noticing.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import route_gate
+import rowkey
 
 _routes = route_gate.route_index(dictrows('fulltext_screening.tsv'))
 _route_findings = route_gate.findings(eff, _routes)
@@ -241,13 +253,17 @@ for name, key in (('integration.json', 'refused_values'),):
 p = os.path.join(sup, 'R1087_coexposure_pending.json')
 if os.path.exists(p):
     R['held_without_comparator'] = len(json.load(io.open(p, encoding='utf-8'))['printed_values'])
-R['idempotency'] = {}
-for n in ('integrate_supplements', 'figure_printed_numbers'):
-    p = os.path.join(sup, '%s_idempotency.json' % n)
-    if os.path.exists(p):
-        R['idempotency'][n] = json.load(io.open(p, encoding='utf-8'))['verdict']
-if set(R['idempotency'].values()) - {'ALREADY_PRESENT_NO_WRITE'}:
-    fail('a writer would still append on a rerun: %s' % R['idempotency'])
+#: The writers whose reruns this receipt speaks for. Declared, so that a
+#: MISSING receipt is a failure rather than a silence - `if os.path.exists`
+#: meant deleting a log made the check disappear along with it, and the receipt
+#: then reported CONSISTENT while saying nothing about that writer at all.
+EXPECTED_WRITERS = ('integrate_supplements', 'figure_printed_numbers')
+R['idempotency'] = rowkey.receipt_verdicts(sup, EXPECTED_WRITERS)
+_unclean = rowkey.unclean_reruns(R['idempotency'])
+if _unclean:
+    fail('a rerun is unproven or would append for: %s (%s)'
+         % (', '.join(_unclean),
+            ', '.join('%s=%s' % (n, R['idempotency'][n]) for n in _unclean)))
 
 # ------------------------------------------------------------------- QC
 out = subprocess.run([sys.executable, 'qc_extraction.py',

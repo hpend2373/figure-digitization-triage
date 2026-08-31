@@ -16,6 +16,7 @@ and disagreeing tables die.
 
 Writes only into a temporary directory.
 """
+import io
 import json
 import os
 import shutil
@@ -302,6 +303,99 @@ check('카운트는 수량과 그룹으로 구분된다',
                                            K.COUNT_KEY))
 check('같은 카운트를 다시 쓰려 하면 동일로 잡힌다',
       len(K.compare([C], [C], K.COUNT_KEY, K.COUNT_VALUE)[1]) == 1)
+
+# ---- A MISSING RECEIPT IS NOT A SILENCE
+# Reading whichever receipts happen to be on disk meant deleting one deleted
+# the check with it, and the final manifest went on reporting a consistent
+# state while saying nothing about that writer at all.
+_R = os.path.join(TMP, 'receipts')
+os.makedirs(_R, exist_ok=True)
+json.dump({'verdict': K.CLEAN_RERUN},
+          io.open(os.path.join(_R, 'present_idempotency.json'), 'w',
+                  encoding='utf-8'))
+json.dump({'verdict': 'CONFLICT_NO_WRITE'},
+          io.open(os.path.join(_R, 'conflicted_idempotency.json'), 'w',
+                  encoding='utf-8'))
+io.open(os.path.join(_R, 'broken_idempotency.json'), 'w',
+        encoding='utf-8').write('not json at all')
+_v = K.receipt_verdicts(_R, ('present', 'conflicted', 'broken', 'absent'))
+check("a writer with no receipt is reported, not skipped",
+      _v['absent'] == 'RECEIPT_MISSING', '%s' % _v)
+check("a receipt that cannot be read is not a pass either",
+      _v['broken'] == 'RECEIPT_UNREADABLE')
+check("a declared writer always gets an entry",
+      sorted(_v) == ['absent', 'broken', 'conflicted', 'present'])
+check("only the clean rerun counts as proven",
+      K.unclean_reruns(_v) == ['absent', 'broken', 'conflicted'])
+check("and a full set of clean receipts leaves nothing outstanding",
+      K.unclean_reruns(K.receipt_verdicts(_R, ('present',))) == [])
+
+# ---- THE WRITE ITSELF, WHICH THE GUARD NEVER SEES
+# `parent_effect_key` is added by this module so both sides can name a parent
+# the same way. It is not a column of the CSV, and a row still carrying it
+# raises ValueError inside csv.DictWriter - in the write branch, which a clean
+# no-op never enters, after the first table has already been written.
+import csv as _csv                                              # noqa: E402
+
+_COLS = ['rec_id', 'quantity', 'value']
+_row = {'rec_id': 'R1', 'quantity': 'n', 'value': '3',
+        'parent_effect_key': "('R1', ...)", '_transient': 'x'}
+check("a row is cut down to the file's own columns before it is written",
+      K.writable([_row], _COLS) == [{'rec_id': 'R1', 'quantity': 'n',
+                                     'value': '3'}])
+check("and a column the row lacks becomes empty, not missing",
+      K.writable([{'rec_id': 'R1'}], _COLS)
+      == [{'rec_id': 'R1', 'quantity': '', 'value': ''}])
+_probe = os.path.join(TMP, 'probe.csv')
+with io.open(_probe, 'w', encoding='utf-8', newline='') as _fh:
+    _w = _csv.DictWriter(_fh, fieldnames=_COLS)
+    _w.writeheader()
+    _w.writerows(K.writable([_row], _COLS))
+check("so DictWriter accepts it, which it does not without this",
+      os.path.getsize(_probe) > 0)
+_raised = False
+try:
+    with io.open(os.path.join(TMP, 'raw.csv'), 'w', encoding='utf-8',
+                 newline='') as _fh:
+        _w = _csv.DictWriter(_fh, fieldnames=_COLS)
+        _w.writerow(_row)
+except ValueError:
+    _raised = True
+check("the unfiltered row really does raise, or this scenario proves nothing",
+      _raised)
+
+# ALL OR NOTHING. A failure partway through leaves one table ahead of another,
+# and that in-between state is the one the guard cannot describe: neither "has
+# not happened" nor "has happened".
+_a = os.path.join(TMP, 'a.csv')
+_b = os.path.join(TMP, 'b.csv')
+for _p in (_a, _b):
+    with io.open(_p, 'w', encoding='utf-8') as _fh:
+        _fh.write('rec_id,quantity,value\nOLD,,\n')
+K.write_all_or_nothing([(_a, _COLS, [_row]), (_b, _COLS, [_row])])
+check("both files are written when both can be",
+      all('OLD' not in io.open(p, encoding='utf-8').read() for p in (_a, _b)))
+for _p in (_a, _b):
+    with io.open(_p, 'w', encoding='utf-8') as _fh:
+        _fh.write('rec_id,quantity,value\nOLD,,\n')
+
+
+class _Boom(list):
+    def __iter__(self):
+        raise RuntimeError('failure partway through')
+
+
+_failed = False
+try:
+    K.write_all_or_nothing([(_a, _COLS, [_row]), (_b, _COLS, _Boom())])
+except RuntimeError:
+    _failed = True
+check("a failure on the second file raises", _failed)
+check("and leaves the FIRST file as it was",
+      'OLD' in io.open(_a, encoding='utf-8').read())
+check("leaving no half-written file behind either",
+      not [f for f in os.listdir(TMP) if f.endswith('.writing')],
+      "%s" % [f for f in os.listdir(TMP) if f.endswith('.writing')])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

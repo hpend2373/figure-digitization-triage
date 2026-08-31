@@ -203,6 +203,89 @@ def compare(existing, intended, kfields, vfields):
     return missing, identical, conflict
 
 
+#: The only verdict that means a rerun would change nothing.
+CLEAN_RERUN = 'ALREADY_PRESENT_NO_WRITE'
+
+
+def receipt_verdicts(receipt_dir, expected):
+    """{writer: verdict} for every writer that was DECLARED, present or not.
+
+    A MISSING RECEIPT IS NOT A SILENCE. Reading whichever receipts happen to be
+    on disk meant deleting one deleted the check with it: the final manifest
+    went on reporting a consistent state while saying nothing at all about that
+    writer's rerun. Every declared writer gets an entry, and a writer with no
+    receipt gets RECEIPT_MISSING, which is not CLEAN_RERUN and so cannot pass.
+    """
+    out = {}
+    for name in expected:
+        path = os.path.join(receipt_dir, '%s_idempotency.json' % name)
+        if not os.path.exists(path):
+            out[name] = 'RECEIPT_MISSING'
+            continue
+        try:
+            out[name] = json.load(io.open(path, encoding='utf-8'))['verdict']
+        except (ValueError, KeyError):
+            out[name] = 'RECEIPT_UNREADABLE'
+    return out
+
+
+def unclean_reruns(verdicts):
+    """The writers whose rerun is not proven harmless. Empty means all are."""
+    return sorted(n for n, v in verdicts.items() if v != CLEAN_RERUN)
+
+
+def writable(rows, fieldnames):
+    """Rows restricted to the file's own columns, in the file's own order.
+
+    THE GUARD DOES NOT SEE THE WRITE. `parent_effect_key` is a field this
+    module ADDS so that both sides can name a parent the same way; it is not a
+    column of the CSV. Handing such a row straight to `csv.DictWriter` raises
+    `ValueError: dict contains fields not in fieldnames` - and the writer that
+    hit it had already written its first table, so the failure landed exactly
+    where nothing was watching: between two outputs, in the write branch a
+    clean no-op never enters.
+
+    Anything the file does not have a column for is dropped here; anything the
+    file has and the row does not becomes empty.
+    """
+    return [{c: r.get(c, '') for c in fieldnames} for r in rows]
+
+
+def write_all_or_nothing(specs):
+    """Write several CSVs, or leave every one of them as it was.
+
+    `specs` is [(path, fieldnames, rows)]. Each file is written beside itself
+    and moved into place only after all of them have been written, so a failure
+    partway through - a schema mismatch, a full disk, an interrupt - leaves the
+    whole set at the previous state rather than one table ahead of another.
+    That in-between state is the one the guard cannot describe: it is neither
+    "has not happened" nor "has happened".
+    """
+    import csv as _csv
+    import shutil as _shutil
+    staged, opened = [], []
+    try:
+        for path, fieldnames, rows in specs:
+            tmp = path + '.writing'
+            # Recorded BEFORE the write, not after: the file that fails is the
+            # one whose half-written temp would otherwise be left behind, and
+            # it is never the one already in `staged`.
+            opened.append(tmp)
+            with io.open(tmp, 'w', encoding='utf-8', newline='') as fh:
+                w = _csv.DictWriter(fh, fieldnames=list(fieldnames))
+                w.writeheader()
+                w.writerows(writable(rows, fieldnames))
+            staged.append((tmp, path))
+    except Exception:
+        for tmp in opened:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        raise
+    for tmp, path in staged:
+        _shutil.move(tmp, path)
+    return [p for _t, p in staged]
+
+
 def state_of(missing, identical, conflict, dup_existing, dup_intended):
     if conflict or dup_existing or dup_intended:
         return CONFLICT

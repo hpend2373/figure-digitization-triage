@@ -318,6 +318,53 @@ _dryv, _ = K.run_writer(
 check("so a dry run still refuses a broken parent reference",
       _dryv == 'PREFLIGHT_CONFLICT_NO_WRITE', _dryv)
 
+# --------------------------------------- what the verdict is a verdict about
+# A RECEIPT THAT RECORDS ONLY ITS VERDICT SAYS NOTHING ABOUT WHAT IT JUDGED.
+# Change the code, the inputs, or the files, and an old
+# ALREADY_PRESENT_NO_WRITE still reads as proof of a rerun that never happened.
+AT = fresh('attest.csv')
+K.run_writer('att', [('a', AT, COLS, [], [row(1)], KEY, VALUE)], TMP,
+             assign_ids=number, assignable={'row_id'}, dry_run=True,
+             attest={'study_inputs_sha256': 'abc'})
+_a = json.load(io.open(os.path.join(TMP, 'att_idempotency.json'),
+                       encoding='utf-8')).get('attestation', {})
+check("the receipt records which protocol reached the verdict",
+      len(_a.get('protocol_sha256', '')) == 64)
+check("and the hash of each file it judged against",
+      'file_sha256' in _a.get('tables', {}).get('a', {}))
+check("and a hash of the rows it intended to write",
+      len(_a.get('tables', {}).get('a', {}).get('intended_rows_sha256', '')) == 64)
+check("and whatever the caller attests to as well",
+      _a.get('study_inputs_sha256') == 'abc')
+check("a changed file gives a different hash, or the binding is decorative",
+      K.file_digest(AT) != K.file_digest(fresh('attest2.csv', [row(1)])))
+check("and changed rows give a different rows hash",
+      K.rows_digest([row(1)], COLS) != K.rows_digest([row(2)], COLS))
+
+# --------------------------------------------------- one writer at a time
+# Two processes reading the same tables both see them empty and are both told
+# to WRITE; the second then appends what the first has already written. The
+# guard cannot see that - each is telling the truth about the moment it looked.
+LOCK = os.path.join(TMP, 'writer.lock')
+L = fresh('locked.csv')
+held = K._Lock(LOCK)
+held.__enter__()
+raised = False
+try:
+    K.run_writer('locked', [('a', L, COLS, [], [row(1)], KEY, VALUE)], TMP,
+                 assign_ids=number, assignable={'row_id'}, lock_path=LOCK)
+except K.Locked:
+    raised = True
+check("a second writer is refused while the lock is held", raised)
+check("and it wrote nothing", read(L) == [])
+held.__exit__()
+check("the lock is released afterwards", not os.path.exists(LOCK))
+check("and the writer runs once it is free",
+      K.run_writer('locked', [('a', L, COLS, [], [row(1)], KEY, VALUE)], TMP,
+                   assign_ids=number, assignable={'row_id'},
+                   lock_path=LOCK)[0] == 'WRITE')
+check("leaving no lock behind", not os.path.exists(LOCK))
+
 # ------------------------------------------------- and the archive, if asked
 G = fresh('g.csv', [dict(row(1), row_id='g-001')])
 ARCH = os.path.join(TMP, 'archive')

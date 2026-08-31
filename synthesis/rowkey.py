@@ -357,9 +357,69 @@ def _snapshot(rows, assignable):
             for r in rows]
 
 
+def file_digest(path):
+    """sha256 of a file, or '' when it is not there yet."""
+    import hashlib
+    if not os.path.exists(path):
+        return ''
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(65536), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def rows_digest(rows, fields):
+    """sha256 of the rows a writer intends, under the fields that matter."""
+    import hashlib
+    h = hashlib.sha256()
+    for r in rows:
+        h.update(repr(sorted((k, v) for k, v in r.items()
+                             if not k.startswith('_'))).encode('utf-8'))
+    h.update(repr(tuple(fields)).encode('utf-8'))
+    return h.hexdigest()
+
+
+class Locked(Exception):
+    """Another writer holds the lock."""
+
+
+class _Lock(object):
+    """Exclusive for the whole transaction, guard to final replace.
+
+    Two processes reading the same tables both see them empty and both are told
+    to WRITE; the second then appends what the first has already written. The
+    guard cannot see that, because each is telling the truth about the moment
+    it looked.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self.fd = None
+
+    def __enter__(self):
+        if not self.path:
+            return self
+        try:
+            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except OSError:
+            raise Locked('another writer holds %s; if no writer is running, '
+                         'that file is left over from one that was killed and '
+                         'can be removed by hand' % self.path)
+        os.write(self.fd, ('%d\n' % os.getpid()).encode('ascii'))
+        return self
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            os.close(self.fd)
+            os.remove(self.path)
+        return False
+
+
 def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                journal_path=None, replace=None, relations=(),
-               assignable=None, dry_run=False):
+               assignable=None, dry_run=False, lock_path=None,
+               attest=None):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -384,6 +444,14 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
     # collapse and read as duplicates that are not there. The supplement writer
     # used to do this itself and discard what it found, so a duplicated or
     # dangling parent arrived at the guard as an ordinary unmatched key.
+    with _Lock(lock_path):
+        return _run_writer(name, tables, receipt_dir, assign_ids, archive,
+                           journal_path, replace, relations, assignable,
+                           dry_run, attest)
+
+
+def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,
+                replace, relations, assignable, dry_run, attest):
     by_label = {label: (existing, intended)
                 for label, _p, _f, existing, intended, _k, _v in tables}
     problems = []
@@ -406,6 +474,24 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
     verdict_tables = [(label, existing, intended, kf, vf)
                       for label, _p, _f, existing, intended, kf, vf in tables]
     may = guard(name, verdict_tables, receipt_dir)
+    # WHAT THE VERDICT IS A VERDICT ABOUT. A receipt that records only its
+    # verdict says nothing about which code, which inputs and which files it
+    # was reached from - so an old ALREADY_PRESENT_NO_WRITE reads as proof of
+    # a rerun that has not happened. These are what would have to be the same
+    # for the verdict to still hold.
+    attestation = {
+        'generated': __import__('datetime').datetime.now().isoformat(
+            timespec='seconds'),
+        'protocol_sha256': file_digest(os.path.abspath(__file__)),
+        'tables': {label: {'file_sha256': file_digest(path),
+                           'intended_rows_sha256': rows_digest(intended, fields),
+                           'intended_rows': len(intended),
+                           'existing_rows': len(existing)}
+                   for label, path, fields, existing, intended, _k, _v in tables},
+    }
+    if attest:
+        attestation.update(attest)
+    _amend_receipt(receipt_dir, name, {'attestation': attestation})
     if not may:
         return _last_verdict(receipt_dir, name), []
     # ONE PATH, INCLUDING THE ONE THAT DOES NOT WRITE. A dry run used to call
@@ -442,6 +528,18 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
          for _l, path, fieldnames, existing, intended, _k, _v in tables],
         replace=replace, journal_path=journal_path)
     return 'WRITE', written
+
+
+def _amend_receipt(receipt_dir, name, extra):
+    path = os.path.join(receipt_dir, '%s_idempotency.json' % name)
+    try:
+        d = json.load(io.open(path, encoding='utf-8'))
+    except Exception:
+        d = {}
+    d.update(extra)
+    os.makedirs(receipt_dir, exist_ok=True)
+    json.dump(d, io.open(path, 'w', encoding='utf-8'), indent=2,
+              ensure_ascii=False)
 
 
 def _last_verdict(receipt_dir, name):

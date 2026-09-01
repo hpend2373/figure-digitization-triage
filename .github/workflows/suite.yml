@@ -69,6 +69,14 @@ jobs:
               sys.exit("%s is still importable" % ", ".join(present))
           print("core profile: no PDF backend, as declared")
           PY
+      - name: sheet logic under node
+        run: |
+          # The decisions that can put a number on the wrong figure are pure
+          # functions in sheet/sheet_logic.js, and they had no runner here at
+          # all - 35 scenarios that only ever ran on a laptop. It prints its
+          # own verdict rather than the scenario marker, so it is a step of
+          # its own and not part of the core count.
+          node sheet/test_sheet_logic.mjs
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: synthesis suites
@@ -94,6 +102,7 @@ jobs:
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
+                   test_sheet_build test_merge_counts \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
@@ -273,6 +282,7 @@ jobs:
                    test_measure_mono_bars \
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
+                   test_sheet_build test_merge_counts \
                    test_geometry_proposer test_line_style_mono \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \

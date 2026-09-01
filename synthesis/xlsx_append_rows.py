@@ -186,23 +186,38 @@ def sheet_schema(parts, sheet):
     part = sheet_part(parts, sheet)
     tpart = table_part(parts, part)
     cols = width = None
-    if tpart and tpart in parts:
+    if tpart:
+        # A DECLARED TABLE HAS TO BE THERE AND HAVE TO BE COMPLETE. When the
+        # part was missing, or carried no column names, or no range this could
+        # read, the checks below simply skipped it - and `plan_append` then
+        # died on 'table ref not found', which is a traceback rather than a
+        # refusal with a name.
+        if tpart not in parts:
+            return 'MISSING_TABLE_PART', None, None
         raw = parts[tpart].decode('utf-8')
         cols = [SU.unescape(m.group(1)) for m in re.finditer(
             r'<(?:\w+:)?tableColumn[^>]*\bname="([^"]*)"', raw)] or None
         m = re.search(r'ref="([A-Z]+)\d+:([A-Z]+)\d+"', raw)
         if m:
             width = col_index(m.group(2)) - col_index(m.group(1)) + 1
+        if cols is None or width is None:
+            return 'INCOMPLETE_TABLE_PART', cols, width
     head = row_values(parts[part].decode('utf-8'), 1, 4096)
     if head is not None:
         while head and head[-1] == '':
             head.pop()
-    return cols, (head or None), width
+    return (cols, (head or None), width)
 
 
 def schema_problems(parts, sheet, fields):
     """Where this sheet's idea of its columns differs from the file's."""
-    cols, head, width = sheet_schema(parts, sheet)
+    got = sheet_schema(parts, sheet)
+    if got[0] in ('MISSING_TABLE_PART', 'INCOMPLETE_TABLE_PART'):
+        return ['the sheet declares a table and %s'
+                % ('its part is not in the workbook'
+                   if got[0] == 'MISSING_TABLE_PART'
+                   else 'it names no columns or no range')]
+    cols, head, width = got
     out = []
     if head != fields:
         out.append('the header row is %s' % (head,))
@@ -261,7 +276,8 @@ def load_workbook_snapshot(path):
     return members, hashlib.sha256(raw).hexdigest()
 
 
-def write_workbook(path, members, edited, expect=None):
+def write_workbook(path, members, edited, expect=None,
+                   replace=os.replace):
     """The whole workbook, once, through a temporary file.
 
     Every part not in `edited` is copied byte for byte - that is what keeps
@@ -281,6 +297,11 @@ def write_workbook(path, members, edited, expect=None):
         if expect is not None and rowkey.file_digest(path) != expect:
             raise StaleWorkbook(
                 'the workbook changed since it was read; nothing was written')
+        # THE REPLACE IS INSIDE THE CLEANUP TOO. It sat outside, so a
+        # permission or filesystem error there left a complete .tmp beside the
+        # workbook and took the exception straight out of the step - no
+        # refusal receipt, nothing said about why.
+        replace(tmp, path)
     except Exception:
         # A HALF-BUILT ZIP IS NOT A WORKBOOK, AND IT SITS NEXT TO THE REAL
         # ONE. The replace below never runs, so the workbook itself is intact
@@ -293,7 +314,6 @@ def write_workbook(path, members, edited, expect=None):
         except OSError:
             pass
         raise
-    os.replace(tmp, path)
 
 
 #: The tables whose rows this step carries into the workbook, and the files
@@ -348,8 +368,9 @@ def preconditions(base, logs):
     # mutation. `sidecars=False` because the sidecar this step will APPLY has
     # already been judged above, as the object it will apply - re-reading the
     # file here would check one thing while another is used.
-    problems += writer_contracts.problems(WRITER, receipt, base, logs,
-                                          sidecars=False)
+    contract_problems, _side = writer_contracts.problems(
+        WRITER, receipt, base, logs, sidecars=False)
+    problems += contract_problems
     # ONLY A CLEAN RERUN. The attestation is written before the tables are
     # replaced, so a first WRITE's receipt records the PRE-write file hashes
     # and can never match the CSVs it just produced. Allowing WRITE here was a
@@ -439,13 +460,23 @@ def preconditions(base, logs):
     return receipt, new, problems
 
 
-def apply_workbook(base, logs, workbook_path):
+def apply_workbook(base, logs, workbook_path, replace=os.replace,
+                   lock_path=None):
     """Read, decide, and either apply the rows or leave the workbook alone.
 
     Separated from __main__ so the decision can be exercised. Everything the
     audit named as untested lived in that block: the precondition set, the
     verdict, the receipt it writes. Returns the receipt it wrote.
+
+    IT TAKES THE LOCK ITSELF. The CLI held it outside, so this - the public
+    way in, and the one that mutates the workbook - ran unlocked for anything
+    that called it directly. `lock_path=None` means the bundle's own lock.
     """
+    with rowkey.write_lock(lock_path or bundle_paths.write_lock()):
+        return _apply_workbook_locked(base, logs, workbook_path, replace)
+
+
+def _apply_workbook_locked(base, logs, workbook_path, replace):
     receipt, new, problems = preconditions(base, logs)
     if problems:
         for code, detail in problems:
@@ -520,15 +551,31 @@ def apply_workbook(base, logs, workbook_path):
                               'table_part': tp}
             print('  %-24s %d행 -> %d행 (+%d), 표 %s'
                   % (sheet, a, b, len(rows), tp))
+        # AND THE CONTRACT IS RECHECKED WITH THE ROWS IN HAND. Everything
+        # above was true when it was read; a CSV, a source document or the
+        # receipt itself can move while the plan is being built, and the
+        # workbook's own snapshot check cannot see any of that. Recomputed
+        # here, so a mutation never happens against a tree that has already
+        # gone stale.
+        moved, _side = writer_contracts.problems(WRITER, receipt, base, logs,
+                                                 sidecars=False)
+        if moved:
+            for code, detail in moved:
+                print('  %-32s %s' % (code, detail))
+            return _refused(logs, workbook_path, before,
+                            [('WRITER_CONTRACT_MOVED_BEFORE_COMMIT',
+                              '%s: %s' % (c, d)) for c, d in moved])
         try:
-            write_workbook(workbook_path, members, edited, expect=before)
+            write_workbook(workbook_path, members, edited, expect=before,
+                           replace=replace)
         except StaleWorkbook as exc:
-            print('  %-32s %s' % ('WORKBOOK_STALE_SNAPSHOT', exc))
-            return _receipt(logs, {
-                'verdict': 'REFUSED_NO_WRITE',
-                'problems': [['WORKBOOK_STALE_SNAPSHOT', str(exc)]],
-                'workbook_sha256_before': before,
-                'workbook_sha256_after': rowkey.file_digest(workbook_path)})
+            return _refused(logs, workbook_path, before,
+                            [('WORKBOOK_STALE_SNAPSHOT', str(exc))])
+        except OSError as exc:
+            # The workbook is untouched - the replace is the only thing that
+            # could have changed it, and it is what failed.
+            return _refused(logs, workbook_path, before,
+                            [('WORKBOOK_REPLACE_FAILED', str(exc))])
 
     return _receipt(logs, {
         'verdict': verdict,
@@ -539,6 +586,16 @@ def apply_workbook(base, logs, workbook_path):
         'new_rows_sha256': (receipt.get('sidecars') or {}).get('new_rows.json'),
         'persisted': receipt.get('persisted'),
         'writer_receipt_verdict': receipt.get('verdict')})
+
+
+def _refused(logs, workbook_path, before, problems):
+    for code, detail in problems:
+        print('  %-32s %s' % (code, detail))
+    return _receipt(logs, {
+        'verdict': 'REFUSED_NO_WRITE',
+        'problems': [list(x) for x in problems],
+        'workbook_sha256_before': before,
+        'workbook_sha256_after': rowkey.file_digest(workbook_path)})
 
 
 def _receipt(logs, body):
@@ -556,8 +613,7 @@ if __name__ == '__main__':
     # the workbook and the receipts by walking up from its own directory, so
     # the shipped copy read a different tree than FDT_BUNDLE named: it could
     # check one run's receipt and append to another run's workbook.
-    with rowkey.write_lock(bundle_paths.write_lock()):
-        out = apply_workbook(bundle_paths.BASE, bundle_paths.receipt_dir(),
-                             os.path.join(bundle_paths.BASE, WORKBOOK))
+    out = apply_workbook(bundle_paths.BASE, bundle_paths.receipt_dir(),
+                         os.path.join(bundle_paths.BASE, WORKBOOK))
     if out['verdict'] in ('CONFLICT_NO_WRITE', 'REFUSED_NO_WRITE'):
         raise SystemExit(1)

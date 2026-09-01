@@ -43,7 +43,7 @@ def sheet_xml(rows, start=1):
 
 
 def book(sheets, table_on=None, table_cols=None,
-         table_last_col=None):
+         table_last_col=None, table_broken=None):
     """A workbook with one part per named sheet, and optionally a table."""
     path = os.path.join(TMP, 'wb-%d.xlsx' % len(os.listdir(TMP)))
     names = sorted(sheets)
@@ -76,10 +76,11 @@ def book(sheets, table_on=None, table_cols=None,
                            'openxmlformats.org/package/2006/relationships">'
                            '<Relationship Target="/xl/tables/table1.xml" '
                            'Id="t1" /></Relationships>')
-                cols = ''.join('<x:tableColumn id="%d" name="%s" />'
-                               % (j + 1, c)
-                               for j, c in enumerate(table_cols
-                                                     or sheets[n][0]))
+                if table_broken == 'no-part':
+                    continue
+                cols = '' if table_broken == 'no-columns' else ''.join(
+                    '<x:tableColumn id="%d" name="%s" />' % (j + 1, c)
+                    for j, c in enumerate(table_cols or sheets[n][0]))
                 z.writestr('xl/tables/table1.xml',
                            '<?xml version="1.0" encoding="utf-8"?>'
                            '<x:table xmlns:x="%s" id="1" name="t" '
@@ -320,8 +321,11 @@ WB = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
            LABELS[1]: [COLS, ['old-1', 'R1', '0']]})
 
 
+LOCK = os.path.join(TMP, 'bundle.lock')
+
+
 def apply():
-    return X.apply_workbook(BASE, LOGS, WB)
+    return X.apply_workbook(BASE, LOGS, WB, lock_path=LOCK)
 
 
 _r = apply()
@@ -561,6 +565,97 @@ check("a snapshot nobody has touched still writes",
                        expect=X.load_workbook_snapshot(PS)[1]) is None
       and X.sheet_state(members_dict(PS), 's1', NEW)[0] == 'PRESENT')
 
+# --- what a sidecar has to BE, not just which bytes it is --------------------
+# A hash proves the file is the one the receipt names. It says nothing about
+# the shape of what is inside, and the final manifest did
+# `len(integration.json['refused_values'])` - an integer there ended the run in
+# a TypeError before any check could report anything. That is not a
+# hypothetical: I put an integer there myself while testing a mutation.
+_GOOD = {'refused_values': [], 'new_effect_rows': 0, 'new_count_rows': 2}
+check("a well formed narrative receipt has nothing to say",
+      WC.shape_problems('integration.json', _GOOD) == [],
+      "%s" % WC.shape_problems('integration.json', _GOOD))
+for _bad, _why in ((dict(_GOOD, refused_values=14), 'a count where a list goes'),
+                   (dict(_GOOD, new_effect_rows=-1), 'a negative row count'),
+                   (dict(_GOOD, new_effect_rows=True), 'a boolean row count'),
+                   (dict(_GOOD, new_count_rows='2'), 'a row count as text')):
+    check("%s is a named refusal, not a TypeError later" % _why,
+          [c for c, _d in WC.shape_problems('integration.json', _bad)]
+          == ['SIDECAR_SCHEMA_INVALID'],
+          "%s" % WC.shape_problems('integration.json', _bad))
+check("a list of rows that arrived as an object is named",
+      [c for c, _d in WC.shape_problems('figure_rows.json', {'a': 1})]
+      == ['SIDECAR_SCHEMA_INVALID'])
+check("and a list of rows that is a list is fine",
+      WC.shape_problems('figure_rows.json', [['a']]) == [])
+check("held estimates without their list are named",
+      [c for c, _d in WC.shape_problems('R1087_coexposure_pending.json',
+                                        {'note': 'none'})]
+      == ['SIDECAR_SCHEMA_INVALID'])
+
+# --- when the replace itself fails ------------------------------------------
+# THE ONE STEP THAT CHANGES THE WORKBOOK WAS OUTSIDE THE CLEANUP. A permission
+# or filesystem error there left a complete .tmp beside the workbook and took
+# the exception out of the step - no refusal receipt, nothing said about why.
+def _no_replace(_tmp, _dst):
+    raise OSError(13, 'permission denied')
+
+
+_wb_fail = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                 LABELS[1]: [COLS, ['old-1', 'R1', '0']]})
+_keep = K.file_digest(_wb_fail)
+_r = X.apply_workbook(BASE, LOGS, _wb_fail, replace=_no_replace,
+                             lock_path=LOCK)
+check("a replace that fails is a refusal, not a traceback",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and [c for c, _d in _r['problems']] == ['WORKBOOK_REPLACE_FAILED'],
+      "%s" % _r.get('problems'))
+check("  the workbook is what it was", K.file_digest(_wb_fail) == _keep)
+check("  no temporary file is left beside it",
+      not os.path.exists(_wb_fail + '.tmp'))
+check("  and the refusal is on record",
+      json.load(io.open(os.path.join(LOGS, 'xlsx_append_rows_receipt.json'),
+                        encoding='utf-8'))['verdict'] == 'REFUSED_NO_WRITE')
+
+# --- the tree moving while the plan is built --------------------------------
+# The workbook's own snapshot check cannot see a CSV or a source document
+# changing; only recomputing the contract with the rows in hand can.
+_wb_move = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                 LABELS[1]: [COLS, ['old-1', 'R1', '0']]})
+_keep = K.file_digest(_wb_move)
+
+
+_reached = []
+
+
+def _move_the_tree(_tmp, _dst):
+    # Records rather than raises, so removing the recheck fails a scenario
+    # instead of ending the suite in a traceback.
+    _reached.append(1)
+
+
+_orig_plan = X.plan_append
+
+
+def _plan_then_move(*a, **k):
+    out = _orig_plan(*a, **k)
+    io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'moved')
+    return out
+
+
+X.plan_append = _plan_then_move
+try:
+    _r = X.apply_workbook(BASE, LOGS, _wb_move, replace=_move_the_tree,
+                                 lock_path=LOCK)
+finally:
+    X.plan_append = _orig_plan
+    io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'two')
+check("a source that moves while the plan is built stops the commit",
+      not _reached and _r['verdict'] == 'REFUSED_NO_WRITE'
+      and [c for c, _d in _r['problems']]
+      == ['WRITER_CONTRACT_MOVED_BEFORE_COMMIT'], "%s" % _r.get('problems'))
+check("  and that workbook is untouched", K.file_digest(_wb_move) == _keep)
+
 # --- the workbook's own columns ---------------------------------------------
 # THE ROWS GO IN FROM COLUMN A RIGHTWARDS, IN THE CSV'S ORDER. A workbook
 # whose headings are in a different order takes every value under the wrong
@@ -570,7 +665,7 @@ _SWAP = [COLS[0], COLS[2], COLS[1]]
 _wb_swapped = book({LABELS[0]: [_SWAP, ['old-1', '0', 'R1']],
                     LABELS[1]: [COLS, ['old-1', 'R1', '0']]})
 _keep = K.file_digest(_wb_swapped)
-_r = X.apply_workbook(BASE, LOGS, _wb_swapped)
+_r = X.apply_workbook(BASE, LOGS, _wb_swapped, lock_path=LOCK)
 check("a sheet whose header is in another order is refused",
       _r['verdict'] == 'REFUSED_NO_WRITE'
       and [c for c, _d in _r['problems']] == ['WORKBOOK_SCHEMA_MISMATCH'],
@@ -583,12 +678,12 @@ check("  and that workbook is untouched",
 _wb_tab = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
                 LABELS[1]: [COLS, ['old-1', 'R1', '0']]}, table_on=LABELS[0])
 check("a table whose columns match the file applies",
-      X.apply_workbook(BASE, LOGS, _wb_tab)['verdict'] == 'APPLY')
+      X.apply_workbook(BASE, LOGS, _wb_tab, lock_path=LOCK)['verdict'] == 'APPLY')
 _wb_bad = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
                 LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
                table_on=LABELS[0], table_cols=_SWAP)
 _keep = K.file_digest(_wb_bad)
-_r = X.apply_workbook(BASE, LOGS, _wb_bad)
+_r = X.apply_workbook(BASE, LOGS, _wb_bad, lock_path=LOCK)
 check("a table whose columns disagree with the file is refused, header or no",
       _r['verdict'] == 'REFUSED_NO_WRITE'
       and [c for c, _d in _r['problems']] == ['WORKBOOK_SCHEMA_MISMATCH'],
@@ -604,7 +699,7 @@ _wb_head_bad = book({LABELS[0]: [_SWAP, ['old-1', '0', 'R1']],
                      LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
                     table_on=LABELS[0], table_cols=COLS)
 _keep = K.file_digest(_wb_head_bad)
-_r = X.apply_workbook(BASE, LOGS, _wb_head_bad)
+_r = X.apply_workbook(BASE, LOGS, _wb_head_bad, lock_path=LOCK)
 check("a table that is right while the header is swapped is refused",
       _r['verdict'] == 'REFUSED_NO_WRITE'
       and 'header row' in (_r['problems'] or [['', '']])[0][1],
@@ -612,11 +707,31 @@ check("a table that is right while the header is swapped is refused",
 check("  and that workbook is untouched as well",
       K.file_digest(_wb_head_bad) == _keep)
 
+# A DECLARED TABLE THAT IS NOT THERE, OR SAYS NOTHING. These used to skip the
+# comparison and die later inside plan_append on 'table ref not found', which
+# is a traceback and not a refusal anyone can act on.
+for _broken, _what in (('no-part', 'its part is not in the workbook'),
+                       ('no-columns', 'it names no columns or no range')):
+    _wb_broken = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                       LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
+                      table_on=LABELS[0], table_broken=_broken)
+    _keep = K.file_digest(_wb_broken)
+    try:
+        _r = X.apply_workbook(BASE, LOGS, _wb_broken, lock_path=LOCK)
+    except Exception as _exc:          # a crash IS the defect being tested
+        _r = {'verdict': repr(_exc), 'problems': []}
+    check("a table declared as %s is refused, not crashed into" % _broken,
+          _r['verdict'] == 'REFUSED_NO_WRITE'
+          and _what in (_r['problems'] or [['', '']])[0][1],
+          "%s" % (_r.get('problems') or _r['verdict']))
+    check("  and that workbook is untouched",
+          K.file_digest(_wb_broken) == _keep)
+
 _wb_narrow = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
                    LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
                   table_on=LABELS[0], table_last_col='B')
 _keep = K.file_digest(_wb_narrow)
-_r = X.apply_workbook(BASE, LOGS, _wb_narrow)
+_r = X.apply_workbook(BASE, LOGS, _wb_narrow, lock_path=LOCK)
 check("a table whose range is narrower than the file is refused",
       _r['verdict'] == 'REFUSED_NO_WRITE'
       and 'range' in (_r['problems'] or [['', '']])[0][1],

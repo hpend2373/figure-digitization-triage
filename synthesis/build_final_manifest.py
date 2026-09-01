@@ -247,41 +247,19 @@ if len(R['figure_transcribed_rows']) != 4:
 
 # --------------------------------------------------------- refusals, guards
 sup = bundle_paths.receipt_dir()
-for name, key in (('integration.json', 'refused_values'),):
-    p = os.path.join(sup, name)
-    if os.path.exists(p):
-        R['refused_values'] = len(json.load(io.open(p, encoding='utf-8'))[key])
-p = os.path.join(sup, 'R1087_coexposure_pending.json')
-if os.path.exists(p):
-    R['held_without_comparator'] = len(json.load(io.open(p, encoding='utf-8'))['printed_values'])
 #: The writers whose reruns this receipt speaks for. Declared, so that a
 #: MISSING receipt is a failure rather than a silence - `if os.path.exists`
 #: meant deleting a log made the check disappear along with it, and the receipt
 #: then reported CONSISTENT while saying nothing about that writer at all.
 EXPECTED_WRITERS = ('integrate_supplements', 'figure_printed_numbers')
 R['idempotency'] = rowkey.receipt_verdicts(sup, EXPECTED_WRITERS)
-# AND THE VERDICT IS CHECKED AGAINST WHAT IT WAS REACHED FROM. Reading the
-# verdict string alone let an old clean receipt stand for a rerun that never
-# happened - change the writer, the inputs or the tables and nothing noticed.
-_WRITER_FILE = {'integrate_supplements': 'integrate_supplements.py',
-                'figure_printed_numbers': 'figure_printed_numbers.py'}
-_expected = {
-    'protocol_sha256': rowkey.file_digest(
-        os.path.join(os.path.dirname(os.path.abspath(rowkey.__file__)),
-                     'rowkey.py')),
-    'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
-    'tables': {
-        'effects_text_long': rowkey.file_digest(
-            os.path.join(BASE, 'effect_extraction_text_long.csv')),
-        'extraction_counts_long': rowkey.file_digest(
-            os.path.join(BASE, 'extraction_counts_long.csv'))},
-}
 if sorted(writer_contracts.CONTRACTS) != sorted(EXPECTED_WRITERS):
     fail('the declared writers and the declared contracts are not the same '
          'set: %s vs %s' % (sorted(EXPECTED_WRITERS),
                             sorted(writer_contracts.CONTRACTS)))
 
 R['receipt_attestation'] = {}
+_payloads = {}
 for _name in EXPECTED_WRITERS:
     _path = os.path.join(sup, '%s_idempotency.json' % _name)
     try:
@@ -292,11 +270,24 @@ for _name in EXPECTED_WRITERS:
     # that actually mutates a file checked a subset it had written for
     # itself - a source document could change, the writer not be re-run, and
     # the workbook be modified anyway.
-    _found = writer_contracts.problems(_name, _receipt, BASE, sup)
+    _found, _side = writer_contracts.problems(_name, _receipt, BASE, sup)
+    _payloads.update(_side)
     R['receipt_attestation'][_name] = [{'code': c, 'detail': d}
                                        for c, d in _found]
     for code, detail in _found:
         fail('%s: %s - %s' % (_name, code, detail))
+
+# COUNTED OUT OF THE PAYLOADS THAT PASSED, not out of the files. These two
+# numbers used to be read before anything had asked whether the files were
+# the ones the receipts name, from a second open of each - so what was
+# counted and what was checked could differ, and a malformed value ended the
+# run in a TypeError before any check could report it.
+_integration = _payloads.get('integration.json')
+if _integration is not None:
+    R['refused_values'] = len(_integration['refused_values'])
+_pending = _payloads.get('R1087_coexposure_pending.json')
+if _pending is not None:
+    R['held_without_comparator'] = len(_pending['printed_values'])
 
 _unclean = rowkey.unclean_reruns(R['idempotency'])
 if _unclean:

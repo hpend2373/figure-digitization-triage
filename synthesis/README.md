@@ -25,8 +25,8 @@
 <!-- SYNTHESIS_SUITE_COUNT: test_route_gate 18 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_rowkey 71 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 95 -->
-<!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 67 -->
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 251 -->
+<!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 85 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 269 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 

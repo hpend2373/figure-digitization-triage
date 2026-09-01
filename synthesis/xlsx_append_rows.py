@@ -170,6 +170,32 @@ def sheet_state(parts, sheet, rows):
     return 'CONFLICT', last
 
 
+def sheet_columns(parts, sheet):
+    """The column names this sheet declares, in order, or None.
+
+    An Excel table's `tableColumn` names first, because that is what
+    structured references resolve against; the header row when the sheet has
+    no table. Either way it is the order the workbook believes in, and
+    `plan_append` writes the sidecar's values from column A rightwards - so
+    if the two orders disagree, every value lands under the wrong heading and
+    the rows look perfectly well formed.
+    """
+    part = sheet_part(parts, sheet)
+    tpart = table_part(parts, part)
+    if tpart and tpart in parts:
+        cols = [SU.unescape(m.group(1)) for m in re.finditer(
+            r'<(?:\w+:)?tableColumn[^>]*\bname="([^"]*)"',
+            parts[tpart].decode('utf-8'))]
+        if cols:
+            return cols
+    head = row_values(parts[part].decode('utf-8'), 1, 4096)
+    if head is None:
+        return None
+    while head and head[-1] == '':
+        head.pop()
+    return head or None
+
+
 def plan_append(parts, sheet, rows):
     """The parts an append would change. Nothing is written here.
 
@@ -249,8 +275,23 @@ def preconditions(base, logs):
     writer digested what it persisted, and looked up in the CSV itself.
     """
     receipt = rowkey.read_receipt(logs, WRITER)
-    problems = rowkey.sidecar_problems(
-        receipt, {'new_rows.json': os.path.join(logs, 'new_rows.json')})
+    # READ ONCE, AND CHECK THE OBJECT THAT WILL BE APPLIED. Verifying the file
+    # and then opening it again to use it verifies one thing and applies
+    # another if anything touches it in between - the same gap that was closed
+    # for the CSVs by digesting the bytes that were parsed. The CLI holds the
+    # bundle lock, but a hand edit or a process that does not take the lock is
+    # not bound by it, and the fix costs one variable.
+    path = os.path.join(logs, 'new_rows.json')
+    new = None
+    if not os.path.exists(path):
+        problems = [('SIDECAR_MISSING', 'new_rows.json is not on disk')]
+    else:
+        try:
+            new = json.load(io.open(path, encoding='utf-8'))
+            problems = rowkey.sidecar_payload_problems(
+                receipt, 'new_rows.json', new)
+        except ValueError as exc:
+            problems = [('SIDECAR_UNREADABLE', 'new_rows.json: %s' % exc)]
     problems += rowkey.attestation_problems(receipt, {
         'protocol_sha256': rowkey.file_digest(
             os.path.join(os.path.dirname(os.path.abspath(rowkey.__file__)),
@@ -276,8 +317,6 @@ def preconditions(base, logs):
     if problems:
         return receipt, None, problems
 
-    path = os.path.join(logs, 'new_rows.json')
-    new = json.load(io.open(path, encoding='utf-8'))
     if not isinstance(new, dict) or sorted(new) != sorted(TABLES):
         problems.append(('SIDECAR_SHEET_SET_MISMATCH',
                          'new_rows.json carries %s, this step needs %s'
@@ -325,19 +364,31 @@ def preconditions(base, logs):
             # answer it. Stopping here left it with no case of its own, and a
             # check nothing can make fail is not a check.
 
-        # AND THE ROWS ARE IN THE FILE, ONCE EACH. The digest proves the
-        # sidecar is what the writer persisted; this proves the file still
-        # carries it, and carries it once.
+        # AND THE ROWS ARE IN THE FILE, ONCE EACH, AS OFTEN AS THE SIDECAR
+        # CLAIMS THEM. Counted on both sides: the sidecar's own rows used to
+        # go through a set, which threw away how many times it asked for each
+        # one. A sidecar claiming the same row twice, with a receipt written
+        # to match, then compared a one-element set against a file that had
+        # it once and passed - and the workbook would have taken the row
+        # twice.
         have = collections.Counter(
             tuple((r.get(c) or '') for c in fields) for r in on_file)
-        wrong = [t for t in {tuple((r.get(c) or '') for c in fields)
-                             for r in as_dicts} if have[t] != 1]
+        side = collections.Counter(
+            tuple((r.get(c) or '') for c in fields) for r in as_dicts)
+        twice = sorted(t for t, n in side.items() if n != 1)
+        if twice:
+            # Every persisted row carries an ordinal, so two identical rows in
+            # one block is not a thing this pipeline can legitimately produce.
+            problems.append(('SIDECAR_DUPLICATE_ROW',
+                             '%s: %d of its rows appear more than once in the '
+                             'sidecar itself' % (label, len(twice))))
+        wrong = [t for t, n in side.items() if have[t] != n]
         if wrong:
             problems.append(('SIDECAR_ROWS_NOT_ONCE_IN_TABLE',
                              '%s: %d of its rows are in the file %s'
                              % (label, len(wrong),
-                                'more than once' if any(have[t] > 1
-                                                        for t in wrong)
+                                'a different number of times'
+                                if any(have[t] for t in wrong)
                                 else 'not at all')))
     return receipt, new, problems
 
@@ -368,6 +419,30 @@ def apply_workbook(base, logs, workbook_path):
     # attested sidecar says the rows are the right rows. It does not say they
     # have not been applied - and this script used to append whatever it was
     # handed, so a second run put every row in twice.
+    # AND THE WORKBOOK'S COLUMNS ARE THE FILE'S COLUMNS. The rows are written
+    # from column A rightwards in the CSV's order; a workbook whose headings
+    # are in a different order takes them all under the wrong ones, and the
+    # sheet still looks well formed. The final manifest would find it later -
+    # after the workbook had been changed, which is exactly what a
+    # fail-closed mutation step is supposed to prevent.
+    schema = []
+    for sheet in sorted(new):
+        declared = sheet_columns(parts, sheet)
+        fields = list(load_table(base, sheet)[0] or ())
+        if declared != fields:
+            schema.append(('WORKBOOK_SCHEMA_MISMATCH',
+                           '%s: the sheet declares %s and the file has %s'
+                           % (sheet, declared, fields)))
+    if schema:
+        for code, detail in schema:
+            print('  %-32s %s' % (code, detail))
+        return _receipt(logs, {'verdict': 'REFUSED_NO_WRITE',
+                               'problems': [list(x) for x in schema],
+                               'workbook_sha256_before':
+                                   rowkey.file_digest(workbook_path),
+                               'workbook_sha256_after':
+                                   rowkey.file_digest(workbook_path)})
+
     states = {sheet: sheet_state(parts, sheet, rows)[0]
               for sheet, rows in sorted(new.items())}
     for sheet, state in sorted(states.items()):

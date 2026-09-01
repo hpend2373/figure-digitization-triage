@@ -466,6 +466,7 @@ check("an attested sidecar that is not there is named",
       [c for c, _d in K.sidecar_problems(
           _att, {'new_rows.json': os.path.join(_side, 'gone.json')})]
       == ['SIDECAR_MISSING'])
+json.dump(_payload, io.open(_sp, 'w', encoding='utf-8'))
 check("a sidecar the receipt never named is not silently accepted",
       [c for c, _d in K.sidecar_problems({'verdict': 'WRITE'},
                                          {'new_rows.json': _sp})]

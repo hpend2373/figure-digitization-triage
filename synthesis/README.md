@@ -25,8 +25,8 @@
 <!-- SYNTHESIS_SUITE_COUNT: test_route_gate 18 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_rowkey 71 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 95 -->
-<!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 45 -->
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 229 -->
+<!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 53 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 237 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 
@@ -129,6 +129,15 @@ missing으로 나온다, 이 커밋은 못 고쳤다"고 적었습니다. **그 
 `pool_eligible`, RoB 판정, 코호트 중복 판정을 **설정하지 않습니다.** 여기 어떤 스크립트도
 그 필드에 쓰지 않으며, `build_final_manifest.py`는 그 중 하나라도 채워져 있으면
 **실패합니다.**
+
+### 변이 시험은 실제 번들에 하지 않습니다
+
+가드가 진짜인지 보려면 결함을 다시 집어넣어야 하는데, 그 대상이 실제 번들이면 실수
+한 번이 증거를 손상시킵니다. 2026-09-01에 그렇게 `integration.json`을 망가뜨렸고,
+그 파일만 바이트 사본을 떠두지 않았습니다(영수증이 결박해둔 digest 덕분에 비휘발성
+내용은 복구·검증됐지만, 네 volatile 필드의 과거 값과 원본 바이트까지 증명된 것은
+아닙니다). 변이는 `test_*.py`가 만드는 합성 번들이나 트리 사본에서 돌리고, 실제
+번들을 건드려야 한다면 **먼저 바이트 사본을 뜨고 복원 후 해시를 대조**하세요.
 
 ## 실행
 

@@ -42,7 +42,7 @@ def sheet_xml(rows, start=1):
             '</x:worksheet>' % (NS, body))
 
 
-def book(sheets, table_on=None):
+def book(sheets, table_on=None, table_cols=None):
     """A workbook with one part per named sheet, and optionally a table."""
     path = os.path.join(TMP, 'wb-%d.xlsx' % len(os.listdir(TMP)))
     names = sorted(sheets)
@@ -75,10 +75,16 @@ def book(sheets, table_on=None):
                            'openxmlformats.org/package/2006/relationships">'
                            '<Relationship Target="/xl/tables/table1.xml" '
                            'Id="t1" /></Relationships>')
+                cols = ''.join('<x:tableColumn id="%d" name="%s" />'
+                               % (j + 1, c)
+                               for j, c in enumerate(table_cols
+                                                     or sheets[n][0]))
                 z.writestr('xl/tables/table1.xml',
                            '<?xml version="1.0" encoding="utf-8"?>'
                            '<x:table xmlns:x="%s" id="1" name="t" '
-                           'ref="A1:C%d" />' % (NS, len(sheets[n])))
+                           'ref="A1:C%d"><x:tableColumns>%s'
+                           '</x:tableColumns></x:table>'
+                           % (NS, len(sheets[n]), cols))
     return path
 
 
@@ -345,6 +351,24 @@ def rewrite(path, obj):
                              indent=2, ensure_ascii=False)
 
 
+def _persist(label, rows):
+    """Rewrite the receipt's persisted record to match a tampered sidecar.
+
+    A corrupted file is easy to catch. This is the harder case the audit
+    named: a producer whose receipt and sidecar AGREE with each other and
+    disagree with the table.
+    """
+    d = json.loads(_rec_keep)
+    fields = d['persisted'][label]['fields']
+    d['persisted'][label]['rows'] = len(rows)
+    d['persisted'][label]['rows_sha256'] = K.persisted_digest(
+        [dict(zip(fields, r)) for r in rows], fields)
+    json.dump(d, io.open(_rec_path, 'w', encoding='utf-8'), indent=2)
+    K.attest_sidecars(LOGS, 'integrate_supplements',
+                      {'new_rows.json': json.load(io.open(_side_path,
+                                                          encoding='utf-8'))})
+
+
 def edited_receipt(fn):
     def go():
         d = json.loads(_rec_keep)
@@ -406,6 +430,21 @@ refuses("a sidecar holding real rows the writer never persisted is refused",
         lambda: (restore(_side_path, _side_keep)(),
                  restore(_rec_path, _rec_keep)()))
 
+# A SIDECAR THAT ASKS FOR THE SAME ROW TWICE. Its own count matches, the
+# receipt is written to match it, and the rows are real - the set-based
+# comparison saw one row, found it once in the file, and let it through. The
+# workbook would then have taken it twice.
+_twice = json.loads(_side_keep)
+_twice[LABELS[0]] = _twice[LABELS[0]] * 2
+refuses("a sidecar claiming the same row twice is refused",
+        ['SIDECAR_DUPLICATE_ROW'],
+        lambda: (rewrite(_side_path, _twice)(),
+                 K.attest_sidecars(LOGS, 'integrate_supplements',
+                                   {'new_rows.json': _twice}),
+                 _persist(LABELS[0], _twice[LABELS[0]])),
+        lambda: (restore(_side_path, _side_keep)(),
+                 restore(_rec_path, _rec_keep)()))
+
 _short = json.loads(_side_keep)
 _short[LABELS[0]] = [r[:2] for r in _short[LABELS[0]]]
 refuses("a sidecar row narrower than the file is refused",
@@ -415,6 +454,66 @@ refuses("a sidecar row narrower than the file is refused",
                                    {'new_rows.json': _short})),
         lambda: (restore(_side_path, _side_keep)(),
                  restore(_rec_path, _rec_keep)()))
+
+# NOTHING CAN SLIP BETWEEN THE CHECK AND THE USE, because there is only one
+# read. A second open cannot be made to return different content inside a
+# single-threaded test, so the property is asserted directly: the step opens
+# new_rows.json once.
+_opens = [0]
+_real_open = io.open
+
+
+def _counting_open(path, *a, **k):
+    if os.path.basename(str(path)) == 'new_rows.json' and 'r' in (
+            (a[0] if a else k.get('mode', 'r'))):
+        _opens[0] += 1
+    return _real_open(path, *a, **k)
+
+
+io.open = _counting_open
+try:
+    X.io.open = _counting_open
+    X.preconditions(BASE, LOGS)
+finally:
+    io.open = _real_open
+    X.io.open = _real_open
+check("the sidecar is read once, and it is that payload that is judged",
+      _opens[0] == 1, "%d opens" % _opens[0])
+
+# --- the workbook's own columns ---------------------------------------------
+# THE ROWS GO IN FROM COLUMN A RIGHTWARDS, IN THE CSV'S ORDER. A workbook
+# whose headings are in a different order takes every value under the wrong
+# one and still looks well formed; the final manifest would find it after the
+# workbook had already been changed.
+_SWAP = [COLS[0], COLS[2], COLS[1]]
+_wb_swapped = book({LABELS[0]: [_SWAP, ['old-1', '0', 'R1']],
+                    LABELS[1]: [COLS, ['old-1', 'R1', '0']]})
+_keep = K.file_digest(_wb_swapped)
+_r = X.apply_workbook(BASE, LOGS, _wb_swapped)
+check("a sheet whose header is in another order is refused",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and [c for c, _d in _r['problems']] == ['WORKBOOK_SCHEMA_MISMATCH'],
+      "%s" % _r.get('problems'))
+check("  and that workbook is untouched",
+      K.file_digest(_wb_swapped) == _keep)
+
+# The same check through an Excel table's declared columns, which is what
+# structured references actually resolve against.
+_wb_tab = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                LABELS[1]: [COLS, ['old-1', 'R1', '0']]}, table_on=LABELS[0])
+check("a table whose columns match the file applies",
+      X.apply_workbook(BASE, LOGS, _wb_tab)['verdict'] == 'APPLY')
+_wb_bad = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
+               table_on=LABELS[0], table_cols=_SWAP)
+_keep = K.file_digest(_wb_bad)
+_r = X.apply_workbook(BASE, LOGS, _wb_bad)
+check("a table whose columns disagree with the file is refused, header or no",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and [c for c, _d in _r['problems']] == ['WORKBOOK_SCHEMA_MISMATCH'],
+      "%s" % _r.get('problems'))
+check("  and that workbook is untouched too",
+      K.file_digest(_wb_bad) == _keep)
 
 check("and after all of that it still declines cleanly",
       apply()['verdict'] == 'ALREADY_APPLIED_NO_WRITE')

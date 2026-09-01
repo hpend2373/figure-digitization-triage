@@ -538,6 +538,13 @@ def json_digest(payload):
         .encode('utf-8')).hexdigest()
 
 
+def _without(payload, volatile):
+    """A payload minus the keys a writer declared it cannot re-derive."""
+    if not volatile or not isinstance(payload, dict):
+        return payload
+    return {k: v for k, v in payload.items() if k not in set(volatile)}
+
+
 def sidecar_problems(receipt, files, volatile=None):
     """Sidecars on disk that are not the ones this receipt's run produced.
 
@@ -562,49 +569,54 @@ def sidecar_problems(receipt, files, volatile=None):
     the scope of the proof set, again, by the thing being proved.
     """
     allowed = volatile or {}
-    recorded = (receipt or {}).get('sidecars') or {}
     out = []
     for name, path in sorted(files.items()):
-        record = recorded.get(name)
-        if record is None:
-            out.append(('SIDECAR_NOT_ATTESTED',
-                        '%s is expected and the receipt does not name it'
-                        % name))
-            continue
-        if not isinstance(record, dict):
-            record = {'sha256': record, 'volatile': []}
-        want = record.get('sha256')
-        declared = tuple(sorted(record.get('volatile') or ()))
-        permitted = tuple(sorted(allowed.get(name) or ()))
-        if declared != permitted:
-            out.append(('SIDECAR_VOLATILE_SET_MISMATCH',
-                        '%s leaves out %s, the contract allows %s'
-                        % (name, list(declared), list(permitted))))
-            continue
         if not os.path.exists(path):
             out.append(('SIDECAR_MISSING',
                         '%s is attested and is not on disk' % name))
             continue
         try:
-            # Digested under what the CONTRACT allows, not what the
-            # receipt claims - they are equal by the check above, and this
-            # says which one is the authority.
-            got = json_digest(_without(
-                json.load(io.open(path, encoding='utf-8')), permitted))
+            payload = json.load(io.open(path, encoding='utf-8'))
         except ValueError as exc:
             out.append(('SIDECAR_UNREADABLE', '%s: %s' % (name, exc)))
             continue
-        if got != want:
-            out.append(('SIDECAR_STALE', '%s recorded %s, disk has %s'
-                        % (name, want[:12], got[:12])))
+        out += sidecar_payload_problems(receipt, name, payload, volatile)
     return out
 
 
-def _without(payload, volatile):
-    """A payload minus the keys a writer declared it cannot re-derive."""
-    if not volatile or not isinstance(payload, dict):
-        return payload
-    return {k: v for k, v in payload.items() if k not in set(volatile)}
+def sidecar_payload_problems(receipt, name, payload, volatile=None):
+    """The same judgement, on a payload the caller already holds.
+
+    READ ONCE, CHECK AND USE THE SAME OBJECT. A consumer that verified the
+    file and then opened it again to apply it verified one thing and applied
+    another if anything touched the file in between - the same gap that was
+    closed for the CSVs by digesting the bytes that were parsed. `files` above
+    is for readers that only want the verdict; anything that goes on to ACT on
+    a sidecar passes the object it will act on.
+    """
+    allowed = volatile or {}
+    recorded = (receipt or {}).get('sidecars') or {}
+    out = []
+    record = recorded.get(name)
+    if record is None:
+        return [('SIDECAR_NOT_ATTESTED',
+                 '%s is expected and the receipt does not name it' % name)]
+    if not isinstance(record, dict):
+        record = {'sha256': record, 'volatile': []}
+    declared = tuple(sorted(record.get('volatile') or ()))
+    permitted = tuple(sorted(allowed.get(name) or ()))
+    if declared != permitted:
+        return [('SIDECAR_VOLATILE_SET_MISMATCH',
+                 '%s leaves out %s, the contract allows %s'
+                 % (name, list(declared), list(permitted)))]
+    # Digested under what the CONTRACT allows, not what the receipt claims -
+    # they are equal by the check above, and this says which is the authority.
+    got = json_digest(_without(payload, permitted))
+    if got != record.get('sha256'):
+        out.append(('SIDECAR_STALE', '%s recorded %s, this payload is %s'
+                    % (name, (record.get('sha256') or '(absent)')[:12],
+                       got[:12])))
+    return out
 
 
 def attest_sidecars(receipt_dir, name, payloads, volatile=None):

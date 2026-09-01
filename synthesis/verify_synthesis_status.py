@@ -46,6 +46,13 @@ BUNDLE_SUITES = ("test_readiness_gate",)
 
 MARKER = re.compile(
     r"<!--\s*CURRENT_SYNTHESIS_SCENARIO_COUNT:\s*([0-9]+)\s*-->")
+#: PER SUITE, NOT ONLY THE TOTAL. The README table carried a count per suite in
+#: prose, which nothing checked: scenarios were added to two suites and the
+#: three cells still read 18 / 63 / 66 while the checked total said 171. A
+#: number no one verifies is a number that drifts, so the per-suite counts are
+#: a marker too, and the prose no longer carries any.
+SUITE_MARKER = re.compile(
+    r"<!--\s*SYNTHESIS_SUITE_COUNT:\s*([A-Za-z0-9_]+)\s+([0-9]+)\s*-->")
 COUNT = re.compile(r"^FDT_SCENARIOS_RUN=([0-9]+)$", re.M)
 
 
@@ -97,7 +104,7 @@ def vacuous_scenarios():
 
 
 def main():
-    problems, total = [], 0
+    problems, total, measured = [], 0, {}
 
     for where in vacuous_scenarios():
         problems.append('%s is a scenario whose condition cannot fail' % where)
@@ -144,10 +151,17 @@ def main():
         if "all scenarios passed" not in (run.stdout or ""):
             problems.append("%s did not print its verdict" % name)
             continue
+        measured[name] = int(counts[0])
         total += int(counts[0])
         print("    %-22s %4d" % (name + ".py", int(counts[0])))
 
     readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+    per_suite = dict((n, int(c)) for n, c in SUITE_MARKER.findall(readme))
+    if per_suite != measured:
+        problems.append(
+            "synthesis/README.md's per-suite markers are %s and the suites "
+            "reported %s"
+            % (sorted(per_suite.items()), sorted(measured.items())))
     said = MARKER.findall(readme)
     if len(said) != 1:
         problems.append("synthesis/README.md carries %d "
@@ -163,6 +177,10 @@ def main():
             print("  - %s" % p)
         print()
         print("what synthesis/README.md should carry:")
+        for name in CI_SUITES:
+            if name in measured:
+                print("    <!-- SYNTHESIS_SUITE_COUNT: %s %d -->"
+                      % (name, measured[name]))
         print("    <!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: %d -->" % total)
         raise SystemExit(1)
     print("synthesis status matches the tree: %d scenarios across %d suites, "

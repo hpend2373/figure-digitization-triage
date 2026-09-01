@@ -11,25 +11,77 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+#: What each variable falls back to when the environment says nothing. Kept
+#: because a check on the effective value is a check on whoever ran it: with
+#: FDT_PATH_REWRITE set, the suite asked whether THIS run had a machine path,
+#: not whether the repository ships one as its default. The default is the
+#: thing that travels.
+DEFAULTS = {}
+
+
 def _p(name, default):
+    DEFAULTS[name] = default
     return os.environ.get(name, default)
 
 
+#: WHERE ONE RUN LIVES. The paths below were one machine's absolute paths -
+#: `/tmp/intake6/draft`, `/tmp/intake`, `/mnt/user-data/uploads/...` - which is
+#: the defect this module was written for, still sitting in the defaults it
+#: hands out. A run is a directory: the draft CSVs, `pages/`, `crops/` and the
+#: sheet all sit in it, which is what `corpus_intake.py --out` produces and
+#: what `build_sheet2.py` writes back into. Point FDT_RUN at one and the rest
+#: follow; override any single one when a tree is arranged differently.
+RUN = _p("FDT_RUN", os.path.join(os.path.dirname(HERE), "intake-run"))
+
+
+def require(name, what):
+    """A path that must exist, or a message naming the variable to set."""
+    value = globals()[name]
+    if value and os.path.exists(value):
+        return value
+    raise SystemExit(
+        "%s이(가) 없습니다: %r\n"
+        "FDT_%s로 지정하거나, FDT_RUN을 인테이크 산출 디렉터리로 두십시오 "
+        "(지금 FDT_RUN=%r)." % (what, value, name, RUN))
+
+
 #: The intake output the sheet is built from.
-DRAFT = _p("FDT_DRAFT", "/tmp/intake6/draft")
+DRAFT = _p("FDT_DRAFT", RUN)
 #: The human-authored worklist, as CSV.
-WORKLIST = _p("FDT_WORKLIST", "/tmp/wl/worklist.csv")
+WORKLIST = _p("FDT_WORKLIST", os.path.join(RUN, "worklist.csv"))
 #: The second audit's findings, which the sheet reads to block rows.
-AUDIT = _p("FDT_AUDIT",
-           "/mnt/user-data/uploads/Downloads/include_fulltext_bundle/outputs/"
-           "2026-08-28-contact-sheet-audit")
+AUDIT = _p("FDT_AUDIT", os.path.join(RUN, "audit"))
 #: Where the built sheet goes, and what the tests read.
-SHEET = _p("FDT_SHEET", "/tmp/intake/panel_count_contact_sheet.html")
+SHEET = _p("FDT_SHEET",
+           os.path.join(RUN, "panel_count_contact_sheet.html"))
 #: How large one sheet may get before the next document starts a new file.
 #: The crops now ride at the resolution they were cut at, and one file of 604
 #: of them is not a file a browser opens. Documents are never split across
 #: sheets - a person works a document at a time.
 SHEET_BUDGET = int(_p("FDT_SHEET_BUDGET", str(18 * 1024 * 1024)))
+
+
+def pid_of_document(worklist_rows, ledger_rows):
+    """{Source_Document_ID: pid}, from the two files that already say it.
+
+    The crop harness took this from a JSON map that no code in this repository
+    writes. The worklist names each publication's file, the ledger records the
+    path the intake read, and `rewrite` bridges the two - which is exactly what
+    the sheet builder does to put a pid on a card.
+    """
+    import urllib.parse
+    by_path = {}
+    for w in worklist_rows:
+        href = w.get("href") or ""
+        if href.startswith("file://"):
+            href = href[len("file://"):]
+        by_path[rewrite(urllib.parse.unquote(href))] = w.get("pid", "")
+    out = {}
+    for row in ledger_rows:
+        pid = by_path.get(row.get("Input_Path", ""))
+        if pid:
+            out[row["Source_Document_ID"]] = pid
+    return out
 
 
 def part_path(sheet, i):
@@ -54,18 +106,21 @@ def parts_for(sheet):
 
 
 #: The repository, for the modules the crop tools import.
-REPO = _p("FDT_REPO", "/home/claude/geo/verify")
+REPO = _p("FDT_REPO", os.path.dirname(HERE))
 #: Page rasters, for the crop regression.
 PAGES = _p("FDT_PAGES", os.path.join(DRAFT, "pages"))
 #: Source documents, listed one absolute path per line.
-STAGED = _p("FDT_STAGED", "/tmp/wl/staged_paths.txt")
+STAGED = _p("FDT_STAGED", os.path.join(RUN, "staged_paths.txt"))
 #: How a worklist href is turned into the path the intake recorded. The
 #: builder had one machine's home directory written into it - the worklist was
 #: authored on a laptop and the intake ran in a container - so it matched
 #: nothing anywhere else and died on a bare `assert`. Pairs are `from=to`,
 #: separated by commas; empty means the href is used as it stands.
-PATH_REWRITE = _p("FDT_PATH_REWRITE",
-                  "/Users/minyeop/=/mnt/user-data/uploads/")
+#: Empty by default. It used to default to one person's home directory, which
+#: is data about a laptop, not a default - and a default nobody can be right
+#: about silently matches nothing. `build_sheet2.py` names the unmatched pids
+#: and says to set this.
+PATH_REWRITE = _p("FDT_PATH_REWRITE", "")
 
 
 def rewrite(path):
@@ -78,4 +133,10 @@ def rewrite(path):
 
 
 #: The worklist-to-document map the crop harness reads to find a pid's PDF.
-CROSSCHECK = _p("FDT_CROSSCHECK", "/tmp/intake/crosscheck.json")
+#: An OPTIONAL pid -> document map. Optional because nothing in this
+#: repository ever produced one: `regress_crop.py` required it, and the file
+#: was made by hand, once, on one machine - so the harness that grades the
+#: crops could not be run by anyone else at all. It is derived from the
+#: worklist and the ledger now (see `pid_of_document`), and this stays only as
+#: an override for a tree where that derivation does not hold.
+CROSSCHECK = _p("FDT_CROSSCHECK", "")

@@ -36,7 +36,29 @@ def check(name, ok, detail=""):
         FAIL.append(name)
 
 
+def _raises_named():
+    """paths.require names the variable rather than failing on a bare path."""
+    import paths as _p
+    keep = _p.DRAFT
+    _p.DRAFT = os.path.join(tempfile.gettempdir(), "fdt-no-such-run")
+    try:
+        _p.require("DRAFT", "인테이크 산출 디렉터리")
+    except SystemExit as exc:
+        return "FDT_DRAFT" in str(exc) and "FDT_RUN" in str(exc)
+    finally:
+        _p.DRAFT = keep
+    return False
+
+
 TMP = tempfile.mkdtemp(prefix="fdt-sheet-")
+#: A file with one machine's path in it, so the scan above can be shown to
+#: find one. A scan that has nothing to find proves nothing.
+TMP_PORT = os.path.join(TMP, "port")
+os.makedirs(TMP_PORT, exist_ok=True)
+io.open(os.path.join(TMP_PORT, "planted.py"), "w", encoding="utf-8").write(
+    '"""A docstring naming /home/claude, which must NOT count."""\n'
+    "P = \"/home/\" + \"claude/geo/verify\"\n"
+    "Q = \"/tmp/intake6/draft\"\n")
 FX = make_fixture.write(os.path.join(TMP, "fx"))
 SHEET = os.path.join(TMP, "sheet.html")
 ENV = dict(os.environ, FDT_DRAFT=FX["draft"], FDT_WORKLIST=FX["worklist"],
@@ -405,6 +427,51 @@ check("초안이 부르지 않는 파일은 세기만 하고 거부하지 않는
       _rc3 == 0 and _rep3["on_disk_not_named"] >= 1,
       "%s %s" % (_rc3, _rep3["on_disk_not_named"]))
 os.remove(_extra)
+
+# --- 다른 사람의 기기에서도 도는가 -------------------------------------------
+# The module that exists so no path is written into a file still handed out
+# one machine's paths as its defaults, and the crop harness required a JSON
+# map nothing in this repository writes - made by hand, once, on that machine.
+import portability as _PORT                                     # noqa: E402
+import paths as _P                                              # noqa: E402
+
+_offenders = _PORT.machine_paths(HERE, skip=("test_sheet_build.py",))
+check("어떤 파일도 한 기기의 절대경로를 코드에 담지 않는다",
+      not _offenders, "%s" % _offenders[:4])
+check("그 검사가 실제로 무언가를 볼 수 있다 - 심어 두면 잡는다",
+      bool(_PORT.machine_paths(TMP_PORT)), "심은 파일을 못 잡음")
+
+# THE DEFAULT IS THE THING THAT TRAVELS, so these read paths.DEFAULTS rather
+# than the effective values: with FDT_* set - as any real run sets them - the
+# effective values say what this run was pointed at, not what the repository
+# ships to somebody who sets nothing.
+_bad_defaults = {k: v for k, v in _P.DEFAULTS.items()
+                 if isinstance(v, str)
+                 and any(str(v).startswith(h)
+                         for h in _PORT.MACHINE_PREFIXES + ("/tmp/",))}
+check("경로 기본값이 저장소 밖 절대경로가 아니다",
+      not _bad_defaults, "%s" % _bad_defaults)
+check("한 사람의 홈 디렉터리가 경로 치환 기본값이 아니다",
+      not any(h in _P.DEFAULTS.get("FDT_PATH_REWRITE", "")
+              for h in _PORT.MACHINE_PREFIXES),
+      _P.DEFAULTS.get("FDT_PATH_REWRITE"))
+check("기본값 목록이 실제로 변수들을 담고 있다 - 빈 목록은 통과가 아니다",
+      len(_P.DEFAULTS) >= 8, sorted(_P.DEFAULTS))
+check("없는 경로는 어떤 변수를 세우라고 말하며 멈춘다",
+      _raises_named())
+
+# The map the crop harness needed, derived from the two files that say it.
+_work = list(csv.DictReader(io.open(FX["worklist"], encoding="utf-8")))
+_ledger = list(csv.DictReader(io.open(
+    os.path.join(FX["draft"], "intake_document_status.csv"), encoding="utf-8")))
+_map = _P.pid_of_document(_work, _ledger)
+check("pid-문서 지도를 워크리스트와 원장에서 유도한다",
+      len(_map) == len(_work) and set(_map.values()) == {w["pid"]
+                                                         for w in _work},
+      "%s" % _map)
+check("접두사가 어긋나면 빈 지도가 나오고, 그것이 신호다",
+      _P.pid_of_document([dict(w, href="file:///elsewhere/x.pdf")
+                          for w in _work], _ledger) == {})
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

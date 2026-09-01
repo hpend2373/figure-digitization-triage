@@ -121,12 +121,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 3717 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 3794 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 3725 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 3802 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 262 -->
 
-3717 scenarios on main under `requirements-lock.txt`, and 3794 with
+3725 scenarios on main under `requirements-lock.txt`, and 3802 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs
@@ -153,10 +153,10 @@ not redistributable. `test_bar_reader` (24), `test_integration` (17),
 where `raster_root.py` cannot find the file, and say which file. Point
 `FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
 `fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and the totals are
-4003 and 4080. Every raster is pinned there by SHA-256, so a file that is not
+4011 and 4088. Every raster is pinned there by SHA-256, so a file that is not
 the one the coordinates were measured on is refused rather than read. CI passes
 `--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at 3717/3794 rather than red for a reason it cannot fix.
+no secret is green at 3725/3802 rather than red for a reason it cannot fix.
 
 Both are verified in a clean room with scipy blocked — the statistics are
 hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every

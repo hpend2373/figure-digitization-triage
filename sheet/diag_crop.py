@@ -22,17 +22,28 @@ import json
 import os
 import sys
 
-sys.path.insert(0, "/home/claude/geo/verify")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths as P                                                 # noqa: E402
+
+sys.path.insert(0, P.REPO)
 import corpus_intake as CI                                        # noqa: E402
 
-AUDIT = ("/mnt/user-data/uploads/Downloads/include_fulltext_bundle/outputs/"
-         "2026-08-28-contact-sheet-audit/confirmed_image_defects.csv")
+# EVERY PATH THROUGH paths.py. This file carried four of one machine's:
+# /home/claude for the repository, an absolute audit CSV, /tmp/intake for a
+# map nothing writes, and /tmp/wl for the staged-path list.
+AUDIT = os.path.join(P.require("AUDIT", "감사 산출 디렉터리"),
+                     "confirmed_image_defects.csv")
 DEFECTS = list(csv.DictReader(io.open(AUDIT, encoding="utf-8-sig")))
-ROWS = json.load(open("/tmp/intake/crosscheck.json"))
-BYPID = {r["pid"]: r for r in ROWS}
+_work = list(csv.DictReader(io.open(
+    P.require("WORKLIST", "워크리스트"), encoding="utf-8-sig")))
+_ledger = list(csv.DictReader(io.open(
+    os.path.join(P.require("DRAFT", "인테이크 산출 디렉터리"),
+                 "intake_document_status.csv"), encoding="utf-8")))
+BYPID = {pid: {"pid": pid, "doc": doc}
+         for doc, pid in P.pid_of_document(_work, _ledger).items()}
 PATHS = {l.strip().rsplit("/", 1)[-1]: l.strip()
-         for l in io.open("/tmp/wl/staged_paths.txt", encoding="utf-8")
-         if l.strip()}
+         for l in io.open(P.require("STAGED", "원본 경로 목록"),
+                          encoding="utf-8") if l.strip()}
 
 blocks_cache = {}
 

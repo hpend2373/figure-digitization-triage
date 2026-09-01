@@ -227,13 +227,32 @@ if __name__ == "__main__":
     # keyed by basename, and two documents named `fulltext.pdf` resolved to
     # whichever line came last, so one publication's box could be scored
     # against another publication's page and still produce a number.
-    rows = json.load(io.open(PATHS.CROSSCHECK, encoding="utf-8"))
-    by_pid = {r["pid"]: r for r in rows}
+    # AND THE pid -> DOCUMENT MAP IS DERIVED, NOT REQUIRED. It came from a
+    # JSON file that nothing in this repository writes: made by hand, once, on
+    # one machine, which meant the harness that grades the crops could not be
+    # run by anybody else. The worklist names each publication's file and the
+    # ledger records the path the intake read; that is the map.
+    if PATHS.CROSSCHECK and os.path.exists(PATHS.CROSSCHECK):
+        rows = json.load(io.open(PATHS.CROSSCHECK, encoding="utf-8"))
+        doc_of_pid = {r["pid"]: r["doc"] for r in rows}
+    else:
+        work = list(csv.DictReader(io.open(
+            PATHS.require("WORKLIST", "워크리스트"), encoding="utf-8-sig")))
+        ledger = list(csv.DictReader(io.open(
+            os.path.join(PATHS.require("DRAFT", "인테이크 산출 디렉터리"),
+                         "intake_document_status.csv"), encoding="utf-8")))
+        pid_of_doc = PATHS.pid_of_document(work, ledger)
+        if not pid_of_doc:
+            raise SystemExit(
+                "워크리스트의 어떤 문서도 인테이크 원장과 이어지지 않습니다 — "
+                "두 파일이 같은 파일을 다르게 부르고 있습니다. "
+                "FDT_PATH_REWRITE로 접두사를 맞추십시오 (지금 %r)."
+                % PATHS.PATH_REWRITE)
+        doc_of_pid = {pid: doc for doc, pid in pid_of_doc.items()}
     entries = draft_rows(PATHS.DRAFT)
 
     def document_of(pid):
-        r = by_pid.get(pid)
-        return r["doc"] if r else ""
+        return doc_of_pid.get(pid, "")
 
     scored = score(document_of, entries)
     print("%-22s %9s %9s  %s" % ("figure", "covered", "intrusion", "verdict"))

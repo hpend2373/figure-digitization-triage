@@ -113,6 +113,11 @@ def _zoom(did):
     return base64.b64decode(m.group(1)) if m else None
 
 
+def _pageview(did):
+    m = re.search(r"data-page='data:image/jpeg;base64,([^']+)'", BY_ID[did][3])
+    return base64.b64decode(m.group(1)) if m else None
+
+
 check("같은 크롭을 쓰는 두 행은 같은 이미지를 보여준다",
       _img("DOC_C_D001") == _img("DOC_C_D002") is not None)
 check("서로 다른 크롭은 서로 다른 이미지다",
@@ -155,6 +160,49 @@ check("확대는 마우스 없이도 열린다",
       "'z'" in S and "openZoom" in S)
 check("Enter가 다음 입력 가능 행으로 간다",
       "nextOpenId(ROWS, id)" in S)
+
+# ------------------------- 크롭은 "이게 그림 전체인가"에 답할 수 없다
+# Two run2 crops were a full column wide, ACCEPTABLE and open for input while
+# holding a page header and white space; the figure was beside them. A crop
+# shows what the box caught and never what it missed, so the page - with the
+# box drawn on it - rides along beside the count.
+for _did in _open:
+    check("%s는 상자를 그린 페이지 전체를 함께 싣는다" % _did,
+          _pageview(_did) is not None)
+    if _pageview(_did):
+        check("  %s의 페이지 뷰는 크롭이 아니다" % _did,
+              _pageview(_did) != _zoom(_did))
+        _pv = Image.open(io.BytesIO(_pageview(_did)))
+        _cr = Image.open(io.BytesIO(_zoom(_did)))
+        check("  %s의 페이지 뷰가 크롭보다 넓은 영역이다" % _did,
+              _pv.size[1] > _cr.size[1] or _pv.size[0] > _cr.size[0],
+              "%s vs %s" % (_pv.size, _cr.size))
+def _red(blob):
+    """How much of this image is the outline's red. The box is the view."""
+    im = Image.open(io.BytesIO(blob)).convert("RGB")
+    im.thumbnail((300, 300))
+    px = list(im.getdata())
+    return sum(1 for r, g, b in px if r > 120 and r - g > 60 and r - b > 60)
+
+
+for _did in _open:
+    if _pageview(_did):
+        check("  %s의 페이지에 상자가 실제로 그려져 있다" % _did,
+              _red(_pageview(_did)) > 0, "붉은 화소 0")
+        check("  그 붉은 선은 원본 페이지에 없던 것이다",
+              _red(io.open([d for d in DRAFT
+                            if d["Draft_ID"] == _did][0]["Page_Raster"],
+                           "rb").read()) == 0)
+
+check("막힌 행에는 페이지 뷰도 싣지 않는다",
+      all(_pageview(d) is None for d in BY_ID if d not in _open))
+check("확대창이 두 단계를 그 순서로 묻는다",
+      S.index("상자가 목표 그림 전체를 담았습니까") < S.index("축 영역이 몇 개입니까"))
+check("페이지 뷰 자리와 크롭 자리가 각각 있다",
+      "id='lbpage'" in S and "id='lbimg'" in S)
+check("기하가 없으면 상자 없는 페이지를 보여주지 않는다",
+      "return \"\"" in io.open(os.path.join(HERE, "build_sheet2.py"),
+                              encoding="utf-8").read())
 
 # --------------------------------------------- 캡션은 잘리면 증거가 아니다
 # "(A) ... (B) ..." is where a caption says how many panels there are, and it
@@ -254,6 +302,16 @@ check("각 파일이 몇 번째 시트인지 말한다",
       all(("%d / %d번째 시트" % (i, len(SP)))
           in io.open(f, encoding="utf-8").read()
           for i, f in enumerate(SP, 1)))
+os.makedirs(os.path.join(TMP, "tiny"), exist_ok=True)
+_tiny = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_SHEET=os.path.join(TMP, "tiny",
+                                                            "s.html"),
+                                FDT_SHEET_BUDGET="1000"))
+check("예산보다 큰 문서 하나는 자기 파일을 가지되 그 사실을 말한다",
+      "예산" in (_tiny.stdout or "") and "주의" in (_tiny.stdout or ""),
+      (_tiny.stdout or _tiny.stderr or "")[-300:])
+
 check("나뉜 시트는 합치는 방법을 안내한다",
       "merge_counts.py" in io.open(SP[0], encoding="utf-8").read())
 check("빌드 ID는 모든 파일에서 같다",

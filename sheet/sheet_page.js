@@ -49,18 +49,29 @@
    * large copy. Nothing here suggests a count; it only lets one be seen. */
   var lb = document.getElementById('lb');
   var lbimg = document.getElementById('lbimg');
+  var lbpage = document.getElementById('lbpage');
   var lbcap = document.getElementById('lbcap');
 
   function openZoom(fig) {
     var t = fig && fig.querySelector('img.thumb[data-zoom]');
     if (!t) return;
     lbimg.src = t.getAttribute('data-zoom');
+    /* The page comes first because the first question is whether the box
+     * caught the figure at all. A crop cannot answer that: it shows what the
+     * box caught, never what it missed. */
+    var pv = t.getAttribute('data-page');
+    lbpage.hidden = !pv;
+    if (pv) lbpage.src = pv; else lbpage.removeAttribute('src');
     var cap = fig.querySelector('.cap');
     lbcap.textContent = cap ? cap.textContent.slice(0, 160) : '';
     lb.classList.add('on');
   }
 
-  function closeZoom() { lb.classList.remove('on'); lbimg.removeAttribute('src'); }
+  function closeZoom() {
+    lb.classList.remove('on');
+    lbimg.removeAttribute('src');
+    lbpage.removeAttribute('src');
+  }
 
   lb.addEventListener('click', function (e) {
     if (e.target === lb || e.target.id === 'lbclose') closeZoom();

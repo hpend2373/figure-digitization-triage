@@ -75,9 +75,12 @@ with sync_playwright() as pw:
                                   "els => els.every(e => e.value === '')"))
     check("페이지가 오류 없이 뜬다", not errors, errors[:2])
 
-    # every enabled input gets a value nothing else has, derived from its id,
-    # so a swap cannot hide behind two equal numbers
-    want = {i: str(sum(bytearray(i.encode())) % 41) for i in enabled}
+    # EVERY ENABLED INPUT GETS A VALUE ITS NEIGHBOURS DO NOT, so a swap cannot
+    # hide behind two equal numbers. It was hashed from the id, which collides:
+    # on the smallest part, four rows drew two values and the check that keeps
+    # this from being vacuous failed for a reason that was not the page's.
+    # Positional, so the values are distinct up to the 41 a panel count allows.
+    want = {i: str(n % 41) for n, i in enumerate(enabled)}
     pg.evaluate(
         """m => { for (const [id, v] of Object.entries(m)) {
              const el = document.querySelector(
@@ -99,8 +102,10 @@ with sync_playwright() as pw:
     # the four files, each of which holds a few hundred rows.
     check("입력한 %d개 값이 전부 자기 행에 실려 나온다 (뒤바뀜 0)" % len(enabled),
           not wrong, wrong[:5])
-    check("입력한 값의 종류가 하나가 아니다 — 검사가 무의미하지 않음",
-          len(set(want.values())) > 20, len(set(want.values())))
+    check("이 파트의 행 수만큼(최대 41) 서로 다른 값을 넣었다 — 검사가 "
+          "무의미하지 않음",
+          len(set(want.values())) == min(len(enabled), 41),
+          "%d / %d" % (len(set(want.values())), len(enabled)))
     check("차단 행은 값 없이 BLOCKED_BAD_CROP로 나간다",
           all(by[i]["Observed_Panel_Count"] == ""
               and by[i]["Entry_Status"] == "BLOCKED_BAD_CROP"
@@ -126,7 +131,12 @@ with sync_playwright() as pw:
           != want.get(first_dom, "\0"))
 
     # ---- 빈칸은 0이 되지 않는다 -------------------------------------------
-    one = enabled[7]
+    # PICKED FROM WHAT THIS FILE HAS. The indices were 7 and 11, which is
+    # fine for a part with hundreds of rows and an IndexError on the last
+    # part, which has 22. Two distinct rows are all these checks need.
+    check("이 파트에 서로 다른 입력칸이 둘 이상 있다", len(enabled) >= 2,
+          len(enabled))
+    one = enabled[min(7, len(enabled) - 1)]
     pg.evaluate("""id => { const el = document.querySelector(
           'input[data-id="' + CSS.escape(id) + '"]');
           el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); }""",
@@ -140,7 +150,7 @@ with sync_playwright() as pw:
           r2)
 
     # ---- 유효하지 않은 값은 저장도 내보내기도 되지 않는다 ------------------
-    two = enabled[11]
+    two = enabled[min(11, len(enabled) - 2)]
     for bad in ("-1", "41", "1.5"):
         pg.evaluate("""a => { const el = document.querySelector(
               'input[data-id="' + CSS.escape(a[0]) + '"]');

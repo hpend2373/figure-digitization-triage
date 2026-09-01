@@ -68,6 +68,46 @@ DEFECTS = [
 ]
 
 
+#: A fixture page is a page, not just a crop. The sheet now shows the whole
+#: page with the box drawn on it - the only view that can answer "did the box
+#: catch the figure" - so the fixture has to carry pages, their size in points,
+#: and each row's box, exactly as the intake records them.
+PAGE_PT = (612.0, 792.0)
+PAGE_PX = (850, 1100)
+
+
+def page_png(path, figure_box_pt, panels, thin=False):
+    """A page with some text-like marks and the figure at a known place."""
+    im = Image.new("RGB", PAGE_PX, "white")
+    dr = ImageDraw.Draw(im)
+    sx, sy = PAGE_PX[0] / PAGE_PT[0], PAGE_PX[1] / PAGE_PT[1]
+    for i in range(18):                      # a column of "text"
+        y = 60 + i * 16
+        dr.line([60, y, 300, y], fill=(90, 90, 90), width=3)
+    x0, y0, x1, y1 = [v * s for v, s in zip(figure_box_pt, (sx, sy, sx, sy))]
+    fig = _figure_image(panels, int(x1 - x0), int(y1 - y0), thin)
+    im.paste(fig, (int(x0), int(y0)))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    im.save(path)
+
+
+def _figure_image(panels, w, h, thin=False):
+    im = Image.new("RGB", (max(8, w), max(4, h)), "white")
+    dr = ImageDraw.Draw(im)
+    if thin or h < 40:
+        dr.line([4, h // 2, w - 4, h // 2], fill="black", width=2)
+        return im
+    cols = min(panels, 3) or 1
+    rows = max(1, (panels + cols - 1) // cols)
+    cw, ch = w // cols, h // rows
+    for i in range(panels):
+        x, y = (i % cols) * cw, (i // cols) * ch
+        dr.rectangle([x + 8, y + 6, x + cw - 6, y + ch - 12],
+                     outline="black", width=2)
+        dr.text((x + 12, y + 9), chr(ord("A") + i), fill="black")
+    return im
+
+
 def crop_png(path, panels, thin=False):
     """A figure with `panels` axis regions, drawn plainly.
 
@@ -136,7 +176,14 @@ def write(root):
         for i, (fig, page, panels, status, cap, conf, why) in enumerate(rows, 1):
             did = "%s_D%03d" % (doc, i)
             rel = os.path.join(doc, "%s.png" % did)
+            # Each row gets its own page, so a row's box is unambiguous.
+            box = (306.0, 90.0 + 40.0 * i, 560.0,
+                   (110.0 if status == "THIN_CROP" else 300.0) + 40.0 * i)
+            page_rel = os.path.join("pages", doc, "%s_p%d.png" % (doc, i))
+            page_abs = os.path.join(draft_dir, page_rel)
             if status != "NO_CROP":
+                page_png(page_abs, box, panels,
+                         thin=(status == "THIN_CROP"))
                 crop_png(os.path.join(draft_dir, rel), panels,
                          thin=(status == "THIN_CROP"))
             draft.append({
@@ -144,12 +191,18 @@ def write(root):
                 "Source_File": os.path.basename(src),
                 "Source_File_SHA256": hashlib.sha256(
                     io.open(src, "rb").read()).hexdigest(),
-                "Page": page, "Page_Raster": "", "Page_Raster_SHA256": "",
+                "Page": page,
+                "Page_Raster": page_abs if status != "NO_CROP" else "",
+                "Page_Raster_SHA256": "",
+                "Page_Width_Pt": "%.2f" % PAGE_PT[0],
+                "Page_Height_Pt": "%.2f" % PAGE_PT[1],
+                "Page_Geometry_Method": "PYPDF_MEDIABOX",
                 "Figure_Crop": "" if status == "NO_CROP" else rel,
+                "Figure_BBox": ",".join("%.1f" % v for v in box),
                 "Crop_Quality_Status": status,
                 "Figure_Number": fig, "Figure_Label_Raw": fig,
                 "Label_Repeats_In_Document": "0",
-                "Caption_Text": cap, "Caption_BBox": "", "Figure_BBox": "",
+                "Caption_Text": cap, "Caption_BBox": "",
                 "Extraction_Method": "fixture", "Confidence": "%.2f" % conf,
                 "Confidence_Reason": why,
                 "Human_Verification_Status": "PENDING",

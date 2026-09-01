@@ -257,6 +257,41 @@ def zoom(path):
             + base64.b64encode(buf.getvalue()).decode("ascii"))
 
 
+#: THE CROP CANNOT ANSWER "IS THIS THE WHOLE FIGURE". Two of the run2 crops
+#: were a full column wide, ACCEPTABLE, and open for input while holding a
+#: page header and white space - the figure was beside them. Nothing on the
+#: page could have shown that: a crop shows what the box caught, never what it
+#: missed. The page, with the box drawn on it, is the only view that answers
+#: it, and it belongs next to the count so the two are one look.
+PAGE_VIEW_WIDTH = int(os.environ.get("FDT_PAGE_VIEW_WIDTH", "950"))
+PAGE_VIEW_QUALITY = int(os.environ.get("FDT_PAGE_VIEW_QUALITY", "72"))
+
+
+def page_view(row):
+    """The whole page at reading size, with this row's box outlined."""
+    raster = row.get("Page_Raster") or ""
+    if not raster or not os.path.exists(raster):
+        return ""
+    try:
+        pw, ph = float(row["Page_Width_Pt"]), float(row["Page_Height_Pt"])
+        x0, y0, x1, y1 = [float(v) for v in row["Figure_BBox"].split(",")]
+    except (KeyError, ValueError):
+        # No geometry means no box to draw, and a page with no box on it would
+        # be worse than nothing here - it looks like the crop is fine.
+        return ""
+    from PIL import ImageDraw
+    im = Image.open(raster).convert("RGB")
+    W, H = im.size
+    ImageDraw.Draw(im).rectangle(
+        [x0 * W / pw, y0 * H / ph, x1 * W / pw, y1 * H / ph],
+        outline=(196, 32, 32), width=max(3, W // 220))
+    im.thumbnail((PAGE_VIEW_WIDTH, PAGE_VIEW_WIDTH * 4 // 3))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=PAGE_VIEW_QUALITY, optimize=True)
+    return ("data:image/jpeg;base64,"
+            + base64.b64encode(buf.getvalue()).decode("ascii"))
+
+
 def pages_text(L):
     """The ledger's own blank, preserved. Never printed as a number."""
     v = (L.get("Page_Count") or "").strip()
@@ -317,6 +352,8 @@ z-index:50;overflow:auto;padding:24px}
 #lbbar{position:sticky;top:0;display:flex;gap:12px;align-items:center;
 color:#fff;font-size:13px;margin-bottom:12px}
 #lbbar button{background:#fff;color:var(--ink);border-color:#fff}
+#lb .lbstep{color:#fff;font-size:13.5px;margin:14px auto 6px;max-width:1000px}
+#lbpage{display:block;margin:0 auto 8px;background:#fff}
 .fig label{display:flex;gap:7px;align-items:center;font-size:12.5px}
 .fig input{width:66px;font:inherit;padding:4px 6px;border:1px solid var(--rule);
 border-radius:3px}
@@ -353,7 +390,12 @@ w("<div id='storagewarn'></div>")
 # The picture, at the size it was cut. Sits outside the cards so opening it
 # never moves the grid under the person's cursor.
 w("<div id='lb'><div id='lbbar'><button id='lbclose'>닫기 (Esc)</button>"
-  "<span id='lbcap'></span></div><img id='lbimg' alt=''></div>")
+  "<span id='lbcap'></span></div>"
+  "<div class='lbstep'>① 상자가 목표 그림 전체를 담았습니까? "
+  "— 페이지 전체, 빨간 상자가 이 행의 크롭입니다</div>"
+  "<img id='lbpage' alt=''>"
+  "<div class='lbstep'>② 담았다면, 이 그림에 축 영역이 몇 개입니까? "
+  "— 크롭 원본 해상도</div><img id='lbimg' alt=''></div>")
 
 w("""<div class='stop'><b>아직 계수를 시작하지 마십시오.</b> 이 2판은
 2차 감사가 지적한 <b>안전성 결함</b>(입력 검증 없음, 저장 실패 무경고,
@@ -416,8 +458,12 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         # The large copy rides along only for rows that can take a number.
         # A blocked row is not going to be counted from, and its full-size
         # crop would be most of the file.
-        big = (" data-zoom='%s'" % zoom(p)
-               if has_img and not blocked_reason(d) else "")
+        _open = has_img and not blocked_reason(d)
+        big = ((" data-zoom='%s'" % zoom(p)) if _open else "")
+        if _open:
+            _pv = page_view(d)
+            if _pv:
+                big += " data-page='%s'" % _pv
         img = (("<img class='thumb' src='%s' alt=''%s>" % (thumb(p), big))
                if has_img else
                "<div class='cap'>[페이지 이미지 없음 — 원문에 그림이 "
@@ -502,12 +548,18 @@ def tail(ids):
 #: DOCUMENTS ARE NEVER SPLIT ACROSS FILES. A person works a document at a
 #: time, and half its figures in another file is how one gets skipped. Sheets
 #: fill to a byte budget and then start a new one.
-PARTS, cur, cur_ids, cur_bytes = [], [], [], 0
+PARTS, cur, cur_ids, cur_bytes, OVERSIZE = [], [], [], 0, []
 _head = "\n".join(HEAD)
 _base = len(_head.encode("utf-8")) + len(_LOGIC.encode("utf-8")) \
     + len(_PAGE.encode("utf-8"))
 for pid, ids, card in CARDS:
     size = len(card.encode("utf-8"))
+    # A DOCUMENT LARGER THAN THE BUDGET GETS ITS OWN FILE, OVER BUDGET. Never
+    # splitting a document is the rule a person works by; the file that
+    # results from a 137-figure book is then the size it is, and saying so
+    # here is better than someone meeting it in a browser.
+    if _base + size > PATHS.SHEET_BUDGET:
+        OVERSIZE.append((pid, len(ids), size))
     if cur and _base + cur_bytes + size > PATHS.SHEET_BUDGET:
         PARTS.append((cur, cur_ids))
         cur, cur_ids, cur_bytes = [], [], 0
@@ -542,6 +594,10 @@ for _name in ("figure_intake_draft.csv", "intake_document_status.csv"):
         shutil.copyfile(_src, _dst)
 for _out in _written:
     print("%s  %.1f MB" % (_out, os.path.getsize(_out) / 1e6))
+for _pid, _n, _sz in OVERSIZE:
+    print("주의: pid %s 한 편이 %d행 · %.1f MB 로 예산(%.0f MB)을 넘습니다 — "
+          "문서를 쪼개지 않으므로 그 파일만 큽니다"
+          % (_pid, _n, _sz / 1e6, PATHS.SHEET_BUDGET / 1e6))
 print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d "
       "(결함 %d + THIN %d + NO_CROP %d)"
       % (len(DRAFT), len(WORK), len(PARTS), COUNTABLE, BLOCKED,

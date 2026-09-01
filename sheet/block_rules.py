@@ -46,7 +46,14 @@ STILL_WRONG = {
 }
 
 #: Crop verdicts a person cannot count from, and what to tell them.
-#: The one status that means the picture can be counted from.
+#: The statuses that mean the picture can be counted from. ACCEPTABLE is a
+#: crop cut from a page and judged to hold its figure; PUBLISHER_FIGURE is the
+#: publisher's own figure file, which cannot clip a figure or take in a
+#: neighbour because it IS the figure. Widening this set is widening what a
+#: person may be asked to count, so the two members are named one by one and
+#: everything else is still refused by name.
+COUNTABLE_CROPS = ("ACCEPTABLE", "PUBLISHER_FIGURE")
+#: Kept for readers that ask for the crop case by name.
 COUNTABLE_CROP = "ACCEPTABLE"
 
 UNCOUNTABLE_CROPS = {
@@ -56,6 +63,19 @@ UNCOUNTABLE_CROPS = {
                   "크롭 재생성 전까지 막아 둡니다."),
     "NO_CROP": "원문에 페이지 이미지가 없습니다 (XML·텍스트 원문).",
 }
+
+#: THE TWO SETS CANNOT OVERLAP. The gate answers "countable" before it answers
+#: "uncountable", so a status listed in both is countable and its reason never
+#: runs - which is how a safety rule gets reversed by an addition rather than
+#: a deletion. Adding THIN_CROP to the countable set passed every scenario
+#: there was; nothing compared the sets to each other.
+_BOTH = sorted(set(COUNTABLE_CROPS) & set(UNCOUNTABLE_CROPS))
+if _BOTH:
+    raise AssertionError(
+        "계수 가능과 계수 불가에 같은 상태가 있습니다: %s — 이 문에서는 "
+        "계수 가능이 먼저 답하므로 막는 규칙이 아예 실행되지 않습니다"
+        % ", ".join(_BOTH))
+
 
 #: How the audits' findings are named, for the message.
 DEFECT_KIND = {
@@ -106,13 +126,13 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None):
     # `corpus_intake.CROP_QUALITY_STATUSES` is the set; ACCEPTABLE is the only
     # member that means "a person can count from this picture".
     status = str(row.get("Crop_Quality_Status", "")).strip()
-    if status == COUNTABLE_CROP:
+    if status in COUNTABLE_CROPS:
         return ""
     if status in UNCOUNTABLE_CROPS:
         return UNCOUNTABLE_CROPS[status]
     return ("크롭 상태를 해석할 수 없어 막았습니다 (%s) — 아는 상태는 %s 뿐입니다."
             % (status or "빈 값",
-               ", ".join([COUNTABLE_CROP] + sorted(UNCOUNTABLE_CROPS))))
+               ", ".join(sorted(COUNTABLE_CROPS) + sorted(UNCOUNTABLE_CROPS))))
 
 
 def shared_crop_map(digest_of_row):

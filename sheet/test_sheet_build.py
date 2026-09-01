@@ -97,7 +97,15 @@ check("초안의 모든 행이 정확히 한 번씩 나온다",
       sorted(BY_ID) == sorted(d["Draft_ID"] for d in DRAFT),
       "%d개 블록 / %d개 행" % (len(BY_ID), len(DRAFT)))
 check("ROWS가 초안과 같은 행들을 같은 수만큼 담는다",
-      [r["Draft_ID"] for r in ROWS] == [d["Draft_ID"] for d in DRAFT])
+      sorted(r["Draft_ID"] for r in ROWS)
+      == sorted(d["Draft_ID"] for d in DRAFT))
+# The order that matters is the page's, not the CSV's: the cards run P1 before
+# P2 and then by pid, and ROWS has to follow what a person sees. Comparing to
+# the draft's own order passed only while the fixture happened to list its
+# documents in pid order.
+check("ROWS의 순서가 화면의 순서와 같다",
+      [r["Draft_ID"] for r in ROWS]
+      == re.findall(r"<div class='fig[^']*' data-id='([^']+)'", S))
 check("모든 행에 지문이 있다",
       all(len(r["Row_Fingerprint"]) >= 8 for r in ROWS))
 check("빌드 ID가 페이지에 있다", bool(re.search(r"const BUILD_ID=\"[^\"]+\"", S)))
@@ -197,7 +205,12 @@ check("Enter가 다음 입력 가능 행으로 간다",
 # holding a page header and white space; the figure was beside them. A crop
 # shows what the box caught and never what it missed, so the page - with the
 # box drawn on it - rides along beside the count.
-for _did in _open:
+# A publisher's figure file has no page to show; it is checked on its own
+# terms further down.
+_page_backed = [d for d in _open
+                if {r["Draft_ID"]: r for r in DRAFT}[d]["Crop_Quality_Status"]
+                != "PUBLISHER_FIGURE"]
+for _did in _page_backed:
     check("%s는 상자를 그린 페이지 전체를 함께 싣는다" % _did,
           _pageview(_did) is not None)
     if _pageview(_did):
@@ -216,7 +229,7 @@ def _red(blob):
     return sum(1 for r, g, b in px if r > 120 and r - g > 60 and r - b > 60)
 
 
-for _did in _open:
+for _did in _page_backed:
     if _pageview(_did):
         check("  %s의 페이지에 상자가 실제로 그려져 있다" % _did,
               _red(_pageview(_did)) > 0, "붉은 화소 0")
@@ -253,6 +266,46 @@ _again = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
                                  FDT_SHEET=os.path.join(TMP, "np2", "s.html")))
 check("되돌리면 다시 빌드된다", _again.returncode == 0,
       (_again.stderr or "")[-200:])
+
+# --- 페이지가 없는 출처: 출판사 그림 파일 -----------------------------------
+# Eight of the corpus's sources are JATS XML with no pages to cut from. For one
+# of them the publisher's own figure files are on hand, and a file that IS the
+# figure cannot clip it or take in a neighbour - so the first question does not
+# arise, and saying so is not the same as leaving it blank.
+_pubfig = [d["Draft_ID"] for d in DRAFT
+           if d["Crop_Quality_Status"] == "PUBLISHER_FIGURE"]
+check("픽스처에 출판사 그림 파일 행이 있다", len(_pubfig) == 1, "%s" % _pubfig)
+for _did in _pubfig:
+    check("%s는 입력이 열려 있다" % _did, _did in _open, "%s" % _open)
+    check("  페이지 뷰 대신 사유를 싣는다",
+          _pageview(_did) is None and "data-nopage=" in BY_ID[_did][3])
+    check("  그 사유가 상자가 없다는 사실을 말한다",
+          "상자가 없으므로" in BY_ID[_did][3])
+    check("  확대본은 그대로 싣는다 - 셀 그림이니까",
+          _zoom(_did) is not None)
+check("페이지 뷰를 싣는 행은 사유를 싣지 않는다",
+      all("data-nopage=" not in BY_ID[d][3]
+          for d in _open if d not in _pubfig))
+
+# The build refuses a figure-file row whose file is not there, the way it
+# refuses a page-backed row with no page.
+_pf_csv = os.path.join(FX["draft"], "figure_intake_draft.csv")
+_pf_keep = io.open(_pf_csv, "rb").read()
+_rr = list(csv.DictReader(io.open(_pf_csv, encoding="utf-8")))
+for _row in _rr:
+    if _row["Draft_ID"] == _pubfig[0]:
+        _row["Figure_Crop"] = os.path.join("DOC_E", "gone.png")
+with io.open(_pf_csv, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=list(_rr[0])); _w.writeheader()
+    _w.writerows(_rr)
+_pf = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                     capture_output=True, text=True, cwd=HERE,
+                     env=dict(ENV, FDT_SHEET=os.path.join(TMP, "pf", "s.html")))
+io.open(_pf_csv, "wb").write(_pf_keep)
+check("그림 파일이 없는 그림파일 행은 빌드를 멈춘다",
+      _pf.returncode != 0
+      and "그 파일이 없습니다" in (_pf.stderr or "") + (_pf.stdout or ""),
+      "rc=%s %s" % (_pf.returncode, (_pf.stderr or "")[-160:]))
 
 check("막힌 행에는 페이지 뷰도 싣지 않는다",
       all(_pageview(d) is None for d in BY_ID if d not in _open))

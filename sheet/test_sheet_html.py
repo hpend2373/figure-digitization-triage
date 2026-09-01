@@ -191,10 +191,25 @@ check("THIN_CROP %d행이 모두 입력 차단이다" % len(thin),
 # is the question two crops got past. One row shipped without it, because a
 # merge left its page raster behind and nothing compared the two counts.
 _countable = [r["Draft_ID"] for r in ROWS if r["Count_Blocked"] != "1"]
+# A publisher's figure file has no page and no box, so it carries a line
+# saying so instead of a page view. Every countable row carries one or the
+# other, and none carries both - a row with a box that also claims not to have
+# one would mean the two are being decided in different places.
+_status = {d["Draft_ID"]: d["Crop_Quality_Status"] for d in DRAFT}
+_from_file = [i for i in _countable if _status.get(i) == "PUBLISHER_FIGURE"]
 _pageviews = re.findall(r"data-page='data:image/", SHEET)
-check("입력 가능한 %d행 모두가 페이지 뷰를 싣는다" % len(_countable),
-      len(_pageviews) == len(_countable),
-      "페이지 뷰 %d개 / 입력 가능 %d행" % (len(_pageviews), len(_countable)))
+_nopage = re.findall(r"data-nopage='", SHEET)
+check("입력 가능한 %d행이 페이지 뷰나 그 사유를 싣는다 (뷰 %d + 사유 %d)"
+      % (len(_countable), len(_pageviews), len(_nopage)),
+      len(_pageviews) + len(_nopage) == len(_countable),
+      "뷰 %d + 사유 %d != %d" % (len(_pageviews), len(_nopage),
+                                len(_countable)))
+check("그 사유는 출판사 그림 파일 행에만 붙는다",
+      len(_nopage) == len(_from_file),
+      "사유 %d개 / 그림파일 행 %d개" % (len(_nopage), len(_from_file)))
+check("한 행이 페이지 뷰와 사유를 동시에 달지 않는다",
+      not re.search(r"data-page='[^']*'[^>]*data-nopage=|"
+                    r"data-nopage='[^']*'[^>]*data-page=", SHEET))
 _zooms = re.findall(r"data-zoom='data:image/", SHEET)
 check("확대본도 같은 수만큼 있다",
       len(_zooms) == len(_countable),

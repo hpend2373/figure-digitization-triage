@@ -51,6 +51,18 @@ DOCS = [
          "Figure 2. Study flow diagram.", 0.55,
          "본문 문장으로 읽힙니다"),
     ]),
+    # A source with no pages at all: JATS XML, where the publisher's own figure
+    # files are what there is. The row carries the file whole - no page, no
+    # box - which is a countable status of its own.
+    ("15", "DOC_E", [
+        # Five panels, not three: DOC_C's pair is a three-panel drawing, and
+        # this fixture draws deterministically - so a third three-panel figure
+        # is byte-identical to them and the shared-crop rule blocks all three.
+        # (It did, the first time, which is the rule working.)
+        ("FIG1", "1", 5, "PUBLISHER_FIGURE",
+         "Figure 1. Five panels, taken from the publisher's own file.",
+         1.0, ""),
+    ]),
     ("13", "DOC_C", [
         ("FIG1", "1", 3, "ACCEPTABLE",
          "Figure 1. Three axis regions side by side.", 0.83, ""),
@@ -181,7 +193,11 @@ def write(root):
                    (110.0 if status == "THIN_CROP" else 300.0) + 40.0 * i)
             page_rel = os.path.join("pages", doc, "%s_p%d.png" % (doc, i))
             page_abs = os.path.join(draft_dir, page_rel)
-            if status != "NO_CROP":
+            if status == "PUBLISHER_FIGURE":
+                # No page: the file IS the figure.
+                page_abs, box = "", None
+                crop_png(os.path.join(draft_dir, rel), panels)
+            elif status != "NO_CROP":
                 page_png(page_abs, box, panels,
                          thin=(status == "THIN_CROP"))
                 crop_png(os.path.join(draft_dir, rel), panels,
@@ -192,13 +208,16 @@ def write(root):
                 "Source_File_SHA256": hashlib.sha256(
                     io.open(src, "rb").read()).hexdigest(),
                 "Page": page,
-                "Page_Raster": page_abs if status != "NO_CROP" else "",
+                "Page_Raster": page_abs if status not in
+                ("NO_CROP", "PUBLISHER_FIGURE") else "",
                 "Page_Raster_SHA256": "",
                 "Page_Width_Pt": "%.2f" % PAGE_PT[0],
                 "Page_Height_Pt": "%.2f" % PAGE_PT[1],
-                "Page_Geometry_Method": "PYPDF_MEDIABOX",
+                "Page_Geometry_Method": ("" if status == "PUBLISHER_FIGURE"
+                                         else "PYPDF_MEDIABOX"),
                 "Figure_Crop": "" if status == "NO_CROP" else rel,
-                "Figure_BBox": ",".join("%.1f" % v for v in box),
+                "Figure_BBox": (",".join("%.1f" % v for v in box)
+                                if box else ""),
                 "Crop_Quality_Status": status,
                 "Figure_Number": fig, "Figure_Label_Raw": fig,
                 "Label_Repeats_In_Document": "0",

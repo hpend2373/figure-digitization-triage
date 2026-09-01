@@ -168,6 +168,18 @@ def blocked_reason(d):
                              shared_with=SHARED_CROP.get(d["Draft_ID"], ()))
 
 
+#: A publisher's figure file has no page and no box - it IS the figure - so
+#: the page view is not missing for it, it does not apply. What such a row
+#: must have instead is the file itself.
+FIGURE_FILE_STATUS = "PUBLISHER_FIGURE"
+
+
+def _needs_page(d):
+    return (not blocked_reason(d)
+            and str(d.get("Crop_Quality_Status") or "").strip()
+            != FIGURE_FILE_STATUS)
+
+
 def caution(d):
     hit = DEFECT.get(row_key(d))
     if hit and hit["classification"] == "WARNING":
@@ -354,6 +366,8 @@ color:#fff;font-size:13px;margin-bottom:12px}
 #lbbar button{background:#fff;color:var(--ink);border-color:#fff}
 #lb .lbstep{color:#fff;font-size:13.5px;margin:14px auto 6px;max-width:1000px}
 #lbpage{display:block;margin:0 auto 8px;background:#fff}
+#lbnopage{color:#f0ece4;background:rgba(255,255,255,.10);border-radius:4px;
+padding:12px 14px;margin:0 auto 8px;max-width:1000px;font-size:13.5px}
 .fig label{display:flex;gap:7px;align-items:center;font-size:12.5px}
 .fig input{width:66px;font:inherit;padding:4px 6px;border:1px solid var(--rule);
 border-radius:3px}
@@ -393,7 +407,7 @@ w("<div id='lb'><div id='lbbar'><button id='lbclose'>닫기 (Esc)</button>"
   "<span id='lbcap'></span></div>"
   "<div class='lbstep'>① 상자가 목표 그림 전체를 담았습니까? "
   "— 페이지 전체, 빨간 상자가 이 행의 크롭입니다</div>"
-  "<img id='lbpage' alt=''>"
+  "<img id='lbpage' alt=''><div id='lbnopage'></div>"
   "<div class='lbstep'>② 담았다면, 이 그림에 축 영역이 몇 개입니까? "
   "— 크롭 원본 해상도</div><img id='lbimg' alt=''></div>")
 
@@ -461,9 +475,16 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         _open = has_img and not blocked_reason(d)
         big = ((" data-zoom='%s'" % zoom(p)) if _open else "")
         if _open:
-            _pv = page_view(d)
-            if _pv:
-                big += " data-page='%s'" % _pv
+            if not _needs_page(d):
+                # Says what is true rather than leaving the first step blank:
+                # there is no box to check because there is no box.
+                big += (" data-nopage='이 행은 페이지에서 잘라낸 크롭이 "
+                        "아니라 출판사가 낸 그림 파일입니다 — 상자가 없으므로 "
+                        "잘리거나 이웃이 섞일 수 없습니다'")
+            else:
+                _pv = page_view(d)
+                if _pv:
+                    big += " data-page='%s'" % _pv
         img = (("<img class='thumb' src='%s' alt=''%s>" % (thumb(p), big))
                if has_img else
                # NOT A CLAIM ABOUT THE PAPER. This said "원문에 그림이
@@ -565,9 +586,16 @@ def tail(ids):
 #: the page it needed stayed behind in the part it was built in. Silence is
 #: what made it survive, so this is loud and fatal.
 _NO_PAGE = [d["Draft_ID"] for d in DRAFT
-            if not blocked_reason(d)
+            if _needs_page(d)
             and not (str(d.get("Page_Raster") or "").strip()
                      and os.path.exists(d["Page_Raster"]))]
+_NO_FILE = [d["Draft_ID"] for d in DRAFT
+            if not blocked_reason(d) and not _needs_page(d)
+            and not os.path.exists(os.path.join(D, d.get("Figure_Crop") or ""))]
+if _NO_FILE:
+    raise SystemExit(
+        "출판사 그림 파일로 표시된 행 %d개에 그 파일이 없습니다:\n  %s"
+        % (len(_NO_FILE), "\n  ".join(_NO_FILE[:10])))
 if _NO_PAGE:
     raise SystemExit(
         "입력 가능한 행 %d개에 페이지 래스터가 없습니다 — 이 행들은 "

@@ -122,7 +122,14 @@ DRAFT_STATUSES = (DRAFT_PENDING, "CONFIRMED", "REJECTED")
 #: bounding box wrong. It is a ROUTING fact: show the whole page instead, so
 #: the person confirming sees the figure rather than a strip of white with the
 #: figure just outside it.
-CROP_QUALITY_STATUSES = ("ACCEPTABLE", "THIN_CROP", "EDGE_CLIPPED", "NO_CROP")
+#: PUBLISHER_FIGURE is not a crop at all: the publisher's own figure file,
+#: taken whole. It exists because eight of this corpus's sources are JATS XML
+#: with no pages to cut from, and for one of them the figure files are on
+#: hand. A file that IS the figure cannot clip it or take in a neighbour, so
+#: the question a crop has to answer does not arise - which is why it is a
+#: status of its own rather than ACCEPTABLE with a note.
+CROP_QUALITY_STATUSES = ("ACCEPTABLE", "PUBLISHER_FIGURE", "THIN_CROP",
+                         "EDGE_CLIPPED", "NO_CROP")
 
 #: Anything darker than this is ink on a printed page. Used only to find where
 #: a crop's own edges fall relative to the drawing, never to measure anything.

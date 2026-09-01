@@ -50,6 +50,7 @@
   var lb = document.getElementById('lb');
   var lbimg = document.getElementById('lbimg');
   var lbpage = document.getElementById('lbpage');
+  var lbnopage = document.getElementById('lbnopage');
   var lbcap = document.getElementById('lbcap');
 
   function openZoom(fig) {
@@ -60,8 +61,13 @@
      * caught the figure at all. A crop cannot answer that: it shows what the
      * box caught, never what it missed. */
     var pv = t.getAttribute('data-page');
+    var why = t.getAttribute('data-nopage');
     lbpage.hidden = !pv;
     if (pv) lbpage.src = pv; else lbpage.removeAttribute('src');
+    /* A publisher's figure file has no page and no box. Saying so is not the
+     * same as leaving the first step blank, which reads as an omission. */
+    lbnopage.hidden = !why;
+    lbnopage.textContent = why || '';
     var cap = fig.querySelector('.cap');
     lbcap.textContent = cap ? cap.textContent.slice(0, 160) : '';
     lb.classList.add('on');
@@ -71,6 +77,7 @@
     lb.classList.remove('on');
     lbimg.removeAttribute('src');
     lbpage.removeAttribute('src');
+    lbnopage.textContent = '';
   }
 
   lb.addEventListener('click', function (e) {

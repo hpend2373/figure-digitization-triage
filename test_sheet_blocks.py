@@ -9,6 +9,7 @@ repository alone. It reads no files: the draft it is applied to comes from
 publisher PDFs and cannot be published, and a safety rule that can only be
 checked against data nobody else has is a safety rule nobody else can check.
 """
+import io
 import os
 import sys
 
@@ -134,6 +135,38 @@ check("the refusal names the value it could not read",
 check("and ACCEPTABLE still passes, or the gate blocks everything",
       BR.blocked_reason(row(Crop_Quality_Status=BR.COUNTABLE_CROP),
                         BR.figure_key("1", "FIG1", "2")) == "")
+# WIDENING WHAT MAY BE COUNTED IS A CHANGE TO A SAFETY RULE, so both members
+# are named here one by one. A publisher's figure file cannot clip its figure
+# or take in a neighbour - it IS the figure - which is why it counts; a crop
+# from a page can do both, which is why every other crop status does not.
+check("출판사 그림 파일은 계수 가능하다",
+      BR.blocked_reason({"Figure_Number": "FIG1", "Confidence": "1.00",
+                         "Crop_Quality_Status": "PUBLISHER_FIGURE"},
+                        BR.figure_key("1", "FIG1", "2")) == "")
+check("계수 가능과 계수 불가는 겹치지 않는다 - 겹치면 막는 규칙이 죽는다",
+      not (set(BR.COUNTABLE_CROPS) & set(BR.UNCOUNTABLE_CROPS)),
+      "%s" % sorted(set(BR.COUNTABLE_CROPS) & set(BR.UNCOUNTABLE_CROPS)))
+_overlap_caught = False
+try:
+    import importlib, types
+    _src = io.open(BR.__file__, encoding="utf-8").read().replace(
+        'COUNTABLE_CROPS = ("ACCEPTABLE", "PUBLISHER_FIGURE")',
+        'COUNTABLE_CROPS = ("ACCEPTABLE", "PUBLISHER_FIGURE", "THIN_CROP")')
+    _m = types.ModuleType("block_rules_overlap")
+    exec(compile(_src, BR.__file__, "exec"), _m.__dict__)
+except AssertionError:
+    _overlap_caught = True
+check("겹치게 만들면 모듈이 아예 열리지 않는다", _overlap_caught)
+
+check("계수 가능한 상태는 이 둘뿐이다",
+      sorted(BR.COUNTABLE_CROPS) == ["ACCEPTABLE", "PUBLISHER_FIGURE"],
+      "%s" % (BR.COUNTABLE_CROPS,))
+for _bad in ("PUBLISHER", "publisher_figure", "FIGURE_FILE", ""):
+    check("비슷하지만 다른 값 %r은 여전히 막힌다" % _bad,
+          BR.blocked_reason({"Figure_Number": "FIG1", "Confidence": "1.00",
+                             "Crop_Quality_Status": _bad},
+                            BR.figure_key("1", "FIG1", "2")) != "")
+
 # THE SET THIS GATE KNOWS IS THE SET THE INTAKE WRITES. A status added upstream
 # without a rule here would be blocked - safe - but silently, so this fails
 # loudly instead.
@@ -143,9 +176,9 @@ try:
     import corpus_intake as _CI
     check("every status the intake can write has a rule here",
           set(_CI.CROP_QUALITY_STATUSES)
-          == {BR.COUNTABLE_CROP} | set(BR.UNCOUNTABLE_CROPS),
+          == set(BR.COUNTABLE_CROPS) | set(BR.UNCOUNTABLE_CROPS),
           "intake %s vs rules %s" % (sorted(_CI.CROP_QUALITY_STATUSES),
-                                     sorted({BR.COUNTABLE_CROP}
+                                     sorted(set(BR.COUNTABLE_CROPS)
                                             | set(BR.UNCOUNTABLE_CROPS))))
 except ImportError:
     print("  SKIP the intake status cross-check: corpus_intake did not import")

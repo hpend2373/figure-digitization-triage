@@ -22,6 +22,7 @@ import collections, csv, io, json, os, re, shutil, sys, zipfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bundle_paths
 import rowkey
+import writer_contracts
 import xml.sax.saxutils as SU
 
 NUM = re.compile(r'^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$')
@@ -170,30 +171,48 @@ def sheet_state(parts, sheet, rows):
     return 'CONFLICT', last
 
 
-def sheet_columns(parts, sheet):
-    """The column names this sheet declares, in order, or None.
+def sheet_schema(parts, sheet):
+    """What this sheet says its columns are, from every place it says it.
 
-    An Excel table's `tableColumn` names first, because that is what
-    structured references resolve against; the header row when the sheet has
-    no table. Either way it is the order the workbook believes in, and
-    `plan_append` writes the sidecar's values from column A rightwards - so
-    if the two orders disagree, every value lands under the wrong heading and
-    the rows look perfectly well formed.
+    THREE ANSWERS, AND THEY ALL HAVE TO AGREE. Structured references resolve
+    against the table's `tableColumn` names; the values go in at physical
+    column positions; a person reads the header cells. Checking only the table
+    metadata let a workbook through whose visible headings were swapped -
+    right by one definition of the schema and wrong by the other two.
+
+    Returns (tableColumn names or None, header row or None, table ref width or
+    None). None means the sheet does not carry that one.
     """
     part = sheet_part(parts, sheet)
     tpart = table_part(parts, part)
+    cols = width = None
     if tpart and tpart in parts:
+        raw = parts[tpart].decode('utf-8')
         cols = [SU.unescape(m.group(1)) for m in re.finditer(
-            r'<(?:\w+:)?tableColumn[^>]*\bname="([^"]*)"',
-            parts[tpart].decode('utf-8'))]
-        if cols:
-            return cols
+            r'<(?:\w+:)?tableColumn[^>]*\bname="([^"]*)"', raw)] or None
+        m = re.search(r'ref="([A-Z]+)\d+:([A-Z]+)\d+"', raw)
+        if m:
+            width = col_index(m.group(2)) - col_index(m.group(1)) + 1
     head = row_values(parts[part].decode('utf-8'), 1, 4096)
-    if head is None:
-        return None
-    while head and head[-1] == '':
-        head.pop()
-    return head or None
+    if head is not None:
+        while head and head[-1] == '':
+            head.pop()
+    return cols, (head or None), width
+
+
+def schema_problems(parts, sheet, fields):
+    """Where this sheet's idea of its columns differs from the file's."""
+    cols, head, width = sheet_schema(parts, sheet)
+    out = []
+    if head != fields:
+        out.append('the header row is %s' % (head,))
+    if cols is not None and cols != fields:
+        out.append('the table declares %s' % (cols,))
+    if width is not None and width != len(fields):
+        out.append('the table range is %d columns wide' % width)
+    if head is None and cols is None:
+        out.append('the sheet declares no columns at all')
+    return out
 
 
 def plan_append(parts, sheet, rows):
@@ -221,7 +240,28 @@ def plan_append(parts, sheet, rows):
     return edited, last, new_last, tpart
 
 
-def write_workbook(path, members, edited):
+class StaleWorkbook(Exception):
+    """The workbook moved between the snapshot and the replace."""
+
+
+def load_workbook_snapshot(path):
+    """The workbook's members and the digest OF THE BYTES THEY CAME FROM.
+
+    Same contract as load_csv_snapshot, for the same reason. The members were
+    read at one moment and the digest taken at another, so a workbook changed
+    in between gave a receipt recording the NEW file's hash beside a plan
+    built from the OLD one - and the replace would have written the old
+    members back over someone else's edit.
+    """
+    import hashlib
+    with open(path, 'rb') as fh:
+        raw = fh.read()
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    return members, hashlib.sha256(raw).hexdigest()
+
+
+def write_workbook(path, members, edited, expect=None):
     """The whole workbook, once, through a temporary file.
 
     Every part not in `edited` is copied byte for byte - that is what keeps
@@ -234,6 +274,13 @@ def write_workbook(path, members, edited):
         with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as out:
             for info, data in members:
                 out.writestr(info, edited.get(info.filename, data))
+        # CHECKED AS LATE AS IT CAN BE. The zip is built first, so what stands
+        # between this and the replace is one system call. The bundle lock
+        # covers well-behaved writers; a hand edit is bound by nothing, and
+        # writing these members over it would erase work this run never saw.
+        if expect is not None and rowkey.file_digest(path) != expect:
+            raise StaleWorkbook(
+                'the workbook changed since it was read; nothing was written')
     except Exception:
         # A HALF-BUILT ZIP IS NOT A WORKBOOK, AND IT SITS NEXT TO THE REAL
         # ONE. The replace below never runs, so the workbook itself is intact
@@ -253,8 +300,9 @@ def write_workbook(path, members, edited):
 #: they live in. Declared here rather than read off the receipt or off the
 #: sidecar: a receipt that lost an entry, or a sidecar that arrived with one
 #: sheet missing, would otherwise lose the check along with it.
-TABLES = {'effects_text_long': 'effect_extraction_text_long.csv',
-          'extraction_counts_long': 'extraction_counts_long.csv'}
+TABLES = {k: writer_contracts.TABLE_FILES[k]
+          for k in writer_contracts.CONTRACTS['integrate_supplements']
+          ['tables']}
 WORKBOOK = 'extraction_form_RASi_PCa.xlsx'
 WRITER = 'integrate_supplements'
 
@@ -292,18 +340,16 @@ def preconditions(base, logs):
                 receipt, 'new_rows.json', new)
         except ValueError as exc:
             problems = [('SIDECAR_UNREADABLE', 'new_rows.json: %s' % exc)]
-    problems += rowkey.attestation_problems(receipt, {
-        'protocol_sha256': rowkey.file_digest(
-            os.path.join(os.path.dirname(os.path.abspath(rowkey.__file__)),
-                         'rowkey.py')),
-        'tables': {k: rowkey.file_digest(os.path.join(base, v))
-                   for k, v in TABLES.items()}})
-    named = sorted((receipt.get('attestation') or {})
-                   .get('core', {}).get('tables') or {})
-    if named != sorted(TABLES):
-        problems.append(('RECEIPT_TABLE_SET_MISMATCH',
-                         'receipt names tables %s, this step needs %s'
-                         % (named, sorted(TABLES))))
+    # THE SAME CONTRACT THE FINAL RECEIPT USES. This step checked a subset it
+    # had written for itself - the protocol and the table hashes - and not the
+    # writer code, the study inputs or the source documents. A supplement
+    # could change, the writer not be re-run, and the workbook be modified
+    # anyway; the disagreement then surfaced in the final receipt, after the
+    # mutation. `sidecars=False` because the sidecar this step will APPLY has
+    # already been judged above, as the object it will apply - re-reading the
+    # file here would check one thing while another is used.
+    problems += writer_contracts.problems(WRITER, receipt, base, logs,
+                                          sidecars=False)
     # ONLY A CLEAN RERUN. The attestation is written before the tables are
     # replaced, so a first WRITE's receipt records the PRE-write file hashes
     # and can never match the CSVs it just produced. Allowing WRITE here was a
@@ -411,8 +457,7 @@ def apply_workbook(base, logs, workbook_path):
                                'workbook_sha256_after':
                                    rowkey.file_digest(workbook_path)})
 
-    with zipfile.ZipFile(workbook_path) as z:
-        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    members, before = load_workbook_snapshot(workbook_path)
     parts = {i.filename: d for i, d in members}
 
     # WHAT THE WORKBOOK ALREADY CARRIES, BEFORE DECIDING TO ADD ANYTHING. An
@@ -427,12 +472,11 @@ def apply_workbook(base, logs, workbook_path):
     # fail-closed mutation step is supposed to prevent.
     schema = []
     for sheet in sorted(new):
-        declared = sheet_columns(parts, sheet)
         fields = list(load_table(base, sheet)[0] or ())
-        if declared != fields:
+        for detail in schema_problems(parts, sheet, fields):
             schema.append(('WORKBOOK_SCHEMA_MISMATCH',
-                           '%s: the sheet declares %s and the file has %s'
-                           % (sheet, declared, fields)))
+                           '%s: %s, and the file has %s'
+                           % (sheet, detail, fields)))
     if schema:
         for code, detail in schema:
             print('  %-32s %s' % (code, detail))
@@ -458,7 +502,6 @@ def apply_workbook(base, logs, workbook_path):
         # place to guess which.
         verdict = 'CONFLICT_NO_WRITE'
 
-    before = rowkey.file_digest(workbook_path)
     applied = {}
     if verdict == 'APPLY':
         bak = os.path.join(base, 'archive',
@@ -477,7 +520,15 @@ def apply_workbook(base, logs, workbook_path):
                               'table_part': tp}
             print('  %-24s %d행 -> %d행 (+%d), 표 %s'
                   % (sheet, a, b, len(rows), tp))
-        write_workbook(workbook_path, members, edited)
+        try:
+            write_workbook(workbook_path, members, edited, expect=before)
+        except StaleWorkbook as exc:
+            print('  %-32s %s' % ('WORKBOOK_STALE_SNAPSHOT', exc))
+            return _receipt(logs, {
+                'verdict': 'REFUSED_NO_WRITE',
+                'problems': [['WORKBOOK_STALE_SNAPSHOT', str(exc)]],
+                'workbook_sha256_before': before,
+                'workbook_sha256_after': rowkey.file_digest(workbook_path)})
 
     return _receipt(logs, {
         'verdict': verdict,

@@ -42,7 +42,8 @@ def sheet_xml(rows, start=1):
             '</x:worksheet>' % (NS, body))
 
 
-def book(sheets, table_on=None, table_cols=None):
+def book(sheets, table_on=None, table_cols=None,
+         table_last_col=None):
     """A workbook with one part per named sheet, and optionally a table."""
     path = os.path.join(TMP, 'wb-%d.xlsx' % len(os.listdir(TMP)))
     names = sorted(sheets)
@@ -82,9 +83,9 @@ def book(sheets, table_on=None, table_cols=None):
                 z.writestr('xl/tables/table1.xml',
                            '<?xml version="1.0" encoding="utf-8"?>'
                            '<x:table xmlns:x="%s" id="1" name="t" '
-                           'ref="A1:C%d"><x:tableColumns>%s'
+                           'ref="A1:%s%d"><x:tableColumns>%s'
                            '</x:tableColumns></x:table>'
-                           % (NS, len(sheets[n]), cols))
+                           % (NS, table_last_col or 'C', len(sheets[n]), cols))
     return path
 
 
@@ -269,21 +270,44 @@ for _l in LABELS:
     csv_write(table_path(_l), [{'row_id': 'old-1', 'rec': 'R1', 'val': '0'}])
 
 
+import bundle_paths
+import writer_contracts as WC
+
+
 def run_writer(intended):
-    def sidecars(_v, _w):
+    """A stand-in for integrate_supplements that owes what it owes.
+
+    It has to satisfy the SAME contract the real writer does - the workbook
+    step now checks all of it - so it attests its code, its inputs and its
+    sources, and leaves both sidecars behind.
+    """
+    def sidecars(verdict, written):
         return {'new_rows.json':
                 {l: [[r.get(c, '') for c in COLS] for r in intended[l]]
-                 for l in LABELS}}
+                 for l in LABELS},
+                'integration.json': {'date': '2026-09-01', 'verdict': verdict,
+                                     'dry_run': verdict != 'WRITE',
+                                     'archived_to': '',
+                                     'refused_values': []}}
+    sidecars.volatile = {'integration.json': ('archived_to', 'date',
+                                              'dry_run', 'verdict')}
     tables = []
     for l in LABELS:
         _c, rows, dig = K.load_csv_snapshot(table_path(l))
         tables.append((l, table_path(l), COLS, rows, intended[l],
                        ('rec',), ('val',)))
-    return K.run_writer('integrate_supplements', tables, LOGS,
-                        assign_ids=numbered, assignable={'row_id'},
-                        sidecars=sidecars,
-                        read_digests={l: K.load_csv_snapshot(table_path(l))[2]
-                                      for l in LABELS})[0]
+    return K.run_writer(
+        'integrate_supplements', tables, LOGS,
+        assign_ids=numbered, assignable={'row_id'}, sidecars=sidecars,
+        read_digests={l: K.load_csv_snapshot(table_path(l))[2]
+                      for l in LABELS},
+        attest={'writer_code_sha256': K.file_digest(os.path.join(
+                    os.path.dirname(os.path.abspath(X.__file__)),
+                    'integrate_supplements.py')),
+                'study_inputs_sha256': K.file_digest(
+                    bundle_paths.STUDY_INPUTS),
+                'sources': WC.CONTRACTS['integrate_supplements']['sources'](
+                    BASE)})[0]
 
 
 _v1 = run_writer({l: [dict(r) for r in NEW_ROWS[l]] for l in LABELS})
@@ -480,6 +504,63 @@ finally:
 check("the sidecar is read once, and it is that payload that is judged",
       _opens[0] == 1, "%d opens" % _opens[0])
 
+# THE WHOLE CONTRACT, NOT A SUBSET THIS STEP WROTE FOR ITSELF. A supplement
+# changing without the writer being re-run leaves the CSVs and the sidecar
+# agreeing with each other; only the writer's own attestation notices.
+_src = os.path.join(BASE, 'source_supplements')
+os.makedirs(_src, exist_ok=True)
+io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'one')
+_keep = K.file_digest(WB)
+_r = apply()
+check("a source document the writer never saw is refused",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and 'RECEIPT_SOURCE_SET_MISMATCH'
+      in [c for c, _d in _r['problems']], "%s" % _r.get('problems'))
+check("  and the workbook is untouched",  K.file_digest(WB) == _keep)
+io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'two')
+run_writer({l: [dict(r) for r in NEW_ROWS[l]] for l in LABELS})
+check("re-running the writer over the new source clears it",
+      apply()['verdict'] == 'ALREADY_APPLIED_NO_WRITE')
+io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'three')
+_keep = K.file_digest(WB)
+_r = apply()
+check("and changing that source again is refused by its hash",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and 'RECEIPT_SOURCE_STALE' in [c for c, _d in _r['problems']],
+      "%s" % _r.get('problems'))
+check("  with the workbook still untouched", K.file_digest(WB) == _keep)
+io.open(os.path.join(_src, 'R0855_fixture.docx'), 'wb').write(b'two')
+
+# --- the workbook moved under us ---------------------------------------------
+# THE SAME CONTRACT THE CSVs GOT. Members read at one moment, digest taken at
+# another: a workbook changed in between would be replaced by the old members,
+# erasing an edit this run never saw.
+PS = book({'s1': HEAD})
+_snap_members, _snap_digest = X.load_workbook_snapshot(PS)
+check("the snapshot digests the bytes it unzipped",
+      _snap_digest == K.file_digest(PS))
+_edits, _, _, _ = X.plan_append({i.filename: d for i, d in _snap_members},
+                                's1', NEW)
+# somebody else writes in the meantime
+book({'s1': HEAD + [['z', '9']]})  # a different file, to keep the ids apart
+io.open(PS, 'ab').write(b'\n')
+_meanwhile = K.file_digest(PS)
+_raised = False
+try:
+    X.write_workbook(PS, _snap_members, _edits, expect=_snap_digest)
+except X.StaleWorkbook:
+    _raised = True
+check("writing over a workbook that moved is refused", _raised)
+check("and the other writer's version is still there",
+      K.file_digest(PS) == _meanwhile)
+check("with no temporary file left beside it",
+      not os.path.exists(PS + '.tmp'))
+check("a snapshot nobody has touched still writes",
+      X.write_workbook(PS, *X.load_workbook_snapshot(PS)[:1],
+                       edited=_edits,
+                       expect=X.load_workbook_snapshot(PS)[1]) is None
+      and X.sheet_state(members_dict(PS), 's1', NEW)[0] == 'PRESENT')
+
 # --- the workbook's own columns ---------------------------------------------
 # THE ROWS GO IN FROM COLUMN A RIGHTWARDS, IN THE CSV'S ORDER. A workbook
 # whose headings are in a different order takes every value under the wrong
@@ -514,6 +595,34 @@ check("a table whose columns disagree with the file is refused, header or no",
       "%s" % _r.get('problems'))
 check("  and that workbook is untouched too",
       K.file_digest(_wb_bad) == _keep)
+
+# TABLE METADATA AND THE VISIBLE HEADER ARE TWO DIFFERENT CLAIMS. Structured
+# references follow the first; a person reads the second; the values go in by
+# position. Checking only one let a workbook through that was right by one
+# definition and wrong by the others.
+_wb_head_bad = book({LABELS[0]: [_SWAP, ['old-1', '0', 'R1']],
+                     LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
+                    table_on=LABELS[0], table_cols=COLS)
+_keep = K.file_digest(_wb_head_bad)
+_r = X.apply_workbook(BASE, LOGS, _wb_head_bad)
+check("a table that is right while the header is swapped is refused",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and 'header row' in (_r['problems'] or [['', '']])[0][1],
+      "%s" % _r.get('problems'))
+check("  and that workbook is untouched as well",
+      K.file_digest(_wb_head_bad) == _keep)
+
+_wb_narrow = book({LABELS[0]: [COLS, ['old-1', 'R1', '0']],
+                   LABELS[1]: [COLS, ['old-1', 'R1', '0']]},
+                  table_on=LABELS[0], table_last_col='B')
+_keep = K.file_digest(_wb_narrow)
+_r = X.apply_workbook(BASE, LOGS, _wb_narrow)
+check("a table whose range is narrower than the file is refused",
+      _r['verdict'] == 'REFUSED_NO_WRITE'
+      and 'range' in (_r['problems'] or [['', '']])[0][1],
+      "%s" % _r.get('problems'))
+check("  and so is that one left alone",
+      K.file_digest(_wb_narrow) == _keep)
 
 check("and after all of that it still declines cleanly",
       apply()['verdict'] == 'ALREADY_APPLIED_NO_WRITE')

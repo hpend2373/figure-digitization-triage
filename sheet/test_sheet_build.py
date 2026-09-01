@@ -183,6 +183,38 @@ check("이유가 CSV 열로 나간다", "Uncountable_Reason" in S)
 check("안내문이 빈칸과 '셀 수 없음'의 차이를 말한다",
       "봤지만 셀 수 없음" in S and "안 본 것과 구별되지 않아" in S)
 
+# ------------------------------- 규칙이 바뀌면 빌드 ID도 바뀌어야 한다
+# The id hashed the draft alone, so changing the BLOCKING RULES left it
+# identical - and the stored values, keyed by that id, came back onto a sheet
+# that now refuses rows they were typed on.
+_ID0 = re.search(r'const BUILD_ID="([^"]+)"', S).group(1)
+_rules = os.path.join(HERE, "block_rules.py")
+_keep_rules = io.open(_rules, "rb").read()
+io.open(_rules, "ab").write(b"\n# scenario: a rule changed\n")
+_alt = os.path.join(TMP, "alt", "sheet.html")
+os.makedirs(os.path.dirname(_alt), exist_ok=True)
+try:
+    _r = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                        capture_output=True, text=True, cwd=HERE,
+                        env=dict(ENV, FDT_SHEET=_alt))
+finally:
+    io.open(_rules, "wb").write(_keep_rules)
+check("규칙 파일이 바뀌면 다시 빌드된다", _r.returncode == 0,
+      (_r.stderr or "")[-300:])
+_ID1 = re.search(r'const BUILD_ID="([^"]+)"',
+                 io.open(PATHS.parts_for(_alt)[0], encoding="utf-8").read()
+                 ).group(1)
+check("차단 규칙이 바뀌면 빌드 ID도 바뀐다 - 옛 입력이 새 시트로 넘어오지 않게",
+      _ID0 != _ID1, "%s == %s" % (_ID0, _ID1))
+_r2 = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                     capture_output=True, text=True, cwd=HERE,
+                     env=dict(ENV, FDT_SHEET=_alt))
+_ID2 = re.search(r'const BUILD_ID="([^"]+)"',
+                 io.open(PATHS.parts_for(_alt)[0], encoding="utf-8").read()
+                 ).group(1)
+check("아무것도 바뀌지 않으면 빌드 ID도 그대로다", _ID2 == _ID0,
+      "%s vs %s" % (_ID2, _ID0))
+
 # -------------------------------------------------- 배치로 쪼갤 때
 # The crops now ride at the resolution they were cut at, so one file of 604 of
 # them is not a file a browser opens. Sheets fill to a byte budget.
@@ -228,6 +260,34 @@ check("빌드 ID는 모든 파일에서 같다",
       len({re.search(r'const BUILD_ID="([^"]+)"',
                      io.open(f, encoding="utf-8").read()).group(1)
            for f in SP}) == 1)
+
+# ---------------------------------- 끝까지 읽히지 않는 이미지는 증거가 아니다
+# A render that is interrupted leaves a PNG with a valid header and a truncated
+# body. Its size looks plausible, and Page_Raster_SHA256 hashes what reached
+# disk as happily as it would hash the whole picture; the first thing to fail
+# is whatever finally reads the last row of pixels. One of these survived a
+# killed batch in run2 and was found by a measurement script, a day later.
+import verify_intake_images as V                                # noqa: E402
+
+check("정상 인테이크에는 못 읽는 이미지가 없다",
+      V.unreadable(FX["draft"]) == [], "%s" % V.unreadable(FX["draft"]))
+
+_victim = os.path.join(FX["draft"], "DOC_A", "DOC_A_D001.png")
+_whole = io.open(_victim, "rb").read()
+io.open(_victim, "wb").write(_whole[:len(_whole) // 2])
+_found = V.unreadable(FX["draft"])
+check("몸통이 잘린 PNG는 이름이 불린다",
+      [os.path.basename(f) for f, _s, _e in _found] == ["DOC_A_D001.png"],
+      "%s" % _found)
+check("헤더만 보고 통과시키지 않는다 - Image.open은 그것을 열어 준다",
+      _found and "open" not in _found[0][2].lower())
+_rc = V.main([FX["draft"], os.path.join(TMP, "img.json")])
+check("못 읽는 이미지가 있으면 0이 아닌 코드로 끝난다", _rc == 1)
+check("영수증에 무엇이 몇 개 중 몇 개인지 남는다",
+      json.load(io.open(os.path.join(TMP, "img.json"), encoding="utf-8"))
+      ["verdict"] == "REFUSED")
+io.open(_victim, "wb").write(_whole)
+check("되돌리면 다시 깨끗하다", V.unreadable(FX["draft"]) == [])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

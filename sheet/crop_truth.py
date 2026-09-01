@@ -110,6 +110,16 @@ NOT_SCORABLE = {
                           "쪽이든 막힙니다.",
 }
 
+#: 2026-09-01 run2 감사가 눈으로 확인한 두 건. 상자가 캡션 위 한 단을 집었고
+#: 그림은 그 옆에 있습니다 - 잘린 것이 아니라 통째로 빗나간 것입니다.
+#: `covered`가 이것을 재는 유일한 지표인데, 이 두 행은 픽스처에 없었으므로
+#: 아무도 재지 않았습니다. 좌표는 200 dpi 렌더 위에 상자를 그려 눈으로 확인해
+#: 잡았고, 판정(WRONG)은 감사가 내린 것입니다.
+FIGURE_REGIONS.update({
+    ("177", "FIG3", "5"): (0.30, 0.070, 0.94, 0.375),
+    ("531", "FIG1", "3"): (0.41, 0.520, 0.93, 0.940),
+})
+
 VISUAL_VERDICT = {
     # the ten the fifth audit judged FIXED
     ("36", "FIG1", "4"): "OK",
@@ -131,6 +141,9 @@ VISUAL_VERDICT = {
     ("397", "FIG1", "4"): "WRONG",    # the WOMEN half is clipped
     ("518", "FIG1", "3"): "WRONG",    # four graphs, a sliver of one shown
     ("159", "FIG3", "5"): "WRONG",    # A/B/C, only the start of A and B
+    # run2 감사가 연 두 건 - 잘린 것이 아니라 그림을 통째로 빗나간 상자
+    ("177", "FIG3", "5"): "WRONG",
+    ("531", "FIG1", "3"): "WRONG",
 }
 
 

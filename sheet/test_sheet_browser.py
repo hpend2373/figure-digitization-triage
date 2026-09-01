@@ -95,7 +95,9 @@ with sync_playwright() as pw:
     by = {r["Draft_ID"]: r for r in rows}
     wrong = [(i, want[i], by[i]["Observed_Panel_Count"])
              for i in enabled if by[i]["Observed_Panel_Count"] != want[i]]
-    check("입력한 604개 값이 전부 자기 행에 실려 나온다 (뒤바뀜 0)",
+    # The count is this part's, not the corpus's: it said 604 on every one of
+    # the four files, each of which holds a few hundred rows.
+    check("입력한 %d개 값이 전부 자기 행에 실려 나온다 (뒤바뀜 0)" % len(enabled),
           not wrong, wrong[:5])
     check("입력한 값의 종류가 하나가 아니다 — 검사가 무의미하지 않음",
           len(set(want.values())) > 20, len(set(want.values())))

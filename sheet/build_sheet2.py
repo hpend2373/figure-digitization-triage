@@ -93,11 +93,25 @@ KNOWN_PRESENT = {
     "710": "1차 감사: 원문 텍스트에 Fig. 1 · 2 · 4 캡션이 있음",
 }
 
-BUILD_ID = "sheet-%s-%s" % (
-    datetime.date.today().isoformat(),
-    hashlib.sha256(
-        io.open(os.path.join(D, "figure_intake_draft.csv"), "rb").read()
-    ).hexdigest()[:8])
+#: WHAT THE PAGE PRESENTS, NOT JUST THE ROWS IT LISTS. The id hashed the draft
+#: alone, so a change to the BLOCKING RULES left it identical - and the stored
+#: values, which are keyed by this id, came back onto a sheet that now refuses
+#: two of the rows they were typed on. Whatever decides what a person sees and
+#: may answer goes into it: the draft, the rule, the builder, the page's own
+#: scripts, and the audit findings the rule reads.
+_ID_INPUTS = [os.path.join(D, "figure_intake_draft.csv"),
+              os.path.join(AUDIT, "confirmed_image_defects.csv"),
+              os.path.join(AUDIT, "sentence_warning_rows.csv")]
+_HERE0 = os.path.dirname(os.path.abspath(__file__))
+_ID_INPUTS += [os.path.join(_HERE0, f) for f in
+               ("block_rules.py", "build_sheet2.py", "sheet_logic.js",
+                "sheet_page.js")]
+_h = hashlib.sha256()
+for _f in _ID_INPUTS:
+    _h.update(os.path.basename(_f).encode("utf-8"))
+    _h.update(io.open(_f, "rb").read() if os.path.exists(_f) else b"")
+BUILD_ID = "sheet-%s-%s" % (datetime.date.today().isoformat(),
+                            _h.hexdigest()[:8])
 
 
 def fingerprint(d):

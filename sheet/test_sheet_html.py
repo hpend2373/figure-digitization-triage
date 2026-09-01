@@ -163,10 +163,14 @@ check("2차 감사 FAIL %d건이 모두 입력 차단이다 (라벨 기준)" % l
 #: What the third audit judged still wrong after the crop round.
 _STILL = [("437", "FIG2", "176"), ("516", "FIG5", "6"), ("99", "FIG1", "4"),
           ("554", "FIG4", "5"), ("700", "FIG1", "3"), ("397", "FIG1", "4"),
-          ("518", "FIG1", "3"), ("159", "FIG3", "5")]
+          ("518", "FIG1", "3"), ("159", "FIG3", "5"),
+          # 2026-09-01 run2 감사. 목록에 손으로 적혀 있는 이유는 이것이
+          # block_rules.STILL_WRONG에서 유도되면 안 되기 때문입니다 - 규칙에서
+          # 한 줄을 지우면 기대값도 같이 줄어들어 아무 일도 일어나지 않습니다.
+          ("177", "FIG3", "5"), ("531", "FIG1", "3")]
 _open_still = [k for k in _STILL
                if not _rows_for(*k) or _rows_for(*k)[0]["Count_Blocked"] != "1"]
-check("3차 감사가 여전히 틀렸다고 한 %d건도 모두 차단이다" % len(_STILL),
+check("사람이 틀렸다고 판정한 %d건이 모두 차단이다" % len(_STILL),
       not _open_still, _open_still)
 check("차단 판단이 Draft_ID 순번에 걸려 있지 않다",
       "Figure_Number" in SHEET and not re.search(r"DEFECT\.get\(d\[.Draft_ID", SHEET))
@@ -175,10 +179,14 @@ fails = {r["Draft_ID"] for r in ROWS
                 and r["Figure_Number"] == k[1] and r["Page"] == k[2]
                 for k in _fail_keys)}
 thin = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"}
-check("THIN_CROP 151행이 모두 입력 차단이다",
+# THE NAME COUNTS WHAT THE CHECK COUNTS. This said 151 while the set it
+# actually tested had 114 in it - the number was from the previous intake and
+# nothing recomputed it, so a person reading the receipt would take the run to
+# have covered rows it never saw.
+check("THIN_CROP %d행이 모두 입력 차단이다" % len(thin),
       all(byid[i]["Count_Blocked"] == "1" for i in thin))
 nocrop = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP"}
-check("이미지 없는 45행이 모두 입력 차단이다",
+check("이미지 없는 %d행이 모두 입력 차단이다" % len(nocrop),
       all(byid[i]["Count_Blocked"] == "1" for i in nocrop))
 clipped = {d["Draft_ID"] for d in DRAFT
            if d["Crop_Quality_Status"] == "EDGE_CLIPPED"}

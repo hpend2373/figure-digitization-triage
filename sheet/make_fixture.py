@@ -32,8 +32,11 @@ from PIL import Image, ImageDraw
 DOCS = [
     ("11", "DOC_A", [
         ("FIG1", "2", 4, "ACCEPTABLE",
-         "Figure 1. Kaplan-Meier curves. (A) overall, (B) by stage, "
-         "(C) by age, (D) sensitivity analysis excluding the first year.",
+         "Figure 1. Kaplan-Meier estimates of biochemical recurrence-free "
+         "survival among men treated with radical prostatectomy, stratified "
+         "by renin-angiotensin system inhibitor use at baseline. "
+         "(A) overall, (B) by stage, (C) by age at diagnosis, and "
+         "(D) a sensitivity analysis excluding the first year of follow-up.",
          0.94, ""),
         ("FIG2", "5", 1, "ACCEPTABLE",
          "Figure 2. Forest plot of the adjusted hazard ratios.", 0.88, ""),

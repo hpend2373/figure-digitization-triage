@@ -38,6 +38,39 @@
     } catch (e) { store = {}; }
   }
 
+  /* THE PICTURE, AT THE SIZE IT WAS CUT. The grid's thumbnail is 300px wide;
+   * the crop it came from is not, and until now those pixels were not in the
+   * page at all. Clicking the thumbnail - or pressing z on a row - opens the
+   * large copy. Nothing here suggests a count; it only lets one be seen. */
+  var lb = document.getElementById('lb');
+  var lbimg = document.getElementById('lbimg');
+  var lbcap = document.getElementById('lbcap');
+
+  function openZoom(fig) {
+    var t = fig && fig.querySelector('img.thumb[data-zoom]');
+    if (!t) return;
+    lbimg.src = t.getAttribute('data-zoom');
+    var cap = fig.querySelector('.cap');
+    lbcap.textContent = cap ? cap.textContent.slice(0, 160) : '';
+    lb.classList.add('on');
+  }
+
+  function closeZoom() { lb.classList.remove('on'); lbimg.removeAttribute('src'); }
+
+  lb.addEventListener('click', function (e) {
+    if (e.target === lb || e.target.id === 'lbclose') closeZoom();
+  });
+  document.getElementById('lbclose').addEventListener('click', closeZoom);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && lb.classList.contains('on')) closeZoom();
+  });
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t && t.tagName === 'IMG' && t.classList.contains('thumb')) {
+      openZoom(t.closest('.fig'));
+    }
+  });
+
   var restored = restoreEntries(store, ROWS);
   var applied = restored.applied;
   if (restored.rejected.length) {
@@ -69,9 +102,28 @@
   }
 
   function tally() {
-    var n = Object.keys(applied).length;
-    cnt.textContent = n + ' / ' + countable.length + ' 입력됨 · 계수 불가 ' +
-      (ROWS.length - countable.length) + '행 · 전체 ' + ROWS.length + '행';
+    var r = remaining(ROWS, applied);
+    cnt.textContent = r.done + ' / ' + r.open + ' 입력됨 · 남은 ' + r.left +
+      '행 · 계수 불가 ' + (ROWS.length - r.open) + '행 · 전체 ' +
+      ROWS.length + '행';
+  }
+
+  var byInput = {};
+
+  /* ENTER GOES TO THE NEXT ROW THAT CAN TAKE A NUMBER. 415 of these means 415
+   * reaches for the mouse otherwise, and a hand that leaves the keyboard
+   * between every figure is a hand that starts skipping. Where "next" is
+   * lives in sheet_logic.js, under test. */
+  function focusRow(id) {
+    var el = byInput[id];
+    if (!el) return;
+    el.focus();
+    var fig = el.closest('.fig');
+    fig.scrollIntoView({ block: 'center' });
+    document.querySelectorAll('.fig.here').forEach(function (f) {
+      f.classList.remove('here');
+    });
+    fig.classList.add('here');
   }
 
   function msgFor(id) {
@@ -80,6 +132,28 @@
 
   inputs.forEach(function (i) {
     var id = i.dataset.id;
+    byInput[id] = i;
+    if (!i.disabled) {
+      i.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var nxt = nextOpenId(ROWS, id);
+          if (nxt) focusRow(nxt);
+          else i.blur();
+        } else if (e.key === 'z' || e.key === 'Z') {
+          /* The picture is a keystroke away, so looking closer costs nothing.
+           * A count made without looking closer is the thing to avoid. */
+          e.preventDefault();
+          openZoom(i.closest('.fig'));
+        }
+      });
+      i.addEventListener('focus', function () {
+        document.querySelectorAll('.fig.here').forEach(function (f) {
+          f.classList.remove('here');
+        });
+        i.closest('.fig').classList.add('here');
+      });
+    }
     if (applied[id] !== undefined) {
       i.value = applied[id];
       i.closest('.fig').classList.add('done');

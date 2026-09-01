@@ -219,6 +219,30 @@ def thumb(path, width=300, quality=58):
             + base64.b64encode(buf.getvalue()).decode("ascii"))
 
 
+#: WHAT THE COUNTING ACTUALLY NEEDS. The sheet embedded one 300px-wide JPEG
+#: at quality 58 per row and nothing else, so 41% of the countable rows
+#: rendered under 200px tall and there was no way to see more: no zoom, and no
+#: pixels in the page to zoom into. A person was being asked to count axis
+#: regions in a picture that cannot show them. The thumbnail still lays out
+#: the grid; this is what opens when the picture is clicked.
+ZOOM_QUALITY = int(os.environ.get("FDT_ZOOM_QUALITY", "85"))
+#: 0 means "as large as the crop is". A cap exists only for the case where a
+#: crop is a whole page raster at 600 dpi.
+ZOOM_MAX_WIDTH = int(os.environ.get("FDT_ZOOM_MAX_WIDTH", "0"))
+
+
+def zoom(path):
+    im = Image.open(path).convert("RGB")
+    if ZOOM_MAX_WIDTH and im.width > ZOOM_MAX_WIDTH:
+        im = im.resize((ZOOM_MAX_WIDTH,
+                        max(1, round(im.height * ZOOM_MAX_WIDTH / im.width))),
+                       Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=ZOOM_QUALITY, optimize=True)
+    return ("data:image/jpeg;base64,"
+            + base64.b64encode(buf.getvalue()).decode("ascii"))
+
+
 def pages_text(L):
     """The ledger's own blank, preserved. Never printed as a number."""
     v = (L.get("Page_Count") or "").strip()
@@ -256,6 +280,17 @@ gap:14px}
 .fig{border:1px solid var(--rule);border-radius:3px;padding:9px;font-size:12px}
 .fig img{width:100%;display:block;background:#fff;border:1px solid var(--rule)}
 .fig .cap{color:var(--mut);margin:6px 0 8px}
+.fig img.thumb{cursor:zoom-in}
+.fig img.thumb[data-zoom]{outline:1px solid transparent}
+.fig input:focus{outline:2px solid var(--acc);outline-offset:1px}
+.fig.here{box-shadow:0 0 0 3px rgba(43,76,126,.35)}
+#lb{position:fixed;inset:0;background:rgba(20,19,17,.92);display:none;
+z-index:50;overflow:auto;padding:24px}
+#lb.on{display:block}
+#lb img{display:block;margin:0 auto;background:#fff;max-width:none}
+#lbbar{position:sticky;top:0;display:flex;gap:12px;align-items:center;
+color:#fff;font-size:13px;margin-bottom:12px}
+#lbbar button{background:#fff;color:var(--ink);border-color:#fff}
 .fig label{display:flex;gap:7px;align-items:center;font-size:12.5px}
 .fig input{width:66px;font:inherit;padding:4px 6px;border:1px solid var(--rule);
 border-radius:3px}
@@ -289,6 +324,10 @@ w("<div class='sub'>102편 · 캡션 후보 %d행 · 빌드 <code>%s</code> · "
   "P1 → P2 순</div>" % (len(DRAFT), esc(BUILD_ID)))
 
 w("<div id='storagewarn'></div>")
+# The picture, at the size it was cut. Sits outside the cards so opening it
+# never moves the grid under the person's cursor.
+w("<div id='lb'><div id='lbbar'><button id='lbclose'>닫기 (Esc)</button>"
+  "<span id='lbcap'></span></div><img id='lbimg' alt=''></div>")
 
 w("""<div class='stop'><b>아직 계수를 시작하지 마십시오.</b> 이 2판은
 2차 감사가 지적한 <b>안전성 결함</b>(입력 검증 없음, 저장 실패 무경고,
@@ -341,8 +380,14 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
     for d in ds:
         did = d["Draft_ID"]
         p = os.path.join(D, d["Figure_Crop"]) if d["Figure_Crop"] else ""
-        img = (("<img src='%s' alt=''>" % thumb(p))
-               if p and os.path.exists(p) else
+        has_img = bool(p) and os.path.exists(p)
+        # The large copy rides along only for rows that can take a number.
+        # A blocked row is not going to be counted from, and its full-size
+        # crop would be most of the file.
+        big = (" data-zoom='%s'" % zoom(p)
+               if has_img and not blocked_reason(d) else "")
+        img = (("<img class='thumb' src='%s' alt=''%s>" % (thumb(p), big))
+               if has_img else
                "<div class='cap'>[페이지 이미지 없음 — 원문에 그림이 "
                "포함되어 있지 않습니다]</div>")
         br, ca = blocked_reason(d), caution(d)
@@ -359,7 +404,11 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
           "<div class='cap'><b>%s</b> · p.%s<br>%s<br>%s</div>"
           % (" blocked" if br else "", esc(did), esc(FP[did]), img,
              esc(d["Figure_Number"]), esc(d["Page"]), "".join(badges),
-             esc((d["Caption_Text"] or "")[:120])))
+             # THE CAPTION IS THE DOCUMENT'S OWN ACCOUNT OF ITS PANELS, and it
+             # was cut at 120 characters - which is where "(A) ... (B) ..."
+             # usually begins. Showing it whole is showing the source, not
+             # suggesting a number.
+             esc(d["Caption_Text"] or "")))
         if sent:
             w("<div class='why'><b>기계가 스스로 남긴 의심:</b> %s</div>"
               % esc(sent["reason"]))

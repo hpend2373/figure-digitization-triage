@@ -95,8 +95,39 @@ function buildCsv(rows, applied, buildId) {
   return lines.join('\n');
 }
 
+/* WHERE TO GO NEXT. 415 countable rows means 415 reaches for the mouse, and a
+ * hand leaving the keyboard between every figure is a hand that starts
+ * skipping. Enter moves to the next row that can take a number - the blocked
+ * ones are not stops, because nothing can be typed there. It stops at the end
+ * rather than wrapping: coming back around to a row already counted is how a
+ * value gets typed over one that was right. */
+function nextOpenId(rows, currentId) {
+  var seen = currentId === null || currentId === undefined;
+  for (var i = 0; i < rows.length; i++) {
+    if (!seen) { if (rows[i].Draft_ID === currentId) seen = true; continue; }
+    if (rows[i].Count_Blocked !== '1') return rows[i].Draft_ID;
+  }
+  return null;
+}
+
+/* What is left to do, counted the way the person experiences it: rows that
+ * can take a number and do not have one. A blocked row is not "remaining" -
+ * it can never be done - and counting it as such told the old sheet's
+ * progress line that 649 rows were outstanding when 415 were. */
+function remaining(rows, applied) {
+  var left = 0, open = 0;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].Count_Blocked === '1') continue;
+    open++;
+    var v = (applied || {})[rows[i].Draft_ID];
+    if (v === undefined || v === null || v === '') left++;
+  }
+  return { open: open, left: left, done: open - left };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { PANEL_MAX: PANEL_MAX, validatePanelCount: validatePanelCount,
                      restoreEntries: restoreEntries, entryStatus: entryStatus,
-                     buildCsv: buildCsv, CSV_COLUMNS: CSV_COLUMNS };
+                     buildCsv: buildCsv, CSV_COLUMNS: CSV_COLUMNS,
+                     nextOpenId: nextOpenId, remaining: remaining };
 }

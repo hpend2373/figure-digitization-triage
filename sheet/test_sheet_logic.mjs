@@ -123,5 +123,36 @@ test('큰따옴표가 든 값이 CSV를 깨지 않는다', () => {
   assert.match(L.buildCsv(rows, {}, 'B'), /"a ""quoted"" name\.pdf"/);
 });
 
+/* ---- where the keyboard goes next, and what is actually left ---- */
+const seq = [row('a', 'f1'), row('b', 'f2', { Count_Blocked: '1' }),
+             row('c', 'f3'), row('d', 'f4', { Count_Blocked: '1' })];
+
+test('Enter는 다음으로 숫자를 넣을 수 있는 행으로 간다', () => {
+  assert.equal(L.nextOpenId(seq, 'a'), 'c');
+});
+test('막힌 행은 멈춰 서는 자리가 아니다', () => {
+  assert.equal(L.nextOpenId(seq, null), 'a');
+  assert.equal(L.nextOpenId([seq[1], seq[0]], null), 'a');
+});
+test('끝에서는 처음으로 돌아가지 않는다 - 센 값을 덮어쓰게 된다', () => {
+  assert.equal(L.nextOpenId(seq, 'c'), null);
+});
+test('사라진 행에서 출발하면 아무 데도 가지 않는다', () => {
+  assert.equal(L.nextOpenId(seq, 'zzz'), null);
+});
+test('남은 수는 입력 가능한 행만 센다', () => {
+  assert.deepEqual(L.remaining(seq, {}), { open: 2, left: 2, done: 0 });
+  assert.deepEqual(L.remaining(seq, { a: '4' }), { open: 2, left: 1, done: 1 });
+});
+test('막힌 행에 값이 있어도 진행률을 올리지 않는다', () => {
+  assert.deepEqual(L.remaining(seq, { b: '3' }), { open: 2, left: 2, done: 0 });
+});
+test('빈 문자열은 아직 안 한 것으로 센다', () => {
+  assert.deepEqual(L.remaining(seq, { a: '' }), { open: 2, left: 2, done: 0 });
+});
+test('0은 한 것으로 센다 - 빈칸과 다르다', () => {
+  assert.deepEqual(L.remaining(seq, { a: '0' }), { open: 2, left: 1, done: 1 });
+});
+
 console.log('\n' + (ran - failed) + '/' + ran + ' passed');
 process.exit(failed ? 1 : 0);

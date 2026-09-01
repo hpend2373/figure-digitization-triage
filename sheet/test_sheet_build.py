@@ -101,7 +101,13 @@ check("막힌 행은 이유를 함께 보여준다",
 
 # -------------------------------------------- 같은 그림, 같은 이미지
 def _img(did):
-    m = re.search(r"<img src='data:image/jpeg;base64,([^']+)'", BY_ID[did][3])
+    m = re.search(r"<img class='thumb' src='data:image/jpeg;base64,([^']+)'",
+                  BY_ID[did][3])
+    return base64.b64decode(m.group(1)) if m else None
+
+
+def _zoom(did):
+    m = re.search(r"data-zoom='data:image/jpeg;base64,([^']+)'", BY_ID[did][3])
     return base64.b64decode(m.group(1)) if m else None
 
 
@@ -115,6 +121,50 @@ check("크롭이 없는 행은 이미지 대신 그 사실을 말한다",
 check("바이트가 같은 크롭 두 행은 둘 다 막힌다",
       "disabled" in BY_ID["DOC_C_D001"][3]
       and "disabled" in BY_ID["DOC_C_D002"][3])
+
+# ------------------------------------------------ 볼 수 있어야 셀 수 있다
+# The sheet embedded one 300px JPEG per row and nothing else, so 41% of the
+# countable rows rendered under 200px tall and there was no way to see more.
+from PIL import Image                                            # noqa: E402
+
+
+def _size(blob):
+    return Image.open(io.BytesIO(blob)).size
+
+
+for _did in _open:
+    check("%s는 크롭 원본 해상도의 확대본을 함께 싣는다" % _did,
+          _zoom(_did) is not None)
+    if _zoom(_did):
+        _t, _z = _size(_img(_did)), _size(_zoom(_did))
+        _src = Image.open(os.path.join(
+            FX["draft"],
+            [d for d in DRAFT if d["Draft_ID"] == _did][0]["Figure_Crop"])).size
+        check("  %s의 확대본이 썸네일보다 크다" % _did, _z[0] > _t[0],
+              "%s vs %s" % (_z, _t))
+        check("  %s의 확대본이 크롭을 줄이지 않는다" % _did, _z == _src,
+              "%s vs 크롭 %s" % (_z, _src))
+
+check("막힌 행에는 확대본을 싣지 않는다 - 셀 일이 없는 그림이다",
+      all(_zoom(d) is None for d in BY_ID if d not in _open))
+check("확대창과 닫기 수단이 페이지에 있다",
+      "id='lb'" in S and "id='lbclose'" in S and "Esc" in S)
+check("확대는 마우스 없이도 열린다",
+      "'z'" in S and "openZoom" in S)
+check("Enter가 다음 입력 가능 행으로 간다",
+      "nextOpenId(ROWS, id)" in S)
+
+# --------------------------------------------- 캡션은 잘리면 증거가 아니다
+# "(A) ... (B) ..." is where a caption says how many panels there are, and it
+# is also where a 120-character cut lands.
+_long = [d for d in DRAFT if len(d["Caption_Text"]) > 120]
+check("픽스처에 120자를 넘는 캡션이 있다", bool(_long))
+for d in _long:
+    check("%s의 캡션이 통째로 실린다" % d["Draft_ID"],
+          d["Caption_Text"][-40:] in BY_ID[d["Draft_ID"]][3].replace("&#x27;", "'")
+          or d["Caption_Text"][-40:] in S)
+check("캡션을 접어 감추지 않는다",
+      "max-height:46px" not in S and "text-overflow:ellipsis" not in S)
 
 # ------------------------------------------------------------ 총계 없음
 check("그림 총계를 지어내지 않는다",

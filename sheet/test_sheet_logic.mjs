@@ -154,5 +154,48 @@ test('0은 한 것으로 센다 - 빈칸과 다르다', () => {
   assert.deepEqual(L.remaining(seq, { a: '0' }), { open: 2, left: 1, done: 1 });
 });
 
+/* ---- 봤지만 셀 수 없음: 빈칸이 감당하던 두 번째 뜻 ---- */
+test('이유 없는 "셀 수 없음"은 받지 않는다', () => {
+  assert.equal(L.validateUncountable('').ok, false);
+  assert.equal(L.validateUncountable('   ').ok, false);
+});
+test('이유가 있으면 받고, 200자에서 자른다', () => {
+  assert.equal(L.validateUncountable(' 인셋이 축인지 모르겠음 ').value,
+               '인셋이 축인지 모르겠음');
+  assert.equal(L.validateUncountable('가'.repeat(400)).value.length, 200);
+});
+test('셀 수 없음은 안 본 것과 다른 상태다', () => {
+  assert.equal(L.entryStatus(row('a', 'f'), {}, {}), 'NOT_REVIEWED');
+  assert.equal(L.entryStatus(row('a', 'f'), {}, { a: '이유' }),
+               'SEEN_UNCOUNTABLE');
+});
+test('숫자가 있으면 숫자가 이긴다', () => {
+  assert.equal(L.entryStatus(row('a', 'f'), { a: '3' }, { a: '이유' }),
+               'ENTERED');
+});
+test('막힌 행은 무엇을 붙여도 막힌 행이다', () => {
+  assert.equal(L.entryStatus(row('a', 'f', { Count_Blocked: '1' }), {},
+                             { a: '이유' }), 'BLOCKED_BAD_CROP');
+});
+test('CSV가 이유를 함께 내보낸다', () => {
+  const line = L.buildCsv([row('a', 'f')], {}, 'B', { a: '스캔이 거침' })
+    .split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Entry_Status')],
+               '"SEEN_UNCOUNTABLE"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Uncountable_Reason')],
+               '"스캔이 거침"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Observed_Panel_Count')], '""');
+});
+test('숫자를 넣은 행에는 이유를 내보내지 않는다', () => {
+  const line = L.buildCsv([row('a', 'f')], { a: '2' }, 'B', { a: '옛 이유' })
+    .split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Uncountable_Reason')], '""');
+});
+test('셀 수 없음으로 정리된 행은 남은 일이 아니다', () => {
+  const rs = [row('a', 'f1'), row('b', 'f2')];
+  assert.deepEqual(L.remaining(rs, {}, { a: '이유' }),
+                   { open: 2, left: 1, done: 1 });
+});
+
 console.log('\n' + (ran - failed) + '/' + ran + ' passed');
 process.exit(failed ? 1 : 0);

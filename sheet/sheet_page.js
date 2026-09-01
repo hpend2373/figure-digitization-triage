@@ -7,6 +7,11 @@
  * each entry still carries its row's fingerprint. */
 (function () {
   var KEY = 'fdt_panel_counts::' + BUILD_ID;
+  /* Kept beside the counts rather than inside them: a count carries the row
+   * fingerprint and is refused when the row changes, and a reason someone
+   * wrote about a figure that has since been recut should be refused the same
+   * way. Same key shape, same build id, checked against the same rows. */
+  var UNC_KEY = 'fdt_panel_uncountable::' + BUILD_ID;
   var store = {};
   var storageOk = true;
   var warn = document.getElementById('storagewarn');
@@ -71,6 +76,20 @@
     }
   });
 
+  var uncStore = {};
+  if (storageOk) {
+    try {
+      var rawU = localStorage.getItem(UNC_KEY);
+      var pu = rawU ? JSON.parse(rawU) : {};
+      uncStore = (pu && typeof pu === 'object' && !Array.isArray(pu)) ? pu : {};
+    } catch (e) { uncStore = {}; }
+  }
+  var restoredU = restoreWith(uncStore, ROWS, validateUncountable);
+  var uncountable = {};
+  Object.keys(restoredU.applied).forEach(function (id) {
+    uncountable[id] = restoredU.applied[id];
+  });
+
   var restored = restoreEntries(store, ROWS);
   var applied = restored.applied;
   if (restored.rejected.length) {
@@ -102,7 +121,7 @@
   }
 
   function tally() {
-    var r = remaining(ROWS, applied);
+    var r = remaining(ROWS, applied, uncountable);
     cnt.textContent = r.done + ' / ' + r.open + ' 입력됨 · 남은 ' + r.left +
       '행 · 계수 불가 ' + (ROWS.length - r.open) + '행 · 전체 ' +
       ROWS.length + '행';
@@ -187,6 +206,10 @@
       }
       fig.classList.remove('err');
       msg.textContent = '';
+      if (i.value.trim() !== '' && uncountable[id]) {
+        delete uncountable[id]; delete uncStore[id]; persistUnc();
+        paintUnc(id);
+      }
       if (v.value === null) {
         delete applied[id];
         delete store[id];
@@ -214,8 +237,66 @@
     tally();
   });
 
+  /* The third state, wired. Checking the box asks for a reason; a reason that
+   * is not given leaves the row as it was, because "cannot tell" with nothing
+   * said is indistinguishable from not having looked. Typing a number clears
+   * it - a row that got counted is not a row that could not be. */
+  function persistUnc() {
+    if (!storageOk) return;
+    try { localStorage.setItem(UNC_KEY, JSON.stringify(uncStore)); }
+    catch (e) { showStorageWarning('저장 중 오류가 났습니다 (' + e.name + ').'); }
+  }
+
+  function paintUnc(id) {
+    var box = document.querySelector('[data-unc="' + CSS.escape(id) + '"]');
+    var why = document.querySelector('[data-uncwhy="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    var on = !!uncountable[id];
+    box.checked = on;
+    why.hidden = !on && !box.checked;
+    if (on) why.value = uncountable[id];
+    box.closest('.fig').classList.toggle('unc', on);
+  }
+
+  ROWS.forEach(function (r) {
+    var id = r.Draft_ID;
+    var box = document.querySelector('[data-unc="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    var why = document.querySelector('[data-uncwhy="' + CSS.escape(id) + '"]');
+    paintUnc(id);
+    box.addEventListener('change', function () {
+      why.hidden = !box.checked;
+      if (box.checked) { why.focus(); }
+      else { delete uncountable[id]; delete uncStore[id]; persistUnc(); }
+      msgFor(id).textContent = box.checked && !why.value.trim()
+        ? '왜 셀 수 없는지 한 줄 적어 주세요' : '';
+      paintUnc(id);
+      tally();
+    });
+    why.addEventListener('input', function () {
+      var v = validateUncountable(why.value);
+      if (!v.ok) {
+        delete uncountable[id]; delete uncStore[id];
+        msgFor(id).textContent = v.error;
+      } else {
+        var input = byInput[id];
+        if (input && input.value.trim() !== '') {
+          input.value = '';
+          delete applied[id]; delete store[id]; persist();
+          input.closest('.fig').classList.remove('done');
+        }
+        uncountable[id] = v.value;
+        uncStore[id] = { v: v.value, fp: r.Row_Fingerprint };
+        msgFor(id).textContent = '';
+      }
+      persistUnc();
+      paintUnc(id);
+      tally();
+    });
+  });
+
   document.getElementById('dl').addEventListener('click', function () {
-    var csv = buildCsv(ROWS, applied, BUILD_ID);
+    var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable);
     var b = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(b);

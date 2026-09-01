@@ -291,6 +291,10 @@ gap:14px}
 .fig img.thumb{cursor:zoom-in}
 .fig img.thumb[data-zoom]{outline:1px solid transparent}
 .fig input:focus{outline:2px solid var(--acc);outline-offset:1px}
+.fig label.unc{margin-top:5px;font-size:12px;color:var(--mut)}
+.fig label.unc input{width:auto}
+.fig .uncwhy{width:100%;margin-top:4px;font-size:12px}
+.fig.unc{border-color:#c9b48a;background:#fffaf0}
 .fig.here{box-shadow:0 0 0 3px rgba(43,76,126,.35)}
 #lb{position:fixed;inset:0;background:rgba(20,19,17,.92);display:none;
 z-index:50;overflow:auto;padding:24px}
@@ -351,6 +355,9 @@ w("""<div class='note'>각 그림에 <b>축 영역(패널)이 몇 개</b> 인쇄
 값이며 내보내기에서도 구별됩니다.</li>
 <li>0 이상 %d 이하의 <b>정수만</b> 저장됩니다. 그 밖의 값은 저장되지도,
 내보내지지도 않습니다.</li>
+<li>보긴 봤는데 셀 수 없으면 <b>봤지만 셀 수 없음</b>에 표시하고 이유를
+한 줄 적습니다. 빈칸으로 두면 아무도 안 본 것과 구별되지 않아, 다음 사람이
+같은 자리에서 다시 막힙니다.</li>
 <li><b>붉은 칸</b>은 크롭 결함이 확인되어 입력을 막은 행입니다.
 숫자를 넣을 수 없고, <code>BLOCKED_BAD_CROP</code>으로 내보내집니다.</li>
 <li>입력값은 브라우저에 저장되며, <b>행의 내용이 바뀌면 되살아나지
@@ -435,6 +442,15 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         else:
             w("<label>패널 수 <input type='number' min='0' max='40' "
               "step='1' data-id='%s'></label>" % esc(did))
+            # A BLANK MEANT "NOT LOOKED AT YET" AND NOTHING MEANT "LOOKED,
+            # CANNOT TELL". A figure someone studied and could not resolve
+            # went back into the pile as unread - or the only way to make the
+            # row stop asking was to type a number.
+            w("<label class='unc'><input type='checkbox' data-unc='%s'> "
+              "봤지만 셀 수 없음</label>"
+              "<input class='uncwhy' type='text' data-uncwhy='%s' hidden "
+              "maxlength='200' placeholder='왜 셀 수 없는지 한 줄'>"
+              % (esc(did), esc(did)))
         w("<div class='msg' data-msg='%s'></div></div>" % esc(did))
     w("</div>")
     w("</div>")

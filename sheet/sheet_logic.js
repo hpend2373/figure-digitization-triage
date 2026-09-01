@@ -34,6 +34,14 @@ function validatePanelCount(raw) {
  * chapters renumbered - a row keeping its Draft_ID is not proof it is the same
  * figure, so the value is held back rather than silently reattached. */
 function restoreEntries(store, rows) {
+  return restoreWith(store, rows, validatePanelCount);
+}
+
+/* The same guard, for anything else typed against a row. A reason someone
+ * wrote about a figure that has since been recut is exactly as wrong as a
+ * count typed on it, and was one `validatePanelCount` away from being kept
+ * when the count beside it was thrown out. */
+function restoreWith(store, rows, validate) {
   var byId = {}, i;
   for (i = 0; i < rows.length; i++) byId[rows[i].Draft_ID] = rows[i];
   var applied = {}, rejected = [];
@@ -49,9 +57,9 @@ function restoreEntries(store, rows) {
       rejected.push({ id: id, reason: 'ROW_CHANGED' });
       continue;
     }
-    var v = validatePanelCount(e.v);
+    var v = validate(e.v);
     if (!v.ok) { rejected.push({ id: id, reason: 'INVALID_VALUE' }); continue; }
-    if (v.value !== null) applied[id] = v.value;
+    if (v.value !== null && v.value !== '') applied[id] = v.value;
   }
   return { applied: applied, rejected: rejected };
 }
@@ -60,11 +68,31 @@ function restoreEntries(store, rows) {
  * crop holds a neighbouring figure, or clips the target, or is the wrong
  * region entirely. They export as BLOCKED_BAD_CROP with an empty count, never
  * as 0. */
-function entryStatus(row, applied) {
+/* A BLANK MEANT "NOT LOOKED AT YET", AND THERE WAS NOWHERE ELSE TO PUT
+ * "LOOKED, CANNOT TELL". So a figure a person studied and could not resolve -
+ * an inset that may or may not be its own axes, a panel running off the crop,
+ * a scan too coarse at any zoom - went back into the pile as unread, to be
+ * done again by someone who would reach the same place. Or worse: the only
+ * way to make the row stop asking was to type a number.
+ *
+ * The reason is required, because "cannot tell" without one is indistinguish-
+ * able from not having tried, which is the state it exists to separate. */
+function entryStatus(row, applied, uncountable) {
   if (row.Count_Blocked === '1') return 'BLOCKED_BAD_CROP';
   if (Object.prototype.hasOwnProperty.call(applied, row.Draft_ID))
     return 'ENTERED';
+  if ((uncountable || {})[row.Draft_ID]) return 'SEEN_UNCOUNTABLE';
   return 'NOT_REVIEWED';
+}
+
+function validateUncountable(raw) {
+  var s = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (s === '') {
+    return { ok: false, value: '',
+             error: '왜 셀 수 없는지 한 줄 적어 주세요 — 이유 없는 ' +
+                    '"셀 수 없음"은 안 본 것과 구별되지 않습니다' };
+  }
+  return { ok: true, value: s.slice(0, 200), error: '' };
 }
 
 function csvCell(s) {
@@ -74,19 +102,24 @@ function csvCell(s) {
 
 var CSV_COLUMNS = ['Draft_ID', 'Source_Document_ID', 'Source_File', 'Page',
                    'Figure_Number', 'Crop_Quality_Status', 'Row_Fingerprint',
-                   'Observed_Panel_Count', 'Entry_Status', 'Sheet_Build_ID'];
+                   'Observed_Panel_Count', 'Entry_Status', 'Uncountable_Reason',
+                   'Sheet_Build_ID'];
 
-function buildCsv(rows, applied, buildId) {
+function buildCsv(rows, applied, buildId, uncountable) {
   var lines = [CSV_COLUMNS.join(',')];
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    var status = entryStatus(r, applied);
+    var status = entryStatus(r, applied, uncountable);
     var count = status === 'ENTERED' ? applied[r.Draft_ID] : '';
     var out = [];
     for (var c = 0; c < CSV_COLUMNS.length; c++) {
       var k = CSV_COLUMNS[c];
       if (k === 'Observed_Panel_Count') out.push(csvCell(count));
       else if (k === 'Entry_Status') out.push(csvCell(status));
+      else if (k === 'Uncountable_Reason') {
+        out.push(csvCell(status === 'SEEN_UNCOUNTABLE'
+                         ? (uncountable || {})[r.Draft_ID] : ''));
+      }
       else if (k === 'Sheet_Build_ID') out.push(csvCell(buildId));
       else out.push(csvCell(r[k]));
     }
@@ -114,20 +147,27 @@ function nextOpenId(rows, currentId) {
  * can take a number and do not have one. A blocked row is not "remaining" -
  * it can never be done - and counting it as such told the old sheet's
  * progress line that 649 rows were outstanding when 415 were. */
-function remaining(rows, applied) {
+function remaining(rows, applied, uncountable) {
   var left = 0, open = 0;
   for (var i = 0; i < rows.length; i++) {
     if (rows[i].Count_Blocked === '1') continue;
     open++;
-    var v = (applied || {})[rows[i].Draft_ID];
-    if (v === undefined || v === null || v === '') left++;
+    var id = rows[i].Draft_ID;
+    var v = (applied || {})[id];
+    // A row settled as "looked, cannot tell" is settled. It is not waiting
+    // for anyone, and leaving it in the outstanding count is what would send
+    // a person back to it to reach the same place again.
+    if ((v === undefined || v === null || v === '')
+        && !(uncountable || {})[id]) left++;
   }
   return { open: open, left: left, done: open - left };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { PANEL_MAX: PANEL_MAX, validatePanelCount: validatePanelCount,
-                     restoreEntries: restoreEntries, entryStatus: entryStatus,
+                     restoreEntries: restoreEntries,
+                     restoreWith: restoreWith, entryStatus: entryStatus,
                      buildCsv: buildCsv, CSV_COLUMNS: CSV_COLUMNS,
-                     nextOpenId: nextOpenId, remaining: remaining };
+                     nextOpenId: nextOpenId, remaining: remaining,
+                     validateUncountable: validateUncountable };
 }

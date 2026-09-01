@@ -172,6 +172,17 @@ check("캡션을 접어 감추지 않는다",
 check("그림 총계를 지어내지 않는다",
       not re.search(r"그림 총\s*\d|총 그림\s*\d", S))
 
+# ------------------------------------------ 빈칸이 감당하던 두 번째 뜻
+for _did in _open:
+    check("%s에 '봤지만 셀 수 없음'과 이유 칸이 있다" % _did,
+          "data-unc='%s'" % _did in BY_ID[_did][3]
+          and "data-uncwhy='%s'" % _did in BY_ID[_did][3])
+check("막힌 행에는 그 칸을 두지 않는다 - 볼 그림이 없다",
+      all("data-unc=" not in BY_ID[d][3] for d in BY_ID if d not in _open))
+check("이유가 CSV 열로 나간다", "Uncountable_Reason" in S)
+check("안내문이 빈칸과 '셀 수 없음'의 차이를 말한다",
+      "봤지만 셀 수 없음" in S and "안 본 것과 구별되지 않아" in S)
+
 # -------------------------------------------------- 배치로 쪼갤 때
 # The crops now ride at the resolution they were cut at, so one file of 604 of
 # them is not a file a browser opens. Sheets fill to a byte budget.

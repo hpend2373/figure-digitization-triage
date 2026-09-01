@@ -31,12 +31,12 @@ def check(name, ok, detail=""):
 BUILD = "sheet-2026-09-01-abcdef12"
 
 
-def row(did, status="ENTERED", value="4", build=BUILD):
+def row(did, status="ENTERED", value="4", build=BUILD, why=""):
     return {"Draft_ID": did, "Source_Document_ID": "DOC", "Source_File": "f.pdf",
             "Page": "3", "Figure_Number": "FIG1",
             "Crop_Quality_Status": "ACCEPTABLE", "Row_Fingerprint": "fp" + did,
             "Observed_Panel_Count": value, "Entry_Status": status,
-            "Sheet_Build_ID": build}
+            "Uncountable_Reason": why, "Sheet_Build_ID": build}
 
 
 DRAFT = [{"Draft_ID": "A"}, {"Draft_ID": "B"}, {"Draft_ID": "C"}]
@@ -82,6 +82,21 @@ check("알 수 없는 상태는 거부한다",
 check("0은 유효한 입력이다 - 빈칸과 다르다",
       M.merge(DRAFT, [("p1.csv", [row("A", value="0"), row("B"),
                                   row("C")])])[1] == [])
+
+# ------------------------------- 봤지만 셀 수 없음: 이유가 있어야 한다
+check("이유가 붙은 '셀 수 없음'은 통과한다",
+      M.merge(DRAFT, [("p1.csv", [row("A", "SEEN_UNCOUNTABLE", "", why="인셋"),
+                                  row("B"), row("C")])])[1] == [])
+check("이유 없는 '셀 수 없음'은 거부한다 - 안 본 것과 같아진다",
+      "REASON_MISSING" in codes([("p1.csv", [row("A", "SEEN_UNCOUNTABLE", ""),
+                                             row("B"), row("C")])]))
+check("'셀 수 없음'이 숫자를 달고 있으면 거부한다",
+      "VALUE_INVALID" in codes([("p1.csv", [row("A", "SEEN_UNCOUNTABLE", "3",
+                                                why="인셋"),
+                                            row("B"), row("C")])]))
+check("숫자를 넣은 행이 이유를 달고 있으면 거부한다",
+      "VALUE_INVALID" in codes([("p1.csv", [row("A", why="옛 이유"), row("B"),
+                                            row("C")])]))
 
 # ------------------------------------------------------- 명령줄 전체
 TMP = tempfile.mkdtemp(prefix="fdt-merge-")

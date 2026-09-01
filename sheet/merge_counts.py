@@ -18,6 +18,9 @@ What it refuses, and why each one is a way to be wrong:
   ROW_UNKNOWN       an exported row the draft does not have.
   ROW_MISSING       a draft row no export covers. A sheet was not downloaded,
                     and the gap is silent in a pile of CSVs.
+  REASON_MISSING    a row marked "looked, cannot tell" with nothing said. That
+                    is not distinguishable from not having looked, which is
+                    the state it exists to separate.
   VALUE_INVALID     a count that is not a whole number in range, or a count on
                     a row the sheet had blocked.
 
@@ -36,8 +39,10 @@ import sys
 PANEL_MAX = 40
 COLUMNS = ["Draft_ID", "Source_Document_ID", "Source_File", "Page",
            "Figure_Number", "Crop_Quality_Status", "Row_Fingerprint",
-           "Observed_Panel_Count", "Entry_Status", "Sheet_Build_ID"]
-STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP")
+           "Observed_Panel_Count", "Entry_Status", "Uncountable_Reason",
+           "Sheet_Build_ID"]
+STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP",
+            "SEEN_UNCOUNTABLE")
 
 
 def read(path):
@@ -96,6 +101,16 @@ def merge(draft_rows, exports):
             problems.append(("VALUE_INVALID",
                              "%s: 상태가 %s인데 값 %r을 달고 있습니다"
                              % (did, status, value)))
+        why = (r.get("Uncountable_Reason") or "").strip()
+        if status == "SEEN_UNCOUNTABLE" and not why:
+            # Without one it is not distinguishable from not having looked,
+            # which is the state it exists to separate.
+            problems.append(("REASON_MISSING",
+                             "%s: 셀 수 없다고만 하고 이유가 없습니다" % did))
+        if status != "SEEN_UNCOUNTABLE" and why:
+            problems.append(("VALUE_INVALID",
+                             "%s: 상태가 %s인데 이유 %r을 달고 있습니다"
+                             % (did, status, why)))
 
     merged = [seen[d] for d in draft_ids if d in seen]
     return merged, problems

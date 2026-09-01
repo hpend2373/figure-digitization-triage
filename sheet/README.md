@@ -28,7 +28,7 @@
 아직 푸시되지 않아 공개 저장소에 존재하지 않았습니다. 재현 지점은 **버전 태그와
 파일 해시**로 잡습니다:
 
-    corpus_intake.py  sha256 = 292a404e6d3af41d2f526f25e270a35ecc32c7dbcea06d5ca47630b535d10aae
+    corpus_intake.py  sha256 = b54a1858a77c07d271c09c131bd78041b29455305d0337ebd20a4d974ef9acd7
 
 `git log --oneline` 에서 `v9.28`로 시작하는 커밋을 받은 뒤 그 파일 해시가 위와
 같은지 확인하십시오. 아래 크롭 도구들은 `FDT_REPO`로 그 클론을 가리킵니다.
@@ -39,14 +39,18 @@
     python3 -m playwright install chromium
     sudo apt-get install poppler-utils
 
-    $FDT_REPO/corpus_intake.py <PDF...> --out draft --render 150  # 1. 인테이크
+    $FDT_REPO/corpus_intake.py <PDF...> --out draft --render 200  # 1. 인테이크
     python3 build_sheet2.py                                       # 2. 시트
-    node    test_sheet_logic.mjs      #  19
-    python3 test_sheet_html.py        #  44
-    python3 test_sheet_browser.py     #  28
-    python3 mutate_intake.py          # 변이 28, 전부 사살되어야 함
+    node    test_sheet_logic.mjs      #  35
+    python3 test_sheet_html.py        #  54
+    python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
+    python3 test_sheet_build.py       #  99
+    python3 test_merge_counts.py      #  22
+    python3 verify_intake_images.py $FDT_RUN   # 초안이 부르는 이미지가 다 있고 끝까지 읽히는가
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
-    python3 regress_crop.py           # 크롭 회귀 (사람 판정 18건 재현 후 점수)
+    (저장소 루트) python3 test_sheet_blocks.py  #  42
+    (저장소 루트) python3 test_crop_truth.py    #  60
+    python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
 
 `build_sheet2.py`는 자기 옆의 `sheet_logic.js`·`sheet_page.js`를 읽습니다
 (4차 감사가 지적한 `/tmp/intake` 하드코딩을 없앴습니다). 그리고 시트를 쓸 때 자기가 읽은 두 CSV를 시트 옆에 복사합니다.
@@ -63,7 +67,7 @@
 `regress_crop.py`는 더 이상 잉크로 재지 않고, `crop_truth.py`가 들고 있는
 **사람이 페이지를 보고 기록한 그림 영역**에 대고 두 값을 냅니다 — 목표 그림을
 얼마나 담았는지(covered), 다른 그림을 얼마나 물었는지(intrusion). 그리고 점수를
-내기 전에 **자기부터 검사합니다**: 사람이 남긴 18건의 OK/WRONG 판정을 재현하지
+내기 전에 **자기부터 검사합니다**: 사람이 남긴 20건의 OK/WRONG 판정을 재현하지
 못하면 점수를 출력하지 않고 비정상 종료합니다.
 
 **이 하네스는 PDF를 열지 않습니다.** 상자도 페이지 크기도 배포된

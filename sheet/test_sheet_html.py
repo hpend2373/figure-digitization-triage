@@ -14,7 +14,11 @@ import sys
 
 import paths as PATHS
 
-SHEET = io.open(PATHS.SHEET, encoding="utf-8").read()
+# THE SHEET IS SEVERAL FILES NOW. The crops ride at the resolution they were
+# cut at, so it fills to a byte budget and starts a new file; these checks are
+# about the corpus, which is spread across all of them.
+SHEET = "\n".join(io.open(f, encoding="utf-8").read()
+                  for f in PATHS.parts_for(PATHS.SHEET))
 DRAFT = list(csv.DictReader(io.open(
     os.path.join(PATHS.DRAFT, "figure_intake_draft.csv"), encoding="utf-8")))
 LEDGER = list(csv.DictReader(io.open(

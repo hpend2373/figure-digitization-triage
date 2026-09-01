@@ -50,7 +50,9 @@ if RUN.returncode != 0:
     print("%d/%d" % (N[0] - len(FAIL), N[0]))
     raise SystemExit(1)
 
-S = io.open(SHEET, encoding="utf-8").read()
+import paths as PATHS                                            # noqa: E402
+PARTS = PATHS.parts_for(SHEET)
+S = "\n".join(io.open(f, encoding="utf-8").read() for f in PARTS)
 DRAFT = list(csv.DictReader(io.open(
     os.path.join(FX["draft"], "figure_intake_draft.csv"), encoding="utf-8")))
 WORK = list(csv.DictReader(io.open(FX["worklist"], encoding="utf-8")))
@@ -169,6 +171,52 @@ check("캡션을 접어 감추지 않는다",
 # ------------------------------------------------------------ 총계 없음
 check("그림 총계를 지어내지 않는다",
       not re.search(r"그림 총\s*\d|총 그림\s*\d", S))
+
+# -------------------------------------------------- 배치로 쪼갤 때
+# The crops now ride at the resolution they were cut at, so one file of 604 of
+# them is not a file a browser opens. Sheets fill to a byte budget.
+check("예산 안에 들어가면 한 파일 그대로다", len(PARTS) == 1, "%s" % PARTS)
+
+SPLIT = os.path.join(TMP, "split", "sheet.html")
+os.makedirs(os.path.dirname(SPLIT), exist_ok=True)
+RUN2 = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                      capture_output=True, text=True, cwd=HERE,
+                      env=dict(ENV, FDT_SHEET=SPLIT, FDT_SHEET_BUDGET="60000"))
+check("작은 예산으로 다시 빌드된다", RUN2.returncode == 0,
+      (RUN2.stderr or "")[-300:])
+SP = PATHS.parts_for(SPLIT)
+check("예산을 넘으면 여러 파일로 나온다", len(SP) > 1, "%s" % SP)
+
+_part_rows, _part_cards = [], []
+for _f in SP:
+    _t = io.open(_f, encoding="utf-8").read()
+    _part_rows.append([r["Draft_ID"] for r in json.loads(
+        re.search(r"const ROWS=(\[.*?\]);const BUILD_ID=", _t, re.S).group(1))])
+    _part_cards.append(re.findall(r"<h2>pid (\d+) ·", _t))
+
+check("한 문서가 두 파일로 쪼개지지 않는다",
+      all(len(set(c)) == len(c) for c in _part_cards)
+      and len(set().union(*[set(c) for c in _part_cards]))
+      == sum(len(c) for c in _part_cards))
+check("모든 행이 정확히 한 파일에만 있다",
+      sorted(sum(_part_rows, [])) == sorted(d["Draft_ID"] for d in DRAFT),
+      "%s" % _part_rows)
+check("각 파일은 자기가 보여주는 행만 ROWS로 싣는다",
+      all(sorted(ids) == sorted(re.findall(r"data-id='([^']+)'",
+                                io.open(f, encoding="utf-8").read())[:len(ids)])
+          or set(ids) <= set(re.findall(r"data-id='([^']+)'",
+                                        io.open(f, encoding="utf-8").read()))
+          for f, ids in zip(SP, _part_rows)))
+check("각 파일이 몇 번째 시트인지 말한다",
+      all(("%d / %d번째 시트" % (i, len(SP)))
+          in io.open(f, encoding="utf-8").read()
+          for i, f in enumerate(SP, 1)))
+check("나뉜 시트는 합치는 방법을 안내한다",
+      "merge_counts.py" in io.open(SP[0], encoding="utf-8").read())
+check("빌드 ID는 모든 파일에서 같다",
+      len({re.search(r'const BUILD_ID="([^"]+)"',
+                     io.open(f, encoding="utf-8").read()).group(1)
+           for f in SP}) == 1)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

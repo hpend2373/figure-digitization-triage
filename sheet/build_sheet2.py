@@ -249,8 +249,16 @@ def pages_text(L):
     return (v + "쪽") if v else "쪽수 없음"
 
 
-P = []
-w = P.append
+#: The page is assembled into whichever buffer is current, so the cards can be
+#: collected per document and dealt out into files afterwards.
+HEAD = []
+BUF = HEAD
+
+
+def w(x):
+    BUF.append(x)
+
+
 w("<!doctype html><html lang='ko'><head><meta charset='utf-8'>")
 w("<meta name='viewport' content='width=device-width,initial-scale=1'>")
 w("<title>패널 수 확인 시트 (2판) — 102편 / %d행</title>" % len(DRAFT))
@@ -353,11 +361,13 @@ w("<div class='bar'><button id='dl'>CSV 내려받기</button>"
   "<button class='g' id='clr'>입력 지우기</button>"
   "<span class='count' id='cnt'></span></div>")
 
+CARDS = []
 for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
     pid = wl["pid"]
     doc = DOC_OF[pid]
     L = LEDGER[doc]
     ds = BYDOC.get(doc, [])
+    BUF = []
     w("<div class='doc'><h2>pid %s · %s <span class='count'>%s</span></h2>"
       % (esc(pid), esc(os.path.basename(L["Input_Path"])), esc(wl["priority"])))
     w("<div class='meta'>워크리스트: 추출대상 %s · 그림수 %s · 형태 %s · %s"
@@ -375,6 +385,7 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
           % ((" <b style='color:#9a2f2f'>" + esc(extra) + ".</b>") if extra
              else "", esc(wl["figures"])))
         w("</div>")
+        CARDS.append((pid, [], "\n".join(BUF)))
         continue
     w("<div class='gal'>")
     for d in ds:
@@ -427,19 +438,62 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         w("<div class='msg' data-msg='%s'></div></div>" % esc(did))
     w("</div>")
     w("</div>")
+    CARDS.append((pid, [d["Draft_ID"] for d in ds], "\n".join(BUF)))
 
 # beside this file, not at an absolute path: the third audit could not
 # rebuild the sheet in a clean checkout because these two were pinned to
 # /tmp/intake.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-w("<script>%s</script>" % io.open(os.path.join(_HERE, "sheet_logic.js"),
-                                  encoding="utf-8").read())
-w("<script>const ROWS=%s;const BUILD_ID=%s;</script>"
-  % (json.dumps(ROWS, ensure_ascii=False), json.dumps(BUILD_ID)))
-w(io.open(os.path.join(_HERE, "sheet_page.js"), encoding="utf-8").read())
-w("</div></body></html>")
+_LOGIC = io.open(os.path.join(_HERE, "sheet_logic.js"), encoding="utf-8").read()
+_PAGE = io.open(os.path.join(_HERE, "sheet_page.js"), encoding="utf-8").read()
+_BY_ID = {r["Draft_ID"]: r for r in ROWS}
 
-io.open(OUT, "w", encoding="utf-8").write("\n".join(P))
+
+def tail(ids):
+    """The scripts, carrying ONLY the rows this file shows.
+
+    A part that declared all 649 rows would count rows it does not display as
+    outstanding, and would export them as NOT_REVIEWED - so two parts would
+    each make a claim about the same row and the merge would have to arbitrate
+    between a person's answer and a page that never asked the question.
+    """
+    return "\n".join([
+        "<script>%s</script>" % _LOGIC,
+        "<script>const ROWS=%s;const BUILD_ID=%s;</script>"
+        % (json.dumps([_BY_ID[i] for i in ids], ensure_ascii=False),
+           json.dumps(BUILD_ID)),
+        _PAGE, "</div></body></html>"])
+
+
+#: DOCUMENTS ARE NEVER SPLIT ACROSS FILES. A person works a document at a
+#: time, and half its figures in another file is how one gets skipped. Sheets
+#: fill to a byte budget and then start a new one.
+PARTS, cur, cur_ids, cur_bytes = [], [], [], 0
+_head = "\n".join(HEAD)
+_base = len(_head.encode("utf-8")) + len(_LOGIC.encode("utf-8")) \
+    + len(_PAGE.encode("utf-8"))
+for pid, ids, card in CARDS:
+    size = len(card.encode("utf-8"))
+    if cur and _base + cur_bytes + size > PATHS.SHEET_BUDGET:
+        PARTS.append((cur, cur_ids))
+        cur, cur_ids, cur_bytes = [], [], 0
+    cur.append(card)
+    cur_ids.extend(ids)
+    cur_bytes += size
+if cur or not PARTS:
+    PARTS.append((cur, cur_ids))
+
+_written = []
+for _i, (_cards, _ids) in enumerate(PARTS, 1):
+    _out = OUT if len(PARTS) == 1 else PATHS.part_path(OUT, _i)
+    _where = ("" if len(PARTS) == 1 else
+              "<div class='sub'><b>%d / %d번째 시트</b> · 이 파일의 행 %d개 · "
+              "입력은 시트마다 따로 저장되고, 시트마다 CSV를 내려받은 뒤 "
+              "<code>merge_counts.py</code>로 합칩니다.</div>"
+              % (_i, len(PARTS), len(_ids)))
+    io.open(_out, "w", encoding="utf-8").write(
+        "\n".join([_head, _where] + _cards + [tail(_ids)]))
+    _written.append(_out)
 
 # THE SHEET AND ITS DATA TRAVEL TOGETHER. The last delivery put a 639-row page
 # beside a 604-row CSV from an older walk, so nothing in the bundle described
@@ -448,9 +502,11 @@ import shutil
 for _name in ("figure_intake_draft.csv", "intake_document_status.csv"):
     shutil.copyfile(os.path.join(D, _name),
                     os.path.join(os.path.dirname(OUT), _name))
-print("%s  %.1f MB" % (OUT, os.path.getsize(OUT) / 1e6))
-print("행 %d · 카드 %d · 입력 가능 %d · 막음 %d (결함 %d + THIN %d + NO_CROP %d)"
-      % (len(DRAFT), len(WORK), COUNTABLE, BLOCKED,
+for _out in _written:
+    print("%s  %.1f MB" % (_out, os.path.getsize(_out) / 1e6))
+print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d "
+      "(결함 %d + THIN %d + NO_CROP %d)"
+      % (len(DRAFT), len(WORK), len(PARTS), COUNTABLE, BLOCKED,
          sum(1 for r in DEFECT.values() if r["classification"] == "FAIL"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP")))

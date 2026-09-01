@@ -19,7 +19,17 @@ from playwright.sync_api import sync_playwright
 
 import paths as PATHS
 
-SHEET = "file://" + PATHS.SHEET
+# ONE PART, DRIVEN END TO END. The sheet is several files now; this exercises
+# the largest of them, because the properties under test are per page - typing
+# into a row, the export's columns, what comes back after a reload - and a
+# page is a page. FDT_BROWSER_PART picks another one.
+_PARTS = PATHS.parts_for(PATHS.SHEET)
+if not _PARTS:
+    raise SystemExit("빌드된 시트가 없습니다: %s" % PATHS.SHEET)
+_PICK = os.environ.get("FDT_BROWSER_PART")
+SHEET = "file://" + (_PICK if _PICK else
+                     max(_PARTS, key=lambda f: os.path.getsize(f)))
+print("대상 시트: %s (%d개 중)" % (os.path.basename(SHEET), len(_PARTS)))
 ran = failed = 0
 
 
@@ -97,13 +107,18 @@ with sync_playwright() as pw:
           all(re.fullmatch(r"[0-9a-f]{12}", r["Row_Fingerprint"])
               and r["Sheet_Build_ID"].startswith("sheet-") for r in rows))
 
-    # ---- 첫 카드의 첫 그림: 화면 순서와 배열 순서가 다른 지점 -------------
-    first_dom = pg.eval_on_selector(
-        ".fig input[data-id]:not([disabled])", "e => e.dataset.id")
+    # ---- 값이 자기 행에 붙는가: 배열 첫 행이 아닌 칸을 골라서 -------------
+    # A value binding to ROWS[0] instead of its own row is the defect here, so
+    # the row has to be one that is NOT ROWS[0] - otherwise the check passes
+    # for a page that has the bug. It used to take the first enabled input on
+    # screen, which stopped being a different row once each file began
+    # carrying only the rows it shows.
     first_arr = pg.evaluate("ROWS[0].Draft_ID")
-    check("화면 첫 입력칸과 배열 첫 행은 서로 다른 행이다 (이 검사가 의미를 가짐)",
-          first_dom != first_arr, "%s == %s" % (first_dom, first_arr))
-    check("화면 첫 입력칸의 값이 배열 첫 행이 아니라 자기 행에 붙는다",
+    not_first = [i for i in enabled if i != first_arr]
+    check("배열 첫 행이 아닌 입력칸이 있다 (이 검사가 의미를 가짐)",
+          bool(not_first), "enabled=%d" % len(enabled))
+    first_dom = not_first[0]
+    check("입력한 값이 배열 첫 행이 아니라 자기 행에 붙는다",
           by[first_dom]["Observed_Panel_Count"] == want[first_dom]
           and by[first_arr]["Observed_Panel_Count"]
           != want.get(first_dom, "\0"))

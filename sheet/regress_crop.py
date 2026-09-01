@@ -187,17 +187,39 @@ def score(document_of, entries):
     return out
 
 
+#: The verdicts that mean "this cannot be scored" rather than a judgement.
+REFUSALS = (UNTRUSTED, AMBIGUOUS, NO_PAGE_SIZE)
+
+
 def calibrate(scored):
-    """The harness must agree with the person. Returns the disagreements."""
+    """The harness must agree with the person. Returns the disagreements.
+
+    A REFUSAL IS NOT A DISAGREEMENT, IF SOMEBODY WROTE IT DOWN. Equality was
+    the whole rule, so a crop the harness stopped being able to score read the
+    same as a crop it got wrong - and the two are opposite. Saying "I cannot
+    put a number on this" blocks the row exactly as WRONG does; what it costs
+    is coverage, not safety, and the cost is worth seeing rather than failing
+    on. It is tolerated only for the keys `crop_truth.NOT_SCORABLE` names, so
+    a case the harness newly loses its grip on is still a failure until a
+    person looks at it and records why.
+
+    Nothing tolerates the harness being MORE permissive than the person: a
+    crop somebody judged WRONG that comes back OK is the defect this file
+    exists for, and it is fatal wherever it appears.
+    """
     got = {k: v for k, _c, _i, v in scored}
-    bad = []
+    bad, tolerated = [], []
     for key, want in sorted(T.VISUAL_VERDICT.items()):
         have = got.get(key)
+        if have == want:
+            continue
         if have is None:
             bad.append((key, want, "not scored"))
-        elif have != want:
+        elif have in REFUSALS and key in T.NOT_SCORABLE:
+            tolerated.append((key, want, have))
+        else:
             bad.append((key, want, have))
-    return bad
+    return bad, tolerated
 
 
 if __name__ == "__main__":
@@ -220,7 +242,10 @@ if __name__ == "__main__":
               % ("%s/%s/p%s" % key, cov, intr, v))
 
     print()
-    bad = calibrate(scored)
+    bad, tolerated = calibrate(scored)
+    for key, want, have in tolerated:
+        print("점수 없음  %s/%s/p%s  사람은 %s, 하네스는 %s — %s"
+              % (key[0], key[1], key[2], want, have, T.NOT_SCORABLE[key]))
     if bad:
         print("THE HARNESS DISAGREES WITH THE PERSON - fix the harness first:")
         for key, want, have in bad:

@@ -17,8 +17,9 @@ import paths as PATHS
 # THE SHEET IS SEVERAL FILES NOW. The crops ride at the resolution they were
 # cut at, so it fills to a byte budget and starts a new file; these checks are
 # about the corpus, which is spread across all of them.
-SHEET = "\n".join(io.open(f, encoding="utf-8").read()
-                  for f in PATHS.parts_for(PATHS.SHEET))
+PART_TEXTS = [io.open(f, encoding="utf-8").read()
+              for f in PATHS.parts_for(PATHS.SHEET)]
+SHEET = "\n".join(PART_TEXTS)
 DRAFT = list(csv.DictReader(io.open(
     os.path.join(PATHS.DRAFT, "figure_intake_draft.csv"), encoding="utf-8")))
 LEDGER = list(csv.DictReader(io.open(
@@ -40,8 +41,18 @@ def check(name, cond, detail=""):
 
 ids = re.findall(r"<div class='fig[^']*' data-id='([^']+)'", SHEET)
 cards = re.findall(r"<h2>pid (\d+) ·", SHEET)
-ROWS = json.loads(re.search(r"const ROWS=(\[.*?\]);const BUILD_ID=",
-                            SHEET, re.S).group(1))
+# EVERY PART'S ROWS, NOT THE FIRST ONE'S. Each file declares only the rows it
+# shows, so a `re.search` here quietly reduced this whole suite to whatever
+# landed in part 1 - and it reported the corpus's defects as unblocked because
+# it could not see the rows they were on.
+ROWS = [r for m in re.finditer(r"const ROWS=(\[.*?\]);const BUILD_ID=",
+                               SHEET, re.S)
+        for r in json.loads(m.group(1))]
+_seen = {}
+for _r in ROWS:
+    if _r["Draft_ID"] in _seen:
+        raise SystemExit("행 %s가 두 시트에 있습니다" % _r["Draft_ID"])
+    _seen[_r["Draft_ID"]] = _r
 
 # --- W2: every document gets a card -----------------------------------------
 check("문서 102편이 모두 카드를 가진다 (감사 지적: 94)",
@@ -124,8 +135,12 @@ byid = {r["Draft_ID"]: r for r in ROWS}
 import urllib.parse
 _pid_of = {}
 for _w in WORK:
-    _p = urllib.parse.unquote(_w["href"][len("file://"):]).replace(
-        "/Users/minyeop/", "/mnt/user-data/uploads/")
+    # THE SAME REWRITE THE BUILDER USES. This file had the other copy of one
+    # machine's home directory in it, so against an intake run anywhere else
+    # `_pid_of` came out empty - and every check that asks "is this document's
+    # figure blocked" then found no rows and reported the corpus's confirmed
+    # defects as wide open.
+    _p = PATHS.rewrite(urllib.parse.unquote(_w["href"][len("file://"):]))
     for _L in LEDGER:
         if _L["Input_Path"] == _p:
             _pid_of[_L["Source_Document_ID"]] = _w["pid"]
@@ -246,9 +261,14 @@ check("저장소를 쓰기로 탐지한다 (읽기 성공만 믿지 않음)",
       "::probe" in SHEET)
 check("저장 키에 빌드 ID가 들어간다",
       "fdt_panel_counts::' + BUILD_ID" in SHEET)
+# PER FILE, NOT OVER THE JOIN. The sheet is several files now, and a property
+# each page must have ("at most one deliberate empty catch") multiplies by the
+# number of parts when it is counted over their concatenation.
 check("빈 catch로 실패를 삼키지 않는다",
-      len(re.findall(r"catch\s*\([^)]*\)\s*\{\s*\}", SHEET)) <= 1,
-      re.findall(r"catch\s*\([^)]*\)\s*\{\s*\}", SHEET))
+      all(len(re.findall(r"catch\s*\([^)]*\)\s*\{\s*\}", t)) <= 1
+          for t in PART_TEXTS),
+      [len(re.findall(r"catch\s*\([^)]*\)\s*\{\s*\}", t))
+       for t in PART_TEXTS])
 
 print("\n%d/%d passed" % (ran - failed, ran))
 sys.exit(1 if failed else 0)

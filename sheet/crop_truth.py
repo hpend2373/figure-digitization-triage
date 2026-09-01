@@ -88,6 +88,28 @@ FIGURE_REGIONS = {
 #: What a person judged of the crop the pipeline produced, at the fifth audit.
 #: The harness has to agree with this on every entry, or the harness is what is
 #: wrong. Kept beside the regions so the two cannot drift apart.
+#: Figures a person judged, that the harness can no longer put a number on.
+#:
+#: A REFUSAL IS NOT AN AGREEMENT AND IT IS NOT A FAILURE EITHER. `covered` and
+#: `intrusion` are shares of a page, so they need the page's size; when the
+#: geometry is not one of the trusted methods, or the draft offers two boxes
+#: and nothing says which, the honest answer is that this crop cannot be
+#: scored. Both of these were scored by an earlier run, on page geometry that
+#: run had no business trusting - so the refusal is the improvement, not the
+#: regression.
+#:
+#: Recorded here, one line each, because a refusal nobody wrote down is
+#: indistinguishable from the harness quietly losing its grip on a case. A new
+#: one that is not in this map is a failure until a person puts it here.
+NOT_SCORABLE = {
+    ("437", "FIG2", "176"): "374쪽 단행본 - 쪽 크기가 균일하지 않아 기하가 "
+                            "신뢰 범위 밖입니다. 사람은 WRONG으로 봤고, "
+                            "계수는 어느 쪽이든 막힙니다.",
+    ("518", "FIG1", "3"): "초안이 상자 두 개를 내놓고 어느 쪽인지 말하지 "
+                          "않습니다. 사람은 WRONG으로 봤고, 계수는 어느 "
+                          "쪽이든 막힙니다.",
+}
+
 VISUAL_VERDICT = {
     # the ten the fifth audit judged FIXED
     ("36", "FIG1", "4"): "OK",

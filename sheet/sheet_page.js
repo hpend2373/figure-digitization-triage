@@ -249,11 +249,12 @@
 
   function paintUnc(id) {
     var box = document.querySelector('[data-unc="' + CSS.escape(id) + '"]');
-    var why = document.querySelector('[data-uncwhy="' + CSS.escape(id) + '"]');
+    var why = document.querySelector('input[data-uncwhy="' + CSS.escape(id) + '"]');
+    var wrap = document.querySelector('[data-uncwrap="' + CSS.escape(id) + '"]');
     if (!box) return;
     var on = !!uncountable[id];
     box.checked = on;
-    why.hidden = !on && !box.checked;
+    wrap.hidden = !on && !box.checked;
     if (on) why.value = uncountable[id];
     box.closest('.fig').classList.toggle('unc', on);
   }
@@ -262,10 +263,11 @@
     var id = r.Draft_ID;
     var box = document.querySelector('[data-unc="' + CSS.escape(id) + '"]');
     if (!box) return;
-    var why = document.querySelector('[data-uncwhy="' + CSS.escape(id) + '"]');
+    var why = document.querySelector('input[data-uncwhy="' + CSS.escape(id) + '"]');
+    var wrap = document.querySelector('[data-uncwrap="' + CSS.escape(id) + '"]');
     paintUnc(id);
     box.addEventListener('change', function () {
-      why.hidden = !box.checked;
+      wrap.hidden = !box.checked;
       if (box.checked) { why.focus(); }
       else { delete uncountable[id]; delete uncStore[id]; persistUnc(); }
       msgFor(id).textContent = box.checked && !why.value.trim()

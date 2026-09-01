@@ -448,9 +448,13 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
             # row stop asking was to type a number.
             w("<label class='unc'><input type='checkbox' data-unc='%s'> "
               "봤지만 셀 수 없음</label>"
-              "<input class='uncwhy' type='text' data-uncwhy='%s' hidden "
-              "maxlength='200' placeholder='왜 셀 수 없는지 한 줄'>"
-              % (esc(did), esc(did)))
+              # NO placeholder. The sheet forbids them on inputs and it is
+              # right to: a hint inside the box is read as a value that is
+              # already there, and this page's whole argument is that an
+              # empty box means nobody has answered yet.
+              "<span class='uncwhy' data-uncwrap='%s' hidden>왜 셀 수 없는지 "
+              "<input type='text' data-uncwhy='%s' maxlength='200'></span>"
+              % (esc(did), esc(did), esc(did)))
         w("<div class='msg' data-msg='%s'></div></div>" % esc(did))
     w("</div>")
     w("</div>")
@@ -516,8 +520,12 @@ for _i, (_cards, _ids) in enumerate(PARTS, 1):
 # what was on screen. Copying them here means the pair cannot drift again.
 import shutil
 for _name in ("figure_intake_draft.csv", "intake_document_status.csv"):
-    shutil.copyfile(os.path.join(D, _name),
-                    os.path.join(os.path.dirname(OUT), _name))
+    _src = os.path.join(D, _name)
+    _dst = os.path.join(os.path.dirname(OUT), _name)
+    # Building the sheet beside the draft it was built from is the ordinary
+    # case, not an error - and copyfile raises on it.
+    if os.path.abspath(_src) != os.path.abspath(_dst):
+        shutil.copyfile(_src, _dst)
 for _out in _written:
     print("%s  %.1f MB" % (_out, os.path.getsize(_out) / 1e6))
 print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d "

@@ -85,15 +85,42 @@ check("the two thresholds sit between the failures and the passes",
 # ------------------------------------------------- the calibration mechanism
 _perfect = [(k, 1.0, 0.0, v) for k, v in T.VISUAL_VERDICT.items()]
 check("a harness that agrees with the person passes calibration",
-      R.calibrate(_perfect) == [], "%s" % R.calibrate(_perfect))
+      R.calibrate(_perfect)[0] == [], "%s" % (R.calibrate(_perfect)[0],))
 _lying = [(k, 1.0, 0.0, "OK") for k in T.VISUAL_VERDICT]
 _wrongs = [k for k, v in T.VISUAL_VERDICT.items() if v == "WRONG"]
 check("a harness that calls every crop fine is caught by calibration",
-      len(R.calibrate(_lying)) == len(_wrongs), "%s" % R.calibrate(_lying))
+      len(R.calibrate(_lying)[0]) == len(_wrongs), "%s" % (R.calibrate(_lying)[0],))
 check("a harness that scores nothing is caught too",
-      len(R.calibrate([])) == len(T.VISUAL_VERDICT))
+      len(R.calibrate([])[0]) == len(T.VISUAL_VERDICT))
 check("and the report says what the person said and what the harness said",
-      all(len(row) == 3 for row in R.calibrate(_lying)))
+      all(len(row) == 3 for row in R.calibrate(_lying)[0]))
+
+# ------------------------------- a refusal is not a disagreement, if recorded
+# Equality was the whole rule, so a crop the harness stopped being able to
+# score read the same as one it got wrong - and those are opposite things.
+_refusable = sorted(T.NOT_SCORABLE)
+check("픽스처가 점수 불가로 기록한 항목이 있다", bool(_refusable))
+_refused = [(k, 1.0, 0.0, R.UNTRUSTED if k in T.NOT_SCORABLE else v)
+            for k, v in T.VISUAL_VERDICT.items()]
+_bad, _tol = R.calibrate(_refused)
+check("기록된 항목의 점수 불가는 실패가 아니라 별도로 보고된다",
+      _bad == [] and sorted(k for k, _w, _h in _tol) == _refusable,
+      "%s / %s" % (_bad, _tol))
+_new_refusal = [(k, 1.0, 0.0,
+                 R.AMBIGUOUS if k == _wrongs[0] and k not in T.NOT_SCORABLE
+                 else v)
+                for k, v in T.VISUAL_VERDICT.items()]
+check("기록에 없는 새 점수 불가는 실패다",
+      [k for k, _w, _h in R.calibrate(_new_refusal)[0]] == [_wrongs[0]],
+      "%s" % (R.calibrate(_new_refusal)[0],))
+_permissive = [(k, 1.0, 0.0, "OK" if k in T.NOT_SCORABLE else v)
+               for k, v in T.VISUAL_VERDICT.items()]
+check("점수 불가로 기록된 항목이라도 OK라고 하면 실패다 - 사람은 WRONG이라 했다",
+      sorted(k for k, _w, _h in R.calibrate(_permissive)[0]) == _refusable,
+      "%s" % (R.calibrate(_permissive)[0],))
+check("점수 불가 기록에는 사람이 쓴 사유가 붙어 있다",
+      all(isinstance(v, str) and len(v.strip()) > 10
+          for v in T.NOT_SCORABLE.values()))
 
 # ------------------------------------------------------ the fixture itself
 check("every recorded verdict has a region to score against",
@@ -279,9 +306,9 @@ check("and a non-finite page size is refused too",
 
 
 check("calibration is computed only over the judged ones",
-      R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])
+      R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])[0]
       == [(k, v, "not scored") for k, v in sorted(T.VISUAL_VERDICT.items())],
-      "%d" % len(R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])))
+      "%d" % len(R.calibrate([(k, 1.0, 0.0, "WRONG") for k in _unjudged])[0]))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % PASSED[0])

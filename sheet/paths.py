@@ -31,5 +31,23 @@ REPO = _p("FDT_REPO", "/home/claude/geo/verify")
 PAGES = _p("FDT_PAGES", os.path.join(DRAFT, "pages"))
 #: Source documents, listed one absolute path per line.
 STAGED = _p("FDT_STAGED", "/tmp/wl/staged_paths.txt")
+#: How a worklist href is turned into the path the intake recorded. The
+#: builder had one machine's home directory written into it - the worklist was
+#: authored on a laptop and the intake ran in a container - so it matched
+#: nothing anywhere else and died on a bare `assert`. Pairs are `from=to`,
+#: separated by commas; empty means the href is used as it stands.
+PATH_REWRITE = _p("FDT_PATH_REWRITE",
+                  "/Users/minyeop/=/mnt/user-data/uploads/")
+
+
+def rewrite(path):
+    for pair in PATH_REWRITE.split(","):
+        if "=" in pair:
+            src, dst = pair.split("=", 1)
+            if src and path.startswith(src):
+                return dst + path[len(src):]
+    return path
+
+
 #: The worklist-to-document map the crop harness reads to find a pid's PDF.
 CROSSCHECK = _p("FDT_CROSSCHECK", "/tmp/intake/crosscheck.json")

@@ -166,12 +166,24 @@ DOC_OF = {}
 for w in WORK:
     import urllib.parse
     _p = urllib.parse.unquote(w["href"][len("file://"):])
-    _p = _p.replace("/Users/minyeop/", "/mnt/user-data/uploads/")
+    # ONE MACHINE'S HOME DIRECTORY WAS WRITTEN INTO THIS. The worklist is
+    # authored on a laptop and the intake runs elsewhere, so the two name the
+    # same file differently - and the rewrite that bridged them was a literal
+    # `/Users/<name>/`. Anywhere else it matched nothing and the assert below
+    # ended the build with a pair of integers and no idea which rows.
+    _p = PATHS.rewrite(_p)
     for _did, _L in LEDGER.items():
         if _L["Input_Path"] == _p:
             DOC_OF[w["pid"]] = _did
             break
-assert len(DOC_OF) == len(WORK), (len(DOC_OF), len(WORK))
+_missing = [w["pid"] for w in WORK if w["pid"] not in DOC_OF]
+if _missing:
+    raise SystemExit(
+        "worklist에서 %d편의 문서를 찾지 못했습니다: pid %s\n"
+        "워크리스트의 href와 인테이크 원장의 Input_Path가 같은 파일을 "
+        "다르게 부르고 있습니다. FDT_PATH_REWRITE로 접두사를 맞추십시오 "
+        "(지금 값: %r)."
+        % (len(_missing), ", ".join(_missing[:8]), PATHS.PATH_REWRITE))
 PID_OF_DOC.update({v: k for k, v in DOC_OF.items()})
 
 ROWS, BLOCKED, COUNTABLE = [], 0, 0

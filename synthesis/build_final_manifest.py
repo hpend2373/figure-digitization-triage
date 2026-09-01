@@ -275,11 +275,44 @@ _expected = {
         'extraction_counts_long': rowkey.file_digest(
             os.path.join(BASE, 'extraction_counts_long.csv'))},
 }
-#: The files each writer leaves beside the tables, named here so that a
-#: sidecar nobody attested is a failure rather than a silence.
-_SIDECARS = {'integrate_supplements': ('new_rows.json',),
-             'figure_printed_numbers': ('figure_rows.json',
-                                        'R1087_coexposure_pending.json')}
+#: WHAT EACH WRITER OWES, DECLARED HERE RATHER THAN READ OFF ITS RECEIPT.
+#: The table set used to be intersected with whatever the receipt already
+#: named, so a receipt that lost an entry lost the check along with it - the
+#: proof's scope was set by the thing being proved. Sources were never checked
+#: at all: the writers record them, nothing recomputed them, so a changed
+#: supplement or figure page left an old receipt passing.
+#:
+#: `sources` is recomputed the same way the writer computes it, so the file
+#: set is compared as a set and each file's hash on its own.
+def _supplement_sources():
+    supp = os.path.join(BASE, 'source_supplements')
+    return {f: rowkey.file_digest(os.path.join(supp, f))
+            for f in sorted(os.listdir(supp))
+            if f.startswith(('R0855', 'R0856', 'R1040'))}
+
+
+def _figure_sources():
+    spec = bundle_paths.study_inputs()['figure_rows']
+    return {os.path.basename(v): rowkey.file_digest(os.path.join(BASE, v))
+            for v in sorted({r['source_local_path'] for r in spec})}
+
+
+WRITER_CONTRACTS = {
+    'integrate_supplements': {
+        'file': 'integrate_supplements.py',
+        'tables': ('effects_text_long', 'extraction_counts_long'),
+        'sidecars': ('new_rows.json', 'integration.json'),
+        'sources': _supplement_sources},
+    'figure_printed_numbers': {
+        'file': 'figure_printed_numbers.py',
+        'tables': ('effects_text_long',),
+        'sidecars': ('figure_rows.json', 'R1087_coexposure_pending.json'),
+        'sources': _figure_sources},
+}
+if sorted(WRITER_CONTRACTS) != sorted(EXPECTED_WRITERS):
+    fail('the declared writers and the declared contracts are not the same '
+         'set: %s vs %s' % (sorted(EXPECTED_WRITERS), sorted(WRITER_CONTRACTS)))
+
 R['receipt_attestation'] = {}
 for _name in EXPECTED_WRITERS:
     _path = os.path.join(sup, '%s_idempotency.json' % _name)
@@ -287,16 +320,34 @@ for _name in EXPECTED_WRITERS:
         _receipt = json.load(io.open(_path, encoding='utf-8'))
     except Exception:
         _receipt = {}
+    _contract = WRITER_CONTRACTS[_name]
     _want = dict(_expected)
     _here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         _WRITER_FILE[_name])
+                         _contract['file'])
     if os.path.exists(_here):
         _want['writer_code_sha256'] = rowkey.file_digest(_here)
-    # a writer that touches one table is not judged against the other
-    _want['tables'] = {k: v for k, v in _expected['tables'].items()
-                       if k in ((_receipt.get('attestation') or {})
-                                .get('core', {}).get('tables') or {})}
+    # A writer that touches one table is not judged against the other - but
+    # which tables those are is declared, not read back off the receipt.
+    _want['tables'] = {k: _expected['tables'][k] for k in _contract['tables']}
+    _want['sources'] = _contract['sources']()
     _found = rowkey.attestation_problems(_receipt, _want)
+    # AND THE SETS THEMSELVES, NOT ONLY THE ENTRIES THEY SHARE.
+    # attestation_problems judges what the caller names; a receipt that names
+    # something extra, or that lost an entry, is a different claim about what
+    # this writer did and has to be caught here.
+    _core = (_receipt.get('attestation') or {}).get('core') or {}
+    _caller = (_receipt.get('attestation') or {}).get('caller') or {}
+    for _what, _got, _declared in (
+            ('table', sorted(_core.get('tables') or {}),
+             sorted(_contract['tables'])),
+            ('source', sorted(_caller.get('sources') or {}),
+             sorted(_want['sources'])),
+            ('sidecar', sorted(_receipt.get('sidecars') or {}),
+             sorted(_contract['sidecars']))):
+        if _got != _declared:
+            _found.append(('RECEIPT_%s_SET_MISMATCH' % _what.upper(),
+                           'receipt names %ss %s, the contract declares %s'
+                           % (_what, _got, _declared)))
     # AND THE FILES WRITTEN BESIDE THE TABLES ARE CHECKED TOO. The tables
     # commit together; the JSON sidecars are a plain dump after the fact, and
     # one of them used to be dumped before the guard had spoken. Nothing tied
@@ -304,7 +355,7 @@ for _name in EXPECTED_WRITERS:
     # manifest counted refusals and held estimates out of files that might
     # have been left by an earlier run.
     _found += rowkey.sidecar_problems(
-        _receipt, {f: os.path.join(sup, f) for f in _SIDECARS[_name]})
+        _receipt, {f: os.path.join(sup, f) for f in _contract['sidecars']})
     R['receipt_attestation'][_name] = [{'code': c, 'detail': d}
                                        for c, d in _found]
     for code, detail in _found:

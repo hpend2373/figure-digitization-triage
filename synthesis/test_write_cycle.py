@@ -444,7 +444,9 @@ K.attest_sidecars(_side, 'sc', {'new_rows.json': _payload})
 _att = json.load(io.open(os.path.join(_side, 'sc_idempotency.json'),
                          encoding='utf-8'))
 check("the receipt records what the sidecar it wrote contains",
-      _att['sidecars']['new_rows.json'] == K.json_digest(_payload))
+      _att['sidecars']['new_rows.json']
+      == {'sha256': K.json_digest(_payload), 'volatile': []},
+      "%s" % _att['sidecars']['new_rows.json'])
 check("a sidecar that is the payload the receipt attested passes",
       K.sidecar_problems(_att, {'new_rows.json': _sp}) == [],
       "%s" % K.sidecar_problems(_att, {'new_rows.json': _sp}))
@@ -468,6 +470,30 @@ check("a sidecar the receipt never named is not silently accepted",
       [c for c, _d in K.sidecar_problems({'verdict': 'WRITE'},
                                          {'new_rows.json': _sp})]
       == ['SIDECAR_NOT_ATTESTED'])
+# PART OF A SIDECAR IS THE RUN, NOT THE WORK. integration.json carries the
+# date and the verdict of the run that wrote it, which no later run can
+# re-derive. Those keys are declared volatile and named in the receipt, so
+# what is bound and what is not can be read rather than assumed.
+_narrative = {'date': '2026-08-30', 'verdict': 'WRITE', 'refused_values': 14}
+_np = os.path.join(_side, 'integration.json')
+json.dump(_narrative, io.open(_np, 'w', encoding='utf-8'))
+K.attest_sidecars(_side, 'sc', {'integration.json': _narrative},
+                  volatile={'integration.json': ('date', 'verdict')})
+_att2 = json.load(io.open(os.path.join(_side, 'sc_idempotency.json'),
+                          encoding='utf-8'))
+check("the receipt names which keys were left out of the digest",
+      _att2['sidecars']['integration.json']['volatile'] == ['date', 'verdict'])
+json.dump(dict(_narrative, date='2026-09-01', verdict='ALREADY_PRESENT'),
+          io.open(_np, 'w', encoding='utf-8'))
+check("a later run's date and verdict are not a changed sidecar",
+      K.sidecar_problems(_att2, {'integration.json': _np}) == [],
+      "%s" % K.sidecar_problems(_att2, {'integration.json': _np}))
+json.dump(dict(_narrative, refused_values=13),
+          io.open(_np, 'w', encoding='utf-8'))
+check("but a changed refusal count still is",
+      [c for c, _d in K.sidecar_problems(_att2, {'integration.json': _np})]
+      == ['SIDECAR_STALE'])
+
 check("a receipt that records none of them names every one",
       len(K.sidecar_problems({}, {'a.json': _sp, 'b.json': _sp})) == 2)
 

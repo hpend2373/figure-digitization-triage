@@ -701,6 +701,49 @@ def main():
     print('재실행 안전성 점검:')
     arch = os.path.join(BASE, 'archive', 'pre_supplement_integration_' + TODAY)
     write = '--write' in sys.argv
+    def sidecars(verdict, written):
+        """What this run leaves beside the tables, built inside the lock.
+
+        WITH THE ORDINALS IN THE ROWS. This runs after the write decision, so
+        the ids are there either way - minted on a write, read back off the
+        files on a clean rerun - and the payloads describe the tables as they
+        now are rather than as they were before the ids existed.
+        """
+        return {
+            # What the workbook step applies. Nothing used to tie it to the
+            # run that produced it, so a file left by an earlier run would
+            # have been appended to the workbook while the CSVs said
+            # something else.
+            'new_rows.json': {
+                'effects_text_long': [[r.get(c, '') for c in ef_cols]
+                                      for r in new_ef],
+                'extraction_counts_long': [[r.get(c, '') for c in ct_cols]
+                                           for r in new_ct]},
+            # The run's own narrative receipt. The final manifest reads its
+            # refusal count, so an old one left in place would be reported as
+            # this run's.
+            'integration.json': {
+                'date': TODAY, 'dry_run': verdict != 'WRITE',
+                'parsed_effect_rows': counts,
+                'new_effect_rows': len(new_ef),
+                'new_count_rows': len(new_ct),
+                'refused_values': BLOCKED, 'verdict': verdict,
+                'human_fields_set_by_this_script':
+                    'none; human_confirmed=no, pool_eligible=no, '
+                    'human_gate=HUMAN_DUAL_EXTRACTION_REQUIRED on every row',
+                'archived_to': ('archive/pre_supplement_integration_' + TODAY
+                                if written else ''),
+                'supplement_sha256': {
+                    f: sha(os.path.join(SUPP, f))
+                    for f in sorted(os.listdir(SUPP))
+                    if f.startswith(('R0855', 'R0856', 'R1040'))}}}
+
+    # The run's own identity - which day it ran, what the guard said, where it
+    # archived - is not something a later run can re-derive, so it is declared
+    # rather than bound. Everything else in the file is bound.
+    sidecars.volatile = {'integration.json': ('date', 'verdict', 'dry_run',
+                                              'archived_to')}
+
     verdict, written = rowkey.run_writer(
         'integrate_supplements',
         [('effects_text_long', os.path.join(BASE, 'effect_extraction_text_long.csv'),
@@ -724,41 +767,14 @@ def main():
                             if f.startswith(('R0855', 'R0856', 'R1040'))}},
         assign_ids=assign_ids if write else None,
         archive=arch if write else None,
+        sidecars=sidecars,
         dry_run=not write)
-    dry = verdict != 'WRITE'
-    receipt = {'date': TODAY, 'dry_run': dry, 'parsed_effect_rows': counts,
-               'new_effect_rows': len(new_ef), 'new_count_rows': len(new_ct),
-               'refused_values': BLOCKED, 'verdict': verdict,
-               'human_fields_set_by_this_script': 'none; human_confirmed=no, '
-               'pool_eligible=no, human_gate=HUMAN_DUAL_EXTRACTION_REQUIRED '
-               'on every row',
-               'supplement_sha256': {f: sha(os.path.join(SUPP, f))
-                                     for f in sorted(os.listdir(SUPP))
-                                     if f.startswith(('R0855', 'R0856', 'R1040'))}}
-    if written:
-        receipt['archived_to'] = 'archive/pre_supplement_integration_' + TODAY
-    # WHAT THE WORKBOOK STEP APPLIES IS RECORDED IN THIS RUN'S RECEIPT.
-    # new_rows.json is written outside the table transaction, and nothing tied
-    # it to the run that produced it: a file left by an earlier run would have
-    # been appended to the workbook while the CSVs said something else. The
-    # ordinals are in the rows either way - minted here on a write, read back
-    # off the files on a clean rerun - so this run can say what the file must
-    # contain whether or not it is the run that wrote it.
-    if written or verdict == rowkey.CLEAN_RERUN:
-        new_rows = {'effects_text_long': [[r.get(c, '') for c in ef_cols]
-                                          for r in new_ef],
-                    'extraction_counts_long': [[r.get(c, '') for c in ct_cols]
-                                               for r in new_ct]}
-        if written:
-            json.dump(new_rows,
-                      io.open(os.path.join(bundle_paths.receipt_dir(), 'new_rows.json'), 'w',
-                              encoding='utf-8'), ensure_ascii=False)
-        rowkey.attest_sidecars(bundle_paths.receipt_dir(),
-                               'integrate_supplements',
-                               {'new_rows.json': new_rows})
-    json.dump(receipt, io.open(os.path.join(bundle_paths.receipt_dir(), 'integration.json'), 'w',
-                               encoding='utf-8'), indent=2, ensure_ascii=False)
-    print(json.dumps(receipt, indent=2, ensure_ascii=False))
+    # The narrative receipt is now a sidecar, so what is printed is what the
+    # transaction recorded - not a second copy built out here that could say
+    # something else.
+    print(json.dumps(rowkey.read_receipt(bundle_paths.receipt_dir(),
+                                         'integrate_supplements'),
+                     indent=2, ensure_ascii=False))
 
 
 if __name__ == '__main__':

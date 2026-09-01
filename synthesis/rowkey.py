@@ -546,18 +546,22 @@ def sidecar_problems(receipt, files):
     recorded = (receipt or {}).get('sidecars') or {}
     out = []
     for name, path in sorted(files.items()):
-        want = recorded.get(name)
-        if want is None:
+        record = recorded.get(name)
+        if record is None:
             out.append(('SIDECAR_NOT_ATTESTED',
                         '%s is expected and the receipt does not name it'
                         % name))
             continue
+        if not isinstance(record, dict):
+            record = {'sha256': record, 'volatile': []}
+        want, volatile = record.get('sha256'), record.get('volatile') or []
         if not os.path.exists(path):
             out.append(('SIDECAR_MISSING',
                         '%s is attested and is not on disk' % name))
             continue
         try:
-            got = json_digest(json.load(io.open(path, encoding='utf-8')))
+            got = json_digest(_without(
+                json.load(io.open(path, encoding='utf-8')), volatile))
         except ValueError as exc:
             out.append(('SIDECAR_UNREADABLE', '%s: %s' % (name, exc)))
             continue
@@ -567,7 +571,14 @@ def sidecar_problems(receipt, files):
     return out
 
 
-def attest_sidecars(receipt_dir, name, payloads):
+def _without(payload, volatile):
+    """A payload minus the keys a writer declared it cannot re-derive."""
+    if not volatile or not isinstance(payload, dict):
+        return payload
+    return {k: v for k, v in payload.items() if k not in set(volatile)}
+
+
+def attest_sidecars(receipt_dir, name, payloads, volatile=None):
     """Record in this writer's receipt what the sidecars it wrote contain.
 
     AFTER THE FILES, NOT BEFORE. Part of what a sidecar carries - an ordinal
@@ -582,8 +593,17 @@ def attest_sidecars(receipt_dir, name, payloads):
     # in this run's hands. Replacing the map would drop the entry for a file
     # that is still there and still correct, and an unattested file reads as a
     # problem.
+    # SOME OF A SIDECAR IS THE RUN, NOT THE WORK. integration.json records the
+    # date, the verdict and where the previous tables were archived - the run's
+    # own identity, which a later run cannot re-derive and must not overwrite.
+    # A writer may declare those keys volatile; they are then left out of the
+    # digest and NAMED IN THE RECEIPT, so what is bound and what is not is
+    # readable rather than assumed. Everything else is bound as before.
+    vol = volatile or {}
     keep = _read_receipt(receipt_dir, name).get('sidecars') or {}
-    keep.update({k: json_digest(v) for k, v in payloads.items()})
+    keep.update({k: {'sha256': json_digest(_without(v, vol.get(k))),
+                     'volatile': sorted(vol.get(k) or ())}
+                 for k, v in payloads.items()})
     _amend_receipt(receipt_dir, name, {'sidecars': keep})
 
 
@@ -640,7 +660,7 @@ class _Lock(object):
 def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                journal_path=None, replace=None, relations=(),
                assignable=None, dry_run=False, lock_path=None,
-               attest=None, read_digests=None):
+               attest=None, read_digests=None, sidecars=None):
     """The whole write protocol, in one place, so both writers share one.
 
     ONE FUNCTION BECAUSE TWO COPIES DRIFT. Each writer had its own sequence -
@@ -701,9 +721,32 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
         if disagree:
             return _refuse(receipt_dir, name, 'SNAPSHOT_ROWS_DISAGREE',
                            'disagreeing_tables', disagree)
-        return _run_writer(name, tables, receipt_dir, assign_ids, archive,
-                           journal_path, replace, relations, assignable,
-                           dry_run, attest)
+        verdict, written = _run_writer(name, tables, receipt_dir, assign_ids,
+                                       archive, journal_path, replace,
+                                       relations, assignable, dry_run, attest)
+        # THE FILES BESIDE THE TABLES ARE PART OF THE TRANSACTION. They used to
+        # be written after run_writer returned - which is after the lock was
+        # released - so two runs could interleave into a state neither of them
+        # produced: one commits its tables, the other commits its own, and the
+        # first then writes ITS sidecar and merges ITS digest into the other's
+        # receipt. Built and recorded here, they cannot outlive the lock that
+        # the tables were written under.
+        #
+        # `sidecars(verdict, written)` returns {filename: payload}. It is
+        # called after the ordinals exist - minted on a write, read back off
+        # the files on a clean rerun - and the payloads are written only when
+        # this run is the one that wrote the tables.
+        if sidecars is not None and verdict in ('WRITE', CLEAN_RERUN):
+            payloads = sidecars(verdict, written)
+            volatile = getattr(sidecars, 'volatile', None)
+            if verdict == 'WRITE':
+                for fname, payload in sorted(payloads.items()):
+                    json.dump(payload,
+                              io.open(os.path.join(receipt_dir, fname), 'w',
+                                      encoding='utf-8'),
+                              indent=2, ensure_ascii=False)
+            attest_sidecars(receipt_dir, name, payloads, volatile)
+        return verdict, written
 
 
 def _run_writer(name, tables, receipt_dir, assign_ids, archive, journal_path,

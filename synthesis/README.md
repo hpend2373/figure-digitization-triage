@@ -24,8 +24,8 @@
      그대로 읽었고, 검사되는 총합만 171로 움직였습니다. -->
 <!-- SYNTHESIS_SUITE_COUNT: test_route_gate 18 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_rowkey 71 -->
-<!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 90 -->
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 179 -->
+<!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 93 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 182 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 

@@ -144,9 +144,18 @@ check("같은 크롭을 쓰는 두 행은 같은 이미지를 보여준다",
       _img("DOC_C_D001") == _img("DOC_C_D002") is not None)
 check("서로 다른 크롭은 서로 다른 이미지다",
       _img("DOC_A_D001") != _img("DOC_A_D002"))
+# AND IT SAYS WHAT IS TRUE. The message read "원문에 그림이 포함되어 있지
+# 않습니다" on 45 rows whose sources are JATS XML - papers that do have
+# figures, one of them fifteen, named file by file inside the XML. What is
+# absent is a file in this corpus, not a figure in the paper.
+_nocrop_text = BY_ID["DOC_B_D002"][3]
 check("크롭이 없는 행은 이미지 대신 그 사실을 말한다",
-      _img("DOC_B_D002") is None
-      and "페이지 이미지 없음" in BY_ID["DOC_B_D002"][3])
+      _img("DOC_B_D002") is None and "보여줄 이미지가 없습니다" in _nocrop_text)
+check("  그 문구가 논문에 그림이 없다고 주장하지 않는다",
+      "그림이 포함되어 있지 않" not in S and "그림이 없습니다" not in S,
+      "%s" % _nocrop_text[:120])
+check("  무엇을 구하면 되는지 말한다",
+      "PDF" in _nocrop_text and "그림 파일" in _nocrop_text)
 check("바이트가 같은 크롭 두 행은 둘 다 막힌다",
       "disabled" in BY_ID["DOC_C_D001"][3]
       and "disabled" in BY_ID["DOC_C_D002"][3])

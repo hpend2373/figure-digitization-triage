@@ -466,8 +466,17 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
                 big += " data-page='%s'" % _pv
         img = (("<img class='thumb' src='%s' alt=''%s>" % (thumb(p), big))
                if has_img else
-               "<div class='cap'>[페이지 이미지 없음 — 원문에 그림이 "
-               "포함되어 있지 않습니다]</div>")
+               # NOT A CLAIM ABOUT THE PAPER. This said "원문에 그림이
+               # 포함되어 있지 않습니다" on 45 rows whose sources are JATS
+               # XML - and those papers do have figures: one of them declares
+               # fifteen <fig> elements, and the XML names the image files by
+               # name. What is missing is a file we have, not a figure the
+               # paper has. `block_rules.py` had this right all along; only
+               # the sheet said otherwise.
+               "<div class='cap'>[보여줄 이미지가 없습니다 — 이 원문은 "
+               "XML·텍스트라 쪽 이미지가 없고, 그림 파일도 함께 받지 "
+               "않았습니다. 그림을 보려면 이 논문의 PDF나 그림 파일이 "
+               "필요합니다]</div>")
         br, ca = blocked_reason(d), caution(d)
         sent = SENTENCE.get(did)
         conf = float(d["Confidence"])

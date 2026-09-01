@@ -185,6 +185,21 @@ thin = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"}
 # have covered rows it never saw.
 check("THIN_CROP %d행이 모두 입력 차단이다" % len(thin),
       all(byid[i]["Count_Blocked"] == "1" for i in thin))
+# EVERY COUNTABLE ROW CARRIES ITS PAGE, OR THE SHEET IS ASKING FOR A COUNT
+# WITH THE CHECK REMOVED. The page view - the whole page with this row's box
+# drawn - is how a person answers "did the box catch the figure at all", which
+# is the question two crops got past. One row shipped without it, because a
+# merge left its page raster behind and nothing compared the two counts.
+_countable = [r["Draft_ID"] for r in ROWS if r["Count_Blocked"] != "1"]
+_pageviews = re.findall(r"data-page='data:image/", SHEET)
+check("입력 가능한 %d행 모두가 페이지 뷰를 싣는다" % len(_countable),
+      len(_pageviews) == len(_countable),
+      "페이지 뷰 %d개 / 입력 가능 %d행" % (len(_pageviews), len(_countable)))
+_zooms = re.findall(r"data-zoom='data:image/", SHEET)
+check("확대본도 같은 수만큼 있다",
+      len(_zooms) == len(_countable),
+      "확대본 %d개 / 입력 가능 %d행" % (len(_zooms), len(_countable)))
+
 nocrop = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP"}
 check("이미지 없는 %d행이 모두 입력 차단이다" % len(nocrop),
       all(byid[i]["Count_Blocked"] == "1" for i in nocrop))

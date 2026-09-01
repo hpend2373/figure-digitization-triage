@@ -194,6 +194,35 @@ for _did in _open:
                             if d["Draft_ID"] == _did][0]["Page_Raster"],
                            "rb").read()) == 0)
 
+# A COUNTABLE ROW WITHOUT ITS PAGE SHIPPED ONCE, IN SILENCE. The build has to
+# stop instead: such a row asks to be counted with the one check that catches
+# a box that missed its figure removed.
+_draft_csv = os.path.join(FX["draft"], "figure_intake_draft.csv")
+_keep_csv = io.open(_draft_csv, "rb").read()
+_r = list(csv.DictReader(io.open(_draft_csv, encoding="utf-8")))
+for _row in _r:
+    if _row["Draft_ID"] == _open[0]:
+        _row["Page_Raster"] = os.path.join(FX["draft"], "no_such_page.png")
+with io.open(_draft_csv, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=list(_r[0])); _w.writeheader()
+    _w.writerows(_r)
+_bad = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                      capture_output=True, text=True, cwd=HERE,
+                      env=dict(ENV, FDT_SHEET=os.path.join(TMP, "np", "s.html")))
+io.open(_draft_csv, "wb").write(_keep_csv)
+check("입력 가능한 행에 페이지 래스터가 없으면 빌드가 실패한다",
+      _bad.returncode != 0 and _open[0] in (_bad.stderr or "") + (_bad.stdout or ""),
+      "rc=%s %s" % (_bad.returncode, (_bad.stderr or "")[-200:]))
+check("  그리고 어느 행인지 이름을 댄다",
+      "페이지 래스터가 없습니다" in (_bad.stderr or "") + (_bad.stdout or ""))
+os.makedirs(os.path.join(TMP, "np2"), exist_ok=True)
+_again = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                        capture_output=True, text=True, cwd=HERE,
+                        env=dict(ENV,
+                                 FDT_SHEET=os.path.join(TMP, "np2", "s.html")))
+check("되돌리면 다시 빌드된다", _again.returncode == 0,
+      (_again.stderr or "")[-200:])
+
 check("막힌 행에는 페이지 뷰도 싣지 않는다",
       all(_pageview(d) is None for d in BY_ID if d not in _open))
 check("확대창이 두 단계를 그 순서로 묻는다",
@@ -346,6 +375,36 @@ check("영수증에 무엇이 몇 개 중 몇 개인지 남는다",
       ["verdict"] == "REFUSED")
 io.open(_victim, "wb").write(_whole)
 check("되돌리면 다시 깨끗하다", V.unreadable(FX["draft"]) == [])
+
+# DECODING WHAT IS THERE SAYS NOTHING ABOUT WHAT IS NOT. The walk reported
+# every file it found as fine while a page raster the draft names sat in the
+# part it was built in - a merge had skipped the document because its
+# directory already existed at the destination.
+_want = V.expected(FX["draft"])
+check("기대 목록은 초안이 부르는 크롭과 페이지를 모두 담는다",
+      _want and len(_want) >= len([d for d in DRAFT if d["Figure_Crop"]]),
+      "%s" % (len(_want or {}),))
+check("정상 상태에서는 부르는 것이 전부 디스크에 있다",
+      not [r for r in _want if r not in V.on_disk(FX["draft"])])
+_moved = os.path.join(FX["draft"], "DOC_A", "DOC_A_D002.png")
+_body = io.open(_moved, "rb").read()
+os.remove(_moved)
+_rc2 = V.main([FX["draft"], os.path.join(TMP, "img2.json")])
+_rep = json.load(io.open(os.path.join(TMP, "img2.json"), encoding="utf-8"))
+check("초안이 부르는 파일이 사라지면 거부한다", _rc2 == 1)
+check("  그리고 어느 행이 부르던 파일인지 말한다",
+      [d for _f, d in _rep["named_but_absent"]] == ["DOC_A_D002"],
+      "%s" % _rep["named_but_absent"])
+io.open(_moved, "wb").write(_body)
+
+_extra = os.path.join(FX["draft"], "DOC_A", "leftover_from_an_old_run.png")
+shutil.copyfile(_moved, _extra)
+_rc3 = V.main([FX["draft"], os.path.join(TMP, "img3.json")])
+_rep3 = json.load(io.open(os.path.join(TMP, "img3.json"), encoding="utf-8"))
+check("초안이 부르지 않는 파일은 세기만 하고 거부하지 않는다",
+      _rc3 == 0 and _rep3["on_disk_not_named"] >= 1,
+      "%s %s" % (_rc3, _rep3["on_disk_not_named"]))
+os.remove(_extra)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

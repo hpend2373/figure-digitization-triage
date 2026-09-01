@@ -548,6 +548,26 @@ def tail(ids):
 #: DOCUMENTS ARE NEVER SPLIT ACROSS FILES. A person works a document at a
 #: time, and half its figures in another file is how one gets skipped. Sheets
 #: fill to a byte budget and then start a new one.
+#: A COUNTABLE ROW WITHOUT ITS PAGE IS NOT SHIPPABLE. The page view is how a
+#: person answers "did the box catch the figure" - the question that let two
+#: crops through - so a row that can take a number and cannot show its page is
+#: a row being asked to be counted with the check removed. One row shipped
+#: that way: a merge skipped a document whose directory already existed, and
+#: the page it needed stayed behind in the part it was built in. Silence is
+#: what made it survive, so this is loud and fatal.
+_NO_PAGE = [d["Draft_ID"] for d in DRAFT
+            if not blocked_reason(d)
+            and not (str(d.get("Page_Raster") or "").strip()
+                     and os.path.exists(d["Page_Raster"]))]
+if _NO_PAGE:
+    raise SystemExit(
+        "입력 가능한 행 %d개에 페이지 래스터가 없습니다 — 이 행들은 "
+        "'상자가 그림을 담았는가'를 물을 수 없습니다:\n  %s%s\n"
+        "인테이크 산출물이 온전한지 verify_intake_images.py로 확인하십시오."
+        % (len(_NO_PAGE), "\n  ".join(_NO_PAGE[:10]),
+           "\n  ... 그리고 %d개 더" % (len(_NO_PAGE) - 10)
+           if len(_NO_PAGE) > 10 else ""))
+
 PARTS, cur, cur_ids, cur_bytes, OVERSIZE = [], [], [], 0, []
 _head = "\n".join(HEAD)
 _base = len(_head.encode("utf-8")) + len(_LOGIC.encode("utf-8")) \

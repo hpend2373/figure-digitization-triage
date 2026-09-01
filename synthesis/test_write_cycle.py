@@ -485,14 +485,30 @@ check("the receipt names which keys were left out of the digest",
       _att2['sidecars']['integration.json']['volatile'] == ['date', 'verdict'])
 json.dump(dict(_narrative, date='2026-09-01', verdict='ALREADY_PRESENT'),
           io.open(_np, 'w', encoding='utf-8'))
+_VOL = {'integration.json': ('date', 'verdict')}
 check("a later run's date and verdict are not a changed sidecar",
-      K.sidecar_problems(_att2, {'integration.json': _np}) == [],
-      "%s" % K.sidecar_problems(_att2, {'integration.json': _np}))
+      K.sidecar_problems(_att2, {'integration.json': _np}, _VOL) == [],
+      "%s" % K.sidecar_problems(_att2, {'integration.json': _np}, _VOL))
 json.dump(dict(_narrative, refused_values=13),
           io.open(_np, 'w', encoding='utf-8'))
 check("but a changed refusal count still is",
+      [c for c, _d in K.sidecar_problems(_att2, {'integration.json': _np},
+                                         _VOL)] == ['SIDECAR_STALE'])
+# THE RECEIPT DOES NOT GET TO WIDEN ITS OWN EXEMPTION. Adding a field to the
+# receipt's volatile list and re-digesting without it used to pass everything:
+# the sidecar name set was unchanged, and so were every protocol, writer,
+# source and table hash.
+_widened = json.loads(json.dumps(_att2))
+_widened['sidecars']['integration.json'] = {
+    'sha256': K.json_digest({'refused_values': 13}),
+    'volatile': ['date', 'refused_values', 'verdict']}
+check("a receipt that widened its own volatile set is named",
+      [c for c, _d in K.sidecar_problems(_widened, {'integration.json': _np},
+                                         _VOL)]
+      == ['SIDECAR_VOLATILE_SET_MISMATCH'])
+check("and a caller that allows none is the default",
       [c for c, _d in K.sidecar_problems(_att2, {'integration.json': _np})]
-      == ['SIDECAR_STALE'])
+      == ['SIDECAR_VOLATILE_SET_MISMATCH'])
 
 check("a receipt that records none of them names every one",
       len(K.sidecar_problems({}, {'a.json': _sp, 'b.json': _sp})) == 2)

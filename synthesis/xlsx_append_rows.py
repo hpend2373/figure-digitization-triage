@@ -17,7 +17,7 @@ the new rows go after the last one, in the same spelling the workbook already
 uses (an x: prefix, t="str" for text and t="n" for numbers), and the sheet's
 table range is extended to take them in.
 """
-import io, json, os, re, shutil, sys, zipfile
+import collections, csv, io, json, os, re, shutil, sys, zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bundle_paths
@@ -134,18 +134,22 @@ def sheet_state(parts, sheet, rows):
     """Whether this sheet already carries these rows. Three answers, not two.
 
     ABSENT     none of them are anywhere on the sheet
-    PRESENT    all of them are there, in order, as one contiguous block
-    CONFLICT   some are there and some are not, or they are there but broken
-               up - a state nobody can append their way out of
+    PRESENT    all of them are there, in order, as ONE block, and no copy of
+               any of them anywhere else
+    CONFLICT   anything in between - some there and some not, the block twice,
+               the block plus a stray copy of one of its rows, or two halves
+               in two places
 
     NOT "are they the last rows". They were the last rows on the day they were
-    appended, and then the figure writer added four more; an exact-tail rule
+    appended and then the figure writer added four more; an exact-tail rule
     calls that applied-and-then-written-past state a conflict, which is a
-    refusal the operator cannot act on. What matters is whether this block is
-    on the sheet, not whether anything came after it.
+    refusal the operator cannot act on.
 
-    "Absent" used to be assumed rather than established - the script appended
-    whatever it was handed, so a second run put every row in twice.
+    But "the block is somewhere" is not enough either. The very state the old
+    implementation could produce - a second run appending the same rows again -
+    contains the block, so finding it and stopping there would have called
+    the duplicate-applied workbook fine. Every intended row is counted, and
+    the count has to match the block exactly.
     """
     xml = parts[sheet_part(parts, sheet)].decode('utf-8')
     ncols = max(len(r) for r in rows) if rows else 0
@@ -154,11 +158,16 @@ def sheet_state(parts, sheet, rows):
     seq = [tuple(v) for v in seq if v is not None]
     want = [tuple(as_text(r)) for r in rows]
     n = len(want)
-    if n and any(seq[i:i + n] == want for i in range(len(seq) - n + 1)):
-        return 'PRESENT', last
-    if set(want) & set(seq):
+    if not n:
         return 'CONFLICT', last
-    return 'ABSENT', last
+    wanted = collections.Counter(want)
+    found = collections.Counter(t for t in seq if t in wanted)
+    blocks = [i for i in range(len(seq) - n + 1) if seq[i:i + n] == want]
+    if len(blocks) == 1 and found == wanted:
+        return 'PRESENT', last
+    if not found:
+        return 'ABSENT', last
+    return 'CONFLICT', last
 
 
 def plan_append(parts, sheet, rows):
@@ -215,22 +224,29 @@ def write_workbook(path, members, edited):
 
 
 #: The tables whose rows this step carries into the workbook, and the files
-#: they live in. Declared here rather than read off the receipt: a receipt
-#: that lost an entry would otherwise lose the check with it.
+#: they live in. Declared here rather than read off the receipt or off the
+#: sidecar: a receipt that lost an entry, or a sidecar that arrived with one
+#: sheet missing, would otherwise lose the check along with it.
 TABLES = {'effects_text_long': 'effect_extraction_text_long.csv',
           'extraction_counts_long': 'extraction_counts_long.csv'}
 WORKBOOK = 'extraction_form_RASi_PCa.xlsx'
 WRITER = 'integrate_supplements'
 
 
+def load_table(base, label):
+    return rowkey.load_csv_snapshot(os.path.join(base, TABLES[label]))
+
+
 def preconditions(base, logs):
     """Everything that has to hold before the workbook may be touched.
 
-    THE ROWS AND THE TABLES THEY CAME FROM ARE ONE CLAIM. new_rows.json is
-    written by another script in another run; this one used to take it on
-    faith, so a file left by an earlier run would have been appended while the
-    CSVs said something else. The receipt binds the rows to the tables they
-    were derived from, and those tables are hashed here and now.
+    THE ROWS, THE RECEIPT AND THE TABLES ARE ONE CLAIM OR THEY ARE NOTHING.
+    new_rows.json is written by another script in another run. Checking that
+    it was attested, and separately that the CSV hash matches the receipt,
+    leaves the two facts unrelated: a producer recording a correct file hash
+    beside a sidecar full of different rows satisfied both. So the rows in the
+    sidecar are rebuilt against the CURRENT columns, digested the way the
+    writer digested what it persisted, and looked up in the CSV itself.
     """
     receipt = rowkey.read_receipt(logs, WRITER)
     problems = rowkey.sidecar_problems(
@@ -247,11 +263,166 @@ def preconditions(base, logs):
         problems.append(('RECEIPT_TABLE_SET_MISMATCH',
                          'receipt names tables %s, this step needs %s'
                          % (named, sorted(TABLES))))
-    if receipt.get('verdict') not in ('WRITE', rowkey.CLEAN_RERUN):
-        problems.append(('WRITER_VERDICT_NOT_CLEAN',
-                         '%s last reported %s' % (WRITER,
-                                                  receipt.get('verdict'))))
-    return receipt, problems
+    # ONLY A CLEAN RERUN. The attestation is written before the tables are
+    # replaced, so a first WRITE's receipt records the PRE-write file hashes
+    # and can never match the CSVs it just produced. Allowing WRITE here was a
+    # branch that could not be taken; the order is writer, then the writer
+    # again to prove the rerun is clean, then this.
+    if receipt.get('verdict') != rowkey.CLEAN_RERUN:
+        problems.append(('WRITER_VERDICT_NOT_A_CLEAN_RERUN',
+                         '%s last reported %s; run it again and let it prove '
+                         'the rerun is a no-op first'
+                         % (WRITER, receipt.get('verdict'))))
+    if problems:
+        return receipt, None, problems
+
+    path = os.path.join(logs, 'new_rows.json')
+    new = json.load(io.open(path, encoding='utf-8'))
+    if not isinstance(new, dict) or sorted(new) != sorted(TABLES):
+        problems.append(('SIDECAR_SHEET_SET_MISMATCH',
+                         'new_rows.json carries %s, this step needs %s'
+                         % (sorted(new) if isinstance(new, dict) else type(new),
+                            sorted(TABLES))))
+        return receipt, None, problems
+
+    persisted = receipt.get('persisted') or {}
+    for label in sorted(TABLES):
+        rows, said = new[label], persisted.get(label) or {}
+        fields, on_file, _d = load_table(base, label)
+        if not isinstance(rows, list) or not rows or not all(
+                isinstance(r, list) for r in rows):
+            problems.append(('SIDECAR_BLOCK_MALFORMED',
+                             '%s is not a non-empty list of rows' % label))
+            continue
+        if list(said.get('fields') or ()) != list(fields or ()):
+            problems.append(('SIDECAR_FIELDS_MISMATCH',
+                             '%s: the receipt was written against %d columns '
+                             'and the file has %d'
+                             % (label, len(said.get('fields') or ()),
+                                len(fields or ()))))
+            continue
+        widths = sorted({len(r) for r in rows})
+        if widths != [len(fields)]:
+            problems.append(('SIDECAR_ROW_WIDTH_MISMATCH',
+                             '%s: rows are %s wide, the file has %d columns'
+                             % (label, widths, len(fields))))
+            continue
+        if len(rows) != said.get('rows'):
+            problems.append(('SIDECAR_ROW_COUNT_MISMATCH',
+                             '%s: sidecar has %d rows, the receipt persisted '
+                             '%s' % (label, len(rows), said.get('rows'))))
+            continue
+        as_dicts = [dict(zip(fields, r)) for r in rows]
+        got = rowkey.persisted_digest(as_dicts, fields)
+        if got != said.get('rows_sha256'):
+            problems.append(('SIDECAR_NOT_THE_PERSISTED_ROWS',
+                             '%s: the receipt persisted %s and the sidecar '
+                             'digests %s'
+                             % (label, (said.get('rows_sha256')
+                                        or '(absent)')[:12], got[:12])))
+            # NOT `continue`. The next check asks a different question - are
+            # these rows in the file at all - and it is the only one that can
+            # answer it. Stopping here left it with no case of its own, and a
+            # check nothing can make fail is not a check.
+
+        # AND THE ROWS ARE IN THE FILE, ONCE EACH. The digest proves the
+        # sidecar is what the writer persisted; this proves the file still
+        # carries it, and carries it once.
+        have = collections.Counter(
+            tuple((r.get(c) or '') for c in fields) for r in on_file)
+        wrong = [t for t in {tuple((r.get(c) or '') for c in fields)
+                             for r in as_dicts} if have[t] != 1]
+        if wrong:
+            problems.append(('SIDECAR_ROWS_NOT_ONCE_IN_TABLE',
+                             '%s: %d of its rows are in the file %s'
+                             % (label, len(wrong),
+                                'more than once' if any(have[t] > 1
+                                                        for t in wrong)
+                                else 'not at all')))
+    return receipt, new, problems
+
+
+def apply_workbook(base, logs, workbook_path):
+    """Read, decide, and either apply the rows or leave the workbook alone.
+
+    Separated from __main__ so the decision can be exercised. Everything the
+    audit named as untested lived in that block: the precondition set, the
+    verdict, the receipt it writes. Returns the receipt it wrote.
+    """
+    receipt, new, problems = preconditions(base, logs)
+    if problems:
+        for code, detail in problems:
+            print('  %-32s %s' % (code, detail))
+        return _receipt(logs, {'verdict': 'REFUSED_NO_WRITE',
+                               'problems': [list(x) for x in problems],
+                               'workbook_sha256_before':
+                                   rowkey.file_digest(workbook_path),
+                               'workbook_sha256_after':
+                                   rowkey.file_digest(workbook_path)})
+
+    with zipfile.ZipFile(workbook_path) as z:
+        members = [(i, z.read(i.filename)) for i in z.infolist()]
+    parts = {i.filename: d for i, d in members}
+
+    # WHAT THE WORKBOOK ALREADY CARRIES, BEFORE DECIDING TO ADD ANYTHING. An
+    # attested sidecar says the rows are the right rows. It does not say they
+    # have not been applied - and this script used to append whatever it was
+    # handed, so a second run put every row in twice.
+    states = {sheet: sheet_state(parts, sheet, rows)[0]
+              for sheet, rows in sorted(new.items())}
+    for sheet, state in sorted(states.items()):
+        print('  %-24s %s' % (sheet, state))
+    distinct = set(states.values())
+    if distinct == {'PRESENT'}:
+        verdict = 'ALREADY_APPLIED_NO_WRITE'
+    elif distinct == {'ABSENT'}:
+        verdict = 'APPLY'
+    else:
+        # Half applied, applied twice, or applied and then copied. Neither
+        # adding the rows nor leaving them is right, and this step is not the
+        # place to guess which.
+        verdict = 'CONFLICT_NO_WRITE'
+
+    before = rowkey.file_digest(workbook_path)
+    applied = {}
+    if verdict == 'APPLY':
+        bak = os.path.join(base, 'archive',
+                           'pre_supplement_integration_2026-08-30', WORKBOOK)
+        if not os.path.exists(bak):
+            os.makedirs(os.path.dirname(bak), exist_ok=True)
+            shutil.copy2(workbook_path, bak)
+        edited = {}
+        for sheet, rows in sorted(new.items()):
+            part_edits, a, b, tp = plan_append(parts, sheet, rows)
+            # Planned against the parts as the previous sheet left them, so
+            # both sheets and both table refs go in together.
+            parts.update(part_edits)
+            edited.update(part_edits)
+            applied[sheet] = {'from_row': a, 'to_row': b, 'rows': len(rows),
+                              'table_part': tp}
+            print('  %-24s %d행 -> %d행 (+%d), 표 %s'
+                  % (sheet, a, b, len(rows), tp))
+        write_workbook(workbook_path, members, edited)
+
+    return _receipt(logs, {
+        'verdict': verdict,
+        'sheet_states': states,
+        'applied': applied,
+        'workbook_sha256_before': before,
+        'workbook_sha256_after': rowkey.file_digest(workbook_path),
+        'new_rows_sha256': (receipt.get('sidecars') or {}).get('new_rows.json'),
+        'persisted': receipt.get('persisted'),
+        'writer_receipt_verdict': receipt.get('verdict')})
+
+
+def _receipt(logs, body):
+    os.makedirs(logs, exist_ok=True)
+    json.dump(body, io.open(os.path.join(logs,
+                                         'xlsx_append_rows_receipt.json'),
+                            'w', encoding='utf-8'),
+              indent=2, ensure_ascii=False)
+    print('  판정: %s' % body['verdict'])
+    return body
 
 
 if __name__ == '__main__':
@@ -259,76 +430,8 @@ if __name__ == '__main__':
     # the workbook and the receipts by walking up from its own directory, so
     # the shipped copy read a different tree than FDT_BUNDLE named: it could
     # check one run's receipt and append to another run's workbook.
-    base = bundle_paths.BASE
-    logs = bundle_paths.receipt_dir()
-    wbp = os.path.join(base, WORKBOOK)
-
     with rowkey.write_lock(bundle_paths.write_lock()):
-        receipt, problems = preconditions(base, logs)
-        if problems:
-            for code, detail in problems:
-                print('  %-28s %s' % (code, detail))
-            raise SystemExit(
-                'the rows handed to this step are not bound to the tables on '
-                'disk; the workbook is untouched.')
-        new = json.load(io.open(os.path.join(logs, 'new_rows.json'),
-                                encoding='utf-8'))
-
-        with zipfile.ZipFile(wbp) as z:
-            members = [(i, z.read(i.filename)) for i in z.infolist()]
-        parts = {i.filename: d for i, d in members}
-
-        # WHAT THE WORKBOOK ALREADY CARRIES, BEFORE DECIDING TO ADD ANYTHING.
-        # An attested sidecar says the rows are the right rows. It does not
-        # say they have not been applied - and this script used to append
-        # whatever it was handed, so a second run put every row in twice.
-        states = {sheet: sheet_state(parts, sheet, rows)[0]
-                  for sheet, rows in sorted(new.items())}
-        for sheet, state in sorted(states.items()):
-            print('  %-24s %s' % (sheet, state))
-        distinct = set(states.values())
-        if distinct == {'PRESENT'}:
-            verdict = 'ALREADY_APPLIED_NO_WRITE'
-        elif distinct == {'ABSENT'}:
-            verdict = 'APPLY'
-        else:
-            # Half applied, or applied and then written past. Neither adding
-            # the rows nor leaving them is right, and this step is not the
-            # place to guess which.
-            verdict = 'CONFLICT_NO_WRITE'
-
-        before = rowkey.file_digest(wbp)
-        applied = {}
-        if verdict == 'APPLY':
-            bak = os.path.join(base, 'archive',
-                               'pre_supplement_integration_2026-08-30',
-                               WORKBOOK)
-            if not os.path.exists(bak):
-                os.makedirs(os.path.dirname(bak), exist_ok=True)
-                shutil.copy2(wbp, bak)
-            edited = {}
-            for sheet, rows in sorted(new.items()):
-                part_edits, a, b, tp = plan_append(parts, sheet, rows)
-                # Planned against the parts as the previous sheet left them,
-                # so both sheets and both table refs go in together.
-                parts.update(part_edits)
-                edited.update(part_edits)
-                applied[sheet] = {'from_row': a, 'to_row': b,
-                                  'rows': len(rows), 'table_part': tp}
-                print('  %-24s %d행 -> %d행 (+%d), 표 %s'
-                      % (sheet, a, b, len(rows), tp))
-            write_workbook(wbp, members, edited)
-
-        json.dump({'verdict': verdict,
-                   'sheet_states': states,
-                   'applied': applied,
-                   'workbook_sha256_before': before,
-                   'workbook_sha256_after': rowkey.file_digest(wbp),
-                   'new_rows_sha256': (receipt.get('sidecars') or {})
-                                      .get('new_rows.json'),
-                   'writer_receipt_verdict': receipt.get('verdict')},
-                  io.open(os.path.join(logs, 'xlsx_append_rows_receipt.json'),
-                          'w', encoding='utf-8'), indent=2, ensure_ascii=False)
-        print('  판정: %s' % verdict)
-        if verdict == 'CONFLICT_NO_WRITE':
-            raise SystemExit(1)
+        out = apply_workbook(bundle_paths.BASE, bundle_paths.receipt_dir(),
+                             os.path.join(bundle_paths.BASE, WORKBOOK))
+    if out['verdict'] in ('CONFLICT_NO_WRITE', 'REFUSED_NO_WRITE'):
+        raise SystemExit(1)

@@ -510,6 +510,19 @@ def load_csv_snapshot(path):
     return rd.fieldnames, list(rd), hashlib.sha256(raw).hexdigest()
 
 
+def persisted_digest(rows, fields):
+    """The digest of these rows AS THE FILE CARRIES THEM.
+
+    `intended_rows_sha256` is taken over the rows as the writer holds them,
+    transients and all, and before the ordinals are minted. It cannot be
+    recomputed by anything downstream that has only the file. This one is
+    taken over `writable(rows, fields)` - the exact dicts the CSV writer
+    serialises - so a consumer holding the rows and the file's columns can
+    arrive at the same number and prove it is looking at the same rows.
+    """
+    return rows_digest(writable(rows, fields), fields)
+
+
 def json_digest(payload):
     """sha256 of a JSON payload, canonically.
 
@@ -525,7 +538,7 @@ def json_digest(payload):
         .encode('utf-8')).hexdigest()
 
 
-def sidecar_problems(receipt, files):
+def sidecar_problems(receipt, files, volatile=None):
     """Sidecars on disk that are not the ones this receipt's run produced.
 
     A SIDECAR IS OUTSIDE THE TRANSACTION. The tables commit together or not at
@@ -541,8 +554,14 @@ def sidecar_problems(receipt, files):
     parsed and digested the same way and compared, so a sidecar that does not
     belong to this receipt is named rather than believed.
 
-    `files` is {name recorded in the attestation: path on disk}.
+    `files` is {name recorded in the attestation: path on disk}. `volatile`
+    is {name: keys the CALLER allows to be left out of the digest}; anything
+    the receipt declares beyond that is a mismatch, not a permission. The
+    receipt used to name its own volatile keys and be believed, so adding
+    `refused_values` to that list and then changing it passed every check -
+    the scope of the proof set, again, by the thing being proved.
     """
+    allowed = volatile or {}
     recorded = (receipt or {}).get('sidecars') or {}
     out = []
     for name, path in sorted(files.items()):
@@ -554,14 +573,24 @@ def sidecar_problems(receipt, files):
             continue
         if not isinstance(record, dict):
             record = {'sha256': record, 'volatile': []}
-        want, volatile = record.get('sha256'), record.get('volatile') or []
+        want = record.get('sha256')
+        declared = tuple(sorted(record.get('volatile') or ()))
+        permitted = tuple(sorted(allowed.get(name) or ()))
+        if declared != permitted:
+            out.append(('SIDECAR_VOLATILE_SET_MISMATCH',
+                        '%s leaves out %s, the contract allows %s'
+                        % (name, list(declared), list(permitted))))
+            continue
         if not os.path.exists(path):
             out.append(('SIDECAR_MISSING',
                         '%s is attested and is not on disk' % name))
             continue
         try:
+            # Digested under what the CONTRACT allows, not what the
+            # receipt claims - they are equal by the check above, and this
+            # says which one is the authority.
             got = json_digest(_without(
-                json.load(io.open(path, encoding='utf-8')), volatile))
+                json.load(io.open(path, encoding='utf-8')), permitted))
         except ValueError as exc:
             out.append(('SIDECAR_UNREADABLE', '%s: %s' % (name, exc)))
             continue
@@ -743,6 +772,19 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
         # called after the ordinals exist - minted on a write, read back off
         # the files on a clean rerun - and the payloads are written only when
         # this run is the one that wrote the tables.
+        # WHAT THE ROWS BECAME, RECORDED AFTER THEY BECAME IT. The
+        # attestation above is written before the ordinals exist, so nothing
+        # in it describes the rows that are actually in the file. A consumer -
+        # the workbook step - could check that the sidecar was attested and
+        # that the CSV hash matched, and still not know the sidecar held THESE
+        # rows: a producer recording a correct file hash beside a sidecar full
+        # of different rows passed both checks.
+        if verdict in ('WRITE', CLEAN_RERUN):
+            _amend_receipt(receipt_dir, name, {'persisted': {
+                label: {'rows_sha256': persisted_digest(intended, fields),
+                        'rows': len(intended),
+                        'fields': list(fields)}
+                for label, _p, fields, _e, intended, _k, _v in tables}})
         if sidecars is not None and verdict in ('WRITE', CLEAN_RERUN):
             payloads = sidecars(verdict, written)
             volatile = getattr(sidecars, 'volatile', None)

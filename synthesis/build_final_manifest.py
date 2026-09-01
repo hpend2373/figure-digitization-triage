@@ -293,7 +293,7 @@ def _supplement_sources():
 
 def _figure_sources():
     spec = bundle_paths.study_inputs()['figure_rows']
-    return {os.path.basename(v): rowkey.file_digest(os.path.join(BASE, v))
+    return {v: rowkey.file_digest(os.path.join(BASE, v))
             for v in sorted({r['source_local_path'] for r in spec})}
 
 
@@ -301,12 +301,19 @@ WRITER_CONTRACTS = {
     'integrate_supplements': {
         'file': 'integrate_supplements.py',
         'tables': ('effects_text_long', 'extraction_counts_long'),
-        'sidecars': ('new_rows.json', 'integration.json'),
+        # WHAT MAY BE LEFT OUT OF EACH DIGEST, DECLARED HERE. The receipt
+        # names its own volatile keys; without a contract to check them
+        # against, widening that list was a way to exempt any field from the
+        # comparison and still pass every other check.
+        'sidecars': {'new_rows.json': (),
+                     'integration.json': ('archived_to', 'date', 'dry_run',
+                                          'verdict')},
         'sources': _supplement_sources},
     'figure_printed_numbers': {
         'file': 'figure_printed_numbers.py',
         'tables': ('effects_text_long',),
-        'sidecars': ('figure_rows.json', 'R1087_coexposure_pending.json'),
+        'sidecars': {'figure_rows.json': (),
+                     'R1087_coexposure_pending.json': ()},
         'sources': _figure_sources},
 }
 if sorted(WRITER_CONTRACTS) != sorted(EXPECTED_WRITERS):
@@ -355,7 +362,8 @@ for _name in EXPECTED_WRITERS:
     # manifest counted refusals and held estimates out of files that might
     # have been left by an earlier run.
     _found += rowkey.sidecar_problems(
-        _receipt, {f: os.path.join(sup, f) for f in _contract['sidecars']})
+        _receipt, {f: os.path.join(sup, f) for f in _contract['sidecars']},
+        _contract['sidecars'])
     R['receipt_attestation'][_name] = [{'code': c, 'detail': d}
                                        for c, d in _found]
     for code, detail in _found:

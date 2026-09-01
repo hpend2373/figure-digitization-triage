@@ -129,8 +129,12 @@ verdict, written = rowkey.run_writer(
     read_digests={'effects_text_long': read_digest},
     attest={'writer_code_sha256': rowkey.file_digest(os.path.abspath(__file__)),
             'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
-            'sources': {os.path.basename(v): rowkey.file_digest(
-                os.path.join(BASE, v)) for v in digests}},
+            # KEYED BY BUNDLE-RELATIVE PATH, NOT BASENAME. Two sources in
+            # different folders can share a file name, and the second would
+            # have taken the first's place in this dict - one page's hash
+            # standing in for another's, with the set still the right size.
+            'sources': {v: rowkey.file_digest(os.path.join(BASE, v))
+                        for v in digests}},
     sidecars=sidecars,
     dry_run=not write)
 may = verdict == 'WRITE'

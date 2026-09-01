@@ -22,7 +22,7 @@ The third case is where a naive "skip what exists" would quietly half-write a
 table. A partial or conflicting state is a question for a person, not something
 to resolve by guessing which side is right.
 """
-import io, json, os
+import csv, io, json, os
 
 #: The fields that make an effect row the fact it is. `effect_row_id` is
 #: deliberately absent: it is an ordinal, and an ordinal is a position.
@@ -476,6 +476,40 @@ def rows_digest(rows, fields):
     return h.hexdigest()
 
 
+def _refuse(receipt_dir, name, verdict, key, labels):
+    """Record a refusal that happened before any table was touched."""
+    os.makedirs(receipt_dir, exist_ok=True)
+    json.dump({'verdict': verdict, key: labels},
+              io.open(os.path.join(receipt_dir, '%s_idempotency.json' % name),
+                      'w', encoding='utf-8'), indent=2)
+    print('  판정: %s (%s)' % (verdict, ', '.join(labels)))
+    return verdict, []
+
+
+def load_csv_snapshot(path):
+    """A table's columns, rows and digest, from ONE read of its bytes.
+
+    THE DIGEST HAS TO BE OF WHAT WAS PARSED. The stale-snapshot check compares
+    what the caller read against what is on disk inside the lock - but it was
+    handed a digest computed at the call site, long after the rows had been
+    read and usually after minutes of parsing source documents. Another writer
+    committing in that gap left the caller holding OLD rows and a NEW digest,
+    which is the one pair the check reads as fresh. It would then replace the
+    whole table from rows that never saw the other writer's work, and the
+    guard would have signed it off.
+
+    Reading the bytes once and digesting those bytes closes the gap without
+    holding the lock across the parsing.
+    """
+    import hashlib
+    if not os.path.exists(path):
+        return None, [], ''
+    with open(path, 'rb') as fh:
+        raw = fh.read()
+    rd = csv.DictReader(io.StringIO(raw.decode('utf-8-sig')))
+    return rd.fieldnames, list(rd), hashlib.sha256(raw).hexdigest()
+
+
 def json_digest(payload):
     """sha256 of a JSON payload, canonically.
 
@@ -642,14 +676,31 @@ def run_writer(name, tables, receipt_dir, assign_ids=None, archive=None,
                  if (read_digests or {}).get(label) is not None
                  and (read_digests or {})[label] != file_digest(path)]
         if stale:
-            os.makedirs(receipt_dir, exist_ok=True)
-            json.dump({'verdict': 'STALE_EXISTING_SNAPSHOT',
-                       'stale_tables': stale},
-                      io.open(os.path.join(receipt_dir,
-                                           '%s_idempotency.json' % name), 'w',
-                              encoding='utf-8'), indent=2)
-            print('  판정: STALE_EXISTING_SNAPSHOT (%s)' % ', '.join(stale))
-            return 'STALE_EXISTING_SNAPSHOT', []
+            return _refuse(receipt_dir, name, 'STALE_EXISTING_SNAPSHOT',
+                           'stale_tables', stale)
+        # AND THE ROWS HAVE TO BE THE ROWS THAT DIGEST DESCRIBES. Matching
+        # digests only prove the file has not moved since the digest was
+        # taken - not that the caller's rows came from it. A caller that read
+        # its rows early and took the digest late (which is what both writers
+        # did: rows first, then minutes of document parsing, then the digest
+        # at the call) holds old rows and a current digest, and that is the
+        # one pair this check used to read as fresh. The whole table would
+        # then be replaced from rows that never saw the other writer's work.
+        # Inside the lock the file IS what the digest says, so its rows are
+        # what `existing` has to be.
+        disagree = []
+        for label, path, _f, existing, _i, _k, _v in tables:
+            if (read_digests or {}).get(label) is None:
+                continue
+            on_file_cols, on_file, _d = load_csv_snapshot(path)
+            cols = on_file_cols or ()
+            if len(on_file) != len(existing) or not all(
+                    all((a.get(c) or '') == (b.get(c) or '') for c in cols)
+                    for a, b in zip(on_file, existing)):
+                disagree.append(label)
+        if disagree:
+            return _refuse(receipt_dir, name, 'SNAPSHOT_ROWS_DISAGREE',
+                           'disagreeing_tables', disagree)
         return _run_writer(name, tables, receipt_dir, assign_ids, archive,
                            journal_path, replace, relations, assignable,
                            dry_run, attest)

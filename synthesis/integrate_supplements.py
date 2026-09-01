@@ -26,7 +26,12 @@ import csv, hashlib, io, json, os, re, sys, datetime
 
 OUT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, OUT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bundle_paths
+# Module level, because `load` below needs it: a function-local import
+# is a local name, and the reader that has to bind rows to their digest
+# is not inside main().
+import rowkey
 BASE = bundle_paths.BASE
 SUPP = os.path.join(BASE, 'source_supplements')
 
@@ -539,9 +544,14 @@ DESC_MEASURES = {'median', 'IQR_low', 'IQR_high', 'mean', 'SD'}
 
 
 def load(name):
-    with io.open(os.path.join(BASE, name), encoding='utf-8-sig') as fh:
-        rd = csv.DictReader(fh)
-        return rd.fieldnames, list(rd)
+    """Columns, rows and the digest OF THE BYTES THESE ROWS CAME FROM.
+
+    The digest used to be taken at the run_writer call, minutes of document
+    parsing after these rows were read. A writer committing in that gap left
+    this run holding old rows and a current digest - the one pair the
+    stale-snapshot check cannot tell from a fresh read.
+    """
+    return rowkey.load_csv_snapshot(os.path.join(BASE, name))
 
 
 def attach_count_parents(new_ef, new_ct):
@@ -607,8 +617,8 @@ def attach_count_parents(new_ef, new_ct):
 def main():
     counts = {'R0856': do_R0856(), 'R1040': do_R1040(), 'R0855': do_R0855()}
 
-    ef_cols, ef_rows = load('effect_extraction_text_long.csv')
-    ct_cols, ct_rows = load('extraction_counts_long.csv')
+    ef_cols, ef_rows, ef_digest = load('effect_extraction_text_long.csv')
+    ct_cols, ct_rows, ct_digest = load('extraction_counts_long.csv')
 
     # IDs CONTINUE THE RECORD'S OWN SEQUENCE and never reuse one. A row id is
     # the key other tables point at, so a collision would silently reattach a
@@ -635,8 +645,6 @@ def main():
         new_ct.append(out)
 
     # IDEMPOTENCY. A second --write must not append these rows again.
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import rowkey
     # BOTH SIDES NAME THE PARENT THE SAME WAY. On file a count points at its
     # parent by ordinal; a count about to be written cannot, because the
     # ordinals do not exist yet. Give the new rows their parent's semantic key
@@ -705,11 +713,8 @@ def main():
         journal_path=os.path.join(bundle_paths.receipt_dir(),
                                   'integrate_supplements_journal.json'),
         lock_path=bundle_paths.write_lock(),
-        read_digests={
-            'effects_text_long': rowkey.file_digest(
-                os.path.join(BASE, 'effect_extraction_text_long.csv')),
-            'extraction_counts_long': rowkey.file_digest(
-                os.path.join(BASE, 'extraction_counts_long.csv'))},
+        read_digests={'effects_text_long': ef_digest,
+                      'extraction_counts_long': ct_digest},
         attest={'writer_code_sha256': rowkey.file_digest(
                     os.path.abspath(__file__)),
                 'study_inputs_sha256': rowkey.file_digest(

@@ -61,9 +61,12 @@ def sha(p):
 
 
 p = os.path.join(BASE, 'effect_extraction_text_long.csv')
-with io.open(p, encoding='utf-8-sig', newline='') as fh:
-    rd = csv.DictReader(fh)
-    cols, rows = rd.fieldnames, list(rd)
+# COLUMNS, ROWS AND DIGEST FROM ONE READ. The digest was taken at the
+# run_writer call below, after the figure specs had been parsed and every
+# source page hashed; a writer committing in that gap would have handed this
+# run old rows with a current digest, which is what the stale-snapshot check
+# reads as fresh.
+cols, rows, read_digest = rowkey.load_csv_snapshot(p)
 
 digests = {}
 out = []
@@ -108,7 +111,7 @@ verdict, written = rowkey.run_writer(
     assignable={'effect_row_id'},
     journal_path=os.path.join(RECEIPTS, 'figure_printed_numbers_journal.json'),
     lock_path=bundle_paths.write_lock(),
-    read_digests={'effects_text_long': rowkey.file_digest(p)},
+    read_digests={'effects_text_long': read_digest},
     attest={'writer_code_sha256': rowkey.file_digest(os.path.abspath(__file__)),
             'study_inputs_sha256': rowkey.file_digest(bundle_paths.STUDY_INPUTS),
             'sources': {os.path.basename(v): rowkey.file_digest(

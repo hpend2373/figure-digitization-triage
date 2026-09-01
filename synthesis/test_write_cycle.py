@@ -584,6 +584,69 @@ check("a snapshot that still matches is allowed through",
                    [('a', SNAP, COLS, read(SNAP), [row(3)], KEY, VALUE)], TMP,
                    assign_ids=number, assignable={'row_id'},
                    read_digests={'a': K.file_digest(SNAP)})[0] == 'WRITE')
+# THE ORDER BOTH WRITERS ACTUALLY USED. Rows were read first, the source
+# documents were parsed for minutes, and only at the run_writer call was the
+# digest taken. A writer committing in that window hands this run OLD rows and
+# a CURRENT digest - the one pair a digest comparison cannot see through.
+SNAPB = fresh('snapb.csv', [dict(row(1), row_id='b-001')])
+_late_rows = read(SNAPB)                       # 1. rows
+fresh('snapb.csv', [dict(row(1), row_id='b-001'),      # 2. somebody commits
+                    dict(row(2), row_id='b-002')])
+_late_digest = K.file_digest(SNAPB)            # 3. digest, at the call
+check("old rows with a current digest are refused, not written",
+      K.run_writer('late',
+                   [('a', SNAPB, COLS, _late_rows, [row(3)], KEY, VALUE)], TMP,
+                   assign_ids=number, assignable={'row_id'},
+                   read_digests={'a': _late_digest})[0]
+      == 'SNAPSHOT_ROWS_DISAGREE')
+check("and the other writer's rows are still there",
+      len(read(SNAPB)) == 2, "%d" % len(read(SNAPB)))
+
+# The loader exists so a caller cannot build that pair in the first place.
+SNAPC = fresh('snapc.csv', [dict(row(1), row_id='c-001')])
+_cols_c, _rows_c, _dig_c = K.load_csv_snapshot(SNAPC)
+check("the loader digests the bytes it parsed",
+      _dig_c == K.file_digest(SNAPC))
+# NOT A SECOND READ OF THE PATH. Two reads are two moments, and the whole
+# point of the loader is that the rows and the digest come from one. Nothing
+# can change the file between them inside a single-threaded test, so the
+# distinction is asserted directly: the loader must not go back to the file.
+_orig_digest = K.file_digest
+
+
+def _no_second_read(_path):
+    raise AssertionError('load_csv_snapshot read the path a second time')
+
+
+K.file_digest = _no_second_read
+try:
+    _again = K.load_csv_snapshot(SNAPC)[2]
+    _one_read = _again == _dig_c
+except AssertionError:
+    _one_read = False
+finally:
+    K.file_digest = _orig_digest
+check("and does not go back to the file for it", _one_read)
+check("and parses what csv.DictReader parses",
+      [dict(r) for r in _rows_c] == [dict(r) for r in read(SNAPC)]
+      and _cols_c == COLS)
+fresh('snapc.csv', [dict(row(1), row_id='c-001'), dict(row(2), row_id='c-002')])
+check("a loaded snapshot that the file has moved past is refused",
+      K.run_writer('loaded',
+                   [('a', SNAPC, COLS, _rows_c, [row(3)], KEY, VALUE)], TMP,
+                   assign_ids=number, assignable={'row_id'},
+                   read_digests={'a': _dig_c})[0]
+      == 'STALE_EXISTING_SNAPSHOT')
+check("a loaded snapshot of a file nobody has touched goes through",
+      K.run_writer('loaded2',
+                   [('a', SNAPC, COLS) + tuple(K.load_csv_snapshot(SNAPC)[1:2])
+                    + ([row(3)], KEY, VALUE)], TMP,
+                   assign_ids=number, assignable={'row_id'},
+                   read_digests={'a': K.load_csv_snapshot(SNAPC)[2]})[0]
+      == 'WRITE')
+check("a file that is not there loads as empty rather than raising",
+      K.load_csv_snapshot(os.path.join(TMP, 'nope.csv')) == (None, [], ''))
+
 check("and a caller that records no digest is not judged on one",
       K.run_writer('snap3',
                    [('a', fresh('snap3.csv'), COLS, [], [row(4)], KEY, VALUE)],

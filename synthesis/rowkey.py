@@ -611,6 +611,13 @@ class Locked(Exception):
     """Another writer holds the lock."""
 
 
+#: The same exclusive lock the writers take, for anything else that has to be
+#: alone with the bundle - the workbook step above all, which mutates a file
+#: the CSVs are compared against.
+def write_lock(path):
+    return _Lock(path)
+
+
 class _Lock(object):
     """Exclusive for the whole transaction, guard to final replace.
 

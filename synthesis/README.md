@@ -25,7 +25,8 @@
 <!-- SYNTHESIS_SUITE_COUNT: test_route_gate 18 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_rowkey 71 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 93 -->
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 182 -->
+<!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 17 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 199 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 
@@ -34,6 +35,7 @@
 | `route_gate.py` · `test_route_gate.py` | 기록의 **경로**를 스크리닝이 정하면 그 기록의 모든 효과행이 같은 경로를 달아야 합니다. 스크리닝이 한 기록을 두 번 다르게 판정하면 어느 쪽도 권위가 없습니다. |
 | `rowkey.py` · `test_rowkey.py` | 추가 작업의 재실행 가드. 여러 출력의 상태가 서로 다르면 전체를 막고, 같은 자연키가 두 번이면 거부합니다. 비교 대상은 손으로 고르지 않고 유도합니다. 쓰기는 전부 아니면 전무이고, 선언된 writer의 영수증이 없으면 실패입니다. |
 | `test_write_cycle.py` | **쓰기의 네 단계** — 최초 쓰기, 재실행 no-op, 한 표만 채워진 상태, 그리고 **staging 중 실패와 replace 중 실패**. 부모 참조 preflight, 콜백의 월권, 스키마 드리프트, 쓰지 않는 경로, 영수증 결박, 동시 실행 잠금, 새 파일 롤백, 영수증 결박 검증, 낡은 스냅숏 거부까지. |
+| `xlsx_append_rows.py` · `test_xlsx_cycle.py` | 워크북에 행을 넣는 단계. **이미 적용됐는지를 먼저 판정**하고(ABSENT / PRESENT / CONFLICT), 두 시트 변경을 한 워크북에 모아 **한 번만 교체**합니다. 실제 워크북은 이미 적용된 상태라 거절 경로밖에 돌릴 수 없으므로, 시나리오는 이 파일이 만드는 작은 워크북 위에서 돕니다. |
 | `verify_synthesis_status.py` | 위 숫자가 트리와 맞는지. 파일 집합·정확히 한 개의 카운트 표시·0 거부·합계 대조 |
 
 CI는 마지막 줄만 grep하지 않습니다. `verify_synthesis_status.py`가 여기 있는

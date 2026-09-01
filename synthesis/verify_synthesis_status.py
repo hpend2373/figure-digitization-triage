@@ -39,7 +39,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 #: Suites that read no files and so can run anywhere, including CI.
-CI_SUITES = ("test_route_gate", "test_rowkey", "test_write_cycle")
+CI_SUITES = ("test_route_gate", "test_rowkey", "test_write_cycle",
+             "test_xlsx_cycle")
 #: Suites that need the extraction bundle, which is not redistributable. They
 #: are declared, not run: an undeclared file is the failure this catches.
 BUNDLE_SUITES = ("test_readiness_gate",)

@@ -99,6 +99,38 @@ def make(run, out_dir):
     return 0
 
 
+#: Which box each choice names. A choice is a statement about ONE of the three
+#: boxes, so it is that box - not all three - whose change invalidates it.
+CHOICE_BOX = {"TEXT": "Proposal_Figure_BBox", "PDF": "PDF_BBox",
+              "RASTER": "Raster_BBox"}
+
+
+def stale(queue_row, region_row, crop_sha):
+    """Why this answer is no longer about what the person saw, or ''.
+
+    TWO THINGS CAN GO STALE, and the first version only checked one. The crop
+    digest catches a picture that was recut under the answer. It does NOT
+    catch a proposer that improved: after the PDF fix, 6 of the 48 rows in the
+    first returned file had a different blue box than the one on screen when
+    somebody chose, and merge would have applied a choice to a box nobody had
+    looked at. The box a choice NAMES is compared too - only that one, because
+    "the green box is the figure" stays true however the blue box moved.
+    """
+    choice = (queue_row.get("Human_Choice") or "").strip().upper()
+    if not choice:
+        return ""
+    if queue_row.get("Crop_SHA256") and queue_row["Crop_SHA256"] != crop_sha:
+        return "판정한 크롭과 지금 크롭이 다름 - 다시 봐야 함"
+    column = CHOICE_BOX.get(choice)
+    if column is None:                     # BLOCKED names no box
+        return ""
+    was, now = queue_row.get(column, ""), (region_row or {}).get(column, "")
+    if was != now:
+        return ("고른 %s 상자가 판정할 때와 다름 (%s → %s) - 다시 봐야 함"
+                % (choice, was or "빈칸", now or "빈칸"))
+    return ""
+
+
 def merge(run, queue_path):
     regions_path = os.path.join(run, "validated_regions.csv")
     with io.open(regions_path, encoding="utf-8") as fh:
@@ -118,8 +150,9 @@ def merge(run, queue_path):
             continue
         crop = os.path.join(run, draft[q["Draft_ID"]].get("Figure_Crop") or "")
         now = _sha(crop) if os.path.exists(crop) else ""
-        if q.get("Crop_SHA256") and q["Crop_SHA256"] != now:
-            refused.append((q["Draft_ID"], "판정한 크롭과 지금 크롭이 다름 - 다시 봐야 함"))
+        why = stale(q, reg, now)
+        if why:
+            refused.append((q["Draft_ID"], why))
             continue
         changed = False
         for col in ("Human_Choice", "Human_Note", "Agent_Choice", "Agent_Note"):

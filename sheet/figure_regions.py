@@ -107,8 +107,12 @@ def furniture(graphics, size):
             out.add(i)
         elif near_edge and hairline:
             out.add(i)
-        elif area(g) < MIN_AREA:
-            out.add(i)
+    # NOT "too small to be a figure". A line chart is hundreds of objects a
+    # few points each - every tick, every segment of every trace - and no one
+    # of them is a figure; together they are. Dropping small objects here, one
+    # by one, threw away 690 of a page's 691 drawings and left the caption
+    # with nothing to answer to: that is where 49 of run2's 149 "PDF did not
+    # answer" rows came from. Size is judged after clustering, on the cluster.
     return out
 
 
@@ -135,31 +139,70 @@ def gutter(texts, size):
     return (edge_l, edge_r)
 
 
+#: Cell size, in points, of the grid the objects are painted on to be joined.
+#: Finer than GAP so that "within GAP of each other" survives quantisation.
+CELL_PT = 4.0
+
+
 def cluster(graphics, size, texts=(), gap=GAP):
-    """Figure candidates: drawings joined into the shapes a reader would see."""
+    """Figure candidates: drawings joined into the shapes a reader would see.
+
+    ON A GRID, NOT PAIR BY PAIR. The first version compared every pair of
+    boxes and repeated until nothing merged - fine for a page of twenty
+    drawings, and hopeless for a line chart of seven hundred segments, which
+    is what the MIN_AREA fix let through. Here each object is painted onto a
+    grid of CELL_PT cells, widened by half of `gap` so that two objects within
+    `gap` of each other touch, and the grid's connected components are the
+    clusters. Linear in the number of objects, and the same answer.
+    """
+    import numpy as np
     skip = furniture(graphics, size)
     items = [g for i, g in enumerate(graphics) if i not in skip]
     if not items:
         return []
+    w, h = size
+    if w <= 0 or h <= 0:
+        return []
     band = gutter(texts, size)
+    centre = (band[0] + band[1]) / 2.0 if band else None
+    W, H = int(w / CELL_PT) + 2, int(h / CELL_PT) + 2
+    grid = np.zeros((H, W), dtype=bool)
+    half = gap / 2.0
+    for x0, y0, x1, y1 in items:
+        ex0, ey0, ex1, ey1 = x0 - half, y0 - half, x1 + half, y1 + half
+        # NEVER ACROSS THE GUTTER, unless the object itself crosses its
+        # middle: a widened box may not reach into the other column.
+        if centre is not None and not (x0 < centre < x1):
+            if x1 <= centre:
+                ex1 = min(ex1, centre - CELL_PT)
+            else:
+                ex0 = max(ex0, centre + CELL_PT)
+        cx0, cx1 = max(0, int(ex0 / CELL_PT)), min(W - 1, int(ex1 / CELL_PT))
+        cy0, cy1 = max(0, int(ey0 / CELL_PT)), min(H - 1, int(ey1 / CELL_PT))
+        if cx1 < cx0 or cy1 < cy0:
+            continue
+        grid[cy0:cy1 + 1, cx0:cx1 + 1] = True
+    labels = _label(grid)
+    groups = {}
+    for g in items:
+        cx = min(W - 1, max(0, int(((g[0] + g[2]) / 2.0) / CELL_PT)))
+        cy = min(H - 1, max(0, int(((g[1] + g[3]) / 2.0) / CELL_PT)))
+        lab = labels[cy, cx]
+        if lab == 0:
+            continue
+        groups.setdefault(lab, []).append(g)
+    out = [_box(g) for g in groups.values()]
+    out = [b for b in out if area(b) >= MIN_AREA * 3
+           and (b[2] - b[0]) >= MIN_SIDE and (b[3] - b[1]) >= MIN_SIDE]
+    return join_over_blank(out, texts, size)
 
-    def joinable(a, b):
-        near = (overlap(a, b, 0) > -gap and overlap(a, b, 1) > -gap
-                and _gap(a, b, 0) <= gap and _gap(a, b, 1) <= gap)
-        if not near or band is None:
-            return near
-        # NEVER ACROSS THE GUTTER. Two panels in opposite columns pass the
-        # distance test whenever the gutter is narrow, and asking whether each
-        # box sits entirely outside the band does not work either - a panel
-        # normally reaches a few points into it. What separates them is where
-        # the EMPTY SPACE between them falls: if that space contains the middle
-        # of the gutter, the two are in different columns.
-        centre = (band[0] + band[1]) / 2.0
-        if a[0] < centre < a[2] or b[0] < centre < b[2]:
-            return True                 # one of them crosses on its own
-        return not (min(a[2], b[2]) <= centre <= max(a[0], b[0]))
 
-    parent = list(range(len(items)))
+def _label(grid):
+    """Connected-component labels for a boolean grid (0 = background)."""
+    import numpy as np
+    H, W = grid.shape
+    labels = np.zeros((H, W), dtype=np.int32)
+    parent = [0]
 
     def find(i):
         while parent[i] != i:
@@ -167,29 +210,33 @@ def cluster(graphics, size, texts=(), gap=GAP):
             i = parent[i]
         return i
 
-    changed = True
-    while changed:                      # boxes grow as they merge, so repeat
-        changed = False
-        groups = {}
-        for i in range(len(items)):
-            groups.setdefault(find(i), []).append(i)
-        keys = sorted(groups)
-        boxes = {k: _box([items[i] for i in groups[k]]) for k in keys}
-        for x in range(len(keys)):
-            for y in range(x + 1, len(keys)):
-                a, b = keys[x], keys[y]
-                if find(a) == find(b):
-                    continue
-                if joinable(boxes[a], boxes[b]):
-                    parent[find(a)] = find(b)
-                    changed = True
-    groups = {}
-    for i in range(len(items)):
-        groups.setdefault(find(i), []).append(i)
-    out = [_box([items[i] for i in g]) for g in groups.values()]
-    out = [b for b in out if area(b) >= MIN_AREA * 3
-           and (b[2] - b[0]) >= MIN_SIDE and (b[3] - b[1]) >= MIN_SIDE]
-    return join_over_blank(out, texts, size)
+    g = grid.tolist()
+    lab = labels.tolist()
+    nxt = 1
+    for y in range(H):
+        row, prev, cur = g[y], (lab[y - 1] if y else None), lab[y]
+        for x in range(W):
+            if not row[x]:
+                continue
+            left = cur[x - 1] if x else 0
+            up = prev[x] if prev is not None else 0
+            if left and up:
+                cur[x] = left
+                ra, rb = find(left), find(up)
+                if ra != rb:
+                    parent[max(ra, rb)] = min(ra, rb)
+            elif left or up:
+                cur[x] = left or up
+            else:
+                parent.append(nxt)
+                cur[x] = nxt
+                nxt += 1
+    for y in range(H):
+        cur = lab[y]
+        for x in range(W):
+            if cur[x]:
+                cur[x] = find(cur[x])
+    return np.asarray(lab, dtype=np.int32)
 
 
 def _gap(a, b, axis):

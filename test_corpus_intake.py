@@ -1402,6 +1402,29 @@ check("and with the footer left in, it reaches the other column - so the "
       "exclusion is what holds the edge",
       _box1_furn is not None and _box1_furn[2] > 300.0, "%s" % (_box1_furn,))
 
+# NOTHING ELSE STOPS THE WALK ON THAT PAGE, so it used to reach y=0 and take
+# the running head with it - the strip at the top of so many run2 crops. Now
+# it stops under the head. Measured against the PDF-object and raster
+# detectors on run2: 135 of 376 boxes moved closer to the figure, none away.
+_head_bottom = max(b[4] for b in _two_col if b[0] == 4 and "Downloaded" in b[5])
+check("with nothing else to stop it, the box ends under the running head, "
+      "not at the top of the page",
+      _box1 is not None and _box1[1] == _head_bottom, "%s vs %s" % (_box1, _head_bottom))
+_no_head = [b for b in _two_col if "Downloaded" not in b[5]]
+_box1_nohead = CI.figure_bbox(_c1, _no_head)
+check("a page with no furniture still reaches the top - no head, nothing to stop at",
+      _box1_nohead is not None and _box1_nohead[1] == 0.0, "%s" % (_box1_nohead,))
+_footer_only = list(_no_head)
+for _p in (1, 2, 3, 4, 5, 6):
+    _footer_only.append(_paged(_p, "Page %d of 6" % _p, 780.0, 250.0, 350.0))
+_box1_footer = CI.figure_bbox(_c1, _footer_only)
+check("a footer is furniture too, but it is not a head: the box still reaches the top",
+      _box1_footer is not None and _box1_footer[1] == 0.0, "%s" % (_box1_footer,))
+check("the head does not set an edge when a real block above stops the walk first",
+      CI.figure_bbox(_c1, _two_col + [_paged(4, "A paragraph of body text long enough "
+                                           "to read as prose and stop the walk.",
+                                           200.0, 44.0, 290.0)])[1] > _head_bottom)
+
 # ----------------------------------------- what stops the walk up the page
 _cap = 250.0
 check("an axis title does not stop the walk", CI.interior_floor(

@@ -31,7 +31,7 @@ FAIL = []
 def check(name, ok, detail=""):
     N[0] += 1
     print("  %s %s%s" % ("ok  " if ok else "FAIL", name,
-                         "" if ok else "  <- %s" % detail))
+                         "" if ok else "  <- %s" % (detail,)))
     if not ok:
         FAIL.append(name)
 
@@ -1062,6 +1062,103 @@ _d4, _g4, _t4 = _after(_ag_root)
 check("에이전트의 Agent_Choice만으로는 아무것도 열리지 않는다",
       _g4[_target]["Agreement"] == "DISAGREE" and _disabled(_t4, _target)
       and _d4[_target]["Figure_BBox"] == _tr["Figure_BBox"])
+
+# ------------------------------------------------ 2단계: 화면이 파일을 보여 주는가
+import display_checks as DC                                      # noqa: E402
+
+_open_rows = [d for d in DRAFT if d["Figure_Crop"] and d["Page_Raster"]
+              and not [r for r in ROWS_JSON if r["Draft_ID"] == d["Draft_ID"]
+                       and r["Count_Blocked"] == "1"]] if "ROWS_JSON" in dir() else None
+_probs, _seen = DC.check_run(FX["draft"], PARTS, DRAFT)
+check("픽스처의 열린 카드가 확대·비율·페이지 상자 검사를 모두 통과한다",
+      _probs == [] and _seen > 0, (_probs[:3], _seen))
+_cards = [c for part in PARTS for c in DC.cards(io.open(part, encoding="utf-8").read())]
+check("카드 수 = 초안 행 수 (파서가 카드를 빠뜨리지 않는다)",
+      len(_cards) == len(DRAFT), (len(_cards), len(DRAFT)))
+_with_zoom = [c for c in _cards if c["zoom"]]
+check("열린 행에만 확대 이미지가 있다 (막힌 행은 없다)",
+      len(_with_zoom) == _seen and 0 < _seen < len(DRAFT), (_seen, len(DRAFT)))
+
+# 페이지 상자 검사가 실제로 거울을 잡는지: 좋은 카드에 뒤집힌 행을 대 본다.
+_good = [c for c in _with_zoom if c["page"]][0]
+_grow = [d for d in DRAFT if d["Draft_ID"] == _good["Draft_ID"]][0]
+_ok_true, _det_true = DC.page_box_drawn_where_the_row_says(_good, _grow)
+check("올바른 행에서는 빨간 상자가 네 변을 모두 덮는다", _ok_true, _det_true)
+_ph = float(_grow["Page_Height_Pt"])
+_bx0, _by0, _bx1, _by1 = [float(v) for v in _grow["Figure_BBox"].split(",")]
+_mirrored = dict(_grow, Figure_BBox="%.1f,%.1f,%.1f,%.1f"
+                 % (_bx0, _ph - _by1, _bx1, _ph - _by0))
+_ok_mir, _det_mir = DC.page_box_drawn_where_the_row_says(_good, _mirrored)
+check("아래 기준으로 뒤집힌 행에서는 검사가 실패한다", not _ok_mir, _det_mir)
+_shifted = dict(_grow, Figure_BBox="%.1f,%.1f,%.1f,%.1f"
+                % (_bx0 + 40, _by0 + 40, _bx1 + 40, _by1 + 40))
+check("40pt 밀린 행에서도 실패한다",
+      not DC.page_box_drawn_where_the_row_says(_good, _shifted)[0])
+
+# 전체 경로: 한 카드의 페이지 뷰를 다른 행의 것으로 바꾼 HTML은 문제가 잡혀야 한다.
+# 전체 경로: 페이지 뷰의 그림을 40px 아래로 밀어 다시 심은 HTML은 문제가 잡혀야
+# 한다. (픽스처의 열린 두 행은 상자가 같은 자리라 서로 맞바꿔도 보이지 않는다.)
+import base64 as _b64                                            # noqa: E402
+_html0 = io.open(PARTS[0], encoding="utf-8").read()
+_pv = DC.decode(_good["page"]).convert("RGB")
+_moved = _Image.new("RGB", _pv.size, "white")
+_moved.paste(_pv, (0, 40))
+_buf = io.BytesIO()
+_moved.save(_buf, "JPEG", quality=72)
+_moved_uri = "data:image/jpeg;base64," + _b64.b64encode(_buf.getvalue()).decode("ascii")
+_tmp_part = os.path.join(TMP, "moved.html")
+io.open(_tmp_part, "w", encoding="utf-8").write(_html0.replace(_good["page"], _moved_uri, 1))
+_p2, _ = DC.check_run(FX["draft"], [_tmp_part], DRAFT)
+check("페이지 뷰 안의 상자가 40px 밀려 있으면 그 카드가 페이지 상자 문제로 잡힌다",
+      any(d == _good["Draft_ID"] and n == "page_box" for d, n, _ in _p2), _p2)
+_small = _html0.replace(_good["zoom"], _good["thumb"], 1)
+io.open(_tmp_part, "w", encoding="utf-8").write(_small)
+_p3, _ = DC.check_run(FX["draft"], [_tmp_part], DRAFT)
+check("확대 이미지가 축소본이면 잡힌다",
+      any(d == _good["Draft_ID"] and n == "zoom" for d, n, _ in _p3), _p3)
+_sq = DC.decode(_good["thumb"]).convert("RGB").resize((300, 300))
+_buf = io.BytesIO()
+_sq.save(_buf, "JPEG", quality=58)
+_sq_uri = "data:image/jpeg;base64," + _b64.b64encode(_buf.getvalue()).decode("ascii")
+io.open(_tmp_part, "w", encoding="utf-8").write(_html0.replace(_good["thumb"], _sq_uri, 1))
+_p4, _ = DC.check_run(FX["draft"], [_tmp_part], DRAFT)
+check("썸네일이 비율을 잃으면 잡힌다",
+      any(d == _good["Draft_ID"] and n == "thumb" for d, n, _ in _p4), _p4)
+
+# ------------------------------- 제안자를 다시 돌려도 사람이 적은 것은 남는다
+import validate_regions as VRG                                   # noqa: E402
+_vr_root = os.path.join(TMP, "vr_keep")
+shutil.copytree(FX["draft"], _vr_root)
+_vr_path = os.path.join(_vr_root, "validated_regions.csv")
+_vr_rows = list(csv.DictReader(io.open(_vr_path, encoding="utf-8")))
+_vr_cols = list(_vr_rows[0]) + ["Human_Choice", "Human_Note", "Agent_Choice",
+                                "Agent_Note", "Recut_On", "Recut_From"]
+for r in _vr_rows:
+    r.update(Human_Choice="", Human_Note="", Agent_Choice="", Agent_Note="",
+             Recut_On="", Recut_From="")
+    if r["Draft_ID"] == _target:
+        r["Human_Choice"], r["Human_Note"] = "RASTER", "사람이 적은 메모"
+        r["Agent_Choice"] = "PDF"
+        r["Agreement"], r["Recut_On"] = "HUMAN_VALIDATED", "2026-09-02"
+with io.open(_vr_path, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_vr_cols)
+    w.writeheader()
+    w.writerows(_vr_rows)
+_vr_rc = VRG.main(_vr_root, 60)
+_vr_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(_vr_path, encoding="utf-8"))}
+check("제안자를 다시 돌려도 Human_Choice와 메모가 남는다",
+      _vr_after[_target].get("Human_Choice") == "RASTER"
+      and _vr_after[_target].get("Human_Note") == "사람이 적은 메모",
+      {k: _vr_after[_target].get(k) for k in ("Human_Choice", "Human_Note")})
+check("에이전트 제안과 다시 자른 기록도 남는다",
+      _vr_after[_target].get("Agent_Choice") == "PDF"
+      and _vr_after[_target].get("Recut_On") == "2026-09-02")
+check("사람이 확정한 합의(HUMAN_VALIDATED)는 기계가 되돌리지 못한다",
+      _vr_after[_target].get("Agreement") == "HUMAN_VALIDATED",
+      _vr_after[_target].get("Agreement"))
+check("사람이 적지 않은 행은 빈칸 그대로다",
+      all(_vr_after[d["Draft_ID"]].get("Human_Choice", "") == ""
+          for d in DRAFT if d["Draft_ID"] != _target))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

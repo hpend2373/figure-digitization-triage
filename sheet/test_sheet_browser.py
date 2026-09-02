@@ -75,6 +75,59 @@ with sync_playwright() as pw:
                                   "els => els.every(e => e.value === '')"))
     check("페이지가 오류 없이 뜬다", not errors, errors[:2])
 
+    # ------------------------------------------- 2단계: 화면이 그림을 그대로 보인다
+    # 파일이 온전해도 화면은 다를 수 있습니다 - CSS가 비율을 바꾸거나 카드가
+    # 그림을 잘라 내거나, 확대가 CSS로 줄어들면 사람이 세는 것은 파일이 아니라
+    # 그 화면입니다. 브라우저가 실제로 그린 크기를 묻습니다.
+    shown = pg.evaluate("""() => {
+      const out = [];
+      const imgs = Array.from(document.querySelectorAll("img.thumb[data-zoom]")).slice(0, 12);
+      for (const img of imgs) {
+        const fig = img.closest('.fig');
+        const r = img.getBoundingClientRect(), f = fig.getBoundingClientRect();
+        out.push({id: fig.dataset.id, complete: img.complete,
+                  nw: img.naturalWidth, nh: img.naturalHeight,
+                  cw: img.clientWidth, ch: img.clientHeight,
+                  inside: r.left >= f.left - 1 && r.right <= f.right + 1 &&
+                          r.top >= f.top - 1 && r.bottom <= f.bottom + 1,
+                  clipped: fig.scrollWidth > fig.clientWidth + 1 ||
+                           fig.scrollHeight > fig.clientHeight + 1});
+      }
+      return out; }""")
+    check("열린 카드의 썸네일이 모두 실제로 로드된다 (%d개 표본)" % len(shown),
+          shown and all(i["complete"] and i["nw"] > 0 and i["nh"] > 0 for i in shown))
+    check("썸네일이 비율을 잃지 않고 그려진다",
+          all(abs(i["cw"] / float(i["ch"]) - i["nw"] / float(i["nh"]))
+              / (i["nw"] / float(i["nh"])) < 0.02 for i in shown),
+          [(i["id"], i["cw"], i["ch"], i["nw"], i["nh"]) for i in shown
+           if abs(i["cw"] / float(i["ch"]) - i["nw"] / float(i["nh"]))
+           / (i["nw"] / float(i["nh"])) >= 0.02][:2])
+    check("썸네일이 카드 밖으로 잘리지 않는다",
+          all(i["inside"] and not i["clipped"] for i in shown),
+          [i["id"] for i in shown if not i["inside"] or i["clipped"]][:3])
+
+    # 확대: 클릭하면 lbimg가 원본 픽셀 크기 그대로 - CSS로 줄이지 않는다
+    pg.click("img.thumb[data-zoom]")
+    pg.wait_for_selector("#lb.on")
+    pg.wait_for_function("() => document.getElementById('lbimg').complete && "
+                         "document.getElementById('lbimg').naturalWidth > 0")
+    zoomed = pg.evaluate("""() => {
+      const i = document.getElementById('lbimg'), p = document.getElementById('lbpage');
+      return {nw: i.naturalWidth, nh: i.naturalHeight, cw: i.clientWidth, ch: i.clientHeight,
+              page_shown: !p.hidden && p.naturalWidth > 0, page_nw: p.naturalWidth}; }""")
+    import base64 as _b64
+    from PIL import Image as _Image
+    _zoom_uri = pg.get_attribute("img.thumb[data-zoom]", "data-zoom")
+    _zoom_img = _Image.open(io.BytesIO(_b64.b64decode(_zoom_uri.split(",", 1)[1])))
+    check("확대 이미지의 자연 크기가 심어 둔 확대본과 같다",
+          (zoomed["nw"], zoomed["nh"]) == _zoom_img.size,
+          ((zoomed["nw"], zoomed["nh"]), _zoom_img.size))
+    check("확대 이미지는 CSS로 줄어들지 않고 자연 크기로 그려진다",
+          zoomed["cw"] == zoomed["nw"] and zoomed["ch"] == zoomed["nh"], zoomed)
+    check("확대와 함께 페이지 뷰가 실제로 뜬다", zoomed["page_shown"], zoomed)
+    pg.keyboard.press("Escape")
+    pg.wait_for_function("() => !document.getElementById('lb').classList.contains('on')")
+
     # EVERY ENABLED INPUT GETS A VALUE ITS NEIGHBOURS DO NOT, so a swap cannot
     # hide behind two equal numbers. It was hashed from the id, which collides:
     # on the smallest part, four rows drew two values and the check that keeps

@@ -196,8 +196,29 @@ def main(run, budget):
             "Region_Code": pc,
         })
     target = os.path.join(run, "validated_regions.csv")
+    # WHAT A PERSON WROTE SURVIVES A RE-RUN OF THE MACHINES. Human_Choice,
+    # the notes, the agent's proposals and the recut record are not this
+    # tool's to produce, so they are not its to erase: they are carried over
+    # from the table already on disk, row by row. A proposer that improved
+    # must not cost somebody an afternoon of decisions.
+    keep = ("Human_Choice", "Human_Note", "Agent_Choice", "Agent_Note",
+            "Recut_On", "Recut_From")
+    prior = {}
+    if os.path.exists(target):
+        prior = {r["Draft_ID"]: r for r in csv.DictReader(
+            io.open(target, encoding="utf-8"))}
+    fieldnames = list(rows[0]) + [k for k in keep if k not in rows[0]]
+    for r in rows:
+        old = prior.get(r["Draft_ID"], {})
+        for k in keep:
+            r[k] = old.get(k, "")
+        # A human choice already applied is a HUMAN_VALIDATED / HUMAN_BLOCKED
+        # agreement; the machines do not get to re-open it.
+        if old.get("Agreement") in ("HUMAN_VALIDATED", "HUMAN_BLOCKED"):
+            r["Agreement"] = old["Agreement"]
+            r["Validated_Figure_BBox"] = old.get("Validated_Figure_BBox", "")
     with io.open(target, "w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w = csv.DictWriter(fh, fieldnames=fieldnames)
         w.writeheader()
         w.writerows(rows)
     pending = sum(1 for r in rows if r["Agreement"] == "PENDING")

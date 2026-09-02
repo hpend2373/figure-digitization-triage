@@ -30,7 +30,7 @@
 아직 푸시되지 않아 공개 저장소에 존재하지 않았습니다. 재현 지점은 **버전 태그와
 파일 해시**로 잡습니다:
 
-    corpus_intake.py  sha256 = fc04d880905751fb17c4511d8cf45c491a8a09a66b60d130f8d435420fefc7b8
+    corpus_intake.py  sha256 = 8568fd2a87662d1180f014117f5980e150f2c0f62b5431630ef2092011adc371
 
 `git log --oneline` 에서 `v9.28`로 시작하는 커밋을 받은 뒤 그 파일 해시가 위와
 같은지 확인하십시오. 아래 크롭 도구들은 `FDT_REPO`로 그 클론을 가리킵니다.
@@ -45,21 +45,26 @@
     python3 build_sheet2.py                                       # 2. 시트
     node    test_sheet_logic.mjs      #  35
     python3 test_sheet_html.py        #  57
-    python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
-    python3 test_sheet_build.py       # 164
+    python3 test_sheet_browser.py     #  35 (파트마다; FDT_BROWSER_PART로 고름)
+    python3 display_checks.py $FDT_RUN     # 2단계: 확대 크기 · 썸네일 비율 · 페이지 상자 위치
+    python3 test_sheet_build.py       # 177
     python3 test_merge_counts.py      #  22
     python3 verify_intake_images.py $FDT_RUN   # 있는가 · 끝까지 읽히는가 · 상자에서 다시 만들어지는가
     python3 roundtrip.py $FDT_RUN     # 상자대로 다시 잘라 크롭과 픽셀 비교 (run2: 642 MATCH)
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
-    python3 test_figure_regions.py    #  32
+    python3 test_figure_regions.py    #  35
     python3 test_raster_regions.py    #  16
     python3 validate_regions.py $FDT_RUN   # 세 제안자 + 합의 → validated_regions.csv
     python3 apply_validated.py $FDT_RUN    # AGREE_2 행과 Human_Choice 행을 검증 상자로 다시 자름
     python3 review_packet.py make $FDT_RUN $FDT_RUN/review   # 사람이 볼 13장 + review_queue.csv
+    python3 review_sheet.py $FDT_RUN       # 그 149행을 고르는 HTML 3파일
     python3 mutate_census.py          # 변이 11, 전부 사살되어야 함
     python3 mutate_regions.py         # 변이 12, 전부 사살되어야 함
     python3 mutate_roundtrip.py       # 변이  9, 전부 사살되어야 함
     python3 mutate_agreement.py       # 변이 14, 전부 사살되어야 함
+    python3 mutate_display.py         # 변이  9, 전부 사살되어야 함
+    python3 test_review_sheet.py      #  42
+    python3 mutate_review.py          # 변이 15, 전부 사살되어야 함
     (저장소 루트) python3 test_sheet_blocks.py  #  42
     (저장소 루트) python3 test_crop_truth.py    #  60
     python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
@@ -119,6 +124,35 @@ NO_CUT 2**입니다. NO_CUT 둘은 두 번째 판독기 행(`_S001`)으로, 크�
 따로 그린 크롭은 이 검사를 절대 통과하지 못하고, 통과하지 못하는 검사는 작동을
 보일 수 없기 때문입니다.
 
+## 하네스의 세 단계
+
+    1단계 파일 무결성   verify_intake_images · roundtrip
+                        있는가 · 끝까지 읽히는가 · 상자에서 다시 만들어지는가
+    2단계 화면 표시     display_checks · test_sheet_browser
+                        확대본이 크롭의 픽셀 크기 그대로인가 · 썸네일이 비율을
+                        지키는가 · 페이지 뷰의 빨간 상자가 Figure_BBox 자리에
+                        그려졌는가 · 브라우저가 CSS로 줄이거나 자르지 않는가
+    3단계 의미 정확성   validate_regions(세 제안자 합의) · census(사람 판정)
+                        그 그림이 캡션의 그림 전체인가, 다른 것이 섞이지 않았는가
+
+1단계를 다 통과한 시트도 2·3단계에서 떨어질 수 있습니다. 뒤집힌 크롭은
+완벽하게 디코드되고(1단계 통과), 화면에는 뒤집힌 자리에 상자가 그려지며
+(2단계에서 잡힘), 그 안에 그림이 없습니다(3단계에서 잡힘). 2단계의 페이지 상자
+검사는 왕복 검사의 화면 쪽 짝입니다 — 파일 수준 변이 9개와 CSS 변이 3개(비율
+왜곡·확대 축소·카드 잘림)가 모두 잡힙니다.
+
+## 글자 걸음 개선 (`corpus_intake.figure_bbox`)
+
+걸음을 멈출 블록이 없으면 영역이 y=0까지 올라가 러닝헤드를 품었습니다 —
+run2 크롭 위쪽의 그 띠입니다. 이제 그 페이지에 러닝헤드가 있으면 그 아래에서
+멈춥니다. 가구가 없는 페이지는 옛 답 그대로입니다(증거가 없으면 멈추지 않음).
+
+측정(run2, 검증 상자가 있는 376행, `walk_experiment.py`): 검증 상자와 IoU ≥ 0.5
+인 행 253 → 262, **135행이 가까워지고 0행이 멀어짐**. 두 단 페이지에서 전폭
+문단을 폭에서 빼는 규칙도 시험했으나(+3, 회귀 9) 넣지 않았습니다 — 그 문제는
+합의 규칙이 DISAGREE로 잡습니다. 이 변경은 앞으로의 인테이크에만 적용되며,
+run2의 상자는 그대로입니다.
+
 ## 세 제안자와 합의 — 언제 셀 수 있는가
 
 그림 영역을 세 방법이 따로 답합니다.
@@ -141,10 +175,36 @@ AGREE_3 239 · AGREE_2 55(→ 다시 잘라 열림) · 검토 134. 사람이 먼
 합의 판정을 대조하니 12/12 일치했습니다 — "두 상자 모두 틀림" 9건은 전부
 DISAGREE/RASTER_ONLY, "새 상자가 맞음" 3건은 전부 AGREE_2였습니다.
 
+**PDF 제안자의 결함과 수정.** 첫 판은 넓이 1,200pt² 미만인 객체를 뭉치기
+*전에* 하나씩 버렸습니다. 선 그래프는 눈금·선분 하나하나가 별개 객체라 한
+페이지의 691개 중 690개가 버려졌고, 검토 149행 중 49행에서 PDF가 "답하지
+않았습니다". 크기는 뭉친 덩어리에 재도록 고쳤고(검토 149행 중 PDF가 답한 행
+69 → 116), 그러자 뭉치기가 O(n²)라 멈춰서 격자 연결 성분으로 바꿨습니다(691개
+0.08초). 결과: AGREE_3 318 → 390, 검토 149 → 77행. AGREE_3에서 빠진 행 2
+(978 D075·D118) — 더 많은 객체가 다른 뭉치를 만들어 어긋난 경우이고, 막힙니다.
+
+`validate_regions`를 다시 돌리면 `Human_Choice`·메모·`Agent_Choice`·다시 자른
+기록은 **그대로 남습니다**(시나리오 4개). 사람이 확정한 HUMAN_VALIDATED /
+HUMAN_BLOCKED는 기계가 되돌리지 못합니다.
+
 **사람이 푸는 길.** `review_packet.py make`가 검토 대기 행을 12칸씩 그려
-(빨강 TEXT · 파랑 PDF · 초록 RASTER) `review_queue.csv`와 함께 냅니다.
-`Human_Choice`에 RASTER / PDF / TEXT / BLOCKED 를 적고 `review_packet.py merge`
-→ `apply_validated.py` 하면 그 상자로 다시 잘려 열립니다(HUMAN_VALIDATED).
+(빨강 TEXT · 파랑 PDF · 초록 RASTER) `review_queue.csv`와 함께 냅니다. 읽기용
+장면이고, **고르는 것은 `review_sheet.py`가 내는 HTML**입니다: 행마다 세 상자를
+그린 페이지와 **각 상자가 실제로 잘라낼 그림**(`roundtrip.cut`으로 만든, 곧
+`apply_validated`가 쓸 바로 그것)을 나란히 놓고 버튼 넷을 답니다. 아무것도 미리
+고르지 않으며 에이전트 제안은 토글 뒤에 숨어 있습니다 — 빈 버튼 옆에 답이 적혀
+있으면 그것은 백지가 아닙니다. 판정은 크롭 digest와 세 상자를 함께 담은 지문에
+묶여, 그림이 바뀌면 저장된 답이 화면에서 비워집니다. 파일마다 자기 행만
+내보내므로 한 파일을 채우고 받은 CSV가 다 끝난 것처럼 보이지 않습니다.
+내려받은 CSV를 `review_packet.py merge` → `apply_validated.py` 하면 그 상자로
+다시 잘려 열립니다(HUMAN_VALIDATED).
+
+**판정이 지났는지 merge가 두 가지로 봅니다.** 크롭 digest는 그림이 다시 잘린
+것을 잡고, **고른 상자**의 좌표는 제안자가 좋아진 것을 잡습니다. 고르지 않은
+상자가 움직인 것은 지나지 않습니다 — "초록이 그림"은 파랑이 어떻게 바뀌든 참
+입니다. 처음 판은 digest만 봤고, PDF 제안자를 고친 뒤 돌려받은 48행 중 6행의
+파랑 상자가 화면에 있던 것과 달랐습니다: 그대로였다면 아무도 보지 않은 상자로
+크롭이 잘렸을 것입니다.
 `Agent_Choice`는 에이전트가 제안을 적는 칸이며 **아무것도 열지 못합니다** —
 시나리오가 그것을 지킵니다. 판정은 크롭 digest에 묶여, 다시 잘린 뒤의 옛
 판정은 merge가 거부합니다.

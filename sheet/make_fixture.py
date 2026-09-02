@@ -107,7 +107,10 @@ def _figure_image(panels, w, h, thin=False):
     im = Image.new("RGB", (max(8, w), max(4, h)), "white")
     dr = ImageDraw.Draw(im)
     if thin or h < 40:
-        dr.line([4, h // 2, w - 4, h // 2], fill="black", width=2)
+        # Thick enough to survive the intake's 8px floor after the border is
+        # trimmed, thin enough against the page to be THIN_CROP: a whisker the
+        # intake would have refused to save is not a thin crop, it is no crop.
+        dr.line([4, h // 2, w - 4, h // 2], fill="black", width=12)
         return im
     cols = min(panels, 3) or 1
     rows = max(1, (panels + cols - 1) // cols)
@@ -152,6 +155,8 @@ def crop_png(path, panels, thin=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     im.save(path)
 
+
+import roundtrip                                                 # noqa: E402
 
 #: The census columns, named here so a fixture and the loader cannot drift.
 CENSUS_FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
@@ -206,8 +211,19 @@ def write(root):
             elif status != "NO_CROP":
                 page_png(page_abs, box, panels,
                          thin=(status == "THIN_CROP"))
-                crop_png(os.path.join(draft_dir, rel), panels,
-                         thin=(status == "THIN_CROP"))
+                # THE CROP IS CUT FROM THE PAGE, with the intake's own formula
+                # (`roundtrip.cut`). A fixture whose crop was drawn separately
+                # could never fail the round-trip check, and a check that
+                # cannot fail on the fixture cannot be shown to work.
+                _cut = roundtrip.cut(Image.open(page_abs), {
+                    "Figure_BBox": ",".join("%.1f" % v for v in box),
+                    "Page_Width_Pt": "%.2f" % PAGE_PT[0],
+                    "Page_Height_Pt": "%.2f" % PAGE_PT[1]})
+                if _cut is None:
+                    raise AssertionError("픽스처 상자가 크롭을 내지 못합니다: %s" % did)
+                os.makedirs(os.path.dirname(os.path.join(draft_dir, rel)),
+                            exist_ok=True)
+                _cut[0].save(os.path.join(draft_dir, rel))
             draft.append({
                 "Draft_ID": did, "Source_Document_ID": doc,
                 "Source_File": os.path.basename(src),

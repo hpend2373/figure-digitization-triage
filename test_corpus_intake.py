@@ -616,6 +616,22 @@ else:
           _found and _found[0]["Confidence"] == "0.00")
     check("a caption both readers see is not added twice",
           len([r for r in _rd2 if r["Figure_Number"] == "FIG6"]) == 1)
+    # A row the crop step can cut a picture for must also say what page size
+    # that picture was cut against. These rows did not: they were appended
+    # after `draft_rows` had stamped the geometry, so the sheet's round-trip
+    # check found crops in run2 whose box could not be placed on any page.
+    # `.get`, because before the fix the row had no such KEY at all - and a
+    # scenario that dies of a KeyError says less than one that says FAIL.
+    _f0 = _found[0] if _found else {}
+    check("the second reader's row carries the page size like every other row",
+          _found and _f0.get("Page_Width_Pt", "") == _rd2[0]["Page_Width_Pt"]
+          and _f0.get("Page_Height_Pt", "") == _rd2[0]["Page_Height_Pt"]
+          and _f0.get("Page_Width_Pt", "") != "",
+          "%s vs %s" % ((_f0.get("Page_Width_Pt"), _f0.get("Page_Height_Pt")),
+                        (_rd2[0]["Page_Width_Pt"], _rd2[0]["Page_Height_Pt"])))
+    check("and says how the size was read",
+          _found and _f0.get("Page_Geometry_Method", "")
+          == _rd2[0]["Page_Geometry_Method"] != "")
     # And the count in the ledger is the one `page_count` gives, whatever that
     # is on this machine - checked by making it say something no text layer
     # could.

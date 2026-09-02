@@ -28,6 +28,9 @@ import json
 import os
 import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
 from PIL import Image
 
 
@@ -71,6 +74,21 @@ def on_disk(root):
             if f.lower().endswith((".png", ".jpg", ".jpeg"))}
 
 
+def roundtrip_mismatches(root):
+    """[(Draft_ID, detail)] for crops the draft's own geometry cannot re-cut."""
+    import csv
+    import roundtrip
+    path = os.path.join(root, "figure_intake_draft.csv")
+    if not os.path.exists(path):
+        return []
+    out = []
+    for row in csv.DictReader(io.open(path, encoding="utf-8")):
+        status, detail = roundtrip.check(row, root)
+        if status in ("MISMATCH", "NO_CUT"):
+            out.append((row["Draft_ID"], "%s %s" % (status, detail)))
+    return out
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
@@ -85,13 +103,20 @@ def main(argv=None):
     # parts directories and any earlier run's leftovers live under the same
     # root - so it is counted and named, not refused on.
     unnamed = sorted(here - set(want or {}))
-    problems = bool(bad) or bool(absent) or want is None
+    # THE THIRD QUESTION. Decoding proves the file is whole; the expected list
+    # proves it is the file the draft names. Neither proves the picture in it
+    # is the region the draft's box describes - a mirrored or stale crop
+    # decodes perfectly. `roundtrip` cuts the box again and compares.
+    mismatched = roundtrip_mismatches(root)
+    problems = (bool(bad) or bool(absent) or want is None
+                or bool(mismatched))
     if receipt:
         json.dump({"root": os.path.abspath(root), "images_on_disk": len(here),
                    "named_by_draft": len(want or {}),
                    "unreadable": [list(x) for x in bad],
                    "named_but_absent": [list(x) for x in absent],
                    "on_disk_not_named": len(unnamed),
+                   "roundtrip_mismatched": [list(x) for x in mismatched],
                    "verdict": "REFUSED" if problems else "COMPLETE_AND_DECODES"},
                   io.open(receipt, "w", encoding="utf-8"), indent=2,
                   ensure_ascii=False)
@@ -105,9 +130,14 @@ def main(argv=None):
         print("초안이 부르는 %d개 중 없는 것 %d개 · 디스크의 %d개 중 초안이 "
               "부르지 않는 것 %d개" % (len(want), len(absent), len(here),
                                   len(unnamed)))
-    print("끝까지 읽히지 않는 것 %d개" % len(bad))
+    for did, detail in mismatched[:20]:
+        print("  상자에서 다시 만들 수 없음  %-40s %s" % (did[-40:], detail))
+    print("끝까지 읽히지 않는 것 %d개 · 상자에서 다시 만들 수 없는 것 %d개"
+          % (len(bad), len(mismatched)))
     if problems:
-        print("판정: REFUSED — 다시 렌더하거나 병합을 마저 해야 합니다")
+        print("판정: REFUSED — 깨진·없는 이미지는 다시 렌더하거나 병합을 마저 "
+              "해야 하고, 상자에서 다시 만들 수 없는 크롭은 초안의 기하를 "
+              "채우거나 그 행을 계수에서 빼야 합니다")
         return 1
     print("판정: COMPLETE_AND_DECODES")
     return 0

@@ -48,6 +48,7 @@ from PIL import Image
 
 import block_rules as BR
 import census as CENSUS_MOD
+import roundtrip as RT
 import paths as PATHS
 
 D = PATHS.DRAFT
@@ -106,8 +107,8 @@ _ID_INPUTS = [os.path.join(D, "figure_intake_draft.csv"),
               PATHS.CENSUS]
 _HERE0 = os.path.dirname(os.path.abspath(__file__))
 _ID_INPUTS += [os.path.join(_HERE0, f) for f in
-               ("block_rules.py", "census.py", "build_sheet2.py",
-                "sheet_logic.js", "sheet_page.js")]
+               ("block_rules.py", "census.py", "roundtrip.py",
+                "build_sheet2.py", "sheet_logic.js", "sheet_page.js")]
 _h = hashlib.sha256()
 for _f in _ID_INPUTS:
     _h.update(os.path.basename(_f).encode("utf-8"))
@@ -150,6 +151,13 @@ def _crop_digests(rows, root):
 CROP_SHA = _crop_digests(DRAFT, D)
 SHARED_CROP = BR.shared_crop_map(CROP_SHA)
 
+#: EVERY CROP CUT AGAIN FROM ITS BOX. `roundtrip.check` repeats the intake's
+#: cut and compares with the file; a row whose crop cannot be reproduced from
+#: the draft's own geometry is blocked by `block_rules`. This is the check that
+#: would have caught a mirrored box on the first row - and it runs on every
+#: build so that nobody has to remember to.
+ROUNDTRIP = {d["Draft_ID"]: RT.check(d, D)[0] for d in DRAFT}
+
 #: THE VISUAL CENSUS, OR A STATED REASON THERE IS NONE. `ACCEPTABLE` is a
 #: measurement of the crop; this is a record of what is inside it, and without
 #: it 336 of run2's 440 open rows are rows asking somebody to count panels in
@@ -190,7 +198,8 @@ def blocked_reason(d):
     return BR.blocked_reason(d, row_key(d), defect=DEFECT.get(row_key(d)),
                              shared_with=SHARED_CROP.get(d["Draft_ID"], ()),
                              census=CENSUS,
-                             crop_sha=CROP_SHA.get(d["Draft_ID"], ""))
+                             crop_sha=CROP_SHA.get(d["Draft_ID"], ""),
+                             roundtrip=ROUNDTRIP.get(d["Draft_ID"]))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -690,4 +699,8 @@ print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d "
          sum(1 for r in DEFECT.values() if r["classification"] == "FAIL"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP")))
+_rt = {}
+for _v in ROUNDTRIP.values():
+    _rt[_v] = _rt.get(_v, 0) + 1
+print("왕복 검사: %s" % ", ".join("%s %d" % kv for kv in sorted(_rt.items())))
 print("빌드 ID", BUILD_ID)

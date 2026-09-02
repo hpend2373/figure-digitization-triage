@@ -667,6 +667,146 @@ check("조사표가 달라지면 빌드 ID가 달라진다",
       _id1 and _id2 and _id1.group(0) != _id2.group(0),
       "%s vs %s" % (_id1 and _id1.group(0), _id2 and _id2.group(0)))
 
+# ------------------------------------------------ 상자대로 다시 자르면 크롭인가
+# 2026-09-02에 상자를 거울처럼 뒤집어 그린 판정 461개가 모든 게이트를 통과했습니다.
+# 게이트는 시트를 시트와 대조했고, 상자를 그 상자가 가리킨다는 그림과 대조하는
+# 검사는 없었습니다. 이것이 그 검사입니다.
+import roundtrip as RT                                           # noqa: E402
+from PIL import Image as _Image                                  # noqa: E402
+
+_with_page = [d for d in DRAFT if d["Figure_Crop"] and d["Page_Raster"]]
+_rt = {d["Draft_ID"]: RT.check(d, FX["draft"]) for d in _with_page}
+check("픽스처의 모든 크롭이 자기 상자에서 다시 만들어진다 (%d행)" % len(_with_page),
+      all(v[0] == "MATCH" for v in _rt.values()),
+      {k: v for k, v in _rt.items() if v[0] != "MATCH"})
+check("MATCH는 잘라낸 픽셀 상자를 함께 돌려준다",
+      all(len(v[1].split(",")) == 4 for v in _rt.values()))
+
+
+def _variant(name, mutate):
+    """픽스처 초안의 사본을 바꾼 뒤 그 사본으로 빌드한다. (초안 dict, 결과, 시트)"""
+    root = os.path.join(TMP, "var_" + name)
+    shutil.copytree(FX["draft"], root)
+    rows = list(csv.DictReader(io.open(
+        os.path.join(root, "figure_intake_draft.csv"), encoding="utf-8")))
+    mutate(rows, root)
+    with io.open(os.path.join(root, "figure_intake_draft.csv"), "w",
+                 encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    out = os.path.join(TMP, "var_%s.html" % name)
+    r = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_DRAFT=root, FDT_SHEET=out,
+                                FDT_CENSUS=os.path.join(root,
+                                                        "crop_visual_census.csv")))
+    text = ("\n".join(io.open(f, encoding="utf-8").read()
+                      for f in _P.parts_for(out)) if r.returncode == 0 else "")
+    return rows, r, text
+
+
+_target = _with_page[0]["Draft_ID"]
+
+
+def _flip(rows, root):
+    for r in rows:
+        if r["Draft_ID"] == _target:
+            ph = float(r["Page_Height_Pt"])
+            x0, y0, x1, y1 = [float(v) for v in r["Figure_BBox"].split(",")]
+            r["Figure_BBox"] = "%.1f,%.1f,%.1f,%.1f" % (x0, ph - y1, x1, ph - y0)
+
+
+_flipped_rows, _flip_run, _flip_text = _variant("flip", _flip)
+_flip_row = [r for r in _flipped_rows if r["Draft_ID"] == _target][0]
+check("상자를 아래 기준으로 뒤집으면 왕복 검사가 MISMATCH를 낸다",
+      RT.check(_flip_row, os.path.join(TMP, "var_flip"))[0] == "MISMATCH",
+      RT.check(_flip_row, os.path.join(TMP, "var_flip")))
+check("뒤집힌 상자의 행은 시트에서 막힌다",
+      _flip_run.returncode == 0 and re.search(
+          r"<input[^>]*disabled[^>]*data-id='%s'" % re.escape(_target),
+          _flip_text) is not None, (_flip_run.stderr or "")[-300:])
+check("막은 이유가 '다시 자른 그림이 크롭 파일과 다르다'고 말한다",
+      "다시 자른 그림이 크롭 파일과 다릅니다" in _flip_text)
+try:
+    RT.selfcheck(os.path.join(TMP, "var_flip"))
+    _sc = None
+except SystemExit as exc:
+    _sc = str(exc)
+check("상자를 쓰는 도구는 뒤집힌 초안 위에서 시작하기를 거부한다", _sc is not None)
+check("거부하면서 어느 행인지 말한다", _sc is not None and _target in _sc, _sc)
+
+
+def _shift(rows, root):
+    for r in rows:
+        if r["Draft_ID"] == _target:
+            x0, y0, x1, y1 = [float(v) for v in r["Figure_BBox"].split(",")]
+            r["Figure_BBox"] = "%.1f,%.1f,%.1f,%.1f" % (x0, y0 + 30, x1, y1 + 30)
+
+
+_shift_rows = _variant("shift", _shift)[0]
+check("상자가 30pt만 밀려도 MISMATCH다",
+      RT.check([r for r in _shift_rows if r["Draft_ID"] == _target][0],
+               os.path.join(TMP, "var_shift"))[0] == "MISMATCH")
+
+
+def _tamper(rows, root):
+    for r in rows:
+        if r["Draft_ID"] == _target:
+            path = os.path.join(root, r["Figure_Crop"])
+            im = _Image.open(path).convert("L")
+            _Image.eval(im, lambda v: 255 - v).save(path)   # 같은 크기, 다른 내용
+
+
+_tamper_rows, _tamper_run, _tamper_text = _variant("tamper", _tamper)
+check("크기는 같고 내용만 다른 크롭도 MISMATCH다",
+      RT.check([r for r in _tamper_rows if r["Draft_ID"] == _target][0],
+               os.path.join(TMP, "var_tamper"))[0] == "MISMATCH")
+check("바뀐 크롭의 행은 시트에서 막힌다",
+      _tamper_run.returncode == 0 and re.search(
+          r"<input[^>]*disabled[^>]*data-id='%s'" % re.escape(_target),
+          _tamper_text) is not None)
+
+
+def _nogeom(rows, root):
+    for r in rows:
+        if r["Draft_ID"] == _target:
+            r["Page_Width_Pt"] = r["Page_Height_Pt"] = ""
+
+
+_ng_rows, _ng_run, _ng_text = _variant("nogeom", _nogeom)
+check("크롭은 있는데 쪽 크기가 없는 행은 NO_CUT이다",
+      RT.check([r for r in _ng_rows if r["Draft_ID"] == _target][0],
+               os.path.join(TMP, "var_nogeom"))[0] == "NO_CUT")
+check("그 행은 시트에서 '기하로는 만들 수 없다'는 이유로 막힌다",
+      _ng_run.returncode == 0 and "초안의 기하로는 이 크롭을 만들 수 없습니다" in _ng_text
+      and re.search(r"<input[^>]*disabled[^>]*data-id='%s'" % re.escape(_target),
+                    _ng_text) is not None, (_ng_run.stderr or "")[-300:])
+
+# 상자 바깥으로 잉크가 이어질 때만 pad가 결과에 드러납니다. 그래서 그런 그림을
+# 여기서 하나 그립니다 - 픽스처의 그림은 상자 안에 들어 있어 pad를 증명하지 못합니다.
+_pg = _Image.new("L", (400, 400), 255)
+for _yy in range(100, 300):
+    for _xx in range(100, 300):
+        _pg.putpixel((_xx, _yy), 0)                       # 200x200 검은 사각형
+_bleed_row = {"Figure_BBox": "150,150,250,250", "Page_Width_Pt": "400",
+              "Page_Height_Pt": "400"}                    # 그 안쪽 100x100 상자
+_bl = RT.cut(_pg, _bleed_row)
+# 숫자 8은 인테이크의 `pad=8`입니다. RT.PAD로 쓰면 그 상수를 바꿔도 시나리오가
+# 따라 바뀌어 통과하므로, 계약은 숫자로 적습니다.
+check("잉크가 상자 밖으로 이어지면 잘라낸 것이 인테이크의 pad 8px만큼 더 크다",
+      _bl is not None and _bl[1] == (142, 142, 258, 258), _bl and _bl[1])
+
+# 1단계 검사기가 이 결함을 REFUSED로 낸다.
+import verify_intake_images as _VI                                # noqa: E402
+_vi_rc = _VI.main([os.path.join(TMP, "var_nogeom"),
+                   os.path.join(TMP, "var_nogeom_receipt.json")])
+_vi = json.loads(io.open(os.path.join(TMP, "var_nogeom_receipt.json"),
+                         encoding="utf-8").read())
+check("파일 무결성 검사기가 재현 불가 크롭을 REFUSED로 낸다",
+      _vi_rc != 0 and _vi["verdict"] == "REFUSED"
+      and any(_target in x[0] for x in _vi["roundtrip_mismatched"]), _vi)
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("FDT_SCENARIOS_RUN=%d" % N[0])

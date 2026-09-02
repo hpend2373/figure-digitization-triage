@@ -60,6 +60,9 @@ def iou(a, b):
 
 
 def main(run, budget):
+    # 상자를 소비하는 도구는 먼저 자기 상자가 크롭을 재현하는지 증명합니다.
+    import roundtrip
+    roundtrip.selfcheck(run)
     draft = list(csv.DictReader(io.open(
         os.path.join(run, "figure_intake_draft.csv"), encoding="utf-8")))
     ledger = {r["Source_Document_ID"]: r for r in csv.DictReader(io.open(

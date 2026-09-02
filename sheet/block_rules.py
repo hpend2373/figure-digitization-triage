@@ -45,6 +45,41 @@ STILL_WRONG = {
                           "오른쪽에 있습니다",
     ("531", "FIG1", "3"): "run2 감사: 상자가 캡션 위 빈 영역이고 MSNA 기록 두 "
                           "개는 오른쪽에 있습니다",
+
+    # 2026-09-02, 사람 검토. `figure_regions.py`가 낸 두 번째 상자와 지금
+    # 상자가 크게 어긋난 22행 중 앞의 12행을 사람이 나란히 보고 판정한
+    # 결과입니다. 아래 아홉 건은 **어느 상자도** 대상 그림을 제대로 잡지
+    # 못했습니다 - 다시 자르는 것으로는 풀리지 않으므로, 그림을 사람이 지정
+    # 하기 전에는 계수 불가입니다.
+    ("61", "FIG2", "4"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                         "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("61", "FIG4", "6"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                         "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("437", "FIG1", "118"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                            "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("437", "FIG1", "315"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                            "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("687", "FIG2", "4"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("687", "FIG4", "5"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("122", "FIG2", "3"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("571", "FIG3", "4"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+    ("574", "FIG3", "5"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
+                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+
+    # 같은 검토에서, 새 상자가 맞다고 판정된 세 건입니다. 그림이 어디인지는
+    # 밝혀졌지만 시트가 보여 주는 크롭은 여전히 옛 상자에서 잘린 것이므로,
+    # 지금 화면으로는 셀 수 없습니다. 다시 자르면 열립니다.
+    ("345", "FIG2", "4"): "사람 검토(2026-09-02): 지금 상자는 본문을 집었고 "
+                          "PDF 기준 새 상자가 맞습니다 — 다시 잘라야 열립니다",
+    ("564", "FIG2", "4"): "사람 검토(2026-09-02): 지금 상자는 본문을 집었고 "
+                          "PDF 기준 새 상자가 맞습니다 — 다시 잘라야 열립니다",
+    ("744", "FIG4", "6"): "사람 검토(2026-09-02): 지금 상자는 그림의 일부만 "
+                          "집었고 PDF 기준 새 상자가 맞습니다 — 다시 잘라야 "
+                          "열립니다",
 }
 
 #: Crop verdicts a person cannot count from, and what to tell them.
@@ -93,8 +128,22 @@ def figure_key(pid, label, page):
     return (str(pid).strip(), str(label).strip().upper(), str(page).strip())
 
 
+#: What `roundtrip.check` can say about a row, and which of those answers
+#: mean the picture on the sheet cannot be traced back to its box. A crop that
+#: cannot be cut again from the draft's own geometry is a crop nobody can
+#: verify - a mirrored box, a stale crop, a row whose page size was never
+#: recorded - and a person may not count from it.
+ROUNDTRIP_UNVERIFIABLE = {
+    "MISMATCH": ("상자대로 다시 자른 그림이 크롭 파일과 다릅니다 — 크롭이 어느 "
+                 "상자에서 나왔는지 알 수 없으므로 셀 수 없습니다."),
+    "NO_CUT": ("초안의 기하로는 이 크롭을 만들 수 없습니다 (쪽 크기나 상자가 "
+               "없음) — 크롭이 어디서 나왔는지 확인할 길이 없으므로 셀 수 "
+               "없습니다."),
+}
+
+
 def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
-                   census=None, crop_sha=""):
+                   census=None, crop_sha="", roundtrip=None):
     """Why this row may not take a panel count. Empty string means it may.
 
     `row` needs only the four fields the decision reads, so this can be tested
@@ -125,6 +174,11 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
         seen = _census.reason(census, row, crop_sha)
         if seen:
             return seen
+    # CAN THE PICTURE BE TRACED TO ITS BOX. Checked before the crop status,
+    # because ACCEPTABLE is a measurement OF the crop and says nothing about
+    # whether the crop is the one the box describes.
+    if roundtrip in ROUNDTRIP_UNVERIFIABLE:
+        return ROUNDTRIP_UNVERIFIABLE[roundtrip]
     if not str(row.get("Figure_Number", "")).strip():
         return ("그림 번호를 읽지 못했습니다 — %s 사람이 번호를 정해야 합니다."
                 % (row.get("Confidence_Reason") or ""))

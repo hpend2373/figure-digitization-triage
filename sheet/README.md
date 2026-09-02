@@ -30,7 +30,7 @@
 아직 푸시되지 않아 공개 저장소에 존재하지 않았습니다. 재현 지점은 **버전 태그와
 파일 해시**로 잡습니다:
 
-    corpus_intake.py  sha256 = b54a1858a77c07d271c09c131bd78041b29455305d0337ebd20a4d974ef9acd7
+    corpus_intake.py  sha256 = fc04d880905751fb17c4511d8cf45c491a8a09a66b60d130f8d435420fefc7b8
 
 `git log --oneline` 에서 `v9.28`로 시작하는 커밋을 받은 뒤 그 파일 해시가 위와
 같은지 확인하십시오. 아래 크롭 도구들은 `FDT_REPO`로 그 클론을 가리킵니다.
@@ -46,14 +46,16 @@
     node    test_sheet_logic.mjs      #  35
     python3 test_sheet_html.py        #  57
     python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
-    python3 test_sheet_build.py       # 117
+    python3 test_sheet_build.py       # 131
     python3 test_merge_counts.py      #  22
-    python3 verify_intake_images.py $FDT_RUN   # 초안이 부르는 이미지가 다 있고 끝까지 읽히는가
+    python3 verify_intake_images.py $FDT_RUN   # 있는가 · 끝까지 읽히는가 · 상자에서 다시 만들어지는가
+    python3 roundtrip.py $FDT_RUN     # 상자대로 다시 잘라 크롭과 픽셀 비교 (run2: 642 MATCH)
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
     python3 test_figure_regions.py    #  32
     python3 validate_regions.py $FDT_RUN   # 두 번째 상자(PDF가 그리는 것)를 낸다
     python3 mutate_census.py          # 변이 11, 전부 사살되어야 함
     python3 mutate_regions.py         # 변이 12, 전부 사살되어야 함
+    python3 mutate_roundtrip.py       # 변이  9, 전부 사살되어야 함
     (저장소 루트) python3 test_sheet_blocks.py  #  42
     (저장소 루트) python3 test_crop_truth.py    #  60
     python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
@@ -88,6 +90,30 @@ run2에서 열려 있던 440행을 한 장씩 눈으로 본 결과는 이렇습�
 - 조사표가 **없으면 빌드가 멈춥니다.** 파일 하나가 사라졌다고 336행이 조용히
   다시 열리면 그것은 안전 규칙이 아닙니다. 아직 아무도 보지 않은 코퍼스라면
   `FDT_CENSUS_OPTIONAL=1`로 그렇다고 밝히십시오.
+
+## 왕복 검사 — 크롭은 자기 상자에서 다시 만들어져야 합니다
+
+`roundtrip.py`가 인테이크의 자르기(`pad=8` → 바깥 여백 제거)를 그대로 반복해
+크롭 파일과 픽셀 단위로 비교합니다. run2는 644행 중 **642 MATCH, 불일치 0,
+NO_CUT 2**입니다. NO_CUT 둘은 두 번째 판독기 행(`_S001`)으로, 크롭은 있는데
+쪽 크기가 비어 상자를 페이지에 놓을 수 없었습니다 — `corpus_intake.py`가 그
+행들에 기하를 찍지 않던 결함이고, 이번에 고쳤습니다(`test_corpus_intake.py`
+264 시나리오).
+
+세 곳에서 씁니다.
+
+- `build_sheet2.py`: 모든 행을 검사해 MISMATCH·NO_CUT이면 막습니다
+  (`block_rules.ROUNDTRIP_UNVERIFIABLE`). 크롭이 어느 상자에서 나왔는지 알 수
+  없으면 셀 수 없습니다.
+- `verify_intake_images.py`: 1단계(파일 무결성)의 세 번째 질문입니다. 디코드는
+  파일이 온전함을, 기대 목록은 초안이 부르는 파일임을, 왕복은 그 그림이 상자가
+  가리키는 영역임을 증명합니다. 뒤집힌 크롭도 완벽하게 디코드됩니다.
+- `validate_regions.py`·`compare_regions.py`: 시작할 때 `roundtrip.selfcheck`로
+  세 행을 확인하고, 안 맞으면 돌지 않습니다.
+
+픽스처(`make_fixture.py`)의 크롭도 이제 같은 공식으로 페이지에서 잘라 냅니다.
+따로 그린 크롭은 이 검사를 절대 통과하지 못하고, 통과하지 못하는 검사는 작동을
+보일 수 없기 때문입니다.
 
 ## 좌표는 위 기준입니다 — 한 번 뒤집으면 조용히 틀립니다
 

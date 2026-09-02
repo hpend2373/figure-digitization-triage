@@ -12,6 +12,9 @@ import csv
 import io
 import os
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 from PIL import Image, ImageDraw, ImageFont
 Image.MAX_IMAGE_PIXELS = None
 
@@ -76,6 +79,8 @@ def _parse(text):
 
 
 def main(run, out, ids, cols=4, size=430):
+    import roundtrip
+    roundtrip.selfcheck(run)
     draft = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
         os.path.join(run, "figure_intake_draft.csv"), encoding="utf-8"))}
     val = {r["Draft_ID"]: r for r in csv.DictReader(io.open(

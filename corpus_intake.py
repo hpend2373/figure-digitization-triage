@@ -1679,6 +1679,21 @@ def intake_document(path, document_id, out_dir, backend=None, render_dpi=0,
     # settles each one against the page.
     rows.extend(second_opinion_rows(path, document_id, method, blocks, rows,
                                     rasters))
+    # THE SECOND READER'S ROWS GET THE PAGE SIZE TOO. `draft_rows` stamps the
+    # geometry on the rows it makes and returns; the rows added just above
+    # arrived after that and left with three blank columns - while the crop
+    # step below still cut them a picture, because it had the size from
+    # `page_sizes`. The result was a crop the draft could not account for:
+    # the sheet's round-trip check (sheet/roundtrip.py) found two such rows in
+    # run2, one of them ACCEPTABLE, whose box could not be placed on any page.
+    _sizes, _geometry_method = page_geometry(path, rasters=rasters)
+    for row in rows:
+        if str(row.get("Page_Width_Pt") or "").strip():
+            continue
+        w, h = _sizes.get(row["Page"], (0, 0))
+        row["Page_Width_Pt"] = ("%.2f" % w) if w else ""
+        row["Page_Height_Pt"] = ("%.2f" % h) if h else ""
+        row["Page_Geometry_Method"] = _geometry_method if w else "UNKNOWN"
     low = sum(1 for r in rows if float(r["Confidence"]) < LOW_CONFIDENCE)
     base.update(Text_Block_Count=len(blocks), Caption_Candidate_Count=len(rows),
                 Low_Confidence_Count=low)

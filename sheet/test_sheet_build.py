@@ -64,6 +64,7 @@ SHEET = os.path.join(TMP, "sheet.html")
 ENV = dict(os.environ, FDT_DRAFT=FX["draft"], FDT_WORKLIST=FX["worklist"],
            FDT_AUDIT=FX["audit"], FDT_SHEET=SHEET, FDT_PATH_REWRITE="",
            FDT_CENSUS=FX["census"], FDT_CENSUS_OPTIONAL="",
+           FDT_REGIONS=FX["regions"], FDT_REGIONS_OPTIONAL="",
            PYTHONPYCACHEPREFIX=os.path.join(TMP, "pyc"))
 RUN = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
                      capture_output=True, text=True, env=ENV, cwd=HERE)
@@ -700,7 +701,9 @@ def _variant(name, mutate):
                        capture_output=True, text=True, cwd=HERE,
                        env=dict(ENV, FDT_DRAFT=root, FDT_SHEET=out,
                                 FDT_CENSUS=os.path.join(root,
-                                                        "crop_visual_census.csv")))
+                                                        "crop_visual_census.csv"),
+                                FDT_REGIONS=os.path.join(root,
+                                                         "validated_regions.csv")))
     text = ("\n".join(io.open(f, encoding="utf-8").read()
                       for f in _P.parts_for(out)) if r.returncode == 0 else "")
     return rows, r, text
@@ -806,6 +809,259 @@ _vi = json.loads(io.open(os.path.join(TMP, "var_nogeom_receipt.json"),
 check("파일 무결성 검사기가 재현 불가 크롭을 REFUSED로 낸다",
       _vi_rc != 0 and _vi["verdict"] == "REFUSED"
       and any(_target in x[0] for x in _vi["roundtrip_mismatched"]), _vi)
+
+# ---------------------------------------------- 두 방법이 가리켜야 셀 수 있다
+# 그림 영역은 세 제안자(글자 걸음·PDF 객체·래스터 잉크)가 각각 답하고, PDF와
+# 래스터가 같은 곳을 가리키며 그곳이 지금 크롭일 때만(AGREE_3) 숫자를 받습니다.
+def _regions_variant(name, agreement, validated=None):
+    root = os.path.join(TMP, "reg_" + name)
+    shutil.copytree(FX["draft"], root)
+    rp = os.path.join(root, "validated_regions.csv")
+    rows = list(csv.DictReader(io.open(rp, encoding="utf-8")))
+    for r in rows:
+        if r["Draft_ID"] == _target:
+            r["Agreement"] = agreement
+            if validated is not None:
+                r["Validated_Figure_BBox"] = validated
+    with io.open(rp, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    out = os.path.join(TMP, "reg_%s.html" % name)
+    r = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_DRAFT=root, FDT_SHEET=out,
+                                FDT_CENSUS=os.path.join(root, "crop_visual_census.csv"),
+                                FDT_REGIONS=rp))
+    text = ("\n".join(io.open(f, encoding="utf-8").read()
+                      for f in _P.parts_for(out)) if r.returncode == 0 else "")
+    return root, r, text
+
+
+def _disabled(text, did):
+    return re.search(r"<input[^>]*disabled[^>]*data-id='%s'" % re.escape(did),
+                     text) is not None
+
+
+def _open(text, did):
+    return re.search(r"<input(?![^>]*disabled)[^>]*data-id='%s'" % re.escape(did),
+                     text) is not None
+
+
+_no_reg = subprocess.run(
+    [sys.executable, os.path.join(HERE, "build_sheet2.py")],
+    capture_output=True, text=True, cwd=HERE,
+    env=dict(ENV, FDT_REGIONS=os.path.join(TMP, "no_such_regions.csv"),
+             FDT_SHEET=os.path.join(TMP, "noreg.html")))
+check("영역 검증표가 없으면 빌드가 멈춘다", _no_reg.returncode != 0)
+check("멈추면서 만드는 명령과 밝히는 변수를 말한다",
+      "validate_regions.py" in (_no_reg.stdout + _no_reg.stderr)
+      and "FDT_REGIONS_OPTIONAL" in (_no_reg.stdout + _no_reg.stderr))
+_waived_reg = subprocess.run(
+    [sys.executable, os.path.join(HERE, "build_sheet2.py")],
+    capture_output=True, text=True, cwd=HERE,
+    env=dict(ENV, FDT_REGIONS=os.path.join(TMP, "no_such_regions.csv"),
+             FDT_REGIONS_OPTIONAL="1", FDT_SHEET=os.path.join(TMP, "noreg2.html")))
+check("아직 돌리지 않았다고 밝히면 빌드는 된다", _waived_reg.returncode == 0,
+      (_waived_reg.stderr or "")[-200:])
+
+check("AGREE_3인 행은 열려 있다",
+      _open(_regions_variant("a3", "AGREE_3")[2], _target))
+_dis = _regions_variant("dis", "DISAGREE")[2]
+check("두 방법이 어긋난 행은 막힌다", _disabled(_dis, _target))
+check("사유가 사람이 정해야 한다고 말한다", "REVIEW_REQUIRED" in _dis
+      and "서로 다른 곳을" in _dis)
+_a2 = _regions_variant("a2", "AGREE_2_TEXT_DIFFERS")[2]
+check("두 방법은 일치하는데 크롭이 다른 행은 막힌다", _disabled(_a2, _target))
+check("사유가 '다시 자르기 전에는'이라고 말한다", "다시 자르기 전에는" in _a2)
+check("래스터만 답한 행은 막힌다",
+      _disabled(_regions_variant("ro", "RASTER_ONLY")[2], _target))
+check("PDF만 답한 행은 막힌다",
+      _disabled(_regions_variant("po", "PDF_ONLY")[2], _target))
+check("아무 방법도 답이 없는 행은 막힌다",
+      _disabled(_regions_variant("none", "NONE")[2], _target))
+_odd = _regions_variant("odd", "MOSTLY_FINE")[2]
+check("모르는 합의 값은 통과가 아니라 차단이다", _disabled(_odd, _target))
+check("그 사유가 값을 그대로 보여 준다", "MOSTLY_FINE" in _odd)
+_id_a = re.search(r"sheet-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}", _dis)
+_id_b = re.search(r"sheet-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}", _a2)
+check("영역 검증표가 달라지면 빌드 ID가 달라진다",
+      _id_a and _id_b and _id_a.group(0) != _id_b.group(0))
+
+# ----------------------------------------------- 검증 상자로 다시 자르기
+import hashlib as _hl                                            # noqa: E402
+import apply_validated as AV                                     # noqa: E402
+
+_tr = [d for d in _with_page if d["Draft_ID"] == _target][0]
+_x0, _y0, _x1, _y1 = [float(v) for v in _tr["Figure_BBox"].split(",")]
+# 같은 페이지 안의 다른 영역 - 실제 픽스처 그림이 있는 자리에서 20pt 안쪽으로
+_new_box = "%.1f,%.1f,%.1f,%.1f" % (_x0 + 20, _y0 + 20, _x1 - 20, _y1 - 20)
+_root_av, _, _ = _regions_variant("av", "AGREE_2_TEXT_DIFFERS", validated=_new_box)
+_crop_path = os.path.join(_root_av, _tr["Figure_Crop"])
+_sha_before = _hl.sha256(io.open(_crop_path, "rb").read()).hexdigest()
+_rc_av = AV.main(_root_av)
+_draft_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_root_av, "figure_intake_draft.csv"), encoding="utf-8"))}
+_reg_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_root_av, "validated_regions.csv"), encoding="utf-8"))}
+check("AGREE_2 행의 상자가 검증 상자로 바뀐다",
+      _rc_av == 0 and _draft_after[_target]["Figure_BBox"] == _new_box,
+      _draft_after[_target]["Figure_BBox"])
+check("옛 상자는 Proposal_Figure_BBox에 남는다",
+      _draft_after[_target]["Proposal_Figure_BBox"] == _tr["Figure_BBox"])
+check("크롭 파일이 실제로 다시 잘렸다 (digest가 바뀜)",
+      _hl.sha256(io.open(_crop_path, "rb").read()).hexdigest() != _sha_before)
+check("다시 잘린 크롭은 새 상자에서 왕복한다",
+      RT.check(_draft_after[_target], _root_av)[0] == "MATCH",
+      RT.check(_draft_after[_target], _root_av))
+check("영역 표는 이제 셋이 일치한다고 적는다",
+      _reg_after[_target]["Agreement"] == "AGREE_3"
+      and _reg_after[_target]["Recut_From"] == _tr["Figure_BBox"])
+check("손대지 않은 행은 그대로다",
+      all(_draft_after[d["Draft_ID"]]["Figure_BBox"] == d["Figure_BBox"]
+          for d in DRAFT if d["Draft_ID"] != _target))
+_r_after = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                          capture_output=True, text=True, cwd=HERE,
+                          env=dict(ENV, FDT_DRAFT=_root_av,
+                                   FDT_SHEET=os.path.join(TMP, "av.html"),
+                                   FDT_CENSUS=os.path.join(_root_av, "crop_visual_census.csv"),
+                                   FDT_REGIONS=os.path.join(_root_av, "validated_regions.csv")))
+_av_text = "\n".join(io.open(f, encoding="utf-8").read()
+                     for f in _P.parts_for(os.path.join(TMP, "av.html")))
+check("다시 자른 뒤 그 행은 시트에서 열린다", _r_after.returncode == 0
+      and _open(_av_text, _target), (_r_after.stderr or "")[-200:])
+_sha_once = _hl.sha256(io.open(_crop_path, "rb").read()).hexdigest()
+AV.main(_root_av)
+check("두 번 돌려도 더 바뀌지 않는다",
+      _hl.sha256(io.open(_crop_path, "rb").read()).hexdigest() == _sha_once)
+# 검증 상자가 너무 작아 크롭이 나오지 않으면 건너뛰고 말한다
+_root_tiny, _, _ = _regions_variant("tiny", "AGREE_2_TEXT_DIFFERS",
+                                    validated="%.1f,%.1f,%.1f,%.1f"
+                                    % (_x0, _y0, _x0 + 2, _y0 + 2))
+AV.main(_root_tiny)
+_tiny_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_root_tiny, "figure_intake_draft.csv"), encoding="utf-8"))}
+check("크롭을 낼 수 없는 검증 상자는 적용하지 않는다",
+      _tiny_after[_target]["Figure_BBox"] == _tr["Figure_BBox"])
+# DISAGREE 행은 건드리지 않는다 - 사람의 몫
+_root_d, _, _ = _regions_variant("keep", "DISAGREE", validated=_new_box)
+AV.main(_root_d)
+_d_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_root_d, "figure_intake_draft.csv"), encoding="utf-8"))}
+check("DISAGREE 행은 검증 상자가 있어도 다시 자르지 않는다",
+      _d_after[_target]["Figure_BBox"] == _tr["Figure_BBox"])
+# THIN_CROP 행은 그 판정이 지금 크롭에 대한 것이므로 손대지 않는다
+_thin_row = [d for d in _with_page if d["Crop_Quality_Status"] == "THIN_CROP"]
+if _thin_row:
+    _tid = _thin_row[0]["Draft_ID"]
+    _root_t = os.path.join(TMP, "reg_thin")
+    shutil.copytree(FX["draft"], _root_t)
+    _rp_t = os.path.join(_root_t, "validated_regions.csv")
+    _rows_t = list(csv.DictReader(io.open(_rp_t, encoding="utf-8")))
+    for r in _rows_t:
+        if r["Draft_ID"] == _tid:
+            r["Agreement"] = "AGREE_2_TEXT_DIFFERS"
+            r["Validated_Figure_BBox"] = _thin_row[0]["Figure_BBox"]
+    with io.open(_rp_t, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(_rows_t[0]))
+        w.writeheader()
+        w.writerows(_rows_t)
+    AV.main(_root_t)
+    _t_after = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+        os.path.join(_root_t, "figure_intake_draft.csv"), encoding="utf-8"))}
+    check("THIN_CROP 행은 AGREE_2여도 다시 자르지 않는다",
+          "Crop_Source" not in _t_after[_tid] or
+          _t_after[_tid].get("Crop_Source", "") == "")
+
+# ------------------------------------------- 사람이 세 상자 중 하나를 고르면
+def _choice_variant(name, agreement, choice, raster_box=None, pdf_box=None):
+    root = os.path.join(TMP, "ch_" + name)
+    shutil.copytree(FX["draft"], root)
+    rp = os.path.join(root, "validated_regions.csv")
+    rows = list(csv.DictReader(io.open(rp, encoding="utf-8")))
+    cols = list(rows[0])
+    if "Human_Choice" not in cols:
+        cols.append("Human_Choice")
+    for r in rows:
+        r.setdefault("Human_Choice", "")
+        if r["Draft_ID"] == _target:
+            r["Agreement"] = agreement
+            r["Human_Choice"] = choice
+            if raster_box is not None:
+                r["Raster_BBox"] = raster_box
+            if pdf_box is not None:
+                r["PDF_BBox"] = pdf_box
+    with io.open(rp, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols)
+        w.writeheader()
+        w.writerows(rows)
+    return root
+
+
+def _after(root):
+    d = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+        os.path.join(root, "figure_intake_draft.csv"), encoding="utf-8"))}
+    g = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+        os.path.join(root, "validated_regions.csv"), encoding="utf-8"))}
+    out = os.path.join(root, "sheet.html")
+    r = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_DRAFT=root, FDT_SHEET=out,
+                                FDT_CENSUS=os.path.join(root, "crop_visual_census.csv"),
+                                FDT_REGIONS=os.path.join(root, "validated_regions.csv")))
+    text = ("\n".join(io.open(f, encoding="utf-8").read()
+                      for f in _P.parts_for(out)) if r.returncode == 0 else "")
+    return d, g, text
+
+
+_rc_root = _choice_variant("raster", "DISAGREE", "RASTER", raster_box=_new_box)
+AV.main(_rc_root)
+_d1, _g1, _t1 = _after(_rc_root)
+check("사람이 RASTER를 고르면 DISAGREE 행이 래스터 상자로 다시 잘린다",
+      _d1[_target]["Figure_BBox"] == _new_box and
+      _d1[_target]["Crop_Source"] == "HUMAN_CHOICE_RASTER")
+check("그 행은 HUMAN_VALIDATED가 되어 시트에서 열린다",
+      _g1[_target]["Agreement"] == "HUMAN_VALIDATED" and _open(_t1, _target))
+check("다시 잘린 크롭은 왕복한다", RT.check(_d1[_target], _rc_root)[0] == "MATCH")
+
+_tx_root = _choice_variant("text", "DISAGREE", "TEXT")
+AV.main(_tx_root)
+_d2, _g2, _t2 = _after(_tx_root)
+check("사람이 TEXT를 고르면 크롭은 그대로 두고 행만 연다",
+      _d2[_target]["Figure_BBox"] == _tr["Figure_BBox"]
+      and _g2[_target]["Agreement"] == "HUMAN_VALIDATED" and _open(_t2, _target))
+
+_bl_root = _choice_variant("blocked", "AGREE_3", "BLOCKED")
+AV.main(_bl_root)
+_d3, _g3, _t3 = _after(_bl_root)
+check("사람이 BLOCKED라고 하면 셋이 일치해도 막힌다",
+      _g3[_target]["Agreement"] == "HUMAN_BLOCKED" and _disabled(_t3, _target))
+check("그 사유가 사람의 판정이라고 말한다", "사람이 이 행의 그림 영역을" in _t3)
+
+_bad_root = _choice_variant("typo", "DISAGREE", "raster?")
+try:
+    AV.main(_bad_root)
+    _typo_stop = None
+except SystemExit as exc:
+    _typo_stop = str(exc)
+check("Human_Choice에 모르는 값이 있으면 도구가 멈춘다",
+      _typo_stop is not None and _target in _typo_stop, _typo_stop)
+
+_ag_root = _choice_variant("agent", "DISAGREE", "")
+_rp_ag = os.path.join(_ag_root, "validated_regions.csv")
+_rows_ag = list(csv.DictReader(io.open(_rp_ag, encoding="utf-8")))
+_cols_ag = list(_rows_ag[0]) + ["Agent_Choice"]
+for r in _rows_ag:
+    r["Agent_Choice"] = "RASTER" if r["Draft_ID"] == _target else ""
+with io.open(_rp_ag, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_cols_ag)
+    w.writeheader()
+    w.writerows(_rows_ag)
+AV.main(_ag_root)
+_d4, _g4, _t4 = _after(_ag_root)
+check("에이전트의 Agent_Choice만으로는 아무것도 열리지 않는다",
+      _g4[_target]["Agreement"] == "DISAGREE" and _disabled(_t4, _target)
+      and _d4[_target]["Figure_BBox"] == _tr["Figure_BBox"])
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

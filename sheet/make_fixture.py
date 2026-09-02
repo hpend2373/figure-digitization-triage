@@ -158,6 +158,12 @@ def crop_png(path, panels, thin=False):
 
 import roundtrip                                                 # noqa: E402
 
+#: The regions-table columns `validate_regions.py` writes.
+REGIONS_FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
+                  "Agreement", "Validated_Figure_BBox", "Proposal_Figure_BBox",
+                  "PDF_Code", "PDF_BBox", "Raster_Code", "Raster_BBox", "IoU",
+                  "IoU_PDF_Raster", "Region_Code")
+
 #: The census columns, named here so a fixture and the loader cannot drift.
 CENSUS_FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
                  "Crop_SHA256", "Figure_BBox", "Agent_Visual_Code",
@@ -279,9 +285,28 @@ def write(root):
     with io.open(census_path, "w", encoding="utf-8", newline="") as fh:
         csv.DictWriter(fh, fieldnames=list(CENSUS_FIELDS)).writeheader()
 
+    # A REGIONS TABLE THAT SAYS AGREE_3 FOR EVERY ROW. The fixture has no PDF
+    # for the proposers to run on, so this is a stated assumption, not a
+    # result - and scenarios that need a disagreement write their own row.
+    regions_path = os.path.join(draft_dir, "validated_regions.csv")
+    with io.open(regions_path, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(REGIONS_FIELDS))
+        w.writeheader()
+        for r in draft:
+            w.writerow({"Draft_ID": r["Draft_ID"],
+                        "Source_Document_ID": r["Source_Document_ID"],
+                        "Page": r["Page"], "Figure_Number": r["Figure_Number"],
+                        "Agreement": "AGREE_3",
+                        "Validated_Figure_BBox": r["Figure_BBox"],
+                        "Proposal_Figure_BBox": r["Figure_BBox"],
+                        "PDF_Code": "OK", "PDF_BBox": r["Figure_BBox"],
+                        "Raster_Code": "OK", "Raster_BBox": r["Figure_BBox"],
+                        "IoU": "1.000", "IoU_PDF_Raster": "1.000",
+                        "Region_Code": "OK"})
+
     return {"draft": draft_dir, "audit": audit,
             "worklist": os.path.join(root, "worklist.csv"),
-            "census": census_path,
+            "census": census_path, "regions": regions_path,
             "rows": len(draft), "documents": len(DOCS)}
 
 

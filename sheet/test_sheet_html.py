@@ -296,8 +296,10 @@ if os.path.exists(_census_path):
     # 모두 막혔다"를 각각 봅니다. 규칙이 넓어지면 앞이, 좁아지면 뒤가 깨집니다.
     _card = re.compile(r"<div class='why'>(.*?)</div>\s*<label>패널 수 "
                        r"<input[^>]*data-id='([^']+)'", re.S)
+    # 조사표의 문장만: "육안 전수조사 —"와 "육안 조사에서 결함으로 본 그림".
+    # REVIEW_REQUIRED라는 낱말은 영역 합의 사유에도 들어가므로 표식이 못 된다.
     _printed = {did for why, did in _card.findall(SHEET)
-                if "육안 전수조사" in why or "REVIEW_REQUIRED" in why}
+                if "육안 전수조사" in why or "육안 조사에서 결함으로 본" in why}
     # 관측이 하나도 없는 조사표(아직 아무도 보지 않은 판)에서는 화면에도
     # 조사표 사유가 없어야 합니다. 양쪽이 함께 비거나 함께 차야 합니다.
     check("조사표가 거부하는 행이 있을 때만 그 사유가 화면에 찍힌다 "

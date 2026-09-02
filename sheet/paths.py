@@ -62,6 +62,14 @@ CENSUS = _p("FDT_CENSUS", os.path.join(RUN, "crop_visual_census.csv"))
 #: safety rule that vanishes when its file is missing is not a safety rule.
 CENSUS_OPTIONAL = _p("FDT_CENSUS_OPTIONAL", "") == "1"
 
+#: What three independent proposers said about every row's figure region and
+#: whether they agree - `validate_regions.py` writes it. The sheet's blocking
+#: rule reads the Agreement column: a row nobody's second method confirms is
+#: REVIEW_REQUIRED. Missing means the build stops, unless FDT_REGIONS_OPTIONAL=1
+#: says out loud that nobody has run the proposers on this corpus yet.
+REGIONS = _p("FDT_REGIONS", os.path.join(RUN, "validated_regions.csv"))
+REGIONS_OPTIONAL = _p("FDT_REGIONS_OPTIONAL", "") == "1"
+
 #: Where the built sheet goes, and what the tests read.
 SHEET = _p("FDT_SHEET",
            os.path.join(RUN, "panel_count_contact_sheet.html"))

@@ -104,7 +104,7 @@ KNOWN_PRESENT = {
 _ID_INPUTS = [os.path.join(D, "figure_intake_draft.csv"),
               os.path.join(AUDIT, "confirmed_image_defects.csv"),
               os.path.join(AUDIT, "sentence_warning_rows.csv"),
-              PATHS.CENSUS]
+              PATHS.CENSUS, PATHS.REGIONS]
 _HERE0 = os.path.dirname(os.path.abspath(__file__))
 _ID_INPUTS += [os.path.join(_HERE0, f) for f in
                ("block_rules.py", "census.py", "roundtrip.py",
@@ -150,6 +150,21 @@ def _crop_digests(rows, root):
 
 CROP_SHA = _crop_digests(DRAFT, D)
 SHARED_CROP = BR.shared_crop_map(CROP_SHA)
+
+#: WHAT THE THREE PROPOSERS AGREED ON, per row - or a stated reason there is
+#: no such file yet. Same shape as the census: missing stops the build.
+if os.path.exists(PATHS.REGIONS):
+    AGREEMENT = {r["Draft_ID"]: (r.get("Agreement") or "PENDING")
+                 for r in csv.DictReader(io.open(PATHS.REGIONS,
+                                                 encoding="utf-8"))}
+elif PATHS.REGIONS_OPTIONAL:
+    AGREEMENT = None
+else:
+    raise SystemExit(
+        "그림 영역 검증표가 없습니다: %r\n"
+        "python3 validate_regions.py <run> 으로 만들거나, FDT_REGIONS로 지정하거나, "
+        "아직 돌리지 않은 코퍼스라면 FDT_REGIONS_OPTIONAL=1로 밝히십시오."
+        % PATHS.REGIONS)
 
 #: EVERY CROP CUT AGAIN FROM ITS BOX. `roundtrip.check` repeats the intake's
 #: cut and compares with the file; a row whose crop cannot be reproduced from
@@ -199,7 +214,9 @@ def blocked_reason(d):
                              shared_with=SHARED_CROP.get(d["Draft_ID"], ()),
                              census=CENSUS,
                              crop_sha=CROP_SHA.get(d["Draft_ID"], ""),
-                             roundtrip=ROUNDTRIP.get(d["Draft_ID"]))
+                             roundtrip=ROUNDTRIP.get(d["Draft_ID"]),
+                             agreement=(None if AGREEMENT is None else
+                                        AGREEMENT.get(d["Draft_ID"], "PENDING")))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -677,8 +694,9 @@ for _i, (_cards, _ids) in enumerate(PARTS, 1):
 # what was on screen. Copying them here means the pair cannot drift again.
 import shutil
 for _name in ("figure_intake_draft.csv", "intake_document_status.csv",
-              os.path.basename(PATHS.CENSUS)):
+              os.path.basename(PATHS.CENSUS), os.path.basename(PATHS.REGIONS)):
     _src = (PATHS.CENSUS if _name == os.path.basename(PATHS.CENSUS)
+            else PATHS.REGIONS if _name == os.path.basename(PATHS.REGIONS)
             else os.path.join(D, _name))
     if not os.path.exists(_src):
         continue
@@ -703,4 +721,10 @@ _rt = {}
 for _v in ROUNDTRIP.values():
     _rt[_v] = _rt.get(_v, 0) + 1
 print("왕복 검사: %s" % ", ".join("%s %d" % kv for kv in sorted(_rt.items())))
+if AGREEMENT is not None:
+    _ag = {}
+    for d in DRAFT:
+        _v = AGREEMENT.get(d["Draft_ID"], "PENDING")
+        _ag[_v] = _ag.get(_v, 0) + 1
+    print("영역 합의: %s" % ", ".join("%s %d" % kv for kv in sorted(_ag.items())))
 print("빌드 ID", BUILD_ID)

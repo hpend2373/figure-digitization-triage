@@ -142,8 +142,41 @@ ROUNDTRIP_UNVERIFIABLE = {
 }
 
 
+#: What `validate_regions.agree` can say, and what each answer means for a
+#: person about to type a number. AGREE_3 is the only answer under which the
+#: crop on the sheet is a region two independent methods both point at; it
+#: is therefore the only answer that is not a reason. AGREE_2 means the two
+#: methods agree with each other and NOT with the crop on the sheet - the
+#: crop is the odd one out, and `apply_validated.py` recuts it.
+AGREEMENT_UNCOUNTABLE = {
+    "AGREE_2_TEXT_DIFFERS": (
+        "PDF 객체와 래스터 잉크가 같은 영역을 가리키는데 지금 크롭은 다른 곳을 "
+        "잘랐습니다 — 검증 상자로 다시 자르기 전에는 셀 수 없습니다."),
+    "DISAGREE": (
+        "그림 영역을 찾는 두 방법(PDF 객체·래스터 잉크)이 서로 다른 곳을 "
+        "가리킵니다 — 어느 쪽이 그림인지 사람이 정해야 합니다 (REVIEW_REQUIRED)."),
+    "RASTER_ONLY": (
+        "래스터 잉크만 그림 영역을 냈고 PDF 객체는 답이 없습니다 — 한 방법의 "
+        "답은 제안일 뿐이므로 사람이 확인해야 합니다 (REVIEW_REQUIRED)."),
+    "PDF_ONLY": (
+        "PDF 객체만 그림 영역을 냈고 래스터 잉크는 답이 없습니다 — 한 방법의 "
+        "답은 제안일 뿐이므로 사람이 확인해야 합니다 (REVIEW_REQUIRED)."),
+    "NONE": (
+        "어느 방법도 이 캡션에 답하는 그림 영역을 찾지 못했습니다 — 캡션 옆에 "
+        "그림이 없거나 두 방법이 모두 놓친 배치입니다 (REVIEW_REQUIRED)."),
+    "PENDING": "그림 영역 검증이 아직 이 행까지 오지 않았습니다.",
+}
+#: The answers that leave a row countable: the two detectors agreeing with the
+#: crop, or a person having chosen the region after looking (`Human_Choice`
+#: in the regions table, applied by `apply_validated.py`).
+AGREEMENT_COUNTABLE = ("AGREE_3", "HUMAN_VALIDATED")
+AGREEMENT_UNCOUNTABLE["HUMAN_BLOCKED"] = (
+    "사람이 이 행의 그림 영역을 정할 수 없다고 표시했습니다 — 세 제안 중 어느 것도 "
+    "그림이 아닙니다.")
+
+
 def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
-                   census=None, crop_sha="", roundtrip=None):
+                   census=None, crop_sha="", roundtrip=None, agreement=None):
     """Why this row may not take a panel count. Empty string means it may.
 
     `row` needs only the four fields the decision reads, so this can be tested
@@ -174,17 +207,24 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
         seen = _census.reason(census, row, crop_sha)
         if seen:
             return seen
-    # CAN THE PICTURE BE TRACED TO ITS BOX. Checked before the crop status,
-    # because ACCEPTABLE is a measurement OF the crop and says nothing about
-    # whether the crop is the one the box describes.
-    if roundtrip in ROUNDTRIP_UNVERIFIABLE:
-        return ROUNDTRIP_UNVERIFIABLE[roundtrip]
     if not str(row.get("Figure_Number", "")).strip():
         return ("그림 번호를 읽지 못했습니다 — %s 사람이 번호를 정해야 합니다."
                 % (row.get("Confidence_Reason") or ""))
     if str(row.get("Confidence", "")).strip() == "0.00":
         return ("기계가 스스로 신뢰도 0으로 표시한 행입니다 — %s"
                 % (row.get("Confidence_Reason") or "사유 없음"))
+    # CAN THE PICTURE BE TRACED TO ITS BOX. After the row's own defects (no
+    # number, no confidence), which a person can act on directly; before the
+    # crop status, because ACCEPTABLE is a measurement OF the crop and says
+    # nothing about whether the crop is the one the box describes.
+    if roundtrip in ROUNDTRIP_UNVERIFIABLE:
+        return ROUNDTRIP_UNVERIFIABLE[roundtrip]
+    # DO TWO INDEPENDENT METHODS POINT AT THIS CROP. A closed set again: an
+    # agreement value this module has not heard of is a reason, not a pass.
+    if agreement is not None and agreement not in AGREEMENT_COUNTABLE:
+        return AGREEMENT_UNCOUNTABLE.get(
+            agreement, "그림 영역 검증 결과를 해석할 수 없어 막았습니다 (%r)."
+            % (agreement,))
     # THE CROP STATUS IS A CLOSED SET, so anything outside it is a value this
     # gate does not understand - and a gate that lets through what it cannot
     # read is not a gate. Listing only the dangerous statuses meant an empty

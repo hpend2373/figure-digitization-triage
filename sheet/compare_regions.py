@@ -49,8 +49,10 @@ def cell(row, val, run, size):
         return tile
     im = Image.open(pr).convert("RGB")
     old = box_px(_parse(row.get("Figure_BBox")), im.size, (pw, ph))
-    new = box_px(_parse(val.get("Validated_Figure_BBox")), im.size, (pw, ph))
-    keep = [b for b in (old, new) if b]
+    new = box_px(_parse(val.get("PDF_BBox") or val.get("Validated_Figure_BBox")),
+                 im.size, (pw, ph))
+    ras = box_px(_parse(val.get("Raster_BBox")), im.size, (pw, ph))
+    keep = [b for b in (old, new, ras) if b]
     L = max(0, min(b[0] for b in keep) - 60) if keep else 0
     T = max(0, min(b[1] for b in keep) - 60) if keep else 0
     R = min(im.size[0], max(b[2] for b in keep) + 60) if keep else im.size[0]
@@ -60,7 +62,9 @@ def cell(row, val, run, size):
     view = view.resize((max(1, int(view.size[0] * k)),
                         max(1, int(view.size[1] * k))), Image.LANCZOS)
     vd = ImageDraw.Draw(view)
-    for b, colour, wide in ((old, (230, 0, 0), 3), (new, (0, 80, 235), 3)):
+    # 빨강 = 지금 상자(글자 걸음) · 파랑 = PDF 객체 · 초록 = 래스터 잉크
+    for b, colour, wide in ((old, (230, 0, 0), 3), (new, (0, 80, 235), 3),
+                            (ras, (0, 150, 40), 3)):
         if not b:
             continue
         vd.rectangle([int((b[0] - L) * k), int((b[1] - T) * k),
@@ -78,7 +82,7 @@ def _parse(text):
     return (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
 
 
-def main(run, out, ids, cols=4, size=430):
+def main(run, out, ids, cols=4, size=430, first=1):
     import roundtrip
     roundtrip.selfcheck(run)
     draft = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
@@ -97,12 +101,13 @@ def main(run, out, ids, cols=4, size=430):
         t = cell(draft[did], val.get(did, {}), run, size)
         d = ImageDraw.Draw(t)
         d.rectangle([0, size, size, size + 39], fill=(245, 245, 245))
-        d.text((5, size + 2), "%d %s" % (i + 1, did[:36]), fill=(0, 0, 0),
+        d.text((5, size + 2), "%d %s" % (first + i, did[:36]), fill=(0, 0, 0),
                font=ImageFont.truetype(F, 15))
-        d.text((5, size + 20), "눈=%s  새=%s"
-               % ((cen.get(did) or {}).get("Agent_Visual_Code", "-"),
-                  (val.get(did) or {}).get("Region_Code", "-")),
-               fill=(90, 90, 90), font=ImageFont.truetype(F, 13))
+        d.text((5, size + 20), "합의=%s  PDF=%s  래스터=%s"
+               % ((val.get(did) or {}).get("Agreement", "-"),
+                  (val.get(did) or {}).get("PDF_Code", "-"),
+                  (val.get(did) or {}).get("Raster_Code", "-")),
+               fill=(90, 90, 90), font=ImageFont.truetype(F, 12))
         d.rectangle([0, 0, size - 1, size + 39], outline=(170, 170, 170))
         sheet.paste(t, (6 + (i % cols) * (size + 6),
                         6 + (i // cols) * (size + 46)))
@@ -111,4 +116,8 @@ def main(run, out, ids, cols=4, size=430):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], sys.argv[3:])
+    _args = sys.argv[3:]
+    _first = 1
+    if _args and _args[0] == "--first":
+        _first, _args = int(_args[1]), _args[2:]
+    main(sys.argv[1], sys.argv[2], _args, first=_first)

@@ -46,16 +46,20 @@
     node    test_sheet_logic.mjs      #  35
     python3 test_sheet_html.py        #  57
     python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
-    python3 test_sheet_build.py       # 131
+    python3 test_sheet_build.py       # 164
     python3 test_merge_counts.py      #  22
     python3 verify_intake_images.py $FDT_RUN   # 있는가 · 끝까지 읽히는가 · 상자에서 다시 만들어지는가
     python3 roundtrip.py $FDT_RUN     # 상자대로 다시 잘라 크롭과 픽셀 비교 (run2: 642 MATCH)
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
     python3 test_figure_regions.py    #  32
-    python3 validate_regions.py $FDT_RUN   # 두 번째 상자(PDF가 그리는 것)를 낸다
+    python3 test_raster_regions.py    #  16
+    python3 validate_regions.py $FDT_RUN   # 세 제안자 + 합의 → validated_regions.csv
+    python3 apply_validated.py $FDT_RUN    # AGREE_2 행과 Human_Choice 행을 검증 상자로 다시 자름
+    python3 review_packet.py make $FDT_RUN $FDT_RUN/review   # 사람이 볼 13장 + review_queue.csv
     python3 mutate_census.py          # 변이 11, 전부 사살되어야 함
     python3 mutate_regions.py         # 변이 12, 전부 사살되어야 함
     python3 mutate_roundtrip.py       # 변이  9, 전부 사살되어야 함
+    python3 mutate_agreement.py       # 변이 14, 전부 사살되어야 함
     (저장소 루트) python3 test_sheet_blocks.py  #  42
     (저장소 루트) python3 test_crop_truth.py    #  60
     python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
@@ -114,6 +118,36 @@ NO_CUT 2**입니다. NO_CUT 둘은 두 번째 판독기 행(`_S001`)으로, 크�
 픽스처(`make_fixture.py`)의 크롭도 이제 같은 공식으로 페이지에서 잘라 냅니다.
 따로 그린 크롭은 이 검사를 절대 통과하지 못하고, 통과하지 못하는 검사는 작동을
 보일 수 없기 때문입니다.
+
+## 세 제안자와 합의 — 언제 셀 수 있는가
+
+그림 영역을 세 방법이 따로 답합니다.
+
+    TEXT    `Figure_BBox`        글자 블록 걸음 (인테이크) — 지금 크롭이 잘린 상자
+    PDF     `figure_regions.py`  PDF가 선언한 이미지·곡선·선의 뭉치
+    RASTER  `raster_regions.py`  페이지 래스터의 잉크 연결 성분 (본문 글줄은 지운 뒤)
+
+`validate_regions.py`가 셋을 한 표에 놓고 합의를 매깁니다.
+
+    AGREE_3                PDF·RASTER가 같은 곳(IoU ≥ 0.6)을 가리키고, TEXT도 그곳
+                           → 지금 크롭으로 셀 수 있음
+    AGREE_2_TEXT_DIFFERS   PDF·RASTER는 일치하는데 TEXT가 다름
+                           → `apply_validated.py`가 검증 상자로 다시 자름 (ACCEPTABLE 행만)
+    DISAGREE · RASTER_ONLY · PDF_ONLY · NONE
+                           → REVIEW_REQUIRED. 사람이 `Human_Choice`로 정함
+
+한 방법의 답은 언제나 제안입니다. run2 (2026-09-02): 입력 가능 428행 중
+AGREE_3 239 · AGREE_2 55(→ 다시 잘라 열림) · 검토 134. 사람이 먼저 본 12행과
+합의 판정을 대조하니 12/12 일치했습니다 — "두 상자 모두 틀림" 9건은 전부
+DISAGREE/RASTER_ONLY, "새 상자가 맞음" 3건은 전부 AGREE_2였습니다.
+
+**사람이 푸는 길.** `review_packet.py make`가 검토 대기 행을 12칸씩 그려
+(빨강 TEXT · 파랑 PDF · 초록 RASTER) `review_queue.csv`와 함께 냅니다.
+`Human_Choice`에 RASTER / PDF / TEXT / BLOCKED 를 적고 `review_packet.py merge`
+→ `apply_validated.py` 하면 그 상자로 다시 잘려 열립니다(HUMAN_VALIDATED).
+`Agent_Choice`는 에이전트가 제안을 적는 칸이며 **아무것도 열지 못합니다** —
+시나리오가 그것을 지킵니다. 판정은 크롭 digest에 묶여, 다시 잘린 뒤의 옛
+판정은 merge가 거부합니다.
 
 ## 좌표는 위 기준입니다 — 한 번 뒤집으면 조용히 틀립니다
 

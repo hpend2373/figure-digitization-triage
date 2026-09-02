@@ -46,11 +46,14 @@
     node    test_sheet_logic.mjs      #  35
     python3 test_sheet_html.py        #  57
     python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
-    python3 test_sheet_build.py       # 114
+    python3 test_sheet_build.py       # 117
     python3 test_merge_counts.py      #  22
     python3 verify_intake_images.py $FDT_RUN   # 초안이 부르는 이미지가 다 있고 끝까지 읽히는가
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
+    python3 test_figure_regions.py    #  32
+    python3 validate_regions.py $FDT_RUN   # 두 번째 상자(PDF가 그리는 것)를 낸다
     python3 mutate_census.py          # 변이 11, 전부 사살되어야 함
+    python3 mutate_regions.py         # 변이 12, 전부 사살되어야 함
     (저장소 루트) python3 test_sheet_blocks.py  #  42
     (저장소 루트) python3 test_crop_truth.py    #  60
     python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
@@ -85,6 +88,40 @@ run2에서 열려 있던 440행을 한 장씩 눈으로 본 결과는 이렇습�
 - 조사표가 **없으면 빌드가 멈춥니다.** 파일 하나가 사라졌다고 336행이 조용히
   다시 열리면 그것은 안전 규칙이 아닙니다. 아직 아무도 보지 않은 코퍼스라면
   `FDT_CENSUS_OPTIONAL=1`로 그렇다고 밝히십시오.
+
+## 좌표는 위 기준입니다 — 한 번 뒤집으면 조용히 틀립니다
+
+`Figure_BBox`와 `Caption_BBox`는 **래스터와 같은 위 기준**입니다. y는 페이지
+위에서 아래로 자랍니다. PDF 자체는 아래 기준(y가 아래에서 위로)이고
+`pdfminer`도 그 좌표로 답하므로, 둘을 섞으면 상자가 페이지 한가운데를 축으로
+**거울처럼 뒤집힙니다.**
+
+이것이 위험한 이유는 실패하지 않기 때문입니다. 뒤집힌 상자도 페이지 안의
+멀쩡한 직사각형이라 그림처럼 보이고, 그 자리에 본문이 있으면 "이 행에는
+그림이 없다"는 그럴듯한 결론이 나옵니다. 2026-09-02에 실제로 그렇게 461행을
+잘못 판정했고, 그 판정으로 336행을 막았다가 되돌렸습니다.
+
+- `validate_regions.py`의 `to_raster()`가 pdfminer의 답을 한 번만 바꿉니다.
+- 그 아래로는(초안·시트·`compare_regions.py`) 전부 위 기준 하나뿐입니다.
+- 새 도구를 붙일 때 확인하는 방법: 상자대로 페이지를 잘라 실제 크롭 파일과
+  겹쳐 보십시오. 방향이 맞으면 거의 같은 그림이 나옵니다.
+
+## 그림 영역을 PDF에서 직접 찾기 (`figure_regions.py`)
+
+캡션 위 빈칸을 글자 블록으로 잡는 것 말고, PDF가 그리는 것(이미지·곡선·선·
+사각형)에서 후보를 만들어 캡션과 짝짓는 두 번째 방법입니다.
+
+    떨어진 패널을 하나로        GAP 안의 조각을 뭉치고, 사이에 글이 없으면
+                                REACH_BLANK까지 더 잇습니다.
+    거터 너머는 남              두 단 사이 빈 띠를 본문에서 찾아 넘지 않습니다.
+    캡션을 함께 배정            페이지의 캡션과 후보를 한 번에 일대일로.
+    비슷하면 고르지 않음        1·2위 점수 차가 MARGIN 미만이면 AMBIGUOUS.
+
+`validate_regions.py`가 이것을 코퍼스 전체에 돌려 `validated_regions.csv`에
+`Validated_Figure_BBox`와 `Region_Code`를 씁니다. **계수에 바로 쓰지
+않습니다.** run2에서 두 방법은 476행에 대해 답을 냈고 겹침 중앙값은 0.59이며,
+크게 어긋난 22행을 눈으로 보면 어느 쪽이 맞는지는 반반이었습니다. 지금 이
+파일의 쓸모는 "사람이 봐야 할 행"을 99행으로 좁혀 주는 것입니다.
 
 ## 배포되지 않는 것
 

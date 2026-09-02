@@ -298,8 +298,11 @@ if os.path.exists(_census_path):
                        r"<input[^>]*data-id='([^']+)'", re.S)
     _printed = {did for why, did in _card.findall(SHEET)
                 if "육안 전수조사" in why or "REVIEW_REQUIRED" in why}
-    check("조사표 사유가 화면에 실제로 찍혀 있다 (%d행)" % len(_printed),
-          len(_printed) > 0)
+    # 관측이 하나도 없는 조사표(아직 아무도 보지 않은 판)에서는 화면에도
+    # 조사표 사유가 없어야 합니다. 양쪽이 함께 비거나 함께 차야 합니다.
+    check("조사표가 거부하는 행이 있을 때만 그 사유가 화면에 찍힌다 "
+          "(거부 %d · 화면 %d)" % (len(_should), len(_printed)),
+          (len(_printed) > 0) == (len(_should) > 0))
     check("조사표 사유가 찍힌 행은 모두 조사표가 거부하는 행이다",
           _printed <= _should, "%s" % sorted(_printed - _should)[:3])
     check("거부된 행 중 다른 사유가 먼저 나온 %d행도 어쨌든 막혀 있다"

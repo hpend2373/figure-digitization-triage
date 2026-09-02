@@ -47,6 +47,7 @@ import os
 from PIL import Image
 
 import block_rules as BR
+import census as CENSUS_MOD
 import paths as PATHS
 
 D = PATHS.DRAFT
@@ -101,11 +102,12 @@ KNOWN_PRESENT = {
 #: scripts, and the audit findings the rule reads.
 _ID_INPUTS = [os.path.join(D, "figure_intake_draft.csv"),
               os.path.join(AUDIT, "confirmed_image_defects.csv"),
-              os.path.join(AUDIT, "sentence_warning_rows.csv")]
+              os.path.join(AUDIT, "sentence_warning_rows.csv"),
+              PATHS.CENSUS]
 _HERE0 = os.path.dirname(os.path.abspath(__file__))
 _ID_INPUTS += [os.path.join(_HERE0, f) for f in
-               ("block_rules.py", "build_sheet2.py", "sheet_logic.js",
-                "sheet_page.js")]
+               ("block_rules.py", "census.py", "build_sheet2.py",
+                "sheet_logic.js", "sheet_page.js")]
 _h = hashlib.sha256()
 for _f in _ID_INPUTS:
     _h.update(os.path.basename(_f).encode("utf-8"))
@@ -145,7 +147,28 @@ def _crop_digests(rows, root):
     return out
 
 
-SHARED_CROP = BR.shared_crop_map(_crop_digests(DRAFT, D))
+CROP_SHA = _crop_digests(DRAFT, D)
+SHARED_CROP = BR.shared_crop_map(CROP_SHA)
+
+#: THE VISUAL CENSUS, OR A STATED REASON THERE IS NONE. `ACCEPTABLE` is a
+#: measurement of the crop; this is a record of what is inside it, and without
+#: it 336 of run2's 440 open rows are rows asking somebody to count panels in
+#: a paragraph. A missing file therefore stops the build instead of quietly
+#: reopening them; `FDT_CENSUS_OPTIONAL=1` is how a corpus nobody has looked
+#: at yet says so out loud.
+if os.path.exists(PATHS.CENSUS):
+    try:
+        CENSUS = CENSUS_MOD.load(PATHS.CENSUS)
+    except CENSUS_MOD.CensusError as exc:
+        raise SystemExit("육안 조사표를 읽을 수 없습니다 (%s): %s"
+                         % (PATHS.CENSUS, exc))
+elif PATHS.CENSUS_OPTIONAL:
+    CENSUS = None
+else:
+    raise SystemExit(
+        "육안 조사표가 없습니다: %r\n"
+        "FDT_CENSUS로 지정하거나, 아직 아무도 보지 않은 코퍼스라면 "
+        "FDT_CENSUS_OPTIONAL=1로 그렇다고 밝히십시오." % PATHS.CENSUS)
 
 PID_OF_DOC = {}
 
@@ -165,7 +188,9 @@ def blocked_reason(d):
     safety rule nobody else can check.
     """
     return BR.blocked_reason(d, row_key(d), defect=DEFECT.get(row_key(d)),
-                             shared_with=SHARED_CROP.get(d["Draft_ID"], ()))
+                             shared_with=SHARED_CROP.get(d["Draft_ID"], ()),
+                             census=CENSUS,
+                             crop_sha=CROP_SHA.get(d["Draft_ID"], ""))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -642,8 +667,12 @@ for _i, (_cards, _ids) in enumerate(PARTS, 1):
 # beside a 604-row CSV from an older walk, so nothing in the bundle described
 # what was on screen. Copying them here means the pair cannot drift again.
 import shutil
-for _name in ("figure_intake_draft.csv", "intake_document_status.csv"):
-    _src = os.path.join(D, _name)
+for _name in ("figure_intake_draft.csv", "intake_document_status.csv",
+              os.path.basename(PATHS.CENSUS)):
+    _src = (PATHS.CENSUS if _name == os.path.basename(PATHS.CENSUS)
+            else os.path.join(D, _name))
+    if not os.path.exists(_src):
+        continue
     _dst = os.path.join(os.path.dirname(OUT), _name)
     # Building the sheet beside the draft it was built from is the ordinary
     # case, not an error - and copyfile raises on it.

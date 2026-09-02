@@ -259,11 +259,54 @@ check("pid 554의 읽지 못한 캡션이 번호 없이라도 초안에 있다",
 check("둘 다 화면에서 사유와 함께 보인다",
       "기계가 스스로 신뢰도 0으로" in SHEET
       and "그림 번호를 읽지 못했습니다" in SHEET)
-check("0 신뢰도 차단이 시트를 비우지 않았다 — 여전히 400행 넘게 입력 가능",
-      sum(1 for r in ROWS if r["Count_Blocked"] == "0") > 400,
+# WHY THIS IS NOT A PERCENTAGE ANY MORE. It used to be "more than 400 rows
+# stay open" and "blocks stay under 60%", which asked a real question - did a
+# rule go wrong and wipe the sheet? - with a number that only held for the
+# corpus it was written against. A visual pass over run2's open rows then found
+# 336 of 440 showing no figure or a cut one, and blocking those is the sheet
+# working, not failing. So the question is kept and the number is replaced by
+# a measurement: the sheet is not empty, and every census block is one this
+# test can account for from the census file itself.
+check("차단이 시트를 비우지 않았다 — 셀 수 있는 행이 남아 있다",
+      sum(1 for r in ROWS if r["Count_Blocked"] == "0") > 0,
       sum(1 for r in ROWS if r["Count_Blocked"] == "0"))
-check("차단이 과반을 넘지 않는다 — 안전을 이유로 시트를 비우지 않았다",
-      len(blocked) < len(DRAFT) * 0.6, "%d/%d" % (len(blocked), len(DRAFT)))
+_census_path = os.path.join(os.path.dirname(PATHS.SHEET),
+                            os.path.basename(PATHS.CENSUS))
+if os.path.exists(_census_path):
+    import hashlib
+    import census as _C
+    _cen = _C.load(_census_path)
+    _sha = {}
+    for d in DRAFT:
+        rel = d.get("Figure_Crop") or ""
+        f = os.path.join(PATHS.DRAFT, rel) if rel else ""
+        if f and os.path.exists(f):
+            _sha[d["Draft_ID"]] = hashlib.sha256(
+                io.open(f, "rb").read()).hexdigest()
+    _should = {d["Draft_ID"] for d in DRAFT
+               if _C.reason(_cen, d, _sha.get(d["Draft_ID"], ""))}
+    _blocked_ids = {r["Draft_ID"] for r in ROWS if r["Count_Blocked"] == "1"}
+    check("육안 조사표가 막아야 한다고 계산되는 %d행이 전부 막혀 있다"
+          % len(_should), _should <= _blocked_ids,
+          "열려 있는 것: %s" % sorted(_should - _blocked_ids)[:3])
+    # 화면에 조사표 사유가 찍힌 행은, 조사표가 실제로 거부하는 행이어야
+    # 합니다. 개수를 그냥 맞추지 않는 이유는 차단 사유에 우선순위가 있어서
+    # 입니다 - 같은 크롭을 쓰는 두 행이나 2차 감사가 이미 막은 행은 그쪽
+    # 사유가 먼저 나옵니다. 그래서 "찍힌 것은 모두 거부된 행"과 "거부된 행은
+    # 모두 막혔다"를 각각 봅니다. 규칙이 넓어지면 앞이, 좁아지면 뒤가 깨집니다.
+    _card = re.compile(r"<div class='why'>(.*?)</div>\s*<label>패널 수 "
+                       r"<input[^>]*data-id='([^']+)'", re.S)
+    _printed = {did for why, did in _card.findall(SHEET)
+                if "육안 전수조사" in why or "REVIEW_REQUIRED" in why}
+    check("조사표 사유가 화면에 실제로 찍혀 있다 (%d행)" % len(_printed),
+          len(_printed) > 0)
+    check("조사표 사유가 찍힌 행은 모두 조사표가 거부하는 행이다",
+          _printed <= _should, "%s" % sorted(_printed - _should)[:3])
+    check("거부된 행 중 다른 사유가 먼저 나온 %d행도 어쨌든 막혀 있다"
+          % len(_should - _printed), (_should - _printed) <= _blocked_ids)
+else:
+    check("시트 옆에 조사표가 함께 놓여 있다", False,
+          "없음: %s" % _census_path)
 check("차단 행마다 이유가 적혀 있다",
       SHEET.count("입력을 막았습니다") == len(blocked))
 

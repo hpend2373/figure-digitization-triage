@@ -153,6 +153,12 @@ def crop_png(path, panels, thin=False):
     im.save(path)
 
 
+#: The census columns, named here so a fixture and the loader cannot drift.
+CENSUS_FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
+                 "Crop_SHA256", "Figure_BBox", "Agent_Visual_Code",
+                 "Agent_Visual_Note", "Human_Verdict", "Human_Note")
+
+
 def write(root):
     draft_dir = os.path.join(root, "draft")
     os.makedirs(draft_dir, exist_ok=True)
@@ -248,8 +254,18 @@ def write(root):
     dump(os.path.join(audit, "sentence_warning_rows.csv"),
          [{"draft_id": "DOC_B_D002", "reason": "본문 문장으로 읽힙니다"}],
          ["draft_id", "reason"])
+    # AN EMPTY VISUAL CENSUS, WRITTEN ON PURPOSE. The sheet refuses to build
+    # without one, because a missing census silently reopens every row a
+    # person judged unshowable. A fixture nobody has looked at says so with a
+    # file that has the columns and no observations, rather than by being
+    # absent - and the scenarios that need an observation write their own.
+    census_path = os.path.join(draft_dir, "crop_visual_census.csv")
+    with io.open(census_path, "w", encoding="utf-8", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=list(CENSUS_FIELDS)).writeheader()
+
     return {"draft": draft_dir, "audit": audit,
             "worklist": os.path.join(root, "worklist.csv"),
+            "census": census_path,
             "rows": len(draft), "documents": len(DOCS)}
 
 

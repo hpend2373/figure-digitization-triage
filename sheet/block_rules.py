@@ -21,6 +21,8 @@ back in play with their inputs open, and left eight it had judged fixed still
 blocked. Nothing here uses Draft_ID as an identity.
 """
 
+import census as _census
+
 #: What the third and fourth audits judged still wrong after the crop round,
 #: keyed by what the page prints. These take no number whatever the crop
 #: grader says about them - the grader is an ink measurement and the finding
@@ -91,7 +93,8 @@ def figure_key(pid, label, page):
     return (str(pid).strip(), str(label).strip().upper(), str(page).strip())
 
 
-def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None):
+def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
+                   census=None, crop_sha=""):
     """Why this row may not take a panel count. Empty string means it may.
 
     `row` needs only the four fields the decision reads, so this can be tested
@@ -113,6 +116,15 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None):
         kind = str(defect.get("kind", "")).strip()
         return "2차 감사 확인 — %s: %s" % (DEFECT_KIND.get(kind, kind),
                                        defect.get("screen", ""))
+    # WHAT SOMEBODY SAW IN THE CROP, after what the audits recorded about the
+    # figure. `census.reason` is given the loaded record, never a path: this
+    # module reads no files. It can only take a row out of counting - an agent
+    # observation is a reason to stop, and only a person's `Human_Verdict`
+    # puts one back.
+    if census is not None:
+        seen = _census.reason(census, row, crop_sha)
+        if seen:
+            return seen
     if not str(row.get("Figure_Number", "")).strip():
         return ("그림 번호를 읽지 못했습니다 — %s 사람이 번호를 정해야 합니다."
                 % (row.get("Confidence_Reason") or ""))

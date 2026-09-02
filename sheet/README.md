@@ -15,6 +15,8 @@
     export FDT_REPO=/path/to/figure-digitization-triage
     export FDT_PAGES=$FDT_DRAFT/pages
     export FDT_STAGED=/path/to/staged_paths.txt   # 원문 절대경로 한 줄에 하나
+    export FDT_CENSUS=$FDT_RUN/crop_visual_census.csv   # 육안 조사표
+    export FDT_CENSUS_OPTIONAL=1   # 아직 아무도 보지 않은 코퍼스일 때만
 
 ## 인테이크 본체는 저장소에 있습니다
 
@@ -42,12 +44,13 @@
     $FDT_REPO/corpus_intake.py <PDF...> --out draft --render 200  # 1. 인테이크
     python3 build_sheet2.py                                       # 2. 시트
     node    test_sheet_logic.mjs      #  35
-    python3 test_sheet_html.py        #  54
+    python3 test_sheet_html.py        #  57
     python3 test_sheet_browser.py     #  29 (파트마다; FDT_BROWSER_PART로 고름)
-    python3 test_sheet_build.py       #  99
+    python3 test_sheet_build.py       # 114
     python3 test_merge_counts.py      #  22
     python3 verify_intake_images.py $FDT_RUN   # 초안이 부르는 이미지가 다 있고 끝까지 읽히는가
     python3 mutate_sheet.py           # 변이  7, 전부 사살되어야 함
+    python3 mutate_census.py          # 변이 11, 전부 사살되어야 함
     (저장소 루트) python3 test_sheet_blocks.py  #  42
     (저장소 루트) python3 test_crop_truth.py    #  60
     python3 regress_crop.py           # 크롭 회귀 (사람 판정 20건 재현 후 점수)
@@ -55,6 +58,33 @@
 `build_sheet2.py`는 자기 옆의 `sheet_logic.js`·`sheet_page.js`를 읽습니다
 (4차 감사가 지적한 `/tmp/intake` 하드코딩을 없앴습니다). 그리고 시트를 쓸 때 자기가 읽은 두 CSV를 시트 옆에 복사합니다.
 3차 감사가 지적한 "639행 HTML 대 604행 CSV" 불일치가 다시 생길 수 없습니다.
+
+## 육안 조사표 — ACCEPTABLE이 무엇을 뜻하지 않는가
+
+`ACCEPTABLE`은 인테이크가 크롭을 **재어** 보고 이상을 찾지 못했다는 뜻입니다.
+크롭이 그림을 담고 있다는 뜻이 아닙니다. 상자는 `corpus_intake.figure_bbox`가
+잡은 "캡션 위의 빈칸"이고, 그 함수의 주석이 스스로 밝히듯 *"a LOOK HERE for a
+contact sheet, not a crop anybody measures from"* — 글자 블록만 보고 잡으며
+PDF가 들고 있는 그림 객체는 한 번도 보지 않습니다.
+
+run2에서 열려 있던 440행을 한 장씩 눈으로 본 결과는 이렇습니다.
+
+    그림이 아예 없음 (본문·참고문헌·빈 영역)   171
+    잘렸거나 두 그림이 섞임                   136
+    표를 그림으로 잡음                        29
+    그림이 온전                              104
+
+그래서 `crop_visual_census.csv`가 실행 폴더에 함께 있고, `sheet/census.py`가
+그것을 읽어 차단합니다. 규칙은 세 가지입니다.
+
+- 판정은 **크롭의 sha256에 묶입니다.** 크롭을 다시 자르면 그 판정은 이 크롭에
+  대한 판정이 아니므로, 결함으로 봤던 그림이 다시 잘린 경우 자동으로 열리지
+  않고 `REVIEW_REQUIRED`로 남습니다.
+- 에이전트 판정(`Agent_Visual_Code`)은 **행을 빼기만 합니다.** 다시 여는 것은
+  사람이 `Human_Verdict`에 `COUNTABLE`이라고 적었을 때뿐입니다.
+- 조사표가 **없으면 빌드가 멈춥니다.** 파일 하나가 사라졌다고 336행이 조용히
+  다시 열리면 그것은 안전 규칙이 아닙니다. 아직 아무도 보지 않은 코퍼스라면
+  `FDT_CENSUS_OPTIONAL=1`로 그렇다고 밝히십시오.
 
 ## 배포되지 않는 것
 

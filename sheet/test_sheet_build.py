@@ -63,6 +63,7 @@ FX = make_fixture.write(os.path.join(TMP, "fx"))
 SHEET = os.path.join(TMP, "sheet.html")
 ENV = dict(os.environ, FDT_DRAFT=FX["draft"], FDT_WORKLIST=FX["worklist"],
            FDT_AUDIT=FX["audit"], FDT_SHEET=SHEET, FDT_PATH_REWRITE="",
+           FDT_CENSUS=FX["census"], FDT_CENSUS_OPTIONAL="",
            PYTHONPYCACHEPREFIX=os.path.join(TMP, "pyc"))
 RUN = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
                      capture_output=True, text=True, env=ENV, cwd=HERE)
@@ -534,6 +535,137 @@ check("pid-문서 지도를 워크리스트와 원장에서 유도한다",
 check("접두사가 어긋나면 빈 지도가 나오고, 그것이 신호다",
       _P.pid_of_document([dict(w, href="file:///elsewhere/x.pdf")
                           for w in _work], _ledger) == {})
+
+# ------------------------------------------- 육안 조사표를 통과한 것만 계수 가능
+# ACCEPTABLE은 크롭에 대한 측정이고, 조사표는 그 안에 무엇이 들어 있는지에 대한
+# 기록입니다. run2에서 열려 있던 440행 중 336행이 본문·표·잘린 그림이었으므로,
+# 이 파일이 사라지면 그 336행이 조용히 다시 열립니다. 그래서 없으면 멈춥니다.
+import hashlib                                                   # noqa: E402
+
+
+def _census_run(rows, extra_env=None, path=None):
+    """조사표를 쓴 뒤 빌드를 돌리고 (결과, 시트 텍스트)를 준다."""
+    target = path or os.path.join(TMP, "census.csv")
+    with io.open(target, "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(make_fixture.CENSUS_FIELDS))
+        w.writeheader()
+        w.writerows(rows)
+    out = os.path.join(TMP, "census_sheet.html")
+    env = dict(ENV, FDT_CENSUS=target, FDT_SHEET=out)
+    env.update(extra_env or {})
+    r = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, env=env, cwd=HERE)
+    text = "\n".join(io.open(f, encoding="utf-8").read()
+                      for f in _P.parts_for(out)) if r.returncode == 0 else ""
+    return r, text
+
+
+#: 픽스처에서 열려 있는 아무 행 하나와 그 크롭의 digest.
+_open_row = [d for d in DRAFT
+             if d["Crop_Quality_Status"] == "ACCEPTABLE" and d["Figure_Crop"]][0]
+_open_sha = hashlib.sha256(io.open(
+    os.path.join(FX["draft"], _open_row["Figure_Crop"]), "rb").read()).hexdigest()
+
+
+def _entry(**kw):
+    base = dict(Draft_ID=_open_row["Draft_ID"],
+                Source_Document_ID=_open_row["Source_Document_ID"],
+                Page=_open_row["Page"], Figure_Number=_open_row["Figure_Number"],
+                Crop_SHA256=_open_sha, Figure_BBox=_open_row["Figure_BBox"],
+                Agent_Visual_Code="NO_FIGURE",
+                Agent_Visual_Note="상자 안이 본문뿐", Human_Verdict="",
+                Human_Note="")
+    base.update(kw)
+    return base
+
+
+_no_file = subprocess.run(
+    [sys.executable, os.path.join(HERE, "build_sheet2.py")],
+    capture_output=True, text=True, cwd=HERE,
+    env=dict(ENV, FDT_CENSUS=os.path.join(TMP, "gone.csv"),
+             FDT_SHEET=os.path.join(TMP, "gone.html")))
+check("조사표가 없으면 빌드가 멈춘다", _no_file.returncode != 0,
+      (_no_file.stdout or "")[-200:])
+check("멈추면서 어떻게 밝히면 되는지까지 말한다",
+      "FDT_CENSUS_OPTIONAL" in (_no_file.stdout + _no_file.stderr))
+_waived = subprocess.run(
+    [sys.executable, os.path.join(HERE, "build_sheet2.py")],
+    capture_output=True, text=True, cwd=HERE,
+    env=dict(ENV, FDT_CENSUS=os.path.join(TMP, "gone.csv"),
+             FDT_CENSUS_OPTIONAL="1",
+             FDT_SHEET=os.path.join(TMP, "waived.html")))
+check("아직 아무도 보지 않았다고 밝히면 빌드는 된다", _waived.returncode == 0,
+      (_waived.stderr or "")[-300:])
+
+_blocked_run, _blocked_text = _census_run([_entry()])
+check("조사표가 결함으로 본 행은 빌드가 되고도 입력이 막힌다",
+      _blocked_run.returncode == 0
+      and ("data-id='%s'" % _open_row["Draft_ID"]) in _blocked_text
+      and re.search(r"<input[^>]*disabled[^>]*data-id='%s'"
+                    % re.escape(_open_row["Draft_ID"]), _blocked_text)
+      is not None, (_blocked_run.stderr or "")[-300:])
+check("막은 이유가 화면에 그대로 적힌다",
+      "상자 안이 본문뿐" in _blocked_text)
+check("사람이 COUNTABLE로 바꾸면 다시 열린다",
+      re.search(r"<input(?![^>]*disabled)[^>]*data-id='%s'"
+                % re.escape(_open_row["Draft_ID"]),
+                _census_run([_entry(Human_Verdict="COUNTABLE")])[1]) is not None)
+check("사람이 BLOCKED로 적으면 코드가 OK라도 막힌다",
+      re.search(r"<input[^>]*disabled[^>]*data-id='%s'"
+                % re.escape(_open_row["Draft_ID"]),
+                _census_run([_entry(Agent_Visual_Code="OK",
+                                    Human_Verdict="BLOCKED",
+                                    Human_Note="사람이 다시 봤더니 잘림")])[1])
+      is not None)
+check("OK로 본 행은 조사표가 막지 않는다",
+      re.search(r"<input(?![^>]*disabled)[^>]*data-id='%s'"
+                % re.escape(_open_row["Draft_ID"]),
+                _census_run([_entry(Agent_Visual_Code="OK",
+                                    Agent_Visual_Note="온전")])[1]) is not None)
+
+# 픽셀이 달라졌으면 그 판정은 이 크롭에 대한 판정이 아니다.
+_moved = _census_run([_entry(Crop_SHA256="0" * 64)])[1]
+check("같은 그림을 결함으로 본 기록이 있는데 크롭이 바뀌었으면 다시 막는다",
+      re.search(r"<input[^>]*disabled[^>]*data-id='%s'"
+                % re.escape(_open_row["Draft_ID"]), _moved) is not None)
+check("그 이유는 '다시 봐야 한다'라고 적힌다", "REVIEW_REQUIRED" in _moved)
+_moved_ok = _census_run([_entry(Crop_SHA256="0" * 64,
+                                Agent_Visual_Code="OK")])[1]
+check("온전하다고 본 그림은 크롭이 바뀌어도 막지 않는다",
+      re.search(r"<input(?![^>]*disabled)[^>]*data-id='%s'"
+                % re.escape(_open_row["Draft_ID"]), _moved_ok) is not None)
+
+_typo = _census_run([_entry(Human_Verdict="ok")])[0]
+check("사람 칸에 모르는 값이 있으면 빌드가 멈춘다", _typo.returncode != 0)
+check("멈추면서 어느 행인지 말한다",
+      _open_row["Draft_ID"] in (_typo.stdout + _typo.stderr))
+_badcode = _census_run([_entry(Agent_Visual_Code="LOOKS_FINE")])[0]
+check("모르는 판정 코드도 멈춘다 (오타가 '계수 가능'으로 읽히지 않게)",
+      _badcode.returncode != 0)
+# 멈추는 것만으로는 부족합니다. 어휘 검사를 지워도 뒤쪽에서 KeyError로 죽기
+# 때문에 "멈췄다"는 검사는 가드가 없어도 통과합니다. 가드가 하는 일은 무엇이
+# 잘못됐고 아는 값이 무엇인지 말해 주는 것이므로, 그것을 봅니다.
+_badout = _badcode.stdout + _badcode.stderr
+check("모르는 코드를 이름으로 부르고 아는 어휘를 함께 알려 준다",
+      "LOOKS_FINE" in _badout and "NO_FIGURE" in _badout and
+      "Traceback" not in _badout, _badout[-200:])
+_shortsha = _census_run([_entry(Crop_SHA256="deadbeef")])[0]
+check("판정이 64자 digest에 묶여 있지 않으면 멈춘다", _shortsha.returncode != 0,
+      (_shortsha.stdout or "")[-160:])
+_conflict = _census_run([_entry(Agent_Visual_Code="OK"),
+                         _entry(Draft_ID=_open_row["Draft_ID"] + "_B",
+                                Agent_Visual_Code="NO_FIGURE")])[0]
+check("같은 크롭에 서로 다른 판정이 있으면 멈춘다", _conflict.returncode != 0,
+      (_conflict.stdout or "")[-160:])
+
+# 조사표는 빌드 ID에 들어간다: 규칙이 바뀌면 저장된 값이 새 화면으로 돌아오면 안 된다.
+_id1 = re.search(r"sheet-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}",
+                 _census_run([_entry()])[1])
+_id2 = re.search(r"sheet-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}",
+                 _census_run([_entry(Agent_Visual_Code="OK")])[1])
+check("조사표가 달라지면 빌드 ID가 달라진다",
+      _id1 and _id2 and _id1.group(0) != _id2.group(0),
+      "%s vs %s" % (_id1 and _id1.group(0), _id2 and _id2.group(0)))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

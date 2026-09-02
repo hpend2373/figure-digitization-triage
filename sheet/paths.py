@@ -51,6 +51,17 @@ DRAFT = _p("FDT_DRAFT", RUN)
 WORKLIST = _p("FDT_WORKLIST", os.path.join(RUN, "worklist.csv"))
 #: The second audit's findings, which the sheet reads to block rows.
 AUDIT = _p("FDT_AUDIT", os.path.join(RUN, "audit"))
+#: The row-by-row record of a visual pass over the countable rows, bound to
+#: crop digests. `sheet/census.py` says what it is for; the short version is
+#: that ACCEPTABLE is a measurement of the crop and this is a look at what is
+#: inside it. It travels with the run because the sheet's blocking rule reads
+#: it: a run without it is a run whose blocks silently disappeared.
+CENSUS = _p("FDT_CENSUS", os.path.join(RUN, "crop_visual_census.csv"))
+#: Build without a census on purpose (a fixture, a corpus nobody has looked
+#: at yet). Anything but "1" and a missing census stops the build, because a
+#: safety rule that vanishes when its file is missing is not a safety rule.
+CENSUS_OPTIONAL = _p("FDT_CENSUS_OPTIONAL", "") == "1"
+
 #: Where the built sheet goes, and what the tests read.
 SHEET = _p("FDT_SHEET",
            os.path.join(RUN, "panel_count_contact_sheet.html"))

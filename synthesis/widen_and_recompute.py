@@ -21,7 +21,7 @@ TWO THINGS IT WILL NOT TOUCH.
   report printed. Here an unparsed formula returns None and the cell is left
   exactly as found.
 """
-import csv, io, os, re, shutil, zipfile
+import csv, io, os, re, shutil, sys, zipfile
 import xml.sax.saxutils as SU
 import openpyxl
 

@@ -60,3 +60,6 @@ synthesis/study_inputs.json
 # computed FROM the private corpus, so they carry it.
 synthesis/logs/
 synthesis/FINAL_MANIFEST.json
+
+# 변이 러너가 원본을 붙들어 두는 자리 (mutate_guard.py) — 빈 파일은 진행 중인 것 없음
+*.mutant-backup

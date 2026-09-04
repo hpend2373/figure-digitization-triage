@@ -297,6 +297,13 @@ EXTENDED_RE = re.compile(
 FIGURE_SERIES = (("EXTFIG", EXTENDED_RE), ("FIG", CAPTION_RE))
 
 
+#: WHY the confidence is zero when the number will not parse, as a constant.
+#: `sheet/block_rules` needs to recognise this exact reason: a person who
+#: supplies the number has answered it, and the row must not stay blocked on
+#: the machine's uncertainty about the very thing they just settled. Matching
+#: the prose by hand in two places is how the two drift apart.
+UNREADABLE_NUMBER_REASON = "the line opens like a caption but its number reads as"
+
 #: A line that opens like a caption but whose number will not parse. The label
 #: is one to three characters that are not a number - publication 554 prints
 #: its first caption as "Fig.l." with a lower-case L, and BOTH readers report
@@ -867,8 +874,8 @@ def draft_rows(path, document_id, backend=None, page_rasters=None,
                                      blocks)
         else:
             score, why = 0.0, (
-                "the line opens like a caption but its number reads as %r, "
-                "which is not a number; a person has to supply it"
+                UNREADABLE_NUMBER_REASON
+                + " %r, which is not a number; a person has to supply it"
                 % candidate.get("token", ""))
         raster = (page_rasters or {}).get(candidate["page"], "")
         rows.append({

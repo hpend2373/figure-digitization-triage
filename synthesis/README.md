@@ -26,7 +26,8 @@
 <!-- SYNTHESIS_SUITE_COUNT: test_rowkey 71 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_write_cycle 95 -->
 <!-- SYNTHESIS_SUITE_COUNT: test_xlsx_cycle 85 -->
-<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 269 -->
+<!-- SYNTHESIS_SUITE_COUNT: test_status_gate 23 -->
+<!-- CURRENT_SYNTHESIS_SCENARIO_COUNT: 292 -->
 
 ## 데이터 없이 도는 것 (CI에서 실행)
 
@@ -37,7 +38,7 @@
 | `test_write_cycle.py` | **쓰기의 네 단계** — 최초 쓰기, 재실행 no-op, 한 표만 채워진 상태, 그리고 **staging 중 실패와 replace 중 실패**. 부모 참조 preflight, 콜백의 월권, 스키마 드리프트, 쓰지 않는 경로, 영수증 결박, 동시 실행 잠금, 새 파일 롤백, 영수증 결박 검증, 낡은 스냅숏 거부까지. |
 | `xlsx_append_rows.py` · `test_xlsx_cycle.py` | 워크북에 행을 넣는 단계. **이미 적용됐는지를 먼저 판정**하고(ABSENT / PRESENT / CONFLICT), 두 시트 변경을 한 워크북에 모아 **한 번만 교체**합니다. 실제 워크북은 이미 적용된 상태라 거절 경로밖에 돌릴 수 없으므로, 시나리오는 이 파일이 만드는 작은 워크북 위에서 돕니다. |
 | `writer_contracts.py` | 각 writer가 무엇을 빚지는지 — 표·출처·sidecar·volatile 필드 — 를 한 곳에 선언합니다. 최종 영수증과 워크북 단계가 **같은 함수**로 검사합니다. 전에는 최종 영수증만 전부 재계산하고, 실제로 파일을 바꾸는 워크북 단계는 자기가 쓴 부분집합만 봤습니다. |
-| `verify_synthesis_status.py` | 위 숫자가 트리와 맞는지. 파일 집합·정확히 한 개의 카운트 표시·0 거부·합계 대조 |
+| `verify_synthesis_status.py` · `test_status_gate.py` | 위 숫자가 트리와 맞는지. 파일 집합·정확히 한 개의 카운트 표시·0 거부·합계 대조, 그리고 **모든 모듈이 자기가 쓰는 이름을 실제로 얻는지** — `test_*.py`만이 아니라. `build_packets.py`와 `widen_and_recompute.py`가 `import sys` 없이 `sys.path.insert`를 불렀고, 문법은 통과하므로 `py_compile`이 받아들였으며, 둘 다 스위트가 아니라 여기 어떤 검사도 보지 못했습니다. |
 
 CI는 마지막 줄만 grep하지 않습니다. `verify_synthesis_status.py`가 여기 있는
 `test_*.py` 전부가 **CI 실행분과 번들 의존분 중 하나로 분류돼 있는지**까지 봅니다.

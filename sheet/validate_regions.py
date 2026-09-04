@@ -115,6 +115,14 @@ def main(run, budget):
             # 넘깁니다 - 두 제안자 모두 PDF가 말하는 좌표로만 셈합니다.
             caps = []
             for r in rows:
+                # A row a person moved to the page next door carries its
+                # caption's box in the CAPTION page's coordinates. On this
+                # page that box means nothing, and handing it to the
+                # proposers would make them answer a question nobody asked.
+                cap_page = str(r.get("Caption_Page") or "").strip()
+                if cap_page and cap_page != str(r.get("Page") or "").strip():
+                    caps.append(None)
+                    continue
                 b = _box(r.get("Caption_BBox"))
                 try:
                     ph = float(r["Page_Height_Pt"])
@@ -201,8 +209,9 @@ def main(run, budget):
     # tool's to produce, so they are not its to erase: they are carried over
     # from the table already on disk, row by row. A proposer that improved
     # must not cost somebody an afternoon of decisions.
-    keep = ("Human_Choice", "Human_Note", "Agent_Choice", "Agent_Note",
-            "Recut_On", "Recut_From")
+    keep = ("Human_Choice", "Human_Box", "Human_Page", "Human_Note",
+            "Agent_Choice", "Agent_Note", "Recut_On", "Recut_From",
+            "Stale_Choice", "Stale_Reason", "Blocked_From")
     prior = {}
     if os.path.exists(target):
         prior = {r["Draft_ID"]: r for r in csv.DictReader(

@@ -8,6 +8,8 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mutate_guard                                       # noqa: E402
 SUITE = ["python3", os.path.join(HERE, "test_sheet_build.py")]
 
 MUT = [
@@ -24,8 +26,8 @@ MUT = [
     ("M7 차단 규칙이 왕복 결과를 안 봄", "block_rules.py",
      "    if roundtrip in ROUNDTRIP_UNVERIFIABLE:", "    if False:"),
     ("M8 빌더가 왕복 결과를 안 넘김", "build_sheet2.py",
-     '                             roundtrip=ROUNDTRIP.get(d["Draft_ID"]))',
-     "                             roundtrip=None)"),
+     '                             roundtrip=ROUNDTRIP.get(d["Draft_ID"]),',
+     "                             roundtrip=None,"),
     ("M9 검사기가 왕복 단계를 뺌", "verify_intake_images.py",
      "    mismatched = roundtrip_mismatches(root)", "    mismatched = []"),
 ]
@@ -38,6 +40,8 @@ def run():
     return r.returncode, fails
 
 
+mutate_guard.restore_any(HERE)
+
 bad = 0
 for name, filename, old, new in MUT:
     path = os.path.join(HERE, filename)
@@ -46,11 +50,8 @@ for name, filename, old, new in MUT:
         print("PATCH_FAILED %s" % name)
         bad += 1
         continue
-    try:
-        open(path, "w", encoding="utf-8").write(base.replace(old, new, 1))
+    with mutate_guard.mutation(path, base.replace(old, new, 1)):
         code, fails = run()
-    finally:
-        open(path, "w", encoding="utf-8").write(base)
     killed = code != 0
     print("%-9s %-30s %s" % ("KILLED" if killed else "SURVIVED", name,
                              ("| " + "; ".join(f[:60] for f in fails[:2])) if killed

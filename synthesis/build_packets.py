@@ -13,7 +13,7 @@ are blocked and why, which values the machine refused to read at all, and what
 the source-coverage note says is still outstanding. A reviewer should be able to
 open one packet and know what is in front of them.
 """
-import collections, csv, io, json, os
+import collections, csv, io, json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)

@@ -28,6 +28,7 @@ Three things, and the file-set check is the one the grep could never do:
                                               own, in either direction.
 """
 import ast
+import builtins
 import glob
 import io
 import os
@@ -40,7 +41,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 #: Suites that read no files and so can run anywhere, including CI.
 CI_SUITES = ("test_route_gate", "test_rowkey", "test_write_cycle",
-             "test_xlsx_cycle")
+             "test_xlsx_cycle", "test_status_gate")
 #: Suites that need the extraction bundle, which is not redistributable. They
 #: are declared, not run: an undeclared file is the failure this catches.
 BUNDLE_SUITES = ("test_readiness_gate",)
@@ -55,6 +56,25 @@ MARKER = re.compile(
 SUITE_MARKER = re.compile(
     r"<!--\s*SYNTHESIS_SUITE_COUNT:\s*([A-Za-z0-9_]+)\s+([0-9]+)\s*-->")
 COUNT = re.compile(r"^FDT_SCENARIOS_RUN=([0-9]+)$", re.M)
+
+
+def _modules(where, pattern="*.py"):
+    """Files here that `import` could actually reach.
+
+    A stem with a space in it is not an identifier, so no statement anywhere
+    can name it. This tree syncs through a service that resolves a collision
+    by writing `test_route_gate 2.py` beside the original; none of those are
+    in the repository, and the file-set check below counted them as suites
+    nobody declared - which made the gate fail on a clean checkout that
+    happened to be sitting in a synced folder, and a gate that cannot pass
+    locally is a gate nobody runs locally.
+
+    The rule is not "ignore that sync tool", which would be a fact about one
+    laptop rather than about the code. It is that an unimportable name cannot
+    be a module of this package on any machine.
+    """
+    return [p for p in sorted(glob.glob(os.path.join(where, pattern)))
+            if os.path.splitext(os.path.basename(p))[0].isidentifier()]
 
 
 def _short_circuits(tree):
@@ -82,7 +102,7 @@ def vacuous_scenarios():
     idiom for a default and says nothing about whether the scenario can fail.
     """
     out = []
-    for path in sorted(glob.glob(os.path.join(HERE, 'test_*.py'))):
+    for path in _modules(HERE, 'test_*.py'):
         tree = ast.parse(io.open(path, encoding='utf-8').read(), path)
         for node in ast.walk(tree):
             tested = []
@@ -104,14 +124,98 @@ def vacuous_scenarios():
     return out
 
 
+#: Names that exist without any binding in the file. Kept beside the module so
+#: a scenario can name it, and so this list is one place, not two.
+_ALWAYS_BOUND = frozenset(dir(builtins)) | frozenset((
+    "__file__", "__name__", "__doc__", "__spec__", "__package__",
+    "__loader__", "__builtins__"))
+
+
+def _binds(tree):
+    """Every name this module binds, in ANY scope.
+
+    DELIBERATELY OVER-APPROXIMATE. A name bound inside one function counts as
+    bound for the whole file, which means real scope errors pass. That is the
+    trade this check makes on purpose: the question it answers is only "was
+    this name ever obtained at all", which is exactly the shape of a missing
+    import, and answering only that keeps the false-positive count at zero. A
+    checker people learn to skim past is not a checker.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx,
+                                                       (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+    return names
+
+
+def unbound_names(where=HERE):
+    """Names read but never bound, across EVERY module here - not only tests.
+
+    WHAT THIS CAUGHT. `build_packets.py` called `sys.path.insert` on its
+    nineteenth line and never imported `sys`; `widen_and_recompute.py` did the
+    same on its twenty-ninth. Both are grammatically perfect, so `py_compile`
+    accepts them and the NameError waits for import time. Neither is a
+    `test_*.py`, so every check in this file looked straight past them, and
+    neither runs in CI - the packet builder had been dead for as long as
+    anybody had not run it by hand.
+
+    So this one scans `*.py`, not `test_*.py`. The scenario-count checks above
+    can only see the suites; the defect that motivated them - a thing silently
+    not running - lives just as comfortably in the scripts the suites do not
+    import. A gate that only inspects the files someone remembered to register
+    reproduces the failure it was built to stop.
+
+    A file that cannot be read or parsed is REPORTED, not skipped: on this
+    tree a cloud-evicted file raises OSError on open, and a scan that treats
+    "could not look" as "nothing wrong" is the same silence in a new place.
+    """
+    out = []
+    for path in _modules(where):
+        name = os.path.basename(path)
+        try:
+            tree = ast.parse(io.open(path, encoding="utf-8").read(), path)
+        except SyntaxError as exc:
+            out.append("%s:%s does not parse (%s)" % (name, exc.lineno, exc.msg))
+            continue
+        except (OSError, UnicodeDecodeError) as exc:
+            out.append("%s could not be read (%s)" % (name, exc))
+            continue
+        have, seen = _binds(tree) | _ALWAYS_BOUND, set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                    and node.id not in have and node.id not in seen):
+                seen.add(node.id)
+                out.append("%s:%d uses %s and never binds it"
+                           % (name, node.lineno, node.id))
+    return out
+
+
 def main():
     problems, total, measured = [], 0, {}
 
     for where in vacuous_scenarios():
         problems.append('%s is a scenario whose condition cannot fail' % where)
 
+    problems.extend(unbound_names())
+
     found = sorted(os.path.splitext(os.path.basename(p))[0]
-                   for p in glob.glob(os.path.join(HERE, "test_*.py")))
+                   for p in _modules(HERE, "test_*.py"))
     declared = sorted(CI_SUITES + BUNDLE_SUITES)
     if found != declared:
         problems.append(

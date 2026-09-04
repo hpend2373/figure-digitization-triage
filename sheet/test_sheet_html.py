@@ -153,12 +153,33 @@ def _rows_for(pid, label, page):
             and r["Figure_Number"] == label and r["Page"] == page]
 
 
+#: 사람이 그 행의 크롭을 자기가 고른 상자로 바꿨는가. 감사의 판정은 **그림
+#: 하나를 보고** 쓴 문장이므로, 그 그림이 사람 손으로 교체되면 가리킬 대상이
+#: 없습니다. 기계가 다시 자른 것(VALIDATED_REGION)은 여기 들어가지 않습니다 -
+#: 두 탐지기가 서로 동의한 것은 사람이 본 것이 아닙니다.
+_CROP_SRC = {d["Draft_ID"]: str(d.get("Crop_Source") or "") for d in DRAFT}
+
+
+def _replaced_by_hand(key):
+    rows = _rows_for(*key)
+    return bool(rows) and _CROP_SRC.get(rows[0]["Draft_ID"], "").startswith(
+        "HUMAN_CHOICE_")
+
+
 _fail_keys = [(d["pid"], d["label"], d["page"]) for d in defects
               if d["classification"] == "FAIL"]
-_open_fails = [k for k in _fail_keys
+_fail_standing = [k for k in _fail_keys if not _replaced_by_hand(k)]
+_open_fails = [k for k in _fail_standing
                if not _rows_for(*k) or _rows_for(*k)[0]["Count_Blocked"] != "1"]
-check("2차 감사 FAIL %d건이 모두 입력 차단이다 (라벨 기준)" % len(_fail_keys),
-      not _open_fails, _open_fails)
+check("2차 감사 FAIL 중 크롭이 그대로인 %d건이 모두 입력 차단이다 (라벨 기준)"
+      % len(_fail_standing), not _open_fails, _open_fails)
+# 만료는 삭제가 아닙니다. 그 행이 다시 열렸다면, 한때 무엇이 지적됐는지는
+# 카드에 남아 있어야 합니다 - 남지 않으면 판정은 조용히 사라진 것입니다.
+_fail_lapsed = [k for k in _fail_keys if _replaced_by_hand(k)]
+check("사람이 크롭을 직접 바꾼 %d건은 그 사실이 카드에 남는다" % len(_fail_lapsed),
+      all(_rows_for(*k)[0]["Draft_ID"] in SHEET for k in _fail_lapsed)
+      and (not _fail_lapsed or "지난 판정(지금은 만료)" in SHEET),
+      _fail_lapsed)
 
 #: What the third audit judged still wrong after the crop round.
 _STILL = [("437", "FIG2", "176"), ("516", "FIG5", "6"), ("99", "FIG1", "4"),
@@ -168,16 +189,22 @@ _STILL = [("437", "FIG2", "176"), ("516", "FIG5", "6"), ("99", "FIG1", "4"),
           # block_rules.STILL_WRONG에서 유도되면 안 되기 때문입니다 - 규칙에서
           # 한 줄을 지우면 기대값도 같이 줄어들어 아무 일도 일어나지 않습니다.
           ("177", "FIG3", "5"), ("531", "FIG1", "3")]
-_open_still = [k for k in _STILL
+_still_standing = [k for k in _STILL if not _replaced_by_hand(k)]
+_open_still = [k for k in _still_standing
                if not _rows_for(*k) or _rows_for(*k)[0]["Count_Blocked"] != "1"]
-check("사람이 틀렸다고 판정한 %d건이 모두 차단이다" % len(_STILL),
-      not _open_still, _open_still)
+check("사람이 틀렸다고 판정한 것 중 크롭이 그대로인 %d건이 모두 차단이다"
+      % len(_still_standing), not _open_still, _open_still)
+# 그리고 만료가 아무거나 뚫는 것이 아님을 여기서도 잡습니다: 손으로 바꾼 행이
+# 하나도 없다면 위 두 검사는 예전과 똑같은 것을 보고 있어야 합니다.
+check("크롭을 손으로 바꾼 행이 없으면 만료도 없다",
+      bool([k for k in _STILL + _fail_keys if _replaced_by_hand(k)])
+      or _still_standing == _STILL)
 check("차단 판단이 Draft_ID 순번에 걸려 있지 않다",
       "Figure_Number" in SHEET and not re.search(r"DEFECT\.get\(d\[.Draft_ID", SHEET))
 fails = {r["Draft_ID"] for r in ROWS
          if any(_pid_of.get(r["Source_Document_ID"]) == k[0]
                 and r["Figure_Number"] == k[1] and r["Page"] == k[2]
-                for k in _fail_keys)}
+                for k in _fail_standing)}
 thin = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"}
 # THE NAME COUNTS WHAT THE CHECK COUNTS. This said 151 while the set it
 # actually tested had 114 in it - the number was from the previous intake and

@@ -202,21 +202,34 @@ def write(root):
                      "figures": str(len(rows)), "shapes": "B",
                      "domains": "FIXTURE", "memo": "",
                      "href": "file://" + src})
+        _pages_drawn = {}
         for i, (fig, page, panels, status, cap, conf, why) in enumerate(rows, 1):
             did = "%s_D%03d" % (doc, i)
             rel = os.path.join(doc, "%s.png" % did)
             # Each row gets its own page, so a row's box is unambiguous.
             box = (306.0, 90.0 + 40.0 * i, 560.0,
                    (110.0 if status == "THIN_CROP" else 300.0) + 40.0 * i)
-            page_rel = os.path.join("pages", doc, "%s_p%d.png" % (doc, i))
+            # NAMED AS THE INTAKE NAMES THEM: `pdftoppm` writes page-N.png with
+            # N the page number (padded to the document's page count), and
+            # `roundtrip.page_rasters` reads that back. A fixture that named
+            # its pages differently could never exercise "the page next door".
+            page_rel = os.path.join("pages", doc, "page-%d.png" % int(page))
             page_abs = os.path.join(draft_dir, page_rel)
             if status == "PUBLISHER_FIGURE":
                 # No page: the file IS the figure.
                 page_abs, box = "", None
                 crop_png(os.path.join(draft_dir, rel), panels)
             elif status != "NO_CROP":
-                page_png(page_abs, box, panels,
-                         thin=(status == "THIN_CROP"))
+                # ONE RASTER PER PAGE, as in a real run. Two rows on the same
+                # page (DOC_C: the same picture under two labels) share the
+                # page and the box, so their crops are pixel-identical - which
+                # is the shared-crop case the block rule exists for.
+                if page_abs in _pages_drawn:
+                    box = _pages_drawn[page_abs]
+                else:
+                    page_png(page_abs, box, panels,
+                             thin=(status == "THIN_CROP"))
+                    _pages_drawn[page_abs] = box
                 # THE CROP IS CUT FROM THE PAGE, with the intake's own formula
                 # (`roundtrip.cut`). A fixture whose crop was drawn separately
                 # could never fail the round-trip check, and a check that

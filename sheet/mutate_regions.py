@@ -10,6 +10,8 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import mutate_guard                                       # noqa: E402
 SRC = os.path.join(HERE, "figure_regions.py")
 SUITE = ["python3", os.path.join(HERE, "test_figure_regions.py")]
 
@@ -46,17 +48,16 @@ def run():
 
 
 base = open(SRC, encoding="utf-8").read()
+mutate_guard.restore_any(HERE)
+
 bad = 0
 for name, old, new in MUT:
     if old not in base:
         print("PATCH_FAILED %s" % name)
         bad += 1
         continue
-    try:
-        open(SRC, "w", encoding="utf-8").write(base.replace(old, new, 1))
+    with mutate_guard.mutation(SRC, base.replace(old, new, 1)):
         code, fails = run()
-    finally:
-        open(SRC, "w", encoding="utf-8").write(base)
     killed = code != 0
     print("%-9s %-24s %s" % ("KILLED" if killed else "SURVIVED", name,
                              ("| " + "; ".join(fails[:2])) if killed

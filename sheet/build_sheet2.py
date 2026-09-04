@@ -149,22 +149,41 @@ def _crop_digests(rows, root):
 
 
 CROP_SHA = _crop_digests(DRAFT, D)
-SHARED_CROP = BR.shared_crop_map(CROP_SHA)
+#: Rows whose figure number has another row on the page next door.
+TWIN = BR.twin_map(DRAFT)
 
 #: WHAT THE THREE PROPOSERS AGREED ON, per row - or a stated reason there is
 #: no such file yet. Same shape as the census: missing stops the build.
 if os.path.exists(PATHS.REGIONS):
-    AGREEMENT = {r["Draft_ID"]: (r.get("Agreement") or "PENDING")
-                 for r in csv.DictReader(io.open(PATHS.REGIONS,
-                                                 encoding="utf-8"))}
+    _REG = list(csv.DictReader(io.open(PATHS.REGIONS, encoding="utf-8")))
+    AGREEMENT = {r["Draft_ID"]: (r.get("Agreement") or "PENDING") for r in _REG}
+    #: What each detector said about this page - the evidence `phantom_reason`
+    #: needs that "nothing figure-sized is here".
+    CODES = {r["Draft_ID"]: (r.get("PDF_Code", ""), r.get("Raster_Code", ""))
+             for r in _REG}
 elif PATHS.REGIONS_OPTIONAL:
     AGREEMENT = None
+    CODES = {}
 else:
     raise SystemExit(
         "그림 영역 검증표가 없습니다: %r\n"
         "python3 validate_regions.py <run> 으로 만들거나, FDT_REGIONS로 지정하거나, "
         "아직 돌리지 않은 코퍼스라면 FDT_REGIONS_OPTIONAL=1로 밝히십시오."
         % PATHS.REGIONS)
+
+#: Rows that would count a picture another row already holds - found two
+#: ways. Two boxes on one page (`duplicate_map`), and a person's box landing
+#: on a page where the figure already has a row (`confirmed_duplicates`, from
+#: what `apply_validated` wrote down when it refused the move). A row the
+#: person BLOCKED takes no part: it holds no figure to win or to duplicate.
+_BLOCKED_IDS = {i for i, a in (AGREEMENT or {}).items() if a == "HUMAN_BLOCKED"}
+DUPLICATE = BR.duplicate_map(DRAFT, blocked_ids=_BLOCKED_IDS)
+for _i, _v in BR.confirmed_duplicates(_REG if AGREEMENT is not None else []).items():
+    DUPLICATE.setdefault(_i, _v)
+#: Byte-identical crops - minus the pairs `DUPLICATE` already explains as one
+#: figure, so the row that holds the figure is not blocked for resembling
+#: the row that does not.
+SHARED_CROP = BR.shared_crop_map(CROP_SHA, duplicate=DUPLICATE)
 
 #: EVERY CROP CUT AGAIN FROM ITS BOX. `roundtrip.check` repeats the intake's
 #: cut and compares with the file; a row whose crop cannot be reproduced from
@@ -216,7 +235,10 @@ def blocked_reason(d):
                              crop_sha=CROP_SHA.get(d["Draft_ID"], ""),
                              roundtrip=ROUNDTRIP.get(d["Draft_ID"]),
                              agreement=(None if AGREEMENT is None else
-                                        AGREEMENT.get(d["Draft_ID"], "PENDING")))
+                                        AGREEMENT.get(d["Draft_ID"], "PENDING")),
+                             codes=CODES.get(d["Draft_ID"], ()),
+                             twin=TWIN.get(d["Draft_ID"]),
+                             duplicate=DUPLICATE.get(d["Draft_ID"]))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -232,6 +254,14 @@ def _needs_page(d):
 
 
 def caution(d):
+    # A LAPSED FINDING IS NOT A DELETED ONE. The row counts again because the
+    # person replaced the picture the finding was about, but they should still
+    # see what was once said about this figure - so it moves from the block to
+    # the card, in the person's own words.
+    gone = BR.lapsed(d, row_key(d), defect=DEFECT.get(row_key(d)))
+    if gone:
+        return ("지난 판정(지금은 만료) — %s · 그 뒤 사람이 상자를 %s로 정해 "
+                "크롭이 바뀌었습니다" % (gone, BR.human_cut(d)))
     hit = DEFECT.get(row_key(d))
     if hit and hit["classification"] == "WARNING":
         return "2차 감사 경고 — %s" % hit["screen"]
@@ -280,6 +310,51 @@ for d in DRAFT:
                      Count_Blocked="1" if br else "0"))
 FP = {r["Draft_ID"]: r["Row_Fingerprint"] for r in ROWS}
 BLOCK = {r["Draft_ID"]: r["Count_Blocked"] for r in ROWS}
+
+# WHAT THIS BUILD BLOCKED, AND WHY, AS A FILE. The reason lived only inside
+# this process, so anything else that wanted to know had to reimplement the
+# decision from a partial view - `review_packet.queue` calls the rule with a
+# blank key and no census, which is why it once offered people rows the sheet
+# then ignored. Writing it down makes the review queue read the SHEET'S answer
+# instead of a second opinion about it.
+#: 문서별 행 목록 - `mentions_held`가 "그 그림을 누가 세고 있나"를 볼 때 씁니다.
+BYDOC_ROWS = {}
+for _d in DRAFT:
+    BYDOC_ROWS.setdefault(_d["Source_Document_ID"], []).append(_d)
+
+_REASONS = os.path.join(D, "block_reasons.csv")
+_reason_fields = ("Draft_ID", "Count_Blocked", "Reason", "Box_Would_Open",
+                  "Number_Would_Open", "Duplicate_Of", "Mentions_Held")
+with io.open(_REASONS, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=list(_reason_fields))
+    _w.writeheader()
+    for _d in DRAFT:
+        _br = blocked_reason(_d)
+        # 사람이 무엇을 채우면 풀리는가 - 규칙에게 직접 물어봅니다. 한 번 물어
+        # 두 답을 얻습니다: 같은 행에 대해 두 번 물으면 두 답이 어긋날 수 있고,
+        # 그러면 페이지가 상자는 청하면서 번호는 청하지 않게 됩니다.
+        _fix = BR.repairs_that_open(
+            _d, row_key(_d), defect=DEFECT.get(row_key(_d)),
+            census=CENSUS, codes=CODES.get(_d["Draft_ID"], ()),
+            twin=TWIN.get(_d["Draft_ID"]),
+            duplicate=DUPLICATE.get(_d["Draft_ID"])) if _br else ()
+        _w.writerow({
+            "Draft_ID": _d["Draft_ID"],
+            "Count_Blocked": "1" if _br else "0",
+            "Reason": _br,
+            "Box_Would_Open": "1" if BR.REPAIR_BOX in _fix else "0",
+            "Number_Would_Open": "1" if BR.REPAIR_NUMBER in _fix else "0",
+            # 어느 행이 그 그림을 가지는가 - 큐가 산문을 읽지 않고 이 칸을 읽습니다.
+            "Duplicate_Of": (DUPLICATE.get(_d["Draft_ID"]) or ("",))[0] if _br else "",
+            # 이 줄이 부르는 그림을 이미 세고 있는 행들. 판정이 아니라 사람에게
+            # 보여 줄 사실입니다 - 번호를 못 읽은 행은 중복 규칙에도 유령 규칙에도
+            # 걸리지 않아, 사람이 여덟 행을 앞에 두고 무엇을 그려야 할지 알 길이
+            # 없었습니다.
+            "Mentions_Held": ";".join(
+                "%s=%s" % kv for kv in BR.mentions_held(
+                    _d, BYDOC_ROWS.get(_d["Source_Document_ID"], ()), BLOCK))
+            if _br else ""})
+print("막힌 사유 표: %s" % _REASONS)
 
 BYDOC = collections.defaultdict(list)
 for d in DRAFT:
@@ -711,9 +786,14 @@ for _pid, _n, _sz in OVERSIZE:
     print("주의: pid %s 한 편이 %d행 · %.1f MB 로 예산(%.0f MB)을 넘습니다 — "
           "문서를 쪼개지 않으므로 그 파일만 큽니다"
           % (_pid, _n, _sz / 1e6, PATHS.SHEET_BUDGET / 1e6))
-print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d "
+# 중복은 막힘이 아닙니다 - 그 그림은 다른 행이 세고 있고, 이 행에 물을 것이
+# 없습니다. 한 숫자로 합치면 "사람이 할 일"이 실제보다 커 보입니다.
+_DUP_BLOCKED = sum(1 for d in DRAFT if BLOCK[d["Draft_ID"]] == "1"
+                   and d["Draft_ID"] in DUPLICATE)
+print("행 %d · 카드 %d · 시트 %d · 입력 가능 %d · 막음 %d · 중복 %d "
       "(결함 %d + THIN %d + NO_CROP %d)"
-      % (len(DRAFT), len(WORK), len(PARTS), COUNTABLE, BLOCKED,
+      % (len(DRAFT), len(WORK), len(PARTS), COUNTABLE, BLOCKED - _DUP_BLOCKED,
+         _DUP_BLOCKED,
          sum(1 for r in DEFECT.values() if r["classification"] == "FAIL"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "THIN_CROP"),
          sum(1 for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP")))

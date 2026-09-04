@@ -30,6 +30,14 @@ import sys
 PAD = 8
 INK = 235
 
+#: `corpus_intake._THIN_CROP_FRACTION` and `_EDGE_INK_SHARE`. Copied for the
+#: same reason `cut` copies the cutting formula: importing would tie the sheet
+#: to the repository root, and the copy is what notices when the two drift -
+#: `test_crop_truth.py` compares this module's grade with the intake's on the
+#: real corpus, so a changed constant there fails here.
+THIN_FRACTION = 0.12
+EDGE_SHARE = 0.06
+
 
 def _box(text):
     try:
@@ -75,6 +83,119 @@ def cut(page, row):
     if padded.width < 8 or padded.height < 8:
         return None
     return padded, (left, top, left + padded.width, top + padded.height)
+
+
+def grade(image, page):
+    """ACCEPTABLE / THIN_CROP / EDGE_CLIPPED for a crop this module just made.
+
+    WHY A RECUT NEEDS THIS. `Crop_Quality_Status` is a MEASUREMENT OF A CROP -
+    is it tall enough to be a figure, does the drawing run off its sides. When
+    a person names a different box and the crop is cut again, the stored
+    measurement describes a picture that no longer exists, and it is the last
+    gate the sheet applies: 183 of the 210 blocked rows carry THIN_CROP or
+    EDGE_CLIPPED, so without re-measuring, drawing a box on them would recut
+    the picture and leave the row blocked anyway - the page would be asking
+    people for answers it had already decided to ignore.
+
+    Unlike an audit's finding, this one is not a judgement anybody made by
+    looking; it is arithmetic, and the honest thing is to do it again on the
+    new picture rather than let it lapse.
+
+    `image` is the crop BEFORE its blank border is trimmed, because that is
+    where the edge question still has an answer: after trimming, ink lies
+    against every side by construction. `cut` returns the trimmed picture, so
+    this takes the untrimmed one separately.
+    """
+    import numpy as np
+    if page.height <= 0:
+        return "NO_CROP"
+    ink = np.asarray(image.convert("L"), dtype=np.uint8) < INK
+    clipped = bool(ink.shape[1] >= 2 and ink.size
+                   and (ink[:, 0].mean() >= EDGE_SHARE
+                        or ink[:, -1].mean() >= EDGE_SHARE))
+    if not ink.any():
+        # NOT A FIGURE, WHATEVER ITS SIZE. The intake grades a blank rectangle
+        # ACCEPTABLE - it measures height against the page and a blank crop is
+        # as tall as any other - and never produces one, because its boxes come
+        # from text and ink. A hand-drawn box can: somebody drags across the
+        # margin. `box_would_open` promises that drawing opens the row, so an
+        # empty rectangle must not be the way to collect that promise. This is
+        # the one place this grade is deliberately stricter than the intake,
+        # and it is unreachable for the intake's own crops (0 of 644 in run2).
+        return "NO_CROP"
+    rows = np.flatnonzero(ink.any(axis=1))
+    cols = np.flatnonzero(ink.any(axis=0))
+    trimmed = image.crop((int(cols[0]), int(rows[0]),
+                          int(cols[-1]) + 1, int(rows[-1]) + 1))
+    if trimmed.width < 8 or trimmed.height < 8:
+        return "NO_CROP"
+    if trimmed.height < THIN_FRACTION * page.height:
+        return "THIN_CROP"
+    return "EDGE_CLIPPED" if clipped else "ACCEPTABLE"
+
+
+def _trim_for_mutant(image):
+    """변이 검사가 '여백을 턴 뒤에 옆면을 본다'를 흉내 낼 때만 씁니다."""
+    import numpy as np
+    ink = np.asarray(image.convert("L"), dtype=np.uint8) < INK
+    if not ink.any():
+        return image
+    rows = np.flatnonzero(ink.any(axis=1))
+    cols = np.flatnonzero(ink.any(axis=0))
+    return image.crop((int(cols[0]), int(rows[0]),
+                       int(cols[-1]) + 1, int(rows[-1]) + 1))
+
+
+def cut_and_grade(page, row):
+    """(image, pixel box, quality) - `cut`, plus what the new crop is worth."""
+    box = _box(row.get("Figure_BBox"))
+    try:
+        pw, ph = float(row["Page_Width_Pt"]), float(row["Page_Height_Pt"])
+    except (KeyError, ValueError):
+        return None
+    if not box or pw <= 0 or ph <= 0:
+        return None
+    x0, y0, x1, y1 = box
+    sx, sy = page.width / pw, page.height / ph
+    left = max(0, int(x0 * sx) - PAD)
+    top = max(0, int(y0 * sy) - PAD)
+    right = min(page.width, int(x1 * sx) + PAD)
+    bottom = min(page.height, int(y1 * sy) + PAD)
+    if right - left < 8 or bottom - top < 8:
+        return None
+    untrimmed = page.crop((left, top, right, bottom))
+    got = cut(page, row)
+    if got is None:
+        return None
+    image, pixel_box = got
+    return image, pixel_box, grade(untrimmed, page)
+
+
+def page_rasters(raster_dir):
+    """{page number: path} for the rasters in one document's folder.
+
+    THE INTAKE'S OWN CONVENTION, read the way `corpus_intake` reads it:
+    `pdftoppm` writes page-N.png and pads N to the document's page count -
+    page-4.png in a nine-page paper, page-004.png in a 350-page book - so the
+    number is parsed, never formatted. Three tools used to format
+    "page-%d.png" themselves and would have found nothing in the book.
+    """
+    out = {}
+    if not raster_dir or not os.path.isdir(raster_dir):
+        return out
+    for name in os.listdir(raster_dir):
+        if not (name.startswith("page-") and name.endswith(".png")):
+            continue
+        try:
+            out[int(name[len("page-"):-len(".png")])] = os.path.join(raster_dir, name)
+        except ValueError:
+            continue
+    return out
+
+
+def sibling_raster(raster_path, page):
+    """The raster for `page` in the same document folder as `raster_path`."""
+    return page_rasters(os.path.dirname(str(raster_path or ""))).get(int(page), "")
 
 
 def check(row, root):

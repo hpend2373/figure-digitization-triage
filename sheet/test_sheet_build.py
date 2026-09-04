@@ -492,6 +492,309 @@ check("초안이 부르지 않는 파일은 세기만 하고 거부하지 않는
       "%s %s" % (_rc3, _rep3["on_disk_not_named"]))
 os.remove(_extra)
 
+# --- 한 그림을 두 행이 세지 않는가 (빌드 끝에서 끝까지) -----------------------
+# 2026-09-03: 사람이 210행에 답하자 26쌍이 같은 그림을 두 번 세게 됐습니다.
+# 규칙은 `test_sheet_blocks.py`가 지키지만, 빌더가 그 규칙에 사실을 넘겨주지
+# 않으면 규칙은 한 번도 불리지 않습니다 - 그것을 여기서 잡습니다.
+_dup_root = os.path.join(TMP, "dup_root")
+shutil.copytree(FX["draft"], _dup_root)
+_dp = os.path.join(_dup_root, "figure_intake_draft.csv")
+_drows = list(csv.DictReader(io.open(_dp, encoding="utf-8")))
+_dcols = list(_drows[0])
+_base = [r for r in _drows if r["Figure_Crop"] and r["Page_Raster"]][0]
+_bx = [float(v) for v in _base["Figure_BBox"].split(",")]
+# 같은 문서·같은 번호·같은 쪽에, 살짝 어긋난 상자로 한 행을 더 만듭니다 -
+# 인테이크가 본문의 언급을 캡션으로 읽었을 때 실제로 생기는 모양입니다.
+# 크롭 파일도 자기 상자에서 따로 잘라 줍니다. 같은 파일을 가리키면 픽셀까지
+# 같은 크롭(shared_crop)으로 먼저 막혀, 중복 관문은 불리지도 않습니다.
+import roundtrip as _RT_dup                                      # noqa: E402
+from PIL import Image as _Img_dup                                # noqa: E402
+_twin_box = "%.1f,%.1f,%.1f,%.1f" % (_bx[0] + 20, _bx[1] + 20, _bx[2] - 20, _bx[3] - 20)
+_twin_rel = os.path.join(os.path.dirname(_base["Figure_Crop"]),
+                         os.path.basename(_base["Figure_Crop"])[:-4] + "X.png")
+_twin_cut = _RT_dup.cut(_Img_dup.open(_base["Page_Raster"]),
+                        dict(_base, Figure_BBox=_twin_box))
+_twin_cut[0].save(os.path.join(_dup_root, _twin_rel))
+_twin_row = dict(_base, Draft_ID=_base["Draft_ID"] + "X",
+                 Figure_BBox=_twin_box, Figure_Crop=_twin_rel,
+                 Crop_Source="HUMAN_CHOICE_DRAWN")
+_drows.append(_twin_row)
+with io.open(_dp, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_dcols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _dcols} for r in _drows])
+_rp2 = os.path.join(_dup_root, "validated_regions.csv")
+_rr2 = list(csv.DictReader(io.open(_rp2, encoding="utf-8")))
+_rr2.append(dict(_rr2[0], Draft_ID=_twin_row["Draft_ID"], Agreement="HUMAN_VALIDATED"))
+with io.open(_rp2, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(_rr2[0]))
+    w.writeheader()
+    w.writerows(_rr2)
+_dup_out = os.path.join(TMP, "dup.html")
+_rc_dup = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                         capture_output=True, text=True, cwd=HERE,
+                         env=dict(ENV, FDT_DRAFT=_dup_root, FDT_SHEET=_dup_out,
+                                  FDT_CENSUS=os.path.join(_dup_root,
+                                                          "crop_visual_census.csv"),
+                                  FDT_REGIONS=_rp2))
+_dup_reasons = {r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_dup_root, "block_reasons.csv"), encoding="utf-8"))}     if _rc_dup.returncode == 0 else {}
+check("중복 행이 있어도 빌드는 돈다", _rc_dup.returncode == 0,
+      (_rc_dup.stderr or "")[-200:])
+_pair = [_base["Draft_ID"], _twin_row["Draft_ID"]]
+_blocked_pair = [d for d in _pair if _dup_reasons.get(d, {}).get("Count_Blocked") == "1"
+                 and "두 번 세는 것" in _dup_reasons[d]["Reason"]]
+check("빌더가 그 사실을 규칙에 넘겨, 둘 중 하나가 중복으로 막힌다",
+      len(_blocked_pair) == 1, [(d, _dup_reasons.get(d, {}).get("Reason", "")[:40])
+                                for d in _pair])
+check("진 쪽은 손으로 그린 행이다 (근거가 약한 쪽)",
+      _blocked_pair == [_twin_row["Draft_ID"]], _blocked_pair)
+check("이긴 쪽은 막히지 않는다",
+      _dup_reasons.get(_base["Draft_ID"], {}).get("Count_Blocked") == "0",
+      _dup_reasons.get(_base["Draft_ID"], {}).get("Reason", "")[:60])
+check("진 쪽에는 상자를 그려도 소용없다고 적힌다",
+      _dup_reasons.get(_twin_row["Draft_ID"], {}).get("Box_Would_Open") == "0")
+# 큐가 산문이 아니라 이 칸을 읽습니다 - 누가 그 그림을 가지는가.
+check("사유 표가 이긴 행을 칸으로 적는다 (큐가 읽을 수 있게)",
+      _dup_reasons.get(_twin_row["Draft_ID"], {}).get("Duplicate_Of") == _base["Draft_ID"]
+      and _dup_reasons.get(_base["Draft_ID"], {}).get("Duplicate_Of") == "",
+      (_dup_reasons.get(_twin_row["Draft_ID"], {}).get("Duplicate_Of"),
+       _dup_reasons.get(_base["Draft_ID"], {}).get("Duplicate_Of")))
+check("요약 줄이 중복을 막음과 따로 센다",
+      re.search(r"막음 \d+ · 중복 1 ", _rc_dup.stdout or "") is not None,
+      [l for l in (_rc_dup.stdout or "").splitlines() if l.startswith("행 ")])
+
+
+def _rebuild_dup(tag):
+    out = os.path.join(TMP, "dup_%s.html" % tag)
+    rc = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                        capture_output=True, text=True, cwd=HERE,
+                        env=dict(ENV, FDT_DRAFT=_dup_root, FDT_SHEET=out,
+                                 FDT_CENSUS=os.path.join(_dup_root,
+                                                         "crop_visual_census.csv"),
+                                 FDT_REGIONS=_rp2))
+    reasons = ({r["Draft_ID"]: r for r in csv.DictReader(io.open(
+        os.path.join(_dup_root, "block_reasons.csv"), encoding="utf-8"))}
+        if rc.returncode == 0 else {})
+    return rc, reasons
+
+
+# 한 그림, 두 행, 픽셀까지 같은 크롭 - 잉크에 맞춰 자르므로 한 그림을 둘러싼
+# 두 상자는 그렇게 됩니다. 2026-09-04에 이긴 행 셋이 진 행과 "픽셀까지 같다"는
+# 이유로 막혀 있었습니다 - 사람이 방금 그려 준 그림이 세어지지 않은 채로.
+shutil.copyfile(os.path.join(_dup_root, _base["Figure_Crop"]),
+                os.path.join(_dup_root, _twin_rel))
+_rc_same, _same = _rebuild_dup("same")
+check("크롭이 픽셀까지 같아도 빌드는 돈다", _rc_same.returncode == 0,
+      (_rc_same.stderr or "")[-200:])
+check("중복으로 설명되는 쌍은 이긴 행을 막지 않는다",
+      _same.get(_base["Draft_ID"], {}).get("Count_Blocked") == "0",
+      _same.get(_base["Draft_ID"], {}).get("Reason", "")[:80])
+check("진 행은 '픽셀까지 같다'가 아니라 중복으로 막힌다",
+      "두 번 세는 것" in _same.get(_twin_row["Draft_ID"], {}).get("Reason", ""),
+      _same.get(_twin_row["Draft_ID"], {}).get("Reason", "")[:80])
+_twin_cut[0].save(os.path.join(_dup_root, _twin_rel))
+
+# 이긴 행을 사람이 막으면 그림은 진 행으로 넘어갑니다 - 메시지가 그렇게
+# 약속하고, 이제 코드도 그렇게 합니다.
+_rr2b = list(csv.DictReader(io.open(_rp2, encoding="utf-8")))
+for r in _rr2b:
+    if r["Draft_ID"] == _base["Draft_ID"]:
+        r["Agreement"] = "HUMAN_BLOCKED"
+with io.open(_rp2, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(_rr2b[0]))
+    w.writeheader()
+    w.writerows(_rr2b)
+_rc_blk, _blk = _rebuild_dup("blk")
+check("이긴 행을 사람이 막으면 진 행은 중복이 아니게 된다",
+      _rc_blk.returncode == 0 and _blk.get(_twin_row["Draft_ID"], {}).get("Duplicate_Of") == ""
+      and "두 번 세는 것" not in _blk.get(_twin_row["Draft_ID"], {}).get("Reason", ""),
+      _blk.get(_twin_row["Draft_ID"], {}).get("Reason", "")[:80])
+check("그리고 그 행이 그림을 가진다 (셀 수 있다)",
+      _blk.get(_twin_row["Draft_ID"], {}).get("Count_Blocked") == "0",
+      _blk.get(_twin_row["Draft_ID"], {}).get("Reason", "")[:80])
+for r in _rr2b:
+    if r["Draft_ID"] == _base["Draft_ID"]:
+        r["Agreement"] = "AGREE_3"
+    if r["Draft_ID"] == _twin_row["Draft_ID"]:
+        # 사람이 다른 쪽에 그렸는데 그 쪽의 행이 이미 세고 있었다고 apply가 적어 둔 행
+        r["Duplicate_Of"] = "SOMEDOC_D777"
+        r["Duplicate_Page"] = "9"
+_cols2b = list(_rr2b[0]) + [c for c in ("Duplicate_Of", "Duplicate_Page")
+                            if c not in _rr2b[0]]
+with io.open(_rp2, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_cols2b)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _cols2b} for r in _rr2b])
+_rc_cf, _cf = _rebuild_dup("cf")
+# 같은 쪽의 중복(기계)이 먼저고, 적어 둔 것은 그것이 없을 때 읽습니다 - 여기서는
+# 같은 쪽 중복이 있으므로 그쪽이 이유가 됩니다. 적어 둔 것만 있는 경우를 보려면
+# 진 행을 다른 쪽으로 보냅니다.
+_drows2 = list(csv.DictReader(io.open(_dp, encoding="utf-8")))
+for r in _drows2:
+    if r["Draft_ID"] == _twin_row["Draft_ID"]:
+        r["Page"] = str(int(r["Page"]) + 40)
+with io.open(_dp, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_dcols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _dcols} for r in _drows2])
+_rc_cf2, _cf2 = _rebuild_dup("cf2")
+check("apply가 적어 둔 중복을 빌더가 읽어 이유로 만든다",
+      _rc_cf2.returncode == 0
+      and _cf2.get(_twin_row["Draft_ID"], {}).get("Duplicate_Of") == "SOMEDOC_D777"
+      and "다시 묻지 않습니다" in _cf2.get(_twin_row["Draft_ID"], {}).get("Reason", ""),
+      (_cf2.get(_twin_row["Draft_ID"], {}).get("Duplicate_Of"),
+       _cf2.get(_twin_row["Draft_ID"], {}).get("Reason", "")[:80]))
+
+# --- 번호를 적어야 하는 행: 사유 표가 그 사실을 적는가 -----------------------
+# 번호를 못 읽어 막힌 8행 중 7행은 크롭도 얇습니다. 상자와 번호를 따로 물으면
+# 두 답이 다 "아니오"이고, 카드는 "상자를 그려도 소용없습니다"라고만 했습니다.
+_num_root = os.path.join(TMP, "num_root")
+shutil.copytree(FX["draft"], _num_root)
+_np = os.path.join(_num_root, "figure_intake_draft.csv")
+_nrows = list(csv.DictReader(io.open(_np, encoding="utf-8")))
+_ncols = list(_nrows[0])
+import block_rules as _BR_num                                    # noqa: E402
+_unread = (_BR_num.UNREADABLE_NUMBER_REASON
+           + " 's', which is not a number; a person has to supply it")
+# 같은 논문에 크롭과 쪽이 있는 행이 둘 이상인 문서를 고릅니다: 앞의 행은 그
+# 그림을 세는 쪽으로 남고, 뒤의 행이 번호를 못 읽은 행이 됩니다. 문서가 하나뿐인
+# 행을 고르면 "누가 세고 있나"를 볼 상대가 없습니다.
+_bydoc_n = {}
+for r in _nrows:
+    if r["Figure_Crop"] and r["Page_Raster"]:
+        _bydoc_n.setdefault(r["Source_Document_ID"], []).append(r)
+_pair = [v for v in _bydoc_n.values() if len(v) >= 2][0]
+_hold_row, _nbase = _pair[0], _pair[1]
+_nbase["Figure_Number"] = ""
+_nbase["Confidence"] = "0.00"
+_nbase["Confidence_Reason"] = _unread
+with io.open(_np, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_ncols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _ncols} for r in _nrows])
+_rc_num = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                         capture_output=True, text=True, cwd=HERE,
+                         env=dict(ENV, FDT_DRAFT=_num_root,
+                                  FDT_SHEET=os.path.join(TMP, "num.html"),
+                                  FDT_CENSUS=os.path.join(_num_root,
+                                                          "crop_visual_census.csv"),
+                                  FDT_REGIONS=os.path.join(_num_root,
+                                                           "validated_regions.csv")))
+_num_reasons = ({r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_num_root, "block_reasons.csv"), encoding="utf-8"))}
+    if _rc_num.returncode == 0 else {})
+check("번호 없는 행이 있어도 빌드는 돈다", _rc_num.returncode == 0,
+      (_rc_num.stderr or "")[-200:])
+_nsaid = _num_reasons.get(_nbase["Draft_ID"], {})
+check("번호를 못 읽은 행은 막힌다", _nsaid.get("Count_Blocked") == "1")
+check("사유 표가 '번호가 필요하다'를 칸으로 적는다",
+      _nsaid.get("Number_Would_Open") == "1", _nsaid.get("Number_Would_Open"))
+check("그 행의 이유는 번호를 먼저 말한다 (사람이 할 수 있는 것)",
+      "그림 번호를 읽지 못했습니다" in _nsaid.get("Reason", ""),
+      _nsaid.get("Reason", "")[:60])
+# 상자만 필요한 행과 번호만/둘 다 필요한 행이 갈라져야 두 칸이 서로 다른 것을
+# 말합니다 - 한 칸을 다른 칸으로 적어도 둘 다 필요한 행에서는 티가 안 납니다.
+_box_only = [k for k, r in _num_reasons.items()
+             if r.get("Count_Blocked") == "1" and r.get("Box_Would_Open") == "1"
+             and k != _nbase["Draft_ID"]]
+check("상자만 필요한 행이 있고, 그 행에는 번호를 청하지 않는다",
+      _box_only and all(_num_reasons[k].get("Number_Would_Open") == "0"
+                        for k in _box_only),
+      [(k[-6:], _num_reasons[k].get("Box_Would_Open"),
+        _num_reasons[k].get("Number_Would_Open")) for k in _box_only[:4]])
+# 그리고 그 행이 부르는 그림을 누가 세고 있는지 사유 표가 적는가. 여덟 행이
+# "번호를 적어 주십시오"만 달고 왔고, 그 줄들이 부르는 그림은 전부 이 논문이
+# 이미 세고 있었습니다 - 적어 주지 않으면 사람은 무엇을 그릴지 알 수 없습니다.
+#
+# 상황을 픽스처에서 만듭니다. 처음에는 "마침 그런 형제 행이 있으면"이라는 `if`
+# 안에 두었는데, 그 조건이 늘 거짓이라 검사는 한 번도 돌지 않고 조용히
+# 통과했습니다 - 실행되지 않는 시나리오는 시나리오가 아닙니다.
+_hold, _holdnum = _hold_row["Draft_ID"], _hold_row["Figure_Number"]
+check("(그 논문의 다른 행은 그 그림을 세고 있다)",
+      _num_reasons.get(_hold, {}).get("Count_Blocked") == "0",
+      (_hold, _num_reasons.get(_hold, {}).get("Reason", "")[:50]))
+_nrows2 = list(csv.DictReader(io.open(_np, encoding="utf-8")))
+for r in _nrows2:
+    if r["Draft_ID"] == _nbase["Draft_ID"]:
+        r["Caption_Text"] = "Figures %s and 99 show the effects" % (
+            _holdnum.replace("FIG", ""),)
+with io.open(_np, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_ncols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _ncols} for r in _nrows2])
+_rc_h = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_DRAFT=_num_root,
+                                FDT_SHEET=os.path.join(TMP, "held.html"),
+                                FDT_CENSUS=os.path.join(_num_root,
+                                                        "crop_visual_census.csv"),
+                                FDT_REGIONS=os.path.join(_num_root,
+                                                         "validated_regions.csv")))
+_held = ({r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_num_root, "block_reasons.csv"), encoding="utf-8"))}
+    if _rc_h.returncode == 0 else {})
+_hv = _held.get(_nbase["Draft_ID"], {}).get("Mentions_Held", "")
+check("사유 표가 그 그림을 세고 있는 행을 이름으로 적는다",
+      _rc_h.returncode == 0 and _hold in _hv and _holdnum in _hv,
+      (_rc_h.returncode, _hv, _hold, _holdnum))
+check("이 논문에 없는 그림 번호는 적지 않는다", "FIG99" not in _hv, _hv)
+check("다른 논문의 행을 끌어오지 않는다",
+      all(v.split("=")[-1].startswith(_nbase["Source_Document_ID"])
+          for v in _hv.split(";") if v), _hv)
+# 다른 논문의 행은 끌어오지 않습니다. 앞의 검사는 같은 논문의 행이 먼저 나오면
+# 통과해 버리므로, 그 번호가 **다른 논문에만** 있는 경우를 만듭니다.
+_far = [k for k, r in _num_reasons.items()
+        if r.get("Count_Blocked") == "0"
+        and not k.startswith(_nbase["Source_Document_ID"])]
+check("(픽스처에 다른 논문의 셀 수 있는 행이 있다)", bool(_far), list(_num_reasons))
+_nrows3 = list(csv.DictReader(io.open(_np, encoding="utf-8")))
+for r in _nrows3:
+    if r["Draft_ID"] == _far[0]:
+        r["Figure_Number"] = "FIG7"
+    if r["Draft_ID"] == _nbase["Draft_ID"]:
+        r["Caption_Text"] = "Figures 7 and 99 show the effects"
+with io.open(_np, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_ncols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _ncols} for r in _nrows3])
+_rc_f = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                       capture_output=True, text=True, cwd=HERE,
+                       env=dict(ENV, FDT_DRAFT=_num_root,
+                                FDT_SHEET=os.path.join(TMP, "far.html"),
+                                FDT_CENSUS=os.path.join(_num_root,
+                                                        "crop_visual_census.csv"),
+                                FDT_REGIONS=os.path.join(_num_root,
+                                                         "validated_regions.csv")))
+_farheld = ({r["Draft_ID"]: r for r in csv.DictReader(io.open(
+    os.path.join(_num_root, "block_reasons.csv"), encoding="utf-8"))}
+    if _rc_f.returncode == 0 else {})
+_fv = _farheld.get(_nbase["Draft_ID"], {}).get("Mentions_Held", "")
+check("그 번호가 다른 논문에만 있으면 아무도 세고 있지 않다고 답한다",
+      _rc_f.returncode == 0 and _fv == "", (_rc_f.returncode, _fv))
+# 그리고 원래 캡션으로 되돌립니다 - 다음 검사가 이 편집을 물려받지 않게.
+for r in _nrows3:
+    if r["Draft_ID"] == _nbase["Draft_ID"]:
+        r["Caption_Text"] = "Figures %s and 99 show the effects" % (
+            _holdnum.replace("FIG", ""),)
+    if r["Draft_ID"] == _far[0]:
+        r["Figure_Number"] = {x["Draft_ID"]: x["Figure_Number"]
+                              for x in _nrows2}[_far[0]]
+with io.open(_np, "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=_ncols)
+    w.writeheader()
+    w.writerows([{c: r.get(c, "") for c in _ncols} for r in _nrows3])
+
+check("그리고 이 사실이 그 행을 막지는 않는다 (막힌 이유는 번호 그대로)",
+      "그림 번호를 읽지 못했습니다"
+      in _held.get(_nbase["Draft_ID"], {}).get("Reason", ""),
+      _held.get(_nbase["Draft_ID"], {}).get("Reason", "")[:60])
+check("번호가 있는 다른 행에는 번호를 청하지 않는다",
+      all(r.get("Number_Would_Open") == "0"
+          for k, r in _num_reasons.items() if k != _nbase["Draft_ID"]),
+      [(k[-6:], r.get("Number_Would_Open")) for k, r in _num_reasons.items()
+       if r.get("Number_Would_Open") == "1"])
+
 # --- 다른 사람의 기기에서도 도는가 -------------------------------------------
 # The module that exists so no path is written into a file still handed out
 # one machine's paths as its defaults, and the crop harness required a JSON

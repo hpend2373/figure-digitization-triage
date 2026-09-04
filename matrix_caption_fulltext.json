@@ -1,0 +1,88 @@
+{
+  "files": {
+    "caption_fulltext.py": "1c4edabbb9193faae4e45ef34278ca6e0ca2a00ddb5bcc061fa68217259f9b15"
+  },
+  "suites": [
+    "test_caption_fulltext.py"
+  ],
+  "mutations": [
+    {
+      "name": "bbox ignored: any block on the page with the line",
+      "file": "caption_fulltext.py",
+      "old": "if CI._bbox_text(b[1:5]) != want:\n            continue",
+      "new": "if False:\n            continue"
+    },
+    {
+      "name": "caption runs into the next figure's caption",
+      "file": "caption_fulltext.py",
+      "old": "if i and opens_another_caption(raw):\n            break",
+      "new": "if False:\n            break"
+    },
+    {
+      "name": "hyphen-broken words stay broken",
+      "file": "caption_fulltext.py",
+      "old": "elif text.endswith(\"-\") and not text.endswith(\" -\"):",
+      "new": "elif False:"
+    },
+    {
+      "name": "two named dispersions report the first",
+      "file": "caption_fulltext.py",
+      "old": "if len(set(codes)) > 1:\n        return DEF_AMBIGUOUS",
+      "new": "if False:\n        return DEF_AMBIGUOUS"
+    },
+    {
+      "name": "source hash not checked",
+      "file": "caption_fulltext.py",
+      "old": "if want and sha256_of(path) != want:",
+      "new": "if False:"
+    },
+    {
+      "name": "intake backend ignored",
+      "file": "caption_fulltext.py",
+      "old": "blocks = CI.text_blocks(path, backend=backend)",
+      "new": "blocks = CI.text_blocks(path)"
+    },
+    {
+      "name": "document statement accepts an unnamed +/-",
+      "file": "caption_fulltext.py",
+      "old": "if code not in (DEF_UNSTATED, DEF_PM_UNNAMED):",
+      "new": "if code != DEF_UNSTATED:"
+    },
+    {
+      "name": "LINE_ONLY reported as BLOCK",
+      "file": "caption_fulltext.py",
+      "old": "STATUS_BLOCK if len(lines) > 1 else STATUS_LINE_ONLY",
+      "new": "STATUS_BLOCK"
+    },
+    {
+      "name": "rows left in file order",
+      "file": "caption_fulltext.py",
+      "old": "rows.sort(key=lambda r: order.get(r[\"Draft_ID\"], 1 << 30))",
+      "new": "pass"
+    },
+    {
+      "name": "a row with no bbox looks like a missing block",
+      "file": "caption_fulltext.py",
+      "old": "if not want:\n        return None, STATUS_NO_BBOX",
+      "new": "if False:\n        return None, STATUS_NO_BBOX"
+    },
+    {
+      "name": "line-not-in-block reported as block-not-found",
+      "file": "caption_fulltext.py",
+      "old": "return None, (STATUS_NO_LINE if found else STATUS_NO_BLOCK)",
+      "new": "return None, STATUS_NO_BLOCK"
+    },
+    {
+      "name": "evidence dropped",
+      "file": "caption_fulltext.py",
+      "old": "    if hits:\n        return hits[0]",
+      "new": "    if hits:\n        return hits[0][0], \"\""
+    },
+    {
+      "name": "blank lines kept as caption lines",
+      "file": "caption_fulltext.py",
+      "old": "        if raw.strip():\n            out.append(_norm(raw))",
+      "new": "        out.append(_norm(raw))"
+    }
+  ]
+}

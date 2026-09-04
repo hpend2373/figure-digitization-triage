@@ -165,8 +165,16 @@ def main(spec_path):
             red = []
             try:
                 for mod in suites:
-                    r, _rc = run_suite(mod)
+                    r, rc = run_suite(mod)
                     red += r
+                    # A SUITE THAT EXITS NON-ZERO IS RED, whatever its output
+                    # looks like. The names above come from unittest's
+                    # "FAIL: name (" lines; a suite written in the check()
+                    # style prints "  FAIL name" and matched nothing, so
+                    # fourteen mutants of caption_fulltext.py were reported
+                    # as NOTHING WENT RED while every one of them exited 1.
+                    if rc and not r:
+                        red.append("%s exit %d" % (mod, rc))
             finally:
                 open(path, "w", encoding="utf-8").write(src)
                 clear_cache()

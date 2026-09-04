@@ -96,6 +96,30 @@ class TheBaselineCheck(unittest.TestCase):
                          "the tree was not restored")
         RUN[0] += 1
 
+    def test_a_suite_that_exits_nonzero_is_red_whatever_it_prints(self):
+        """REVERT: judge red by the FAIL: regex alone. A check()-style suite
+        that prints "  FAIL name" and exits 1 is then NOTHING WENT RED."""
+        d = self._tree("def answer():\n    return 42\n")
+        open(os.path.join(d, "test_subject.py"), "w").write(
+            "import subject, sys\n"
+            "ok = subject.answer() == 42\n"
+            "print(('  ok   ' if ok else '  FAIL ') + 'the answer')\n"
+            "print('FDT_SCENARIOS_RUN=1')\n"
+            "sys.exit(0 if ok else 1)\n")
+        h = self._harness_in(d)
+        spec = os.path.join(d, "m.json")
+        json.dump({"suites": ["test_subject.py"],
+                   "mutations": [{"name": "the answer", "file": "subject.py",
+                                  "old": "return 42", "new": "return 7"}]},
+                  open(spec, "w"))
+        p = subprocess.run([sys.executable, h, spec], cwd=d,
+                           capture_output=True, text=True)
+        self.assertNotIn("NOTHING WENT RED", p.stdout)
+        self.assertIn("exit 1", p.stdout)
+        self.assertIn("unobserved: none", p.stdout)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        RUN[0] += 1
+
     def test_decoration_is_named(self):
         """A guard whose reversion changes nothing."""
         d = self._tree("def answer():\n    return 42\n\n\ndef unused():\n    return 1\n")

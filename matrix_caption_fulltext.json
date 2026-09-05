@@ -1,6 +1,6 @@
 {
   "files": {
-    "caption_fulltext.py": "36fa491373f3656c2eed79ea7e48ebc9064a9c3c2297722cdff9b27d41af58b0"
+    "caption_fulltext.py": "550b1144689afc4fe8f458fff9372482527cbe6dff2d237f75f29f02f0ee1002"
   },
   "suites": [
     "test_caption_fulltext.py"
@@ -95,6 +95,48 @@
       "file": "caption_fulltext.py",
       "old": "_IN = r\"(?:\\.(?!\\s|$)|[^.])\"",
       "new": "_IN = r\"[^.]\""
+    },
+    {
+      "name": "label-only rule switched off",
+      "file": "caption_fulltext.py",
+      "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
+      "new": "if False:"
+    },
+    {
+      "name": "every LINE_ONLY caption is extended",
+      "file": "caption_fulltext.py",
+      "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
+      "new": "if status == STATUS_LINE_ONLY:"
+    },
+    {
+      "name": "first gap unlimited",
+      "file": "caption_fulltext.py",
+      "old": "LABEL_FIRST_GAP_MAX = 30.0",
+      "new": "LABEL_FIRST_GAP_MAX = 1e9"
+    },
+    {
+      "name": "continuation gap unlimited",
+      "file": "caption_fulltext.py",
+      "old": "LABEL_CONT_GAP_MAX = 10.0",
+      "new": "LABEL_CONT_GAP_MAX = 1e9"
+    },
+    {
+      "name": "column test switched off",
+      "file": "caption_fulltext.py",
+      "old": "if _overlap_share(prev, b) < LABEL_COLUMN_OVERLAP:",
+      "new": "if False:"
+    },
+    {
+      "name": "chain does not stop at a label, table or footer",
+      "file": "caption_fulltext.py",
+      "old": "        if ends_the_chain(first):\n            break",
+      "new": "        if False:\n            break"
+    },
+    {
+      "name": "gap and block count not recorded",
+      "file": "caption_fulltext.py",
+      "old": "                base[\"Caption_Next_Gap\"] = \"%.1f\" % tail[0][0]\n                base[\"Caption_Next_Blocks\"] = str(len(tail))\n",
+      "new": ""
     }
   ]
 }

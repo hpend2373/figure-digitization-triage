@@ -26,9 +26,12 @@ WHAT IT REFUSES.
     and one whose line is not in that block is `LINE_NOT_IN_BLOCK`. Nothing
     is reconstructed from a different block.
   * A caption that is the last line of its block is `LINE_ONLY`. The rest of it
-    is probably in the block below, and this module does not go there, because
-    the block below is also where the body text is. That case is counted, not
-    guessed.
+    may be in the block below, but so is the body text, so this module does
+    not go there - with ONE exception: a line that is nothing but a label
+    ("Figure 1") cannot be a caption, and its text is taken from the blocks
+    directly below under measured limits (`LABEL_*`), reported as
+    `LABEL_NEXT_BLOCKS` with the gap and block count so a reader can see it
+    was reconstructed. Everything else is counted, not guessed.
   * The dispersion columns are EVIDENCE, not a verdict. `Errorbar_Definition`
     names what the words say and `Errorbar_Evidence` quotes them; a caption
     naming two things is `AMBIGUOUS`, a "±" with no name is `PM_UNNAMED`, and
@@ -59,6 +62,23 @@ STATUS_NO_SOURCE = "SOURCE_MISSING"     # no such file under --pdf-root
 STATUS_BAD_SOURCE = "SOURCE_SHA_MISMATCH"
 STATUS_UNREADABLE = "SOURCE_UNREADABLE"
 STATUS_NO_BBOX = "NO_CAPTION_BBOX"      # a row the intake never placed
+STATUS_LABEL_NEXT = "LABEL_NEXT_BLOCKS"  # label-only line; body read from the blocks below
+
+#: THE ONE PLACE THIS MODULE READS OUTSIDE THE CAPTION'S OWN BLOCK, and only
+#: when the caption line is nothing but a label. "Figure 1" on its own cannot
+#: be a caption; the text has to be somewhere, and in the two Research Square
+#: preprints of run2 (nine rows) it is the block directly below. Measured
+#: there: the first body block starts 14.5-21.7 pt under the label, the
+#: paragraph continues in blocks 4-6 pt apart (pdfminer splits it), and what
+#: comes after is 30 pt or more away, or a "Page 9/12" footer that does not
+#: share the column, or the next figure's label. The thresholds sit in those
+#: gaps rather than on the data.
+LABEL_FIRST_GAP_MAX = 30.0     # label bottom -> first body block top, pt
+LABEL_CONT_GAP_MAX = 10.0      # between consecutive body blocks, pt
+LABEL_COLUMN_OVERLAP = 0.5     # share of the narrower width the blocks must share
+LABEL_MAX_BLOCKS = 6
+PAGE_FOOTER = re.compile(r"^\s*(?:page\s+\d+(?:\s*(?:/|of)\s*\d+)?|\d+\s*/\s*\d+)\s*$", re.I)
+TABLE_LABEL = re.compile(r"^\s*(?:Table|TABLE)\s*[0-9]", re.I)
 
 #: What a caption can say its bars are. Order matters only for the evidence
 #: string; the verdict is AMBIGUOUS whenever more than one family matches.
@@ -100,7 +120,8 @@ FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
           "Caption_Line", "Caption_Full", "Caption_Full_Status",
           "Caption_Full_Lines", "Errorbar_Definition", "Errorbar_Evidence",
           "Doc_Errorbar_Definition", "Doc_Errorbar_Evidence",
-          "Doc_Errorbar_Page", "Source_SHA256_OK")
+          "Doc_Errorbar_Page", "Source_SHA256_OK",
+          "Caption_Next_Gap", "Caption_Next_Blocks")
 
 
 #: Typographic ligatures as pdfminer hands them over. A PDF that sets
@@ -174,6 +195,54 @@ def caption_lines(block_text, offset):
             break
         if raw.strip():
             out.append(_norm(raw))
+    return out
+
+
+def label_only(line):
+    """Whether a caption line is nothing but its label ("Figure 1", "Fig. 2.")."""
+    m = CI.CAPTION_RE.match(line or "") or CI.EXTENDED_RE.match(line or "")
+    if not m:
+        return False
+    return not m.group(2).strip(" .|:\u2013-\u2014")
+
+
+def _overlap_share(a, b):
+    """Horizontal overlap of two boxes as a share of the narrower one."""
+    ox = min(a[3], b[3]) - max(a[1], b[1])
+    w = min(a[3] - a[1], b[3] - b[1])
+    return ox / w if w > 0 else 0.0
+
+
+def ends_the_chain(first_line):
+    """A block that is not caption text: another label, a table, a footer."""
+    return bool(opens_another_caption(first_line) or TABLE_LABEL.match(first_line)
+                or PAGE_FOOTER.match(first_line))
+
+
+def blocks_below_label(blocks, label_block):
+    """The body blocks of a label-only caption: [(gap, block)], possibly empty.
+
+    Nearest block first. Each must share the column with the block before it,
+    start within the gap the data allows, and not itself be a label, a table
+    or a footer. Anything else ends the chain - including silence.
+    """
+    page = label_block[0]
+    below = sorted((b for b in blocks if b[0] == page and b is not label_block
+                    and b[2] >= label_block[4] - 0.5), key=lambda b: b[2])
+    out, prev, limit = [], label_block, LABEL_FIRST_GAP_MAX
+    for b in below:
+        gap = b[2] - prev[4]
+        if gap > limit:
+            break
+        if _overlap_share(prev, b) < LABEL_COLUMN_OVERLAP:
+            continue                      # a footer or the other column
+        first = (b[5].splitlines() or [""])[0]
+        if ends_the_chain(first):
+            break
+        out.append((gap, b))
+        if len(out) >= LABEL_MAX_BLOCKS:
+            break
+        prev, limit = b, LABEL_CONT_GAP_MAX
     return out
 
 
@@ -271,6 +340,7 @@ def rows_for_document(doc_rows, blocks, failure=None, sha_ok=""):
             "Doc_Errorbar_Definition": doc_def, "Doc_Errorbar_Evidence": doc_ev,
             "Doc_Errorbar_Page": doc_page,
             "Source_SHA256_OK": sha_ok,
+            "Caption_Next_Gap": "", "Caption_Next_Blocks": "",
         }
         if blocks is None:
             base["Caption_Full_Status"] = failure or STATUS_UNREADABLE
@@ -288,10 +358,19 @@ def rows_for_document(doc_rows, blocks, failure=None, sha_ok=""):
             continue
         block, offset = hit
         lines = caption_lines(block[5], offset)
+        status = STATUS_BLOCK if len(lines) > 1 else STATUS_LINE_ONLY
+        if status == STATUS_LINE_ONLY and label_only(lines[0]):
+            tail = blocks_below_label(blocks, block)
+            if tail:
+                for _gap, b in tail:
+                    lines += caption_lines(b[5], 0)
+                status = STATUS_LABEL_NEXT
+                base["Caption_Next_Gap"] = "%.1f" % tail[0][0]
+                base["Caption_Next_Blocks"] = str(len(tail))
         full = join_lines(lines)
         base["Caption_Full"] = full
         base["Caption_Full_Lines"] = str(len(lines))
-        base["Caption_Full_Status"] = STATUS_BLOCK if len(lines) > 1 else STATUS_LINE_ONLY
+        base["Caption_Full_Status"] = status
         code, ev = errorbar_definition(full)
         base["Errorbar_Definition"], base["Errorbar_Evidence"] = code, ev
         out.append(base)
@@ -349,7 +428,7 @@ def build(run, pdf_root, out_path=None, log=print, only=None):
 def summary(rows):
     import collections
     st = collections.Counter(r["Caption_Full_Status"] for r in rows)
-    got = [r for r in rows if r["Caption_Full_Status"] in (STATUS_BLOCK, STATUS_LINE_ONLY)]
+    got = [r for r in rows if r["Caption_Full_Status"] in (STATUS_BLOCK, STATUS_LINE_ONLY, STATUS_LABEL_NEXT)]
     de = collections.Counter(r["Errorbar_Definition"] for r in got)
     docs = {r["Source_Document_ID"]: r["Doc_Errorbar_Definition"] for r in rows}
     dd = collections.Counter(v or "(없음)" for v in docs.values())

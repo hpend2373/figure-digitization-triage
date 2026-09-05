@@ -195,9 +195,35 @@ PDF = minimal_pdf(os.path.join(ROOT, "paper.pdf"), [
              "Fig. 2. Blood pressure during tilt.",
              "Values are mean +/- SEM.")
     + column(72, 300, "Body text continues here and says nothing about bars."),
-    # page 2: a caption that is the last line of its block
+    # page 2: a caption that is the last line of its block - WITH a body
+    # block 17 pt below it, which the label-only rule must leave alone
     column(72, 700, "Some body text above.")
-    + column(72, 500, "Fig. 3. Cardiac output during tilt."),
+    + column(72, 500, "Fig. 3. Cardiac output during tilt.")
+    + column(72, 472, "Body text resumes here and must not become the caption."),
+    # page 3: the Research Square shape. "Figure 4" alone; its text 19 pt
+    # below in two blocks 7 pt apart; then body text 21 pt further (beyond
+    # the continuation gap); a footer off-column; then "Figure 5" and its text.
+    column(72, 700, "Figure 4")
+    + column(72, 670, "Cardiac output in eight subjects during tilt.",
+             "Displayed are means +/- 95% confidence intervals.")
+    + column(72, 640, "Asterisks mark p < .05 versus baseline.")
+    + column(72, 608, "Methods continue here with unrelated body text.")
+    + column(300, 560, "Page 3/4")
+    + column(72, 500, "Figure 5")
+    + column(72, 470, "Heart rate during the same tilt. Bars are SD.")
+    + column(72, 420, "Figure 6")
+    + column(72, 350, "Too far below to be Figure 6's text."),
+    # page 4: three ways the chain must NOT continue. Figure 7's only
+    # neighbour is body text in the OTHER column; Figure 8's text is followed
+    # 9 pt later by a table caption; Figure 9's by the page footer.
+    column(72, 700, "Figure 7")
+    + column(330, 682, "Right-column body text at the same height.")
+    + column(72, 600, "Figure 8")
+    + column(72, 572, "Eight subjects. Bars are SEM.")
+    + column(72, 552, "Table 1 Haemodynamic variables at rest.")
+    + column(72, 480, "Figure 9")
+    + column(72, 452, "Nine subjects during tilt.")
+    + column(72, 432, "Page 4/4"),
 ])
 SHA = hashlib.sha256(open(PDF, "rb").read()).hexdigest()
 # THE BACKEND THIS MACHINE'S INTAKE WOULD USE - pdfminer where it is installed,
@@ -216,9 +242,10 @@ OTHER = {"PDFMINER_TEXT_BLOCKS": "POPPLER_BBOX_LAYOUT",
          "POPPLER_BBOX_LAYOUT": "PDFMINER_TEXT_BLOCKS"}[BACKEND]
 BLOCKS = CI.text_blocks(PDF, backend=BACKEND)
 CANDS = CI.caption_candidates(BLOCKS)
-check("the fixture yields three captions the intake's way (%d)" % len(CANDS),
-      [c["number"] for c in CANDS] == ["1", "2", "3"], [c["number"] for c in CANDS])
-if len(CANDS) != 3:
+check("the fixture yields nine captions the intake's way (%d)" % len(CANDS),
+      [c["number"] for c in CANDS] == [str(i) for i in range(1, 10)],
+      [c["number"] for c in CANDS])
+if len(CANDS) != 9:
     print("FDT_SCENARIOS_RUN=%d" % PASSED[0])
     raise SystemExit(1)
 
@@ -247,8 +274,7 @@ def write_draft(rows):
         w.writerows(rows)
 
 
-write_draft([draft_row(CANDS[0], "DOC_D001"), draft_row(CANDS[1], "DOC_D002"),
-             draft_row(CANDS[2], "DOC_D003")])
+write_draft([draft_row(CANDS[i], "DOC_D%03d" % (i + 1)) for i in range(9)])
 ROWS, OUTP = CF.build(RUN, os.path.join(ROOT, "pdfs"), log=lambda *_a: None)
 BY = {r["Draft_ID"]: r for r in ROWS}
 check("the output is written where it says (%s)" % os.path.basename(OUTP), os.path.isfile(OUTP))
@@ -277,6 +303,61 @@ check("a caption that is its block's last line says so (LINE_ONLY)",
       BY["DOC_D003"]["Caption_Full_Status"] == CF.STATUS_LINE_ONLY
       and BY["DOC_D003"]["Caption_Full"] == "Fig. 3. Cardiac output during tilt.",
       (BY["DOC_D003"]["Caption_Full_Status"], BY["DOC_D003"]["Caption_Full"]))
+# ---- the label-only rule
+_f4 = BY["DOC_D004"]
+# REVERT: never read below the block. "Figure 4" is then the whole caption of
+# a figure whose text says "95% confidence intervals", and it counts as UNSTATED.
+check("a label-only line takes the blocks directly below (LABEL_NEXT_BLOCKS)",
+      _f4["Caption_Full_Status"] == CF.STATUS_LABEL_NEXT, _f4["Caption_Full_Status"])
+check("... the two body blocks 7 pt apart are one caption",
+      _f4["Caption_Full"] == "Figure 4 Cardiac output in eight subjects during tilt. "
+      "Displayed are means +/- 95% confidence intervals. Asterisks mark p < .05 versus baseline.",
+      _f4["Caption_Full"])
+# REVERT: drop the continuation gap. Body text 21 pt below the caption is
+# then swallowed into it, and its words become the figure's.
+check("... but body text 21 pt further down is not (continuation gap)",
+      "Methods continue" not in _f4["Caption_Full"])
+check("... and the figure now names its dispersion", _f4["Errorbar_Definition"] == "CI")
+check("the gap and block count are written down so the join is visible",
+      _f4["Caption_Next_Gap"] and float(_f4["Caption_Next_Gap"]) < CF.LABEL_FIRST_GAP_MAX
+      and _f4["Caption_Next_Blocks"] == "2", (_f4["Caption_Next_Gap"], _f4["Caption_Next_Blocks"]))
+# REVERT: stop honouring the next label. Figure 5's text lands in Figure 4's
+# caption on any page that prints two label-only figures.
+check("figure 5's label ends figure 4's chain; figure 5 gets its own text",
+      "Heart rate" not in _f4["Caption_Full"]
+      and BY["DOC_D005"]["Caption_Full"].endswith("Bars are SD.")
+      and BY["DOC_D005"]["Errorbar_Definition"] == "SD", BY["DOC_D005"]["Caption_Full"])
+# REVERT: widen the first gap. The block 50 pt under "Figure 6" is then its
+# caption, and nothing says it is not.
+check("a label whose nearest text is too far below stays LINE_ONLY",
+      BY["DOC_D006"]["Caption_Full_Status"] == CF.STATUS_LINE_ONLY
+      and BY["DOC_D006"]["Caption_Full"] == "Figure 6", BY["DOC_D006"])
+# REVERT: drop the column test. The other column's body text, 18 pt below
+# the label at the same height, becomes figure 7's caption.
+check("text in the other column is not the caption (LINE_ONLY)",
+      BY["DOC_D007"]["Caption_Full_Status"] == CF.STATUS_LINE_ONLY
+      and "Right-column" not in BY["DOC_D007"]["Caption_Full"], BY["DOC_D007"])
+# REVERT: stop ending the chain at a table caption or a footer. Nine points
+# under figure 8's text is "Table 1 ..."; under figure 9's, "Page 4/4".
+check("a table caption 9 pt below ends the chain",
+      BY["DOC_D008"]["Caption_Full"] == "Figure 8 Eight subjects. Bars are SEM."
+      and BY["DOC_D008"]["Caption_Next_Blocks"] == "1", BY["DOC_D008"]["Caption_Full"])
+check("a page footer 9 pt below ends the chain",
+      BY["DOC_D009"]["Caption_Full"] == "Figure 9 Nine subjects during tilt."
+      and "Page" not in BY["DOC_D009"]["Caption_Full"], BY["DOC_D009"]["Caption_Full"])
+# REVERT: extend every LINE_ONLY caption. Figure 3 has a body already, and the
+# body text 17 pt below it would be read as its second sentence.
+check("a one-line caption WITH a body is not extended, whatever sits below",
+      BY["DOC_D003"]["Caption_Full_Status"] == CF.STATUS_LINE_ONLY
+      and "resumes" not in BY["DOC_D003"]["Caption_Full"], BY["DOC_D003"]["Caption_Full"])
+check("label_only: 'Figure 1' / 'Fig. 2.' / 'FIGURE 3 |' are labels; a body is not",
+      CF.label_only("Figure 1") and CF.label_only("Fig. 2.") and CF.label_only("FIGURE 3 |")
+      and not CF.label_only("Fig. 5; Fig. 6).") and not CF.label_only("Fig. 1 Heart rate")
+      and not CF.label_only("Body text"))
+check("a footer line is recognised in both spellings",
+      CF.ends_the_chain("Page 9/12") and CF.ends_the_chain("Page 9 of 12")
+      and CF.ends_the_chain("Table 2 Haemodynamics") and not CF.ends_the_chain("Cardiac output"))
+
 check("the document's Methods sentence is found once and put on every row",
       all(r["Doc_Errorbar_Definition"] == "SEM" and r["Doc_Errorbar_Page"] == "1"
           for r in ROWS), [(r["Doc_Errorbar_Definition"], r["Doc_Errorbar_Page"]) for r in ROWS])

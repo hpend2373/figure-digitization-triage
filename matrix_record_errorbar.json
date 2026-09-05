@@ -1,0 +1,167 @@
+{
+ "files": {
+  "record_errorbar.py": "9362b063a4a78ab5366717fc04147133d5c9dc5b8163504fd5c99d2ee2ded775",
+  "test_record_errorbar.py": "a074167a42076fb5fcbc132e5b59baa7b0c60c2222d89ec5bfc6c2a7673d8d4d"
+ },
+ "suites": [
+  "test_record_errorbar.py"
+ ],
+ "mutations": [
+  {
+   "name": "사람이 표시하지 않은 답도 받는다",
+   "file": "record_errorbar.py",
+   "old": "    if not is_true(answer.get(\"Verified_In_Source\")):",
+   "new": "    if False:"
+  },
+  {
+   "name": "어휘 밖의 종류를 받는다",
+   "file": "record_errorbar.py",
+   "old": "    elif code not in DISPERSION_TYPES:",
+   "new": "    elif False:"
+  },
+  {
+   "name": "추정하는 말이 든 인용문을 받는다",
+   "file": "record_errorbar.py",
+   "old": "    marker = hedge_in(quote)\n    if marker:",
+   "new": "    marker = hedge_in(quote)\n    if False:"
+  },
+  {
+   "name": "인용문 없는 종류를 받는다",
+   "file": "record_errorbar.py",
+   "old": "    if not quote:\n        problems.append((\"NO_ERRORBAR_SOURCE\",",
+   "new": "    if False:\n        problems.append((\"NO_ERRORBAR_SOURCE\","
+  },
+  {
+   "name": "인용문이 무엇을 말하는지 보지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    if rx is not None and not rx.search(_soft(quote)):",
+   "new": "    if False:"
+  },
+  {
+   "name": "인용문이 다른 종류를 말해도 넘어간다",
+   "file": "record_errorbar.py",
+   "old": "    if other:",
+   "new": "    if False and other:"
+  },
+  {
+   "name": "인용문을 문서에서 찾지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    if not source.holds(quote):",
+   "new": "    if False:"
+  },
+  {
+   "name": "쪽을 적지 않아도 받는다",
+   "file": "record_errorbar.py",
+   "old": "    if not page:\n        problems.append((\"PAGE_MISSING\",",
+   "new": "    if False:\n        problems.append((\"PAGE_MISSING\","
+  },
+  {
+   "name": "적힌 쪽이 틀려도 받는다",
+   "file": "record_errorbar.py",
+   "old": "    elif page not in source.page_of(quote):",
+   "new": "    elif False:"
+  },
+  {
+   "name": "못 찾았다는 답을 문서에 대고 보지 않는다",
+   "file": "record_errorbar.py",
+   "old": "            found, sentence, where = CF.document_statement(source.blocks)\n            if found:",
+   "new": "            found, sentence, where = CF.document_statement(source.blocks)\n            if False:"
+  },
+  {
+   "name": "못 찾았다면서 인용문을 달아도 받는다",
+   "file": "record_errorbar.py",
+   "old": "        if quote:\n            problems.append((\"%s_WITH_QUOTE\" % code,",
+   "new": "        if False:\n            problems.append((\"%s_WITH_QUOTE\" % code,"
+  },
+  {
+   "name": "아직 정하지 않은 답도 적는다",
+   "file": "record_errorbar.py",
+   "old": "        problems.append((\"HELD\", \"아직 정하지 않은 답입니다.\"))",
+   "new": "        pass"
+  },
+  {
+   "name": "기다리는 목록에 없는 문서도 받는다",
+   "file": "record_errorbar.py",
+   "old": "        if not rows:",
+   "new": "        if False:"
+  },
+  {
+   "name": "이미 판정된 행을 조용히 덮는다",
+   "file": "record_errorbar.py",
+   "old": "            if row[\"Draft_ID\"] in settled and not replace:",
+   "new": "            if False:"
+  },
+  {
+   "name": "거절된 답도 파일에 적는다",
+   "file": "record_errorbar.py",
+   "old": "        if problems:\n            refused.append((doc, problems))\n            continue",
+   "new": "        if problems:\n            refused.append((doc, problems))"
+  },
+  {
+   "name": "초안이 읽은 파일인지 보지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    if want and CF.sha256_of(path) != want:",
+   "new": "    if False:"
+  },
+  {
+   "name": "원문을 못 읽어도 넘어간다",
+   "file": "record_errorbar.py",
+   "old": "        if source is None and why and not any(c == \"SOURCE_UNREADABLE\"\n                                              for c, _m in problems):",
+   "new": "        if False:"
+  },
+  {
+   "name": "답 CSV의 열을 보지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    if answers and missing:",
+   "new": "    if False:"
+  },
+  {
+   "name": "초안의 백엔드 대신 기본값으로 읽는다",
+   "file": "record_errorbar.py",
+   "old": "backend = (rows[0].get(\"Extraction_Method\") or \"\").strip() or None",
+   "new": "backend = None"
+  },
+  {
+   "name": "인쇄용 기호를 지우지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    for glyph, plain in _TYPOGRAPHY.items():\n        flat = flat.replace(glyph, plain)",
+   "new": "    pass"
+  },
+  {
+   "name": "줄바꿈 hyphen을 잇지 않는다 (문장 대조)",
+   "file": "record_errorbar.py",
+   "old": "    flat = _HYPHEN_BREAK.sub(r\"\\1\\2\", flat)\n    return \" \".join(_WORD.sub(\" \", flat).split())",
+   "new": "    return \" \".join(_WORD.sub(\" \", flat).split())"
+  },
+  {
+   "name": "낱말만 남기지 않고 글자 그대로 대조한다",
+   "file": "record_errorbar.py",
+   "old": "    return \" \".join(_WORD.sub(\" \", flat).split())",
+   "new": "    return flat"
+  },
+  {
+   "name": "종류를 kernel이 아니라 이 파일에서 가져온다",
+   "file": "record_errorbar.py",
+   "old": "DISPERSION_TYPES = tuple(kernel.FIG_DISPERSION_TYPES)",
+   "new": "DISPERSION_TYPES = (\"SD\", \"SE\", \"SEM\", \"CI\", \"IQR\", \"RANGE\", \"NO_ERRORBAR\")"
+  },
+  {
+   "name": "Recorded_At을 오늘로 채운다",
+   "file": "record_errorbar.py",
+   "old": "Verified_By_Person=\"1\", Recorded_Via=via, Recorded_At=when,",
+   "new": "Verified_By_Person=\"1\", Recorded_Via=via,\n                Recorded_At=__import__(\"datetime\").date.today().isoformat(),"
+  },
+  {
+   "name": "먼저 있던 판정을 버린다",
+   "file": "record_errorbar.py",
+   "old": "    keep = [r for r in existing\n            if r[\"Draft_ID\"] not in set(w[\"Draft_ID\"] for w in written)]",
+   "new": "    keep = []"
+  },
+  {
+   "name": "한 행만 적고 문서의 나머지 행은 두고 간다",
+   "file": "record_errorbar.py",
+   "old": "        for row in rows:",
+   "new": "        for row in rows[:1]:"
+  }
+ ]
+}

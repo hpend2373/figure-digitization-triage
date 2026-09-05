@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "d69b4c2cbd027f06aebe6465c8607a5700dd5652f250dd7dcb362accb333cbcc",
-  "test_make_plan.py": "fafeb49e177f4de0a09c927e3756e7f12b82faf4979e5dc6cc485a696edb6928"
+  "make_plan.py": "73ee9497d8c4d7bb5a4e6f6106945d6be44dcd4951f58b103cc712fc4a92600c",
+  "test_make_plan.py": "ca71dddfa60b80ceabb37ea0edf90bbada4a735afe197fad86cee3de6b6b2be9"
  },
  "suites": [
   "test_make_plan.py"
@@ -168,6 +168,18 @@
    "file": "make_plan.py",
    "old": "            if code in RE.DISPOSITIONS:\n                dropped += 1",
    "new": "            if False:\n                dropped += 1"
+  },
+  {
+   "name": "계수 파일 이름을 여기서만 새로 짓는다",
+   "file": "make_plan.py",
+   "old": "COUNTS = \"observed_panel_counts.csv\"",
+   "new": "COUNTS = \"panel_counts.csv\""
+  },
+  {
+   "name": "상태를 보지 않고 수를 가져온다",
+   "file": "make_plan.py",
+   "old": "                  if (r.get(\"Entry_Status\") or COUNTED).strip() == COUNTED)",
+   "new": "                  )"
   }
  ]
 }

@@ -112,7 +112,7 @@ write(MP.CAPTIONS, CAPTION_FIELDS, [
 ])
 write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type",
                      "Errorbar_Definition_Source", "Found_On_Page"), [])
-write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count"), [])
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"), [])
 
 
 def build(**kw):
@@ -227,12 +227,29 @@ check("기하를 아직 아무도 쓰지 않았다는 것이 할 일에 적힌�
 check("계수가 필요하다는 것이 할 일에 적힌다",
       all("패널 계수" in r["Needs"] for r in SHEET.values()))
 
-write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count"),
-      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "3"},
-       {"Draft_ID": "PUB_D003", "Observed_Panel_Count": "1"}])
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"),
+      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "3",
+        "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D003", "Observed_Panel_Count": "1",
+        "Entry_Status": "ENTERED"},
+       # 보았지만 셀 수 없다고 적힌 행. 수가 아닙니다.
+       {"Draft_ID": "PUB_D004", "Observed_Panel_Count": "2",
+        "Entry_Status": "SEEN_UNCOUNTABLE"},
+       # 아직 안 본 행.
+       {"Draft_ID": "PUB_D005", "Observed_Panel_Count": "",
+        "Entry_Status": "NOT_REVIEWED"}])
 _plan, _sheet, _ready = build()
 _fig = dict((f["source_figure_id"], f) for f in _plan["figures"])
 check("사람이 센 수는 그대로 적힌다", _fig["PUB_D001"]["observed_panel_count"] == 3)
+check("계수 파일의 이름은 시트 합치기가 쓰는 그 이름이다",
+      MP.COUNTS == "observed_panel_counts.csv", MP.COUNTS)
+# REVERT: take the number whatever the status says. "보았지만 셀 수 없다"와
+# "아직 안 보았다"가 세어진 것이 되고, 그 그림은 사람 손을 떠납니다.
+check("셀 수 없다고 적힌 행의 수는 가져오지 않는다",
+      "observed_panel_count" not in _fig["PUB_D004"],
+      _fig["PUB_D004"].get("observed_panel_count"))
+check("아직 안 본 행도 가져오지 않는다",
+      "observed_panel_count" not in _fig["PUB_D005"])
 check("센 수만큼 패널이 선다", len(_fig["PUB_D001"]["panels"]) == 3,
       len(_fig["PUB_D001"]["panels"]))
 check("패널 이름은 서로 다르다",
@@ -261,7 +278,7 @@ check("세어진 그림은 계획서를 멎게 하지 않는다",
 check("세지 않은 그림은 여전히 멎게 한다",
       len([p for p in _left if p["check"] == "PLAN_PANEL_COUNT_MISSING"]) == 4,
       [p["where"] for p in _left])
-write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count"), [])
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"), [])
 
 # --- 사람인 척하지 않는다 ------------------------------------------------------
 _r = PLAN["reviewers"][0]

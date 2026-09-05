@@ -39,7 +39,15 @@ DRAFT = "figure_intake_draft.csv"
 BLOCKS = "block_reasons.csv"
 CAPTIONS = "caption_fulltext.csv"
 DECISIONS = "errorbar_decisions.csv"
-COUNTS = "panel_counts.csv"
+#: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
+#: 새로 짓지 않습니다 - 파이프라인이 이미 쓰는 이름이 따로 있는데 여기서만
+#: 다른 이름을 보면, 계수는 들어와 있는데 계획서는 영영 못 보게 됩니다.
+COUNTS = "observed_panel_counts.csv"
+
+#: 그 파일에서 수를 가져올 수 있는 유일한 상태. `SEEN_UNCOUNTABLE`은
+#: "보았지만 셀 수 없다"이고 `NOT_REVIEWED`는 "아직 안 보았다"입니다 -
+#: 둘 다 수가 아니고, 둘을 수로 바꾸면 그 그림은 세어진 것이 됩니다.
+COUNTED = "ENTERED"
 READINESS = "plan_readiness.csv"
 WORKSHEET = "plan_figures.csv"
 
@@ -244,7 +252,8 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
     captions = _by(_rows(os.path.join(run, CAPTIONS)), "Draft_ID")
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
-                  for r in _rows(os.path.join(run, COUNTS)))
+                  for r in _rows(os.path.join(run, COUNTS))
+                  if (r.get("Entry_Status") or COUNTED).strip() == COUNTED)
     by_pub = {}
     for row in rows:
         if only and row["Source_Document_ID"] not in only:

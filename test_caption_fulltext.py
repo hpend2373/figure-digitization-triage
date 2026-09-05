@@ -102,7 +102,21 @@ for _text, _want in (
         # pdfminer's ligatures: the glyph kept, and the glyph dropped
         ("Displayed are means +/- 95% con\ufb01dence intervals.", "CI"),
         ("Data are presented as mean +/- .95 con dence intervals.", "CI"),
-        ("Sedentary (SED) group vs. exercise group.", CF.DEF_UNSTATED)):
+        ("Sedentary (SED) group vs. exercise group.", CF.DEF_UNSTATED),
+        # 2026-09-05: 어시스턴트가 이 코퍼스에서 찾아낸 네 문장. 전부 이 모듈이
+        # "본문이 아무 말도 하지 않는다"로 분류했던 논문의 것이고, 그 분류는
+        # 이 모듈이 할 수 있는 가장 단정적인 말이라 틀리면 가장 나쁩니다.
+        ("The percent changes were displayed as mean6SD.", "SD"),
+        ("Data are presented as means6SE with n57 for both conditions.", "SE"),
+        ("Fig. 1 and Fig. 2 show the physiological responses "
+         "(30-min means and SEMs) of men.", "SEM"),
+        ("Data are presented as median and 25th and 75th percentiles.", "IQR"),
+        ("Boxes span the 25th to 75th percentile.", "IQR"),
+        # 그리고 그 완화가 데려오면 안 되는 것들
+        ("The SDS score improved after training.", CF.DEF_UNSTATED),
+        ("SES was matched between groups.", CF.DEF_UNSTATED),
+        ("Prices in USD were converted.", CF.DEF_UNSTATED),
+        ("Values are means and SDs.", "SD")):
     _code, _ev = CF.errorbar_definition(_text)
     check("%r -> %s" % (_text[:48], _want), _code == _want, "%s %r" % (_code, _ev))
 # REVERT: stop folding ligatures. "conﬁdence" then matches nothing, and a
@@ -180,6 +194,25 @@ check("a decimal point inside the sentence does not end it",
 check("the subject-less caption form counts: 'Displayed are means +/- 95% CI'",
       CF.document_statement([(9, 0, 0, 1, 1, "Displayed are means +/- 95% confidence intervals.")])
       == ("CI", "Displayed are means +/- 95% confidence intervals", "9"))
+# REVERT: put the word boundary back. Two journals print ± as a digit, so
+# "mean6SD" has no boundary before SD and the only sentence in the paper that
+# names the bars is invisible. Both papers were filed as "the body never says".
+check("깨진 ±에 붙은 약어도 문서 진술로 읽힌다",
+      CF.document_statement([(3, 0, 0, 1, 1,
+          "The percent changes were displayed as mean6SD.")])[0] == "SD")
+# REVERT: drop the active-voice branch. "Fig. 1 and Fig. 2 show the responses
+# (30-min means and SEMs)" is then not a statement, and that sentence is the
+# whole of what one paper says about its bars.
+check("능동태로 쓴 진술도 읽힌다",
+      CF.document_statement([(5, 0, 0, 1, 1, "Fig. 1 and Fig. 2 show the "
+          "physiological responses (30-min means and SEMs) of men.")])[0] == "SEM")
+check("그러나 분산을 대지 않는 능동태 문장은 진술이 아니다",
+      CF.document_statement([(3, 0, 0, 1, 1,
+          "Figure 3 shows the relationship between heart rate and tilt angle.")])
+      == ("", "", ""))
+check("'changes'도 진술의 주어가 된다",
+      "changes" in CF.document_statement([(3, 0, 0, 1, 1,
+          "The percent changes were displayed as mean6SD.")])[1])
 check("a subject-age sentence with ± is not a presentation statement",
       CF.document_statement([(1, 0, 0, 1, 1, "Subjects were aged 32 ± 4 years.")])
       == ("", "", ""))

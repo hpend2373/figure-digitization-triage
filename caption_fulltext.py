@@ -82,12 +82,30 @@ TABLE_LABEL = re.compile(r"^\s*(?:Table|TABLE)\s*[0-9]", re.I)
 
 #: What a caption can say its bars are. Order matters only for the evidence
 #: string; the verdict is AMBIGUOUS whenever more than one family matches.
+#: A boundary that a mangled plus-minus does not destroy. Two journals in this
+#: corpus print "±" as a digit - "mean6SD", "means6SE with n57" - and `\b`
+#: sees no boundary between "6" and "S", so `\bSD\b` misses the only sentence
+#: in the paper that names the bars. Both papers were filed under "the body
+#: never says", which is the most confident thing this module can say and so
+#: the worst place for it to be wrong. A letter on either side still refuses
+#: ("USD", "SDS"); a digit or a symbol does not.
+#: THE PLURAL "s" IS LOWERCASE, and saying so is what keeps three real words
+#: out: "SDS" (sodium dodecyl sulfate), "SES" (socioeconomic status) and
+#: "SEMS" (self-expandable metallic stent) all read as a plural abbreviation
+#: under a case-insensitive `s?`. "means and SDs" is the form a paper writes.
+_L, _R, _S = r"(?<![A-Za-z])", r"(?![A-Za-z])", r"(?-i:s)?"
 DEFINITIONS = (
-    ("SEM", re.compile(r"\bS\.?\s?E\.?\s?M\.?\b|standard\s+errors?\s+of\s+the\s+means?", re.I)),
-    ("SE",  re.compile(r"\bS\.?E\.?s?\b(?!\s?M)|standard\s+errors?\b(?!\s+of\s+the\s+mean)", re.I)),
-    ("SD",  re.compile(r"\bS\.?D\.?s?\b|standard\s+deviations?", re.I)),
-    ("CI",  re.compile(r"\b9[05]\s*%\s*(?:CIs?|con(?:fi|\s)?dence)|con(?:fi|\s)?dence\s+intervals?|\bCIs?\b", re.I)),
-    ("IQR", re.compile(r"\bIQRs?\b|inter-?quartile", re.I)),
+    ("SEM", re.compile(_L + r"S\.?\s?E\.?\s?M\.?" + _S + _R
+                       + r"|standard\s+errors?\s+of\s+the\s+means?", re.I)),
+    ("SE",  re.compile(_L + r"S\.?E\.?" + _S + _R + r"(?!\s?M)"
+                       + r"|standard\s+errors?\b(?!\s+of\s+the\s+mean)", re.I)),
+    ("SD",  re.compile(_L + r"S\.?D\.?" + _S + _R + r"|standard\s+deviations?", re.I)),
+    ("CI",  re.compile(r"\b9[05]\s*%\s*(?:CIs?|con(?:fi|\s)?dence)"
+                       r"|con(?:fi|\s)?dence\s+intervals?|\bCIs?\b", re.I)),
+    # IQR is as often spelled out as abbreviated: "median and 25th and 75th
+    # percentiles" is the whole of what one paper here says about its boxes.
+    ("IQR", re.compile(r"\bIQRs?\b|inter-?quartile"
+                       r"|\b25\s?th\s*(?:and|to|[-\u2013\u2014])\s*75\s?th\s+percentiles?", re.I)),
 )
 PLUS_MINUS = re.compile(r"±|\+/-|\+/−|plus\s+or\s+minus", re.I)
 
@@ -103,17 +121,28 @@ DEF_UNSTATED = "UNSTATED"
 #: period in it that ends nothing, and reading it as the end of the sentence
 #: left "mean +/-" - a statement that named no dispersion.
 _IN = r"(?:\.(?!\s|$)|[^.])"
+#: What a document can call the thing it is presenting. "changes" is here
+#: because one paper says only "The percent changes were displayed as mean6SD".
+_SUBJECT = (r"data|values?|results|variables|measurements|numbers|changes?|"
+            r"error\s+bars?|bars?|whiskers|points?|lines?|responses?")
 STATEMENT = re.compile(
     r"(?:"
-    r"%(in)s{0,120}\b(?:data|values?|results|variables|measurements|numbers|"
-    r"error\s+bars?|bars?|whiskers|points?|lines?)\b%(in)s{0,60}\b"
+    r"%(in)s{0,120}\b(?:%(subj)s)\b%(in)s{0,60}\b"
     r"(?:are|were|is|was|be)\b%(in)s{0,40}\b(?:presented|expressed|shown|given|"
     r"reported|displayed|represented|plotted|depicted|summari[sz]ed|indicated)"
     r"|"
     # the subject-less form a caption uses: "Displayed are means +/- 95% CI"
     r"\b(?:displayed|shown|presented|plotted|given)\s+(?:are|is)\s+(?:the\s+)?"
     r"(?:means?|medians?|averages?)"
-    r")\b%(in)s{0,200}" % {"in": _IN},
+    r"|"
+    # ACTIVE VOICE, which one paper uses and the passive branches cannot see:
+    # "Fig. 1 and Fig. 2 show the physiological responses (30-min means and
+    # SEMs) of men and women". A sentence only becomes the document's
+    # statement when it also NAMES a dispersion, so widening the verb here
+    # cannot on its own promote a sentence that says nothing.
+    r"%(in)s{0,60}\b(?:shows?|displays?|presents?|reports?|gives?)\b"
+    r"%(in)s{0,60}\b(?:%(subj)s|means?|medians?|averages?)\b"
+    r")%(in)s{0,200}" % {"in": _IN, "subj": _SUBJECT},
     re.I)
 
 FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",

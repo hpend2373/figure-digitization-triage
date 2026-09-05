@@ -601,12 +601,18 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         did = d["Draft_ID"]
         p = os.path.join(D, d["Figure_Crop"]) if d["Figure_Crop"] else ""
         has_img = bool(p) and os.path.exists(p)
-        # The large copy rides along only for rows that can take a number.
-        # A blocked row is not going to be counted from, and its full-size
-        # crop would be most of the file.
         _open = has_img and not blocked_reason(d)
-        big = ((" data-zoom='%s'" % zoom(p)) if _open else "")
-        if _open:
+        # SEEING IS NOT COUNTING. The large copy used to ride along only for
+        # rows that can take a number, to keep the file small - so all 75
+        # blocked rows had a thumbnail and nothing behind it, and `openZoom`
+        # returns at once without `data-zoom`. A person who wanted to know
+        # whether a block was right had no way to look, and the 2026-09-06
+        # audit found that 57 of those 75 are not the figure at all while 15
+        # are the figure, blocked as a duplicate. Both of those are things a
+        # person can only see by opening the picture. The input gate stays
+        # exactly where it was; the pictures come along.
+        big = ((" data-zoom='%s'" % zoom(p)) if has_img else "")
+        if has_img:
             if not _needs_page(d):
                 # Says what is true rather than leaving the first step blank:
                 # there is no box to check because there is no box.

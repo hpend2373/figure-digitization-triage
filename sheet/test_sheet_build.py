@@ -193,8 +193,22 @@ for _did in _open:
         check("  %s의 확대본이 크롭을 줄이지 않는다" % _did, _z == _src,
               "%s vs 크롭 %s" % (_z, _src))
 
-check("막힌 행에는 확대본을 싣지 않는다 - 셀 일이 없는 그림이다",
-      all(_zoom(d) is None for d in BY_ID if d not in _open))
+# REVERSED, AND HERE IS WHY. This said "막힌 행에는 확대본을 싣지 않는다 -
+# 셀 일이 없는 그림이다", to keep the file small. The consequence was that all
+# 75 blocked rows of run2 had a thumbnail and nothing behind it: `openZoom`
+# returns at once without `data-zoom`, so nobody could look at what had been
+# blocked. The 2026-09-06 audit of those 75 found 57 that are not the figure
+# at all and 15 that ARE the figure, blocked as a duplicate - and neither of
+# those can be seen in a 300px thumbnail. 막는 것과 보여주지 않는 것은 다른
+# 일입니다: the number field stays locked, the picture comes along.
+_blocked_with_crop = [d for d in BY_ID if d not in _open and _img(d) is not None]
+check("막힌 행도 크롭이 있으면 확대본을 함께 싣는다 - 막는 것과 못 보게 하는 것은 다르다",
+      _blocked_with_crop and all(_zoom(d) is not None for d in _blocked_with_crop),
+      [d for d in _blocked_with_crop if _zoom(d) is None])
+check("  그래도 막힌 행의 숫자칸은 잠겨 있다",
+      all("disabled" in BY_ID[d][3] for d in _blocked_with_crop))
+check("크롭이 없는 막힌 행에는 실을 확대본도 없다",
+      _zoom("DOC_B_D002") is None)
 check("확대창과 닫기 수단이 페이지에 있다",
       "id='lb'" in S and "id='lbclose'" in S and "Esc" in S)
 check("확대는 마우스 없이도 열린다",

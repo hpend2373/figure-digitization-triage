@@ -107,6 +107,11 @@ for _text, _want in (
     check("%r -> %s" % (_text[:48], _want), _code == _want, "%s %r" % (_code, _ev))
 # REVERT: stop folding ligatures. "conﬁdence" then matches nothing, and a
 # preprint whose every caption says "95% conﬁdence intervals" is UNSTATED.
+# REVERT: leave control characters in. csv refuses the field and the run
+# stops at the first caption that carries one.
+check("a control character from a broken font does not survive into the text",
+      CF._norm("Fig. 1.\x00 Heart\x1f rate") == "Fig. 1. Heart rate"
+      and CF.join_lines(CF.caption_lines("Fig. 1.\x00 Heart", 0)) == "Fig. 1. Heart")
 check("a ligature is folded in the evidence too",
       "confidence" in CF.errorbar_definition("means +/- 95% con\ufb01dence intervals")[1])
 check("evidence quotes the words it matched",

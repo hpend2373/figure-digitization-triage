@@ -132,8 +132,15 @@ LIGATURES = {"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi",
              "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st"}
 
 
+#: C0 control characters other than whitespace. pdfminer hands them over
+#: from broken fonts, and Python's csv writer refuses a field that holds one
+#: ("need to escape, but no escapechar set") - which stopped a whole run over
+#: one caption on page 9 of one preprint.
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 def _norm(text):
-    text = str(text or "")
+    text = _CONTROL.sub(" ", str(text or ""))
     for glyph, plain in LIGATURES.items():
         text = text.replace(glyph, plain)
     return " ".join(text.split())

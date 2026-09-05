@@ -1,6 +1,6 @@
 {
   "files": {
-    "caption_fulltext.py": "550b1144689afc4fe8f458fff9372482527cbe6dff2d237f75f29f02f0ee1002"
+    "caption_fulltext.py": "e37f58453d5cfa3cf559d51bb3f4fa4aa3bc00ee87f03da5a59b2b3ceb8758ce"
   },
   "suites": [
     "test_caption_fulltext.py"
@@ -137,6 +137,12 @@
       "file": "caption_fulltext.py",
       "old": "                base[\"Caption_Next_Gap\"] = \"%.1f\" % tail[0][0]\n                base[\"Caption_Next_Blocks\"] = str(len(tail))\n",
       "new": ""
+    },
+    {
+      "name": "control characters kept",
+      "file": "caption_fulltext.py",
+      "old": "    text = _CONTROL.sub(\" \", str(text or \"\"))",
+      "new": "    text = str(text or \"\")"
     }
   ]
 }

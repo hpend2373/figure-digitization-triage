@@ -99,9 +99,16 @@ for _text, _want in (
         ("Heart rate during tilt in eight subjects.", CF.DEF_UNSTATED),
         ("Panels A-C are mean ± SD; panel D is mean ± SEM.", CF.DEF_AMBIGUOUS),
         ("Word-final SD. Then nothing.", "SD"),
+        # pdfminer's ligatures: the glyph kept, and the glyph dropped
+        ("Displayed are means +/- 95% con\ufb01dence intervals.", "CI"),
+        ("Data are presented as mean +/- .95 con dence intervals.", "CI"),
         ("Sedentary (SED) group vs. exercise group.", CF.DEF_UNSTATED)):
     _code, _ev = CF.errorbar_definition(_text)
     check("%r -> %s" % (_text[:48], _want), _code == _want, "%s %r" % (_code, _ev))
+# REVERT: stop folding ligatures. "conﬁdence" then matches nothing, and a
+# preprint whose every caption says "95% conﬁdence intervals" is UNSTATED.
+check("a ligature is folded in the evidence too",
+      "confidence" in CF.errorbar_definition("means +/- 95% con\ufb01dence intervals")[1])
 check("evidence quotes the words it matched",
       "standard deviation" in CF.errorbar_definition(
           "Error bars show the standard deviation at each point.")[1])
@@ -160,6 +167,14 @@ check("a ± that names nothing is passed over", "error where" not in _sent, _sen
 check("the sentence is quoted", "mean ± SEM" in _sent, _sent)
 check("no statement, no invention", CF.document_statement(
     [(1, 0, 0, 1, 1, "Fourteen subjects took part.")]) == ("", "", ""))
+# REVERT: end a sentence at any period. ".95" then ends it, and the statement
+# read is "mean +/-" - which names nothing, so the document has no statement.
+check("a decimal point inside the sentence does not end it",
+      CF.document_statement([(5, 0, 0, 1, 1,
+          "Data are presented as mean +/- .95 confidence intervals. Next sentence.")])[0] == "CI")
+check("the subject-less caption form counts: 'Displayed are means +/- 95% CI'",
+      CF.document_statement([(9, 0, 0, 1, 1, "Displayed are means +/- 95% confidence intervals.")])
+      == ("CI", "Displayed are means +/- 95% confidence intervals", "9"))
 check("a subject-age sentence with ± is not a presentation statement",
       CF.document_statement([(1, 0, 0, 1, 1, "Subjects were aged 32 ± 4 years.")])
       == ("", "", ""))

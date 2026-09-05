@@ -66,7 +66,7 @@ DEFINITIONS = (
     ("SEM", re.compile(r"\bS\.?\s?E\.?\s?M\.?\b|standard\s+errors?\s+of\s+the\s+means?", re.I)),
     ("SE",  re.compile(r"\bS\.?E\.?s?\b(?!\s?M)|standard\s+errors?\b(?!\s+of\s+the\s+mean)", re.I)),
     ("SD",  re.compile(r"\bS\.?D\.?s?\b|standard\s+deviations?", re.I)),
-    ("CI",  re.compile(r"\b9[05]\s*%\s*(?:CIs?|confidence)|confidence\s+intervals?|\bCIs?\b", re.I)),
+    ("CI",  re.compile(r"\b9[05]\s*%\s*(?:CIs?|con(?:fi|\s)?dence)|con(?:fi|\s)?dence\s+intervals?|\bCIs?\b", re.I)),
     ("IQR", re.compile(r"\bIQRs?\b|inter-?quartile", re.I)),
 )
 PLUS_MINUS = re.compile(r"±|\+/-|\+/−|plus\s+or\s+minus", re.I)
@@ -78,12 +78,22 @@ DEF_UNSTATED = "UNSTATED"
 #: A sentence in which the document says how it presents its numbers. This is
 #: the Methods sentence a person would look for by hand; the module only finds
 #: it and quotes it.
+#: A character that does not end a sentence: anything but a period, or a
+#: period with no space after it. "mean +/- .95 confidence intervals" has a
+#: period in it that ends nothing, and reading it as the end of the sentence
+#: left "mean +/-" - a statement that named no dispersion.
+_IN = r"(?:\.(?!\s|$)|[^.])"
 STATEMENT = re.compile(
-    r"[^.]{0,120}\b(?:data|values?|results|variables|measurements|numbers|"
-    r"error\s+bars?|bars?|whiskers|points?|lines?)\b[^.]{0,60}\b"
-    r"(?:are|were|is|was|be)\b[^.]{0,40}\b(?:presented|expressed|shown|given|"
+    r"(?:"
+    r"%(in)s{0,120}\b(?:data|values?|results|variables|measurements|numbers|"
+    r"error\s+bars?|bars?|whiskers|points?|lines?)\b%(in)s{0,60}\b"
+    r"(?:are|were|is|was|be)\b%(in)s{0,40}\b(?:presented|expressed|shown|given|"
     r"reported|displayed|represented|plotted|depicted|summari[sz]ed|indicated)"
-    r"\b[^.]{0,200}",
+    r"|"
+    # the subject-less form a caption uses: "Displayed are means +/- 95% CI"
+    r"\b(?:displayed|shown|presented|plotted|given)\s+(?:are|is)\s+(?:the\s+)?"
+    r"(?:means?|medians?|averages?)"
+    r")\b%(in)s{0,200}" % {"in": _IN},
     re.I)
 
 FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
@@ -93,8 +103,19 @@ FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
           "Doc_Errorbar_Page", "Source_SHA256_OK")
 
 
+#: Typographic ligatures as pdfminer hands them over. A PDF that sets
+#: "confidence" with an fi ligature comes back as "conﬁdence" - 264 of them
+#: in run2's captions - and one that dropped the glyph comes back as
+#: "con dence". The CI pattern above tolerates the gap; this folds the glyph.
+LIGATURES = {"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi",
+             "\ufb04": "ffl", "\ufb05": "st", "\ufb06": "st"}
+
+
 def _norm(text):
-    return " ".join(str(text or "").split())
+    text = str(text or "")
+    for glyph, plain in LIGATURES.items():
+        text = text.replace(glyph, plain)
+    return " ".join(text.split())
 
 
 def _bbox_key(text):

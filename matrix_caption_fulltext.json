@@ -1,6 +1,6 @@
 {
   "files": {
-    "caption_fulltext.py": "1c4edabbb9193faae4e45ef34278ca6e0ca2a00ddb5bcc061fa68217259f9b15"
+    "caption_fulltext.py": "36fa491373f3656c2eed79ea7e48ebc9064a9c3c2297722cdff9b27d41af58b0"
   },
   "suites": [
     "test_caption_fulltext.py"
@@ -83,6 +83,18 @@
       "file": "caption_fulltext.py",
       "old": "        if raw.strip():\n            out.append(_norm(raw))",
       "new": "        out.append(_norm(raw))"
+    },
+    {
+      "name": "ligatures not folded",
+      "file": "caption_fulltext.py",
+      "old": "    for glyph, plain in LIGATURES.items():\n        text = text.replace(glyph, plain)\n",
+      "new": ""
+    },
+    {
+      "name": "any period ends the statement sentence",
+      "file": "caption_fulltext.py",
+      "old": "_IN = r\"(?:\\.(?!\\s|$)|[^.])\"",
+      "new": "_IN = r\"[^.]\""
     }
   ]
 }

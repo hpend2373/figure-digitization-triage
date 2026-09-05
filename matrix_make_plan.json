@@ -1,0 +1,173 @@
+{
+ "files": {
+  "make_plan.py": "d69b4c2cbd027f06aebe6465c8607a5700dd5652f250dd7dcb362accb333cbcc",
+  "test_make_plan.py": "fafeb49e177f4de0a09c927e3756e7f12b82faf4979e5dc6cc485a696edb6928"
+ },
+ "suites": [
+  "test_make_plan.py"
+ ],
+ "mutations": [
+  {
+   "name": "블록된 행도 계획서에 넣는다",
+   "file": "make_plan.py",
+   "old": "        if reason.get(\"Count_Blocked\") == \"1\":\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "중복 행도 계획서에 넣는다",
+   "file": "make_plan.py",
+   "old": "        if (reason.get(\"Duplicate_Of\") or \"\").strip():\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "경로를 보지 않고 모두 기하 대상으로 둔다",
+   "file": "make_plan.py",
+   "old": "    disposition = disposition_for(route)",
+   "new": "    disposition = \"GEOMETRY_NOT_AUTHORED\""
+  },
+  {
+   "name": "모르는 경로도 기하 대상으로 둔다",
+   "file": "make_plan.py",
+   "old": "    return ROUTE_DISPOSITION.get(route, \"UNRESOLVED\")",
+   "new": "    return ROUTE_DISPOSITION.get(route, \"GEOMETRY_NOT_AUTHORED\")"
+  },
+  {
+   "name": "사람의 판정을 캡션 규칙이 덮는다",
+   "file": "make_plan.py",
+   "old": "    if decision:\n        code = (decision.get(\"Dispersion_Type\") or \"\").strip().upper()",
+   "new": "    if False:\n        code = (decision.get(\"Dispersion_Type\") or \"\").strip().upper()"
+  },
+  {
+   "name": "풀에서 뺀 행도 기하를 쓸 대상으로 둔다",
+   "file": "make_plan.py",
+   "old": "        if code in RE.DISPOSITIONS:\n            # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.\n            disposition = \"UNRESOLVED\"",
+   "new": "        if False:\n            disposition = \"UNRESOLVED\""
+  },
+  {
+   "name": "캡션이 말해도 문서 진술을 먼저 본다",
+   "file": "make_plan.py",
+   "old": "    code = DEFINITION_TO_DISPERSION.get(\n        (caption.get(\"Errorbar_Definition\") or \"\").strip())\n    if code:",
+   "new": "    code = DEFINITION_TO_DISPERSION.get(\n        (caption.get(\"Errorbar_Definition\") or \"\").strip())\n    if False:"
+  },
+  {
+   "name": "문서 진술은 보지 않는다",
+   "file": "make_plan.py",
+   "old": "    code = DEFINITION_TO_DISPERSION.get(\n        (caption.get(\"Doc_Errorbar_Definition\") or \"\").strip())\n    if code:",
+   "new": "    code = DEFINITION_TO_DISPERSION.get(\n        (caption.get(\"Doc_Errorbar_Definition\") or \"\").strip())\n    if False:"
+  },
+  {
+   "name": "CI를 계획서의 이름으로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "DEFINITION_TO_DISPERSION = {\"SD\": \"SD\", \"SE\": \"SE\", \"SEM\": \"SEM\",\n                            \"CI\": \"CI95\", \"IQR\": \"IQR\"}",
+   "new": "DEFINITION_TO_DISPERSION = {\"SD\": \"SD\", \"SE\": \"SE\", \"SEM\": \"SEM\",\n                            \"CI\": \"CI\", \"IQR\": \"IQR\"}"
+  },
+  {
+   "name": "두 가지를 말하는 문서에 한 가지를 골라 준다",
+   "file": "make_plan.py",
+   "old": "                            \"CI\": \"CI95\", \"IQR\": \"IQR\"}",
+   "new": "                            \"CI\": \"CI95\", \"IQR\": \"IQR\", \"AMBIGUOUS\": \"SD\"}"
+  },
+  {
+   "name": "논문의 말 대신 규칙이 맞춘 토막을 적는다",
+   "file": "make_plan.py",
+   "old": "return code, (caption.get(\"Caption_Full\") or \"\").strip(), FROM_CAPTION, \\",
+   "new": "return code, (caption.get(\"Errorbar_Evidence\") or \"\").strip(), FROM_CAPTION, \\"
+  },
+  {
+   "name": "정의가 없어도 할 일로 적지 않는다",
+   "file": "make_plan.py",
+   "old": "        elif not code:\n            needs.append(\"오차 정의\")",
+   "new": "        elif False:\n            needs.append(\"오차 정의\")"
+  },
+  {
+   "name": "기하를 할 일로 적지 않는다",
+   "file": "make_plan.py",
+   "old": "        needs.append(\"패널 기하 (읽을 자리·눈금·표 종류)\")",
+   "new": "        pass"
+  },
+  {
+   "name": "없는 잘린 그림을 할 일로 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    if not image or not os.path.isfile(path):\n        needs.append(\"잘린 그림 파일\")",
+   "new": "    if False:\n        needs.append(\"잘린 그림 파일\")"
+  },
+  {
+   "name": "세지 않은 패널 수를 그림 수로 채운다",
+   "file": "make_plan.py",
+   "old": "    if count is None:\n        needs.append(\"패널 계수\")",
+   "new": "    if False:\n        needs.append(\"패널 계수\")"
+  },
+  {
+   "name": "세지 않았는데 1개라고 적는다",
+   "file": "make_plan.py",
+   "old": "        figure[\"observed_panel_count\"] = count",
+   "new": "        figure[\"observed_panel_count\"] = count\n    if \"observed_panel_count\" not in figure:\n        figure[\"observed_panel_count\"] = 1"
+  },
+  {
+   "name": "센 수와 다른 개수의 패널을 세운다",
+   "file": "make_plan.py",
+   "old": "            for i in range(count)]",
+   "new": "            for i in range(count + 1)]"
+  },
+  {
+   "name": "패널 이름을 그림마다 같게 짓는다",
+   "file": "make_plan.py",
+   "old": "            {\"panel_id\": \"%s_P%d\" % (row[\"Draft_ID\"], i + 1),",
+   "new": "            {\"panel_id\": \"P%d\" % (i + 1),"
+  },
+  {
+   "name": "검토자를 사람으로 적는다",
+   "file": "make_plan.py",
+   "old": "\"record_type\": \"DEMO_IDENTITY\",\n            \"human_attestation\": \"DEMO_EXAMPLE\",",
+   "new": "\"record_type\": \"HUMAN\",\n            \"human_attestation\": \"HUMAN_CONFIRMED\","
+  },
+  {
+   "name": "등록일을 오늘로 채운다",
+   "file": "make_plan.py",
+   "old": "\"registration_date\": run_date,",
+   "new": "\"registration_date\": __import__(\"datetime\").date.today().isoformat(),"
+  },
+  {
+   "name": "문서를 확인된 것으로 적는다",
+   "file": "make_plan.py",
+   "old": "            \"inventory_status\": \"PENDING\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        })",
+   "new": "            \"inventory_status\": \"VISUALLY_VERIFIED\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        })"
+  },
+  {
+   "name": "그림을 확인된 것으로 적는다",
+   "file": "make_plan.py",
+   "old": "        \"inventory_status\": \"PENDING\",\n        \"reviewer_id\": DEMO_REVIEWER,\n        \"panels\": [],",
+   "new": "        \"inventory_status\": \"VISUALLY_VERIFIED\",\n        \"reviewer_id\": DEMO_REVIEWER,\n        \"panels\": [],"
+  },
+  {
+   "name": "계획서가 받지 못하는 이름도 그냥 쓴다",
+   "file": "make_plan.py",
+   "old": "        if not BM.SAFE_ID.match(publication):",
+   "new": "        if False:"
+  },
+  {
+   "name": "schema를 손으로 적는다",
+   "file": "make_plan.py",
+   "old": "\"schema\": CP.PLAN_SCHEMA,",
+   "new": "\"schema\": \"figure-digitization-triage/extraction-plan/0\","
+  },
+  {
+   "name": "--only를 무시한다",
+   "file": "make_plan.py",
+   "old": "        if only and row[\"Source_Document_ID\"] not in only:\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "캡션 전문 대신 초안의 한 줄을 넣는다",
+   "file": "make_plan.py",
+   "old": "    text = (caption.get(\"Caption_Full\") if caption else \"\") or row[\"Caption_Text\"]",
+   "new": "    text = row[\"Caption_Text\"]"
+  },
+  {
+   "name": "풀에서 뺀 행도 셈에 든다",
+   "file": "make_plan.py",
+   "old": "            if code in RE.DISPOSITIONS:\n                dropped += 1",
+   "new": "            if False:\n                dropped += 1"
+  }
+ ]
+}

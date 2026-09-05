@@ -98,6 +98,18 @@ def thumb_keeps_aspect(card, crop_path, tolerance=0.02):
     t = decode(card["thumb"])
     c = Image.open(crop_path)
     a, b = t.width / float(t.height), c.width / float(c.height)
+    # PIXELS ARE WHOLE NUMBERS AND RATIOS ARE NOT. A 1150x40 crop thumbnailed
+    # to 300 wide wants to be 10.43 pixels tall and can only be 10, so its
+    # ratio reads 30.0 against the crop's 28.75 - 4% out, and every bit of it
+    # rounding. Called a distortion, that verdict falls on exactly the flattest
+    # crops, which is the shape THIN_CROP rows have - the rows this check
+    # started seeing the day blocked rows began carrying their pictures. So a
+    # ratio the thumbnail's integer size can explain passes, and the flat
+    # tolerance still catches anything wider than rounding.
+    lo = (t.width - 0.5) / (t.height + 0.5)
+    hi = (t.width + 0.5) / max(t.height - 0.5, 0.5)
+    if lo <= b <= hi:
+        return True, "%.3f (반올림 범위 %.3f~%.3f 안)" % (a, lo, hi)
     if abs(a - b) / b > tolerance:
         return False, "썸네일 비율 %.3f vs 크롭 %.3f" % (a, b)
     return True, "%.3f" % a
@@ -158,7 +170,7 @@ def check_run(run, parts, draft_rows, zoom_max_width=0):
                 problems.append((card["Draft_ID"], "card", "초안에 없는 행"))
                 continue
             if not card["zoom"]:
-                continue        # blocked rows and rows without a picture carry no zoom
+                continue        # rows without a picture carry no zoom
             seen += 1
             crop = os.path.join(run, row.get("Figure_Crop") or "")
             if not os.path.exists(crop):

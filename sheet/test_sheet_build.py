@@ -209,6 +209,22 @@ check("  그래도 막힌 행의 숫자칸은 잠겨 있다",
       all("disabled" in BY_ID[d][3] for d in _blocked_with_crop))
 check("크롭이 없는 막힌 행에는 실을 확대본도 없다",
       _zoom("DOC_B_D002") is None)
+# AND THE PAGE COMES TOO. `_needs_page` meant two things at once - "was this
+# cut out of a page" and "is this row being counted" - and the card read the
+# first meaning off the second. The moment blocked rows started carrying
+# pictures, all 75 of them were labelled 출판사가 낸 그림 파일: the one
+# sentence that says the box cannot have clipped the figure, said about crops
+# cut from pages with a box that might have.
+_blocked_from_page = [d for d in _blocked_with_crop
+                      if {r["Draft_ID"]: r for r in DRAFT}[d]["Crop_Quality_Status"]
+                      != "PUBLISHER_FIGURE"]
+check("페이지에서 잘라낸 막힌 행은 원문 쪽도 함께 싣는다",
+      _blocked_from_page
+      and all(_pageview(d) is not None for d in _blocked_from_page),
+      [d for d in _blocked_from_page if _pageview(d) is None])
+check("  그리고 출판사 그림 파일이라고 말하지 않는다",
+      not any("data-nopage=" in BY_ID[d][3] for d in _blocked_from_page),
+      [d for d in _blocked_from_page if "data-nopage=" in BY_ID[d][3]])
 check("확대창과 닫기 수단이 페이지에 있다",
       "id='lb'" in S and "id='lbclose'" in S and "Esc" in S)
 check("확대는 마우스 없이도 열린다",
@@ -323,8 +339,9 @@ check("그림 파일이 없는 그림파일 행은 빌드를 멈춘다",
       and "그 파일이 없습니다" in (_pf.stderr or "") + (_pf.stdout or ""),
       "rc=%s %s" % (_pf.returncode, (_pf.stderr or "")[-160:]))
 
-check("막힌 행에는 페이지 뷰도 싣지 않는다",
-      all(_pageview(d) is None for d in BY_ID if d not in _open))
+check("페이지에서 잘라낸 막힌 행은 페이지 뷰도 싣는다",
+      all(_pageview(d) is not None for d in _blocked_from_page),
+      [d for d in _blocked_from_page if _pageview(d) is None])
 check("확대창이 두 단계를 그 순서로 묻는다",
       S.index("상자가 목표 그림 전체를 담았습니까") < S.index("축 영역이 몇 개입니까"))
 check("페이지 뷰 자리와 크롭 자리가 각각 있다",
@@ -1393,8 +1410,9 @@ _cards = [c for part in PARTS for c in DC.cards(io.open(part, encoding="utf-8").
 check("카드 수 = 초안 행 수 (파서가 카드를 빠뜨리지 않는다)",
       len(_cards) == len(DRAFT), (len(_cards), len(DRAFT)))
 _with_zoom = [c for c in _cards if c["zoom"]]
-check("열린 행에만 확대 이미지가 있다 (막힌 행은 없다)",
-      len(_with_zoom) == _seen and 0 < _seen < len(DRAFT), (_seen, len(DRAFT)))
+check("그림이 있는 행은 막혔든 아니든 확대 이미지를 가진다",
+      len(_with_zoom) == _seen
+      and _seen == len([c for c in _cards if c["thumb"]]), (_seen, len(_cards)))
 
 # 페이지 상자 검사가 실제로 거울을 잡는지: 좋은 카드에 뒤집힌 행을 대 본다.
 _good = [c for c in _with_zoom if c["page"]][0]

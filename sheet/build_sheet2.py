@@ -247,10 +247,28 @@ def blocked_reason(d):
 FIGURE_FILE_STATUS = "PUBLISHER_FIGURE"
 
 
+def _from_page(d):
+    """Was this crop cut out of a page? - a fact about the crop, nothing else.
+
+    Kept apart from `_needs_page` because the two were one function and the
+    card read it as "is there a page to show". A blocked row answered False,
+    so once blocked rows started carrying their pictures every one of them
+    was labelled "출판사가 낸 그림 파일" - which is untrue of a crop cut from
+    a page, and it is the reassuring untruth: it says the box cannot have
+    clipped anything.
+    """
+    return str(d.get("Crop_Quality_Status") or "").strip() != FIGURE_FILE_STATUS
+
+
 def _needs_page(d):
-    return (not blocked_reason(d)
-            and str(d.get("Crop_Quality_Status") or "").strip()
-            != FIGURE_FILE_STATUS)
+    """Is this a row that MUST ship its page? Only a countable one is.
+
+    The build stops when one of these has no raster (see `_NO_PAGE`): a row a
+    person is asked to count without the page is a row asked with the check
+    removed. A blocked row is not being asked, so a missing raster there costs
+    a picture and not an answer.
+    """
+    return not blocked_reason(d) and _from_page(d)
 
 
 def caution(d):
@@ -613,7 +631,7 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         # exactly where it was; the pictures come along.
         big = ((" data-zoom='%s'" % zoom(p)) if has_img else "")
         if has_img:
-            if not _needs_page(d):
+            if not _from_page(d):
                 # Says what is true rather than leaving the first step blank:
                 # there is no box to check because there is no box.
                 big += (" data-nopage='이 행은 페이지에서 잘라낸 크롭이 "

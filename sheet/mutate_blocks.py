@@ -223,6 +223,19 @@ MUT = [
      "        return ((duplicate.get(a) or (None,))[0] == b\n"
      "                or (duplicate.get(b) or (None,))[0] == a)",
      "        return (duplicate.get(a) or (None,))[0] == b"),
+    ("M61 범위 밖을 안 봄", "block_rules.py",
+     "    outside = out_of_scope_reason(row, scope)\n    if outside:\n        return outside",
+     "    pass"),
+    ("M62 범위 밖을 다른 이유 뒤로 미룸", "block_rules.py",
+     "    outside = out_of_scope_reason(row, scope)\n    if outside:\n        return outside\n    if shared_with:",
+     "    if shared_with:"),
+    ("M63 범위 없는 문서를 전부 범위 밖으로", "block_rules.py",
+     "    if not scope:\n        return \"\"", "    if False:\n        return \"\""),
+    ("M64 범위의 끝쪽을 밖으로", "block_rules.py",
+     "    if lo <= page <= hi:", "    if lo < page < hi:"),
+    ("M65 쪽을 못 읽으면 범위 밖으로", "block_rules.py",
+     "    except (TypeError, ValueError):\n        # 쪽을 모르면 범위 안인지도 모릅니다. 모르는 것을 밖이라고 하지\n        # 않습니다 - 다른 문들이 이 행을 각자의 이유로 볼 것입니다.\n        return \"\"",
+     "    except (TypeError, ValueError):\n        return \"범위 밖\""),
 ]
 
 

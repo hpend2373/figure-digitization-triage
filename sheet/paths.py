@@ -70,6 +70,12 @@ CENSUS_OPTIONAL = _p("FDT_CENSUS_OPTIONAL", "") == "1"
 REGIONS = _p("FDT_REGIONS", os.path.join(RUN, "validated_regions.csv"))
 REGIONS_OPTIONAL = _p("FDT_REGIONS_OPTIONAL", "") == "1"
 
+#: 사람이 문서마다 정한 쪽 범위. 한 권짜리 논문집이 코퍼스에 들어오면 장마다
+#: "Fig. 1"이 다시 시작되고 그 책의 그림이 전부 잡히는데, 목표는 한 장뿐일 수
+#: 있습니다. 무엇이 대상인지는 규칙이 아니라 사람의 결정이므로 파일로 받습니다.
+#: 없으면 아무 문서도 제한하지 않습니다 - 빈 파일과 없는 파일은 같은 뜻입니다.
+SCOPE = _p("FDT_SCOPE", os.path.join(RUN, "document_scope.csv"))
+
 #: Where the built sheet goes, and what the tests read.
 SHEET = _p("FDT_SHEET",
            os.path.join(RUN, "panel_count_contact_sheet.html"))

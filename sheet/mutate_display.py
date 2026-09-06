@@ -36,6 +36,9 @@ MUT = [
     ("M9 카드 파서가 그림 있는 카드만 봄", "display_checks.py",
      "        out.append({\"Draft_ID\": m.group(1),",
      "        if img is None:\n            continue\n        out.append({\"Draft_ID\": m.group(1),"),
+    ("M10 범위 밖 행에도 사진을 실음", "build_sheet2.py",
+     "        outside = out_of_scope(d)\n        if outside:\n            has_img = False",
+     "        outside = out_of_scope(d)"),
 ]
 
 

@@ -215,6 +215,37 @@ else:
 PID_OF_DOC = {}
 
 
+#: {문서: (from, to, 메모)} - 사람이 정한 쪽 범위. 파일이 없으면 빈 표이고,
+#: 빈 표는 아무 문서도 제한하지 않습니다.
+def _read_scope(path):
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    for r in csv.DictReader(io.open(path, encoding="utf-8")):
+        doc = (r.get("Source_Document_ID") or "").strip()
+        try:
+            lo, hi = int(r["Page_From"]), int(r["Page_To"])
+        except (KeyError, TypeError, ValueError):
+            raise SystemExit("%s: %s의 Page_From/Page_To가 정수가 아닙니다"
+                             % (os.path.basename(path), doc or "(빈 문서 이름)"))
+        if lo > hi:
+            raise SystemExit("%s: %s의 범위가 뒤집혀 있습니다 (p.%d~%d)"
+                             % (os.path.basename(path), doc, lo, hi))
+        out[doc] = (lo, hi, (r.get("Note") or "").strip())
+    return out
+
+
+SCOPE = _read_scope(PATHS.SCOPE)
+if SCOPE:
+    print("쪽 범위가 정해진 문서 %d편: %s"
+          % (len(SCOPE), ", ".join("%s p.%d~%d" % (k, v[0], v[1])
+                                   for k, v in sorted(SCOPE.items()))))
+
+
+def out_of_scope(d):
+    return BR.out_of_scope_reason(d, SCOPE.get(d["Source_Document_ID"]))
+
+
 def row_key(d):
     return _defect_key(PID_OF_DOC.get(d["Source_Document_ID"], ""),
                        d["Figure_Number"], d["Page"])
@@ -238,7 +269,8 @@ def blocked_reason(d):
                                         AGREEMENT.get(d["Draft_ID"], "PENDING")),
                              codes=CODES.get(d["Draft_ID"], ()),
                              twin=TWIN.get(d["Draft_ID"]),
-                             duplicate=DUPLICATE.get(d["Draft_ID"]))
+                             duplicate=DUPLICATE.get(d["Draft_ID"]),
+                             scope=SCOPE.get(d["Source_Document_ID"]))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -622,6 +654,13 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         did = d["Draft_ID"]
         p = os.path.join(D, d["Figure_Crop"]) if d["Figure_Crop"] else ""
         has_img = bool(p) and os.path.exists(p)
+        # 범위 밖 행은 사진을 싣지 않습니다. 막힌 행이 사진을 들고 다니는 것은
+        # "이 막힘이 맞나"를 사람이 볼 수 있게 하려는 것인데, 범위 밖은 볼
+        # 것이 없습니다 - 사람이 이미 답한 자리입니다. run2의 논문집 한 권이
+        # 그런 행 134개를 냈고, 그 사진들만 30 MB에 시트 한 장이었습니다.
+        outside = out_of_scope(d)
+        if outside:
+            has_img = False
         _open = has_img and not blocked_reason(d)
         # SEEING IS NOT COUNTING. The large copy used to ride along only for
         # rows that can take a number, to keep the file small - so all 75
@@ -653,10 +692,13 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
                # name. What is missing is a file we have, not a figure the
                # paper has. `block_rules.py` had this right all along; only
                # the sheet said otherwise.
-               "<div class='cap'>[보여줄 이미지가 없습니다 — 이 원문은 "
-               "XML·텍스트라 쪽 이미지가 없고, 그림 파일도 함께 받지 "
-               "않았습니다. 그림을 보려면 이 논문의 PDF나 그림 파일이 "
-               "필요합니다]</div>")
+               ("<div class='cap'>[이 문서의 대상 쪽 범위 밖입니다 — "
+                "그림은 그대로 있고, 세는 자리가 아니라 싣지 않았습니다]</div>"
+                if outside else
+                "<div class='cap'>[보여줄 이미지가 없습니다 — 이 원문은 "
+                "XML·텍스트라 쪽 이미지가 없고, 그림 파일도 함께 받지 "
+                "않았습니다. 그림을 보려면 이 논문의 PDF나 그림 파일이 "
+                "필요합니다]</div>"))
         br, ca = blocked_reason(d), caution(d)
         sent = SENTENCE.get(did)
         conf = float(d["Confidence"])

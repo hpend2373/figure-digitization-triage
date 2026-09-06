@@ -1517,6 +1517,69 @@ check("사람이 적지 않은 행은 빈칸 그대로다",
       all(_vr_after[d["Draft_ID"]].get("Human_Choice", "") == ""
           for d in DRAFT if d["Draft_ID"] != _target))
 
+# --- 사람이 정한 쪽 범위 ---------------------------------------------------
+# run2에서 호흡 신경생리 논문집 한 권이 137행을 냈고, 워크리스트가 그 책에
+# 대해 적어 둔 목표는 그림 하나였습니다. 세는 사람에게 나머지 133행은 물음이
+# 아닙니다 - 그리고 그 사진들만 30 MB에 시트 한 장이었습니다.
+_scope_dir = os.path.join(TMP, "scope")
+os.makedirs(_scope_dir, exist_ok=True)
+_scope_csv = os.path.join(_scope_dir, "document_scope.csv")
+_target_doc = DRAFT[0]["Source_Document_ID"]
+_target_page = int(DRAFT[0]["Page"])
+with io.open(_scope_csv, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(["Source_Document_ID", "Page_From", "Page_To", "Note"])
+    _w.writerow([_target_doc, _target_page, _target_page, "표적 장만"])
+_sc_sheet = os.path.join(_scope_dir, "s.html")
+_sc = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                     capture_output=True, text=True,
+                     env=dict(ENV, FDT_SHEET=_sc_sheet, FDT_SCOPE=_scope_csv))
+check("쪽 범위를 주면 빌드가 통과한다", _sc.returncode == 0,
+      (_sc.stderr or _sc.stdout)[-200:])
+check("  그리고 어느 문서를 어디까지로 제한했는지 말한다",
+      "쪽 범위가 정해진 문서" in (_sc.stdout or ""), (_sc.stdout or "")[:200])
+_sc_parts = PATHS.parts_for(_sc_sheet)
+_sc_html = "".join(io.open(p, encoding="utf-8").read() for p in _sc_parts)
+_sc_by = {}
+for _m in re.finditer(r"<div class='fig[^']*' data-id='([^']+)'", _sc_html):
+    _e = _sc_html.find("<div class='fig", _m.end())
+    _sc_by[_m.group(1)] = _sc_html[_m.start(): _e if _e > 0 else len(_sc_html)]
+_same = [d["Draft_ID"] for d in DRAFT
+         if d["Source_Document_ID"] == _target_doc and int(d["Page"]) == _target_page]
+_other = [d["Draft_ID"] for d in DRAFT
+          if d["Source_Document_ID"] == _target_doc and int(d["Page"]) != _target_page]
+check("범위 밖 행이 실제로 생겼다", len(_other) > 0 and len(_same) > 0,
+      (len(_same), len(_other)))
+# REVERT: leave the pictures on. 물음이 아닌 행 133개의 확대본과 원문 쪽이
+# 그대로 실려, 아무도 볼 일 없는 30 MB가 시트에 남습니다.
+check("범위 밖 행에는 사진을 싣지 않는다",
+      all("data-zoom=" not in _sc_by[d] and "<img class='thumb'" not in _sc_by[d]
+          for d in _other),
+      [d for d in _other if "data-zoom=" in _sc_by[d]])
+check("  대신 왜 없는지 말하고, XML이라고 말하지 않는다",
+      all("대상 쪽 범위 밖" in _sc_by[d] and "XML" not in _sc_by[d]
+          for d in _other), [_sc_by[d][:200] for d in _other[:1]])
+check("범위 밖 행은 숫자를 넣을 수 없다",
+      all("disabled" in _sc_by[d] for d in _other))
+check("범위 안 행은 그대로 남는다",
+      all("data-zoom=" in _sc_by[d] for d in _same
+          if [x for x in DRAFT if x["Draft_ID"] == d][0]["Figure_Crop"]),
+      [d for d in _same if "data-zoom=" not in _sc_by[d]])
+check("범위 파일이 없으면 아무 문서도 제한되지 않는다",
+      all("대상 쪽 범위 밖" not in BY_ID[d][3] for d in BY_ID))
+_bad_scope = os.path.join(_scope_dir, "bad.csv")
+with io.open(_bad_scope, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(["Source_Document_ID", "Page_From", "Page_To", "Note"])
+    _w.writerow([_target_doc, "316", "313", "뒤집힘"])
+_bs = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                     capture_output=True, text=True,
+                     env=dict(ENV, FDT_SHEET=os.path.join(_scope_dir, "b.html"),
+                              FDT_SCOPE=_bad_scope))
+check("뒤집힌 범위는 빌드를 멈춘다",
+      _bs.returncode != 0 and "뒤집혀" in (_bs.stderr or "") + (_bs.stdout or ""),
+      "rc=%s %s" % (_bs.returncode, (_bs.stderr or "")[-160:]))
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("FDT_SCENARIOS_RUN=%d" % N[0])

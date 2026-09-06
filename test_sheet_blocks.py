@@ -639,6 +639,48 @@ check("without the duplicate map nothing changes",
       BR.shared_crop_map({"A": "d1", "B": "d1"}, duplicate=None)
       == {"A": ["B"], "B": ["A"]})
 
+# --- 사람이 정한 쪽 범위 ---------------------------------------------------
+# 한 권짜리 논문집이 코퍼스에 들어오면 장마다 "Fig. 1"이 다시 시작되고 캡션
+# 인식기는 장 경계를 모르므로 그 책의 그림을 전부 잡습니다. run2에서 호흡
+# 신경생리 논문집 한 권이 137행을 냈는데 목표는 한 장(4쪽)이었습니다 - 계수
+# 대상 569행의 22%가 한 권의 다른 장들이었습니다.
+_SCOPE = (313, 316, "HDBR 장")
+check("범위 안의 행은 범위 때문에 막히지 않는다",
+      BR.out_of_scope_reason(row(Page="315"), _SCOPE) == "")
+check("범위의 양끝은 안쪽이다",
+      BR.out_of_scope_reason(row(Page="313"), _SCOPE) == ""
+      and BR.out_of_scope_reason(row(Page="316"), _SCOPE) == "")
+check("범위 밖의 행은 막히고, 범위와 자기 쪽을 함께 말한다",
+      "313" in BR.out_of_scope_reason(row(Page="69"), _SCOPE)
+      and "316" in BR.out_of_scope_reason(row(Page="69"), _SCOPE)
+      and "69" in BR.out_of_scope_reason(row(Page="69"), _SCOPE),
+      BR.out_of_scope_reason(row(Page="69"), _SCOPE))
+check("  그리고 행을 지우지 않았다고 말한다",
+      "지우지 않았" in BR.out_of_scope_reason(row(Page="69"), _SCOPE))
+check("메모를 주면 왜 그 범위인지도 말한다",
+      "HDBR" in BR.out_of_scope_reason(row(Page="69"), _SCOPE))
+# REVERT: treat a row with no scope as outside. 범위를 정한 적 없는 97편이
+# 통째로 물음에서 빠집니다.
+check("범위가 정해지지 않은 문서는 아무것도 막지 않는다",
+      BR.out_of_scope_reason(row(Page="69"), None) == ""
+      and BR.out_of_scope_reason(row(Page="69"), ()) == "")
+check("쪽을 모르는 행은 범위 밖이라고 하지 않는다",
+      BR.out_of_scope_reason(row(Page=""), _SCOPE) == ""
+      and BR.out_of_scope_reason(row(Page="p.7"), _SCOPE) == "")
+# REVERT: put the scope check after the others. 범위 밖 행이 크롭 결함이나
+# 중복을 이유로 막히고, 그러면 범위를 넓히면 다시 물어야 할 행처럼 보입니다.
+check("범위 밖은 다른 어떤 이유보다 먼저 답한다",
+      BR.blocked_reason(row(Page="69", Crop_Quality_Status="THIN_CROP"),
+                        BR.figure_key("1", "FIG1", "69"), scope=_SCOPE)
+      == BR.out_of_scope_reason(row(Page="69"), _SCOPE),
+      BR.blocked_reason(row(Page="69", Crop_Quality_Status="THIN_CROP"),
+                        BR.figure_key("1", "FIG1", "69"), scope=_SCOPE)[:60])
+check("범위를 주지 않으면 예전 그대로 답한다",
+      BR.blocked_reason(row(Page="69", Crop_Quality_Status="THIN_CROP"),
+                        BR.figure_key("1", "FIG1", "69"))
+      == BR.blocked_reason(row(Page="69", Crop_Quality_Status="THIN_CROP"),
+                           BR.figure_key("1", "FIG1", "69"), scope=None))
+
 print()
 print("FDT_SCENARIOS_RUN=%d" % PASSED[0])
 print("%d scenarios run" % PASSED[0])

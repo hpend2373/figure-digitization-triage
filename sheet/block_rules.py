@@ -638,9 +638,41 @@ AGREEMENT_UNCOUNTABLE["HUMAN_BLOCKED"] = (
     "그림이 아닙니다.")
 
 
+def out_of_scope_reason(row, scope):
+    """이 행이 사람이 정한 쪽 범위 밖이면 그 이유. 범위가 없으면 빈 문자열.
+
+    코퍼스에 무엇이 들어가는가는 규칙이 아니라 사람의 결정입니다. 이 모듈은
+    그 결정을 읽어 적용만 하고, 스스로 범위를 정하지 않습니다 - `scope`가
+    None이면 이 문은 아무것도 하지 않습니다.
+
+    왜 필요한가: 한 권짜리 논문집이 코퍼스에 들어오면 장마다 "Fig. 1"이 다시
+    시작되고, 캡션 인식기는 장 경계를 모르므로 그 책의 그림을 전부 잡습니다.
+    run2에서 호흡 신경생리 논문집 한 권이 137행을 냈는데, 워크리스트가 그
+    책에 대해 적어 둔 목표는 그림 하나였습니다 - 계수 대상 569행의 22%가 한
+    권의 다른 장들이었습니다. 세는 사람에게 그 133행은 물음이 아닙니다.
+
+    (from, to)는 PDF 쪽 번호이고 양끝을 포함합니다.
+    """
+    if not scope:
+        return ""
+    lo, hi = scope[0], scope[1]
+    note = scope[2] if len(scope) > 2 else ""
+    try:
+        page = int(str(row.get("Page") or "").strip())
+    except (TypeError, ValueError):
+        # 쪽을 모르면 범위 안인지도 모릅니다. 모르는 것을 밖이라고 하지
+        # 않습니다 - 다른 문들이 이 행을 각자의 이유로 볼 것입니다.
+        return ""
+    if lo <= page <= hi:
+        return ""
+    return ("이 문서는 p.%d~%d만 대상으로 정해졌고 이 행은 p.%d입니다%s — "
+            "세는 자리가 아니므로 물음에서 뺍니다. 행은 지우지 않았습니다."
+            % (lo, hi, page, (" (%s)" % note) if note else ""))
+
+
 def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
                    census=None, crop_sha="", roundtrip=None, agreement=None,
-                   codes=(), twin=None, duplicate=None):
+                   codes=(), twin=None, duplicate=None, scope=None):
     """Why this row may not take a panel count. Empty string means it may.
 
     `row` needs only the four fields the decision reads, so this can be tested
@@ -652,6 +684,13 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
     not to.
     """
     table = STILL_WRONG if still_wrong is None else still_wrong
+    # 범위 밖이 가장 먼저입니다. 다른 모든 이유는 "이 행이 코퍼스에 있다"를
+    # 전제로 무엇이 잘못되었는지를 말하는데, 이것은 그 전제 자체를 부정합니다.
+    # 크롭 결함이나 중복을 이유로 대면, 범위를 넓히면 다시 물어야 할 행처럼
+    # 보입니다.
+    outside = out_of_scope_reason(row, scope)
+    if outside:
+        return outside
     if shared_with:
         return ("이 크롭은 %s 행과 픽셀까지 같습니다 — 상자가 두 라벨을 "
                 "구분하지 못했으므로 어느 쪽 그림인지 알 수 없습니다."

@@ -266,5 +266,26 @@ test('그림이 바뀐 행의 이의는 되살아나지 않는다', () => {
   assert.equal(out.rejected[0].reason, 'ROW_CHANGED');
 });
 
+/* ---- 체크 칸이 자기를 누른 사람과 싸우지 않는다 ---- */
+// REVERT: derive the box from the stored reason alone. 누르는 순간 체크가
+// 풀리고 이유 칸이 사라져, "한 줄 적어 주세요"라는 말만 남고 적을 자리가
+// 없어집니다 - 사람이 화면에서 본 그대로입니다.
+test('방금 눌렀고 이유가 아직 없으면 켜진 채로 이유 칸이 보인다', () => {
+  assert.deepEqual(L.boxState(undefined, true),
+                   { checked: true, reasonVisible: true, settled: false });
+});
+test('저장된 이유가 있으면 켜져 있고 이유 칸이 보인다', () => {
+  assert.deepEqual(L.boxState('본문 문단', false),
+                   { checked: true, reasonVisible: true, settled: true });
+});
+test('누르지도 않고 저장된 것도 없으면 꺼져 있고 이유 칸은 숨는다', () => {
+  assert.deepEqual(L.boxState('', false),
+                   { checked: false, reasonVisible: false, settled: false });
+});
+test('이유 없이 눌러만 둔 것은 정리된 답이 아니다', () => {
+  assert.equal(L.boxState('', true).settled, false);
+  assert.equal(L.boxState('적었음', true).settled, true);
+});
+
 console.log('\n' + (ran - failed) + '/' + ran + ' passed');
 process.exit(failed ? 1 : 0);

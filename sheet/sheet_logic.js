@@ -138,6 +138,29 @@ function validateUncountable(raw) {
   return { ok: true, value: s.slice(0, 200), error: '' };
 }
 
+/* 체크 칸이 지금 어떤 모양이어야 하는가.
+ *
+ * THE BOX FOUGHT THE PERSON WHO TICKED IT. 다시 그리는 함수가 저장된 이유만
+ * 보고 `box.checked = !!stored`를 했습니다. 사람이 칸을 누른 직후에는 이유가
+ * 아직 없으므로 저장된 것도 없고, 그래서 방금 누른 체크가 그 자리에서 풀리고
+ * 이유를 적을 칸도 같이 숨었습니다. 화면에 남는 것은 "한 줄 적어 주세요"라는
+ * 말뿐이고, 적을 자리는 없습니다 - 요구만 하고 받을 데를 치우는 것은 묻는
+ * 것이 아닙니다.
+ *
+ * 두 가지가 따로입니다. `checked`/`reasonVisible`은 사람이 지금 무엇을 하고
+ * 있는가이고, `settled`는 이 행이 답을 가졌는가입니다. 카드 색과 저장은
+ * `settled`만 따르므로, 이유 없는 체크는 여전히 아무것도 저장하지 않습니다.
+ *
+ * 이 결정이 `sheet_page.js`에 있었기 때문에 아무 시나리오도 보지 못했습니다 -
+ * 그 파일은 값을 옮기기만 해야 하고, 무엇을 보일지는 값을 옮기는 일이
+ * 아닙니다. */
+function boxState(stored, ticked) {
+  var on = !!stored;
+  var open = on || !!ticked;
+  return { checked: open, reasonVisible: open, settled: on };
+}
+
+
 function csvCell(s) {
   return '"' + String(s === null || s === undefined ? '' : s)
     .replace(/"/g, '""') + '"';
@@ -222,5 +245,6 @@ if (typeof module !== 'undefined' && module.exports) {
                      nextOpenId: nextOpenId, remaining: remaining,
                      validateUncountable: validateUncountable,
                      validateObjection: validateObjection,
+                     boxState: boxState,
                      DISPUTED_STATUSES: DISPUTED_STATUSES };
 }

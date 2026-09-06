@@ -24,6 +24,8 @@ MUT = [
  ("M10 막힌 행의 이의를 버림",
   "return disputed ? 'BLOCK_DISPUTED' : 'BLOCKED_BAD_CROP';",
   "return 'BLOCKED_BAD_CROP';"),
+ ("M11 체크 칸을 저장된 것만 보고 다시 그림",
+  "  var open = on || !!ticked;", "  var open = on;"),
  ("M12 이의 붙은 행이 남은 일로 셈해짐",
   "        && !(uncountable || {})[id] && !(objection || {})[id]) left++;",
   "        && !(uncountable || {})[id]) left++;"),

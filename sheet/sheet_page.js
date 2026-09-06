@@ -285,11 +285,11 @@
     var why = document.querySelector('input[data-uncwhy="' + CSS.escape(id) + '"]');
     var wrap = document.querySelector('[data-uncwrap="' + CSS.escape(id) + '"]');
     if (!box) return;
-    var on = !!uncountable[id];
-    box.checked = on;
-    wrap.hidden = !on && !box.checked;
-    if (on) why.value = uncountable[id];
-    box.closest('.fig').classList.toggle('unc', on);
+    var s = boxState(uncountable[id], box.checked);
+    box.checked = s.checked;
+    wrap.hidden = !s.reasonVisible;
+    if (s.settled) why.value = uncountable[id];
+    box.closest('.fig').classList.toggle('unc', s.settled);
   }
 
   ROWS.forEach(function (r) {
@@ -347,11 +347,11 @@
     var why = document.querySelector('input[data-objwhy="' + CSS.escape(id) + '"]');
     var wrap = document.querySelector('[data-objwrap="' + CSS.escape(id) + '"]');
     if (!box) return;
-    var on = !!objection[id];
-    box.checked = on;
-    wrap.hidden = !on && !box.checked;
-    if (on) why.value = objection[id];
-    box.closest('.fig').classList.toggle('disputed', on);
+    var s = boxState(objection[id], box.checked);
+    box.checked = s.checked;
+    wrap.hidden = !s.reasonVisible;
+    if (s.settled) why.value = objection[id];
+    box.closest('.fig').classList.toggle('disputed', s.settled);
   }
 
   ROWS.forEach(function (r) {

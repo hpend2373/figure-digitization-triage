@@ -31,12 +31,13 @@ def check(name, ok, detail=""):
 BUILD = "sheet-2026-09-01-abcdef12"
 
 
-def row(did, status="ENTERED", value="4", build=BUILD, why=""):
+def row(did, status="ENTERED", value="4", build=BUILD, why="", objection=""):
     return {"Draft_ID": did, "Source_Document_ID": "DOC", "Source_File": "f.pdf",
             "Page": "3", "Figure_Number": "FIG1",
             "Crop_Quality_Status": "ACCEPTABLE", "Row_Fingerprint": "fp" + did,
             "Observed_Panel_Count": value, "Entry_Status": status,
-            "Uncountable_Reason": why, "Sheet_Build_ID": build}
+            "Uncountable_Reason": why, "Objection_Reason": objection,
+            "Sheet_Build_ID": build}
 
 
 DRAFT = [{"Draft_ID": "A"}, {"Draft_ID": "B"}, {"Draft_ID": "C"}]
@@ -130,6 +131,34 @@ check("빠진 시트가 있으면 0이 아닌 코드로 끝난다", _code == 1)
 check("거부하면 합친 파일을 쓰지 않는다", not os.path.exists(_out))
 check("거부도 영수증에 남는다",
       json.load(io.open(_rc, encoding="utf-8"))["verdict"] == "REFUSED")
+
+# --- 시트가 그 행에 대해 틀렸다는 답 ------------------------------------------
+# 계수가 아니라 이 시트에 대한 이의입니다. 값을 달지 않고, 이유는 반드시 답니다 -
+# 이유 없는 이의는 잘못 누른 것과 구별되지 않고, 잘못 누른 것이 이의로 보이면
+# 없느니만 못합니다.
+_disp = [("p1.csv", [row("A", "CROP_DISPUTED", "", objection="본문 문단이 보임"),
+                     row("B", "BLOCK_DISPUTED", "", objection="그림이 멀쩡히 보임"),
+                     row("C", "NOT_REVIEWED", "")])]
+check("이유가 붙은 이의는 통과한다", codes(_disp) == [], codes(_disp))
+_noreason = [("p1.csv", [row("A", "CROP_DISPUTED", ""), row("B"), row("C")])]
+check("이유 없는 이의는 거부한다",
+      codes(_noreason) == ["OBJECTION_REASON_MISSING"], codes(_noreason))
+_valued = [("p1.csv", [row("A", "CROP_DISPUTED", "3", objection="본문"),
+                       row("B"), row("C")])]
+check("이의를 달면서 값까지 달면 거부한다",
+      "VALUE_INVALID" in codes(_valued), codes(_valued))
+_stray = [("p1.csv", [row("A", "ENTERED", "3", objection="옛 이유"),
+                      row("B"), row("C")])]
+check("이의 상태가 아닌데 이의 이유가 붙어 있으면 거부한다",
+      "VALUE_INVALID" in codes(_stray), codes(_stray))
+_both = [("p1.csv", [row("A", "CROP_DISPUTED", "", why="거침", objection="본문"),
+                     row("B"), row("C")])]
+check("셀 수 없음 이유와 이의 이유가 같이 붙으면 거부한다",
+      "VALUE_INVALID" in codes(_both), codes(_both))
+check("이의 두 상태는 merge가 아는 상태다",
+      set(M.DISPUTED) <= set(M.STATUSES) and len(M.DISPUTED) == 2)
+check("내보내기 열에 이의 칸이 있다", "Objection_Reason" in M.COLUMNS)
+
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

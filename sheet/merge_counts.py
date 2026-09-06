@@ -40,9 +40,13 @@ PANEL_MAX = 40
 COLUMNS = ["Draft_ID", "Source_Document_ID", "Source_File", "Page",
            "Figure_Number", "Crop_Quality_Status", "Row_Fingerprint",
            "Observed_Panel_Count", "Entry_Status", "Uncountable_Reason",
-           "Sheet_Build_ID"]
+           "Objection_Reason", "Sheet_Build_ID"]
+#: 이의가 붙은 두 상태. `CROP_DISPUTED`는 열려 있던 행에 대고 "이 크롭은 대상
+#: 그림이 아니다", `BLOCK_DISPUTED`는 막힌 행에 대고 "이 차단이 틀렸다"입니다.
+#: 둘 다 계수가 아니라 이 시트에 대한 이의이고, 그래서 값을 달지 않습니다.
+DISPUTED = ("CROP_DISPUTED", "BLOCK_DISPUTED")
 STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP",
-            "SEEN_UNCOUNTABLE")
+            "SEEN_UNCOUNTABLE") + DISPUTED
 
 
 def read(path):
@@ -111,6 +115,19 @@ def merge(draft_rows, exports):
             problems.append(("VALUE_INVALID",
                              "%s: 상태가 %s인데 이유 %r을 달고 있습니다"
                              % (did, status, why)))
+        # 이의도 이유가 있어야 합니다. 이유 없는 이의는 잘못 누른 것과
+        # 구별되지 않고, 잘못 누른 것이 이의로 보이면 없느니만 못합니다.
+        objection = (r.get("Objection_Reason") or "").strip()
+        if status in DISPUTED and not objection:
+            problems.append(("OBJECTION_REASON_MISSING",
+                             "%s: 이상하다고만 하고 무엇이 이상한지가 "
+                             "없습니다" % did))
+        if status not in DISPUTED and objection:
+            problems.append(("VALUE_INVALID",
+                             "%s: 상태가 %s인데 이의 %r을 달고 있습니다"
+                             % (did, status, objection)))
+        # 막힌 행의 이의는 막힘을 풀지 않습니다. 차단된 행에 대고 이의를
+        # 적으면서 값까지 달았다면, 값 검사가 이미 위에서 거부했습니다.
 
     merged = [seen[d] for d in draft_ids if d in seen]
     return merged, problems

@@ -77,12 +77,55 @@ function restoreWith(store, rows, validate) {
  *
  * The reason is required, because "cannot tell" without one is indistinguish-
  * able from not having tried, which is the state it exists to separate. */
-function entryStatus(row, applied, uncountable) {
-  if (row.Count_Blocked === '1') return 'BLOCKED_BAD_CROP';
+/* AND THE PERSON MAY DISAGREE WITH THE SHEET ITSELF.
+ *
+ * Two ways this sheet can be wrong about a row, and until now neither had
+ * anywhere to go. A row open for input can be showing the wrong picture -
+ * a paragraph of body text, a header, half of the figure next door - and the
+ * only moves available were to type a number for it (counting panels in a
+ * page header) or to leave it blank, which reads as "nobody has looked".
+ * A blocked row can be blocked wrongly - the 2026-09-06 audit of run2's 75
+ * blocked rows found 15 whose figure is perfectly visible, held back as
+ * duplicates - and there was no way to say so from the sheet at all.
+ *
+ * So one objection, recorded against either kind of row, with the reason
+ * required for the same cause the "cannot tell" reason is: an objection
+ * nobody explained cannot be told from a mis-click, and a mis-click that
+ * looks like an objection is worse than no button.
+ *
+ * IT IS AN OBJECTION AND NOT A VERDICT. On a blocked row it changes nothing
+ * about the block - the row stays blocked, exports blocked-and-disputed, and
+ * a person decides later. On an open row it does take the number away, and
+ * that direction is deliberate: a count read off the wrong picture is a wrong
+ * value, and a wrong value is worse than a missing one.
+ */
+function entryStatus(row, applied, uncountable, objection) {
+  var disputed = (objection || {})[row.Draft_ID];
+  if (row.Count_Blocked === '1')
+    return disputed ? 'BLOCK_DISPUTED' : 'BLOCKED_BAD_CROP';
+  // Ahead of ENTERED on purpose. If a number was typed before the person saw
+  // what the crop was, the objection is the later and better-informed answer,
+  // and `buildCsv` only writes a count for ENTERED - so the number cannot
+  // ride out under a status that disowns it.
+  if (disputed) return 'CROP_DISPUTED';
   if (Object.prototype.hasOwnProperty.call(applied, row.Draft_ID))
     return 'ENTERED';
   if ((uncountable || {})[row.Draft_ID]) return 'SEEN_UNCOUNTABLE';
   return 'NOT_REVIEWED';
+}
+
+//: The two statuses an objection produces. Read by the merge, not by this
+//: file's own export - see `buildCsv`.
+var DISPUTED_STATUSES = ['CROP_DISPUTED', 'BLOCK_DISPUTED'];
+
+function validateObjection(raw) {
+  var s = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (s === '') {
+    return { ok: false, value: '',
+             error: '무엇이 이상한지 한 줄 적어 주세요 — 이유 없는 이의는 ' +
+                    '잘못 누른 것과 구별되지 않습니다' };
+  }
+  return { ok: true, value: s.slice(0, 200), error: '' };
 }
 
 function validateUncountable(raw) {
@@ -103,13 +146,13 @@ function csvCell(s) {
 var CSV_COLUMNS = ['Draft_ID', 'Source_Document_ID', 'Source_File', 'Page',
                    'Figure_Number', 'Crop_Quality_Status', 'Row_Fingerprint',
                    'Observed_Panel_Count', 'Entry_Status', 'Uncountable_Reason',
-                   'Sheet_Build_ID'];
+                   'Objection_Reason', 'Sheet_Build_ID'];
 
-function buildCsv(rows, applied, buildId, uncountable) {
+function buildCsv(rows, applied, buildId, uncountable, objection) {
   var lines = [CSV_COLUMNS.join(',')];
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    var status = entryStatus(r, applied, uncountable);
+    var status = entryStatus(r, applied, uncountable, objection);
     var count = status === 'ENTERED' ? applied[r.Draft_ID] : '';
     var out = [];
     for (var c = 0; c < CSV_COLUMNS.length; c++) {
@@ -120,6 +163,12 @@ function buildCsv(rows, applied, buildId, uncountable) {
         out.push(csvCell(status === 'SEEN_UNCOUNTABLE'
                          ? (uncountable || {})[r.Draft_ID] : ''));
       }
+      // No status guard here, and none is possible: `entryStatus` returns a
+      // disputed status for exactly the rows this map has a reason for, so a
+      // check that the status is disputed can never change the answer. One
+      // was written and no mutation could kill it - decoration, removed.
+      else if (k === 'Objection_Reason')
+        out.push(csvCell((objection || {})[r.Draft_ID]));
       else if (k === 'Sheet_Build_ID') out.push(csvCell(buildId));
       else out.push(csvCell(r[k]));
     }
@@ -147,7 +196,7 @@ function nextOpenId(rows, currentId) {
  * can take a number and do not have one. A blocked row is not "remaining" -
  * it can never be done - and counting it as such told the old sheet's
  * progress line that 649 rows were outstanding when 415 were. */
-function remaining(rows, applied, uncountable) {
+function remaining(rows, applied, uncountable, objection) {
   var left = 0, open = 0;
   for (var i = 0; i < rows.length; i++) {
     if (rows[i].Count_Blocked === '1') continue;
@@ -156,9 +205,11 @@ function remaining(rows, applied, uncountable) {
     var v = (applied || {})[id];
     // A row settled as "looked, cannot tell" is settled. It is not waiting
     // for anyone, and leaving it in the outstanding count is what would send
-    // a person back to it to reach the same place again.
+    // a person back to it to reach the same place again. A row objected to is
+    // settled the same way: the person has looked and answered, and the
+    // answer is that this row is not a figure to count.
     if ((v === undefined || v === null || v === '')
-        && !(uncountable || {})[id]) left++;
+        && !(uncountable || {})[id] && !(objection || {})[id]) left++;
   }
   return { open: open, left: left, done: open - left };
 }
@@ -169,5 +220,7 @@ if (typeof module !== 'undefined' && module.exports) {
                      restoreWith: restoreWith, entryStatus: entryStatus,
                      buildCsv: buildCsv, CSV_COLUMNS: CSV_COLUMNS,
                      nextOpenId: nextOpenId, remaining: remaining,
-                     validateUncountable: validateUncountable };
+                     validateUncountable: validateUncountable,
+                     validateObjection: validateObjection,
+                     DISPUTED_STATUSES: DISPUTED_STATUSES };
 }

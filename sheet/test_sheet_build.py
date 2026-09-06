@@ -133,6 +133,28 @@ check("막힌 행은 이유를 함께 보여준다",
       all("입력을 막았습니다" in BY_ID[d][3]
           for d in BY_ID if d not in _open))
 
+# 시트가 그 행에 대해 틀렸을 때 사람이 말할 자리. 열린 행에는 "이 크롭은 대상
+# 그림이 아닙니다"(숫자를 지웁니다), 막힌 행에는 "이 차단이 틀렸습니다"(막힘은
+# 그대로 둡니다). 없으면 사람이 할 수 있는 일은 엉뚱한 그림을 세거나 빈칸으로
+# 두는 것뿐이고, 빈칸은 "아무도 안 봤다"로 읽힙니다.
+check("열린 행에는 크롭이 대상이 아니라고 말할 칸이 있다",
+      all("data-obj='%s'" % d in BY_ID[d][3] for d in _open),
+      [d for d in _open if "data-obj=" not in BY_ID[d][3]])
+check("  그 칸의 문구는 '대상 그림이 아닙니다'다",
+      all("이 크롭은 대상 그림이 아닙니다" in BY_ID[d][3] for d in _open))
+_blocked_ids = [d for d in BY_ID if d not in _open]
+check("막힌 행에는 차단이 틀렸다고 말할 칸이 있다",
+      all("data-obj='%s'" % d in BY_ID[d][3] for d in _blocked_ids),
+      [d for d in _blocked_ids if "data-obj=" not in BY_ID[d][3]])
+check("  그 칸의 문구는 '이 차단이 틀렸습니다'다",
+      all("이 차단이 틀렸습니다" in BY_ID[d][3] for d in _blocked_ids))
+check("  그래도 막힌 행의 숫자칸은 잠겨 있다",
+      all("disabled" in BY_ID[d][3] for d in _blocked_ids))
+check("이의 칸마다 이유를 적을 자리가 함께 있다",
+      all("data-objwhy='%s'" % d in BY_ID[d][3] for d in BY_ID))
+check("이의 이유 칸도 placeholder를 쓰지 않는다",
+      "data-objwhy" in S and "placeholder" not in S)
+
 # -------------------------------------------- 같은 그림, 같은 이미지
 def _img(did):
     m = re.search(r"<img class='thumb' src='data:image/jpeg;base64,([^']+)'",

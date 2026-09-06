@@ -12,6 +12,7 @@
    * wrote about a figure that has since been recut should be refused the same
    * way. Same key shape, same build id, checked against the same rows. */
   var UNC_KEY = 'fdt_panel_uncountable::' + BUILD_ID;
+  var OBJ_KEY = 'fdt_panel_objection::' + BUILD_ID;
   var store = {};
   var storageOk = true;
   var warn = document.getElementById('storagewarn');
@@ -108,6 +109,20 @@
     uncountable[id] = restoredU.applied[id];
   });
 
+  var objStore = {};
+  if (storageOk) {
+    try {
+      var rawO = localStorage.getItem(OBJ_KEY);
+      var po = rawO ? JSON.parse(rawO) : {};
+      objStore = (po && typeof po === 'object' && !Array.isArray(po)) ? po : {};
+    } catch (e) { objStore = {}; }
+  }
+  var restoredO = restoreWith(objStore, ROWS, validateObjection);
+  var objection = {};
+  Object.keys(restoredO.applied).forEach(function (id) {
+    objection[id] = restoredO.applied[id];
+  });
+
   var restored = restoreEntries(store, ROWS);
   var applied = restored.applied;
   if (restored.rejected.length) {
@@ -139,7 +154,7 @@
   }
 
   function tally() {
-    var r = remaining(ROWS, applied, uncountable);
+    var r = remaining(ROWS, applied, uncountable, objection);
     cnt.textContent = r.done + ' / ' + r.open + ' 입력됨 · 남은 ' + r.left +
       '행 · 계수 불가 ' + (ROWS.length - r.open) + '행 · 전체 ' +
       ROWS.length + '행';
@@ -315,8 +330,70 @@
     });
   });
 
+  /* THE OBJECTION, WIRED - on both kinds of row. On a blocked row it changes
+   * nothing: the number stays locked and the row exports blocked-and-disputed.
+   * On an open row it clears the number, because a count read off a page
+   * header is a wrong value and a wrong value is worse than a missing one.
+   * The reason is required either way; without one nothing is stored, and the
+   * row is exactly as it was. */
+  function persistObj() {
+    if (!storageOk) return;
+    try { localStorage.setItem(OBJ_KEY, JSON.stringify(objStore)); }
+    catch (e) { showStorageWarning('저장 중 오류가 났습니다 (' + e.name + ').'); }
+  }
+
+  function paintObj(id) {
+    var box = document.querySelector('[data-obj="' + CSS.escape(id) + '"]');
+    var why = document.querySelector('input[data-objwhy="' + CSS.escape(id) + '"]');
+    var wrap = document.querySelector('[data-objwrap="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    var on = !!objection[id];
+    box.checked = on;
+    wrap.hidden = !on && !box.checked;
+    if (on) why.value = objection[id];
+    box.closest('.fig').classList.toggle('disputed', on);
+  }
+
+  ROWS.forEach(function (r) {
+    var id = r.Draft_ID;
+    var box = document.querySelector('[data-obj="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    var why = document.querySelector('input[data-objwhy="' + CSS.escape(id) + '"]');
+    var wrap = document.querySelector('[data-objwrap="' + CSS.escape(id) + '"]');
+    paintObj(id);
+    box.addEventListener('change', function () {
+      wrap.hidden = !box.checked;
+      if (box.checked) { why.focus(); }
+      else { delete objection[id]; delete objStore[id]; persistObj(); }
+      msgFor(id).textContent = box.checked && !why.value.trim()
+        ? '무엇이 이상한지 한 줄 적어 주세요' : '';
+      paintObj(id);
+      tally();
+    });
+    why.addEventListener('input', function () {
+      var v = validateObjection(why.value);
+      if (!v.ok) {
+        delete objection[id]; delete objStore[id];
+        msgFor(id).textContent = v.error;
+      } else {
+        var input = byInput[id];
+        if (input && !input.disabled && input.value.trim() !== '') {
+          input.value = '';
+          delete applied[id]; delete store[id]; persist();
+          input.closest('.fig').classList.remove('done');
+        }
+        objection[id] = v.value;
+        objStore[id] = { v: v.value, fp: r.Row_Fingerprint };
+        msgFor(id).textContent = '';
+      }
+      persistObj();
+      paintObj(id);
+      tally();
+    });
+  });
+
   document.getElementById('dl').addEventListener('click', function () {
-    var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable);
+    var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable, objection);
     var b = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(b);

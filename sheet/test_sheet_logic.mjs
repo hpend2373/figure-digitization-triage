@@ -197,5 +197,74 @@ test('셀 수 없음으로 정리된 행은 남은 일이 아니다', () => {
                    { open: 2, left: 1, done: 1 });
 });
 
+/* ---- 2026-09-06 감사: 시트가 그 행에 대해 틀렸다고 말할 자리 ---- */
+test('이유 없는 이의는 저장되지 않는다', () => {
+  assert.equal(L.validateObjection('').ok, false);
+  assert.equal(L.validateObjection('   ').ok, false);
+});
+test('이유 없는 이의 거절문이 무엇을 적으라는지 말한다', () => {
+  assert.ok(L.validateObjection('').error.includes('한 줄'));
+});
+test('이의 이유도 200자에서 끊긴다', () => {
+  assert.equal(L.validateObjection('가'.repeat(500)).value.length, 200);
+});
+test('열린 행의 이의는 CROP_DISPUTED다', () => {
+  assert.equal(L.entryStatus(row('a', 'f'), {}, {}, { a: '본문 문단' }),
+               'CROP_DISPUTED');
+});
+// REVERT: put the objection after ENTERED. 엉뚱한 그림에서 읽은 수가 그대로
+// 나갑니다 - 그 수를 지우려고 만든 칸인데.
+test('숫자를 넣은 뒤의 이의는 숫자를 이긴다', () => {
+  assert.equal(L.entryStatus(row('a', 'f'), { a: '3' }, {}, { a: '머리글' }),
+               'CROP_DISPUTED');
+});
+test('그 행의 숫자는 CSV에 나가지 않는다', () => {
+  const line = L.buildCsv([row('a', 'f')], { a: '3' }, 'B', {}, { a: '머리글' })
+    .split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Observed_Panel_Count')], '""');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Objection_Reason')], '"머리글"');
+});
+test('막힌 행의 이의는 BLOCK_DISPUTED이고 막힘은 그대로다', () => {
+  const b = row('a', 'f', { Count_Blocked: '1' });
+  assert.equal(L.entryStatus(b, {}, {}, { a: '그림이 멀쩡히 보임' }),
+               'BLOCK_DISPUTED');
+  assert.equal(L.entryStatus(b, {}, {}, {}), 'BLOCKED_BAD_CROP');
+});
+test('막힌 행의 이의도 이유와 함께 나간다', () => {
+  const line = L.buildCsv([row('a', 'f', { Count_Blocked: '1' })], {}, 'B', {},
+                          { a: '중복이 아님' }).split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Entry_Status')], '"BLOCK_DISPUTED"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Objection_Reason')], '"중복이 아님"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Observed_Panel_Count')], '""');
+});
+test('이의가 없는 행의 이의 칸은 빈칸이다', () => {
+  const line = L.buildCsv([row('a', 'f')], { a: '2' }, 'B', {}, {})
+    .split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Objection_Reason')], '""');
+});
+test('이의와 셀 수 없음은 서로 다른 칸으로 나간다', () => {
+  const line = L.buildCsv([row('a', 'f')], {}, 'B', { a: '거침' }, { a: '머리글' })
+    .split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Entry_Status')], '"CROP_DISPUTED"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Uncountable_Reason')], '""');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Objection_Reason')], '"머리글"');
+});
+test('이의로 정리된 행은 남은 일이 아니다', () => {
+  const rs = [row('a', 'f1'), row('b', 'f2')];
+  assert.deepEqual(L.remaining(rs, {}, {}, { a: '본문' }),
+                   { open: 2, left: 1, done: 1 });
+});
+test('막힌 행의 이의는 남은 일 셈을 건드리지 않는다', () => {
+  const rs = [row('a', 'f1', { Count_Blocked: '1' }), row('b', 'f2')];
+  assert.deepEqual(L.remaining(rs, {}, {}, { a: '차단이 틀림' }),
+                   { open: 1, left: 1, done: 0 });
+});
+test('그림이 바뀐 행의 이의는 되살아나지 않는다', () => {
+  const out = L.restoreWith({ a: { v: '본문', fp: '옛지문' } },
+                            [row('a', '새지문')], L.validateObjection);
+  assert.deepEqual(out.applied, {});
+  assert.equal(out.rejected[0].reason, 'ROW_CHANGED');
+});
+
 console.log('\n' + (ran - failed) + '/' + ran + ' passed');
 process.exit(failed ? 1 : 0);

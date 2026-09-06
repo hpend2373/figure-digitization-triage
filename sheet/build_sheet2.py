@@ -518,6 +518,9 @@ border-radius:3px}
 .fig input:disabled{background:#f0eeea;color:#a5a09a;cursor:not-allowed}
 .fig.done{border-color:#9dc2a2;background:#f4faf5}
 .fig.blocked{border-color:#e0bcbc;background:#fdf4f4}
+/* 이의가 붙은 카드. 셈이 끝난 초록도, 막힌 빨강도 아닌 제 색으로
+   둡니다 - 이 행은 시트에 대한 답이지 그림에 대한 답이 아닙니다. */
+.fig.disputed{border-color:#8f7cc0;background:#f7f4fd}
 .fig.err input{border-color:var(--bad);background:#fff5f5}
 .badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:9px;
 border:1px solid var(--rule);margin:0 4px 4px 0;white-space:nowrap}
@@ -685,6 +688,17 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
             w("<div class='why'><b>입력을 막았습니다.</b> %s</div>" % esc(br))
             w("<label>패널 수 <input type='number' disabled "
               "data-id='%s'></label>" % esc(did))
+            # AND THE PERSON MAY SAY THE BLOCK IS WRONG. 2026-09-06의 감사가
+            # run2의 막힌 75행을 전부 눈으로 대조한 결과, 15행은 그림이
+            # 멀쩡히 보이는데 중복으로 막혀 있었습니다. 그때까지 이 시트에서
+            # 그 사실을 적을 자리는 없었습니다 - 막힌 행은 숫자칸이 잠겨
+            # 있었고, 잠긴 칸 말고는 아무것도 없었으니까요. 이의는 막힘을
+            # 풀지 않습니다. 막힌 채로, 이의가 붙은 채로 나갑니다.
+            w("<label class='unc'><input type='checkbox' data-obj='%s'> "
+              "이 차단이 틀렸습니다</label>"
+              "<span class='uncwhy' data-objwrap='%s' hidden>무엇이 이상한지 "
+              "<input type='text' data-objwhy='%s' maxlength='200'></span>"
+              % (esc(did), esc(did), esc(did)))
         else:
             w("<label>패널 수 <input type='number' min='0' max='40' "
               "step='1' data-id='%s'></label>" % esc(did))
@@ -700,6 +714,17 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
               # empty box means nobody has answered yet.
               "<span class='uncwhy' data-uncwrap='%s' hidden>왜 셀 수 없는지 "
               "<input type='text' data-uncwhy='%s' maxlength='200'></span>"
+              % (esc(did), esc(did), esc(did)))
+            # AND THE THIRD ANSWER: the picture is not this figure at all.
+            # "봤지만 셀 수 없음"은 그림을 보고 판단이 안 선 것이고, 이것은
+            # 그림이 아예 다른 것일 때입니다 - 본문 한 문단, 페이지 머리글,
+            # 옆 그림의 절반. 두 경우에 할 일이 다르므로 칸도 다릅니다.
+            # 표시하면 적어 둔 숫자를 지웁니다: 엉뚱한 그림에서 읽은 수는
+            # 틀린 값이고, 틀린 값은 없는 값보다 나쁩니다.
+            w("<label class='unc'><input type='checkbox' data-obj='%s'> "
+              "이 크롭은 대상 그림이 아닙니다</label>"
+              "<span class='uncwhy' data-objwrap='%s' hidden>무엇이 보이는지 "
+              "<input type='text' data-objwhy='%s' maxlength='200'></span>"
               % (esc(did), esc(did), esc(did)))
         w("<div class='msg' data-msg='%s'></div></div>" % esc(did))
     w("</div>")

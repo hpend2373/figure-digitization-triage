@@ -126,6 +126,8 @@ for did in sorted(_blocked):
     check("%s는 계수 불가이므로 입력이 잠겨 있다" % did,
           "disabled" in BY_ID[did][3])
 _open = [r["Draft_ID"] for r in ROWS if r["Count_Blocked"] == "0"]
+#: 이 이름은 아래에서 다시 쓰이지 않습니다 - `_open`은 뒤에서 함수로 덮입니다.
+_open_ids = list(_open)
 check("입력 가능한 행에는 잠기지 않은 숫자칸이 있다",
       all("disabled" not in BY_ID[d][3] and "type='number'" in BY_ID[d][3]
           for d in _open), "%s" % _open)
@@ -1574,6 +1576,44 @@ check("범위 안 행은 그대로 남는다",
       [d for d in _same if "data-zoom=" not in _sc_by[d]])
 check("범위 파일이 없으면 아무 문서도 제한되지 않는다",
       all("대상 쪽 범위 밖" not in BY_ID[d][3] for d in BY_ID))
+# 이미 답한 행은 사진도 싣지 않고 다시 묻지도 않습니다. 사진은 "이 막힘이
+# 맞나"를 사람이 보라고 딸려 오는 것인데, 이 행은 그 사람이 이미 답했습니다.
+_rec_dir = os.path.join(TMP, "recorded")
+os.makedirs(_rec_dir, exist_ok=True)
+_rec_csv = os.path.join(_rec_dir, "observed_panel_counts.csv")
+_rec_id = _open_ids[0]
+with io.open(_rec_csv, "w", encoding="utf-8", newline="") as _fh:
+    _w = csv.writer(_fh)
+    _w.writerow(["Draft_ID", "Entry_Status", "Observed_Panel_Count",
+                 "Uncountable_Reason", "Objection_Reason"])
+    _w.writerow([_rec_id, "ENTERED", "7", "", ""])
+    _w.writerow([_open_ids[1], "NOT_REVIEWED", "", "", ""])
+_rc_sheet = os.path.join(_rec_dir, "s.html")
+_rc = subprocess.run([sys.executable, os.path.join(HERE, "build_sheet2.py")],
+                     capture_output=True, text=True,
+                     env=dict(ENV, FDT_SHEET=_rc_sheet, FDT_RECORDED=_rec_csv))
+check("이미 답이 있어도 빌드가 통과한다", _rc.returncode == 0,
+      (_rc.stderr or _rc.stdout)[-200:])
+check("  그리고 몇 행에 답이 있는지 말한다",
+      "이미 답이 있는 행" in (_rc.stdout or ""), (_rc.stdout or "")[:160])
+_rc_html = "".join(io.open(p, encoding="utf-8").read()
+                   for p in PATHS.parts_for(_rc_sheet))
+_rc_by = {}
+for _m in re.finditer(r"<div class='fig[^']*' data-id='([^']+)'", _rc_html):
+    _e = _rc_html.find("<div class='fig", _m.end())
+    _rc_by[_m.group(1)] = _rc_html[_m.start(): _e if _e > 0 else len(_rc_html)]
+# REVERT: ask it again. 45행을 다 세어 둔 시트가 통째로 다시 물었습니다.
+check("이미 센 행은 다시 묻지 않고 그 수를 말한다",
+      "이미 답하신 행" in _rc_by[_rec_id] and "7개" in _rc_by[_rec_id],
+      _rc_by[_rec_id][:200])
+check("  그 행의 숫자칸은 잠긴다", "disabled" in _rc_by[_rec_id])
+check("  그 행에는 사진을 싣지 않는다", "data-zoom=" not in _rc_by[_rec_id])
+check("아직 안 본 행은 그대로 묻는다",
+      "이미 답하신 행" not in _rc_by[_open_ids[1]]
+      and "disabled" not in _rc_by[_open_ids[1]])
+check("기록 파일이 없으면 아무 행도 막히지 않는다",
+      all("이미 답하신 행" not in BY_ID[d][3] for d in BY_ID))
+
 _bad_scope = os.path.join(_scope_dir, "bad.csv")
 with io.open(_bad_scope, "w", encoding="utf-8", newline="") as _fh:
     _w = csv.writer(_fh)

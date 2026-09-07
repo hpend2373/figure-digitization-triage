@@ -235,6 +235,23 @@ def _read_scope(path):
     return out
 
 
+#: {Draft_ID: 그 행에 대한 사람의 답} - `merge_counts.py`가 합쳐 둔 기록.
+#: 없으면 빈 표이고, 빈 표는 아무 행도 막지 않습니다.
+def _read_recorded(path):
+    if not path or not os.path.exists(path):
+        return {}
+    return {r["Draft_ID"]: r
+            for r in csv.DictReader(io.open(path, encoding="utf-8"))
+            if (r.get("Draft_ID") or "").strip()}
+
+
+RECORDED = _read_recorded(PATHS.RECORDED)
+if RECORDED:
+    import collections as _c
+    _by = _c.Counter(r.get("Entry_Status", "") for r in RECORDED.values())
+    print("이미 답이 있는 행 %d개: %s"
+          % (len(RECORDED), " · ".join("%s %d" % kv for kv in sorted(_by.items()))))
+
 SCOPE = _read_scope(PATHS.SCOPE)
 if SCOPE:
     print("쪽 범위가 정해진 문서 %d편: %s"
@@ -270,7 +287,8 @@ def blocked_reason(d):
                              codes=CODES.get(d["Draft_ID"], ()),
                              twin=TWIN.get(d["Draft_ID"]),
                              duplicate=DUPLICATE.get(d["Draft_ID"]),
-                             scope=SCOPE.get(d["Source_Document_ID"]))
+                             scope=SCOPE.get(d["Source_Document_ID"]),
+                             recorded=RECORDED.get(d["Draft_ID"]))
 
 
 #: A publisher's figure file has no page and no box - it IS the figure - so
@@ -666,7 +684,10 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
         # 것이 없습니다 - 사람이 이미 답한 자리입니다. run2의 논문집 한 권이
         # 그런 행 134개를 냈고, 그 사진들만 30 MB에 시트 한 장이었습니다.
         outside = out_of_scope(d)
-        if outside:
+        # 이미 답한 행도 사진을 싣지 않습니다. 사진은 "이 막힘이 맞나"를
+        # 사람이 보라고 딸려 오는 것인데, 이 행은 그 사람이 이미 답했습니다.
+        answered = BR.recorded_reason(RECORDED.get(did))
+        if outside or answered:
             has_img = False
         _open = has_img and not blocked_reason(d)
         # SEEING IS NOT COUNTING. The large copy used to ride along only for

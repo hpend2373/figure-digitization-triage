@@ -37,8 +37,11 @@ MUT = [
      "        out.append({\"Draft_ID\": m.group(1),",
      "        if img is None:\n            continue\n        out.append({\"Draft_ID\": m.group(1),"),
     ("M10 범위 밖 행에도 사진을 실음", "build_sheet2.py",
-     "        outside = out_of_scope(d)\n        if outside:\n            has_img = False",
-     "        outside = out_of_scope(d)"),
+     "        if outside or answered:\n            has_img = False",
+     "        if answered:\n            has_img = False"),
+    ("M11 이미 답한 행에도 사진을 실음", "build_sheet2.py",
+     "        if outside or answered:\n            has_img = False",
+     "        if outside:\n            has_img = False"),
 ]
 
 

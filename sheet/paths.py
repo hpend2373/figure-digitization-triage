@@ -76,6 +76,11 @@ REGIONS_OPTIONAL = _p("FDT_REGIONS_OPTIONAL", "") == "1"
 #: 없으면 아무 문서도 제한하지 않습니다 - 빈 파일과 없는 파일은 같은 뜻입니다.
 SCOPE = _p("FDT_SCOPE", os.path.join(RUN, "document_scope.csv"))
 
+#: `merge_counts.py`가 합쳐 둔 사람의 답. 시트는 이것을 읽어 이미 답한 행을
+#: 다시 묻지 않습니다 - 시트는 여러 번 다시 만들어지고, 그때마다 다시 물으면
+#: 사람이 자기가 한 일을 기억으로 지켜야 합니다.
+RECORDED = _p("FDT_RECORDED", os.path.join(RUN, "observed_panel_counts.csv"))
+
 #: Where the built sheet goes, and what the tests read.
 SHEET = _p("FDT_SHEET",
            os.path.join(RUN, "panel_count_contact_sheet.html"))

@@ -670,9 +670,52 @@ def out_of_scope_reason(row, scope):
             % (lo, hi, page, (" (%s)" % note) if note else ""))
 
 
+#: 사람이 이미 답한 행의 상태와, 카드에 적을 말. 여기 없는 상태는 답이
+#: 아닙니다 - `NOT_REVIEWED`는 안 본 것이고 `BLOCKED_BAD_CROP`은 시트가 막아
+#: 둔 것이며, 막힌 행은 다른 문들이 저마다의 이유로 이미 막습니다. 그 둘을
+#: 따로 먼저 걸러내는 줄을 썼다가 지웠습니다: 이 표에 없으면 어차피 빈 문자열이
+#: 나오므로 답을 바꾸지 못했고, 돌연변이를 붙여도 죽지 않았습니다.
+RECORDED_SAID = {
+    "ENTERED": "패널 %s개로 세었습니다",
+    "SEEN_UNCOUNTABLE": "보았지만 셀 수 없다고 하셨습니다 — %s",
+    "CROP_DISPUTED": "이 크롭이 대상 그림이 아니라고 하셨습니다 — %s",
+    "BLOCK_DISPUTED": "이 차단이 틀렸다고 하셨습니다 — %s",
+}
+
+
+def recorded_reason(recorded):
+    """사람이 이미 답한 행이면 그 답을 말하는 이유. 아니면 빈 문자열.
+
+    `recorded`는 `observed_panel_counts.csv`의 그 행이거나 None입니다.
+
+    같은 것을 두 번 묻지 않습니다. 시트는 여러 번 다시 만들어지고, 그때마다
+    이미 답한 행이 다시 빈칸으로 나오면 사람은 자기가 무엇을 했는지 시트가
+    아니라 기억으로 지켜야 합니다. 2026-09-07에 실제로 그렇게 됐습니다 -
+    45행을 다 세어 둔 시트가 통째로 다시 물었습니다.
+
+    답을 지우지 않고 말합니다. 카드에 그 사람이 무엇이라 답했는지가 그대로
+    적히므로, 틀렸다고 보면 기록을 고쳐서 다시 열 수 있습니다.
+    """
+    if not recorded:
+        return ""
+    status = str(recorded.get("Entry_Status") or "").strip()
+    said = RECORDED_SAID.get(status)
+    if not said:
+        return ""
+    detail = (recorded.get("Observed_Panel_Count") if status == "ENTERED"
+              else (recorded.get("Uncountable_Reason")
+                    or recorded.get("Objection_Reason")))
+    when = str(recorded.get("Recorded_At") or "").strip()
+    return ("이미 답하신 행입니다 — %s%s. 다시 묻지 않습니다. 고치시려면 "
+            "기록(observed_panel_counts.csv)에서 이 행을 지우십시오."
+            % (said % (str(detail or "").strip() or "(적힌 것 없음)"),
+               (" (%s)" % when) if when else ""))
+
+
 def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
                    census=None, crop_sha="", roundtrip=None, agreement=None,
-                   codes=(), twin=None, duplicate=None, scope=None):
+                   codes=(), twin=None, duplicate=None, scope=None,
+                   recorded=None):
     """Why this row may not take a panel count. Empty string means it may.
 
     `row` needs only the four fields the decision reads, so this can be tested
@@ -691,6 +734,11 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
     outside = out_of_scope_reason(row, scope)
     if outside:
         return outside
+    # 범위 다음입니다. 범위 밖은 물을 자리가 아니고, 이것은 이미 답한
+    # 자리입니다 - 둘 다 묻지 않지만 이유가 다릅니다.
+    already = recorded_reason(recorded)
+    if already:
+        return already
     if shared_with:
         return ("이 크롭은 %s 행과 픽셀까지 같습니다 — 상자가 두 라벨을 "
                 "구분하지 못했으므로 어느 쪽 그림인지 알 수 없습니다."

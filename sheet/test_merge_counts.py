@@ -160,6 +160,45 @@ check("이의 두 상태는 merge가 아는 상태다",
 check("내보내기 열에 이의 칸이 있다", "Objection_Reason" in M.COLUMNS)
 
 
+# --- 한 번에 다 세지 않는다 --------------------------------------------------
+# 시트가 열두 장이면 사람은 세 장을 세고, 며칠 뒤 네 장을 더 셉니다. 그때마다
+# 나머지를 ROW_MISSING으로 거부하면 다 세기 전에는 아무것도 기록할 수 없습니다.
+_three = [("p1.csv", [row("A")])]
+check("다 세지 않았는데 말하지 않으면 예전처럼 거부한다",
+      codes(_three) == ["ROW_MISSING", "ROW_MISSING"], codes(_three))
+check("--partial이라고 밝히면 남은 행을 거부하지 않는다",
+      [c for c, _d in M.merge(DRAFT, _three, partial=True)[1]] == [],
+      [c for c, _d in M.merge(DRAFT, _three, partial=True)[1]])
+_m, _p = M.merge(DRAFT, _three, partial=True)
+check("  그리고 센 행만 합쳐진다",
+      [r["Draft_ID"] for r in _m] == ["A"], [r["Draft_ID"] for r in _m])
+# REVERT: drop the carried rows. 두 번째 합치기가 첫 번째를 지웁니다 - 세 시트를
+# 센 사람이 네 시트를 더 세면 앞의 세 장이 없어집니다.
+_carry = [row("A", "ENTERED", "9")]
+_later = [("p2.csv", [row("B")])]
+_m2, _p2 = M.merge(DRAFT, _later, carry=_carry, partial=True)
+check("앞서 합쳐 둔 행은 그대로 남는다",
+      sorted(r["Draft_ID"] for r in _m2) == ["A", "B"],
+      [r["Draft_ID"] for r in _m2])
+check("  남은 행의 값도 그대로다",
+      [r["Observed_Panel_Count"] for r in _m2 if r["Draft_ID"] == "A"] == ["9"])
+check("  들고 온 행은 ROW_MISSING이 아니다",
+      [c for c, _d in M.merge(DRAFT, [("p2.csv", [row("B"), row("C")])],
+                              carry=_carry)[1]] == [],
+      [c for c, _d in M.merge(DRAFT, [("p2.csv", [row("B"), row("C")])],
+                              carry=_carry)[1]])
+# REVERT: let the carried row win. 다시 센 값이 옛 값에 덮이고, 사람이 고친
+# 답이 조용히 사라집니다.
+_again = [("p2.csv", [row("A", "ENTERED", "2")])]
+_m3, _p3 = M.merge(DRAFT, _again, carry=_carry, partial=True)
+check("다시 센 행은 새 값이 이긴다",
+      [r["Observed_Panel_Count"] for r in _m3 if r["Draft_ID"] == "A"] == ["2"],
+      [r["Observed_Panel_Count"] for r in _m3])
+check("초안에 없는 행은 들고 오지 않는다",
+      [r["Draft_ID"] for r in M.merge(DRAFT, _later,
+                                      carry=[row("Z")], partial=True)[0]] == ["B"])
+
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("FDT_SCENARIOS_RUN=%d" % N[0])

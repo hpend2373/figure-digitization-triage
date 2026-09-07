@@ -681,6 +681,59 @@ check("범위를 주지 않으면 예전 그대로 답한다",
       == BR.blocked_reason(row(Page="69", Crop_Quality_Status="THIN_CROP"),
                            BR.figure_key("1", "FIG1", "69"), scope=None))
 
+# --- 이미 답한 행은 다시 묻지 않는다 ------------------------------------------
+# 시트는 여러 번 다시 만들어집니다. 그때마다 이미 답한 행이 빈칸으로 다시
+# 나오면, 사람은 자기가 무엇을 했는지 시트가 아니라 기억으로 지켜야 합니다.
+# 2026-09-07에 실제로 그렇게 됐습니다 - 45행을 다 세어 둔 시트가 통째로
+# 다시 물었습니다.
+check("센 행은 그 수를 말하며 다시 묻지 않는다",
+      "4개" in BR.recorded_reason({"Entry_Status": "ENTERED",
+                                   "Observed_Panel_Count": "4"})
+      and "다시 묻지 않습니다" in BR.recorded_reason(
+          {"Entry_Status": "ENTERED", "Observed_Panel_Count": "4"}))
+check("  고치는 길도 함께 말한다",
+      "observed_panel_counts.csv" in BR.recorded_reason(
+          {"Entry_Status": "ENTERED", "Observed_Panel_Count": "4"}))
+check("셀 수 없다고 한 행도 그 이유와 함께 다시 묻지 않는다",
+      "스캔" in BR.recorded_reason({"Entry_Status": "SEEN_UNCOUNTABLE",
+                                    "Uncountable_Reason": "스캔이 거침"}))
+check("이의를 단 행도 그 말과 함께 다시 묻지 않는다",
+      "개념그림" in BR.recorded_reason({"Entry_Status": "CROP_DISPUTED",
+                                        "Objection_Reason": "개념그림"})
+      and "개념그림" in BR.recorded_reason({"Entry_Status": "BLOCK_DISPUTED",
+                                            "Objection_Reason": "개념그림"}))
+# REVERT: treat a blocked or unreviewed record as an answer. 아무도 답하지 않은
+# 행이 "이미 답하셨습니다"로 막히고, 그 행은 영영 물어지지 않습니다.
+check("답이 아닌 것은 답으로 치지 않는다",
+      BR.recorded_reason({"Entry_Status": "NOT_REVIEWED"}) == ""
+      and BR.recorded_reason({"Entry_Status": "BLOCKED_BAD_CROP"}) == ""
+      and BR.recorded_reason({"Entry_Status": ""}) == "")
+check("기록이 없으면 아무것도 막지 않는다",
+      BR.recorded_reason(None) == "" and BR.recorded_reason({}) == "")
+check("모르는 상태는 답으로 치지 않는다",
+      BR.recorded_reason({"Entry_Status": "무언가_새로운_상태"}) == "")
+check("적힌 것이 없으면 없다고 말한다",
+      "(적힌 것 없음)" in BR.recorded_reason({"Entry_Status": "ENTERED",
+                                              "Observed_Panel_Count": ""}))
+# REVERT: put the recorded check before the scope check. 범위 밖 행이 "이미
+# 답하셨습니다"로 막히고, 범위를 넓혀도 그 행은 물어지지 않습니다.
+check("범위 밖이 이미 답한 것보다 먼저 답한다",
+      BR.blocked_reason(row(Page="69"), BR.figure_key("1", "FIG1", "69"),
+                        scope=(313, 316, ""),
+                        recorded={"Entry_Status": "ENTERED",
+                                  "Observed_Panel_Count": "4"})
+      == BR.out_of_scope_reason(row(Page="69"), (313, 316, "")))
+check("이미 답한 것은 크롭 결함보다 먼저 답한다",
+      BR.blocked_reason(row(Crop_Quality_Status="THIN_CROP"),
+                        BR.figure_key("1", "FIG1", "2"),
+                        recorded={"Entry_Status": "ENTERED",
+                                  "Observed_Panel_Count": "4"}).startswith("이미 답하신"))
+check("기록을 주지 않으면 예전 그대로 답한다",
+      BR.blocked_reason(row(Crop_Quality_Status="THIN_CROP"),
+                        BR.figure_key("1", "FIG1", "2"))
+      == BR.blocked_reason(row(Crop_Quality_Status="THIN_CROP"),
+                           BR.figure_key("1", "FIG1", "2"), recorded=None))
+
 print()
 print("FDT_SCENARIOS_RUN=%d" % PASSED[0])
 print("%d scenarios run" % PASSED[0])

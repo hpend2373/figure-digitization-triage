@@ -47,6 +47,13 @@ COLUMNS = ["Draft_ID", "Source_Document_ID", "Source_File", "Page",
 DISPUTED = ("CROP_DISPUTED", "BLOCK_DISPUTED")
 STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP",
             "SEEN_UNCOUNTABLE") + DISPUTED
+#: 사람이 답한 상태들. 나머지 둘은 답이 아닙니다 - `NOT_REVIEWED`는 아직 안
+#: 본 것이고 `BLOCKED_BAD_CROP`은 시트가 막아 둔 것입니다.
+ANSWERS = ("ENTERED", "SEEN_UNCOUNTABLE") + DISPUTED
+
+
+def is_answer(row):
+    return (row or {}).get("Entry_Status", "").strip() in ANSWERS
 
 
 def read(path):
@@ -95,7 +102,7 @@ def merge(draft_rows, exports, carry=(), partial=False):
     carried = {}
     for r in carry:
         did = (r.get("Draft_ID") or "").strip()
-        if did in known and did not in seen:
+        if did in known:
             carried[did] = r
     for did in draft_ids:
         if did in seen or did in carried:
@@ -146,11 +153,22 @@ def merge(draft_rows, exports, carry=(), partial=False):
         # 막힌 행의 이의는 막힘을 풀지 않습니다. 차단된 행에 대고 이의를
         # 적으면서 값까지 달았다면, 값 검사가 이미 위에서 거부했습니다.
 
-    # 앞서 합쳐 둔 행은 새 내보내기가 그 행을 담고 있을 때만 밀려납니다.
-    # 담고 있지 않으면 그대로 남습니다 - 세지 않은 것이 세었던 것을 지우는
-    # 일은 없습니다.
-    merged = [seen.get(d, carried.get(d)) for d in draft_ids
-              if d in seen or d in carried]
+    # 답이 아닌 것은 답을 지우지 못합니다.
+    #
+    # 이것을 처음에 "내보내기에 없는 행만 들고 온다"로 썼다가 사람의 답
+    # 열셋을 지웠습니다. 시트는 이미 답한 행을 막아서 보여 주므로, 그 행은
+    # 다음 내보내기에 `BLOCKED_BAD_CROP`으로 - 값 없이 - 다시 나옵니다.
+    # 새 내보내기가 무조건 이기면, 사람이 답했다는 이유로 막힌 행이 바로 그
+    # 답을 덮어씁니다. 답을 지울 수 있는 것은 다른 답뿐입니다.
+    def pick(d):
+        new, old = seen.get(d), carried.get(d)
+        if new is None:
+            return old
+        if old is not None and is_answer(old) and not is_answer(new):
+            return old
+        return new
+
+    merged = [pick(d) for d in draft_ids if d in seen or d in carried]
     return merged, problems
 
 

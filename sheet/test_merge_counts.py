@@ -194,6 +194,35 @@ _m3, _p3 = M.merge(DRAFT, _again, carry=_carry, partial=True)
 check("다시 센 행은 새 값이 이긴다",
       [r["Observed_Panel_Count"] for r in _m3 if r["Draft_ID"] == "A"] == ["2"],
       [r["Observed_Panel_Count"] for r in _m3])
+# REVERT: let the new export win whatever it says. 사람의 답 열셋이 실제로
+# 이렇게 지워졌습니다 - 시트는 이미 답한 행을 막아서 보여 주므로 그 행이 다음
+# 내보내기에 BLOCKED_BAD_CROP으로 값 없이 다시 나오고, 그것이 답을 덮습니다.
+_blocked_again = [("p2.csv", [row("A", "BLOCKED_BAD_CROP", "")])]
+_m4, _p4 = M.merge(DRAFT, _blocked_again, carry=_carry, partial=True)
+check("답이 아닌 것은 답을 지우지 못한다",
+      [(r["Entry_Status"], r["Observed_Panel_Count"]) for r in _m4
+       if r["Draft_ID"] == "A"] == [("ENTERED", "9")],
+      [(r["Entry_Status"], r["Observed_Panel_Count"]) for r in _m4])
+_unread = [("p2.csv", [row("A", "NOT_REVIEWED", "")])]
+check("  아직 안 본 것도 답을 지우지 못한다",
+      [r["Observed_Panel_Count"] for r in
+       M.merge(DRAFT, _unread, carry=_carry, partial=True)[0]
+       if r["Draft_ID"] == "A"] == ["9"])
+check("  그러나 다른 답은 답을 덮는다",
+      [r["Observed_Panel_Count"] for r in
+       M.merge(DRAFT, [("p2.csv", [row("A", "ENTERED", "2")])],
+               carry=_carry, partial=True)[0]
+       if r["Draft_ID"] == "A"] == ["2"])
+check("  셀 수 없음도 답이므로 값을 덮는다",
+      [r["Entry_Status"] for r in
+       M.merge(DRAFT, [("p2.csv", [row("A", "SEEN_UNCOUNTABLE", "", why="거침")])],
+               carry=_carry, partial=True)[0]
+       if r["Draft_ID"] == "A"] == ["SEEN_UNCOUNTABLE"])
+check("답이 아닌 기록끼리는 새것이 이긴다",
+      [r["Entry_Status"] for r in
+       M.merge(DRAFT, [("p2.csv", [row("A", "BLOCKED_BAD_CROP", "")])],
+               carry=[row("A", "NOT_REVIEWED", "")], partial=True)[0]
+       if r["Draft_ID"] == "A"] == ["BLOCKED_BAD_CROP"])
 check("초안에 없는 행은 들고 오지 않는다",
       [r["Draft_ID"] for r in M.merge(DRAFT, _later,
                                       carry=[row("Z")], partial=True)[0]] == ["B"])

@@ -29,6 +29,10 @@ MUT = [
  ("M12 이의 붙은 행이 남은 일로 셈해짐",
   "        && !(uncountable || {})[id] && !(objection || {})[id]) left++;",
   "        && !(uncountable || {})[id]) left++;"),
+ ("M13 들여올 때 지문을 안 봄", "  var a = restoreWith(cs, rows, validatePanelCount);",
+  "  var a = { applied: (function(){var o={},k;for(k in cs)o[k]=cs[k].v;return o;})(), rejected: [] };"),
+ ("M14 지금 막힌 행에도 값을 들여옴", "    if (answer && blocked[id]) {", "    if (false) {"),
+ ("M15 열이 없어도 들여옴", "  if (missing.length) {", "  if (false) {"),
 ]
 mutate_guard.restore_any(HERE)
 

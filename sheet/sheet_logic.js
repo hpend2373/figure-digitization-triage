@@ -200,6 +200,99 @@ function buildCsv(rows, applied, buildId, uncountable, objection) {
   return lines.join('\n');
 }
 
+/* 내보낸 CSV를 다시 들여온다.
+ *
+ * 저장은 빌드마다 따로입니다 - 초안이 바뀌면 옛 값이 되살아나지 않게 하려고
+ * 그렇게 만들었고, 그것은 옳습니다. 그런데 초안이 그대로인데 시트만 다시
+ * 만들어도 빌드 이름이 바뀝니다. 2026-09-06에 실제로 그렇게 됐습니다: 사람이
+ * 세 시트 97행을 세어 CSV로 내려받은 뒤, 다른 이유로 시트를 다시 만들었더니
+ * 새 시트가 그 97행을 빈칸으로 보여 주었습니다. 지문은 97행 모두 그대로였고,
+ * 값도 그대로 옳았는데, 값이 붙어 있던 이름만 달랐습니다.
+ *
+ * 그래서 CSV를 답의 원본으로 씁니다. 브라우저 저장은 편의이고, 사람이 내려받은
+ * 파일이 기록입니다 - 기록이 있으면 어느 빌드로든 옮겨질 수 있어야 합니다.
+ *
+ * 무엇을 들여오지 않는가가 이 함수의 값어치입니다. `restoreWith`를 그대로 쓰기
+ * 때문에 지문이 다른 행은 들어오지 않습니다. 옛 CSV의 값이 지금은 다른 그림인
+ * 행에 얹히는 것이야말로 빌드를 나눈 이유이고, 들여오기가 그 문을 우회하면
+ * 빌드를 나눈 의미가 없습니다.
+ */
+var ADOPT_REQUIRED = ['Draft_ID', 'Row_Fingerprint', 'Observed_Panel_Count',
+                      'Entry_Status'];
+
+function parseCsv(text) {
+  var s = String(text == null ? '' : text).replace(/^\ufeff/, '');
+  var rows = [], row = [], field = '', q = false, i;
+  for (i = 0; i < s.length; i++) {
+    var c = s.charAt(i);
+    if (q) {
+      if (c === '"') {
+        if (s.charAt(i + 1) === '"') { field += '"'; i++; } else { q = false; }
+      } else { field += c; }
+    } else if (c === '"') { q = true; }
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') { field += c; }
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return { header: [], rows: [] };
+  var head = rows[0], out = [];
+  for (i = 1; i < rows.length; i++) {
+    if (rows[i].length === 1 && rows[i][0] === '') continue;
+    var o = {};
+    for (var k = 0; k < head.length; k++) o[head[k]] = rows[i][k] || '';
+    out.push(o);
+  }
+  return { header: head, rows: out };
+}
+
+function adoptCsv(text, rows) {
+  var parsed = parseCsv(text), missing = [], i;
+  for (i = 0; i < ADOPT_REQUIRED.length; i++) {
+    if (parsed.header.indexOf(ADOPT_REQUIRED[i]) < 0) missing.push(ADOPT_REQUIRED[i]);
+  }
+  if (missing.length) {
+    return { ok: false, missing: missing, counts: {}, uncountable: {},
+             objection: {}, rejected: [], taken: 0 };
+  }
+  var blocked = {};
+  for (i = 0; i < rows.length; i++) {
+    if (rows[i].Count_Blocked === '1') blocked[rows[i].Draft_ID] = true;
+  }
+  var cs = {}, us = {}, os = {}, refused = [];
+  for (i = 0; i < parsed.rows.length; i++) {
+    var r = parsed.rows[i], id = r.Draft_ID, fp = r.Row_Fingerprint;
+    if (!id) continue;
+    var answer = r.Entry_Status === 'ENTERED'
+              || r.Entry_Status === 'SEEN_UNCOUNTABLE';
+    // 이 빌드가 막아 둔 행에는 답을 들여오지 않습니다. 옛 빌드에서 셀 수
+    // 있던 행이 지금은 범위 밖이거나 결함으로 막혀 있을 수 있고, 거기에 값을
+    // 얹으면 막은 판정이 조용히 뒤집힙니다. 지문은 이것을 보지 못합니다 -
+    // 그림이 그대로여도 그 행을 세지 않기로 한 것은 사람이니까요.
+    if (answer && blocked[id]) {
+      refused.push({ id: id, reason: 'ROW_BLOCKED_NOW' });
+      continue;
+    }
+    if (r.Entry_Status === 'ENTERED') cs[id] = { v: r.Observed_Panel_Count, fp: fp };
+    else if (r.Entry_Status === 'SEEN_UNCOUNTABLE') us[id] = { v: r.Uncountable_Reason, fp: fp };
+    else if (r.Entry_Status === 'CROP_DISPUTED' || r.Entry_Status === 'BLOCK_DISPUTED')
+      // 이의는 막힌 행에도 들어옵니다 - `BLOCK_DISPUTED`가 바로 그 행의
+      // 답이고, 값을 달지 않으므로 막음을 뒤집지 않습니다.
+      os[id] = { v: r.Objection_Reason, fp: fp };
+    // BLOCKED_BAD_CROP과 NOT_REVIEWED는 답이 아닙니다. 들여올 것이 없고,
+    // 거절도 아닙니다 - 거절 목록에 넣으면 사람이 고칠 것이 있는 줄 압니다.
+  }
+  var a = restoreWith(cs, rows, validatePanelCount);
+  var b = restoreWith(us, rows, validateUncountable);
+  var c = restoreWith(os, rows, validateObjection);
+  return { ok: true, missing: [],
+           counts: a.applied, uncountable: b.applied, objection: c.applied,
+           rejected: refused.concat(a.rejected, b.rejected, c.rejected),
+           taken: Object.keys(a.applied).length + Object.keys(b.applied).length
+                  + Object.keys(c.applied).length };
+}
+
+
 /* WHERE TO GO NEXT. 415 countable rows means 415 reaches for the mouse, and a
  * hand leaving the keyboard between every figure is a hand that starts
  * skipping. Enter moves to the next row that can take a number - the blocked
@@ -246,5 +339,7 @@ if (typeof module !== 'undefined' && module.exports) {
                      validateUncountable: validateUncountable,
                      validateObjection: validateObjection,
                      boxState: boxState,
+                     parseCsv: parseCsv, adoptCsv: adoptCsv,
+                     ADOPT_REQUIRED: ADOPT_REQUIRED,
                      DISPUTED_STATUSES: DISPUTED_STATUSES };
 }

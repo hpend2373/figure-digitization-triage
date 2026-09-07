@@ -512,9 +512,9 @@ h1{font-size:24px;margin:0 0 4px}
 border-bottom:1px solid var(--rule);padding:10px 0;margin-bottom:16px;
 display:flex;gap:12px;align-items:center;flex-wrap:wrap;
 backdrop-filter:saturate(180%) blur(8px)}
-button{font:inherit;font-size:14px;padding:7px 14px;border-radius:4px;
+button,.bar label.g{font:inherit;font-size:14px;padding:7px 14px;border-radius:4px;
 border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
-button.g{background:#fff;color:var(--acc)}
+button.g,.bar label.g{background:#fff;color:var(--acc)}
 .count{font-size:13px;color:var(--mut)}
 .doc{background:var(--card);border:1px solid var(--rule);border-radius:4px;
 padding:14px 16px;margin:0 0 16px}
@@ -620,7 +620,14 @@ w("""<div class='note'>각 그림에 <b>축 영역(패널)이 몇 개</b> 인쇄
 </ul></div>""" % 40)
 
 w("<div class='bar'><button id='dl'>CSV 내려받기</button>"
+  # 빌드 이름이 바뀌어도 사람이 이미 적은 답이 살아 오는 길. 저장은 빌드마다
+  # 따로이고 그것이 옳지만, 초안이 그대로인데 시트만 다시 만들어도 이름이
+  # 바뀝니다 - 그때 내려받아 둔 CSV가 답의 원본이 됩니다. 지문이 다른 행은
+  # 들어오지 않습니다.
+  "<label class='g' for='imp'>CSV 불러오기</label>"
+  "<input id='imp' type='file' accept='.csv,text/csv' multiple hidden>"
   "<button class='g' id='clr'>입력 지우기</button>"
+  "<span class='count' id='impmsg'></span>"
   "<span class='count' id='cnt'></span></div>")
 
 CARDS = []

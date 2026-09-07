@@ -160,6 +160,8 @@
       ROWS.length + '행';
   }
 
+  var BY_ROW = {};
+  ROWS.forEach(function (r) { BY_ROW[r.Draft_ID] = r; });
   var byInput = {};
 
   /* ENTER GOES TO THE NEXT ROW THAT CAN TAKE A NUMBER. 415 of these means 415
@@ -391,6 +393,82 @@
       tally();
     });
   });
+
+  /* 다른 빌드에서 내려받은 CSV를 이 빌드로 들여옵니다. 지문이 다른 행은
+   * `adoptCsv`가 `restoreWith`에 그대로 맡기므로 들어오지 않습니다. */
+  var imp = document.getElementById('imp');
+  if (imp) {
+    imp.addEventListener('change', function () {
+      var files = imp.files ? Array.prototype.slice.call(imp.files) : [];
+      if (!files.length) return;
+      // 시트가 여러 장이면 사람이 내려받은 CSV도 여러 장입니다. 한 장씩
+      // 고르게 하면 시트마다 그 짓을 반복해야 합니다 - 한 번에 다 받습니다.
+      var texts = [], done = 0;
+      files.forEach(function (f, n) {
+        var fr = new FileReader();
+        fr.onload = function () {
+          texts[n] = String(fr.result); done++;
+          if (done === files.length) took(texts);
+        };
+        fr.readAsText(f, 'utf-8');
+      });
+
+      function took(all) {
+        var got = { ok: true, missing: [], counts: {}, uncountable: {},
+                    objection: {}, rejected: [], taken: 0 };
+        for (var n = 0; n < all.length; n++) {
+          var one = adoptCsv(all[n], ROWS);
+          if (!one.ok) { got = one; break; }
+          Object.keys(one.counts).forEach(function (k) { got.counts[k] = one.counts[k]; });
+          Object.keys(one.uncountable).forEach(function (k) { got.uncountable[k] = one.uncountable[k]; });
+          Object.keys(one.objection).forEach(function (k) { got.objection[k] = one.objection[k]; });
+          got.rejected = got.rejected.concat(one.rejected);
+          got.taken += one.taken;
+        }
+        if (!got.ok) {
+          showStorageWarning('시트가 내려준 CSV가 아닌 것 같습니다 — ' +
+                             got.missing.join(', ') + ' 열이 없습니다.');
+          imp.value = '';
+          return;
+        }
+        Object.keys(got.counts).forEach(function (id) {
+          applied[id] = got.counts[id];
+          store[id] = { v: got.counts[id],
+                        fp: BY_ROW[id] ? BY_ROW[id].Row_Fingerprint : '' };
+          var el = byInput[id];
+          if (el) { el.value = got.counts[id]; el.closest('.fig').classList.add('done'); }
+        });
+        Object.keys(got.uncountable).forEach(function (id) {
+          uncountable[id] = got.uncountable[id];
+          uncStore[id] = { v: got.uncountable[id],
+                           fp: BY_ROW[id] ? BY_ROW[id].Row_Fingerprint : '' };
+          paintUnc(id);
+        });
+        Object.keys(got.objection).forEach(function (id) {
+          objection[id] = got.objection[id];
+          objStore[id] = { v: got.objection[id],
+                           fp: BY_ROW[id] ? BY_ROW[id].Row_Fingerprint : '' };
+          paintObj(id);
+        });
+        persist(); persistUnc(); persistObj(); tally();
+        var why = {};
+        got.rejected.forEach(function (r) { why[r.reason] = (why[r.reason] || 0) + 1; });
+        var parts = Object.keys(why).map(function (k) {
+          // 다른 시트의 행은 잘못이 아닙니다. 시트가 여러 장이니 어느 CSV든
+          // 이 시트가 모르는 행을 담고 있고, 그것을 "없는 행"이라고 부르면
+          // 사람이 고칠 것을 찾게 됩니다.
+          return ({ ROW_CHANGED: '그림 내용이 바뀜', ROW_GONE: '다른 시트의 행',
+                    ROW_BLOCKED_NOW: '지금은 막힌 행',
+                    INVALID_VALUE: '값이 유효하지 않음',
+                    MALFORMED: '모양이 깨짐' }[k] || k) + ' ' + why[k] + '행';
+        });
+        document.getElementById('impmsg').textContent =
+          got.taken + '행을 들여왔습니다'
+          + (parts.length ? ' · 들여오지 않음: ' + parts.join(', ') : '');
+        imp.value = '';
+      }
+    });
+  }
 
   document.getElementById('dl').addEventListener('click', function () {
     var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable, objection);

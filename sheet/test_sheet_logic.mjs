@@ -287,5 +287,90 @@ test('이유 없이 눌러만 둔 것은 정리된 답이 아니다', () => {
   assert.equal(L.boxState('적었음', true).settled, true);
 });
 
+/* ---- 내려받은 CSV를 다른 빌드로 다시 들여온다 ---- */
+const _line = (id, fp, count, status, why, obj) =>
+  ['"' + id + '"', '"D"', '"f.pdf"', '"3"', '"FIG1"', '"ACCEPTABLE"',
+   '"' + fp + '"', '"' + count + '"', '"' + status + '"', '"' + (why || '') + '"',
+   '"' + (obj || '') + '"', '"old-build"'].join(',');
+const _csv = (...lines) => L.CSV_COLUMNS.join(',') + '\n' + lines.join('\n') + '\n';
+const _rows = [row('a', 'f1'), row('b', 'f2'),
+               row('c', 'f3', { Count_Blocked: '1' })];
+
+test('세어 둔 값이 다른 빌드로 들어온다', () => {
+  const g = L.adoptCsv(_csv(_line('a', 'f1', '4', 'ENTERED')), _rows);
+  assert.equal(g.ok, true);
+  assert.deepEqual(g.counts, { a: '4' });
+  assert.equal(g.taken, 1);
+});
+// REVERT: adopt without the fingerprint check. 초안이 바뀐 뒤의 옛 CSV가 지금은
+// 다른 그림인 행에 값을 얹습니다 - 빌드를 나눈 이유가 바로 그것입니다.
+test('그림이 바뀐 행의 값은 들어오지 않는다', () => {
+  const g = L.adoptCsv(_csv(_line('a', '옛지문', '4', 'ENTERED')), _rows);
+  assert.deepEqual(g.counts, {});
+  assert.equal(g.rejected[0].reason, 'ROW_CHANGED');
+});
+test('이 시트에 없는 행은 들어오지 않는다', () => {
+  const g = L.adoptCsv(_csv(_line('z', 'fz', '4', 'ENTERED')), _rows);
+  assert.equal(g.rejected[0].reason, 'ROW_GONE');
+});
+test('저장할 수 없는 값은 들어오지 않는다', () => {
+  const g = L.adoptCsv(_csv(_line('a', 'f1', '99', 'ENTERED')), _rows);
+  assert.deepEqual(g.counts, {});
+  assert.equal(g.rejected[0].reason, 'INVALID_VALUE');
+});
+test('셀 수 없음과 이의도 각자의 칸으로 들어온다', () => {
+  const g = L.adoptCsv(_csv(_line('a', 'f1', '', 'SEEN_UNCOUNTABLE', '스캔이 거침'),
+                            _line('b', 'f2', '', 'CROP_DISPUTED', '', '본문 문단'),
+                            _line('c', 'f3', '', 'BLOCK_DISPUTED', '', '멀쩡히 보임')),
+                       _rows);
+  assert.deepEqual(g.uncountable, { a: '스캔이 거침' });
+  assert.deepEqual(g.objection, { b: '본문 문단', c: '멀쩡히 보임' });
+});
+test('이유 없는 이의는 들여올 때도 거절된다', () => {
+  const g = L.adoptCsv(_csv(_line('a', 'f1', '', 'CROP_DISPUTED')), _rows);
+  assert.deepEqual(g.objection, {});
+  assert.equal(g.rejected[0].reason, 'INVALID_VALUE');
+});
+// REVERT: count these as rejections. 사람이 고칠 것이 있는 줄 알고 CSV를
+// 들여다보는데, 거기에는 아무 답도 없습니다.
+test('막힌 행과 미검토 행은 들여올 것도 거절할 것도 없다', () => {
+  const g = L.adoptCsv(_csv(_line('c', 'f3', '', 'BLOCKED_BAD_CROP'),
+                            _line('a', 'f1', '', 'NOT_REVIEWED')), _rows);
+  assert.equal(g.taken, 0);
+  assert.deepEqual(g.rejected, []);
+});
+// REVERT: adopt the value anyway. 옛 빌드에서 셀 수 있던 행이 지금은 범위
+// 밖인데 값이 얹히고, 막은 판정이 조용히 뒤집힙니다.
+test('지금 막혀 있는 행에는 값을 들여오지 않는다', () => {
+  const g = L.adoptCsv(_csv(_line('c', 'f3', '4', 'ENTERED')), _rows);
+  assert.deepEqual(g.counts, {});
+  assert.equal(g.rejected[0].reason, 'ROW_BLOCKED_NOW');
+});
+test('  셀 수 없음도 마찬가지다', () => {
+  const g = L.adoptCsv(_csv(_line('c', 'f3', '', 'SEEN_UNCOUNTABLE', '거침')), _rows);
+  assert.deepEqual(g.uncountable, {});
+  assert.equal(g.rejected[0].reason, 'ROW_BLOCKED_NOW');
+});
+test('  그러나 막힌 행의 이의는 그 행의 답이므로 들어온다', () => {
+  const g = L.adoptCsv(_csv(_line('c', 'f3', '', 'BLOCK_DISPUTED', '', '멀쩡히 보임')), _rows);
+  assert.deepEqual(g.objection, { c: '멀쩡히 보임' });
+  assert.deepEqual(g.rejected, []);
+});
+test('시트가 내려준 파일이 아니면 무엇이 없는지 말한다', () => {
+  const g = L.adoptCsv('a,b\n1,2\n', _rows);
+  assert.equal(g.ok, false);
+  assert.ok(g.missing.indexOf('Row_Fingerprint') >= 0);
+  assert.equal(g.taken, 0);
+});
+test('쉼표와 따옴표가 든 이유도 그대로 들어온다', () => {
+  const why = '표본, 그리고 ""원그래프""';
+  const g = L.adoptCsv(_csv(_line('a', 'f1', '', 'SEEN_UNCOUNTABLE', why)), _rows);
+  assert.deepEqual(g.uncountable, { a: '표본, 그리고 "원그래프"' });
+});
+test('BOM이 붙은 파일도 읽는다', () => {
+  const g = L.adoptCsv('\ufeff' + _csv(_line('a', 'f1', '4', 'ENTERED')), _rows);
+  assert.deepEqual(g.counts, { a: '4' });
+});
+
 console.log('\n' + (ran - failed) + '/' + ran + ' passed');
 process.exit(failed ? 1 : 0);

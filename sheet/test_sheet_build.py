@@ -247,6 +247,13 @@ check("페이지에서 잘라낸 막힌 행은 원문 쪽도 함께 싣는다",
 check("  그리고 출판사 그림 파일이라고 말하지 않는다",
       not any("data-nopage=" in BY_ID[d][3] for d in _blocked_from_page),
       [d for d in _blocked_from_page if "data-nopage=" in BY_ID[d][3]])
+# 빌드 이름이 바뀌어도 이미 적은 답이 살아 오는 길. 2026-09-06에 사람이 세
+# 시트 97행을 세어 내려받은 뒤 시트를 다시 만들었더니, 지문은 97행 모두
+# 그대로인데 새 시트가 그 답을 빈칸으로 보여 주었습니다.
+check("내려받은 CSV를 다시 들여올 자리가 있다",
+      "id='imp'" in S and "CSV 불러오기" in S and "adoptCsv" in S)
+check("  그 자리는 CSV만 받는다", "accept='.csv,text/csv'" in S)
+check("  들여온 결과를 말할 자리도 있다", "id='impmsg'" in S)
 check("확대창과 닫기 수단이 페이지에 있다",
       "id='lb'" in S and "id='lbclose'" in S and "Esc" in S)
 check("확대는 마우스 없이도 열린다",

@@ -99,10 +99,19 @@ function restoreWith(store, rows, validate) {
  * that direction is deliberate: a count read off the wrong picture is a wrong
  * value, and a wrong value is worse than a missing one.
  */
-function entryStatus(row, applied, uncountable, objection) {
+function entryStatus(row, applied, uncountable, objection, confirmed) {
   var disputed = (objection || {})[row.Draft_ID];
-  if (row.Count_Blocked === '1')
-    return disputed ? 'BLOCK_DISPUTED' : 'BLOCKED_BAD_CROP';
+  if (row.Count_Blocked === '1') {
+    // 이의가 확인을 이깁니다. 이의에는 사람이 쓴 한 줄이 붙고 확인에는
+    // 붙지 않으므로, 둘이 함께 켜져 있으면 글이 있는 쪽이 나중에 더 알고
+    // 한 답입니다 - CROP_DISPUTED가 ENTERED를 이기는 것과 같은 까닭.
+    if (disputed) return 'BLOCK_DISPUTED';
+    // 사람이 이 차단을 보고 맞다고 한 행. 아무도 보지 않아 막혀 있는
+    // 행과 같은 이름으로 내보내면, 확인한 사람의 눈이 기록에서
+    // 사라집니다 - 그리고 다음 사람이 같은 카드를 다시 봅니다.
+    if ((confirmed || {})[row.Draft_ID]) return 'BLOCK_CONFIRMED';
+    return 'BLOCKED_BAD_CROP';
+  }
   // Ahead of ENTERED on purpose. If a number was typed before the person saw
   // what the crop was, the objection is the later and better-informed answer,
   // and `buildCsv` only writes a count for ENTERED - so the number cannot
@@ -118,6 +127,11 @@ function entryStatus(row, applied, uncountable, objection) {
 //: file's own export - see `buildCsv`.
 var DISPUTED_STATUSES = ['CROP_DISPUTED', 'BLOCK_DISPUTED'];
 
+//: 사람이 차단을 보고 맞다고 한 행의 이름. 이의가 아니므로 이유를
+//: 요구하지 않습니다 - 확인은 카드에 이미 인쇄된 사유에 동의하는 것이고,
+//: 동의에까지 글을 쓰게 하면 아무도 확인하지 않습니다.
+var BLOCK_CONFIRMED = 'BLOCK_CONFIRMED';
+
 function validateObjection(raw) {
   var s = String(raw === null || raw === undefined ? '' : raw).trim();
   if (s === '') {
@@ -126,6 +140,20 @@ function validateObjection(raw) {
                     '잘못 누른 것과 구별되지 않습니다' };
   }
   return { ok: true, value: s.slice(0, 200), error: '' };
+}
+
+//: 확인은 값이 아니라 표입니다. 그래도 저장된 것을 되살릴 때 지문을 보는
+//: 길은 이의·셀수없음과 같아야 해서(`restoreWith`), 표를 한 글자 값으로
+//: 둡니다. 그 값이 아닌 것은 사람이 누른 표가 아니므로 되살리지 않습니다.
+var CONFIRM_MARK = '1';
+
+function validateConfirm(raw) {
+  var s = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (s !== CONFIRM_MARK) {
+    return { ok: false, value: '',
+             error: '확인 표가 아닙니다' };
+  }
+  return { ok: true, value: s, error: '' };
 }
 
 function validateUncountable(raw) {
@@ -171,11 +199,11 @@ var CSV_COLUMNS = ['Draft_ID', 'Source_Document_ID', 'Source_File', 'Page',
                    'Observed_Panel_Count', 'Entry_Status', 'Uncountable_Reason',
                    'Objection_Reason', 'Sheet_Build_ID'];
 
-function buildCsv(rows, applied, buildId, uncountable, objection) {
+function buildCsv(rows, applied, buildId, uncountable, objection, confirmed) {
   var lines = [CSV_COLUMNS.join(',')];
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    var status = entryStatus(r, applied, uncountable, objection);
+    var status = entryStatus(r, applied, uncountable, objection, confirmed);
     var count = status === 'ENTERED' ? applied[r.Draft_ID] : '';
     var out = [];
     for (var c = 0; c < CSV_COLUMNS.length; c++) {
@@ -341,5 +369,8 @@ if (typeof module !== 'undefined' && module.exports) {
                      boxState: boxState,
                      parseCsv: parseCsv, adoptCsv: adoptCsv,
                      ADOPT_REQUIRED: ADOPT_REQUIRED,
-                     DISPUTED_STATUSES: DISPUTED_STATUSES };
+                     DISPUTED_STATUSES: DISPUTED_STATUSES,
+                     BLOCK_CONFIRMED: BLOCK_CONFIRMED,
+                     CONFIRM_MARK: CONFIRM_MARK,
+                     validateConfirm: validateConfirm };
 }

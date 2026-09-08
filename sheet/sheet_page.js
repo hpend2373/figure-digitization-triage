@@ -13,6 +13,9 @@
    * way. Same key shape, same build id, checked against the same rows. */
   var UNC_KEY = 'fdt_panel_uncountable::' + BUILD_ID;
   var OBJ_KEY = 'fdt_panel_objection::' + BUILD_ID;
+  /* 확인은 이유가 없어 값이 한 글자지만, 지문을 보는 길은 같습니다:
+   * 다시 자른 행의 옛 확인이 새 그림에 붙으면 안 됩니다. */
+  var OK_KEY = 'fdt_block_confirmed::' + BUILD_ID;
   var store = {};
   var storageOk = true;
   var warn = document.getElementById('storagewarn');
@@ -121,6 +124,20 @@
   var objection = {};
   Object.keys(restoredO.applied).forEach(function (id) {
     objection[id] = restoredO.applied[id];
+  });
+
+  var okStore = {};
+  if (storageOk) {
+    try {
+      var rawK = localStorage.getItem(OK_KEY);
+      var pk = rawK ? JSON.parse(rawK) : {};
+      okStore = (pk && typeof pk === 'object' && !Array.isArray(pk)) ? pk : {};
+    } catch (e) { okStore = {}; }
+  }
+  var restoredK = restoreWith(okStore, ROWS, validateConfirm);
+  var confirmed = {};
+  Object.keys(restoredK.applied).forEach(function (id) {
+    confirmed[id] = restoredK.applied[id];
   });
 
   var restored = restoreEntries(store, ROWS);
@@ -394,6 +411,35 @@
     });
   });
 
+  function persistOk() {
+    if (!storageOk) return;
+    try { localStorage.setItem(OK_KEY, JSON.stringify(okStore)); }
+    catch (e) { showStorageWarning('저장 중 오류가 났습니다 (' + e.name + ').'); }
+  }
+
+  function paintOk(id) {
+    var box = document.querySelector('[data-ok="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    box.checked = !!confirmed[id];
+    box.closest('.fig').classList.toggle('confirmed', !!confirmed[id]);
+  }
+
+  ROWS.forEach(function (r) {
+    var id = r.Draft_ID;
+    var box = document.querySelector('[data-ok="' + CSS.escape(id) + '"]');
+    if (!box) return;
+    paintOk(id);
+    box.addEventListener('change', function () {
+      if (box.checked) {
+        confirmed[id] = CONFIRM_MARK;
+        okStore[id] = { v: CONFIRM_MARK, fp: r.Row_Fingerprint };
+      } else { delete confirmed[id]; delete okStore[id]; }
+      persistOk();
+      paintOk(id);
+      tally();
+    });
+  });
+
   /* 다른 빌드에서 내려받은 CSV를 이 빌드로 들여옵니다. 지문이 다른 행은
    * `adoptCsv`가 `restoreWith`에 그대로 맡기므로 들어오지 않습니다. */
   var imp = document.getElementById('imp');
@@ -471,7 +517,8 @@
   }
 
   document.getElementById('dl').addEventListener('click', function () {
-    var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable, objection);
+    var csv = buildCsv(ROWS, applied, BUILD_ID, uncountable, objection,
+                       confirmed);
     var b = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(b);

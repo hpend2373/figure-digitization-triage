@@ -152,6 +152,19 @@ check("  그 칸의 문구는 '이 차단이 틀렸습니다'다",
       all("이 차단이 틀렸습니다" in BY_ID[d][3] for d in _blocked_ids))
 check("  그래도 막힌 행의 숫자칸은 잠겨 있다",
       all("disabled" in BY_ID[d][3] for d in _blocked_ids))
+# REVERT: 막힌 카드에 확인 칸을 두지 않는다. 그러면 차단이 맞다고 말할
+# 자리가 없어서, 확인하려는 사람이 이의 칸에 글을 씁니다 - 2026-09-08에
+# 실제로 그렇게 기록된 행이 있었고, 뜻이 정반대로 남았습니다.
+check("막힌 행에는 차단이 맞다고 말할 칸도 있다",
+      all("data-ok='%s'" % d in BY_ID[d][3] for d in _blocked_ids),
+      [d for d in _blocked_ids if "data-ok=" not in BY_ID[d][3]])
+check("  그 칸의 문구는 '이 차단이 맞습니다'다",
+      all("이 차단이 맞습니다" in BY_ID[d][3] for d in _blocked_ids))
+check("  확인 칸은 이유를 받지 않는다",
+      all("data-okwhy=" not in BY_ID[d][3] for d in _blocked_ids))
+check("열린 행에는 확인 칸을 두지 않는다",
+      all("data-ok='%s'" % d not in BY_ID[d][3] for d in _open_ids),
+      [d for d in _open_ids if "data-ok=" in BY_ID[d][3]])
 check("이의 칸마다 이유를 적을 자리가 함께 있다",
       all("data-objwhy='%s'" % d in BY_ID[d][3] for d in BY_ID))
 check("이의 이유 칸도 placeholder를 쓰지 않는다",

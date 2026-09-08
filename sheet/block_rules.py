@@ -251,8 +251,13 @@ STILL_WRONG = {
                             "상자도 대상 그림을 제대로 잡지 못했습니다",
     ("687", "FIG2", "4"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
                           "상자도 대상 그림을 제대로 잡지 못했습니다",
-    ("687", "FIG4", "5"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
-                          "상자도 대상 그림을 제대로 잡지 못했습니다",
+    # ("687", "FIG4", "5") 는 2026-09-08에 사람이 뒤집었습니다. 그 날 이
+    # 행의 크롭을 확대해 보고 "차단이 틀렸다"고 판정했고, 같은 자리에서
+    # 패널을 2개로 세었습니다. `lapsed()`가 settle하지 않기로 한 바로 그
+    # 모순 - 같은 날 사람이 RASTER를 고르면서 "이 상자가 맞다"고도 했던
+    # 행 - 이고, 그 판정은 사람만 할 수 있어서 여기서 항목을 걷어냅니다.
+    # 감사가 다시 이 그림을 훑더라도 이 줄을 되살리지 마십시오: 그림을
+    # 직접 본 사람의 나중 판정이 앞선 검토를 이깁니다.
     ("122", "FIG2", "3"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
                           "상자도 대상 그림을 제대로 잡지 못했습니다",
     ("571", "FIG3", "4"): "사람 검토(2026-09-02): 지금 상자도 PDF 기준 새 "
@@ -680,6 +685,7 @@ RECORDED_SAID = {
     "SEEN_UNCOUNTABLE": "보았지만 셀 수 없다고 하셨습니다 — %s",
     "CROP_DISPUTED": "이 크롭이 대상 그림이 아니라고 하셨습니다 — %s",
     "BLOCK_DISPUTED": "이 차단이 틀렸다고 하셨습니다 — %s",
+    "BLOCK_CONFIRMED": "이 차단이 맞다고 확인하셨습니다",
 }
 
 
@@ -706,10 +712,14 @@ def recorded_reason(recorded):
               else (recorded.get("Uncountable_Reason")
                     or recorded.get("Objection_Reason")))
     when = str(recorded.get("Recorded_At") or "").strip()
+    # 이유를 받지 않는 답도 있습니다. `BLOCK_CONFIRMED`는 카드에 이미
+    # 인쇄된 사유에 동의하는 것이라 쓸 것이 없고, 거기에 "(적힌 것 없음)"
+    # 을 붙이면 확인한 사람이 무언가를 빠뜨린 것처럼 읽힙니다.
+    body = said % (str(detail or "").strip() or "(적힌 것 없음)") \
+        if "%s" in said else said
     return ("이미 답하신 행입니다 — %s%s. 다시 묻지 않습니다. 고치시려면 "
             "기록(observed_panel_counts.csv)에서 이 행을 지우십시오."
-            % (said % (str(detail or "").strip() or "(적힌 것 없음)"),
-               (" (%s)" % when) if when else ""))
+            % (body, (" (%s)" % when) if when else ""))
 
 
 def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,

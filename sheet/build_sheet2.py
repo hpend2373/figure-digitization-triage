@@ -570,7 +570,7 @@ border-radius:3px}
 .fig.blocked{border-color:#e0bcbc;background:#fdf4f4}
 /* 이의가 붙은 카드. 셈이 끝난 초록도, 막힌 빨강도 아닌 제 색으로
    둡니다 - 이 행은 시트에 대한 답이지 그림에 대한 답이 아닙니다. */
-.fig.disputed{border-color:#8f7cc0;background:#f7f4fd}
+.fig.disputed{border-color:#8f7cc0;background:#f7f4fd}.fig.confirmed{border-color:#6b8f6b;background:#f3f8f3}
 .fig.err input{border-color:var(--bad);background:#fff5f5}
 .badge{display:inline-block;font-size:11px;padding:1px 6px;border-radius:9px;
 border:1px solid var(--rule);margin:0 4px 4px 0;white-space:nowrap}
@@ -769,6 +769,15 @@ for wl in sorted(WORK, key=lambda r: (r["priority"], int(r["pid"]))):
               "<span class='uncwhy' data-objwrap='%s' hidden>무엇이 이상한지 "
               "<input type='text' data-objwhy='%s' maxlength='200'></span>"
               % (esc(did), esc(did), esc(did)))
+            # AND THE PERSON MAY SAY THE BLOCK IS RIGHT. 이 자리가 없어서
+            # 2026-09-08에 한 사람이 "잘잡았어."라고 이의 칸에 적었고,
+            # 그 행은 이의가 붙은 행으로 기록됐습니다 - 뜻이 정반대인
+            # 채로. 확인에는 이유를 받지 않습니다: 카드에 이미 사유가
+            # 인쇄돼 있고, 동의에까지 글을 쓰게 하면 아무도 확인하지
+            # 않습니다. 확인도 막힘을 풀지 않습니다 - 막힌 채로, 사람이
+            # 보았다는 표가 붙은 채로 나갑니다.
+            w("<label class='unc'><input type='checkbox' data-ok='%s'> "
+              "이 차단이 맞습니다</label>" % esc(did))
         else:
             w("<label>패널 수 <input type='number' min='0' max='40' "
               "step='1' data-id='%s'></label>" % esc(did))

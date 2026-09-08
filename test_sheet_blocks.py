@@ -702,6 +702,16 @@ check("이의를 단 행도 그 말과 함께 다시 묻지 않는다",
                                         "Objection_Reason": "개념그림"})
       and "개념그림" in BR.recorded_reason({"Entry_Status": "BLOCK_DISPUTED",
                                             "Objection_Reason": "개념그림"}))
+# REVERT: 확인을 답으로 치지 않는다. 사람이 카드를 보고 "이 차단 맞다"고 한
+# 행이 다음 시트에서 다시 나오고, 그 사람은 자기가 이미 본 카드를 또 봅니다.
+check("차단이 맞다고 확인한 행도 답이므로 다시 묻지 않는다",
+      BR.recorded_reason({"Entry_Status": "BLOCK_CONFIRMED"}) != "")
+# REVERT: 이유 자리가 없는 문장에도 "(적힌 것 없음)"을 채워 넣는다. 쓸 것이
+# 없는 답이 무언가를 빠뜨린 답처럼 읽힙니다.
+check("이유를 받지 않는 답에는 없다는 말을 붙이지 않는다",
+      "(적힌 것 없음)" not in BR.recorded_reason(
+          {"Entry_Status": "BLOCK_CONFIRMED"}),
+      BR.recorded_reason({"Entry_Status": "BLOCK_CONFIRMED"}))
 # REVERT: treat a blocked or unreviewed record as an answer. 아무도 답하지 않은
 # 행이 "이미 답하셨습니다"로 막히고, 그 행은 영영 물어지지 않습니다.
 check("답이 아닌 것은 답으로 치지 않는다",

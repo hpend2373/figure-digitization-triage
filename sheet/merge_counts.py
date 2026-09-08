@@ -45,11 +45,16 @@ COLUMNS = ["Draft_ID", "Source_Document_ID", "Source_File", "Page",
 #: 그림이 아니다", `BLOCK_DISPUTED`는 막힌 행에 대고 "이 차단이 틀렸다"입니다.
 #: 둘 다 계수가 아니라 이 시트에 대한 이의이고, 그래서 값을 달지 않습니다.
 DISPUTED = ("CROP_DISPUTED", "BLOCK_DISPUTED")
+#: 사람이 차단을 보고 맞다고 한 상태. 이의가 아니므로 `DISPUTED`에 넣지
+#: 않습니다 - 넣으면 이유를 요구하게 되고, 이미 카드에 적힌 사유에
+#: 동의하는 데까지 글을 쓰라고 하면 아무도 확인하지 않습니다.
+BLOCK_CONFIRMED = "BLOCK_CONFIRMED"
 STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP",
-            "SEEN_UNCOUNTABLE") + DISPUTED
+            "SEEN_UNCOUNTABLE", BLOCK_CONFIRMED) + DISPUTED
 #: 사람이 답한 상태들. 나머지 둘은 답이 아닙니다 - `NOT_REVIEWED`는 아직 안
-#: 본 것이고 `BLOCKED_BAD_CROP`은 시트가 막아 둔 것입니다.
-ANSWERS = ("ENTERED", "SEEN_UNCOUNTABLE") + DISPUTED
+#: 본 것이고 `BLOCKED_BAD_CROP`은 시트가 막아 둔 것입니다. `BLOCK_CONFIRMED`
+#: 는 답입니다: 사람이 그 카드를 보고 차단이 맞다고 했습니다.
+ANSWERS = ("ENTERED", "SEEN_UNCOUNTABLE", BLOCK_CONFIRMED) + DISPUTED
 
 
 def is_answer(row):

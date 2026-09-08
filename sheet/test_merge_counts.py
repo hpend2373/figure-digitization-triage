@@ -140,6 +140,19 @@ _disp = [("p1.csv", [row("A", "CROP_DISPUTED", "", objection="본문 문단이 �
                      row("B", "BLOCK_DISPUTED", "", objection="그림이 멀쩡히 보임"),
                      row("C", "NOT_REVIEWED", "")])]
 check("이유가 붙은 이의는 통과한다", codes(_disp) == [], codes(_disp))
+# REVERT: 확인을 이의와 같은 무리에 넣는다. 그러면 이유를 요구하게 되고,
+# 카드에 이미 인쇄된 사유에 동의하는 데까지 글을 쓰라고 하면 아무도
+# 확인하지 않습니다. 확인은 답이지만 이의는 아닙니다.
+_ok = [("p1.csv", [row("A", "BLOCK_CONFIRMED", ""),
+                   row("B"), row("C")])]
+check("이유 없는 차단 확인은 통과한다", codes(_ok) == [], codes(_ok))
+check("확인은 사람이 답한 것으로 친다",
+      M.is_answer({"Entry_Status": "BLOCK_CONFIRMED"})
+      and not M.is_answer({"Entry_Status": "BLOCKED_BAD_CROP"}))
+_okvalued = [("p1.csv", [row("A", "BLOCK_CONFIRMED", "3"),
+                         row("B"), row("C")])]
+check("확인하면서 값까지 달면 거부한다",
+      "VALUE_INVALID" in codes(_okvalued), codes(_okvalued))
 _noreason = [("p1.csv", [row("A", "CROP_DISPUTED", ""), row("B"), row("C")])]
 check("이유 없는 이의는 거부한다",
       codes(_noreason) == ["OBJECTION_REASON_MISSING"], codes(_noreason))

@@ -230,6 +230,46 @@ test('막힌 행의 이의는 BLOCK_DISPUTED이고 막힘은 그대로다', () =
                'BLOCK_DISPUTED');
   assert.equal(L.entryStatus(b, {}, {}, {}), 'BLOCKED_BAD_CROP');
 });
+/* REVERT: 확인한 행을 BLOCKED_BAD_CROP으로 내보낸다. 그러면 사람이 눈으로 보고
+ * "이 차단 맞다"고 한 행과 아무도 보지 않아 막혀 있는 행이 파일에서 같은 줄이
+ * 되고, 다음 사람이 같은 카드를 다시 봅니다. 오늘 그 일이 실제로 났습니다 -
+ * 확인할 자리가 없어서 이의 칸에 "잘잡았어."라고 적힌 행이 이의로 기록됐습니다. */
+test('확인 표가 아닌 값은 되살아나지 않는다', () => {
+  assert.equal(L.validateConfirm(L.CONFIRM_MARK).ok, true);
+  assert.equal(L.validateConfirm('아무거나').ok, false);
+  assert.equal(L.validateConfirm('').ok, false);
+});
+test('손댄 저장값은 확인으로 복원되지 않는다', () => {
+  const rows = [row('a', 'f', { Count_Blocked: '1' })];
+  const got = L.restoreWith({ a: { v: '예', fp: 'f' } }, rows,
+                            L.validateConfirm);
+  assert.equal(Object.keys(got.applied).length, 0);
+  assert.equal(L.entryStatus(rows[0], {}, {}, {}, got.applied),
+               'BLOCKED_BAD_CROP');
+});
+test('막힌 행을 사람이 확인하면 BLOCK_CONFIRMED다', () => {
+  const b = row('a', 'f', { Count_Blocked: '1' });
+  assert.equal(L.entryStatus(b, {}, {}, {}, { a: true }), 'BLOCK_CONFIRMED');
+  assert.equal(L.entryStatus(b, {}, {}, {}, {}), 'BLOCKED_BAD_CROP');
+});
+test('확인은 이유를 요구하지 않는다', () => {
+  const line = L.buildCsv([row('a', 'f', { Count_Blocked: '1' })], {}, 'B', {},
+                          {}, { a: true }).split('\n')[1].split(',');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Entry_Status')], '"BLOCK_CONFIRMED"');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Objection_Reason')], '""');
+  assert.equal(line[L.CSV_COLUMNS.indexOf('Observed_Panel_Count')], '""');
+});
+test('이의와 확인이 함께 켜지면 글이 있는 이의가 이긴다', () => {
+  const b = row('a', 'f', { Count_Blocked: '1' });
+  assert.equal(L.entryStatus(b, {}, {}, { a: '그림이 멀쩡히 보임' }, { a: true }),
+               'BLOCK_DISPUTED');
+});
+test('막히지 않은 행은 확인이 켜져 있어도 확인이 아니다', () => {
+  const open = row('a', 'f');
+  assert.equal(L.entryStatus(open, { a: '2' }, {}, {}, { a: true }), 'ENTERED');
+  assert.equal(L.entryStatus(open, {}, {}, {}, { a: true }), 'NOT_REVIEWED');
+});
+
 test('막힌 행의 이의도 이유와 함께 나간다', () => {
   const line = L.buildCsv([row('a', 'f', { Count_Blocked: '1' })], {}, 'B', {},
                           { a: '중복이 아님' }).split('\n')[1].split(',');

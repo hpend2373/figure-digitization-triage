@@ -226,11 +226,27 @@ _status = {d["Draft_ID"]: d["Crop_Quality_Status"] for d in DRAFT}
 _from_file = [i for i in _countable if _status.get(i) == "PUBLISHER_FIGURE"]
 _pageviews = re.findall(r"data-page='data:image/", SHEET)
 _nopage = re.findall(r"data-nopage='", SHEET)
-check("입력 가능한 %d행이 페이지 뷰나 그 사유를 싣는다 (뷰 %d + 사유 %d)"
-      % (len(_countable), len(_pageviews), len(_nopage)),
-      len(_pageviews) + len(_nopage) == len(_countable),
+# 세는 단위는 "입력 가능한 행"이 아니라 "크롭을 실은 행"입니다. 2026-09-07에
+# 이미 답한 행과 쪽 범위 밖 행의 그림을 걷어내면서(build_sheet2의 `has_img`)
+# 두 집합이 갈라졌습니다 - 그 전까지는 같았고, 이 줄은 그때의 셈을 그대로
+# 들고 있었습니다. 규칙 자체는 그대로입니다: 그림을 보여 주는 행은 그 그림이
+# 쪽 어디에서 왔는지도 함께 보여 준다.
+_shown = re.findall(r"data-zoom='data:image/", SHEET)
+check("크롭을 실은 %d행이 페이지 뷰나 그 사유를 싣는다 (뷰 %d + 사유 %d)"
+      % (len(_shown), len(_pageviews), len(_nopage)),
+      len(_pageviews) + len(_nopage) == len(_shown),
       "뷰 %d + 사유 %d != %d" % (len(_pageviews), len(_nopage),
-                                len(_countable)))
+                                len(_shown)))
+# 그리고 사람이 숫자를 넣을 수 있는 행은 언제나 그 안에 있습니다 - 쪽을 보지
+# 못하고 세라고 하는 것이 애초에 이 줄이 막으려던 일입니다.
+_cards = SHEET.split("<div class='fig")
+_shows = set()
+for _c in _cards:
+    _m = re.search(r"data-id='([^']+)'", _c)
+    if _m and "data-zoom='data:image/" in _c:
+        _shows.add(_m.group(1))
+_blind = [i for i in _countable if i not in _shows]
+check("입력 가능한 행은 모두 그 안에 있다", not _blind, _blind[:5])
 check("그 사유는 출판사 그림 파일 행에만 붙는다",
       len(_nopage) == len(_from_file),
       "사유 %d개 / 그림파일 행 %d개" % (len(_nopage), len(_from_file)))
@@ -239,8 +255,8 @@ check("한 행이 페이지 뷰와 사유를 동시에 달지 않는다",
                     r"data-nopage='[^']*'[^>]*data-page=", SHEET))
 _zooms = re.findall(r"data-zoom='data:image/", SHEET)
 check("확대본도 같은 수만큼 있다",
-      len(_zooms) == len(_countable),
-      "확대본 %d개 / 입력 가능 %d행" % (len(_zooms), len(_countable)))
+      len(_zooms) == len(_shown),
+      "확대본 %d개 / 크롭 실은 %d행" % (len(_zooms), len(_shown)))
 
 nocrop = {d["Draft_ID"] for d in DRAFT if d["Crop_Quality_Status"] == "NO_CROP"}
 check("이미지 없는 %d행이 모두 입력 차단이다" % len(nocrop),
@@ -280,9 +296,16 @@ check("pid 563 FIG6이 초안에 있다 — 4차 감사가 원문에서 확인�
       any(_pid_of.get(d["Source_Document_ID"]) == "563"
           and d["Figure_Number"] == "FIG6" and d["Page"] == "7"
           for d in DRAFT))
-check("pid 554의 읽지 못한 캡션이 번호 없이라도 초안에 있다",
+# 이 줄은 "기계가 번호를 못 읽은 행도 초안에 남아 있다"를 지키려고 쓰였습니다.
+# 그 뒤 사람이 그 행을 보고 "fig1"이라고 적었고 `apply_validated`가 넣었으므로,
+# 이제 번호가 없다는 것은 사실이 아닙니다. 지키려던 것 - 그 행이 사라지지
+# 않는다 - 은 그대로 두고, 번호가 사람에게서 왔다는 것까지 봅니다.
+check("pid 554의 읽지 못한 캡션은 초안에 남아 있고, 번호는 사람이 주었다",
       any(_pid_of.get(d["Source_Document_ID"]) == "554"
-          and not d["Figure_Number"] and d["Page"] == "3" for d in DRAFT))
+          and d["Page"] == "3"
+          and (d.get("Number_Source") or "") == "HUMAN" for d in DRAFT),
+      [(d["Page"], d["Figure_Number"], d.get("Number_Source"))
+       for d in DRAFT if _pid_of.get(d["Source_Document_ID"]) == "554"])
 check("둘 다 화면에서 사유와 함께 보인다",
       "기계가 스스로 신뢰도 0으로" in SHEET
       and "그림 번호를 읽지 못했습니다" in SHEET)

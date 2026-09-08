@@ -48,6 +48,19 @@ COUNTS = "observed_panel_counts.csv"
 #: "보았지만 셀 수 없다"이고 `NOT_REVIEWED`는 "아직 안 보았다"입니다 -
 #: 둘 다 수가 아니고, 둘을 수로 바꾸면 그 그림은 세어진 것이 됩니다.
 COUNTED = "ENTERED"
+
+#: 수가 없는 까닭마다 사람이 다음에 할 일이 다릅니다. 아무도 보지 않은 행은
+#: 세면 되지만, "보았지만 셀 수 없다"·"이 크롭은 대상 그림이 아니다"·"이
+#: 차단이 틀렸다"는 **이미 답한 행**입니다. 그 세 가지에까지 "패널 계수"
+#: 라고 적으면, 답한 사람에게 같은 질문을 다시 하는 대기열이 됩니다 -
+#: 그리고 답한 사람은 그 줄을 보고 자기 답이 사라졌다고 읽습니다.
+#: 답을 못 읽는 것과 답이 없는 것은 다릅니다.
+COUNT_NEED = "패널 계수"
+ANSWERED_WITHOUT_A_NUMBER = {
+    "SEEN_UNCOUNTABLE": "셀 수 없다고 하신 그림 — 처분 결정",
+    "CROP_DISPUTED": "대상 그림이 아니라고 하신 크롭 — 처분 결정 또는 재크롭",
+    "BLOCK_DISPUTED": "차단이 틀렸다고 하신 행 — 차단 재검토",
+}
 READINESS = "plan_readiness.csv"
 WORKSHEET = "plan_figures.csv"
 
@@ -138,6 +151,12 @@ def dispersion_for(draft_id, caption, decision):
     return "", "", "", ""
 
 
+def count_need(status):
+    """수가 없는 이 행에 대해 사람이 다음에 할 일의 이름."""
+    return ANSWERED_WITHOUT_A_NUMBER.get(str(status or "").strip(),
+                                         COUNT_NEED)
+
+
 def disposition_for(route):
     """캡션 심사의 경로를 패널 처분으로. 모르는 경로는 추출 대상이 아닙니다.
 
@@ -149,7 +168,7 @@ def disposition_for(route):
     return ROUTE_DISPOSITION.get(route, "UNRESOLVED")
 
 
-def figure_of(row, caption, decision, count, crop_root):
+def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
     """(figure, needs). `needs`는 이 그림에 대해 사람이 아직 해야 할 일들."""
     needs = []
     text = (caption.get("Caption_Full") if caption else "") or row["Caption_Text"]
@@ -184,8 +203,15 @@ def figure_of(row, caption, decision, count, crop_root):
         "reviewer_id": DEMO_REVIEWER,
         "panels": [],
     }
+    status, reason = answer
     if count is None:
-        needs.append("패널 계수")
+        needs.append(count_need(status))
+        if str(status or "").strip() in ANSWERED_WITHOUT_A_NUMBER:
+            # 사람의 답을 계획서가 들고 가게 합니다. 여기 없으면 그 답은
+            # 계수 시트에만 있고, 계획서를 읽는 쪽에서는 아무도 이 그림을
+            # 보지 않은 것과 구별할 수 없습니다.
+            figure["note"] = ("사람 답: %s%s"
+                              % (status, (" — %s" % reason) if reason else ""))
     else:
         figure["observed_panel_count"] = count
         figure["panel_count_method"] = "HUMAN_VISUAL"
@@ -198,9 +224,10 @@ def figure_of(row, caption, decision, count, crop_root):
 
 
 def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
-             run_date):
+             run_date, said=None):
     """(plan, 그림별 (figure_id, needs, ...)). 한 편의 계획서."""
     first = rows[0]
+    said = said or {}
     documents, seen = [], set()
     for row in rows:
         name = (row.get("Source_File") or "").strip()
@@ -224,7 +251,8 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
         raw = counts.get(row["Draft_ID"])
         count = int(raw) if str(raw or "").strip().isdigit() else None
         figure, needs, route, disposition, dispersion = figure_of(
-            row, cap, dec, count, crop_root)
+            row, cap, dec, count, crop_root,
+            said.get(row["Draft_ID"], ("", "")))
         figures.append(figure)
         notes.append((figure, needs, route, disposition, dispersion, row))
     plan = {
@@ -251,9 +279,17 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
     rows = live_rows(run)
     captions = _by(_rows(os.path.join(run, CAPTIONS)), "Draft_ID")
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
+    answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
-                  for r in _rows(os.path.join(run, COUNTS))
+                  for r in answers
                   if (r.get("Entry_Status") or COUNTED).strip() == COUNTED)
+    # 수가 아닌 답도 읽습니다. 수만 읽으면 "셀 수 없다"고 답한 행과
+    # 아무도 안 본 행이 계획서에서 같은 줄로 보입니다.
+    said = dict((r["Draft_ID"],
+                 ((r.get("Entry_Status") or "").strip(),
+                  (r.get("Uncountable_Reason") or "").strip()
+                  or (r.get("Objection_Reason") or "").strip()))
+                for r in answers)
     by_pub = {}
     for row in rows:
         if only and row["Source_Document_ID"] not in only:
@@ -268,7 +304,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
             log("건너뜀 %s: 계획서가 받는 이름이 아닙니다" % publication)
             continue
         plan, notes = plan_for(run, publication, pub_rows, captions, decisions,
-                               counts, crop_root, run_date)
+                               counts, crop_root, run_date, said)
         path = os.path.join(out_dir, "plan_%s.json" % publication)
         with io.open(path, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(plan, ensure_ascii=False, indent=1,

@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "73ee9497d8c4d7bb5a4e6f6106945d6be44dcd4951f58b103cc712fc4a92600c",
-  "test_make_plan.py": "ca71dddfa60b80ceabb37ea0edf90bbada4a735afe197fad86cee3de6b6b2be9"
+  "make_plan.py": "f2b05dd9356eb5b426f84d81331805352d06f7d3b12a3c94043f7c1e137e72be",
+  "test_make_plan.py": "1fed46405ed7e06b72be44ae67b54da37d3f94ba87ba399bb006d90998db33f7"
  },
  "suites": [
   "test_make_plan.py"
@@ -94,8 +94,8 @@
   {
    "name": "세지 않은 패널 수를 그림 수로 채운다",
    "file": "make_plan.py",
-   "old": "    if count is None:\n        needs.append(\"패널 계수\")",
-   "new": "    if False:\n        needs.append(\"패널 계수\")"
+   "old": "    if count is None:\n        needs.append(count_need(status))",
+   "new": "    if False:\n        needs.append(count_need(status))"
   },
   {
    "name": "세지 않았는데 1개라고 적는다",
@@ -180,6 +180,24 @@
    "file": "make_plan.py",
    "old": "                  if (r.get(\"Entry_Status\") or COUNTED).strip() == COUNTED)",
    "new": "                  )"
+  },
+  {
+   "name": "수가 없으면 까닭을 가리지 않고 세라고 적는다",
+   "file": "make_plan.py",
+   "old": "        needs.append(count_need(status))",
+   "new": "        needs.append(COUNT_NEED)"
+  },
+  {
+   "name": "사람이 답한 것을 계획서에 싣지 않는다",
+   "file": "make_plan.py",
+   "old": "        if str(status or \"\").strip() in ANSWERED_WITHOUT_A_NUMBER:",
+   "new": "        if False:"
+  },
+  {
+   "name": "수가 아닌 답은 아예 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "            said.get(row[\"Draft_ID\"], (\"\", \"\"))",
+   "new": "            (\"\", \"\")"
   }
  ]
 }

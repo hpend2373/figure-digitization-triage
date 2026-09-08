@@ -227,17 +227,23 @@ check("기하를 아직 아무도 쓰지 않았다는 것이 할 일에 적힌�
 check("계수가 필요하다는 것이 할 일에 적힌다",
       all("패널 계수" in r["Needs"] for r in SHEET.values()))
 
-write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"),
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
+                  "Uncountable_Reason", "Objection_Reason"),
       [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "3",
         "Entry_Status": "ENTERED"},
        {"Draft_ID": "PUB_D003", "Observed_Panel_Count": "1",
         "Entry_Status": "ENTERED"},
        # 보았지만 셀 수 없다고 적힌 행. 수가 아닙니다.
        {"Draft_ID": "PUB_D004", "Observed_Panel_Count": "2",
-        "Entry_Status": "SEEN_UNCOUNTABLE"},
+        "Entry_Status": "SEEN_UNCOUNTABLE",
+        "Uncountable_Reason": "셀수없는그래프"},
        # 아직 안 본 행.
        {"Draft_ID": "PUB_D005", "Observed_Panel_Count": "",
-        "Entry_Status": "NOT_REVIEWED"}])
+        "Entry_Status": "NOT_REVIEWED"},
+       # 크롭이 대상 그림이 아니라고 적힌 행. 이것도 답입니다.
+       {"Draft_ID": "PUB_D002", "Observed_Panel_Count": "",
+        "Entry_Status": "CROP_DISPUTED",
+        "Objection_Reason": "개념그림"}])
 _plan, _sheet, _ready = build()
 _fig = dict((f["source_figure_id"], f) for f in _plan["figures"])
 check("사람이 센 수는 그대로 적힌다", _fig["PUB_D001"]["observed_panel_count"] == 3)
@@ -250,6 +256,38 @@ check("셀 수 없다고 적힌 행의 수는 가져오지 않는다",
       _fig["PUB_D004"].get("observed_panel_count"))
 check("아직 안 본 행도 가져오지 않는다",
       "observed_panel_count" not in _fig["PUB_D005"])
+
+# --- 수가 아닌 답도 답이다 ------------------------------------------------------
+# REVERT: 수가 없으면 무조건 "패널 계수"라고 적는다. 그러면 사람이 보고 답한
+# 행과 아무도 보지 않은 행이 같은 줄로 나오고, 답한 사람은 자기 답이 사라진
+# 것을 봅니다. 계획서를 읽는 쪽에서는 둘을 가를 방법이 없습니다.
+check("셀 수 없다고 답한 행에는 세라고 적지 않는다",
+      MP.COUNT_NEED not in _sheet["PUB_D004"]["Needs"],
+      _sheet["PUB_D004"]["Needs"])
+check("대상 그림이 아니라고 답한 행에도 세라고 적지 않는다",
+      MP.COUNT_NEED not in _sheet["PUB_D002"]["Needs"],
+      _sheet["PUB_D002"]["Needs"])
+check("아직 아무도 보지 않은 행에는 여전히 세라고 적는다",
+      MP.COUNT_NEED in _sheet["PUB_D005"]["Needs"],
+      _sheet["PUB_D005"]["Needs"])
+check("답한 행의 할 일은 사람이 다음에 무엇을 할지 이름을 댄다",
+      "처분" in _sheet["PUB_D004"]["Needs"], _sheet["PUB_D004"]["Needs"])
+check("사람이 뭐라 답했는지가 계획서에 실린다",
+      "SEEN_UNCOUNTABLE" in _fig["PUB_D004"].get("note", ""),
+      _fig["PUB_D004"].get("note"))
+check("사람이 적은 까닭까지 함께 실린다",
+      "셀수없는그래프" in _fig["PUB_D004"].get("note", ""),
+      _fig["PUB_D004"].get("note"))
+check("답을 실었다고 그것이 수가 되지는 않는다",
+      "observed_panel_count" not in _fig["PUB_D004"]
+      and _fig["PUB_D004"]["panels"] == [])
+check("답을 실은 그림도 계획서가 받는 모양이다",
+      not [p for p in CP.validate_plan(_plan, file_root=RUN)
+           if p["check"] not in ("PLAN_PANEL_COUNT_MISSING",
+                                 "SOURCE_FILE_NOT_FOUND")],
+      [p["check"] for p in CP.validate_plan(_plan, file_root=RUN)])
+check("아무도 답하지 않은 행에는 답이 실리지 않는다",
+      "note" not in _fig["PUB_D005"], _fig["PUB_D005"].get("note"))
 check("센 수만큼 패널이 선다", len(_fig["PUB_D001"]["panels"]) == 3,
       len(_fig["PUB_D001"]["panels"]))
 check("패널 이름은 서로 다르다",

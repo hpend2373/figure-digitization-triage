@@ -663,6 +663,57 @@ check("그 상자로도 크롭은 나온다 - 왕복 검사가 막아 주는 게
              dict(_bad, Figure_BBox=_slip)) is not None)
 check("마우스가 미끄러진 상자는 확인된 것이 되지 않는다",
       _bad_after["Agreement"] != "HUMAN_VALIDATED", _bad_after["Agreement"])
+
+# --- 사람이 읽은 캡션 ----------------------------------------------------------
+# REVERT: 캡션 확인을 초안에 옮기지 않는다. 그러면 판독기 하나만 캡션을 찾은
+# 행은 "사람이 정할 일"이라고 적힌 채 정할 자리가 없는 행으로 남고, 사람이
+# 이의를 눌러도 그 답은 아무 데도 닿지 못합니다 - run2의 IWASAKI FIG6.
+import block_rules as _BR                                        # noqa: E402
+check("초안에 적는 말과 관문이 읽는 말이 같은 글자다",
+      AV.CAPTION_BY_HUMAN == _BR.CAPTION_BY_HUMAN,
+      (AV.CAPTION_BY_HUMAN, _BR.CAPTION_BY_HUMAN))
+_cap = [d for d in D2 if d["Draft_ID"] != _d2["Draft_ID"]][0]
+_rows2 = _reg2_rows()
+for r in _rows2:
+    if r["Draft_ID"] == _cap["Draft_ID"]:
+        r[AV.HUMAN_CAPTION] = AV.CAPTION_CONFIRMED
+_write_reg2(_rows2, (AV.HUMAN_CAPTION,))
+AV.main(RUN2)
+_cap_after = {d["Draft_ID"]: d for d in csv.DictReader(io.open(
+    os.path.join(RUN2, "figure_intake_draft.csv"), encoding="utf-8"))}[_cap["Draft_ID"]]
+check("사람이 캡션을 확인하면 초안이 그렇게 적는다",
+      _cap_after.get(AV.CAPTION_SOURCE) == AV.CAPTION_BY_HUMAN,
+      _cap_after.get(AV.CAPTION_SOURCE))
+check("  캡션 확인은 상자를 건드리지 않는다",
+      _cap_after["Figure_BBox"] == _cap["Figure_BBox"])
+check("  그리고 관문이 그것을 사람이 읽은 것으로 본다",
+      _BR.caption_read_by_hand(_cap_after))
+_others = [d for d in csv.DictReader(io.open(
+    os.path.join(RUN2, "figure_intake_draft.csv"), encoding="utf-8"))
+    if d["Draft_ID"] != _cap["Draft_ID"]]
+check("확인하지 않은 행에는 아무 말도 적지 않는다",
+      all((d.get(AV.CAPTION_SOURCE) or "") != AV.CAPTION_BY_HUMAN for d in _others),
+      [d["Draft_ID"] for d in _others
+       if (d.get(AV.CAPTION_SOURCE) or "") == AV.CAPTION_BY_HUMAN][:3])
+# REVERT: 모르는 값을 조용히 넘긴다. "확인함"이라고 적었다고 믿은 사람과, 그
+# 글자를 못 알아본 파이프라인이 서로 다른 것을 사실로 여기게 됩니다.
+_rows2 = _reg2_rows()
+for r in _rows2:
+    if r["Draft_ID"] == _cap["Draft_ID"]:
+        r[AV.HUMAN_CAPTION] = "확인함"
+_write_reg2(_rows2, (AV.HUMAN_CAPTION,))
+try:
+    AV.main(RUN2)
+    _refused = ""
+except SystemExit as e:
+    _refused = str(e)
+check("쓸 수 없는 캡션 값은 이름을 대며 거부한다",
+      AV.HUMAN_CAPTION in _refused and "확인함" in _refused, _refused[:80])
+_rows2 = _reg2_rows()
+for r in _rows2:
+    if r["Draft_ID"] == _cap["Draft_ID"]:
+        r[AV.HUMAN_CAPTION] = ""
+_write_reg2(_rows2, (AV.HUMAN_CAPTION,))
 check("그런 상자로 크롭을 바꾸지도 않는다",
       _bad_draft["Figure_BBox"] == _bad["Figure_BBox"], _bad_draft["Figure_BBox"])
 

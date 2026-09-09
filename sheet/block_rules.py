@@ -285,12 +285,23 @@ STILL_WRONG = {
 HUMAN_CUT = "HUMAN_CHOICE_"
 #: What `apply_validated` writes when a person typed the figure number.
 NUMBER_BY_HUMAN = "HUMAN"
+#: And what it writes when a person read the caption in the paper and said
+#: it is this figure's caption. A separate column from the number because
+#: they answer separate findings - a row can have a caption nobody could
+#: confirm and a number nobody could read, and one answer is not the other.
+CAPTION_BY_HUMAN = "HUMAN"
 
 
 def numbered_by_hand(row):
     """Did a person supply this row's figure number?"""
     return (str(row.get("Number_Source") or "").strip().upper()
             == NUMBER_BY_HUMAN)
+
+
+def caption_read_by_hand(row):
+    """Did a person read this row's caption in the paper and confirm it?"""
+    return (str(row.get("Caption_Source") or "").strip().upper()
+            == CAPTION_BY_HUMAN)
 
 
 def human_cut(row):
@@ -476,7 +487,10 @@ def confirmed_duplicates(regions):
 #: produces. Named, because "would a box help" was one boolean and the page
 #: could therefore only offer one kind of repair - a row needing a figure
 #: number was told "a box will not help" and given nothing else to do.
-REPAIR_BOX, REPAIR_NUMBER = "BOX", "NUMBER"
+#: `REPAIR_CAPTION`은 상자도 번호도 아닌 셋째 답입니다 - 사람이 논문에서
+#: 캡션을 읽고 "이 글이 이 그림의 캡션이 맞다"고 하는 것. 판독기 하나만
+#: 캡션을 찾은 행에는 이것 말고 닿는 답이 없습니다.
+REPAIR_BOX, REPAIR_NUMBER, REPAIR_CAPTION = "BOX", "NUMBER", "CAPTION"
 #: A number that is not any real figure's, used only to ask the rule whether
 #: HAVING one would change its answer. Never written anywhere.
 _TRIAL_NUMBER = "FIG?"
@@ -501,8 +515,12 @@ def repairs_that_open(row, key, **context):
     answered anyway - once by writing the number into the free-text note,
     once by picking a proposer - and neither could reach the field.
     """
-    for wanted in ((), (REPAIR_BOX,), (REPAIR_NUMBER,),
-                   (REPAIR_BOX, REPAIR_NUMBER)):
+    for wanted in ((),
+                   (REPAIR_BOX,), (REPAIR_NUMBER,), (REPAIR_CAPTION,),
+                   (REPAIR_BOX, REPAIR_NUMBER),
+                   (REPAIR_BOX, REPAIR_CAPTION),
+                   (REPAIR_NUMBER, REPAIR_CAPTION),
+                   (REPAIR_BOX, REPAIR_NUMBER, REPAIR_CAPTION)):
         trial, ctx = dict(row), dict(context)
         if REPAIR_BOX in wanted:
             # What the row WOULD look like after `apply_validated` applies a
@@ -517,6 +535,11 @@ def repairs_that_open(row, key, **context):
         if REPAIR_NUMBER in wanted:
             trial["Figure_Number"] = _TRIAL_NUMBER
             trial["Number_Source"] = NUMBER_BY_HUMAN
+        if REPAIR_CAPTION in wanted:
+            # 캡션을 사람이 읽었다는 것 하나만 바뀝니다. 캡션 글자를
+            # 여기서 지어내지 않습니다 - 무엇이라 적혀 있는지는 논문이
+            # 아는 것이고, 이 함수는 "그 답이 닿기는 하는가"만 묻습니다.
+            trial["Caption_Source"] = CAPTION_BY_HUMAN
         # `duplicate` is NOT cleared by either repair: neither can stop
         # another row from already holding this figure - if anything a box is
         # how a row gets there.
@@ -543,6 +566,11 @@ def box_would_open(row, key, **context):
     exactly what a box cannot answer.
     """
     return REPAIR_BOX in repairs_that_open(row, key, **context)
+
+
+def caption_would_open(row, key, **context):
+    """Is a person reading the caption one of the things this row waits for?"""
+    return REPAIR_CAPTION in repairs_that_open(row, key, **context)
 
 
 def number_would_open(row, key, **context):
@@ -808,8 +836,22 @@ def blocked_reason(row, key, defect=None, shared_with=(), still_wrong=None,
         # text is too short) is untouched - a supplied number says nothing
         # about those.
         reason = str(row.get("Confidence_Reason") or "")
-        if not (numbered_by_hand(row)
-                and reason.startswith(UNREADABLE_NUMBER_REASON)):
+        unread_number = reason.startswith(UNREADABLE_NUMBER_REASON)
+        # AND THE OTHER ZERO HAS AN ANSWER TOO. The reasons that are not
+        # about the number are about the CAPTION - one reader found it and
+        # the other did not, or the text is too short to be sure it is a
+        # caption at all. Both say "a person has to read this", and until
+        # now there was nowhere for that reading to go: the row stayed
+        # blocked, the objection button recorded the disagreement, and no
+        # code path could act on it. A door with no handle.
+        #
+        # The two answers do not cross. A person who typed the number said
+        # nothing about whether this text is the caption, and a person who
+        # read the caption said nothing about a number that would not
+        # parse - so each opens only its own reason.
+        answered = ((numbered_by_hand(row) and unread_number)
+                    or (caption_read_by_hand(row) and not unread_number))
+        if not answered:
             return ("기계가 스스로 신뢰도 0으로 표시한 행입니다 — %s"
                     % (reason or "사유 없음"))
     # CAN THE PICTURE BE TRACED TO ITS BOX. After the row's own defects (no

@@ -186,22 +186,21 @@ MUT = [
 
     # -------------------------------- 번호: 사람이 채우면 풀리는가, 같은 문 두 번
     ("M52 상자만 물어보고 번호는 안 물어봄", "block_rules.py",
-     "    for wanted in ((), (REPAIR_BOX,), (REPAIR_NUMBER,),\n"
-     "                   (REPAIR_BOX, REPAIR_NUMBER)):",
-     "    for wanted in ((), (REPAIR_BOX,)):"),
+     "                   (REPAIR_BOX,), (REPAIR_NUMBER,), (REPAIR_CAPTION,),",
+     "                   (REPAIR_BOX,),"),
     ("M53 둘 다 필요한 경우를 안 봄", "block_rules.py",
-     "                   (REPAIR_BOX, REPAIR_NUMBER)):",
+     "                   (REPAIR_BOX, REPAIR_NUMBER),\n"
+     "                   (REPAIR_BOX, REPAIR_CAPTION),\n"
+     "                   (REPAIR_NUMBER, REPAIR_CAPTION),\n"
+     "                   (REPAIR_BOX, REPAIR_NUMBER, REPAIR_CAPTION)):",
      "                   ):"),
     ("M54 번호 시늉만 하고 사람이 적었다고 안 함", "block_rules.py",
      '            trial["Number_Source"] = NUMBER_BY_HUMAN\n', ""),
     ("M55 사람이 적어도 신뢰도 0이 그대로 막음", "block_rules.py",
-     "        if not (numbered_by_hand(row)\n"
-     "                and reason.startswith(UNREADABLE_NUMBER_REASON)):",
-     "        if True:"),
+     "        if not answered:", "        if True:"),
     ("M56 어떤 사유의 신뢰도 0이든 번호로 뚫림", "block_rules.py",
-     "        if not (numbered_by_hand(row)\n"
-     "                and reason.startswith(UNREADABLE_NUMBER_REASON)):",
-     "        if not numbered_by_hand(row):"),
+     "        answered = ((numbered_by_hand(row) and unread_number)",
+     "        answered = ((numbered_by_hand(row) or True)"),
     ("M57 기계가 넣은 번호도 사람 것으로 침", "block_rules.py",
      '    return (str(row.get("Number_Source") or "").strip().upper()\n'
      "            == NUMBER_BY_HUMAN)",
@@ -234,6 +233,18 @@ MUT = [
     ("M69 모르는 상태도 답으로 침", "block_rules.py",
      "    said = RECORDED_SAID.get(status)\n    if not said:\n        return \"\"",
      "    said = RECORDED_SAID.get(status) or \"%s\""),
+    ("M72 캡션을 읽어도 신뢰도 0을 풀지 않음", "block_rules.py",
+     "                    or (caption_read_by_hand(row) and not unread_number))",
+     "                    or False)"),
+    ("M73 기계가 찾은 캡션도 사람이 읽은 것으로 침", "block_rules.py",
+     '    return (str(row.get("Caption_Source") or "").strip().upper()\n            == CAPTION_BY_HUMAN)',
+     '    return True'),
+    ("M74 캡션 확인이 번호 문제까지 푼다", "block_rules.py",
+     "        answered = ((numbered_by_hand(row) and unread_number)\n                    or (caption_read_by_hand(row) and not unread_number))",
+     "        answered = (numbered_by_hand(row) or caption_read_by_hand(row))"),
+    ("M75 고칠 거리 목록에서 캡션을 뺀다", "block_rules.py",
+     "                   (REPAIR_BOX,), (REPAIR_NUMBER,), (REPAIR_CAPTION,),",
+     "                   (REPAIR_BOX,), (REPAIR_NUMBER,),"),
     ("M70 차단 확인을 답으로 치지 않음", "block_rules.py",
      '    "BLOCK_CONFIRMED": "이 차단이 맞다고 확인하셨습니다",\n', ""),
     ("M71 이유 자리가 없어도 채워 넣음", "block_rules.py",

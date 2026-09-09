@@ -128,6 +128,21 @@ def page_size_from_pdf(src, page):
 #: rather than stored - a `Figure_Number` nothing can match is worse than none,
 #: because the row then counts a figure no other row can be checked against.
 HUMAN_NUMBER = "Human_Figure_Number"
+
+#: 사람이 논문에서 캡션을 읽고 "이 글이 이 그림의 캡션이 맞다"고 적는 칸.
+#: 판독기 하나만 캡션을 찾았거나 캡션 글이 너무 짧아 신뢰도가 0인 행은
+#: "사람이 정할 일"이라고 적혀 있었는데 정할 자리가 없었습니다.
+#:
+#: 값은 하나뿐입니다. "이 캡션은 틀렸다"는 상태를 두지 않는 것은, 그것이
+#: 이미 지금 상태 - 막힌 채로 - 이기 때문입니다. 아무것도 바꾸지 않는 값을
+#: 받아 두면 사람은 답했다고 여기고 파이프라인은 답을 못 본 채로 남습니다.
+HUMAN_CAPTION = "Human_Caption_Verdict"
+CAPTION_CONFIRMED = "CONFIRMED"
+CAPTION_VERDICTS = ("", CAPTION_CONFIRMED)
+#: 초안에 적히는 말. `block_rules.CAPTION_BY_HUMAN`과 같은 글자여야 하고,
+#: `test_sheet_build`가 둘이 같은지 봅니다 - 아무도 대조하지 않는 사본은
+#: 어긋나는 사본입니다.
+CAPTION_SOURCE, CAPTION_BY_HUMAN = "Caption_Source", "HUMAN"
 NUMBER_SPELLING = re.compile(
     r"^\s*(?P<ext>(?:extended(?:\s+data)?|supplement(?:ary|al)?|online\s+resource)\s+)?"
     r"(?:fig(?:ure)?\.?|그림|도)?\s*(?P<n>[0-9]{1,2})\s*(?P<sub>[a-z])?\s*$", re.I)
@@ -250,12 +265,12 @@ def main(run):
         raise SystemExit("영역 검증표에 없는 초안 행 %d개 (예: %s) — 표를 다시 "
                          "만드십시오" % (len(missing), missing[0]))
     for col in ("Proposal_Figure_BBox", "Crop_Source", "Caption_Page",
-                "Moved_From_Page", "Number_Source"):
+                "Moved_From_Page", "Number_Source", CAPTION_SOURCE):
         if col not in dcols:
             dcols.append(col)
     for col in ("Recut_On", "Recut_From", "Human_Choice", "Human_Box",
                 "Human_Page", "Agent_Choice", "Blocked_From",
-                DUPLICATE_OF, DUPLICATE_PAGE, HUMAN_NUMBER):
+                DUPLICATE_OF, DUPLICATE_PAGE, HUMAN_NUMBER, HUMAN_CAPTION):
         if col not in rcols:
             rcols.append(col)
     ledger_path = os.path.join(run, "intake_document_status.csv")
@@ -268,6 +283,12 @@ def main(run):
         twins.setdefault((d["Source_Document_ID"], d["Figure_Number"], d["Page"]),
                          d["Draft_ID"])
     for reg in regions:
+        verdict = str(reg.get(HUMAN_CAPTION) or "").strip().upper()
+        if verdict not in CAPTION_VERDICTS:
+            raise SystemExit(
+                "%s 행의 %s가 %r입니다 — 쓸 수 있는 값은 %s 뿐입니다"
+                % (reg["Draft_ID"], HUMAN_CAPTION, reg.get(HUMAN_CAPTION),
+                   ", ".join(v or "(빈칸)" for v in CAPTION_VERDICTS)))
         choice = str(reg.get("Human_Choice") or "").strip().upper()
         if choice not in HUMAN_CHOICES:
             raise SystemExit(
@@ -284,6 +305,15 @@ def main(run):
         # machine could not number are also THIN_CROP. Applying it before the
         # choice means the box and the number land in one pass, and a row that
         # needs only the number needs no choice at all.
+        # THE CAPTION BEFORE THE NUMBER, and on its own. 한 판독기만 찾은
+        # 캡션과 읽히지 않는 번호는 서로 다른 발견이고, 한 행이 둘 다
+        # 가질 수 있습니다. 하나의 답이 다른 하나를 대신하지 않습니다.
+        if (str(reg.get(HUMAN_CAPTION) or "").strip().upper()
+                == CAPTION_CONFIRMED
+                and str(d.get(CAPTION_SOURCE) or "").strip().upper()
+                != CAPTION_BY_HUMAN):
+            d[CAPTION_SOURCE] = CAPTION_BY_HUMAN
+            done.append(d["Draft_ID"] + " (캡션 확인)")
         want, why = figure_number(reg.get(HUMAN_NUMBER))
         if why:
             skipped.append((d["Draft_ID"], why))
@@ -426,7 +456,8 @@ def main(run):
     bad = []
     # A block and a recorded duplicate change the regions table, not a crop.
     recut_ids = {x.split(" (")[0] for x in done
-                 if "BLOCKED" not in x and "중복" not in x and "(번호 " not in x}
+                 if "BLOCKED" not in x and "중복" not in x
+                 and "(번호 " not in x and "(캡션 확인)" not in x}
     for d in draft:
         if d["Draft_ID"] in recut_ids:
             status, detail = roundtrip.check(d, run)

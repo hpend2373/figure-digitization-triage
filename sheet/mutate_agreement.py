@@ -23,6 +23,9 @@ MUT = [
      '''        if agreement in AGREEMENT_UNCOUNTABLE:
             return AGREEMENT_UNCOUNTABLE[agreement]
         return ""'''),
+    ("M26 사유 표에서 캡션 칸을 뺌", "build_sheet2.py",
+     '            "Caption_Would_Open": "1" if BR.REPAIR_CAPTION in _fix else "0",\n',
+     ""),
     ("M3 빌더가 합의를 안 넘김", "build_sheet2.py",
      '''                             agreement=(None if AGREEMENT is None else
                                         AGREEMENT.get(d["Draft_ID"], "PENDING")),''',

@@ -364,8 +364,36 @@ _other0 = dict(_no_num, Figure_Number="FIG3", Number_Source=BR.NUMBER_BY_HUMAN,
 check("다른 사유의 신뢰도 0은 번호를 적어도 그대로 막는다",
       "신뢰도 0" in BR.blocked_reason(_other0, _NOKEY_A),
       BR.blocked_reason(_other0, _NOKEY_A)[:50])
-check("그리고 그런 행은 사람이 채울 것이 없다고 답한다",
-      BR.repairs_that_open(_other0, _NOKEY_A) == ())
+# REVERT: 캡션을 읽은 것이 신뢰도 0에 닿지 못하게 한다. 판독기 하나만 캡션을
+# 찾은 행은 "사람이 정할 일"이라고 적어 놓고 정할 자리를 주지 않는 행이 되고,
+# 사람이 이의를 눌러도 그 답은 아무 데도 가지 못합니다 - run2의 IWASAKI FIG6이
+# 그렇게 서 있었습니다. 손잡이 없는 문입니다.
+check("그런 행은 사람이 캡션을 읽어 주면 열린다",
+      BR.repairs_that_open(_other0, _NOKEY_A) == (BR.REPAIR_CAPTION,),
+      BR.repairs_that_open(_other0, _NOKEY_A))
+check("  상자나 번호로는 여전히 열리지 않는다",
+      not BR.box_would_open(_other0, _NOKEY_A)
+      and not BR.number_would_open(_other0, _NOKEY_A))
+check("  캡션을 읽었다고 하면 실제로 막히지 않는다",
+      BR.blocked_reason(dict(_other0, Caption_Source=BR.CAPTION_BY_HUMAN),
+                        _NOKEY_A) == "",
+      BR.blocked_reason(dict(_other0, Caption_Source=BR.CAPTION_BY_HUMAN),
+                        _NOKEY_A))
+check("기계가 캡션을 찾은 것으로는 그 문이 열리지 않는다 (사람이 읽어야 한다)",
+      "신뢰도 0" in BR.blocked_reason(
+          dict(_other0, Caption_Source="POPPLER_BBOX_LAYOUT"), _NOKEY_A))
+# 두 답은 서로를 대신하지 못합니다. 번호를 적은 사람은 이 글이 캡션인지에
+# 대해 아무 말도 하지 않았고, 캡션을 읽은 사람은 읽히지 않는 번호에 대해
+# 아무 말도 하지 않았습니다.
+check("캡션을 읽어도 '번호를 못 읽어 신뢰도 0'은 그대로 막는다",
+      "신뢰도 0" in BR.blocked_reason(
+          dict(_no_num, Figure_Number="FIG3",
+               Crop_Quality_Status="ACCEPTABLE",
+               Caption_Source=BR.CAPTION_BY_HUMAN), _NOKEY_A),
+      BR.blocked_reason(
+          dict(_no_num, Figure_Number="FIG3",
+               Crop_Quality_Status="ACCEPTABLE",
+               Caption_Source=BR.CAPTION_BY_HUMAN), _NOKEY_A)[:60])
 # 사유 문자열은 인테이크의 것입니다 - 두 곳에서 손으로 맞추면 어긋납니다.
 try:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

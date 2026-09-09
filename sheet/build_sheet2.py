@@ -392,7 +392,8 @@ for _d in DRAFT:
 
 _REASONS = os.path.join(D, "block_reasons.csv")
 _reason_fields = ("Draft_ID", "Count_Blocked", "Reason", "Box_Would_Open",
-                  "Number_Would_Open", "Duplicate_Of", "Mentions_Held")
+                  "Number_Would_Open", "Caption_Would_Open",
+                  "Duplicate_Of", "Mentions_Held")
 with io.open(_REASONS, "w", encoding="utf-8", newline="") as _fh:
     _w = csv.DictWriter(_fh, fieldnames=list(_reason_fields))
     _w.writeheader()
@@ -412,6 +413,10 @@ with io.open(_REASONS, "w", encoding="utf-8", newline="") as _fh:
             "Reason": _br,
             "Box_Would_Open": "1" if BR.REPAIR_BOX in _fix else "0",
             "Number_Would_Open": "1" if BR.REPAIR_NUMBER in _fix else "0",
+            # 판독기 하나만 캡션을 찾은 행에 닿는 유일한 답. 이 칸이
+            # 없으면 그 행은 "사람이 정할 일"이라고만 적힌 채, 무엇을
+            # 하면 되는지는 어디에도 적히지 않습니다.
+            "Caption_Would_Open": "1" if BR.REPAIR_CAPTION in _fix else "0",
             # 어느 행이 그 그림을 가지는가 - 큐가 산문을 읽지 않고 이 칸을 읽습니다.
             "Duplicate_Of": (DUPLICATE.get(_d["Draft_ID"]) or ("",))[0] if _br else "",
             # 이 줄이 부르는 그림을 이미 세고 있는 행들. 판정이 아니라 사람에게

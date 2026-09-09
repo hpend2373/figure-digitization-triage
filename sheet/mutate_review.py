@@ -414,6 +414,13 @@ MUT = [
      '        _reason_of(fields).encode("utf-8")).hexdigest()[:16]',
      '        str(fields.get("Block_Reason") or "").strip()'
      '.encode("utf-8")).hexdigest()[:16]'),
+    ("M119 사람의 캡션 확인을 초안에 안 옮김", "apply_validated.py",
+     '            d[CAPTION_SOURCE] = CAPTION_BY_HUMAN', '            pass'),
+    ("M120 모르는 캡션 값도 그냥 받는다", "apply_validated.py",
+     '        if verdict not in CAPTION_VERDICTS:', '        if False:'),
+    ("M121 확인하지 않은 행에도 확인을 적는다", "apply_validated.py",
+     '        if (str(reg.get(HUMAN_CAPTION) or "").strip().upper()',
+     '        if (True or str(reg.get(HUMAN_CAPTION) or "").strip().upper()'),
     ("M118 카드가 그 문장을 안 실음", "review_sheet.py",
      "again_block = (\"<div class='again'><b>다시 묻는 이유</b> %s</div>\"",
      "again_block = \"\" and (\"<div class='again'><b>다시 묻는 이유</b> %s</div>\""),

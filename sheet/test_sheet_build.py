@@ -768,6 +768,14 @@ check("사유 표가 '번호가 필요하다'를 칸으로 적는다",
 check("그 행의 이유는 번호를 먼저 말한다 (사람이 할 수 있는 것)",
       "그림 번호를 읽지 못했습니다" in _nsaid.get("Reason", ""),
       _nsaid.get("Reason", "")[:60])
+# REVERT: 캡션 칸을 사유 표에서 뺀다. 판독기 하나만 캡션을 찾은 행은 화면에
+# "사람이 정할 일"이라고만 적힌 채, 무엇을 하면 그 행이 열리는지는 어디에도
+# 적히지 않습니다 - 답할 곳을 만들어 두고 그 자리를 말해 주지 않는 것입니다.
+check("사유 표에 캡션 칸이 있다",
+      "Caption_Would_Open" in (_nsaid or {}), sorted(_nsaid or {}))
+check("  번호를 청하는 행에는 캡션을 청하지 않는다",
+      _nsaid.get("Caption_Would_Open") == "0",
+      _nsaid.get("Caption_Would_Open"))
 # 상자만 필요한 행과 번호만/둘 다 필요한 행이 갈라져야 두 칸이 서로 다른 것을
 # 말합니다 - 한 칸을 다른 칸으로 적어도 둘 다 필요한 행에서는 티가 안 납니다.
 _box_only = [k for k, r in _num_reasons.items()

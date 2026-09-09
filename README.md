@@ -122,11 +122,11 @@ Every test file is a standalone script:
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
 <!-- CURRENT_SCENARIO_COUNT_CORE: 3943 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 4097 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 4335 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 262 -->
 
-3943 scenarios on main under `requirements-lock.txt`, and 4097 with
+3943 scenarios on main after v9.28 under `requirements-lock.txt`, and 4335 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs

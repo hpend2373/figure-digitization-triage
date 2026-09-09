@@ -103,6 +103,24 @@ for _text, _want in (
         ("Displayed are means +/- 95% con\ufb01dence intervals.", "CI"),
         ("Data are presented as mean +/- .95 con dence intervals.", "CI"),
         ("Sedentary (SED) group vs. exercise group.", CF.DEF_UNSTATED),
+        # 2026-09-09: 한 문장이 두 종류를 말해도, 논문이 **그림만 따로** 적었으면
+        # 그림에 대해서는 애매하지 않습니다. run2에서 이 문장 하나가 그림 여섯
+        # 개를 사람 대기열에 세워 두고 있었고, 같은 논문 FIG5의 캡션이 따로 SE라고
+        # 말해 이 읽기가 맞다는 것을 보여 줍니다. 줄 끝에서 잘린 "representa-
+        # tions"도 그대로 둡니다 - 붙이지 않으면 그림을 가리키는 말을 놓칩니다.
+        # REVERT: 두 종류가 나오면 바로 AMBIGUOUS를 낸다. 논문이 이미 답한 것을
+        # 사람이 다시 판정합니다.
+        ("Data are presented as means (cid:2) SD, except graphical "
+         "representa- tions, which use SE", "SE"),
+        # REVERT: 예외절이 무엇을 가리키는지 보지 않는다. 그러면 이 문장이 그림에
+        # SD를 줍니다 - 논문은 그림이 anthropometric data에 드는지 말한 적이
+        # 없는데도.
+        ("The values are given as mean and SEM, besides anthropometric data "
+         "and time intervals which are given as mean and SD", CF.DEF_AMBIGUOUS),
+        # REVERT: 예외절 안에서 종류가 하나로 좁혀졌는지 보지 않는다. 예외절이
+        # 그림을 가리켜도 그 안이 갈리면 답이 아닙니다.
+        ("Data are means ± SD, except figures, which use SE or SEM",
+         CF.DEF_AMBIGUOUS),
         # 2026-09-05: 어시스턴트가 이 코퍼스에서 찾아낸 네 문장. 전부 이 모듈이
         # "본문이 아무 말도 하지 않는다"로 분류했던 논문의 것이고, 그 분류는
         # 이 모듈이 할 수 있는 가장 단정적인 말이라 틀리면 가장 나쁩니다.

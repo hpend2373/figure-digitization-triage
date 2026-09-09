@@ -1,6 +1,7 @@
 {
  "files": {
-  "caption_fulltext.py": "e1543b7e3cbdaf6d24cff9876c6ef4c9914f52367758bbc9f965d7064037fff7"
+  "caption_fulltext.py": "86df60357a4bba24b7c839ac0a230003f696ac59b78f03a011b7c6c6ff01b8b9",
+  "test_caption_fulltext.py": "520f43e7eac0143c6fff2c09209dde0350e1421d59760081904c7e1fc3c6e9fc"
  },
  "suites": [
   "test_caption_fulltext.py"
@@ -27,8 +28,8 @@
   {
    "name": "two named dispersions report the first",
    "file": "caption_fulltext.py",
-   "old": "if len(set(codes)) > 1:\n        return DEF_AMBIGUOUS",
-   "new": "if False:\n        return DEF_AMBIGUOUS"
+   "old": "    codes = [c for c, _ in hits]\n    if len(set(codes)) > 1:",
+   "new": "    codes = [c for c, _ in hits]\n    if False:"
   },
   {
    "name": "source hash not checked",
@@ -179,6 +180,30 @@
    "file": "caption_fulltext.py",
    "old": "+ _S + _R + r\"(?!\\.?\\s?M)\"",
    "new": "+ _S + _R + r\"(?!\\s?M)\""
+  },
+  {
+   "name": "그림만 따로 적은 문장도 애매하다고 한다",
+   "file": "caption_fulltext.py",
+   "old": "        code, clause = figure_exception(text)\n        if code:",
+   "new": "        code, clause = figure_exception(text)\n        if False:"
+  },
+  {
+   "name": "예외절이 무엇을 가리키는지 보지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "    if not FIGURE_SCOPE.search(_BROKEN_WORD.sub(r\"\\1\\2\", tail)):\n        return \"\", \"\"",
+   "new": "    if False:\n        return \"\", \"\""
+  },
+  {
+   "name": "예외절 안에서 종류가 하나인지 보지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "    if len(set(hits)) != 1:\n        return \"\", \"\"",
+   "new": "    if not hits:\n        return \"\", \"\""
+  },
+  {
+   "name": "줄 끝에서 잘린 낱말을 붙이지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "_BROKEN_WORD = re.compile(r\"(\\w)-\\s+(\\w)\")",
+   "new": "_BROKEN_WORD = re.compile(r\"(?!x)x\")"
   }
  ]
 }

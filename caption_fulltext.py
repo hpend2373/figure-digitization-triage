@@ -303,6 +303,59 @@ def join_lines(lines):
     return text
 
 
+#: 예외절을 여는 말. 논문이 기본 규칙을 적고 나서 한 갈래만 따로 적을 때 씁니다.
+#: `unless otherwise stated`는 여기 없습니다 - 그것은 예외의 내용을 말하지 않는
+#: 기본값 선언이고, 코퍼스의 다섯 편이 그 모양인데 전부 지금 옳게 처리됩니다.
+EXCEPTION_OPENS = re.compile(
+    r"\b(?:except(?:ing)?|besides|apart\s+from|other\s+than)\b", re.I)
+
+#: 그 예외절이 **그림**을 가리키는가. 가리키지 않으면 이 규칙은 손대지 않습니다 -
+#: "besides anthropometric data and time intervals"가 그림을 포함하는지는 논문이
+#: 말하지 않았고, 그것을 정하는 것은 읽는 사람의 일입니다.
+FIGURE_SCOPE = re.compile(
+    r"graphical\s+representations?|graphical\s+data"
+    r"|\bfigures?\b|\bgraphs?\b|\bplots?\b", re.I)
+
+#: 줄 끝에서 잘린 낱말을 붙입니다. 실제로 걸린 문장이 "graphical representa- tions"
+#: 였습니다 - 붙이지 않으면 그림을 가리키는 말을 못 알아봅니다. 이어 붙인 것은
+#: 대조용이고, 증거로 내보내는 글자는 원문 그대로입니다.
+_BROKEN_WORD = re.compile(r"(\w)-\s+(\w)")
+
+
+def figure_exception(text):
+    """(code, 예외절) - "…, except <그림>, which use X" 문장이 그림에 주는 답.
+
+    한 문장이 두 종류를 말할 때 그것이 늘 애매한 것은 아닙니다. 논문이
+    **어느 갈래가 어느 종류인지 말하고 있고 그 갈래가 그림이면**, 그 문장은
+    그림에 대해 애매하지 않습니다. 실제 문장:
+
+        Data are presented as means ± SD, except graphical
+        representations, which use SE
+
+    이것을 AMBIGUOUS로 두면 사람은 논문이 이미 답한 것을 다시 판정합니다.
+    반대로 예외절이 그림을 가리키지 않으면("besides anthropometric data")
+    아무것도 하지 않습니다 - 그 갈래에 그림이 드는지는 논문의 말이 아닙니다.
+
+    코드를 못 정하면 ("", "")를 냅니다: 예외절이 없거나, 그림을 가리키지
+    않거나, 예외절 안에서도 종류가 하나로 좁혀지지 않을 때.
+    """
+    flat = _norm(text)
+    m = EXCEPTION_OPENS.search(flat)
+    if not m:
+        return "", ""
+    tail = flat[m.end():]
+    if not FIGURE_SCOPE.search(_BROKEN_WORD.sub(r"\1\2", tail)):
+        return "", ""
+    hits = []
+    for code, rx in DEFINITIONS:
+        found = rx.search(tail)
+        if found:
+            hits.append(code)
+    if len(set(hits)) != 1:
+        return "", ""
+    return hits[0], flat[m.start():][:160].strip()
+
+
 def errorbar_definition(text):
     """(code, evidence) for what a text says its dispersion is.
 
@@ -324,6 +377,10 @@ def errorbar_definition(text):
     # scenario - it was decoration, and it is gone.
     codes = [c for c, _ in hits]
     if len(set(codes)) > 1:
+        # 논문이 그림만 따로 적었으면 그 문장은 그림에 대해 애매하지 않습니다.
+        code, clause = figure_exception(text)
+        if code:
+            return code, clause
         return DEF_AMBIGUOUS, " | ".join("%s: %s" % h for h in hits)
     if hits:
         return hits[0]

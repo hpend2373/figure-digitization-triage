@@ -63,3 +63,9 @@ synthesis/FINAL_MANIFEST.json
 
 # 변이 러너가 원본을 붙들어 두는 자리 (mutate_guard.py) — 빈 파일은 진행 중인 것 없음
 *.mutant-backup
+
+# Cowork가 이 대화에서 사람에게 보낸 그림들이 쌓이는 자리. 판정 페이지의
+# 스크린샷이라 안에 출판사 그림이 그대로 들어 있습니다 - 위의 파일 목록과
+# 같은 이유로 public history에 들어가면 안 되고, 이름을 미리 알 수 없으니
+# 디렉터리째 막습니다.
+Claude outputs/

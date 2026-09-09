@@ -1,0 +1,77 @@
+{
+ "files": {
+  "errorbar_review_page.py": "c66cc9268867559588dc9c58cc92e2ebc15a4db76c3eade6fad909f57f2ccc35",
+  "test_errorbar_review_page.py": "669140a0b185c6c89a08a728b032f05fcc64e40fffcf164aa9c3cf94af3ae58b"
+ },
+ "suites": [
+  "test_errorbar_review_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "목록을 계수 전의 파일이 정한다",
+   "file": "errorbar_review_page.py",
+   "old": "QUEUE = \"errorbar_answers_TEMPLATE.csv\"",
+   "new": "QUEUE = \"errorbar_unstated.csv\""
+  },
+  {
+   "name": "종류를 골라 둔 채로 낸다",
+   "file": "errorbar_review_page.py",
+   "old": "        w(\"<option value='%s'>%s</option>\" % (esc(t), esc(t)))",
+   "new": "        w(\"<option value='%s' selected>%s</option>\" % (esc(t), esc(t)))"
+  },
+  {
+   "name": "확인 칸을 눌린 채로 낸다",
+   "file": "errorbar_review_page.py",
+   "old": "    w(\"<label class='verify'><input type='checkbox' data-verified='%s'> \"",
+   "new": "    w(\"<label class='verify'><input type='checkbox' checked data-verified='%s'> \""
+  },
+  {
+   "name": "라디오가 적는 칸과 같은 이름을 쓴다",
+   "file": "errorbar_review_page.py",
+   "old": "          \"data-doc='%s' data-qtext=\\\"%s\\\" data-ptext='%s'> \"",
+   "new": "          \"data-doc='%s' data-quote=\\\"%s\\\" data-page='%s'> \""
+  },
+  {
+   "name": "확인 없이 관문에 물어본다",
+   "file": "errorbar_review_page.py",
+   "old": "        probe = dict(row, Verified_In_Source=\"1\")",
+   "new": "        probe = dict(row)"
+  },
+  {
+   "name": "인용문을 그대로 싣는다",
+   "file": "errorbar_review_page.py",
+   "old": "            w(\"<blockquote>%s</blockquote>\" % esc(quote))",
+   "new": "            w(\"<blockquote>%s</blockquote>\" % quote)"
+  },
+  {
+   "name": "없는 크롭을 말없이 지나간다",
+   "file": "errorbar_review_page.py",
+   "old": "        w(\"<div class='nofig'>크롭 없음</div>\")",
+   "new": "        w(\"\")"
+  },
+  {
+   "name": "그림마다 묻는 페이지가 차단된 크롭까지 편다",
+   "file": "errorbar_review_page.py",
+   "old": "        if status in (\"BLOCKED_BAD_CROP\", \"BLOCK_CONFIRMED\"):\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "논문 단위 카드가 차단된 크롭을 집는다",
+   "file": "errorbar_review_page.py",
+   "old": "        if r[\"Draft_ID\"] in blocked:\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "캡션 전문이 없으면 아무것도 적지 않는다",
+   "file": "errorbar_review_page.py",
+   "old": "            line = (c.get(\"Caption_Line\") or \"\").strip()",
+   "new": "            line = \"\""
+  },
+  {
+   "name": "논문의 문서 진술을 걸어 두지 않는다",
+   "file": "errorbar_review_page.py",
+   "old": "        if ev:\n            w(\"<p class='note'><b>%s</b> (지금 붙어 있는 값: %s, p.%s)</p>\"",
+   "new": "        if False:\n            w(\"<p class='note'><b>%s</b> (지금 붙어 있는 값: %s, p.%s)</p>\""
+  }
+ ]
+}

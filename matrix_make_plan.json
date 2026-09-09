@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "f2b05dd9356eb5b426f84d81331805352d06f7d3b12a3c94043f7c1e137e72be",
-  "test_make_plan.py": "1fed46405ed7e06b72be44ae67b54da37d3f94ba87ba399bb006d90998db33f7"
+  "make_plan.py": "0606ce0780cab6908ce451c08f755b185fbcdfa32f5d9c0fa8076cb7796b4b4c",
+  "test_make_plan.py": "33b10062f9c88077143ae5d323ff829de381232db6e886b1626675b7e1f247f7"
  },
  "suites": [
   "test_make_plan.py"
@@ -10,7 +10,7 @@
   {
    "name": "블록된 행도 계획서에 넣는다",
    "file": "make_plan.py",
-   "old": "        if reason.get(\"Count_Blocked\") == \"1\":\n            continue",
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):\n            continue",
    "new": "        if False:\n            continue"
   },
   {
@@ -76,8 +76,8 @@
   {
    "name": "정의가 없어도 할 일로 적지 않는다",
    "file": "make_plan.py",
-   "old": "        elif not code:\n            needs.append(\"오차 정의\")",
-   "new": "        elif False:\n            needs.append(\"오차 정의\")"
+   "old": "            if not code:\n                needs.append(\"오차 정의\")",
+   "new": "            if False:\n                needs.append(\"오차 정의\")"
   },
   {
    "name": "기하를 할 일로 적지 않는다",
@@ -198,6 +198,24 @@
    "file": "make_plan.py",
    "old": "            said.get(row[\"Draft_ID\"], (\"\", \"\"))",
    "new": "            (\"\", \"\")"
+  },
+  {
+   "name": "0개로 센 그림에도 기하를 할 일로 적는다",
+   "file": "make_plan.py",
+   "old": "        elif count == 0:",
+   "new": "        elif False:"
+  },
+  {
+   "name": "이미 답해서 막아 둔 행도 계획서에서 뺀다",
+   "file": "make_plan.py",
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):",
+   "new": "        if reason.get(\"Count_Blocked\") == \"1\":"
+  },
+  {
+   "name": "막힌 행에 붙은 답이면 무엇이든 계획서에 넣는다",
+   "file": "make_plan.py",
+   "old": "ANSWERED_ON_AN_OPEN_ROW = (\"ENTERED\", \"SEEN_UNCOUNTABLE\", \"CROP_DISPUTED\")",
+   "new": "ANSWERED_ON_AN_OPEN_ROW = (\"ENTERED\", \"SEEN_UNCOUNTABLE\", \"CROP_DISPUTED\",\n                           \"BLOCK_CONFIRMED\", \"BLOCK_DISPUTED\")"
   }
  ]
 }

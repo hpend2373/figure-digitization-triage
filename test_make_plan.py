@@ -233,6 +233,9 @@ write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
         "Entry_Status": "ENTERED"},
        {"Draft_ID": "PUB_D003", "Observed_Panel_Count": "1",
         "Entry_Status": "ENTERED"},
+       # 축 영역이 없다고 사람이 센 행. 빈칸이 아니라 0입니다.
+       {"Draft_ID": "PUB_D008", "Observed_Panel_Count": "0",
+        "Entry_Status": "ENTERED"},
        # 보았지만 셀 수 없다고 적힌 행. 수가 아닙니다.
        {"Draft_ID": "PUB_D004", "Observed_Panel_Count": "2",
         "Entry_Status": "SEEN_UNCOUNTABLE",
@@ -247,6 +250,69 @@ write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
 _plan, _sheet, _ready = build()
 _fig = dict((f["source_figure_id"], f) for f in _plan["figures"])
 check("사람이 센 수는 그대로 적힌다", _fig["PUB_D001"]["observed_panel_count"] == 3)
+# REVERT: 0으로 센 그림에도 기하를 할 일로 적는다. 읽을 자리가 없다고 사람이
+# 센 그림에 대해 "읽을 자리를 쓰라"는 줄이 서고, 그 줄은 아무도 지울 수
+# 없습니다 - 쓸 것이 없으니까요.
+check("0은 빈칸이 아니라 세어진 수다",
+      _fig["PUB_D008"]["observed_panel_count"] == 0
+      and _fig["PUB_D008"]["panels"] == [])
+check("0으로 센 그림에는 기하를 할 일로 적지 않는다",
+      "패널 기하" not in _sheet["PUB_D008"]["Needs"],
+      _sheet["PUB_D008"]["Needs"])
+check("0으로 센 그림에는 오차 정의도 묻지 않는다",
+      "오차 정의" not in _sheet["PUB_D008"]["Needs"],
+      _sheet["PUB_D008"]["Needs"])
+check("1개 이상으로 센 그림에는 여전히 기하를 묻는다",
+      "패널 기하" in _sheet["PUB_D001"]["Needs"],
+      _sheet["PUB_D001"]["Needs"])
+
+# --- 다시 묻지 않는 것과 그림이 아닌 것 -----------------------------------------
+# REVERT: 막힌 행은 답이 붙어 있어도 계획서에서 뺀다. 시트가 "이미 답하셨으니 또
+# 묻지 않는다"고 막아 둔 행이 통째로 사라집니다 - run2에서 계수가 끝나자 계획서의
+# 그림이 446개에서 1개로 줄었습니다. 다시 묻지 않는 것과 그림이 아닌 것은 다릅니다.
+write(MP.BLOCKS, ("Draft_ID", "Count_Blocked", "Duplicate_Of"),
+      [{"Draft_ID": "PUB_D006", "Count_Blocked": "1", "Duplicate_Of": ""},
+       {"Draft_ID": "PUB_D007", "Count_Blocked": "1",
+        "Duplicate_Of": "PUB_D002"}])
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
+                  "Uncountable_Reason", "Objection_Reason"),
+      [{"Draft_ID": "PUB_D006", "Observed_Panel_Count": "2",
+        "Entry_Status": "ENTERED"}])
+_p2, _s2, _r2 = build()
+check("이미 답해서 막아 둔 행은 계획서의 그림으로 남는다",
+      "PUB_D006" in dict((f["source_figure_id"], f) for f in _p2["figures"]),
+      sorted(f["source_figure_id"] for f in _p2["figures"]))
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
+                  "Uncountable_Reason", "Objection_Reason"),
+      [{"Draft_ID": "PUB_D006", "Observed_Panel_Count": "",
+        "Entry_Status": "BLOCK_CONFIRMED"}])
+_p3, _s3, _r3 = build()
+check("차단이 맞다고 확인한 행은 그대로 계획서 밖이다",
+      "PUB_D006" not in dict((f["source_figure_id"], f) for f in _p3["figures"]),
+      sorted(f["source_figure_id"] for f in _p3["figures"]))
+check("중복으로 막힌 행은 답이 있어도 계획서 밖이다",
+      "PUB_D007" not in dict((f["source_figure_id"], f) for f in _p2["figures"]))
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status",
+                  "Uncountable_Reason", "Objection_Reason"),
+      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "3",
+        "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D003", "Observed_Panel_Count": "1",
+        "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D008", "Observed_Panel_Count": "0",
+        "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D004", "Observed_Panel_Count": "2",
+        "Entry_Status": "SEEN_UNCOUNTABLE",
+        "Uncountable_Reason": "셀수없는그래프"},
+       {"Draft_ID": "PUB_D005", "Observed_Panel_Count": "",
+        "Entry_Status": "NOT_REVIEWED"},
+       {"Draft_ID": "PUB_D002", "Observed_Panel_Count": "",
+        "Entry_Status": "CROP_DISPUTED", "Objection_Reason": "개념그림"}])
+write(MP.BLOCKS, ("Draft_ID", "Count_Blocked", "Duplicate_Of"),
+      [{"Draft_ID": "PUB_D006", "Count_Blocked": "1", "Duplicate_Of": ""},
+       {"Draft_ID": "PUB_D007", "Count_Blocked": "1",
+        "Duplicate_Of": "PUB_D002"}])
+_plan, _sheet, _ready = build()
+_fig = dict((f["source_figure_id"], f) for f in _plan["figures"])
 check("계수 파일의 이름은 시트 합치기가 쓰는 그 이름이다",
       MP.COUNTS == "observed_panel_counts.csv", MP.COUNTS)
 # REVERT: take the number whatever the status says. "보았지만 셀 수 없다"와
@@ -314,7 +380,7 @@ check("세어진 그림은 계획서를 멎게 하지 않는다",
       not [p for p in _left if p["where"] == "figures[0]"],
       [p for p in _left if p["where"] == "figures[0]"])
 check("세지 않은 그림은 여전히 멎게 한다",
-      len([p for p in _left if p["check"] == "PLAN_PANEL_COUNT_MISSING"]) == 4,
+      len([p for p in _left if p["check"] == "PLAN_PANEL_COUNT_MISSING"]) == 3,
       [p["where"] for p in _left])
 write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"), [])
 

@@ -56,6 +56,14 @@ COUNTED = "ENTERED"
 #: 그리고 답한 사람은 그 줄을 보고 자기 답이 사라졌다고 읽습니다.
 #: 답을 못 읽는 것과 답이 없는 것은 다릅니다.
 COUNT_NEED = "패널 계수"
+
+#: 열려 있던 행에만 붙을 수 있는 답들. 시트는 이미 답한 행을 다시 묻지
+#: 않으려고 막아 두는데(`block_rules.recorded_reason`), 그 막음은 "이 행은
+#: 그림이 아니다"가 아니라 "이 사람에게 또 묻지 않는다"입니다. 둘을 한 칸에
+#: 담아 두어서, 계수가 끝나자 계획서의 그림이 310개에서 1개로 줄었습니다.
+#: `BLOCK_CONFIRMED`·`BLOCK_DISPUTED`는 여기 없습니다 - 그 둘은 막힌 행에
+#: 대고 한 답이고, 막힌 행은 여전히 막힌 행입니다.
+ANSWERED_ON_AN_OPEN_ROW = ("ENTERED", "SEEN_UNCOUNTABLE", "CROP_DISPUTED")
 ANSWERED_WITHOUT_A_NUMBER = {
     "SEEN_UNCOUNTABLE": "셀 수 없다고 하신 그림 — 처분 결정",
     "CROP_DISPUTED": "대상 그림이 아니라고 하신 크롭 — 처분 결정 또는 재크롭",
@@ -110,10 +118,14 @@ def live_rows(run):
     """블록되지도 중복도 아닌 초안 행 - 트랙 A가 남긴 그림들."""
     draft = _rows(os.path.join(run, DRAFT))
     reasons = _by(_rows(os.path.join(run, BLOCKS)), "Draft_ID")
+    answered = set(
+        r["Draft_ID"] for r in _rows(os.path.join(run, COUNTS))
+        if (r.get("Entry_Status") or "").strip() in ANSWERED_ON_AN_OPEN_ROW)
     out = []
     for row in draft:
         reason = reasons.get(row["Draft_ID"], {})
-        if reason.get("Count_Blocked") == "1":
+        if (reason.get("Count_Blocked") == "1"
+                and row["Draft_ID"] not in answered):
             continue
         if (reason.get("Duplicate_Of") or "").strip():
             continue
@@ -179,9 +191,18 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
         if code in RE.DISPOSITIONS:
             # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.
             disposition = "UNRESOLVED"
-        elif not code:
-            needs.append("오차 정의")
-        needs.append("패널 기하 (읽을 자리·눈금·표 종류)")
+        elif count == 0:
+            # 사람이 축 영역을 0개로 세었습니다. 기하는 패널마다 쓰는
+            # 것이고 패널이 없으니 쓸 자리가 없습니다 - 여기에 할 일을
+            # 적으면, 읽을 것이 없는 그림에 대해 사람이 무언가 쓰기를
+            # 기다리는 줄이 생깁니다. 캡션이 읽을 값이 있다고 본 것과
+            # 어긋나면 `Route`와 계수에 그대로 남아 보입니다 - 가리는
+            # 것이 아니라, 할 일이 아닌 것을 할 일에서 빼는 것입니다.
+            pass
+        else:
+            if not code:
+                needs.append("오차 정의")
+            needs.append("패널 기하 (읽을 자리·눈금·표 종류)")
 
     image = (row.get("Figure_Crop") or "").strip()
     path = os.path.join(crop_root, image) if image else ""

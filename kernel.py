@@ -13,6 +13,31 @@ FIG_PHASES = ("PRE", "DURING", "POST", "RECOVERY", "DELTA", "ASSOCIATION")
 FIG_FOLLOWUP_PHASES = ("DURING", "POST", "RECOVERY")
 FIG_DISPERSION_TYPES = ("SD", "SE", "SEM", "CI95", "IQR", "RANGE", "NO_ERRORBAR")
 FIG_ASYMMETRIC_TYPES = ("CI95", "IQR", "RANGE")
+
+#: 한 계열에 그려진 표시들. `FIG_DISPERSION_TYPES`가 담지 못하는 것이 여기
+#: 있습니다: 상자그림은 종류 하나가 아니라 세 표시이고 각각 다른 것을 말합니다.
+#: `IQR` 한 토큰으로는 상자가 25-75인지 수염이 1.5xIQR인지 구별할 수 없고, 그
+#: 둘은 디지타이즈하면 다른 수가 됩니다. 막대그림은 `ERRORBAR` 하나로 지금과
+#: 같습니다 - 표시가 하나뿐인 계열의 특수한 경우일 뿐입니다.
+FIG_MARKED_ELEMENTS = ("CENTER", "ERRORBAR", "BOX", "WHISKER")
+
+#: 각 표시가 뜻할 수 있는 것. **코퍼스가 실제로 말한 것만** 있습니다. `P5_P95`나
+#: `IQR_1_5`는 그럴듯하고 흔한 표기지만 이 98편에 한 건도 없습니다. 아무도
+#: 만들어 본 적 없는 값은 검증기가 다뤄야 할 자리만 늘리고, 그 자리가 옳은지는
+#: 아무 시나리오도 말해 주지 않습니다. 논문이 그렇게 적은 것이 처음 나오면 그때
+#: 한 줄과 시나리오 하나를 더합니다 - 그 줄의 근거는 그 논문의 문장입니다.
+FIG_ELEMENT_MEANINGS = {
+    "CENTER": ("MEAN", "MEDIAN"),
+    "ERRORBAR": tuple(t for t in FIG_DISPERSION_TYPES if t != "NO_ERRORBAR"),
+    "BOX": ("P25_P75",),
+    "WHISKER": ("MIN_MAX",),
+}
+
+#: 두 가지 모름을 가릅니다. 논문이 그 표시를 설명하지 않은 것과, 그 표시가
+#: 그림에 아예 없는 것. 하나로 뭉치면 "수염이 없는 상자그림"과 "수염이 무엇인지
+#: 논문이 안 적은 상자그림"이 같은 값이 되고, 뒤엣것만 사람을 불러야 합니다.
+FIG_ELEMENT_UNSTATED = "UNSTATED"
+FIG_ELEMENT_ABSENT = "NO_ELEMENT"
 #: Kept in step with `grid_engine.FIG_TRANSFORMATIONS` and
 #: `grid_engine.FIG_DISTRIBUTION_SHAPES`; test_kernel pins that they agree,
 #: because a template the standalone validator accepts and the batch gate
@@ -140,6 +165,12 @@ def fig_template_columns():
         "Outcome_Variable", "Outcome_Domain", "Unit",
         "Arm", "Posture_Condition", "Exposure_Phase", "Timepoint_Label", "Timepoint_Days",
         "Mean_R1", "Dispersion_R1", "Mean_R2", "Dispersion_R2",
+        # WHAT THE CENTRAL NUMBER IS. `Mean`은 칸 이름일 뿐이고, 이 열이
+        # 없으면 중앙값이 평균이라는 이름으로 들어갑니다. 실제로 이 코퍼스의
+        # `IQR` 여덟 그림이 전부 자기 근거 문장에 median이라고 적고 있고,
+        # 그 값들이 갈 자리가 여기 말고 없었습니다. 아직 한 행도 추출되지
+        # 않았을 때 더하는 것이 가장 싼 순간입니다.
+        "Center_Statistic",
         "Mean", "Dispersion_Value", "Errorbar_Lower", "Errorbar_Upper", "Dispersion_Type",
         "Errorbar_Definition_Source", "N_Outcome",
         # WHAT SCALE THE NUMBERS ARE ON, and what shape the distribution is.
@@ -596,11 +627,14 @@ def fig_panel_confidence(caption, tokens=None, letters=None):
             "no panel key in caption - panel structure unknown, confirm visually")
 
 
-def fig_screen_caption(caption, target_terms=None):
+def fig_screen_caption(caption, target_terms=None, states_dispersion=False):
     """Classify a figure caption into a route before any digitization work.
 
     Returns (route, reason). Routes:
       NOT_DATA                     - schematic / representative tracing / protocol
+      MIXED_CAPTION_NOT_DECIDABLE  - the caption carries BOTH not-data wording and
+                                     its own dispersion definition; nobody can say
+                                     from the caption alone which panels are data
       ASSOCIATION_ONLY_NOT_TARGET  - correlation or regression plot; needs the
                                      association schema, NOT the mean template
       NO_TARGET_OUTCOME            - a data figure whose outcome is off-target
@@ -613,6 +647,22 @@ def fig_screen_caption(caption, target_terms=None):
     import re
     cap = fig_normalize_caption(caption)
     if any(re.search(p, cap, re.I) for p in FIG_NOTDATA_PATTERNS):
+        # THE CAPTION DESCRIBES PANELS, THE ROUTE DECIDES A FIGURE. 한 낱말이
+        # 캡션 어디에 있든 그림 전체를 뺍니다. 그런데 그 낱말이 그림의 성격이
+        # 아니라 다른 것을 수식할 때가 있습니다 - "infusion protocols",
+        # "representative subjects", "the LBNP protocol" - 그리고 그림이 정말
+        # 반은 데이터, 반은 사진일 때가 있습니다.
+        #
+        # 캡션이 **스스로 오차 막대가 무엇인지 말했다면** 그 캡션은 데이터가
+        # 그려졌다고 말한 것입니다. 실제로 `Values are mean ± SD`가 자기를
+        # 뺀 낱말의 두 문장 뒤에 있는 캡션이 이 코퍼스에 있습니다. 그래도
+        # 여기서 "데이터다"라고 하지는 않습니다 - 어느 패널이 데이터인지는
+        # 캡션만으로 알 수 없으니, 캡션이 스스로 어긋난다고만 말하고 사람에게
+        # 넘깁니다.
+        if states_dispersion:
+            return ("MIXED_CAPTION_NOT_DECIDABLE",
+                    "caption carries not-data wording AND its own dispersion "
+                    "definition - which panels are data cannot be read off it")
         return "NOT_DATA", "schematic/representative wording in caption"
     if any(re.search(p, cap, re.I) for p in FIG_BINARY_PATTERNS):
         return "BINARY_EVENT_NOT_MEAN", "event/incidence wording - needs the binary-event schema"
@@ -1156,6 +1206,14 @@ def fig_validate_extraction(df, ranges=None, se_sd_ratio=1.5, require_dual=False
             flag(line, "BAD_ANALYSIS_TRANSFORMATION",
                  "Analysis_Transformation=%s (expected %s)"
                  % (_tf or "blank", "/".join(FIG_TRANSFORMATIONS)))
+        _centre = ("" if fig_is_blank(r.get("Center_Statistic"))
+                   else str(r.get("Center_Statistic")).strip().upper())
+        if _centre not in FIG_ELEMENT_MEANINGS["CENTER"]:
+            flag(line, "BAD_CENTER_STATISTIC",
+                 "Center_Statistic=%s (expected %s). 이 칸이 비면 중앙값이 "
+                 "`Mean`이라는 이름으로 들어가고, 평균으로 합성됩니다."
+                 % (_centre or "blank",
+                    "/".join(FIG_ELEMENT_MEANINGS["CENTER"])))
         _shape = ("" if fig_is_blank(r.get("Distribution_Shape"))
                   else str(r.get("Distribution_Shape")).strip().upper())
         if _shape not in FIG_DISTRIBUTION_SHAPES:

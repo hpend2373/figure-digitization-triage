@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "0606ce0780cab6908ce451c08f755b185fbcdfa32f5d9c0fa8076cb7796b4b4c",
-  "test_make_plan.py": "33b10062f9c88077143ae5d323ff829de381232db6e886b1626675b7e1f247f7"
+  "make_plan.py": "abb0f04993a2dc3a8c5424fee80214119df084b44b0df4a1b8d11488d8822bf6",
+  "test_make_plan.py": "1a7f3723dfdcbea718aed819c530947339b0764299627ae20c99020c87aac9a3"
  },
  "suites": [
   "test_make_plan.py"
@@ -216,6 +216,48 @@
    "file": "make_plan.py",
    "old": "ANSWERED_ON_AN_OPEN_ROW = (\"ENTERED\", \"SEEN_UNCOUNTABLE\", \"CROP_DISPUTED\")",
    "new": "ANSWERED_ON_AN_OPEN_ROW = (\"ENTERED\", \"SEEN_UNCOUNTABLE\", \"CROP_DISPUTED\",\n                           \"BLOCK_CONFIRMED\", \"BLOCK_DISPUTED\")"
+  },
+  {
+   "name": "사분위 요약을 연속형으로 보낸다",
+   "file": "make_plan.py",
+   "old": "    return \"QUANTILE_SUMMARY\" if c in QUANTILE_DISPERSIONS else \"CONTINUOUS\"",
+   "new": "    return \"CONTINUOUS\""
+  },
+  {
+   "name": "정의가 없어도 종류를 정한다",
+   "file": "make_plan.py",
+   "old": "    if not c or c in RE.DISPOSITIONS:\n        return \"\"",
+   "new": "    if False:\n        return \"\""
+  },
+  {
+   "name": "추출 대상이 아닌 그림에도 종류를 준다",
+   "file": "make_plan.py",
+   "old": "    if disposition != \"GEOMETRY_NOT_AUTHORED\":\n        return \"\"",
+   "new": "    if False:\n        return \"\""
+  },
+  {
+   "name": "상자그림 읽기를 캡션 판정 뒤로 미룬다",
+   "file": "make_plan.py",
+   "old": "    if CF.box_elements_of(caption.get(\"Box_Elements\")):",
+   "new": "    if False:"
+  },
+  {
+   "name": "캡션이 스스로 분산을 말했는지 보지 않는다",
+   "file": "make_plan.py",
+   "old": "    route = kernel.fig_screen_caption(text, states_dispersion=own)[0]",
+   "new": "    route = kernel.fig_screen_caption(text)[0]"
+  },
+  {
+   "name": "상자그림 읽기는 반대 증거로 세지 않는다",
+   "file": "make_plan.py",
+   "old": "    own = said not in (\"\", \"UNSTATED\", \"PM_UNNAMED\") or bool(\n        (caption or {}).get(\"Box_Elements\", \"\").strip())",
+   "new": "    own = said not in (\"\", \"UNSTATED\", \"PM_UNNAMED\")"
+  },
+  {
+   "name": "어긋난 캡션에 할 일을 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    if route == \"MIXED_CAPTION_NOT_DECIDABLE\" and count:",
+   "new": "    if False:"
   }
  ]
 }

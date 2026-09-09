@@ -540,6 +540,54 @@ check("--only narrows to the documents named",
       [r["Draft_ID"] for r in CF.build(RUN, os.path.join(ROOT, "pdfs"), log=lambda *_a: None,
                                         only={"OTHER"})[0]] == ["OTHER_D001"])
 
+# ------------------------------------------------- 상자그림의 세 표시
+
+import kernel as _kernel                                          # noqa: E402
+
+_FIG6 = ("Box plots indicate minimum, 25th percentile, median, 75th "
+         "percentile, and maximum values. One-way RM ANOVA test")
+_FIG8 = ("Box plots indicate minimum, 25th percentile, median, 75th "
+         "percentile, and maximum.")
+#: 같은 논문 FIG9. 글자층에서 여는 말 뒤가 잘려 있습니다.
+_FIG9 = "Hypothesis schema of the DI effects on bone metabolism loop. Box plots indicate"
+
+# REVERT: 중앙선을 읽지 않는다. 상자그림의 가운데 선이 평균인지 중앙값인지는
+# 상자·수염과 별개의 사실이고, 이것을 빼면 그 계열은 중심값이 무엇인지 모르는
+# 채로 추출됩니다.
+_e6, _v6 = CF.box_elements(_FIG6)
+check("상자그림 문장은 표시 셋을 각각 낸다",
+      _e6 == {"CENTER": "MEDIAN", "BOX": "P25_P75", "WHISKER": "MIN_MAX"}
+      and _FIG6[:17] in _v6, _e6)
+
+check("values 없이 끝나도 같은 셋을 낸다",
+      CF.box_elements(_FIG8)[0] == _e6)
+
+# REVERT: 여는 말 뒤가 비어도 근거 문장을 내보낸다. 아무것도 못 읽은 줄에 근거가
+# 붙으면, 읽은 것처럼 보이는 빈 답이 됩니다.
+check("여는 말 뒤가 잘려 있으면 아무것도 내지 않는다",
+      CF.box_elements(_FIG9) == ({}, ""))
+
+# REVERT: 여는 말을 보지 않고 낱말만 찾는다. 그러면 피험자 머리 앞의 상자와
+# 검사 세션을 묶은 상자가 상자그림이 됩니다 - 둘 다 이 코퍼스의 실제 캡션입니다.
+check("상자그림을 설명하는 문장이 아니면 잡지 않는다",
+      CF.box_elements("The black box in front of the subject's head contains "
+                      "a display. The median was 3.") == ({}, "")
+      and CF.box_elements("Each box represents one test session, in which 11 "
+                          "VAN trials") == ({}, ""))
+
+# REVERT: 짝이 아니라 낱말 하나로 정한다. 25th만 있는 문장에서 상자가 25-75라고
+# 하는 것은 논문이 하지 않은 말입니다.
+_half_box = CF.box_elements("Box plots indicate the 25th percentile and the median.")[0]
+_half_whisker = CF.box_elements("Box plots indicate the median and the maximum value.")[0]
+check("짝이 갖춰지지 않은 표시는 내지 않는다",
+      _half_box == {"CENTER": "MEDIAN"}
+      and _half_whisker == {"CENTER": "MEDIAN"},
+      (_half_box, _half_whisker))
+
+check("내는 값은 전부 계획서의 어휘 안에 있다",
+      all(v in _kernel.FIG_ELEMENT_MEANINGS[k] for k, v in _e6.items())
+      and set(_e6) <= set(_kernel.FIG_MARKED_ELEMENTS))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

@@ -145,7 +145,7 @@ def run(rows, cols, drop=None):
 
 print("the shipped template is what gets filled")
 cols = emit_blank_template(os.path.join(HERE, "figure_extraction_template_v7.csv"))
-check("template emitted with %d columns" % len(cols), len(cols) == 55, "got %d" % len(cols))
+check("template emitted with %d columns" % len(cols), len(cols) == 56, "got %d" % len(cols))
 check("Extraction_Method is in the emitted header", "Extraction_Method" in cols)
 # Three of the 55 are read out of the METHODS TEXT and appear nowhere in a
 # raster: what scale the plotted numbers are on, what shape the distribution

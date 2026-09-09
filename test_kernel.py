@@ -102,6 +102,9 @@ CONT_BASE = dict(
     # bigger than the mean is impossible depends on the distribution.
     Analysis_Transformation="UNTRANSFORMED", Distribution_Shape="SYMMETRIC",
     Transformation_Source="",
+    # 같은 이유로 여기 있습니다: `Mean` 칸에 든 수가 평균인지 중앙값인지는
+    # 래스터에 없고, 논문의 문장에만 있습니다.
+    Center_Statistic="MEAN",
 )
 
 
@@ -260,6 +263,34 @@ expect("a transformation outside the vocabulary",
 expect("a distribution shape outside it",
        B(Distribution_Shape="LOG_NORMALISH"),
        want=["BAD_DISTRIBUTION_SHAPE"])
+print("a caption that contradicts itself is not decided by the caption")
+#: 실제 캡션입니다. 자기를 뺀 낱말("protocol")과 자기가 데이터라는 말
+#: ("Values are mean ± SD")이 두 문장 사이에 같이 있습니다.
+MIXED = ("Fig. 4. Cardiovascular responses during the constant LBNP protocol "
+         "for pre-HDBR and post-HDBR. Values are mean +- SD.")
+# REVERT: 반대 증거를 보지 않는다. 낱말 하나가 캡션 어디에 있든 그림 전체가
+# 추출 대기열에서 빠지고, 이 코퍼스에서 그렇게 빠진 것이 여덟 그림 스물세
+# 패널입니다.
+_plain("a not-data word wins when the caption says nothing else",
+       k.fig_screen_caption(MIXED)[0] == "NOT_DATA")
+_plain("but not when the caption states its own dispersion",
+       k.fig_screen_caption(MIXED, states_dispersion=True)[0]
+       == "MIXED_CAPTION_NOT_DECIDABLE")
+_plain("and the flag alone does not reroute a clean caption",
+       k.fig_screen_caption("Fig. 2. Heart rate during tilt. Values are mean +- SD.",
+                            states_dispersion=True)[0] == "DIGITIZE")
+
+expect("a centre statistic outside the vocabulary",
+       B(Center_Statistic="AVERAGE"), want=["BAD_CENTER_STATISTIC"])
+# 빈칸이 통과하면 이 열은 아무것도 막지 않습니다. 중앙값을 `Mean`에 넣고 이 칸을
+# 비워 두는 것이 정확히 지금까지 벌어질 수 있던 일이고, 코퍼스의 IQR 여덟 그림이
+# 그 문 앞에 서 있습니다.
+expect("and one left blank, which is what a template arrives as",
+       B(Center_Statistic=""), want=["BAD_CENTER_STATISTIC"])
+expect("a median is a centre statistic, not a bad row",
+       B(Center_Statistic="MEDIAN", Dispersion_Type="IQR", Dispersion_Value="",
+         Errorbar_Lower=90, Errorbar_Upper=104),
+       forbid=["BAD_CENTER_STATISTIC", "ASYMMETRIC_NEEDS_BOUNDS"])
 expect("and one left blank, which is what a template arrives as",
        B(Distribution_Shape=""), want=["BAD_DISTRIBUTION_SHAPE"])
 expect("a transformation with nothing quoted behind it",

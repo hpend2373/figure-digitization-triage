@@ -435,6 +435,89 @@ check("--only는 이름 댄 편만 쓴다",
       [r["Publication_ID"] for r in build(only={"NOPE"})[2]] == [],
       [r["Publication_ID"] for r in build(only={"NOPE"})[2]])
 
+# ------------------------------------------------- 통계 종류를 가른다
+
+_ST = MP.statistic_type_for
+
+# REVERT: 사분위 요약을 연속형으로 보낸다. 평평한 연속형 템플릿에는 중앙값을
+# 적을 자리가 없어서, 중앙값이 `Mean`이라는 이름의 칸에 들어가고 평균으로
+# 합성됩니다. 이 코퍼스의 IQR 여덟 그림이 전부 자기 문장에 median이라고
+# 적혀 있습니다.
+check("IQR과 RANGE는 사분위 요약으로 간다",
+      _ST("GEOMETRY_NOT_AUTHORED", "IQR") == "QUANTILE_SUMMARY"
+      and _ST("GEOMETRY_NOT_AUTHORED", "RANGE") == "QUANTILE_SUMMARY")
+check("나머지 분산은 연속형이다",
+      all(_ST("GEOMETRY_NOT_AUTHORED", c) == "CONTINUOUS"
+          for c in ("SD", "SE", "SEM", "CI95", "NO_ERRORBAR")))
+check("처분이 정하는 종류는 처분을 따른다",
+      _ST("ASSOCIATION_EXTRACT", "") == "ASSOCIATION"
+      and _ST("BINARY_EXTRACT", "") == "BINARY_EVENT")
+# REVERT: 오차 정의가 없어도 종류를 정한다. 아직 아무도 무엇을 읽을지 말하지
+# 않은 그림이 추출 대기열에 서게 됩니다.
+check("정의가 없거나 처분된 그림은 종류를 정하지 않는다",
+      _ST("GEOMETRY_NOT_AUTHORED", "") == ""
+      and _ST("GEOMETRY_NOT_AUTHORED", "DROP") == ""
+      and _ST("NOT_DATA", "SD") == "")
+
+# REVERT: 상자그림 읽기를 캡션의 일반 판정 뒤로 미룬다. 그 논문의 문서 진술이
+# SEM이고 그것이 상자그림 그림들에 붙어 있었습니다 - 캡션이 상자라고 말하는데도.
+_boxcap = {"Box_Elements": "CENTER=MEDIAN;BOX=P25_P75;WHISKER=MIN_MAX",
+           "Box_Evidence": "Box plots indicate minimum, 25th percentile, median,"
+                           " 75th percentile, and maximum values.",
+           "Errorbar_Definition": "SEM", "Caption_Full": "…",
+           "Doc_Errorbar_Definition": "SEM", "Page": "9"}
+_code, _src, _kind, _where = MP.dispersion_for("d", _boxcap, None)
+check("캡션이 상자그림이라고 말하면 그 말이 이깁니다",
+      (_code, _kind, _where) == ("IQR", MP.FROM_CAPTION, "9")
+      and _src.startswith("Box plots indicate"),
+      (_code, _kind, _where))
+check("그 그림은 사분위 요약으로 간다",
+      _ST("GEOMETRY_NOT_AUTHORED", _code) == "QUANTILE_SUMMARY")
+
+# --------------------------------- 캡션이 스스로 어긋난 그림은 사람에게
+
+_MIXED_CAP = ("Fig. 8 | Endothelial and capillary state. a Soluble VEGF (n = 18). "
+              "b Example of capillaroscopy, and capillary density per mm (n = 15). "
+              "Box plots indicate minimum, 25th percentile, median, 75th "
+              "percentile, and maximum.")
+
+def _route(cap, count=4):
+    row = {"Draft_ID": "d", "Source_Document_ID": "DOC", "Caption_Text": "",
+           "Figure_Number": "FIG8", "Source_File": "a.pdf", "Page": "11",
+           "Figure_Crop": ""}
+    _fig, needs, route, disposition, _disp = MP.figure_of(
+        row, cap, None, count, ROOT)
+    return {"route": route, "disposition": disposition, "needs": needs}
+
+# REVERT: 캡션이 스스로 분산을 말했는지 보지 않고 경로를 정한다. "Example of"
+# 한 낱말이 패널 b 하나를 가리키는데 그림 전체가 NOT_DATA가 됩니다.
+_own = _route({"Caption_Full": _MIXED_CAP, "Errorbar_Definition": "UNSTATED",
+               "Box_Elements": "CENTER=MEDIAN;BOX=P25_P75;WHISKER=MIN_MAX",
+               "Box_Evidence": "Box plots indicate minimum,", "Page": "11"})
+check("상자그림을 말하는 캡션은 NOT_DATA로 가지 않는다",
+      _own["route"] == "MIXED_CAPTION_NOT_DECIDABLE"
+      and _own["disposition"] == "UNRESOLVED", _own)
+
+_said = _route({"Caption_Full": "Fig. 4. Responses during the LBNP protocol. "
+                                "Values are mean +- SD.",
+                "Errorbar_Definition": "SD", "Box_Elements": "", "Page": "4"})
+check("캡션이 분산을 말하면 낱말 하나로 빠지지 않는다",
+      _said["route"] == "MIXED_CAPTION_NOT_DECIDABLE", _said["route"])
+
+_quiet = _route({"Caption_Full": "Fig. 1. Study protocol and timeline.",
+                 "Errorbar_Definition": "UNSTATED", "Box_Elements": "", "Page": "2"})
+check("아무 말도 없는 캡션은 그대로 NOT_DATA다",
+      _quiet["route"] == "NOT_DATA", _quiet["route"])
+
+# REVERT: 할 일을 적지 않는다. 그림들이 `UNRESOLVED`에 이름 없이 앉아 있고,
+# 사람은 그것들이 있다는 것조차 모릅니다 - `NOT_DATA`보다 나쁩니다.
+check("그 그림은 사람이 볼 목록에 이름이 오른다",
+      any("어긋난" in n for n in _own["needs"]), _own["needs"])
+check("패널이 없으면 할 일도 없다",
+      not any("어긋난" in n for n in _route(
+          {"Caption_Full": _MIXED_CAP, "Errorbar_Definition": "SD",
+           "Box_Elements": "", "Page": "11"}, count=0)["needs"]))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

@@ -31,6 +31,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import batch_manifests as BM                                     # noqa: E402
+import caption_fulltext as CF                                    # noqa: E402
 import compile_plan as CP                                        # noqa: E402
 import kernel                                                    # noqa: E402
 import record_errorbar as RE                                     # noqa: E402
@@ -85,18 +86,35 @@ ROUTE_DISPOSITION = {
     "ASSOCIATION_ONLY_NOT_TARGET": "ASSOCIATION_EXTRACT",
     "BINARY_EVENT_NOT_MEAN": "BINARY_EXTRACT",
     "NO_TARGET_OUTCOME": "NON_TARGET_OUTCOME",
+    # 캡션이 스스로 어긋난 그림. 값이 있을 수도 없을 수도 있고, 캡션은 어느
+    # 쪽인지 말해 주지 않습니다. 사람이 그림을 봐야 합니다.
+    "MIXED_CAPTION_NOT_DECIDABLE": "UNRESOLVED",
 }
 
 #: 캡션 찾기가 쓰는 이름과 계획서가 쓰는 이름. `CI`는 계획서에서 `CI95`입니다.
 DEFINITION_TO_DISPERSION = {"SD": "SD", "SE": "SE", "SEM": "SEM",
                             "CI": "CI95", "IQR": "IQR"}
 
+#: 처분이 곧 정하는 통계 종류. 이름은 `grid_engine.FIG_STATISTIC_TYPES`의
+#: 것을 그대로 씁니다 - 계획서가 부르는 이름과 검증기가 받는 이름이 다르면,
+#: 계획서를 그대로 따라 채운 행이 관문에서 거부됩니다.
+STATISTIC_BY_DISPOSITION = {
+    "ASSOCIATION_EXTRACT": "ASSOCIATION",
+    "BINARY_EXTRACT": "BINARY_EVENT",
+}
+
+#: 사분위 요약으로 그려진 값. `grid_engine`은 `QUANTILE_SUMMARY`에 IQR이나
+#: RANGE만 받고, 그 행은 `Median`/`Q1`/`Q3`/`Whisker_*`에 적힙니다. 평평한
+#: 연속형 템플릿에는 중앙값을 적을 자리가 없어서, 이 그림들을 그쪽으로 보내지
+#: 않으면 중앙값이 `Mean`이라는 이름으로 들어갑니다.
+QUANTILE_DISPERSIONS = ("IQR", "RANGE")
+
 #: 정의의 출처. 어느 것이든 논문의 말이고, 어느 논문의 어디인지가 다릅니다.
 FROM_DECISION, FROM_CAPTION, FROM_DOCUMENT = "DECISION", "CAPTION", "DOCUMENT"
 
 WORKSHEET_FIELDS = ("Publication_ID", "Source_Figure_ID", "Draft_ID",
                     "Figure_Number", "Page", "Image", "Route", "Disposition",
-                    "Observed_Panel_Count", "Dispersion_Type",
+                    "Observed_Panel_Count", "Statistic_Type", "Dispersion_Type",
                     "Errorbar_Definition_Source", "Errorbar_Source_Kind",
                     "Errorbar_Found_On_Page", "Needs")
 READINESS_FIELDS = ("Publication_ID", "Figures", "Digitize_Figures",
@@ -148,6 +166,15 @@ def dispersion_for(draft_id, caption, decision):
                 FROM_DECISION, (decision.get("Found_On_Page") or "").strip())
     if not caption:
         return "", "", "", ""
+    # 상자그림은 캡션이 표시마다 따로 말합니다("Box plots indicate minimum,
+    # 25th percentile, median, 75th percentile, and maximum"). 계획서가 나르는
+    # 종류는 상자(IQR)이고, 중앙값과 수염은 `QUANTILE_SUMMARY`가 여는
+    # `Median`/`Whisker_*` 열에 적힙니다. 이 읽기가 캡션의 일반 판정보다 먼저인
+    # 것은, 같은 캡션이 다른 패널에 대해 SEM을 말할 수 있기 때문입니다 - 실제로
+    # 그 논문의 문서 진술이 SEM이고, 그것이 상자그림에 붙어 있었습니다.
+    if CF.box_elements_of(caption.get("Box_Elements")):
+        return "IQR", (caption.get("Box_Evidence") or "").strip(), \
+            FROM_CAPTION, (caption.get("Page") or "").strip()
     code = DEFINITION_TO_DISPERSION.get(
         (caption.get("Errorbar_Definition") or "").strip())
     if code:
@@ -180,13 +207,41 @@ def disposition_for(route):
     return ROUTE_DISPOSITION.get(route, "UNRESOLVED")
 
 
+def statistic_type_for(disposition, code):
+    """이 그림의 값이 어느 통계 종류로 적히는가. 빈 문자열이면 아직 모릅니다 -
+    추출 대상이 아니거나 오차 정의가 없는 그림입니다.
+
+    연속형과 사분위 요약을 여기서 가르는 것이 이 함수의 전부입니다. 가르지
+    않으면 둘 다 평평한 연속형 템플릿으로 가고, 거기에는 중앙값 칸이 없습니다.
+    """
+    if disposition in STATISTIC_BY_DISPOSITION:
+        return STATISTIC_BY_DISPOSITION[disposition]
+    if disposition != "GEOMETRY_NOT_AUTHORED":
+        return ""
+    c = (code or "").strip().upper()
+    if not c or c in RE.DISPOSITIONS:
+        return ""
+    return "QUANTILE_SUMMARY" if c in QUANTILE_DISPERSIONS else "CONTINUOUS"
+
+
 def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
     """(figure, needs). `needs`는 이 그림에 대해 사람이 아직 해야 할 일들."""
     needs = []
     text = (caption.get("Caption_Full") if caption else "") or row["Caption_Text"]
-    route = kernel.fig_screen_caption(text)[0]
+    # 캡션이 스스로 분산을 말했는가. 이 사실은 `caption_fulltext`가 이미 읽어
+    # 두었고, kernel은 어휘를 들고 판정만 합니다 - 같은 정규식을 두 곳에 두면
+    # 한쪽만 고쳐질 때 경로와 정의가 서로 다른 캡션을 보게 됩니다.
+    said = (caption.get("Errorbar_Definition") or "").strip() if caption else ""
+    own = said not in ("", "UNSTATED", "PM_UNNAMED") or bool(
+        (caption or {}).get("Box_Elements", "").strip())
+    route = kernel.fig_screen_caption(text, states_dispersion=own)[0]
     code, source, kind, where = dispersion_for(row["Draft_ID"], caption, decision)
     disposition = disposition_for(route)
+    if route == "MIXED_CAPTION_NOT_DECIDABLE" and count:
+        # 할 일을 적지 않으면 이 그림들은 `UNRESOLVED`에 조용히 앉아 있습니다 -
+        # `NOT_DATA`보다 나쁩니다. 그쪽은 적어도 판정된 처분이고, 이쪽은 아무도
+        # 보지 않은 채로 아무 이름도 없이 남습니다.
+        needs.append("캡션이 스스로 어긋난 그림 — 어느 패널이 데이터인지 확인")
     if disposition == "GEOMETRY_NOT_AUTHORED":
         if code in RE.DISPOSITIONS:
             # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.
@@ -350,6 +405,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
                 Page=figure["source_page"], Image=figure["image"],
                 Route=route, Disposition=disposition,
                 Observed_Panel_Count=figure.get("observed_panel_count", ""),
+                Statistic_Type=statistic_type_for(disposition, code),
                 Dispersion_Type=code, Errorbar_Definition_Source=source,
                 Errorbar_Source_Kind=kind, Errorbar_Found_On_Page=where,
                 Needs=" · ".join(needs)))

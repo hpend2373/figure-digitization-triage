@@ -157,7 +157,29 @@ FIELDS = ("Draft_ID", "Source_Document_ID", "Page", "Figure_Number",
           "Caption_Full_Lines", "Errorbar_Definition", "Errorbar_Evidence",
           "Doc_Errorbar_Definition", "Doc_Errorbar_Evidence",
           "Doc_Errorbar_Page", "Source_SHA256_OK",
-          "Caption_Next_Gap", "Caption_Next_Blocks")
+          "Caption_Next_Gap", "Caption_Next_Blocks",
+          # 상자그림은 종류 하나로 적을 수 없습니다. 읽은 표시들을
+          # "CENTER=MEDIAN;BOX=P25_P75;WHISKER=MIN_MAX"로 싣고, 계획서가 이
+          # 그림을 `QUANTILE_SUMMARY`로 보냅니다 - 평평한 연속형 템플릿에는
+          # 중앙값을 적을 자리가 없습니다.
+          "Box_Elements", "Box_Evidence")
+
+
+def box_elements_text(elements):
+    """{표시: 뜻}을 CSV 한 칸에. 순서는 `FIG_MARKED_ELEMENTS`를 따릅니다 -
+    사전의 순서를 그대로 쓰면 같은 읽기가 파이썬 판마다 다른 글자가 됩니다."""
+    order = ("CENTER", "ERRORBAR", "BOX", "WHISKER")
+    return ";".join("%s=%s" % (k, elements[k]) for k in order if k in elements)
+
+
+def box_elements_of(text):
+    """{표시: 뜻} - `box_elements_text`가 만든 칸을 되읽습니다."""
+    out = {}
+    for part in str(text or "").split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
 
 
 #: Typographic ligatures as pdfminer hands them over. A PDF that sets
@@ -391,6 +413,60 @@ def errorbar_definition(text):
     return DEF_UNSTATED, ""
 
 
+#: 상자그림을 설명하겠다고 여는 말. 이 말이 없으면 아래를 보지 않습니다 -
+#: "The black box in front of the subject's head"도 box를 말하고 median을
+#: 말하는 문장이 같은 캡션에 있을 수 있습니다.
+BOX_OPENS = re.compile(
+    r"box\s*-?\s*(?:and\s*-?\s*whiskers?\s*)?plots?\s+"
+    r"(?:indicate|show|shows|represent|represents|display|displays|are|give)\b",
+    re.I)
+
+#: 여는 말 뒤에서 찾는 표시들. 낱말이 아니라 **짝**을 봅니다: 25th 하나만으로는
+#: 상자의 아래위를 알 수 없고, minimum 하나만으로는 수염이 어디까지인지 알 수
+#: 없습니다.
+_BOX_P25_P75 = re.compile(r"25\s?th\s+percentile", re.I), \
+               re.compile(r"75\s?th\s+percentile", re.I)
+_WHISKER_MIN_MAX = re.compile(r"\bminimum\b|\bmin\b", re.I), \
+                   re.compile(r"\bmaximum\b|\bmax\b", re.I)
+_CENTER_MEDIAN = re.compile(r"\bmedians?\b", re.I)
+
+
+def box_elements(text):
+    """({표시: 뜻}, 근거 문장) - 상자그림이 무엇을 나타내는지 캡션이 말한 것.
+
+    `errorbar_definition`은 계열 하나에 종류 하나를 냅니다. 상자그림은 그렇게
+    적을 수 없습니다 - 중앙선·상자·수염이 각각 다른 것을 말하고, 그 셋을
+    `IQR` 한 토큰으로 뭉치면 상자가 25-75인지 수염이 어디까지인지가 사라집니다.
+    사라진 채로 디지타이즈하면 수는 나오고 그 수는 다른 값입니다.
+
+    코퍼스에서 이 모양으로 적은 논문은 하나뿐이고, 문장은 이것입니다:
+
+        Box plots indicate minimum, 25th percentile, median, 75th percentile,
+        and maximum values.
+
+    찾은 것만 냅니다. 여는 말 뒤가 잘려 있으면(그 논문 FIG9가 그렇습니다) 빈
+    사전을 내고, 그 그림은 사람에게 갑니다 - 반쯤 읽은 문장으로 답을 짓는 것이
+    이 파이프라인이 하지 않기로 한 일입니다.
+    """
+    flat = _norm(text)
+    m = BOX_OPENS.search(flat)
+    if not m:
+        return {}, ""
+    tail = flat[m.end():]
+    out = {}
+    if _CENTER_MEDIAN.search(tail):
+        out["CENTER"] = "MEDIAN"
+    lo, hi = _BOX_P25_P75
+    if lo.search(tail) and hi.search(tail):
+        out["BOX"] = "P25_P75"
+    lo, hi = _WHISKER_MIN_MAX
+    if lo.search(tail) and hi.search(tail):
+        out["WHISKER"] = "MIN_MAX"
+    if not out:
+        return {}, ""
+    return out, flat[m.start():m.start() + 180].strip()
+
+
 def document_statement(blocks):
     """(code, sentence, page) for the first sentence in which the document
     says how its values are presented AND names a dispersion. ("", "", "")
@@ -441,6 +517,7 @@ def rows_for_document(doc_rows, blocks, failure=None, sha_ok=""):
             "Doc_Errorbar_Page": doc_page,
             "Source_SHA256_OK": sha_ok,
             "Caption_Next_Gap": "", "Caption_Next_Blocks": "",
+            "Box_Elements": "", "Box_Evidence": "",
         }
         if blocks is None:
             base["Caption_Full_Status"] = failure or STATUS_UNREADABLE
@@ -473,6 +550,10 @@ def rows_for_document(doc_rows, blocks, failure=None, sha_ok=""):
         base["Caption_Full_Status"] = status
         code, ev = errorbar_definition(full)
         base["Errorbar_Definition"], base["Errorbar_Evidence"] = code, ev
+        marks, mev = box_elements(full)
+        if marks:
+            base["Box_Elements"] = box_elements_text(marks)
+            base["Box_Evidence"] = mev
         out.append(base)
     return out
 

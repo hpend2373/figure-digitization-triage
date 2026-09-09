@@ -1,7 +1,7 @@
 {
  "files": {
-  "caption_fulltext.py": "86df60357a4bba24b7c839ac0a230003f696ac59b78f03a011b7c6c6ff01b8b9",
-  "test_caption_fulltext.py": "520f43e7eac0143c6fff2c09209dde0350e1421d59760081904c7e1fc3c6e9fc"
+  "caption_fulltext.py": "793e7de5d1fa926a806c455901a0cb31df0d09bbc7e5976cb5f353089f1ec3bb",
+  "test_caption_fulltext.py": "c929394cfcc8cba45ad3a6f4f6a47303916ea1357e32a914b072032d9e0f3422"
  },
  "suites": [
   "test_caption_fulltext.py"
@@ -204,6 +204,36 @@
    "file": "caption_fulltext.py",
    "old": "_BROKEN_WORD = re.compile(r\"(\\w)-\\s+(\\w)\")",
    "new": "_BROKEN_WORD = re.compile(r\"(?!x)x\")"
+  },
+  {
+   "name": "여는 말을 보지 않고 낱말만 찾는다",
+   "file": "caption_fulltext.py",
+   "old": "    m = BOX_OPENS.search(flat)\n    if not m:\n        return {}, \"\"\n    tail = flat[m.end():]",
+   "new": "    m = BOX_OPENS.search(flat)\n    if False:\n        return {}, \"\"\n    tail = flat"
+  },
+  {
+   "name": "상자그림의 중앙선을 읽지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "    if _CENTER_MEDIAN.search(tail):",
+   "new": "    if False:"
+  },
+  {
+   "name": "상자의 아래위를 짝으로 보지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "    if lo.search(tail) and hi.search(tail):\n        out[\"BOX\"] = \"P25_P75\"",
+   "new": "    if lo.search(tail) or hi.search(tail):\n        out[\"BOX\"] = \"P25_P75\""
+  },
+  {
+   "name": "수염의 끝을 짝으로 보지 않는다",
+   "file": "caption_fulltext.py",
+   "old": "    if lo.search(tail) and hi.search(tail):\n        out[\"WHISKER\"] = \"MIN_MAX\"",
+   "new": "    if lo.search(tail) or hi.search(tail):\n        out[\"WHISKER\"] = \"MIN_MAX\""
+  },
+  {
+   "name": "아무것도 못 읽고도 근거를 낸다",
+   "file": "caption_fulltext.py",
+   "old": "    if not out:\n        return {}, \"\"",
+   "new": "    if False:\n        return {}, \"\""
   }
  ]
 }

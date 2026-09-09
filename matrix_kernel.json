@@ -1,0 +1,23 @@
+{
+ "files": {
+  "kernel.py": "b959537f68589f988f167742f48eb4d93e3b5eaa3ce7b7d1a7f34116a8642407",
+  "test_kernel.py": "7994260eca433b1ad18698ecc48d45f896eaf9732bb0cbd5c90e82ed396f3a63"
+ },
+ "suites": [
+  "test_kernel.py"
+ ],
+ "mutations": [
+  {
+   "name": "캡션의 반대 증거를 무시한다",
+   "file": "kernel.py",
+   "old": "        if states_dispersion:\n            return (\"MIXED_CAPTION_NOT_DECIDABLE\",",
+   "new": "        if False:\n            return (\"MIXED_CAPTION_NOT_DECIDABLE\","
+  },
+  {
+   "name": "중심 통계가 어휘 밖이어도 받는다",
+   "file": "kernel.py",
+   "old": "        if _centre not in FIG_ELEMENT_MEANINGS[\"CENTER\"]:",
+   "new": "        if False:"
+  }
+ ]
+}

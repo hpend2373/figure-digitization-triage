@@ -518,6 +518,73 @@ check("패널이 없으면 할 일도 없다",
           {"Caption_Full": _MIXED_CAP, "Errorbar_Definition": "SD",
            "Box_Elements": "", "Page": "11"}, count=0)["needs"]))
 
+# ------------------------------------------- 사람이 보고 정한 것이 이깁니다
+
+def _decided(choice, which="", cap=None, count=4):
+    """그 처분이 적힌 그림 하나를 계획서에 태워 보고, 나온 것을 돌려준다."""
+    row = {"Draft_ID": "d", "Source_Document_ID": "DOC", "Caption_Text": "",
+           "Figure_Number": "FIG8", "Source_File": "a.pdf", "Page": "11",
+           "Figure_Crop": ""}
+    dec = {"Draft_ID": "d", "Decision": choice, "Which_Panels": which} if choice else None
+    _fig, needs, route, disposition, _d = MP.figure_of(
+        row, cap if cap is not None else {
+            "Caption_Full": _MIXED_CAP, "Errorbar_Definition": "UNSTATED",
+            "Box_Elements": "CENTER=MEDIAN;BOX=P25_P75;WHISKER=MIN_MAX",
+            "Box_Evidence": "Box plots indicate minimum,", "Page": "11"},
+        None, count, ROOT, figure_decision=dec)
+    # 이 편에는 잘린 그림 파일이 없습니다. 그 할 일은 처분과 상관없이 늘
+    # 붙고, 여기서 보려는 것이 아니라서 빼고 봅니다 - 지우는 것이 아니라
+    # 다른 물음에 속한 줄이기 때문입니다.
+    return {"route": route, "disposition": disposition,
+            "needs": [n for n in needs if n != "잘린 그림 파일"]}
+
+# REVERT: 사람의 처분을 읽지 않는다. `record_decisions`가 적어 둔 64개의 판정이
+# 파일 안에만 있고, 계획서는 사람이 이미 답한 것을 계속 묻습니다.
+_not_data = _decided("NOT_DATA")
+check("데이터가 아니라고 하신 그림은 그렇게 처분된다",
+      _not_data["disposition"] == "NOT_DATA", _not_data)
+check("처분된 그림에는 더 물을 것이 없다",
+      _not_data["needs"] == [], _not_data["needs"])
+
+# REVERT: "전부 데이터다"를 그냥 처분으로 적는다. 사람이 데이터라고 한 그림이
+# `DATA`라는 이름의 처분에 앉아서, 아무도 그 그림을 읽지 않습니다.
+_data = _decided("DATA")
+check("데이터라고 하신 그림은 보통 그림으로 돌아온다",
+      _data["route"] == "DIGITIZE"
+      and _data["disposition"] == "GEOMETRY_NOT_AUTHORED", _data)
+check("돌아온 그림에는 기하 할 일이 붙는다",
+      any("패널 기하" in n for n in _data["needs"]), _data["needs"])
+
+_partial = _decided("PARTIAL", which="a")
+check("일부 패널만이라고 하신 그림은 어느 패널인지까지 적힌다",
+      _partial["disposition"] == "UNRESOLVED"
+      and any(n.endswith(": a") for n in _partial["needs"]), _partial)
+check("패널을 대지 않은 일부 처분은 이름만 적는다",
+      _decided("PARTIAL")["needs"] == ["일부 패널만 데이터라고 하신 그림 — 그 패널만 추출"],
+      _decided("PARTIAL")["needs"])
+check("다시 세라·다시 자르라는 각자의 이름으로 적힌다",
+      any("계수 다시" in n for n in _decided("COUNTABLE")["needs"])
+      and any("재크롭" in n for n in _decided("RECROP")["needs"]))
+
+# REVERT: 보류를 처분으로 친다. 사람이 "아직 모르겠다"고 누른 것이 판정이
+# 되어서, 아무도 그 그림을 다시 보지 않습니다.
+check("보류는 판정이 아니다",
+      _decided("HOLD") == _decided(""), _decided("HOLD"))
+check("판정이 없으면 전과 같다",
+      _decided("")["disposition"] == "UNRESOLVED"
+      and any("어긋난" in n for n in _decided("")["needs"]), _decided(""))
+
+# REVERT: 처분된 그림에도 계수를 묻는다. 세지 않은 채로 "데이터가 아니다"라고
+# 답한 그림에게 계획서가 "패널 계수"라고 다시 적습니다.
+check("처분된 그림에는 계수도 묻지 않는다",
+      _decided("NOT_DATA", count=None)["needs"] == [],
+      _decided("NOT_DATA", count=None)["needs"])
+check("판정이 없으면 계수는 그대로 묻는다",
+      MP.COUNT_NEED in _decided("", count=None)["needs"])
+
+_missing = MP.load_figure_decisions(os.path.join(ROOT, "no_such_run"))
+check("처분 파일이 없는 실행도 계획서를 만든다", _missing == {}, _missing)
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

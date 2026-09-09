@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "abb0f04993a2dc3a8c5424fee80214119df084b44b0df4a1b8d11488d8822bf6",
-  "test_make_plan.py": "1a7f3723dfdcbea718aed819c530947339b0764299627ae20c99020c87aac9a3"
+  "make_plan.py": "598b5bc0d72d00c5765aa9cd30fd3172e2d668301b220a119b676fea14658aca",
+  "test_make_plan.py": "bb9e811924ca92362eba8a3699c79b2d64d33825b4abe186f45b5f4f82a1f98f"
  },
  "suites": [
   "test_make_plan.py"
@@ -92,10 +92,10 @@
    "new": "    if False:\n        needs.append(\"잘린 그림 파일\")"
   },
   {
-   "name": "세지 않은 패널 수를 그림 수로 채운다",
+   "name": "수가 없으면 무조건 세라고 적지 않는다",
    "file": "make_plan.py",
-   "old": "    if count is None:\n        needs.append(count_need(status))",
-   "new": "    if False:\n        needs.append(count_need(status))"
+   "old": "    if count is None:\n        if not settled:\n            needs.append(count_need(status))",
+   "new": "    if count is None:\n        if not settled:\n            pass"
   },
   {
    "name": "세지 않았는데 1개라고 적는다",
@@ -256,8 +256,44 @@
   {
    "name": "어긋난 캡션에 할 일을 적지 않는다",
    "file": "make_plan.py",
-   "old": "    if route == \"MIXED_CAPTION_NOT_DECIDABLE\" and count:",
+   "old": "    if not settled and route == \"MIXED_CAPTION_NOT_DECIDABLE\" and count:",
    "new": "    if False:"
+  },
+  {
+   "name": "사람의 처분을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    decided, decided_need = decided_for(figure_decision)",
+   "new": "    decided, decided_need = \"\", None"
+  },
+  {
+   "name": "\"전부 데이터다\"를 처분으로만 적는다",
+   "file": "make_plan.py",
+   "old": "    if decided == \"DIGITIZE\":",
+   "new": "    if False:"
+  },
+  {
+   "name": "어느 패널인지는 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    return \"UNRESOLVED\", (\"%s: %s\" % (need, which)) if which else need",
+   "new": "    return \"UNRESOLVED\", need"
+  },
+  {
+   "name": "보류도 처분으로 친다",
+   "file": "make_plan.py",
+   "old": "    if need is None:\n        return \"\", None",
+   "new": "    if need is None:\n        return \"UNRESOLVED\", None"
+  },
+  {
+   "name": "처분된 그림에도 계수를 묻는다",
+   "file": "make_plan.py",
+   "old": "        if not settled:\n            needs.append(count_need(status))",
+   "new": "        needs.append(count_need(status))"
+  },
+  {
+   "name": "처분 파일이 없으면 멈춘다",
+   "file": "make_plan.py",
+   "old": "    if not os.path.exists(path):\n        return out",
+   "new": "    if False:\n        return out"
   }
  ]
 }

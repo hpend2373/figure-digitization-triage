@@ -40,6 +40,9 @@ DRAFT = "figure_intake_draft.csv"
 BLOCKS = "block_reasons.csv"
 CAPTIONS = "caption_fulltext.csv"
 DECISIONS = "errorbar_decisions.csv"
+#: `record_decisions.py`가 적은 처분들. 사람이 그림을 보고 정한 것이고, 계획서가
+#: 그것을 읽지 않으면 판정은 파일 안에만 있습니다.
+FIGURE_DECISIONS = "figure_decisions.csv"
 #: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
 #: 새로 짓지 않습니다 - 파이프라인이 이미 쓰는 이름이 따로 있는데 여기서만
 #: 다른 이름을 보면, 계수는 들어와 있는데 계획서는 영영 못 보게 됩니다.
@@ -70,6 +73,17 @@ ANSWERED_WITHOUT_A_NUMBER = {
     "CROP_DISPUTED": "대상 그림이 아니라고 하신 크롭 — 처분 결정 또는 재크롭",
     "BLOCK_DISPUTED": "차단이 틀렸다고 하신 행 — 차단 재검토",
 }
+#: 사람의 처분이 계획서에서 무엇이 되는가. `NOT_DATA`는 셋 다 같은 뜻이라
+#: 한 줄이고, 나머지는 아직 할 일이 남은 처분입니다.
+DECIDED_NOT_DATA = "NOT_DATA"
+#: "전부 데이터다" - 멈춰 두었던 그림이 보통 그림으로 돌아갑니다.
+DECIDED_IS_DATA = "DATA"
+DECIDED_NEEDS = {
+    "RECROP": "다시 자르라고 하신 그림 — 재크롭",
+    "COUNTABLE": "이제 셀 수 있다고 하신 그림 — 계수 다시",
+    "PARTIAL": "일부 패널만 데이터라고 하신 그림 — 그 패널만 추출",
+}
+
 READINESS = "plan_readiness.csv"
 WORKSHEET = "plan_figures.csv"
 
@@ -224,7 +238,8 @@ def statistic_type_for(disposition, code):
     return "QUANTILE_SUMMARY" if c in QUANTILE_DISPERSIONS else "CONTINUOUS"
 
 
-def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
+def figure_of(row, caption, decision, count, crop_root, answer=("", ""),
+              figure_decision=None):
     """(figure, needs). `needs`는 이 그림에 대해 사람이 아직 해야 할 일들."""
     needs = []
     text = (caption.get("Caption_Full") if caption else "") or row["Caption_Text"]
@@ -237,7 +252,24 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
     route = kernel.fig_screen_caption(text, states_dispersion=own)[0]
     code, source, kind, where = dispersion_for(row["Draft_ID"], caption, decision)
     disposition = disposition_for(route)
-    if route == "MIXED_CAPTION_NOT_DECIDABLE" and count:
+
+    # 사람이 그림을 보고 정한 것이 있으면 그것이 이깁니다. 캡션 심사도 계수도
+    # 그림을 보지 않고 한 판정이고, 이것은 보고 한 판정입니다. 이 갈래가
+    # 없으면 `record_decisions`가 적어 둔 것은 파일 안에만 있고, 계획서는
+    # 사람이 이미 답한 것을 계속 묻습니다.
+    decided, decided_need = decided_for(figure_decision)
+    if decided == "DIGITIZE":
+        # "전부 데이터다" - 캡션이 어긋나 멈춰 두었던 그림이 보통 그림이
+        # 됩니다. 기하와 오차 정의는 아래에서 여느 그림과 같이 붙습니다.
+        route, disposition = "DIGITIZE", "GEOMETRY_NOT_AUTHORED"
+    elif decided:
+        disposition = decided
+        if decided_need:
+            needs.append(decided_need)
+    #: 사람이 이미 처분한 그림. 아래의 물음들은 그 처분보다 앞설 수 없습니다.
+    settled = decided in ("NOT_DATA", "UNRESOLVED")
+
+    if not settled and route == "MIXED_CAPTION_NOT_DECIDABLE" and count:
         # 할 일을 적지 않으면 이 그림들은 `UNRESOLVED`에 조용히 앉아 있습니다 -
         # `NOT_DATA`보다 나쁩니다. 그쪽은 적어도 판정된 처분이고, 이쪽은 아무도
         # 보지 않은 채로 아무 이름도 없이 남습니다.
@@ -281,7 +313,8 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
     }
     status, reason = answer
     if count is None:
-        needs.append(count_need(status))
+        if not settled:
+            needs.append(count_need(status))
         if str(status or "").strip() in ANSWERED_WITHOUT_A_NUMBER:
             # 사람의 답을 계획서가 들고 가게 합니다. 여기 없으면 그 답은
             # 계수 시트에만 있고, 계획서를 읽는 쪽에서는 아무도 이 그림을
@@ -299,8 +332,44 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", "")):
     return figure, needs, route, disposition, (code, source, kind, where)
 
 
+def load_figure_decisions(run):
+    """{Draft_ID: 처분 행} - 사람이 그림을 보고 정한 것.
+
+    한 그림에 물음이 둘일 수는 있지만 처분은 하나입니다. 둘 다 적혀 있으면
+    나중 것을 씁니다 - 그런 일이 생기면 `record_decisions`가 먼저 막습니다.
+    """
+    path = os.path.join(run, FIGURE_DECISIONS)
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for r in csv.DictReader(io.open(path, encoding="utf-8-sig")):
+        out[r["Draft_ID"]] = r
+    return out
+
+
+def decided_for(figure_decision):
+    """(처분, 할 일) - 사람의 판정이 계획서에서 무엇이 되는가.
+
+    ("", None)이면 판정이 없습니다. 할 일이 `None`이면 더 할 일이 없다는
+    뜻이고, 빈 문자열이 아니라 `None`인 것은 "없음"과 "빈 이름"을 가르기
+    위해서입니다.
+    """
+    if not figure_decision:
+        return "", None
+    choice = (figure_decision.get("Decision") or "").strip().upper()
+    if choice == DECIDED_NOT_DATA:
+        return "NOT_DATA", None
+    if choice == DECIDED_IS_DATA:
+        return "DIGITIZE", None
+    need = DECIDED_NEEDS.get(choice)
+    if need is None:
+        return "", None
+    which = (figure_decision.get("Which_Panels") or "").strip()
+    return "UNRESOLVED", ("%s: %s" % (need, which)) if which else need
+
+
 def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
-             run_date, said=None):
+             run_date, said=None, decided=None):
     """(plan, 그림별 (figure_id, needs, ...)). 한 편의 계획서."""
     first = rows[0]
     said = said or {}
@@ -328,7 +397,8 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
         count = int(raw) if str(raw or "").strip().isdigit() else None
         figure, needs, route, disposition, dispersion = figure_of(
             row, cap, dec, count, crop_root,
-            said.get(row["Draft_ID"], ("", "")))
+            said.get(row["Draft_ID"], ("", "")),
+            (decided or {}).get(row["Draft_ID"]))
         figures.append(figure)
         notes.append((figure, needs, route, disposition, dispersion, row))
     plan = {
@@ -355,6 +425,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
     rows = live_rows(run)
     captions = _by(_rows(os.path.join(run, CAPTIONS)), "Draft_ID")
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
+    decided = load_figure_decisions(run)
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers
@@ -380,7 +451,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print):
             log("건너뜀 %s: 계획서가 받는 이름이 아닙니다" % publication)
             continue
         plan, notes = plan_for(run, publication, pub_rows, captions, decisions,
-                               counts, crop_root, run_date, said)
+                               counts, crop_root, run_date, said, decided)
         path = os.path.join(out_dir, "plan_%s.json" % publication)
         with io.open(path, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(plan, ensure_ascii=False, indent=1,

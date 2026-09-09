@@ -34,6 +34,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import kernel                                                    # noqa: E402
+from page_bits import CSS, esc, thumb                            # noqa: E402
 
 DRAFT = "figure_intake_draft.csv"
 #: 무엇이 남았는지 정하는 파일. 계획서가 만든 답안지이고, 한 줄이 논문 한
@@ -59,42 +60,11 @@ GROUPS = (
      "그렇게 답하십시오."),
 )
 
-#: 크롭을 페이지에 싣는 크기. 오차 막대가 무엇인지 보려면 막대가 보여야 하고,
-#: 78개를 원본 크기로 실으면 브라우저가 열지 못합니다.
-THUMB = (560, 560)
-
-
 def _rows(path):
     if not os.path.exists(path):
         return []
     with io.open(path, encoding="utf-8-sig") as fh:
         return list(csv.DictReader(fh))
-
-
-def esc(text):
-    return (str(text if text is not None else "")
-            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            .replace('"', "&quot;").replace("'", "&#39;"))
-
-
-def thumb(path):
-    """크롭 한 장을 data URL로. 못 읽으면 빈 문자열 - 없는 그림은 없다고 둡니다."""
-    if not path or not os.path.isfile(path):
-        return ""
-    try:
-        from PIL import Image
-    except Exception:                                   # pragma: no cover
-        return ""
-    try:
-        im = Image.open(path)
-        im.thumbnail(THUMB)
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=72)
-    except Exception:                                   # noqa: BLE001
-        return ""
-    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 def verdicts(run, pdf_root, candidates):
@@ -128,55 +98,6 @@ def verdicts(run, pdf_root, candidates):
         problems = RE.check_answer(probe, source)
         out[i] = problems[0] if problems else ("OK", "관문을 지나갑니다")
     return out
-
-
-CSS = """<style>
-body{font:15px/1.6 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;
-margin:0;background:#f4f4f2;color:#1a1a1a}
-header{position:sticky;top:0;background:#fff;border-bottom:1px solid #d8d8d4;
-padding:14px 20px;z-index:5}
-h1{font-size:17px;margin:0 0 4px}
-.note{color:#5a5a56;font-size:13px;margin:6px 0 0;max-width:80ch}
-main{padding:20px;max-width:1180px;margin:0 auto}
-h3.sec{font-size:15px;margin:26px 0 2px;padding-top:8px;border-top:2px solid #ddddd6}
-.sec-why{margin:0 0 12px}
-.doc{background:#fff;border:1px solid #ddddd8;border-radius:8px;margin:0 0 22px;
-padding:16px 18px}
-.doc.done{border-color:#6b8f6b;background:#f6faf6}
-h2{font-size:14px;margin:0 0 2px;font-family:ui-monospace,Menlo,monospace;
-word-break:break-all}
-.sub{color:#66665f;font-size:13px;margin:0 0 12px}
-.figs{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 14px}
-.fig{border:1px solid #e2e2dd;border-radius:6px;padding:6px;background:#fbfbfa}
-.fig img{display:block;max-width:270px;height:auto;border-radius:3px}
-.fig .nofig{width:120px;height:60px;display:flex;align-items:center;
-justify-content:center;color:#9a9a92;font-size:12px}
-.fig .cap{font-size:12px;color:#55554f;margin-top:5px}
-.cand{border:1px solid #e2e2dd;border-radius:6px;padding:10px 12px;margin:0 0 9px;
-background:#fbfbfa}
-.cand.ok{border-color:#b7d3b9}
-.cand.picked{border-color:#3b6ea5;background:#f2f7fd}
-.cand.own{display:block;font-size:13px;color:#55554f}
-blockquote{margin:6px 0;padding:8px 11px;background:#fff;border-left:3px solid #c9c9c2;
-font-size:14px;white-space:pre-wrap}
-.meta{font-size:12px;color:#55554f;margin-top:4px}
-.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;
-border:1px solid;margin-right:6px;vertical-align:1px}
-.ok{color:#2f6b34;border-color:#9dc4a0;background:#eef7ef}
-.warn{color:#8a5a12;border-color:#dcc08a;background:#fdf6e9}
-.row{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:12px;
-padding-top:12px;border-top:1px solid #eeeee9}
-label{font-size:13px}
-.verify{padding:3px 8px;border:1px solid #dcc08a;border-radius:5px;background:#fdf6e9}
-select,input[type=text]{font:13px inherit;padding:5px 7px;border:1px solid #c9c9c2;
-border-radius:4px;background:#fff}
-.state{font-size:13px;color:#8a5a12;margin-top:9px}
-.state.ready{color:#2f6b34}
-button{font:14px inherit;padding:8px 15px;border:1px solid #b9b9b2;border-radius:5px;
-background:#fff;cursor:pointer}
-button:hover{background:#f2f2ee}
-.count{font-variant-numeric:tabular-nums;color:#55554f;font-size:13px;font-weight:400}
-</style></head><body>"""
 
 
 def answer_row(key):

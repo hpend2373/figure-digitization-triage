@@ -66,6 +66,20 @@ ANSWER_REQUIRED = ("Source_Document_ID", "Dispersion_Type",
                    "Errorbar_Definition_Source", "Verified_In_Source")
 
 _WORD = re.compile(r"[^0-9a-z]+")
+#: PDF 배경이 이름을 모르는 글자를 내놓는 모양. poppler와 pdfminer가 `±`를
+#: 이렇게 적습니다 - 글자가 아니라 "여기 글자가 하나 있는데 뭔지 모르겠다"는
+#: 표시입니다. 낱말로 세면 문장 한가운데에 `cid 2` 두 낱말이 끼고, 뷰어에서
+#: 그대로 긁어 온 진짜 문장이 원문에 없는 문장이 됩니다.
+#:
+#: run2에서 인용문 41개 중 14개가 이것 하나로 거부됐습니다. 거부 문구는
+#: "낱말이 바뀌었거나, 서로 다른 문장의 조각이 이어 붙었습니다" - 정직하게
+#: 옮겨 적은 사람에게 지어냈다고 말하는 문이었습니다.
+#:
+#: `_key`에서만 씁니다. `_soft`(규칙 대조)에서도 지워 봤지만 죽는 시나리오가
+#: 없었습니다 - 이 표시는 `±`가 있던 자리에 서고, 종류를 알아보는 규칙은
+#: 이어진 낱말을 찾으므로 그 자리에 무엇이 끼든 답이 바뀌지 않습니다.
+#: 관측되지 않는 가드는 장식이라 넣지 않습니다.
+_CID = re.compile(r"\(\s*cid\s*:\s*\d+\s*\)", re.I)
 _HYPHEN_BREAK = re.compile(r"([a-z])-\s+([a-z])", re.I)
 #: 인쇄용 글자들. PDF 뷰어에서 긁으면 따라오고, 낱말 사이에 끼면 낱말이
 #: 붙어 있지 않은 것처럼 보입니다 - `Standard "deviations"`가 `standard\s+
@@ -100,7 +114,7 @@ def _key(text):
     그 차례가 원문에 없으므로 여전히 걸립니다 - 이 문이 실제로 잡아야 하는 것이
     그것입니다.
     """
-    flat = CF._norm(text).lower()
+    flat = _CID.sub(" ", CF._norm(text)).lower()
     flat = _HYPHEN_BREAK.sub(r"\1\2", flat)
     return " ".join(_WORD.sub(" ", flat).split())
 

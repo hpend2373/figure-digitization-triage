@@ -1,178 +1,184 @@
 {
-  "files": {
-    "caption_fulltext.py": "eb99d31f628c8e7f6b7ac87e718e543be1ee56494d4c2cdd6c8e5d770df0b399"
+ "files": {
+  "caption_fulltext.py": "e1543b7e3cbdaf6d24cff9876c6ef4c9914f52367758bbc9f965d7064037fff7"
+ },
+ "suites": [
+  "test_caption_fulltext.py"
+ ],
+ "mutations": [
+  {
+   "name": "bbox ignored: any block on the page with the line",
+   "file": "caption_fulltext.py",
+   "old": "if CI._bbox_text(b[1:5]) != want:\n            continue",
+   "new": "if False:\n            continue"
   },
-  "suites": [
-    "test_caption_fulltext.py"
-  ],
-  "mutations": [
-    {
-      "name": "bbox ignored: any block on the page with the line",
-      "file": "caption_fulltext.py",
-      "old": "if CI._bbox_text(b[1:5]) != want:\n            continue",
-      "new": "if False:\n            continue"
-    },
-    {
-      "name": "caption runs into the next figure's caption",
-      "file": "caption_fulltext.py",
-      "old": "if i and opens_another_caption(raw):\n            break",
-      "new": "if False:\n            break"
-    },
-    {
-      "name": "hyphen-broken words stay broken",
-      "file": "caption_fulltext.py",
-      "old": "elif text.endswith(\"-\") and not text.endswith(\" -\"):",
-      "new": "elif False:"
-    },
-    {
-      "name": "two named dispersions report the first",
-      "file": "caption_fulltext.py",
-      "old": "if len(set(codes)) > 1:\n        return DEF_AMBIGUOUS",
-      "new": "if False:\n        return DEF_AMBIGUOUS"
-    },
-    {
-      "name": "source hash not checked",
-      "file": "caption_fulltext.py",
-      "old": "if want and sha256_of(path) != want:",
-      "new": "if False:"
-    },
-    {
-      "name": "intake backend ignored",
-      "file": "caption_fulltext.py",
-      "old": "blocks = CI.text_blocks(path, backend=backend)",
-      "new": "blocks = CI.text_blocks(path)"
-    },
-    {
-      "name": "document statement accepts an unnamed +/-",
-      "file": "caption_fulltext.py",
-      "old": "if code not in (DEF_UNSTATED, DEF_PM_UNNAMED):",
-      "new": "if code != DEF_UNSTATED:"
-    },
-    {
-      "name": "LINE_ONLY reported as BLOCK",
-      "file": "caption_fulltext.py",
-      "old": "STATUS_BLOCK if len(lines) > 1 else STATUS_LINE_ONLY",
-      "new": "STATUS_BLOCK"
-    },
-    {
-      "name": "rows left in file order",
-      "file": "caption_fulltext.py",
-      "old": "rows.sort(key=lambda r: order.get(r[\"Draft_ID\"], 1 << 30))",
-      "new": "pass"
-    },
-    {
-      "name": "a row with no bbox looks like a missing block",
-      "file": "caption_fulltext.py",
-      "old": "if not want:\n        return None, STATUS_NO_BBOX",
-      "new": "if False:\n        return None, STATUS_NO_BBOX"
-    },
-    {
-      "name": "line-not-in-block reported as block-not-found",
-      "file": "caption_fulltext.py",
-      "old": "return None, (STATUS_NO_LINE if found else STATUS_NO_BLOCK)",
-      "new": "return None, STATUS_NO_BLOCK"
-    },
-    {
-      "name": "evidence dropped",
-      "file": "caption_fulltext.py",
-      "old": "    if hits:\n        return hits[0]",
-      "new": "    if hits:\n        return hits[0][0], \"\""
-    },
-    {
-      "name": "blank lines kept as caption lines",
-      "file": "caption_fulltext.py",
-      "old": "        if raw.strip():\n            out.append(_norm(raw))",
-      "new": "        out.append(_norm(raw))"
-    },
-    {
-      "name": "ligatures not folded",
-      "file": "caption_fulltext.py",
-      "old": "    for glyph, plain in LIGATURES.items():\n        text = text.replace(glyph, plain)\n",
-      "new": ""
-    },
-    {
-      "name": "any period ends the statement sentence",
-      "file": "caption_fulltext.py",
-      "old": "_IN = r\"(?:\\.(?!\\s|$)|[^.])\"",
-      "new": "_IN = r\"[^.]\""
-    },
-    {
-      "name": "label-only rule switched off",
-      "file": "caption_fulltext.py",
-      "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
-      "new": "if False:"
-    },
-    {
-      "name": "every LINE_ONLY caption is extended",
-      "file": "caption_fulltext.py",
-      "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
-      "new": "if status == STATUS_LINE_ONLY:"
-    },
-    {
-      "name": "first gap unlimited",
-      "file": "caption_fulltext.py",
-      "old": "LABEL_FIRST_GAP_MAX = 30.0",
-      "new": "LABEL_FIRST_GAP_MAX = 1e9"
-    },
-    {
-      "name": "continuation gap unlimited",
-      "file": "caption_fulltext.py",
-      "old": "LABEL_CONT_GAP_MAX = 10.0",
-      "new": "LABEL_CONT_GAP_MAX = 1e9"
-    },
-    {
-      "name": "column test switched off",
-      "file": "caption_fulltext.py",
-      "old": "if _overlap_share(prev, b) < LABEL_COLUMN_OVERLAP:",
-      "new": "if False:"
-    },
-    {
-      "name": "chain does not stop at a label, table or footer",
-      "file": "caption_fulltext.py",
-      "old": "        if ends_the_chain(first):\n            break",
-      "new": "        if False:\n            break"
-    },
-    {
-      "name": "gap and block count not recorded",
-      "file": "caption_fulltext.py",
-      "old": "                base[\"Caption_Next_Gap\"] = \"%.1f\" % tail[0][0]\n                base[\"Caption_Next_Blocks\"] = str(len(tail))\n",
-      "new": ""
-    },
-    {
-      "name": "control characters kept",
-      "file": "caption_fulltext.py",
-      "old": "    text = _CONTROL.sub(\" \", str(text or \"\"))",
-      "new": "    text = str(text or \"\")"
-    },
-    {
-      "name": "mangled +/- breaks the abbreviation boundary",
-      "file": "caption_fulltext.py",
-      "old": "_L, _R, _S = r\"(?<![A-Za-z])\", r\"(?![A-Za-z])\", r\"(?-i:s)?\"",
-      "new": "_L, _R, _S = r\"\\b\", r\"\\b\", r\"(?-i:s)?\""
-    },
-    {
-      "name": "plural s accepted in any case",
-      "file": "caption_fulltext.py",
-      "old": "r\"(?-i:s)?\"",
-      "new": "r\"s?\""
-    },
-    {
-      "name": "IQR only when spelled IQR",
-      "file": "caption_fulltext.py",
-      "old": "r\"|\\b25\\s?th\\s*(?:and|to|[-\\u2013\\u2014])\\s*75\\s?th\\s+percentiles?\", re.I)),",
-      "new": "r\"\""
-    },
-    {
-      "name": "active voice is not a statement",
-      "file": "caption_fulltext.py",
-      "old": "    r\"%(in)s{0,60}\\b(?:shows?|displays?|presents?|reports?|gives?)\\b\"\n    r\"%(in)s{0,60}\\b(?:%(subj)s|means?|medians?|averages?)\\b\"\n",
-      "new": ""
-    },
-    {
-      "name": "'changes' is not a subject",
-      "file": "caption_fulltext.py",
-      "old": "r\"data|values?|results|variables|measurements|numbers|changes?|\"",
-      "new": "r\"data|values?|results|variables|measurements|numbers|\""
-    }
-  ]
+  {
+   "name": "caption runs into the next figure's caption",
+   "file": "caption_fulltext.py",
+   "old": "if i and opens_another_caption(raw):\n            break",
+   "new": "if False:\n            break"
+  },
+  {
+   "name": "hyphen-broken words stay broken",
+   "file": "caption_fulltext.py",
+   "old": "elif text.endswith(\"-\") and not text.endswith(\" -\"):",
+   "new": "elif False:"
+  },
+  {
+   "name": "two named dispersions report the first",
+   "file": "caption_fulltext.py",
+   "old": "if len(set(codes)) > 1:\n        return DEF_AMBIGUOUS",
+   "new": "if False:\n        return DEF_AMBIGUOUS"
+  },
+  {
+   "name": "source hash not checked",
+   "file": "caption_fulltext.py",
+   "old": "if want and sha256_of(path) != want:",
+   "new": "if False:"
+  },
+  {
+   "name": "intake backend ignored",
+   "file": "caption_fulltext.py",
+   "old": "blocks = CI.text_blocks(path, backend=backend)",
+   "new": "blocks = CI.text_blocks(path)"
+  },
+  {
+   "name": "document statement accepts an unnamed +/-",
+   "file": "caption_fulltext.py",
+   "old": "if code not in (DEF_UNSTATED, DEF_PM_UNNAMED):",
+   "new": "if code != DEF_UNSTATED:"
+  },
+  {
+   "name": "LINE_ONLY reported as BLOCK",
+   "file": "caption_fulltext.py",
+   "old": "STATUS_BLOCK if len(lines) > 1 else STATUS_LINE_ONLY",
+   "new": "STATUS_BLOCK"
+  },
+  {
+   "name": "rows left in file order",
+   "file": "caption_fulltext.py",
+   "old": "rows.sort(key=lambda r: order.get(r[\"Draft_ID\"], 1 << 30))",
+   "new": "pass"
+  },
+  {
+   "name": "a row with no bbox looks like a missing block",
+   "file": "caption_fulltext.py",
+   "old": "if not want:\n        return None, STATUS_NO_BBOX",
+   "new": "if False:\n        return None, STATUS_NO_BBOX"
+  },
+  {
+   "name": "line-not-in-block reported as block-not-found",
+   "file": "caption_fulltext.py",
+   "old": "return None, (STATUS_NO_LINE if found else STATUS_NO_BLOCK)",
+   "new": "return None, STATUS_NO_BLOCK"
+  },
+  {
+   "name": "evidence dropped",
+   "file": "caption_fulltext.py",
+   "old": "    if hits:\n        return hits[0]",
+   "new": "    if hits:\n        return hits[0][0], \"\""
+  },
+  {
+   "name": "blank lines kept as caption lines",
+   "file": "caption_fulltext.py",
+   "old": "        if raw.strip():\n            out.append(_norm(raw))",
+   "new": "        out.append(_norm(raw))"
+  },
+  {
+   "name": "ligatures not folded",
+   "file": "caption_fulltext.py",
+   "old": "    for glyph, plain in LIGATURES.items():\n        text = text.replace(glyph, plain)\n",
+   "new": ""
+  },
+  {
+   "name": "any period ends the statement sentence",
+   "file": "caption_fulltext.py",
+   "old": "_IN = r\"(?:\\.(?!\\s|$)|[^.])\"",
+   "new": "_IN = r\"[^.]\""
+  },
+  {
+   "name": "label-only rule switched off",
+   "file": "caption_fulltext.py",
+   "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
+   "new": "if False:"
+  },
+  {
+   "name": "every LINE_ONLY caption is extended",
+   "file": "caption_fulltext.py",
+   "old": "if status == STATUS_LINE_ONLY and label_only(lines[0]):",
+   "new": "if status == STATUS_LINE_ONLY:"
+  },
+  {
+   "name": "first gap unlimited",
+   "file": "caption_fulltext.py",
+   "old": "LABEL_FIRST_GAP_MAX = 30.0",
+   "new": "LABEL_FIRST_GAP_MAX = 1e9"
+  },
+  {
+   "name": "continuation gap unlimited",
+   "file": "caption_fulltext.py",
+   "old": "LABEL_CONT_GAP_MAX = 10.0",
+   "new": "LABEL_CONT_GAP_MAX = 1e9"
+  },
+  {
+   "name": "column test switched off",
+   "file": "caption_fulltext.py",
+   "old": "if _overlap_share(prev, b) < LABEL_COLUMN_OVERLAP:",
+   "new": "if False:"
+  },
+  {
+   "name": "chain does not stop at a label, table or footer",
+   "file": "caption_fulltext.py",
+   "old": "        if ends_the_chain(first):\n            break",
+   "new": "        if False:\n            break"
+  },
+  {
+   "name": "gap and block count not recorded",
+   "file": "caption_fulltext.py",
+   "old": "                base[\"Caption_Next_Gap\"] = \"%.1f\" % tail[0][0]\n                base[\"Caption_Next_Blocks\"] = str(len(tail))\n",
+   "new": ""
+  },
+  {
+   "name": "control characters kept",
+   "file": "caption_fulltext.py",
+   "old": "    text = _CONTROL.sub(\" \", str(text or \"\"))",
+   "new": "    text = str(text or \"\")"
+  },
+  {
+   "name": "mangled +/- breaks the abbreviation boundary",
+   "file": "caption_fulltext.py",
+   "old": "_L, _R, _S = r\"(?<![A-Za-z])\", r\"(?![A-Za-z])\", r\"(?-i:s)?\"",
+   "new": "_L, _R, _S = r\"\\b\", r\"\\b\", r\"(?-i:s)?\""
+  },
+  {
+   "name": "plural s accepted in any case",
+   "file": "caption_fulltext.py",
+   "old": "r\"(?-i:s)?\"",
+   "new": "r\"s?\""
+  },
+  {
+   "name": "IQR only when spelled IQR",
+   "file": "caption_fulltext.py",
+   "old": "r\"|\\b25\\s?th\\s*(?:and|to|[-\\u2013\\u2014])\\s*75\\s?th\\s+percentiles?\", re.I)),",
+   "new": "r\"\""
+  },
+  {
+   "name": "active voice is not a statement",
+   "file": "caption_fulltext.py",
+   "old": "    r\"%(in)s{0,60}\\b(?:shows?|displays?|presents?|reports?|gives?)\\b\"\n    r\"%(in)s{0,60}\\b(?:%(subj)s|means?|medians?|averages?)\\b\"\n",
+   "new": ""
+  },
+  {
+   "name": "'changes' is not a subject",
+   "file": "caption_fulltext.py",
+   "old": "r\"data|values?|results|variables|measurements|numbers|changes?|\"",
+   "new": "r\"data|values?|results|variables|measurements|numbers|\""
+  },
+  {
+   "name": "마침표 있는 S.E.M.을 SE로도 읽는다",
+   "file": "caption_fulltext.py",
+   "old": "+ _S + _R + r\"(?!\\.?\\s?M)\"",
+   "new": "+ _S + _R + r\"(?!\\s?M)\""
+  }
+ ]
 }

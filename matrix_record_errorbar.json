@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_errorbar.py": "9362b063a4a78ab5366717fc04147133d5c9dc5b8163504fd5c99d2ee2ded775",
-  "test_record_errorbar.py": "a074167a42076fb5fcbc132e5b59baa7b0c60c2222d89ec5bfc6c2a7673d8d4d"
+  "record_errorbar.py": "e549f5c26a9c762adae93a542ba253e99faba1475e89ece6f60b47553ab82869",
+  "test_record_errorbar.py": "80f7d8fd749fcb4be7f8cdc4c6af7f86d1abadc314524ec2eb087128b708e8c1"
  },
  "suites": [
   "test_record_errorbar.py"
@@ -162,6 +162,12 @@
    "file": "record_errorbar.py",
    "old": "        for row in rows:",
    "new": "        for row in rows[:1]:"
+  },
+  {
+   "name": "(cid:N)을 낱말로 센다 (열쇠)",
+   "file": "record_errorbar.py",
+   "old": "    flat = _CID.sub(\" \", CF._norm(text)).lower()",
+   "new": "    flat = CF._norm(text).lower()"
   }
  ]
 }

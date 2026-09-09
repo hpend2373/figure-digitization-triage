@@ -138,6 +138,21 @@ check("silence has no evidence", CF.errorbar_definition("no bars")[1] == "")
 # the bare SE family through "standard error" and one statement becomes two.
 check("'standard error of the mean' is one statement, not SE and SEM",
       CF.errorbar_definition("means ± standard error of the mean")[0] == "SEM")
+# REVERT: let the SE family match inside a dotted `S.E.M.`. `S.E` matches and
+# the `M` guard, written without the period, does not see `.M` behind it - so
+# a sentence that says SEM once is read as saying SEM and SE, and the
+# errorbar gate refuses the person's correct quote as saying another type.
+check("a dotted S.E.M. is one statement, not SE and SEM",
+      CF.errorbar_definition("Results are mean ± S.E.M.")[0] == "SEM",
+      CF.errorbar_definition("Results are mean ± S.E.M."))
+check("  lowercase s.e.m. reads the same way",
+      CF.errorbar_definition("Bars represent mean ± s.e.m.")[0] == "SEM",
+      CF.errorbar_definition("Bars represent mean ± s.e.m."))
+# 그리고 마침표가 붙은 진짜 SE는 그대로 SE입니다 - 이 고침이 SE 자체를
+# 지워 버리면 SEM으로 적힌 논문과 SE로 적힌 논문이 한 이름이 됩니다.
+check("  a dotted S.E. is still SE",
+      CF.errorbar_definition("Values are means ± S.E.")[0] == "SE",
+      CF.errorbar_definition("Values are means ± S.E."))
 check("ambiguity names both sides",
       "SD:" in CF.errorbar_definition("mean ± SD; panel D mean ± SEM")[1]
       and "SEM:" in CF.errorbar_definition("mean ± SD; panel D mean ± SEM")[1])

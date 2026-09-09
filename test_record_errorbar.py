@@ -96,6 +96,9 @@ FLAT = RE.Source([
     (1, 0, 0, 100, 10, "The vertical bars in Figure 1 show the scatter."),
     (2, 0, 0, 100, 10,
      "Standard deviations are indicated by the vertical bars in Figure 1."),
+    # PDF 배경이 `±`에 이름을 못 붙인 쪽. 뷰어에서는 "Values are means ± SE."
+    # 로 보이고, 어댑터가 내주는 글자는 이것입니다.
+    (3, 0, 0, 100, 10, "Values are means (cid:2) SE. Bars show the spread."),
 ])
 SD_IN_FLAT = "Standard deviations are indicated by the vertical bars in Figure 1."
 
@@ -131,6 +134,23 @@ check("인용문이 고른 종류를 말하지 않으면 걸린다",
       == ["QUOTE_DOES_NOT_SAY_TYPE"])
 check("인용문이 다른 종류를 말하면 걸린다",
       "QUOTE_SAYS_ANOTHER_TYPE" in codes(plain("D", "SEM", SD_IN_FLAT, "2")))
+# REVERT: `(cid:N)`을 낱말로 센다. 뷰어에서 그대로 긁어 온 진짜 문장이 원문에
+# 없는 문장이 되고, 거부 문구는 "서로 다른 문장의 조각이 이어 붙었습니다"
+# 입니다 - 정직하게 옮겨 적은 사람에게 지어냈다고 말하는 문. run2에서 인용문
+# 41개 중 14개가 이것 하나로 거부됐고, 되살아난 14개는 전부 적어 낸 그 쪽에
+# 있었습니다.
+check("배경이 이름을 못 붙인 글자는 낱말로 세지 않는다",
+      codes(plain("D", "SE", "Values are means ± SE.", "3")) == [],
+      codes(plain("D", "SE", "Values are means ± SE.", "3")))
+check("  그 글자를 그대로 적어 내도 같은 문장으로 본다",
+      codes(plain("D", "SE", "Values are means (cid:2) SE.", "3")) == [],
+      codes(plain("D", "SE", "Values are means (cid:2) SE.", "3")))
+# 그리고 이것이 문을 열어 주는 것은 아닙니다 - 이어 붙인 인용문은 여전히
+# 걸립니다. 낱말의 차례가 원문에 없기 때문입니다.
+check("  그래도 이어 붙인 문장은 여전히 문서에 없다",
+      codes(plain("D", "SE", "Values are means ± SE in Figure 1.", "3"))
+      == ["QUOTE_NOT_IN_SOURCE"],
+      codes(plain("D", "SE", "Values are means ± SE in Figure 1.", "3")))
 check("서로 다른 문장의 조각을 이어 붙이면 문서에 없다",
       codes(plain("D", "SD",
                   "Standard deviations are indicated by the scatter.", "2"))

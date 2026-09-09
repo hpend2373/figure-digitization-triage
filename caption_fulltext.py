@@ -97,7 +97,14 @@ _L, _R, _S = r"(?<![A-Za-z])", r"(?![A-Za-z])", r"(?-i:s)?"
 DEFINITIONS = (
     ("SEM", re.compile(_L + r"S\.?\s?E\.?\s?M\.?" + _S + _R
                        + r"|standard\s+errors?\s+of\s+the\s+means?", re.I)),
-    ("SE",  re.compile(_L + r"S\.?E\.?" + _S + _R + r"(?!\s?M)"
+    # THE PERIOD BELONGS TO THE LOOKAHEAD. `S.E.M.`은 `S.E`까지 SE로 읽히고
+    # 나서 `(?!\s?M)`이 뒤의 `.M`을 보지 못해 통과합니다 - 그래서 한 문장이
+    # SEM과 SE를 동시에 말하는 것이 되고, `record_errorbar`는 그것을
+    # QUOTE_SAYS_ANOTHER_TYPE으로 거부합니다. 논문이 `s.e.m.`이라고 적는
+    # 것은 흔한 일이고, 그 문장은 SEM 하나만 말합니다. run2의 캡션 644개
+    # 중 판정이 달라지는 것은 한 개뿐이고, 그 하나는 SE·SEM 둘 다에서
+    # SEM 하나로 좁혀집니다.
+    ("SE",  re.compile(_L + r"S\.?E\.?" + _S + _R + r"(?!\.?\s?M)"
                        + r"|standard\s+errors?\b(?!\s+of\s+the\s+mean)", re.I)),
     ("SD",  re.compile(_L + r"S\.?D\.?" + _S + _R + r"|standard\s+deviations?", re.I)),
     ("CI",  re.compile(r"\b9[05]\s*%\s*(?:CIs?|con(?:fi|\s)?dence)"

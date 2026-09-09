@@ -1,0 +1,47 @@
+{
+ "files": {
+  "worklist_page.py": "0c4e180ec4877cfd432020386117e6c3ae32ee6d548120b8e4a5db698942b6f6",
+  "test_worklist_page.py": "c6c83ade93727fa61bed89e1f55bf4b0b84d13879dd8ff21f928995595a3e86e"
+ },
+ "suites": [
+  "test_worklist_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "일이 여럿인 그림을 한 번만 싣는다",
+   "file": "worklist_page.py",
+   "old": "        for n in needs_of(r):\n            if n not in by_need:",
+   "new": "        for n in needs_of(r)[:1]:\n            if n not in by_need:"
+  },
+  {
+   "name": "일이 없는 그림도 싣는다",
+   "file": "worklist_page.py",
+   "old": "    live = [r for r in figs if needs_of(r)]",
+   "new": "    live = list(figs)"
+  },
+  {
+   "name": "사람이 적어 둔 말을 싣지 않는다",
+   "file": "worklist_page.py",
+   "old": "    said = (count.get(\"Uncountable_Reason\") or \"\").strip() \\\n        or (count.get(\"Objection_Reason\") or \"\").strip()",
+   "new": "    said = \"\""
+  },
+  {
+   "name": "크롭이 없어도 말없이 지나간다",
+   "file": "worklist_page.py",
+   "old": "        w(\"<div class='nofig'>크롭 없음</div>\")",
+   "new": "        w(\"\")"
+  },
+  {
+   "name": "숨김 규칙을 격자에 지게 둔다",
+   "file": "worklist_page.py",
+   "old": "[hidden]{display:none!important}",
+   "new": "[hidden]{display:none}"
+  },
+  {
+   "name": "남은 일이 없어도 빈 페이지를 낸다",
+   "file": "worklist_page.py",
+   "old": "    if not live:\n        raise SystemExit(",
+   "new": "    if False:\n        raise SystemExit("
+  }
+ ]
+}

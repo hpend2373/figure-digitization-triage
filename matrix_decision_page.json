@@ -1,0 +1,47 @@
+{
+ "files": {
+  "decision_page.py": "b165eaa2b1c113f6fd076460c392689868630762d1783d33d32f4a0ab544bc3f",
+  "test_decision_page.py": "bdabb3ea406084ccd0ff59581e6f509d8d1b1194f51b350f0364b536cd592e94"
+ },
+ "suites": [
+  "test_decision_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "단추로 답할 수 없는 일까지 카드로 만든다",
+   "file": "decision_page.py",
+   "old": "        kind = QUESTIONS.get(need.strip())\n        if kind and kind not in out:",
+   "new": "        kind = QUESTIONS.get(need.strip()) or need.strip()\n        if kind and kind not in out:"
+  },
+  {
+   "name": "선택지를 골라 둔 채로 낸다",
+   "file": "decision_page.py",
+   "old": "        w(\"<label class='opt'><input type='radio' name='c-%s' \"\n          \"data-choice='%s' value='%s'> %s</label>\"",
+   "new": "        w(\"<label class='opt'><input type='radio' checked name='c-%s' \"\n          \"data-choice='%s' value='%s'> %s</label>\""
+  },
+  {
+   "name": "사람이 적어 둔 말을 싣지 않는다",
+   "file": "decision_page.py",
+   "old": "    said = (count.get(\"Uncountable_Reason\") or \"\").strip() \\\n        or (count.get(\"Objection_Reason\") or \"\").strip()",
+   "new": "    said = \"\""
+  },
+  {
+   "name": "어긋난 캡션에 캡션을 싣지 않는다",
+   "file": "decision_page.py",
+   "old": "    if kind == \"MIXED\" and full:",
+   "new": "    if False:"
+  },
+  {
+   "name": "물을 것이 없어도 빈 페이지를 낸다",
+   "file": "decision_page.py",
+   "old": "    if not items:\n        raise SystemExit(",
+   "new": "    if False:\n        raise SystemExit("
+  },
+  {
+   "name": "META에 나갈 이름을 심지 않는다",
+   "file": "decision_page.py",
+   "old": "            meta[key] = {\"kind\": kind, \"draft\": r[\"Draft_ID\"]}",
+   "new": "            meta[key] = {\"kind\": kind}"
+  }
+ ]
+}

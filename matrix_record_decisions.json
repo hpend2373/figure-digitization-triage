@@ -1,0 +1,77 @@
+{
+ "files": {
+  "record_decisions.py": "eb64fc59fd4093525b04d489b972035e7882808802167a5157599559efc1e710",
+  "test_record_decisions.py": "0f3afb0977051266cf6d0b00c87813a051456f544e0cab5790a5cad053d17d5f"
+ },
+ "suites": [
+  "test_record_decisions.py"
+ ],
+ "mutations": [
+  {
+   "name": "사람이 보았다는 표시를 보지 않는다",
+   "file": "record_decisions.py",
+   "old": "    if not is_true(answer.get(\"Seen_By_Person\")):",
+   "new": "    if False:"
+  },
+  {
+   "name": "계획서가 물었는지 보지 않는다",
+   "file": "record_decisions.py",
+   "old": "    if (draft, kind) not in asked:",
+   "new": "    if False:"
+  },
+  {
+   "name": "모르는 물음도 받는다",
+   "file": "record_decisions.py",
+   "old": "    if kind not in CHOICES:",
+   "new": "    if False:"
+  },
+  {
+   "name": "물음에 없는 답도 받는다",
+   "file": "record_decisions.py",
+   "old": "    if choice not in CHOICES[kind]:",
+   "new": "    if False:"
+  },
+  {
+   "name": "어느 패널인지 묻지 않는다",
+   "file": "record_decisions.py",
+   "old": "    if choice in NEEDS_PANELS and not panels:",
+   "new": "    if False:"
+  },
+  {
+   "name": "받지 않는 답에 붙은 패널을 그냥 적는다",
+   "file": "record_decisions.py",
+   "old": "    if choice not in NEEDS_PANELS and panels:",
+   "new": "    if False:"
+  },
+  {
+   "name": "아직 못 정하겠다를 처분으로 적는다",
+   "file": "record_decisions.py",
+   "old": "    if choice == HELD:",
+   "new": "    if False:"
+  },
+  {
+   "name": "이미 적힌 것을 말없이 덮어쓴다",
+   "file": "record_decisions.py",
+   "old": "        if key in settled and not replace:",
+   "new": "        if False:"
+  },
+  {
+   "name": "답 파일이 곧 적는 파일이어도 돌린다",
+   "file": "record_decisions.py",
+   "old": "    if answers_path and os.path.exists(answers_path) \\",
+   "new": "    if False and os.path.exists(answers_path) \\"
+  },
+  {
+   "name": "사람이 본 날 대신 아무 날이나 적는다",
+   "file": "record_decisions.py",
+   "old": "            \"Recorded_At\": when,",
+   "new": "            \"Recorded_At\": \"\","
+  },
+  {
+   "name": "초안과 계획서의 이름을 채우지 않는다",
+   "file": "record_decisions.py",
+   "old": "            \"Source_Document_ID\": d.get(\"Source_Document_ID\", \"\"),",
+   "new": "            \"Source_Document_ID\": \"\","
+  }
+ ]
+}

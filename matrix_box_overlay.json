@@ -1,0 +1,42 @@
+{
+ "files": {
+  "review_overlay.py": "787a873d7d536c45678f32c37bcb67d3da172411d5677cc8f12d7dd13f340987",
+  "run_batch.py": "328893f4526c5232a83f4012df41d2516ce7a9439840bffcbd666e224bd83661",
+  "test_run_batch.py": "34f74f9795e6467c9145cda2e8f46255212c8b199e07473bdd9811f5dc04bfd6"
+ },
+ "suites": [
+  "test_run_batch.py"
+ ],
+ "mutations": [
+  {
+   "name": "상자에는 그릴 것이 없다고 본다",
+   "file": "review_overlay.py",
+   "old": "    rows = box_rows(mark)\n    return rows[len(rows) // 2] if rows else None",
+   "new": "    return None"
+  },
+  {
+   "name": "다섯 줄 대신 가운데에 십자만 그린다",
+   "file": "review_overlay.py",
+   "old": "            rows = box_rows(mark)\n            if rows:",
+   "new": "            rows = []\n            if rows:"
+  },
+  {
+   "name": "줄 폭을 재지 않고 다 같은 길이로 그린다",
+   "file": "review_overlay.py",
+   "old": "                widths = [w for w in _box_widths(mark)] or [18.0] * len(rows)",
+   "new": "                widths = [18.0] * len(rows)"
+  },
+  {
+   "name": "상자 줄을 픽셀 순서로 두지 않는다",
+   "file": "review_overlay.py",
+   "old": "    return sorted(out)",
+   "new": "    return out"
+  },
+  {
+   "name": "프로젝트에 상자 한 점만 넣는다",
+   "file": "run_batch.py",
+   "old": "        if px is not None and rows:\n            grouped.setdefault(key, []).extend(\n                dict(x=float(px), y=row, value=None) for row in sorted(rows))\n            continue",
+   "new": "        if False:\n            continue"
+  }
+ ]
+}

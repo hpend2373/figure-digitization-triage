@@ -2036,6 +2036,21 @@ def write_panel_project(path, panel, marks, xcal, ycal):
     axes = [dict(name="XY", isLogX=(_upper(panel.get("Axis_X_Scale")) == "LOG"),
                  isLogY=(_upper(panel.get("Axis_Y_Scale")) == "LOG"),
                  calibrationPoints=_calibration_points(panel, xcal, ycal))]
+    grouped = project_points(marks)
+    if not grouped:
+        return None
+    datasets = [dict(name=name, axesName="XY", data=pts)
+                for name, pts in sorted(grouped.items())]
+    return WPD.write_project(path, image_path, axes, datasets)
+
+
+def project_points(marks):
+    """{series: [{x, y, value}]} - every pixel a reader placed, for the project.
+
+    Split out from `write_panel_project` so the shape can be exercised without
+    a raster and a calibration: what is under test is which pixels a mark
+    contributes, not whether a tar file writes.
+    """
     grouped = {}
     for m in marks:
         key = str(m.get("series") or "ALL")
@@ -2043,14 +2058,23 @@ def write_panel_project(path, panel, marks, xcal, ycal):
         py = m.get("point_px_y", m.get("marker_center_px", m.get("top_px")))
         if px is None:
             px = m.get("x")
+        # A BOX HAS NO SINGLE PIXEL. Its mark is five rows at one x, and it
+        # carries them in `Box_Line_Rows_Px` rather than in any of the columns
+        # above - so every box panel saved no project at all, and the gate
+        # refused all thirty of its values for `MISSING_PROVENANCE`. Five
+        # points is also what a reviewer needs from the project: the question
+        # about a box is whether the three rules and two caps sit on the lines
+        # somebody printed, and one point in the middle cannot be asked it.
+        rows = [float(v) for v in _s(m.get("Box_Line_Rows_Px")).split(";") if v]
+        if px is not None and rows:
+            grouped.setdefault(key, []).extend(
+                dict(x=float(px), y=row, value=None) for row in sorted(rows))
+            continue
         if px is None or py is None:
             continue
-        grouped.setdefault(key, []).append(dict(x=float(px), y=float(py), value=None))
-    if not grouped:
-        return None
-    datasets = [dict(name=name, axesName="XY", data=pts)
-                for name, pts in sorted(grouped.items())]
-    return WPD.write_project(path, image_path, axes, datasets)
+        grouped.setdefault(key, []).append(
+            dict(x=float(px), y=float(py), value=None))
+    return grouped
 
 
 def _calibration_points(panel, xcal, ycal):

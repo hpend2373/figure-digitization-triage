@@ -151,7 +151,40 @@ def _mark_y(mark):
         value = mark.get(key)
         if value is not None:
             return float(value)
-    return None
+    # A BOX REPORTS FIVE ROWS AND NO CENTRE. Its middle rule is the median, and
+    # without this a box panel drew nothing at all: the reviewer was handed a
+    # picture of the figure with no marks on it and asked whether the marks sat
+    # where a reader would put them. `box_rows` draws the other four.
+    rows = box_rows(mark)
+    return rows[len(rows) // 2] if rows else None
+
+
+def _box_widths(mark):
+    """[width] of each of a box's five lines, in the order the rows are sorted."""
+    rows, widths = [], []
+    for row, width in zip(str(mark.get("Box_Line_Rows_Px") or "").split(";"),
+                          str(mark.get("Box_Line_Widths_Px") or "").split(";")):
+        try:
+            rows.append(float(row))
+            widths.append(float(width))
+        except ValueError:
+            continue
+    return [w for _r, w in sorted(zip(rows, widths))]
+
+
+def box_rows(mark):
+    """[pixel row] the five lines a box was read from, top to bottom, or []."""
+    text = mark.get("Box_Line_Rows_Px")
+    out = []
+    for part in str(text or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(float(part))
+        except ValueError:
+            continue
+    return sorted(out)
 
 
 #: Reader fields that say HOW a mark's series was decided, and the one value in
@@ -414,8 +447,20 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
                 continue
             mx, my = float(mx) - ox, float(my) - oy
             colour = colour_of.get(str(mark.get("series", "")), MISSING_COLOUR)
-            draw.line((mx - 9, my, mx + 9, my), fill=colour, width=2)
-            draw.line((mx, my - 5, mx, my + 5), fill=colour, width=2)
+            rows = box_rows(mark)
+            if rows:
+                # THE FIVE LINES, at the width the reader measured each one at.
+                # A cross at the median says nothing about whether the box's
+                # own edges were found, and that is the whole question about a
+                # box: three rules and two caps, each on a printed line.
+                widths = [w for w in _box_widths(mark)] or [18.0] * len(rows)
+                for row, width in zip(rows, widths + [widths[-1]] * len(rows)):
+                    ry, half = float(row) - oy, max(6.0, width / 2.0)
+                    draw.line((mx - half, ry, mx + half, ry), fill=colour, width=2)
+                draw.line((mx, rows[0] - oy, mx, rows[-1] - oy), fill=colour, width=1)
+            else:
+                draw.line((mx - 9, my, mx + 9, my), fill=colour, width=2)
+                draw.line((mx, my - 5, mx, my + 5), fill=colour, width=2)
             cap = mark.get("cap_px")
             if cap is not None:
                 cy = float(cap) - oy

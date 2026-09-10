@@ -1673,6 +1673,85 @@ _mo = os.path.join(ROOT, "o_multi")
 RB.run_batch(_multi, _mo, file_root=ROOT, run_date="2026-08-06")
 _raw = pd.read_csv(os.path.join(_mo, "figure_values_raw.csv"), dtype=object).fillna("")
 _rm = pd.read_csv(os.path.join(_mo, "run_manifest.csv"), dtype=object).fillna("")
+def _runs_of(values, gap=1):
+    out, cur = [], []
+    for v in values:
+        if cur and v - cur[-1] > gap:
+            out.append(cur); cur = []
+        cur.append(v)
+    if cur:
+        out.append(cur)
+    return out
+
+
+print("a box's five rows are its mark, in the project and on the overlay")
+import review_overlay as _OV                                     # noqa: E402
+# ROWS OUT OF ORDER on purpose: the reader emits them sorted today and nothing
+# promises it will, and every consumer here asks "which is the median" and
+# "which is the top" by position.
+_box_mark = {"series": "DI", "x": 200.0,
+             "Box_Line_Rows_Px": "180.0;100.0;260.0;140.0;220.0",
+             "Box_Line_Widths_Px": "88;44;44;88;88"}
+# REVERT: look only for a single centre pixel. A box reports FIVE rows and no
+# centre, so `point_px_y`/`top_px`/`marker_center_px` are all absent - the
+# project came back None for every box panel and the gate refused all thirty of
+# its values for MISSING_PROVENANCE, and the overlay drew a picture of the
+# figure with nothing marked on it.
+check("a box's median is its middle rule", _OV._mark_y(_box_mark) == 180.0,
+      "%s" % (_OV._mark_y(_box_mark),))
+check("  and all five rows are available to draw",
+      _OV.box_rows(_box_mark) == [100.0, 140.0, 180.0, 220.0, 260.0],
+      "%s" % (_OV.box_rows(_box_mark),))
+check("  each with the width the reader measured it at",
+      _OV._box_widths(_box_mark) == [44.0, 88.0, 88.0, 88.0, 44.0],
+      "%s" % (_OV._box_widths(_box_mark),))
+check("  and a mark with no box rows is unchanged",
+      _OV.box_rows({"top_px": 12.0}) == []
+      and _OV._mark_y({"top_px": 12.0}) == 12.0)
+# REVERT: give the project one point per box instead of one per LINE. The
+# question about a box is whether its three rules and two caps sit on printed
+# lines, and one point in the middle cannot be asked it.
+check("the project writer emits one point per box row",
+      [p["y"] for p in RB.project_points([_box_mark])["DI"]]
+      == [100.0, 140.0, 180.0, 220.0, 260.0],
+      "%s" % (RB.project_points([_box_mark]),))
+# REVERT: draw a cross at the median instead of the five lines. A cross says
+# nothing about whether the box's own edges were found, and that is the whole
+# question about a box. The reviewer was handed the figure with one tick on it.
+_odir = tempfile.mkdtemp(prefix="fdt-boxover-")
+_oras = os.path.join(_odir, "r.png")
+Image.new("RGB", (400, 320), "white").save(_oras)
+_opath = _OV.draw_panel_overlay(os.path.join(_odir, "o.png"), _oras,
+                                (100, 300, 80, 280), [_box_mark],
+                                series_order=["DI"], label_marks=False)
+_oim = Image.open(_opath).convert("RGB") if _opath else None
+_px, _ow, _oh = (_oim.load(), _oim.width, _oim.height) if _oim else (None, 0, 0)
+# 가로로 그은 줄만 셉니다. 세로 줄기는 한두 픽셀이고, 바닥의 설명글도
+# 잉크입니다 - 둘 다 "상자의 줄"이 아닙니다.
+_wide = {}
+# 그림만 봅니다. 바닥의 설명글은 이 오버레이의 잉크이지만 상자의 줄이
+# 아니고, 세는 것은 줄입니다.
+for _y in range(_oh - 70) if _px else []:
+    _n = sum(1 for _x in range(_ow)
+             if _px[_x, _y] not in ((255, 255, 255), (160, 160, 160)))
+    if _n >= 30:
+        _wide[_y] = _n
+_bands = _runs_of(sorted(_wide))
+check("the overlay draws all five of a box's lines",
+      len(_bands) == 5, "%d band(s): %s" % (len(_bands), _bands[:6]))
+# REVERT: draw every line the same length. The box's rules and its whisker caps
+# are different widths, and a reviewer checking "is this the box" is checking
+# exactly that difference.
+_widths = [max(_wide[y] for y in band) for band in _bands]
+check("  each at the width the reader measured",
+      len(set(_widths)) == 2, "%s" % (_widths,))
+shutil.rmtree(_odir, ignore_errors=True)
+check("  and a mark with an ordinary centre still gives one",
+      RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}])["A"]
+      == [dict(x=5.0, y=9.0, value=None)],
+      "%s" % (RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}]),))
+
+
 _by_panel = dict(zip(_rm["Panel_ID"], _rm["WPD_Project_File"]))
 check("every value names the project that can re-derive it",
       len(_raw) and all(str(v).strip() for v in _raw["WPD_Project_File"]),

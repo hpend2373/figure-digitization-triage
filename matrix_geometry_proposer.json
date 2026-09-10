@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "e620c4a95ddfb27a2b66491ef7755eafcd4474b255ad730927ba074d94b3e1d4",
-  "test_geometry_proposer.py": "4fb86b47620604f3ac129bce0a4311cc74f7de6ac67f3ecb41bfa9e8cedfc497"
+  "geometry_proposer.py": "670ea4183b5205ee62b7d50501439e1e6b68bedcc230f5f4f3ca497e6fc21b29",
+  "test_geometry_proposer.py": "eb5ed62a37aa616335000aa956340e675ab6b22d9e8e50cd4427671936a26f08"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -54,6 +54,42 @@
    "file": "geometry_proposer.py",
    "old": "            draw.text((x0 + 20, y - int(step * 0.16)), \"%g\" % value,",
    "new": "            draw.text((x1 + 6, y - int(step * 0.16)), \"%g\" % value,"
+  },
+  {
+   "name": "가장 많이 되풀이되는 폭을 고른다",
+   "file": "geometry_proposer.py",
+   "old": "    for width in sorted({int(round(w / 4.0)) * 4 for w, _c, _r in seen}, reverse=True):",
+   "new": "    for width in sorted({int(round(w / 4.0)) * 4 for w, _c, _r in seen}):"
+  },
+  {
+   "name": "한 덩이짜리 폭에서 더 좁은 폭으로 내려간다",
+   "file": "geometry_proposer.py",
+   "old": "        if len(kept) < MARK_MIN_GROUPS:\n            return [], (\"the widest outlined mark (about %d px) is drawn in %d \"\n                        \"place, and one mark is not a categorical axis\"\n                        % (width, len(kept)))",
+   "new": "        if len(kept) < MARK_MIN_GROUPS:\n            continue"
+  },
+  {
+   "name": "떨어진 두 줄을 요구하지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        kept = [g for g in _cluster(at_width, tolerance)\n                if len(_bands([r for _c, r in g])) >= MARK_MIN_BANDS]",
+   "new": "        kept = list(_cluster(at_width, tolerance))"
+  },
+  {
+   "name": "마크 폭의 한계를 픽셀로 잰다",
+   "file": "geometry_proposer.py",
+   "old": "    low, high = MARK_MIN_SHARE * span, MARK_MAX_SHARE * span",
+   "new": "    low, high = 8, 100"
+  },
+  {
+   "name": "상자 읽기가 잉크 기둥 읽기를 대신한다",
+   "file": "geometry_proposer.py",
+   "old": "        \"Box_Anchor_Pixels\": \";\".join(\"%g\" % a for a in boxes),",
+   "new": "        \"Group_Anchor_Pixels\": \";\".join(\"%g\" % a for a in boxes),\n        \"Box_Anchor_Pixels\": \";\".join(\"%g\" % a for a in boxes),"
+  },
+  {
+   "name": "두 읽기를 같은 색으로 그린다",
+   "file": "geometry_proposer.py",
+   "old": "        draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),\n                  fill=(190, 60, 190), width=5)",
+   "new": "        draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),\n                  fill=(20, 150, 90), width=5)"
   }
  ]
 }

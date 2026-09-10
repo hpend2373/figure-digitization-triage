@@ -88,6 +88,44 @@ def panel_fixture(scale=1, ticks=11, groups=5, frame="BOX", tick_side="OUTSIDE")
     return image, (x0, x1, y0, y1), anchors, [y0 + i * step for i in range(ticks)]
 
 
+def box_fixture(scale=1, groups=5, dots=9):
+    """A box plot with points scattered over it, which is what this corpus prints.
+
+    The points are the whole difficulty. They put ink in every column of the
+    panel, so a detector that looks for inked columns finds one group or three
+    where five are drawn - and there are many more points than boxes, so a
+    detector that takes the COMMONEST repeated width finds the points.
+    """
+    W, H = 400 * scale, 320 * scale
+    x0, x1 = 60 * scale, 360 * scale
+    y0, y1 = 30 * scale, 270 * scale
+    image = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(image)
+    width = max(1, scale)
+    d.line((x0, y0, x0, y1), fill="black", width=width)
+    d.line((x0, y1, x1, y1), fill="black", width=width)
+    span = (x1 - x0) / float(groups + 1)
+    half, centres = 14 * scale, []
+    for g in range(groups):
+        cx = x0 + span * (g + 1)
+        centres.append(cx)
+        top, bottom = y1 - (150 - 8 * g) * scale, y1 - (70 - 8 * g) * scale
+        # top, median and bottom: three rules of ONE width, which is the box
+        d.rectangle((cx - half, top, cx + half, bottom), outline="black",
+                    width=width)
+        d.line((cx - half, (top + bottom) / 2, cx + half, (top + bottom) / 2),
+               fill="black", width=width)
+        # the whisker, and the points scattered across the group's width
+        d.line((cx, top - 20 * scale, cx, bottom + 20 * scale), fill="black",
+               width=width)
+        for i in range(dots):
+            dx = cx + ((i % 3) - 1) * 8 * scale
+            dy = top + (i * (bottom - top)) / float(dots)
+            d.ellipse((dx - 4 * scale, dy - 4 * scale, dx + 4 * scale,
+                       dy + 4 * scale), fill="black")
+    return image, (x0, x1, y0, y1), centres
+
+
 print("the frame, the ticks and the anchors are measurements")
 _im, _frame, _anchors, _tickrows = panel_fixture()
 _got = GP.find_frame(_im)
@@ -297,6 +335,83 @@ check("and it is drawn on the raster, not on a blank",
       _ov.size[0] > 100 and any(_px[x, y] != (255, 255, 255)
                                 for x in range(0, _ov.size[0], 7)
                                 for y in range(0, _ov.size[1], 7)))
+
+print()
+print("where the marks stand, when the marks are boxes")
+
+_bim, _bframe, _bcentres = box_fixture()
+_marks, _why = GP.find_box_anchors(_bim, _bframe)
+# REVERT: take the commonest repeated width instead of the widest. There are
+# nine points per group and one box, so the points win and a five-group panel
+# comes back with twenty anchors.
+check("every box is found, and only the boxes",
+      len(_marks) == len(_bcentres), "%d vs %d: %s" % (len(_marks), len(_bcentres), _marks))
+check("and each one is where it was drawn",
+      len(_marks) == len(_bcentres)
+      and max(abs(a - b) for a, b in zip(_marks, _bcentres)) <= 2,
+      "%s vs %s" % (_marks, _bcentres))
+check("the width it decided on is said out loud",
+      "wide" in _why, _why)
+
+# REVERT: make the run limits pixel distances. The same figure rendered larger
+# is the same figure, and this whole module is measured at more than one scale.
+# Two is not enough to catch a constant chosen from the small one: the fixture's
+# box is 28 px wide at scale 1 and 56 at scale 2, and any range wide enough for
+# a real figure holds both.
+for _scale in (2, 4):
+    _bs, _fs, _cs = box_fixture(scale=_scale)
+    _ms, _whys = GP.find_box_anchors(_bs, _fs)
+    check("the same figure drawn %dx as large gives the same reading" % _scale,
+          len(_ms) == len(_marks)
+          and max(abs(a * _scale - b) for a, b in zip(_marks, _ms)) <= 2 * _scale,
+          "%s" % _ms)
+
+# REVERT: find filled bars here too. A filled bar is ONE band of rows, not two,
+# and its panel is `find_group_anchors`'s - a detector that answers for both is a
+# detector nobody can disagree with.
+_bar = Image.new("RGB", (400, 320), "white")
+_bd = ImageDraw.Draw(_bar)
+_bd.line((60, 30, 60, 270), fill="black")
+_bd.line((60, 270, 360, 270), fill="black")
+for _g in range(5):
+    _cx = 60 + 50 * (_g + 1)
+    _bd.rectangle((_cx - 14, 270 - (60 + 20 * _g), _cx + 14, 269), fill="black")
+check("filled bars are not outlined marks",
+      GP.find_box_anchors(_bar, (60, 360, 30, 270))[0] == [],
+      "%s" % (GP.find_box_anchors(_bar, (60, 360, 30, 270)),))
+
+# REVERT: return a guess when nothing repeats. A line panel has no mark of one
+# width, and putting a category where the figure has none is a wrong number.
+_lim = Image.new("RGB", (400, 320), "white")
+_ld = ImageDraw.Draw(_lim)
+_ld.line((60, 30, 60, 270), fill="black")
+_ld.line((60, 270, 360, 270), fill="black")
+_ld.line([(70 + 8 * i, 200 - 4 * (i % 7)) for i in range(30)], fill="black")
+_lmarks, _lwhy = GP.find_box_anchors(_lim, (60, 360, 30, 270))
+check("a panel with no repeated mark gets no anchors, and a reason",
+      _lmarks == [] and _lwhy, "%s %s" % (_lmarks, _lwhy))
+_one, _oframe, _ocent = box_fixture(groups=1)
+check("one mark is not a categorical axis",
+      GP.find_box_anchors(_one, _oframe)[0] == [])
+
+# REVERT: replace the ink-column reading with this one. Which reading a panel
+# needs depends on what is drawn in it, and nothing has said that yet when a
+# geometry is proposed.
+_brow = GP.propose_panel(_bim)
+check("both readings are proposed, in their own columns",
+      _brow["Box_Anchor_Count"] == len(_bcentres)
+      and "Group_Anchor_Pixels" in _brow and "Box_Anchor_Pixels" in _brow,
+      "%s / %s" % (_brow["Box_Anchor_Count"], _brow["Group_Anchor_Count"]))
+check("and the ink-column reading is still its own answer",
+      _brow["Group_Anchor_Pixels"] == ";".join(
+          "%g" % a for a in GP.find_group_anchors(GP._gray(_bim), _bframe)),
+      "%s" % _brow["Group_Anchor_Pixels"])
+_bpic = GP.proposal_overlay(_bim, _brow, os.path.join(ROOT, "marks.png"))
+_bpx = Image.open(_bpic).convert("RGB").load()
+_bsize = Image.open(_bpic).size
+check("and the mark reading is drawn in its own colour",
+      any(_bpx[x, y] == (190, 60, 190)
+          for x in range(_bsize[0]) for y in range(_bsize[1])))
 
 print()
 print("what the reader may say about an axis")

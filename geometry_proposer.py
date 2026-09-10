@@ -71,6 +71,12 @@ PROPOSAL_COLUMNS = (
     "Y_Tick_Coverage",
     "X_Tick_Pixels", "X_Tick_Count",
     "Group_Anchor_Pixels", "Group_Anchor_Count",
+    # THE SECOND ANCHOR READING, from the marks' shape rather than from where
+    # the ink is. Reported beside the first and not instead of it: which one a
+    # panel needs depends on what is drawn in it, and nothing has said that yet
+    # when a geometry is proposed. Two readings that agree are evidence; one
+    # arbitrated away is a choice nobody measured.
+    "Box_Anchor_Pixels", "Box_Anchor_Count", "Box_Anchor_Detail",
     "Confidence", "Confidence_Reason",
     # WHAT THE MACHINE READ, in its own columns. Separate from the two below on
     # purpose: `Y_Tick_First_Value` still means "a person read this axis", and a
@@ -301,6 +307,119 @@ _ANCHOR_TALL_FRACTION = 0.06
 _FRAME_INSET_FRACTION = 0.01
 
 
+#: A horizontal run shorter than this share of the panel is a tick, a dot's
+#: middle row or a letter; longer than this is the frame or a grid rule. Neither
+#: end is a mark whose centre means a category.
+MARK_MIN_SHARE = 0.02
+MARK_MAX_SHARE = 0.40
+
+#: A box draws its width at its TOP and again at its BOTTOM, with the plot's
+#: background between them. That separation is the whole discriminator: a
+#: scattered point is one band of rows and a box is two or three.
+MARK_MIN_BANDS = 2
+
+#: And the width has to occur at this many places across the panel. One is a
+#: legend swatch or a p-value underline; a categorical axis has groups.
+MARK_MIN_GROUPS = 2
+
+
+def find_box_anchors(gray, box, threshold=160):
+    """(centres, detail) - x pixels of OUTLINED marks: box plots, mostly.
+
+    `find_group_anchors` looks for columns with ink in them, which is what a bar
+    chart is. It does not find a box plot: this corpus draws boxes with points
+    scattered over them, and the points put ink in every column, so what comes
+    back is one anchor or three - never the five that are printed. FIG9 of
+    publication S41467 is six panels of exactly that, and none of them reads.
+
+    A BOX IS FOUND BY THE SHAPE OF ITS RULES. It draws a horizontal run of the
+    SAME width at its top, at its median and at its bottom, with the plot's
+    background between them. A scattered point does not: a circle's run is narrow
+    at the top, widest in the middle and narrow again, so the rows that match any
+    one width are a SINGLE band. Two separated bands of one width is the test,
+    and it is what tells a box from the dots drawn on it.
+
+    Widest first, not commonest. The points outnumber the boxes many times over
+    on this corpus, and a mark that carries a value is drawn wider than the dots
+    scattered on it. Measured on all six panels of that FIG9: exactly five
+    centres in every one, evenly spaced, each under its printed category label.
+
+    A FILLED bar is one band, not two, and is not found here - that is
+    `find_group_anchors`'s panel. Neither is a line panel, and neither is a panel
+    whose widest outline is drawn once: one mark is not a categorical axis, and a
+    category put where the figure has none is a wrong number rather than a
+    missing one. In every one of those cases this returns ([], why) rather than
+    carry on to a narrower width, because the narrower width is the points.
+    """
+    gray = _gray(gray)
+    x0, x1, y0, y1 = [int(v) for v in box]
+    span = x1 - x0
+    if span <= 0 or y1 - y0 <= 0:
+        return [], "the panel has no area to look in"
+    inside = gray[y0 + 1:y1, x0 + 1:x1] < threshold
+    tolerance = max(3, int(0.01 * span))
+    low, high = MARK_MIN_SHARE * span, MARK_MAX_SHARE * span
+    seen = []
+    for row in range(inside.shape[0]):
+        for start, end in _row_runs(inside[row]):
+            if low <= end - start <= high:
+                seen.append((end - start, (start + end) / 2.0, row))
+    if not seen:
+        return [], "no horizontal run of a mark's width inside the panel"
+    for width in sorted({int(round(w / 4.0)) * 4 for w, _c, _r in seen}, reverse=True):
+        at_width = sorted((c, r) for w, c, r in seen if abs(w - width) <= tolerance)
+        kept = [g for g in _cluster(at_width, tolerance)
+                if len(_bands([r for _c, r in g])) >= MARK_MIN_BANDS]
+        if not kept:
+            continue
+        # THE WIDEST OUTLINE IS THE ANSWER OR THERE ISN'T ONE. Carrying on to
+        # narrower widths is a search, and what it finds is the points: a column
+        # of scattered dots is also same-width runs at separated rows, and there
+        # are more of them than there are boxes. Measured on all six panels of
+        # S41467's FIG9 the widest outline is the box every time, so the next
+        # width down is not a second chance - it is a different mark.
+        if len(kept) < MARK_MIN_GROUPS:
+            return [], ("the widest outlined mark (about %d px) is drawn in %d "
+                        "place, and one mark is not a categorical axis"
+                        % (width, len(kept)))
+        return ([round(sum(c for c, _r in g) / len(g) + x0 + 1, 1) for g in kept],
+                "%d outlined marks about %d px wide" % (len(kept), width))
+    return [], ("no width is drawn as %d separated rules anywhere in the panel"
+                % MARK_MIN_BANDS)
+
+
+def _cluster(points, tolerance):
+    """[(centre, row)] grouped by centre, splitting where the gap exceeds `tolerance`."""
+    out, current = [], []
+    for centre, row in points:
+        if current and centre - current[-1][0] > tolerance:
+            out.append(current)
+            current = []
+        current.append((centre, row))
+    if current:
+        out.append(current)
+    return out
+
+
+def _bands(rows, gap=2):
+    """Row numbers grouped into the separated horizontal rules they came from."""
+    return _runs(sorted(set(int(r) for r in rows)), gap=gap)
+
+
+def _row_runs(mask):
+    """[(start, end)] of the True runs in one row. End is exclusive."""
+    out, start = [], None
+    for i, on in enumerate(mask):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            out.append((start, i))
+            start = None
+    if start is not None:
+        out.append((start, len(mask)))
+    return out
+
+
 def find_group_anchors(gray, box, threshold=160, min_fraction=0.004):
     """Where the marks stand, as x pixels inside the plot area.
 
@@ -434,6 +553,7 @@ def propose_panel(image, region=None, proposal_id="GP001", raster_path="",
     spacing, regularity = tick_regularity(y_marks)
     coverage = ladder_coverage(y_marks, y0, y1)
     anchors = find_group_anchors(gray, frame, threshold=threshold)
+    boxes, boxes_why = find_box_anchors(gray, frame, threshold=threshold)
     score, why = _confidence(frame, y_marks, regularity, anchors, region,
                              coverage=coverage)
     rx0, ry0, rx1, ry1 = [int(v) for v in region]
@@ -456,6 +576,9 @@ def propose_panel(image, region=None, proposal_id="GP001", raster_path="",
         "X_Tick_Count": len(x_marks),
         "Group_Anchor_Pixels": ";".join("%g" % a for a in anchors),
         "Group_Anchor_Count": len(anchors),
+        "Box_Anchor_Pixels": ";".join("%g" % a for a in boxes),
+        "Box_Anchor_Count": len(boxes),
+        "Box_Anchor_Detail": boxes_why,
         "Confidence": "%.2f" % score, "Confidence_Reason": why,
         # MEASURED, NOT READ. `read_tick_values` is a separate call because the
         # reading needs tesseract and the measurement does not: a machine with no
@@ -716,15 +839,33 @@ def proposal_overlay(image, row, out_path):
             draw.line((x0 - 22, y, x0 + 14, y), fill=(190, 60, 190), width=3)
             draw.text((x0 + 20, y - int(step * 0.16)), "%g" % value,
                       fill=(190, 60, 190), font=font)
+    # TWO READINGS, TWO COLOURS. Drawn the same, a person cannot tell which
+    # detector put a line where, and "the anchors look right" stops being a
+    # statement about anything.
     for anchor in _s(row.get("Group_Anchor_Pixels")).split(";"):
         if not anchor:
             continue
         x = int(float(anchor))
         draw.line((x, y0, x, y1), fill=(20, 150, 90), width=1)
+    # BELOW THE BASELINE, in the reader's own colour. Drawn up inside the plot in
+    # a colour of its own it was invisible: this corpus prints its box plots in
+    # orange, and an orange anchor line on an orange box is a line nobody can
+    # check. Under the axis is empty on every panel of it, and magenta is what
+    # this module already means by "the machine read this".
+    stub = max(4, (y1 - y0) // 30)
+    for anchor in _s(row.get("Box_Anchor_Pixels")).split(";"):
+        if not anchor:
+            continue
+        x = int(float(anchor))
+        draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),
+                  fill=(190, 60, 190), width=5)
     region = [int(v) for v in _s(row.get("Region")).split(",")] \
         if _s(row.get("Region")) else None
     if region:
-        pad = 12
+        # ENOUGH ROOM FOR WHAT IS DRAWN OUTSIDE THE FRAME. The anchor stubs hang
+        # below the baseline, and a crop that cuts them off is a crop that hides
+        # the reading it was made to show.
+        pad = max(12, stub + 6)
         canvas = canvas.crop((max(0, region[0] - pad), max(0, region[1] - pad),
                               min(canvas.width, region[2] + pad),
                               min(canvas.height, region[3] + pad)))
@@ -771,6 +912,8 @@ def main(argv=None):
                  round(float(row["Y_Tick_Regularity"] or 0) * 100, 1),
                  row["Group_Anchor_Count"], row["Confidence"]))
         print("    %s" % picture)
+        if row["Box_Anchor_Count"]:
+            print("    %s" % row["Box_Anchor_Detail"])
         if row["Y_Tick_Read_Status"] == READ_OK:
             print("    axis reads %s .. %s (%s)"
                   % (row["Y_Tick_Read_First"], row["Y_Tick_Read_Last"],

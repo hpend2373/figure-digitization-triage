@@ -1,0 +1,47 @@
+{
+ "files": {
+  "geometry_page.py": "da999591f6f49bc682df37e9d6c0e1bfa46ab5d59d68a764b25f859ad991a3f4",
+  "test_geometry_page.py": "83eaa7d701d4f7fbf37d6c49df79d86f078bdb10231b468040951fc6ffa9c471"
+ },
+ "suites": [
+  "test_geometry_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "오버레이가 없어도 조용히 넘어간다",
+   "file": "geometry_page.py",
+   "old": "        w(\"<div class='nofig'>오버레이 없음 — 확인할 그림이 없습니다</div>\")",
+   "new": "        pass"
+  },
+  {
+   "name": "거절한 까닭을 감춘다",
+   "file": "geometry_page.py",
+   "old": "          \"<span class='sub'>%s</span><br>첫 눈금과 끝 눈금을 적어 주세요.</div>\"\n          % esc((row.get(\"Y_Tick_Read_Detail\") or \"\")[:180]))",
+   "new": "          \"<br>첫 눈금과 끝 눈금을 적어 주세요.</div>\")"
+  },
+  {
+   "name": "읽은 값을 입력 칸에 미리 채워 둔다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<div class='vals'>축의 첫 눈금 \"\n      \"<input type='text' data-first='%s' placeholder='%s'> \"",
+   "new": "    w(\"<div class='vals'>축의 첫 눈금 \"\n      \"<input type='text' data-first='%s' value='%s'> \""
+  },
+  {
+   "name": "관문이 적는 이름으로 내려받는다",
+   "file": "geometry_page.py",
+   "old": "    a.download = 'geometry_answers.csv';",
+   "new": "    a.download = 'geometry_decisions.csv';"
+  },
+  {
+   "name": "제안이 없어도 페이지를 만든다",
+   "file": "geometry_page.py",
+   "old": "    if not rows:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))",
+   "new": "    if False:\n        raise SystemExit(\"\")"
+  },
+  {
+   "name": "리더가 읽은 값을 META로 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"readFirst\": (row.get(\"Y_Tick_Read_First\") or \"\").strip(),",
+   "new": "            \"readFirst\": \"\","
+  }
+ ]
+}

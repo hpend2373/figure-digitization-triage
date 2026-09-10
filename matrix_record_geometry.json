@@ -1,0 +1,89 @@
+{
+ "files": {
+  "record_geometry.py": "7feb49d32aab3b34c2708c2799be7935431e85e23540fbd33adb92697f550756",
+  "test_record_geometry.py": "e66d05f9b5186e476f6a7db7ccf6af10198cfc200ac6a7dcc3530b4fca4cdd1d"
+ },
+ "suites": [
+  "test_record_geometry.py"
+ ],
+ "mutations": [
+  {
+   "name": "본 표시를 보지 않는다",
+   "file": "record_geometry.py",
+   "old": "    if not is_true(answer.get(\"Seen_By_Person\")):",
+   "new": "    if False:"
+  },
+  {
+   "name": "누가 보았는지 묻지 않는다",
+   "file": "record_geometry.py",
+   "old": "    if not who:",
+   "new": "    if False:"
+  },
+  {
+   "name": "값 없는 확인을 적는다",
+   "file": "record_geometry.py",
+   "old": "    if verdict in NEEDS_VALUES:",
+   "new": "    if False:"
+  },
+  {
+   "name": "첫 눈금과 끝 눈금이 같아도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if first and last and first == last:",
+   "new": "        if False:"
+  },
+  {
+   "name": "확인하지 않은 기하에 붙은 값을 그냥 적는다",
+   "file": "record_geometry.py",
+   "old": "    elif first or last:",
+   "new": "    elif False:"
+  },
+  {
+   "name": "모르는 판정을 받는다",
+   "file": "record_geometry.py",
+   "old": "    if verdict not in VERDICTS:",
+   "new": "    if False:"
+  },
+  {
+   "name": "낸 적 없는 제안의 답도 적는다",
+   "file": "record_geometry.py",
+   "old": "    if pid not in proposed:",
+   "new": "    if False:"
+  },
+  {
+   "name": "보류를 확인으로 적는다",
+   "file": "record_geometry.py",
+   "old": "    if verdict == HELD:",
+   "new": "    if False:"
+  },
+  {
+   "name": "제안이 잰 것을 버리고 답만 적는다",
+   "file": "record_geometry.py",
+   "old": "        row = dict(proposed[pid])",
+   "new": "        row = {\"Proposal_ID\": pid}"
+  },
+  {
+   "name": "이미 적힌 제안을 다시 적는다",
+   "file": "record_geometry.py",
+   "old": "        if pid in settled and not replace:",
+   "new": "        if False:"
+  },
+  {
+   "name": "답 파일과 적는 파일이 같아도 읽고 쓴다",
+   "file": "record_geometry.py",
+   "old": "    if answers_path and os.path.exists(answers_path) \\\n            and os.path.exists(out_path) \\\n            and os.path.samefile(answers_path, out_path):",
+   "new": "    if False:"
+  },
+  {
+   "name": "답 CSV에 빠진 열을 보지 않는다",
+   "file": "record_geometry.py",
+   "old": "    if answers and missing:",
+   "new": "    if False:"
+  },
+  {
+   "name": "적기 전에 제안 규칙을 걸어 보지 않는다",
+   "file": "record_geometry.py",
+   "old": "    bad = GP.proposal_problems(rows)\n    if bad:",
+   "new": "    bad = []\n    if bad:"
+  }
+ ]
+}

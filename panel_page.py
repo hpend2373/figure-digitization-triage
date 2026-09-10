@@ -141,7 +141,8 @@ def build(run, queue, proposals=None, chunk=1, of=1, log=print):
 .opt{display:block;font-size:13px;margin:3px 0}
 .wrap{position:relative;display:inline-block;border:1px solid #ccc;background:#fff}
 .wrap img{display:block;max-width:100%%;height:auto}
-.wrap canvas{position:absolute;left:0;top:0;cursor:crosshair;touch-action:none}
+.wrap canvas{position:absolute;left:0;top:0;width:100%%;height:100%%;cursor:crosshair;
+touch-action:none}
 .boxes{margin:8px 0;font-size:13px}
 .boxes .b{display:flex;gap:8px;align-items:center;margin:3px 0}
 .boxes .b.sel{background:#fff3c4}
@@ -150,6 +151,10 @@ def build(run, queue, proposals=None, chunk=1, of=1, log=print):
 .who{margin:8px 0}
 .cap{font-size:12px;color:#55554f;margin:4px 0 10px;max-width:%dpx}
 .hint{font-size:12px;color:#8a8a82}
+.warn{font-size:13px;color:#8a4b00;background:#fff6e5;border:1px solid #efd9ac;
+border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
+.said{font-size:12px;color:#55554f;margin:4px 0 0;max-width:80ch}
+.state.odd{color:#8a4b00}
 </style>""" % SHOW_WIDTH)
     w("<header><h1>패널 확인 <span class='count' id='left'></span></h1>")
     w("<p class='note'>그림마다 <b>패널의 자리</b>와 <b>무엇이 그려졌는지</b>가 "
@@ -178,7 +183,14 @@ def build(run, queue, proposals=None, chunk=1, of=1, log=print):
             boxes = []
         ids.append(fid)
         verdict = str(prop.get("verdict") or "").upper()
+        crop = str(prop.get("crop_sha256") or "")
+        version = str(prop.get("proposal_version") or "")
         meta[fid] = {"draft": fid,
+                     # 브라우저에 남은 답이 **이 크롭·이 제안**에 대한 것인지
+                     # 가리는 표. 다르면 화면이 그 답을 버립니다.
+                     "stamp": "%s/%s/%d" % (crop[:16], version, len(boxes)),
+                     "crop": crop, "proposalVersion": version,
+                     "note": str(prop.get("note") or ""),
                      "size": {"w": size[0], "h": size[1]} if size else None,
                      "shown": {"w": shown[0], "h": shown[1]} if shown else None,
                      "declared": q.get("axes") or "",
@@ -187,7 +199,7 @@ def build(run, queue, proposals=None, chunk=1, of=1, log=print):
                      # "직접 봤다"와 이름이지, 이미 제안된 것을 다시 고르는 일이
                      # 아닙니다. 다만 이 페이지의 어휘에 없는 판정은 싣지 않습니다.
                      "proposedVerdict": verdict if verdict in dict(LABELS) else ""}
-        w(card(fid, d, q, src, shown, len(boxes)))
+        w(card(fid, d, q, src, shown, len(boxes), prop))
 
     w("</main><script>")
     w("var IDS = %s;" % json.dumps(ids, ensure_ascii=False))
@@ -215,7 +227,7 @@ def proposed_box(b):
             "mark": "", "source": "PROPOSED", "markSource": ""}
 
 
-def card(fid, draft, q, src, shown, n_prop):
+def card(fid, draft, q, src, shown, n_prop, prop):
     out = []
     w = out.append
     w("<div class='doc' data-id='%s'>" % esc(fid))
@@ -225,6 +237,11 @@ def card(fid, draft, q, src, shown, n_prop):
     cap = (draft.get("Caption_Text") or "").strip()
     if cap:
         w("<p class='cap'>%s</p>" % esc(cap[:400] + ("…" if len(cap) > 400 else "")))
+    said = (prop.get("note") or "").strip()
+    if said:
+        # 제안을 낸 쪽이 남긴 말. 이것을 감추면 사람은 기계가 스스로 의심한
+        # 자리를 모른 채 "맞다"를 누릅니다.
+        w("<p class='warn'>제안한 쪽의 말: %s</p>" % esc(said))
     if src:
         w("<div class='wrap' data-wrap='%s'><img src='%s' alt='%s' width='%d' "
           "height='%d'><canvas data-canvas='%s' width='%d' height='%d'></canvas></div>"
@@ -265,14 +282,19 @@ PAGE_JS = r"""
   }
   function st(id) {
     var m = META[id] || {};
+    // 브라우저에 남아 있던 답이 다른 크롭·다른 제안에 대한 것이면 버립니다.
+    // 좌표가 그 그림의 좌표가 아니고, "봤다"도 그 그림을 본 것이 아닙니다.
+    if (states[id] && staleState(states[id], m)) { delete states[id]; }
     if (!states[id]) {
       // 처음 여는 그림은 제안의 상자를 들고 시작합니다. 사람이 지우거나 더
       // 그으면 그때부터는 사람의 것입니다.
       states[id] = { verdict: m.proposedVerdict || '', boxes: fromProposal(m),
-                     seen: false, who: '', note: '', sel: -1 };
+                     seen: false, who: '', note: '', sel: -1, stamp: m.stamp || '' };
     }
     // 그림의 크기와 이름은 화면이 아니라 페이지가 심어 둔 것에서 옵니다.
     states[id].draft = m.draft; states[id].size = m.size; states[id].declared = m.declared;
+    states[id].crop = m.crop; states[id].proposalVersion = m.proposalVersion;
+    states[id].stamp = m.stamp || '';
     if (!states[id].boxes) states[id].boxes = [];
     return states[id];
   }
@@ -300,7 +322,8 @@ PAGE_JS = r"""
     });
     if (drag && drag.id === id) {
       ctx.strokeStyle = '#d4572a'; ctx.setLineDash([4, 3]);
-      ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
+      ctx.strokeRect(drag.x0 * k, drag.y0 * k,
+                     (drag.x1 - drag.x0) * k, (drag.y1 - drag.y0) * k);
       ctx.setLineDash([]);
     }
   }
@@ -317,7 +340,10 @@ PAGE_JS = r"""
       tag.className = 'tag';
       tag.textContent = (i + 1) + ': ' + Math.round(b.x0) + ',' + Math.round(b.y0)
         + ' – ' + Math.round(b.x1) + ',' + Math.round(b.y1);
-      tag.addEventListener('click', function () { s.sel = i; save(); paint(id); });
+      tag.addEventListener('click', function () {
+        if (active && active !== id) { st(active).sel = -1; paint(active); }
+        active = id; s.sel = i; save(); paint(id);
+      });
       row.appendChild(tag);
       var sel = document.createElement('select');
       var none = document.createElement('option');
@@ -347,10 +373,26 @@ PAGE_JS = r"""
     var got = panelsOf(id, s);
     var box = q("[data-state=\"" + esc(id) + "\"]");
     if (box) {
-      box.textContent = got.ready
-        ? '답이 되었습니다 — ' + got.rows[0].Verdict + ' · 패널 ' + (got.rows[0].Verdict === 'PANELS' ? got.rows.length : 0) + '개'
+      var say = got.ready
+        ? '답이 되었습니다 — ' + got.rows[0].Verdict + ' · 패널 '
+          + (got.rows[0].Verdict === 'PANELS' ? got.rows.length : 0) + '개'
         : got.why;
-      box.className = 'state' + (got.ready ? ' ready' : '');
+      // 답이 되었어도 말해 주어야 하는 것 둘: 상자가 겹친다, 전에 센 수와 다르다.
+      // 둘 다 답을 막지는 않습니다 - 인셋도 있고, 전에 센 수가 틀렸을 수도
+      // 있습니다. 다만 모르는 채로 넘기지는 않게 합니다.
+      var pairs = overlapPairs(s.boxes);
+      if (pairs.length) {
+        say += ' · 겹침 ' + pairs.map(function (p) {
+          return p.a + '·' + p.b + ' ' + Math.round(p.part * 100) + '%%'; }).join(', ');
+      }
+      var dec = Number(s.declared);
+      if (s.verdict === 'PANELS' && isFinite(dec) && dec !== s.boxes.length) {
+        say += ' · 전에 센 수 ' + dec + ' ≠ 그린 수 ' + s.boxes.length;
+      }
+      box.textContent = say;
+      box.className = 'state' + (got.ready ? ' ready' : '')
+        + ((pairs.length || (isFinite(dec) && s.verdict === 'PANELS'
+            && dec !== s.boxes.length)) ? ' odd' : '');
     }
     var card = q(".doc[data-id=\"" + esc(id) + "\"]");
     if (card) card.classList.toggle('done', got.ready);
@@ -383,7 +425,8 @@ PAGE_JS = r"""
     IDS.forEach(function (o) { if (!st(o).who) st(o).who = el.value; });
   });
   bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; });
-  bind('button[data-del]', 'data-del', function (s) {
+  bind('button[data-del]', 'data-del', function (s, el) {
+    active = el.getAttribute('data-del');
     if (s.sel >= 0 && s.sel < s.boxes.length) { s.boxes.splice(s.sel, 1); s.sel = -1; }
   }, 'click');
   bind('button[data-reset]', 'data-reset', function (s, el) {
@@ -392,42 +435,45 @@ PAGE_JS = r"""
   }, 'click');
 
   // 그림 위를 끌면 상자가 생깁니다. 끈 거리가 짧으면 상자가 아니라 고르기입니다.
+  // 자리는 캔버스가 **실제로 차지한 크기**로 재서 원본 픽셀로 옮깁니다 - 창이
+  // 좁으면 그림은 줄어도 캔버스의 좌표계는 줄지 않기 때문입니다. 옮기는 산수는
+  // 화면이 아니라 논리(`imagePoint`)가 합니다.
   var drag = null;
+  //: 마지막으로 손댄 카드. Delete는 여기에만 듭니다 - 화면 밖 다른 그림의
+  //: 고른 상자까지 함께 지우면 사람은 지운 줄도 모릅니다.
+  var active = null;
   function pos(c, ev) {
-    var r = c.getBoundingClientRect();
-    return { x: Math.max(0, Math.min(c.width, ev.clientX - r.left)),
-             y: Math.max(0, Math.min(c.height, ev.clientY - r.top)) };
+    var m = META[c.getAttribute('data-canvas')] || {};
+    return imagePoint(c.getBoundingClientRect(), { w: c.width, h: c.height },
+                      m.size, ev.clientX, ev.clientY);
   }
   all('canvas[data-canvas]').forEach(function (c) {
     var id = c.getAttribute('data-canvas');
     c.addEventListener('pointerdown', function (ev) {
       var p = pos(c, ev);
+      if (!p) return;
+      if (active && active !== id) { st(active).sel = -1; paint(active); }
+      active = id;
       drag = { id: id, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
       c.setPointerCapture(ev.pointerId);
     });
     c.addEventListener('pointermove', function (ev) {
       if (!drag || drag.id !== id) return;
-      var p = pos(c, ev); drag.x1 = p.x; drag.y1 = p.y; drawBoxes(id);
+      var p = pos(c, ev);
+      if (!p) return;
+      drag.x1 = p.x; drag.y1 = p.y; drawBoxes(id);
     });
     c.addEventListener('pointerup', function (ev) {
       if (!drag || drag.id !== id) return;
-      var s = st(id), k = scaleOf(id);
+      var s = st(id);
       var x0 = Math.min(drag.x0, drag.x1), x1 = Math.max(drag.x0, drag.x1);
       var y0 = Math.min(drag.y0, drag.y1), y1 = Math.max(drag.y0, drag.y1);
-      if (x1 - x0 < 6 || y1 - y0 < 6) {
-        // 고르기: 누른 자리를 품는 가장 작은 상자.
-        var best = -1, area = Infinity;
-        s.boxes.forEach(function (b, i) {
-          var bx0 = b.x0 / k, by0 = b.y0 / k, bx1 = b.x1 / k, by1 = b.y1 / k;
-          if (drag.x0 >= bx0 && drag.x0 <= bx1 && drag.y0 >= by0 && drag.y0 <= by1) {
-            var a = (bx1 - bx0) * (by1 - by0);
-            if (a < area) { area = a; best = i; }
-          }
-        });
-        s.sel = best;
+      var thin = (scaleOf(id) || 1) * 6;
+      if (x1 - x0 < thin || y1 - y0 < thin) {
+        s.sel = boxAt(s.boxes, drag.x0, drag.y0);   // 고르기
       } else {
-        s.boxes.push({ x0: Math.round(x0 * k), y0: Math.round(y0 * k),
-                       x1: Math.round(x1 * k), y1: Math.round(y1 * k),
+        s.boxes.push({ x0: Math.round(x0), y0: Math.round(y0),
+                       x1: Math.round(x1), y1: Math.round(y1),
                        mark: '', source: 'DRAWN', markSource: 'TYPED' });
         s.sel = s.boxes.length - 1;
       }
@@ -437,12 +483,11 @@ PAGE_JS = r"""
   document.addEventListener('keydown', function (ev) {
     if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    IDS.forEach(function (id) {
-      var s = st(id);
-      if (s.sel >= 0 && s.sel < s.boxes.length) {
-        s.boxes.splice(s.sel, 1); s.sel = -1; save(); paint(id);
-      }
-    });
+    if (!active) return;
+    var s = st(active);
+    if (s.sel >= 0 && s.sel < s.boxes.length) {
+      s.boxes.splice(s.sel, 1); s.sel = -1; save(); paint(active);
+    }
   });
 
   q('#dl').addEventListener('click', function () {

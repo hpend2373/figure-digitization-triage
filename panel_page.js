@@ -22,6 +22,12 @@
  * 고쳤는지는 `Region_Source`·`Mark_Source`로 따로 나갑니다 - 그 둘이 없으면
  * 제안이 얼마나 맞았는지 아무도 셀 수 없고, 사람이 본 것과 기계가 낸 것이
  * 같은 줄에 앉습니다.
+ *
+ * 화면의 기하도 여기 있습니다. 끌어서 그은 자리를 원본 픽셀로 옮기는 산수가
+ * 렌더러의 문자열 안에 있었고, 그래서 아무 시나리오도 그것을 보지 않았습니다 -
+ * 창이 좁으면 그림은 줄고 캔버스는 안 줄어 상자가 1.25배 어긋난 자리에 앉는데,
+ * 좌표는 그림 안이라 관문도 못 잡았습니다. 재는 것은 화면이 하고, 잰 것으로
+ * 무엇을 하는지는 여기서 정합니다.
  */
 
 //: 패널에 그려질 수 있는 것. 리더 이름이 아니라 사람이 보는 이름입니다 -
@@ -37,6 +43,67 @@ var VERDICTS = ['PANELS', 'NO_PANELS', 'HOLD'];
 var HELD = 'HOLD';
 
 function num(v) { var n = Number(v); return isFinite(n) ? n : null; }
+
+/* 화면에서 잰 것을 원본 픽셀로. `rect`는 캔버스가 **실제로 차지한** 크기이고
+ * `backing`은 캔버스가 그리는 좌표계의 크기입니다. 둘은 같지 않습니다: 창이
+ * 좁거나 브라우저를 확대하면 그림과 캔버스는 CSS로 줄어들지만 그리는 좌표계는
+ * 그대로입니다. 잰 크기를 쓰지 않으면 그은 자리와 저장되는 자리가 어긋납니다. */
+function imagePoint(rect, backing, size, clientX, clientY) {
+  var rw = num((rect || {}).width), rh = num((rect || {}).height);
+  var bw = num((backing || {}).w), bh = num((backing || {}).h);
+  var sw = num((size || {}).w), sh = num((size || {}).h);
+  if (!rw || !rh || !bw || !bh || !sw || !sh) return null;
+  var x = (num(clientX) - num((rect || {}).left || 0)) * (sw / rw);
+  var y = (num(clientY) - num((rect || {}).top || 0)) * (sh / rh);
+  return { x: Math.max(0, Math.min(sw, x)), y: Math.max(0, Math.min(sh, y)) };
+}
+
+/* 누른 자리를 품는 가장 작은 상자의 번호. 없으면 -1. */
+function boxAt(boxes, x, y) {
+  var best = -1, area = Infinity;
+  for (var i = 0; i < (boxes || []).length; i++) {
+    var b = boxes[i] || {};
+    if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) continue;
+    var a = (b.x1 - b.x0) * (b.y1 - b.y0);
+    if (a < area) { area = a; best = i; }
+  }
+  return best;
+}
+
+/* 서로 많이 겹치는 상자 쌍. 사람에게 보여 주는 말이 됩니다 - 겹친 상자는 한
+ * 패널을 두 번 읽거나 이웃의 표시를 함께 읽습니다. 인셋처럼 정말 겹치는 그림도
+ * 있어서 답을 막지는 않고, 보이게만 합니다. */
+var OVERLAP_MAX = 0.20;
+
+function overlapPairs(boxes) {
+  var out = [];
+  boxes = boxes || [];
+  for (var i = 0; i < boxes.length; i++) {
+    for (var j = i + 1; j < boxes.length; j++) {
+      var f = Math.max(coverOf(boxes[i], boxes[j]), coverOf(boxes[j], boxes[i]));
+      if (f > OVERLAP_MAX) out.push({ a: i + 1, b: j + 1, part: f });
+    }
+  }
+  return out;
+}
+
+function coverOf(a, b) {
+  a = a || {}; b = b || {};
+  var ix = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+  var iy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+  var area = (a.x1 - a.x0) * (a.y1 - a.y0);
+  return area > 0 ? (ix * iy) / area : 0;
+}
+
+/* 브라우저에 남아 있던 답이 지금 이 그림의 답인가. 같은 file:// 자리에서는
+ * 묶음이 저장소를 함께 쓰고, 제안을 고쳐 페이지를 다시 만들어도 옛 상자가
+ * "제안"으로 되살아납니다 - 크롭이나 제안이 바뀌었으면 그 답은 다른 그림에
+ * 대한 답입니다. */
+function staleState(state, meta) {
+  var was = String((state || {}).stamp || '');
+  var now = String((meta || {}).stamp || '');
+  return was !== now;
+}
 
 /* 상자 하나가 이 그림 위에 놓일 수 있는가. 돌려주는 것은 잘못이 없으면 ''. */
 function boxProblem(box, size) {
@@ -91,6 +158,10 @@ function panelsOf(id, state) {
         // 아무도 셀 수 없습니다.
         Region_Source: b.source === 'PROPOSED' ? 'PROPOSED' : 'DRAWN',
         Mark_Source: b.markSource === 'PROPOSED' ? 'PROPOSED' : 'TYPED',
+        // 이 좌표가 **어느 크롭 위의** 좌표인지. 크롭이 다시 만들어지면 같은
+        // 이름의 다른 그림이고, 관문이 그것을 알아야 합니다.
+        Crop_SHA256: String(s.crop || ''),
+        Proposal_Version: String(s.proposalVersion || ''),
         Declared_Count: num(s.declared) === null ? '' : String(num(s.declared)),
         Drawn_Count: String(boxes.length),
         Verdict: verdict,
@@ -103,6 +174,7 @@ function panelsOf(id, state) {
     rows.push({
       Draft_ID: String(s.draft || id), Panel_Index: 0,
       X0: '', Y0: '', X1: '', Y1: '', Mark_Type: '', Region_Source: '', Mark_Source: '',
+      Crop_SHA256: String(s.crop || ''), Proposal_Version: String(s.proposalVersion || ''),
       Declared_Count: num(s.declared) === null ? '' : String(num(s.declared)),
       Drawn_Count: '0', Verdict: verdict,
       Seen_By_Person: '1', Verified_By: who,
@@ -113,7 +185,8 @@ function panelsOf(id, state) {
 }
 
 var CSV_COLUMNS = ['Draft_ID', 'Panel_Index', 'X0', 'Y0', 'X1', 'Y1', 'Mark_Type',
-                   'Region_Source', 'Mark_Source', 'Declared_Count', 'Drawn_Count', 'Verdict',
+                   'Region_Source', 'Mark_Source', 'Crop_SHA256', 'Proposal_Version',
+                   'Declared_Count', 'Drawn_Count', 'Verdict',
                    'Seen_By_Person', 'Verified_By', 'Note'];
 
 function csvCell(s) {
@@ -153,5 +226,8 @@ function held(ids, states) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { MARKS: MARKS, VERDICTS: VERDICTS, HELD: HELD,
                      boxProblem: boxProblem, panelsOf: panelsOf, buildCsv: buildCsv,
-                     CSV_COLUMNS: CSV_COLUMNS, remaining: remaining, held: held };
+                     CSV_COLUMNS: CSV_COLUMNS, remaining: remaining, held: held,
+                     imagePoint: imagePoint, boxAt: boxAt, overlapPairs: overlapPairs,
+                     coverOf: coverOf, staleState: staleState,
+                     OVERLAP_MAX: OVERLAP_MAX };
 }

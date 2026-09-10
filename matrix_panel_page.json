@@ -1,8 +1,8 @@
 {
  "files": {
-  "panel_page.py": "4d8aaa48463024fcf0638bcec8a4fadd9dcc43df3f24b5b91998dfb35fb9b593",
-  "panel_page.js": "d1e34236185845f6d97dfd11cd79493411b507ed79dc29a0072862aedb710c11",
-  "test_panel_page.py": "bfc5af69eec07113c4f5b91709b40ecc9e3f7c20cc96878b07e8ffb06f707896"
+  "panel_page.py": "6ebd8f3a3ba913c5c8d237a03ec6947c4c17bdeeef46e313d30856afeff3f1a6",
+  "panel_page.js": "eeee8e57b927bc6ce8551aeafa1a6c10144e0dbfcb4625fa43040c8e33d77237",
+  "test_panel_page.py": "96fff87d9ecef6150f56ea19b666ead227c8e90d43b549ff66d7ac5fadb006e9"
  },
  "suites": [
   "test_panel_page.py"
@@ -97,6 +97,48 @@
    "file": "panel_page.py",
    "old": "                \"mark\": mark if mark in dict(MARK_LABELS) else \"\",",
    "new": "                \"mark\": mark,"
+  },
+  {
+   "name": "답을 크롭·제안 판본에 묶지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"crop\": crop, \"proposalVersion\": version,",
+   "new": "                     \"crop\": \"\", \"proposalVersion\": \"\","
+  },
+  {
+   "name": "표가 제안 판본을 담지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"stamp\": \"%s/%s/%d\" % (crop[:16], version, len(boxes)),",
+   "new": "                     \"stamp\": \"%s\", % (crop[:16],)"
+  },
+  {
+   "name": "제안한 쪽의 말을 감춘다",
+   "file": "panel_page.py",
+   "old": "        w(\"<p class='warn'>제안한 쪽의 말: %s</p>\" % esc(said))",
+   "new": "        pass"
+  },
+  {
+   "name": "겹침을 화면이 말하지 않는다",
+   "file": "panel_page.py",
+   "old": "      var pairs = overlapPairs(s.boxes);",
+   "new": "      var pairs = [];"
+  },
+  {
+   "name": "전에 센 수와의 차이를 말하지 않는다",
+   "file": "panel_page.py",
+   "old": "        say += ' · 전에 센 수 ' + dec + ' ≠ 그린 수 ' + s.boxes.length;",
+   "new": "        say += '';"
+  },
+  {
+   "name": "캔버스가 그림 크기를 따라가지 않는다",
+   "file": "panel_page.py",
+   "old": ".wrap canvas{position:absolute;left:0;top:0;width:100%%;height:100%%;cursor:crosshair;",
+   "new": ".wrap canvas{position:absolute;left:0;top:0;cursor:crosshair;"
+  },
+  {
+   "name": "Delete가 모든 카드를 돈다",
+   "file": "panel_page.py",
+   "old": "    if (!active) return;",
+   "new": "    if (false) return;"
   }
  ]
 }

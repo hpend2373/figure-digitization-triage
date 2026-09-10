@@ -1,8 +1,8 @@
 {
  "files": {
-  "record_panels.py": "0019299ac409578b5e0ee65c1577aed18b205b3f3720c3947d144416df1e22e8",
-  "panel_page.js": "d1e34236185845f6d97dfd11cd79493411b507ed79dc29a0072862aedb710c11",
-  "test_record_panels.py": "572982e664dbe3bb6c56aca2a7047127b9668a1109fd1449c632d63a7f9ac074"
+  "record_panels.py": "2d7390f91760a71694c27292a465bad3a07ae3c0f03cae4caad68379ab87e514",
+  "panel_page.js": "eeee8e57b927bc6ce8551aeafa1a6c10144e0dbfcb4625fa43040c8e33d77237",
+  "test_record_panels.py": "e1750adf1993d05c0f6bbcb68fa122fec64144c1262edac9836866ce431f5cd5"
  },
  "suites": [
   "test_record_panels.py"
@@ -139,6 +139,54 @@
    "file": "record_panels.py",
    "old": "    if answers and missing:",
    "new": "    if False:"
+  },
+  {
+   "name": "크롭 지문을 보지 않는다",
+   "file": "record_panels.py",
+   "old": "    if crop_sha and said and said != {crop_sha}:",
+   "new": "    if False:"
+  },
+  {
+   "name": "지문 없는 답은 눈감아 준다",
+   "file": "record_panels.py",
+   "old": "    if crop_sha and said and said != {crop_sha}:",
+   "new": "    if crop_sha and said and \"\" not in said and said != {crop_sha}:"
+  },
+  {
+   "name": "적을 때 지금 크롭의 지문을 넣지 않는다",
+   "file": "record_panels.py",
+   "old": "            row[\"Crop_SHA256\"] = sha",
+   "new": "            pass"
+  },
+  {
+   "name": "실수 좌표를 그대로 적는다",
+   "file": "record_panels.py",
+   "old": "                    row[k] = str(_int(row[k]))",
+   "new": "                    pass"
+  },
+  {
+   "name": "전에 센 수를 답에서 받아 적는다",
+   "file": "record_panels.py",
+   "old": "            row[\"Declared_Count\"] = declared.get(fid, \"\")",
+   "new": "            pass"
+  },
+  {
+   "name": "거의 같은 상자 둘을 그대로 적는다",
+   "file": "record_panels.py",
+   "old": "                if iou(boxes[i][1], boxes[j][1]) >= DUPLICATE_IOU:",
+   "new": "                if False:"
+  },
+  {
+   "name": "겹치기만 해도 같은 패널로 본다",
+   "file": "record_panels.py",
+   "old": "                if iou(boxes[i][1], boxes[j][1]) >= DUPLICATE_IOU:",
+   "new": "                if iou(boxes[i][1], boxes[j][1]) > 0:"
+  },
+  {
+   "name": "묶음이 아니라 대기열 전체를 본다",
+   "file": "record_panels.py",
+   "old": "        PP.pick_chunk(_rows(queue_path), a.chunk, a.of), answers, a.when, out,",
+   "new": "        _rows(queue_path), answers, a.when, out,"
   }
  ]
 }

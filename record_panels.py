@@ -11,7 +11,13 @@
 
 상자의 크기는 페이지가 심어 둔 크기가 아니라 여기서 크롭을 다시 열어 봅니다.
 페이지는 브라우저에 남아 있던 다른 묶음의 상태를 들고 있을 수 있고, 그 좌표가
-어느 그림 위의 것인지 확인하는 마지막 자리가 이 관문입니다.
+어느 그림 위의 것인지 확인하는 마지막 자리가 이 관문입니다. 크기만으로는 모자라서
+**크롭의 지문**도 다시 재서 답이 들고 온 것과 맞춰 봅니다 - 같은 이름으로 다시
+만들어진 크롭은 같은 크기의 다른 그림입니다.
+
+대기열은 페이지가 실은 그 묶음이어야 합니다. `--chunk/--of`를 페이지에 준 대로
+주십시오. 전체 대기열을 주면 "이 대기열의 그림이 아니다"는 아무것도 막지 못하고,
+다른 묶음에서 브라우저에 남아 있던 답이 그대로 적힙니다.
 
 한 그림의 답은 한 덩어리입니다: `PANELS`면 1번부터 이어지는 패널 줄이고,
 `NO_PANELS`면 0번 한 줄입니다. 덩어리가 깨져 있으면 - 2번만 있거나, 패널이
@@ -23,6 +29,7 @@
 """
 import argparse
 import csv
+import hashlib
 import io
 import os
 import sys
@@ -44,8 +51,13 @@ HELD = "HOLD"
 ANSWER_REQUIRED = ("Draft_ID", "Panel_Index", "Verdict", "Verified_By",
                    "Seen_By_Person")
 COLUMNS = ("Draft_ID", "Panel_Index", "X0", "Y0", "X1", "Y1", "Mark_Type",
-           "Region_Source", "Mark_Source", "Declared_Count", "Drawn_Count", "Verdict",
+           "Region_Source", "Mark_Source", "Crop_SHA256", "Proposal_Version",
+           "Declared_Count", "Drawn_Count", "Verdict",
            "Seen_By_Person", "Verified_By", "Verified_At", "Note")
+
+#: 같은 패널을 두 번 적었다고 볼 겹침. 인셋처럼 상자가 상자 안에 드는 그림도
+#: 있어서 겹침 자체는 막지 않고, 거의 같은 상자만 막습니다.
+DUPLICATE_IOU = 0.80
 
 TRUE = ("1", "TRUE", "YES", "Y", "T")
 
@@ -61,17 +73,27 @@ def _rows(path):
         return list(csv.DictReader(fh))
 
 
-def crop_size(run, drafts, fid):
-    """크롭의 (w, h). 크롭을 열 수 없으면 None - 그 그림에는 상자를 놓을 수 없습니다."""
+def crop_facts(run, drafts, fid):
+    """((w, h), sha256). 크롭을 열 수 없으면 (None, "")."""
     rel = (drafts.get(fid) or {}).get("Figure_Crop") or ""
     path = os.path.join(run, rel)
     if not rel or not os.path.isfile(path):
-        return None
+        return None, ""
     try:
         from PIL import Image
-        return Image.open(path).size
+        size = Image.open(path).size
     except Exception:                                   # noqa: BLE001
-        return None
+        return None, ""
+    with io.open(path, "rb") as fh:
+        return size, hashlib.sha256(fh.read()).hexdigest()
+
+
+def iou(a, b):
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    i = ix * iy
+    u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - i
+    return (i / float(u)) if u > 0 else 0.0
 
 
 def _int(v):
@@ -81,7 +103,7 @@ def _int(v):
         return None
 
 
-def check_figure(fid, rows, queued, size):
+def check_figure(fid, rows, queued, size, crop_sha=""):
     """(문제 목록). 한 그림의 줄들을 한 덩어리로 봅니다."""
     problems = []
     verdicts = set((r.get("Verdict") or "").strip().upper() for r in rows)
@@ -138,11 +160,35 @@ def check_figure(fid, rows, queued, size):
                                  "%s번 패널의 종류 %r은 받는 것이 아닙니다. 받는 것: %s"
                                  % (r.get("Panel_Index"), mark or "(빈칸)",
                                     ", ".join(MARKS))))
+        # 같은 패널을 두 번 적은 답. 겹치는 상자 자체는 막지 않습니다 - 인셋도
+        # 있습니다 - 만 거의 같은 상자 둘은 한 패널이고, 그대로 두면 같은 값이
+        # 두 번 풀에 들어갑니다.
+        boxes = [(r.get("Panel_Index"), [_int(r.get(k)) for k in ("X0", "Y0", "X1", "Y1")])
+                 for r in rows]
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                if None in boxes[i][1] or None in boxes[j][1]:
+                    continue
+                if iou(boxes[i][1], boxes[j][1]) >= DUPLICATE_IOU:
+                    problems.append(("PANEL_DUPLICATE",
+                                     "%s번과 %s번 상자가 거의 같습니다. 한 패널을 "
+                                     "두 번 적으면 같은 값이 두 번 들어갑니다."
+                                     % (boxes[i][0], boxes[j][0])))
     else:
         if idx != [0] or any((r.get("X0") or "").strip() for r in rows):
             problems.append(("ROWS_WITHOUT_PANELS",
                              "%s인데 상자 줄이 붙어 있습니다. 패널이 없다는 답에 "
                              "상자가 무엇을 뜻하는지 이 관문은 모릅니다." % verdict))
+    # 이 좌표가 지금 이 크롭 위의 좌표인가. 크기가 같아도 크롭이 다시 만들어졌으면
+    # 같은 이름의 다른 그림이고, 그때 상자는 아무 데도 아닌 자리를 가리킵니다.
+    said = set((r.get("Crop_SHA256") or "").strip().lower() for r in rows)
+    if crop_sha and said and said != {crop_sha}:
+        problems.append(("CROP_CHANGED",
+                         "답이 들고 온 크롭 지문 %s이 지금 크롭 %s과 다릅니다. "
+                         "크롭이 다시 만들어졌거나 다른 그림의 답입니다."
+                         % (", ".join(sorted(x[:12] or "(빈칸)" for x in said)),
+                            crop_sha[:12])))
+
     if verdict == HELD:
         problems.append(("HELD", "아직 정하지 않은 답입니다. 적지 않고 목록에 "
                                  "남겨 둡니다."))
@@ -165,6 +211,9 @@ def record(run, queue, answers, when, out_path, replace=False, log=print,
                          "%s입니다." % (out_path, DECISIONS))
     drafts = dict((r["Draft_ID"], r) for r in _rows(os.path.join(run, PP.DRAFTS)))
     queued = set(q["fig"] for q in queue)
+    #: 전에 센 패널 수는 답이 아니라 대기열이 아는 것입니다. 화면이 들고 온 것을
+    #: 그대로 적으면 그 수가 무엇과도 대조되지 않습니다.
+    declared = dict((q["fig"], str(q.get("axes") or "").strip()) for q in queue)
     existing = _rows(out_path)
     settled = set(r["Draft_ID"] for r in existing)
 
@@ -175,7 +224,8 @@ def record(run, queue, answers, when, out_path, replace=False, log=print,
     written, refused = [], []
     for fid in sorted(by_fig):
         rows = by_fig[fid]
-        problems = check_figure(fid, rows, queued, crop_size(run, drafts, fid))
+        size, sha = crop_facts(run, drafts, fid)
+        problems = check_figure(fid, rows, queued, size, sha)
         if problems:
             refused.append((fid or "(빈칸)", problems))
             continue
@@ -189,6 +239,13 @@ def record(run, queue, answers, when, out_path, replace=False, log=print,
             row["Verdict"] = row["Verdict"].upper()
             row["Mark_Type"] = row["Mark_Type"].upper()
             row["Verified_At"] = when
+            # 좌표는 정수로 적습니다. 다음 단계는 이 값을 픽셀 자리로 쓰고,
+            # `10.4`는 픽셀이 아닙니다.
+            for k in ("X0", "Y0", "X1", "Y1"):
+                if row[k]:
+                    row[k] = str(_int(row[k]))
+            row["Crop_SHA256"] = sha
+            row["Declared_Count"] = declared.get(fid, "")
             written.append(row)
 
     done = set(w["Draft_ID"] for w in written)
@@ -213,6 +270,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", required=True)
     ap.add_argument("--queue", required=True)
+    ap.add_argument("--chunk", type=int, default=1,
+                    help="페이지에 준 것과 같은 묶음. 전체 대기열을 주면 다른 "
+                         "묶음의 답을 막지 못합니다.")
+    ap.add_argument("--of", type=int, default=1)
     ap.add_argument("--answers", required=True)
     ap.add_argument("--out", help="기본은 --queue 옆의 %s" % DECISIONS)
     ap.add_argument("--when", required=True,
@@ -224,7 +285,8 @@ def main(argv=None):
         os.path.join(os.path.dirname(queue_path), DECISIONS)
     answers = _rows(os.path.expanduser(a.answers))
     _w, refused, path = record(
-        os.path.expanduser(a.run), _rows(queue_path), answers, a.when, out,
+        os.path.expanduser(a.run),
+        PP.pick_chunk(_rows(queue_path), a.chunk, a.of), answers, a.when, out,
         replace=a.replace, answers_path=os.path.expanduser(a.answers))
     print(path)
     return 1 if refused else 0

@@ -49,6 +49,8 @@ QUEUE = [{"fig": "D1", "axes": "2", "pid": "P"},
          {"fig": "D2", "axes": "1", "pid": "P"},
          {"fig": "D3", "axes": "1", "pid": "P"}]
 PROPS = {"D1": {"fig": "D1", "size": [1800, 900], "verdict": "PANELS",
+                "crop_sha256": "abc123def456", "proposal_version": "v2",
+                "note": "전에 센 수 2 ≠ 제안 1. 상자가 서로 겹칩니다 (1·2 100%)",
                 "boxes": [{"x0": 10, "y0": 10, "x1": 800, "y1": 800, "mark": "bar"}]},
          "D2": {"fig": "D2", "size": [999, 300], "boxes": [[10, 10, 100, 100]]},
          "D3": {"fig": "D3", "size": [1, 1], "verdict": "MAYBE", "boxes": []}}
@@ -96,6 +98,43 @@ check("받을 수 없는 종류는 제안으로 싣지 않는다",
 check("다른 크기 위의 제안은 싣지 않는다", META["D2"]["proposed"] == [],
       META["D2"]["proposed"])
 check("제안이 몇 개인지 카드에 적힌다", "제안 상자 1개" in HTML and "제안 상자 0개" in HTML)
+
+print()
+print("답은 제안과 크롭에 묶여 나간다")
+# REVERT: 답을 크롭·제안 판본에 묶지 않는다. 브라우저는 같은 file:// 자리에서
+# 저장소를 함께 쓰고, 제안을 고쳐 페이지를 다시 만들어도 옛 답이 되살아납니다.
+check("크롭 지문과 제안 판본이 META로 간다",
+      META["D1"]["crop"] == "abc123def456" and META["D1"]["proposalVersion"] == "v2",
+      (META["D1"].get("crop"), META["D1"].get("proposalVersion")))
+check("표가 크롭·제안·상자 수를 함께 담는다",
+      META["D1"]["stamp"] == "abc123def456/v2/1", META["D1"].get("stamp"))
+check("크롭이나 제안이 다르면 표도 다르다",
+      META["D1"]["stamp"] != META["D2"]["stamp"])
+check("화면이 그 표로 남은 답을 버린다", "staleState(states[id], m)" in HTML)
+
+print()
+print("기계가 남긴 말과 어긋난 수를 사람에게 보인다")
+# REVERT: 제안한 쪽이 남긴 말을 감춘다. 사람은 기계가 스스로 의심한 자리를
+# 모르는 채로 "맞다"를 누릅니다.
+check("제안한 쪽의 말이 카드에 실린다", "제안한 쪽의 말" in HTML and "겹칩니다" in HTML)
+# REVERT: 겹치는 상자와 전에 센 수의 차이를 말하지 않는다. 계수만 맞으면
+# 아무 데도 안 걸리는 오류가 그대로 넘어갑니다.
+check("겹침과 계수 차이를 화면이 말한다",
+      "overlapPairs(s.boxes)" in HTML and "≠ 그린 수" in HTML)
+
+print()
+print("화면의 기하는 논리가 한다")
+# REVERT: 자리를 옮기는 산수를 페이지 안에 다시 적는다. 아무 시나리오도 그것을
+# 보지 않고, 창이 좁을 때 상자가 어긋난 자리에 저장됩니다.
+check("자리는 imagePoint가 옮긴다",
+      "imagePoint(c.getBoundingClientRect()" in HTML and "ev.clientX - r.left" not in HTML)
+check("고르기는 boxAt이 한다", "boxAt(s.boxes" in HTML)
+check("캔버스가 그림이 차지한 크기를 따라간다",
+      ".wrap canvas{" in HTML and "width:100%;height:100%" in HTML)
+# REVERT: Delete가 모든 카드를 돈다. 화면 밖 다른 그림의 고른 상자까지 지우고,
+# 사람은 지운 줄도 모릅니다.
+check("지우기는 마지막에 손댄 카드에만 든다",
+      "if (!active) return;" in HTML and "IDS.forEach(function (id) {\n      var s = st(id);" not in HTML)
 
 print()
 print("화면과 논리가 같은 어휘를 쓴다")

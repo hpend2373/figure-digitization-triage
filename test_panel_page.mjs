@@ -153,6 +153,89 @@ test('남은 일과 보류를 따로 센다', () => {
   assert.equal(L.held(['a', 'b', 'c'], st), 1);
 });
 
+/* 화면에서 잰 것을 원본 픽셀로 옮기는 산수. 이것이 렌더러의 문자열 안에 있는
+ * 동안에는 아무 시나리오도 보지 않았고, 창이 좁을 때 상자가 어긋난 자리에
+ * 저장되는 것을 아무도 몰랐습니다. */
+const RECT = { left: 0, top: 0, width: 900, height: 450 };
+test('캔버스가 제 크기일 때는 그린 자리가 그대로다', () => {
+  const p = L.imagePoint(RECT, { w: 900, h: 450 }, { w: 1800, h: 900 }, 450, 225);
+  assert.deepEqual(p, { x: 900, y: 450 });
+});
+/* REVERT: 잰 크기를 쓰지 않고 캔버스의 좌표계 크기로 나눈다. 창이 좁으면 그림은
+ * 줄어도 좌표계는 안 줄어서, 그은 자리와 저장되는 자리가 1.25배 어긋납니다.
+ * 좌표는 그림 안이라 관문도 못 잡습니다. */
+test('창이 좁아 그림이 줄면 줄어든 크기로 잰다', () => {
+  const p = L.imagePoint({ left: 0, top: 0, width: 720, height: 360 },
+                         { w: 900, h: 450 }, { w: 1800, h: 900 }, 360, 180);
+  assert.deepEqual(p, { x: 900, y: 450 });
+});
+test('캔버스가 어디에 놓였든 그 자리를 뺀다', () => {
+  const p = L.imagePoint({ left: 100, top: 50, width: 900, height: 450 },
+                         { w: 900, h: 450 }, { w: 1800, h: 900 }, 550, 275);
+  assert.deepEqual(p, { x: 900, y: 450 });
+});
+test('그림 밖을 눌러도 그림 안으로 붙인다', () => {
+  const p = L.imagePoint(RECT, { w: 900, h: 450 }, { w: 1800, h: 900 }, -50, 9000);
+  assert.deepEqual(p, { x: 0, y: 900 });
+});
+test('크기를 모르면 자리도 없다', () => {
+  assert.equal(L.imagePoint({ left: 0, top: 0, width: 0, height: 0 },
+                            { w: 900, h: 450 }, { w: 1800, h: 900 }, 10, 10), null);
+  assert.equal(L.imagePoint(RECT, { w: 900, h: 450 }, null, 10, 10), null);
+});
+
+test('누른 자리를 품는 가장 작은 상자를 고른다', () => {
+  const bs = [{ x0: 0, y0: 0, x1: 100, y1: 100 }, { x0: 10, y0: 10, x1: 40, y1: 40 }];
+  assert.equal(L.boxAt(bs, 20, 20), 1);
+  assert.equal(L.boxAt(bs, 80, 80), 0);
+  assert.equal(L.boxAt(bs, 200, 200), -1);
+});
+
+/* REVERT: 겹치는 상자를 말하지 않는다. 한 패널을 두 번 읽거나 이웃의 표시를
+ * 함께 읽는데, 계수만 맞으면 아무 데도 안 걸립니다 - 실제로 자동 제안이
+ * 이웃 패널을 통째로 품은 상자를 30쌍 냈고 아무도 몰랐습니다. */
+test('많이 겹치는 상자 쌍을 이름 대어 말한다', () => {
+  const got = L.overlapPairs([{ x0: 0, y0: 0, x1: 100, y1: 100 },
+                              { x0: 0, y0: 0, x1: 90, y1: 90 },
+                              { x0: 500, y0: 0, x1: 600, y1: 100 }]);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].a, 1); assert.equal(got[0].b, 2);
+  assert.ok(got[0].part > 0.8);
+});
+/* REVERT: 겹침을 큰 상자 쪽으로만 잰다. 큰 패널 안에 작은 상자가 통째로 들어
+ * 있으면 큰 쪽 넓이로는 몇 %밖에 안 되어 조용히 지나갑니다 - 실제로 자동 제안이
+ * 낸 완전 포함 4건이 그런 모양이었습니다. */
+test('큰 상자가 작은 상자를 통째로 품는 것도 겹침이다', () => {
+  const got = L.overlapPairs([{ x0: 0, y0: 0, x1: 1000, y1: 1000 },
+                              { x0: 10, y0: 10, x1: 100, y1: 100 }]);
+  assert.equal(got.length, 1);
+  assert.equal(got[0].part, 1);
+});
+test('스치는 상자는 겹침이 아니다', () => {
+  assert.equal(L.overlapPairs([{ x0: 0, y0: 0, x1: 100, y1: 100 },
+                               { x0: 95, y0: 0, x1: 200, y1: 100 }]).length, 0);
+});
+
+/* REVERT: 브라우저에 남아 있던 답을 그대로 쓴다. 같은 file:// 자리에서 묶음이
+ * 저장소를 함께 쓰기 때문에, 제안을 고쳐 페이지를 다시 만들어도 옛 상자가
+ * "제안"으로 되살아나고 옛 "봤다"가 그대로 나갑니다. */
+test('제안이나 크롭이 바뀐 답은 이 그림의 답이 아니다', () => {
+  assert.equal(L.staleState({ stamp: 'abc/v2/3' }, { stamp: 'abc/v2/3' }), false);
+  assert.equal(L.staleState({ stamp: 'abc/v1/3' }, { stamp: 'abc/v2/3' }), true);
+  assert.equal(L.staleState({}, { stamp: 'abc/v2/3' }), true);
+});
+
+/* REVERT: 답을 크롭에 묶지 않는다. 같은 이름으로 다시 만들어진 크롭은 같은
+ * 크기의 다른 그림이고, 관문은 그것을 알 길이 없습니다. */
+test('답은 어느 크롭 위의 좌표인지 들고 나간다', () => {
+  const row = L.panelsOf('D0001', state({ crop: 'deadbeef', proposalVersion: 'v2' })).rows[0];
+  assert.equal(row.Crop_SHA256, 'deadbeef');
+  assert.equal(row.Proposal_Version, 'v2');
+  const none = L.panelsOf('D0001', state({ verdict: 'NO_PANELS', boxes: [],
+                                           crop: 'deadbeef' })).rows[0];
+  assert.equal(none.Crop_SHA256, 'deadbeef');
+});
+
 console.log('');
 console.log(pass + '/' + (pass + fails.length) + ' passed');
 if (fails.length) { console.log('FAILED: ' + fails.join(', ')); process.exit(1); }

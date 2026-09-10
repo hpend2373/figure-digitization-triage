@@ -12,6 +12,11 @@
 있어서, 확인은 두 줄을 나란히 보는 일이 됩니다. 리더가 거절한 축에서만 사람이
 숫자를 칩니다 - 그것이 이 페이지에서 타이핑이 남아 있는 유일한 자리입니다.
 
+묻는 것은 **맨 위 눈금**과 **맨 아래 눈금**이고, 각각 픽셀 행까지 적어
+보여 줍니다. 처음엔 "첫 눈금 / 끝 눈금"이라고만 물었고, FIG9 여섯 패널이 전부
+뒤집혀 돌아왔습니다 - 축은 아래에서 시작하니 아래부터 적는 것이 자연스럽고,
+계산은 위부터 짝지었습니다. 물음이 위치를 말하면 애매한 데가 없습니다.
+
 무엇이 답이 되는지는 여기 없고 `geometry_page.js`에 있습니다. 화면은 값을
 옮기기만 합니다 - `errorbar_review_page`·`decision_page`와 같은 나눔이고, 같은
 이유입니다: 브라우저 안에서만 사는 판단 논리는 아무도 시험할 수 없습니다.
@@ -127,13 +132,20 @@ def build(proposals, log=print):
             continue
         ids.append(pid)
         read = GP.read_values_of(row)
+        marks = [m for m in (row.get("Y_Tick_Pixels") or "").split(";") if m]
         meta[pid] = {
             "proposal": pid,
-            # 리더가 읽은 값은 화면의 칸이 아니라 여기서 논리로 갑니다. 칸을
+            # 리더가 읽은 것은 화면의 칸이 아니라 여기서 논리로 갑니다. 칸을
             # 미리 채워 두면 사람이 고치지 않은 값과 리더의 값이 구별되지
             # 않고, `Value_Source`가 아무것도 세지 못합니다.
-            "readFirst": (row.get("Y_Tick_Read_First") or "").strip(),
-            "readLast": (row.get("Y_Tick_Read_Last") or "").strip(),
+            #
+            # 값만이 아니라 **짝**을 넘깁니다. 리더가 맨 위·맨 아래 눈금을
+            # 읽었다는 보장이 없어서, 값만 넘기면 그 값이 어느 눈금의 것인지
+            # 논리가 짐작해야 합니다.
+            "readPairs": (row.get("Y_Tick_Read_Values") or "").strip(),
+            # 사람이 값을 칠 때 그 값이 붙는 자리.
+            "topPixel": marks[0] if marks else "",
+            "bottomPixel": marks[-1] if marks else "",
         }
         w(card(proposals, pid, row, read))
 
@@ -193,12 +205,17 @@ def card(proposals, pid, row, read):
         w("<label class='opt'><input type='radio' name='v-%s' "
           "data-verdict='%s' value='%s'> %s</label>"
           % (esc(pid), esc(pid), esc(value), esc(label)))
-    w("<div class='vals'>축의 첫 눈금 "
-      "<input type='text' data-first='%s' placeholder='%s'> "
-      "끝 눈금 <input type='text' data-last='%s' placeholder='%s'>"
-      "<div class='sub'>비워 두면 리더가 읽은 값을 그대로 씁니다.</div></div>"
-      % (esc(pid), esc(row.get("Y_Tick_Read_First") or "예: 40"),
-         esc(pid), esc(row.get("Y_Tick_Read_Last") or "예: 0")))
+    # 픽셀 행을 함께 적습니다. "맨 위"가 어느 줄인지는 그림에 그려져 있지만,
+    # 숫자로도 보이면 사람이 자기가 어느 눈금을 말하는지 틀릴 수가 없습니다.
+    marks = [m for m in (row.get("Y_Tick_Pixels") or "").split(";") if m]
+    w("<div class='vals'>맨 <b>위</b> 눈금%s "
+      "<input type='text' data-top='%s' placeholder='예: 40'> "
+      "맨 <b>아래</b> 눈금%s "
+      "<input type='text' data-bottom='%s' placeholder='예: 0'>"
+      "<div class='sub'>비워 두면 리더가 읽은 값을 그대로 씁니다. "
+      "위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>"
+      % ((" (픽셀 행 %s)" % esc(marks[0])) if marks else "", esc(pid),
+         (" (픽셀 행 %s)" % esc(marks[-1])) if marks else "", esc(pid)))
     w("<div class='who'>보신 분 <input type='text' data-who='%s' size='12' "
       "placeholder='이름 또는 이니셜'></div>" % esc(pid))
     w("<div class='row'>")
@@ -220,7 +237,7 @@ PAGE_JS = r"""
 
   function st(id) {
     if (!states[id]) {
-      states[id] = { verdict: '', first: '', last: '', note: '', who: '',
+      states[id] = { verdict: '', top: '', bottom: '', note: '', who: '',
                      seen: false };
     }
     var m = META[id];
@@ -228,8 +245,9 @@ PAGE_JS = r"""
     // 옵니다. 화면의 칸에서 읽으면 사람이 고친 값과 구별되지 않습니다.
     if (m) {
       states[id].proposal = m.proposal;
-      states[id].readFirst = m.readFirst;
-      states[id].readLast = m.readLast;
+      states[id].readPairs = m.readPairs;
+      states[id].topPixel = m.topPixel;
+      states[id].bottomPixel = m.bottomPixel;
     }
     return states[id];
   }
@@ -255,9 +273,14 @@ PAGE_JS = r"""
     if (box) {
       box.textContent = got.ready
         ? '답이 되었습니다 — ' + got.row.Human_Verification_Status
-          + (got.row.Y_Tick_First_Value
-             ? ' (' + got.row.Y_Tick_First_Value + ' … '
-               + got.row.Y_Tick_Last_Value + ', ' + got.row.Value_Source + ')'
+          + (got.row.Confirmed_Tick_Values
+             ? ' (위 ' + got.row.Y_Tick_Top_Value + ' … 아래 '
+               + got.row.Y_Tick_Bottom_Value + ', ' + got.row.Value_Source
+               + ') — '
+               // 리더가 못 읽은 축에서는 방향을 견줄 데가 없습니다. 막는 대신
+               // 되읽어 줍니다: 자기가 방금 무슨 축을 만들었는지 글자로 보면
+               // 위아래를 바꿔 적은 것이 눈에 걸립니다.
+               + directionWord(parsePairs(got.row.Confirmed_Tick_Values))
              : '')
         : got.why;
       box.className = 'state' + (got.ready ? ' ready' : '');
@@ -267,11 +290,11 @@ PAGE_JS = r"""
     all("input[data-verdict=\"" + esc(id) + "\"]").forEach(function (r) {
       r.checked = r.value === s.verdict;
     });
-    var ff = q("input[data-first=\"" + esc(id) + "\"]");
-    if (ff) { if (ff.value !== s.first) ff.value = s.first;
+    var ff = q("input[data-top=\"" + esc(id) + "\"]");
+    if (ff) { if (ff.value !== s.top) ff.value = s.top;
               ff.parentNode.hidden = !needsValues(s.verdict); }
-    var ll = q("input[data-last=\"" + esc(id) + "\"]");
-    if (ll && ll.value !== s.last) ll.value = s.last;
+    var ll = q("input[data-bottom=\"" + esc(id) + "\"]");
+    if (ll && ll.value !== s.bottom) ll.value = s.bottom;
     var ww = q("input[data-who=\"" + esc(id) + "\"]");
     if (ww && ww.value !== s.who) ww.value = s.who;
     var vv = q("input[data-seen=\"" + esc(id) + "\"]");
@@ -292,8 +315,8 @@ PAGE_JS = r"""
   }
   bind('input[data-verdict]', 'data-verdict',
        function (s, el) { s.verdict = el.value; }, 'change');
-  bind('input[data-first]', 'data-first', function (s, el) { s.first = el.value; });
-  bind('input[data-last]', 'data-last', function (s, el) { s.last = el.value; });
+  bind('input[data-top]', 'data-top', function (s, el) { s.top = el.value; });
+  bind('input[data-bottom]', 'data-bottom', function (s, el) { s.bottom = el.value; });
   bind('input[data-who]', 'data-who',
        function (s, el) { s.who = el.value; spreadWho(el.value); });
   bind('input[data-seen]', 'data-seen',

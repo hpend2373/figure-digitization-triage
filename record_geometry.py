@@ -52,11 +52,25 @@ HELD = "HOLD"
 ANSWER_REQUIRED = ("Proposal_ID", "Human_Verification_Status",
                    "Verified_By", "Seen_By_Person")
 
+#: 계산이 서는 짝. 값만으로는 어느 눈금의 값인지 알 수 없고, 그것을
+#: `Y_Tick_Pixels`의 양 끝이라고 짐작하던 것이 이 파이프라인에서 축척을
+#: 20~50% 어긋나게 한 결함이었습니다.
+PAIRS = "Confirmed_Tick_Values"
+
 TRUE = ("1", "TRUE", "YES", "Y", "T")
 
 
 def is_true(v):
     return str(v or "").strip().upper() in TRUE
+
+
+def _numeric(*values):
+    try:
+        for v in values:
+            float(v)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def load_proposals(proposals):
@@ -85,8 +99,9 @@ def check_answer(answer, proposed):
     pid = (answer.get("Proposal_ID") or "").strip()
     verdict = (answer.get("Human_Verification_Status") or "").strip().upper()
     who = (answer.get("Verified_By") or "").strip()
-    first = (answer.get("Y_Tick_First_Value") or "").strip()
-    last = (answer.get("Y_Tick_Last_Value") or "").strip()
+    top = (answer.get("Y_Tick_Top_Value") or "").strip()
+    bottom = (answer.get("Y_Tick_Bottom_Value") or "").strip()
+    pairs = GP.pairs_of({PAIRS: answer.get(PAIRS)})
 
     # 사람이 오버레이를 보았다고 말하지 않은 답은 답이 아닙니다. 이 문이
     # 지키는 것은 값의 모양이 아니라 "누가 보았는가"이고, 그것은 에이전트가
@@ -117,7 +132,7 @@ def check_answer(answer, proposed):
                          % (pid or "(빈칸)")))
 
     if verdict in NEEDS_VALUES:
-        for label, value in (("첫", first), ("끝", last)):
+        for label, value in (("맨 위", top), ("맨 아래", bottom)):
             try:
                 float(value)
             except ValueError:
@@ -125,11 +140,34 @@ def check_answer(answer, proposed):
                                  "확인이라면서 %s 눈금 값이 %r입니다. 값 없는 "
                                  "기하는 계산이 되지 않습니다."
                                  % (label, value)))
-        if first and last and first == last:
+        if top and bottom and top == bottom:
             problems.append(("TICK_VALUES_EQUAL",
-                             "첫 눈금과 끝 눈금이 둘 다 %s입니다. 축이 "
-                             "아닙니다." % first))
-    elif first or last:
+                             "맨 위 눈금과 맨 아래 눈금이 둘 다 %s입니다. 축이 "
+                             "아닙니다." % top))
+        # 그리고 값이 어느 눈금 행에 붙는지. 값 둘만 받아 두면 픽셀은 다음
+        # 단계가 짐작해야 하고, 그 짐작은 `Y_Tick_Pixels`의 양 끝이었습니다 -
+        # 리더의 사다리가 눈금 전부를 읽지 못하면 그 짝은 틀리고, 잔차 0.1px에
+        # 앞뒤가 맞는 채로 축척이 절반이 됩니다.
+        if len(pairs) != 2:
+            problems.append(("CALIBRATION_PAIRS_MISSING",
+                             "확인인데 값@픽셀 짝이 %d개입니다. 계산은 둘이 "
+                             "필요하고, 어느 눈금의 값인지는 눈금 목록에서 "
+                             "짐작할 수 없습니다." % len(pairs)))
+        elif pairs[0][1] == pairs[1][1]:
+            problems.append(("CALIBRATION_PAIRS_ONE_ROW",
+                             "두 값이 같은 픽셀 행 %g에 붙어 있습니다."
+                             % pairs[0][1]))
+        else:
+            # 사람이 적은 값과 짝이 서로 다른 말을 하면 어느 쪽이 답인지 이
+            # 관문은 모릅니다. 화면이 둘을 함께 만들지만, 답 CSV는 손으로
+            # 고칠 수 있는 파일입니다.
+            said = sorted((float(top), float(bottom))) if _numeric(top, bottom) else None
+            if said and sorted(v for v, _px in pairs) != said:
+                problems.append(("CALIBRATION_PAIRS_DISAGREE",
+                                 "적으신 값(%s, %s)과 짝의 값(%s)이 다릅니다."
+                                 % (top, bottom,
+                                    ", ".join("%g" % v for v, _px in pairs))))
+    elif top or bottom or pairs:
         # 거절과 보류에 값이 붙어 왔습니다. 붙은 값이 무엇을 뜻하는지 - 틀린
         # 프레임에서 읽은 값인지, 고쳐 준 값인지 - 이 관문은 모릅니다.
         problems.append(("VALUES_WITHOUT_CONFIRMATION",
@@ -187,8 +225,9 @@ def record(proposals, answers, when, out_path=None, replace=False,
         row.update({
             "Human_Verification_Status": (
                 answer.get("Human_Verification_Status") or "").strip().upper(),
-            "Y_Tick_First_Value": (answer.get("Y_Tick_First_Value") or "").strip(),
-            "Y_Tick_Last_Value": (answer.get("Y_Tick_Last_Value") or "").strip(),
+            "Y_Tick_Top_Value": (answer.get("Y_Tick_Top_Value") or "").strip(),
+            "Y_Tick_Bottom_Value": (answer.get("Y_Tick_Bottom_Value") or "").strip(),
+            PAIRS: (answer.get(PAIRS) or "").strip(),
             "Verified_By": (answer.get("Verified_By") or "").strip(),
             "Verified_At": when,
             "Note": (answer.get("Note") or "").strip(),

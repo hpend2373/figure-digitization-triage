@@ -234,7 +234,7 @@ check("a proposal is produced", _row is not None)
 # raster cannot be asked is what the axis SAYS, and a wrong answer to it
 # rescales the panel with every check still passing.
 check("it carries no tick value at all",
-      _row["Y_Tick_First_Value"] == "" and _row["Y_Tick_Last_Value"] == "")
+      _row["Y_Tick_Top_Value"] == "" and _row["Y_Tick_Bottom_Value"] == "")
 check("and no verifier, and PENDING",
       _row["Human_Verification_Status"] == "PENDING"
       and not _row["Verified_By"] and not _row["Verified_At"])
@@ -262,36 +262,46 @@ check("a PENDING proposal yields no calibration",
 # values into and did not sign is refused by `proposal_problems` - and this is
 # the other side of that door, so the geometry cannot reach a plan by being
 # read directly.
-_unsigned = dict(_conf, Y_Tick_First_Value="1.3", Y_Tick_Last_Value="0.2")
+_unsigned = dict(_conf, Y_Tick_Top_Value="1.3", Y_Tick_Bottom_Value="0.2",
+                 Confirmed_Tick_Values="1.3@10;0.2@90")
 check("and neither does one with the values typed in but nobody's name on it",
       GP.calibration_from(_unsigned) is None,
       "%s" % (GP.calibration_from(_unsigned),))
 _conf.update(Human_Verification_Status="CONFIRMED", Verified_By="RV_1",
-             Verified_At="2026-08-11", Y_Tick_First_Value="1.3",
-             Y_Tick_Last_Value="0.2")
+             Verified_At="2026-08-11", Y_Tick_Top_Value="1.3",
+             Y_Tick_Bottom_Value="0.2",
+             Confirmed_Tick_Values="1.3@10;0.2@90")
 _cal = GP.calibration_from(_conf)
 check("a confirmed one yields two points, value and pixel",
       _cal is not None and len(_cal) == 2 and _cal[0][0] == 1.3
       and _cal[1][0] == 0.2, "%s" % (_cal,))
-check("and the pixels are the FIRST and LAST tick that was measured",
-      _cal[0][1] == float(_row["Y_Tick_Pixels"].split(";")[0])
-      and _cal[1][1] == float(_row["Y_Tick_Pixels"].split(";")[-1]),
-      "%s" % (_cal,))
+# THIS SCENARIO USED TO ASSERT THE DEFECT. It required the pixels to be the
+# first and last of `Y_Tick_Pixels`, which is right only when the answer was
+# about those two ticks - and the reader's answer usually is not. What the row
+# carries is what the calibration stands on.
+check("and the pixels are the ones the row carries, not the tick list's ends",
+      _cal[0][1] == 10.0 and _cal[1][1] == 90.0
+      and float(_row["Y_Tick_Pixels"].split(";")[-1]) != 90.0,
+      "%s vs %s" % (_cal, _row["Y_Tick_Pixels"]))
 for _label, _edit, _code in (
         ("a confirmation with nobody behind it",
-         dict(Human_Verification_Status="CONFIRMED", Y_Tick_First_Value="1.3",
-              Y_Tick_Last_Value="0.2"), "PROPOSAL_VERDICT_UNATTRIBUTED"),
+         dict(Human_Verification_Status="CONFIRMED", Y_Tick_Top_Value="1.3",
+              Y_Tick_Bottom_Value="0.2",
+              Confirmed_Tick_Values="1.3@10;0.2@90"),
+         "PROPOSAL_VERDICT_UNATTRIBUTED"),
         ("a confirmation with no tick value",
          dict(Human_Verification_Status="CONFIRMED", Verified_By="RV_1",
               Verified_At="2026-08-11"), "PROPOSAL_TICK_VALUE_MISSING"),
         ("a confirmation whose two ticks are the same number",
          dict(Human_Verification_Status="CONFIRMED", Verified_By="RV_1",
-              Verified_At="2026-08-11", Y_Tick_First_Value="1",
-              Y_Tick_Last_Value="1"), "PROPOSAL_TICK_VALUES_EQUAL"),
+              Verified_At="2026-08-11", Y_Tick_Top_Value="1",
+              Y_Tick_Bottom_Value="1",
+              Confirmed_Tick_Values="1@10;1@90"),
+         "PROPOSAL_TICK_VALUES_EQUAL"),
         ("a PENDING row that names a verifier anyway",
          dict(Verified_By="RV_1"), "PROPOSAL_PENDING_WITH_A_VERIFIER"),
         ("a PENDING row carrying a tick value",
-         dict(Y_Tick_First_Value="1.3"), "PROPOSAL_PENDING_WITH_A_TICK_VALUE"),
+         dict(Y_Tick_Top_Value="1.3"), "PROPOSAL_PENDING_WITH_A_TICK_VALUE"),
         ("a status nobody declared",
          dict(Human_Verification_Status="LOOKS_FINE"),
          "PROPOSAL_STATUS_UNKNOWN"),
@@ -414,6 +424,34 @@ check("and the mark reading is drawn in its own colour",
           for x in range(_bsize[0]) for y in range(_bsize[1])))
 
 print()
+print("a calibration stands on pairs, not on two numbers and a guess")
+
+# REVERT: pair the confirmed values with `Y_Tick_Pixels`'s two ends. That is the
+# right pair only when the answer was ABOUT those two ticks, and the reader's
+# usually is not: its ladder covered five of six ticks on this project's own
+# FIG9 and three of five on another panel. Pairing its last value with the last
+# tick put those two panels 20% and 50% off, with a ladder residual of 0.1 px
+# and no complaint anywhere.
+_conf = dict(_row, Human_Verification_Status="CONFIRMED", Verified_By="MC",
+             Verified_At="2026-09-10", Y_Tick_Top_Value="40",
+             Y_Tick_Bottom_Value="20",
+             Y_Tick_Pixels="100;200;300;400",
+             Confirmed_Tick_Values="40@100;20@300")
+check("the calibration uses the pixels it was given",
+      GP.calibration_from(_conf) == [[40.0, 100.0], [20.0, 300.0]],
+      GP.calibration_from(_conf))
+check("and refuses a row that carries none",
+      GP.calibration_from(dict(_conf, Confirmed_Tick_Values="")) is None)
+check("a CONFIRMED row with no pairs is refused",
+      any(c == "PROPOSAL_CALIBRATION_PAIRS_MISSING"
+          for _p, c, _d in GP.proposal_problems(
+              [dict(_conf, Confirmed_Tick_Values="40@100")])))
+check("and one that pins both values to one row",
+      any(c == "PROPOSAL_CALIBRATION_PAIRS_ONE_ROW"
+          for _p, c, _d in GP.proposal_problems(
+              [dict(_conf, Confirmed_Tick_Values="40@100;20@100")])))
+
+print()
 print("what the reader may say about an axis")
 
 # REVERT: hand back everything the OCR returned. `ladder` accepts a contiguous
@@ -442,7 +480,7 @@ _status, _kept, _detail, _resid = GP.values_from_ladder([(30.0, 100.0), (20.0, 2
 check("two labels are not a ladder",
       _status == GP.READ_REFUSED and "3 needed" in _detail, _detail)
 
-# REVERT: put the reading in the person's column. `Y_Tick_First_Value` means a
+# REVERT: put the reading in the person's column. `Y_Tick_Top_Value` means a
 # person read this axis; a machine writing there is a machine answering for one.
 _read = GP.apply_reading(dict(_row), *GP.values_from_ladder(_WITH_BAD))
 check("what the reader read lands in the reader's columns",
@@ -451,22 +489,22 @@ check("what the reader read lands in the reader's columns",
       "%s" % [_read[c] for c in ("Y_Tick_Read_First", "Y_Tick_Read_Last",
                                  "Y_Tick_Read_Values")])
 check("and in nobody else's",
-      not GP._s(_read.get("Y_Tick_First_Value"))
-      and not GP._s(_read.get("Y_Tick_Last_Value"))
+      not GP._s(_read.get("Y_Tick_Top_Value"))
+      and not GP._s(_read.get("Y_Tick_Bottom_Value"))
       and not GP._s(_read.get("Verified_By")),
-      "%s" % [_read.get(c) for c in ("Y_Tick_First_Value", "Y_Tick_Last_Value",
+      "%s" % [_read.get(c) for c in ("Y_Tick_Top_Value", "Y_Tick_Bottom_Value",
                                      "Verified_By")])
 check("a refused reading writes no value at all",
       not GP._s(GP.apply_reading(dict(_row), *GP.values_from_ladder(
           [(30.0, 100.0), (6.0, 200.0), (10.0, 300.0)])).get("Y_Tick_Read_First")))
 check("a reading is not a confirmation",
       _read["Human_Verification_Status"] == GP.PROPOSAL_PENDING
-      and not GP._s(_read.get("Y_Tick_First_Value"))
+      and not GP._s(_read.get("Y_Tick_Top_Value"))
       and not GP._s(_read.get("Verified_By")))
 check("and a PENDING row that carries one is still refused",
       any(c == "PROPOSAL_PENDING_WITH_A_TICK_VALUE"
           for _p, c, _d in GP.proposal_problems(
-              [dict(_read, Y_Tick_First_Value="30")])))
+              [dict(_read, Y_Tick_Top_Value="30")])))
 check("a proposal that says it read the axis and carries nothing is refused",
       any(c == "PROPOSAL_READ_WITHOUT_VALUES"
           for _p, c, _d in GP.proposal_problems(

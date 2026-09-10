@@ -52,7 +52,8 @@ GP.write_proposals(os.path.join(PROP, R.PROPOSALS),
 
 def answer(**over):
     row = {"Proposal_ID": "GP001", "Human_Verification_Status": "CONFIRMED",
-           "Y_Tick_First_Value": "30", "Y_Tick_Last_Value": "10",
+           "Y_Tick_Top_Value": "30", "Y_Tick_Bottom_Value": "10",
+           "Confirmed_Tick_Values": "30@10;10@90",
            "Verified_By": "MC", "Seen_By_Person": "1",
            "Value_Source": "READ", "Note": ""}
     row.update(over)
@@ -85,6 +86,18 @@ check("제안이 잰 것을 그대로 들고 간다", _w[0]["Y_Tick_Pixels"] == 
 check("그래서 그 행에서 바로 계산이 나온다",
       GP.calibration_from(_w[0]) == [[30.0, 10.0], [10.0, 90.0]],
       GP.calibration_from(_w[0]))
+# REVERT: 값만 받아 두고 픽셀은 눈금 목록의 양 끝이라고 짐작한다. 리더의
+# 사다리가 눈금 전부를 읽었다는 보장이 없습니다 - FIG9에서 6개 중 5개,
+# 5개 중 3개를 읽었고, 그 값을 양 끝과 짝지으니 축척이 20%와 50% 어긋난 채로
+# 잔차 0.1px에 앞뒤가 맞았습니다.
+check("값이 어느 눈금 행의 것인지까지 들고 간다",
+      _w[0]["Confirmed_Tick_Values"] == "30@10;10@90",
+      _w[0].get("Confirmed_Tick_Values"))
+_partial = run([answer(Y_Tick_Bottom_Value="20",
+                       Confirmed_Tick_Values="30@10;20@50")])[0][0]
+check("리더가 눈금 일부만 읽었으면 계산도 그 눈금에 선다",
+      GP.calibration_from(_partial) == [[30.0, 10.0], [20.0, 50.0]],
+      GP.calibration_from(_partial))
 
 print()
 print("이 관문이 지키는 것은 값의 모양이 아니라 누가 보았는가다")
@@ -103,12 +116,26 @@ print("확인은 값을 들고 와야 확인이다")
 # REVERT: 값 없는 확인을 적는다. 계산이 되지 않는 기하가 확인된 채로 앉아
 # 있고, 다음 사람은 그것이 쓸 수 있는 줄 압니다.
 check("값 없는 확인은 거절한다",
-      "TICK_VALUE_MISSING" in codes(run([answer(Y_Tick_First_Value="")])[1]))
+      "TICK_VALUE_MISSING" in codes(run([answer(Y_Tick_Top_Value="")])[1]))
 check("숫자가 아닌 값도 거절한다",
-      "TICK_VALUE_MISSING" in codes(run([answer(Y_Tick_First_Value="약 30")])[1]))
-check("첫 눈금과 끝 눈금이 같으면 거절한다",
+      "TICK_VALUE_MISSING" in codes(run([answer(Y_Tick_Top_Value="약 30")])[1]))
+check("맨 위와 맨 아래가 같으면 거절한다",
       "TICK_VALUES_EQUAL" in codes(
-          run([answer(Y_Tick_First_Value="10", Y_Tick_Last_Value="10")])[1]))
+          run([answer(Y_Tick_Top_Value="10", Y_Tick_Bottom_Value="10",
+                      Confirmed_Tick_Values="10@10;10@90")])[1]))
+# REVERT: 짝 없이 값만 있어도 적는다. 다음 단계가 픽셀을 짐작해야 하고,
+# 짐작할 데가 없으면 눈금 목록의 양 끝을 씁니다.
+check("값@픽셀 짝이 없으면 거절한다",
+      "CALIBRATION_PAIRS_MISSING" in codes(
+          run([answer(Confirmed_Tick_Values="")])[1]))
+check("두 값이 같은 픽셀 행에 붙으면 거절한다",
+      "CALIBRATION_PAIRS_ONE_ROW" in codes(
+          run([answer(Confirmed_Tick_Values="30@10;10@10")])[1]))
+# REVERT: 적힌 값과 짝의 값이 달라도 그냥 적는다. 답 CSV는 손으로 고칠 수 있는
+# 파일이고, 둘이 다르면 어느 쪽이 답인지 이 관문은 모릅니다.
+check("적으신 값과 짝의 값이 다르면 거절한다",
+      "CALIBRATION_PAIRS_DISAGREE" in codes(
+          run([answer(Confirmed_Tick_Values="99@10;10@90")])[1]))
 # REVERT: 확인하지 않은 기하에 붙어 온 값을 그냥 적는다. 그 값이 틀린
 # 프레임에서 읽은 것인지 고쳐 준 것인지 이 관문은 모릅니다.
 check("거절·보류에 붙어 온 값은 거절한다",
@@ -116,7 +143,8 @@ check("거절·보류에 붙어 온 값은 거절한다",
           run([answer(Human_Verification_Status="REJECTED")])[1]))
 check("값 없는 거절은 그대로 적힌다",
       len(run([answer(Human_Verification_Status="REJECTED",
-                      Y_Tick_First_Value="", Y_Tick_Last_Value="")])[0]) == 1)
+                      Y_Tick_Top_Value="", Y_Tick_Bottom_Value="",
+                      Confirmed_Tick_Values="")])[0]) == 1)
 
 print()
 print("적을 수 없는 답에는 이름을 붙여 돌려보낸다")
@@ -129,21 +157,24 @@ check("낸 적 없는 제안의 답은 거절한다",
 # REVERT: 보류를 확인으로 적는다. "아직 못 정하겠다"가 정해진 것이 됩니다.
 check("보류는 적지 않고 이름을 대고 거절한다",
       codes(run([answer(Human_Verification_Status="HOLD",
-                        Y_Tick_First_Value="", Y_Tick_Last_Value="")])[1])
-      == ["HELD"])
+                        Y_Tick_Top_Value="", Y_Tick_Bottom_Value="",
+                        Confirmed_Tick_Values="")])[1]) == ["HELD"])
 
 print()
 print("두 번 적지 않는다")
 _out = os.path.join(TMP, "twice.csv")
 R.record(PROP, [answer()], "2026-09-10", out_path=_out, log=lambda *a: None)
-_w2, _r2, _ = R.record(PROP, [answer(Y_Tick_First_Value="99")], "2026-09-11",
-                       out_path=_out, log=lambda *a: None)
+_w2, _r2, _ = R.record(PROP, [answer(Y_Tick_Top_Value="99",
+                                     Confirmed_Tick_Values="99@10;10@90")],
+                       "2026-09-11", out_path=_out, log=lambda *a: None)
 check("이미 적힌 제안은 거절한다",
       not _w2 and "ALREADY_RECORDED" in codes(_r2), codes(_r2))
-_w3, _r3, _ = R.record(PROP, [answer(Y_Tick_First_Value="99")], "2026-09-11",
-                       out_path=_out, replace=True, log=lambda *a: None)
+_w3, _r3, _ = R.record(PROP, [answer(Y_Tick_Top_Value="99",
+                                     Confirmed_Tick_Values="99@10;10@90")],
+                       "2026-09-11", out_path=_out, replace=True,
+                       log=lambda *a: None)
 check("--replace를 주면 바꾼다",
-      len(_w3) == 1 and _w3[0]["Y_Tick_First_Value"] == "99")
+      len(_w3) == 1 and _w3[0]["Y_Tick_Top_Value"] == "99")
 _rows = list(csv.DictReader(io.open(_out, encoding="utf-8-sig")))
 check("바꾼 뒤에도 줄은 하나다", len(_rows) == 1, len(_rows))
 
@@ -169,7 +200,7 @@ print("적으려는 파일 전체를 마지막으로 걸어 본다")
 # 가장 쉬운 손질입니다 - 이 관문은 그것을 그대로 다시 적어 축복해 줍니다.
 _dirty = os.path.join(TMP, "dirty.csv")
 GP.write_proposals(_dirty, [dict(PROPOSED, Proposal_ID="GP002",
-                                 Y_Tick_First_Value="30")])
+                                 Y_Tick_Top_Value="30")])
 try:
     R.record(PROP, [answer()], "2026-09-10", out_path=_dirty,
              log=lambda *a: None)

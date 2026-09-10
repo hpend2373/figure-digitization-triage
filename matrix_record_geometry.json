@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_geometry.py": "7feb49d32aab3b34c2708c2799be7935431e85e23540fbd33adb92697f550756",
-  "test_record_geometry.py": "e66d05f9b5186e476f6a7db7ccf6af10198cfc200ac6a7dcc3530b4fca4cdd1d"
+  "record_geometry.py": "7bc26b3462bd17a26ea1fcfdb243fde0e165943b6cf3a94badc33824521f0b4f",
+  "test_record_geometry.py": "4414fc3d2962fca79ec393bd26cae370a8ef1315ce91c2c07f62a491e97facc7"
  },
  "suites": [
   "test_record_geometry.py"
@@ -18,24 +18,6 @@
    "file": "record_geometry.py",
    "old": "    if not who:",
    "new": "    if False:"
-  },
-  {
-   "name": "값 없는 확인을 적는다",
-   "file": "record_geometry.py",
-   "old": "    if verdict in NEEDS_VALUES:",
-   "new": "    if False:"
-  },
-  {
-   "name": "첫 눈금과 끝 눈금이 같아도 적는다",
-   "file": "record_geometry.py",
-   "old": "        if first and last and first == last:",
-   "new": "        if False:"
-  },
-  {
-   "name": "확인하지 않은 기하에 붙은 값을 그냥 적는다",
-   "file": "record_geometry.py",
-   "old": "    elif first or last:",
-   "new": "    elif False:"
   },
   {
    "name": "모르는 판정을 받는다",
@@ -84,6 +66,48 @@
    "file": "record_geometry.py",
    "old": "    bad = GP.proposal_problems(rows)\n    if bad:",
    "new": "    bad = []\n    if bad:"
+  },
+  {
+   "name": "값 없는 확인을 적는다",
+   "file": "record_geometry.py",
+   "old": "    if verdict in NEEDS_VALUES:",
+   "new": "    if False:"
+  },
+  {
+   "name": "맨 위와 맨 아래가 같아도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if top and bottom and top == bottom:",
+   "new": "        if False:"
+  },
+  {
+   "name": "확인하지 않은 기하에 붙은 값을 그냥 적는다",
+   "file": "record_geometry.py",
+   "old": "    elif top or bottom or pairs:",
+   "new": "    elif False:"
+  },
+  {
+   "name": "짝 없이 값만 있어도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if len(pairs) != 2:",
+   "new": "        if False:"
+  },
+  {
+   "name": "두 값이 같은 픽셀 행에 붙어도 적는다",
+   "file": "record_geometry.py",
+   "old": "        elif pairs[0][1] == pairs[1][1]:",
+   "new": "        elif False:"
+  },
+  {
+   "name": "적힌 값과 짝의 값이 달라도 적는다",
+   "file": "record_geometry.py",
+   "old": "            if said and sorted(v for v, _px in pairs) != said:",
+   "new": "            if False:"
+  },
+  {
+   "name": "짝을 적지 않는다",
+   "file": "record_geometry.py",
+   "old": "            PAIRS: (answer.get(PAIRS) or \"\").strip(),",
+   "new": "            PAIRS: \"\","
   }
  ]
 }

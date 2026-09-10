@@ -105,7 +105,7 @@ for name, hand in HAND.items():
         failures.append("%s: an anchor is off by more than %.1f px"
                         % (name, ANCHOR_TOL_PX))
     # And nothing that only a person can answer.
-    if row["Y_Tick_First_Value"] or row["Y_Tick_Last_Value"]:
+    if row["Y_Tick_Top_Value"] or row["Y_Tick_Bottom_Value"]:
         failures.append("%s: the proposal invented a tick VALUE" % name)
     if row["Human_Verification_Status"] != "PENDING":
         failures.append("%s: the proposal is not PENDING" % name)

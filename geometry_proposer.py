@@ -79,7 +79,7 @@ PROPOSAL_COLUMNS = (
     "Box_Anchor_Pixels", "Box_Anchor_Count", "Box_Anchor_Detail",
     "Confidence", "Confidence_Reason",
     # WHAT THE MACHINE READ, in its own columns. Separate from the two below on
-    # purpose: `Y_Tick_First_Value` still means "a person read this axis", and a
+    # purpose: `Y_Tick_Top_Value` still means "a person read this axis", and a
     # PENDING row carrying one is still refused. A reading is not a confirmation,
     # and putting them in one column is how a machine's guess becomes a person's
     # answer without anybody deciding that it should.
@@ -87,7 +87,20 @@ PROPOSAL_COLUMNS = (
     "Y_Tick_Read_First", "Y_Tick_Read_Last",
     "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail",
     "Human_Verification_Status", "Verified_By", "Verified_At",
-    "Y_Tick_First_Value", "Y_Tick_Last_Value", "Note",
+    # 사람이 적은 두 수. 이름이 `First`/`Last`였고, 그것이 무엇의 처음인지
+    # 아무 데도 적혀 있지 않았습니다. 축은 아래에서 시작하니 아래부터 적는
+    # 것이 자연스럽고, 계산은 위부터 짝지었습니다 - FIG9 여섯 패널이 전부
+    # 뒤집혀 돌아왔고 관문의 문 넷을 다 지났습니다. 뒤집힌 축은 이 코퍼스에
+    # 실제로 있어서(`AXIS_INVERTED`) 뒤집힘 자체로는 막을 수 없습니다.
+    # 이름이 위치를 말하면 물음에 애매한 데가 없습니다.
+    "Y_Tick_Top_Value", "Y_Tick_Bottom_Value",
+    # 계산이 실제로 쓰는 것: 값과 그 값이 붙은 픽셀 행의 짝, 둘.
+    # 값만 받아 두고 픽셀은 `Y_Tick_Pixels`의 양 끝이라고 짐작하던 것이
+    # 두 번째 결함이었습니다 - 리더의 사다리가 눈금 전부를 읽지 못하면
+    # (GP001은 6개 중 5개, GP002는 5개 중 3개) 리더가 말한 값은 읽은
+    # 눈금의 끝인데 짝은 모든 눈금의 끝과 지어져, 축척이 20~50% 어긋난
+    # 채로 잔차 0.1px에 앞뒤가 맞습니다.
+    "Confirmed_Tick_Values", "Note",
 )
 
 #: What `read_tick_values` can say. `REFUSED` is a reading that did not hold
@@ -647,7 +660,7 @@ def apply_reading(row, status, kept, detail, residual):
     Split from the reading for the same reason as `values_from_ladder`: this is
     where the line between what a machine read and what a person answered is
     actually drawn, and a line nobody can test is a line that moves. Only
-    `Y_Tick_Read_*` is written here - `Y_Tick_First_Value`, `Y_Tick_Last_Value`,
+    `Y_Tick_Read_*` is written here - `Y_Tick_Top_Value`, `Y_Tick_Bottom_Value`,
     `Verified_By`, `Verified_At` and `Human_Verification_Status` are not touched,
     whatever the reader saw.
     """
@@ -718,14 +731,15 @@ def proposal_problems(rows):
             continue
         who = _s(row.get("Verified_By"))
         when = _s(row.get("Verified_At"))
-        first = _s(row.get("Y_Tick_First_Value"))
-        last = _s(row.get("Y_Tick_Last_Value"))
+        top = _s(row.get("Y_Tick_Top_Value"))
+        bottom = _s(row.get("Y_Tick_Bottom_Value"))
+        pairs = _s(row.get("Confirmed_Tick_Values"))
         if status == PROPOSAL_PENDING:
             if who or when:
                 out.append((pid, "PROPOSAL_PENDING_WITH_A_VERIFIER",
                             "%s is still PENDING and names %s"
                             % (pid, who or when)))
-            if first or last:
+            if top or bottom or pairs:
                 out.append((pid, "PROPOSAL_PENDING_WITH_A_TICK_VALUE",
                             "%s carries a tick value and nobody has read the "
                             "axis" % pid))
@@ -737,8 +751,8 @@ def proposal_problems(rows):
         if status != "CONFIRMED":
             continue
         # The two numbers the whole split exists for.
-        for label, value in (("Y_Tick_First_Value", first),
-                             ("Y_Tick_Last_Value", last)):
+        for label, value in (("Y_Tick_Top_Value", top),
+                             ("Y_Tick_Bottom_Value", bottom)):
             try:
                 float(value)
             except ValueError:
@@ -746,31 +760,69 @@ def proposal_problems(rows):
                             "%s is CONFIRMED with %s=%r; what the axis says is "
                             "the one thing a raster cannot be asked"
                             % (pid, label, value)))
-        if first and last and first == last:
+        if top and bottom and top == bottom:
             out.append((pid, "PROPOSAL_TICK_VALUES_EQUAL",
-                        "%s says the first and last tick are both %s, which is "
-                        "not an axis" % (pid, first)))
+                        "%s says the top and bottom tick are both %s, which is "
+                        "not an axis" % (pid, top)))
+        # AND THE PAIRS THE CALIBRATION ACTUALLY USES. Two numbers alone leave
+        # the pixels to be guessed, and the guess was `Y_Tick_Pixels`'s two ends
+        # - which are the right ticks only when whoever answered was answering
+        # about those two. The reader usually is not: its ladder covered five of
+        # six ticks on this project's own FIG9, and pairing its last value with
+        # the last tick made that panel's scale 20% wrong with a 0.1 px residual.
+        got = pairs_of(row)
+        if len(got) != 2:
+            out.append((pid, "PROPOSAL_CALIBRATION_PAIRS_MISSING",
+                        "%s is CONFIRMED and carries %d value@pixel pair(s); a "
+                        "calibration is two, and which ticks they are cannot be "
+                        "guessed from the tick list" % (pid, len(got))))
+        elif got[0][1] == got[1][1]:
+            out.append((pid, "PROPOSAL_CALIBRATION_PAIRS_ONE_ROW",
+                        "%s pins both values to pixel row %g" % (pid, got[0][1])))
+        elif got[0][0] == got[1][0]:
+            out.append((pid, "PROPOSAL_CALIBRATION_PAIRS_ONE_VALUE",
+                        "%s pins the same value %g to two rows" % (pid, got[0][0])))
+    return out
+
+
+def pairs_of(row):
+    """[(value, pixel)] a CONFIRMED row's calibration stands on, or []."""
+    return _parse_pairs(_s(row.get("Confirmed_Tick_Values")))
+
+
+def _parse_pairs(text):
+    out = []
+    for part in str(text or "").split(";"):
+        if not part or "@" not in part:
+            continue
+        value, pixel = part.split("@", 1)
+        try:
+            out.append((float(value), float(pixel)))
+        except ValueError:
+            continue
     return out
 
 
 def calibration_from(row):
     """[[value, pixel], [value, pixel]] for a CONFIRMED proposal, or None.
 
-    The join between the two halves: the pixels this module measured and the
-    values a person read, put together only once both exist. Returns the FIRST
-    and LAST tick, which on a regular ladder pins every one between them.
+    The join between the two halves, and it reads the pixels rather than
+    guessing them. It used to take the value columns and pair them with
+    `Y_Tick_Pixels`'s two ends - which is right only when the answer was ABOUT
+    those two ticks. The reader's answer usually is not: on this project's own
+    FIG9 its ladder covered five of six ticks on one panel and three of five on
+    another, and pairing its last value with the last tick put those panels 20%
+    and 50% off with a ladder residual of 0.1 px and no complaint anywhere.
+
+    So the pairs are carried, not inferred, and a row without them is refused
+    rather than calibrated on a guess.
     """
     if _s(row.get("Human_Verification_Status")).upper() != "CONFIRMED":
         return None
-    marks = [float(m) for m in _s(row.get("Y_Tick_Pixels")).split(";") if m]
-    try:
-        first = float(_s(row.get("Y_Tick_First_Value")))
-        last = float(_s(row.get("Y_Tick_Last_Value")))
-    except ValueError:
+    pairs = pairs_of(row)
+    if len(pairs) != 2 or pairs[0][1] == pairs[1][1]:
         return None
-    if len(marks) < 2:
-        return None
-    return [[first, marks[0]], [last, marks[-1]]]
+    return [[pairs[0][0], pairs[0][1]], [pairs[1][0], pairs[1][1]]]
 
 
 def write_proposals(path, rows):
@@ -928,7 +980,7 @@ def main(argv=None):
     print("%d proposal(s), all PENDING; the axis was read on %d and refused on "
           "%d. Open each overlay: the frame, the tick rows, and - where it is "
           "drawn - what the reader says each tick is. Confirming is looking; "
-          "type Y_Tick_First_Value and Y_Tick_Last_Value where the reader "
+          "type Y_Tick_Top_Value and Y_Tick_Bottom_Value where the reader "
           "refused or where the picture disagrees with it."
           % (len(rows), read, len(rows) - read))
     return 0

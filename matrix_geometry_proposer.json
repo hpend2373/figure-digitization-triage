@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "670ea4183b5205ee62b7d50501439e1e6b68bedcc230f5f4f3ca497e6fc21b29",
-  "test_geometry_proposer.py": "eb5ed62a37aa616335000aa956340e675ab6b22d9e8e50cd4427671936a26f08"
+  "geometry_proposer.py": "234d2451387497dc6e6e8ba311c7be2c5670458c8c5ea960651d3c058008775e",
+  "test_geometry_proposer.py": "6ecd3742a2733096c75147edf1f1c3581277bb20113301a5e542f92fd8a33b0b"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -90,6 +90,24 @@
    "file": "geometry_proposer.py",
    "old": "        draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),\n                  fill=(190, 60, 190), width=5)",
    "new": "        draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),\n                  fill=(20, 150, 90), width=5)"
+  },
+  {
+   "name": "확인된 값이 어느 눈금의 것인지 짐작한다",
+   "file": "geometry_proposer.py",
+   "old": "    pairs = pairs_of(row)\n    if len(pairs) != 2 or pairs[0][1] == pairs[1][1]:\n        return None",
+   "new": "    pairs = pairs_of(row)\n    marks = [float(m) for m in _s(row.get(\"Y_Tick_Pixels\")).split(\";\") if m]\n    if len(marks) >= 2:\n        pairs = [(float(_s(row.get(\"Y_Tick_Top_Value\")) or 0), marks[0]),\n                 (float(_s(row.get(\"Y_Tick_Bottom_Value\")) or 0), marks[-1])]\n    if len(pairs) != 2 or pairs[0][1] == pairs[1][1]:\n        return None"
+  },
+  {
+   "name": "확인에 짝이 없어도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "        got = pairs_of(row)\n        if len(got) != 2:",
+   "new": "        got = pairs_of(row)\n        if False:"
+  },
+  {
+   "name": "두 값이 같은 픽셀 행에 붙어도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "        elif got[0][1] == got[1][1]:",
+   "new": "        elif False:"
   }
  ]
 }

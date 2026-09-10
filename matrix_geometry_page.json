@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "da999591f6f49bc682df37e9d6c0e1bfa46ab5d59d68a764b25f859ad991a3f4",
-  "test_geometry_page.py": "83eaa7d701d4f7fbf37d6c49df79d86f078bdb10231b468040951fc6ffa9c471"
+  "geometry_page.py": "b2d7e78db0577242ce9b04ce5c1a4c745dc44b9db8be52c0edaec0428164bd07",
+  "test_geometry_page.py": "2b8df02806ac769c7a477a8fdbed7055a3d0484bb2d0c13d32ac7010f920371c"
  },
  "suites": [
   "test_geometry_page.py"
@@ -20,12 +20,6 @@
    "new": "          \"<br>첫 눈금과 끝 눈금을 적어 주세요.</div>\")"
   },
   {
-   "name": "읽은 값을 입력 칸에 미리 채워 둔다",
-   "file": "geometry_page.py",
-   "old": "    w(\"<div class='vals'>축의 첫 눈금 \"\n      \"<input type='text' data-first='%s' placeholder='%s'> \"",
-   "new": "    w(\"<div class='vals'>축의 첫 눈금 \"\n      \"<input type='text' data-first='%s' value='%s'> \""
-  },
-  {
    "name": "관문이 적는 이름으로 내려받는다",
    "file": "geometry_page.py",
    "old": "    a.download = 'geometry_answers.csv';",
@@ -38,10 +32,40 @@
    "new": "    if False:\n        raise SystemExit(\"\")"
   },
   {
-   "name": "리더가 읽은 값을 META로 넘기지 않는다",
+   "name": "읽은 값을 입력 칸에 미리 채워 둔다",
    "file": "geometry_page.py",
-   "old": "            \"readFirst\": (row.get(\"Y_Tick_Read_First\") or \"\").strip(),",
-   "new": "            \"readFirst\": \"\","
+   "old": "      \"<input type='text' data-top='%s' placeholder='예: 40'> \"",
+   "new": "      \"<input type='text' data-top='%s' value='예: 40'> \""
+  },
+  {
+   "name": "리더가 읽은 짝을 META로 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"readPairs\": (row.get(\"Y_Tick_Read_Values\") or \"\").strip(),",
+   "new": "            \"readPairs\": \"\","
+  },
+  {
+   "name": "값을 붙일 눈금 행을 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"topPixel\": marks[0] if marks else \"\",",
+   "new": "            \"topPixel\": \"\","
+  },
+  {
+   "name": "어느 끝인지 위치로 묻지 않는다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<div class='vals'>맨 <b>위</b> 눈금%s \"",
+   "new": "    w(\"<div class='vals'>축의 첫 눈금%s \""
+  },
+  {
+   "name": "어느 눈금 행인지 보여 주지 않는다",
+   "file": "geometry_page.py",
+   "old": "      % ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \"\", esc(pid),",
+   "new": "      % (\"\", esc(pid),"
+  },
+  {
+   "name": "바꿔 적으면 어떻게 되는지 말하지 않는다",
+   "file": "geometry_page.py",
+   "old": "      \"위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>\"",
+   "new": "      \"</div></div>\""
   }
  ]
 }

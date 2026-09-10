@@ -103,10 +103,29 @@ print()
 print("리더가 읽은 값은 화면의 칸이 아니라 논리로 건너간다")
 # REVERT: 읽은 값을 입력 칸에 미리 채워 둔다. 그러면 사람이 고치지 않은 값과
 # 사람이 친 값이 구별되지 않고, `Value_Source`가 아무것도 세지 못합니다.
-_first = re.search(r"data-first='GP001'[^>]*>", HTML).group(0)
-check("첫 눈금 칸은 비어서 나간다", "value=" not in _first, _first)
-check("읽은 값은 META로 건너간다",
-      '"readFirst": "30"' in HTML or '"readFirst":"30"' in HTML)
+_top = re.search(r"data-top='GP001'[^>]*>", HTML).group(0)
+check("맨 위 눈금 칸은 비어서 나간다", "value=" not in _top, _top)
+# REVERT: 값만 META로 넘긴다. 리더가 맨 위·맨 아래 눈금을 읽었다는 보장이
+# 없어서, 값만 넘기면 그 값이 어느 눈금의 것인지 논리가 짐작해야 합니다.
+check("읽은 것은 값이 아니라 값@픽셀 짝으로 건너간다",
+      '"readPairs": "30@10;20@50;10@90"' in HTML
+      or '"readPairs":"30@10;20@50;10@90"' in HTML)
+# REVERT: 값을 붙일 눈금 행을 넘기지 않는다. 사람이 친 값이 어디에 붙는지
+# 논리가 알 수 없고, 그러면 짝을 만들 수 없습니다.
+check("값을 붙일 눈금 행도 함께 건너간다",
+      '"topPixel": "10"' in HTML or '"topPixel":"10"' in HTML)
+
+print()
+print("맨 위·맨 아래로 묻는다")
+# REVERT: "첫 눈금 / 끝 눈금"이라고 묻는다. 축은 아래에서 시작하니 아래부터
+# 적는 것이 자연스럽고, 계산은 위부터 짝지었습니다 - FIG9 여섯 패널이 전부
+# 뒤집혀 돌아왔고 관문의 문 넷을 다 지났습니다.
+check("어느 끝인지를 위치로 묻는다",
+      "맨 <b>위</b> 눈금" in HTML and "맨 <b>아래</b> 눈금" in HTML)
+check("어느 눈금 행인지 숫자로도 보여 준다",
+      "(픽셀 행 10)" in HTML and "(픽셀 행 90)" in HTML)
+check("바꿔 적으면 어떻게 되는지도 칸 옆에 적혀 있다",
+      "위·아래를 바꿔 적으면" in HTML.split("<script>")[0])
 
 print()
 print("내려받는 이름은 관문의 출력과 다르다")

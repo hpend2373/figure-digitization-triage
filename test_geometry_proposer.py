@@ -8,10 +8,11 @@ measurement every time. So it is proposed here.
 
 The scenarios are mostly about the boundary, again. A frame found two pixels
 out costs a slightly wider crop. A tick VALUE guessed wrong rescales every
-number in the panel by ten, leaves the calibration residual at zero, and makes
-the whole file self-consistent and wrong - so the contract under test is that
-this module never produces one, and refuses a proposal that claims to be
-confirmed without a person having typed it.
+number in the panel by ten - so the contract under test is that a reading which
+does not hold together as a ladder is REFUSED rather than returned, that only
+the run the ladder kept is proposed, that a reading lands in its own columns and
+never in the person's, and that a proposal claiming to be CONFIRMED without a
+person is refused whatever the machine read.
 
 The fixtures are drawn here with PIL at two scales, because the second thing
 under test is that nothing in the detection is a distance in pixels: the same
@@ -298,6 +299,87 @@ check("and it is drawn on the raster, not on a blank",
                                 for y in range(0, _ov.size[1], 7)))
 
 print()
+print("what the reader may say about an axis")
+
+# REVERT: hand back everything the OCR returned. `ladder` accepts a contiguous
+# SUBSET when the full set fails; on FIG9 of this project's own corpus that
+# dropped a `9000` printed `5000`, and drawing all the pairs put that 9000 back
+# on the overlay in the reader's own colour - where a person confirming the
+# picture confirms the one value the calibration threw away.
+_LADDER = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+_status, _kept, _detail, _resid = GP.values_from_ladder(_LADDER)
+check("a reading that holds together is proposed",
+      _status == GP.READ_OK and _kept == _LADDER, "%s %s" % (_status, _kept))
+_WITH_BAD = _LADDER + [(9000.0, 400.0)]
+_status, _kept, _detail, _resid = GP.values_from_ladder(_WITH_BAD)
+check("and only the run the ladder kept",
+      _status == GP.READ_OK and _kept == _LADDER, "%s %s" % (_status, _kept))
+check("the dropped value is named, not silently gone",
+      "9000" in _detail, _detail)
+
+# REVERT: return the reading even when the ladder refuses it. A misread digit
+# breaks either the direction or the step, and both are the whole guard.
+_status, _kept, _detail, _resid = GP.values_from_ladder(
+    [(30.0, 100.0), (6.0, 200.0), (10.0, 300.0)])
+check("a reading that is not monotone is refused, not returned",
+      _status == GP.READ_REFUSED and _kept == [], "%s %s" % (_status, _kept))
+_status, _kept, _detail, _resid = GP.values_from_ladder([(30.0, 100.0), (20.0, 200.0)])
+check("two labels are not a ladder",
+      _status == GP.READ_REFUSED and "3 needed" in _detail, _detail)
+
+# REVERT: put the reading in the person's column. `Y_Tick_First_Value` means a
+# person read this axis; a machine writing there is a machine answering for one.
+_read = GP.apply_reading(dict(_row), *GP.values_from_ladder(_WITH_BAD))
+check("what the reader read lands in the reader's columns",
+      (_read["Y_Tick_Read_First"], _read["Y_Tick_Read_Last"],
+       _read["Y_Tick_Read_Values"]) == ("30", "10", "30@100;20@200;10@300"),
+      "%s" % [_read[c] for c in ("Y_Tick_Read_First", "Y_Tick_Read_Last",
+                                 "Y_Tick_Read_Values")])
+check("and in nobody else's",
+      not GP._s(_read.get("Y_Tick_First_Value"))
+      and not GP._s(_read.get("Y_Tick_Last_Value"))
+      and not GP._s(_read.get("Verified_By")),
+      "%s" % [_read.get(c) for c in ("Y_Tick_First_Value", "Y_Tick_Last_Value",
+                                     "Verified_By")])
+check("a refused reading writes no value at all",
+      not GP._s(GP.apply_reading(dict(_row), *GP.values_from_ladder(
+          [(30.0, 100.0), (6.0, 200.0), (10.0, 300.0)])).get("Y_Tick_Read_First")))
+check("a reading is not a confirmation",
+      _read["Human_Verification_Status"] == GP.PROPOSAL_PENDING
+      and not GP._s(_read.get("Y_Tick_First_Value"))
+      and not GP._s(_read.get("Verified_By")))
+check("and a PENDING row that carries one is still refused",
+      any(c == "PROPOSAL_PENDING_WITH_A_TICK_VALUE"
+          for _p, c, _d in GP.proposal_problems(
+              [dict(_read, Y_Tick_First_Value="30")])))
+check("a proposal that says it read the axis and carries nothing is refused",
+      any(c == "PROPOSAL_READ_WITHOUT_VALUES"
+          for _p, c, _d in GP.proposal_problems(
+              [dict(_read, Y_Tick_Read_Values="")])))
+check("a reading status this module cannot write is refused",
+      any(c == "PROPOSAL_READ_STATUS_UNKNOWN"
+          for _p, c, _d in GP.proposal_problems(
+              [dict(_read, Y_Tick_Read_Status="PROBABLY")])))
+check("values are read back only from a row that says it read them",
+      GP.read_values_of(_read) == [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+      and GP.read_values_of(dict(_read, Y_Tick_Read_Status=GP.READ_REFUSED)) == [])
+check("measuring alone does not claim to have read",
+      GP.propose_panel(_im)["Y_Tick_Read_Status"] == GP.READ_NOT_ATTEMPTED)
+
+# REVERT: write the read value past the frame's right edge. On a figure whose
+# panels sit side by side that is the NEXT panel, and a person confirming this
+# one is shown numbers drawn on that one.
+_pic = GP.proposal_overlay(_im, _read, os.path.join(ROOT, "read.png"))
+_rov = Image.open(_pic).convert("RGB")
+_rpx = _rov.load()
+_ink = [(x, y) for x in range(_rov.size[0]) for y in range(_rov.size[1])
+        if _rpx[x, y] == (190, 60, 190)]
+_offset = int(GP._s(_read.get("Region")).split(",")[0] or 0) - 12
+check("the reading is drawn on the picture the person confirms", bool(_ink))
+check("and inside the frame it belongs to",
+      _ink and max(x for x, _y in _ink) + max(0, _offset) <= int(_read["Panel_X1"]),
+      "%s vs %s" % (max(x for x, _y in _ink) if _ink else None, _read["Panel_X1"]))
+
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

@@ -13,17 +13,27 @@ So this measures the parts that ARE measurement and refuses the parts that are
 reading:
 
     proposed          the plot frame, the axis regions, the tick PIXEL rows,
-                      the tick spacing, the group anchor x pixels
-    never proposed    what a tick is WORTH, what a series MEANS, how many
-                      panels the figure has
+                      the tick spacing, the group anchor x pixels, and - when
+                      the reading holds together as a ladder - what the ticks SAY
+    never proposed    what a series MEANS, how many panels the figure has, and
+                      whether any of the above is right
 
-**The tick values are the whole reason for the split.** A printed 30 read as 3
-rescales every value in the panel by ten, leaves the calibration residual at
-zero, and makes every number in the file self-consistent and wrong. No
-arithmetic can catch it and no classifier should be trusted with it, so this
-module reports "eleven ticks, evenly spaced, at these pixel rows" and a person
-types what the first and last one say. That is one number per axis per panel
-instead of a measurement session.
+**The tick values are read here, and they are still not confirmed here.** A
+printed 30 read as 3 rescales every value in the panel by ten - but "a person
+types it" was never the only answer to that, and it was the expensive one.
+`axis_reader.ladder` is: values must fall monotonically at a CONSTANT value per
+pixel, so a single misread digit breaks the sequence and the reading is refused
+rather than returned. Measured on this project's own corpus at 600 DPI, six
+panels of one figure came back four read - all four correct, one of them only
+because the ladder dropped a `9000` that should have been `5000` - and two
+refused. None wrong. At 300 DPI the same six gave three, and one of those was
+`3.05` for a printed `3.0`: resolution is the lever, and the ladder is the gate.
+
+So the split moved. It is no longer "the machine measures pixels, the person
+supplies numbers" but "the machine measures AND reads, the person LOOKS". The
+read lands in its own columns (`Y_Tick_Read_*`) and never in the person's, the
+overlay draws each value beside the tick it was read from, and a proposal is
+CONFIRMED only when somebody who is named says the picture is right.
 
 Everything it does emit is PROPOSED. `proposal_problems` refuses a proposal
 that claims to be confirmed without a person behind it, exactly as the intake
@@ -62,9 +72,24 @@ PROPOSAL_COLUMNS = (
     "X_Tick_Pixels", "X_Tick_Count",
     "Group_Anchor_Pixels", "Group_Anchor_Count",
     "Confidence", "Confidence_Reason",
+    # WHAT THE MACHINE READ, in its own columns. Separate from the two below on
+    # purpose: `Y_Tick_First_Value` still means "a person read this axis", and a
+    # PENDING row carrying one is still refused. A reading is not a confirmation,
+    # and putting them in one column is how a machine's guess becomes a person's
+    # answer without anybody deciding that it should.
+    "Y_Tick_Read_Status", "Y_Tick_Read_Values",
+    "Y_Tick_Read_First", "Y_Tick_Read_Last",
+    "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail",
     "Human_Verification_Status", "Verified_By", "Verified_At",
     "Y_Tick_First_Value", "Y_Tick_Last_Value", "Note",
 )
+
+#: What `read_tick_values` can say. `REFUSED` is a reading that did not hold
+#: together; `NOT_ATTEMPTED` is one nobody asked for. Neither is a gap to fill.
+READ_OK = "READ"
+READ_REFUSED = "REFUSED"
+READ_NOT_ATTEMPTED = "NOT_ATTEMPTED"
+READ_STATUSES = (READ_OK, READ_REFUSED, READ_NOT_ATTEMPTED)
 
 PROPOSAL_PENDING = "PENDING"
 PROPOSAL_STATUSES = (PROPOSAL_PENDING, "CONFIRMED", "REJECTED")
@@ -432,10 +457,107 @@ def propose_panel(image, region=None, proposal_id="GP001", raster_path="",
         "Group_Anchor_Pixels": ";".join("%g" % a for a in anchors),
         "Group_Anchor_Count": len(anchors),
         "Confidence": "%.2f" % score, "Confidence_Reason": why,
+        # MEASURED, NOT READ. `read_tick_values` is a separate call because the
+        # reading needs tesseract and the measurement does not: a machine with no
+        # OCR still proposes a usable geometry, and says so here rather than
+        # leaving a blank that reads as "refused".
+        "Y_Tick_Read_Status": READ_NOT_ATTEMPTED,
         # The only status this module may write.
         "Human_Verification_Status": PROPOSAL_PENDING,
     })
     return row
+
+
+def values_from_ladder(pairs):
+    """(status, kept, detail) - what a set of read (value, pixel) pairs may become.
+
+    Split out from the reading so the whole guard can be exercised without an
+    OCR engine: what is under test here is not whether tesseract saw a `5`, but
+    what this module does with what it saw.
+
+    `axis_reader.ladder` is the test. It accepts three or more values falling (or
+    rising) monotonically at a CONSTANT value per pixel, so a single misread
+    digit breaks the sequence, and when the full set fails it retries on
+    contiguous subsets and names what it dropped.
+
+    THE KEPT RUN IS WHAT COMES BACK, not everything that was read. On this
+    project's own FIG9 the subset dropped a `9000` printed `5000`; returning all
+    the pairs put that 9000 on the overlay in the reader's colour, where a person
+    confirming the picture would have confirmed the one value the calibration
+    threw away. The run is re-checked here with subsetting OFF, because a run
+    that only holds as somebody else's subset is not a ladder.
+    """
+    import axis_reader as A                                 # noqa: PLC0415
+    ok, detail, first, last, residual, _cv = A.ladder(pairs)
+    if not ok:
+        return READ_REFUSED, [], detail, None
+    return READ_OK, pairs[pairs.index(first):pairs.index(last) + 1], detail, residual
+
+
+def read_tick_values(image, row):
+    """Read what this panel's y axis SAYS, or refuse. Never confirm.
+
+    The reader is `axis_reader`: it crops the label strip beside the spine, asks
+    tesseract for the numerals, and hands the pairs to `values_from_ladder`.
+    Returns the row, updated in place. `Y_Tick_Read_*` only; the person's two
+    columns are not touched here and no status is changed.
+    """
+    import axis_reader as A                                 # noqa: PLC0415
+
+    row.setdefault("Y_Tick_Read_Status", READ_NOT_ATTEMPTED)
+    try:
+        box = (int(row["Panel_X0"]), int(row["Panel_X1"]),
+               int(row["Panel_Y0"]), int(row["Panel_Y1"]))
+    except (KeyError, TypeError, ValueError):
+        row["Y_Tick_Read_Status"] = READ_REFUSED
+        row["Y_Tick_Read_Detail"] = "the proposal carries no panel box to read against"
+        return row
+    _grey, dark = A._dark(image)
+    spine_x, baseline_y = A.spine_and_baseline(dark, box)
+    pairs = A.y_tick_labels(image, dark, box, spine_x, baseline_y)
+    return apply_reading(row, *values_from_ladder(pairs))
+
+
+def apply_reading(row, status, kept, detail, residual):
+    """Write a reading into its OWN columns. Never into the person's two.
+
+    Split from the reading for the same reason as `values_from_ladder`: this is
+    where the line between what a machine read and what a person answered is
+    actually drawn, and a line nobody can test is a line that moves. Only
+    `Y_Tick_Read_*` is written here - `Y_Tick_First_Value`, `Y_Tick_Last_Value`,
+    `Verified_By`, `Verified_At` and `Human_Verification_Status` are not touched,
+    whatever the reader saw.
+    """
+    row["Y_Tick_Read_Status"] = status
+    row["Y_Tick_Read_Detail"] = detail
+    if status != READ_OK:
+        return row
+    row["Y_Tick_Read_Values"] = ";".join("%g@%g" % (v, px) for v, px in kept)
+    row["Y_Tick_Read_First"] = "%g" % kept[0][0]
+    row["Y_Tick_Read_Last"] = "%g" % kept[-1][0]
+    row["Y_Tick_Read_Residual_Px"] = ("%.2f" % residual) if residual is not None else ""
+    return row
+
+
+def read_values_of(row):
+    """[(value, pixel)] a reading proposed for this row, or [] - never a gap.
+
+    `REFUSED` and `NOT_ATTEMPTED` both come back empty, and they mean different
+    things to a person and the same thing to a calibration: there is no reading
+    here.
+    """
+    if _s(row.get("Y_Tick_Read_Status")).upper() != READ_OK:
+        return []
+    out = []
+    for part in _s(row.get("Y_Tick_Read_Values")).split(";"):
+        if not part or "@" not in part:
+            continue
+        value, pixel = part.split("@", 1)
+        try:
+            out.append((float(value), float(pixel)))
+        except ValueError:
+            continue
+    return out
 
 
 def proposal_problems(rows):
@@ -456,6 +578,16 @@ def proposal_problems(rows):
         if pid in seen:
             out.append((pid, "PROPOSAL_ID_DUPLICATE", pid))
         seen.add(pid)
+        read = _s(row.get("Y_Tick_Read_Status")).upper()
+        if read and read not in READ_STATUSES:
+            out.append((pid, "PROPOSAL_READ_STATUS_UNKNOWN",
+                        "%r is not %s" % (read, "/".join(READ_STATUSES))))
+        elif read == READ_OK and not read_values_of(row):
+            # A row that says it read the axis and carries nothing is worse than
+            # one that refused: the refusal sends a person to the axis and this
+            # sends them past it.
+            out.append((pid, "PROPOSAL_READ_WITHOUT_VALUES",
+                        "%s says the axis was READ and carries no values" % pid))
         status = _s(row.get("Human_Verification_Status")).upper()
         if status not in PROPOSAL_STATUSES:
             out.append((pid, "PROPOSAL_STATUS_UNKNOWN",
@@ -527,6 +659,24 @@ def write_proposals(path, rows):
     return path
 
 
+def _font(size):
+    """A font that is actually `size` px tall, or the default if none is installed.
+
+    `ImageDraw.text` without a font is 11 px whatever the raster is, and a
+    proposal overlay is read at the raster's own scale.
+    """
+    from PIL import ImageFont
+    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:                               # pragma: no cover
+                continue
+    return ImageFont.load_default()
+
+
 def proposal_overlay(image, row, out_path):
     """The proposal drawn on the raster it was measured from.
 
@@ -547,6 +697,25 @@ def proposal_overlay(image, row, out_path):
             continue
         y = int(float(mark))
         draw.line((x0 - 18, y, x0 + 10, y), fill=(30, 90, 200), width=1)
+    # WHAT THE READER SAYS EACH TICK IS, beside the tick it was read from. This
+    # is what turns confirming into looking: a person who can see `2.6` printed
+    # on the axis and `2.6` written next to it has checked the reading, and one
+    # who sees `3.05` beside a printed `3.0` has caught it.
+    #
+    # INSIDE the frame, not outside it. Written past the right edge it lands on
+    # the neighbouring panel, which is where this was drawn first and where a
+    # reader confirming panel 2 was shown panel 3's numbers.
+    reading = read_values_of(row)
+    if reading:
+        # SIZED TO THE PANEL. A 12 px default on a 4000 px raster is a smudge,
+        # and the whole point is that the two numbers can be compared by eye.
+        step = abs(reading[1][1] - reading[0][1]) if len(reading) > 1 else (y1 - y0) / 6.0
+        font = _font(max(11, int(step * 0.28)))
+        for value, pixel in reading:
+            y = int(float(pixel))
+            draw.line((x0 - 22, y, x0 + 14, y), fill=(190, 60, 190), width=3)
+            draw.text((x0 + 20, y - int(step * 0.16)), "%g" % value,
+                      fill=(190, 60, 190), font=font)
     for anchor in _s(row.get("Group_Anchor_Pixels")).split(";"):
         if not anchor:
             continue
@@ -572,6 +741,8 @@ def main(argv=None):
                     help="where to look for a panel; repeatable. Without any, "
                          "the whole raster is one region")
     ap.add_argument("--threshold", type=int, default=160)
+    ap.add_argument("--no-read", action="store_true",
+                    help="measure only; do not read what the axis says")
     args = ap.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
     from PIL import Image
@@ -587,6 +758,8 @@ def main(argv=None):
         if row is None:
             print("no plot frame in region %s" % (region,))
             continue
+        if not args.no_read:
+            read_tick_values(image, row)
         rows.append(row)
         picture = proposal_overlay(image, row,
                                    os.path.join(args.out, "%s.png" % row["Proposal_ID"]))
@@ -598,14 +771,23 @@ def main(argv=None):
                  round(float(row["Y_Tick_Regularity"] or 0) * 100, 1),
                  row["Group_Anchor_Count"], row["Confidence"]))
         print("    %s" % picture)
+        if row["Y_Tick_Read_Status"] == READ_OK:
+            print("    axis reads %s .. %s (%s)"
+                  % (row["Y_Tick_Read_First"], row["Y_Tick_Read_Last"],
+                     row["Y_Tick_Read_Detail"]))
+        elif row["Y_Tick_Read_Status"] == READ_REFUSED:
+            print("    axis NOT read: %s" % row["Y_Tick_Read_Detail"])
         if row["Confidence_Reason"]:
             print("    %s" % row["Confidence_Reason"])
     path = write_proposals(os.path.join(args.out, "geometry_proposal.csv"), rows)
     print("wrote %s" % path)
-    print("%d proposal(s), all PENDING. Open each overlay, check the frame and "
-          "the tick ladder, then type Y_Tick_First_Value and Y_Tick_Last_Value "
-          "- what the axis SAYS is the one thing this cannot measure."
-          % len(rows))
+    read = sum(1 for r in rows if r["Y_Tick_Read_Status"] == READ_OK)
+    print("%d proposal(s), all PENDING; the axis was read on %d and refused on "
+          "%d. Open each overlay: the frame, the tick rows, and - where it is "
+          "drawn - what the reader says each tick is. Confirming is looking; "
+          "type Y_Tick_First_Value and Y_Tick_Last_Value where the reader "
+          "refused or where the picture disagrees with it."
+          % (len(rows), read, len(rows) - read))
     return 0
 
 

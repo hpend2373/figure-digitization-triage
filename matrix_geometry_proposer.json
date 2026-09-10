@@ -1,0 +1,59 @@
+{
+ "files": {
+  "geometry_proposer.py": "e620c4a95ddfb27a2b66491ef7755eafcd4474b255ad730927ba074d94b3e1d4",
+  "test_geometry_proposer.py": "4fb86b47620604f3ac129bce0a4311cc74f7de6ac67f3ecb41bfa9e8cedfc497"
+ },
+ "suites": [
+  "test_geometry_proposer.py"
+ ],
+ "mutations": [
+  {
+   "name": "읽은 것을 전부 돌려준다",
+   "file": "geometry_proposer.py",
+   "old": "    return READ_OK, pairs[pairs.index(first):pairs.index(last) + 1], detail, residual",
+   "new": "    return READ_OK, list(pairs), detail, residual"
+  },
+  {
+   "name": "사다리가 거절해도 값을 돌려준다",
+   "file": "geometry_proposer.py",
+   "old": "    if not ok:\n        return READ_REFUSED, [], detail, None",
+   "new": "    if False:\n        return READ_REFUSED, [], detail, None"
+  },
+  {
+   "name": "읽은 값을 사람 칸에 적는다",
+   "file": "geometry_proposer.py",
+   "old": "    row[\"Y_Tick_Read_First\"] = \"%g\" % kept[0][0]",
+   "new": "    row[\"Y_Tick_First_Value\"] = \"%g\" % kept[0][0]"
+  },
+  {
+   "name": "읽었다면서 아무것도 없는 행을 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "        elif read == READ_OK and not read_values_of(row):",
+   "new": "        elif False:"
+  },
+  {
+   "name": "모르는 읽기 상태를 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "        if read and read not in READ_STATUSES:",
+   "new": "        if False:"
+  },
+  {
+   "name": "상태를 보지 않고 읽은 값을 돌려준다",
+   "file": "geometry_proposer.py",
+   "old": "    if _s(row.get(\"Y_Tick_Read_Status\")).upper() != READ_OK:\n        return []",
+   "new": "    if False:\n        return []"
+  },
+  {
+   "name": "재기만 해도 읽었다고 적는다",
+   "file": "geometry_proposer.py",
+   "old": "        \"Y_Tick_Read_Status\": READ_NOT_ATTEMPTED,",
+   "new": "        \"Y_Tick_Read_Status\": READ_OK,"
+  },
+  {
+   "name": "읽은 값을 프레임 밖에 적는다",
+   "file": "geometry_proposer.py",
+   "old": "            draw.text((x0 + 20, y - int(step * 0.16)), \"%g\" % value,",
+   "new": "            draw.text((x1 + 6, y - int(step * 0.16)), \"%g\" % value,"
+  }
+ ]
+}

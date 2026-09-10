@@ -1,0 +1,59 @@
+{
+ "files": {
+  "value_page.py": "834926a90fca974f7386b8df999fea9cd2ee91bafe753d63a765e28a30361e86",
+  "test_value_page.py": "174c73245c90008200761add6c6029e4910042ee3bbb87ce715b8f8d060051dd"
+ },
+ "suites": [
+  "test_value_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "겹쳐 그린 그림이 없어도 조용히 넘어간다",
+   "file": "value_page.py",
+   "old": "        w(\"<div class='nofig'>겹쳐 그린 그림 없음 — 확인할 것이 없습니다</div>\")",
+   "new": "        pass"
+  },
+  {
+   "name": "실행 지문을 입력 칸으로 내민다",
+   "file": "value_page.py",
+   "old": "        meta[pid] = {\"panel\": pid, \"subject\": subjects.get(pid, \"\"),",
+   "new": "        meta[pid] = {\"panel\": pid, \"subject\": \"\","
+  },
+  {
+   "name": "지문이 없는 패널도 있는 것처럼 내민다",
+   "file": "value_page.py",
+   "old": "      % (len(cells), \"\" if subject else \" · 실행 지문 없음\"))",
+   "new": "      % (len(cells), \"\"))"
+  },
+  {
+   "name": "확인 칸에 열 이름만 적는다",
+   "file": "value_page.py",
+   "old": "          \"data-name='%s'> %s</label>\" % (esc(pid), esc(name), esc(ask)))",
+   "new": "          \"data-name='%s'> %s</label>\" % (esc(pid), esc(name), esc(name)))"
+  },
+  {
+   "name": "무엇을 확인해야 하는지 심어 주지 않는다",
+   "file": "value_page.py",
+   "old": "                     \"required\": [name for name, _ask in ASKS]}",
+   "new": "                     \"required\": []}"
+  },
+  {
+   "name": "finalize_batch가 읽는 이름으로 내려받는다",
+   "file": "value_page.py",
+   "old": "    a.download = 'value_review_answers.csv';",
+   "new": "    a.download = 'value_review.csv';"
+  },
+  {
+   "name": "읽힌 값이 없어도 페이지를 만든다",
+   "file": "value_page.py",
+   "old": "    if not rows:\n        raise SystemExit(\"%s에 읽힌 값이 없습니다.\"\n                         % os.path.join(values, VALUES))",
+   "new": "    if False:\n        raise SystemExit(\"\")"
+  },
+  {
+   "name": "본 날짜를 페이지에 심지 않는다",
+   "file": "value_page.py",
+   "old": "    w(\"var WHEN = %s;\" % json.dumps(str(when or \"\"), ensure_ascii=False))",
+   "new": "    w(\"var WHEN = '';\")"
+  }
+ ]
+}

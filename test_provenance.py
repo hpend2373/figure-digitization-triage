@@ -1108,11 +1108,16 @@ check("four lines are not a five-number summary",
                    Box_Line_Widths_Px="14;26;26;26").problems,
       "%s" % (_box_verdict(Box_Line_Rows_Px="370.0;330.0;274.0;206.0",
                            Box_Line_Widths_Px="14;26;26;26"),))
+# REVERT: gate on a pixel length instead of on the shape. 20 px was measured at
+# one DPI; at 600 this corpus's box is 88 px and its caps are 45, so every one of
+# the five lines is "at least 20 wide" and all five read as the box.
 check("  and neither is a violin with one wide line through it",
-      "at least" in " ".join(
-          _box_verdict(Box_Line_Widths_Px="14;8;26;8;14").problems)
-      and MR.BOX_LINE_MIN_WIDTH_PX == 20,
+      "three lines of one width" in " ".join(
+          _box_verdict(Box_Line_Widths_Px="14;8;26;8;14").problems),
       "%s" % (_box_verdict(Box_Line_Widths_Px="14;8;26;8;14"),))
+check("  and the same box drawn twice as large is still a box",
+      not _box_verdict(Box_Line_Widths_Px="28;52;52;52;28").problems,
+      "%s" % (_box_verdict(Box_Line_Widths_Px="28;52;52;52;28"),))
 check("the box has to sit between its own whisker caps",
       "not between its two cap lines" in " ".join(
           _box_verdict(Box_Line_Widths_Px="26;26;26;14;14").problems),

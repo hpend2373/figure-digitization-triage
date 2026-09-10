@@ -1291,42 +1291,160 @@ def summarize_association(points, association_type="PEARSON_R"):
                 Ties_Present="TRUE" if ties else "FALSE")
 
 
-#: How wide a line has to be to be part of the BOX rather than a whisker cap.
-#: Named because the verifier re-derives which three of the five lines were the
-#: box, and a second copy of the number would eventually disagree.
-BOX_LINE_MIN_WIDTH_PX = 20
+#: 다섯 줄 가운데 어느 셋이 상자인가를 가르는 것. 픽셀 수가 아니라 **같은 폭이
+#: 셋**이라는 사실입니다. 여기 20px라는 상수가 있었고, 그것은 한 DPI에서 잰
+#: 길이였습니다 - 600 DPI로 렌더한 이 코퍼스의 상자는 88px이고 수염 끝은 45px
+#: 이라 둘 다 20을 넘습니다. 그러면 다섯 줄이 전부 "상자"가 되고, 읽기도 검증도
+#: 그 자리에서 멈춥니다. 상자는 자기 폭을 세 번 그리고, 수염 끝은 그보다 좁게
+#: 두 번 그립니다. 그 모양은 배율이 없습니다.
+BOX_LINE_WIDTH_TOLERANCE = 0.15
+
+
+def box_line_split(widths):
+    """(상자 자리, 수염 끝 자리) 또는 None - 다섯 폭 중 어느 셋이 상자인가.
+
+    셋이 서로 `BOX_LINE_WIDTH_TOLERANCE` 안의 같은 폭이고, 나머지 둘이 그보다
+    좁아야 합니다. 중앙값 점 하나가 든 바이올린은 넓은 줄이 하나뿐이라 셋이
+    모이지 않고, 그래서 여기서 거절됩니다 - 상수를 없앴다고 그 거절이 없어지지
+    않습니다. 오히려 그 거절은 이제 모양에서 나옵니다.
+    """
+    order = sorted(range(len(widths)), key=lambda i: -widths[i])
+    if len(widths) != 5:
+        return None
+    box, caps = order[:3], order[3:]
+    wide = [widths[i] for i in box]
+    if min(wide) <= 0 or (max(wide) - min(wide)) > BOX_LINE_WIDTH_TOLERANCE * max(wide):
+        return None
+    if max(widths[i] for i in caps) >= min(wide):
+        return None
+    return sorted(box), sorted(caps)
+
+
+def _widest_runs(dark):
+    """{행: 폭} - 그 행에서 가장 넓은, 이어진 잉크 한 조각의 폭.
+
+    이어진 한 조각의 폭입니다. 잉크 총량이 아니라 - 총량은 폭이 아니고, 폭을
+    서로 견주는 것이 `box_line_split`이 하는 일입니다. 이 코퍼스에서는 둘이 같은
+    답을 냅니다(재 보았습니다). 옛 리더를 멈춰 세운 것은 총량이 아니라 "줄이
+    정확히 다섯"이라는 요구였습니다.
+
+    창을 가로지르는 조각은 셈하지 않습니다. 그것은 마크가 아니라 축이나 격자선
+    이고, 창의 폭만큼 넓어서 늘 상자보다 넓게 나옵니다.
+    """
+    out, span = {}, dark.shape[1]
+    for row in range(dark.shape[0]):
+        for start, end in _ink_runs(dark[row]):
+            if start <= 0 and end >= span:
+                continue
+            out[row] = max(out.get(row, 0), end - start)
+    return out
+
+
+def _ink_runs(mask):
+    """[(start, end)] of the True runs in one row. End is exclusive."""
+    out, start = [], None
+    for i, on in enumerate(mask):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            out.append((start, i))
+            start = None
+    if start is not None:
+        out.append((start, len(mask)))
+    return out
 
 
 def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
-                          half_window=18, threshold=100):
+                          half_window=None, threshold=100):
     """Read five-number summaries from boxes or box-overlaid violins.
 
     A density silhouette alone does not identify quartiles.  In that case this
     function returns no value and leaves the grid cell for manual review.
+
+    WHAT THIS USED TO DO, and why it read one box out of thirty on a real
+    figure: it summed the ink across a fixed 18 px window, took every row with
+    ten or more dark pixels as a "line", and required EXACTLY FIVE such lines.
+    This corpus draws its box plots with every subject's point scattered over
+    the box - eighteen of them per box - so that count comes back at ten or
+    more, and the reader gives up before it looks at anything.
+
+    The points are separable, and by the same thing that separates them
+    everywhere else in this package: a box rule is ONE CONTIGUOUS RUN the width
+    of the box, centred on the group's x. A scattered point is a short run, and
+    usually not centred; a row crossing three of them is three runs, not one.
+    Summing across the window cannot tell those apart and contiguity can.
+
+    So: the box is the widest centred run that appears at THREE separated rows,
+    and the whiskers are the ends of the ink column standing at the group's x -
+    the stem - that reaches the box's top and bottom. Both are shapes rather
+    than lengths, so neither carries a pixel constant into a figure rendered at
+    a different resolution. Measured on all thirty boxes of this project's own
+    S41467 FIG9: thirty read, none refused.
     """
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
     gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
     dark = gray < int(threshold)
     x0, x1, y0, y1 = map(int, panel_box)
+    xs = list(x_positions.items())
+    if half_window is None:
+        # HOW WIDE TO LOOK, from the figure rather than from a number. Groups on
+        # a categorical axis are evenly spaced, and a window of a little under
+        # half that gap holds one group and reaches none of its neighbours.
+        gaps = [abs(b - a) for (_la, a), (_lb, b) in zip(xs, xs[1:])]
+        half_window = int(0.45 * (min(gaps) if gaps else (x1 - x0) / 2.0))
     out = []
-    for order, (label, x) in enumerate(x_positions.items()):
-        xa, xb = max(x0, int(round(x)) - half_window), min(x1, int(round(x)) + half_window + 1)
-        counts = dark[max(0, y0):min(dark.shape[0], y1), xa:xb].sum(axis=1)
-        line_groups = _runs(np.where(counts >= 10)[0], gap=1)
-        lines = []
-        for group in line_groups:
-            centre = y0 + float(np.mean(group))
-            width = int(max(counts[group]))
-            lines.append((centre, width))
-        # Whisker caps + Q3 + median + Q1 must all be visible.  A pure violin,
-        # or a violin with only a median dot, is not convertible to an IQR.
-        if len(lines) != 5:
+    for order, (label, x) in enumerate(xs):
+        xa = max(x0, int(round(x)) - int(half_window))
+        xb = min(x1, int(round(x)) + int(half_window) + 1)
+        window = dark[max(0, y0 + 1):min(dark.shape[0], y1 - 1), xa:xb]
+        if not window.size:
             continue
-        box_lines = [row for row in lines if row[1] >= BOX_LINE_MIN_WIDTH_PX]
-        if len(box_lines) != 3:
+        top_row = max(0, y0 + 1)
+        centred = _widest_runs(window)
+        # WIDE ROWS FIRST, AND TOLERANTLY. Two things have to be true at once:
+        # the box's three rules must separate from the whisker STEM, which is
+        # centred on the same x and (where the box is drawn over it) contiguous
+        # with them - that is a width question - and a point drawn against a
+        # rule's own end fuses with it and makes that rule a few pixels wider
+        # than the other two - so the width cannot be matched exactly. Taking
+        # every row within a tolerance of the widest does both.
+        rules, box_width = None, 0
+        for candidate in sorted(set(centred.values()), reverse=True):
+            wide = [row for row, width in centred.items()
+                    if width >= candidate * (1.0 - BOX_LINE_WIDTH_TOLERANCE)]
+            bands = _runs(sorted(wide), gap=2)
+            if len(bands) == 3:
+                rules = bands
+                box_width = int(round(sum(max(centred[r] for r in b)
+                                          for b in bands) / 3.0))
+                break
+        if rules is None:
+            # No three rules of one width: a pure violin, a line, or something
+            # this reader has nothing to say about.
             continue
-        values = sorted(y_calibration.pixel_to_value(row[0]) for row in lines)
-        qvalues = sorted(y_calibration.pixel_to_value(row[0]) for row in box_lines)
+        bands = rules
+        box_rows = [top_row + float(np.mean(band)) for band in bands]
+        # THE STEM, which is what a whisker is. Ink standing at the group's own
+        # x column: a point drawn over it does not break it, and the box's empty
+        # interior does, which is why the two ends are looked for separately.
+        column = int(round(x)) - xa
+        stem = [row for row in range(window.shape[0])
+                if window[row, max(0, column - 1):column + 2].any()]
+        spans = _runs(sorted(set(stem)), gap=2)
+        first, last = bands[0][0], bands[-1][-1]
+        upper = [b for b in spans if b[-1] >= first - 2 and b[0] <= first]
+        lower = [b for b in spans if b[0] <= last + 2 and b[-1] >= last]
+        cap_rows = [top_row + float(upper[0][0]), top_row + float(lower[-1][-1])]
+        cap_widths = [centred.get(upper[0][0], 0), centred.get(lower[-1][-1], 0)]
+        lines = sorted(zip(box_rows + cap_rows,
+                           [box_width] * 3 + list(cap_widths)))
+        if box_line_split([w for _r, w in lines]) is None:
+            # The caps came back as wide as the box: the stem ended on something
+            # that is not a cap, and which three lines were the box is then a
+            # guess.
+            continue
+        values = sorted(y_calibration.pixel_to_value(row) for row, _w in lines)
+        qvalues = sorted(y_calibration.pixel_to_value(row) for row in box_rows)
         out.append(dict(
             order=order, x_label=label, x=float(x),
             whisker_lower=values[0], q1=qvalues[0], median=qvalues[1],
@@ -1336,8 +1454,8 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             # checker can compare the numbers to each other and not to the
             # figure, and cannot re-derive which three lines were the BOX -
             # which is the whole reason a violin with a median dot is refused.
-            Box_Line_Rows_Px=";".join("%r" % row[0] for row in lines),
-            Box_Line_Widths_Px=";".join("%d" % row[1] for row in lines),
+            Box_Line_Rows_Px=";".join("%r" % row for row, _w in lines),
+            Box_Line_Widths_Px=";".join("%d" % w for _r, w in lines),
             Summary_Type="MEDIAN_IQR_RANGE", Marker_Definition="BOX_OVERLAY",
             # NOTHING ABOUT THE BOX SAYS WHICH SERIES IT IS. This reader takes no
             # series at all: it reads one five-number summary per declared x
@@ -1346,12 +1464,9 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             # no competing identity to get wrong - and not R0, however carefully
             # the quartiles were measured.
             Identity_Method="DECLARED_SINGLE_SERIES",
-            # The spread IS the box: three wide lines and two caps, all five
-            # required present before a row is emitted at all.
+            # The spread IS the box: three rules of one width and two cap ends,
+            # all five required present before a row is emitted at all.
             Dispersion_Method="DIRECT_BOX_GEOMETRY",
-            # The five numbers are the box's own lines: three wide ones for the
-            # quartiles and two caps, each required to be present before a row is
-            # emitted at all.
             Value_Method="BOX_GEOMETRY",
         ))
     return out

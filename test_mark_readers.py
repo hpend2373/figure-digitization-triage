@@ -10,7 +10,7 @@ from mark_readers import (AxisCalibration, SeriesSpec, read_line_marker_panel,
                           read_monochrome_marker_panel, read_scatter_panel,
                           summarize_association, read_box_violin_panel,
                           read_panel, to_value_records, MARK_CARRIED,
-                          BOX_LINE_MIN_WIDTH_PX,
+                          box_line_split,
                           _one_interior_per_marker, measure_marker_scale)
 
 
@@ -666,6 +666,54 @@ for association_type in ("SPEARMAN_RHO", "KENDALL_TAU", "R_SQUARED", "SLOPE"):
           association_ok)
 
 
+def box_points_fixture(scale=1, dots=18, whiskers=True, grid=True):
+    """A box plot as this corpus actually prints one.
+
+    Three things here are not decoration, and each of them broke the reader:
+
+      THE POINTS. Every subject is drawn over the box, eighteen of them, jittered
+      across its whole width, so a reader that demands exactly five ink rows in
+      the window finds ten and gives up before it looks at anything.
+
+      THE GRID. Rules that cross the whole panel are wider than any mark in it, so
+      a reader that does not skip them takes three gridlines for a box.
+
+      THE WHISKERS, optionally absent. A box drawn with no whiskers has no range
+      to report, and reporting the box's own edges as the range would be a number
+      nobody drew.
+    """
+    W, H = 800 * scale, 520 * scale
+    im = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(im)
+    ycal = AxisCalibration.from_points([(0, 450 * scale), (100, 50 * scale)])
+    xs = [200 * scale, 400 * scale, 600 * scale]
+    truth = [(15, 30, 44, 61, 82), (10, 24, 38, 55, 76), (20, 36, 52, 68, 90)]
+    half, cap, wide = 44 * scale, 22 * scale, max(2, 3 * scale)
+    if grid:
+        for value in (25, 50, 75):
+            y = ycal.value_to_pixel(value)
+            d.line((120 * scale, y, 680 * scale, y), fill="black", width=wide)
+    for x, (lo, q1, med, q3, hi) in zip(xs, truth):
+        ylo, yq1, ymed, yq3, yhi = [ycal.value_to_pixel(v)
+                                    for v in (lo, q1, med, q3, hi)]
+        if whiskers:
+            d.line((x, yhi, x, yq3), fill="black", width=wide)
+            d.line((x, yq1, x, ylo), fill="black", width=wide)
+            d.line((x - cap, yhi, x + cap, yhi), fill="black", width=wide)
+            d.line((x - cap, ylo, x + cap, ylo), fill="black", width=wide)
+        d.rectangle((x - half, yq3, x + half, yq1), outline="black", width=wide)
+        d.line((x - half, ymed, x + half, ymed), fill="black", width=wide)
+        for i in range(dots):
+            # ACROSS THE WHOLE BOX, which is where they are drawn. Jitter that
+            # keeps the points in a narrow column leaves the sum well under the
+            # box's width and hides what this reader was changed to survive.
+            dx = x + ((i % 5) - 2) * (half // 2)
+            dy = ylo + (i * (yhi - ylo)) / float(dots)
+            r = max(3, 9 * scale)
+            d.ellipse((dx - r, dy - r, dx + r, dy + r), fill="black")
+    return im, xs, ycal, truth
+
+
 def box_violin_fixture(with_summary=True):
     im = Image.new("RGB", (800, 520), "white")
     d = ImageDraw.Draw(im)
@@ -708,10 +756,21 @@ check("every box keeps its five line rows and their widths",
           and len(r["Box_Line_Widths_Px"].split(";")) == 5 for r in brows),
       "%s" % [(r["Box_Line_Rows_Px"], r["Box_Line_Widths_Px"])
               for r in brows][:1])
-check("  and exactly three of them are wide enough to be the box",
-      all(sum(1 for w in r["Box_Line_Widths_Px"].split(";")
-              if int(w) >= BOX_LINE_MIN_WIDTH_PX) == 3 for r in brows),
+# REVERT: call three lines the box because they are wider than a fixed number of
+# pixels. 20 px was measured at one DPI; at 600 this corpus's box is 88 px and
+# its whisker caps are 45, so all five lines pass and which three were the box
+# becomes a guess. A box draws ONE width three times.
+check("  and exactly three of them are the box, by sharing one width",
+      all(box_line_split([int(w) for w in r["Box_Line_Widths_Px"].split(";")])
+          is not None for r in brows),
       "%s" % [r["Box_Line_Widths_Px"] for r in brows])
+check("  and that answer does not move when the figure is drawn larger",
+      box_line_split([14, 26, 26, 26, 14]) == ([1, 2, 3], [0, 4])
+      and box_line_split([28, 52, 52, 52, 28]) == ([1, 2, 3], [0, 4]),
+      "%s / %s" % (box_line_split([14, 26, 26, 26, 14]),
+                   box_line_split([28, 52, 52, 52, 28])))
+check("  and a violin with one wide line through it is not a box",
+      box_line_split([14, 8, 26, 8, 14]) is None)
 check("  and the rows reproduce all five numbers under this panel's axis",
       all(abs(bycal.pixel_to_value(float(row)) - value) < 1e-9
           for r in brows
@@ -734,6 +793,66 @@ vrows = read_box_violin_panel(
     y_calibration=vycal,
 )
 check("a pure violin does not invent quartiles", vrows == [])
+
+# REVERT: sum the ink across the window and demand exactly five lines. Every
+# subject's point is drawn over the box in this corpus, so the count comes back
+# at ten or more on rows that are not lines at all - and the reader stops. One
+# box read out of thirty on S41467 FIG9, and that one wrong.
+pim, pxs, pycal, ptruth = box_points_fixture()
+prows = read_box_violin_panel(
+    pim, panel_box=(120, 680, 40, 460),
+    x_positions={"G%d" % i: x for i, x in enumerate(pxs)},
+    y_calibration=pycal)
+check("a box with every point scattered over it is still read",
+      len(prows) == 3, "got %d" % len(prows))
+perr = []
+for row, want in zip(prows, ptruth):
+    perr.extend(abs(row[k] - v) for k, v in zip(
+        ("whisker_lower", "q1", "median", "q3", "whisker_upper"), want))
+check("  and the five numbers are the box's, not the points'",
+      perr and max(perr) < 1.5, "max %.3f" % (max(perr) if perr else -1))
+# REVERT: make the window a fixed pixel width. The same figure drawn twice as
+# large is the same figure, and this corpus is rendered at whatever DPI the page
+# needed - 88 px boxes at 600 against 26 px in the fixture above.
+p2im, p2xs, p2ycal, _ = box_points_fixture(scale=2)
+p2rows = read_box_violin_panel(
+    p2im, panel_box=(240, 1360, 80, 920),
+    x_positions={"G%d" % i: x for i, x in enumerate(p2xs)},
+    y_calibration=p2ycal)
+check("  at twice the size, with no number changed",
+      len(p2rows) == 3
+      and max(abs(a[k] - b[k]) for a, b in zip(prows, p2rows)
+              for k in ("q1", "median", "q3")) < 1.5,
+      "got %d" % len(p2rows))
+check("  and the stem's ends are the whiskers, not the outermost point",
+      all(r["whisker_upper"] > r["q3"] and r["whisker_lower"] < r["q1"]
+          for r in prows))
+# REVERT: take a rule that crosses the whole panel for a mark. Three gridlines
+# are three bands of one width, wider than any box, and a reader that ranks by
+# width and does not skip them reads the grid as the box.
+check("  with gridlines across the panel and none of them read as a box",
+      len(read_box_violin_panel(
+          box_points_fixture(grid=True)[0], panel_box=(120, 680, 40, 460),
+          x_positions={"G%d" % i: x for i, x in enumerate(pxs)},
+          y_calibration=pycal)) == 3)
+# REVERT: report a box with no whiskers anyway. Its edges are not a range, and
+# a range nobody drew is a wrong number rather than a missing one.
+nim, nxs, nycal, _ = box_points_fixture(whiskers=False)
+check("  and a box drawn with no whiskers is refused, not stretched",
+      read_box_violin_panel(
+          nim, panel_box=(120, 680, 40, 460),
+          x_positions={"G%d" % i: x for i, x in enumerate(nxs)},
+          y_calibration=nycal) == [])
+
+# REVERT: split five lines into box and caps by something other than one shared
+# width. Three lines of one width with two narrower ones is the shape; anything
+# else is a guess about which three were the box.
+check("five lines are a box only when three of them share one width",
+      box_line_split([14, 26, 26, 26, 14]) == ([1, 2, 3], [0, 4])
+      and box_line_split([26, 26, 26, 26, 14]) is None
+      and box_line_split([26, 26, 26, 14]) is None,
+      "%s / %s" % (box_line_split([26, 26, 26, 26, 14]),
+                   box_line_split([26, 26, 26, 14])))
 
 
 print("the generic entry point cannot quietly be a different reader")

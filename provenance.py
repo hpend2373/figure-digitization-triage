@@ -1249,23 +1249,25 @@ def expected_box_violin_methods(mark, context=None):
         problems.append("the mark records %d line rows and %d widths, and this "
                         "reader emits a row only when it can see five lines"
                         % (len(line_rows), len(widths)))
-    elif sum(1 for w in widths if w is not None
-             and w >= MR.BOX_LINE_MIN_WIDTH_PX) != 3:
+    elif None in widths or MR.box_line_split(widths) is None:
+        # NOT "wider than N pixels". That was a length measured at one DPI, and
+        # at 600 DPI this corpus's box is 88 px and its whisker caps are 45 -
+        # both over any such N, so all five lines read as the box and the
+        # verdict stops there. A box draws ONE width three times and its caps
+        # narrower twice; that shape has no scale in it.
         problems.append("the mark records %s as its line widths, and a box is "
-                        "the three lines at least %s wide - a violin with a "
-                        "median dot is not a five-number summary"
-                        % (field("Box_Line_Widths_Px") or "nothing",
-                           MR.BOX_LINE_MIN_WIDTH_PX))
+                        "three lines of one width with two narrower caps - a "
+                        "violin with a median dot is not a five-number summary"
+                        % (field("Box_Line_Widths_Px") or "nothing",))
     elif axis is None:
         problems.append("this run declares no y calibration for the panel, so "
                         "what the box's own rows should have read cannot be "
                         "re-computed")
     else:
         paired = sorted(zip(line_rows, widths))
-        box = sorted(row for row, width in paired
-                     if width >= MR.BOX_LINE_MIN_WIDTH_PX)
-        caps = sorted(row for row, width in paired
-                      if width < MR.BOX_LINE_MIN_WIDTH_PX)
+        box_at, cap_at = MR.box_line_split([w for _r, w in paired])
+        box = sorted(paired[i][0] for i in box_at)
+        caps = sorted(paired[i][0] for i in cap_at)
         want = sorted(axis.pixel_to_value(row) for row in line_rows)
         want_box = sorted(axis.pixel_to_value(row) for row in box)
         wrong = [name for (name, value), expected in zip(

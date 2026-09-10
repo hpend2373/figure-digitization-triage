@@ -1,0 +1,65 @@
+{
+ "files": {
+  "mark_readers.py": "74e365213b1f357c115d81cfc3cea3331a6da4da862456f4ca8757f402a75975",
+  "test_mark_readers.py": "2292da3a583362248c36e8d8e060fc5f15e32a9d029d49a2a3cc4728f6eae587"
+ },
+ "suites": [
+  "test_mark_readers.py"
+ ],
+ "mutations": [
+  {
+   "name": "창을 가로지르는 자도 마크로 센다",
+   "file": "mark_readers.py",
+   "old": "            if start <= 0 and end >= span:\n                continue",
+   "new": "            if False:\n                continue"
+  },
+  {
+   "name": "줄 폭을 딱 맞춰야만 한 상자로 친다",
+   "file": "mark_readers.py",
+   "old": "                    if width >= candidate * (1.0 - BOX_LINE_WIDTH_TOLERANCE)]",
+   "new": "                    if width == candidate]"
+  },
+  {
+   "name": "상자 줄을 못 찾아도 읽는다",
+   "file": "mark_readers.py",
+   "old": "        if rules is None:",
+   "new": "        if False:"
+  },
+  {
+   "name": "수염을 앵커 기둥이 아니라 아무 잉크에서 찾는다",
+   "file": "mark_readers.py",
+   "old": "                if window[row, max(0, column - 1):column + 2].any()]",
+   "new": "                if window[row].any()]"
+  },
+  {
+   "name": "수염 끝이 상자만큼 넓어도 읽는다",
+   "file": "mark_readers.py",
+   "old": "        if box_line_split([w for _r, w in lines]) is None:",
+   "new": "        if False:"
+  },
+  {
+   "name": "창 너비를 픽셀로 못 박는다",
+   "file": "mark_readers.py",
+   "old": "        half_window = int(0.45 * (min(gaps) if gaps else (x1 - x0) / 2.0))",
+   "new": "        half_window = 18"
+  },
+  {
+   "name": "상자 셋의 폭이 서로 달라도 한 상자로 친다",
+   "file": "mark_readers.py",
+   "old": "    if min(wide) <= 0 or (max(wide) - min(wide)) > BOX_LINE_WIDTH_TOLERANCE * max(wide):\n        return None",
+   "new": "    if min(wide) <= 0:\n        return None"
+  },
+  {
+   "name": "수염 끝이 상자보다 넓어도 가른다",
+   "file": "mark_readers.py",
+   "old": "    if max(widths[i] for i in caps) >= min(wide):\n        return None",
+   "new": "    if False:\n        return None"
+  },
+  {
+   "name": "다섯 줄이 아니어도 가른다",
+   "file": "mark_readers.py",
+   "old": "    if len(widths) != 5:\n        return None",
+   "new": "    if False:\n        return None"
+  }
+ ]
+}

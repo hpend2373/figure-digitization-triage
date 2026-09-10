@@ -1,0 +1,102 @@
+{
+ "files": {
+  "panel_page.py": "4d8aaa48463024fcf0638bcec8a4fadd9dcc43df3f24b5b91998dfb35fb9b593",
+  "panel_page.js": "d1e34236185845f6d97dfd11cd79493411b507ed79dc29a0072862aedb710c11",
+  "test_panel_page.py": "bfc5af69eec07113c4f5b91709b40ecc9e3f7c20cc96878b07e8ffb06f707896"
+ },
+ "suites": [
+  "test_panel_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "크롭이 없어도 조용히 넘어간다",
+   "file": "panel_page.py",
+   "old": "        w(\"<div class='nofig'>크롭 없음 — 그을 그림이 없습니다</div>\")",
+   "new": "        pass"
+  },
+  {
+   "name": "원본 크기를 넘기지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"size\": {\"w\": size[0], \"h\": size[1]} if size else None,",
+   "new": "                     \"size\": {\"w\": shown[0], \"h\": shown[1]} if shown else None,"
+  },
+  {
+   "name": "크롭을 줄이지 않고 싣는다",
+   "file": "panel_page.py",
+   "old": "        if im.size[0] > SHOW_WIDTH:",
+   "new": "        if False:"
+  },
+  {
+   "name": "다른 크기 위의 제안도 싣는다",
+   "file": "panel_page.py",
+   "old": "        if size and list(prop.get(\"size\") or []) != list(size):",
+   "new": "        if False:"
+  },
+  {
+   "name": "제안을 논리로 넘기지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"proposed\": boxes,",
+   "new": "                     \"proposed\": [],"
+  },
+  {
+   "name": "전에 센 수를 넘기지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"declared\": q.get(\"axes\") or \"\",",
+   "new": "                     \"declared\": \"\","
+  },
+  {
+   "name": "화면의 판정 어휘를 논리와 따로 둔다",
+   "file": "panel_page.py",
+   "old": "    (\"HOLD\", \"아직 못 정하겠다\"),\n)\nMARK_LABELS",
+   "new": "    (\"HOLD\", \"아직 못 정하겠다\"),\n    (\"MAYBE\", \"글쎄\"),\n)\nMARK_LABELS"
+  },
+  {
+   "name": "화면의 종류 어휘를 논리와 따로 둔다",
+   "file": "panel_page.py",
+   "old": "    (\"NOT_DATA\", \"축은 있지만 읽을 값 없음\"),",
+   "new": "    (\"PIE\", \"원\"),"
+  },
+  {
+   "name": "묶음이 대기열을 겹쳐 나눈다",
+   "file": "panel_page.py",
+   "old": "    return queue[(chunk - 1) * per: chunk * per]",
+   "new": "    return queue[: chunk * per]"
+  },
+  {
+   "name": "묶음 밖의 번호도 받는다",
+   "file": "panel_page.py",
+   "old": "    if of < 1 or chunk < 1 or chunk > of:",
+   "new": "    if False:"
+  },
+  {
+   "name": "관문이 적는 이름으로 내려받는다",
+   "file": "panel_page.py",
+   "old": "    a.download = 'panel_answers.csv';",
+   "new": "    a.download = 'panel_decisions.csv';"
+  },
+  {
+   "name": "제안된 판정을 넘기지 않는다",
+   "file": "panel_page.py",
+   "old": "                     \"proposedVerdict\": verdict if verdict in dict(LABELS) else \"\"}",
+   "new": "                     \"proposedVerdict\": \"\"}"
+  },
+  {
+   "name": "어휘에 없는 판정도 미리 고른다",
+   "file": "panel_page.py",
+   "old": "                     \"proposedVerdict\": verdict if verdict in dict(LABELS) else \"\"}",
+   "new": "                     \"proposedVerdict\": verdict}"
+  },
+  {
+   "name": "제안된 종류를 넘기지 않는다",
+   "file": "panel_page.py",
+   "old": "                \"mark\": mark if mark in dict(MARK_LABELS) else \"\",",
+   "new": "                \"mark\": \"\","
+  },
+  {
+   "name": "받을 수 없는 종류도 제안으로 싣는다",
+   "file": "panel_page.py",
+   "old": "                \"mark\": mark if mark in dict(MARK_LABELS) else \"\",",
+   "new": "                \"mark\": mark,"
+  }
+ ]
+}

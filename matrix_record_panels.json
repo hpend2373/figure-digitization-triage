@@ -1,0 +1,144 @@
+{
+ "files": {
+  "record_panels.py": "0019299ac409578b5e0ee65c1577aed18b205b3f3720c3947d144416df1e22e8",
+  "panel_page.js": "d1e34236185845f6d97dfd11cd79493411b507ed79dc29a0072862aedb710c11",
+  "test_record_panels.py": "572982e664dbe3bb6c56aca2a7047127b9668a1109fd1449c632d63a7f9ac074"
+ },
+ "suites": [
+  "test_record_panels.py"
+ ],
+ "mutations": [
+  {
+   "name": "보았다는 표시를 보지 않는다",
+   "file": "record_panels.py",
+   "old": "    if not all(is_true(r.get(\"Seen_By_Person\")) for r in rows):",
+   "new": "    if False:"
+  },
+  {
+   "name": "이름 없이도 적는다",
+   "file": "record_panels.py",
+   "old": "    if \"\" in whos or len(whos) != 1:",
+   "new": "    if False:"
+  },
+  {
+   "name": "한 그림에 이름이 둘이어도 적는다",
+   "file": "record_panels.py",
+   "old": "    if \"\" in whos or len(whos) != 1:",
+   "new": "    if \"\" in whos:"
+  },
+  {
+   "name": "한 그림에 판정이 둘이어도 적는다",
+   "file": "record_panels.py",
+   "old": "    if len(verdicts) != 1 or not verdicts <= set(VERDICTS):",
+   "new": "    if not verdicts <= set(VERDICTS):"
+  },
+  {
+   "name": "모르는 판정도 적는다",
+   "file": "record_panels.py",
+   "old": "    if len(verdicts) != 1 or not verdicts <= set(VERDICTS):",
+   "new": "    if len(verdicts) != 1:"
+  },
+  {
+   "name": "대기열에 없는 그림의 답도 적는다",
+   "file": "record_panels.py",
+   "old": "    if fid not in queued:",
+   "new": "    if False:"
+  },
+  {
+   "name": "번호가 이어지지 않아도 적는다",
+   "file": "record_panels.py",
+   "old": "        if idx != list(range(1, len(rows) + 1)):",
+   "new": "        if False:"
+  },
+  {
+   "name": "크롭을 열 수 없어도 적는다",
+   "file": "record_panels.py",
+   "old": "        if size is None:",
+   "new": "        if False:"
+  },
+  {
+   "name": "수가 아닌 좌표도 적는다",
+   "file": "record_panels.py",
+   "old": "            if None in b:",
+   "new": "            if False:"
+  },
+  {
+   "name": "넓이 없는 상자도 적는다",
+   "file": "record_panels.py",
+   "old": "            if b[2] - b[0] < 4 or b[3] - b[1] < 4:",
+   "new": "            if False:"
+  },
+  {
+   "name": "크롭 밖의 상자도 적는다",
+   "file": "record_panels.py",
+   "old": "            if size and (b[0] < 0 or b[1] < 0 or b[2] > size[0] or b[3] > size[1]):",
+   "new": "            if False:"
+  },
+  {
+   "name": "받을 수 없는 종류도 적는다",
+   "file": "record_panels.py",
+   "old": "            if mark not in MARKS:",
+   "new": "            if False:"
+  },
+  {
+   "name": "패널이 없다는 답에 상자가 붙어도 적는다",
+   "file": "record_panels.py",
+   "old": "        if idx != [0] or any((r.get(\"X0\") or \"\").strip() for r in rows):",
+   "new": "        if False:"
+  },
+  {
+   "name": "보류를 적는다",
+   "file": "record_panels.py",
+   "old": "    if verdict == HELD:",
+   "new": "    if False:"
+  },
+  {
+   "name": "본 날짜를 부른 쪽이 아니라 오늘로 채운다",
+   "file": "record_panels.py",
+   "old": "            row[\"Verified_At\"] = when",
+   "new": "            row[\"Verified_At\"] = \"2026-01-01\""
+  },
+  {
+   "name": "종류를 대문자로 적지 않는다",
+   "file": "record_panels.py",
+   "old": "            row[\"Mark_Type\"] = row[\"Mark_Type\"].upper()",
+   "new": "            pass"
+  },
+  {
+   "name": "이미 적힌 그림을 다시 적는다",
+   "file": "record_panels.py",
+   "old": "        if fid in settled and not replace:",
+   "new": "        if False:"
+  },
+  {
+   "name": "바꿀 때 지난 줄을 남긴다",
+   "file": "record_panels.py",
+   "old": "    keep = [r for r in existing if r[\"Draft_ID\"] not in done]",
+   "new": "    keep = list(existing)"
+  },
+  {
+   "name": "같은 파일이어도 읽고 쓴다",
+   "file": "record_panels.py",
+   "old": "            and os.path.samefile(answers_path, out_path):",
+   "new": "            and False:"
+  },
+  {
+   "name": "관문의 어휘를 논리와 따로 둔다",
+   "file": "record_panels.py",
+   "old": "VERDICTS = (\"PANELS\", \"NO_PANELS\", \"HOLD\")",
+   "new": "VERDICTS = (\"PANELS\", \"NO_PANELS\", \"HOLD\", \"MAYBE\")"
+  },
+  {
+   "name": "종류의 어휘를 논리와 따로 둔다",
+   "file": "record_panels.py",
+   "old": "MARKS = (\"BAR\", \"LINE\", \"BOX\", \"SCATTER\", \"NOT_DATA\")",
+   "new": "MARKS = (\"BAR\", \"LINE\", \"BOX\", \"SCATTER\", \"NOT_DATA\", \"PIE\")"
+  },
+  {
+   "name": "빠진 열을 말하지 않는다",
+   "file": "record_panels.py",
+   "old": "    if answers and missing:",
+   "new": "    if False:"
+  }
+ ]
+}

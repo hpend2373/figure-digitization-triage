@@ -90,6 +90,9 @@ jobs:
           # 값 검토도 같은 나눔입니다: 화면은 값을 옮기고,
           # value_page.js가 무엇이 승인이 되는지 정합니다.
           node test_value_page.mjs
+          # 패널 확인도 같은 나눔입니다: 화면은 값을 옮기고,
+          # panel_page.js가 무엇이 답이 되는지 정합니다.
+          node test_panel_page.mjs
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: synthesis suites
@@ -127,7 +130,7 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
-                   test_value_page; do
+                   test_value_page test_panel_page test_record_panels; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
@@ -311,7 +314,7 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
-                   test_value_page; do
+                   test_value_page test_panel_page test_record_panels; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then
               printf '%s\n' "$out"

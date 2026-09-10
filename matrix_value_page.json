@@ -1,7 +1,8 @@
 {
  "files": {
   "value_page.py": "834926a90fca974f7386b8df999fea9cd2ee91bafe753d63a765e28a30361e86",
-  "test_value_page.py": "174c73245c90008200761add6c6029e4910042ee3bbb87ce715b8f8d060051dd"
+  "value_page.js": "737f2c528235725e9dd75ece6cbb0cd8ed075810a31c0b3a1795b7379ab0f7e1",
+  "test_value_page.py": "fc0a500d9ceefa615a2ba4314c799b972fd1523e8a2a754ab7a91e1fde779f95"
  },
  "suites": [
   "test_value_page.py"
@@ -54,6 +55,18 @@
    "file": "value_page.py",
    "old": "    w(\"var WHEN = %s;\" % json.dumps(str(when or \"\"), ensure_ascii=False))",
    "new": "    w(\"var WHEN = '';\")"
+  },
+  {
+   "name": "확인 칸에 페이지가 고른 낱말을 적는다",
+   "file": "value_page.js",
+   "old": "var CONFIRMED = 'CONFIRMED';",
+   "new": "var CONFIRMED = 'TRUE';"
+  },
+  {
+   "name": "이 모드가 묻지 않는 확인을 묻는다",
+   "file": "value_page.py",
+   "old": "    (\"Calibration_Checked\", \"그려진 값이 그 자리의 눈금과 맞는다\"),",
+   "new": "    (\"Calibration_Checked\", \"그려진 값이 그 자리의 눈금과 맞는다\"),\n    (\"Identity_Checked\", \"계열 이름이 맞는다\"),"
   }
  ]
 }

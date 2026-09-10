@@ -62,6 +62,8 @@ with io.open(os.path.join(VALS, "P_A.png"), "wb") as fh:
 SUBJECTS = {"P_A": "abc123"}
 HTML, COUNT = V.build(VALS, when="2026-09-10", subjects=SUBJECTS,
                       log=lambda *a: None)
+with io.open(os.path.join(HERE, "value_page.js"), encoding="utf-8") as fh:
+    LOGIC = fh.read()
 
 print("패널마다 한 장, 값은 표로")
 check("패널마다 카드가 하나", COUNT == 2 and HTML.count("class='doc'") == 2,
@@ -101,9 +103,23 @@ check("논리가 무엇을 요구하는지 페이지가 심어 준다",
       _need.group(1) if _need else "없음")
 
 print()
+print("확인 칸에 적히는 말이 관문이 보는 말과 같다")
+# REVERT: 확인 칸에 이 페이지가 고른 낱말을 적는다. `TRUE`라고 적었고 관문은
+# `CONFIRMED`를 봅니다 - 사람이 여섯 패널을 다 보고 다 눌렀는데
+# `finalize_batch`가 여섯 줄을 전부 되돌려 보냈고, 그 왕복을 사람이 두 번
+# 했습니다. 관문의 낱말은 `run_batch`가 정합니다.
+import run_batch as RB                                           # noqa: E402
+_conf = re.search(r"var CONFIRMED = '([A-Z_]+)'", LOGIC).group(1)
+check("확인의 낱말은 run_batch가 정한 것과 같다", _conf == RB.REVIEW_CONFIRMED,
+      "페이지 %s / 관문 %s" % (_conf, RB.REVIEW_CONFIRMED))
+_asked = set(name for name, _a in V.ASKS)
+check("페이지가 묻는 확인은 이 실행 모드가 요구하는 것과 같다",
+      _asked == set(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY"]),
+      "페이지 %s / 모드 %s"
+      % (sorted(_asked), sorted(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY"])))
+
+print()
 print("화면과 논리가 같은 어휘를 쓴다")
-with io.open(os.path.join(HERE, "value_page.js"), encoding="utf-8") as fh:
-    LOGIC = fh.read()
 _js = set(re.findall(r"'([A-Z_]+)'",
                      re.search(r"var DECISIONS = \[(.*?)\]", LOGIC, re.S).group(1)))
 check("고를 수 있는 답이 곧 답이 되는 답이다",

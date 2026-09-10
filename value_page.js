@@ -23,6 +23,15 @@ var DECISIONS = ['APPROVED', 'REJECTED', 'HOLD'];
 var HELD = 'HOLD';
 var APPROVED = 'APPROVED';
 
+//: 확인 칸에 적히는 말. `run_batch.REVIEW_CONFIRMED`와 **같은 글자**여야 합니다.
+//: 여기 `TRUE`라고 적었고, 관문은 `CONFIRMED`를 봅니다 - 사람이 여섯 패널을
+//: 다 보고 다 눌렀는데 `finalize_batch`가 여섯 줄을 전부
+//: "APPROVED alone is a signature on a filename"으로 되돌려 보냈습니다.
+//: 화면이 통과시킨 답을 관문이 다른 낱말 때문에 거절하면, 그 왕복은 사람이
+//: 두 번 하는 일이 됩니다.
+var CONFIRMED = 'CONFIRMED';
+var NOT_CONFIRMED = 'NOT_CONFIRMED';
+
 function requiredOf(state) {
   var r = (state || {}).required;
   return Object.prototype.toString.call(r) === '[object Array]' ? r : [];
@@ -69,7 +78,7 @@ function reviewOf(id, state) {
   var checks = {};
   var need = requiredOf(s);
   for (var i = 0; i < need.length; i++) {
-    checks[need[i]] = (s.checks || {})[need[i]] ? 'TRUE' : 'FALSE';
+    checks[need[i]] = (s.checks || {})[need[i]] ? CONFIRMED : NOT_CONFIRMED;
   }
   return { ready: true, why: '', row: {
     Panel_ID: String(s.panel || id),
@@ -138,6 +147,7 @@ function held(ids, states) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { DECISIONS: DECISIONS, HELD: HELD, APPROVED: APPROVED,
+                     CONFIRMED: CONFIRMED, NOT_CONFIRMED: NOT_CONFIRMED,
                      requiredOf: requiredOf, missingChecks: missingChecks,
                      reviewOf: reviewOf, buildCsv: buildCsv,
                      CSV_COLUMNS: CSV_COLUMNS, remaining: remaining, held: held };

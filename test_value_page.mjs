@@ -25,7 +25,7 @@ test('다 갖춘 승인은 한 줄이 된다', () => {
   const got = L.reviewOf('P_GP001', state());
   assert.equal(got.ready, true);
   assert.equal(got.row.Decision, 'APPROVED');
-  assert.equal(got.row.Marks_Checked, 'TRUE');
+  assert.equal(got.row.Marks_Checked, 'CONFIRMED');
   assert.equal(got.row.Review_Subject_SHA256, 'abc123');
 });
 
@@ -52,7 +52,7 @@ test('거절과 보류는 확인 칸을 묻지 않는다', () => {
 });
 test('거절이 확인하지 않은 것을 확인했다고 적지 않는다', () => {
   const got = L.reviewOf('P_GP001', state({ decision: 'REJECTED', checks: {} }));
-  assert.equal(got.row.Marks_Checked, 'FALSE');
+  assert.equal(got.row.Marks_Checked, 'NOT_CONFIRMED');
 });
 
 /* REVERT: 이름 없이도 판정으로 친다. `finalize_batch`는 등록된 사람만 승인할

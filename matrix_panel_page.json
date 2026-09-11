@@ -1,8 +1,8 @@
 {
  "files": {
-  "panel_page.py": "bd908599aba237058b14160f233de529edcc07f797b3300d76e55f9b46a7e935",
+  "panel_page.py": "5a48e579354b993f424374a4a61e667fbc9c2837e3324841abe7bdc5a071ab22",
   "panel_page.js": "797ff16291fe96cec8d6fd4dba46536f09a573e45d1cc935bf0f294ae8574adf",
-  "test_panel_page.py": "dbc32c02f167fc7bb737d7b6083d87ddf0c8a9cb97a957955cfc5db3fbc295e0"
+  "test_panel_page.py": "65413f619d0f43566c1906542e1313348021043f48f93dfada9bce4e337447e2"
  },
  "suites": [
   "test_panel_page.py"
@@ -217,6 +217,30 @@
    "file": "panel_page.py",
    "old": "      ovl.appendChild(ovc); ovl.appendChild(document.createTextNode(' 개별 점·선 겹침'));",
    "new": "      ovl.appendChild(ovc);"
+  },
+  {
+   "name": "설명을 접을 수 없게 한다",
+   "file": "panel_page.py",
+   "old": "      \"<button id='help-toggle' class='mini'>설명 숨기기</button></h1>\")",
+   "new": "      \"</h1>\")"
+  },
+  {
+   "name": "접은 것을 기억하지 않는다",
+   "file": "panel_page.py",
+   "old": "    try { localStorage.setItem(HELP, on ? '1' : '0'); } catch (e) {}",
+   "new": "    ;"
+  },
+  {
+   "name": "머리말 높이를 재지 않는다",
+   "file": "panel_page.py",
+   "old": "    if (h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px');",
+   "new": "    ;"
+  },
+  {
+   "name": "머리말 높이만큼 물러나지 않는다",
+   "file": "panel_page.py",
+   "old": ".doc{scroll-margin-top:calc(var(--hdr, 120px) + 10px)}",
+   "new": ""
   }
  ]
 }

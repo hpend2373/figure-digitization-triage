@@ -138,6 +138,10 @@ def build(run, queue, proposals=None, chunk=1, of=1, log=print):
     w(CSS)
     w("""<style>
 [hidden]{display:none!important}
+button.mini{font-size:12px;padding:1px 8px;margin-left:8px;vertical-align:1px}
+header{max-height:70vh;overflow:auto}
+/* 붙박이 머리말이 카드 위쪽을 덮지 않도록, 머리말 높이만큼 물러나 멈춥니다. */
+.doc{scroll-margin-top:calc(var(--hdr, 120px) + 10px)}
 .opt{display:block;font-size:13px;margin:3px 0}
 .wrap{position:relative;display:inline-block;border:1px solid #ccc;background:#fff}
 .wrap img{display:block;max-width:100%%;height:auto}
@@ -161,7 +165,12 @@ border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
 .said{font-size:12px;color:#55554f;margin:4px 0 0;max-width:80ch}
 .state.odd{color:#8a4b00}
 </style>""" % SHOW_WIDTH)
-    w("<header><h1>패널 확인 <span class='count' id='left'></span></h1>")
+    # 머리말은 붙박이(sticky)라 접지 않으면 그림 위쪽을 덮습니다. 설명은 처음
+    # 한 번 읽으면 되는 것이라 접어 둘 수 있게 하고, 접은 채로 두면 다음에 열
+    # 때도 접혀 있습니다.
+    w("<header><h1>패널 확인 <span class='count' id='left'></span> "
+      "<button id='help-toggle' class='mini'>설명 숨기기</button></h1>")
+    w("<div id='help'>")
     w("<p class='note'>그림마다 <b>패널의 자리</b>와 <b>무엇이 그려졌는지</b>가 "
       "기계의 제안으로 미리 채워져 있습니다 (파란 상자 = 제안). 맞으면 그대로 두고 "
       "<b>직접 봤다</b>와 이름만 채우면 됩니다. 틀리면 상자를 눌러 고르고 "
@@ -183,6 +192,7 @@ border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
     w("<p class='note'>이 페이지는 <b>관문이 아닙니다</b>. "
       "<code>record_panels</code>가 답이 실제로 낸 그림에 대한 것인지, 상자가 "
       "크롭 안에 드는지를 다시 봅니다.</p>")
+    w("</div>")
     w("<p style='margin:10px 0 0'><button id='dl'>CSV 내려받기</button> "
       "<span class='count' id='msg'></span></p></header><main>")
 
@@ -628,7 +638,30 @@ PAGE_JS = r"""
     q('#msg').textContent = n + '장의 답을 내려받았습니다.';
   });
 
+  // 설명 접기. 붙박이 머리말이 길면 그림 위쪽을 덮고, 스크롤해서 맞춰 놓은
+  // 자리가 단추 하나로 다시 가려집니다.
+  var HELP = 'fdt_panels_help';
+  var help = q('#help'), toggle = q('#help-toggle');
+  function measure() {
+    var h = document.querySelector('header');
+    if (h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px');
+  }
+  function showHelp(on) {
+    if (help) help.hidden = !on;
+    if (toggle) toggle.textContent = on ? '설명 숨기기' : '설명 보기';
+    try { localStorage.setItem(HELP, on ? '1' : '0'); } catch (e) {}
+    measure();
+  }
+  var wasOpen = '1';
+  try { wasOpen = localStorage.getItem(HELP); } catch (e) {}
+  showHelp(wasOpen !== '0');
+  if (toggle) {
+    toggle.addEventListener('click', function () { showHelp(!!(help && help.hidden)); });
+  }
+  window.addEventListener('resize', measure);
+
   IDS.forEach(paint);
+  measure();
 })();
 """ % json.dumps(MARK_LABELS, ensure_ascii=False)
 

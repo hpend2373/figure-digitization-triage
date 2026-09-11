@@ -158,6 +158,18 @@ check("개수를 아직 말하지 않은 패널을 세어 보인다",
       "missingCounts(IDS, states)" in HTML)
 
 print()
+print("붙박이 머리말이 그림을 덮지 않는다")
+# REVERT: 설명을 접을 수 없게 한다. 머리말이 붙박이라 스크롤해서 맞춰 놓은
+# 그림 위쪽이 설명에 가려지고, 상자를 그 자리에 그을 수 없습니다.
+check("설명을 접는 단추가 있다", "id='help-toggle'" in HTML and "설명 숨기기" in HTML)
+check("설명이 한 덩어리로 묶여 있다", "<div id='help'>" in HTML)
+check("접은 것을 다음에도 기억한다", "localStorage.setItem(HELP" in HTML)
+# REVERT: 머리말 높이를 재지 않는다. 카드로 스크롤하면 머리말 아래로 들어가
+# 그림 위쪽과 판정 줄이 가려집니다.
+check("머리말 높이만큼 물러나 멈춘다",
+      "scroll-margin-top:calc(var(--hdr" in HTML and "offsetHeight" in HTML)
+
+print()
 print("화면의 기하는 논리가 한다")
 # REVERT: 자리를 옮기는 산수를 페이지 안에 다시 적는다. 아무 시나리오도 그것을
 # 보지 않고, 창이 좁을 때 상자가 어긋난 자리에 저장됩니다.

@@ -266,6 +266,41 @@ test('개수를 아직 말하지 않은 패널을 센다', () => {
   assert.equal(L.missingCounts(['a', 'b'], st), 1);
 });
 
+/* 한 패널에 종류가 둘인 그림 - 막대 위에 선(쌍축). 리더 둘이 같은 자리를 읽어야
+ * 하고, 종류 하나로는 말할 수 없습니다. */
+test('두 번째 종류와 그 개수가 줄이 된다', () => {
+  const row = L.panelsOf('D0001', state({
+    boxes: [box({ mark: 'BAR', mark2: 'LINE', count2: '2', mark2Source: 'PROPOSED' })] })).rows[0];
+  assert.equal(row.Mark_Type_2, 'LINE');
+  assert.equal(row.Mark_Count_2, '2');
+  assert.equal(row.Mark2_Source, 'PROPOSED');
+});
+test('두 번째 종류가 없으면 그 칸들은 비어 나간다', () => {
+  const row = L.panelsOf('D0001', state({ boxes: [box({ count2: '9' })] })).rows[0];
+  assert.equal(row.Mark_Type_2, ''); assert.equal(row.Mark_Count_2, ''); assert.equal(row.Mark2_Source, '');
+});
+/* REVERT: 두 번째 종류를 첫 번째와 같게, 또는 "읽을 값 없음"으로 받는다. 같은
+ * 종류를 두 번 읽을 일도, 없는 값을 읽을 일도 없습니다. */
+test('두 번째 종류는 첫 번째와 달라야 한다', () => {
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'BOX' })] })).why, /같습니다/);
+});
+test('읽을 값 없음은 두 번째 종류가 아니다', () => {
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'NOT_DATA' })] })).why, /받을 수 없는 두 번째/);
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark: 'NOT_DATA', mark2: 'LINE' })] })).why, /받을 수 없는 두 번째/);
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'PIE' })] })).why, /받을 수 없는 두 번째/);
+});
+test('두 번째 종류의 개수도 셀 수여야 한다', () => {
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'LINE', count2: '0' })] })).why, /두 번째 종류: 개수는/);
+});
+/* REVERT: 개별 피험자의 점·선이 겹친 것을 적지 않는다. 읽을 값이 아니라 리더가
+ * 비켜 가야 할 잉크이고, 상자 리더가 실제로 그 점에 걸린 적이 있습니다. */
+test('개별 점·선 겹침은 따로 나간다', () => {
+  const rows = L.panelsOf('D0001', state({
+    boxes: [box({ overlay: 'INDIVIDUAL', overlaySource: 'PROPOSED' }), box({ x0: 500, x1: 900 })] })).rows;
+  assert.equal(rows[0].Overlay, 'INDIVIDUAL'); assert.equal(rows[0].Overlay_Source, 'PROPOSED');
+  assert.equal(rows[1].Overlay, ''); assert.equal(rows[1].Overlay_Source, '');
+});
+
 console.log('');
 console.log(pass + '/' + (pass + fails.length) + ' passed');
 if (fails.length) { console.log('FAILED: ' + fails.join(', ')); process.exit(1); }

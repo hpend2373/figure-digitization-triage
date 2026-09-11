@@ -1,8 +1,8 @@
 {
  "files": {
-  "record_panels.py": "b5e6b79906b4af7bef9a07b9f2fac9279ed8d388c7fdb53006b0094f515f5255",
-  "panel_page.js": "f6e02fd91e24cf0ebf72135db2fc42ba12fb1675b6ec5fc51ed4259b1c0fc89e",
-  "test_record_panels.py": "ecf5676e03d799bd7f8d3ec72f7e320ffa7e9eed2c6fca4fe6697b4118d360b3"
+  "record_panels.py": "c839e6d8abb39e6ca7286802ffa6802a6332fb581b69c13218c4828eaa211c15",
+  "panel_page.js": "797ff16291fe96cec8d6fd4dba46536f09a573e45d1cc935bf0f294ae8574adf",
+  "test_record_panels.py": "d158051039d274144756b83a63e34d2b69eb45dfc8ecfab4709323fe9ce07764"
  },
  "suites": [
   "test_record_panels.py"
@@ -199,6 +199,30 @@
    "file": "record_panels.py",
    "old": "            if count and (not count.isdigit() or int(count) < 1):",
    "new": "            if not count.isdigit() or int(count) < 1:"
+  },
+  {
+   "name": "첫 번째와 같은 둘째 종류도 적는다",
+   "file": "record_panels.py",
+   "old": "            if mark2 and (mark2 not in MARKS or mark2 == \"NOT_DATA\"\n                          or mark2 == mark or mark == \"NOT_DATA\"):",
+   "new": "            if mark2 and (mark2 not in MARKS or mark2 == \"NOT_DATA\"):"
+  },
+  {
+   "name": "둘째 종류 없이 온 개수를 적는다",
+   "file": "record_panels.py",
+   "old": "            if not mark2 and count2:",
+   "new": "            if False:"
+  },
+  {
+   "name": "둘째 종류의 개수를 보지 않는다",
+   "file": "record_panels.py",
+   "old": "            if count2 and (not count2.isdigit() or int(count2) < 1):",
+   "new": "            if False:"
+  },
+  {
+   "name": "겹침 칸에 아무 말이나 받는다",
+   "file": "record_panels.py",
+   "old": "            if overlay not in (\"\", \"INDIVIDUAL\"):",
+   "new": "            if False:"
   }
  ]
 }

@@ -52,6 +52,7 @@ ANSWER_REQUIRED = ("Draft_ID", "Panel_Index", "Verdict", "Verified_By",
                    "Seen_By_Person")
 COLUMNS = ("Draft_ID", "Panel_Index", "X0", "Y0", "X1", "Y1", "Mark_Type",
            "Mark_Count", "Region_Source", "Mark_Source", "Count_Source",
+           "Mark_Type_2", "Mark_Count_2", "Mark2_Source", "Overlay", "Overlay_Source",
            "Crop_SHA256", "Proposal_Version",
            "Declared_Count", "Drawn_Count", "Verdict",
            "Seen_By_Person", "Verified_By", "Verified_At", "Note")
@@ -170,6 +171,29 @@ def check_figure(fid, rows, queued, size, crop_sha=""):
                                  "%s번 패널의 종류 %r은 받는 것이 아닙니다. 받는 것: %s"
                                  % (r.get("Panel_Index"), mark or "(빈칸)",
                                     ", ".join(MARKS))))
+            # 두 번째 종류: 같은 자리를 읽을 두 번째 리더. 첫 번째와 다르고,
+            # 읽을 값 없음이 아니어야 합니다.
+            mark2 = (r.get("Mark_Type_2") or "").strip().upper()
+            count2 = (r.get("Mark_Count_2") or "").strip()
+            if mark2 and (mark2 not in MARKS or mark2 == "NOT_DATA"
+                          or mark2 == mark or mark == "NOT_DATA"):
+                problems.append(("BAD_MARK_2",
+                                 "%s번 패널의 두 번째 종류 %r은 받을 수 없습니다 - "
+                                 "첫 번째(%s)와 다르고 읽을 값이 있는 종류여야 합니다."
+                                 % (r.get("Panel_Index"), mark2, mark or "(빈칸)")))
+            if not mark2 and count2:
+                problems.append(("BAD_MARK_2",
+                                 "%s번 패널에 두 번째 종류 없이 개수 %r만 왔습니다."
+                                 % (r.get("Panel_Index"), count2)))
+            if count2 and (not count2.isdigit() or int(count2) < 1):
+                problems.append(("BAD_COUNT",
+                                 "%s번 패널 두 번째 종류의 개수 %r은 셀 수가 아닙니다."
+                                 % (r.get("Panel_Index"), count2)))
+            overlay = (r.get("Overlay") or "").strip().upper()
+            if overlay not in ("", "INDIVIDUAL"):
+                problems.append(("BAD_OVERLAY",
+                                 "%s번 패널의 겹침 %r은 받는 말이 아닙니다. 받는 것: "
+                                 "INDIVIDUAL 또는 빈칸." % (r.get("Panel_Index"), overlay)))
         # 같은 패널을 두 번 적은 답. 겹치는 상자 자체는 막지 않습니다 - 인셋도
         # 있습니다 - 만 거의 같은 상자 둘은 한 패널이고, 그대로 두면 같은 값이
         # 두 번 풀에 들어갑니다.

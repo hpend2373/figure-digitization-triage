@@ -1,8 +1,8 @@
 {
  "files": {
-  "panel_page.py": "fd86329f9be23c3092ba8d75e50cb4bf46bf4d09825123881c319ad90bc37e9b",
-  "panel_page.js": "f6e02fd91e24cf0ebf72135db2fc42ba12fb1675b6ec5fc51ed4259b1c0fc89e",
-  "test_panel_page.py": "bf427d0fbcba9c9a715ffc1f55658360f6b95205f9a8326a20589abaf5f0b86b"
+  "panel_page.py": "bd908599aba237058b14160f233de529edcc07f797b3300d76e55f9b46a7e935",
+  "panel_page.js": "797ff16291fe96cec8d6fd4dba46536f09a573e45d1cc935bf0f294ae8574adf",
+  "test_panel_page.py": "dbc32c02f167fc7bb737d7b6083d87ddf0c8a9cb97a957955cfc5db3fbc295e0"
  },
  "suites": [
   "test_panel_page.py"
@@ -181,6 +181,42 @@
    "file": "panel_page.py",
    "old": "    w(\"<p class='hint'><button data-add='%s'>상자 추가</button> \"",
    "new": "    w(\"<p class='hint'><button data-xx='%s'>상자 추가</button> \""
+  },
+  {
+   "name": "첫 번째와 같은 둘째 종류도 싣는다",
+   "file": "panel_page.py",
+   "old": "        ok2 = mark2 in dict(MARK_LABELS) and mark2 not in (\"NOT_DATA\", mark) \\\n            and mark != \"NOT_DATA\"",
+   "new": "        ok2 = mark2 in dict(MARK_LABELS) and mark2 != \"NOT_DATA\" and mark != \"NOT_DATA\""
+  },
+  {
+   "name": "읽을 값 없음 패널에도 둘째 종류를 싣는다",
+   "file": "panel_page.py",
+   "old": "        ok2 = mark2 in dict(MARK_LABELS) and mark2 not in (\"NOT_DATA\", mark) \\\n            and mark != \"NOT_DATA\"",
+   "new": "        ok2 = mark2 in dict(MARK_LABELS) and mark2 not in (\"NOT_DATA\", mark)"
+  },
+  {
+   "name": "읽을 값 없음 패널에도 겹침을 싣는다",
+   "file": "panel_page.py",
+   "old": "                \"overlay\": \"INDIVIDUAL\" if str(b.get(\"overlay\") or \"\").upper() == \"INDIVIDUAL\"\n                           and mark != \"NOT_DATA\" else \"\",",
+   "new": "                \"overlay\": \"INDIVIDUAL\" if str(b.get(\"overlay\") or \"\").upper() == \"INDIVIDUAL\" else \"\","
+  },
+  {
+   "name": "둘째 종류 칸을 내밀지 않는다",
+   "file": "panel_page.py",
+   "old": "      none2.value = ''; none2.textContent = '두 번째 종류 없음';",
+   "new": "      none2.value = ''; none2.textContent = '';"
+  },
+  {
+   "name": "둘째 종류 목록에 읽을 값 없음을 넣는다",
+   "file": "panel_page.py",
+   "old": "        if (ml[0] === 'NOT_DATA') return;",
+   "new": "        ;"
+  },
+  {
+   "name": "겹침 표시를 내밀지 않는다",
+   "file": "panel_page.py",
+   "old": "      ovl.appendChild(ovc); ovl.appendChild(document.createTextNode(' 개별 점·선 겹침'));",
+   "new": "      ovl.appendChild(ovc);"
   }
  ]
 }

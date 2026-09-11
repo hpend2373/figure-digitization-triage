@@ -48,6 +48,8 @@ def panel(i, **over):
            "X1": "400", "Y1": "300", "Mark_Type": "BOX", "Region_Source": "DRAWN",
            "Mark_Source": "TYPED", "Crop_SHA256": SHA, "Proposal_Version": "v2",
            "Mark_Count": "3", "Count_Source": "TYPED",
+           "Mark_Type_2": "", "Mark_Count_2": "", "Mark2_Source": "",
+           "Overlay": "", "Overlay_Source": "",
            "Declared_Count": "2", "Drawn_Count": "2", "Verdict": "PANELS",
            "Seen_By_Person": "1", "Verified_By": "MC", "Note": ""}
     row.update(over)
@@ -148,6 +150,26 @@ check("0은 개수가 아니다", "BAD_COUNT" in codes(run([panel(1, Mark_Count=
 # 1019칸 채우게 붙잡아 두면 아무도 끝내지 못합니다.
 check("아직 말하지 않은 개수는 막지 않는다",
       not run([panel(1, Mark_Count="", Count_Source="")])[1])
+
+print()
+print("한 자리에 종류가 둘일 수 있다")
+_two = run([panel(1, Mark_Type_2="LINE", Mark_Count_2="2", Mark2_Source="PROPOSED")])
+check("두 번째 종류가 그대로 적힌다",
+      not _two[1] and _two[0][0]["Mark_Type_2"] == "LINE" and _two[0][0]["Mark_Count_2"] == "2")
+# REVERT: 두 번째 종류를 첫 번째와 같게, 또는 읽을 값 없음으로 받는다.
+check("첫 번째와 같은 둘째 종류는 거절한다",
+      "BAD_MARK_2" in codes(run([panel(1, Mark_Type_2="BOX")])[1]))
+check("읽을 값 없음은 둘째 종류가 아니다",
+      "BAD_MARK_2" in codes(run([panel(1, Mark_Type_2="NOT_DATA")])[1]))
+check("둘째 종류 없이 온 개수는 거절한다",
+      "BAD_MARK_2" in codes(run([panel(1, Mark_Count_2="2")])[1]))
+check("둘째 종류의 개수도 셀 수여야 한다",
+      "BAD_COUNT" in codes(run([panel(1, Mark_Type_2="LINE", Mark_Count_2="x")])[1]))
+check("개별 점·선 겹침은 그대로 적힌다",
+      run([panel(1, Overlay="INDIVIDUAL", Overlay_Source="TYPED")])[0][0]["Overlay"] == "INDIVIDUAL")
+# REVERT: 겹침 칸에 아무 말이나 받는다. 리더는 정해진 말만 알아듣습니다.
+check("모르는 겹침 말은 거절한다",
+      "BAD_OVERLAY" in codes(run([panel(1, Overlay="DOTS")])[1]))
 
 print()
 print("같은 패널을 두 번 적지 않는다")

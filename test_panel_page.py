@@ -52,7 +52,8 @@ PROPS = {"D1": {"fig": "D1", "size": [1800, 900], "verdict": "PANELS",
                 "crop_sha256": "abc123def456", "proposal_version": "v2",
                 "note": "전에 센 수 2 ≠ 제안 1. 상자가 서로 겹칩니다 (1·2 100%)",
                 "boxes": [{"x0": 10, "y0": 10, "x1": 800, "y1": 800, "mark": "bar",
-                           "count": "5"}]},
+                           "count": "5", "mark2": "line", "count2": "2",
+                           "overlay": "INDIVIDUAL"}]},
          "D2": {"fig": "D2", "size": [999, 300], "boxes": [[10, 10, 100, 100]]},
          "D3": {"fig": "D3", "size": [1, 1], "verdict": "MAYBE", "boxes": []}}
 
@@ -81,11 +82,22 @@ check("전에 센 수가 함께 건너간다", META["D1"]["declared"] == "2")
 
 print()
 print("제안은 화면의 칸이 아니라 논리로 건너간다")
-check("제안 상자가 종류·개수와 함께 META로 간다",
+check("제안 상자가 종류·개수·둘째 종류·겹침과 함께 META로 간다",
       META["D1"]["proposed"] == [{"x0": 10, "y0": 10, "x1": 800, "y1": 800,
-                                  "mark": "BAR", "count": "5", "source": "PROPOSED",
-                                  "markSource": "PROPOSED", "countSource": "PROPOSED"}],
+                                  "mark": "BAR", "count": "5", "mark2": "LINE", "count2": "2",
+                                  "overlay": "INDIVIDUAL", "source": "PROPOSED",
+                                  "markSource": "PROPOSED", "countSource": "PROPOSED",
+                                  "mark2Source": "PROPOSED", "overlaySource": "PROPOSED"}],
       META["D1"]["proposed"])
+# REVERT: 두 번째 종류를 첫 번째와 같게, 또는 읽을 값 없음으로 싣는다.
+check("첫 번째와 같은 둘째 종류는 싣지 않는다",
+      P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "BAR", "mark2": "BAR"})["mark2"] == "")
+check("읽을 값 없음 패널의 둘째 종류·겹침은 싣지 않는다",
+      P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "NOT_DATA", "mark2": "LINE",
+                      "overlay": "INDIVIDUAL"}) == {"x0": 1, "y0": 1, "x1": 9, "y1": 9,
+                      "mark": "NOT_DATA", "count": "", "mark2": "", "count2": "", "overlay": "",
+                      "source": "PROPOSED", "markSource": "PROPOSED", "countSource": "",
+                      "mark2Source": "", "overlaySource": ""})
 check("셀 수 없는 개수는 제안으로 싣지 않는다",
       P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "BAR",
                       "count": "몇"})["count"] == "")
@@ -134,6 +146,11 @@ check("상자마다 좌표 칸이 넷", "n.type = 'number'" in HTML and "['x0', 
 # REVERT: 개수를 물을 자리가 없다. 리더가 찾아낸 수와 대조할 수는 끌기로는
 # 말할 수 없습니다.
 check("상자마다 개수 칸이 하나", "cnt.placeholder = '개수'" in HTML)
+# REVERT: 두 번째 종류를 고를 자리가 없다. 막대 위에 선이 있는 패널은 종류
+# 하나로 말할 수 없고, 리더 하나만 그 자리를 읽습니다.
+check("상자마다 두 번째 종류 칸", "두 번째 종류 없음" in HTML and "select.m2" in HTML)
+check("두 번째 종류 목록에 읽을 값 없음은 없다", "if (ml[0] === 'NOT_DATA') return;" in HTML)
+check("상자마다 개별 점·선 겹침 표시", "createTextNode(' 개별 점·선 겹침')" in HTML)
 check("숫자로 고친 상자는 사람이 그은 것으로 바뀐다",
       "if (b.source === 'PROPOSED') { b.source = 'DRAWN'; }" in HTML)
 check("끌지 않고도 상자를 더할 수 있다", "data-add=" in HTML and "상자 추가" in HTML)

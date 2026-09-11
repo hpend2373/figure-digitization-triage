@@ -149,6 +149,9 @@ touch-action:none}
 .boxes .tag{font-family:ui-monospace,Menlo,monospace;min-width:26px;cursor:pointer}
 .boxes input.xy{width:66px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
 .boxes input.cnt{width:62px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
+.boxes .plus{color:#8a8a82}
+.boxes select.m2{font-size:12px;color:#55554f}
+.boxes .ovl{font-size:12px;color:#55554f;white-space:nowrap}
 .boxes .src{color:#8a8a82;font-size:12px}
 .who{margin:8px 0}
 .cap{font-size:12px;color:#55554f;margin:4px 0 10px;max-width:%dpx}
@@ -169,6 +172,11 @@ border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
       "수와 대조할 유일한 수라 틀리면 고쳐 주시고, 모르겠으면 비워 두십시오 — "
       "빈칸은 답을 막지 않습니다. 자리도 <b>숫자 칸에 직접 쳐서</b> 고칠 수 "
       "있습니다.</p>")
+    w("<p class='note'>한 패널에 종류가 둘이면(막대 위에 선, 상자 옆에 선) "
+      "<b>+ 두 번째 종류</b>와 그 개수를 고르십시오 — 같은 자리를 리더 둘이 "
+      "읽습니다. 상자 위에 찍힌 개별 피험자의 점이나 막대 위의 개별 선은 두 번째 "
+      "종류가 아니라 <b>개별 점·선 겹침</b>입니다 — 읽을 요약값이 아니라 리더가 "
+      "비켜 가야 할 잉크라서, 따로 표시합니다.</p>")
     w("<p class='note'>눈금 값은 여기서 묻지 않습니다 — 확인된 자리에서 리더가 "
       "읽고, 다음 페이지가 그것을 다시 보입니다. 정하기 어려우면 "
       "<b>아직 못 정하겠다</b>도 답입니다.</p>")
@@ -227,14 +235,27 @@ def proposed_box(b):
     if isinstance(b, dict):
         mark = str(b.get("mark") or "").upper()
         count = str(b.get("count") or "").strip()
+        mark2 = str(b.get("mark2") or "").upper()
+        count2 = str(b.get("count2") or "").strip()
+        # 두 번째 종류는 첫 번째와 다르고 "읽을 값 없음"이 아닐 때만 제안입니다.
+        ok2 = mark2 in dict(MARK_LABELS) and mark2 not in ("NOT_DATA", mark) \
+            and mark != "NOT_DATA"
         return {"x0": b["x0"], "y0": b["y0"], "x1": b["x1"], "y1": b["y1"],
                 "mark": mark if mark in dict(MARK_LABELS) else "",
                 "count": count if count.isdigit() and int(count) >= 1 else "",
+                "mark2": mark2 if ok2 else "",
+                "count2": count2 if ok2 and count2.isdigit() and int(count2) >= 1 else "",
+                "overlay": "INDIVIDUAL" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
+                           and mark != "NOT_DATA" else "",
                 "source": "PROPOSED",
                 "markSource": "PROPOSED" if mark in dict(MARK_LABELS) else "",
-                "countSource": "PROPOSED" if count.isdigit() else ""}
+                "countSource": "PROPOSED" if count.isdigit() else "",
+                "mark2Source": "PROPOSED" if ok2 else "",
+                "overlaySource": "PROPOSED" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
+                                 and mark != "NOT_DATA" else ""}
     return {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3], "mark": "", "count": "",
-            "source": "PROPOSED", "markSource": "", "countSource": ""}
+            "mark2": "", "count2": "", "overlay": "", "source": "PROPOSED", "markSource": "",
+            "countSource": "", "mark2Source": "", "overlaySource": ""}
 
 
 def card(fid, draft, q, src, shown, n_prop, prop):
@@ -289,9 +310,12 @@ PAGE_JS = r"""
   function fromProposal(m) {
     return (m.proposed || []).map(function (b) {
       return { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, mark: b.mark || '',
-               count: b.count || '', source: 'PROPOSED',
+               count: b.count || '', mark2: b.mark2 || '', count2: b.count2 || '',
+               overlay: b.overlay || '', source: 'PROPOSED',
                markSource: b.mark ? 'PROPOSED' : '',
-               countSource: b.count ? 'PROPOSED' : '' };
+               countSource: b.count ? 'PROPOSED' : '',
+               mark2Source: b.mark2 ? 'PROPOSED' : '',
+               overlaySource: b.overlay ? 'PROPOSED' : '' };
     });
   }
   function st(id) {
@@ -402,12 +426,53 @@ PAGE_JS = r"""
         active = id; save(); paint(id);
       });
       row.appendChild(cnt);
+      // 두 번째 종류: 막대 위에 선, 상자 옆에 선처럼 한 자리에 리더 둘이 필요한
+      // 패널. 개별 피험자의 점이 상자 위에 찍힌 것은 여기 적지 않습니다.
+      var plus = document.createElement('span'); plus.className = 'plus'; plus.textContent = '+';
+      row.appendChild(plus);
+      var sel2 = document.createElement('select'); sel2.className = 'm2';
+      var none2 = document.createElement('option');
+      none2.value = ''; none2.textContent = '두 번째 종류 없음';
+      sel2.appendChild(none2);
+      MARK_LABELS.forEach(function (ml) {
+        if (ml[0] === 'NOT_DATA') return;
+        var o = document.createElement('option');
+        o.value = ml[0]; o.textContent = ml[1]; sel2.appendChild(o);
+      });
+      sel2.value = b.mark2 || '';
+      sel2.addEventListener('change', function () {
+        b.mark2 = sel2.value; b.mark2Source = 'TYPED';
+        if (!b.mark2) { b.count2 = ''; }
+        active = id; save(); paint(id);
+      });
+      row.appendChild(sel2);
+      var cnt2 = document.createElement('input');
+      cnt2.type = 'number'; cnt2.min = '1'; cnt2.step = '1'; cnt2.className = 'cnt';
+      cnt2.placeholder = '개수'; cnt2.hidden = !b.mark2;
+      cnt2.value = (b.count2 === null || b.count2 === undefined) ? '' : b.count2;
+      cnt2.addEventListener('input', function () {
+        b.count2 = cnt2.value; b.mark2Source = b.mark2Source || 'TYPED';
+        active = id; save(); paint(id);
+      });
+      row.appendChild(cnt2);
+      // 개별 피험자의 점·선이 요약 표시 위에 겹쳐 있는가. 두 번째 종류가
+      // 아니라 리더가 비켜 가야 할 잉크입니다.
+      var ovl = document.createElement('label'); ovl.className = 'ovl';
+      var ovc = document.createElement('input'); ovc.type = 'checkbox';
+      ovc.checked = !!b.overlay;
+      ovc.addEventListener('change', function () {
+        b.overlay = ovc.checked ? 'INDIVIDUAL' : ''; b.overlaySource = 'TYPED';
+        active = id; save(); paint(id);
+      });
+      ovl.appendChild(ovc); ovl.appendChild(document.createTextNode(' 개별 점·선 겹침'));
+      row.appendChild(ovl);
       var src = document.createElement('span');
       src.className = 'src';
       src.textContent = (b.source === 'PROPOSED' ? '제안' : '그음')
         + (b.mark ? (b.markSource === 'PROPOSED' ? ' · 종류 제안' : ' · 종류 고름') : '')
         + (String(b.count || '').trim()
-           ? (b.countSource === 'PROPOSED' ? ' · 개수 제안' : ' · 개수 침') : '');
+           ? (b.countSource === 'PROPOSED' ? ' · 개수 제안' : ' · 개수 침') : '')
+        + (b.mark2 ? (b.mark2Source === 'PROPOSED' ? ' · 둘째 제안' : ' · 둘째 고름') : '');
       row.appendChild(src);
       host.appendChild(row);
     });

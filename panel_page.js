@@ -13,6 +13,12 @@
  * 개수는 리더가 찾아낸 수와 대조할 유일한 수이고(격자 관문이 그것으로 구멍을
  * 잡습니다), 끌기로는 말할 수 없는 것이라 숫자 칸이 필요합니다.
  *
+ * 한 패널에 종류가 둘인 그림이 있습니다 - 막대 위에 선(쌍축), 상자 옆에 선.
+ * 그것은 리더 둘이 같은 자리를 읽어야 한다는 말이고, 종류 하나로는 말할 수
+ * 없어서 **두 번째 종류**와 그 개수를 따로 받습니다. 개별 피험자의 점이 상자
+ * 위에 찍힌 것은 두 번째 종류가 아닙니다 - 읽을 요약값이 아니라 리더가 비켜
+ * 가야 할 잉크입니다.
+ *
  * 이 파일이 지키는 넷:
  *   1. 그림을 직접 보았다고 누르지 않으면 답이 아닙니다.
  *   2. 누가 보았는지 없는 답은 답이 아닙니다.
@@ -164,6 +170,17 @@ function panelsOf(id, state) {
       }
       var badCount = countProblem(b.count);
       if (badCount) return { ready: false, why: (i + 1) + '번 패널: ' + badCount, rows: [] };
+      var mark2 = String(b.mark2 || '').trim().toUpperCase();
+      if (mark2) {
+        // 두 번째 종류는 첫 번째와 달라야 하고, "읽을 값 없음"일 수 없습니다 -
+        // 같은 종류를 두 번 읽을 일도, 없는 값을 읽을 일도 없습니다.
+        if (MARKS.indexOf(mark2) < 0 || mark2 === 'NOT_DATA' || mark === 'NOT_DATA') {
+          return { ready: false, why: (i + 1) + '번 패널: 받을 수 없는 두 번째 종류 ' + mark2, rows: [] };
+        }
+        if (mark2 === mark) return { ready: false, why: (i + 1) + '번 패널: 두 번째 종류가 첫 번째와 같습니다', rows: [] };
+        var badCount2 = countProblem(b.count2);
+        if (badCount2) return { ready: false, why: (i + 1) + '번 패널 두 번째 종류: ' + badCount2, rows: [] };
+      }
       rows.push({
         Draft_ID: String(s.draft || id),
         Panel_Index: i + 1,
@@ -180,6 +197,15 @@ function panelsOf(id, state) {
         Mark_Source: b.markSource === 'PROPOSED' ? 'PROPOSED' : 'TYPED',
         Count_Source: String(b.count || '').trim()
           ? (b.countSource === 'PROPOSED' ? 'PROPOSED' : 'TYPED') : '',
+        // 같은 자리를 읽을 두 번째 리더. 없으면 빈칸.
+        Mark_Type_2: mark2,
+        Mark_Count_2: mark2 ? String(b.count2 === null || b.count2 === undefined ? '' : b.count2).trim() : '',
+        Mark2_Source: mark2 ? (b.mark2Source === 'PROPOSED' ? 'PROPOSED' : 'TYPED') : '',
+        // 요약 표시 위에 개별 피험자의 점·선이 겹쳐 있는가. 읽을 값이 아니라
+        // 리더가 비켜 가야 할 잉크이고, 상자 리더가 실제로 그 점에 걸린 적이
+        // 있습니다.
+        Overlay: b.overlay ? 'INDIVIDUAL' : '',
+        Overlay_Source: b.overlay ? (b.overlaySource === 'PROPOSED' ? 'PROPOSED' : 'TYPED') : '',
         // 이 좌표가 **어느 크롭 위의** 좌표인지. 크롭이 다시 만들어지면 같은
         // 이름의 다른 그림이고, 관문이 그것을 알아야 합니다.
         Crop_SHA256: String(s.crop || ''),
@@ -197,6 +223,7 @@ function panelsOf(id, state) {
       Draft_ID: String(s.draft || id), Panel_Index: 0,
       X0: '', Y0: '', X1: '', Y1: '', Mark_Type: '', Mark_Count: '',
       Region_Source: '', Mark_Source: '', Count_Source: '',
+      Mark_Type_2: '', Mark_Count_2: '', Mark2_Source: '', Overlay: '', Overlay_Source: '',
       Crop_SHA256: String(s.crop || ''), Proposal_Version: String(s.proposalVersion || ''),
       Declared_Count: num(s.declared) === null ? '' : String(num(s.declared)),
       Drawn_Count: '0', Verdict: verdict,
@@ -209,6 +236,7 @@ function panelsOf(id, state) {
 
 var CSV_COLUMNS = ['Draft_ID', 'Panel_Index', 'X0', 'Y0', 'X1', 'Y1', 'Mark_Type',
                    'Mark_Count', 'Region_Source', 'Mark_Source', 'Count_Source',
+                   'Mark_Type_2', 'Mark_Count_2', 'Mark2_Source', 'Overlay', 'Overlay_Source',
                    'Crop_SHA256', 'Proposal_Version',
                    'Declared_Count', 'Drawn_Count', 'Verdict',
                    'Seen_By_Person', 'Verified_By', 'Note'];

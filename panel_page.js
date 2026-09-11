@@ -8,6 +8,11 @@
  * 그것이 리더를 고르고, 이 논문이 "막대는 SEM, 상자는 사분위"라고 말할 때
  * 분산의 뜻까지 정합니다.
  *
+ * 상자 하나에 대해 사람이 고칠 수 있는 것은 셋입니다: **자리**(끌거나 숫자로
+ * 치거나), **종류**, 그리고 **개수** - 그 패널에서 읽어야 할 표시가 몇인지.
+ * 개수는 리더가 찾아낸 수와 대조할 유일한 수이고(격자 관문이 그것으로 구멍을
+ * 잡습니다), 끌기로는 말할 수 없는 것이라 숫자 칸이 필요합니다.
+ *
  * 이 파일이 지키는 넷:
  *   1. 그림을 직접 보았다고 누르지 않으면 답이 아닙니다.
  *   2. 누가 보았는지 없는 답은 답이 아닙니다.
@@ -35,6 +40,16 @@
 //: 막대냐 선이냐입니다. `NOT_DATA`는 그 패널이 축은 있지만 읽을 값이 없다는
 //: 답이고, 답입니다.
 var MARKS = ['BAR', 'LINE', 'BOX', 'SCATTER', 'NOT_DATA'];
+
+/* 개수 칸에 친 것이 수인가. 빈칸은 "말하지 않음"이고 답을 막지 않습니다 -
+ * 이 페이지가 묻는 것은 자리와 종류이고, 개수는 할 수 있을 때 미리 적어 두는
+ * 것입니다. 그러나 0이나 1.5나 "몇 개"는 수가 아닙니다. */
+function countProblem(v) {
+  var t = String(v === null || v === undefined ? '' : v).trim();
+  if (!t) return '';
+  if (!/^[0-9]+$/.test(t) || Number(t) < 1) return '개수는 1 이상의 정수여야 합니다';
+  return '';
+}
 
 //: 그림 전체에 대한 판정. `NO_PANELS`는 "이 그림에 읽을 패널이 없다" - 사람이
 //: 전에 센 수가 틀렸다는 말이고, 그것도 답입니다. `HOLD`는 답이지만 넘어가지
@@ -147,17 +162,24 @@ function panelsOf(id, state) {
       if (MARKS.indexOf(mark) < 0) {
         return { ready: false, why: (i + 1) + '번 패널: 받을 수 없는 종류 ' + mark, rows: [] };
       }
+      var badCount = countProblem(b.count);
+      if (badCount) return { ready: false, why: (i + 1) + '번 패널: ' + badCount, rows: [] };
       rows.push({
         Draft_ID: String(s.draft || id),
         Panel_Index: i + 1,
         X0: Math.round(num(b.x0)), Y0: Math.round(num(b.y0)),
         X1: Math.round(num(b.x1)), Y1: Math.round(num(b.y1)),
         Mark_Type: mark,
+        // 그 패널에서 읽어야 할 표시의 수. 리더가 찾아낸 수와 대조할 수이고,
+        // 빈칸은 "아직 말하지 않음"입니다.
+        Mark_Count: String(b.count === null || b.count === undefined ? '' : b.count).trim(),
         // 사람이 그은 것과 기계가 제안한 것을 그대로 받은 것은 같은 상자가
         // 아닙니다. 둘을 가르는 칸이 없으면 자동 분할이 얼마나 맞았는지
         // 아무도 셀 수 없습니다.
         Region_Source: b.source === 'PROPOSED' ? 'PROPOSED' : 'DRAWN',
         Mark_Source: b.markSource === 'PROPOSED' ? 'PROPOSED' : 'TYPED',
+        Count_Source: String(b.count || '').trim()
+          ? (b.countSource === 'PROPOSED' ? 'PROPOSED' : 'TYPED') : '',
         // 이 좌표가 **어느 크롭 위의** 좌표인지. 크롭이 다시 만들어지면 같은
         // 이름의 다른 그림이고, 관문이 그것을 알아야 합니다.
         Crop_SHA256: String(s.crop || ''),
@@ -173,7 +195,8 @@ function panelsOf(id, state) {
     // NO_PANELS와 HOLD는 그림 한 줄입니다. 상자 없이.
     rows.push({
       Draft_ID: String(s.draft || id), Panel_Index: 0,
-      X0: '', Y0: '', X1: '', Y1: '', Mark_Type: '', Region_Source: '', Mark_Source: '',
+      X0: '', Y0: '', X1: '', Y1: '', Mark_Type: '', Mark_Count: '',
+      Region_Source: '', Mark_Source: '', Count_Source: '',
       Crop_SHA256: String(s.crop || ''), Proposal_Version: String(s.proposalVersion || ''),
       Declared_Count: num(s.declared) === null ? '' : String(num(s.declared)),
       Drawn_Count: '0', Verdict: verdict,
@@ -185,7 +208,8 @@ function panelsOf(id, state) {
 }
 
 var CSV_COLUMNS = ['Draft_ID', 'Panel_Index', 'X0', 'Y0', 'X1', 'Y1', 'Mark_Type',
-                   'Region_Source', 'Mark_Source', 'Crop_SHA256', 'Proposal_Version',
+                   'Mark_Count', 'Region_Source', 'Mark_Source', 'Count_Source',
+                   'Crop_SHA256', 'Proposal_Version',
                    'Declared_Count', 'Drawn_Count', 'Verdict',
                    'Seen_By_Person', 'Verified_By', 'Note'];
 
@@ -208,6 +232,21 @@ function buildCsv(ids, states) {
   return lines.join('\n');
 }
 
+/* 개수를 아직 말하지 않은 패널 수. 답을 막지는 않지만 화면이 세어 보입니다 -
+ * 개수 없는 패널은 리더가 무엇을 찾아야 하는지 아무 데도 적히지 않은 패널입니다. */
+function missingCounts(ids, states) {
+  var n = 0;
+  for (var i = 0; i < ids.length; i++) {
+    var s = (states || {})[ids[i]] || {};
+    if (String(s.verdict || '').toUpperCase() !== 'PANELS') continue;
+    var bs = s.boxes || [];
+    for (var j = 0; j < bs.length; j++) {
+      if (!String(bs[j].count === null || bs[j].count === undefined ? '' : bs[j].count).trim()) n++;
+    }
+  }
+  return n;
+}
+
 function remaining(ids, states) {
   var left = 0;
   for (var i = 0; i < ids.length; i++) if (!panelsOf(ids[i], (states || {})[ids[i]]).ready) left++;
@@ -228,6 +267,7 @@ if (typeof module !== 'undefined' && module.exports) {
                      boxProblem: boxProblem, panelsOf: panelsOf, buildCsv: buildCsv,
                      CSV_COLUMNS: CSV_COLUMNS, remaining: remaining, held: held,
                      imagePoint: imagePoint, boxAt: boxAt, overlapPairs: overlapPairs,
+                     countProblem: countProblem, missingCounts: missingCounts,
                      coverOf: coverOf, staleState: staleState,
                      OVERLAP_MAX: OVERLAP_MAX };
 }

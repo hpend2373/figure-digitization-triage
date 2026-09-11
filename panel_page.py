@@ -146,7 +146,9 @@ touch-action:none}
 .boxes{margin:8px 0;font-size:13px}
 .boxes .b{display:flex;gap:8px;align-items:center;margin:3px 0}
 .boxes .b.sel{background:#fff3c4}
-.boxes .tag{font-family:ui-monospace,Menlo,monospace;min-width:150px}
+.boxes .tag{font-family:ui-monospace,Menlo,monospace;min-width:26px;cursor:pointer}
+.boxes input.xy{width:66px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
+.boxes input.cnt{width:62px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
 .boxes .src{color:#8a8a82;font-size:12px}
 .who{margin:8px 0}
 .cap{font-size:12px;color:#55554f;margin:4px 0 10px;max-width:%dpx}
@@ -162,6 +164,11 @@ border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
       "<b>직접 봤다</b>와 이름만 채우면 됩니다. 틀리면 상자를 눌러 고르고 "
       "<b>지우기</b> 단추나 Delete로 지운 뒤 그림 위를 끌어 다시 긋고(주황 = 그음), "
       "종류는 목록에서 바꿉니다.</p>")
+    w("<p class='note'>상자마다 <b>개수</b> 칸은 그 패널에서 읽어야 할 표시가 "
+      "몇인지입니다(선 몇 개·상자 몇 개·막대 몇 개·점 계열 몇 개). 리더가 찾아낸 "
+      "수와 대조할 유일한 수라 틀리면 고쳐 주시고, 모르겠으면 비워 두십시오 — "
+      "빈칸은 답을 막지 않습니다. 자리도 <b>숫자 칸에 직접 쳐서</b> 고칠 수 "
+      "있습니다.</p>")
     w("<p class='note'>눈금 값은 여기서 묻지 않습니다 — 확인된 자리에서 리더가 "
       "읽고, 다음 페이지가 그것을 다시 보입니다. 정하기 어려우면 "
       "<b>아직 못 정하겠다</b>도 답입니다.</p>")
@@ -219,12 +226,15 @@ def proposed_box(b):
     """제안 상자 하나를 화면이 드는 모양으로. 종류가 딸려 오면 미리 골라집니다."""
     if isinstance(b, dict):
         mark = str(b.get("mark") or "").upper()
+        count = str(b.get("count") or "").strip()
         return {"x0": b["x0"], "y0": b["y0"], "x1": b["x1"], "y1": b["y1"],
                 "mark": mark if mark in dict(MARK_LABELS) else "",
+                "count": count if count.isdigit() and int(count) >= 1 else "",
                 "source": "PROPOSED",
-                "markSource": "PROPOSED" if mark in dict(MARK_LABELS) else ""}
-    return {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3],
-            "mark": "", "source": "PROPOSED", "markSource": ""}
+                "markSource": "PROPOSED" if mark in dict(MARK_LABELS) else "",
+                "countSource": "PROPOSED" if count.isdigit() else ""}
+    return {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3], "mark": "", "count": "",
+            "source": "PROPOSED", "markSource": "", "countSource": ""}
 
 
 def card(fid, draft, q, src, shown, n_prop, prop):
@@ -249,9 +259,11 @@ def card(fid, draft, q, src, shown, n_prop, prop):
     else:
         w("<div class='nofig'>크롭 없음 — 그을 그림이 없습니다</div>")
     w("<div class='boxes' data-boxes='%s'></div>" % esc(fid))
-    w("<p class='hint'><button data-del='%s'>고른 상자 지우기</button> "
-      "<button data-reset='%s'>제안으로 되돌리기</button></p>"
-      % (esc(fid), esc(fid)))
+    w("<p class='hint'><button data-add='%s'>상자 추가</button> "
+      "<button data-del='%s'>고른 상자 지우기</button> "
+      "<button data-reset='%s'>제안으로 되돌리기</button> "
+      "끌어서 그리거나, 숫자 칸에 직접 쳐서 고칠 수 있습니다.</p>"
+      % (esc(fid), esc(fid), esc(fid)))
     w("<div class='pick'>")
     for value, label in LABELS:
         w("<label class='opt'><input type='radio' name='v-%s' data-verdict='%s' "
@@ -277,7 +289,9 @@ PAGE_JS = r"""
   function fromProposal(m) {
     return (m.proposed || []).map(function (b) {
       return { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, mark: b.mark || '',
-               source: 'PROPOSED', markSource: b.mark ? 'PROPOSED' : '' };
+               count: b.count || '', source: 'PROPOSED',
+               markSource: b.mark ? 'PROPOSED' : '',
+               countSource: b.count ? 'PROPOSED' : '' };
     });
   }
   function st(id) {
@@ -332,19 +346,36 @@ PAGE_JS = r"""
     var host = q("[data-boxes=\"" + esc(id) + "\"]");
     if (!host) return;
     var s = st(id);
+    var m = META[id] || {};
     host.innerHTML = '';
     s.boxes.forEach(function (b, i) {
       var row = document.createElement('div');
       row.className = 'b' + (i === s.sel ? ' sel' : '');
       var tag = document.createElement('span');
       tag.className = 'tag';
-      tag.textContent = (i + 1) + ': ' + Math.round(b.x0) + ',' + Math.round(b.y0)
-        + ' – ' + Math.round(b.x1) + ',' + Math.round(b.y1);
+      tag.textContent = (i + 1) + ':';
       tag.addEventListener('click', function () {
         if (active && active !== id) { st(active).sel = -1; paint(active); }
         active = id; s.sel = i; save(); paint(id);
       });
       row.appendChild(tag);
+      // 자리를 숫자로 칠 수 있어야 합니다. 끌기로는 한 픽셀을 맞추기 어렵고,
+      // 옆 패널에 한 뼘 걸친 상자를 고치는 일이 대부분 그런 일입니다.
+      ['x0', 'y0', 'x1', 'y1'].forEach(function (k) {
+        var n = document.createElement('input');
+        n.type = 'number'; n.step = '1'; n.className = 'xy';
+        n.value = Math.round(b[k]);
+        n.title = k;
+        n.addEventListener('input', function () {
+          var v = parseInt(n.value, 10);
+          if (!isFinite(v)) return;
+          var lim = (k === 'x0' || k === 'x1') ? (m.size ? m.size.w : v) : (m.size ? m.size.h : v);
+          b[k] = Math.max(0, Math.min(lim, v));
+          if (b.source === 'PROPOSED') { b.source = 'DRAWN'; }
+          active = id; s.sel = i; save(); paint(id);
+        });
+        row.appendChild(n);
+      });
       var sel = document.createElement('select');
       var none = document.createElement('option');
       none.value = ''; none.textContent = '무엇이 그려졌나?';
@@ -359,10 +390,24 @@ PAGE_JS = r"""
         b.mark = sel.value; b.markSource = 'TYPED'; save(); paint(id);
       });
       row.appendChild(sel);
+      // 개수: 그 패널에서 읽어야 할 표시가 몇인가. 리더가 찾아낸 수와 대조할
+      // 유일한 수이고, 끌기로는 말할 수 없습니다.
+      var cnt = document.createElement('input');
+      cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.className = 'cnt';
+      cnt.placeholder = '개수';
+      cnt.title = '이 패널에서 읽어야 할 표시(선·상자·막대·점)의 수';
+      cnt.value = (b.count === null || b.count === undefined) ? '' : b.count;
+      cnt.addEventListener('input', function () {
+        b.count = cnt.value; b.countSource = 'TYPED';
+        active = id; save(); paint(id);
+      });
+      row.appendChild(cnt);
       var src = document.createElement('span');
       src.className = 'src';
       src.textContent = (b.source === 'PROPOSED' ? '제안' : '그음')
-        + (b.mark ? (b.markSource === 'PROPOSED' ? ' · 종류 제안' : ' · 종류 고름') : '');
+        + (b.mark ? (b.markSource === 'PROPOSED' ? ' · 종류 제안' : ' · 종류 고름') : '')
+        + (String(b.count || '').trim()
+           ? (b.countSource === 'PROPOSED' ? ' · 개수 제안' : ' · 개수 침') : '');
       row.appendChild(src);
       host.appendChild(row);
     });
@@ -385,6 +430,8 @@ PAGE_JS = r"""
         say += ' · 겹침 ' + pairs.map(function (p) {
           return p.a + '·' + p.b + ' ' + Math.round(p.part * 100) + '%%'; }).join(', ');
       }
+      var nc = missingCounts([id], states);
+      if (nc) { say += ' · 개수 안 적음 ' + nc; }
       var dec = Number(s.declared);
       if (s.verdict === 'PANELS' && isFinite(dec) && dec !== s.boxes.length) {
         say += ' · 전에 센 수 ' + dec + ' ≠ 그린 수 ' + s.boxes.length;
@@ -407,7 +454,8 @@ PAGE_JS = r"""
     if (nn && nn.value !== s.note) nn.value = s.note;
     drawBoxes(id); listBoxes(id);
     q('#left').textContent = '· 남은 것 ' + remaining(IDS, states)
-      + ' / ' + IDS.length + ' · 보류 ' + held(IDS, states);
+      + ' / ' + IDS.length + ' · 보류 ' + held(IDS, states)
+      + ' · 개수 안 적은 패널 ' + missingCounts(IDS, states);
   }
 
   function bind(sel, attr, read, ev) {
@@ -425,6 +473,17 @@ PAGE_JS = r"""
     IDS.forEach(function (o) { if (!st(o).who) st(o).who = el.value; });
   });
   bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; });
+  bind('button[data-add]', 'data-add', function (s, el) {
+    // 끌기가 어려울 때를 위한 자리. 그림 가운데에 상자를 하나 놓고, 숫자 칸에서
+    // 고치게 합니다.
+    var m = META[el.getAttribute('data-add')] || {};
+    var w = (m.size ? m.size.w : 100), h = (m.size ? m.size.h : 100);
+    s.boxes.push({ x0: Math.round(w * 0.25), y0: Math.round(h * 0.25),
+                   x1: Math.round(w * 0.75), y1: Math.round(h * 0.75),
+                   mark: '', source: 'DRAWN', markSource: 'TYPED' });
+    s.sel = s.boxes.length - 1;
+    active = el.getAttribute('data-add');
+  }, 'click');
   bind('button[data-del]', 'data-del', function (s, el) {
     active = el.getAttribute('data-del');
     if (s.sel >= 0 && s.sel < s.boxes.length) { s.boxes.splice(s.sel, 1); s.sel = -1; }

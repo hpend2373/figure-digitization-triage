@@ -51,7 +51,8 @@ HELD = "HOLD"
 ANSWER_REQUIRED = ("Draft_ID", "Panel_Index", "Verdict", "Verified_By",
                    "Seen_By_Person")
 COLUMNS = ("Draft_ID", "Panel_Index", "X0", "Y0", "X1", "Y1", "Mark_Type",
-           "Region_Source", "Mark_Source", "Crop_SHA256", "Proposal_Version",
+           "Mark_Count", "Region_Source", "Mark_Source", "Count_Source",
+           "Crop_SHA256", "Proposal_Version",
            "Declared_Count", "Drawn_Count", "Verdict",
            "Seen_By_Person", "Verified_By", "Verified_At", "Note")
 
@@ -154,6 +155,15 @@ def check_figure(fid, rows, queued, size, crop_sha=""):
                                  "%s번 상자 %s가 크롭 %sx%s 밖으로 나갑니다. 다른 "
                                  "그림 위의 좌표입니다."
                                  % (r.get("Panel_Index"), b, size[0], size[1])))
+            # 개수는 리더가 찾아낸 수와 대조할 수입니다. 빈칸은 "아직 말하지
+            # 않음"이고 막지 않습니다 - 이 관문이 묻는 것은 자리와 종류입니다.
+            # 그러나 0이나 `세 개`는 대조할 수가 아닙니다.
+            count = (r.get("Mark_Count") or "").strip()
+            if count and (not count.isdigit() or int(count) < 1):
+                problems.append(("BAD_COUNT",
+                                 "%s번 패널의 개수 %r은 셀 수가 아닙니다. 1 이상의 "
+                                 "정수나 빈칸이어야 합니다."
+                                 % (r.get("Panel_Index"), count)))
             mark = (r.get("Mark_Type") or "").strip().upper()
             if mark not in MARKS:
                 problems.append(("BAD_MARK",

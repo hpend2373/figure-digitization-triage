@@ -236,6 +236,36 @@ test('답은 어느 크롭 위의 좌표인지 들고 나간다', () => {
   assert.equal(none.Crop_SHA256, 'deadbeef');
 });
 
+/* 개수: 그 패널에서 읽어야 할 표시가 몇인가. 리더가 찾아낸 수와 대조할 유일한
+ * 수이고, 끌기로는 말할 수 없어 숫자 칸으로 받습니다. */
+test('개수는 그대로 줄이 된다', () => {
+  const rows = L.panelsOf('D0001', state({
+    boxes: [box({ count: '3', countSource: 'PROPOSED' }), box({ x0: 500, x1: 900, count: '5' })]
+  })).rows;
+  assert.equal(rows[0].Mark_Count, '3');
+  assert.equal(rows[0].Count_Source, 'PROPOSED');
+  assert.equal(rows[1].Count_Source, 'TYPED');
+});
+/* REVERT: 빈 개수를 막는다. 이 페이지가 묻는 것은 자리와 종류이고, 개수 1019칸을
+ * 다 채우게 붙잡아 두면 아무도 끝내지 못합니다. */
+test('개수를 아직 말하지 않아도 답이 된다', () => {
+  const got = L.panelsOf('D0001', state());
+  assert.equal(got.ready, true);
+  assert.equal(got.rows[0].Mark_Count, '');
+  assert.equal(got.rows[0].Count_Source, '');
+});
+/* REVERT: 아무 글자나 개수로 받는다. 리더가 찾아낸 수와 대조할 수가 아닙니다. */
+test('셀 수 없는 개수는 답이 아니다', () => {
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ count: '세 개' })] })).why, /개수는 1 이상/);
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ count: '0' })] })).why, /개수는 1 이상/);
+  assert.match(L.panelsOf('D0001', state({ boxes: [box({ count: '1.5' })] })).why, /개수는 1 이상/);
+});
+test('개수를 아직 말하지 않은 패널을 센다', () => {
+  const st = { a: state({ boxes: [box({ count: '2' }), box({ x0: 500, x1: 900 })] }),
+               b: state({ verdict: 'NO_PANELS', boxes: [] }) };
+  assert.equal(L.missingCounts(['a', 'b'], st), 1);
+});
+
 console.log('');
 console.log(pass + '/' + (pass + fails.length) + ' passed');
 if (fails.length) { console.log('FAILED: ' + fails.join(', ')); process.exit(1); }

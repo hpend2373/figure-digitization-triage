@@ -1,8 +1,8 @@
 {
  "files": {
-  "record_panels.py": "2d7390f91760a71694c27292a465bad3a07ae3c0f03cae4caad68379ab87e514",
-  "panel_page.js": "eeee8e57b927bc6ce8551aeafa1a6c10144e0dbfcb4625fa43040c8e33d77237",
-  "test_record_panels.py": "e1750adf1993d05c0f6bbcb68fa122fec64144c1262edac9836866ce431f5cd5"
+  "record_panels.py": "b5e6b79906b4af7bef9a07b9f2fac9279ed8d388c7fdb53006b0094f515f5255",
+  "panel_page.js": "f6e02fd91e24cf0ebf72135db2fc42ba12fb1675b6ec5fc51ed4259b1c0fc89e",
+  "test_record_panels.py": "ecf5676e03d799bd7f8d3ec72f7e320ffa7e9eed2c6fca4fe6697b4118d360b3"
  },
  "suites": [
   "test_record_panels.py"
@@ -187,6 +187,18 @@
    "file": "record_panels.py",
    "old": "        PP.pick_chunk(_rows(queue_path), a.chunk, a.of), answers, a.when, out,",
    "new": "        _rows(queue_path), answers, a.when, out,"
+  },
+  {
+   "name": "아무 글자나 개수로 받는다",
+   "file": "record_panels.py",
+   "old": "            if count and (not count.isdigit() or int(count) < 1):",
+   "new": "            if False:"
+  },
+  {
+   "name": "빈 개수를 막는다",
+   "file": "record_panels.py",
+   "old": "            if count and (not count.isdigit() or int(count) < 1):",
+   "new": "            if not count.isdigit() or int(count) < 1:"
   }
  ]
 }

@@ -47,6 +47,7 @@ def panel(i, **over):
     row = {"Draft_ID": "D1", "Panel_Index": str(i), "X0": "10", "Y0": "10",
            "X1": "400", "Y1": "300", "Mark_Type": "BOX", "Region_Source": "DRAWN",
            "Mark_Source": "TYPED", "Crop_SHA256": SHA, "Proposal_Version": "v2",
+           "Mark_Count": "3", "Count_Source": "TYPED",
            "Declared_Count": "2", "Drawn_Count": "2", "Verdict": "PANELS",
            "Seen_By_Person": "1", "Verified_By": "MC", "Note": ""}
     row.update(over)
@@ -134,6 +135,19 @@ check("좌표는 정수로 적힌다", run([panel(1, X0="10.4")])[0][0]["X0"] ==
 # 않고, 화면이 들고 온 것이 그대로 증거가 됩니다.
 check("전에 센 수는 답이 아니라 대기열에서 온다",
       run([panel(1, Declared_Count="99")])[0][0]["Declared_Count"] == "2")
+
+print()
+print("개수는 대조할 수여야 한다")
+check("개수가 그대로 들고 간다", run([panel(1)])[0][0]["Mark_Count"] == "3")
+# REVERT: 아무 글자나 개수로 받는다. 리더가 찾아낸 수와 대조할 수가 아니고,
+# 격자 관문은 그 패널의 구멍을 영영 못 잡습니다.
+check("셀 수 없는 개수는 거절한다",
+      "BAD_COUNT" in codes(run([panel(1, Mark_Count="세 개")])[1]))
+check("0은 개수가 아니다", "BAD_COUNT" in codes(run([panel(1, Mark_Count="0")])[1]))
+# REVERT: 빈 개수를 막는다. 이 관문이 묻는 것은 자리와 종류이고, 개수를
+# 1019칸 채우게 붙잡아 두면 아무도 끝내지 못합니다.
+check("아직 말하지 않은 개수는 막지 않는다",
+      not run([panel(1, Mark_Count="", Count_Source="")])[1])
 
 print()
 print("같은 패널을 두 번 적지 않는다")

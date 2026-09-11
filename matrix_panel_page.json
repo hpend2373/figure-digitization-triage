@@ -1,8 +1,8 @@
 {
  "files": {
-  "panel_page.py": "6ebd8f3a3ba913c5c8d237a03ec6947c4c17bdeeef46e313d30856afeff3f1a6",
-  "panel_page.js": "eeee8e57b927bc6ce8551aeafa1a6c10144e0dbfcb4625fa43040c8e33d77237",
-  "test_panel_page.py": "96fff87d9ecef6150f56ea19b666ead227c8e90d43b549ff66d7ac5fadb006e9"
+  "panel_page.py": "fd86329f9be23c3092ba8d75e50cb4bf46bf4d09825123881c319ad90bc37e9b",
+  "panel_page.js": "f6e02fd91e24cf0ebf72135db2fc42ba12fb1675b6ec5fc51ed4259b1c0fc89e",
+  "test_panel_page.py": "bf427d0fbcba9c9a715ffc1f55658360f6b95205f9a8326a20589abaf5f0b86b"
  },
  "suites": [
   "test_panel_page.py"
@@ -139,6 +139,48 @@
    "file": "panel_page.py",
    "old": "    if (!active) return;",
    "new": "    if (false) return;"
+  },
+  {
+   "name": "제안된 개수를 싣지 않는다",
+   "file": "panel_page.py",
+   "old": "                \"count\": count if count.isdigit() and int(count) >= 1 else \"\",",
+   "new": "                \"count\": \"\","
+  },
+  {
+   "name": "셀 수 없는 개수도 제안으로 싣는다",
+   "file": "panel_page.py",
+   "old": "                \"count\": count if count.isdigit() and int(count) >= 1 else \"\",",
+   "new": "                \"count\": count,"
+  },
+  {
+   "name": "좌표를 숫자로 칠 수 없게 한다",
+   "file": "panel_page.py",
+   "old": "      ['x0', 'y0', 'x1', 'y1'].forEach(function (k) {",
+   "new": "      [].forEach(function (k) {"
+  },
+  {
+   "name": "숫자로 고쳐도 제안으로 남겨 둔다",
+   "file": "panel_page.py",
+   "old": "          if (b.source === 'PROPOSED') { b.source = 'DRAWN'; }",
+   "new": "          ;"
+  },
+  {
+   "name": "개수 칸을 내밀지 않는다",
+   "file": "panel_page.py",
+   "old": "      cnt.placeholder = '개수';",
+   "new": "      cnt.placeholder = '';"
+  },
+  {
+   "name": "개수 안 적은 패널을 세지 않는다",
+   "file": "panel_page.py",
+   "old": "      + ' · 개수 안 적은 패널 ' + missingCounts(IDS, states);",
+   "new": "      ;"
+  },
+  {
+   "name": "끌지 않고 상자를 더할 수 없게 한다",
+   "file": "panel_page.py",
+   "old": "    w(\"<p class='hint'><button data-add='%s'>상자 추가</button> \"",
+   "new": "    w(\"<p class='hint'><button data-xx='%s'>상자 추가</button> \""
   }
  ]
 }

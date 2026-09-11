@@ -51,7 +51,8 @@ QUEUE = [{"fig": "D1", "axes": "2", "pid": "P"},
 PROPS = {"D1": {"fig": "D1", "size": [1800, 900], "verdict": "PANELS",
                 "crop_sha256": "abc123def456", "proposal_version": "v2",
                 "note": "전에 센 수 2 ≠ 제안 1. 상자가 서로 겹칩니다 (1·2 100%)",
-                "boxes": [{"x0": 10, "y0": 10, "x1": 800, "y1": 800, "mark": "bar"}]},
+                "boxes": [{"x0": 10, "y0": 10, "x1": 800, "y1": 800, "mark": "bar",
+                           "count": "5"}]},
          "D2": {"fig": "D2", "size": [999, 300], "boxes": [[10, 10, 100, 100]]},
          "D3": {"fig": "D3", "size": [1, 1], "verdict": "MAYBE", "boxes": []}}
 
@@ -80,11 +81,14 @@ check("전에 센 수가 함께 건너간다", META["D1"]["declared"] == "2")
 
 print()
 print("제안은 화면의 칸이 아니라 논리로 건너간다")
-check("제안 상자가 종류와 함께 META로 간다",
+check("제안 상자가 종류·개수와 함께 META로 간다",
       META["D1"]["proposed"] == [{"x0": 10, "y0": 10, "x1": 800, "y1": 800,
-                                  "mark": "BAR", "source": "PROPOSED",
-                                  "markSource": "PROPOSED"}],
+                                  "mark": "BAR", "count": "5", "source": "PROPOSED",
+                                  "markSource": "PROPOSED", "countSource": "PROPOSED"}],
       META["D1"]["proposed"])
+check("셀 수 없는 개수는 제안으로 싣지 않는다",
+      P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "BAR",
+                      "count": "몇"})["count"] == "")
 # REVERT: 제안된 판정을 넘기지 않는다. 사람이 이미 제안된 것을 다시 고르고,
 # 297장을 다 골라야 합니다.
 check("제안된 판정이 미리 골라져 나간다", META["D1"]["proposedVerdict"] == "PANELS")
@@ -121,6 +125,20 @@ check("제안한 쪽의 말이 카드에 실린다", "제안한 쪽의 말" in H
 # 아무 데도 안 걸리는 오류가 그대로 넘어갑니다.
 check("겹침과 계수 차이를 화면이 말한다",
       "overlapPairs(s.boxes)" in HTML and "≠ 그린 수" in HTML)
+
+print()
+print("사람이 숫자로 고칠 수 있다")
+# REVERT: 자리를 끌기로만 고치게 한다. 한 픽셀을 맞추기 어렵고, 옆 패널에 한 뼘
+# 걸친 상자를 고치는 일이 대부분 그런 일입니다.
+check("상자마다 좌표 칸이 넷", "n.type = 'number'" in HTML and "['x0', 'y0', 'x1', 'y1']" in HTML)
+# REVERT: 개수를 물을 자리가 없다. 리더가 찾아낸 수와 대조할 수는 끌기로는
+# 말할 수 없습니다.
+check("상자마다 개수 칸이 하나", "cnt.placeholder = '개수'" in HTML)
+check("숫자로 고친 상자는 사람이 그은 것으로 바뀐다",
+      "if (b.source === 'PROPOSED') { b.source = 'DRAWN'; }" in HTML)
+check("끌지 않고도 상자를 더할 수 있다", "data-add=" in HTML and "상자 추가" in HTML)
+check("개수를 아직 말하지 않은 패널을 세어 보인다",
+      "missingCounts(IDS, states)" in HTML)
 
 print()
 print("화면의 기하는 논리가 한다")

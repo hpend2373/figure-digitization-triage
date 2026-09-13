@@ -170,6 +170,12 @@ function panelsOf(id, state) {
       }
       var badCount = countProblem(b.count);
       if (badCount) return { ready: false, why: (i + 1) + '번 패널: ' + badCount, rows: [] };
+      // 읽을 값이 없는 패널에는 셀 표시가 없습니다. 개수가 남아 있으면 그것은
+      // 종류를 고치기 전에 제안이 채워 둔 수이고, 리더가 대조할 수가 아닌데도
+      // 계획서는 그 패널을 읽을 수 있는 패널로 셉니다 - 두 번 그렇게 됐습니다.
+      if (mark === 'NOT_DATA' && String(b.count === null || b.count === undefined ? '' : b.count).trim()) {
+        return { ready: false, why: (i + 1) + '번 패널: 읽을 값이 없다고 하셨는데 개수가 적혀 있습니다', rows: [] };
+      }
       var mark2 = String(b.mark2 || '').trim().toUpperCase();
       if (mark2) {
         // 두 번째 종류는 첫 번째와 달라야 하고, "읽을 값 없음"일 수 없습니다 -

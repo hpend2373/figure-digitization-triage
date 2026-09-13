@@ -151,6 +151,15 @@ check("0은 개수가 아니다", "BAD_COUNT" in codes(run([panel(1, Mark_Count=
 check("아직 말하지 않은 개수는 막지 않는다",
       not run([panel(1, Mark_Count="", Count_Source="")])[1])
 
+# REVERT: 읽을 값 없다면서 개수를 단 줄을 그대로 적는다. 리더가 대조할 표시가
+# 없는 패널인데 계획서는 그 개수를 보고 읽을 수 있는 패널로 셉니다 - 실제 답
+# 두 장이 그렇게 왔습니다.
+check("읽을 값 없음에 달려 온 개수는 거절한다",
+      "COUNT_ON_NOT_DATA" in codes(run([panel(1, Mark_Type="NOT_DATA", Mark_Count="6",
+                                               Count_Source="PROPOSED")])[1]))
+check("개수 없는 읽을 값 없음은 그대로 적는다",
+      not run([panel(1, Mark_Type="NOT_DATA", Mark_Count="", Count_Source="")])[1])
+
 print()
 print("한 자리에 종류가 둘일 수 있다")
 _two = run([panel(1, Mark_Type_2="LINE", Mark_Count_2="2", Mark2_Source="PROPOSED")])

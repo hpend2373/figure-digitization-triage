@@ -98,6 +98,14 @@ check("읽을 값 없음 패널의 둘째 종류·겹침은 싣지 않는다",
                       "mark": "NOT_DATA", "count": "", "mark2": "", "count2": "", "overlay": "",
                       "source": "PROPOSED", "markSource": "PROPOSED", "countSource": "",
                       "mark2Source": "", "overlaySource": ""})
+# REVERT: 읽을 값 없다고 제안한 패널에 개수까지 제안한다. 그 수가 칸에 남아
+# 사람이 종류를 고친 뒤에도 함께 기록되고, 계획서는 그 패널을 읽을 수 있는
+# 패널로 셉니다 - 실제 답 두 장이 그렇게 들어왔습니다.
+check("읽을 값 없음 패널에는 개수를 제안하지 않는다",
+      P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "NOT_DATA",
+                      "count": "8"})["count"] == ""
+      and P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "NOT_DATA",
+                          "count": "8"})["countSource"] == "")
 check("셀 수 없는 개수는 제안으로 싣지 않는다",
       P.proposed_box({"x0": 1, "y0": 1, "x1": 9, "y1": 9, "mark": "BAR",
                       "count": "몇"})["count"] == "")
@@ -148,6 +156,12 @@ check("상자마다 좌표 칸이 넷", "n.type = 'number'" in HTML and "['x0', 
 check("상자마다 개수 칸이 하나", "cnt.placeholder = '개수'" in HTML)
 # REVERT: 두 번째 종류를 고를 자리가 없다. 막대 위에 선이 있는 패널은 종류
 # 하나로 말할 수 없고, 리더 하나만 그 자리를 읽습니다.
+# REVERT: 종류를 읽을 값 없음으로 바꿔도 개수칸과 그 값을 그대로 둔다. 제안이
+# 채워 둔 수가 답이 되어 나갑니다.
+check("읽을 값 없음을 고르면 개수를 비운다",
+      "if (b.mark === 'NOT_DATA') { b.count = ''; b.countSource = ''; }" in HTML)
+check("읽을 값 없음 패널은 개수칸을 보이지 않는다",
+      "cnt.hidden = (b.mark === 'NOT_DATA');" in HTML)
 check("상자마다 두 번째 종류 칸", "두 번째 종류 없음" in HTML and "select.m2" in HTML)
 check("두 번째 종류 목록에 읽을 값 없음은 없다", "if (ml[0] === 'NOT_DATA') return;" in HTML)
 check("상자마다 개별 점·선 겹침 표시", "createTextNode(' 개별 점·선 겹침')" in HTML)

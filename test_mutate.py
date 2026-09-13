@@ -9,6 +9,7 @@ failure modes matter more than most. All three of these are things it actually
 did: two runs interleaved over one file, a killed run left a mutation applied,
 and the next matrix measured that leftover as the baseline.
 """
+import io
 import json
 import os
 import subprocess
@@ -36,6 +37,17 @@ class TheLock(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             mutate.acquire()
         self.assertIn("another mutation run", str(cm.exception))
+        RUN[0] += 1
+
+    def test_a_lock_left_by_a_dead_run_refuses_nothing(self):
+        """The file is not the lock. On a mount that refuses `unlink`, a killed
+        run leaves `.mutate.lock` on disk holding a dead pid; if its existence
+        were the lock, every later run over that tree would be refused forever -
+        which is what happened on 2026-09-13. Guard: the `flock`, which the
+        kernel drops when the process dies."""
+        with io.open(mutate.LOCK, "w", encoding="utf-8") as f:
+            f.write("999999")     # a pid from a run that is gone
+        mutate.acquire()          # must not raise
         RUN[0] += 1
 
     def test_the_lock_is_released_and_the_next_run_starts(self):

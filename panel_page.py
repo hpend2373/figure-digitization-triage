@@ -252,14 +252,18 @@ def proposed_box(b):
             and mark != "NOT_DATA"
         return {"x0": b["x0"], "y0": b["y0"], "x1": b["x1"], "y1": b["y1"],
                 "mark": mark if mark in dict(MARK_LABELS) else "",
-                "count": count if count.isdigit() and int(count) >= 1 else "",
+                # 읽을 값이 없다고 제안한 패널에 개수를 함께 제안하지 않습니다.
+                # 그렇게 제안한 수가 종류를 고친 뒤에도 칸에 남아, 읽을 값이 없는
+                # 패널이 개수를 달고 기록된 적이 두 번 있습니다.
+                "count": count if count.isdigit() and int(count) >= 1
+                         and mark != "NOT_DATA" else "",
                 "mark2": mark2 if ok2 else "",
                 "count2": count2 if ok2 and count2.isdigit() and int(count2) >= 1 else "",
                 "overlay": "INDIVIDUAL" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
                            and mark != "NOT_DATA" else "",
                 "source": "PROPOSED",
                 "markSource": "PROPOSED" if mark in dict(MARK_LABELS) else "",
-                "countSource": "PROPOSED" if count.isdigit() else "",
+                "countSource": "PROPOSED" if count.isdigit() and mark != "NOT_DATA" else "",
                 "mark2Source": "PROPOSED" if ok2 else "",
                 "overlaySource": "PROPOSED" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
                                  and mark != "NOT_DATA" else ""}
@@ -421,7 +425,11 @@ PAGE_JS = r"""
       sel.value = b.mark || '';
       sel.addEventListener('change', function () {
         // 사람이 바꾼 종류는 사람의 것입니다 - 제안과 같은 값으로 되돌려도.
-        b.mark = sel.value; b.markSource = 'TYPED'; save(); paint(id);
+        b.mark = sel.value; b.markSource = 'TYPED';
+        // 읽을 값이 없다고 하면 개수칸은 물을 것이 없습니다. 남겨 두면 제안이
+        // 채워 둔 수가 그대로 답이 됩니다 - 실제로 두 번 그랬습니다.
+        if (b.mark === 'NOT_DATA') { b.count = ''; b.countSource = ''; }
+        save(); paint(id);
       });
       row.appendChild(sel);
       // 개수: 그 패널에서 읽어야 할 표시가 몇인가. 리더가 찾아낸 수와 대조할
@@ -430,6 +438,7 @@ PAGE_JS = r"""
       cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.className = 'cnt';
       cnt.placeholder = '개수';
       cnt.title = '이 패널에서 읽어야 할 표시(선·상자·막대·점)의 수';
+      cnt.hidden = (b.mark === 'NOT_DATA');
       cnt.value = (b.count === null || b.count === undefined) ? '' : b.count;
       cnt.addEventListener('input', function () {
         b.count = cnt.value; b.countSource = 'TYPED';

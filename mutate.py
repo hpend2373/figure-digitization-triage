@@ -43,6 +43,7 @@ a.py b.py` prints the block to paste in.
 `old` must appear EXACTLY ONCE in the file. A mutation that matches twice is not
 applied and is reported as such: it would be two changes measured as one.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -62,23 +63,54 @@ def sha(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
+# The open file description that holds the lock, so `release` can let it go.
+_HELD = []
+
+
 def acquire():
-    """Exclusive, and refused rather than waited on."""
+    """Exclusive, and refused rather than waited on.
+
+    THE LOCK IS THE `flock`, NOT THE FILE. `O_EXCL` on the file made the file's
+    existence the lock, and `release` unlinked it - which silently does nothing
+    where the tree is a mount that refuses `unlink` (EPERM). On 2026-09-13 a run
+    was killed by the shell timeout on such a mount and left `.mutate.lock`
+    behind holding a pid that no longer existed; every later run over that tree
+    was refused, with a message naming a process that was gone. `sheet/
+    mutate_guard.py` already says this about its own backups: a permission to
+    delete is not something this can depend on.
+
+    A `flock` does not depend on one. The kernel drops it when the process dies,
+    however it dies, so a leftover file refuses nothing; and it is per open file
+    description, so a second `acquire` in this same process is still refused.
+    """
+    fd = os.open(LOCK, os.O_CREAT | os.O_RDWR)
     try:
-        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
         try:
-            held = open(LOCK).read().strip()
+            held = os.read(fd, 64).decode("utf-8", "replace").strip() or "?"
         except OSError:
             held = "?"
+        os.close(fd)
         raise SystemExit("another mutation run holds %s (pid %s). Two matrices "
                          "over one tree is not a slower run, it is a wrong "
                          "answer." % (LOCK, held))
+    os.ftruncate(fd, 0)
     os.write(fd, str(os.getpid()).encode())
-    os.close(fd)
+    _HELD.append(fd)
 
 
 def release():
+    while _HELD:
+        fd = _HELD.pop()
+        try:
+            os.ftruncate(fd, 0)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+    # Tidy where deleting is allowed; where it is not, the emptied file is
+    # already harmless.
     try:
         os.unlink(LOCK)
     except OSError:

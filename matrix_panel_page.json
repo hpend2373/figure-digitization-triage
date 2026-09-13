@@ -1,8 +1,8 @@
 {
  "files": {
-  "panel_page.py": "5a48e579354b993f424374a4a61e667fbc9c2837e3324841abe7bdc5a071ab22",
-  "panel_page.js": "797ff16291fe96cec8d6fd4dba46536f09a573e45d1cc935bf0f294ae8574adf",
-  "test_panel_page.py": "65413f619d0f43566c1906542e1313348021043f48f93dfada9bce4e337447e2"
+  "panel_page.py": "9964a93841703d84f2a8b3f06ae6b21675c2e345618b0a1cb77347271fc7a6c4",
+  "panel_page.js": "ca07dc7c8ed94883a258e3447bd6ae067fc380866b9956b9c28bc381490f5929",
+  "test_panel_page.py": "b30c2d4c02ffa7889b01567a9ac1bb8dd31166a7b4c1230744a804b528f043bd"
  },
  "suites": [
   "test_panel_page.py"
@@ -143,13 +143,13 @@
   {
    "name": "제안된 개수를 싣지 않는다",
    "file": "panel_page.py",
-   "old": "                \"count\": count if count.isdigit() and int(count) >= 1 else \"\",",
+   "old": "                \"count\": count if count.isdigit() and int(count) >= 1\n                         and mark != \"NOT_DATA\" else \"\",",
    "new": "                \"count\": \"\","
   },
   {
    "name": "셀 수 없는 개수도 제안으로 싣는다",
    "file": "panel_page.py",
-   "old": "                \"count\": count if count.isdigit() and int(count) >= 1 else \"\",",
+   "old": "                \"count\": count if count.isdigit() and int(count) >= 1\n                         and mark != \"NOT_DATA\" else \"\",",
    "new": "                \"count\": count,"
   },
   {
@@ -240,6 +240,24 @@
    "name": "머리말 높이만큼 물러나지 않는다",
    "file": "panel_page.py",
    "old": ".doc{scroll-margin-top:calc(var(--hdr, 120px) + 10px)}",
+   "new": ""
+  },
+  {
+   "name": "읽을 값 없음 패널에도 개수를 제안한다",
+   "file": "panel_page.py",
+   "old": "                \"count\": count if count.isdigit() and int(count) >= 1\n                         and mark != \"NOT_DATA\" else \"\",",
+   "new": "                \"count\": count if count.isdigit() and int(count) >= 1 else \"\","
+  },
+  {
+   "name": "종류를 읽을 값 없음으로 바꿔도 개수를 남긴다",
+   "file": "panel_page.py",
+   "old": "        if (b.mark === 'NOT_DATA') { b.count = ''; b.countSource = ''; }\n",
+   "new": ""
+  },
+  {
+   "name": "읽을 값 없음 패널에도 개수칸을 보인다",
+   "file": "panel_page.py",
+   "old": "      cnt.hidden = (b.mark === 'NOT_DATA');\n",
    "new": ""
   }
  ]

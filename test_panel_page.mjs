@@ -289,6 +289,20 @@ test('읽을 값 없음은 두 번째 종류가 아니다', () => {
   assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark: 'NOT_DATA', mark2: 'LINE' })] })).why, /받을 수 없는 두 번째/);
   assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'PIE' })] })).why, /받을 수 없는 두 번째/);
 });
+/* REVERT: 읽을 값 없음 패널에 남은 개수를 그대로 받는다. 제안이 채워 둔 수가
+ * 종류를 고친 뒤에도 남고, 계획서는 읽을 값이 없는 패널을 읽을 수 있는 패널로
+ * 셉니다. 실제 답 두 장에서 그렇게 들어왔습니다. */
+test('읽을 값 없음 패널에는 개수가 남을 수 없다', () => {
+  const got = L.panelsOf('D0001', state({ boxes: [box({ mark: 'NOT_DATA', count: '6' })] }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /1번 패널: 읽을 값이 없다고 하셨는데 개수가 적혀 있습니다/);
+});
+test('읽을 값 없음 패널은 개수가 비어 있으면 넘어간다', () => {
+  const got = L.panelsOf('D0001', state({ boxes: [box({ mark: 'NOT_DATA', count: '' })] }));
+  assert.equal(got.ready, true);
+  assert.equal(got.rows[0].Mark_Count, '');
+  assert.equal(got.rows[0].Count_Source, '');
+});
 test('두 번째 종류의 개수도 셀 수여야 한다', () => {
   assert.match(L.panelsOf('D0001', state({ boxes: [box({ mark2: 'LINE', count2: '0' })] })).why, /두 번째 종류: 개수는/);
 });

@@ -171,6 +171,15 @@ def check_figure(fid, rows, queued, size, crop_sha=""):
                                  "%s번 패널의 종류 %r은 받는 것이 아닙니다. 받는 것: %s"
                                  % (r.get("Panel_Index"), mark or "(빈칸)",
                                     ", ".join(MARKS))))
+            # 읽을 값이 없는 패널에는 대조할 표시가 없습니다. 개수가 함께 오면
+            # 그것은 종류를 고치기 전에 제안이 채워 둔 수이고, 계획서는 그 패널을
+            # 읽을 수 있는 패널로 셉니다 - 실제 답 두 장이 그렇게 왔습니다.
+            if mark == "NOT_DATA" and count:
+                problems.append(("COUNT_ON_NOT_DATA",
+                                 "%s번 패널은 읽을 값이 없다고 하면서 개수 %r을 "
+                                 "달고 왔습니다. 데이터 패널이면 종류를 고치고, "
+                                 "아니면 개수를 비워 주세요."
+                                 % (r.get("Panel_Index"), count)))
             # 두 번째 종류: 같은 자리를 읽을 두 번째 리더. 첫 번째와 다르고,
             # 읽을 값 없음이 아니어야 합니다.
             mark2 = (r.get("Mark_Type_2") or "").strip().upper()

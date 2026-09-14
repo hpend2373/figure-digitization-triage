@@ -3,7 +3,8 @@
   "test_tick_ocr.py"
  ],
  "files": {
-  "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f"
+  "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
+  "axis_reader.py": "3ecb3db29439fd3750818187a2c98f5dcb25d33274579e940ad877eddae06845"
  },
  "mutations": [
   {
@@ -89,6 +90,30 @@
    "file": "tick_ocr.py",
    "old": "    out = [int(ink)]\n    if int(ink) != int(A.INK_DEFAULT):\n        out.append(int(A.INK_DEFAULT))\n    return out",
    "new": "    return [int(ink)]"
+  },
+  {
+   "name": "라벨 띠를 해상도에 맞추지 않는다",
+   "file": "axis_reader.py",
+   "old": "    if not (k > 1.2):            # 같은 크기면 늘릴 것이 없습니다\n        return out",
+   "new": "    if True:\n        return out"
+  },
+  {
+   "name": "늘린 띠를 튜닝된 띠보다 먼저 쓴다",
+   "file": "axis_reader.py",
+   "old": "    out = list(base)\n    try:",
+   "new": "    out = []\n    try:"
+  },
+  {
+   "name": "늘린 띠를 앵커 고리 안에서 덧붙인다",
+   "file": "axis_reader.py",
+   "old": "    for strips in ([list(_STRIPS), wider] if wider else [list(_STRIPS)]):",
+   "new": "    for strips in [list(_STRIPS) + wider]:"
+  },
+  {
+   "name": "숫자가 아닌 높이에 걸려 넘어진다",
+   "file": "axis_reader.py",
+   "old": "    except (TypeError, ValueError, ZeroDivisionError):\n        return out",
+   "new": "    except ZeroDivisionError:\n        return out"
   }
  ]
 }

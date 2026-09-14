@@ -295,6 +295,102 @@ class RecordsAndChangesNothing(unittest.TestCase):
         RUN[0] += 1
 
 
+_TUNED_H = A._TUNED_PANEL_PX
+
+
+def panel_with_labels(scale, labels=("3000", "2000", "1000")):
+    """A panel drawn at `scale`: a spine, three ticks and three WIDE numerals.
+
+    Everything in it is `scale` times the tuned render - which is what a 600 DPI
+    page is next to the 300 DPI one `_STRIPS` was measured on.
+    """
+    # The panel is the TUNED height at scale 1, so scale 2 is exactly the step
+    # from the 300 DPI render `_STRIPS` was measured on to a 600 DPI one.
+    w, h = int(300 * scale), int(460 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)                   # spine
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)  # baseline
+    ys = [int((top + off) * scale) for off in (60, 190, 320)]
+    for y, txt in zip(ys, labels):
+        d.rectangle([sx - int(6 * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((sx - int(95 * scale), y - int(11 * scale)), txt, font=f, fill=0)
+    box = (sx, w - int(20 * scale), top, bot)
+    return img, np.asarray(img) <= 140, box, sx, bot
+
+
+class LabelStripsScaleWithTheRender(unittest.TestCase):
+    """`_STRIPS` is pixels, and pixels are a resolution."""
+
+    def test_at_the_tuned_height_the_strips_are_unchanged(self):
+        self.assertEqual(A.strips_for(A._TUNED_PANEL_PX), list(A._STRIPS))
+        self.assertEqual(A.strips_for(A._TUNED_PANEL_PX * 1.1), list(A._STRIPS))
+        RUN[0] += 1
+
+    def test_a_taller_panel_adds_wider_strips_after_the_tuned_ones(self):
+        got = A.strips_for(A._TUNED_PANEL_PX * 2)
+        self.assertEqual(got[:len(A._STRIPS)], list(A._STRIPS),
+                         "the tuned strips must still be tried first")
+        wider = got[len(A._STRIPS):]
+        self.assertEqual(wider, [(4, 88), (12, 120), (12, 220), (12, 340)], wider)
+        self.assertFalse(set(wider) & set(A._STRIPS), "a width was tried twice")
+        RUN[0] += 1
+
+    def test_a_height_that_is_not_a_number_is_not_a_scale(self):
+        self.assertEqual(A.strips_for(None), list(A._STRIPS))
+        self.assertEqual(A.strips_for(0), list(A._STRIPS))
+        RUN[0] += 1
+
+    def test_wide_labels_are_read_at_the_bigger_render(self):
+        """The defect, drawn. `3000` is wider than every tuned strip once the
+        page is rendered at twice the DPI, so the numerals are cut in half and
+        tesseract reads nothing - on 379 of this project's 600 DPI panels."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertTrue(A.ladder(pairs)[0], "the wide labels were not read: %s" % (pairs,))
+        self.assertEqual([v for v, _r in pairs], [3000.0, 2000.0, 1000.0], pairs)
+        RUN[0] += 1
+
+    def test_every_tuned_strip_at_both_anchors_comes_before_any_wider_one(self):
+        """REVERT: append the wider strips inside the anchor loop. Then the
+        spine's wide strips are tried before the block edge's narrow ones, and a
+        fallback that can change an answer an earlier pass already had is not a
+        fallback: two of thirty panels that read correctly came back with a
+        different, worse ladder. Observed on the STRIPS THE SEARCH ASKS FOR, so
+        it does not need tesseract and does not depend on a fixture happening to
+        exhibit it."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3):
+            asked.append(int(right) - int(left))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        widest_tuned = max(w for _g, w in A._STRIPS)
+        wide = [i for i, w in enumerate(asked) if w > widest_tuned]
+        self.assertTrue(wide, "no wider strip was ever tried: %s" % (asked,))
+        tuned_widths = {w for _g, w in A._STRIPS}
+        before = [w for w in asked[:wide[0]] if w in tuned_widths]
+        self.assertGreaterEqual(
+            len(before), 2 * len(A._STRIPS),
+            "a wider strip was tried before both anchors had had every tuned "
+            "strip: %s" % (asked[:wide[0] + 1],))
+        RUN[0] += 1
+
+
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))

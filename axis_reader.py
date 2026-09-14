@@ -2012,6 +2012,47 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3):
 #: 80 and 60 that broke the ladder. The wide strips are still tried, just later.
 _STRIPS = ((2, 44), (6, 60), (6, 110), (6, 170))
 
+#: The panel height those pixel widths were tuned against: publication S41467's
+#: figure 9 rendered at 300 DPI, where a panel is 394 px tall.
+_TUNED_PANEL_PX = 394
+
+
+def strips_for(panel_height, base=_STRIPS, tuned=_TUNED_PANEL_PX):
+    """The (gap, width) strips to try on a panel this tall, narrowest first.
+
+    THE WIDTHS ARE PIXELS AND PIXELS ARE A RESOLUTION. `_STRIPS` was measured on
+    a 300 DPI render; at 600 the same printed `3000` is twice as wide as the
+    widest strip that gets tried early and twice the cap `label_band` will
+    accept, so the numerals are cut in half and tesseract reads nothing. Of 446
+    panels this project could not read at 600 DPI, 379 failed with "no numerals
+    found", and doubling the strips recovered 8 of a sample of 30. The tick
+    LENGTH is already measured against the spine so that it does not care about
+    DPI (`_TICK_MIN_PX` and its neighbours are the exception that proves it);
+    the label strip was the one piece of this reader still written in page
+    pixels.
+
+    The panel's height is the scale, because it is the thing in the picture that
+    grows with the render and is already measured. It is a PROXY - a physically
+    tall panel at 300 DPI gets wider strips than its labels need - and that is
+    why the scaled strips are APPENDED rather than merged in: everything that
+    reads today is tried first, in the same order, and the wider strips are
+    reached only where nothing else produced a ladder. A strip that is too wide
+    still has to get a ladder past `ladder`, which is the gate that has always
+    decided this.
+    """
+    out = list(base)
+    try:
+        k = float(panel_height) / float(tuned)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return out
+    if not (k > 1.2):            # 같은 크기면 늘릴 것이 없습니다
+        return out
+    for gap, width in base:
+        wide = (int(round(gap * k)), int(round(width * k)))
+        if wide not in out:
+            out.append(wide)
+    return out
+
 
 LABEL_GAP = 7             # blank columns this wide end the label column
 LABEL_BAND_MAX = 60       # a measured label column wider than this is not one
@@ -2083,40 +2124,56 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
         bottom = min(bottom, brk[0])
     top = max(0, y0 - 10)
     best = []
-    for use_union in (False, True):
-        for anchor in (spine_x, x0):
-            band = label_band(dark, box, anchor, top, min(img.height, bottom))
-            geoms = ([(anchor - band[1], band[1] - band[0])] if band else []) + list(_STRIPS)
-            for gap, w in geoms:
-                left, right = max(0, anchor - gap - w), max(1, anchor - gap)
-                if not use_union:
-                    pairs = _ocr_numerals(img, dark, left, right, top,
-                                          min(img.height, bottom), scale)
-                else:
-                    # SECOND PASS ONLY. One strip read at two magnifications and
-                    # unioned by row, because tesseract drops a different numeral at
-                    # each: publication 122's heart-rate axis gives 70 at x3 and
-                    # 80/50 at x4, so no single pass reaches the three labels the
-                    # ladder needs while the axis is perfectly legible. Run FIRST it
-                    # was harmful - it cost 23 panels to gain 14, because a union is
-                    # also a union of noise - so it is a fallback, reached only when
-                    # no single-scale strip produced a ladder. That makes it strictly
-                    # additive. Rows where the two scales disagree are dropped, not
-                    # arbitrated.
-                    merged = {}
-                    for sc in SCALES:
-                        for v, row in _ocr_numerals(img, dark, left, right, top,
-                                                    min(img.height, bottom), sc):
-                            k = round(row / 4)
-                            if k in merged and merged[k] and abs(merged[k][0] - v) > 1e-9:
-                                merged[k] = None
-                            elif k not in merged:
-                                merged[k] = (v, row)
-                    pairs = sorted((p for p in merged.values() if p), key=lambda p: p[1])
-                if ladder(pairs)[0]:
-                    return pairs
-                if len(pairs) > len(best):
-                    best = pairs
+    # THE WHOLE SEARCH AT THE TUNED WIDTHS FIRST, then again at the widths this
+    # panel's size asks for. Appending the wider strips inside the anchor loop
+    # is NOT additive and was measured not to be: it put the spine's wide strips
+    # ahead of the block edge's narrow ones, and two of thirty panels that read
+    # correctly came back reading a different, worse ladder. A fallback that can
+    # change an answer the earlier pass already had is not a fallback.
+    wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
+    for strips in ([list(_STRIPS), wider] if wider else [list(_STRIPS)]):
+        if not strips:
+            continue
+        for use_union in (False, True):
+            for anchor in (spine_x, x0):
+                band = label_band(dark, box, anchor, top, min(img.height, bottom))
+                # The measured band belongs to the tuned pass: it is a
+                # measurement, not a width, so widening does not change it and
+                # trying it twice only costs an OCR call.
+                geoms = ([(anchor - band[1], band[1] - band[0])]
+                         if band and strips is not wider else []) + strips
+                for gap, w in geoms:
+                    left, right = max(0, anchor - gap - w), max(1, anchor - gap)
+                    if not use_union:
+                        pairs = _ocr_numerals(img, dark, left, right, top,
+                                              min(img.height, bottom), scale)
+                    else:
+                        # SECOND PASS ONLY. One strip read at two magnifications
+                        # and unioned by row, because tesseract drops a different
+                        # numeral at each: publication 122's heart-rate axis gives
+                        # 70 at x3 and 80/50 at x4, so no single pass reaches the
+                        # three labels the ladder needs while the axis is
+                        # perfectly legible. Run FIRST it was harmful - it cost 23
+                        # panels to gain 14, because a union is also a union of
+                        # noise - so it is a fallback, reached only when no
+                        # single-scale strip produced a ladder. That makes it
+                        # strictly additive. Rows where the two scales disagree
+                        # are dropped, not arbitrated.
+                        merged = {}
+                        for sc in SCALES:
+                            for v, row in _ocr_numerals(img, dark, left, right, top,
+                                                        min(img.height, bottom), sc):
+                                k = round(row / 4)
+                                if k in merged and merged[k] and abs(merged[k][0] - v) > 1e-9:
+                                    merged[k] = None
+                                elif k not in merged:
+                                    merged[k] = (v, row)
+                        pairs = sorted((p for p in merged.values() if p),
+                                       key=lambda p: p[1])
+                    if ladder(pairs)[0]:
+                        return pairs
+                    if len(pairs) > len(best):
+                        best = pairs
     return best
 
 

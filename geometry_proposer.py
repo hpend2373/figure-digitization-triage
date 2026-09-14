@@ -178,6 +178,17 @@ def find_frame(gray, region=None, threshold=160):
     vertical runs. A panel drawn with only a left spine and a bottom axis - SPSS
     does this - has one of each, and that is still a frame: the other two edges
     are the region's own bounds, which is what a person would draw too.
+
+    ONE LINE IS STILL A FRAME. The paragraph above promised the L-shape and
+    the code below refused anything short of it: a panel with a left spine and
+    no baseline - the middle rows of a stacked figure that shares one x axis -
+    came back as no frame at all. That is 112 of the 145 panels this project's
+    600 DPI corpus could not propose a geometry for (75 with only a spine, 37
+    with only a baseline). With a spine the ticks are where they always were;
+    with only a baseline there is no spine to find ticks on, and the proposal
+    says so with a tick count of 0 rather than by not existing - a panel that
+    is not on the sheet is a panel nobody decides about. No line at all is no
+    frame: nothing printed marks where the plot is.
     """
     dark = _gray(gray) < threshold
     if region:
@@ -193,17 +204,20 @@ def find_frame(gray, region=None, threshold=160):
             if v >= width * _AXIS_RUN]
     cols = [j + rx0 for j, v in enumerate(window.sum(axis=0))
             if v >= height * _AXIS_RUN]
-    if not rows or not cols:
+    if not rows and not cols:
         return None
-    row_runs = [int(round(sum(r) / len(r))) for r in _runs(rows, gap=2)]
-    col_runs = [int(round(sum(c) / len(c))) for c in _runs(cols, gap=2)]
+    row_runs = [int(round(sum(r) / len(r))) for r in _runs(rows, gap=2)] if rows else []
+    col_runs = [int(round(sum(c) / len(c))) for c in _runs(cols, gap=2)] if cols else []
     # An L-shaped axis is one horizontal line and one vertical one, which is
     # what SPSS prints and what publication BF02919461's right-hand panel is.
     # The missing edges are the region's own bounds - which is where a person
     # would put them too, because there is nothing else printed to put them at.
+    # A single horizontal line is the baseline, so the top is the region's; a
+    # single vertical line is the spine, so the right edge is the region's;
+    # and no line on an axis at all means both of its edges are the region's.
     y0 = min(row_runs) if len(row_runs) > 1 else min(row_runs + [ry0])
-    y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0])
-    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1])
+    y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0 if row_runs else ry1 - 1])
+    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1 if col_runs else rx0])
     x1 = max(col_runs) if len(col_runs) > 1 else max(col_runs + [rx1 - 1])
     if y1 - y0 < 8 or x1 - x0 < 8:
         return None

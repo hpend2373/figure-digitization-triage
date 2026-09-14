@@ -218,6 +218,51 @@ check("an L-shaped axis yields a frame",
       _lgot is not None and abs(_lgot[0] - _Lframe[0]) <= 2
       and abs(_lgot[3] - _Lframe[3]) <= 2, "%s" % (_lgot,))
 
+# REVERT: require a line on both axes. The docstring promised the L-shape and
+# the code refused anything short of it - 112 of the 145 panels this corpus
+# could not propose a geometry for had a spine or a baseline, not both.
+print()
+print("one printed line is still a frame")
+
+
+def one_line_fixture(which):
+    """A panel with ONLY a spine or ONLY a baseline, and ticks on the spine."""
+    W, H = 400, 320
+    x0, x1, y0, y1 = 60, 360, 30, 270
+    image = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(image)
+    if which == "SPINE":
+        d.line((x0, y0, x0, y1), fill="black", width=1)
+        for i in range(6):
+            y = y0 + i * (y1 - y0) / 5.0
+            d.line((x0 - 5, y, x0 - 1, y), fill="black", width=1)
+    else:
+        d.line((x0, y1, x1, y1), fill="black", width=1)
+    for g in range(4):
+        cx = x0 + (x1 - x0) * (g + 1) / 5.0
+        d.rectangle((cx - 9, y1 - 60 - 20 * g, cx + 9, y1 - 2), outline="black")
+    return image, (x0, x1, y0, y1)
+
+
+_S, _Sframe = one_line_fixture("SPINE")
+_sgot = GP.find_frame(_S, region=(0, 0, 400, 320))
+check("a spine with no baseline yields a frame on the region's rows",
+      _sgot is not None and abs(_sgot[0] - _Sframe[0]) <= 2
+      and _sgot[2] == 0 and _sgot[3] == 319, "%s" % (_sgot,))
+check("and its ticks are found on that spine",
+      _sgot is not None and len(GP.find_ticks(_S, _sgot[0], _sgot[2] - 2, _sgot[3] + 3)[0]) == 6,
+      "%s" % (_sgot and GP.find_ticks(_S, _sgot[0], _sgot[2] - 2, _sgot[3] + 3)[0],))
+_B, _Bframe = one_line_fixture("BASELINE")
+_bgot = GP.find_frame(_B, region=(0, 0, 400, 320))
+check("a baseline with no spine yields a frame on the region's columns",
+      _bgot is not None and abs(_bgot[3] - _Bframe[3]) <= 2
+      and _bgot[0] == 0 and _bgot[1] == 399, "%s" % (_bgot,))
+check("and it has no ticks to offer, which the proposal says rather than hides",
+      _bgot is not None and GP.propose_panel(_B, (0, 0, 400, 320))["Y_Tick_Count"] == 0)
+_N = Image.new("RGB", (400, 320), "white")
+ImageDraw.Draw(_N).rectangle((100, 100, 130, 200), outline="black")
+check("no printed line at all is no frame", GP.find_frame(_N, region=(0, 0, 400, 320)) is None)
+
 print()
 print("the spacing is reported; the values are not")
 _spacing, _regular = GP.tick_regularity(_marks)

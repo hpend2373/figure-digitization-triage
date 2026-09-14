@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "234d2451387497dc6e6e8ba311c7be2c5670458c8c5ea960651d3c058008775e",
-  "test_geometry_proposer.py": "6ecd3742a2733096c75147edf1f1c3581277bb20113301a5e542f92fd8a33b0b"
+  "geometry_proposer.py": "2b731212524a62305b0cf191016320d03fa334f2ab26e2afbb71db06d82c0fba",
+  "test_geometry_proposer.py": "d6c552d305db3fc966edb53093bef6401568eda5b94b9b3b099d109e7dd8013b"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -108,6 +108,30 @@
    "file": "geometry_proposer.py",
    "old": "        elif got[0][1] == got[1][1]:",
    "new": "        elif False:"
+  },
+  {
+   "name": "두 축 모두 선이 있어야 프레임이다",
+   "file": "geometry_proposer.py",
+   "old": "    if not rows and not cols:\n        return None",
+   "new": "    if not rows or not cols:\n        return None"
+  },
+  {
+   "name": "스파인만 있으면 아래 변을 위 변에 붙인다",
+   "file": "geometry_proposer.py",
+   "old": "    y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0 if row_runs else ry1 - 1])",
+   "new": "    y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0])"
+  },
+  {
+   "name": "밑선만 있으면 왼 변을 오른 변에 붙인다",
+   "file": "geometry_proposer.py",
+   "old": "    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1 if col_runs else rx0])",
+   "new": "    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1])"
+  },
+  {
+   "name": "선이 하나도 없어도 프레임을 낸다",
+   "file": "geometry_proposer.py",
+   "old": "    if not rows and not cols:\n        return None",
+   "new": "    if False:\n        return None"
   }
  ]
 }

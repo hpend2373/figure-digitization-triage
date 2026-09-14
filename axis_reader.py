@@ -2131,6 +2131,20 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
     # correctly came back reading a different, worse ladder. A fallback that can
     # change an answer the earlier pass already had is not a fallback.
     wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
+    # ONE STRIP, ONE READ. The union pass asks for the same strip at x3 that the
+    # single pass already read at x3, and the wider pass does it again for its
+    # strips: a third of the tesseract calls on a refused panel were repeats of
+    # a call whose answer was already in hand. tesseract is deterministic on the
+    # same pixels, so remembering the answer changes nothing but the clock -
+    # and the clock was 8 s a panel where 5 would do.
+    seen = {}
+
+    def ocr(left, right, top_, bottom_, sc):
+        k = (int(left), int(right), int(top_), int(bottom_), int(sc))
+        if k not in seen:
+            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)
+        return list(seen[k])
+
     for strips in ([list(_STRIPS), wider] if wider else [list(_STRIPS)]):
         if not strips:
             continue
@@ -2145,8 +2159,7 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
                 for gap, w in geoms:
                     left, right = max(0, anchor - gap - w), max(1, anchor - gap)
                     if not use_union:
-                        pairs = _ocr_numerals(img, dark, left, right, top,
-                                              min(img.height, bottom), scale)
+                        pairs = ocr(left, right, top, min(img.height, bottom), scale)
                     else:
                         # SECOND PASS ONLY. One strip read at two magnifications
                         # and unioned by row, because tesseract drops a different
@@ -2161,8 +2174,7 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
                         # are dropped, not arbitrated.
                         merged = {}
                         for sc in SCALES:
-                            for v, row in _ocr_numerals(img, dark, left, right, top,
-                                                        min(img.height, bottom), sc):
+                            for v, row in ocr(left, right, top, min(img.height, bottom), sc):
                                 k = round(row / 4)
                                 if k in merged and merged[k] and abs(merged[k][0] - v) > 1e-9:
                                     merged[k] = None

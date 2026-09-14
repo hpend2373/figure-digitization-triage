@@ -391,6 +391,33 @@ class LabelStripsScaleWithTheRender(unittest.TestCase):
         RUN[0] += 1
 
 
+class OneStripOneRead(unittest.TestCase):
+
+    def test_no_strip_is_read_twice_at_the_same_magnification(self):
+        """REVERT: call tesseract again for a strip it has already read. The
+        union pass re-reads every single-pass strip at x3, and the wider pass
+        repeats the pattern: a third of the calls on a refused panel, for
+        answers already in hand. tesseract is deterministic on the same pixels,
+        so the memo changes nothing but the clock."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3):
+            asked.append((int(left), int(right), int(top), int(bottom), int(scale)))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertGreater(len(asked), 8, "the search hardly searched: %s" % (asked,))
+        self.assertEqual(len(asked), len(set(asked)),
+                         "%d of %d strip reads were repeats" % (len(asked) - len(set(asked)), len(asked)))
+        RUN[0] += 1
+
+
 if __name__ == "__main__":
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))

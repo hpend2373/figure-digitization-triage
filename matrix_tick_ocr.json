@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "3ecb3db29439fd3750818187a2c98f5dcb25d33274579e940ad877eddae06845"
+  "axis_reader.py": "de428029180c1c10fcdf843d26c4298fdbec1479d2f830ac04fba99c4e5f4064"
  },
  "mutations": [
   {
@@ -114,6 +114,12 @@
    "file": "axis_reader.py",
    "old": "    except (TypeError, ValueError, ZeroDivisionError):\n        return out",
    "new": "    except ZeroDivisionError:\n        return out"
+  },
+  {
+   "name": "같은 띠를 다시 읽는다",
+   "file": "axis_reader.py",
+   "old": "        if k not in seen:\n            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)",
+   "new": "        if True:\n            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)"
   }
  ]
 }

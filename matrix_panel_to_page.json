@@ -1,0 +1,95 @@
+{
+ "files": {
+  "panel_to_page.py": "b0ff2987dee49401bbd7669af7ea030f0e06ab10eccd39d601ebaae5b235b5ea",
+  "test_panel_to_page.py": "50a13604d6f2aad0cdd7ac34540476929de920ebbdb761caff69ece8c3965a82"
+ },
+ "suites": [
+  "test_panel_to_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "가장 비슷한 자리를 같은 자리로 친다",
+   "file": "panel_to_page.py",
+   "old": "    if not np.array_equal(page[oy:oy + ch, ox:ox + cw], crop):\n        return None\n",
+   "new": ""
+  },
+  {
+   "name": "배율을 200 DPI로 가정한다",
+   "file": "panel_to_page.py",
+   "old": "    return (w / float(page_pt[0]), h / float(page_pt[1]))",
+   "new": "    return (200 / 72.0, 200 / 72.0)"
+  },
+  {
+   "name": "크롭의 자리를 더하지 않는다",
+   "file": "panel_to_page.py",
+   "old": "    return ((ox + x0) / sx, (oy + y0) / sy, (ox + x1) / sx, (oy + y1) / sy)",
+   "new": "    return (x0 / sx, y0 / sy, x1 / sx, y1 / sy)"
+  },
+  {
+   "name": "래스터 원점을 빼지 않는다",
+   "file": "panel_to_page.py",
+   "old": "    x, y = frame[0], frame[1]\n    x0, y0, x1, y1 = box_pt",
+   "new": "    x, y = 0, 0\n    x0, y0, x1, y1 = box_pt"
+  },
+  {
+   "name": "렌더 해상도를 잊는다",
+   "file": "panel_to_page.py",
+   "old": "    return [\"pdftoppm\", \"-r\", str(int(dpi)),",
+   "new": "    return [\"pdftoppm\", \"-r\", \"150\","
+  },
+  {
+   "name": "읽을 값 없는 패널도 옮긴다",
+   "file": "panel_to_page.py",
+   "old": "        if (r.get(\"Mark_Type\") or \"\").strip().upper() == \"NOT_DATA\":\n            continue\n",
+   "new": ""
+  },
+  {
+   "name": "패널 없는 그림도 옮긴다",
+   "file": "panel_to_page.py",
+   "old": "        if (r.get(\"Verdict\") or \"\").strip() != \"PANELS\":\n            continue\n",
+   "new": ""
+  },
+  {
+   "name": "크롭 지문을 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if want != {crop_sha}:",
+   "new": "        if False:"
+  },
+  {
+   "name": "PDF 지문을 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if pdf_sha != (d.get(\"Source_File_SHA256\") or \"\"):",
+   "new": "        if False:"
+  },
+  {
+   "name": "렌더러가 낸 크기를 믿는다",
+   "file": "panel_to_page.py",
+   "old": "        if big.shape[1] != frame[2] or big.shape[0] != frame[3]:",
+   "new": "        if False:"
+  },
+  {
+   "name": "되돌려 본 어긋남을 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if shift is None or max(abs(shift[0]), abs(shift[1])) > SHIFT_MAX:",
+   "new": "        if False:"
+  },
+  {
+   "name": "어긋남을 재지 않고 0이라 한다",
+   "file": "panel_to_page.py",
+   "old": "    dx, dy = loc[0] - m, loc[1] - m",
+   "new": "    dx, dy = 0, 0"
+  },
+  {
+   "name": "렌더러의 거절을 삼킨다",
+   "file": "panel_to_page.py",
+   "old": "        if status:\n            refusals.append((fid, status,",
+   "new": "        if False:\n            refusals.append((fid, status,"
+  },
+  {
+   "name": "시계를 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if deadline is not None and time.time() > deadline:\n            left.append(fid); continue\n",
+   "new": ""
+  }
+ ]
+}

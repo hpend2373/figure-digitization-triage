@@ -130,7 +130,8 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
-                   test_value_page test_panel_page test_record_panels; do
+                   test_value_page test_panel_page test_record_panels \
+                   test_panel_to_page; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
@@ -314,7 +315,8 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
-                   test_value_page test_panel_page test_record_panels; do
+                   test_value_page test_panel_page test_record_panels \
+                   test_panel_to_page; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then
               printf '%s\n' "$out"

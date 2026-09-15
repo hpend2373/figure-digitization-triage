@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "2b731212524a62305b0cf191016320d03fa334f2ab26e2afbb71db06d82c0fba",
-  "test_geometry_proposer.py": "d6c552d305db3fc966edb53093bef6401568eda5b94b9b3b099d109e7dd8013b"
+  "geometry_proposer.py": "c53bd405e7fac42e53e0cdec2798a059ef91ba4490a34d7b697972d395a1dc60",
+  "test_geometry_proposer.py": "497ab0d6a2067a83e8ef272f4d9b053b70f13ccfdc712390f50736bcc995d26c"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -52,8 +52,8 @@
   {
    "name": "읽은 값을 프레임 밖에 적는다",
    "file": "geometry_proposer.py",
-   "old": "            draw.text((x0 + 20, y - int(step * 0.16)), \"%g\" % value,",
-   "new": "            draw.text((x1 + 6, y - int(step * 0.16)), \"%g\" % value,"
+   "old": "            draw.text((x0 + 20, y - size - 3), \"%g\" % value,",
+   "new": "            draw.text((x1 + 6, y - size - 3), \"%g\" % value,"
   },
   {
    "name": "가장 많이 되풀이되는 폭을 고른다",
@@ -132,6 +132,12 @@
    "file": "geometry_proposer.py",
    "old": "    if not rows and not cols:\n        return None",
    "new": "    if False:\n        return None"
+  },
+  {
+   "name": "읽은 값을 눈금 선 위에 겹쳐 쓴다",
+   "file": "geometry_proposer.py",
+   "old": "            draw.text((x0 + 20, y - size - 3), \"%g\" % value,",
+   "new": "            draw.text((x0 + 20, y - size // 2), \"%g\" % value,"
   }
  ]
 }

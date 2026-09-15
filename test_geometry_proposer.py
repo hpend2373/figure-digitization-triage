@@ -578,6 +578,47 @@ check("and inside the frame it belongs to",
       _ink and max(x for x, _y in _ink) + max(0, _offset) <= int(_read["Panel_X1"]),
       "%s vs %s" % (max(x for x, _y in _ink) if _ink else None, _read["Panel_X1"]))
 
+# REVERT: draw the reading across the tick line. The text's midline - where a
+# minus sign is - lands on the line drawn in the same colour, and -0.9 shows as
+# 0.9: the one glyph that flips every value in the panel is the one a person
+# cannot see. Publication S0094576505000263's axis (-1 .. -0.3) read correctly
+# and was drawn without a single minus.
+print()
+print("a negative axis is read, kept and shown with its sign")
+_NEG = [(-10.0, 100.0), (-20.0, 200.0), (-30.0, 300.0)]
+_ZERO = [(10.0, 100.0), (0.0, 200.0), (-10.0, 300.0)]
+_nst, _nk, _nd, _ = GP.values_from_ladder(_NEG)
+_zst, _zk, _zd, _ = GP.values_from_ladder(_ZERO)
+check("an all-negative ladder is a ladder", _nst == GP.READ_OK and [v for v, _p in _nk] == [-10.0, -20.0, -30.0], _nd)
+check("a ladder through zero is a ladder", _zst == GP.READ_OK and [v for v, _p in _zk] == [10.0, 0.0, -10.0], _zd)
+_nread = GP.apply_reading(dict(_row), *GP.values_from_ladder(_NEG))
+check("the sign reaches the reader's columns",
+      (_nread["Y_Tick_Read_First"], _nread["Y_Tick_Read_Last"], _nread["Y_Tick_Read_Values"])
+      == ("-10", "-30", "-10@100;-20@200;-30@300"),
+      "%s" % [_nread[c] for c in ("Y_Tick_Read_First", "Y_Tick_Read_Last", "Y_Tick_Read_Values")])
+_pos = GP.apply_reading(dict(_row), *GP.values_from_ladder([(10.0, 100.0), (20.0, 200.0), (30.0, 300.0)]))
+_npic = Image.open(GP.proposal_overlay(_im, _nread, os.path.join(ROOT, "neg.png"))).convert("RGB")
+_ppic = Image.open(GP.proposal_overlay(_im, _pos, os.path.join(ROOT, "pos.png"))).convert("RGB")
+_npx, _ppx = _npic.load(), _ppic.load()
+_W, _H = _npic.size
+# the magenta tick bars are the rows with an unbroken 30 px run of that
+# colour; the value text and the anchor stubs are magenta too, but in runs
+# of a few pixels
+def _run(y):
+    best = cur = 0
+    for x in range(_W):
+        cur = cur + 1 if _npx[x, y] == (190, 60, 190) else 0
+        best = max(best, cur)
+    return best
+_bars = [y for y in range(_H) if _run(y) >= 30]
+_near = set(b + d for b in _bars for d in range(-2, 3))
+_onband = sum(1 for x in range(_W) for y in _near if 0 <= y < _H and _npx[x, y] != _ppx[x, y])
+_offband = sum(1 for x in range(_W) for y in range(_H)
+               if y not in _near and _npx[x, y] != _ppx[x, y])
+check("and the value is written clear of the tick line, where a minus can be seen",
+      len(_bars) >= 3 and _offband > 0 and _onband == 0,
+      "bars %d, differs on the tick line %d px, off it %d px" % (len(_bars), _onband, _offband))
+
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

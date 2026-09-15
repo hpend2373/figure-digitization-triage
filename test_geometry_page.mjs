@@ -117,6 +117,23 @@ test('리더도 뒤집혀 읽었으면 뒤집힌 답이 통과한다', () => {
   assert.equal(L.verdictOf('GP001', inverted).ready, true);
 });
 
+/* 음수 축. 이 코퍼스에 -10 .. -40, -1 .. -0.3 같은 축이 실제로 있고, 부호를
+ * 잃는 순간 그 패널의 모든 값이 뒤집힙니다. 친 값도, 읽은 값도 부호째 나가야
+ * 합니다. */
+test('사람이 친 음수 눈금 값은 부호째 답이 된다', () => {
+  const got = L.verdictOf('GP002', unread({ top: '0', bottom: '-40' }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Y_Tick_Bottom_Value, '-40');
+  assert.equal(got.row.Confirmed_Tick_Values, '0@100;-40@400');
+});
+test('리더가 읽은 음수 눈금 값도 부호째 답이 된다', () => {
+  const got = L.verdictOf('GP001', state({ readPairs: '-10@100;-20@200;-30@300' }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Y_Tick_Top_Value, '-10');
+  assert.equal(got.row.Y_Tick_Bottom_Value, '-30');
+  assert.equal(got.row.Confirmed_Tick_Values, '-10@100;-30@300');
+});
+
 /* REVERT: 숫자가 아닌 것도 눈금 값으로 받는다. 축이 "약 40"이라고 적힌
  * 제안은 계산에 들어가는 순간 0이 되거나 터집니다. */
 test('숫자가 아닌 눈금 값은 답이 아니다', () => {

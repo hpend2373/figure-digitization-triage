@@ -161,6 +161,20 @@ check("보류는 적지 않고 이름을 대고 거절한다",
                         Confirmed_Tick_Values="")])[1]) == ["HELD"])
 
 print()
+print("음수 눈금 값은 부호째 적힌다")
+_wn, _rn, _ = run([answer(Y_Tick_Top_Value="0", Y_Tick_Bottom_Value="-40",
+                          Confirmed_Tick_Values="0@10;-40@90")])
+check("0 .. -40 축은 문제 없이 적힌다", len(_wn) == 1 and not _rn, codes(_rn))
+check("적힌 값과 짝에 부호가 남아 있다",
+      _wn and (_wn[0]["Y_Tick_Bottom_Value"], _wn[0]["Confirmed_Tick_Values"])
+      == ("-40", "0@10;-40@90"),
+      "%s" % ([(w["Y_Tick_Bottom_Value"], w["Confirmed_Tick_Values"]) for w in _wn],))
+check("친 값 -40과 짝의 값 40은 다른 말이다",
+      "CALIBRATION_PAIRS_DISAGREE" in codes(run([answer(
+          Y_Tick_Top_Value="0", Y_Tick_Bottom_Value="-40",
+          Confirmed_Tick_Values="0@10;40@90")])[1]))
+
+print()
 print("두 번 적지 않는다")
 _out = os.path.join(TMP, "twice.csv")
 R.record(PROP, [answer()], "2026-09-10", out_path=_out, log=lambda *a: None)

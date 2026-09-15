@@ -1,7 +1,7 @@
 {
  "files": {
   "record_geometry.py": "7bc26b3462bd17a26ea1fcfdb243fde0e165943b6cf3a94badc33824521f0b4f",
-  "test_record_geometry.py": "4414fc3d2962fca79ec393bd26cae370a8ef1315ce91c2c07f62a491e97facc7"
+  "test_record_geometry.py": "a582fadea5f51ecdc57d838f84f765bfa66f793fa25eaef56c9fecfe3d548c12"
  },
  "suites": [
   "test_record_geometry.py"
@@ -108,6 +108,12 @@
    "file": "record_geometry.py",
    "old": "            PAIRS: (answer.get(PAIRS) or \"\").strip(),",
    "new": "            PAIRS: \"\","
+  },
+  {
+   "name": "적힌 값과 짝의 값을 부호 없이 견준다",
+   "file": "record_geometry.py",
+   "old": "            said = sorted((float(top), float(bottom))) if _numeric(top, bottom) else None",
+   "new": "            said = sorted((abs(float(top)), abs(float(bottom)))) if _numeric(top, bottom) else None"
   }
  ]
 }

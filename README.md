@@ -121,12 +121,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4306 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 4698 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 4313 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 4706 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 262 -->
 
-4306 scenarios on main after v9.28 under `requirements-lock.txt`, and 4698 with
+4313 scenarios on main after v9.28 under `requirements-lock.txt`, and 4706 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its three glyph-reading scenarios where tesseract is not. `intake-full` installs

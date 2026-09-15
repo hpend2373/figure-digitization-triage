@@ -899,11 +899,18 @@ def proposal_overlay(image, row, out_path):
         # SIZED TO THE PANEL. A 12 px default on a 4000 px raster is a smudge,
         # and the whole point is that the two numbers can be compared by eye.
         step = abs(reading[1][1] - reading[0][1]) if len(reading) > 1 else (y1 - y0) / 6.0
-        font = _font(max(11, int(step * 0.28)))
+        size = max(11, int(step * 0.28))
+        font = _font(size)
         for value, pixel in reading:
             y = int(float(pixel))
             draw.line((x0 - 22, y, x0 + 14, y), fill=(190, 60, 190), width=3)
-            draw.text((x0 + 20, y - int(step * 0.16)), "%g" % value,
+            # ABOVE THE TICK LINE, not across it. Written across it, the text's
+            # midline - where a minus sign is - lands on the tick line drawn
+            # in the same colour, and `-0.9` shows as `0.9`: the one glyph
+            # that flips every value in the panel is the one glyph a person
+            # cannot see. Publication S0094576505000263's axis, -1 .. -0.3,
+            # read correctly and was drawn without a single minus.
+            draw.text((x0 + 20, y - size - 3), "%g" % value,
                       fill=(190, 60, 190), font=font)
     # TWO READINGS, TWO COLOURS. Drawn the same, a person cannot tell which
     # detector put a line where, and "the anchors look right" stops being a

@@ -64,6 +64,12 @@ MUT = [
      "  return '';"),
     ("M19 따옴표를 감싸지 않는다",
      "    .replace(/\"/g, '\"\"') + '\"';", "    + '\"';"),
+    ("M20 음수는 눈금 값이 아니라고 한다",
+     "  return v !== '' && isFinite(Number(v));",
+     "  return v !== '' && isFinite(Number(v)) && Number(v) >= 0;"),
+    ("M21 음수로 읽은 짝은 버린다",
+     "    if (isFinite(v) && isFinite(px)) out.push([v, px]);",
+     "    if (v >= 0 && isFinite(px)) out.push([v, px]);"),
 ]
 
 mutate_guard.restore_any(HERE)

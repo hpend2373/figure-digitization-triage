@@ -588,6 +588,23 @@ class TheSecondPass(unittest.TestCase):
         self.assertEqual([v for v, _r in pairs], [200.0, 150.0, 100.0], pairs)
         RUN[0] += 1
 
+    def test_a_negative_axis_is_read_with_its_sign(self):
+        """The whole read, not the one strip: -10 -20 -30 come back negative,
+        and an axis through zero (10, 0, -10) comes back as a ladder with a
+        negative step. The single-strip test above shows the guard; this one
+        shows the pass that runs in production keeps the sign it found."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-10", "-20", "-30"), gap=100)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [-10.0, -20.0, -30.0], pairs)
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("10", "0", "-10"), gap=100)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [10.0, 0.0, -10.0], pairs)
+        RUN[0] += 1
+
     def test_european_decimals_are_read_in_the_second_pass(self):
         """PIIS1566070202001327's axes: 1,00 0,90 ... 0,00. Without the comma
         they read as 1 00 0 90, and once as the ladder 9 .. 1 - ten times

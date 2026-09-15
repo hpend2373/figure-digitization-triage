@@ -1995,9 +1995,9 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
     single tick string on 392 panels, so it was decoration and is gone.
 
     `with_clip` returns (value, row, clipped) instead. A numeral is CLIPPED when
-    its word box touches the strip's left or right edge and the two pixel
-    columns just outside that edge carry ink on the word's own rows: the strip
-    cut through the label. A narrow strip that cuts the leading digit off every label reads
+    ink stands just left of its word on the word's middle rows, or when its word
+    box touches the strip's right edge with ink just past it: the strip cut
+    through the label, or off its sign. A narrow strip that cuts the leading digit off every label reads
     "250 225 200" as "50 25 0" and "1400 1200 1000" as "400 200 0" - still an
     arithmetic ladder, still accepted, and the whole panel is then rescaled by
     a digit. Five of sixty panels this project had read at 600 DPI were that.
@@ -2048,9 +2048,26 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
             key = round(row / 4)
             wt, wb = int(top + t_ / scale), int(top + (t_ + h_) / scale)
             rows_ = slice(max(0, wt), max(1, wb))
+            # WHAT STANDS JUST LEFT OF THE WORD. Ink on the word's middle rows
+            # within six tenths of its height to the left of it - inside the
+            # strip or past its edge - is something the word did not account
+            # for: the rest of a digit the strip cut through ("1400" read as
+            # "400"), a decimal point and its zero ("0.8" read as "8"), or a
+            # minus sign. Publication S0362119712070249 prints -10 -20 -30 -40
+            # with the minus a third of an em off, and tesseract - the minus
+            # at the strip's border, or drawn as an en dash - returned "10":
+            # a ladder in good standing with the wrong sign, every value in
+            # the panel flipped. A word with such a neighbour is not trusted;
+            # the wider strip that holds the neighbour is read instead. (A
+            # two-pixel look past the edge on every row came first and was
+            # found to see nothing this does not.)
             clipped = False
-            if l_ / float(scale) <= 3.0 and int(left) >= 2:
-                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())
+            wl = int(left + l_ / float(scale))
+            look = max(3, int(0.6 * (wb - wt)))
+            third = (wb - wt) // 3
+            mid = slice(max(0, wt + third), max(1, wb - third))
+            if not s_.startswith("-") and wl - 2 > 0:
+                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())
             # And on the right: a label whose last digit runs under the strip's
             # right edge reads "200" as "20", which is the same digit lost by
             # the other door. Ink just past the edge on the word's rows says so.

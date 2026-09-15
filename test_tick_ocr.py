@@ -554,6 +554,26 @@ class TheSecondPass(unittest.TestCase):
         self.assertEqual([(v, cl) for v, _r, cl in cut], [(400.0, True), (200.0, True), (0.0, True)])
         RUN[0] += 1
 
+    def test_a_sign_left_of_the_strip_makes_the_word_untrusted(self):
+        """REVERT: look only two pixels past the edge. Publication
+        S0362119712070249 prints -10 -20 -30 -40 with the minus a third of an
+        em to the left; a strip starting between the two read 10 20 30 40 - a
+        ladder in good standing with the wrong sign, and every value in the
+        panel flipped. The same look catches `0.8` read as `8`."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-10", "-20", "-30"), gap=100)
+        x0, x1, y0, y1 = box
+        ink_left = int(np.where(dark[y0:y1, :sx - 40].any(axis=0))[0].min())
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+        signed = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        unsigned = A._ocr_numerals(img, dark, ink_left + 18, sx - 40, top, bottom, 1.5, with_clip=True)
+        self.assertEqual([(v, cl) for v, _r, cl in signed], [(-10.0, False), (-20.0, False), (-30.0, False)])
+        self.assertEqual([(v, cl) for v, _r, cl in unsigned], [(10.0, True), (20.0, True), (30.0, True)])
+        RUN[0] += 1
+
     def test_ticks_inside_the_strip_are_read_past_in_the_second_pass(self):
         """The 283 shape, drawn: 200 150 100 with 44 px ticks. The tuned strips
         end 2 to 6 px from the spine and so hold the ticks; tesseract returns

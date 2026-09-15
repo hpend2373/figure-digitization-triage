@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "c3d08c9eb4f45f91b663d3018eedb45692d4136178c8014551cc5c26178fbd21"
+  "axis_reader.py": "c06d61ec8886fb0dac7d21d7563ee6d5a7303b9d476c0d8bd04970e46a1273d8"
  },
  "mutations": [
   {
@@ -134,12 +134,6 @@
    "new": "        elif False:\n            s_ = s_.replace(\",\", \".\")"
   },
   {
-   "name": "왼쪽 가장자리의 잘림을 보지 않는다",
-   "file": "axis_reader.py",
-   "old": "            if l_ / float(scale) <= 3.0 and int(left) >= 2:\n                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())",
-   "new": "            if False:\n                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())"
-  },
-  {
    "name": "잘린 숫자의 띠도 받는다",
    "file": "axis_reader.py",
    "old": "                    if any(cl for _v, _r, cl in trip):\n                        continue",
@@ -174,6 +168,12 @@
    "file": "axis_reader.py",
    "old": "                     scale_for(y1 - y0, scale), comma=True, seen=seen,",
    "new": "                     scale_for(y1 - y0, scale), comma=False, seen=seen,"
+  },
+  {
+   "name": "낱말 왼쪽에 선 것을 보지 않는다",
+   "file": "axis_reader.py",
+   "old": "            if not s_.startswith(\"-\") and wl - 2 > 0:\n                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())",
+   "new": "            if False:\n                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())"
   }
  ]
 }

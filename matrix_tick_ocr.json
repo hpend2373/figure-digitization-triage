@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "de428029180c1c10fcdf843d26c4298fdbec1479d2f830ac04fba99c4e5f4064"
+  "axis_reader.py": "c3d08c9eb4f45f91b663d3018eedb45692d4136178c8014551cc5c26178fbd21"
  },
  "mutations": [
   {
@@ -106,8 +106,8 @@
   {
    "name": "늘린 띠를 앵커 고리 안에서 덧붙인다",
    "file": "axis_reader.py",
-   "old": "    for strips in ([list(_STRIPS), wider] if wider else [list(_STRIPS)]):",
-   "new": "    for strips in [list(_STRIPS) + wider]:"
+   "old": "    for strips in ([tuned, wider] if wider else [tuned]):",
+   "new": "    for strips in [tuned + wider]:"
   },
   {
    "name": "숫자가 아닌 높이에 걸려 넘어진다",
@@ -118,8 +118,62 @@
   {
    "name": "같은 띠를 다시 읽는다",
    "file": "axis_reader.py",
-   "old": "        if k not in seen:\n            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)",
-   "new": "        if True:\n            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)"
+   "old": "        if k not in seen:\n            seen[k] = _ocr_numerals(img, dark, left, right, top, bottom, sc,",
+   "new": "        if True:\n            seen[k] = _ocr_numerals(img, dark, left, right, top, bottom, sc,"
+  },
+  {
+   "name": "천 단위 쉼표를 받지 않는다",
+   "file": "axis_reader.py",
+   "old": "        if re.fullmatch(r\"-?\\d{1,3}(?:,\\d{3})+\", s_):\n            s_ = s_.replace(\",\", \"\")",
+   "new": "        if False:\n            s_ = s_.replace(\",\", \"\")"
+  },
+  {
+   "name": "소수점 쉼표를 받지 않는다",
+   "file": "axis_reader.py",
+   "old": "        elif re.fullmatch(r\"-?\\d+,\\d{1,2}\", s_):\n            s_ = s_.replace(\",\", \".\")",
+   "new": "        elif False:\n            s_ = s_.replace(\",\", \".\")"
+  },
+  {
+   "name": "왼쪽 가장자리의 잘림을 보지 않는다",
+   "file": "axis_reader.py",
+   "old": "            if l_ / float(scale) <= 3.0 and int(left) >= 2:\n                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())",
+   "new": "            if False:\n                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())"
+  },
+  {
+   "name": "잘린 숫자의 띠도 받는다",
+   "file": "axis_reader.py",
+   "old": "                    if any(cl for _v, _r, cl in trip):\n                        continue",
+   "new": "                    if False:\n                        continue"
+  },
+  {
+   "name": "두 번째 패스가 없다",
+   "file": "axis_reader.py",
+   "old": "    if ladder(first)[0]:\n        return first\n    reach = tick_reach(",
+   "new": "    if True:\n        return first\n    reach = tick_reach("
+  },
+  {
+   "name": "두 번째 패스가 눈금을 지나 시작하지 않는다",
+   "file": "axis_reader.py",
+   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    second =",
+   "new": "    reach = 0\n    second ="
+  },
+  {
+   "name": "두 번째 패스도 x3으로 확대한다",
+   "file": "axis_reader.py",
+   "old": "    return max(1.0, min(float(scale), scale * k))",
+   "new": "    return float(scale)"
+  },
+  {
+   "name": "눈금 닿는 데를 모든 행으로 잰다",
+   "file": "axis_reader.py",
+   "old": "    ticks = runs[(runs > base + 2) & (runs < sub.shape[1])]\n    return int(np.percentile(ticks, 90)) if ticks.size else base",
+   "new": "    ticks = runs[(runs > 0) & (runs < sub.shape[1])]\n    return int(np.percentile(ticks, 90)) if ticks.size else 0"
+  },
+  {
+   "name": "두 번째 패스가 쉼표 없이 읽는다",
+   "file": "axis_reader.py",
+   "old": "                     scale_for(y1 - y0, scale), comma=True, seen=seen,",
+   "new": "                     scale_for(y1 - y0, scale), comma=False, seen=seen,"
   }
  ]
 }

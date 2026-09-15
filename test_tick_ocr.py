@@ -298,11 +298,12 @@ class RecordsAndChangesNothing(unittest.TestCase):
 _TUNED_H = A._TUNED_PANEL_PX
 
 
-def panel_with_labels(scale, labels=("3000", "2000", "1000")):
+def panel_with_labels(scale, labels=("3000", "2000", "1000"), tick=6, gap=95):
     """A panel drawn at `scale`: a spine, three ticks and three WIDE numerals.
 
     Everything in it is `scale` times the tuned render - which is what a 600 DPI
-    page is next to the 300 DPI one `_STRIPS` was measured on.
+    page is next to the 300 DPI one `_STRIPS` was measured on. `tick` is the
+    tick length and `gap` the label's distance from the spine, both at scale 1.
     """
     # The panel is the TUNED height at scale 1, so scale 2 is exactly the step
     # from the 300 DPI render `_STRIPS` was measured on to a 600 DPI one.
@@ -316,8 +317,8 @@ def panel_with_labels(scale, labels=("3000", "2000", "1000")):
     d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)  # baseline
     ys = [int((top + off) * scale) for off in (60, 190, 320)]
     for y, txt in zip(ys, labels):
-        d.rectangle([sx - int(6 * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
-        d.text((sx - int(95 * scale), y - int(11 * scale)), txt, font=f, fill=0)
+        d.rectangle([sx - int(tick * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((sx - int(gap * scale), y - int(11 * scale)), txt, font=f, fill=0)
     box = (sx, w - int(20 * scale), top, bot)
     return img, np.asarray(img) <= 140, box, sx, bot
 
@@ -368,7 +369,7 @@ class LabelStripsScaleWithTheRender(unittest.TestCase):
         exhibit it."""
         asked = []
 
-        def spy(img, dark, left, right, top, bottom, scale=3):
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
             asked.append(int(right) - int(left))
             return []
 
@@ -401,7 +402,7 @@ class OneStripOneRead(unittest.TestCase):
         so the memo changes nothing but the clock."""
         asked = []
 
-        def spy(img, dark, left, right, top, bottom, scale=3):
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
             asked.append((int(left), int(right), int(top), int(bottom), int(scale)))
             return []
 
@@ -415,6 +416,169 @@ class OneStripOneRead(unittest.TestCase):
         self.assertGreater(len(asked), 8, "the search hardly searched: %s" % (asked,))
         self.assertEqual(len(asked), len(set(asked)),
                          "%d of %d strip reads were repeats" % (len(asked) - len(set(asked)), len(asked)))
+        RUN[0] += 1
+
+
+class WhatAWordSays(unittest.TestCase):
+    """`numeral`: the string a tesseract word amounts to, or None."""
+
+    def test_the_regex_alone_is_what_it_was(self):
+        self.assertEqual(A.numeral("200"), "200")
+        self.assertEqual(A.numeral("-20"), "-20")
+        self.assertEqual(A.numeral("0.5"), "0.5")
+        self.assertIsNone(A.numeral("200-"))
+        self.assertIsNone(A.numeral("150,000"))
+        self.assertIsNone(A.numeral("0,90"))
+        RUN[0] += 1
+
+    def test_commas_are_thousands_or_decimals_and_nothing_else(self):
+        """REVERT: drop the comma handling. "150,000" and "0,90" then split
+        into two numerals each, and the whitelist never sees a comma."""
+        self.assertEqual(A.numeral("150,000", comma=True), "150000")
+        self.assertEqual(A.numeral("1,000,000", comma=True), "1000000")
+        self.assertEqual(A.numeral("0,90", comma=True), "0.90")
+        self.assertEqual(A.numeral("-2,5", comma=True), "-2.5")
+        self.assertIsNone(A.numeral("1,0000", comma=True))
+        self.assertIsNone(A.numeral("12,34,5", comma=True))
+        RUN[0] += 1
+
+
+class TheSecondPass(unittest.TestCase):
+    """Everything learnt at 600 DPI lives in a pass that runs only after the
+    tuned search refused - because put into the first pass, each of these
+    changed a reading that was right."""
+
+    def test_tick_reach_is_the_ticks_and_not_the_spine_or_the_gridlines(self):
+        """REVERT: take a percentile over every row. The spine is a rule
+        several pixels wide and `spine_x` a column inside it, so most rows
+        carry a 3 px run - publication 283's figure 2 had 647 of them against
+        25 tick rows - and the reach came out 3 where the ticks were 31."""
+        dark = np.zeros((400, 300), dtype=bool)
+        dark[:, 197:201] = True                               # a spine 4 px wide
+        for y in (50, 150, 250, 350):
+            dark[y:y + 3, 170:200] = True                     # 30 px ticks
+        dark[296:306, 0:200] = True                           # a gridline to the spine, 10 rows
+        self.assertEqual(A.tick_reach(dark, 200, 0, 400, cap=60), 30)
+        self.assertEqual(A.tick_reach(dark, 200, 0, 40, cap=60), 3,
+                         "no tick: the spine's own thickness is the reach")
+        RUN[0] += 1
+
+    def test_the_magnification_keeps_the_glyph_size_tesseract_was_tuned_on(self):
+        """REVERT: magnify x3 whatever the render. At 600 DPI that is where
+        `5` reads as `9`: publication 360's 3.5 read 3.9 at x3, 3.5 at x1.5."""
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX), 3.0)
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX * 2), 1.5)
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX * 10), 1.0, "never below none")
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX / 2), 3.0, "never above the tuned")
+        self.assertEqual(A.scale_for(None), 3)
+        RUN[0] += 1
+
+    def test_the_second_pass_starts_only_after_the_first_refused(self):
+        """REVERT: run the second pass first, or fold its settings into the
+        first. A comma in the first pass's whitelist read one panel's 3.5 as
+        3.9; an anchor moved 2 px flipped a marginal read. Observed on the
+        calls the search makes, so it needs no tesseract."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
+            asked.append((bool(kw.get("comma")), int(right), float(scale)))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0, tick=22, gap=72)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        flags = [c for c, _r, _s in asked]
+        self.assertIn(True, flags, "the second pass never ran")
+        self.assertIn(False, flags, "the first pass never ran")
+        first_second = flags.index(True)
+        self.assertNotIn(True, flags[:first_second])
+        self.assertNotIn(False, flags[first_second:],
+                         "a first-pass call after the second pass began")
+        # and the second pass is the one with the 600 DPI settings
+        second = [(r, s) for c, r, s in asked if c]
+        reach = A.tick_reach(dark, sx, box[2], box[3], cap=max(10, (box[3] - box[2]) // 8))
+        self.assertGreater(reach, 20, "the fixture's ticks were not measured")
+        self.assertTrue(all(r <= sx - reach for r, _s in second),
+                        "a second-pass strip reaches into the ticks: %s" % (second[:4],))
+        self.assertTrue(all(s in (1.5, 2.0) for _r, s in second),
+                        "the second pass did not magnify for the render: %s" % (sorted({s for _r, s in second}),))
+        RUN[0] += 1
+
+    def test_a_clipped_numeral_disqualifies_its_strip(self):
+        """REVERT: accept a ladder whose numerals touch the strip edge with
+        ink beyond it. "250 225 200" read as "50 25 0" and "1400 1200 1000" as
+        "400 200 0" are arithmetic ladders too, and every value in the panel is
+        then off by a digit. Five of sixty panels read at 600 DPI were that.
+        The strips are faked so the guard is observed by itself."""
+        calls = []
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            calls.append((int(left), int(right)))
+            if right - left < 100:                              # narrow: clipped ladder
+                return [(50.0, 100.0, True), (25.0, 200.0, False), (0.0, 300.0, False)]
+            return [(250.0, 100.0, False), (225.0, 200.0, False), (200.0, 300.0, False)]
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual([v for v, _r in got], [250.0, 225.0, 200.0], got)
+        self.assertTrue(any(r - l < 100 for l, r in calls), "no narrow strip was tried first")
+        RUN[0] += 1
+
+    def test_a_cut_digit_is_seen_as_clipped(self):
+        """The clip test itself, on real ink: a strip whose left edge falls
+        inside the `1` of 1400 reads 400 and flags it; one that holds the
+        whole label reads 1400 and does not. (An edge that lands exactly in
+        the gap between two digits is not seen - that is the guard's limit,
+        and the overlay is where those are caught.)"""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("1400", "1200", "1000"), gap=100)
+        x0, x1, y0, y1 = box
+        cols = np.where(dark[y0:y1, :sx - 40].any(axis=0))[0]
+        ink_left = int(cols.min())
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+        whole = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        cut = A._ocr_numerals(img, dark, ink_left + 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        self.assertEqual([(v, cl) for v, _r, cl in whole], [(1400.0, False), (1200.0, False), (1000.0, False)])
+        self.assertEqual([(v, cl) for v, _r, cl in cut], [(400.0, True), (200.0, True), (0.0, True)])
+        RUN[0] += 1
+
+    def test_ticks_inside_the_strip_are_read_past_in_the_second_pass(self):
+        """The 283 shape, drawn: 200 150 100 with 44 px ticks. The tuned strips
+        end 2 to 6 px from the spine and so hold the ticks; tesseract returns
+        "200-" at confidence 0 and the first pass refuses. The second pass
+        starts past the ticks and reads the axis."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("200", "150", "100"), tick=22, gap=72)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [200.0, 150.0, 100.0], pairs)
+        RUN[0] += 1
+
+    def test_european_decimals_are_read_in_the_second_pass(self):
+        """PIIS1566070202001327's axes: 1,00 0,90 ... 0,00. Without the comma
+        they read as 1 00 0 90, and once as the ladder 9 .. 1 - ten times
+        the printed value, accepted."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("1,00", "0,90", "0,80"))
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [1.0, 0.9, 0.8], pairs)
         RUN[0] += 1
 
 

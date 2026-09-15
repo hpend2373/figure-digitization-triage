@@ -1957,13 +1957,50 @@ def cut_through_axis(dark, box, spine_x, baseline_y, reach=None):
     return "; ".join(why)
 
 
-def _ocr_numerals(img, dark, left, right, top, bottom, scale=3):
+def numeral(txt, comma=False):
+    """The number a tesseract word says, as a string, or None.
+
+    Only what the regex already accepted comes out unchanged. `comma` is
+    switched on by name because switching it on inside the first pass changed
+    a reading that was right (a comma in the whitelist made one panel's `3.5`
+    read `3.9`): "150,000" is a thousands separator, "0,90" a European decimal
+    point; the whitelist had no comma and both split into two numerals.
+    Groups of exactly three after the comma are thousands, one or two digits
+    after it are decimals, anything else is not a number.
+
+    A trailing '-' - the tick mark read as a character, "200-" - is NOT
+    stripped here. It was, and it rescued 23 of 27 panels while `tick_reach`
+    was mis-measuring the ticks; with the ticks measured, the strips start
+    past them and the same 29 panels read with the stripping off. A rule
+    nothing observes is a rule that gets to drift.
+    """
+    s_ = (txt or "").strip().replace("--", "-")
+    if comma:
+        if re.fullmatch(r"-?\d{1,3}(?:,\d{3})+", s_):
+            s_ = s_.replace(",", "")
+        elif re.fullmatch(r"-?\d+,\d{1,2}", s_):
+            s_ = s_.replace(",", ".")
+    if not re.fullmatch(r"-?\d+(?:\.\d+)?", s_):
+        return None
+    return s_
+
+
+def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
+                  with_clip=False, margin=0):
     """[(value, row)] for every numeral tesseract finds in a strip, sign included.
 
     The sign comes from tesseract itself: '-' is in the whitelist, so "-20" is
     read as -20. A geometric minus detector was written on the assumption that
     tesseract drops the sign; reverting it changed neither the pass count nor a
     single tick string on 392 panels, so it was decoration and is gone.
+
+    `with_clip` returns (value, row, clipped) instead. A numeral is CLIPPED when
+    its word box touches the strip's left or right edge and the two pixel
+    columns just outside that edge carry ink on the word's own rows: the strip
+    cut through the label. A narrow strip that cuts the leading digit off every label reads
+    "250 225 200" as "50 25 0" and "1400 1200 1000" as "400 200 0" - still an
+    arithmetic ladder, still accepted, and the whole panel is then rescaled by
+    a digit. Five of sixty panels this project had read at 600 DPI were that.
     """
     if right - left < 8 or bottom - top < 20:
         return []
@@ -1976,10 +2013,20 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3):
                            "locked environment does not install; the geometry "
                            "path does not call this")
     strip = img.crop((int(left), int(top), int(right), int(bottom)))
-    big = strip.resize((strip.width * scale, strip.height * scale), Image.LANCZOS)
+    if margin:
+        # WHITE ON BOTH SIDES. tesseract wants blank paper past the last glyph:
+        # a strip whose edge falls 3 px after a `0` reads "200" as "20" at
+        # confidence 0. The margin is paper, not picture - it moves nothing
+        # in the strip and the word boxes are shifted back by it below.
+        padded = Image.new("L", (strip.width + 2 * int(margin), strip.height), 255)
+        padded.paste(strip, (int(margin), 0))
+        strip = padded
+    big = strip.resize((max(1, int(round(strip.width * scale))),
+                        max(1, int(round(strip.height * scale)))), Image.LANCZOS)
     found = {}
     for psm in ("11", "6"):
-        cfg = "--psm %s -c tessedit_char_whitelist=0123456789-." % psm
+        cfg = "--psm %s -c tessedit_char_whitelist=0123456789-.%s" % (
+            psm, "," if comma else "")
         try:
             d = pytesseract.image_to_data(big, config=cfg,
                                           output_type=pytesseract.Output.DICT)
@@ -1987,8 +2034,9 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3):
             continue
         for txt, l_, t_, w_, h_, conf in zip(d["text"], d["left"], d["top"],
                                              d["width"], d["height"], d["conf"]):
-            s_ = (txt or "").strip().replace("--", "-")
-            if not re.fullmatch(r"-?\d+(?:\.\d+)?", s_):
+            l_ = l_ - int(margin) * scale
+            s_ = numeral(txt, comma=comma)
+            if s_ is None:
                 continue
             try:
                 c = float(conf)
@@ -1998,9 +2046,22 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3):
                 continue
             row = top + (t_ + h_ / 2.0) / scale
             key = round(row / 4)
+            wt, wb = int(top + t_ / scale), int(top + (t_ + h_) / scale)
+            rows_ = slice(max(0, wt), max(1, wb))
+            clipped = False
+            if l_ / float(scale) <= 3.0 and int(left) >= 2:
+                clipped = bool(dark[rows_, int(left) - 2:int(left)].any())
+            # And on the right: a label whose last digit runs under the strip's
+            # right edge reads "200" as "20", which is the same digit lost by
+            # the other door. Ink just past the edge on the word's rows says so.
+            if (l_ + w_) / float(scale) >= (right - left) - 3.0 and int(right) + 2 <= dark.shape[1]:
+                clipped = clipped or bool(dark[rows_, int(right):int(right) + 2].any())
             if key not in found or c > found[key][2]:
-                found[key] = (float(s_), row, c)
-    return sorted(((v, r) for v, r, _c in found.values()), key=lambda p: p[1])
+                found[key] = (float(s_), row, c, clipped)
+    out = sorted(found.values(), key=lambda p: p[1])
+    if with_clip:
+        return [(v, r, cl) for v, r, _c, cl in out]
+    return [(v, r) for v, r, _c, _cl in out]
 
 
 #: Strips to try, as (how far left of the anchor to start, how wide). A label
@@ -2103,54 +2164,81 @@ def label_band(dark, box, anchor, top, bottom, max_reach=180):
     return left - 1, right + 2
 
 
-def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, scale=3):
-    """The first strip geometry whose numerals form a checkable ladder.
+def tick_reach(dark, spine_x, y0, y1, cap):
+    """How far the tick marks stick out left of the spine, in pixels.
 
-    A search, not a guess: `ladder` has to accept the result, and it only accepts
-    three or more labels that fall monotonically at a constant value per pixel.
-    A strip that catches a caption, an axis title or the neighbouring panel's
-    numbers fails that test, which is why trying several is safe.
+    Per row between y0 and y1, the run of ink continuing leftward from the
+    spine. Most rows carry only the spine's own thickness - `spine_x` is a
+    column inside a rule several pixels wide, and publication 283's figure 2
+    had 647 rows at 3 px against 25 tick rows at 27-31 - so that median is the
+    base, the tick rows are the ones that clear it, and the reach is their
+    90th percentile: a gridline or a whisker touching the spine runs to the
+    cap and does not count, one long tick does not set the number. With no
+    tick rows the reach is the base itself.
+
+    Measured rather than assumed because the strip's start (`gap`, 2 to 15 px)
+    is a 300 DPI number: at 600 DPI ticks are 15 to 40 px long and the strip's
+    right edge cuts through them, so tesseract reads "200-" and the regex reads
+    nothing.
     """
-    x0, x1, y0, y1 = box
-    # The strip runs to the BOTTOM OF THE BOX. Clipping it at the baseline was a
-    # guard against a caption leaking a numeral in, but the box is now trimmed to
-    # ink so the caption is usually outside it - and the guard cost every panel
-    # whose lowest rule is not its x axis.
-    bottom = max(y1 + 6, (baseline_y + 10) if baseline_y is not None else 0)
-    # A BROKEN AXIS ENDS THE LADDER. Labels under the break are on another scale,
-    # so the strip stops at the break rather than reading through it.
-    brk = axis_break(dark, box, spine_x)
-    if brk is not None and brk[0] > y0 + MIN_AXIS_PX:
-        bottom = min(bottom, brk[0])
-    top = max(0, y0 - 10)
-    best = []
-    # THE WHOLE SEARCH AT THE TUNED WIDTHS FIRST, then again at the widths this
-    # panel's size asks for. Appending the wider strips inside the anchor loop
-    # is NOT additive and was measured not to be: it put the spine's wide strips
-    # ahead of the block edge's narrow ones, and two of thirty panels that read
-    # correctly came back reading a different, worse ladder. A fallback that can
-    # change an answer the earlier pass already had is not a fallback.
-    wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
-    # ONE STRIP, ONE READ. The union pass asks for the same strip at x3 that the
-    # single pass already read at x3, and the wider pass does it again for its
-    # strips: a third of the tesseract calls on a refused panel were repeats of
-    # a call whose answer was already in hand. tesseract is deterministic on the
-    # same pixels, so remembering the answer changes nothing but the clock -
-    # and the clock was 8 s a panel where 5 would do.
-    seen = {}
+    sx = int(spine_x)
+    lo = max(0, sx - int(cap))
+    if sx - lo < 2:
+        return 0
+    sub = dark[int(y0):int(y1), lo:sx][:, ::-1]
+    if sub.size == 0:
+        return 0
+    runs = np.argmin(sub, axis=1)
+    runs[sub.all(axis=1)] = sub.shape[1]
+    base = int(np.median(runs))
+    ticks = runs[(runs > base + 2) & (runs < sub.shape[1])]
+    return int(np.percentile(ticks, 90)) if ticks.size else base
 
-    def ocr(left, right, top_, bottom_, sc):
-        k = (int(left), int(right), int(top_), int(bottom_), int(sc))
+
+def scale_for(panel_height, scale=3, tuned=_TUNED_PANEL_PX):
+    """The magnification that shows tesseract glyphs the size it was tuned on.
+
+    x3 was chosen at 300 DPI. At 600 DPI the same glyph is already twice as
+    big, and x3 of that is where `5` starts reading as `9`: the fixture panel
+    of publication 360 read 3.5 as 3.9 at x3 and 3.5 at x1.5. Clamped to
+    [1, scale]: never more than the tuned magnification, never less than none.
+    """
+    try:
+        k = float(tuned) / float(panel_height)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return scale
+    return max(1.0, min(float(scale), scale * k))
+
+
+def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma,
+            seen, tight=False, margin=0):
+    """The strip search at one setting: the numerals of the first strip that
+    ladder, else the longest read - clipped strips counting for neither."""
+    x0, x1, y0, y1 = box
+    best = []
+    wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
+    tuned = list(_STRIPS)
+    if tight:
+        # The anchor already stands past the tick marks, so the gap a strip
+        # keeps from the anchor - there to miss the ticks - only eats into the
+        # label: a fixture whose labels end 7 px before its ticks read "200" as
+        # "20" through a 15 px gap.
+        tuned = [(2, w) for _g, w in tuned]
+        wider = [(2, w) for _g, w in wider]
+
+    def ocr(left, right, sc):
+        k = (int(left), int(right), int(top), int(bottom), round(float(sc), 3), comma, margin)
         if k not in seen:
-            seen[k] = _ocr_numerals(img, dark, left, right, top_, bottom_, sc)
+            seen[k] = _ocr_numerals(img, dark, left, right, top, bottom, sc,
+                                    comma=comma, with_clip=True, margin=margin)
         return list(seen[k])
 
-    for strips in ([list(_STRIPS), wider] if wider else [list(_STRIPS)]):
+    for strips in ([tuned, wider] if wider else [tuned]):
         if not strips:
             continue
         for use_union in (False, True):
-            for anchor in (spine_x, x0):
-                band = label_band(dark, box, anchor, top, min(img.height, bottom))
+            for anchor in (anchor_spine, anchor_edge):
+                band = label_band(dark, box, anchor, top, bottom)
                 # The measured band belongs to the tuned pass: it is a
                 # measurement, not a width, so widening does not change it and
                 # trying it twice only costs an OCR call.
@@ -2159,7 +2247,7 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
                 for gap, w in geoms:
                     left, right = max(0, anchor - gap - w), max(1, anchor - gap)
                     if not use_union:
-                        pairs = ocr(left, right, top, min(img.height, bottom), scale)
+                        trip = ocr(left, right, scale)
                     else:
                         # SECOND PASS ONLY. One strip read at two magnifications
                         # and unioned by row, because tesseract drops a different
@@ -2174,19 +2262,86 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
                         # are dropped, not arbitrated.
                         merged = {}
                         for sc in SCALES:
-                            for v, row in ocr(left, right, top, min(img.height, bottom), sc):
+                            for v, row, cl in ocr(left, right, sc * scale / 3.0):
                                 k = round(row / 4)
                                 if k in merged and merged[k] and abs(merged[k][0] - v) > 1e-9:
                                     merged[k] = None
                                 elif k not in merged:
-                                    merged[k] = (v, row)
-                        pairs = sorted((p for p in merged.values() if p),
-                                       key=lambda p: p[1])
+                                    merged[k] = (v, row, cl)
+                                elif merged[k]:
+                                    merged[k] = (v, row, merged[k][2] or cl)
+                        trip = sorted((p for p in merged.values() if p),
+                                      key=lambda p: p[1])
+                    pairs = [(v, r) for v, r, _cl in trip]
+                    # A CLIPPED NUMERAL DISQUALIFIES THE STRIP - as a ladder
+                    # and as a fallback. The ladder it forms can be perfect
+                    # and still be every label with its first digit cut off,
+                    # and a "longest read" handed back with a digit missing is
+                    # the same wrong answer by another door: publication
+                    # PIIS1566070202001327's `0,9 .. 0,1` came back `9 .. 1`
+                    # that way. The next, wider strip reads the whole label.
+                    if any(cl for _v, _r, cl in trip):
+                        continue
                     if ladder(pairs)[0]:
                         return pairs
                     if len(pairs) > len(best):
                         best = pairs
     return best
+
+
+def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, scale=3):
+    """The first strip geometry whose numerals form a checkable ladder.
+
+    A search, not a guess: `ladder` has to accept the result, and it only accepts
+    three or more labels that fall monotonically at a constant value per pixel.
+    A strip that catches a caption, an axis title or the neighbouring panel's
+    numbers fails that test, which is why trying several is safe.
+
+    TWO PASSES. The first is the search as it was tuned - the strips, the
+    whitelist, the magnification - plus the clipped-numeral guard, so that
+    everything it read before it reads still, except the ladders that were
+    every label with a digit cut off. The second pass runs only when the first
+    refused, and it is where every 600 DPI lesson lives: the strips start past
+    the tick marks (`tick_reach`), commas are thousands or decimals, and the
+    magnification is what shows
+    tesseract the glyph size it was tuned on (`scale_for`). None of that may go
+    into the first pass: putting a comma in the whitelist alone turned one
+    correct 3.5 into 3.9, and moving an anchor by two pixels flipped a marginal
+    read. Measured on sixty panels each way at 600 DPI: sixty of sixty earlier
+    readings kept (five of them corrected from a clipped ladder to the printed
+    one), twenty-seven of sixty refusals read.
+    """
+    x0, x1, y0, y1 = box
+    # The strip runs to the BOTTOM OF THE BOX. Clipping it at the baseline was a
+    # guard against a caption leaking a numeral in, but the box is now trimmed to
+    # ink so the caption is usually outside it - and the guard cost every panel
+    # whose lowest rule is not its x axis.
+    bottom = max(y1 + 6, (baseline_y + 10) if baseline_y is not None else 0)
+    # A BROKEN AXIS ENDS THE LADDER. Labels under the break are on another scale,
+    # so the strip stops at the break rather than reading through it.
+    brk = axis_break(dark, box, spine_x)
+    if brk is not None and brk[0] > y0 + MIN_AXIS_PX:
+        bottom = min(bottom, brk[0])
+    top = max(0, y0 - 10)
+    bottom = min(img.height, bottom)
+    # ONE STRIP, ONE READ. The union pass asks for the same strip at x3 that the
+    # single pass already read at x3, and the wider pass does it again for its
+    # strips: a third of the tesseract calls on a refused panel were repeats of
+    # a call whose answer was already in hand. tesseract is deterministic on the
+    # same pixels, so remembering the answer changes nothing but the clock -
+    # and the clock was 8 s a panel where 5 would do.
+    seen = {}
+    first = _search(img, dark, box, spine_x, x0, top, bottom, scale,
+                    comma=False, seen=seen)
+    if ladder(first)[0]:
+        return first
+    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))
+    second = _search(img, dark, box, spine_x - reach, x0 - reach, top, bottom,
+                     scale_for(y1 - y0, scale), comma=True, seen=seen,
+                     tight=True, margin=8)
+    if ladder(second)[0]:
+        return second
+    return first if len(first) >= len(second) else second
 
 
 def axis_break(dark, box, spine_x, min_seg=20, gap_lo=4, gap_hi=60):

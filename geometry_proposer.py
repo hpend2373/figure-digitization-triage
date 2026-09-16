@@ -86,6 +86,17 @@ PROPOSAL_COLUMNS = (
     "Y_Tick_Read_Status", "Y_Tick_Read_Values",
     "Y_Tick_Read_First", "Y_Tick_Read_Last",
     "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail",
+    # A NEIGHBOUR THIS PANEL MAY BE SHARING ITS AXIS WITH. This corpus prints a
+    # row of panels with the y axis on the leftmost one and nothing on the
+    # rest - Day/Night, left/right column - and those panels have no labels to
+    # read and none for a person to type. What a person can say about one is
+    # "it uses p7's axis", and that is a verdict of its own (`SHARED`, below),
+    # not a pair of numbers. The machine only NAMES the neighbour whose frame
+    # stands on the same rows; whether the axis is shared is what the person
+    # decides, because a panel with its own unread axis looks the same from
+    # here (publication S41467-023-41990-4's ECW panel: same row as ICW,
+    # frame within 3 px, and four labels of its own).
+    "Y_Axis_Shared_Candidate", "Y_Axis_Shared_Detail",
     "Human_Verification_Status", "Verified_By", "Verified_At",
     # 사람이 적은 두 수. 이름이 `First`/`Last`였고, 그것이 무엇의 처음인지
     # 아무 데도 적혀 있지 않았습니다. 축은 아래에서 시작하니 아래부터 적는
@@ -100,7 +111,12 @@ PROPOSAL_COLUMNS = (
     # (GP001은 6개 중 5개, GP002는 5개 중 3개) 리더가 말한 값은 읽은
     # 눈금의 끝인데 짝은 모든 눈금의 끝과 지어져, 축척이 20~50% 어긋난
     # 채로 잔차 0.1px에 앞뒤가 맞습니다.
-    "Confirmed_Tick_Values", "Note",
+    "Confirmed_Tick_Values",
+    # 사람의 답 "이 패널은 <Proposal_ID>의 축을 씀". 판정이 SHARED일 때만
+    # 채워지고, 짝은 그 패널의 확인된 짝을 관문이 옮겨 적습니다 - 같은
+    # 래스터의 같은 픽셀 행이니 옮길 수 있고, 프레임이 어긋나 있으면 옮기지
+    # 않습니다. 값 두 개는 비워 둡니다: 이 패널의 값이 아닙니다.
+    "Y_Axis_Shared_With", "Note",
 )
 
 #: What `read_tick_values` can say. `REFUSED` is a reading that did not hold
@@ -111,7 +127,14 @@ READ_NOT_ATTEMPTED = "NOT_ATTEMPTED"
 READ_STATUSES = (READ_OK, READ_REFUSED, READ_NOT_ATTEMPTED)
 
 PROPOSAL_PENDING = "PENDING"
-PROPOSAL_STATUSES = (PROPOSAL_PENDING, "CONFIRMED", "REJECTED")
+PROPOSAL_SHARED = "SHARED"
+PROPOSAL_STATUSES = (PROPOSAL_PENDING, "CONFIRMED", "REJECTED", PROPOSAL_SHARED)
+
+#: How far apart two frames' top and bottom rows may stand, as a fraction of
+#: the frame height, for one to be offered as the other's axis. Measured on the
+#: 975-panel run: 40 refused panels have a read neighbour within 1%, 9 more
+#: within 3%, and past that the frames are different rows of the figure.
+SHARED_AXIS_TOLERANCE = 0.02
 
 #: Below this a proposal is still a proposal, but it goes to the top of the
 #: sheet. Same threshold and same meaning as the intake draft's.
@@ -710,6 +733,76 @@ def read_values_of(row):
     return out
 
 
+def _frame_of(row):
+    try:
+        return (float(row["Panel_X0"]), float(row["Panel_X1"]),
+                float(row["Panel_Y0"]), float(row["Panel_Y1"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def frames_share_rows(a, b, tolerance=SHARED_AXIS_TOLERANCE):
+    """(True, px) when frame `a` stands on the same rows as frame `b`, else
+    (False, px). `px` is the larger of the two edge differences."""
+    fa, fb = _frame_of(a), _frame_of(b)
+    if fa is None or fb is None:
+        return False, None
+    h = min(fa[3] - fa[2], fb[3] - fb[2])
+    px = max(abs(fa[2] - fb[2]), abs(fa[3] - fb[3]))
+    return (h > 0 and px <= tolerance * h), px
+
+
+def shared_axis_candidates(rows):
+    """Name, on each unread row, the nearest panel to its left on the same
+    raster that stands on the same rows and has ticks of its own. Returns how
+    many rows were given a candidate. Rows that read their own axis get none:
+    they have one. Written into the machine's two columns only.
+
+    The NEAREST with ticks, not the leftmost: a panel shares the axis printed
+    beside it, and a row can hold two axes (two column pairs). A neighbour
+    without ticks in between is skipped - it is sharing too."""
+    by_raster = {}
+    for row in rows:
+        by_raster.setdefault(_s(row.get("Raster")), []).append(row)
+    named = 0
+    for row in rows:
+        row.setdefault("Y_Axis_Shared_Candidate", "")
+        row.setdefault("Y_Axis_Shared_Detail", "")
+        if _s(row.get("Y_Tick_Read_Status")).upper() == READ_OK:
+            continue
+        me = _frame_of(row)
+        if me is None:
+            continue
+        best = None
+        for other in by_raster[_s(row.get("Raster"))]:
+            if other is row:
+                continue
+            them = _frame_of(other)
+            if them is None or them[1] > me[0] + 0.1 * (me[1] - me[0]):
+                continue                                    # not to the left
+            try:
+                if int(float(other.get("Y_Tick_Count") or 0)) < 2:
+                    continue                                # no axis to share
+            except ValueError:
+                continue
+            same, px = frames_share_rows(row, other)
+            if not same:
+                continue
+            if best is None or them[0] > best[1][0]:
+                best = (other, them, px)                    # the nearest
+        if best is None:
+            continue
+        other, _them, px = best
+        own = int(float(row.get("Y_Tick_Count") or 0))
+        row["Y_Axis_Shared_Candidate"] = _s(other.get("Proposal_ID"))
+        row["Y_Axis_Shared_Detail"] = (
+            "%s와 같은 행, 프레임 위아래 차 %.0f px%s"
+            % (_s(other.get("Proposal_ID")), px,
+               "; 이 패널에도 눈금 %d개가 있음" % own if own >= 2 else ""))
+        named += 1
+    return named
+
+
 def proposal_problems(rows):
     """[(Proposal_ID, code, detail)] for a proposal that cannot be what it says.
 
@@ -720,6 +813,7 @@ def proposal_problems(rows):
     the two numbers only a person can supply.
     """
     out, seen = [], set()
+    by_id = dict((_s(r.get("Proposal_ID")), r) for r in rows)
     for row in rows:
         pid = _s(row.get("Proposal_ID"))
         if not pid:
@@ -748,6 +842,7 @@ def proposal_problems(rows):
         top = _s(row.get("Y_Tick_Top_Value"))
         bottom = _s(row.get("Y_Tick_Bottom_Value"))
         pairs = _s(row.get("Confirmed_Tick_Values"))
+        shared = _s(row.get("Y_Axis_Shared_With"))
         if status == PROPOSAL_PENDING:
             if who or when:
                 out.append((pid, "PROPOSAL_PENDING_WITH_A_VERIFIER",
@@ -757,11 +852,53 @@ def proposal_problems(rows):
                 out.append((pid, "PROPOSAL_PENDING_WITH_A_TICK_VALUE",
                             "%s carries a tick value and nobody has read the "
                             "axis" % pid))
+            if shared:
+                # The machine's candidate has its own column. This one is a
+                # person's answer, and nobody has answered.
+                out.append((pid, "PROPOSAL_PENDING_WITH_A_SHARED_AXIS",
+                            "%s says it uses %s's axis and nobody has said so"
+                            % (pid, shared)))
             continue
         if not who or not when:
             out.append((pid, "PROPOSAL_VERDICT_UNATTRIBUTED",
                         "%s says %s and does not say who or when"
                         % (pid, status)))
+        if status == PROPOSAL_SHARED:
+            # "This panel uses that one's axis." The target must be a panel,
+            # not itself, on the same raster, standing on the same rows - the
+            # pairs are pixel rows, and rows only carry across a raster.
+            if not shared:
+                out.append((pid, "PROPOSAL_SHARED_WITHOUT_A_TARGET",
+                            "%s is SHARED and names no panel" % pid))
+            elif shared == pid:
+                out.append((pid, "PROPOSAL_SHARED_WITH_ITSELF", pid))
+            elif shared in by_id:
+                target = by_id[shared]
+                if _s(target.get("Raster")) != _s(row.get("Raster")):
+                    out.append((pid, "PROPOSAL_SHARED_ACROSS_RASTERS",
+                                "%s is on %s and %s on %s"
+                                % (pid, _s(row.get("Raster")), shared,
+                                   _s(target.get("Raster")))))
+                else:
+                    same, px = frames_share_rows(row, target)
+                    if not same:
+                        out.append((pid, "PROPOSAL_SHARED_FRAME_MISALIGNED",
+                                    "%s's frame is %s px off %s's; its tick "
+                                    "rows are not this panel's"
+                                    % (pid, "%.0f" % px if px is not None else "?", shared)))
+            if top or bottom:
+                out.append((pid, "PROPOSAL_SHARED_WITH_A_TICK_VALUE",
+                            "%s uses %s's axis and carries a value of its own"
+                            % (pid, shared)))
+            got = pairs_of(row)
+            if got and (len(got) != 2 or got[0][1] == got[1][1]):
+                out.append((pid, "PROPOSAL_CALIBRATION_PAIRS_MISSING",
+                            "%s carries %d value@pixel pair(s)" % (pid, len(got))))
+            continue
+        if shared:
+            out.append((pid, "PROPOSAL_%s_NAMES_A_SHARED_AXIS" % status,
+                        "%s is %s and also says it uses %s's axis; it is one "
+                        "or the other" % (pid, status, shared)))
         if status != "CONFIRMED":
             continue
         # The two numbers the whole split exists for.
@@ -818,7 +955,10 @@ def _parse_pairs(text):
 
 
 def calibration_from(row):
-    """[[value, pixel], [value, pixel]] for a CONFIRMED proposal, or None.
+    """[[value, pixel], [value, pixel]] for a CONFIRMED or SHARED proposal, or None.
+    A SHARED row's pairs are its neighbour's, copied by the record gate after
+    the frames were checked; a SHARED row that has not been through the gate
+    carries none and calibrates nothing.
 
     The join between the two halves, and it reads the pixels rather than
     guessing them. It used to take the value columns and pair them with
@@ -831,7 +971,7 @@ def calibration_from(row):
     So the pairs are carried, not inferred, and a row without them is refused
     rather than calibrated on a guess.
     """
-    if _s(row.get("Human_Verification_Status")).upper() != "CONFIRMED":
+    if _s(row.get("Human_Verification_Status")).upper() not in ("CONFIRMED", PROPOSAL_SHARED):
         return None
     pairs = pairs_of(row)
     if len(pairs) != 2 or pairs[0][1] == pairs[1][1]:
@@ -866,8 +1006,13 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def proposal_overlay(image, row, out_path):
+def proposal_overlay(image, row, out_path, shared_ticks=None):
     """The proposal drawn on the raster it was measured from.
+
+    `shared_ticks` are the tick rows of the panel `Y_Axis_Shared_Candidate`
+    names, drawn across this panel's spine in a colour of their own, so the
+    person deciding "does this panel use that axis" sees whether that axis's
+    ticks land on this panel's gridlines and frame.
 
     This is the artifact a person confirms against. Confirming a geometry from
     four numbers in a CSV is agreeing with arithmetic; confirming it from the
@@ -881,6 +1026,10 @@ def proposal_overlay(image, row, out_path):
     x0, x1 = int(row["Panel_X0"]), int(row["Panel_X1"])
     y0, y1 = int(row["Panel_Y0"]), int(row["Panel_Y1"])
     draw.rectangle((x0, y0, x1, y1), outline=(200, 30, 30), width=2)
+    for y in (shared_ticks or []):
+        y = int(float(y))
+        for xx in range(x0 - 30, x0 + 31, 6):
+            draw.line((xx, y, xx + 3, y), fill=(230, 120, 20), width=2)
     for mark in _s(row.get("Y_Tick_Pixels")).split(";"):
         if not mark:
             continue

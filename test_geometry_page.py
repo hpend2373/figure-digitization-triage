@@ -57,8 +57,15 @@ REFUSED = dict(READ, Proposal_ID="GP002", Y_Tick_Read_Status=GP.READ_REFUSED,
                Y_Tick_Read_Values="", Y_Tick_Read_First="", Y_Tick_Read_Last="",
                Y_Tick_Read_Detail="only 0 label(s); 3 needed to check a ladder")
 
+#: 축을 나눠 쓸 수 있는 세 번째 패널: 같은 그림, 눈금 없음, 리더가 GP001을
+#: 후보로 댄 것. 그리고 다른 그림의 패널 하나 - 그 패널은 후보가 될 수 없습니다.
+SHARER = dict(REFUSED, Proposal_ID="GP003", Y_Tick_Pixels="", Y_Tick_Count="0",
+              Y_Axis_Shared_Candidate="GP001",
+              Y_Axis_Shared_Detail="GP001와 같은 행, 프레임 위아래 차 2 px")
+OTHER = dict(READ, Proposal_ID="GP004", Raster="other.png")
+
 GP.write_proposals(os.path.join(PROP, GP.PROPOSALS if hasattr(GP, "PROPOSALS")
-                                else "geometry_proposal.csv"), [READ, REFUSED])
+                                else "geometry_proposal.csv"), [READ, REFUSED, SHARER, OTHER])
 #: 오버레이 한 장만 둡니다. 없는 그림이 어떻게 나가는지도 이 페이지의 성질입니다.
 _png = base64.b64decode(
     b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM"
@@ -69,7 +76,7 @@ with io.open(os.path.join(PROP, "GP001.png"), "wb") as fh:
 HTML, COUNT = G.build(PROP, log=lambda *a: None)
 
 print("페이지가 제안을 카드로 내민다")
-check("제안마다 카드가 하나", COUNT == 2 and HTML.count("class='doc'") == 2,
+check("제안마다 카드가 하나", COUNT == 4 and HTML.count("class='doc'") == 4,
       "%s / %s" % (COUNT, HTML.count("class='doc'")))
 check("오버레이가 있으면 그림으로 실린다", "data:image/png;base64," in HTML)
 # REVERT: 오버레이가 없어도 조용히 넘어간다. 확인할 그림이 없는 카드는 확인을
@@ -126,6 +133,58 @@ check("어느 눈금 행인지 숫자로도 보여 준다",
       "(픽셀 행 10)" in HTML and "(픽셀 행 90)" in HTML)
 check("바꿔 적으면 어떻게 되는지도 칸 옆에 적혀 있다",
       "위·아래를 바꿔 적으면" in HTML.split("<script>")[0])
+
+print()
+print("축을 나눠 쓰는 패널을 고를 수 있다")
+# REVERT: 답에 "다른 패널 축을 쓴다"가 없다. 이 코퍼스의 Day/Night, 왼쪽/오른쪽
+# 열 패널은 눈금도 숫자도 없어서, 그 답이 없으면 사람은 값을 지어내거나
+# 보류로 남깁니다.
+check("다른 패널 축을 쓴다는 답을 고를 수 있다",
+      any(v == "SHARED" for v, _l in G.LABELS) and "value='SHARED'" in HTML)
+_sel3 = re.search(r"<select data-shared='GP003'>(.*?)</select>", HTML, re.S).group(1)
+check("같은 그림의 다른 패널만 고를 수 있다",
+      "value='GP001'" in _sel3 and "value='GP002'" in _sel3
+      and "value='GP003'" not in _sel3 and "value='GP004'" not in _sel3, _sel3)
+check("리더가 댄 후보는 논리로 건너간다",
+      '"sharedCandidate": "GP001"' in HTML or '"sharedCandidate":"GP001"' in HTML)
+check("형제 목록도 논리로 건너간다",
+      re.search(r'"siblings": \["GP001", "GP002"\]', HTML) is not None
+      or '"siblings":["GP001","GP002"]' in HTML)
+check("후보와 그 까닭이 카드에 보인다",
+      "축 공유 후보:</b> GP001" in HTML and "프레임 위아래 차 2 px" in HTML)
+check("후보의 눈금 색이 무슨 뜻인지 적혀 있다", "축 공유 후보 패널의 눈금 행" in HTML)
+
+print()
+print("조각은 그림을 자르지 않는다")
+# REVERT: 행 수로만 끊는다. 축을 빌리는 패널과 빌려주는 패널이 두 조각에
+# 갈리면 답이 두 파일에 갈리고, 관문은 어느 한쪽을 먼저 적을 수 없습니다.
+_rows = [dict(Raster="a.png", Proposal_ID="a%d" % i) for i in range(6)] \
+      + [dict(Raster="b.png", Proposal_ID="b%d" % i) for i in range(2)] \
+      + [dict(Raster="c.png", Proposal_ID="c%d" % i) for i in range(4)]
+_chunks = [G.chunk_of(_rows, i, 3) for i in (1, 2, 3)]
+check("모든 행이 한 번씩 나간다",
+      sorted(r["Proposal_ID"] for c in _chunks for r in c) == sorted(r["Proposal_ID"] for r in _rows))
+check("한 그림은 한 조각에 있다",
+      all(sum(1 for c in _chunks if any(r["Raster"] == ras for r in c)) == 1
+          for ras in ("a.png", "b.png", "c.png")),
+      "%s" % [[r["Proposal_ID"] for r in c] for c in _chunks])
+check("조각은 순서를 지킨다",
+      [r["Proposal_ID"] for c in _chunks for r in c] == [r["Proposal_ID"] for r in _rows])
+check("조각 하나면 전부 그대로다", G.chunk_of(_rows, 1, 1) == _rows)
+# REVERT: 넘으면 끊는다. 조각마다 조금씩 모자라고, 모자란 만큼이 마지막 조각에
+# 쌓입니다 - 975장을 열로 나눴더니 마지막이 183장이었습니다.
+_sizes = [20, 20, 20, 45, 20, 20, 45, 20, 20, 45]
+_big = [dict(Raster="r%d.png" % g, Proposal_ID="r%d_%d" % (g, i))
+        for g, n in enumerate(_sizes) for i in range(n)]
+_lens = [len(G.chunk_of(_big, i, 3)) for i in (1, 2, 3)]
+check("조각의 크기가 고르다", max(_lens) <= 1.5 * min(_lens), "%s" % _lens)
+try:
+    G.chunk_of(_rows, 4, 3)
+    check("없는 조각을 달라면 멈춘다", False)
+except SystemExit as exc:
+    check("없는 조각을 달라면 멈춘다", "--chunk" in str(exc), str(exc))
+_html2, _n2 = G.build(PROP, log=lambda *a: None, chunk=2, of=2)
+check("페이지도 조각으로 나온다", _n2 < COUNT and "2/2" in _html2, "%d" % _n2)
 
 print()
 print("내려받는 이름은 관문의 출력과 다르다")

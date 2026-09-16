@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "0a56185a4d97fd27d7501700993b47ed5e068fc0ac4c03a5d7402946f07975a3",
-  "test_geometry_proposer.py": "8fc7563c6de9d0d5dc9de2068381b5686b85a82ca45b7fbaa1ebe99181733808"
+  "geometry_proposer.py": "836727c730ea8b969c5c4080fe665e7a60a05dce7d32a027ddde8729fcd1dbf8",
+  "test_geometry_proposer.py": "5b72dc119a5cbbb941bb45712c5f6519a61461cbf8bd2cb8332d8ca25b6b6bfa"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -144,6 +144,90 @@
    "file": "geometry_proposer.py",
    "old": "            if region and ty < region[1]:\n                ty = y + 4",
    "new": "            if False:\n                ty = y + 4"
+  },
+  {
+   "name": "읽은 패널에도 이웃의 축을 붙인다",
+   "file": "geometry_proposer.py",
+   "old": "        if _s(row.get(\"Y_Tick_Read_Status\")).upper() == READ_OK:\n            continue\n        me = _frame_of(row)",
+   "new": "        if False:\n            continue\n        me = _frame_of(row)"
+  },
+  {
+   "name": "오른쪽 패널도 축의 후보다",
+   "file": "geometry_proposer.py",
+   "old": "            if them is None or them[1] > me[0] + 0.1 * (me[1] - me[0]):\n                continue                                    # not to the left",
+   "new": "            if them is None:\n                continue                                    # not to the left"
+  },
+  {
+   "name": "눈금 없는 패널도 축의 후보다",
+   "file": "geometry_proposer.py",
+   "old": "                if int(float(other.get(\"Y_Tick_Count\") or 0)) < 2:\n                    continue                                # no axis to share",
+   "new": "                if False:\n                    continue                                # no axis to share"
+  },
+  {
+   "name": "다른 행의 프레임도 축의 후보다",
+   "file": "geometry_proposer.py",
+   "old": "            same, px = frames_share_rows(row, other)\n            if not same:\n                continue",
+   "new": "            same, px = frames_share_rows(row, other)\n            if False:\n                continue"
+  },
+  {
+   "name": "가장 가까운 것이 아니라 가장 왼쪽을 고른다",
+   "file": "geometry_proposer.py",
+   "old": "            if best is None or them[0] > best[1][0]:",
+   "new": "            if best is None or them[0] < best[1][0]:"
+  },
+  {
+   "name": "SHARED에 대상이 없어도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "            if not shared:\n                out.append((pid, \"PROPOSAL_SHARED_WITHOUT_A_TARGET\",",
+   "new": "            if False:\n                out.append((pid, \"PROPOSAL_SHARED_WITHOUT_A_TARGET\","
+  },
+  {
+   "name": "자기 자신의 축을 공유해도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "            elif shared == pid:\n                out.append((pid, \"PROPOSAL_SHARED_WITH_ITSELF\", pid))",
+   "new": "            elif False:\n                out.append((pid, \"PROPOSAL_SHARED_WITH_ITSELF\", pid))"
+  },
+  {
+   "name": "다른 래스터의 축을 공유해도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "                if _s(target.get(\"Raster\")) != _s(row.get(\"Raster\")):",
+   "new": "                if False:"
+  },
+  {
+   "name": "프레임이 어긋난 축을 공유해도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "                    if not same:\n                        out.append((pid, \"PROPOSAL_SHARED_FRAME_MISALIGNED\",",
+   "new": "                    if False:\n                        out.append((pid, \"PROPOSAL_SHARED_FRAME_MISALIGNED\","
+  },
+  {
+   "name": "SHARED에 값이 붙어도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "            if top or bottom:\n                out.append((pid, \"PROPOSAL_SHARED_WITH_A_TICK_VALUE\",",
+   "new": "            if False:\n                out.append((pid, \"PROPOSAL_SHARED_WITH_A_TICK_VALUE\","
+  },
+  {
+   "name": "PENDING에 공유 답이 붙어도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "            if shared:\n                # The machine's candidate has its own column.",
+   "new": "            if False:\n                # The machine's candidate has its own column."
+  },
+  {
+   "name": "CONFIRMED가 공유도 말해도 넘긴다",
+   "file": "geometry_proposer.py",
+   "old": "        if shared:\n            out.append((pid, \"PROPOSAL_%s_NAMES_A_SHARED_AXIS\" % status,",
+   "new": "        if False:\n            out.append((pid, \"PROPOSAL_%s_NAMES_A_SHARED_AXIS\" % status,"
+  },
+  {
+   "name": "SHARED 행은 계산에 쓰지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "    if _s(row.get(\"Human_Verification_Status\")).upper() not in (\"CONFIRMED\", PROPOSAL_SHARED):",
+   "new": "    if _s(row.get(\"Human_Verification_Status\")).upper() != \"CONFIRMED\":"
+  },
+  {
+   "name": "이웃의 눈금을 그리지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "    for y in (shared_ticks or []):",
+   "new": "    for y in []:"
   }
  ]
 }

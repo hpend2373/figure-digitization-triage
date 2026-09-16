@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_geometry.py": "7bc26b3462bd17a26ea1fcfdb243fde0e165943b6cf3a94badc33824521f0b4f",
-  "test_record_geometry.py": "a582fadea5f51ecdc57d838f84f765bfa66f793fa25eaef56c9fecfe3d548c12"
+  "record_geometry.py": "cd558548cc03fd08a2f1317b0a27bbd56b416f8685dd13f5c9ceb5d7892b510c",
+  "test_record_geometry.py": "8e117061cd395b2e4f81a2465beb724a66afb64a2c5653efbcb52dcf2eaccf68"
  },
  "suites": [
   "test_record_geometry.py"
@@ -82,7 +82,7 @@
   {
    "name": "확인하지 않은 기하에 붙은 값을 그냥 적는다",
    "file": "record_geometry.py",
-   "old": "    elif top or bottom or pairs:",
+   "old": "    elif verdict != SHARED and (top or bottom or pairs):",
    "new": "    elif False:"
   },
   {
@@ -114,6 +114,72 @@
    "file": "record_geometry.py",
    "old": "            said = sorted((float(top), float(bottom))) if _numeric(top, bottom) else None",
    "new": "            said = sorted((abs(float(top)), abs(float(bottom)))) if _numeric(top, bottom) else None"
+  },
+  {
+   "name": "공유 답에 값이 붙어도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if top or bottom or pairs:\n            problems.append((\"SHARED_WITH_A_TICK_VALUE\",",
+   "new": "        if False:\n            problems.append((\"SHARED_WITH_A_TICK_VALUE\","
+  },
+  {
+   "name": "어느 패널인지 없어도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if not shared:\n            problems.append((\"SHARED_TARGET_MISSING\",",
+   "new": "        if False:\n            problems.append((\"SHARED_TARGET_MISSING\","
+  },
+  {
+   "name": "자기 자신의 축도 적는다",
+   "file": "record_geometry.py",
+   "old": "        elif shared == pid:\n            problems.append((\"SHARED_WITH_ITSELF\",",
+   "new": "        elif False:\n            problems.append((\"SHARED_WITH_ITSELF\","
+  },
+  {
+   "name": "낸 적 없는 패널의 축도 적는다",
+   "file": "record_geometry.py",
+   "old": "        elif shared not in proposed:\n            problems.append((\"SHARED_TARGET_UNKNOWN\",",
+   "new": "        elif False:\n            problems.append((\"SHARED_TARGET_UNKNOWN\","
+  },
+  {
+   "name": "다른 그림의 축도 적는다",
+   "file": "record_geometry.py",
+   "old": "            if (mine.get(\"Raster\") or \"\") != (theirs.get(\"Raster\") or \"\"):",
+   "new": "            if False:"
+  },
+  {
+   "name": "프레임이 어긋난 축도 적는다",
+   "file": "record_geometry.py",
+   "old": "                if not same:\n                    problems.append((\"SHARED_FRAME_MISALIGNED\",",
+   "new": "                if False:\n                    problems.append((\"SHARED_FRAME_MISALIGNED\","
+  },
+  {
+   "name": "확인이면서 공유도 말하는 답을 적는다",
+   "file": "record_geometry.py",
+   "old": "    elif shared:\n        problems.append((\"TARGET_WITHOUT_SHARING\",",
+   "new": "    elif False:\n        problems.append((\"TARGET_WITHOUT_SHARING\","
+  },
+  {
+   "name": "빌려주는 패널이 확인되지 않아도 적는다",
+   "file": "record_geometry.py",
+   "old": "        if target is None:\n            refused.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\",",
+   "new": "        if target is None:\n            still.append(row); continue\n            refused.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\","
+  },
+  {
+   "name": "짝을 옮겨 적지 않는다",
+   "file": "record_geometry.py",
+   "old": "        row[PAIRS] = (target.get(PAIRS) or \"\").strip()\n        still.append(row)",
+   "new": "        still.append(row)"
+  },
+  {
+   "name": "거절된 확인에도 기댄다",
+   "file": "record_geometry.py",
+   "old": "                     if (r.get(\"Human_Verification_Status\") or \"\").upper() == \"CONFIRMED\")",
+   "new": "                     if (r.get(\"Human_Verification_Status\") or \"\").upper() in (\"CONFIRMED\", \"REJECTED\"))"
+  },
+  {
+   "name": "어느 패널의 축인지 적지 않는다",
+   "file": "record_geometry.py",
+   "old": "            TARGET: (answer.get(TARGET) or \"\").strip(),",
+   "new": "            TARGET: \"\","
   }
  ]
 }

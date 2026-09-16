@@ -41,7 +41,13 @@ DECISIONS = "geometry_decisions.csv"
 
 #: 사람이 할 수 있는 말. `geometry_page.js`의 `VERDICTS`와 같아야 하고,
 #: `test_record_geometry.py`가 셋(논리·화면·관문)이 같은지 봅니다.
-VERDICTS = ("CONFIRMED", "REJECTED", "HOLD")
+VERDICTS = ("CONFIRMED", "SHARED", "REJECTED", "HOLD")
+
+#: "이 패널엔 축이 없고 같은 그림의 다른 패널 축을 쓴다." 값은 사람이 치지
+#: 않고, 그 패널의 확인된 짝을 이 관문이 옮겨 적습니다 - 같은 래스터의 같은
+#: 픽셀 행이니 옮길 수 있고, 프레임이 어긋나 있으면 옮기지 않습니다.
+SHARED = "SHARED"
+TARGET = "Y_Axis_Shared_With"
 
 #: 눈금 값이 있어야 적히는 판정.
 NEEDS_VALUES = ("CONFIRMED",)
@@ -131,6 +137,44 @@ def check_answer(answer, proposed):
                          "뒤의 답이거나, 다른 그림의 답입니다."
                          % (pid or "(빈칸)")))
 
+    shared = (answer.get(TARGET) or "").strip()
+    if verdict == SHARED:
+        # 어느 패널의 축인지. 자기 자신은 공유가 아니고, 낸 적 없는 패널이나
+        # 다른 그림의 패널은 옮겨 올 픽셀 행이 없으며, 프레임이 다른 행에
+        # 서 있으면 그 패널의 눈금 행은 이 패널의 것이 아닙니다.
+        if top or bottom or pairs:
+            problems.append(("SHARED_WITH_A_TICK_VALUE",
+                             "다른 패널의 축을 쓴다면서 이 패널의 눈금 값이 "
+                             "붙어 있습니다. 어느 쪽이 답인지 이 관문은 모릅니다."))
+        if not shared:
+            problems.append(("SHARED_TARGET_MISSING",
+                             "어느 패널의 축을 쓰는지 적혀 있지 않습니다."))
+        elif shared == pid:
+            problems.append(("SHARED_WITH_ITSELF",
+                             "자기 자신의 축을 쓴다는 것은 공유가 아닙니다."))
+        elif shared not in proposed:
+            problems.append(("SHARED_TARGET_UNKNOWN",
+                             "%r은 이 폴더가 낸 제안이 아닙니다. 옮겨 올 축이 "
+                             "없습니다." % shared))
+        elif pid in proposed:
+            mine, theirs = proposed[pid], proposed[shared]
+            if (mine.get("Raster") or "") != (theirs.get("Raster") or ""):
+                problems.append(("SHARED_ACROSS_RASTERS",
+                                 "%s은 다른 그림의 패널입니다. 픽셀 행은 그림의 "
+                                 "것이라 옮겨 올 수 없습니다." % shared))
+            else:
+                same, px = GP.frames_share_rows(mine, theirs)
+                if not same:
+                    problems.append(("SHARED_FRAME_MISALIGNED",
+                                     "이 패널의 프레임이 %s의 프레임과 %s px "
+                                     "어긋나 있습니다. 그 패널의 눈금 행은 이 "
+                                     "패널의 행이 아닙니다."
+                                     % (shared, "%.0f" % px if px is not None else "?")))
+    elif shared:
+        problems.append(("TARGET_WITHOUT_SHARING",
+                         "%s인데 다른 패널의 축(%s)을 쓴다고도 적혀 있습니다. "
+                         "둘 중 하나입니다." % (verdict, shared)))
+
     if verdict in NEEDS_VALUES:
         for label, value in (("맨 위", top), ("맨 아래", bottom)):
             try:
@@ -167,7 +211,7 @@ def check_answer(answer, proposed):
                                  "적으신 값(%s, %s)과 짝의 값(%s)이 다릅니다."
                                  % (top, bottom,
                                     ", ".join("%g" % v for v, _px in pairs))))
-    elif top or bottom or pairs:
+    elif verdict != SHARED and (top or bottom or pairs):
         # 거절과 보류에 값이 붙어 왔습니다. 붙은 값이 무엇을 뜻하는지 - 틀린
         # 프레임에서 읽은 값인지, 고쳐 준 값인지 - 이 관문은 모릅니다.
         problems.append(("VALUES_WITHOUT_CONFIRMATION",
@@ -228,11 +272,34 @@ def record(proposals, answers, when, out_path=None, replace=False,
             "Y_Tick_Top_Value": (answer.get("Y_Tick_Top_Value") or "").strip(),
             "Y_Tick_Bottom_Value": (answer.get("Y_Tick_Bottom_Value") or "").strip(),
             PAIRS: (answer.get(PAIRS) or "").strip(),
+            TARGET: (answer.get(TARGET) or "").strip(),
             "Verified_By": (answer.get("Verified_By") or "").strip(),
             "Verified_At": when,
             "Note": (answer.get("Note") or "").strip(),
         })
         written.append(row)
+
+    # 축을 빌리는 줄은 빌려주는 패널이 확인된 뒤에야 적힙니다 - 이 묶음에서든,
+    # 이미 적힌 것에서든. 옮겨 적는 것은 그 패널의 짝뿐이고, 값 두 칸은 비워
+    # 둡니다: 이 패널의 값이 아닙니다. 그 패널이 아직 확인되지 않았으면 이
+    # 줄은 거절되고, 그 패널이 확인된 뒤 다시 내면 됩니다.
+    confirmed = dict((r["Proposal_ID"], r) for r in existing + written
+                     if (r.get("Human_Verification_Status") or "").upper() == "CONFIRMED")
+    still = []
+    for row in written:
+        if (row.get("Human_Verification_Status") or "").upper() != SHARED:
+            still.append(row)
+            continue
+        target = confirmed.get(row.get(TARGET))
+        if target is None:
+            refused.append((row["Proposal_ID"], [("SHARED_TARGET_NOT_CONFIRMED",
+                            "%s의 축을 쓴다는데 %s이 이 답 묶음에서도, 이미 적힌 "
+                            "것에서도 CONFIRMED가 아닙니다. 그 패널이 확인된 뒤 "
+                            "다시 내 주십시오." % (row.get(TARGET), row.get(TARGET)))]))
+            continue
+        row[PAIRS] = (target.get(PAIRS) or "").strip()
+        still.append(row)
+    written = still
 
     keep = [r for r in existing
             if r["Proposal_ID"] not in set(w["Proposal_ID"] for w in written)]

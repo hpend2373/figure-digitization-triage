@@ -47,7 +47,19 @@ PROPOSED = {
     "Human_Verification_Status": GP.PROPOSAL_PENDING,
 }
 GP.write_proposals(os.path.join(PROP, R.PROPOSALS),
-                   [PROPOSED, dict(PROPOSED, Proposal_ID="GP002")])
+                   [PROPOSED, dict(PROPOSED, Proposal_ID="GP002"),
+                    # 같은 그림, 같은 행, 오른쪽 - 눈금 없는 패널
+                    dict(PROPOSED, Proposal_ID="GP003", Panel_X0="300", Panel_X1="490",
+                         Panel_Y0="6", Panel_Y1="151", Y_Tick_Pixels="", Y_Tick_Count="0",
+                         Y_Tick_Read_Status=GP.READ_REFUSED, Y_Tick_Read_Values="",
+                         Y_Tick_Read_First="", Y_Tick_Read_Last=""),
+                    # 같은 그림, 다른 행
+                    dict(PROPOSED, Proposal_ID="GP005", Panel_X0="300", Panel_X1="490",
+                         Panel_Y0="200", Panel_Y1="345", Y_Tick_Pixels="", Y_Tick_Count="0",
+                         Y_Tick_Read_Status=GP.READ_REFUSED, Y_Tick_Read_Values="",
+                         Y_Tick_Read_First="", Y_Tick_Read_Last=""),
+                    # 다른 그림
+                    dict(PROPOSED, Proposal_ID="GP004", Raster="other.png")])
 
 
 def answer(**over):
@@ -173,6 +185,58 @@ check("친 값 -40과 짝의 값 40은 다른 말이다",
       "CALIBRATION_PAIRS_DISAGREE" in codes(run([answer(
           Y_Tick_Top_Value="0", Y_Tick_Bottom_Value="-40",
           Confirmed_Tick_Values="0@10;40@90")])[1]))
+
+print()
+print("축을 나눠 쓰는 패널은 빌려주는 패널의 짝을 옮겨 적는다")
+# REVERT: 그런 답이 없다. Day/Night, 왼쪽/오른쪽 열 패널은 눈금도 숫자도 없어서
+# 사람이 값을 지어내거나 보류로 남깁니다.
+def share(**over):
+    row = answer(Proposal_ID="GP003", Human_Verification_Status="SHARED",
+                 Y_Tick_Top_Value="", Y_Tick_Bottom_Value="",
+                 Confirmed_Tick_Values="", Value_Source="SHARED")
+    row["Y_Axis_Shared_With"] = "GP001"
+    row.update(over)
+    return row
+_ws, _rs, _ = run([answer(), share()])
+check("빌려주는 패널이 같은 묶음에서 확인되면 적힌다",
+      [w["Proposal_ID"] for w in _ws] == ["GP001", "GP003"] and not _rs,
+      "%s / %s" % ([w["Proposal_ID"] for w in _ws], codes(_rs)))
+_sh = [w for w in _ws if w["Proposal_ID"] == "GP003"]
+check("옮겨 적히는 것은 짝이고, 값 두 칸은 비어 있다",
+      _sh and _sh[0]["Confirmed_Tick_Values"] == "30@10;10@90"
+      and _sh[0]["Y_Tick_Top_Value"] == "" and _sh[0]["Y_Tick_Bottom_Value"] == ""
+      and _sh[0]["Y_Axis_Shared_With"] == "GP001"
+      and _sh[0]["Human_Verification_Status"] == "SHARED",
+      "%s" % ([(w["Confirmed_Tick_Values"], w["Y_Tick_Top_Value"], w["Y_Axis_Shared_With"]) for w in _sh],))
+check("적힌 줄은 계산이 바로 읽는다",
+      _sh and GP.calibration_from(_sh[0]) == [[30.0, 10.0], [10.0, 90.0]])
+_wn, _rn, _ = run([share()])
+check("빌려주는 패널이 확인되지 않았으면 적히지 않는다",
+      not _wn and "SHARED_TARGET_NOT_CONFIRMED" in codes(_rn),
+      "%s" % (codes(_rn),))
+_out2 = os.path.join(TMP, "later.csv")
+R.record(PROP, [answer()], "2026-09-10", out_path=_out2, log=lambda *a: None)
+_wl, _rl, _ = R.record(PROP, [share()], "2026-09-11", out_path=_out2, log=lambda *a: None)
+check("이미 적힌 확인에도 기댈 수 있다",
+      len(_wl) == 1 and _wl[0]["Confirmed_Tick_Values"] == "30@10;10@90", "%s" % (codes(_rl),))
+check("빌려주는 패널이 거절이면 적히지 않는다",
+      "SHARED_TARGET_NOT_CONFIRMED" in codes(run([answer(Human_Verification_Status="REJECTED",
+                                                       Y_Tick_Top_Value="", Y_Tick_Bottom_Value="",
+                                                       Confirmed_Tick_Values=""), share()])[1]))
+check("어느 패널인지 없으면 거절한다",
+      "SHARED_TARGET_MISSING" in codes(run([answer(), share(Y_Axis_Shared_With="")])[1]))
+check("자기 자신은 거절한다",
+      "SHARED_WITH_ITSELF" in codes(run([answer(), share(Y_Axis_Shared_With="GP003")])[1]))
+check("낸 적 없는 패널은 거절한다",
+      "SHARED_TARGET_UNKNOWN" in codes(run([answer(), share(Y_Axis_Shared_With="GP999")])[1]))
+check("다른 그림의 패널은 거절한다",
+      "SHARED_ACROSS_RASTERS" in codes(run([answer(), share(Y_Axis_Shared_With="GP004")])[1]))
+check("프레임이 다른 행에 선 패널은 거절한다",
+      "SHARED_FRAME_MISALIGNED" in codes(run([answer(), share(Proposal_ID="GP005")])[1]))
+check("축을 빌리면서 값도 적어 오면 거절한다",
+      "SHARED_WITH_A_TICK_VALUE" in codes(run([answer(), share(Y_Tick_Bottom_Value="0")])[1]))
+check("확인이면서 다른 패널의 축도 쓴다는 답은 거절한다",
+      "TARGET_WITHOUT_SHARING" in codes(run([dict(answer(), Y_Axis_Shared_With="GP002")])[1]))
 
 print()
 print("두 번 적지 않는다")

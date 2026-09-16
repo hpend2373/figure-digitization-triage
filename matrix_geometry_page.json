@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "b2d7e78db0577242ce9b04ce5c1a4c745dc44b9db8be52c0edaec0428164bd07",
-  "test_geometry_page.py": "2b8df02806ac769c7a477a8fdbed7055a3d0484bb2d0c13d32ac7010f920371c"
+  "geometry_page.py": "ab3e2810996a510957813f06766df82301decba349ff49e72b8a6a5de395274e",
+  "test_geometry_page.py": "160802930ad6a7979a2130ab1ea56783097327c48cfc966df035e7ecc3d04bed"
  },
  "suites": [
   "test_geometry_page.py"
@@ -28,8 +28,8 @@
   {
    "name": "제안이 없어도 페이지를 만든다",
    "file": "geometry_page.py",
-   "old": "    if not rows:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))",
-   "new": "    if False:\n        raise SystemExit(\"\")"
+   "old": "    everything = _rows(os.path.join(proposals, PROPOSALS))\n    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))",
+   "new": "    everything = _rows(os.path.join(proposals, PROPOSALS))\n    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))"
   },
   {
    "name": "읽은 값을 입력 칸에 미리 채워 둔다",
@@ -66,6 +66,54 @@
    "file": "geometry_page.py",
    "old": "      \"위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>\"",
    "new": "      \"</div></div>\""
+  },
+  {
+   "name": "다른 패널 축을 쓴다는 답이 없다",
+   "file": "geometry_page.py",
+   "old": "    (\"SHARED\", \"이 패널엔 축이 없다 — 같은 그림의 다른 패널 축을 쓴다\"),\n",
+   "new": ""
+  },
+  {
+   "name": "자기 자신도 축의 후보로 내민다",
+   "file": "geometry_page.py",
+   "old": "                         if s and s != pid],",
+   "new": "                         if s],"
+  },
+  {
+   "name": "다른 그림의 패널도 축의 후보로 내민다",
+   "file": "geometry_page.py",
+   "old": "        by_raster.setdefault((r.get(\"Raster\") or \"\").strip(), []).append(",
+   "new": "        by_raster.setdefault(\"\", []).append("
+  },
+  {
+   "name": "리더의 후보를 논리로 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"sharedCandidate\": (row.get(\"Y_Axis_Shared_Candidate\") or \"\").strip(),",
+   "new": "            \"sharedCandidate\": \"\","
+  },
+  {
+   "name": "후보와 까닭을 카드에 보이지 않는다",
+   "file": "geometry_page.py",
+   "old": "    if cand:\n        w(\"<div class='read shared'>",
+   "new": "    if False:\n        w(\"<div class='read shared'>"
+  },
+  {
+   "name": "조각이 그림을 자른다",
+   "file": "geometry_page.py",
+   "old": "        key = (r.get(\"Raster\") or \"\").strip()\n        if key not in groups:",
+   "new": "        key = (r.get(\"Proposal_ID\") or \"\").strip()\n        if key not in groups:"
+  },
+  {
+   "name": "없는 조각을 달라 해도 넘긴다",
+   "file": "geometry_page.py",
+   "old": "    if not 1 <= chunk <= of:\n        raise SystemExit",
+   "new": "    if False:\n        raise SystemExit"
+  },
+  {
+   "name": "조각을 넘으면 끊는다",
+   "file": "geometry_page.py",
+   "old": "        if cur and of - len(bins) > 1 and \\\n                abs(len(cur) + len(groups[key]) - target) > abs(len(cur) - target):",
+   "new": "        if cur and of - len(bins) > 1 and \\\n                len(cur) + len(groups[key]) > target:"
   }
  ]
 }

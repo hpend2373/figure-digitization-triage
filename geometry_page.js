@@ -25,7 +25,13 @@
 
 //: 사람이 이 제안에 대해 할 수 있는 말. `HOLD`는 "아직 못 정하겠다"이고,
 //: 답이긴 하지만 다음으로 넘어가지 않습니다.
-var VERDICTS = ['CONFIRMED', 'REJECTED', 'HOLD'];
+var VERDICTS = ['CONFIRMED', 'SHARED', 'REJECTED', 'HOLD'];
+
+//: "이 패널엔 축이 없고, 같은 그림의 다른 패널 축을 쓴다." 이 코퍼스는 한 줄의
+//: 패널에 y축을 맨 왼쪽 하나만 찍고(Day/Night, 왼쪽/오른쪽 열) 나머지엔 눈금도
+//: 라벨도 없습니다. 그 패널은 읽을 것도 칠 것도 없고, 사람이 할 수 있는 말은
+//: "p7의 축을 쓴다"뿐입니다. 값은 관문이 p7의 확인된 짝을 옮겨 적습니다.
+var SHARED = 'SHARED';
 
 //: 눈금 값이 있어야만 답이 되는 판정. 거절과 보류는 값을 묻지 않습니다 -
 //: 틀린 프레임의 눈금 값을 받아 적는 것은 틀린 것을 더 자세히 적는 일입니다.
@@ -91,10 +97,12 @@ function directionWord(pairs) {
 /* 이 제안의 지금 상태가 답이 되는가, 안 되면 왜 안 되는가.
  *
  * `state` = { verdict, top, bottom, note, seen, who,
- *             readPairs, topPixel, bottomPixel }
+ *             readPairs, topPixel, bottomPixel, sharedWith, siblings }
  *   readPairs   리더가 읽은 '값@픽셀' 문자열. 비어 있으면 리더가 거절한 축.
  *   topPixel    맨 위 눈금의 픽셀 행. 사람이 값을 적으면 그 값이 붙는 자리.
  *   bottomPixel 맨 아래 눈금의 픽셀 행.
+ *   sharedWith  SHARED일 때, 축을 빌려 오는 패널의 Proposal_ID.
+ *   siblings    같은 래스터의 다른 패널들. 있으면 sharedWith는 그 안이어야 합니다.
  *
  * 돌려주는 것 = { ready, why, row }
  */
@@ -117,7 +125,30 @@ function verdictOf(id, state) {
     return { ready: false, why: '누가 보았는지 적어 주세요 (이름 또는 이니셜)', row: null };
   }
   var read = parsePairs(s.readPairs);
-  var top = '', bottom = '', pairs = [], source = '';
+  var top = '', bottom = '', pairs = [], source = '', sharedWith = '';
+  if (verdict === SHARED) {
+    // 어느 패널의 축인지. 자기 자신은 공유가 아니고, 다른 그림의 패널은 픽셀
+    // 행이 다른 래스터의 것이라 옮겨 올 수 없습니다. 이 패널의 값을 함께
+    // 적어 왔으면 둘 중 무엇을 말하는지 알 수 없어서 답이 아닙니다.
+    sharedWith = String(s.sharedWith === null || s.sharedWith === undefined ? '' : s.sharedWith).trim();
+    var typedHere = String(s.top || '').trim() !== '' || String(s.bottom || '').trim() !== '';
+    if (typedHere) {
+      return { ready: false,
+               why: '다른 패널의 축을 쓰면 이 패널의 눈금 값은 적지 않습니다 — 값을 지우거나 "맞다"를 고르세요',
+               row: null };
+    }
+    if (!sharedWith) {
+      return { ready: false, why: '어느 패널의 축을 쓰는지 골라 주세요', row: null };
+    }
+    if (sharedWith === String(s.proposal || id)) {
+      return { ready: false, why: '자기 자신의 축은 공유가 아닙니다', row: null };
+    }
+    var siblings = s.siblings || [];
+    if (siblings.length && siblings.indexOf(sharedWith) < 0) {
+      return { ready: false, why: '같은 그림의 패널만 축을 나눠 쓸 수 있습니다: ' + sharedWith, row: null };
+    }
+    source = 'SHARED';
+  }
   if (needsValues(verdict)) {
     var typedTop = String(s.top === null || s.top === undefined ? '' : s.top).trim();
     var typedBottom = String(s.bottom === null || s.bottom === undefined ? '' : s.bottom).trim();
@@ -177,13 +208,14 @@ function verdictOf(id, state) {
     // 보고 통과시킨 값이지만 같은 일은 아니고, 리더가 얼마나 맞았는지는 이
     // 칸으로만 셀 수 있습니다.
     Value_Source: source,
+    Y_Axis_Shared_With: sharedWith,
     Note: String(s.note || '').trim()
   } };
 }
 
 var CSV_COLUMNS = ['Proposal_ID', 'Human_Verification_Status',
                    'Y_Tick_Top_Value', 'Y_Tick_Bottom_Value',
-                   'Confirmed_Tick_Values',
+                   'Confirmed_Tick_Values', 'Y_Axis_Shared_With',
                    'Verified_By', 'Seen_By_Person', 'Value_Source', 'Note'];
 
 function csvCell(s) {
@@ -228,7 +260,7 @@ function held(ids, states) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { VERDICTS: VERDICTS, NEEDS_VALUES: NEEDS_VALUES, HELD: HELD,
+  module.exports = { VERDICTS: VERDICTS, NEEDS_VALUES: NEEDS_VALUES, HELD: HELD, SHARED: SHARED,
                      needsValues: needsValues, valueOf: valueOf,
                      parsePairs: parsePairs, slopeSign: slopeSign,
                      directionWord: directionWord,

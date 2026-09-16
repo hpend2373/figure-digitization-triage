@@ -638,6 +638,95 @@ check("a value at the frame's top edge is written inside the picture, not out th
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
+
+# A ROW OF PANELS WITH ONE AXIS. This corpus prints Day/Night, left/right
+# column, with the y axis on the leftmost panel and nothing on the rest. Those
+# panels have no labels to read and none for a person to type; what a person
+# can say is "it uses p1's axis". The machine names the neighbour, and only
+# names it - whether the axis is shared is the person's call, because a panel
+# with its own unread axis looks the same from here.
+print()
+print("a panel with no axis of its own is offered its neighbour's")
+def _p(pid, x0, x1, y0, y1, ticks, read, raster="a.png"):
+    return {"Proposal_ID": pid, "Raster": raster, "Panel_X0": x0, "Panel_X1": x1,
+            "Panel_Y0": y0, "Panel_Y1": y1, "Y_Tick_Count": ticks,
+            "Y_Tick_Read_Status": read, "Y_Tick_Pixels": "60;200;340",
+            "Y_Tick_Read_Values": "40@60;30@200;20@340" if read == GP.READ_OK else "",
+            "Human_Verification_Status": GP.PROPOSAL_PENDING}
+_fig = [_p("p1", 100, 400, 50, 450, 4, GP.READ_OK),          # row 1: the axis
+        _p("p2", 500, 800, 53, 449, 0, GP.READ_REFUSED),      #   same row, no ticks
+        _p("p3", 900, 1200, 52, 451, 4, GP.READ_REFUSED),     #   same row, own ticks, unread
+        _p("p7", 1300, 1600, 50, 450, 4, GP.READ_OK),         #   same row, read its own
+        _p("p4", 100, 400, 500, 900, 0, GP.READ_REFUSED),     # row 2: leftmost, no ticks
+        _p("p5", 500, 800, 500, 930, 0, GP.READ_REFUSED),     #   frame 7% off the row
+        _p("p9", 900, 1200, 500, 900, 4, GP.READ_OK),         #   an axis, to the RIGHT of p4
+        _p("p10", 100, 400, 950, 1350, 4, GP.READ_OK),        # row 3: two axes
+        _p("p11", 500, 800, 950, 1350, 4, GP.READ_OK),
+        _p("p12", 900, 1200, 950, 1350, 0, GP.READ_REFUSED),  #   beside the second
+        _p("p6", 100, 400, 50, 450, 0, GP.READ_REFUSED, raster="b.png")]  # another raster
+_named = GP.shared_axis_candidates(_fig)
+_cand = dict((r["Proposal_ID"], r["Y_Axis_Shared_Candidate"]) for r in _fig)
+_by = dict((r["Proposal_ID"], r) for r in _fig)
+check("the panel to the right with no ticks is offered the axis on its rows",
+      _cand["p2"] == "p1", "%s" % _cand)
+check("and so is one with unread ticks of its own, with a warning",
+      _cand["p3"] == "p1" and "눈금 4개" in _by["p3"]["Y_Axis_Shared_Detail"],
+      _by["p3"]["Y_Axis_Shared_Detail"])
+check("a neighbour without ticks in between is skipped, not offered",
+      _cand["p3"] == "p1" and _by["p2"]["Y_Tick_Count"] == 0)
+check("the nearest axis to the left is offered, not the leftmost",
+      _cand["p12"] == "p11", "%s" % _cand["p12"])
+check("the panel that read its own axis is offered nothing", _cand["p1"] == "" and _cand["p7"] == "")
+check("nor one with an axis only to its right", _cand["p4"] == "", "%s" % _cand["p4"])
+check("nor one whose frame stands on other rows", _cand["p5"] == "")
+check("nor one on another raster", _cand["p6"] == "")
+check("and the count is the rows named", _named == 3, "%s" % _named)
+
+# What a SHARED verdict may say.
+_ok = dict(_fig[1], Human_Verification_Status="SHARED", Verified_By="MC",
+           Verified_At="2026-09-10", Y_Axis_Shared_With="p1")
+_owner = dict(_fig[0], Human_Verification_Status="CONFIRMED", Verified_By="MC",
+              Verified_At="2026-09-10", Y_Tick_Top_Value="40", Y_Tick_Bottom_Value="20",
+              Confirmed_Tick_Values="40@60;20@340")
+def _codes(rows):
+    return [c for _p, c, _d in GP.proposal_problems(rows)]
+check("a SHARED row naming a neighbour on its own rows is in order",
+      _codes([_owner, _ok]) == [], "%s" % _codes([_owner, _ok]))
+check("one naming no panel is refused",
+      "PROPOSAL_SHARED_WITHOUT_A_TARGET" in _codes([_owner, dict(_ok, Y_Axis_Shared_With="")]))
+check("one naming itself is refused",
+      "PROPOSAL_SHARED_WITH_ITSELF" in _codes([_owner, dict(_ok, Y_Axis_Shared_With="p2")]))
+check("one naming a panel on another raster is refused",
+      "PROPOSAL_SHARED_ACROSS_RASTERS" in _codes([_owner, dict(_ok, Raster="b.png")]))
+check("one naming a panel on other rows is refused",
+      "PROPOSAL_SHARED_FRAME_MISALIGNED" in _codes([_owner, dict(_ok, Panel_Y1=520)]))
+check("one carrying a tick value of its own is refused",
+      "PROPOSAL_SHARED_WITH_A_TICK_VALUE" in _codes([_owner, dict(_ok, Y_Tick_Bottom_Value="0")]))
+check("a PENDING row that already names a shared axis is refused",
+      "PROPOSAL_PENDING_WITH_A_SHARED_AXIS" in _codes([dict(_fig[1], Y_Axis_Shared_With="p1")]))
+check("and a CONFIRMED row that also names one is one or the other",
+      "PROPOSAL_CONFIRMED_NAMES_A_SHARED_AXIS" in _codes([dict(_owner, Y_Axis_Shared_With="p3")]))
+check("the machine's candidate on a PENDING row is not an answer",
+      _codes([_fig[1]]) == [], "%s" % _codes([_fig[1]]))
+check("a SHARED row carrying the copied pairs calibrates on them",
+      GP.calibration_from(dict(_ok, Confirmed_Tick_Values="40@60;20@340")) == [[40.0, 60.0], [20.0, 340.0]])
+check("and one that has not been through the gate calibrates nothing",
+      GP.calibration_from(_ok) is None)
+
+# The neighbour's ticks, drawn on this panel so the person can see whether
+# they land on its gridlines and frame.
+_spic = Image.open(GP.proposal_overlay(_im, _row, os.path.join(ROOT, "shared.png"),
+                                       shared_ticks=[int(_row["Panel_Y0"]) + 40])).convert("RGB")
+_spx = _spic.load()
+_orange = sum(1 for x in range(_spic.size[0]) for y in range(_spic.size[1])
+              if _spx[x, y] == (230, 120, 20))
+_plain = Image.open(GP.proposal_overlay(_im, _row, os.path.join(ROOT, "plain.png"))).convert("RGB")
+_ppx2 = _plain.load()
+_orange0 = sum(1 for x in range(_plain.size[0]) for y in range(_plain.size[1])
+               if _ppx2[x, y] == (230, 120, 20))
+check("the neighbour's tick rows are drawn on this panel in their own colour",
+      _orange > 0 and _orange0 == 0, "%d / %d" % (_orange, _orange0))
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 import shutil                                                    # noqa: E402

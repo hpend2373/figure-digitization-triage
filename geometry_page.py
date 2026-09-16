@@ -47,6 +47,7 @@ LOGIC = "geometry_page.js"
 #: 있지만 답이 되지 않고, 논리에만 있는 답은 아무도 고를 수 없습니다.
 LABELS = (
     ("CONFIRMED", "맞다 — 이 프레임과 이 눈금으로 읽는다"),
+    ("SHARED", "이 패널엔 축이 없다 — 같은 그림의 다른 패널 축을 쓴다"),
     ("REJECTED", "틀렸다 — 이 제안으로는 읽지 않는다"),
     ("HOLD", "아직 못 정하겠다"),
 )
@@ -56,7 +57,8 @@ LABELS = (
 #: 확인이 아닙니다.
 KEYS = (("#c81e1e", "프레임 — 이 안이 읽을 자리"),
         ("#be3cbe", "리더가 잰 눈금과 읽은 값, 그리고 축 아래 상자 x 위치"),
-        ("#149650", "잉크 기둥으로 찾은 x 위치 (다른 방법, 참고용)"))
+        ("#149650", "잉크 기둥으로 찾은 x 위치 (다른 방법, 참고용)"),
+        ("#e67814", "축 공유 후보 패널의 눈금 행 (점선) — 이 패널의 선과 맞는지 보세요"))
 
 
 def _rows(path):
@@ -80,18 +82,71 @@ def data_url(path):
         return "data:image/png;base64," + base64.b64encode(fh.read()).decode()
 
 
-def build(proposals, log=print):
+def chunk_of(rows, chunk, of):
+    """조각 `chunk`(1부터)의 행들. 한 그림(래스터)의 패널은 같은 조각에 둡니다.
+
+    축을 나눠 쓰는 패널은 같은 그림의 다른 패널을 가리키고, 관문은 그 패널의
+    확인을 같은 답 묶음에서 찾습니다 - 그림이 두 조각에 걸리면 답이 두 파일에
+    걸리고, 어느 한쪽을 먼저 적을 수 없습니다. 조각은 래스터 순서대로, 패널
+    수가 고르게 나뉘도록 끊습니다.
+    """
+    if of <= 1:
+        return list(rows)
+    if not 1 <= chunk <= of:
+        raise SystemExit("--chunk는 1..%d 사이여야 합니다 (%d)" % (of, chunk))
+    groups, order = {}, []
+    for r in rows:
+        key = (r.get("Raster") or "").strip()
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+    total = len(rows)
+    bins, cur, filled, target = [], [], 0, 0
+    for key in order:
+        if not cur:
+            # 조각이 시작될 때 남은 것을 남은 조각 수로 나눈 목표. 그림 하나가
+            # 크면 그 조각은 커지고, 다음 조각들이 그만큼 줄어듭니다 - 그림은
+            # 자르지 않습니다.
+            left_bins = of - len(bins)
+            target = (total - filled) / float(left_bins) if left_bins else 0
+        # 이 그림을 더하는 쪽과 여기서 끊는 쪽 중 목표에 가까운 쪽. "넘으면
+        # 끊는다"로는 조각마다 조금씩 모자라고, 모자란 만큼이 마지막 조각에
+        # 쌓입니다 - 975장을 열로 나눴더니 마지막이 183장이었습니다.
+        if cur and of - len(bins) > 1 and \
+                abs(len(cur) + len(groups[key]) - target) > abs(len(cur) - target):
+            bins.append(cur)
+            cur = []
+            left_bins = of - len(bins)
+            target = (total - filled) / float(left_bins)
+        cur.extend(groups[key])
+        filled += len(groups[key])
+    if cur:
+        bins.append(cur)
+    while len(bins) < of:
+        bins.append([])
+    return bins[chunk - 1]
+
+
+def build(proposals, log=print, chunk=1, of=1):
     """(html, 제안 수)."""
-    rows = _rows(os.path.join(proposals, PROPOSALS))
-    if not rows:
+    everything = _rows(os.path.join(proposals, PROPOSALS))
+    if not everything:
         raise SystemExit("%s에 제안이 없습니다."
                          % os.path.join(proposals, PROPOSALS))
+    rows = chunk_of(everything, chunk, of)
+    # 같은 그림의 패널들. 축을 빌려 올 수 있는 후보는 이 안에서만 고릅니다.
+    by_raster = {}
+    for r in everything:
+        by_raster.setdefault((r.get("Raster") or "").strip(), []).append(
+            (r.get("Proposal_ID") or "").strip())
 
     out, meta, ids = [], {}, []
     w = out.append
     w("<!doctype html><html lang='ko'><head><meta charset='utf-8'>")
     w("<meta name='viewport' content='width=device-width,initial-scale=1'>")
-    w("<title>기하 확인 — %d개</title>" % len(rows))
+    w("<title>기하 확인 — %d개%s</title>"
+      % (len(rows), (" (%d/%d)" % (chunk, of)) if of > 1 else ""))
     w(CSS)
     w("""<style>
 [hidden]{display:none!important}
@@ -108,8 +163,11 @@ def build(proposals, log=print):
 .vals{margin-top:6px;font-size:13px}
 .vals input{width:8em}
 .who{margin:8px 0}
+.shared{background:#fff6ec;border-left-color:#e67814}
+.share select{max-width:100%}
 </style>""")
-    w("<header><h1>기하 확인 <span class='count' id='left'></span></h1>")
+    w("<header><h1>기하 확인%s <span class='count' id='left'></span></h1>"
+      % ((" — %d/%d 조각" % (chunk, of)) if of > 1 else ""))
     w("<p class='note'><code>geometry_proposer</code>가 잰 것과 읽은 것이 "
       "그림 위에 그려져 있습니다. 전부 <b>제안</b>이고, 아무것도 확인되지 "
       "않았습니다.</p>")
@@ -117,6 +175,11 @@ def build(proposals, log=print):
       "옆에 리더가 읽은 숫자가 자홍색으로 적혀 있으니, 두 줄이 같으면 맞는 "
       "것입니다. <b>리더가 읽지 못한 축에서만</b> 첫 눈금과 끝 눈금을 직접 "
       "적어 주세요.</p>")
+    w("<p class='note'>y축이 <b>맨 왼쪽 패널에만</b> 있고 이 패널엔 눈금도 숫자도 "
+      "없으면, 값을 지어내지 말고 <b>\"다른 패널 축을 쓴다\"</b>를 고른 뒤 어느 "
+      "패널인지 골라 주세요. 그 패널이 확인되면 관문이 그 값을 옮겨 적습니다. "
+      "리더가 후보를 댄 패널에는 그 패널의 눈금 행이 주황 점선으로 그려져 있으니, "
+      "이 패널의 선과 맞는지 보세요.</p>")
     w("<p class='note'><b>직접 보셨을 때만</b> 확인 칸을 눌러 주세요 — 고르는 "
       "것은 판단이고, 그 칸은 목격입니다. 그리고 <b>누가 보았는지</b>가 없는 "
       "확인은 확인이 아니라서, 이름을 적기 전에는 답이 되지 않습니다.</p>")
@@ -146,8 +209,13 @@ def build(proposals, log=print):
             # 사람이 값을 칠 때 그 값이 붙는 자리.
             "topPixel": marks[0] if marks else "",
             "bottomPixel": marks[-1] if marks else "",
+            # 축을 빌려 올 수 있는 패널들과, 리더가 댄 후보. 후보는 고르는
+            # 칸에 미리 들어가지만 판정은 사람이 고릅니다.
+            "siblings": [s for s in by_raster.get((row.get("Raster") or "").strip(), [])
+                         if s and s != pid],
+            "sharedCandidate": (row.get("Y_Axis_Shared_Candidate") or "").strip(),
         }
-        w(card(proposals, pid, row, read))
+        w(card(proposals, pid, row, read, meta[pid]["siblings"]))
 
     w("</main><script>")
     w("var IDS = %s;" % json.dumps(ids, ensure_ascii=False))
@@ -162,7 +230,7 @@ def build(proposals, log=print):
     return "\n".join(out), len(ids)
 
 
-def card(proposals, pid, row, read):
+def card(proposals, pid, row, read, siblings=()):
     out = []
     w = out.append
     w("<div class='doc' data-id='%s'>" % esc(pid))
@@ -194,6 +262,11 @@ def card(proposals, pid, row, read):
         w("<div class='read refused'><b>리더가 축을 읽지 못했습니다.</b><br>"
           "<span class='sub'>%s</span><br>첫 눈금과 끝 눈금을 적어 주세요.</div>"
           % esc((row.get("Y_Tick_Read_Detail") or "")[:180]))
+    cand = (row.get("Y_Axis_Shared_Candidate") or "").strip()
+    if cand:
+        w("<div class='read shared'><b>축 공유 후보:</b> %s<br><span class='sub'>%s"
+          "</span></div>"
+          % (esc(cand), esc(row.get("Y_Axis_Shared_Detail") or "")))
     if (row.get("Box_Anchor_Count") or "").strip() not in ("", "0"):
         w("<div class='meta'>상자 x 위치 %s개 — %s</div>"
           % (esc(row.get("Box_Anchor_Count")),
@@ -216,6 +289,14 @@ def card(proposals, pid, row, read):
       "위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>"
       % ((" (픽셀 행 %s)" % esc(marks[0])) if marks else "", esc(pid),
          (" (픽셀 행 %s)" % esc(marks[-1])) if marks else "", esc(pid)))
+    # 어느 패널의 축을 쓰는지. 같은 그림의 패널만 고를 수 있고, 후보가 있으면
+    # 미리 골라져 있습니다 - 고르는 것은 목록이고 판정은 위의 답입니다.
+    w("<div class='vals share'>축을 쓰는 패널 <select data-shared='%s'>"
+      "<option value=''>— 고르세요 —</option>%s</select>"
+      "<div class='sub'>그 패널이 \"맞다\"로 확인되어야 이 패널의 값이 옮겨집니다. "
+      "이 패널의 눈금 값은 적지 않습니다.</div></div>"
+      % (esc(pid), "".join("<option value='%s'>%s</option>" % (esc(s), esc(s))
+                           for s in siblings)))
     w("<div class='who'>보신 분 <input type='text' data-who='%s' size='12' "
       "placeholder='이름 또는 이니셜'></div>" % esc(pid))
     w("<div class='row'>")
@@ -238,7 +319,7 @@ PAGE_JS = r"""
   function st(id) {
     if (!states[id]) {
       states[id] = { verdict: '', top: '', bottom: '', note: '', who: '',
-                     seen: false };
+                     seen: false, sharedWith: '' };
     }
     var m = META[id];
     // 리더가 읽은 값과 나갈 이름은 화면이 아니라 페이지가 심어 둔 것에서
@@ -248,6 +329,11 @@ PAGE_JS = r"""
       states[id].readPairs = m.readPairs;
       states[id].topPixel = m.topPixel;
       states[id].bottomPixel = m.bottomPixel;
+      states[id].siblings = m.siblings || [];
+      // 리더의 후보는 고르는 칸에 미리 들어갑니다. 판정은 사람이 고릅니다.
+      if (!states[id].sharedWith && m.sharedCandidate) {
+        states[id].sharedWith = m.sharedCandidate;
+      }
     }
     return states[id];
   }
@@ -273,6 +359,7 @@ PAGE_JS = r"""
     if (box) {
       box.textContent = got.ready
         ? '답이 되었습니다 — ' + got.row.Human_Verification_Status
+          + (got.row.Y_Axis_Shared_With ? ' (' + got.row.Y_Axis_Shared_With + '의 축)' : '')
           + (got.row.Confirmed_Tick_Values
              ? ' (위 ' + got.row.Y_Tick_Top_Value + ' … 아래 '
                + got.row.Y_Tick_Bottom_Value + ', ' + got.row.Value_Source
@@ -295,6 +382,9 @@ PAGE_JS = r"""
               ff.parentNode.hidden = !needsValues(s.verdict); }
     var ll = q("input[data-bottom=\"" + esc(id) + "\"]");
     if (ll && ll.value !== s.bottom) ll.value = s.bottom;
+    var sh = q("select[data-shared=\"" + esc(id) + "\"]");
+    if (sh) { if (sh.value !== s.sharedWith) sh.value = s.sharedWith;
+              sh.parentNode.hidden = s.verdict !== SHARED; }
     var ww = q("input[data-who=\"" + esc(id) + "\"]");
     if (ww && ww.value !== s.who) ww.value = s.who;
     var vv = q("input[data-seen=\"" + esc(id) + "\"]");
@@ -317,6 +407,8 @@ PAGE_JS = r"""
        function (s, el) { s.verdict = el.value; }, 'change');
   bind('input[data-top]', 'data-top', function (s, el) { s.top = el.value; });
   bind('input[data-bottom]', 'data-bottom', function (s, el) { s.bottom = el.value; });
+  bind('select[data-shared]', 'data-shared',
+       function (s, el) { s.sharedWith = el.value; }, 'change');
   bind('input[data-who]', 'data-who',
        function (s, el) { s.who = el.value; spreadWho(el.value); });
   bind('input[data-seen]', 'data-seen',
@@ -348,8 +440,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--proposals", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--chunk", type=int, default=1,
+                    help="몇 번째 조각인가 (1부터). 한 그림의 패널은 같은 조각에 둡니다.")
+    ap.add_argument("--of", type=int, default=1, help="조각의 수")
     a = ap.parse_args(argv)
-    html, _n = build(os.path.expanduser(a.proposals))
+    html, _n = build(os.path.expanduser(a.proposals), chunk=a.chunk, of=a.of)
     with io.open(os.path.expanduser(a.out), "w", encoding="utf-8") as fh:
         fh.write(html)
     print("페이지: %s (%.1f MB)"

@@ -70,6 +70,19 @@ MUT = [
     ("M21 음수로 읽은 짝은 버린다",
      "    if (isFinite(v) && isFinite(px)) out.push([v, px]);",
      "    if (v >= 0 && isFinite(px)) out.push([v, px]);"),
+    ("M22 어느 패널의 축인지 없어도 받는다",
+     "    if (!sharedWith) {\n      return { ready: false, why: '어느 패널의 축을 쓰는지 골라 주세요', row: null };\n    }",
+     "    if (false) {\n      return { ready: false, why: '어느 패널의 축을 쓰는지 골라 주세요', row: null };\n    }"),
+    ("M23 자기 자신의 축도 받는다",
+     "    if (sharedWith === String(s.proposal || id)) {", "    if (false) {"),
+    ("M24 다른 그림의 패널도 받는다",
+     "    if (siblings.length && siblings.indexOf(sharedWith) < 0) {", "    if (false) {"),
+    ("M25 축을 빌리면서 값도 적은 것을 받는다",
+     "    if (typedHere) {", "    if (false) {"),
+    ("M26 어느 패널의 축인지 내보내지 않는다",
+     "    Y_Axis_Shared_With: sharedWith,", "    Y_Axis_Shared_With: '',"),
+    ("M27 축을 빌린 줄에 값의 출처를 적지 않는다",
+     "    source = 'SHARED';", "    source = '';"),
 ]
 
 mutate_guard.restore_any(HERE)

@@ -158,6 +158,60 @@ test('거절과 보류는 눈금 값을 묻지 않는다', () => {
   assert.equal(L.verdictOf('GP002', unread({ verdict: 'HOLD' })).ready, true);
 });
 
+/* 축을 나눠 쓰는 패널. 이 코퍼스는 한 줄의 패널에 y축을 맨 왼쪽 하나만 찍고
+ * 나머지엔 눈금도 라벨도 없습니다. 그 패널은 읽을 것도 칠 것도 없고, 사람이
+ * 할 수 있는 말은 "p7의 축을 쓴다"뿐입니다. 값은 관문이 옮겨 적습니다. */
+function shared(over) {
+  return unread(Object.assign({ verdict: 'SHARED', proposal: 'GP002',
+                                sharedWith: 'GP001', siblings: ['GP001', 'GP003'] },
+                              over || {}));
+}
+test('다른 패널의 축을 쓴다는 답은 값 없이 답이 된다', () => {
+  const got = L.verdictOf('GP002', shared());
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Human_Verification_Status, 'SHARED');
+  assert.equal(got.row.Y_Axis_Shared_With, 'GP001');
+  assert.equal(got.row.Y_Tick_Top_Value, '');
+  assert.equal(got.row.Confirmed_Tick_Values, '');
+  assert.equal(got.row.Value_Source, 'SHARED');
+});
+/* REVERT: 어느 패널인지 없어도 받는다. 관문이 옮겨 올 짝이 없습니다. */
+test('어느 패널의 축인지 없으면 답이 아니다', () => {
+  const got = L.verdictOf('GP002', shared({ sharedWith: '' }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /어느 패널/);
+});
+/* REVERT: 자기 자신을 받는다. 옮겨 올 곳이 자기라서 영원히 값이 없습니다. */
+test('자기 자신의 축은 공유가 아니다', () => {
+  assert.equal(L.verdictOf('GP002', shared({ sharedWith: 'GP002',
+                                             siblings: ['GP001', 'GP002', 'GP003'] })).ready, false);
+  // 형제 목록이 없어도(예: 저장된 상태를 되읽을 때) 자기 자신은 막힙니다.
+  assert.equal(L.verdictOf('GP002', shared({ sharedWith: 'GP002', siblings: [] })).ready, false);
+});
+/* REVERT: 다른 그림의 패널도 받는다. 픽셀 행은 래스터의 것이라 옮겨 올 수
+ * 없고, 옮기면 엉뚱한 행에 값이 붙습니다. */
+test('같은 그림의 패널만 축을 나눠 쓴다', () => {
+  const got = L.verdictOf('GP002', shared({ sharedWith: 'GP009' }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /같은 그림/);
+});
+/* REVERT: 공유하면서 값도 적어 온 것을 받는다. 어느 쪽이 답인지 모릅니다. */
+test('축을 빌리면서 값도 적으면 답이 아니다', () => {
+  const got = L.verdictOf('GP002', shared({ top: '40' }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /값을 지우거나/);
+});
+test('축을 빌린 줄은 CSV에 어느 패널인지와 함께 나간다', () => {
+  const csv = L.buildCsv(['GP002'], { GP002: shared() });
+  const lines = csv.split('\n');
+  assert.ok(L.CSV_COLUMNS.indexOf('Y_Axis_Shared_With') >= 0);
+  assert.ok(lines[1].indexOf('"SHARED"') >= 0 && lines[1].indexOf('"GP001"') >= 0, lines[1]);
+});
+/* 값을 확인한 줄은 공유 칸이 비어 나갑니다 - 하나이거나 다른 하나입니다. */
+test('값을 확인한 줄에는 공유 칸이 비어 있다', () => {
+  assert.equal(L.verdictOf('GP001', state({ sharedWith: 'GP003' })).row.Y_Axis_Shared_With, '');
+});
+
 /* REVERT: 만들어진 축이 어느 쪽으로 커지는지 되읽어 주지 않는다. 리더가 읽지
  * 못한 축에서는 방향을 견줄 데가 없어서 막을 근거도 없고, 그러면 남는 방법은
  * 사람이 자기가 방금 무엇을 말했는지 보는 것뿐입니다. */

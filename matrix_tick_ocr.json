@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "46b5930db0336d188585ea23a65e9dfb135c58d34644b10eb94173353e36bd77"
+  "axis_reader.py": "02c92dd4b1a986f52318f89b6f100a95fcfed879ce4b55564681ca9eadb9f6a9"
  },
  "mutations": [
   {
@@ -228,6 +228,18 @@
    "file": "axis_reader.py",
    "old": "    for x in range(min_offset, sub.shape[1]):\n        if _longest_run(sub[:, x]) >= run * h:\n            return x0 + x\n    return None",
    "new": "    cand = [x for x in range(min_offset, sub.shape[1]) if _longest_run(sub[:, x]) >= run * h]\n    return x0 + max(cand, key=lambda x: _longest_run(sub[:, x])) if cand else None"
+  },
+  {
+   "name": "띠에서 잘린 낱말도 받는다",
+   "file": "axis_reader.py",
+   "old": "                if clipped:\n                    continue\n                out.append((value, at))",
+   "new": "                out.append((value, at))"
+  },
+  {
+   "name": "띠를 눈금 자리까지 끌어온다",
+   "file": "axis_reader.py",
+   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)",
+   "new": "    reach = 0\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)"
   }
  ]
 }

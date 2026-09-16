@@ -323,6 +323,28 @@ def panel_with_labels(scale, labels=("3000", "2000", "1000"), tick=6, gap=95):
     return img, np.asarray(img) <= 140, box, sx, bot
 
 
+def panel_with_a_label_on_the_baseline(scale=2.0, labels=("30", "20", "10", "0")):
+    """A panel whose LOWEST label is printed centred on the baseline.
+
+    That is where a y axis puts its 0, and it is the label the strip search's
+    crop cuts in half - the reason `label_near` exists.
+    """
+    w, h = int(300 * scale), int(560 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+    step = (bot - top) / float(len(labels) - 1)
+    for i, txt in enumerate(labels):
+        y = int(top + i * step)
+        d.rectangle([sx - int(6 * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((sx - int(95 * scale), y - int(11 * scale)), txt, font=f, fill=0)
+    return (img, np.asarray(img) <= 140, (sx, w - int(20 * scale), top, bot), sx, bot, step)
+
+
 class LabelStripsScaleWithTheRender(unittest.TestCase):
     """`_STRIPS` is pixels, and pixels are a resolution."""
 
@@ -731,6 +753,69 @@ class TheSecondPass(unittest.TestCase):
         two[20:180, 260] = True
         self.assertEqual(A.inner_spine(two, (5, 400, 20, 180)), 120)
         self.assertIsNone(A.inner_spine(dark, (5, 400, 20, 22)))   # no height, no rule
+        RUN[0] += 1
+
+    def test_the_label_sitting_on_the_baseline_is_read_from_its_own_band(self):
+        """REVERT: leave the label on the baseline to the strip search. Its
+        crop stops ten pixels past the baseline so a caption cannot leak in,
+        and a 0 printed CENTRED on the baseline is then half a glyph: 306 of
+        this corpus's 685 read panels have a 0 down there that went unread,
+        and it is the label a bar chart needs most - every bar starts at it.
+        (Widening the search's own crop reads it too, and costs a second full
+        search on every panel for a label on some.)"""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, bot, step = panel_with_a_label_on_the_baseline()
+        stops = A.y_tick_labels(img, dark, box, sx, bot)
+        self.assertNotIn(0.0, [v for v, _r in stops],
+                         "the cut label was read by the strip search after all: %s" % (stops,))
+        band = A.label_near(img, dark, box, sx, bot, half=int(step * 0.55))
+        self.assertIn(0.0, [v for v, _r in band], "the band missed it too: %s" % (band,))
+        # and it is read at the row it is printed on, not somewhere else
+        self.assertTrue(any(abs(r - bot) <= step * 0.3 for v, r in band if v == 0.0),
+                        "read at the wrong row: %s (baseline %s)" % (band, bot))
+        RUN[0] += 1
+
+    def test_a_cut_numeral_in_the_band_is_not_a_label(self):
+        """REVERT: take whatever the band's OCR returns. The band sits at the
+        edge of the crop by construction - that is why it exists - so a numeral
+        cut there is exactly the failure the strip search's guard was written
+        for, and a cut label that happens to fall on the ladder's line joins it
+        with a digit missing."""
+        img, dark, box, sx, base, _step = panel_with_a_label_on_the_baseline()
+
+        def fake(img_, dark_, left, right, top, bottom, scale=3, **kw):
+            return [(5.0, (top + bottom) / 2.0, A.CLIP_STRIP),
+                    (0.0, (top + bottom) / 2.0 + 1, A.CLIP_NONE)]
+
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.label_near(img, dark, box, sx, base, half=40)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(sorted(set(v for v, _r in got)), [0.0], got)
+        RUN[0] += 1
+
+    def test_a_band_with_nothing_printed_beside_it_reads_nothing(self):
+        """`label_band` measures the label column; where nothing is printed
+        there is no column, and this hands back nothing rather than a strip of
+        its own. What it does NOT do is decide whether what it read is a label
+        - a caption's numerals come back like any other, and `ladder` is what
+        refuses them (see `test_geometry_proposer`)."""
+        scale = 2.0
+        w, h = int(300 * scale), int(460 * scale)
+        img = Image.new("L", (w, h), 255)
+        d = ImageDraw.Draw(img)
+        sx, top = int(150 * scale), int(20 * scale)
+        bot = top + int(_TUNED_H * scale)
+        d.rectangle([sx, top, sx + int(scale), bot], fill=0)          # spine only
+        d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+        dark = np.asarray(img) <= 140
+        self.assertEqual(A.label_near(img, dark, (sx, w - int(20 * scale), top, bot),
+                                      sx, bot, half=40), [])
         RUN[0] += 1
 
     def test_european_decimals_are_read_in_the_second_pass(self):

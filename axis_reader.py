@@ -2382,6 +2382,41 @@ def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma
     return best
 
 
+def label_near(img, dark, box, spine_x, row, half, scale=3):
+    """[(value, row)] for every numeral read from the label band beside ONE row.
+
+    THE LABEL ON THE BASELINE IS THE ONE THE STRIP SEARCH CANNOT SEE. Its crop
+    stops ten pixels past the baseline so that a caption cannot leak a numeral
+    in, and a 0 printed CENTRED on the baseline is then half a glyph: 306 of
+    this corpus's 685 read panels have a 0 down there that went unread, and it
+    is the label a bar chart needs most - every bar starts at it.
+
+    Reading one band is what this is for. Whether the numeral belongs to the
+    axis is not decided here: the caller puts it beside the labels already read
+    and asks `ladder`, which is the same test the rest of the reading passed.
+    """
+    x0, x1, y0, y1 = [int(v) for v in box]
+    top = int(max(0, row - half))
+    bottom = int(min(dark.shape[0], row + half))
+    if bottom - top < 20 or pytesseract is None:
+        return []
+    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))
+    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)
+    if not band:
+        return []
+    out = []
+    for sc in (scale, scale + 1):
+        for comma in (False, True):
+            for value, at, clipped in _ocr_numerals(img, dark, max(0, band[0] - 12),
+                                                    band[1] + 4, top, bottom, sc,
+                                                    comma=comma, with_clip=True,
+                                                    margin=8):
+                if clipped:
+                    continue
+                out.append((value, at))
+    return out
+
+
 def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, scale=3):
     """The first strip geometry whose numerals form a checkable ladder.
 
@@ -2409,6 +2444,10 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
     # guard against a caption leaking a numeral in, but the box is now trimmed to
     # ink so the caption is usually outside it - and the guard cost every panel
     # whose lowest rule is not its x axis.
+    # THE LABEL SITTING ON THE BASELINE IS CUT IN HALF BY THIS BOUND, and it is
+    # usually the 0. `label_near` reads that one band afterwards rather than
+    # this search reading every strip again with a deeper crop - which cost
+    # twice the tesseract calls on every panel for one label on some.
     bottom = max(y1 + 6, (baseline_y + 10) if baseline_y is not None else 0)
     # A BROKEN AXIS ENDS THE LADDER. Labels under the break are on another scale,
     # so the strip stops at the break rather than reading through it.

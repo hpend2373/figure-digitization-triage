@@ -697,6 +697,7 @@ def read_tick_values(image, row):
     spine_x, baseline_y = A.spine_and_baseline(dark, box)
     pairs = A.y_tick_labels(image, dark, box, spine_x, baseline_y)
     status, kept, detail, residual = values_from_ladder(pairs)
+    read_box, read_spine, read_base = box, spine_x, baseline_y
     if status != READ_OK:
         # THE FRAME'S LEFT EDGE WAS NOT THE AXIS. Only when the first read
         # refused, so the 660 panels that read from the frame read exactly as
@@ -705,17 +706,71 @@ def read_tick_values(image, row):
         # refusals are panels whose numerals sit inside their own frame.
         inner = A.inner_spine(dark, box)
         if inner is not None:                    # `inner_spine`이 프레임 변은 돌려주지 않는다
+            inner_base = A.baseline_at(dark, box, inner)
             second = A.y_tick_labels(image, dark, (inner, box[1], box[2], box[3]),
-                                     inner, A.baseline_at(dark, box, inner))
+                                     inner, inner_base)
             st2, kept2, detail2, resid2 = values_from_ladder(second)
             if st2 == READ_OK:
                 row["Y_Axis_Spine_X"] = "%d" % inner
-                return apply_reading(row, st2, kept2,
-                                     "%s; READ FROM THE RULE AT x=%d, not the "
-                                     "frame's left edge at x=%d - the frame is "
-                                     "wider than the plot"
-                                     % (detail2, inner, box[0]), resid2)
+                inner_box = (inner, box[1], box[2], box[3])
+                status, kept, residual = st2, kept2, resid2
+                detail = ("%s; READ FROM THE RULE AT x=%d, not the frame's "
+                          "left edge at x=%d - the frame is wider than the plot"
+                          % (detail2, inner, box[0]))
+                read_box, read_spine, read_base = inner_box, inner, inner_base
+    if status == READ_OK:
+        # AND THEN THE BAND AT THE BASELINE, for the label standing on it.
+        deeper = _label_on_the_baseline(image, dark, read_box, read_spine,
+                                        read_base, kept)
+        if deeper is not None:
+            more, detail3 = deeper
+            detail = ("%s; THE LABEL ON THE BASELINE was read from its own band "
+                      "and joins the ladder: %d labels, where the strip search "
+                      "read %d" % (detail3, len(more), len(kept)))
+            kept = more
     return apply_reading(row, status, kept, detail, residual)
+
+
+def _label_on_the_baseline(image, dark, box, spine_x, baseline_y, kept):
+    """(pairs, detail) with the baseline's own label added, or None.
+
+    THE LABEL SITTING ON THE BASELINE IS THE ONE THE CROP CUTS, and on a y axis
+    it is usually the 0. Only 63 of this corpus's 685 read panels had a 0 in
+    their ladder; 306 more have one printed at the baseline that the strip
+    search never saw whole. The 0 is the label worth the most: a bar chart's
+    bars all START there, so without it every bar's base is read by
+    extrapolation.
+
+    IT IS NOT ACCEPTED FOR BEING WHERE A LABEL WOULD BE. The numeral read down
+    there is put beside the labels already read and handed to `ladder` with no
+    subsets allowed: it has to fall on the same value-per-pixel line as all of
+    them or it is not this axis's label. That is the test the rest of the
+    reading passed, applied to one more point - not a comparison against what
+    the ladder predicts, which would accept whatever agreed with it.
+    """
+    import axis_reader as A                                 # noqa: PLC0415
+
+    if len(kept) < 2:
+        return None
+    # 어느 행이 축의 아래 끝인가. 크롭의 아래 경계와 같은 셈법입니다 - 틀의
+    # 밑변과 잰 밑선 중 아래쪽. `spine_and_baseline`은 상자 틀에서 위 변을
+    # 돌려주기도 하고, 그때 틀의 밑변이 축의 끝입니다.
+    base_row = max(float(box[3]), float(baseline_y) if baseline_y is not None else 0.0)
+    rows = sorted(r for _v, r in kept)
+    gaps = [b - a for a, b in zip(rows, rows[1:])]
+    pitch = sorted(gaps)[len(gaps) // 2]
+    if pitch <= 0 or base_row - rows[-1] < 0.5 * pitch:
+        # 이미 밑선까지 읽었습니다. 그 아래에는 라벨이 설 자리가 없습니다.
+        return None
+    for value, at in A.label_near(image, dark, box, spine_x, base_row,
+                                  half=int(pitch * 0.55)):
+        # 이미 읽은 행의 숫자를 다시 넣어도 `ladder`가 거릅니다 - 같은 행에 둘이
+        # 서거나, 2px 떨어진 두 라벨이 값/픽셀을 무너뜨립니다.
+        more = sorted(list(kept) + [(value, at)], key=lambda p: p[1])
+        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)
+        if ok:
+            return more, detail
+    return None
 
 
 def apply_reading(row, status, kept, detail, residual):

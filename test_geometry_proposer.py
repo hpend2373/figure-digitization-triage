@@ -669,7 +669,10 @@ check("a value at the frame's top edge is written inside the picture, not out th
 print()
 print("when the frame's left edge reads nothing, the rule inside it is tried")
 _SPINE = int(_row["Panel_X0"]) + 100
-_LADDER = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+# 이 틀 안에, 밑선 위로 한 칸이 남게. 밑선에 설 라벨의 자리가 있어야 합니다.
+_LADDER = [(30.0, float(_row["Panel_Y0"]) + 40), (20.0, float(_row["Panel_Y0"]) + 90),
+           (10.0, float(_row["Panel_Y0"]) + 140)]
+_LSTR = ";".join("%g@%g" % p for p in _LADDER)
 
 
 def _reading_spy(good_at):
@@ -684,18 +687,19 @@ def _reading_spy(good_at):
 
 _spy, _asked = _reading_spy(_SPINE)
 import axis_reader as A                                           # noqa: E402
-_real_labels, _real_inner = A.y_tick_labels, A.inner_spine
+_real_labels, _real_inner, _real_near = A.y_tick_labels, A.inner_spine, A.label_near
 A.y_tick_labels = _spy
 A.inner_spine = lambda dark, box, **kw: _SPINE
+A.label_near = lambda *a, **k: []          # 밑선 띠는 아래에서 따로 봅니다
 try:
     _inner_row = GP.read_tick_values(_im, dict(_row))
 finally:
-    A.y_tick_labels = _real_labels
+    A.y_tick_labels, A.label_near = _real_labels, _real_near
 check("a panel that reads nothing at its frame's edge is asked again at the rule inside",
       _asked == [int(_row["Panel_X0"]), _SPINE], "%s" % _asked)
 check("and what the rule read is the reading",
       _inner_row["Y_Tick_Read_Status"] == GP.READ_OK
-      and _inner_row["Y_Tick_Read_Values"] == "30@100;20@200;10@300",
+      and _inner_row["Y_Tick_Read_Values"] == _LSTR,
       "%s" % _inner_row["Y_Tick_Read_Values"])
 check("the line it was read from is named, not left to be guessed",
       _inner_row["Y_Axis_Spine_X"] == str(_SPINE), _inner_row["Y_Axis_Spine_X"])
@@ -710,11 +714,12 @@ check("and the detail says the frame is wider than the plot",
 _spy2, _asked2 = _reading_spy(int(_row["Panel_X0"]))
 _inner_called = []
 A.y_tick_labels = _spy2
+A.label_near = lambda *a, **k: []
 A.inner_spine = lambda dark, box, **kw: (_inner_called.append(1) or _SPINE)
 try:
     _first_row = GP.read_tick_values(_im, dict(_row))
 finally:
-    A.y_tick_labels, A.inner_spine = _real_labels, _real_inner
+    A.y_tick_labels, A.inner_spine, A.label_near = _real_labels, _real_inner, _real_near
 check("a panel that read at its frame's edge is not asked twice",
       _asked2 == [int(_row["Panel_X0"])] and not _inner_called,
       "%s %s" % (_asked2, _inner_called))
@@ -726,11 +731,12 @@ check("and carries no other line", _first_row["Y_Axis_Spine_X"] == "",
 # line it "read from" sends the next person to the wrong line.
 _spy3, _asked3 = _reading_spy(-1)                     # nothing reads anywhere
 A.y_tick_labels = _spy3
+A.label_near = lambda *a, **k: []
 A.inner_spine = lambda dark, box, **kw: _SPINE
 try:
     _none_row = GP.read_tick_values(_im, dict(_row))
 finally:
-    A.y_tick_labels, A.inner_spine = _real_labels, _real_inner
+    A.y_tick_labels, A.inner_spine, A.label_near = _real_labels, _real_inner, _real_near
 check("when the rule inside reads nothing either, the panel is refused",
       _none_row["Y_Tick_Read_Status"] == GP.READ_REFUSED
       and _none_row["Y_Tick_Read_Values"] == "", _none_row["Y_Tick_Read_Status"])
@@ -750,6 +756,81 @@ _down = max(sum(1 for y in range(_ipic.size[1]) if _ipx[c, y] == (190, 60, 190))
             for c in range(max(0, _col - 2), min(_ipic.size[0], _col + 3)))
 check("the line the values came from is drawn on the picture",
       _down > 0.5 * (int(_row["Panel_Y1"]) - int(_row["Panel_Y0"])), "%d px" % _down)
+
+# THE LABEL SITTING ON THE BASELINE IS THE ONE THE CROP CUTS, and on a y axis
+# it is usually the 0. Only 63 of this corpus's 685 read panels had a 0 in
+# their ladder; 306 more have one printed at the baseline, cut in half by a
+# crop that stops ten pixels past it. The 0 is the label worth the most: a bar
+# chart's bars all start there.
+print()
+print("the label standing on the baseline is read from its own band")
+_PITCH = _LADDER[1][1] - _LADDER[0][1]
+_BASE_ROW = _LADDER[-1][1] + _PITCH
+
+
+def _with_band(found):
+    """Run a reading whose strip search gives `_LADDER` and whose baseline band
+    gives `found`, and hand back the row and what the band was asked."""
+    asked = []
+
+    def band(img, dark, box, spine_x, row, half, scale=3):
+        asked.append((int(row), int(half)))
+        return list(found)
+    spy, _a = _reading_spy(int(_row["Panel_X0"]))
+    A.y_tick_labels, A.label_near = spy, band
+    try:
+        return GP.read_tick_values(_im, dict(_row)), asked
+    finally:
+        A.y_tick_labels, A.label_near = _real_labels, _real_near
+
+
+_deep_row, _dasked = _with_band([(0.0, _BASE_ROW)])
+check("the band beside the baseline is read once the strip search has a ladder",
+      len(_dasked) == 1 and _dasked[0][0] == int(_row["Panel_Y1"]), "%s" % _dasked)
+check("and it is half a label's pitch tall, not a fixed number of pixels",
+      abs(_dasked[0][1] - 0.55 * _PITCH) <= 1, "%s vs pitch %s" % (_dasked[0][1], _PITCH))
+check("a numeral that falls on the same line as the labels already read joins them",
+      _deep_row["Y_Tick_Read_Values"] == _LSTR + ";0@%g" % _BASE_ROW
+      and _deep_row["Y_Tick_Read_Last"] == "0", _deep_row["Y_Tick_Read_Values"])
+check("and the detail says where it came from",
+      "LABEL ON THE BASELINE" in _deep_row["Y_Tick_Read_Detail"],
+      _deep_row["Y_Tick_Read_Detail"][-80:])
+
+# REVERT: accept the numeral for being where a label would be. The band holds
+# whatever is printed down there - the x axis's own leftmost numeral, a
+# footnote marker, half of a caption - and a value that does not fall on the
+# ladder's line is not this axis's label.
+for _name, _found in (("a numeral off the ladder's line", [(7.0, _BASE_ROW)]),
+                      ("nothing at all", []),
+                      ("a numeral on a row already read", [(0.0, _LADDER[-1][1] + 2)])):
+    _kept_row, _ = _with_band(_found)
+    check("the reading is unchanged when the band gives %s" % _name,
+          _kept_row["Y_Tick_Read_Values"] == _LSTR
+          and "LABEL ON THE BASELINE" not in _kept_row["Y_Tick_Read_Detail"],
+          _kept_row["Y_Tick_Read_Values"])
+
+# REVERT: read the band even when the lowest label already stands on the
+# baseline. There is no room for a label below it, and the band would hold the
+# label that was already read.
+_low = [(30.0, float(_row["Panel_Y1"]) - 100), (20.0, float(_row["Panel_Y1"]) - 50),
+        (10.0, float(_row["Panel_Y1"]))]
+_asked_low = []
+
+
+def _band_low(img, dark, box, spine_x, row, half, scale=3):
+    _asked_low.append(row)
+    return [(0.0, row + 50)]
+
+
+_spy_low, _ = _reading_spy(int(_row["Panel_X0"]))
+A.y_tick_labels = lambda *a, **k: list(_low)
+A.label_near = _band_low
+try:
+    _low_row = GP.read_tick_values(_im, dict(_row))
+finally:
+    A.y_tick_labels, A.label_near = _real_labels, _real_near
+check("a ladder that already reaches the baseline is not asked for one more",
+      not _asked_low, "%s" % _asked_low)
 
 # A ROW OF PANELS WITH ONE AXIS. This corpus prints Day/Night, left/right
 # column, with the y axis on the leftmost panel and nothing on the rest. Those

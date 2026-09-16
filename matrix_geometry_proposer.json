@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "4ed774255aaff925074f75d5a6fea5815967d2b5d739f7a04b6eb8b0939d73b9",
-  "test_geometry_proposer.py": "0461bf025f1482ca5ecc9f0197c3c2e8b4450c8ca1dd5626ea64a4416a4fa65d"
+  "geometry_proposer.py": "553d7204bf6db4e84f19337a499a025da76fd3138bd5e1da62cccbb1a770df81",
+  "test_geometry_proposer.py": "5bec31c0aa20568af0dc9adaac239a711e0102a933bfb5857a98d3f6fc893dcc"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -270,6 +270,42 @@
    "file": "geometry_proposer.py",
    "old": "        size = max(11, min(int(step * 0.28), int((y1 - y0) * 0.05)))",
    "new": "        size = max(11, int(step * 0.28))"
+  },
+  {
+   "name": "밑선 아래를 다시 묻지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        deeper = _label_on_the_baseline(image, dark, read_box, read_spine,\n                                        read_base, kept)",
+   "new": "        deeper = None"
+  },
+  {
+   "name": "밑선 띠의 숫자를 사다리에 걸어 보지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)\n        if ok:\n            return more, detail",
+   "new": "        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)\n        if True:\n            return more, detail"
+  },
+  {
+   "name": "띠의 높이를 라벨 간격이 아니라 고정 길이로 잡는다",
+   "file": "geometry_proposer.py",
+   "old": "                                  half=int(pitch * 0.55)):",
+   "new": "                                  half=10):"
+  },
+  {
+   "name": "내려 읽었다는 말을 하지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "            detail = (\"%s; THE LABEL ON THE BASELINE was read from its own band \"\n                      \"and joins the ladder: %d labels, where the strip search \"\n                      \"read %d\" % (detail3, len(more), len(kept)))",
+   "new": "            detail = detail3"
+  },
+  {
+   "name": "밑선까지 이미 읽은 사다리에도 한 번 더 묻는다",
+   "file": "geometry_proposer.py",
+   "old": "    if pitch <= 0 or base_row - rows[-1] < 0.5 * pitch:",
+   "new": "    if pitch <= 0:"
+  },
+  {
+   "name": "축의 아래 끝을 잰 밑선만으로 친다",
+   "file": "geometry_proposer.py",
+   "old": "    base_row = max(float(box[3]), float(baseline_y) if baseline_y is not None else 0.0)",
+   "new": "    base_row = float(baseline_y) if baseline_y is not None else float(box[3])"
   }
  ]
 }

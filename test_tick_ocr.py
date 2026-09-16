@@ -508,19 +508,25 @@ class TheSecondPass(unittest.TestCase):
                         "the second pass did not magnify for the render: %s" % (sorted({s for _r, s in second}),))
         RUN[0] += 1
 
-    def test_a_clipped_numeral_disqualifies_its_strip(self):
-        """REVERT: accept a ladder whose numerals touch the strip edge with
-        ink beyond it. "250 225 200" read as "50 25 0" and "1400 1200 1000" as
-        "400 200 0" are arithmetic ladders too, and every value in the panel is
-        then off by a digit. Five of sixty panels read at 600 DPI were that.
-        The strips are faked so the guard is observed by itself."""
+    def test_a_cut_strip_is_dropped_whole(self):
+        """REVERT: drop only the words the guard flagged. A cut at the strip's
+        edge crosses every right-aligned label of that width whether the guard
+        can see it on each or not - a cut just after a decimal point leaves
+        nothing on the middle rows. Publication RS-5362092's `0.74 0.72 0.70
+        0.68` came back `74 72 70` unflagged beside a flagged `38`, and the
+        three were a ladder: every value in the panel a hundred times too
+        big. ("250 225 200" read as "50 25 0" is the same shape with every
+        word flagged.) The strips are faked so the rule is observed by
+        itself."""
         calls = []
 
         def fake(img, dark, left, right, top, bottom, scale=3, **kw):
             calls.append((int(left), int(right)))
-            if right - left < 100:                              # narrow: clipped ladder
-                return [(50.0, 100.0, True), (25.0, 200.0, False), (0.0, 300.0, False)]
-            return [(250.0, 100.0, False), (225.0, 200.0, False), (200.0, 300.0, False)]
+            if right - left < 100:                              # narrow: cut after the point
+                return [(74.0, 100.0, A.CLIP_NONE), (72.0, 200.0, A.CLIP_NONE),
+                        (70.0, 300.0, A.CLIP_NONE), (38.0, 400.0, A.CLIP_STRIP)]
+            return [(0.74, 100.0, A.CLIP_NONE), (0.72, 200.0, A.CLIP_NONE),
+                    (0.70, 300.0, A.CLIP_NONE)]
 
         img, dark, box, sx, base = panel_with_labels(2.0)
         real = A._ocr_numerals
@@ -529,8 +535,98 @@ class TheSecondPass(unittest.TestCase):
             got = A.y_tick_labels(img, dark, box, sx, base)
         finally:
             A._ocr_numerals = real
-        self.assertEqual([v for v, _r in got], [250.0, 225.0, 200.0], got)
+        self.assertEqual([v for v, _r in got], [0.74, 0.72, 0.70], got)
         self.assertTrue(any(r - l < 100 for l, r in calls), "no narrow strip was tried first")
+        RUN[0] += 1
+
+    def test_a_dropped_glyph_costs_only_its_word(self):
+        """REVERT: a clipped numeral disqualifies its whole strip. Publication
+        S41467-023-41990-4's ECW axis, `5 0 -5 -10`: tesseract dropped the
+        minus of -5 in a strip that held all four labels whole, the guard
+        flagged the 5, the strip went out with 5, 0 and -10 in it, no other
+        strip read three, and the axis was refused. A glyph dropped INSIDE the
+        strip says nothing about the other words. Faked: the narrow strip is
+        that strip, the wide one reads nothing."""
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            if right - left < 100:
+                return [(5.0, 100.0, A.CLIP_NONE), (0.0, 200.0, A.CLIP_NONE),
+                        (5.0, 300.0, A.CLIP_WORD), (-10.0, 400.0, A.CLIP_NONE)]
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(got, [(5.0, 100.0), (0.0, 200.0), (-10.0, 400.0)])
+        RUN[0] += 1
+
+    def test_a_cut_seen_at_either_magnification_condemns_the_union(self):
+        """The union pass reads one strip at two magnifications and merges by
+        row. The 0.74 strip above at x3 flags its `38` as a dropped glyph and
+        at x4 as a cut; merged by "first flag wins" the cut is lost and the
+        union is `74 72 70`, a ladder. The graver verdict has to win the
+        merge. Faked so no single magnification ladders on its own."""
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            if right - left >= 100:
+                return []
+            if abs(float(scale) - 3.0) < 1e-6:
+                return [(74.0, 100.0, A.CLIP_NONE), (70.0, 300.0, A.CLIP_NONE),
+                        (38.0, 400.0, A.CLIP_WORD)]
+            return [(72.0, 200.0, A.CLIP_NONE), (38.0, 400.0, A.CLIP_STRIP)]
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertFalse(A.ladder(got)[0], "the cut strip's union was accepted: %s" % (got,))
+        RUN[0] += 1
+
+    def test_the_guard_tells_a_cut_from_a_dropped_glyph(self):
+        """The classification itself, on real ink with tesseract faked: `-5`
+        is drawn, and the reader is told only the `5` was read. With the strip
+        holding the minus the word is `CLIP_WORD`; with the strip's edge
+        between the minus and the 5 it is `CLIP_STRIP`. Same ink, same word,
+        one question: does the word start at the strip's edge?"""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        if A.pytesseract is None:
+            self.skipTest("axis_reader has no pytesseract to fake")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-5", "-15", "-25"), gap=100)
+        x0, x1, y0, y1 = box
+        rows = np.where(dark[y0:y1, :sx - 40].any(axis=1))[0] + y0
+        yt, yb = int(rows.min()), int(rows.min() + 40)             # the first label's rows
+        cols = np.where(dark[yt:yb, :sx - 40].any(axis=0))[0]
+        runs = [[cols[0]]]
+        for c in cols[1:]:
+            (runs[-1].append(c) if c - runs[-1][-1] <= 3 else runs.append([c]))
+        minus, digit = runs[0], runs[-1]                             # ink columns of - and 5
+        gl, gr = int(digit[0]), int(digit[-1]) + 1
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+
+        def faked(left, scale):
+            def image_to_data(big, config="", output_type=None):
+                return {"text": ["5"], "conf": ["90"],
+                        "left": [int((gl - left) * scale)], "top": [int((yt - top) * scale)],
+                        "width": [int((gr - gl) * scale)], "height": [int((yb - yt) * scale)]}
+            real = A.pytesseract.image_to_data
+            A.pytesseract.image_to_data = image_to_data
+            try:
+                return A._ocr_numerals(img, dark, left, sx - 40, top, bottom, scale, with_clip=True)
+            finally:
+                A.pytesseract.image_to_data = real
+
+        inside = faked(int(minus[0]) - 120, 1.5)
+        at_edge = faked(int(minus[-1]) + 2, 1.5)
+        self.assertEqual([(v, cl) for v, _r, cl in inside], [(5.0, A.CLIP_WORD)], inside)
+        self.assertEqual([(v, cl) for v, _r, cl in at_edge], [(5.0, A.CLIP_STRIP)], at_edge)
         RUN[0] += 1
 
     def test_a_cut_digit_is_seen_as_clipped(self):
@@ -551,7 +647,8 @@ class TheSecondPass(unittest.TestCase):
         whole = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
         cut = A._ocr_numerals(img, dark, ink_left + 20, sx - 40, top, bottom, 1.5, with_clip=True)
         self.assertEqual([(v, cl) for v, _r, cl in whole], [(1400.0, False), (1200.0, False), (1000.0, False)])
-        self.assertEqual([(v, cl) for v, _r, cl in cut], [(400.0, True), (200.0, True), (0.0, True)])
+        self.assertEqual([(v, cl) for v, _r, cl in cut],
+                         [(400.0, A.CLIP_STRIP), (200.0, A.CLIP_STRIP), (0.0, A.CLIP_STRIP)])
         RUN[0] += 1
 
     def test_a_sign_left_of_the_strip_makes_the_word_untrusted(self):
@@ -571,7 +668,8 @@ class TheSecondPass(unittest.TestCase):
         signed = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
         unsigned = A._ocr_numerals(img, dark, ink_left + 18, sx - 40, top, bottom, 1.5, with_clip=True)
         self.assertEqual([(v, cl) for v, _r, cl in signed], [(-10.0, False), (-20.0, False), (-30.0, False)])
-        self.assertEqual([(v, cl) for v, _r, cl in unsigned], [(10.0, True), (20.0, True), (30.0, True)])
+        self.assertEqual([(v, cl) for v, _r, cl in unsigned],
+                         [(10.0, A.CLIP_STRIP), (20.0, A.CLIP_STRIP), (30.0, A.CLIP_STRIP)])
         RUN[0] += 1
 
     def test_ticks_inside_the_strip_are_read_past_in_the_second_pass(self):

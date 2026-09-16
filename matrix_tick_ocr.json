@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "c06d61ec8886fb0dac7d21d7563ee6d5a7303b9d476c0d8bd04970e46a1273d8"
+  "axis_reader.py": "391faaab665b873be4988dfe36a15c54b6e4c98b278b9b121ebbd431f87d3f6c"
  },
  "mutations": [
   {
@@ -134,10 +134,10 @@
    "new": "        elif False:\n            s_ = s_.replace(\",\", \".\")"
   },
   {
-   "name": "잘린 숫자의 띠도 받는다",
+   "name": "잘린 숫자도 받는다",
    "file": "axis_reader.py",
-   "old": "                    if any(cl for _v, _r, cl in trip):\n                        continue",
-   "new": "                    if False:\n                        continue"
+   "old": "                    pairs = [(v, r) for v, r, cl in trip if not cl]",
+   "new": "                    pairs = [(v, r) for v, r, cl in trip]"
   },
   {
    "name": "두 번째 패스가 없다",
@@ -172,14 +172,44 @@
   {
    "name": "낱말 왼쪽에 선 것을 보지 않는다",
    "file": "axis_reader.py",
-   "old": "            if not s_.startswith(\"-\") and wl - 2 > 0:\n                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())",
-   "new": "            if False:\n                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())"
+   "old": "            if not s_.startswith(\"-\") and wl - 2 > 0:\n                if dark[mid, max(0, wl - look):wl - 2].any():",
+   "new": "            if False:\n                if dark[mid, max(0, wl - look):wl - 2].any():"
   },
   {
    "name": "the sign is dropped at the parse",
    "file": "axis_reader.py",
    "old": "                found[key] = (float(s_), row, c, clipped)",
    "new": "                found[key] = (abs(float(s_)), row, c, clipped)"
+  },
+  {
+   "name": "잘린 숫자가 띠를 통째로 데려간다",
+   "file": "axis_reader.py",
+   "old": "                    if any(cl == CLIP_STRIP for _v, _r, cl in trip):",
+   "new": "                    if any(cl for _v, _r, cl in trip):"
+  },
+  {
+   "name": "가장자리의 잘림도 낱말만 버린다",
+   "file": "axis_reader.py",
+   "old": "                    if any(cl == CLIP_STRIP for _v, _r, cl in trip):\n                        continue",
+   "new": "                    if False:\n                        continue"
+  },
+  {
+   "name": "낱말이 어디서 시작하든 글자를 잃은 것으로 친다",
+   "file": "axis_reader.py",
+   "old": "                    clipped = CLIP_STRIP if wl - int(left) <= 2 * look else CLIP_WORD",
+   "new": "                    clipped = CLIP_WORD"
+  },
+  {
+   "name": "낱말이 어디서 시작하든 띠가 자른 것으로 친다",
+   "file": "axis_reader.py",
+   "old": "                    clipped = CLIP_STRIP if wl - int(left) <= 2 * look else CLIP_WORD",
+   "new": "                    clipped = CLIP_STRIP"
+  },
+  {
+   "name": "두 배율의 잘림 판정은 먼저 본 것이 이긴다",
+   "file": "axis_reader.py",
+   "old": "    if CLIP_STRIP in (a, b):\n        return CLIP_STRIP\n    return a or b",
+   "new": "    return a or b"
   }
  ]
 }

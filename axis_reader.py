@@ -1985,6 +1985,22 @@ def numeral(txt, comma=False):
     return s_
 
 
+#: What `_ocr_numerals` says about a numeral it does not trust. `CLIP_STRIP`
+#: is a cut at the strip's edge and condemns the strip; `CLIP_WORD` is a glyph
+#: tesseract dropped inside it and condemns the word. Both are true-valued so
+#: "is it clipped at all" is still `if clipped`.
+CLIP_NONE = False
+CLIP_WORD = "word"
+CLIP_STRIP = "strip"
+
+
+def _worse_clip(a, b):
+    """The graver of two clip verdicts: a cut outranks a dropped glyph."""
+    if CLIP_STRIP in (a, b):
+        return CLIP_STRIP
+    return a or b
+
+
 def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
                   with_clip=False, margin=0):
     """[(value, row)] for every numeral tesseract finds in a strip, sign included.
@@ -2001,6 +2017,17 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
     "250 225 200" as "50 25 0" and "1400 1200 1000" as "400 200 0" - still an
     arithmetic ladder, still accepted, and the whole panel is then rescaled by
     a digit. Five of sixty panels this project had read at 600 DPI were that.
+
+    `clipped` says WHICH of two things happened, because they cost different
+    words. `CLIP_STRIP`: the word begins at the strip's own edge, so the strip
+    cut the label - and the same cut crosses every right-aligned label of that
+    width, whether or not the guard could see it on each (a cut just after a
+    decimal point leaves nothing on the middle rows: publication RS-5362092's
+    `0.74 0.72 0.70` came back `74 72 70` unflagged beside a flagged `0.68`).
+    The strip is not trusted. `CLIP_WORD`: the word begins well inside the
+    strip and still has ink to its left, so tesseract dropped a glyph - a
+    detached minus, mostly - and the strip's other words were read whole.
+    Only that word goes.
     """
     if right - left < 8 or bottom - top < 20:
         return []
@@ -2061,18 +2088,23 @@ def _ocr_numerals(img, dark, left, right, top, bottom, scale=3, comma=False,
             # the wider strip that holds the neighbour is read instead. (A
             # two-pixel look past the edge on every row came first and was
             # found to see nothing this does not.)
-            clipped = False
+            clipped = CLIP_NONE
             wl = int(left + l_ / float(scale))
             look = max(3, int(0.6 * (wb - wt)))
             third = (wb - wt) // 3
             mid = slice(max(0, wt + third), max(1, wb - third))
             if not s_.startswith("-") and wl - 2 > 0:
-                clipped = bool(dark[mid, max(0, wl - look):wl - 2].any())
+                if dark[mid, max(0, wl - look):wl - 2].any():
+                    # AT THE EDGE OR INSIDE. A word that starts within two
+                    # looks of the strip's left edge was cut by the strip;
+                    # one that starts further in lost a glyph to tesseract.
+                    clipped = CLIP_STRIP if wl - int(left) <= 2 * look else CLIP_WORD
             # And on the right: a label whose last digit runs under the strip's
             # right edge reads "200" as "20", which is the same digit lost by
             # the other door. Ink just past the edge on the word's rows says so.
             if (l_ + w_) / float(scale) >= (right - left) - 3.0 and int(right) + 2 <= dark.shape[1]:
-                clipped = clipped or bool(dark[rows_, int(right):int(right) + 2].any())
+                if dark[rows_, int(right):int(right) + 2].any():
+                    clipped = CLIP_STRIP
             if key not in found or c > found[key][2]:
                 found[key] = (float(s_), row, c, clipped)
     out = sorted(found.values(), key=lambda p: p[1])
@@ -2230,7 +2262,7 @@ def scale_for(panel_height, scale=3, tuned=_TUNED_PANEL_PX):
 def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma,
             seen, tight=False, margin=0):
     """The strip search at one setting: the numerals of the first strip that
-    ladder, else the longest read - clipped strips counting for neither."""
+    ladder, else the longest read - clipped numerals counting for neither."""
     x0, x1, y0, y1 = box
     best = []
     wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
@@ -2286,19 +2318,24 @@ def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma
                                 elif k not in merged:
                                     merged[k] = (v, row, cl)
                                 elif merged[k]:
-                                    merged[k] = (v, row, merged[k][2] or cl)
+                                    merged[k] = (v, row, _worse_clip(merged[k][2], cl))
                         trip = sorted((p for p in merged.values() if p),
                                       key=lambda p: p[1])
-                    pairs = [(v, r) for v, r, _cl in trip]
-                    # A CLIPPED NUMERAL DISQUALIFIES THE STRIP - as a ladder
-                    # and as a fallback. The ladder it forms can be perfect
-                    # and still be every label with its first digit cut off,
-                    # and a "longest read" handed back with a digit missing is
-                    # the same wrong answer by another door: publication
-                    # PIIS1566070202001327's `0,9 .. 0,1` came back `9 .. 1`
-                    # that way. The next, wider strip reads the whole label.
-                    if any(cl for _v, _r, cl in trip):
+                    # A CUT STRIP IS DROPPED WHOLE; A DROPPED GLYPH COSTS ITS
+                    # WORD. A ladder read through a cut can be perfect and
+                    # still be every label with its first digit gone, and a
+                    # "longest read" with a digit missing is the same wrong
+                    # answer by another door: publication PIIS1566070202001327's
+                    # `0,9 .. 0,1` came back `9 .. 1` that way. The cut crosses
+                    # every label of the column, seen or not, so one `CLIP_STRIP`
+                    # condemns the strip. A `CLIP_WORD` is tesseract dropping a
+                    # glyph inside the strip - publication S41467-023-41990-4's
+                    # ECW axis, `5 0 -5 -10`, lost the minus of -5 in a strip
+                    # that held all four labels whole; thrown away with the
+                    # strip, the axis went unread. Only that word goes.
+                    if any(cl == CLIP_STRIP for _v, _r, cl in trip):
                         continue
+                    pairs = [(v, r) for v, r, cl in trip if not cl]
                     if ladder(pairs)[0]:
                         return pairs
                     if len(pairs) > len(best):

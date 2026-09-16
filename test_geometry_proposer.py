@@ -618,6 +618,20 @@ _offband = sum(1 for x in range(_W) for y in range(_H)
 check("and the value is written clear of the tick line, where a minus can be seen",
       len(_bars) >= 3 and _offband > 0 and _onband == 0,
       "bars %d, differs on the tick line %d px, off it %d px" % (len(_bars), _onband, _offband))
+# REVERT: write every value above its tick. The top tick sits at the frame's
+# top edge, and the text above it leaves through the crop: the one value a
+# confirmer most needs to see was the one cut in half (GISOLF 2005, 120).
+_ty0 = int(_row["Panel_Y0"])
+_top = GP.apply_reading(dict(_row, Region="%s,%d,%s,%s" % (_row["Panel_X0"], _ty0, _row["Panel_X1"], _row["Panel_Y1"])),
+                        *GP.values_from_ladder([(30.0, float(_ty0)), (20.0, _ty0 + 100.0), (10.0, _ty0 + 200.0)]))
+_tpic = Image.open(GP.proposal_overlay(_im, _top, os.path.join(ROOT, "top.png"))).convert("RGB")
+_tpx = _tpic.load()
+_above = sum(1 for x in range(_tpic.size[0]) for y in range(min(10, _tpic.size[1]))
+             if _tpx[x, y] == (190, 60, 190))
+_anywhere = sum(1 for x in range(_tpic.size[0]) for y in range(_tpic.size[1])
+                if _tpx[x, y] == (190, 60, 190))
+check("a value at the frame's top edge is written inside the picture, not out through the crop",
+      _anywhere > 0 and _above == 0, "%d magenta px in the top rows" % _above)
 
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is

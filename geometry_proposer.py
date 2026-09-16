@@ -894,6 +894,8 @@ def proposal_overlay(image, row, out_path):
     # INSIDE the frame, not outside it. Written past the right edge it lands on
     # the neighbouring panel, which is where this was drawn first and where a
     # reader confirming panel 2 was shown panel 3's numbers.
+    region = [int(v) for v in _s(row.get("Region")).split(",")] \
+        if _s(row.get("Region")) else None
     reading = read_values_of(row)
     if reading:
         # SIZED TO THE PANEL. A 12 px default on a 4000 px raster is a smudge,
@@ -910,7 +912,14 @@ def proposal_overlay(image, row, out_path):
             # that flips every value in the panel is the one glyph a person
             # cannot see. Publication S0094576505000263's axis, -1 .. -0.3,
             # read correctly and was drawn without a single minus.
-            draw.text((x0 + 20, y - size - 3), "%g" % value,
+            # And inside the picture. The top tick sits at the frame's top
+            # edge, and text written above it leaves through the crop: the
+            # one value a confirmer most needs to see was the one cut in
+            # half. Below the line for that tick, above it for the rest.
+            ty = y - size - 3
+            if region and ty < region[1]:
+                ty = y + 4
+            draw.text((x0 + 20, ty), "%g" % value,
                       fill=(190, 60, 190), font=font)
     # TWO READINGS, TWO COLOURS. Drawn the same, a person cannot tell which
     # detector put a line where, and "the anchors look right" stops being a
@@ -932,8 +941,6 @@ def proposal_overlay(image, row, out_path):
         x = int(float(anchor))
         draw.line((x, y1, x, min(canvas.height - 1, y1 + stub)),
                   fill=(190, 60, 190), width=5)
-    region = [int(v) for v in _s(row.get("Region")).split(",")] \
-        if _s(row.get("Region")) else None
     if region:
         # ENOUGH ROOM FOR WHAT IS DRAWN OUTSIDE THE FRAME. The anchor stubs hang
         # below the baseline, and a crop that cuts them off is a crop that hides

@@ -1094,12 +1094,39 @@ def proposal_overlay(image, row, out_path, shared_ticks=None):
         # ENOUGH ROOM FOR WHAT IS DRAWN OUTSIDE THE FRAME. The anchor stubs hang
         # below the baseline, and a crop that cuts them off is a crop that hides
         # the reading it was made to show.
-        pad = max(12, stub + 6)
-        canvas = canvas.crop((max(0, region[0] - pad), max(0, region[1] - pad),
+        pad = overlay_pad(row)
+        ox, oy = overlay_origin(row)
+        canvas = canvas.crop((ox, oy,
                               min(canvas.width, region[2] + pad),
                               min(canvas.height, region[3] + pad)))
     canvas.save(out_path)
     return out_path
+
+
+def overlay_pad(row):
+    """How far the overlay's crop reaches past the region, in raster pixels."""
+    try:
+        y0, y1 = int(row["Panel_Y0"]), int(row["Panel_Y1"])
+    except (KeyError, TypeError, ValueError):
+        return 12
+    stub = max(4, (y1 - y0) // 30)
+    return max(12, stub + 6)
+
+
+def overlay_origin(row):
+    """(x, y): where the overlay's top-left corner sits on the raster.
+
+    The one place the crop is defined. The confirmation page lets a person
+    point at a tick on the overlay, and the row they pointed at is a raster
+    row only through this offset; a page that guessed it would put every
+    pointed tick a pad's width off, with nothing to say so.
+    """
+    region = [int(v) for v in _s(row.get("Region")).split(",")] \
+        if _s(row.get("Region")) else None
+    if not region:
+        return 0, 0
+    pad = overlay_pad(row)
+    return max(0, region[0] - pad), max(0, region[1] - pad)
 
 
 def main(argv=None):

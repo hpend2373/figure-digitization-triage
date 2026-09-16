@@ -727,6 +727,20 @@ _orange0 = sum(1 for x in range(_plain.size[0]) for y in range(_plain.size[1])
 check("the neighbour's tick rows are drawn on this panel in their own colour",
       _orange > 0 and _orange0 == 0, "%d / %d" % (_orange, _orange0))
 
+# WHERE THE OVERLAY SITS ON THE RASTER. The page lets a person point at a
+# tick on the overlay; the row they pointed at is a raster row only through
+# this offset. REVERT: let the page guess the pad - every pointed tick lands
+# a pad's width off, with nothing to say so.
+print()
+print("the overlay's origin is stated, and it is where the crop was cut")
+_reg = dict(_row, Region="%d,%d,%d,%d" % (int(_row["Panel_X0"]) - 30, int(_row["Panel_Y0"]) - 25,
+                                           int(_row["Panel_X1"]) + 30, int(_row["Panel_Y1"]) + 25))
+_opic = Image.open(GP.proposal_overlay(_im, _reg, os.path.join(ROOT, "origin.png"))).convert("RGB")
+_ox, _oy = GP.overlay_origin(_reg)
+_edge = _opic.getpixel((int(_reg["Panel_X1"]) - _ox, int(_reg["Panel_Y0"]) + 50 - _oy))
+check("the frame's right edge is at Panel_X1 minus the origin", _edge == (200, 30, 30), "%s" % (_edge,))
+check("and a row without a region starts at the raster's corner", GP.overlay_origin(dict(_reg, Region="")) == (0, 0))
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 import shutil                                                    # noqa: E402

@@ -187,6 +187,20 @@ check("친 값 -40과 짝의 값 40은 다른 말이다",
           Confirmed_Tick_Values="0@10;40@90")])[1]))
 
 print()
+print("짝의 행은 프레임 안이어야 한다")
+# REVERT: 어느 행이든 받는다. 사람이 그림에 찍은 줄은 어디든 찍힐 수 있고,
+# 프레임이 제목 상자에 잡힌 패널에서 진짜 축을 찍으면 틀린 프레임에 맞는
+# 눈금이 붙어 "맞다"로 적힙니다. 프레임이 틀린 것의 답은 "틀렸다"입니다.
+check("프레임 안의 짝은 적힌다",
+      not run([answer(Confirmed_Tick_Values="30@10;10@90")])[1])
+check("프레임 선 바로 밖(높이의 1/10 안)은 프레임 안이다",
+      not run([answer(Confirmed_Tick_Values="30@-5;10@160")])[1],
+      "%s" % codes(run([answer(Confirmed_Tick_Values="30@-5;10@160")])[1]))
+_far = run([answer(Confirmed_Tick_Values="30@10;10@400")])[1]
+check("멀리 밖의 짝은 거절한다", "CALIBRATION_ROW_OUTSIDE_FRAME" in codes(_far), "%s" % codes(_far))
+check("어느 행이 밖인지 말한다", any("400" in why for _n, ps in _far for c, why in ps if c == "CALIBRATION_ROW_OUTSIDE_FRAME"))
+
+print()
 print("축을 나눠 쓰는 패널은 빌려주는 패널의 짝을 옮겨 적는다")
 # REVERT: 그런 답이 없다. Day/Night, 왼쪽/오른쪽 열 패널은 눈금도 숫자도 없어서
 # 사람이 값을 지어내거나 보류로 남깁니다.

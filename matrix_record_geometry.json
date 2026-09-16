@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_geometry.py": "cd558548cc03fd08a2f1317b0a27bbd56b416f8685dd13f5c9ceb5d7892b510c",
-  "test_record_geometry.py": "8e117061cd395b2e4f81a2465beb724a66afb64a2c5653efbcb52dcf2eaccf68"
+  "record_geometry.py": "7fcd08b8691c7efbd64f10dc67520318f4fd27218045b924453ef3ec10872f44",
+  "test_record_geometry.py": "1330ec457cba84808748eb626cde8a302aa6c1baca205c6f1985de88b8b65f80"
  },
  "suites": [
   "test_record_geometry.py"
@@ -180,6 +180,18 @@
    "file": "record_geometry.py",
    "old": "            TARGET: (answer.get(TARGET) or \"\").strip(),",
    "new": "            TARGET: \"\","
+  },
+  {
+   "name": "프레임 밖의 짝도 적는다",
+   "file": "record_geometry.py",
+   "old": "                if outside:\n                    problems.append((\"CALIBRATION_ROW_OUTSIDE_FRAME\",",
+   "new": "                if False:\n                    problems.append((\"CALIBRATION_ROW_OUTSIDE_FRAME\","
+  },
+  {
+   "name": "프레임 선 위의 눈금을 밖이라고 한다",
+   "file": "record_geometry.py",
+   "old": "    slack = abs(y1 - y0) * FRAME_SLACK",
+   "new": "    slack = 0"
   }
  ]
 }

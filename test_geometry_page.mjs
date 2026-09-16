@@ -212,6 +212,63 @@ test('값을 확인한 줄에는 공유 칸이 비어 있다', () => {
   assert.equal(L.verdictOf('GP001', state({ sharedWith: 'GP003' })).row.Y_Axis_Shared_With, '');
 });
 
+/* 사람이 그림에 찍은 눈금. 리더가 눈금을 못 잰 패널 - 프레임은 맞는데
+ * 눈금이 안 잡히거나 아예 없는 것 - 은 값을 붙일 행이 없어서 막혔습니다.
+ * 975장 중 108장. 사람이 맨 위·맨 아래 눈금을 그림에 찍으면 그 행에 값이
+ * 붙습니다. */
+function noticks(over) {
+  return unread(Object.assign({ topPixel: '', bottomPixel: '',
+                                frameTop: 100, frameBottom: 500 }, over || {}));
+}
+test('눈금 행이 없는 제안은 찍어 달라고 말한다', () => {
+  const got = L.verdictOf('GP002', noticks({ top: '40', bottom: '0' }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /찍어 주세요/);
+});
+test('찍은 두 줄에 친 값이 붙는다', () => {
+  const got = L.verdictOf('GP002', noticks({ top: '40', bottom: '0',
+                                             pickedTopPixel: 120, pickedBottomPixel: 480 }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Confirmed_Tick_Values, '40@120;0@480');
+  assert.equal(got.row.Value_Source, 'TYPED_PICKED');
+});
+/* REVERT: 잰 눈금이 있으면 찍은 줄을 무시한다. 잰 눈금이 틀린 자리에
+ * 있어서(프레임 선을 눈금으로 잰 것) 사람이 다시 찍은 것인데 잰 것에
+ * 붙습니다. */
+test('찍은 줄은 잰 눈금보다 앞선다', () => {
+  const got = L.verdictOf('GP002', unread({ top: '40', bottom: '0', frameTop: 100, frameBottom: 500,
+                                            pickedTopPixel: 130, pickedBottomPixel: 470 }));
+  assert.equal(got.row.Confirmed_Tick_Values, '40@130;0@470');
+});
+test('한 줄만 찍었으면 잰 눈금에 붙는다', () => {
+  const got = L.verdictOf('GP002', unread({ top: '40', bottom: '0', pickedTopPixel: 130 }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Confirmed_Tick_Values, '40@100;0@400');
+  assert.equal(got.row.Value_Source, 'TYPED');
+});
+/* REVERT: 같은 행에 두 번 찍은 것을 받는다. 축척이 0으로 나뉩니다. */
+test('찍은 두 줄이 같은 행이면 답이 아니다', () => {
+  const got = L.verdictOf('GP002', noticks({ top: '40', bottom: '0',
+                                             pickedTopPixel: 300, pickedBottomPixel: 300 }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /같은 행/);
+});
+/* REVERT: 프레임 밖에 찍은 줄을 받는다. 프레임이 제목 상자에 잡힌 패널에서
+ * 사람이 진짜 축을 찍으면, 틀린 프레임에 맞는 눈금이 붙어 "맞다"로 나갑니다.
+ * 프레임이 틀린 것의 답은 "틀렸다"입니다. */
+test('프레임 밖에 찍은 줄은 답이 아니다', () => {
+  const got = L.verdictOf('GP002', noticks({ top: '40', bottom: '0',
+                                             pickedTopPixel: 20, pickedBottomPixel: 480 }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /프레임 밖/);
+});
+test('프레임 선 바로 위아래는 프레임 안이다', () => {
+  assert.equal(L.rowsInsideFrame(95, 505, 100, 500), true);
+  assert.equal(L.rowsInsideFrame(40, 505, 100, 500), false);
+  // 프레임을 모르는 상태(옛 저장)는 묻지 않습니다
+  assert.equal(L.rowsInsideFrame(40, 505, '', ''), true);
+});
+
 /* REVERT: 만들어진 축이 어느 쪽으로 커지는지 되읽어 주지 않는다. 리더가 읽지
  * 못한 축에서는 방향을 견줄 데가 없어서 막을 근거도 없고, 그러면 남는 방법은
  * 사람이 자기가 방금 무엇을 말했는지 보는 것뿐입니다. */

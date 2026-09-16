@@ -79,6 +79,22 @@ def _numeric(*values):
     return True
 
 
+#: 프레임 높이의 이만큼은 프레임 밖이어도 봐줍니다 - 눈금이 프레임 선 바로
+#: 위아래에 찍히는 것은 흔합니다. `geometry_page.js`의 FRAME_SLACK과 같습니다.
+FRAME_SLACK = 0.10
+
+
+def rows_outside_frame(proposal, rows):
+    """프레임(위·아래 행 ± 여유) 밖에 선 픽셀 행들. 프레임을 모르면 빈 목록."""
+    try:
+        y0, y1 = float(proposal["Panel_Y0"]), float(proposal["Panel_Y1"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    slack = abs(y1 - y0) * FRAME_SLACK
+    lo, hi = min(y0, y1) - slack, max(y0, y1) + slack
+    return [r for r in rows if r < lo or r > hi]
+
+
 def load_proposals(proposals):
     """{Proposal_ID: 제안 행} - 이 관문이 답을 붙일 수 있는 유일한 것."""
     path = os.path.join(proposals, PROPOSALS)
@@ -211,6 +227,18 @@ def check_answer(answer, proposed):
                                  "적으신 값(%s, %s)과 짝의 값(%s)이 다릅니다."
                                  % (top, bottom,
                                     ", ".join("%g" % v for v, _px in pairs))))
+            # 그리고 짝의 행이 이 프레임 안에 있는지. 사람이 그림에 찍은 줄은
+            # 어디든 찍힐 수 있고, 페이지가 먼저 막지만 답 CSV는 손으로 고칠
+            # 수 있는 파일입니다. 프레임 밖의 눈금은 이 프레임의 눈금이 아니고,
+            # 프레임이 틀린 것의 답은 "틀렸다"입니다.
+            if pid in proposed:
+                outside = rows_outside_frame(proposed[pid], [px for _v, px in pairs])
+                if outside:
+                    problems.append(("CALIBRATION_ROW_OUTSIDE_FRAME",
+                                     "짝의 픽셀 행 %s이 이 제안의 프레임(%s..%s) 밖입니다. "
+                                     "프레임이 틀렸다면 답은 REJECTED입니다."
+                                     % (", ".join("%g" % r for r in outside),
+                                        proposed[pid].get("Panel_Y0"), proposed[pid].get("Panel_Y1"))))
     elif verdict != SHARED and (top or bottom or pairs):
         # 거절과 보류에 값이 붙어 왔습니다. 붙은 값이 무엇을 뜻하는지 - 틀린
         # 프레임에서 읽은 값인지, 고쳐 준 값인지 - 이 관문은 모릅니다.

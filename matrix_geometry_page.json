@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "ab3e2810996a510957813f06766df82301decba349ff49e72b8a6a5de395274e",
-  "test_geometry_page.py": "160802930ad6a7979a2130ab1ea56783097327c48cfc966df035e7ecc3d04bed"
+  "geometry_page.py": "4e4f893dc4b09a2dee3fcc50e40bba836d6dcab467ecce6aa825d77e8dbe1842",
+  "test_geometry_page.py": "d67633cc6a512aad38b5d9845209fe20a214586a7173af06db7880769de6f12e"
  },
  "suites": [
   "test_geometry_page.py"
@@ -58,14 +58,14 @@
   {
    "name": "어느 눈금 행인지 보여 주지 않는다",
    "file": "geometry_page.py",
-   "old": "      % ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \"\", esc(pid),",
-   "new": "      % (\"\", esc(pid),"
+   "old": "      % ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \" (잰 눈금 없음)\", esc(pid),\n         (\" (픽셀 행 %s)\" % esc(marks[-1])) if marks else \" (잰 눈금 없음)\", esc(pid),",
+   "new": "      % (\" (잰 눈금 없음)\", esc(pid),\n         \" (잰 눈금 없음)\", esc(pid),"
   },
   {
    "name": "바꿔 적으면 어떻게 되는지 말하지 않는다",
    "file": "geometry_page.py",
-   "old": "      \"위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>\"",
-   "new": "      \"</div></div>\""
+   "old": "      \"위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div>\"",
+   "new": "      \"</div>\""
   },
   {
    "name": "다른 패널 축을 쓴다는 답이 없다",
@@ -114,6 +114,30 @@
    "file": "geometry_page.py",
    "old": "        if cur and of - len(bins) > 1 and \\\n                abs(len(cur) + len(groups[key]) - target) > abs(len(cur) - target):",
    "new": "        if cur and of - len(bins) > 1 and \\\n                len(cur) + len(groups[key]) > target:"
+  },
+  {
+   "name": "오버레이의 원점을 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"originY\": GP.overlay_origin(row)[1],",
+   "new": "            \"originY\": 0,"
+  },
+  {
+   "name": "프레임의 행을 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"frameTop\": (row.get(\"Panel_Y0\") or \"\").strip(),",
+   "new": "            \"frameTop\": \"\","
+  },
+  {
+   "name": "찍는 단추가 없다",
+   "file": "geometry_page.py",
+   "old": "      \"<div class='sub'><button class='pickbtn' data-arm-top='%s'>맨 위 눈금 찍기</button>\"",
+   "new": "      \"<div class='sub'>\""
+  },
+  {
+   "name": "눈금 없는 패널도 잰 것처럼 보인다",
+   "file": "geometry_page.py",
+   "old": "% ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \" (잰 눈금 없음)\", esc(pid),",
+   "new": "% ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \"\", esc(pid),"
   }
  ]
 }

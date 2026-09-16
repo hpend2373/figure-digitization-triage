@@ -58,6 +58,18 @@ function isNumber(v) {
   return v !== '' && isFinite(Number(v));
 }
 
+/* 찍은 두 줄이 프레임 안에 있는가. 프레임 높이의 1/10만큼은 봐줍니다 -
+ * 눈금이 프레임 선 바로 위아래에 찍히는 것은 흔합니다. 프레임을 모르면
+ * (옛 페이지의 상태) 묻지 않습니다. */
+var FRAME_SLACK = 0.10;
+function rowsInsideFrame(a, b, frameTop, frameBottom) {
+  if (!isNumber(frameTop) || !isNumber(frameBottom)) return true;
+  var t = Number(frameTop), bt = Number(frameBottom);
+  var slack = Math.abs(bt - t) * FRAME_SLACK;
+  var lo = Math.min(t, bt) - slack, hi = Math.max(t, bt) + slack;
+  return a >= lo && a <= hi && b >= lo && b <= hi;
+}
+
 /* 'v@px;v@px' -> [[v,px],...]. 리더가 읽은 짝도, 사람이 확인한 짝도 같은 모양
  * 입니다 - 계산이 쓰는 것은 값이 아니라 값과 그 값이 붙은 픽셀 행입니다. */
 function parsePairs(text) {
@@ -103,6 +115,9 @@ function directionWord(pairs) {
  *   bottomPixel 맨 아래 눈금의 픽셀 행.
  *   sharedWith  SHARED일 때, 축을 빌려 오는 패널의 Proposal_ID.
  *   siblings    같은 래스터의 다른 패널들. 있으면 sharedWith는 그 안이어야 합니다.
+ *   pickedTopPixel / pickedBottomPixel  사람이 그림에 찍은 두 줄(래스터 행).
+ *               둘 다 있으면 잰 눈금 대신 이것에 값이 붙습니다.
+ *   frameTop / frameBottom  프레임의 위·아래 행. 찍은 줄은 이 안이어야 합니다.
  *
  * 돌려주는 것 = { ready, why, row }
  */
@@ -167,15 +182,31 @@ function verdictOf(id, state) {
                  why: '맨 위 눈금과 맨 아래 눈금이 무엇인지 적어 주세요 - 리더가 읽지 못했습니다',
                  row: null };
       }
-      if (!isNumber(s.topPixel) || !isNumber(s.bottomPixel)
-          || Number(s.topPixel) === Number(s.bottomPixel)) {
-        return { ready: false, why: '이 제안에는 값을 붙일 눈금 행이 없습니다', row: null };
+      // 값이 붙는 행. 사람이 그림에 찍은 두 줄이 있으면 그것이고, 없으면
+      // 리더가 잰 눈금의 양 끝입니다. 리더가 눈금을 못 잰 패널(프레임은
+      // 맞는데 눈금이 없거나 안 잡힌 것)은 찍은 줄이 있어야 답이 됩니다.
+      var picked = isNumber(s.pickedTopPixel) && isNumber(s.pickedBottomPixel);
+      var rowTop = picked ? Number(s.pickedTopPixel) : s.topPixel;
+      var rowBottom = picked ? Number(s.pickedBottomPixel) : s.bottomPixel;
+      if (!isNumber(rowTop) || !isNumber(rowBottom) || Number(rowTop) === Number(rowBottom)) {
+        return { ready: false,
+                 why: picked ? '찍은 두 줄이 같은 행입니다'
+                             : '이 제안에는 값을 붙일 눈금 행이 없습니다 — 그림에서 맨 위·맨 아래 눈금을 찍어 주세요',
+                 row: null };
+      }
+      if (picked && !rowsInsideFrame(rowTop, rowBottom, s.frameTop, s.frameBottom)) {
+        // 찍은 줄이 프레임 밖이면 이 프레임의 눈금이 아닙니다. 프레임이
+        // 틀린 것이면 답은 "틀렸다"이지, 다른 프레임의 눈금을 이 프레임에
+        // 붙이는 것이 아닙니다.
+        return { ready: false,
+                 why: '찍은 줄이 프레임 밖입니다 — 프레임이 틀렸다면 "틀렸다"를 골라 주세요',
+                 row: null };
       }
       top = typedTop;
       bottom = typedBottom;
-      pairs = [[Number(top), Number(s.topPixel)],
-               [Number(bottom), Number(s.bottomPixel)]];
-      source = 'TYPED';
+      pairs = [[Number(top), Number(rowTop)],
+               [Number(bottom), Number(rowBottom)]];
+      source = picked ? 'TYPED_PICKED' : 'TYPED';
     }
     if (Number(top) === Number(bottom)) {
       return { ready: false, why: '맨 위 눈금과 맨 아래 눈금이 같으면 축이 아닙니다', row: null };
@@ -263,6 +294,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { VERDICTS: VERDICTS, NEEDS_VALUES: NEEDS_VALUES, HELD: HELD, SHARED: SHARED,
                      needsValues: needsValues, valueOf: valueOf,
                      parsePairs: parsePairs, slopeSign: slopeSign,
+                     rowsInsideFrame: rowsInsideFrame, FRAME_SLACK: FRAME_SLACK,
                      directionWord: directionWord,
                      verdictOf: verdictOf, buildCsv: buildCsv,
                      CSV_COLUMNS: CSV_COLUMNS, remaining: remaining, held: held };

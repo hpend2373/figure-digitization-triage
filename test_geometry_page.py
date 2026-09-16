@@ -42,7 +42,7 @@ os.makedirs(PROP)
 #: 리더가 읽어 낸 제안 하나와 거절한 제안 하나. 이 페이지의 두 가지 줄이고,
 #: 사람이 하는 일이 서로 다릅니다.
 READ = {
-    "Proposal_ID": "GP001", "Raster": "fig.png",
+    "Proposal_ID": "GP001", "Raster": "fig.png", "Region": "40,30,220,180",
     "Panel_X0": "10", "Panel_X1": "200", "Panel_Y0": "5", "Panel_Y1": "150",
     "Y_Tick_Pixels": "10;50;90", "Y_Tick_Count": "3",
     "Y_Tick_Read_Status": GP.READ_OK,
@@ -153,6 +153,26 @@ check("형제 목록도 논리로 건너간다",
 check("후보와 그 까닭이 카드에 보인다",
       "축 공유 후보:</b> GP001" in HTML and "프레임 위아래 차 2 px" in HTML)
 check("후보의 눈금 색이 무슨 뜻인지 적혀 있다", "축 공유 후보 패널의 눈금 행" in HTML)
+
+print()
+print("눈금을 못 잰 패널은 사람이 그림에 찍는다")
+# REVERT: 찍을 수 없다. 프레임은 맞는데 눈금이 없거나 안 잡힌 패널은 값을 붙일
+# 행이 없어서 막힙니다 - 975장 중 108장.
+check("그림에 찍는 단추와 찍은 줄이 카드에 있다",
+      "data-arm-top='GP001'" in HTML and "data-arm-bottom='GP001'" in HTML
+      and "data-mark-top='GP001'" in HTML and "data-unpick='GP001'" in HTML)
+check("눈금 없는 패널은 위·아래 둘 다 그렇다고 말한다",
+      re.search(r"data-id='GP003'.*?data-id='GP004'", HTML, re.S).group(0).count("(잰 눈금 없음)") == 2)
+# REVERT: 오버레이의 원점을 페이지가 짐작한다. 찍은 줄이 전부 여백만큼 어긋납니다.
+_origin = GP.overlay_origin(READ)
+check("오버레이의 원점은 제안 모듈이 말한 대로 논리로 건너간다",
+      _origin[1] > 0 and (('"originY": %d' % _origin[1]) in HTML or ('"originY":%d' % _origin[1]) in HTML),
+      "%s" % (_origin,))
+check("프레임의 위·아래 행도 건너간다",
+      ('"frameTop": "5"' in HTML or '"frameTop":"5"' in HTML)
+      and ('"frameBottom": "150"' in HTML or '"frameBottom":"150"' in HTML))
+check("찍은 줄이 프레임 밖이면 어떻게 하라는지 적혀 있다",
+      "프레임 밖이면" in HTML.split("<script>")[0])
 
 print()
 print("조각은 그림을 자르지 않는다")

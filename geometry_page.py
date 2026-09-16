@@ -165,6 +165,14 @@ def build(proposals, log=print, chunk=1, of=1):
 .who{margin:8px 0}
 .shared{background:#fff6ec;border-left-color:#e67814}
 .share select{max-width:100%}
+.pickwrap{position:relative;display:inline-block}
+.pickwrap.arming img{cursor:crosshair;outline:2px solid #1e64c8}
+.mark{position:absolute;left:0;right:0;height:0;border-top:2px dashed #1e64c8;
+      pointer-events:none}
+.mark span{position:absolute;right:2px;top:-14px;font-size:11px;color:#1e64c8;
+           background:#fff;padding:0 3px}
+.pickbtn{font-size:12px;margin-right:4px}
+.pickbtn.on{background:#1e64c8;color:#fff}
 </style>""")
     w("<header><h1>기하 확인%s <span class='count' id='left'></span></h1>"
       % ((" — %d/%d 조각" % (chunk, of)) if of > 1 else ""))
@@ -180,6 +188,10 @@ def build(proposals, log=print, chunk=1, of=1):
       "패널인지 골라 주세요. 그 패널이 확인되면 관문이 그 값을 옮겨 적습니다. "
       "리더가 후보를 댄 패널에는 그 패널의 눈금 행이 주황 점선으로 그려져 있으니, "
       "이 패널의 선과 맞는지 보세요.</p>")
+    w("<p class='note'>리더가 <b>눈금 행을 못 잰</b> 패널(프레임은 맞는데 눈금이 없거나 "
+      "안 잡힌 것)은 값을 붙일 자리가 없습니다. \"맨 위 눈금 찍기\"를 누른 뒤 그림에서 "
+      "그 눈금을 누르고, 아래도 같이 찍은 다음 값을 적어 주세요. 찍은 줄이 프레임 "
+      "밖이면 프레임이 틀린 것이니 <b>\"틀렸다\"</b>를 골라 주세요.</p>")
     w("<p class='note'><b>직접 보셨을 때만</b> 확인 칸을 눌러 주세요 — 고르는 "
       "것은 판단이고, 그 칸은 목격입니다. 그리고 <b>누가 보았는지</b>가 없는 "
       "확인은 확인이 아니라서, 이름을 적기 전에는 답이 되지 않습니다.</p>")
@@ -214,6 +226,12 @@ def build(proposals, log=print, chunk=1, of=1):
             "siblings": [s for s in by_raster.get((row.get("Raster") or "").strip(), [])
                          if s and s != pid],
             "sharedCandidate": (row.get("Y_Axis_Shared_Candidate") or "").strip(),
+            # 사람이 그림에 찍은 줄을 래스터 행으로 옮기는 데 필요한 것: 오버레이의
+            # 원점(제안 모듈이 자른 자리, 짐작하지 않음)과 프레임의 위·아래.
+            "originX": GP.overlay_origin(row)[0],
+            "originY": GP.overlay_origin(row)[1],
+            "frameTop": (row.get("Panel_Y0") or "").strip(),
+            "frameBottom": (row.get("Panel_Y1") or "").strip(),
         }
         w(card(proposals, pid, row, read, meta[pid]["siblings"]))
 
@@ -245,7 +263,12 @@ def card(proposals, pid, row, read, siblings=()):
     w("<div class='figs'><div class='fig'>")
     src = data_url(os.path.join(proposals, "%s.png" % pid))
     if src:
-        w("<img src='%s' alt='%s'>" % (src, esc(pid)))
+        # 그림 위에 사람이 눈금을 찍을 수 있습니다. 찍은 줄은 파란 점선으로
+        # 그림 위에 남고, 래스터 행은 논리로 갑니다.
+        w("<div class='pickwrap' data-pick='%s'><img src='%s' alt='%s'>"
+          "<div class='mark' data-mark-top='%s' hidden><span>맨 위</span></div>"
+          "<div class='mark' data-mark-bottom='%s' hidden><span>맨 아래</span></div></div>"
+          % (esc(pid), src, esc(pid), esc(pid), esc(pid)))
     else:
         w("<div class='nofig'>오버레이 없음 — 확인할 그림이 없습니다</div>")
     w("</div></div>")
@@ -286,9 +309,14 @@ def card(proposals, pid, row, read, siblings=()):
       "맨 <b>아래</b> 눈금%s "
       "<input type='text' data-bottom='%s' placeholder='예: 0'>"
       "<div class='sub'>비워 두면 리더가 읽은 값을 그대로 씁니다. "
-      "위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div></div>"
-      % ((" (픽셀 행 %s)" % esc(marks[0])) if marks else "", esc(pid),
-         (" (픽셀 행 %s)" % esc(marks[-1])) if marks else "", esc(pid)))
+      "위·아래를 바꿔 적으면 그 패널의 모든 값이 뒤집힙니다.</div>"
+      "<div class='sub'><button class='pickbtn' data-arm-top='%s'>맨 위 눈금 찍기</button>"
+      "<button class='pickbtn' data-arm-bottom='%s'>맨 아래 눈금 찍기</button>"
+      "<button class='pickbtn' data-unpick='%s'>찍은 줄 지우기</button> "
+      "<span data-picked='%s'></span></div></div>"
+      % ((" (픽셀 행 %s)" % esc(marks[0])) if marks else " (잰 눈금 없음)", esc(pid),
+         (" (픽셀 행 %s)" % esc(marks[-1])) if marks else " (잰 눈금 없음)", esc(pid),
+         esc(pid), esc(pid), esc(pid), esc(pid)))
     # 어느 패널의 축을 쓰는지. 같은 그림의 패널만 고를 수 있고, 후보가 있으면
     # 미리 골라져 있습니다 - 고르는 것은 목록이고 판정은 위의 답입니다.
     w("<div class='vals share'>축을 쓰는 패널 <select data-shared='%s'>"
@@ -319,7 +347,7 @@ PAGE_JS = r"""
   function st(id) {
     if (!states[id]) {
       states[id] = { verdict: '', top: '', bottom: '', note: '', who: '',
-                     seen: false, sharedWith: '' };
+                     seen: false, sharedWith: '', pickedTopPixel: '', pickedBottomPixel: '' };
     }
     var m = META[id];
     // 리더가 읽은 값과 나갈 이름은 화면이 아니라 페이지가 심어 둔 것에서
@@ -330,6 +358,8 @@ PAGE_JS = r"""
       states[id].topPixel = m.topPixel;
       states[id].bottomPixel = m.bottomPixel;
       states[id].siblings = m.siblings || [];
+      states[id].frameTop = m.frameTop;
+      states[id].frameBottom = m.frameBottom;
       // 리더의 후보는 고르는 칸에 미리 들어갑니다. 판정은 사람이 고릅니다.
       if (!states[id].sharedWith && m.sharedCandidate) {
         states[id].sharedWith = m.sharedCandidate;
@@ -382,6 +412,33 @@ PAGE_JS = r"""
               ff.parentNode.hidden = !needsValues(s.verdict); }
     var ll = q("input[data-bottom=\"" + esc(id) + "\"]");
     if (ll && ll.value !== s.bottom) ll.value = s.bottom;
+    // 찍은 줄. 그림 위의 파란 점선과 칸 옆의 글자, 둘 다 상태에서 옵니다.
+    var wrap = q(".pickwrap[data-pick=\"" + esc(id) + "\"]");
+    if (wrap) {
+      var im = wrap.querySelector('img');
+      var m = META[id] || {};
+      ['top', 'bottom'].forEach(function (end) {
+        var mk = wrap.querySelector('[data-mark-' + end + ']');
+        var px = s[end === 'top' ? 'pickedTopPixel' : 'pickedBottomPixel'];
+        if (!mk) return;
+        if (px === '' || px === null || px === undefined || !im.naturalHeight) { mk.hidden = true; return; }
+        // 래스터 행 -> 화면의 줄. 원점을 빼고 표시 배율을 곱합니다.
+        var y = (Number(px) - Number(m.originY || 0)) * (im.clientHeight / im.naturalHeight);
+        mk.style.top = y + 'px';
+        mk.hidden = false;
+      });
+      wrap.classList.toggle('arming', !!arming[id]);
+      all("button[data-arm-top=\"" + esc(id) + "\"]").forEach(function (b) { b.classList.toggle('on', arming[id] === 'top'); });
+      all("button[data-arm-bottom=\"" + esc(id) + "\"]").forEach(function (b) { b.classList.toggle('on', arming[id] === 'bottom'); });
+    }
+    var pk = q("[data-picked=\"" + esc(id) + "\"]");
+    if (pk) {
+      var parts = [];
+      if (s.pickedTopPixel !== '' && s.pickedTopPixel !== undefined) parts.push('맨 위 찍은 행 ' + s.pickedTopPixel);
+      if (s.pickedBottomPixel !== '' && s.pickedBottomPixel !== undefined) parts.push('맨 아래 찍은 행 ' + s.pickedBottomPixel);
+      pk.textContent = parts.length ? parts.join(' · ') + ' (찍은 줄이 잰 눈금보다 앞섭니다)'
+                                    : (arming[id] ? '그림에서 그 눈금을 눌러 주세요' : '');
+    }
     var sh = q("select[data-shared=\"" + esc(id) + "\"]");
     if (sh) { if (sh.value !== s.sharedWith) sh.value = s.sharedWith;
               sh.parentNode.hidden = s.verdict !== SHARED; }
@@ -409,6 +466,35 @@ PAGE_JS = r"""
   bind('input[data-bottom]', 'data-bottom', function (s, el) { s.bottom = el.value; });
   bind('select[data-shared]', 'data-shared',
        function (s, el) { s.sharedWith = el.value; }, 'change');
+
+  // 눈금 찍기. 단추로 어느 끝인지 정하고, 그림을 누르면 그 줄이 래스터 행으로
+  // 옮겨져 상태에 들어갑니다. 화면의 좌표는 표시 배율과 원점을 거쳐야 래스터
+  // 행이고, 그 둘은 페이지가 심어 둔 것입니다.
+  var arming = {};
+  function arm(end) {
+    return function (s, el) {
+      var id = el.getAttribute(end === 'top' ? 'data-arm-top' : 'data-arm-bottom');
+      arming[id] = arming[id] === end ? '' : end;
+    };
+  }
+  bind('button[data-arm-top]', 'data-arm-top', arm('top'), 'click');
+  bind('button[data-arm-bottom]', 'data-arm-bottom', arm('bottom'), 'click');
+  bind('button[data-unpick]', 'data-unpick',
+       function (s) { s.pickedTopPixel = ''; s.pickedBottomPixel = ''; }, 'click');
+  all('.pickwrap[data-pick]').forEach(function (wrap) {
+    var id = wrap.getAttribute('data-pick');
+    wrap.querySelector('img').addEventListener('click', function (ev) {
+      if (!arming[id]) return;
+      var im = ev.currentTarget, m = META[id] || {};
+      var rect = im.getBoundingClientRect();
+      var yShown = ev.clientY - rect.top;
+      var row = Math.round(Number(m.originY || 0) + yShown * (im.naturalHeight / im.clientHeight));
+      var s = st(id);
+      if (arming[id] === 'top') { s.pickedTopPixel = row; arming[id] = 'bottom'; }
+      else { s.pickedBottomPixel = row; arming[id] = ''; }
+      save(); IDS.forEach(paint);
+    });
+  });
   bind('input[data-who]', 'data-who',
        function (s, el) { s.who = el.value; spreadWho(el.value); });
   bind('input[data-seen]', 'data-seen',

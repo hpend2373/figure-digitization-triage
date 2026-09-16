@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "836727c730ea8b969c5c4080fe665e7a60a05dce7d32a027ddde8729fcd1dbf8",
-  "test_geometry_proposer.py": "5b72dc119a5cbbb941bb45712c5f6519a61461cbf8bd2cb8332d8ca25b6b6bfa"
+  "geometry_proposer.py": "eb321b5cb8cb0f72cefd35e900a25fd8046ae5608596734ca6c7e2c1d546e6d8",
+  "test_geometry_proposer.py": "3c7f3515c0de69ebe5c5f01037d63c327272e138e9d7c101128c46b4a56d0ed9"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -228,6 +228,12 @@
    "file": "geometry_proposer.py",
    "old": "    for y in (shared_ticks or []):",
    "new": "    for y in []:"
+  },
+  {
+   "name": "오버레이의 원점을 여백 없이 말한다",
+   "file": "geometry_proposer.py",
+   "old": "    pad = overlay_pad(row)\n    return max(0, region[0] - pad), max(0, region[1] - pad)",
+   "new": "    return max(0, region[0]), max(0, region[1])"
   }
  ]
 }

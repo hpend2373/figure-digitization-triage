@@ -175,6 +175,19 @@ check("찍은 줄이 프레임 밖이면 어떻게 하라는지 적혀 있다",
       "프레임 밖이면" in HTML.split("<script>")[0])
 
 print()
+print("본 패널은 치울 수 있고, 치워도 답이다")
+# 95장을 한 화면에서 보면 본 것과 안 본 것이 섞입니다. 숨김은 보는 사람의
+# 편의이고 답이 아닙니다 - 숨긴 카드도 세어지고 내려받기에 나갑니다.
+check("카드마다 숨기기 단추가 있다", HTML.count("data-hide='") == COUNT)
+check("답이 된 것을 한꺼번에 숨기고 도로 볼 수 있다",
+      "id='hidedone'" in HTML and "id='showall'" in HTML)
+# REVERT: 숨긴 카드를 내려받기에서 뺀다. 화면이 판정을 하는 것이고, 본 사람은
+# 자기가 뺐다는 것을 모릅니다.
+_dl = re.search(r"q\('#dl'\)\.addEventListener\(.*?\}\);", HTML, re.S).group(0)
+check("내려받기는 숨김을 보지 않는다", "hiddenIds" not in _dl and "buildCsv(IDS, states)" in _dl)
+check("숨김이 답과 다른 자리에 저장된다", "'fdt_geometry_hidden'" in HTML)
+
+print()
 print("조각은 그림을 자르지 않는다")
 # REVERT: 행 수로만 끊는다. 축을 빌리는 패널과 빌려주는 패널이 두 조각에
 # 갈리면 답이 두 파일에 갈리고, 관문은 어느 한쪽을 먼저 적을 수 없습니다.

@@ -173,6 +173,7 @@ def build(proposals, log=print, chunk=1, of=1):
            background:#fff;padding:0 3px}
 .pickbtn{font-size:12px;margin-right:4px}
 .pickbtn.on{background:#1e64c8;color:#fff}
+h2 .hide{font-size:12px;font-weight:normal;margin-left:10px}
 </style>""")
     w("<header><h1>기하 확인%s <span class='count' id='left'></span></h1>"
       % ((" — %d/%d 조각" % (chunk, of)) if of > 1 else ""))
@@ -199,7 +200,12 @@ def build(proposals, log=print, chunk=1, of=1):
       % " &nbsp; ".join("<i style='background:%s'></i>%s" % (c, esc(t))
                         for c, t in KEYS))
     w("<p style='margin:10px 0 0'><button id='dl'>CSV 내려받기</button> "
-      "<span class='count' id='msg'></span></p></header><main>")
+      "<span class='count' id='msg'></span> &nbsp; "
+      # 숨기기는 보는 사람의 편의이고 답이 아닙니다. 숨긴 카드도 세어지고
+      # 내려받기에 나갑니다 - 숨김이 답을 바꾸면 화면이 판정을 하는 것입니다.
+      "<button id='hidedone'>답이 된 패널 숨기기</button> "
+      "<button id='showall'>숨긴 패널 모두 보기</button> "
+      "<span class='count' id='hiddenN'></span></p></header><main>")
 
     for row in rows:
         pid = (row.get("Proposal_ID") or "").strip()
@@ -252,7 +258,9 @@ def card(proposals, pid, row, read, siblings=()):
     out = []
     w = out.append
     w("<div class='doc' data-id='%s'>" % esc(pid))
-    w("<h2>%s</h2>" % esc(pid))
+    w("<h2>%s <button class='hide' data-hide='%s' title='화면에서만 치웁니다. "
+      "답은 그대로 세어지고 내려받기에 나갑니다'>이 패널 숨기기</button></h2>"
+      % (esc(pid), esc(pid)))
     w("<p class='sub'>%s · 프레임 %s,%s,%s,%s · 눈금 %s개 · 신뢰도 %s</p>"
       % (esc(row.get("Raster") or ""), esc(row.get("Panel_X0")),
          esc(row.get("Panel_X1")), esc(row.get("Panel_Y0")),
@@ -343,6 +351,15 @@ PAGE_JS = r"""
   var states = {};
   try { states = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
   catch (e) { states = {}; }
+  // 화면에서 치운 카드. 답과 따로 둡니다 - 숨김은 보는 사람의 편의이고,
+  // 숨긴 카드도 세어지고 내려받기에 나갑니다.
+  var HKEY = 'fdt_geometry_hidden';
+  var hiddenIds = {};
+  try { hiddenIds = JSON.parse(localStorage.getItem(HKEY) || '{}') || {}; }
+  catch (e) { hiddenIds = {}; }
+  function saveHidden() {
+    try { localStorage.setItem(HKEY, JSON.stringify(hiddenIds)); } catch (e) {}
+  }
 
   function st(id) {
     if (!states[id]) {
@@ -403,7 +420,7 @@ PAGE_JS = r"""
       box.className = 'state' + (got.ready ? ' ready' : '');
     }
     var card = q(".doc[data-id=\"" + esc(id) + "\"]");
-    if (card) card.classList.toggle('done', got.ready);
+    if (card) { card.classList.toggle('done', got.ready); card.hidden = !!hiddenIds[id]; }
     all("input[data-verdict=\"" + esc(id) + "\"]").forEach(function (r) {
       r.checked = r.value === s.verdict;
     });
@@ -450,6 +467,8 @@ PAGE_JS = r"""
     if (nn && nn.value !== s.note) nn.value = s.note;
     q('#left').textContent = '· 남은 것 ' + remaining(IDS, states)
       + ' / ' + IDS.length + ' · 보류 ' + held(IDS, states);
+    var nh = IDS.filter(function (i) { return hiddenIds[i]; }).length;
+    q('#hiddenN').textContent = nh ? '숨김 ' + nh + ' (세어지고 내려받기에 나갑니다)' : '';
   }
 
   function bind(sel, attr, read, ev) {
@@ -500,6 +519,19 @@ PAGE_JS = r"""
   bind('input[data-seen]', 'data-seen',
        function (s, el) { s.seen = el.checked; }, 'change');
   bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; });
+
+  all('button[data-hide]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      hiddenIds[b.getAttribute('data-hide')] = true; saveHidden(); IDS.forEach(paint);
+    });
+  });
+  q('#hidedone').addEventListener('click', function () {
+    IDS.forEach(function (id) { if (verdictOf(id, st(id)).ready) hiddenIds[id] = true; });
+    saveHidden(); IDS.forEach(paint);
+  });
+  q('#showall').addEventListener('click', function () {
+    hiddenIds = {}; saveHidden(); IDS.forEach(paint);
+  });
 
   q('#dl').addEventListener('click', function () {
     var csv = buildCsv(IDS, states);

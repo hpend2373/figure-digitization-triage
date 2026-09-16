@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "4e4f893dc4b09a2dee3fcc50e40bba836d6dcab467ecce6aa825d77e8dbe1842",
-  "test_geometry_page.py": "d67633cc6a512aad38b5d9845209fe20a214586a7173af06db7880769de6f12e"
+  "geometry_page.py": "4838483d8fbf4f5fafb3e53cab3b141b0e3470698f23f4a61e6d82f55b5af52f",
+  "test_geometry_page.py": "b59482f683893944e810d4cf2b6dc161dbc056994d7e24b9602ac97635614038"
  },
  "suites": [
   "test_geometry_page.py"
@@ -138,6 +138,24 @@
    "file": "geometry_page.py",
    "old": "% ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \" (잰 눈금 없음)\", esc(pid),",
    "new": "% ((\" (픽셀 행 %s)\" % esc(marks[0])) if marks else \"\", esc(pid),"
+  },
+  {
+   "name": "숨긴 카드를 내려받기에서 뺀다",
+   "file": "geometry_page.py",
+   "old": "    var csv = buildCsv(IDS, states);",
+   "new": "    var csv = buildCsv(IDS.filter(function (i) { return !hiddenIds[i]; }), states);"
+  },
+  {
+   "name": "숨기기 단추가 없다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<h2>%s <button class='hide' data-hide='%s' title='화면에서만 치웁니다. \"\n      \"답은 그대로 세어지고 내려받기에 나갑니다'>이 패널 숨기기</button></h2>\"\n      % (esc(pid), esc(pid)))",
+   "new": "    w(\"<h2>%s</h2>\" % esc(pid))"
+  },
+  {
+   "name": "숨김을 답과 같은 자리에 저장한다",
+   "file": "geometry_page.py",
+   "old": "  var HKEY = 'fdt_geometry_hidden';",
+   "new": "  var HKEY = 'fdt_geometry';"
   }
  ]
 }

@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "391faaab665b873be4988dfe36a15c54b6e4c98b278b9b121ebbd431f87d3f6c"
+  "axis_reader.py": "46b5930db0336d188585ea23a65e9dfb135c58d34644b10eb94173353e36bd77"
  },
  "mutations": [
   {
@@ -210,6 +210,24 @@
    "file": "axis_reader.py",
    "old": "    if CLIP_STRIP in (a, b):\n        return CLIP_STRIP\n    return a or b",
    "new": "    return a or b"
+  },
+  {
+   "name": "안쪽 축선을 프레임 변에서부터 찾는다",
+   "file": "axis_reader.py",
+   "old": "    for x in range(min_offset, sub.shape[1]):",
+   "new": "    for x in range(sub.shape[1]):"
+  },
+  {
+   "name": "짧은 세로선도 축선으로 친다",
+   "file": "axis_reader.py",
+   "old": "        if _longest_run(sub[:, x]) >= run * h:",
+   "new": "        if _longest_run(sub[:, x]) >= 1:"
+  },
+  {
+   "name": "안쪽 축선 중 가장 긴 것을 고른다",
+   "file": "axis_reader.py",
+   "old": "    for x in range(min_offset, sub.shape[1]):\n        if _longest_run(sub[:, x]) >= run * h:\n            return x0 + x\n    return None",
+   "new": "    cand = [x for x in range(min_offset, sub.shape[1]) if _longest_run(sub[:, x]) >= run * h]\n    return x0 + max(cand, key=lambda x: _longest_run(sub[:, x])) if cand else None"
   }
  ]
 }

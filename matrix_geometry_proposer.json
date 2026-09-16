@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "eb321b5cb8cb0f72cefd35e900a25fd8046ae5608596734ca6c7e2c1d546e6d8",
-  "test_geometry_proposer.py": "3c7f3515c0de69ebe5c5f01037d63c327272e138e9d7c101128c46b4a56d0ed9"
+  "geometry_proposer.py": "4ed774255aaff925074f75d5a6fea5815967d2b5d739f7a04b6eb8b0939d73b9",
+  "test_geometry_proposer.py": "0461bf025f1482ca5ecc9f0197c3c2e8b4450c8ca1dd5626ea64a4416a4fa65d"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -234,6 +234,42 @@
    "file": "geometry_proposer.py",
    "old": "    pad = overlay_pad(row)\n    return max(0, region[0] - pad), max(0, region[1] - pad)",
    "new": "    return max(0, region[0]), max(0, region[1])"
+  },
+  {
+   "name": "첫 읽기가 성공해도 안쪽 축선을 또 본다",
+   "file": "geometry_proposer.py",
+   "old": "    if status != READ_OK:\n        # THE FRAME'S LEFT EDGE WAS NOT THE AXIS.",
+   "new": "    if True:\n        # THE FRAME'S LEFT EDGE WAS NOT THE AXIS."
+  },
+  {
+   "name": "안쪽 축선을 아예 보지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        inner = A.inner_spine(dark, box)",
+   "new": "        inner = None"
+  },
+  {
+   "name": "안쪽 축선이 거절해도 그 답을 쓴다",
+   "file": "geometry_proposer.py",
+   "old": "            if st2 == READ_OK:",
+   "new": "            if True:"
+  },
+  {
+   "name": "어느 선에서 읽었는지 적지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "                row[\"Y_Axis_Spine_X\"] = \"%d\" % inner",
+   "new": "                pass"
+  },
+  {
+   "name": "어느 선에서 읽었는지 그리지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "    spine = _s(row.get(\"Y_Axis_Spine_X\"))\n    if spine:",
+   "new": "    spine = _s(row.get(\"Y_Axis_Spine_X\"))\n    if False:"
+  },
+  {
+   "name": "읽은 값을 눈금 간격에만 맞춰 키운다",
+   "file": "geometry_proposer.py",
+   "old": "        size = max(11, min(int(step * 0.28), int((y1 - y0) * 0.05)))",
+   "new": "        size = max(11, int(step * 0.28))"
   }
  ]
 }

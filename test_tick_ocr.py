@@ -703,6 +703,36 @@ class TheSecondPass(unittest.TestCase):
         self.assertEqual([v for v, _r in pairs], [10.0, 0.0, -10.0], pairs)
         RUN[0] += 1
 
+    def test_a_rule_inside_the_frame_is_found_and_the_frame_edge_is_not(self):
+        """REVERT: measure the axis only at the frame's left edge. `find_frame`
+        returns the leftmost long rule in the REGION, and on a boxed panel that
+        is the box - publication PONE-0032854 puts the border at x 2 and the
+        plot's spine at x 499, with every numeral between them. Everything
+        measured from the border looks at blank paper."""
+        import numpy as _np
+        dark = _np.zeros((200, 400), bool)
+        dark[20:180, 5] = True                       # the frame's own left edge
+        dark[20:180, 120] = True                     # the plot's spine, inside it
+        self.assertEqual(A.inner_spine(dark, (5, 400, 20, 180)), 120)
+        # a frame drawn two pixels thick is not a rule inside the frame
+        thick = _np.zeros((200, 400), bool)
+        thick[20:180, 5] = True
+        thick[20:180, 11] = True
+        self.assertIsNone(A.inner_spine(thick, (5, 400, 20, 180)))
+        # and neither is a short line: a bar's edge, a gridline segment
+        short = _np.zeros((200, 400), bool)
+        short[20:180, 5] = True
+        short[110:180, 120] = True
+        self.assertIsNone(A.inner_spine(short, (5, 400, 20, 180)))
+        # the LEFTMOST rule inside, not the longest: the axis is the first one
+        two = _np.zeros((200, 400), bool)
+        two[20:180, 5] = True
+        two[30:180, 120] = True
+        two[20:180, 260] = True
+        self.assertEqual(A.inner_spine(two, (5, 400, 20, 180)), 120)
+        self.assertIsNone(A.inner_spine(dark, (5, 400, 20, 22)))   # no height, no rule
+        RUN[0] += 1
+
     def test_european_decimals_are_read_in_the_second_pass(self):
         """PIIS1566070202001327's axes: 1,00 0,90 ... 0,00. Without the comma
         they read as 1 00 0 90, and once as the ladder 9 .. 1 - ten times

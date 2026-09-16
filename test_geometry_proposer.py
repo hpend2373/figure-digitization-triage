@@ -618,6 +618,28 @@ _offband = sum(1 for x in range(_W) for y in range(_H)
 check("and the value is written clear of the tick line, where a minus can be seen",
       len(_bars) >= 3 and _offband > 0 and _onband == 0,
       "bars %d, differs on the tick line %d px, off it %d px" % (len(_bars), _onband, _offband))
+# REVERT: size the value only to the tick step. Three labels spread over a whole
+# axis give a step of half the panel, and a number at a quarter of that covers
+# the data it was drawn to vouch for (S0094576511002189: 1, -2, -3 over 2000 px,
+# written 400 px tall, across the curve).
+_h = int(_row["Panel_Y1"]) - int(_row["Panel_Y0"])
+_far = GP.apply_reading(dict(_row), *GP.values_from_ladder(
+    [(3.0, float(_row["Panel_Y0"]) + 5), (1.0, float(_row["Panel_Y0"]) + _h * 0.45),
+     (-1.0, float(_row["Panel_Y0"]) + _h * 0.9)]))
+_fpic = Image.open(GP.proposal_overlay(_im, _far, os.path.join(ROOT, "far.png"))).convert("RGB")
+_fpx = _fpic.load()
+_rows_with = [y for y in range(_fpic.size[1])
+              if any(_fpx[x, y] == (190, 60, 190) for x in range(_fpic.size[0]))]
+_runs, _cur = [], None
+for y in _rows_with:
+    if _cur is not None and y == _cur[-1] + 1:
+        _cur.append(y)
+    else:
+        _cur = [y]; _runs.append(_cur)
+check("a value whose neighbours are far away is still drawn small enough to see past",
+      max(len(r) for r in _runs) <= _h * 0.06,
+      "가장 높은 자홍 덩어리 %d px / 프레임 %d px" % (max(len(r) for r in _runs), _h))
+
 # REVERT: write every value above its tick. The top tick sits at the frame's
 # top edge, and the text above it leaves through the crop: the one value a
 # confirmer most needs to see was the one cut in half (GISOLF 2005, 120).
@@ -638,6 +660,96 @@ check("a value at the frame's top edge is written inside the picture, not out th
 # for a person; this is for `verify_documented_status.py`, and a
 # regex over prose is what it replaces - two suites in this package
 # print no count sentence at all.
+
+# THE FRAME'S LEFT EDGE IS NOT ALWAYS THE AXIS. `find_frame` returns the
+# leftmost long rule in the region, and on a boxed panel that is the box, with
+# the plot's spine and every numeral INSIDE it. Publication PONE-0032854 puts
+# the border at x 2 and the spine at x 499; 104 of this corpus's 282 refusals
+# have such a rule inside their frame, and reading from it rescues 27.
+print()
+print("when the frame's left edge reads nothing, the rule inside it is tried")
+_SPINE = int(_row["Panel_X0"]) + 100
+_LADDER = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+
+
+def _reading_spy(good_at):
+    """A y_tick_labels that only reads at `good_at`, and says where it was asked."""
+    asked = []
+
+    def spy(img, dark, box, spine_x, baseline_y=None, **kw):
+        asked.append(int(spine_x))
+        return list(_LADDER) if int(spine_x) == good_at else []
+    return spy, asked
+
+
+_spy, _asked = _reading_spy(_SPINE)
+import axis_reader as A                                           # noqa: E402
+_real_labels, _real_inner = A.y_tick_labels, A.inner_spine
+A.y_tick_labels = _spy
+A.inner_spine = lambda dark, box, **kw: _SPINE
+try:
+    _inner_row = GP.read_tick_values(_im, dict(_row))
+finally:
+    A.y_tick_labels = _real_labels
+check("a panel that reads nothing at its frame's edge is asked again at the rule inside",
+      _asked == [int(_row["Panel_X0"]), _SPINE], "%s" % _asked)
+check("and what the rule read is the reading",
+      _inner_row["Y_Tick_Read_Status"] == GP.READ_OK
+      and _inner_row["Y_Tick_Read_Values"] == "30@100;20@200;10@300",
+      "%s" % _inner_row["Y_Tick_Read_Values"])
+check("the line it was read from is named, not left to be guessed",
+      _inner_row["Y_Axis_Spine_X"] == str(_SPINE), _inner_row["Y_Axis_Spine_X"])
+check("and the detail says the frame is wider than the plot",
+      ("x=%d" % _SPINE) in _inner_row["Y_Tick_Read_Detail"]
+      and ("x=%s" % _row["Panel_X0"]) in _inner_row["Y_Tick_Read_Detail"],
+      _inner_row["Y_Tick_Read_Detail"][-90:])
+
+# REVERT: try the inner rule always. The 660 panels that read from their frame
+# must read exactly as before - this is a second question asked of a panel that
+# came up empty, like the Otsu threshold and the second OCR pass.
+_spy2, _asked2 = _reading_spy(int(_row["Panel_X0"]))
+_inner_called = []
+A.y_tick_labels = _spy2
+A.inner_spine = lambda dark, box, **kw: (_inner_called.append(1) or _SPINE)
+try:
+    _first_row = GP.read_tick_values(_im, dict(_row))
+finally:
+    A.y_tick_labels, A.inner_spine = _real_labels, _real_inner
+check("a panel that read at its frame's edge is not asked twice",
+      _asked2 == [int(_row["Panel_X0"])] and not _inner_called,
+      "%s %s" % (_asked2, _inner_called))
+check("and carries no other line", _first_row["Y_Axis_Spine_X"] == "",
+      _first_row["Y_Axis_Spine_X"])
+
+# REVERT: take the inner rule's answer whatever it says. Both reads refusing is
+# the ordinary case (255 of this corpus's panels), and a refusal that names a
+# line it "read from" sends the next person to the wrong line.
+_spy3, _asked3 = _reading_spy(-1)                     # nothing reads anywhere
+A.y_tick_labels = _spy3
+A.inner_spine = lambda dark, box, **kw: _SPINE
+try:
+    _none_row = GP.read_tick_values(_im, dict(_row))
+finally:
+    A.y_tick_labels, A.inner_spine = _real_labels, _real_inner
+check("when the rule inside reads nothing either, the panel is refused",
+      _none_row["Y_Tick_Read_Status"] == GP.READ_REFUSED
+      and _none_row["Y_Tick_Read_Values"] == "", _none_row["Y_Tick_Read_Status"])
+check("and it names no line it did not read from",
+      _none_row["Y_Axis_Spine_X"] == "" and "x=%d" % _SPINE not in _none_row["Y_Tick_Read_Detail"],
+      "%s / %s" % (_none_row["Y_Axis_Spine_X"], _none_row["Y_Tick_Read_Detail"][:60]))
+
+# REVERT: read from the inner rule and draw the frame as if nothing happened.
+# The frame IS wrong on these panels, and a person confirming values whose
+# provenance is invisible is confirming arithmetic again.
+_ipic = Image.open(GP.proposal_overlay(_im, _inner_row, os.path.join(ROOT, "inner.png"))).convert("RGB")
+_ipx = _ipic.load()
+_ox, _oy = GP.overlay_origin(_inner_row)
+# 굵기 3의 세로선은 가운데 열에 다 찍히지 않습니다 - 그 자리 ±2열 중 가장 긴 것.
+_col = _SPINE - _ox
+_down = max(sum(1 for y in range(_ipic.size[1]) if _ipx[c, y] == (190, 60, 190))
+            for c in range(max(0, _col - 2), min(_ipic.size[0], _col + 3)))
+check("the line the values came from is drawn on the picture",
+      _down > 0.5 * (int(_row["Panel_Y1"]) - int(_row["Panel_Y0"])), "%d px" % _down)
 
 # A ROW OF PANELS WITH ONE AXIS. This corpus prints Day/Night, left/right
 # column, with the y axis on the leftmost panel and nothing on the rest. Those

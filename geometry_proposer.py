@@ -86,6 +86,14 @@ PROPOSAL_COLUMNS = (
     "Y_Tick_Read_Status", "Y_Tick_Read_Values",
     "Y_Tick_Read_First", "Y_Tick_Read_Last",
     "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail",
+    # WHICH LINE THE AXIS WAS READ FROM, when it was not the frame's left edge.
+    # `find_frame` returns the leftmost long rule in the region, and on a boxed
+    # panel that is the box, with the plot's spine and its numerals inside it.
+    # Reading from the inner rule rescues those panels - but it also means the
+    # FRAME IS WRONG, and a person confirming values whose provenance is
+    # invisible is confirming arithmetic again. So the line is named here and
+    # drawn on the overlay. Empty means the frame's left edge, as always.
+    "Y_Axis_Spine_X",
     # A NEIGHBOUR THIS PANEL MAY BE SHARING ITS AXIS WITH. This corpus prints a
     # row of panels with the y axis on the leftmost one and nothing on the
     # rest - Day/Night, left/right column - and those panels have no labels to
@@ -688,7 +696,26 @@ def read_tick_values(image, row):
     _grey, dark = A._dark(image)
     spine_x, baseline_y = A.spine_and_baseline(dark, box)
     pairs = A.y_tick_labels(image, dark, box, spine_x, baseline_y)
-    return apply_reading(row, *values_from_ladder(pairs))
+    status, kept, detail, residual = values_from_ladder(pairs)
+    if status != READ_OK:
+        # THE FRAME'S LEFT EDGE WAS NOT THE AXIS. Only when the first read
+        # refused, so the 660 panels that read from the frame read exactly as
+        # before: a second question asked of a panel that came up empty, like
+        # the Otsu threshold and the second OCR pass. 27 of this corpus's 282
+        # refusals are panels whose numerals sit inside their own frame.
+        inner = A.inner_spine(dark, box)
+        if inner is not None:                    # `inner_spine`이 프레임 변은 돌려주지 않는다
+            second = A.y_tick_labels(image, dark, (inner, box[1], box[2], box[3]),
+                                     inner, A.baseline_at(dark, box, inner))
+            st2, kept2, detail2, resid2 = values_from_ladder(second)
+            if st2 == READ_OK:
+                row["Y_Axis_Spine_X"] = "%d" % inner
+                return apply_reading(row, st2, kept2,
+                                     "%s; READ FROM THE RULE AT x=%d, not the "
+                                     "frame's left edge at x=%d - the frame is "
+                                     "wider than the plot"
+                                     % (detail2, inner, box[0]), resid2)
+    return apply_reading(row, status, kept, detail, residual)
 
 
 def apply_reading(row, status, kept, detail, residual):
@@ -1026,6 +1053,15 @@ def proposal_overlay(image, row, out_path, shared_ticks=None):
     x0, x1 = int(row["Panel_X0"]), int(row["Panel_X1"])
     y0, y1 = int(row["Panel_Y0"]), int(row["Panel_Y1"])
     draw.rectangle((x0, y0, x1, y1), outline=(200, 30, 30), width=2)
+    # THE LINE THE VALUES WERE READ FROM, when it was not the frame's left edge.
+    # Drawn in the reader's own magenta, because that is what this overlay means
+    # by "the machine read this": the values beside it were read from THIS line,
+    # and the red frame around them is wider than the plot.
+    spine = _s(row.get("Y_Axis_Spine_X"))
+    if spine:
+        sx = int(float(spine))
+        draw.line((sx, y0, sx, y1), fill=(190, 60, 190), width=3)
+        x0 = sx
     for y in (shared_ticks or []):
         y = int(float(y))
         for xx in range(x0 - 30, x0 + 31, 6):
@@ -1050,7 +1086,12 @@ def proposal_overlay(image, row, out_path, shared_ticks=None):
         # SIZED TO THE PANEL. A 12 px default on a 4000 px raster is a smudge,
         # and the whole point is that the two numbers can be compared by eye.
         step = abs(reading[1][1] - reading[0][1]) if len(reading) > 1 else (y1 - y0) / 6.0
-        size = max(11, int(step * 0.28))
+        # SIZED TO THE STEP, BUT CAPPED TO THE PANEL. Three labels spread over a
+        # whole axis give a step of half the panel, and a number drawn at a
+        # quarter of THAT covers the data it was drawn to vouch for:
+        # publication S0094576511002189's panel read 1, -2, -3 across 2000 px
+        # and the overlay wrote them 400 px tall, over the curve.
+        size = max(11, min(int(step * 0.28), int((y1 - y0) * 0.05)))
         font = _font(size)
         for value, pixel in reading:
             y = int(float(pixel))

@@ -1839,6 +1839,45 @@ def spine_and_baseline(dark, box):
     return x0 + sx, baseline_at(dark, box, x0 + sx)
 
 
+#: A vertical rule this fraction of the frame's height, standing INSIDE the
+#: frame, is a candidate axis. Same reading as `geometry_proposer._AXIS_RUN`,
+#: which is what drew the frame in the first place.
+INNER_RUN = 0.55
+
+#: And it has to stand this far inside, or it IS the frame's left edge, drawn
+#: two pixels thick.
+INNER_MIN_OFFSET = 12
+
+
+def inner_spine(dark, box, run=INNER_RUN, min_offset=INNER_MIN_OFFSET):
+    """The leftmost long vertical rule standing INSIDE the frame, or None.
+
+    THE FRAME'S LEFT EDGE IS NOT ALWAYS THE AXIS. `find_frame` looks for long
+    rules in a region, and on a figure whose panel is boxed - or whose region
+    is the whole plate - the leftmost rule it finds is the plate's border or
+    the subfigure's box, with the plot's own spine and the axis numerals
+    sitting INSIDE it. Everything the reader then does (the tick reach, the
+    label band, the strips) is measured from that border and looks at blank
+    paper: publication PONE-0032854's panels put the border at x 2 and the
+    spine at x 499, and 104 of 282 refused panels in this corpus have such a
+    rule inside their frame.
+
+    Only the rule is measured here. Whether it is the axis is decided by
+    whether the numerals beside it form a ladder, which is the same test every
+    other reading passes - and the frame is NOT corrected from it, because the
+    frame is a measurement a person confirms.
+    """
+    x0, x1, y0, y1 = [int(v) for v in box]
+    h, w = y1 - y0, x1 - x0
+    if h < 8 or w < min_offset + 2:
+        return None
+    sub = dark[y0:y1, x0:x1]
+    for x in range(min_offset, sub.shape[1]):
+        if _longest_run(sub[:, x]) >= run * h:
+            return x0 + x
+    return None
+
+
 def baseline_at(dark, box, spine_x):
     """The baseline a given spine stands on - the second half of spine_and_baseline.
 

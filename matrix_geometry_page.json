@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "4838483d8fbf4f5fafb3e53cab3b141b0e3470698f23f4a61e6d82f55b5af52f",
-  "test_geometry_page.py": "b59482f683893944e810d4cf2b6dc161dbc056994d7e24b9602ac97635614038"
+  "geometry_page.py": "2542263576258d21532888467a19951567b60d5bca9a027f3bb20eabe9aef248",
+  "test_geometry_page.py": "5762f8a524a5c2809dd5bc438173cb41bfdb3616616be458223b3e281a2a8546"
  },
  "suites": [
   "test_geometry_page.py"
@@ -156,6 +156,36 @@
    "file": "geometry_page.py",
    "old": "  var HKEY = 'fdt_geometry_hidden';",
    "new": "  var HKEY = 'fdt_geometry';"
+  },
+  {
+   "name": "안내를 접을 수 없다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<div id='guide'>\")",
+   "new": "    w(\"<div>\")"
+  },
+  {
+   "name": "안내가 처음부터 접혀 나온다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<div id='guide'>\")",
+   "new": "    w(\"<div id='guide' hidden>\")"
+  },
+  {
+   "name": "접는 단추가 없다",
+   "file": "geometry_page.py",
+   "old": "      \"<button id='guidetoggle'>안내 접기</button></h1>\"",
+   "new": "      \"</h1>\""
+  },
+  {
+   "name": "색 설명은 접히지 않는다",
+   "file": "geometry_page.py",
+   "old": "                        for c, t in KEYS))\n    w(\"</div>\")",
+   "new": "                        for c, t in KEYS))"
+  },
+  {
+   "name": "접힘을 답과 같은 자리에 저장한다",
+   "file": "geometry_page.py",
+   "old": "  var GKEY = 'fdt_geometry_guide';",
+   "new": "  var GKEY = 'fdt_geometry';"
   }
  ]
 }

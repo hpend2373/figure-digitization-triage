@@ -175,6 +175,25 @@ check("찍은 줄이 프레임 밖이면 어떻게 하라는지 적혀 있다",
       "프레임 밖이면" in HTML.split("<script>")[0])
 
 print()
+print("안내는 접을 수 있고, 처음에는 펴져 있다")
+# 안내 다섯 문단과 색 설명은 처음 한 번 읽는 것이고, 그 뒤로는 화면의 절반을
+# 차지합니다. REVERT: 처음부터 접어 둔다 - 처음 보는 사람이 읽지 않은 채로
+# 시작하면 이 페이지의 규칙(목격, 이름, 지어내지 않기)을 모릅니다.
+_head = HTML.split("</header>")[0]
+_guide = re.search(r"<div id='guide'>(.*?)</div>", _head, re.S)
+check("안내와 색 설명이 접히는 자리에 함께 들어 있다",
+      _guide is not None and _guide.group(1).count("class='note'") >= 4
+      and "class='key'" in _guide.group(1))
+check("접는 단추가 있다", "id='guidetoggle'" in _head)
+check("처음 열면 펴져 있다", "<div id='guide'>" in _head and "<div id='guide' hidden" not in _head)
+# REVERT: 접힘을 답과 같은 자리에 저장한다. 보기의 상태이지 사람이 이 패널들에
+# 대해 한 말이 아닙니다.
+check("접힘은 답과도 숨김과도 다른 자리에 저장된다",
+      "'fdt_geometry_guide'" in HTML)
+check("내려받기와 세는 것은 안내를 보지 않는다",
+      "guideShut" not in re.search(r"q\('#dl'\)\.addEventListener\(.*?\}\);", HTML, re.S).group(0))
+
+print()
 print("본 패널은 치울 수 있고, 치워도 답이다")
 # 95장을 한 화면에서 보면 본 것과 안 본 것이 섞입니다. 숨김은 보는 사람의
 # 편의이고 답이 아닙니다 - 숨긴 카드도 세어지고 내려받기에 나갑니다.

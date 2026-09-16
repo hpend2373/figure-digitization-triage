@@ -174,9 +174,15 @@ def build(proposals, log=print, chunk=1, of=1):
 .pickbtn{font-size:12px;margin-right:4px}
 .pickbtn.on{background:#1e64c8;color:#fff}
 h2 .hide{font-size:12px;font-weight:normal;margin-left:10px}
+h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-align:2px}
 </style>""")
-    w("<header><h1>기하 확인%s <span class='count' id='left'></span></h1>"
+    w("<header><h1>기하 확인%s <span class='count' id='left'></span> "
+      # 안내는 처음 한 번 읽는 것이고, 그 뒤로는 화면의 절반을 차지합니다.
+      # 접히되 처음에는 펴져 나옵니다 - 처음 보는 사람이 읽지 않은 채로
+      # 시작하면 이 페이지의 규칙(목격, 이름, 지어내지 않기)을 모릅니다.
+      "<button id='guidetoggle'>안내 접기</button></h1>"
       % ((" — %d/%d 조각" % (chunk, of)) if of > 1 else ""))
+    w("<div id='guide'>")
     w("<p class='note'><code>geometry_proposer</code>가 잰 것과 읽은 것이 "
       "그림 위에 그려져 있습니다. 전부 <b>제안</b>이고, 아무것도 확인되지 "
       "않았습니다.</p>")
@@ -199,6 +205,7 @@ h2 .hide{font-size:12px;font-weight:normal;margin-left:10px}
     w("<p class='key'>%s</p>"
       % " &nbsp; ".join("<i style='background:%s'></i>%s" % (c, esc(t))
                         for c, t in KEYS))
+    w("</div>")
     w("<p style='margin:10px 0 0'><button id='dl'>CSV 내려받기</button> "
       "<span class='count' id='msg'></span> &nbsp; "
       # 숨기기는 보는 사람의 편의이고 답이 아닙니다. 숨긴 카드도 세어지고
@@ -353,6 +360,19 @@ PAGE_JS = r"""
   catch (e) { states = {}; }
   // 화면에서 치운 카드. 답과 따로 둡니다 - 숨김은 보는 사람의 편의이고,
   // 숨긴 카드도 세어지고 내려받기에 나갑니다.
+  // 안내를 접었는지. 답과도, 숨긴 카드와도 다른 자리입니다 - 보기의 상태이지
+  // 이 패널들에 대해 사람이 한 말이 아닙니다.
+  var GKEY = 'fdt_geometry_guide';
+  function guideShut() {
+    try { return localStorage.getItem(GKEY) === 'shut'; } catch (e) { return false; }
+  }
+  function paintGuide() {
+    var g = q('#guide'), b = q('#guidetoggle');
+    if (!g || !b) return;
+    g.hidden = guideShut();
+    b.textContent = g.hidden ? '안내 보기' : '안내 접기';
+  }
+
   var HKEY = 'fdt_geometry_hidden';
   var hiddenIds = {};
   try { hiddenIds = JSON.parse(localStorage.getItem(HKEY) || '{}') || {}; }
@@ -519,6 +539,12 @@ PAGE_JS = r"""
   bind('input[data-seen]', 'data-seen',
        function (s, el) { s.seen = el.checked; }, 'change');
   bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; });
+
+  q('#guidetoggle').addEventListener('click', function () {
+    try { localStorage.setItem(GKEY, guideShut() ? 'open' : 'shut'); } catch (e) {}
+    paintGuide();
+  });
+  paintGuide();
 
   all('button[data-hide]').forEach(function (b) {
     b.addEventListener('click', function () {

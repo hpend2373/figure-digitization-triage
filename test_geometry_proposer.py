@@ -934,6 +934,85 @@ _edge = _opic.getpixel((int(_reg["Panel_X1"]) - _ox, int(_reg["Panel_Y0"]) + 50 
 check("the frame's right edge is at Panel_X1 minus the origin", _edge == (200, 30, 30), "%s" % (_edge,))
 check("and a row without a region starts at the raster's corner", GP.overlay_origin(dict(_reg, Region="")) == (0, 0))
 
+# THE LADDER HAS SLACK AND THE TICK GRID HAS NONE. `axis_reader.ladder` lets
+# value-per-pixel vary 8% because OCR rows wobble, and a misread that lands
+# inside the 8% passes: publication ASEM-P577's `200 150 100 50 0` read
+# `190 100 20` (6.4%) and stood. Snapped to the ticks the same proposal
+# measured, 377 of this corpus's 378 checkable panels are exactly constant.
+print()
+print("a reading is put to the tick grid its own proposal measured")
+_GRID = {"Y_Tick_Read_Status": GP.READ_OK, "Y_Tick_Pixels": "1870.5;2039.5;2208;2377.5;2546"}
+_asem = GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="190@2039.5;100@2208;20@2378"))
+check("labels on the ticks whose value per tick is not constant are warned about",
+      _asem[0] == GP.WARN_TICK_STEP and "11.8%" in _asem[1], "%s" % (_asem,))
+check("the printed axis on the same ticks is not",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="150@2039.5;100@2208;50@2378")) == ("", ""))
+# REVERT: demand exact equality. Labels printed to three digits - 33.3 66.7
+# 100 - differ by 0.3% per tick and are an axis, not a misread.
+check("labels rounded on the page are not a misread",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="100@2039.5;66.7@2208;33.3@2378")) == ("", ""),
+      "%s" % (GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="100@2039.5;66.7@2208;33.3@2378")),))
+# The step is per TICK, so labels two ticks apart carry two steps.
+check("labels two ticks apart carry two steps",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="40@1870.5;20@2208;10@2377.5")) == ("", ""),
+      "%s" % (GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="40@1870.5;20@2208;10@2377.5")),))
+# REVERT: read the tick list as a grid whatever is in it. Stray marks - data
+# points, gridlines - get into the tick list (S41526's D006 has 1720 1866 2014
+# 2083 2142 2159), and against such a list an honest axis looks uneven.
+_STRAY = dict(_GRID, Y_Tick_Pixels="0;100;140;200;300;400",
+              Y_Tick_Read_Values="40@0;26@140;0@400")
+check("a tick list with stray marks in it says nothing",
+      GP.warn_reading(_STRAY) == ("", ""), "%s" % (GP.warn_reading(_STRAY),))
+_OFF = dict(_GRID, Y_Tick_Read_Values="9@1900;7@2100;1@2300")
+_off = GP.warn_reading(_OFF)
+check("three labels that sit on no tick at all are warned about",
+      _off[0] == GP.WARN_OFF_THE_TICKS and "none of the 5 ticks" in _off[1], "%s" % (_off,))
+# REVERT: warn whenever the labels are off the grid. 99 of this corpus's read
+# panels are, and most of them are long ladders that checked themselves; the
+# shortest ladder accepted is the one that never was.
+check("four such labels are a ladder that checked itself",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="9@1900;7@2100;5@2300;3@2500")) == ("", ""))
+check("some labels on the grid and some off is not measured either way",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="190@2039.5;100@2208;20@2383")) == ("", ""),
+      "%s" % (GP.warn_reading(dict(_GRID, Y_Tick_Read_Values="190@2039.5;100@2208;20@2383")),))
+check("a proposal with too few ticks measured says nothing",
+      GP.warn_reading(dict(_GRID, Y_Tick_Pixels="2039.5;2208",
+                           Y_Tick_Read_Values="190@2039.5;100@2208;20@2378")) == ("", ""))
+check("and a refused reading has nothing to put to the grid",
+      GP.warn_reading(dict(_GRID, Y_Tick_Read_Status=GP.READ_REFUSED,
+                           Y_Tick_Read_Values="190@2039.5;100@2208;20@2378")) == ("", ""))
+
+print()
+print("the warning rides in the proposal, beside the reading and not instead of it")
+_trows = [float(t) for t in _row["Y_Tick_Pixels"].split(";")][:3]
+_UNEVEN = [(190.0, _trows[0]), (100.0, _trows[1]), (20.0, _trows[2])]
+_EVEN = [(150.0, _trows[0]), (100.0, _trows[1]), (50.0, _trows[2])]
+
+
+def _read_with(ladder):
+    real = A.y_tick_labels, A.inner_spine, A.label_near
+    A.y_tick_labels = lambda img, dark, box, spine_x, baseline_y=None, **kw: list(ladder)
+    A.inner_spine = lambda dark, box, **kw: None
+    A.label_near = lambda *a, **k: []
+    try:
+        return GP.read_tick_values(_im, dict(_row))
+    finally:
+        A.y_tick_labels, A.inner_spine, A.label_near = real
+
+
+_wrow = _read_with(_UNEVEN)
+check("an uneven reading is still READ, with its values",
+      _wrow["Y_Tick_Read_Status"] == GP.READ_OK and GP.read_values_of(_wrow) == _UNEVEN,
+      "%s %s" % (_wrow["Y_Tick_Read_Status"], _wrow["Y_Tick_Read_Values"]))
+check("and carries the warning in its own column",
+      _wrow["Y_Tick_Read_Warning"].startswith(GP.WARN_TICK_STEP + ": "),
+      "%r" % (_wrow["Y_Tick_Read_Warning"],))
+_erow = _read_with(_EVEN)
+check("an even one carries none", _erow["Y_Tick_Read_Warning"] == "",
+      "%r" % (_erow["Y_Tick_Read_Warning"],))
+check("the column is a proposal column, so it reaches the CSV and the page",
+      "Y_Tick_Read_Warning" in GP.PROPOSAL_COLUMNS)
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 import shutil                                                    # noqa: E402

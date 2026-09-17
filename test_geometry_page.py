@@ -248,6 +248,43 @@ check("관문의 출력 이름으로는 내려받지 않는다",
       "geometry_decisions.csv" not in re.sub(r"//[^\n]*", "", HTML))
 
 print()
+print("리더가 자기 읽기를 의심하면 그 패널을 맨 앞에 댄다")
+# REVERT: 경고를 카드에만 적거나, 어디에도 적지 않는다. 경고는 판정이 아니라
+# "먼저 보세요"이고, 카드는 래스터 순서 그대로라 맨 앞의 이름표가 없으면
+# 사람은 27장을 찾아 스크롤한다.
+check("의심이 없는 페이지에는 그 말이 없다", "먼저 보세요" not in HTML)
+_wdir = os.path.join(TMP, "warned")
+os.makedirs(_wdir)
+WARNED = dict(READ, Proposal_ID="GP005",
+              Y_Tick_Read_Values="190@10;100@50;20@90",
+              Y_Tick_Read_Warning="TICK_STEP_UNEVEN: value per tick varies 11.8% "
+                                  "(90, 80) though the labels sit on evenly spaced ticks")
+OFF = dict(READ, Proposal_ID="GP006",
+           Y_Tick_Read_Warning="LABELS_OFF_THE_TICKS: the 3 labels read sit on none of "
+                               "the 5 ticks measured")
+UNKNOWN = dict(READ, Proposal_ID="GP007", Y_Tick_Read_Warning="SOMETHING_NEW: a detail")
+GP.write_proposals(os.path.join(_wdir, "geometry_proposal.csv"), [READ, WARNED, OFF, UNKNOWN])
+_whtml, _wn = G.build(_wdir, log=lambda *a: None)
+_front = _whtml[:_whtml.index("<main>")]
+check("맨 앞에 의심하는 패널의 수와 이름이 있다",
+      "의심하는 패널 3개" in _front and "GP005" in _front and "GP006" in _front
+      and "GP007" in _front and "GP001" not in _front, _front[-400:])
+check("이름은 그 카드로 건너뛰는 링크다",
+      "href='#p-GP005'" in _front and "id='p-GP005'" in _whtml)
+_card5 = _whtml[_whtml.index("id='p-GP005'"):_whtml.index("id='p-GP006'")]
+check("카드에는 사람의 말로 적혀 있고 리더의 근거가 딸려 있다",
+      "먼저 보세요" in _card5 and "눈금 한 칸당 값이 일정하지 않습니다" in _card5
+      and "11.8%" in _card5, _card5[:600])
+_card6 = _whtml[_whtml.index("id='p-GP006'"):_whtml.index("id='p-GP007'")]
+check("눈금 밖의 라벨은 그렇게 적혀 있다", "어느 눈금과도 맞지 않습니다" in _card6)
+_card7 = _whtml[_whtml.index("id='p-GP007'"):]
+check("모르는 코드는 숨기지 않고 코드 그대로 보인다", "SOMETHING_NEW" in _card7)
+_card1 = _whtml[_whtml.index("id='p-GP001'"):_whtml.index("id='p-GP005'")]
+check("의심이 없는 카드에는 아무것도 붙지 않는다", "먼저 보세요" not in _card1)
+check("경고가 있어도 읽은 값은 그대로 논리로 건너간다",
+      '"readPairs": "190@10;100@50;20@90"' in _whtml)
+
+print()
 print("빈 제안 폴더는 페이지가 아니다")
 _empty = os.path.join(TMP, "none")
 os.makedirs(_empty)

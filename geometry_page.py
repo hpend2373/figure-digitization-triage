@@ -55,6 +55,25 @@ LABELS = (
 #: 오버레이의 색이 무슨 뜻인지. 그림 위의 색을 설명하지 않으면 사람은 자홍색
 #: 숫자가 인쇄된 것인지 그려 넣은 것인지 알 수 없고, 그것을 모르면 확인이
 #: 확인이 아닙니다.
+#: 리더의 경고 코드를 사람의 말로. 경고는 판정이 아니라 "먼저 보세요"이고,
+#: 모르는 코드는 코드 그대로 보입니다 - 숨기는 것보다 낫습니다.
+WARN_TEXT = {
+    "TICK_STEP_UNEVEN": "눈금 한 칸당 값이 일정하지 않습니다 — 읽은 값 중 하나가 "
+                        "틀렸을 수 있습니다.",
+    "LABELS_OFF_THE_TICKS": "읽은 라벨이 어느 눈금과도 맞지 않습니다 — 프레임이나 "
+                            "읽은 자리가 틀렸을 수 있습니다.",
+}
+
+
+def warning_of(row):
+    """(code, detail) of a proposal's reader warning, or ("", "")."""
+    raw = (row.get("Y_Tick_Read_Warning") or "").strip()
+    if not raw:
+        return "", ""
+    code, _sep, detail = raw.partition(":")
+    return code.strip(), detail.strip()
+
+
 KEYS = (("#c81e1e", "프레임 — 이 안이 읽을 자리"),
         ("#be3cbe", "리더가 잰 눈금과 읽은 값, 그리고 축 아래 상자 x 위치"),
         ("#149650", "잉크 기둥으로 찾은 x 위치 (다른 방법, 참고용)"),
@@ -164,6 +183,9 @@ def build(proposals, log=print, chunk=1, of=1):
 .vals input{width:8em}
 .who{margin:8px 0}
 .shared{background:#fff6ec;border-left-color:#e67814}
+.warn{background:#fff8dc;border-left-color:#c9a000}
+.warnlist{font-size:13px;margin:10px 0 0;padding:8px 10px;background:#fff8dc;
+          border-left:3px solid #c9a000}
 .share select{max-width:100%}
 .pickwrap{position:relative;display:inline-block}
 .pickwrap.arming img{cursor:crosshair;outline:2px solid #1e64c8}
@@ -212,7 +234,18 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
       # 내려받기에 나갑니다 - 숨김이 답을 바꾸면 화면이 판정을 하는 것입니다.
       "<button id='hidedone'>답이 된 패널 숨기기</button> "
       "<button id='showall'>숨긴 패널 모두 보기</button> "
-      "<span class='count' id='hiddenN'></span></p></header><main>")
+      "<span class='count' id='hiddenN'></span></p>")
+    # 리더가 스스로 의심하는 읽기는 맨 앞에 이름을 댑니다. 카드는 래스터 순서
+    # 그대로입니다 - 그림을 쪼개지 않는 것이 조각의 약속이라 순서를 바꾸지 않고,
+    # 대신 여기서 바로 건너뜁니다.
+    warned = [((r.get("Proposal_ID") or "").strip(), warning_of(r)[0])
+              for r in rows if warning_of(r)[0]]
+    if warned:
+        w("<p class='warnlist'><b>먼저 보세요 — 리더가 자기 읽기를 의심하는 패널 "
+          "%d개:</b> %s</p>"
+          % (len(warned), ", ".join("<a href='#p-%s'>%s</a>" % (esc(pid), esc(pid))
+                                    for pid, _c in warned)))
+    w("</header><main>")
 
     for row in rows:
         pid = (row.get("Proposal_ID") or "").strip()
@@ -264,7 +297,7 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
 def card(proposals, pid, row, read, siblings=()):
     out = []
     w = out.append
-    w("<div class='doc' data-id='%s'>" % esc(pid))
+    w("<div class='doc' data-id='%s' id='p-%s'>" % (esc(pid), esc(pid)))
     w("<h2>%s <button class='hide' data-hide='%s' title='화면에서만 치웁니다. "
       "답은 그대로 세어지고 내려받기에 나갑니다'>이 패널 숨기기</button></h2>"
       % (esc(pid), esc(pid)))
@@ -300,6 +333,10 @@ def card(proposals, pid, row, read, siblings=()):
         w("<div class='read refused'><b>리더가 축을 읽지 못했습니다.</b><br>"
           "<span class='sub'>%s</span><br>첫 눈금과 끝 눈금을 적어 주세요.</div>"
           % esc((row.get("Y_Tick_Read_Detail") or "")[:180]))
+    code, why = warning_of(row)
+    if code:
+        w("<div class='read warn'><b>먼저 보세요:</b> %s<br><span class='sub'>%s</span></div>"
+          % (esc(WARN_TEXT.get(code, code)), esc(why[:180])))
     cand = (row.get("Y_Axis_Shared_Candidate") or "").strip()
     if cand:
         w("<div class='read shared'><b>축 공유 후보:</b> %s<br><span class='sub'>%s"

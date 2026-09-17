@@ -86,6 +86,14 @@ PROPOSAL_COLUMNS = (
     "Y_Tick_Read_Status", "Y_Tick_Read_Values",
     "Y_Tick_Read_First", "Y_Tick_Read_Last",
     "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail",
+    # WHAT THE TICK GRID SAYS ABOUT THE READING. A ladder is checked against the
+    # rows OCR put the numerals on, with the slack those rows need, and a
+    # misread that lands inside the slack passes: publication ASEM-P577's
+    # `200 150 100 50 0` was read `190 100 20` and stood. The tick marks the
+    # same proposal measured have no such slack, and nobody was asking them.
+    # A warning, never a verdict: the reading stays, and the page puts the
+    # panel in front of the person first.
+    "Y_Tick_Read_Warning",
     # WHICH LINE THE AXIS WAS READ FROM, when it was not the frame's left edge.
     # `find_frame` returns the leftmost long rule in the region, and on a boxed
     # panel that is the box, with the plot's spine and its numerals inside it.
@@ -728,7 +736,10 @@ def read_tick_values(image, row):
                       "and joins the ladder: %d labels, where the strip search "
                       "read %d" % (detail3, len(more), len(kept)))
             kept = more
-    return apply_reading(row, status, kept, detail, residual)
+    apply_reading(row, status, kept, detail, residual)
+    code, why = warn_reading(row)
+    row["Y_Tick_Read_Warning"] = ("%s: %s" % (code, why)) if code else ""
+    return row
 
 
 def _label_on_the_baseline(image, dark, box, spine_x, baseline_y, kept):
@@ -792,6 +803,92 @@ def apply_reading(row, status, kept, detail, residual):
     row["Y_Tick_Read_Last"] = "%g" % kept[-1][0]
     row["Y_Tick_Read_Residual_Px"] = ("%.2f" % residual) if residual is not None else ""
     return row
+
+
+#: 읽은 라벨이 눈금 위에 앉았다고 볼 거리(px). OCR이 잡는 글자 중심 행은 눈금
+#: 행에서 몇 픽셀 흔들린다 - `axis_reader.richer_read`가 같은 줄로 보는 거리다.
+ON_THE_TICK_PX = 3
+#: 라벨 사이가 눈금 몇 칸인지가 정수라고 볼 여유. 눈금 목록에 데이터 자국이
+#: 섞여 들어오면 칸 수가 정수에서 벗어나고, 그런 격자는 아무것도 말하지 않는다.
+WHOLE_TICKS_SLACK = 0.15
+#: 눈금 한 칸당 값이 같다고 볼 여유. 격자에 맞춘 뒤라 흔들림이 없다: 이 코퍼스가
+#: 읽은 378장 중 377장이 0.0000%, 틀린 한 장이 11.8%. 세 자리로 반올림된
+#: 라벨(33.3 66.7 100)이 0.3%다.
+TICK_STEP_TOLERANCE = 0.01
+WARN_TICK_STEP = "TICK_STEP_UNEVEN"
+WARN_OFF_THE_TICKS = "LABELS_OFF_THE_TICKS"
+
+
+def tick_rows_of(row):
+    """The tick rows a proposal measured, sorted - [] where it measured none."""
+    out = []
+    for part in _s(row.get("Y_Tick_Pixels")).split(";"):
+        try:
+            out.append(float(part))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
+def warn_reading(row):
+    """(code, detail) from putting a READ row's labels to its own tick grid,
+    or ("", "") - a warning for the person, never a verdict on the reading.
+
+    THE LADDER HAS SLACK AND THE TICK GRID HAS NONE. `axis_reader.ladder`
+    accepts value-per-pixel that varies up to 8%, because the rows it works
+    from are where OCR centred the numerals and those wobble; a misread digit
+    that lands inside the 8% passes. Publication ASEM-P577's `200 150 100 50 0`
+    read `190 100 20` - 6.4% - and stood, with two labels wrong the same way.
+    Snapped to the tick marks the same proposal measured, the wobble is gone
+    and the test is exact: 377 of this corpus's 378 checkable panels give a
+    constant value per tick, and the 378th is that one.
+
+    Two things are said, each only where it can be measured. Where every label
+    sits on a tick and the labels are whole ticks apart, the value per tick
+    must be constant. Where NO label sits on any tick and the ladder is the
+    shortest one accepted, the reading was never checked against anything but
+    itself - publication EDGELL-2012's `9 7 1` came from a strip that read
+    beside a frame that was not the axis. Panels with some labels on ticks and
+    some off, or with a grid that stray marks made irregular, get no warning:
+    silence here means "not measured", not "fine", which is why this is a
+    warning column and not a status.
+    """
+    import axis_reader as A                                 # noqa: PLC0415
+    kept = read_values_of(row)
+    ticks = tick_rows_of(row)
+    if len(kept) < A.MIN_LABELS or len(ticks) < A.MIN_LABELS:
+        return "", ""
+    near = [min(abs(px - t) for t in ticks) for _v, px in kept]
+    if all(d > ON_THE_TICK_PX for d in near):
+        if len(kept) <= A.MIN_LABELS:
+            return (WARN_OFF_THE_TICKS,
+                    "the %d labels read sit on none of the %d ticks measured "
+                    "(nearest is %.0f px off) - the strip may have read beside "
+                    "something that is not this axis"
+                    % (len(kept), len(ticks), min(near)))
+        return "", ""
+    if any(d > ON_THE_TICK_PX for d in near):
+        return "", ""
+    gaps = sorted(ticks[i + 1] - ticks[i] for i in range(len(ticks) - 1))
+    pitch = gaps[len(gaps) // 2]
+    if pitch <= 0:
+        return "", ""
+    steps = []
+    for (v0, p0), (v1, p1) in zip(kept, kept[1:]):
+        n = (p1 - p0) / pitch
+        if abs(n - round(n)) > WHOLE_TICKS_SLACK or round(n) < 1:
+            return "", ""
+        steps.append((v0 - v1) / round(n))
+    mean = sum(steps) / len(steps)
+    if not mean:
+        return "", ""
+    spread = (max(steps) - min(steps)) / abs(mean)
+    if spread > TICK_STEP_TOLERANCE:
+        return (WARN_TICK_STEP,
+                "value per tick varies %.1f%% (%s) though the labels sit on "
+                "evenly spaced ticks - one of them was misread"
+                % (100 * spread, ", ".join("%g" % st for st in steps)))
+    return "", ""
 
 
 def read_values_of(row):

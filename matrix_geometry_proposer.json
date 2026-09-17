@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "553d7204bf6db4e84f19337a499a025da76fd3138bd5e1da62cccbb1a770df81",
-  "test_geometry_proposer.py": "5bec31c0aa20568af0dc9adaac239a711e0102a933bfb5857a98d3f6fc893dcc"
+  "geometry_proposer.py": "b7bda390873d8b7f3ae7450cf4859007c8c24469ac69910c1e185541354ad119",
+  "test_geometry_proposer.py": "bd6ca853cf4868642e5a7e7c012798c8936267a49211ab1d2d0952d6203845c0"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -306,6 +306,54 @@
    "file": "geometry_proposer.py",
    "old": "    base_row = max(float(box[3]), float(baseline_y) if baseline_y is not None else 0.0)",
    "new": "    base_row = float(baseline_y) if baseline_y is not None else float(box[3])"
+  },
+  {
+   "name": "눈금 위에 앉은 거리를 재지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "ON_THE_TICK_PX = 3\n",
+   "new": "ON_THE_TICK_PX = 3000\n"
+  },
+  {
+   "name": "눈금당 값의 여유를 크게 준다",
+   "file": "geometry_proposer.py",
+   "old": "TICK_STEP_TOLERANCE = 0.01\n",
+   "new": "TICK_STEP_TOLERANCE = 0.5\n"
+  },
+  {
+   "name": "눈금당 값이 정확히 같아야 한다",
+   "file": "geometry_proposer.py",
+   "old": "TICK_STEP_TOLERANCE = 0.01\n",
+   "new": "TICK_STEP_TOLERANCE = 0.0\n"
+  },
+  {
+   "name": "칸 수가 정수가 아니어도 격자로 친다",
+   "file": "geometry_proposer.py",
+   "old": "        if abs(n - round(n)) > WHOLE_TICKS_SLACK or round(n) < 1:",
+   "new": "        if round(n) < 1:"
+  },
+  {
+   "name": "칸 수로 나누지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        steps.append((v0 - v1) / round(n))",
+   "new": "        steps.append(v0 - v1)"
+  },
+  {
+   "name": "눈금 밖의 라벨은 몇 개든 경고한다",
+   "file": "geometry_proposer.py",
+   "old": "        if len(kept) <= A.MIN_LABELS:",
+   "new": "        if True:"
+  },
+  {
+   "name": "격자에 걸친 라벨이 섞여 있어도 잰다",
+   "file": "geometry_proposer.py",
+   "old": "    if any(d > ON_THE_TICK_PX for d in near):\n        return \"\", \"\"",
+   "new": "    if False:\n        return \"\", \"\""
+  },
+  {
+   "name": "경고를 제안에 싣지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "    code, why = warn_reading(row)\n",
+   "new": "    code, why = \"\", \"\"\n"
   }
  ]
 }

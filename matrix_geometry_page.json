@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "2542263576258d21532888467a19951567b60d5bca9a027f3bb20eabe9aef248",
-  "test_geometry_page.py": "5762f8a524a5c2809dd5bc438173cb41bfdb3616616be458223b3e281a2a8546"
+  "geometry_page.py": "4a79383c6f9e48f2d9d6f30cf1266950a35889ac0a385e5715540731d3e3067d",
+  "test_geometry_page.py": "83c5429fc7fbc7693a693d61d915dc949a37174d485b04fb70010ff824ef449b"
  },
  "suites": [
   "test_geometry_page.py"
@@ -186,6 +186,24 @@
    "file": "geometry_page.py",
    "old": "  var GKEY = 'fdt_geometry_guide';",
    "new": "  var GKEY = 'fdt_geometry';"
+  },
+  {
+   "name": "경고를 맨 앞에 대지 않는다",
+   "file": "geometry_page.py",
+   "old": "    if warned:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "카드에 경고를 붙이지 않는다",
+   "file": "geometry_page.py",
+   "old": "    code, why = warning_of(row)\n    if code:\n",
+   "new": "    code, why = warning_of(row)\n    if False:\n"
+  },
+  {
+   "name": "모르는 코드는 숨긴다",
+   "file": "geometry_page.py",
+   "old": "WARN_TEXT.get(code, code)",
+   "new": "WARN_TEXT.get(code, \"\")"
   }
  ]
 }

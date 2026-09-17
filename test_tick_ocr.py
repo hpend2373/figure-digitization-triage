@@ -467,6 +467,171 @@ class LabelStripsScaleWithTheRender(unittest.TestCase):
         RUN[0] += 1
 
 
+#: ASEM-P577's y axis, as its proposal measured the ticks: 200 150 100 50 0
+#: at a 169 px pitch. `label at` rows are where OCR centred the numerals.
+_TICKS = (1870.5, 2039.5, 2208.0, 2377.5, 2546.0)
+_PRINTED = [(150.0, 2039.5), (100.0, 2208.0), (50.0, 2378.0)]
+_MISREAD = [(190.0, 2039.5), (100.0, 2208.0), (20.0, 2378.0)]   # what was read
+
+
+class TheTickGrid(unittest.TestCase):
+    """The ladder has slack; the tick grid the same proposal measured has none."""
+
+    def test_a_misread_the_ladder_passes_the_grid_refuses(self):
+        """REVERT: let the ladder be the only test. `190 100 20` is a ladder
+        by 6.4% - inside the 8% the wobbling OCR rows need - and stood as the
+        axis of ASEM-P577's panel, two labels wrong the same way. Against the
+        ticks the same proposal measured it is 11.8% per tick."""
+        self.assertTrue(A.ladder(_MISREAD)[0], "the fixture no longer shows the fault")
+        verdict, why = A.grid_verdict(_MISREAD, _TICKS)
+        self.assertEqual(verdict, A.GRID_CONTRADICTED, why)
+        self.assertIn("11.8%", why)
+        self.assertEqual(A.grid_verdict(_PRINTED, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_labels_rounded_on_the_page_are_not_a_misread(self):
+        """REVERT: demand exact equality per tick. Labels printed to three
+        digits - 33.3 66.7 100 - differ by 0.3% per tick and are an axis."""
+        rounded = [(100.0, 2039.5), (66.7, 2208.0), (33.3, 2378.0)]
+        self.assertEqual(A.grid_verdict(rounded, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_every_label_may_share_one_shift_from_its_tick(self):
+        """OCR centres a tall numeral a few pixels off the tick it belongs to,
+        on every label alike: 19 of 21 panels this corpus first flagged as "off
+        the ticks" were shifted 3-9 px as one. What no axis does is disagree
+        about the shift - EDGELL-2012's `9 7 1` has its middle label 34 px off
+        the other two, read beside a frame that was not the axis."""
+        shifted = [(v, r + 5.0) for v, r in _PRINTED]
+        self.assertEqual(A.grid_verdict(shifted, _TICKS)[0], A.GRID_CONSISTENT)
+        astray = [(30.0, 1870.5), (20.0, 2039.5), (8.0, 2248.0)]
+        verdict, why = A.grid_verdict(astray, _TICKS)
+        self.assertEqual(verdict, A.GRID_OFF, why)
+        self.assertIn("do not sit on one grid", why)
+        RUN[0] += 1
+
+    def test_a_label_at_a_tick_the_detector_missed_is_still_on_the_grid(self):
+        """REVERT: place each label by its nearest DETECTED tick. The end
+        ticks sit on the frame's corners and the detector misses them; 65 of
+        this corpus's read panels have a label a whole pitch from any tick it
+        found. The grid continues past the ticks that were seen."""
+        above = [(250.0, 1701.5)] + _PRINTED           # 1701.5 = one pitch above the first tick
+        self.assertEqual(A.grid_verdict(above, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_labels_two_ticks_apart_carry_two_steps(self):
+        """REVERT: count the value step per LABEL. Labels are printed on every
+        other tick as often as on every one."""
+        every_other = [(40.0, 1870.5), (20.0, 2208.0), (10.0, 2377.5)]
+        self.assertEqual(A.grid_verdict(every_other, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_a_tick_list_that_is_not_a_grid_measures_nothing(self):
+        """REVERT: read whatever the tick list holds as a grid. Data marks get
+        into it - S41526's D006 lists 1720 1866 2014 2083 2142 2159 - and
+        against such a list an honest axis looks uneven. Silence is "not
+        measured", not "fine"."""
+        strays = (0.0, 100.0, 140.0, 200.0, 300.0, 400.0)
+        honest = [(40.0, 0.0), (26.0, 140.0), (0.0, 400.0)]      # 0.1 per px throughout
+        verdict, why = A.grid_verdict(honest, strays)
+        self.assertEqual(verdict, A.GRID_UNMEASURED, why)
+        self.assertIn("not a regular grid", why)
+        self.assertEqual(A.grid_verdict(_MISREAD, _TICKS[:2])[0], A.GRID_UNMEASURED)
+        self.assertEqual(A.grid_verdict(_MISREAD[:2], _TICKS)[0], A.GRID_UNMEASURED)
+        RUN[0] += 1
+
+    def test_the_grid_is_asked_about_the_labels_the_ladder_kept(self):
+        """REVERT: ask it about every numeral read. A stray numeral the ladder
+        dropped is not a label, and a stray numeral is off the grid, which
+        would hide a contradiction among the labels that were kept."""
+        with_stray = _MISREAD + [(7.0, 2460.0)]
+        self.assertEqual(A.ladder_run(with_stray), _MISREAD)
+        self.assertFalse(A.accepted(with_stray, _TICKS))
+        self.assertFalse(A.accepted(_MISREAD, _TICKS))
+        self.assertTrue(A.accepted(_PRINTED, _TICKS))
+        self.assertTrue(A.accepted(_MISREAD), "without a grid the ladder alone decides")
+        self.assertFalse(A.accepted([(1.0, 10.0), (5.0, 20.0)], _TICKS))
+        RUN[0] += 1
+
+    def test_a_strip_the_grid_contradicts_is_passed_over(self):
+        """REVERT: take the first strip that ladders. The search goes on to
+        the next strip and the next magnification, and what the grid
+        contradicted is returned only when nothing else was read."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(1.0)
+        answers = [_MISREAD, _PRINTED]
+        real = A._ocr_numerals
+
+        def fake(img_, dark_, left, right, top, bottom, scale=3, comma=False,
+                 with_clip=False, margin=0):
+            got = answers.pop(0) if answers else []
+            return [(v, r, False) for v, r in got]
+
+        A._ocr_numerals = fake
+        try:
+            got = A._search(img, dark, box, sx, box[0], box[2], box[3], 3,
+                            comma=False, seen={}, ticks=_TICKS)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(got, _PRINTED, "the contradicted strip was taken: %s" % (got,))
+        answers[:] = [_MISREAD, _PRINTED]
+        A._ocr_numerals = fake
+        try:
+            alone = A._search(img, dark, box, sx, box[0], box[2], box[3], 3,
+                              comma=False, seen={})
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(alone, _MISREAD, "without a grid the first ladder is the answer")
+        RUN[0] += 1
+
+    def test_the_second_pass_is_asked_when_the_grid_refused_the_first(self):
+        """REVERT: keep the first reading whenever it ladders. Refused by the
+        grid, the tuned reading is one that did not read, and the passes that
+        run only after a refusal - past the ticks, at the glyph's own size -
+        are where ASEM-P577's `150 100 50` was found."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom, scale,
+                comma, seen, **kw):
+            return list(_MISREAD if int(anchor_spine) == sx else _PRINTED)
+
+        A._search = spy
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base, ticks=_TICKS)
+            kept = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(got, _PRINTED, "the grid's refusal did not send the search on")
+        self.assertEqual(kept, _MISREAD, "without a grid the tuned ladder stands")
+        RUN[0] += 1
+
+    def test_the_label_column_may_be_as_wide_as_the_render_makes_it(self):
+        """REVERT: cap the measured column at 60 px whatever the render. That
+        is 60 px of a 300 DPI page, past which the column has swallowed the
+        rotated title; at 600 DPI a printed `150` is 73 px wide by itself, and
+        311 of this corpus's 694 read panels had a column the cap threw away -
+        with it, the glyph's height and the band at the baseline."""
+        self.assertEqual(A.band_max_for(A._TUNED_PANEL_PX), A.LABEL_BAND_MAX)
+        self.assertEqual(A.band_max_for(2 * A._TUNED_PANEL_PX), 2 * A.LABEL_BAND_MAX)
+        self.assertEqual(A.band_max_for(A._TUNED_PANEL_PX // 2), A.LABEL_BAND_MAX,
+                         "never narrower than the tuned cap")
+        self.assertEqual(A.band_max_for("tall"), A.LABEL_BAND_MAX)
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("3000", "2000", "1000"))
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        self.assertIsNone(A.label_band(dark, box, sx - reach, y0 - 10, base + 10),
+                          "the fixture's column no longer exceeds the tuned cap")
+        self.assertIsNotNone(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                             "the glyph was not measured on a 600 DPI column")
+        RUN[0] += 1
+
+
 class OneStripOneRead(unittest.TestCase):
 
     def test_no_strip_is_read_twice_at_the_same_magnification(self):
@@ -478,7 +643,7 @@ class OneStripOneRead(unittest.TestCase):
         asked = []
 
         def spy(img, dark, left, right, top, bottom, scale=3, **kw):
-            asked.append((int(left), int(right), int(top), int(bottom), int(scale)))
+            asked.append((int(left), int(right), int(top), int(bottom), round(float(scale), 3)))
             return []
 
         img, dark, box, sx, base = panel_with_labels(2.0)
@@ -579,8 +744,12 @@ class TheSecondPass(unittest.TestCase):
         self.assertGreater(reach, 20, "the fixture's ticks were not measured")
         self.assertTrue(all(r <= sx - reach for r, _s in second),
                         "a second-pass strip reaches into the ticks: %s" % (second[:4],))
-        self.assertTrue(all(s in (1.5, 2.0) for _r, s in second),
-                        "the second pass did not magnify for the render: %s" % (sorted({s for _r, s in second}),))
+        self.assertEqual(second[0][1], 1.5,
+                         "the second pass did not magnify for the render: %s" % (sorted({s for _r, s in second}),))
+        # and what comes after it only ever shows the glyph SMALLER - the
+        # passes at the glyph's own size - never the x3 the first pass used
+        self.assertTrue(all(s <= 2.0 for _r, s in second),
+                        "a later pass enlarged past the render's magnification: %s" % (sorted({s for _r, s in second}),))
         RUN[0] += 1
 
     def test_a_cut_strip_is_dropped_whole(self):

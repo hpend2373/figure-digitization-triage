@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "df1a4bc29a779e6dc10c28d6beb95a28dc47af7c1c70f6b7bf92a025b4cb7caf"
+  "axis_reader.py": "e501167d6ace3b7df39e7bfb192417e16391fc43a9a38f2c253bf9adcfc0e2e8"
  },
  "mutations": [
   {
@@ -142,14 +142,14 @@
   {
    "name": "두 번째 패스가 없다",
    "file": "axis_reader.py",
-   "old": "    if ladder(first)[0]:\n        return first\n    reach = tick_reach(",
-   "new": "    if True:\n        return first\n    reach = tick_reach("
+   "old": "    second = past_the_ticks()\n    if accepted(second, ticks):",
+   "new": "    second = []\n    if accepted(second, ticks):"
   },
   {
    "name": "두 번째 패스가 눈금을 지나 시작하지 않는다",
    "file": "axis_reader.py",
-   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    second =",
-   "new": "    reach = 0\n    second ="
+   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n\n    def past_the_ticks(sc=None):",
+   "new": "    reach = 0\n\n    def past_the_ticks(sc=None):"
   },
   {
    "name": "두 번째 패스도 x3으로 확대한다",
@@ -166,8 +166,8 @@
   {
    "name": "두 번째 패스가 쉼표 없이 읽는다",
    "file": "axis_reader.py",
-   "old": "                     scale_for(y1 - y0, scale), comma=True, seen=seen,",
-   "new": "                     scale_for(y1 - y0, scale), comma=False, seen=seen,"
+   "old": "                       comma=True, seen=seen, tight=True, margin=8, ticks=ticks)",
+   "new": "                       comma=False, seen=seen, tight=True, margin=8, ticks=ticks)"
   },
   {
    "name": "낱말 왼쪽에 선 것을 보지 않는다",
@@ -238,8 +238,8 @@
   {
    "name": "띠를 눈금 자리까지 끌어온다",
    "file": "axis_reader.py",
-   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)",
-   "new": "    reach = 0\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)"
+   "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom,",
+   "new": "    reach = 0\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom,"
   },
   {
    "name": "눈금을 물어도 첫 읽기를 그대로 쓴다",
@@ -256,8 +256,8 @@
   {
    "name": "눈금 너머 읽기가 사다리가 아니어도 쓴다",
    "file": "axis_reader.py",
-   "old": "        return past if richer_read(first, past) else first",
-   "new": "        return past"
+   "old": "        if not richer_read(first, past) or not accepted(past, ticks):\n            return first",
+   "new": "        if False:\n            return first"
   },
   {
    "name": "눈금 너머 읽기가 더 풍부하지 않아도 쓴다",
@@ -274,8 +274,8 @@
   {
    "name": "사다리가 버린 라벨도 세어 준다",
    "file": "axis_reader.py",
-   "old": "    return sum(1 for _v, row in pairs if lo <= row <= hi)",
-   "new": "    return len(pairs)"
+   "old": "    return sorted((p for p in pairs if lo <= p[1] <= hi), key=lambda p: p[1])",
+   "new": "    return sorted(pairs, key=lambda p: p[1])"
   },
   {
    "name": "더 큰 배율만 있어도 다시 읽는다",
@@ -298,7 +298,7 @@
   {
    "name": "작은 배율의 답이 사다리가 아니어도 쓴다",
    "file": "axis_reader.py",
-   "old": "        smaller = past_the_ticks(sc)\n        if ladder(smaller)[0]:\n            return smaller",
+   "old": "        smaller = past_the_ticks(sc)\n        if accepted(smaller, ticks):\n            return smaller",
    "new": "        smaller = past_the_ticks(sc)\n        if True:\n            return smaller"
   },
   {
@@ -310,8 +310,8 @@
   {
    "name": "사다리가 아닌 읽기도 크기가 있다",
    "file": "axis_reader.py",
-   "old": "    if not ok:\n        return 0",
-   "new": "    if False:\n        return 0"
+   "old": "    if not ok:\n        return []\n    lo, hi = min(first[1], last[1]), max(first[1], last[1])",
+   "new": "    if False:\n        return []\n    lo, hi = min(first[1], last[1]), max(first[1], last[1])"
   },
   {
    "name": "같은 줄을 두 번 읽어도 둘 다 넣는다",
@@ -322,14 +322,86 @@
   {
    "name": "합친 읽기는 언제나 쓴다",
    "file": "axis_reader.py",
-   "old": "        return both if ladder_size(both) > ladder_size(past) else past",
+   "old": "        return both if accepted(both, ticks) and ladder_size(both) > ladder_size(past) else past",
    "new": "        return both"
   },
   {
    "name": "합치지 않고 옮긴 읽기만 쓴다",
    "file": "axis_reader.py",
-   "old": "        both = merged_read(first, past)\n        return both if ladder_size(both) > ladder_size(past) else past",
+   "old": "        both = merged_read(first, past)\n        return both if accepted(both, ticks) and ladder_size(both) > ladder_size(past) else past",
    "new": "        both = merged_read(first, past)\n        return past"
+  },
+  {
+   "name": "눈금 위에 앉은 거리를 재지 않는다",
+   "file": "axis_reader.py",
+   "old": "ON_THE_TICK_PX = 3\n",
+   "new": "ON_THE_TICK_PX = 3000\n"
+  },
+  {
+   "name": "눈금당 값의 여유를 크게 준다",
+   "file": "axis_reader.py",
+   "old": "TICK_STEP_TOLERANCE = 0.01\n",
+   "new": "TICK_STEP_TOLERANCE = 0.5\n"
+  },
+  {
+   "name": "눈금당 값이 정확히 같아야 한다",
+   "file": "axis_reader.py",
+   "old": "TICK_STEP_TOLERANCE = 0.01\n",
+   "new": "TICK_STEP_TOLERANCE = 0.0\n"
+  },
+  {
+   "name": "격자가 고르지 않아도 잰다",
+   "file": "axis_reader.py",
+   "old": "    if astray > ON_THE_TICK_PX:\n        return GRID_UNMEASURED",
+   "new": "    if False:\n        return GRID_UNMEASURED"
+  },
+  {
+   "name": "라벨이 한 격자 위에 있지 않아도 값을 잰다",
+   "file": "axis_reader.py",
+   "old": "    if spread > ON_THE_TICK_PX:\n        return GRID_OFF,",
+   "new": "    if False:\n        return GRID_OFF,"
+  },
+  {
+   "name": "칸 수로 나누지 않는다",
+   "file": "axis_reader.py",
+   "old": "        steps.append((v0 - v1) / n)",
+   "new": "        steps.append(v0 - v1)"
+  },
+  {
+   "name": "가장 가까운 눈금에 댄다",
+   "file": "axis_reader.py",
+   "old": "    shifts = [_wrap(row - ticks[0], pitch) for _v, row in pairs]",
+   "new": "    shifts = [min(abs(row - t) for t in ticks) for _v, row in pairs]"
+  },
+  {
+   "name": "사다리가 버린 라벨도 격자에 묻는다",
+   "file": "axis_reader.py",
+   "old": "    run = ladder_run(pairs)\n    return bool(run) and",
+   "new": "    run = sorted(pairs, key=lambda p: p[1]) if ladder(pairs)[0] else []\n    return bool(run) and"
+  },
+  {
+   "name": "격자가 어긋나도 스트립을 받는다",
+   "file": "axis_reader.py",
+   "old": "                    if accepted(pairs, ticks):\n                        return pairs",
+   "new": "                    if ladder(pairs)[0]:\n                        return pairs"
+  },
+  {
+   "name": "첫 읽기는 격자를 보지 않는다",
+   "file": "axis_reader.py",
+   "old": "    if accepted(first, ticks):\n        if reach <= _TUNED_GAP_MAX:",
+   "new": "    if ladder(first)[0]:\n        if reach <= _TUNED_GAP_MAX:"
+  },
+  {
+   "name": "띠 상한은 300 DPI 그대로다",
+   "file": "axis_reader.py",
+   "old": "    return int(round(base * max(1.0, k)))",
+   "new": "    return base"
+  },
+  {
+   "name": "띠 상한이 튜닝값 아래로도 내려간다",
+   "file": "axis_reader.py",
+   "old": "    return int(round(base * max(1.0, k)))",
+   "new": "    return int(round(base * k))"
   }
  ]
 }

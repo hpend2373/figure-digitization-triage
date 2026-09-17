@@ -2208,7 +2208,25 @@ LABEL_BAND_MAX = 60       # a measured label column wider than this is not one
 SCALES = (3, 4)           # magnifications the FALLBACK pass unions over
 
 
-def label_band(dark, box, anchor, top, bottom, max_reach=180):
+def band_max_for(panel_height, base=LABEL_BAND_MAX, tuned=_TUNED_PANEL_PX):
+    """The widest label column `label_band` may accept on a panel this tall.
+
+    `LABEL_BAND_MAX` is 60 px of a 300 DPI render, the width past which a
+    measured column has swallowed the rotated title. At 600 DPI a printed `150`
+    is 73 px wide on its own, and 311 of the 694 panels this corpus reads have
+    a column wider than 60 - so `label_band` returned None on them, and every
+    reading that needs the column measured (the glyph's height, the band at the
+    baseline) silently never ran. Scaled with the panel like `strips_for`, and
+    never below the tuned cap.
+    """
+    try:
+        k = float(panel_height) / float(tuned)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return base
+    return int(round(base * max(1.0, k)))
+
+
+def label_band(dark, box, anchor, top, bottom, max_reach=180, band_max=LABEL_BAND_MAX):
     """(left, right) of the FIRST block of ink to the left of `anchor`, measured.
 
     A fixed-width strip is a guess about where the numerals are, and on a narrow
@@ -2247,7 +2265,7 @@ def label_band(dark, box, anchor, top, bottom, max_reach=180):
     # with a 129 px band and a self-consistent but wrong ladder, which is worse than
     # no band at all. A column of axis numerals is narrow; if the measurement says
     # otherwise, the measurement is not of a column of axis numerals.
-    if right - left > LABEL_BAND_MAX:
+    if right - left > band_max:
         return None
     return left - 1, right + 2
 
@@ -2313,7 +2331,8 @@ def label_height(dark, box, anchor, top, bottom):
     `5` and reads `9`. The panel is a bad proxy exactly where the figure sets
     its labels large.
     """
-    band = label_band(dark, box, anchor, top, bottom)
+    band = label_band(dark, box, anchor, top, bottom,
+                      band_max=band_max_for(box[3] - box[2]))
     if not band:
         return None
     col = dark[int(max(0, top)):int(bottom), band[0]:band[1] + 1].any(axis=1)
@@ -2343,9 +2362,10 @@ def smaller_scales(height, current):
 
 
 def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma,
-            seen, tight=False, margin=0):
+            seen, tight=False, margin=0, ticks=()):
     """The strip search at one setting: the numerals of the first strip that
-    ladder, else the longest read - clipped numerals counting for neither."""
+    ladder AND do not contradict the tick grid, else the longest read - clipped
+    numerals counting for neither."""
     x0, x1, y0, y1 = box
     best = []
     wider = [g for g in strips_for(y1 - y0) if g not in _STRIPS]
@@ -2419,7 +2439,9 @@ def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma
                     if any(cl == CLIP_STRIP for _v, _r, cl in trip):
                         continue
                     pairs = [(v, r) for v, r, cl in trip if not cl]
-                    if ladder(pairs)[0]:
+                    # A LADDER THE GRID CONTRADICTS IS NOT AN ANSWER, and the
+                    # search goes on: the next strip, the next magnification.
+                    if accepted(pairs, ticks):
                         return pairs
                     if len(pairs) > len(best):
                         best = pairs
@@ -2431,17 +2453,101 @@ def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma
 _TUNED_GAP_MAX = max(g for g, _w in _STRIPS)
 
 
-def ladder_size(pairs):
-    """How many labels the ladder in `pairs` holds - 0 where there is none.
+def ladder_run(pairs):
+    """The labels the ladder in `pairs` kept, in row order - [] where there is
+    no ladder.
 
     The ladder is contiguous in pixel order, so the labels between its ends are
     the ones it kept and the rest were dropped.
     """
     ok, _detail, first, last, _resid, _cv = ladder(pairs)
     if not ok:
-        return 0
+        return []
     lo, hi = min(first[1], last[1]), max(first[1], last[1])
-    return sum(1 for _v, row in pairs if lo <= row <= hi)
+    return sorted((p for p in pairs if lo <= p[1] <= hi), key=lambda p: p[1])
+
+
+def ladder_size(pairs):
+    """How many labels the ladder in `pairs` holds - 0 where there is none."""
+    return len(ladder_run(pairs))
+
+
+#: 라벨이 눈금 격자 위에 앉았다고 볼 거리(px). OCR이 잡는 글자 중심 행은 눈금
+#: 행에서 몇 픽셀 흔들리고, 흔들림은 한 축의 라벨 모두에 같은 만큼 붙는다.
+ON_THE_TICK_PX = 3
+#: 눈금 한 칸당 값이 같다고 볼 여유. 격자에 맞춘 뒤라 흔들림이 없다: 이 코퍼스가
+#: 읽은 패널 중 격자로 잴 수 있던 408장에서 407장이 0.0000%, 틀린 한 장이
+#: 11.8%. 세 자리로 반올림된 라벨(33.3 66.7 100)이 0.3%다.
+TICK_STEP_TOLERANCE = 0.01
+GRID_CONSISTENT = "CONSISTENT"        # 격자 위에 앉았고 한 칸당 값이 일정하다
+GRID_CONTRADICTED = "CONTRADICTED"    # 격자 위에 앉았는데 한 칸당 값이 다르다
+GRID_OFF = "OFF_GRID"                 # 라벨들이 한 격자 위에 있지 않다
+GRID_UNMEASURED = "UNMEASURED"        # 격자가 없거나 격자 자체가 고르지 않다
+
+
+def _wrap(x, pitch):
+    x = x % pitch
+    return x - pitch if x > pitch / 2.0 else x
+
+
+def grid_verdict(pairs, ticks):
+    """(verdict, detail): what the tick marks a panel measured say about a
+    reading of its labels. Never a reading of its own.
+
+    THE LADDER HAS SLACK AND THE GRID HAS NONE. `ladder` lets value-per-pixel
+    vary 8% because the rows OCR centres numerals on wobble; a misread digit
+    that lands inside the 8% passes - publication ASEM-P577's `200 150 100 50`
+    read `190 100 20` at 6.4% and stood. The tick marks were measured on the
+    same proposal, and against them the test is exact.
+
+    THE GRID, NOT THE TICKS: a label is placed by its distance from the tick
+    grid modulo the pitch, so a label at an end tick the detector missed is
+    still on the grid, and every label of an axis is allowed the same shift -
+    OCR centres a tall numeral a few pixels below the tick it belongs to, on
+    every label alike. What is NOT allowed is the labels disagreeing about
+    that shift (`GRID_OFF`), or, once they sit on one grid, the value per tick
+    changing along it (`GRID_CONTRADICTED`). A tick list that is not itself a
+    regular grid - stray data marks in it, or a broken axis - measures nothing
+    (`GRID_UNMEASURED`); silence there means "not measured", never "fine".
+    """
+    ticks = sorted(float(t) for t in ticks)
+    if len(pairs) < MIN_LABELS or len(ticks) < MIN_LABELS:
+        return GRID_UNMEASURED, "no grid to put %d label(s) to" % len(pairs)
+    gaps = sorted(ticks[i + 1] - ticks[i] for i in range(len(ticks) - 1))
+    pitch = gaps[len(gaps) // 2]
+    if pitch < 2 * ON_THE_TICK_PX:
+        return GRID_UNMEASURED, "ticks %.1f px apart are too close to place a label by" % pitch
+    astray = max(abs(_wrap(t - ticks[0], pitch)) for t in ticks)
+    if astray > ON_THE_TICK_PX:
+        return GRID_UNMEASURED, "the tick list is not a regular grid (a tick %.0f px off it)" % astray
+    shifts = [_wrap(row - ticks[0], pitch) for _v, row in pairs]
+    spread = max(shifts) - min(shifts)
+    if spread > ON_THE_TICK_PX:
+        return GRID_OFF, ("the labels do not sit on one grid: offsets %s px"
+                          % ", ".join("%.0f" % x for x in shifts))
+    steps = []
+    for (v0, r0), (v1, r1) in zip(pairs, pairs[1:]):
+        n = int(round((r1 - r0) / pitch))
+        if n < 1:
+            return GRID_UNMEASURED, "two labels on one tick"
+        steps.append((v0 - v1) / n)
+    mean = sum(steps) / len(steps)
+    if not mean:
+        return GRID_UNMEASURED, "the labels do not change along the axis"
+    vary = (max(steps) - min(steps)) / abs(mean)
+    if vary > TICK_STEP_TOLERANCE:
+        return GRID_CONTRADICTED, ("value per tick varies %.1f%% (%s) though the labels sit "
+                                   "on evenly spaced ticks - one of them was misread"
+                                   % (100 * vary, ", ".join("%g" % st for st in steps)))
+    return GRID_CONSISTENT, "%.1f%% per-tick variation over %d labels" % (100 * vary, len(pairs))
+
+
+def accepted(pairs, ticks=()):
+    """Whether a reading may be kept: its ladder holds, and the ladder it holds
+    does not contradict the tick grid. The grid is asked about the labels the
+    ladder KEPT - a stray numeral the ladder dropped is not a label."""
+    run = ladder_run(pairs)
+    return bool(run) and grid_verdict(run, ticks)[0] != GRID_CONTRADICTED
 
 
 def richer_read(first, second):
@@ -2510,7 +2616,8 @@ def label_near(img, dark, box, spine_x, row, half, scale=3):
     if bottom - top < 20 or pytesseract is None:
         return []
     reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))
-    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)
+    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom,
+                      band_max=band_max_for(y1 - y0))
     if not band:
         return []
     out = []
@@ -2526,7 +2633,8 @@ def label_near(img, dark, box, spine_x, row, half, scale=3):
     return out
 
 
-def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, scale=3):
+def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, scale=3,
+                  ticks=()):
     """The first strip geometry whose numerals form a checkable ladder.
 
     A search, not a guess: `ladder` has to accept the result, and it only accepts
@@ -2573,15 +2681,15 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
     # and the clock was 8 s a panel where 5 would do.
     seen = {}
     first = _search(img, dark, box, spine_x, x0, top, bottom, scale,
-                    comma=False, seen=seen)
+                    comma=False, seen=seen, ticks=ticks)
     reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))
 
     def past_the_ticks(sc=None):
         return _search(img, dark, box, spine_x - reach, x0 - reach, top, bottom,
                        scale_for(y1 - y0, scale) if sc is None else sc,
-                       comma=True, seen=seen, tight=True, margin=8)
+                       comma=True, seen=seen, tight=True, margin=8, ticks=ticks)
 
-    if ladder(first)[0]:
+    if accepted(first, ticks):
         if reach <= _TUNED_GAP_MAX:
             return first
         # THE TUNED STRIPS ARE HOLDING THE TICK MARKS, and a tick glued to a
@@ -2599,12 +2707,12 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
         # the ticks are short the strips never touched them and the reading is
         # returned as it was tuned to be.
         past = past_the_ticks()
-        if not richer_read(first, past):
+        if not richer_read(first, past) or not accepted(past, ticks):
             return first
         both = merged_read(first, past)
-        return both if ladder_size(both) > ladder_size(past) else past
+        return both if accepted(both, ticks) and ladder_size(both) > ladder_size(past) else past
     second = past_the_ticks()
-    if ladder(second)[0]:
+    if accepted(second, ticks):
         return second
     # AND THEN SMALLER, BECAUSE THE LABELS ARE ALREADY BIG. `scale_for` reads
     # the magnification off the panel's height, which is a proxy for the glyph
@@ -2619,8 +2727,12 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
     for sc in smaller_scales(label_height(dark, box, spine_x - reach, top, bottom),
                              scale_for(y1 - y0, scale)):
         smaller = past_the_ticks(sc)
-        if ladder(smaller)[0]:
+        if accepted(smaller, ticks):
             return smaller
+    # NOTHING WAS ACCEPTED. The longest read goes back for the refusal to name
+    # - and a ladder the grid contradicted goes back too, because the caller's
+    # own gate (`values_from_ladder`) is what refuses it, with the grid's
+    # reason on the row instead of "only 2 labels".
     return first if len(first) >= len(second) else second
 
 

@@ -2298,6 +2298,50 @@ def scale_for(panel_height, scale=3, tuned=_TUNED_PANEL_PX):
     return max(1.0, min(float(scale), scale * k))
 
 
+#: 눈금 글자가 tesseract가 훈련받은 크기로 보이게 하는 목표 높이(px). 라벨이
+#: 이미 큰 판에서는 확대가 아니라 축소가 필요하다 - 40px가 먼저, 28px가 그다음.
+#: 이 코퍼스가 이 길로 되찾은 9장 중 7장은 40px에서, 2장은 28px에서 사다리가 섰다.
+_GLYPH_TARGETS = (40.0, 28.0)
+
+
+def label_height(dark, box, anchor, top, bottom):
+    """The median height of the ink rows in the label column, or None.
+
+    The glyph, measured - not the panel height `scale_for` uses as its proxy.
+    Publication S41467-023-41990-4's CoP velocity panel is 703 px tall, so
+    `scale_for` asks for x1.68, and its labels are 38 px: tesseract sees a 64 px
+    `5` and reads `9`. The panel is a bad proxy exactly where the figure sets
+    its labels large.
+    """
+    band = label_band(dark, box, anchor, top, bottom)
+    if not band:
+        return None
+    col = dark[int(max(0, top)):int(bottom), band[0]:band[1] + 1].any(axis=1)
+    runs, n = [], 0
+    for v in col:
+        if v:
+            n += 1
+        elif n:
+            runs.append(n)
+            n = 0
+    if n:
+        runs.append(n)
+    return float(np.median(runs)) if runs else None
+
+
+def smaller_scales(height, current):
+    """The magnifications that show a `height` px glyph at the trained size,
+    only those below `current`, largest first.
+
+    Never larger than the magnification already tried, and nothing at all when
+    the glyph was not measured. A 10 px label would want x4 and does not get
+    it: x3 was already asked, and this pass exists to shrink, not to enlarge.
+    """
+    if not height:
+        return []
+    return [t / float(height) for t in _GLYPH_TARGETS if t / float(height) < current]
+
+
 def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma,
             seen, tight=False, margin=0):
     """The strip search at one setting: the numerals of the first strip that
@@ -2380,6 +2424,47 @@ def _search(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma
                     if len(pairs) > len(best):
                         best = pairs
     return best
+
+
+#: 튜닝된 스트립이 축선에서 떨어지는 가장 먼 거리. 눈금이 이보다 멀리 뻗으면
+#: 그 스트립들은 눈금 자국을 물고 있다.
+_TUNED_GAP_MAX = max(g for g, _w in _STRIPS)
+
+
+def ladder_size(pairs):
+    """How many labels the ladder in `pairs` holds - 0 where there is none.
+
+    The ladder is contiguous in pixel order, so the labels between its ends are
+    the ones it kept and the rest were dropped.
+    """
+    ok, _detail, first, last, _resid, _cv = ladder(pairs)
+    if not ok:
+        return 0
+    lo, hi = min(first[1], last[1]), max(first[1], last[1])
+    return sum(1 for _v, row in pairs if lo <= row <= hi)
+
+
+def richer_read(first, second):
+    """`second` when the LADDER IN IT holds more labels than the one in `first`
+    and contradicts none of them, else None.
+
+    The test for "the same axis, read better". More NUMERALS is not that test:
+    the reading counted, the one the panel is calibrated from, is the ladder,
+    and a second look that reads one label twice at two rows has more numerals
+    and a shorter ladder - publication S41467-023-41990-4's `600 450 300 150`
+    came back with `450` at both 679 and 684, which cost it the 600 and left a
+    ladder of three where four had stood. Nor is a longer ladder enough on its
+    own: a strip that moves can read the x axis's numerals or the neighbouring
+    panel's and form a perfectly good ladder of its own. A richer reading of
+    THIS axis says the same thing about every row both of them saw.
+    """
+    if ladder_size(second) <= ladder_size(first):
+        return None
+    for value, row in first:
+        same = [v for v, r in second if abs(r - row) <= 3]
+        if same and same[0] != value:
+            return None
+    return second
 
 
 def label_near(img, dark, box, spine_x, row, half, scale=3):
@@ -2465,14 +2550,50 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
     seen = {}
     first = _search(img, dark, box, spine_x, x0, top, bottom, scale,
                     comma=False, seen=seen)
-    if ladder(first)[0]:
-        return first
     reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))
-    second = _search(img, dark, box, spine_x - reach, x0 - reach, top, bottom,
-                     scale_for(y1 - y0, scale), comma=True, seen=seen,
-                     tight=True, margin=8)
+
+    def past_the_ticks(sc=None):
+        return _search(img, dark, box, spine_x - reach, x0 - reach, top, bottom,
+                       scale_for(y1 - y0, scale) if sc is None else sc,
+                       comma=True, seen=seen, tight=True, margin=8)
+
+    if ladder(first)[0]:
+        if reach <= _TUNED_GAP_MAX:
+            return first
+        # THE TUNED STRIPS ARE HOLDING THE TICK MARKS, and a tick glued to a
+        # numeral is read as punctuation - "9." or "15-" - which `numeral`
+        # throws away whole. Two-digit labels survive it because psm 11 reads
+        # them cleanly on its own; a LONE DIGIT psm 11 does not return at all,
+        # so it is left to psm 6, whose word carries the tick. Publication
+        # S41467-023-41990-4's "Number of finishers" axis reads 16..10 and not
+        # one of 9..1 that way. Asked again past the ticks, tesseract returns
+        # every label at confidence 94 and up.
+        #
+        # ONLY WHEN THE STRIPS BIT. 76% of the panels this corpus reads have
+        # ticks longer than the tuned gap, and on those a second search costs
+        # half a second and gained labels on 32 of 172 with nothing lost; where
+        # the ticks are short the strips never touched them and the reading is
+        # returned as it was tuned to be.
+        past = past_the_ticks()
+        return past if richer_read(first, past) else first
+    second = past_the_ticks()
     if ladder(second)[0]:
         return second
+    # AND THEN SMALLER, BECAUSE THE LABELS ARE ALREADY BIG. `scale_for` reads
+    # the magnification off the panel's height, which is a proxy for the glyph
+    # and a bad one on a figure that sets its labels large: the CoP velocity
+    # panel of S41467-023-41990-4 is 703 px tall, gets x1.68, and its `50` is
+    # read as `90` at confidence 65 - a ladder broken by one digit, on an axis
+    # that reads 150 100 50 at confidence 95 when the glyph is shown at its
+    # trained size. Asked at the measured magnification, 9 of this corpus's
+    # 257 refusals read, every one of them agreeing with the labels the earlier
+    # pass had already got right; nothing else is touched, because a panel whose
+    # reading laddered never reaches here.
+    for sc in smaller_scales(label_height(dark, box, spine_x - reach, top, bottom),
+                             scale_for(y1 - y0, scale)):
+        smaller = past_the_ticks(sc)
+        if ladder(smaller)[0]:
+            return smaller
     return first if len(first) >= len(second) else second
 
 

@@ -121,15 +121,15 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4405 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 4799 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 4409 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 4808 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 262 -->
 
-4405 scenarios on main after v9.28 under `requirements-lock.txt`, and 4799 with
+4409 scenarios on main after v9.28 under `requirements-lock.txt`, and 4808 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
-its three glyph-reading scenarios where tesseract is not. `intake-full` installs
+its fifteen glyph-reading scenarios where tesseract is not. `intake-full` installs
 both explicitly and records both versions in its log. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
 runner image: `core` removes poppler-utils and the Python backends before it

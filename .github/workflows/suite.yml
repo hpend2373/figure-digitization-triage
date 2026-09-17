@@ -276,8 +276,8 @@ jobs:
       - name: install the pinned environment and the intake backends
         run: |
           sudo apt-get update -qq
-          # TESSERACT IS A BACKEND LIKE POPPLER. `test_tick_ocr` has three
-          # scenarios that read real glyphs, and without it they skip - three
+          # TESSERACT IS A BACKEND LIKE POPPLER. `test_tick_ocr` has fifteen
+          # scenarios that read real glyphs, and without it they skip - fifteen
           # scenarios that never run in CI, which is the shape this loop's own
           # count check exists to catch.
           # AND THE CJK FACE THE GALLERY'S CAPTIONS ARE SET IN.

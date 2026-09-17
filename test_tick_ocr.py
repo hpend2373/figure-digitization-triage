@@ -323,6 +323,59 @@ def panel_with_labels(scale, labels=("3000", "2000", "1000"), tick=6, gap=95):
     return img, np.asarray(img) <= 140, box, sx, bot
 
 
+def panel_with_right_aligned_labels(scale=2.0, labels=("12", "11", "10", "9", "8", "7"),
+                                    tick=6, gap=6):
+    """A panel whose labels are RIGHT-aligned `gap` px from the tick marks.
+
+    That is how an axis running 17 down to 0 is printed, and it puts the lone
+    digits nearest the ticks - which is where the reading of them goes wrong.
+    """
+    w, h = int(300 * scale), int(560 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+    span = bot - top
+    step = span * 0.16
+    right = sx - int(tick * scale) - int(gap * scale)
+    for i, txt in enumerate(labels):
+        y = int(top + span * 0.08 + i * step)
+        d.rectangle([sx - int(tick * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((right - d.textlength(txt, font=f), y - int(11 * scale)), txt, font=f, fill=0)
+    return img, np.asarray(img) <= 140, (sx, w - int(20 * scale), top, bot), sx, bot
+
+
+def panel_with_labels_set_large(scale=2.0, size=76, labels=("15", "10", "5"),
+                                tick=14, gap=24):
+    """A panel drawn at `scale` whose labels are set LARGE for it.
+
+    `size` is the font in pixels, fixed, so it does not follow the render the
+    way `panel_with_labels` does: the panel is the tuned height twice over and
+    asks for x1.5, while the glyph is already 56 px. That is the shape of a
+    figure that sets its axis labels large, and of the panel `scale_for`'s
+    proxy is wrong about.
+    """
+    w = int(230 * scale)
+    h = int(_TUNED_H * scale) + 80
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, size)
+    sx, top = int(165 * scale), 30
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + 2, bot], fill=0)                    # spine
+    d.rectangle([sx, bot, w - 20, bot + 2], fill=0)                # baseline
+    for off, txt in zip((60, 390, 720), labels):
+        y = top + off
+        d.rectangle([sx - tick, y, sx - 1, y + 4], fill=0)
+        d.text((sx - tick - gap - d.textlength(txt, font=f),
+                y - int(size * 0.62)), txt, font=f, fill=0)
+    return (img.convert("RGB"), np.asarray(img) <= 140,
+            (sx, w - 20, top, bot), sx, bot)
+
+
 def panel_with_a_label_on_the_baseline(scale=2.0, labels=("30", "20", "10", "0")):
     """A panel whose LOWEST label is printed centred on the baseline.
 
@@ -816,6 +869,220 @@ class TheSecondPass(unittest.TestCase):
         dark = np.asarray(img) <= 140
         self.assertEqual(A.label_near(img, dark, (sx, w - int(20 * scale), top, bot),
                                       sx, bot, half=40), [])
+        RUN[0] += 1
+
+    def test_a_lone_digit_beside_a_tick_needs_the_strip_moved_past_it(self):
+        """REVERT: keep the first reading whenever it ladders. The tuned strips
+        stand 6 px from the axis and this corpus's ticks reach further on 76%
+        of the panels it reads; a tick glued to a numeral comes back as
+        punctuation - "9." or "15-" - and `numeral` throws the word away. A
+        TWO-digit label survives it: psm 11 reads it cleanly on its own. A lone
+        digit psm 11 does not return at all, so only psm 6's "9." is left and
+        that is nothing. Publication S41467-023-41990-4's "Number of finishers"
+        axis read 16..10 and not one of 9..1."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        x0, x1, y0, y1 = box
+        self.assertGreater(A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8)),
+                           A._TUNED_GAP_MAX, "the fixture's ticks do not reach the strips")
+        tuned = A._search(img, dark, box, sx, x0, max(0, y0 - 10),
+                          min(img.height, y1 + 6), 3, comma=False, seen={})
+        got = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in tuned], [12.0, 11.0, 10.0],
+                         "the tuned strips no longer show the fault: %s" % (tuned,))
+        self.assertTrue(any(v < 10 for v, _r in got), "still no lone digit: %s" % (got,))
+        self.assertGreater(len(got), len(tuned), got)
+        RUN[0] += 1
+
+    def test_a_short_tick_leaves_the_tuned_reading_alone(self):
+        """REVERT: ask again on every panel. The tuned strips were measured to
+        clear a printed tick, and where the ticks are short they did: asking
+        again costs half a second a panel and can only answer with what the
+        first reading already said."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        asked = []
+        real = A._search
+
+        def spy(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma, seen, **kw):
+            asked.append(int(anchor_spine))
+            return real(img, dark, box, anchor_spine, anchor_edge, top, bottom,
+                        scale, comma, seen, **kw)
+
+        img, dark, box, sx, base = panel_with_right_aligned_labels(tick=1, gap=40)
+        A._search = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(asked, [sx], "the strips were moved although the ticks are short")
+        RUN[0] += 1
+
+    def test_a_reading_from_somewhere_else_is_not_a_richer_one(self):
+        """REVERT: take the second reading whenever it has more labels. A strip
+        moved off the axis can read the x axis's numerals or the neighbouring
+        panel's and form its own perfectly good ladder; a RICHER reading of
+        this axis says the same thing about every row both of them saw."""
+        first = [(30.0, 100.0), (20.0, 200.0)]
+        self.assertEqual(A.richer_read(first, first + [(10.0, 300.0)]),
+                         first + [(10.0, 300.0)])
+        self.assertIsNone(A.richer_read(first, [(30.0, 100.0)]))
+        self.assertIsNone(A.richer_read(first, list(first)))
+        self.assertIsNone(A.richer_read(first, [(60.0, 100.0), (40.0, 200.0), (20.0, 300.0)]))
+        RUN[0] += 1
+
+    def test_a_label_read_twice_is_not_a_richer_reading(self):
+        """REVERT: count the numerals. The reading a panel is calibrated from
+        is the LADDER, and a second look that reads one label at two rows has
+        more numerals and a shorter ladder: publication S41467-023-41990-4's
+        `600 450 300 150` came back with `450` at both 679 and 684, and the
+        ladder that survived it was three labels where four had stood."""
+        first = [(600.0, 558.3), (450.0, 678.8), (300.0, 799.3), (150.0, 919.8)]
+        twice = [(600.0, 558.3), (450.0, 679.0), (450.0, 684.5), (300.0, 799.3),
+                 (150.0, 920.0)]
+        self.assertGreater(len(twice), len(first))
+        self.assertEqual(A.ladder_size(first), 4)
+        self.assertEqual(A.ladder_size(twice), 3)
+        self.assertIsNone(A.richer_read(first, twice))
+        self.assertEqual(A.ladder_size([(3.0, 10.0), (1.0, 30.0)]), 0)
+        RUN[0] += 1
+
+    def test_a_second_look_is_kept_only_when_it_reads_this_axis_better(self):
+        """REVERT: keep the second look whenever it ladders, or whenever it is
+        longer. The strips move by the length of the ticks, and a strip that
+        moves can land on the x axis's numerals, on the neighbouring panel's,
+        or on nothing at all. A reading replaces the tuned one only when it is
+        a LADDER and says the same thing about every row both of them saw."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def spy_with(second):
+            def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                    scale, comma, seen, **kw):
+                if int(anchor_spine) == sx:
+                    return real(img_, dark_, box_, anchor_spine, anchor_edge,
+                                top, bottom, scale, comma, seen, **kw)
+                return list(second)
+            return spy
+
+        def reading(second):
+            A._search = spy_with(second)
+            try:
+                return A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A._search = real
+
+        tuned = reading([])
+        self.assertTrue(A.ladder(tuned)[0], tuned)
+        longer_elsewhere = [(1.0, 50.0), (5.0, 150.0), (2.0, 250.0), (9.0, 350.0)]
+        self.assertFalse(A.ladder(longer_elsewhere)[0], "the fixture is a ladder")
+        self.assertEqual(reading(longer_elsewhere), tuned,
+                         "a longer reading that is no ladder was kept")
+        another_axis = [(120.0, 50.0), (110.0, 150.0), (100.0, 250.0)]
+        self.assertTrue(A.ladder(another_axis)[0], "the fixture is no ladder")
+        self.assertEqual(reading(another_axis), tuned,
+                         "a ladder that reads no more labels was kept")
+        RUN[0] += 1
+
+    def test_labels_set_large_are_shown_at_their_own_size(self):
+        """REVERT: read only at the magnification the panel's height asks for.
+        `scale_for` takes the panel height as a proxy for the glyph, and a
+        figure that sets its labels large breaks the proxy: publication
+        S41467-023-41990-4's CoP velocity panel is 703 px tall, so it is shown
+        at x1.68, and its `50` comes back `90` at confidence 65 - one digit,
+        and the whole axis refuses. The same pixels read 150 100 50 at
+        confidence 95 when the glyph is shown at its own size."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large()
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        glyph = A.label_height(dark, box, sx - reach, y0 - 10, base + 10)
+        self.assertGreater(glyph, max(A._GLYPH_TARGETS),
+                           "the fixture's labels are not set large")
+        real = A.smaller_scales
+        A.smaller_scales = lambda _h, _c: []
+        try:
+            tuned = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A.smaller_scales = real
+        self.assertFalse(A.ladder(tuned)[0],
+                         "the fixture no longer shows the fault: %s" % (tuned,))
+        got = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in got], [15.0, 10.0, 5.0], got)
+        RUN[0] += 1
+
+    def test_the_glyph_is_measured_and_not_the_panel(self):
+        """The label column's ink, in rows. A measurement, so a panel with
+        nothing printed beside its axis has no height to give."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large(size=76)
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        self.assertAlmostEqual(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                               56, delta=8)
+        self.assertIsNone(A.label_height(dark, box, 0, y0 - 10, base + 10))
+        RUN[0] += 1
+
+    def test_the_smaller_pass_never_enlarges(self):
+        """A 40 px glyph is shown at its own size and then at seven tenths of
+        it; a 10 px one would want x4 and does not get it, because x3 was
+        already asked and this pass is here to shrink."""
+        self.assertEqual(A.smaller_scales(40.0, 3.0), [1.0, 0.7])
+        self.assertEqual(A.smaller_scales(10.0, 3.0), [2.8])
+        self.assertEqual(A.smaller_scales(10.0, 2.0), [])
+        self.assertEqual(A.smaller_scales(None, 3.0), [])
+        RUN[0] += 1
+
+    def test_each_measured_magnification_is_asked_and_only_a_ladder_kept(self):
+        """REVERT: keep whatever the first smaller magnification says. What
+        tesseract answers changes with the size it is shown, which is the whole
+        reason this pass exists - and an answer that does not ladder is not an
+        answer. Two of the nine panels this corpus recovered laddered only at
+        the second magnification."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large()
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        scales = A.smaller_scales(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                                  A.scale_for(y1 - y0, 3))
+        self.assertEqual(len(scales), 2, scales)
+        good = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+        asked, real = [], A._search
+
+        def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom, scale,
+                comma, seen, **kw):
+            asked.append(round(float(scale), 3))
+            if abs(scale - scales[0]) < 1e-9:
+                return [(30.0, 100.0), (20.0, 200.0), (99.0, 300.0)]
+            if abs(scale - scales[1]) < 1e-9:
+                return list(good)
+            return real(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                        scale, comma, seen, **kw)
+
+        A._search = spy
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(got, good, "the second magnification was not kept")
+        self.assertEqual(asked[-2:], [round(s, 3) for s in scales],
+                         "the magnifications asked for were %s" % (asked,))
         RUN[0] += 1
 
     def test_european_decimals_are_read_in_the_second_pass(self):

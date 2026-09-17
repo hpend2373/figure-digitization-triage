@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "02c92dd4b1a986f52318f89b6f100a95fcfed879ce4b55564681ca9eadb9f6a9"
+  "axis_reader.py": "982407c7cc841d4da4f69b086cb5e6cf59331322e397f7b000241b2ef488f2ca"
  },
  "mutations": [
   {
@@ -240,6 +240,78 @@
    "file": "axis_reader.py",
    "old": "    reach = tick_reach(dark, spine_x, y0, y1, cap=max(10, (y1 - y0) // 8))\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)",
    "new": "    reach = 0\n    band = label_band(dark, (spine_x, x1, top, bottom), spine_x - reach, top, bottom)"
+  },
+  {
+   "name": "눈금을 물어도 첫 읽기를 그대로 쓴다",
+   "file": "axis_reader.py",
+   "old": "        if reach <= _TUNED_GAP_MAX:\n            return first",
+   "new": "        if True:\n            return first"
+  },
+  {
+   "name": "눈금이 짧아도 매번 다시 읽는다",
+   "file": "axis_reader.py",
+   "old": "        if reach <= _TUNED_GAP_MAX:",
+   "new": "        if reach < 0:"
+  },
+  {
+   "name": "눈금 너머 읽기가 사다리가 아니어도 쓴다",
+   "file": "axis_reader.py",
+   "old": "        return past if richer_read(first, past) else first",
+   "new": "        return past"
+  },
+  {
+   "name": "눈금 너머 읽기가 더 풍부하지 않아도 쓴다",
+   "file": "axis_reader.py",
+   "old": "    if ladder_size(second) <= ladder_size(first):\n        return None",
+   "new": "    if False:\n        return None"
+  },
+  {
+   "name": "라벨 수만 늘면 더 풍부한 읽기로 친다",
+   "file": "axis_reader.py",
+   "old": "    for value, row in first:\n        same = [v for v, r in second if abs(r - row) <= 3]\n        if same and same[0] != value:\n            return None\n    return second",
+   "new": "    return second"
+  },
+  {
+   "name": "사다리가 버린 라벨도 세어 준다",
+   "file": "axis_reader.py",
+   "old": "    return sum(1 for _v, row in pairs if lo <= row <= hi)",
+   "new": "    return len(pairs)"
+  },
+  {
+   "name": "더 큰 배율만 있어도 다시 읽는다",
+   "file": "axis_reader.py",
+   "old": "    return [t / float(height) for t in _GLYPH_TARGETS if t / float(height) < current]",
+   "new": "    return [t / float(height) for t in _GLYPH_TARGETS]"
+  },
+  {
+   "name": "글자 높이를 재지 못해도 배율을 만든다",
+   "file": "axis_reader.py",
+   "old": "    if not height:\n        return []",
+   "new": "    if False:\n        return []"
+  },
+  {
+   "name": "목표 크기는 하나뿐이다",
+   "file": "axis_reader.py",
+   "old": "_GLYPH_TARGETS = (40.0, 28.0)",
+   "new": "_GLYPH_TARGETS = (40.0,)"
+  },
+  {
+   "name": "작은 배율의 답이 사다리가 아니어도 쓴다",
+   "file": "axis_reader.py",
+   "old": "        smaller = past_the_ticks(sc)\n        if ladder(smaller)[0]:\n            return smaller",
+   "new": "        smaller = past_the_ticks(sc)\n        if True:\n            return smaller"
+  },
+  {
+   "name": "작은 배율로는 다시 읽지 않는다",
+   "file": "axis_reader.py",
+   "old": "    for sc in smaller_scales(label_height(dark, box, spine_x - reach, top, bottom),\n                             scale_for(y1 - y0, scale)):",
+   "new": "    for sc in []:"
+  },
+  {
+   "name": "사다리가 아닌 읽기도 크기가 있다",
+   "file": "axis_reader.py",
+   "old": "    if not ok:\n        return 0",
+   "new": "    if False:\n        return 0"
   }
  ]
 }

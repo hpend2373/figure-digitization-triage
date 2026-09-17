@@ -254,13 +254,62 @@ def find_frame(gray, region=None, threshold=160):
     # A single horizontal line is the baseline, so the top is the region's; a
     # single vertical line is the spine, so the right edge is the region's;
     # and no line on an axis at all means both of its edges are the region's.
-    y0 = min(row_runs) if len(row_runs) > 1 else min(row_runs + [ry0])
-    y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0 if row_runs else ry1 - 1])
-    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1 if col_runs else rx0])
-    x1 = max(col_runs) if len(col_runs) > 1 else max(col_runs + [rx1 - 1])
+    #
+    # A RULE IS AN EDGE ONLY WHERE THE OTHER LINE ENDS. The outermost rule was
+    # taken for the edge, and a plot has long lines inside it too: the stems of
+    # the first error bars stood 55% of the region tall on EDGELL-2012's panel
+    # and its frame ended at the first bar group with the baseline running on
+    # to 2761; a zero line crossing a panel whose values go negative became
+    # its bottom, with the spine and the negative labels below it; a box top
+    # with no bottom became the bottom, and the frame a sliver. 211 frames of
+    # this corpus cut their baseline on the right, 236 their spine at the
+    # bottom. The spine's own ink says where the plot ends vertically and the
+    # baseline's where it ends horizontally: a rule the spine runs on PAST -
+    # by more than a tick's length, which is how far an x tick may stand
+    # below the baseline - is inside the plot, and the edge falls back to the
+    # region's bound, as it does where no rule was printed. The direction
+    # matters: a spine that stops SHORT of a rule (a box drawn around a
+    # shorter axis) leaves that rule the edge it is.
+    x0 = min(col_runs) if col_runs else rx0
+    spine = _extent(dark[ry0:ry1, x0], ry0) if col_runs else None
+    yt, yb = (min(row_runs), max(row_runs)) if row_runs else (None, None)
+    base = _extent(dark[yb, rx0:rx1], rx0) if row_runs else None
+    if spine is not None and row_runs:
+        top_inside = spine[0] < yt - _TICK_MAX_PX        # the spine goes on above it
+        bottom_inside = spine[1] > yb + _TICK_MAX_PX     # the spine goes on below it
+        if len(row_runs) > 1:
+            y0 = ry0 if top_inside else yt
+            y1 = ry1 - 1 if bottom_inside else yb
+        elif bottom_inside:
+            # One rule the spine runs past below: a zero line, or the top of
+            # a box that has no bottom. It is the top only if the spine ends
+            # at it from above.
+            y0 = ry0 if top_inside else yt
+            y1 = ry1 - 1
+        else:
+            y0, y1 = ry0, yb
+    else:
+        y0 = min(row_runs) if len(row_runs) > 1 else min(row_runs + [ry0])
+        y1 = max(row_runs) if len(row_runs) > 1 else max(row_runs + [ry0 if row_runs else ry1 - 1])
+    if len(col_runs) > 1:
+        xr = max(col_runs)
+        right_inside = base is not None and base[1] > xr + _TICK_MAX_PX   # the baseline goes on past it
+        x1 = rx1 - 1 if right_inside else xr
+    else:
+        x1 = rx1 - 1
     if y1 - y0 < 8 or x1 - x0 < 8:
         return None
     return (x0, x1, y0, y1)
+
+
+def _extent(line, offset, gap=2):
+    """(first, last) of the longest run of ink along a 1-D slice, in the
+    raster's own indices - None where there is no ink."""
+    idx = [i + offset for i, v in enumerate(line) if v]
+    if not idx:
+        return None
+    best = max(_runs(idx, gap=gap), key=len)
+    return best[0], best[-1]
 
 
 def _reach(dark, spine, low, high, axis, sign, limit):
@@ -742,8 +791,8 @@ def read_tick_values(image, row):
                                         read_base, kept, ticks)
         if deeper is not None:
             more, detail3 = deeper
-            detail = ("%s; THE LABEL ON THE BASELINE was read from its own band "
-                      "and joins the ladder: %d labels, where the strip search "
+            detail = ("%s; THE LABELS ON BARE TICKS were read from their own bands "
+                      "and join the ladder: %d labels, where the strip search "
                       "read %d" % (detail3, len(more), len(kept)))
             kept = more
     apply_reading(row, status, kept, detail, residual)
@@ -753,45 +802,80 @@ def read_tick_values(image, row):
 
 
 def _label_on_the_baseline(image, dark, box, spine_x, baseline_y, kept, ticks=()):
-    """(pairs, detail) with the baseline's own label added, or None.
+    """(pairs, detail) with the labels standing on ticks the strip search did
+    not read added, or None.
 
     THE LABEL SITTING ON THE BASELINE IS THE ONE THE CROP CUTS, and on a y axis
     it is usually the 0. Only 63 of this corpus's 685 read panels had a 0 in
     their ladder; 306 more have one printed at the baseline that the strip
     search never saw whole. The 0 is the label worth the most: a bar chart's
     bars all START there, so without it every bar's base is read by
-    extrapolation.
+    extrapolation. The label at the TOP tick is cut the same way by the crop's
+    top, and any tick between can lose its label to tesseract's whim.
 
-    IT IS NOT ACCEPTED FOR BEING WHERE A LABEL WOULD BE. The numeral read down
-    there is put beside the labels already read and handed to `ladder` with no
-    subsets allowed: it has to fall on the same value-per-pixel line as all of
-    them or it is not this axis's label. That is the test the rest of the
-    reading passed, applied to one more point - not a comparison against what
-    the ladder predicts, which would accept whatever agreed with it.
+    LABELS STAND ON TICKS, so where the ticks were measured every tick without
+    a label beside it is asked for one, its own band at a time. The frame's
+    bottom is not where the last label stands: a
+    frame whose axis runs on past a zero line ends at the region's bottom,
+    where the caption is. Without ticks the baseline is asked as before.
+
+    NOTHING IS ACCEPTED FOR BEING WHERE A LABEL WOULD BE. Each numeral read is
+    put beside the labels already read and handed to `ladder` with no subsets
+    allowed, and to the tick grid: it has to fall on the same value-per-pixel
+    line as all of them or it is not this axis's label. That is the test the
+    rest of the reading passed, applied to one more point - not a comparison
+    against what the ladder predicts, which would accept whatever agreed with
+    it.
     """
     import axis_reader as A                                 # noqa: PLC0415
 
     if len(kept) < 2:
         return None
-    # 어느 행이 축의 아래 끝인가. 크롭의 아래 경계와 같은 셈법입니다 - 틀의
-    # 밑변과 잰 밑선 중 아래쪽. `spine_and_baseline`은 상자 틀에서 위 변을
-    # 돌려주기도 하고, 그때 틀의 밑변이 축의 끝입니다.
-    base_row = max(float(box[3]), float(baseline_y) if baseline_y is not None else 0.0)
     rows = sorted(r for _v, r in kept)
     gaps = [b - a for a, b in zip(rows, rows[1:])]
     pitch = sorted(gaps)[len(gaps) // 2]
-    if pitch <= 0 or base_row - rows[-1] < 0.5 * pitch:
-        # 이미 밑선까지 읽었습니다. 그 아래에는 라벨이 설 자리가 없습니다.
+    if pitch <= 0:
         return None
-    for value, at in A.label_near(image, dark, box, spine_x, base_row,
-                                  half=int(pitch * 0.55)):
-        # 이미 읽은 행의 숫자를 다시 넣어도 `ladder`가 거릅니다 - 같은 행에 둘이
-        # 서거나, 2px 떨어진 두 라벨이 값/픽셀을 무너뜨립니다.
-        more = sorted(list(kept) + [(value, at)], key=lambda p: p[1])
-        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)
-        if ok and A.grid_verdict(more, ticks)[0] != A.GRID_CONTRADICTED:
-            return more, detail
-    return None
+    # 크롭의 아래 경계와 같은 셈법 - 틀의 밑변과 잰 밑선 중 아래쪽.
+    # `spine_and_baseline`은 상자 틀에서 위 변을 돌려주기도 하고, 그때 틀의
+    # 밑변이 축의 끝입니다.
+    base_row = max(float(box[3]), float(baseline_y) if baseline_y is not None else 0.0)
+    top_row = float(box[2])
+
+    def candidates(rows):
+        """Rows a label may stand on that none of `rows` does: ticks without
+        a label (a label sits a few pixels off its tick, so within a quarter
+        pitch is on it), the ladder's next rung beyond each end - the corner
+        ticks are the ones the detector misses - and the frame's bottom, as
+        before ticks were known."""
+        out = [float(t) for t in ticks if min(abs(float(t) - r) for r in rows) > 0.25 * pitch]
+        for rung in (rows[0] - pitch, rows[-1] + pitch):
+            if top_row - 0.5 * pitch <= rung <= base_row + 0.5 * pitch:
+                out.append(rung)
+        if base_row - rows[-1] >= 0.5 * pitch:
+            out.append(base_row)
+        return sorted(out)
+
+    more, detail, added, asked = list(kept), "", 0, []
+    for _round in range(len(ticks) + 4):
+        grew = False
+        for at_row in candidates(sorted(r for _v, r in more)):
+            # 한 자리에 하나만 묻는다: 눈금과 다음 칸이 같은 자리면 같은 띠다.
+            if any(abs(at_row - a) <= 0.25 * pitch for a in asked):
+                continue
+            asked.append(at_row)
+            for value, at in A.label_near(image, dark, box, spine_x, at_row,
+                                          half=int(pitch * 0.55)):
+                # 이미 읽은 행의 숫자를 다시 넣어도 `ladder`가 거릅니다 - 같은
+                # 행에 둘이 서거나, 2px 떨어진 두 라벨이 값/픽셀을 무너뜨립니다.
+                trial = sorted(more + [(value, at)], key=lambda p: p[1])
+                ok, why, _first, _last, _resid, _cv = A.ladder(trial, allow_subset=False)
+                if ok and A.grid_verdict(trial, ticks)[0] != A.GRID_CONTRADICTED:
+                    more, detail, added, grew = trial, why, added + 1, True
+                    break
+        if not grew:
+            break
+    return (more, detail) if added else None
 
 
 def apply_reading(row, status, kept, detail, residual):

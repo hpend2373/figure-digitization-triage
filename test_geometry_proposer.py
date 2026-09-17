@@ -263,6 +263,71 @@ _N = Image.new("RGB", (400, 320), "white")
 ImageDraw.Draw(_N).rectangle((100, 100, 130, 200), outline="black")
 check("no printed line at all is no frame", GP.find_frame(_N, region=(0, 0, 400, 320)) is None)
 
+# A RULE IS AN EDGE ONLY WHERE THE OTHER LINE ENDS. The outermost long line
+# was taken for the edge, and plots have long lines inside them: 211 frames of
+# this corpus cut their baseline on the right, 236 their spine at the bottom.
+print()
+print("a long line inside the plot is not its edge")
+_REG = (0, 0, 400, 320)
+
+
+def lines_fixture(spine=(60, 30, 270), baseline=(60, 360, 270), extra=()):
+    """A white panel with a spine (x, y_top, y_bottom), a baseline (x_left,
+    x_right, y) and any other lines, each (x0, y0, x1, y1)."""
+    image = Image.new("RGB", (400, 320), "white")
+    d = ImageDraw.Draw(image)
+    if spine:
+        d.line((spine[0], spine[1], spine[0], spine[2]), fill="black", width=2)
+    if baseline:
+        d.line((baseline[0], baseline[2], baseline[1], baseline[2]), fill="black", width=2)
+    for x0, y0, x1, y1 in extra:
+        d.line((x0, y0, x1, y1), fill="black", width=2)
+    return image
+
+
+# REVERT: take the rightmost long vertical line for the right edge. The stem
+# of the first error bar stood 55% of the region tall on EDGELL-2012's panel;
+# the baseline ran on to 2761 and the frame stopped at 1886.
+_stem = GP.find_frame(lines_fixture(extra=[(150, 40, 150, 268)]), region=_REG)
+check("an error bar's stem inside the plot is not the right edge",
+      _stem is not None and _stem[1] == 399 and abs(_stem[0] - 60) <= 1, "%s" % (_stem,))
+_boxed = GP.find_frame(lines_fixture(extra=[(150, 40, 150, 268), (360, 30, 360, 270)]), region=_REG)
+check("a box's right edge, where the baseline ends, still is",
+      _boxed is not None and abs(_boxed[1] - 360) <= 1, "%s" % (_boxed,))
+# REVERT: take the lowest long horizontal line for the bottom. Where values go
+# negative the x axis crosses the panel and the spine, the negative labels
+# and the 0 run on below it.
+_zero = GP.find_frame(lines_fixture(baseline=None, extra=[(60, 150, 360, 150)]), region=_REG)
+check("a zero line the spine runs past is not the bottom",
+      _zero is not None and _zero[3] == 319 and _zero[2] == 0, "%s" % (_zero,))
+# REVERT: read one horizontal line as the baseline whatever the spine does.
+# A box top with no bottom made the frame a sliver between the region's top
+# and that line - S41598-019-39360-6's D006, three panels.
+_topped = GP.find_frame(lines_fixture(baseline=None, extra=[(60, 30, 360, 30)]), region=_REG)
+check("a top rule with no bottom is the top, and the bottom is the region's",
+      _topped is not None and abs(_topped[2] - 30) <= 1 and _topped[3] == 319, "%s" % (_topped,))
+# The direction matters both ways.
+_over = GP.find_frame(lines_fixture(spine=(60, 30, 270 + GP._TICK_MAX_PX - 2)), region=_REG)
+check("a spine overhanging its baseline by less than a tick's length leaves the baseline the bottom",
+      _over is not None and abs(_over[3] - 270) <= 1, "%s" % (_over,))
+_short = GP.find_frame(lines_fixture(spine=(60, 30, 230), extra=[(360, 30, 360, 270), (60, 30, 360, 30)]),
+                       region=_REG)
+check("a spine that stops short of the box's bottom leaves that bottom the edge",
+      _short is not None and abs(_short[3] - 270) <= 1 and abs(_short[2] - 30) <= 1, "%s" % (_short,))
+_grid = GP.find_frame(lines_fixture(extra=[(60, 30, 360, 30), (60, 150, 360, 150), (360, 30, 360, 270)]),
+                      region=_REG)
+check("a gridline inside a box changes nothing",
+      _grid is not None and abs(_grid[2] - 30) <= 1 and abs(_grid[3] - 270) <= 1 and abs(_grid[1] - 360) <= 1,
+      "%s" % (_grid,))
+# REVERT: take the first and last ink in the spine's column for its ends. The
+# x axis's caption runs under the spine's column, and a panel letter sits above
+# it; the spine is the longest unbroken run of ink there, not all of it.
+_caption = lines_fixture(extra=[(40, 300, 120, 300)])          # text under the axis, crossing the column
+ImageDraw.Draw(_caption).rectangle((55, 5, 65, 12), fill="black")   # and a letter above it
+_capt = GP.find_frame(_caption, region=_REG)
+check("ink above and below the spine in its column does not lengthen it",
+      _capt is not None and abs(_capt[3] - 270) <= 1 and _capt[2] == 0, "%s" % (_capt,))
+
 print()
 print("the spacing is reported; the values are not")
 _spacing, _regular = GP.tick_regularity(_marks)
@@ -763,74 +828,141 @@ check("the line the values came from is drawn on the picture",
 # crop that stops ten pixels past it. The 0 is the label worth the most: a bar
 # chart's bars all start there.
 print()
-print("the label standing on the baseline is read from its own band")
-_PITCH = _LADDER[1][1] - _LADDER[0][1]
-_BASE_ROW = _LADDER[-1][1] + _PITCH
+print("the labels standing on bare ticks are read from their own bands")
+# LABELS STAND ON TICKS. The strip search reads a column; the label at the
+# top tick and the one at the bottom are cut by the crop's ends, and any tick
+# between can lose its label to tesseract's whim. Every tick without a label
+# is asked for one, its own band at a time.
+_T = [float(t) for t in _row["Y_Tick_Pixels"].split(";")]
+_PITCH = _T[1] - _T[0]
+_LADDER_T = [(30.0, _T[3]), (20.0, _T[4]), (10.0, _T[5])]        # on three ticks of eleven
+_LSTR_T = ";".join("%g@%g" % p for p in _LADDER_T)
+_BARE = sorted(t for t in _T if t not in (_T[3], _T[4], _T[5]))
 
 
-def _with_band(found):
-    """Run a reading whose strip search gives `_LADDER` and whose baseline band
-    gives `found`, and hand back the row and what the band was asked."""
+def _with_band(found_at):
+    """Run a reading whose strip search gives `_LADDER_T` and whose band gives
+    `found_at[row]` at each row asked, and hand back the row and the rows the
+    band was asked, in order."""
     asked = []
 
     def band(img, dark, box, spine_x, row, half, scale=3):
-        asked.append((int(row), int(half)))
-        return list(found)
-    spy, _a = _reading_spy(int(_row["Panel_X0"]))
-    A.y_tick_labels, A.label_near = spy, band
+        asked.append((row, int(half)))
+        return list(found_at.get(row, []))
+    A.y_tick_labels = lambda *a, **k: list(_LADDER_T)
+    A.inner_spine = lambda dark, box, **kw: None
+    A.label_near = band
     try:
         return GP.read_tick_values(_im, dict(_row)), asked
     finally:
-        A.y_tick_labels, A.label_near = _real_labels, _real_near
+        A.y_tick_labels, A.inner_spine, A.label_near = _real_labels, _real_inner, _real_near
 
 
-_deep_row, _dasked = _with_band([(0.0, _BASE_ROW)])
-check("the band beside the baseline is read once the strip search has a ladder",
-      len(_dasked) == 1 and _dasked[0][0] == int(_row["Panel_Y1"]), "%s" % _dasked)
-check("and it is half a label's pitch tall, not a fixed number of pixels",
-      abs(_dasked[0][1] - 0.55 * _PITCH) <= 1, "%s vs pitch %s" % (_dasked[0][1], _PITCH))
+_deep_row, _dasked = _with_band({_T[6]: [(0.0, _T[6])]})
+check("every tick without a label is asked, and only those",
+      [r for r, _h in _dasked] == _BARE, "%s vs %s" % ([r for r, _h in _dasked], _BARE))
+check("and the band is half a label's pitch tall, not a fixed number of pixels",
+      all(abs(h - 0.55 * _PITCH) <= 1 for _r, h in _dasked), "%s vs pitch %s" % (_dasked[:2], _PITCH))
 check("a numeral that falls on the same line as the labels already read joins them",
-      _deep_row["Y_Tick_Read_Values"] == _LSTR + ";0@%g" % _BASE_ROW
+      _deep_row["Y_Tick_Read_Values"] == _LSTR_T + ";0@%g" % _T[6]
       and _deep_row["Y_Tick_Read_Last"] == "0", _deep_row["Y_Tick_Read_Values"])
 check("and the detail says where it came from",
-      "LABEL ON THE BASELINE" in _deep_row["Y_Tick_Read_Detail"],
-      _deep_row["Y_Tick_Read_Detail"][-80:])
+      "BARE TICKS" in _deep_row["Y_Tick_Read_Detail"], _deep_row["Y_Tick_Read_Detail"][-80:])
+# REVERT: read the band at the frame's bottom only. The label at the TOP tick
+# is cut by the crop's top just as the 0 is by its bottom.
+_top_row, _ = _with_band({_T[2]: [(40.0, _T[2])], _T[6]: [(0.0, _T[6])]})
+check("the label at a tick above the ladder joins it too",
+      _top_row["Y_Tick_Read_Values"] == "40@%g;" % _T[2] + _LSTR_T + ";0@%g" % _T[6],
+      _top_row["Y_Tick_Read_Values"])
 
 # REVERT: accept the numeral for being where a label would be. The band holds
-# whatever is printed down there - the x axis's own leftmost numeral, a
-# footnote marker, half of a caption - and a value that does not fall on the
-# ladder's line is not this axis's label.
-for _name, _found in (("a numeral off the ladder's line", [(7.0, _BASE_ROW)]),
-                      ("nothing at all", []),
-                      ("a numeral on a row already read", [(0.0, _LADDER[-1][1] + 2)])):
+# whatever is printed there - the x axis's own leftmost numeral, a footnote
+# marker, half of a caption - and a value that does not fall on the ladder's
+# line is not this axis's label.
+for _name, _found in (("a numeral off the ladder's line", {_T[6]: [(7.0, _T[6])]}),
+                      ("nothing at all", {}),
+                      ("a numeral on a row already read", {_T[6]: [(0.0, _T[5] + 2)]})):
     _kept_row, _ = _with_band(_found)
     check("the reading is unchanged when the band gives %s" % _name,
-          _kept_row["Y_Tick_Read_Values"] == _LSTR
-          and "LABEL ON THE BASELINE" not in _kept_row["Y_Tick_Read_Detail"],
+          _kept_row["Y_Tick_Read_Values"] == _LSTR_T
+          and "BARE TICKS" not in _kept_row["Y_Tick_Read_Detail"],
           _kept_row["Y_Tick_Read_Values"])
 
-# REVERT: read the band even when the lowest label already stands on the
-# baseline. There is no room for a label below it, and the band would hold the
-# label that was already read.
-_low = [(30.0, float(_row["Panel_Y1"]) - 100), (20.0, float(_row["Panel_Y1"]) - 50),
-        (10.0, float(_row["Panel_Y1"]))]
-_asked_low = []
+# REVERT: ask at every tick. A tick with a label standing beside it - a few
+# pixels off, as OCR centres tall numerals - has been read already, and the
+# band would hold the label that was already read.
+_asked_full = []
+_FULL = [(float(10 - i), t + 0.1 * _PITCH) for i, t in enumerate(_T)]      # a label 10% off every tick
 
 
-def _band_low(img, dark, box, spine_x, row, half, scale=3):
-    _asked_low.append(row)
-    return [(0.0, row + 50)]
+def _band_full(img, dark, box, spine_x, row, half, scale=3):
+    _asked_full.append(row)
+    return []
 
 
-_spy_low, _ = _reading_spy(int(_row["Panel_X0"]))
-A.y_tick_labels = lambda *a, **k: list(_low)
-A.label_near = _band_low
+A.y_tick_labels = lambda *a, **k: list(_FULL)
+A.inner_spine = lambda dark, box, **kw: None
+A.label_near = _band_full
 try:
-    _low_row = GP.read_tick_values(_im, dict(_row))
+    GP.read_tick_values(_im, dict(_row))
 finally:
-    A.y_tick_labels, A.label_near = _real_labels, _real_near
-check("a ladder that already reaches the baseline is not asked for one more",
-      not _asked_low, "%s" % _asked_low)
+    A.y_tick_labels, A.inner_spine, A.label_near = _real_labels, _real_inner, _real_near
+check("a ladder standing on every tick is not asked for one more",
+      not _asked_full, "%s" % _asked_full)
+
+# REVERT: ask only at the ticks that were detected. The corner ticks are the
+# ones the detector misses - 65 of this corpus's read panels have a label a
+# whole pitch from any tick it found - and the 0 stands on one of them. The
+# ladder's next rung beyond each end is asked too, and once it is taken the
+# rung after it, until nothing more joins.
+_asked_rungs = []
+_ROW_SHORT = dict(_row, Y_Tick_Pixels=";".join("%g" % t for t in _T[:6]))    # no ticks below T[5]
+_GIVE = {_T[6]: [(0.0, _T[6])], _T[7]: [(-10.0, _T[7])]}
+
+
+def _band_rungs(img, dark, box, spine_x, row, half, scale=3):
+    _asked_rungs.append(row)
+    return list(_GIVE.get(row, []))
+
+
+A.y_tick_labels = lambda *a, **k: list(_LADDER_T)
+A.inner_spine = lambda dark, box, **kw: None
+A.label_near = _band_rungs
+try:
+    _rung_row = GP.read_tick_values(_im, dict(_ROW_SHORT))
+finally:
+    A.y_tick_labels, A.inner_spine, A.label_near = _real_labels, _real_inner, _real_near
+check("a corner tick the detector missed is asked, one rung past the ladder",
+      _asked_rungs.count(_T[6]) == 1, "%s" % _asked_rungs)
+check("and once it is taken, the rung after it, until nothing more joins",
+      _asked_rungs.count(_T[7]) == 1 and _asked_rungs.count(_T[8]) == 1
+      and _rung_row["Y_Tick_Read_Values"].endswith("0@%g;-10@%g" % (_T[6], _T[7])),
+      "%s | %s" % (_asked_rungs, _rung_row["Y_Tick_Read_Values"]))
+check("no row is asked twice", len(_asked_rungs) == len(set(_asked_rungs)), "%s" % _asked_rungs)
+
+# Without ticks the baseline is asked, as before: the frame's bottom, or the
+# baseline measured below it.
+_asked_nt = []
+A.label_near = lambda img, dark, box, spine_x, row, half, **kw: (_asked_nt.append(row) or [])
+try:
+    GP._label_on_the_baseline(_im, _dark_of_im if "_dark_of_im" in dir() else A._dark(_im)[1],
+                              (0, 100, 0, 300), 0, 300, [(30.0, 100.0), (20.0, 200.0)], ())
+finally:
+    A.label_near = _real_near
+check("without ticks the frame's bottom is asked, as before, and the rung above the ladder",
+      _asked_nt == [0.0, 300.0], "%s" % _asked_nt)
+# REVERT: ask at the bottom even when the lowest label already stands there.
+# There is no room for a label below it, and the band would hold the label
+# that was already read.
+_asked_nt2 = []
+A.label_near = lambda img, dark, box, spine_x, row, half, **kw: (_asked_nt2.append(row) or [])
+try:
+    GP._label_on_the_baseline(_im, A._dark(_im)[1], (0, 100, 0, 300), 0, 300,
+                              [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)], ())
+finally:
+    A.label_near = _real_near
+check("and a ladder that already reaches the bottom is not asked there again",
+      300.0 not in _asked_nt2 and all(r < 250 for r in _asked_nt2), "%s" % _asked_nt2)
 
 # A ROW OF PANELS WITH ONE AXIS. This corpus prints Day/Night, left/right
 # column, with the y axis on the leftmost panel and nothing on the rest. Those
@@ -983,7 +1115,7 @@ try:
     _zero = GP._label_on_the_baseline(_im, _dark_of_im, _BOX, _BOX[0], 2546, _PRI, _GT)
 finally:
     A.label_near = _real3[2]
-check("the band at the baseline was asked", _seen_base and abs(_seen_base[0] - 2546) < 1, "%s" % (_seen_base,))
+check("the band at the baseline's tick was asked", any(abs(r - 2546) < 1 for r in _seen_base), "%s" % (_seen_base,))
 check("a baseline numeral the grid contradicts does not join the ladder",
       _five is None, "%s" % (_five,))
 check("the 0 that fits the grid does",

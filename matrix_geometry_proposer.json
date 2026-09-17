@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "405fb41a4df2e8d8156fcb1c2487a5dba85593082447b22d488d7599514f2b9a",
-  "test_geometry_proposer.py": "95f19ba527c3d6ab2493410c3dd18d77c37f3762bf3612f5a9898e9cefaf9ba8"
+  "geometry_proposer.py": "23f18be4bcf3efe0d0f36cafa9a628d19e264ac636556636ff0061a51d7bdd22",
+  "test_geometry_proposer.py": "dbcdc0a8684a441c6f7544c8c34da3062757f3f961a3e6b04b1a0ecab758f6ab"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -124,8 +124,8 @@
   {
    "name": "밑선만 있으면 왼 변을 오른 변에 붙인다",
    "file": "geometry_proposer.py",
-   "old": "    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1 if col_runs else rx0])",
-   "new": "    x0 = min(col_runs) if len(col_runs) > 1 else min(col_runs + [rx1 - 1])"
+   "old": "    x0 = min(col_runs) if col_runs else rx0\n",
+   "new": "    x0 = min(col_runs) if col_runs else rx1 - 1\n"
   },
   {
    "name": "선이 하나도 없어도 프레임을 낸다",
@@ -280,8 +280,8 @@
   {
    "name": "밑선 띠의 숫자를 사다리에 걸어 보지 않는다",
    "file": "geometry_proposer.py",
-   "old": "        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)\n        if ok and A.grid_verdict(more, ticks)[0] != A.GRID_CONTRADICTED:\n            return more, detail",
-   "new": "        ok, detail, _first, _last, _resid, _cv = A.ladder(more, allow_subset=False)\n        if A.grid_verdict(more, ticks)[0] != A.GRID_CONTRADICTED:\n            return more, detail"
+   "old": "                ok, why, _first, _last, _resid, _cv = A.ladder(trial, allow_subset=False)\n                if ok and A.grid_verdict(trial, ticks)[0] != A.GRID_CONTRADICTED:",
+   "new": "                ok, why, _first, _last, _resid, _cv = A.ladder(trial, allow_subset=False)\n                if A.grid_verdict(trial, ticks)[0] != A.GRID_CONTRADICTED:"
   },
   {
    "name": "띠의 높이를 라벨 간격이 아니라 고정 길이로 잡는다",
@@ -292,14 +292,14 @@
   {
    "name": "내려 읽었다는 말을 하지 않는다",
    "file": "geometry_proposer.py",
-   "old": "            detail = (\"%s; THE LABEL ON THE BASELINE was read from its own band \"\n                      \"and joins the ladder: %d labels, where the strip search \"\n                      \"read %d\" % (detail3, len(more), len(kept)))",
+   "old": "            detail = (\"%s; THE LABELS ON BARE TICKS were read from their own bands \"\n                      \"and join the ladder: %d labels, where the strip search \"\n                      \"read %d\" % (detail3, len(more), len(kept)))",
    "new": "            detail = detail3"
   },
   {
    "name": "밑선까지 이미 읽은 사다리에도 한 번 더 묻는다",
    "file": "geometry_proposer.py",
-   "old": "    if pitch <= 0 or base_row - rows[-1] < 0.5 * pitch:",
-   "new": "    if pitch <= 0:"
+   "old": "        if base_row - rows[-1] >= 0.5 * pitch:\n            out.append(base_row)",
+   "new": "        if True:\n            out.append(base_row)"
   },
   {
    "name": "축의 아래 끝을 잰 밑선만으로 친다",
@@ -334,8 +334,80 @@
   {
    "name": "밑선의 라벨은 격자를 보지 않는다",
    "file": "geometry_proposer.py",
-   "old": "        if ok and A.grid_verdict(more, ticks)[0] != A.GRID_CONTRADICTED:",
-   "new": "        if ok:"
+   "old": "                if ok and A.grid_verdict(trial, ticks)[0] != A.GRID_CONTRADICTED:",
+   "new": "                if ok:"
+  },
+  {
+   "name": "안쪽 세로선도 오른쪽 변으로 삼는다",
+   "file": "geometry_proposer.py",
+   "old": "        right_inside = base is not None and base[1] > xr + _TICK_MAX_PX   # the baseline goes on past it",
+   "new": "        right_inside = False   # the baseline goes on past it"
+  },
+  {
+   "name": "안쪽 가로선도 아래 변으로 삼는다",
+   "file": "geometry_proposer.py",
+   "old": "        bottom_inside = spine[1] > yb + _TICK_MAX_PX     # the spine goes on below it",
+   "new": "        bottom_inside = False     # the spine goes on below it"
+  },
+  {
+   "name": "축선이 위로 뻗어도 윗선을 윗변으로 삼는다",
+   "file": "geometry_proposer.py",
+   "old": "        top_inside = spine[0] < yt - _TICK_MAX_PX        # the spine goes on above it",
+   "new": "        top_inside = False        # the spine goes on above it"
+  },
+  {
+   "name": "가로선 하나는 무조건 밑선이다",
+   "file": "geometry_proposer.py",
+   "old": "        elif bottom_inside:\n",
+   "new": "        elif False:\n"
+  },
+  {
+   "name": "축선이 짧게 끝나도 변을 안쪽으로 친다",
+   "file": "geometry_proposer.py",
+   "old": "        bottom_inside = spine[1] > yb + _TICK_MAX_PX     # the spine goes on below it",
+   "new": "        bottom_inside = abs(spine[1] - yb) > _TICK_MAX_PX     # the spine goes on below it"
+  },
+  {
+   "name": "눈금 길이만큼의 오버행도 안쪽으로 친다",
+   "file": "geometry_proposer.py",
+   "old": "        bottom_inside = spine[1] > yb + _TICK_MAX_PX     # the spine goes on below it",
+   "new": "        bottom_inside = spine[1] > yb     # the spine goes on below it"
+  },
+  {
+   "name": "잉크가 이어진 가장 긴 구간이 아니라 전부를 잰다",
+   "file": "geometry_proposer.py",
+   "old": "    best = max(_runs(idx, gap=gap), key=len)\n    return best[0], best[-1]",
+   "new": "    return idx[0], idx[-1]"
+  },
+  {
+   "name": "라벨이 선 눈금에도 다시 묻는다",
+   "file": "geometry_proposer.py",
+   "old": "        out = [float(t) for t in ticks if min(abs(float(t) - r) for r in rows) > 0.25 * pitch]",
+   "new": "        out = [float(t) for t in ticks if min(abs(float(t) - r) for r in rows) > -1]"
+  },
+  {
+   "name": "가장 아래 눈금에만 묻는다",
+   "file": "geometry_proposer.py",
+   "old": "        for at_row in candidates(sorted(r for _v, r in more)):",
+   "new": "        for at_row in candidates(sorted(r for _v, r in more))[-1:]:"
+  },
+  {
+   "name": "사다리 끝 너머 칸은 묻지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        for rung in (rows[0] - pitch, rows[-1] + pitch):",
+   "new": "        for rung in ():"
+  },
+  {
+   "name": "한 바퀴만 돈다",
+   "file": "geometry_proposer.py",
+   "old": "    for _round in range(len(ticks) + 4):",
+   "new": "    for _round in range(1):"
+  },
+  {
+   "name": "물은 자리를 다시 묻는다",
+   "file": "geometry_proposer.py",
+   "old": "            if any(abs(at_row - a) <= 0.25 * pitch for a in asked):\n                continue",
+   "new": "            if False:\n                continue"
   }
  ]
 }

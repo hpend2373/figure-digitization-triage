@@ -2467,6 +2467,30 @@ def richer_read(first, second):
     return second
 
 
+def merged_read(first, second):
+    """`second` with the labels `first` saw and it did not, in row order.
+
+    TWO READINGS OF ONE AXIS ARE NOT A CHOICE between them. The strips move by
+    the length of the ticks, and what that costs at one end it can pay back at
+    the other: publication S41467-023-41990-4's "Number of finishers" axis reads
+    16..10 where the strips stand and 9..0 where they move, and either answer
+    alone leaves half the printed axis unmarked on the page the person confirms
+    from. The two agree about every row both of them saw - `richer_read` is what
+    checked that - so the labels only one of them read are labels, not a
+    disagreement.
+
+    A row within 3 px of one already in hand is the SAME LABEL read twice, and
+    the second reading's row is the one kept: it is the reading the merge is
+    built on. Whether the result is worth having is not decided here - the
+    caller puts it to `ladder`, the same test both readings passed.
+    """
+    out = list(second)
+    for value, row in first:
+        if not any(abs(row - r) <= 3 for _v, r in out):
+            out.append((value, row))
+    return sorted(out, key=lambda p: p[1])
+
+
 def label_near(img, dark, box, spine_x, row, half, scale=3):
     """[(value, row)] for every numeral read from the label band beside ONE row.
 
@@ -2575,7 +2599,10 @@ def y_tick_labels(img, dark, box, spine_x, baseline_y=None, pad=6, width=58, sca
         # the ticks are short the strips never touched them and the reading is
         # returned as it was tuned to be.
         past = past_the_ticks()
-        return past if richer_read(first, past) else first
+        if not richer_read(first, past):
+            return first
+        both = merged_read(first, past)
+        return both if ladder_size(both) > ladder_size(past) else past
     second = past_the_ticks()
     if ladder(second)[0]:
         return second

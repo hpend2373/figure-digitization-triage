@@ -4,7 +4,7 @@
  ],
  "files": {
   "tick_ocr.py": "4cf06f24721a33ba53310a4f9441233b99e6b6a543cabf6c3819d2bd9d97a31f",
-  "axis_reader.py": "982407c7cc841d4da4f69b086cb5e6cf59331322e397f7b000241b2ef488f2ca"
+  "axis_reader.py": "df1a4bc29a779e6dc10c28d6beb95a28dc47af7c1c70f6b7bf92a025b4cb7caf"
  },
  "mutations": [
   {
@@ -312,6 +312,24 @@
    "file": "axis_reader.py",
    "old": "    if not ok:\n        return 0",
    "new": "    if False:\n        return 0"
+  },
+  {
+   "name": "같은 줄을 두 번 읽어도 둘 다 넣는다",
+   "file": "axis_reader.py",
+   "old": "        if not any(abs(row - r) <= 3 for _v, r in out):",
+   "new": "        if True:"
+  },
+  {
+   "name": "합친 읽기는 언제나 쓴다",
+   "file": "axis_reader.py",
+   "old": "        return both if ladder_size(both) > ladder_size(past) else past",
+   "new": "        return both"
+  },
+  {
+   "name": "합치지 않고 옮긴 읽기만 쓴다",
+   "file": "axis_reader.py",
+   "old": "        both = merged_read(first, past)\n        return both if ladder_size(both) > ladder_size(past) else past",
+   "new": "        both = merged_read(first, past)\n        return past"
   }
  ]
 }

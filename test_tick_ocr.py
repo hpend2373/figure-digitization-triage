@@ -936,6 +936,57 @@ class TheSecondPass(unittest.TestCase):
         self.assertIsNone(A.richer_read(first, [(60.0, 100.0), (40.0, 200.0), (20.0, 300.0)]))
         RUN[0] += 1
 
+    def test_the_labels_only_one_reading_saw_are_kept_too(self):
+        """REVERT: choose between the two readings. What the strips lose at one
+        end of the axis they can find at the other - S41467-023-41990-4's
+        "Number of finishers" reads 16..10 where the strips stand and 9..0 where
+        they move past the ticks - and either answer alone leaves half the
+        printed axis unmarked on the page the person confirms from. The two
+        agree about every row both saw, so the rest are labels."""
+        first = [(12.0, 100.0), (11.0, 200.0), (10.0, 300.0)]
+        second = [(9.0, 400.0), (8.0, 500.0), (7.0, 600.0)]
+        self.assertEqual(A.merged_read(first, second),
+                         first + second, "the merge is not in row order")
+        seen_twice = A.merged_read(first, [(11.0, 201.0)] + second)
+        self.assertEqual([v for v, _r in seen_twice],
+                         [12.0, 11.0, 10.0, 9.0, 8.0, 7.0])
+        self.assertEqual([r for v, r in seen_twice if v == 11.0], [201.0],
+                         "the same label was kept at two rows")
+        RUN[0] += 1
+
+    def test_a_merge_is_kept_only_while_it_lengthens_the_ladder(self):
+        """REVERT: keep the merge whenever there is one. The tuned reading can
+        hold a numeral that is no label - a rotated axis title, the x axis - and
+        `ladder` drops it from a reading of its own; merged into a longer one it
+        would be dropped again, taking the labels beside it with it. The merge
+        is kept only while the ladder in it is longer than the ladder it was
+        built on."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def reading(tuned, moved):
+            def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                    scale, comma, seen, **kw):
+                return list(tuned if int(anchor_spine) == sx else moved)
+            A._search = spy
+            try:
+                return A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A._search = real
+
+        first = [(12.0, 100.0), (11.0, 200.0), (10.0, 300.0)]
+        moved = [(9.0, 400.0), (8.0, 500.0), (7.0, 600.0), (6.0, 700.0)]
+        self.assertEqual(reading(first, moved), first + moved,
+                         "the two readings were not put together")
+        title = first + [(99.0, 350.0)]
+        self.assertEqual(A.ladder_size(A.merged_read(title, moved)),
+                         A.ladder_size(moved), "the fixture's stray numeral is free")
+        self.assertEqual(reading(title, moved), moved,
+                         "a merge that is no longer than what it was built on was kept")
+        RUN[0] += 1
+
     def test_a_label_read_twice_is_not_a_richer_reading(self):
         """REVERT: count the numerals. The reading a panel is calibrated from
         is the LADDER, and a second look that reads one label at two rows has

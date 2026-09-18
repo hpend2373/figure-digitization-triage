@@ -1,7 +1,7 @@
 {
  "files": {
-  "mark_readers.py": "74e365213b1f357c115d81cfc3cea3331a6da4da862456f4ca8757f402a75975",
-  "test_mark_readers.py": "2292da3a583362248c36e8d8e060fc5f15e32a9d029d49a2a3cc4728f6eae587"
+  "mark_readers.py": "e50d5d7a001547850cd1816985a812863a7c23f0b11cba39a855181f89f8afea",
+  "test_mark_readers.py": "7abc40eeded1a100b3706b71addf066686644a9e22643b19a32c1d70078d0170"
  },
  "suites": [
   "test_mark_readers.py"
@@ -60,6 +60,18 @@
    "file": "mark_readers.py",
    "old": "    if len(widths) != 5:\n        return None",
    "new": "    if False:\n        return None"
+  },
+  {
+   "name": "선언된 색을 무시하고 회색으로 문턱한다",
+   "file": "mark_readers.py",
+   "old": "    if colour:\n        from bar_reader import colour_mask\n        dark = colour_mask(rgb, colour, colour_tolerance)",
+   "new": "    if False:\n        from bar_reader import colour_mask\n        dark = colour_mask(rgb, colour, colour_tolerance)"
+  },
+  {
+   "name": "줄기 없는 세 줄에서 터진다",
+   "file": "mark_readers.py",
+   "old": "        if not upper or not lower:\n            # Three rules of one width and no stem reaching them: annotation\n            # text, a legend, a bracket - not a box. Refused, not raised.\n            continue",
+   "new": "        if False:\n            # Three rules of one width and no stem reaching them: annotation\n            # text, a legend, a bracket - not a box. Refused, not raised.\n            continue"
   }
  ]
 }

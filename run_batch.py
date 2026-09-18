@@ -1669,6 +1669,14 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                     "separate %d series drawn in one panel. Declare one series "
                     "for the whole panel, or route the panel to MANUAL until a "
                     "grouped box reader ships" % len(series_level))
+            # THE INK THE BOX IS DRAWN IN, when the series declares one. A box
+            # in colour is invisible to the dark-ink default (S41467's orange
+            # boxes read grey 154 against a threshold of 100), and the series
+            # row is where the manifest already says what colour that is.
+            box_colour = _s(series_rows[0].get("Colour_Hex")) if series_rows else ""
+            if box_colour:
+                kwargs = dict(kwargs, colour=box_colour,
+                              colour_tolerance=BM.colour_tolerance_for(series_rows[0], mark, options))
             rows = MR.read_panel("BOX_VIOLIN", image=image, panel_box=box,
                                  x_positions=_x_positions(position_rows),
                                  y_calibration=ycal, **kwargs)

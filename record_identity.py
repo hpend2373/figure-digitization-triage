@@ -109,9 +109,11 @@ def series_problems(series, mark):
     names, keys = set(), []
     for i, e in enumerate(series, 1):
         name = str(e.get("name") or "").strip()
-        if not name and len(series) > 1:
-            out.append(("SERIES_NAME_MISSING", "%d번째 계열의 이름이 비어 있습니다." % i))
-        elif name and name.upper() in names:
+        if not name:
+            # 하나뿐인 계열도 이름이 있어야 합니다 - 그 이름이 값이 적히는 셀의
+            # 수준이고, 수준 없는 계열은 배치층이 MISSING_SERIES_IDENTITY로 거절합니다.
+            out.append(("SERIES_NAME_MISSING", "%d번째 계열의 이름(수준)이 비어 있습니다." % i))
+        elif name.upper() in names:
             out.append(("SERIES_NAME_DUPLICATE", "계열 이름 %r이 둘입니다." % name))
         names.add(name.upper())
         colour = str(e.get("colour") or "").strip()
@@ -199,9 +201,9 @@ def check_answer(answer, proposed):
         problems.append(bad)
     else:
         problems.extend(series_problems(series, mark))
-        if len(series) > 1 and not s_factor:
-            problems.append(("SERIES_FACTOR_MISSING", "계열이 %d개인데 계열이 무슨 요인인지 적혀 있지 않습니다."
-                             % len(series)))
+        if not s_factor:
+            problems.append(("SERIES_FACTOR_MISSING", "계열이 무슨 요인인지 적혀 있지 않습니다 - 하나뿐이어도 "
+                                                     "그 계열이 어느 군인지가 셀의 이름입니다."))
     if not (answer.get("Outcome_Name") or "").strip():
         problems.append(("OUTCOME_MISSING", "결과변수 이름이 없습니다."))
     n = (answer.get("N_Outcome") or "").strip()

@@ -125,9 +125,10 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
       "있습니다 — x 라벨과 그 위치(파란 점선), 범례의 계열과 색, y축 제목. 전부 "
       "<b>제안</b>이고, 아무것도 확인되지 않았습니다.</p>")
     w("<p class='note'>사람만 적을 수 있는 것이 둘 있습니다: x축이 <b>무슨 요인</b>인지"
-      "(예: TIMEPOINT, GROUP)와, 계열이 둘 이상이면 계열이 <b>무슨 요인</b>인지(예: ARM, "
-      "SEX). 계획서의 격자는 이 이름으로 서고, 값은 이 이름 아래 적힙니다. 같은 논문 "
-      "안에서는 같은 요인을 같은 이름으로 불러 주세요.</p>")
+      "(예: TIMEPOINT, GROUP)와, 계열이 <b>무슨 요인</b>인지(예: ARM, SEX). 계열이 하나뿐"
+      "이어도 그 계열이 어느 군인지 — 요인과 이름(예: GROUP / ALL) — 적어 주세요: 값은 그 "
+      "이름의 셀에 적힙니다. 계획서의 격자는 이 이름으로 서니, 같은 논문 안에서는 같은 "
+      "요인을 같은 이름으로 불러 주세요.</p>")
     w("<p class='note'>리더가 라벨을 <b>못 읽었거나 틀리게</b> 읽었으면: 라벨 칸을 고치거나, "
       "\"x 위치 찍기\"를 누른 뒤 그림에서 각 위치를 차례로 누르고 라벨을 적어 주세요. "
       "계열도 같습니다 — 이름을 고치거나 \"계열 추가\"로 적어 주세요. 색으로 가르는 표는 "
@@ -236,7 +237,7 @@ def card(proposals, pid, row):
     # ---- series ----
     w("<div class='blk'><h4>계열</h4>")
     w("표 종류 <select data-mark='%s'></select> &nbsp; 계열 요인 <input type='text' list='sf' "
-      "data-sfactor='%s' size='10' placeholder='ARM'> <span class='sub'>계열이 둘 이상일 때</span>"
+      "data-sfactor='%s' size='10' placeholder='ARM'> <span class='sub'>하나뿐이어도 (예: GROUP, 이름 ALL)</span>"
       % (esc(pid), esc(pid)))
     w("<div class='sub'><button class='pickbtn' data-s-add='%s'>계열 추가</button>"
       "<button class='pickbtn' data-s-reset='%s'>읽은 대로 되돌리기</button></div>"

@@ -585,6 +585,181 @@ check("판정이 없으면 계수는 그대로 묻는다",
 _missing = MP.load_figure_decisions(os.path.join(ROOT, "no_such_run"))
 check("처분 파일이 없는 실행도 계획서를 만든다", _missing == {}, _missing)
 
+# ------------------------------------------ 사람이 확인한 기하·정체가 계획서가 된다
+print("confirmed geometry and identity become a read block; anything less is named")
+import json as _json                                             # noqa: E402
+import geometry_proposer as GP                                   # noqa: E402
+import identity_proposer as IP                                   # noqa: E402
+import record_geometry as RG                                     # noqa: E402
+import record_identity as RI                                     # noqa: E402
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"),
+      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "4", "Entry_Status": "ENTERED"}])
+_SEG = os.path.join(RUN, "seg")
+for sub in ("geometry600", "identity600", "regions600"):
+    os.makedirs(os.path.join(_SEG, sub), exist_ok=True)
+_RASTER = os.path.join("seg", "regions600", "PUB_D001_600.png")
+open(os.path.join(RUN, _RASTER), "wb").write(b"\x89PNG\r\n")
+import hashlib as _hashlib                                       # noqa: E402
+_RASTER_SHA = _hashlib.sha256(open(os.path.join(RUN, _RASTER), "rb").read()).hexdigest()
+
+
+def _seg_write(rel, fields, rows):
+    with io.open(os.path.join(RUN, rel), "w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(fields))
+        w.writeheader()
+        for row in rows:
+            w.writerow(dict((k, row.get(k, "")) for k in fields))
+
+
+# 사람이 600 DPI 래스터 위에서 그린 패널 셋: 플롯, 데이터 아님, 플롯.
+_seg_write(MP.PANEL_DECISIONS, ("Draft_ID", "Panel_Index", "Mark_Type", "Verdict", "Verified_By", "Verified_At"),
+           [{"Draft_ID": "PUB_D001", "Panel_Index": "1", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-13"},
+            {"Draft_ID": "PUB_D001", "Panel_Index": "2", "Mark_Type": "NOT_DATA", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-13"},
+            {"Draft_ID": "PUB_D001", "Panel_Index": "3", "Mark_Type": "BOX", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-13"}])
+_seg_write(MP.REGIONS, ("Draft_ID", "Panel_Index", "Mark_Type", "Raster_600", "Raster_600_SHA256", "Region_600"),
+           [{"Draft_ID": "PUB_D001", "Panel_Index": "1", "Mark_Type": "BAR", "Raster_600": _RASTER, "Raster_600_SHA256": _RASTER_SHA, "Region_600": "0,0,900,500"},
+            {"Draft_ID": "PUB_D001", "Panel_Index": "3", "Mark_Type": "BOX", "Raster_600": _RASTER, "Raster_600_SHA256": _RASTER_SHA, "Region_600": "900,0,1800,500"}])
+
+
+def _geom(pid, status="CONFIRMED", frame=(100, 700, 60, 460), pairs="100@80;0@440", **over):
+    row = {c: "" for c in GP.PROPOSAL_COLUMNS}
+    row.update({"Proposal_ID": pid, "Raster": _RASTER, "Raster_SHA256": _RASTER_SHA, "Region": "0,0,900,500",
+                "Panel_X0": frame[0], "Panel_X1": frame[1], "Panel_Y0": frame[2], "Panel_Y1": frame[3],
+                "Axis_X_Region": "100,700,460,500", "Axis_Y_Region": "0,100,60,460",
+                "Y_Tick_Read_Status": GP.READ_OK, "Human_Verification_Status": status,
+                "Verified_By": "MC", "Verified_At": "2026-09-18", "Y_Tick_Top_Value": "100",
+                "Y_Tick_Bottom_Value": "0", "Confirmed_Tick_Values": pairs})
+    row.update(over)
+    return row
+
+
+def _ident(pid, status="CONFIRMED", frame=(100, 700, 60, 460), mark="BAR_COLOR", **over):
+    row = {c: "" for c in IP.IDENTITY_COLUMNS}
+    row.update({"Proposal_ID": pid, "Raster": _RASTER, "Panel_Kind": mark.split("_")[0],
+                "Panel_X0": frame[0], "Panel_X1": frame[1], "Panel_Y0": frame[2], "Panel_Y1": frame[3],
+                "Human_Verification_Status": status, "Verified_By": "MC", "Verified_At": "2026-09-18",
+                "X_Factor": "TIMEPOINT",
+                "X_Labels": _json.dumps([{"label": "Pre", "px": 175}, {"label": "Post", "px": 625}]),
+                "Series_Factor": "ARM",
+                "Series": _json.dumps([{"name": "Fluid", "colour": "#DC2828"}, {"name": "Control", "colour": "#2850DC"}]),
+                "Mark_Type": mark, "Outcome_Name": "Heart rate", "Unit": "bpm", "N_Outcome": "8",
+                "Bar_Top_Definition": "OUTLINE_CENTER", "Errorbar_Stem_Confirmed": "TRUE"})
+    row.update(over)
+    return row
+
+
+def _confirm(geometry, identity, **kw):
+    GP.write_proposals(os.path.join(_SEG, "geometry600", RG.DECISIONS), geometry)
+    IP.write_proposals(os.path.join(_SEG, "identity600", RI.DECISIONS), identity)
+    plan, sheet, ready = build(**kw)
+    panels = list(csv.DictReader(io.open(os.path.join(OUT, MP.PANELS), encoding="utf-8")))
+    fig = dict((f["source_figure_id"], f) for f in plan["figures"])["PUB_D001"]
+    return plan, sheet, fig, dict((r["Panel_ID"], r) for r in panels)
+
+
+_plan, _sheet, _fig, _panels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_p1 = [p for p in _fig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+check("the figure's panels are the ones a person drew, by their numbers, on the 600 DPI raster",
+      [p["panel_id"] for p in _fig["panels"]] == ["PUB_D001_P1", "PUB_D001_P2", "PUB_D001_P3"]
+      and _fig["observed_panel_count"] == 3 and _fig["image"] == _RASTER and _fig["image_sha256"] == _RASTER_SHA,
+      "%s %s %s" % ([p["panel_id"] for p in _fig["panels"]], _fig.get("observed_panel_count"), _fig.get("image")))
+check("the count sheet's number, when it differs, is kept in the note",
+      "count sheet said 4" in _fig.get("note", ""), _fig.get("note"))
+# REVERT: the confirmed geometry and identity stay in their files. The panel
+# stays GEOMETRY_NOT_AUTHORED and nothing a person answered reaches a reader.
+check("a panel with confirmed geometry and identity is AUTO_DIGITIZE with a read block",
+      _p1["disposition"] == "AUTO_DIGITIZE" and _p1["target_status"] == "TARGET"
+      and _p1["outcome_label"] == "Heart rate" and _p1["read"]["box"] == [100, 700, 60, 460]
+      and _p1["read"]["y_ticks"] == [[100.0, 80.0], [0.0, 440.0]] and _p1["read"]["mark_type"] == "BAR_COLOR",
+      "%s %s" % ({k: _p1.get(k) for k in ("disposition", "target_status")}, _p1.get("read", {}).get("box")))
+check("positions carry the person's factor, level and pixel",
+      [(q["factor"], q["level"], q["x_pixel"]) for q in _p1["read"]["positions"]] == [("TIMEPOINT", "Pre", 175.0), ("TIMEPOINT", "Post", 625.0)])
+check("series carry factor, level and colour",
+      [(q["factor"], q["level"], q["colour"]) for q in _p1["read"]["series"]] == [("ARM", "Fluid", "#DC2828"), ("ARM", "Control", "#2850DC")])
+_u1 = [u for u in _plan["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+_g1 = [g for g in _plan["grids"] if g["grid_id"] == _u1["grid_id"]][0]
+check("the unit binds the panel, names the outcome, unit, n, dispersion, bar top and stem",
+      _u1["unit_id"] == _p1["read"]["unit_id"] and _u1["outcome_name"] == "Heart rate" and _u1["unit"] == "bpm"
+      and _u1["n_outcome"] == 8 and _u1["dispersion_type"] == "SD" and _u1["statistic"] == "CONTINUOUS"
+      and _u1["bar_top_definition"] == "OUTLINE_CENTER" and _u1["errorbar_stem_confirmed"] == "TRUE"
+      and _u1["x_calibration"] == [[0, 175.0], [1, 625.0]], "%s" % _u1)
+check("the grid declares both factors with the levels the person named",
+      _g1["factors"] == {"TIMEPOINT": ["Pre", "Post"], "ARM": ["Fluid", "Control"]}, _g1["factors"])
+_problems = [q for q in CP.validate_plan(_plan, file_root=RUN) if q["where"].startswith("figures[0]") or q["where"].startswith("units") or q["where"].startswith("grids")]
+check("the authored figure, its unit and its grid validate", _problems == [], _problems[:3])
+check("the person's view is in the figure views", "F_PUB_D001" in _plan.get("figure_views", {}))
+check("a NOT_DATA panel the person drew stays NOT_DATA",
+      [p for p in _fig["panels"] if p["panel_id"] == "PUB_D001_P2"][0]["disposition"] == "NOT_DATA"
+      and [p for p in _fig["panels"] if p["panel_id"] == "PUB_D001_P2"][0]["target_status"] == "NOT_DATA")
+check("an unconfirmed plot panel stays GEOMETRY_NOT_AUTHORED and is named in plan_panels.csv",
+      _panels["PUB_D001_P3"]["Disposition"] == "GEOMETRY_NOT_AUTHORED" and _panels["PUB_D001_P3"]["Geometry"] == "PENDING"
+      and "기하 확인" in _panels["PUB_D001_P3"]["Needs"] and _panels["PUB_D001_P1"]["Authored"] == "1"
+      and _panels["PUB_D001_P3"]["Authored"] == "0", "%s" % _panels.get("PUB_D001_P3"))
+check("the figure's Needs counts what is left", "기하 1/2 · 정체 1/2 · 읽을 준비 1/2" in _sheet["PUB_D001"]["Needs"], _sheet["PUB_D001"]["Needs"])
+check("without a reviewers file the figure inventory stays PENDING and asks for the registration",
+      _fig["inventory_status"] == "PENDING" and any("검토자 등록: minyeop" in n for n in _sheet["PUB_D001"]["Needs"].split(" · ")),
+      "%s %s" % (_fig["inventory_status"], _sheet["PUB_D001"]["Needs"]))
+
+# REVERT: a confirmed geometry alone authors the panel. The reader would have a
+# frame and no idea which mark is which group, nor where on x to look.
+_plan1b, _sheet1b, _fig1b, _panels1b = _confirm([_geom("PUB_D001__p1")], [])
+check("a confirmed geometry without an identity is not read, and the identity is what is asked",
+      _panels1b["PUB_D001_P1"]["Authored"] == "0" and _panels1b["PUB_D001_P1"]["Geometry"] == "CONFIRMED"
+      and "정체 확인" in _panels1b["PUB_D001_P1"]["Needs"] and "기하 확인" not in _panels1b["PUB_D001_P1"]["Needs"],
+      "%s" % _panels1b["PUB_D001_P1"])
+# REVERT: the identity is taken on whatever frame. The x pixels were read on
+# another frame - one the person later redrew - and land off the marks.
+_plan2, _sheet2, _fig2, _panels2 = _confirm([_geom("PUB_D001__p1", frame=(120, 700, 60, 460))], [_ident("PUB_D001__p1")])
+check("an identity confirmed on another frame does not author the panel, and says so",
+      _panels2["PUB_D001_P1"]["Authored"] == "0" and "다른 프레임" in _panels2["PUB_D001_P1"]["Needs"], _panels2["PUB_D001_P1"]["Needs"])
+_plan3, _sheet3, _fig3, _panels3 = _confirm(
+    [_geom("PUB_D001__p1", status="REJECTED", Y_Tick_Top_Value="", Y_Tick_Bottom_Value="", Confirmed_Tick_Values=""),
+     dict(_geom("PUB_D001__p3", status="REJECTED", Y_Tick_Top_Value="", Y_Tick_Bottom_Value="", Confirmed_Tick_Values=""),
+          Panel_X0="", Panel_X1="", Panel_Y0="", Panel_Y1="")],
+    [_ident("PUB_D001__p1", status="REJECTED")])
+check("a rejected geometry with a frame asks for the frame to be redrawn",
+      _panels3["PUB_D001_P1"]["Geometry"] == "REJECTED" and "다시 그리기" in _panels3["PUB_D001_P1"]["Needs"], _panels3["PUB_D001_P1"]["Needs"])
+check("a refusal the person rejected - no plot here - is NOT_DATA",
+      _panels3["PUB_D001_P3"]["Geometry"] == "NO_PLOT" and _panels3["PUB_D001_P3"]["Disposition"] == "NOT_DATA")
+_plan4, _sheet4, _fig4, _panels4 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", status="REJECTED")])
+check("an identity the person declined to read closes the panel as MANUAL_DIGITIZE",
+      _panels4["PUB_D001_P1"]["Disposition"] == "MANUAL_DIGITIZE", _panels4["PUB_D001_P1"]["Disposition"])
+# A box: the box is the IQR by construction, and a box has no bar top.
+_plan5, _sheet5, _fig5, _panels5 = _confirm(
+    [_geom("PUB_D001__p3", Region="900,0,1800,500")],
+    [_ident("PUB_D001__p3", mark="BOX_VIOLIN", Panel_Kind="BOX", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
+            Series_Factor="GROUP", Series=_json.dumps([{"name": "ALL", "colour": "#ED8B09"}]))])
+_u5 = [u for u in _plan5["units"] if u["panel_id"] == "PUB_D001_P3"][0]
+check("a box panel is QUANTILE_SUMMARY on IQR with NOT_A_BAR, whatever the figure's SD",
+      _u5["statistic"] == "QUANTILE_SUMMARY" and _u5["dispersion_type"] == "IQR" and _u5["bar_top_definition"] == "NOT_A_BAR"
+      and "SD" in _u5["errorbar_source"], "%s" % _u5)
+check("a single series still carries its factor and level",
+      [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"] == [
+          {"series_id": "ALL", "factor": "GROUP", "level": "ALL", "colour": "#ED8B09", "note": "legend: ALL"}],
+      [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"])
+# The reviewers file: a person registers once, and the inventory names them.
+_rev = os.path.join(ROOT, "reviewers.json")
+_json.dump({"reviewers": [{"reviewer_id": "RV_MC", "name": "M. C.", "record_type": "HUMAN", "contact_type": "ORCID",
+                           "contact": "0000-0002-1825-0097", "registered_by": "M. C.", "registration_date": "2026-09-18",
+                           "human_attestation": "HUMAN_CONFIRMED"}],
+            "names": {"minyeop": "RV_MC"}}, io.open(_rev, "w", encoding="utf-8"))
+_plan6, _sheet6, _fig6, _panels6 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")], reviewers_path=_rev)
+check("with the person registered, the figure inventory is VISUALLY_VERIFIED in their name, on their date",
+      _fig6["inventory_status"] == "VISUALLY_VERIFIED" and _fig6["reviewer_id"] == "RV_MC" and _fig6["inspection_date"] == "2026-09-13"
+      and any(r["reviewer_id"] == "RV_MC" and r["human_attestation"] == "HUMAN_CONFIRMED" for r in _plan6["reviewers"]),
+      "%s %s" % (_fig6.get("inventory_status"), [r["reviewer_id"] for r in _plan6["reviewers"]]))
+check("without the file, no reviewer but the demo one is written",
+      [r["reviewer_id"] for r in _plan["reviewers"]] == [MP.DEMO_REVIEWER]
+      and _plan["reviewers"][0]["human_attestation"] == "DEMO_EXAMPLE")
+try:
+    _json.dump({"reviewers": [], "names": {"minyeop": "RV_X"}}, io.open(_rev, "w", encoding="utf-8"))
+    MP.load_reviewers(_rev)
+    check("a name pointing at no registered reviewer stops the build", False, "did not stop")
+except SystemExit as exc:
+    check("a name pointing at no registered reviewer stops the build", "RV_X" in str(exc), str(exc))
+check("the demo reviewer carries a contact the registry can be asked about",
+      all(_plan["reviewers"][0].get(k) for k in ("contact_type", "contact", "registered_by")))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

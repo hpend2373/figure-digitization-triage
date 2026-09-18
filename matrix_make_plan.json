@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "598b5bc0d72d00c5765aa9cd30fd3172e2d668301b220a119b676fea14658aca",
-  "test_make_plan.py": "bb9e811924ca92362eba8a3699c79b2d64d33825b4abe186f45b5f4f82a1f98f"
+  "make_plan.py": "9ebcd6ad04565b162e7720545112e5d6b8782ccfd98ed2f8a38f51942ac80c50",
+  "test_make_plan.py": "b5120731dd1b76a72024dff7c2b366e0a6ed69fd6cbba751d6f792dc6fd6ad14"
  },
  "suites": [
   "test_make_plan.py"
@@ -118,8 +118,8 @@
   {
    "name": "검토자를 사람으로 적는다",
    "file": "make_plan.py",
-   "old": "\"record_type\": \"DEMO_IDENTITY\",\n            \"human_attestation\": \"DEMO_EXAMPLE\",",
-   "new": "\"record_type\": \"HUMAN\",\n            \"human_attestation\": \"HUMAN_CONFIRMED\","
+   "old": "            \"human_attestation\": \"DEMO_EXAMPLE\",\n            \"registration_date\": run_date,",
+   "new": "            \"human_attestation\": \"HUMAN_CONFIRMED\",\n            \"registration_date\": run_date,"
   },
   {
    "name": "등록일을 오늘로 채운다",
@@ -130,8 +130,8 @@
   {
    "name": "문서를 확인된 것으로 적는다",
    "file": "make_plan.py",
-   "old": "            \"inventory_status\": \"PENDING\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        })",
-   "new": "            \"inventory_status\": \"VISUALLY_VERIFIED\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        })"
+   "old": "            \"inventory_status\": \"PENDING\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        }\n        status = doc_status.get",
+   "new": "            \"inventory_status\": \"VISUALLY_VERIFIED\",\n            \"reviewer_id\": DEMO_REVIEWER,\n        }\n        status = doc_status.get"
   },
   {
    "name": "그림을 확인된 것으로 적는다",
@@ -294,6 +294,96 @@
    "file": "make_plan.py",
    "old": "    if not os.path.exists(path):\n        return out",
    "new": "    if False:\n        return out"
+  },
+  {
+   "name": "사람이 그린 패널 목록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "        if disposition == \"GEOMETRY_NOT_AUTHORED\" and drawn_rows:",
+   "new": "        if False:"
+  },
+  {
+   "name": "기하가 확인되지 않아도 읽는다",
+   "file": "make_plan.py",
+   "old": "    elif g_state in (\"PENDING\", \"\"):\n        needs.append(\"기하 확인\")",
+   "new": "    elif g_state in (\"PENDING\", \"\"):\n        pass"
+  },
+  {
+   "name": "정체가 확인되지 않아도 읽는다",
+   "file": "make_plan.py",
+   "old": "        elif i_state != \"CONFIRMED\":\n            needs.append(\"정체 확인 (x 위치·계열·단위)\")",
+   "new": "        elif i_state != \"CONFIRMED\":\n            pass"
+  },
+  {
+   "name": "다른 프레임 위의 정체를 받는다",
+   "file": "make_plan.py",
+   "old": "        elif g is not None and g_state in (\"CONFIRMED\", \"SHARED\") and not _frames_agree(g, i):",
+   "new": "        elif False:"
+  },
+  {
+   "name": "프레임 없는 거절을 플롯으로 둔다",
+   "file": "make_plan.py",
+   "old": "    if status == \"REJECTED\" and not (row.get(\"Panel_X0\") or \"\").strip():",
+   "new": "    if False:"
+  },
+  {
+   "name": "읽지 않겠다는 패널을 읽는다",
+   "file": "make_plan.py",
+   "old": "        if i_state == \"REJECTED\":\n            disposition, reason = \"MANUAL_DIGITIZE\", \"identity: 사람이 이 패널은 읽지 않는다고 함\"",
+   "new": "        if False:\n            disposition, reason = \"MANUAL_DIGITIZE\", \"identity: 사람이 이 패널은 읽지 않는다고 함\""
+  },
+  {
+   "name": "상자를 연속형으로 적는다",
+   "file": "make_plan.py",
+   "old": "    if mark == \"BOX_VIOLIN\":\n        # A box is the interquartile range by construction",
+   "new": "    if False:\n        # A box is the interquartile range by construction"
+  },
+  {
+   "name": "계열에 요인을 달지 않는다",
+   "file": "make_plan.py",
+   "old": "        sp = {\"series_id\": sid, \"factor\": s_factor, \"level\": name or sid}",
+   "new": "        sp = {\"series_id\": sid}"
+  },
+  {
+   "name": "x 보정점을 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    if len(positions) >= 2:\n        unit[\"x_calibration\"]",
+   "new": "    if False:\n        unit[\"x_calibration\"]"
+  },
+  {
+   "name": "상자에 NOT_A_BAR를 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    elif mark == \"BOX_VIOLIN\":\n        unit[\"bar_top_definition\"] = \"NOT_A_BAR\"",
+   "new": "    elif False:\n        unit[\"bar_top_definition\"] = \"NOT_A_BAR\""
+  },
+  {
+   "name": "래스터를 크롭인 채로 둔다",
+   "file": "make_plan.py",
+   "old": "                if raster and os.path.isfile(os.path.join(crop_root, raster)):\n                    figure[\"image\"] = raster",
+   "new": "                if False:\n                    figure[\"image\"] = raster"
+  },
+  {
+   "name": "등록되지 않은 이름으로 VISUALLY_VERIFIED를 적는다",
+   "file": "make_plan.py",
+   "old": "            if rid:\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,",
+   "new": "            if who:\n                rid = rid or DEMO_REVIEWER\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,"
+  },
+  {
+   "name": "목록에 없는 검토자를 가리키는 이름을 받는다",
+   "file": "make_plan.py",
+   "old": "        if rid not in reviewers:\n            raise SystemExit",
+   "new": "        if False:\n            raise SystemExit"
+  },
+  {
+   "name": "대상 여부를 적지 않는다",
+   "file": "make_plan.py",
+   "old": "            panel.setdefault(\"target_status\", target_status_of(panel))",
+   "new": "            pass"
+  },
+  {
+   "name": "패널 행을 적지 않는다",
+   "file": "make_plan.py",
+   "old": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, panel_sheet)",
+   "new": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, [])"
   }
  ]
 }

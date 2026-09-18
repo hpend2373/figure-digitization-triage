@@ -1355,11 +1355,21 @@ def _ink_runs(mask):
 
 
 def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
-                          half_window=None, threshold=100):
+                          half_window=None, threshold=100, colour=None,
+                          colour_tolerance=60.0):
     """Read five-number summaries from boxes or box-overlaid violins.
 
     A density silhouette alone does not identify quartiles.  In that case this
     function returns no value and leaves the grid cell for manual review.
+
+    `colour` is the ink the box is drawn in, as the series manifest declares it
+    (`#rrggbb`), with `colour_tolerance` in RGB distance. Without it the box is
+    looked for in DARK ink - grey under `threshold` - which is what this reader
+    was born reading. Publication S41467-023-41990-4 draws every box in orange
+    (237,139,9 - grey 154): under the dark threshold the box is invisible and
+    the only three "rules" in the window are the p-value's text, which has no
+    stem, and the reader then raised an IndexError instead of refusing. A
+    declared colour is the mask; and a box with no stem reaching it is no box.
 
     WHAT THIS USED TO DO, and why it read one box out of thirty on a real
     figure: it summed the ink across a fixed 18 px window, took every row with
@@ -1382,8 +1392,12 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
     S41467 FIG9: thirty read, none refused.
     """
     rgb = np.asarray(image.convert("RGB") if isinstance(image, Image.Image) else image)
-    gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-    dark = gray < int(threshold)
+    if colour:
+        from bar_reader import colour_mask
+        dark = colour_mask(rgb, colour, colour_tolerance)
+    else:
+        gray = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+        dark = gray < int(threshold)
     x0, x1, y0, y1 = map(int, panel_box)
     xs = list(x_positions.items())
     if half_window is None:
@@ -1434,6 +1448,10 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
         first, last = bands[0][0], bands[-1][-1]
         upper = [b for b in spans if b[-1] >= first - 2 and b[0] <= first]
         lower = [b for b in spans if b[0] <= last + 2 and b[-1] >= last]
+        if not upper or not lower:
+            # Three rules of one width and no stem reaching them: annotation
+            # text, a legend, a bracket - not a box. Refused, not raised.
+            continue
         cap_rows = [top_row + float(upper[0][0]), top_row + float(lower[-1][-1])]
         cap_widths = [centred.get(upper[0][0], 0), centred.get(lower[-1][-1], 0)]
         lines = sorted(zip(box_rows + cap_rows,

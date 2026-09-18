@@ -102,10 +102,15 @@ print("확인은 계획서가 설 수 있는 정체를 들고 와야 한다")
 check("x 요인이 없으면 거절한다", "X_FACTOR_MISSING" in codes(run([answer(X_Factor="")])[1]))
 check("요인 이름은 대문자·숫자·밑줄이어야 한다", "FACTOR_NAME_BAD" in codes(run([answer(X_Factor="time point")])[1]))
 check("한 요인이 두 축에 있으면 거절한다", "FACTOR_ON_BOTH_AXES" in codes(run([answer(Series_Factor="TIMEPOINT")])[1]))
-check("계열이 둘인데 계열 요인이 없으면 거절한다", "SERIES_FACTOR_MISSING" in codes(run([answer(Series_Factor="")])[1]))
-check("계열이 하나면 계열 요인은 없어도 된다",
-      not run([answer(Series_Factor="", Series=series({"name": "", "colour": "#DC2828"}))])[1],
-      "%s" % codes(run([answer(Series_Factor="", Series=series({"name": "", "colour": "#DC2828"}))])[1]))
+check("계열 요인이 없으면 거절한다", "SERIES_FACTOR_MISSING" in codes(run([answer(Series_Factor="")])[1]))
+# REVERT: 하나뿐인 계열은 요인·이름 없이 받는다. 수준 없는 계열은 Cell_Key가 되지 못합니다.
+check("계열이 하나여도 요인은 있어야 한다",
+      "SERIES_FACTOR_MISSING" in codes(run([answer(Series_Factor="", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1]))
+check("계열이 하나여도 이름(수준)은 있어야 한다",
+      "SERIES_NAME_MISSING" in codes(run([answer(Series_Factor="GROUP", Series=series({"name": "", "colour": "#DC2828"}))])[1]))
+check("요인과 이름이 있는 계열 하나는 된다",
+      not run([answer(Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1],
+      "%s" % codes(run([answer(Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1]))
 check("x 위치가 없으면 거절한다", "X_POSITIONS_MISSING" in codes(run([answer(X_Labels="[]")])[1]))
 check("JSON이 아닌 위치는 거절한다", "X_Labels_NOT_JSON" in codes(run([answer(X_Labels="Pre@175")])[1]))
 check("빈 라벨은 거절한다", "X_LABEL_MISSING" in codes(run([answer(X_Labels=json.dumps([{"label": "", "px": 175}]))])[1]))
@@ -140,7 +145,7 @@ check("두 계열을 가를 것이 없으면 거절한다",
       "SERIES_NOT_SEPARABLE" in codes(run([answer(Series=series({"name": "A", "colour": "#DC2828"}, {"name": "B", "colour": "#dc2828"}))])[1]))
 check("같은 계열 이름 둘은 거절한다",
       "SERIES_NAME_DUPLICATE" in codes(run([answer(Series=series({"name": "A", "colour": "#DC2828"}, {"name": "a", "colour": "#2850DC"}))])[1]))
-check("이름 없는 계열은 하나뿐일 때만 된다",
+check("이름 없는 계열은 거절한다",
       "SERIES_NAME_MISSING" in codes(run([answer(Series=series({"name": "", "colour": "#DC2828"}, {"name": "B", "colour": "#2850DC"}))])[1]))
 # REVERT: 결과변수 없이 적는다. 값이 무엇의 값인지 없는 단위입니다.
 check("결과변수가 없으면 거절한다", "OUTCOME_MISSING" in codes(run([answer(Outcome_Name="")])[1]))
@@ -149,9 +154,9 @@ check("n이 양의 정수가 아니면 거절한다", "N_BAD" in codes(run([answ
 check("막대 표에 값 정의가 없으면 거절한다", "BAR_TOP_MISSING" in codes(run([answer(Bar_Top_Definition="")])[1]))
 check("상자 표에는 값 정의를 묻지 않는다",
       not run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
-                      Series_Factor="", Series=series({"name": "", "colour": "#DC2828"}))])[1],
+                      Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1],
       "%s" % codes(run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
-                               Series_Factor="", Series=series({"name": "", "colour": "#DC2828"}))])[1]))
+                               Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1]))
 check("줄기 확인은 TRUE/FALSE여야 한다", "STEM_BAD" in codes(run([answer(Errorbar_Stem_Confirmed="maybe")])[1]))
 
 print()

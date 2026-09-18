@@ -55,14 +55,20 @@ test('x 요인은 사람이 적어야 한다', () => {
   assert.match(got.why, /요인/);
   assert.equal(L.verdictOf('GP001', state({ xFactor: 'time point' })).ready, false);
 });
-test('계열이 둘 이상이면 계열 요인이 있어야 하고, x 요인과 달라야 한다', () => {
+/* REVERT: 하나뿐인 계열은 요인 없이 받는다. 수준 없는 계열은 Cell_Key가 되지 못하고
+ * 배치층이 MISSING_SERIES_IDENTITY로 거절합니다 - 파일럿 Beckers는 계열 하나에도
+ * POSTURE=SUPINE을 적었습니다. */
+test('계열 요인은 하나뿐이어도 있어야 하고, x 요인과 달라야 한다', () => {
   assert.equal(L.verdictOf('GP001', state({ seriesFactor: '' })).ready, false);
   const same = L.verdictOf('GP001', state({ seriesFactor: 'TIMEPOINT' }));
   assert.equal(same.ready, false);
   assert.match(same.why, /두 축/);
   const one = L.verdictOf('GP001', state({ seriesFactor: '', readSeries: 'Fluid@220,40,40' }));
-  assert.equal(one.ready, true, one.why);
-  assert.equal(one.row.Series_Factor, '');
+  assert.equal(one.ready, false);
+  assert.match(one.why, /어느 군/);
+  const named = L.verdictOf('GP001', state({ seriesFactor: 'GROUP', readSeries: 'Fluid@220,40,40' }));
+  assert.equal(named.ready, true, named.why);
+  assert.equal(named.row.Series_Factor, 'GROUP');
 });
 test('읽힌 x 라벨이 없으면 찍어야 한다', () => {
   const got = L.verdictOf('GP001', state({ readLabels: '' }));
@@ -106,11 +112,14 @@ test('두 계열을 가를 것이 없으면 답이 아니다', () => {
   const c = state({ series: [{ name: 'A', colour: [220, 40, 40] }, { name: 'B', colour: [220, 40, 40] }] });
   assert.match(L.verdictOf('GP001', c).why, /가를 것이 없습니다/);
 });
-test('계열 이름은 서로 달라야 하고, 하나뿐이면 비어도 된다', () => {
+test('계열 이름은 서로 달라야 하고, 하나뿐이어도 있어야 한다', () => {
   assert.match(L.verdictOf('GP001', state({ series: [{ name: 'A', colour: [1, 2, 3] }, { name: 'a', colour: [4, 5, 6] }] })).why, /같은 계열 이름/);
-  const one = L.verdictOf('GP001', state({ seriesFactor: '', readSeries: '@220,40,40' }));
-  assert.equal(one.ready, true, one.why);
-  assert.equal(JSON.parse(one.row.Series)[0].name, '');
+  const one = L.verdictOf('GP001', state({ seriesFactor: 'GROUP', readSeries: '@220,40,40' }));
+  assert.equal(one.ready, false);
+  assert.match(one.why, /이름\(수준\)이 비어/);
+  const named = L.verdictOf('GP001', state({ seriesFactor: 'GROUP', series: [{ name: 'ALL', colour: [220, 40, 40] }] }));
+  assert.equal(named.ready, true, named.why);
+  assert.equal(JSON.parse(named.row.Series)[0].name, 'ALL');
 });
 /* REVERT: 결과변수 없이 확인이 된다. 값이 무엇의 값인지 없는 단위입니다. */
 test('결과변수 이름이 없으면 답이 아니다', () => {
@@ -133,7 +142,7 @@ test('막대 표는 값을 어디서 읽는지 골라야 한다', () => {
   const got = L.verdictOf('GP001', state({ barTop: '' }));
   assert.equal(got.ready, false);
   assert.match(got.why, /막대/);
-  const box = L.verdictOf('GP001', state({ kind: 'BOX', markProposed: 'BOX_VIOLIN', barTop: '', seriesFactor: '', readSeries: '@220,40,40' }));
+  const box = L.verdictOf('GP001', state({ kind: 'BOX', markProposed: 'BOX_VIOLIN', barTop: '', seriesFactor: 'GROUP', readSeries: 'ALL@220,40,40' }));
   assert.equal(box.ready, true, box.why);
   assert.equal(box.row.Bar_Top_Definition, '');
   assert.equal(box.row.Errorbar_Stem_Confirmed, '');
@@ -141,7 +150,7 @@ test('막대 표는 값을 어디서 읽는지 골라야 한다', () => {
 test('오차막대 줄기 확인은 연속형 표에만 나간다', () => {
   assert.equal(L.verdictOf('GP001', state({ stem: false })).row.Errorbar_Stem_Confirmed, 'FALSE');
   assert.equal(L.verdictOf('GP001', state({ stem: true })).row.Errorbar_Stem_Confirmed, 'TRUE');
-  assert.equal(L.verdictOf('GP001', state({ kind: 'SCATTER', markProposed: 'SCATTER', barTop: '', seriesFactor: '', readSeries: '@1,2,3' })).row.Errorbar_Stem_Confirmed, '');
+  assert.equal(L.verdictOf('GP001', state({ kind: 'SCATTER', markProposed: 'SCATTER', barTop: '', seriesFactor: 'GROUP', readSeries: 'ALL@1,2,3' })).row.Errorbar_Stem_Confirmed, '');
 });
 test('사람이 고친 것과 읽은 것을 가른다', () => {
   assert.equal(L.pick('', 'read'), 'read');

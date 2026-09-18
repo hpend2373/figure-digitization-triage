@@ -1,8 +1,8 @@
 {
  "files": {
   "review_overlay.py": "787a873d7d536c45678f32c37bcb67d3da172411d5677cc8f12d7dd13f340987",
-  "run_batch.py": "328893f4526c5232a83f4012df41d2516ce7a9439840bffcbd666e224bd83661",
-  "test_run_batch.py": "34f74f9795e6467c9145cda2e8f46255212c8b199e07473bdd9811f5dc04bfd6"
+  "run_batch.py": "32066d5bc6ec84693ddf8fc0d366dff7296772580d414262094193ba71375cbf",
+  "test_run_batch.py": "fe0152329ff5eb77ff3c1dafdc5ef3c26a1e0f17ddc0a7c271225f0bda279702"
  },
  "suites": [
   "test_run_batch.py"
@@ -37,6 +37,12 @@
    "file": "run_batch.py",
    "old": "        if px is not None and rows:\n            grouped.setdefault(key, []).extend(\n                dict(x=float(px), y=row, value=None) for row in sorted(rows))\n            continue",
    "new": "        if False:\n            continue"
+  },
+  {
+   "name": "계열이 선언한 색을 상자 리더에 넘기지 않는다",
+   "file": "run_batch.py",
+   "old": "            if box_colour:\n                kwargs = dict(kwargs, colour=box_colour,",
+   "new": "            if False:\n                kwargs = dict(kwargs, colour=box_colour,"
   }
  ]
 }

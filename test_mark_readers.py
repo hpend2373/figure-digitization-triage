@@ -844,6 +844,49 @@ check("  and a box drawn with no whiskers is refused, not stretched",
           x_positions={"G%d" % i: x for i, x in enumerate(nxs)},
           y_calibration=nycal) == [])
 
+# THE BOX IN COLOUR. Publication S41467-023-41990-4 draws every box in orange
+# (237,139,9), grey 154 under the dark threshold of 100: invisible. The series
+# manifest already names the colour, so the reader takes it as its mask.
+def coloured_box_fixture(colour=(237, 139, 9)):
+    im, xs, ycal, truth = box_points_fixture(dots=0, grid=False)
+    a = np.asarray(im).copy()
+    ink = (a.sum(axis=2) < 200)
+    a[ink] = colour
+    return Image.fromarray(a), xs, ycal, truth
+cim, cxs, cycal, ctruth = coloured_box_fixture()
+_cpos = {"G%d" % i: x for i, x in enumerate(cxs)}
+check("a box drawn in colour is invisible to the dark-ink default",
+      read_box_violin_panel(cim, panel_box=(120, 680, 40, 460), x_positions=_cpos, y_calibration=cycal) == [])
+# REVERT: ignore the declared colour and threshold on grey. The boxes above are
+# then not read, and were the annotation in dark ink, would be misread.
+crows = read_box_violin_panel(cim, panel_box=(120, 680, 40, 460), x_positions=_cpos,
+                              y_calibration=cycal, colour="#ED8B09", colour_tolerance=60)
+check("  and read through its declared colour, all three, within a value of the truth",
+      len(crows) == 3 and all(abs(r["median"] - t[2]) < 1.5 and abs(r["whisker_upper"] - t[4]) < 1.5
+                              for r, t in zip(crows, ctruth)),
+      "%s" % [(round(r["median"], 1), t[2]) for r, t in zip(crows, ctruth)] if crows else "none")
+# REVERT: raise on three rules with no stem. `_widest_runs` takes the widest run
+# ANYWHERE in the row, so the "<0.001" printed BESIDE a box gives three rows of
+# one width with no ink at the group's own column at all: the reader took the
+# text for the box, looked for the stem that was never there, and raised
+# IndexError - which halts the whole batch instead of refusing one cell. This is
+# publication S41467-023-41990-4's figure 2b, group B1, measured: bands at rows
+# 104-107, 115-117, 128-129 and the only stem span at 119-139.
+tim = Image.new("RGB", (800, 520), "white")
+td = ImageDraw.Draw(tim)
+for x in (200, 400, 600):
+    for yy in (200, 215, 228):
+        td.line((x - 60, yy, x - 30, yy), fill="black", width=2)   # beside the column, not over it
+_tpos = {"G%d" % i: x for i, x in enumerate((200, 400, 600))}
+_tdark = np.asarray(tim.convert("L")) < 100
+check("  the fixture is the shape that raised: three bands of one width, no ink at the column",
+      all(len(_MR._runs(sorted(r for r, w in _MR._widest_runs(_tdark[41:459, x - 90:x + 91]).items()
+                               if w >= 28), gap=2)) == 3
+          and not _tdark[41:459, x - 1:x + 2].any() for x in (200, 400, 600)))
+check("three rules with no stem reaching them are refused, not raised",
+      read_box_violin_panel(tim, panel_box=(120, 680, 40, 460),
+                            x_positions=_tpos, y_calibration=cycal) == [])
+
 # REVERT: split five lines into box and caps by something other than one shared
 # width. Three lines of one width with two narrower ones is the shape; anything
 # else is a guess about which three were the box.

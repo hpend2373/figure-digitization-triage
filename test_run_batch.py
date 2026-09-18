@@ -1642,6 +1642,39 @@ check("UNSUPPORTED_CAPABILITY names the reader limit, not the figure",
               if p["check"] == "UNSUPPORTED_CAPABILITY"])
 
 
+print("a box drawn in colour is read through the colour its series declares")
+# Publication S41467-023-41990-4 draws every box in orange, grey 154 under the
+# reader's dark threshold of 100 - invisible. The series row already says what
+# colour the box is; the runner hands it to the reader.
+def _coloured_box_image(path, colour=(237, 139, 9)):
+    im = Image.new("RGB", (600, 480), "white")
+    d = ImageDraw.Draw(im)
+    for i, x in enumerate(XS):
+        lo, q1, med, q3, hi = [LINE_CAL.value_to_pixel(v) for v in (20 + 5 * i, 35 + 5 * i, 45 + 5 * i, 58 + 5 * i, 75 + 5 * i)]
+        d.line((x, hi, x, lo), fill=colour, width=2)
+        d.line((x - 7, hi, x + 7, hi), fill=colour, width=2)
+        d.line((x - 7, lo, x + 7, lo), fill=colour, width=2)
+        d.rectangle((x - 14, q3, x + 14, q1), outline=colour, width=2)
+        d.line((x - 14, med, x + 14, med), fill=colour, width=2)
+    im.save(path)
+    return path
+_CBOX_IMG = _coloured_box_image(os.path.join(IMAGES, "coloured_box.png"))
+_cbox_panel = panel("P_CBOX", "U_CBOX", "BOX_VIOLIN", _CBOX_IMG, (100, 500, 40, 440))
+_cbox_unit = unit("U_CBOX", "G_ONE_TIME", "QUANTILE_SUMMARY", Dispersion_Type="IQR")
+_cbox_positions = [dict(r, Panel_ID="P_CBOX") for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"]
+_cbox_raw = os.path.join(ROOT, "raw_cbox")
+os.makedirs(_cbox_raw, exist_ok=True)
+_cbox_with = RB.run_panel(_cbox_panel, [series("P_CBOX", "S_ALL", "ALL", Colour_Hex="#ED8B09")],
+                          _cbox_positions, {}, _cbox_unit, _cbox_raw, file_root=ROOT)
+check("with Colour_Hex on its series, every coloured box is read",
+      len(_cbox_with.values) == 4, "%s: %s (%d values)" % (_cbox_with.state, _cbox_with.detail, len(_cbox_with.values)))
+# REVERT: ignore the series colour and threshold on grey. The orange boxes are
+# then invisible, and the four cells come back missing with nothing wrong named.
+_cbox_without = RB.run_panel(_cbox_panel, [series("P_CBOX", "S_ALL", "ALL")],
+                             _cbox_positions, {}, _cbox_unit, _cbox_raw, file_root=ROOT)
+check("without one, the dark-ink default sees no box - the colour is what made the difference",
+      len(_cbox_without.values) == 0, "%d values" % len(_cbox_without.values))
+
 print("a figure with more than one digitized panel keeps every project")
 # `projects_by_figure.setdefault(Figure_ID, outcome.project)` recorded whichever
 # panel of a figure finished first, and the gate then looked the project up ON

@@ -10,8 +10,10 @@
  *   1. 오버레이를 직접 보았다고 누르지 않으면 답이 아닙니다.
  *   2. 이름 없는 확인은 확인이 아닙니다.
  *   3. 확인은 x 위치를 하나 이상, 라벨을 빠짐없이, 서로 다르게 들고 와야 합니다.
- *   4. 확인은 계열을 하나 이상 들고 와야 하고, 색으로 가르는 표는 계열마다
- *      색이, 선 모양으로 가르는 표는 계열마다 선 모양이 있어야 합니다.
+ *   4. 확인은 계열을 하나 이상 들고 와야 하고, 계열마다 이름이 있어야 하며,
+ *      색으로 가르는 표는 계열마다 색이, 선 모양으로 가르는 표는 계열마다
+ *      선 모양이 있어야 합니다. 하나뿐인 계열도 이름이 있어야 합니다 - 그
+ *      계열이 무엇(어느 군)인지가 값이 적히는 셀의 이름입니다.
  *   5. x 요인과 계열 요인은 사람이 적어야 하고, 둘이 같으면 답이 아닙니다 -
  *      한 요인이 두 축에 있으면 Cell_Key가 두 번 적힙니다.
  *   6. 결과변수 이름이 없으면 답이 아닙니다. n은 비워 둘 수 있고, 비면 계획서가
@@ -161,8 +163,8 @@ function verdictOf(id, state) {
   if (!series.length) {
     return { ready: false, why: '계열이 없습니다 — 범례의 계열을 적어 주세요 (하나뿐이면 하나)', row: null };
   }
-  if (series.length > 1 && !seriesFactor) {
-    return { ready: false, why: '계열이 둘 이상이면 계열이 무슨 요인인지 적어 주세요 (예: ARM, SEX)', row: null };
+  if (!seriesFactor) {
+    return { ready: false, why: '계열이 무슨 요인인지 적어 주세요 (예: ARM, GROUP) — 하나뿐이어도 그 계열이 어느 군인지가 셀의 이름입니다', row: null };
   }
   if (seriesFactor && !/^[A-Z][A-Z0-9_]*$/.test(seriesFactor)) {
     return { ready: false, why: '요인 이름은 대문자·숫자·밑줄만: ' + seriesFactor, row: null };
@@ -173,8 +175,8 @@ function verdictOf(id, state) {
   var names = {};
   for (var k = 0; k < series.length; k++) {
     var nm = trim(series[k].name);
-    if (!nm && series.length > 1) return { ready: false, why: (k + 1) + '번째 계열의 이름이 비어 있습니다', row: null };
-    if (nm && names[nm.toUpperCase()]) return { ready: false, why: '같은 계열 이름이 둘입니다: ' + nm, row: null };
+    if (!nm) return { ready: false, why: (k + 1) + '번째 계열의 이름(수준)이 비어 있습니다 — 하나뿐이면 어느 군인지 적어 주세요 (예: ALL)', row: null };
+    if (names[nm.toUpperCase()]) return { ready: false, why: '같은 계열 이름이 둘입니다: ' + nm, row: null };
     names[nm.toUpperCase()] = true;
     if (COLOUR_MARKS.indexOf(markType) >= 0 && !series[k].colour) {
       return { ready: false, why: markType + '은 색으로 계열을 가릅니다 — ' + (nm || (k + 1) + '번째') + ' 계열의 색이 없습니다', row: null };

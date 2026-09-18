@@ -87,6 +87,8 @@ jobs:
           # 기하 확인도 같은 나눔입니다: 화면은 값을 옮기고,
           # geometry_page.js가 무엇이 답이 되는지 정합니다.
           node test_geometry_page.mjs
+          # 정체 확인(x 라벨·계열·단위)도 같은 나눔입니다.
+          node test_identity_page.mjs
           # 값 검토도 같은 나눔입니다: 화면은 값을 옮기고,
           # value_page.js가 무엇이 승인이 되는지 정합니다.
           node test_value_page.mjs
@@ -130,6 +132,7 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
+                   test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \
                    test_panel_to_page; do
             echo "--- $t"
@@ -315,6 +318,7 @@ jobs:
                    test_errorbar_review_page test_worklist_page \
                    test_decision_page test_record_decisions \
                    test_geometry_page test_record_geometry \
+                   test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \
                    test_panel_to_page; do
             echo "--- $t"

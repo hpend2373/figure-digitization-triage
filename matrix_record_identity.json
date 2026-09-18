@@ -1,0 +1,107 @@
+{
+ "files": {
+  "record_identity.py": "c03aadc1cf3ef8edf93aa633e3047fd8fd31b2177d39b6841c24f82074d8cde9",
+  "test_record_identity.py": "32e1150d00ed70e48552016109bd9d87ae3e5d3f6bb96c7ae50a6abb4ad7a77f"
+ },
+ "suites": [
+  "test_record_identity.py"
+ ],
+ "mutations": [
+  {
+   "name": "보지 않은 답도 적는다",
+   "file": "record_identity.py",
+   "old": "    if not is_true(answer.get(\"Seen_By_Person\")):",
+   "new": "    if False:"
+  },
+  {
+   "name": "이름 없는 답도 적는다",
+   "file": "record_identity.py",
+   "old": "    if not who:\n        problems.append((\"UNATTRIBUTED\",",
+   "new": "    if False:\n        problems.append((\"UNATTRIBUTED\","
+  },
+  {
+   "name": "낸 적 없는 제안의 답도 적는다",
+   "file": "record_identity.py",
+   "old": "    if pid not in proposed:\n        problems.append((\"NOT_PROPOSED\"",
+   "new": "    if False:\n        problems.append((\"NOT_PROPOSED\""
+  },
+  {
+   "name": "보류를 적는다",
+   "file": "record_identity.py",
+   "old": "    if verdict == HELD:\n        problems.append((\"HELD\",",
+   "new": "    if False:\n        problems.append((\"HELD\","
+  },
+  {
+   "name": "x 요인 없이 적는다",
+   "file": "record_identity.py",
+   "old": "    if not x_factor:\n        problems.append((\"X_FACTOR_MISSING\",",
+   "new": "    if False:\n        problems.append((\"X_FACTOR_MISSING\","
+  },
+  {
+   "name": "한 요인이 두 축에 있어도 적는다",
+   "file": "record_identity.py",
+   "old": "    if s_factor and s_factor == x_factor:",
+   "new": "    if False:"
+  },
+  {
+   "name": "같은 라벨 둘을 적는다",
+   "file": "record_identity.py",
+   "old": "        elif label.upper() in seen:\n            out.append((\"X_LABEL_DUPLICATE\", \"x 라벨 %r이 둘입니다.\" % label))",
+   "new": "        elif False:\n            out.append((\"X_LABEL_DUPLICATE\", \"x 라벨 %r이 둘입니다.\" % label))"
+  },
+  {
+   "name": "프레임 밖의 위치를 적는다",
+   "file": "record_identity.py",
+   "old": "        elif x0 is not None and (px < x0 - slack or px > x1 + slack):",
+   "new": "        elif False:"
+  },
+  {
+   "name": "세어진 종류와 다른 표 종류를 적는다",
+   "file": "record_identity.py",
+   "old": "    elif allowed and mark not in allowed:",
+   "new": "    elif False:"
+  },
+  {
+   "name": "색 없는 계열을 색 표에 적는다",
+   "file": "record_identity.py",
+   "old": "        if mark in BM.COLOUR_MARK_TYPES and not colour:",
+   "new": "        if False:"
+  },
+  {
+   "name": "가를 것 없는 두 계열을 적는다",
+   "file": "record_identity.py",
+   "old": "    if len(series) > 1 and len(set(keys)) != len(keys):",
+   "new": "    if False:"
+  },
+  {
+   "name": "결과변수 없이 적는다",
+   "file": "record_identity.py",
+   "old": "    if not (answer.get(\"Outcome_Name\") or \"\").strip():",
+   "new": "    if False:"
+  },
+  {
+   "name": "막대 표에 값 정의 없이 적는다",
+   "file": "record_identity.py",
+   "old": "    if mark.startswith(\"BAR\") and bar_top not in BAR_TOPS:",
+   "new": "    if False:"
+  },
+  {
+   "name": "두 번 적는다",
+   "file": "record_identity.py",
+   "old": "        if pid in settled and not replace:",
+   "new": "        if False:"
+  },
+  {
+   "name": "자기 출력을 답으로 읽는다",
+   "file": "record_identity.py",
+   "old": "            and os.path.samefile(answers_path, out_path):",
+   "new": "            and False:"
+  },
+  {
+   "name": "사람이 준 것을 얹지 않는다",
+   "file": "record_identity.py",
+   "old": "            \"X_Factor\": (answer.get(\"X_Factor\") or \"\").strip().upper(),",
+   "new": "            \"X_Factor\": \"\","
+  }
+ ]
+}

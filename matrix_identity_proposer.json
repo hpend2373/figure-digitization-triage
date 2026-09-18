@@ -1,0 +1,125 @@
+{
+ "files": {
+  "identity_proposer.py": "0d8dc4a8b1667f057d70805e5a8459968b398823c840c3ee2c3ef749b0c394e3",
+  "test_identity_proposer.py": "2ed40324cb44eccd8eb2e7369f9b1af0247ca54515292553149aadf82c262c75"
+ },
+ "suites": [
+  "test_identity_proposer.py"
+ ],
+ "mutations": [
+  {
+   "name": "낱말을 붙이지 않는다",
+   "file": "identity_proposer.py",
+   "old": "        if gap > LABEL_JOIN * max(row[\"h\"], 1):",
+   "new": "        if True:"
+  },
+  {
+   "name": "간격이 고르지 않아도 받는다",
+   "file": "identity_proposer.py",
+   "old": "        if cv > LABEL_PITCH_CV:",
+   "new": "        if False:"
+  },
+  {
+   "name": "같은 라벨 둘을 받는다",
+   "file": "identity_proposer.py",
+   "old": "    if len(set(texts)) != len(texts):\n        dup = sorted(set(t for t in texts if texts.count(t) > 1))",
+   "new": "    if False:\n        dup = sorted(set(t for t in texts if texts.count(t) > 1))"
+  },
+  {
+   "name": "수 라벨의 사다리를 보지 않는다",
+   "file": "identity_proposer.py",
+   "old": "        if not ok:\n            return READ_REFUSED, [], \"numeric x labels do not form a ladder: %s\" % why, True",
+   "new": "        if False:\n            return READ_REFUSED, [], \"numeric x labels do not form a ladder: %s\" % why, True"
+  },
+  {
+   "name": "문장부호도 낱말이다",
+   "file": "identity_proposer.py",
+   "old": "    return re.search(r\"[A-Za-z0-9]\", text) is not None",
+   "new": "    return True"
+  },
+  {
+   "name": "앵커와 어긋나도 맞다고 한다",
+   "file": "identity_proposer.py",
+   "old": "    if len(anchors) != len(labels):\n        return \"DISAGREE\"",
+   "new": "    if False:\n        return \"DISAGREE\""
+  },
+  {
+   "name": "띠가 영역을 한없이 넘는다",
+   "file": "identity_proposer.py",
+   "old": "    ry1 = int(region[3]) + int(0.12 * (y1 - y0)) if region else img.height",
+   "new": "    ry1 = img.height"
+  },
+  {
+   "name": "범례가 이름 붙이지 않은 색을 그냥 둔다",
+   "file": "identity_proposer.py",
+   "old": "    if unnamed:\n        return READ_REFUSED, [], \"plot colour(s) %s named by no legend entry\" % \", \".join(",
+   "new": "    if False:\n        return READ_REFUSED, [], \"plot colour(s) %s named by no legend entry\" % \", \".join("
+  },
+  {
+   "name": "플롯에 없는 색의 범례를 받는다",
+   "file": "identity_proposer.py",
+   "old": "        if _hue_dist(colours[k][0], hue) > HUE_MERGE:\n            return READ_REFUSED, [], \"legend entry %r has a colour the plot does not contain\" % text",
+   "new": "        if False:\n            return READ_REFUSED, [], \"legend entry %r has a colour the plot does not contain\" % text"
+  },
+  {
+   "name": "회색 잉크도 색이다",
+   "file": "identity_proposer.py",
+   "old": "    chroma = (sat > SATURATION) & (val > 0.15)\n    n = int(chroma.sum())\n    if n < 30:",
+   "new": "    chroma = (sat > 0.0) & (val > 0.15)\n    n = int(chroma.sum())\n    if n < 30:"
+  },
+  {
+   "name": "색 하나에 범례 없으면 거절한다",
+   "file": "identity_proposer.py",
+   "old": "        if len(colours) == 1:\n            return READ_OK, [(\"\", colours[0][2])], \"one plot colour and no legend entry: one series\"",
+   "new": "        if False:\n            return READ_OK, [(\"\", colours[0][2])], \"one plot colour and no legend entry: one series\""
+  },
+  {
+   "name": "색 막대는 언제나 MONO다",
+   "file": "identity_proposer.py",
+   "old": "        row[\"Mark_Type_Proposed\"] = kinds[0] if len(colours) >= 1 else kinds[1]",
+   "new": "        row[\"Mark_Type_Proposed\"] = kinds[1]"
+  },
+  {
+   "name": "제목 뒤의 잡글자를 둔다",
+   "file": "identity_proposer.py",
+   "old": "    while tokens and re.fullmatch(r\"[A-Z][A-Z0-9]?[)\\]]*\", tokens[-1]):",
+   "new": "    while False:"
+  },
+  {
+   "name": "글자 둘도 제목이다",
+   "file": "identity_proposer.py",
+   "old": "    if not re.search(r\"[A-Za-z]{3}\", text):",
+   "new": "    if not text:"
+  },
+  {
+   "name": "단위를 가르지 않는다",
+   "file": "identity_proposer.py",
+   "old": "    m = re.match(r\"^(.*?)\\s*[\\(\\[]([^\\)\\]]+)[\\)\\]]\\s*$\", text)\n    if m:",
+   "new": "    m = None\n    if m:"
+  },
+  {
+   "name": "여러 n 중 첫째를 쓴다",
+   "file": "identity_proposer.py",
+   "old": "    if len(distinct) > 1:\n        return READ_REFUSED, \"\", \"the caption prints several n: %s\" % \", \".join(",
+   "new": "    if False:\n        return READ_REFUSED, \"\", \"the caption prints several n: %s\" % \", \".join("
+  },
+  {
+   "name": "n이 없으면 지어낸다",
+   "file": "identity_proposer.py",
+   "old": "    if not distinct:\n        return READ_REFUSED, \"\", \"the caption prints no n =\"",
+   "new": "    if not distinct:\n        return READ_OK, \"1\", \"the caption prints no n =\""
+  },
+  {
+   "name": "그린 프레임의 앵커를 재지 않는다",
+   "file": "identity_proposer.py",
+   "old": "    if not anchors:\n        anchors, source = measure_anchors(gray, (int(x0), int(x1), int(y0), int(y1)))",
+   "new": "    if False:\n        anchors, source = measure_anchors(gray, (int(x0), int(x1), int(y0), int(y1)))"
+  },
+  {
+   "name": "제목 띠가 좁으면 그냥 거절한다",
+   "file": "identity_proposer.py",
+   "old": "        right = int(spine_x) - reach - 3\n    if right - rx0 < 8:\n        return READ_REFUSED, \"\", \"\", \"\", \"no strip left of the numerals for a title\"",
+   "new": "        return READ_REFUSED, \"\", \"\", \"\", \"no strip left of the numerals for a title\"\n    if right - rx0 < 8:\n        return READ_REFUSED, \"\", \"\", \"\", \"no strip left of the numerals for a title\""
+  }
+ ]
+}

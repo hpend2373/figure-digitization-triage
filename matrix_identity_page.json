@@ -1,0 +1,65 @@
+{
+ "files": {
+  "identity_page.py": "967457b4a851888c59eade4f307f6e98fe89bcb44b8c2628818a376a20fff77b",
+  "test_identity_page.py": "feaf57524c891124e80161eb9882eb95f1e41e7467af650d799942bc0ad24cef"
+ },
+ "suites": [
+  "test_identity_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "오버레이가 없어도 조용히 넘어간다",
+   "file": "identity_page.py",
+   "old": "        w(\"<div class='nofig'>오버레이 없음 — 확인할 그림이 없습니다</div>\")",
+   "new": "        pass"
+  },
+  {
+   "name": "거절한 까닭을 감춘다",
+   "file": "identity_page.py",
+   "old": "        body = \"<b>%s — 리더가 읽지 못했습니다.</b><br><span class='sub'>%s</span><br>%s\" % (\n            esc(title), esc(detail[:160]), esc(refused_hint))",
+   "new": "        body = \"<b>%s — 리더가 읽지 못했습니다.</b>\" % esc(title)"
+  },
+  {
+   "name": "앵커와 어긋난 읽기를 여느 읽기처럼 낸다",
+   "file": "identity_page.py",
+   "old": "    if x[0] == IP.READ_OK and \"disagree\" in x[2]:",
+   "new": "    if False:"
+  },
+  {
+   "name": "읽은 결과변수를 칸에 미리 채운다",
+   "file": "identity_page.py",
+   "old": "    w(\"결과변수 <input type='text' data-outcome='%s' size='26' placeholder='%s'> \"",
+   "new": "    w(\"결과변수 <input type='text' data-outcome='%s' size='26' value='%s'> \""
+  },
+  {
+   "name": "읽은 라벨을 논리에 넘기지 않는다",
+   "file": "identity_page.py",
+   "old": "            \"readLabels\": (row.get(\"X_Labels_Read\") or \"\").strip(),",
+   "new": "            \"readLabels\": \"\","
+  },
+  {
+   "name": "LINE에 LINE_MONO_STYLE을 주지 않는다",
+   "file": "identity_page.py",
+   "old": "                [\"LINE_MONO_STYLE\"] if kind == \"LINE\" else []),",
+   "new": "                []),"
+  },
+  {
+   "name": "찾은 색을 넘기지 않는다",
+   "file": "identity_page.py",
+   "old": "            \"colours\": [[int(c) for c in v.split(\",\")]\n                        for v in (row.get(\"Series_Colours\") or \"\").split(\";\") if v],",
+   "new": "            \"colours\": [],"
+  },
+  {
+   "name": "관문의 이름으로 내려받는다",
+   "file": "identity_page.py",
+   "old": "    a.download = 'identity_answers.csv';",
+   "new": "    a.download = 'identity_decisions.csv';"
+  },
+  {
+   "name": "제안이 없어도 페이지를 만든다",
+   "file": "identity_page.py",
+   "old": "    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))",
+   "new": "    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))"
+  }
+ ]
+}

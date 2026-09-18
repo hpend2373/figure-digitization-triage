@@ -54,6 +54,30 @@ figures.
       v
     figure_values_accepted.csv   the only file to pool from
 
+## Before the plan: what a person confirms
+
+At a hundred publications the plan is not typed; it is assembled from what a
+person confirmed on two pages, and a panel reaches the plan only when both
+have been answered for it.
+
+    geometry_proposer.py   frame, tick rows, and what the y axis SAYS (OCR,
+                           checked against the tick grid) - or NO_FRAME
+      | geometry_page.py   the person looks; types only where the reader
+      |                    refused; DRAWS the frame where none was found
+      | record_geometry.py geometry_decisions.csv (who, when, the two
+      v                    value@pixel pairs, Frame_Source)
+    identity_proposer.py   x labels at one pitch, legend entries matched to the
+                           plot's colours, the y title split into outcome and
+                           unit, n from the caption - or refused
+      | identity_page.py   the person names the two FACTORS nobody can read
+      |                    (what the x axis is, what the series are), corrects
+      |                    the rest, declares bar-top and error-bar stems
+      | record_identity.py identity_decisions.csv
+      v
+    make_plan.py           GEOMETRY_NOT_AUTHORED becomes AUTO_DIGITIZE with a
+                           read block, a unit and a grid - and every panel
+                           missing either answer is named in plan_panels.csv
+
 ## What it does
 
     reviewer_registry.csv        who may attest an inventory, and how to reach them
@@ -121,15 +145,16 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4505 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 4904 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 4610 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5012 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 262 -->
 
-4505 scenarios on main after v9.28 under `requirements-lock.txt`, and 4904 with
+4610 scenarios on main after v9.28 under `requirements-lock.txt`, and 5012 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
-its fifteen glyph-reading scenarios where tesseract is not. `intake-full` installs
+its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`
+skips three more). `intake-full` installs
 both explicitly and records both versions in its log. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
 runner image: `core` removes poppler-utils and the Python backends before it

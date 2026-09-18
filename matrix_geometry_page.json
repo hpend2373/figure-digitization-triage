@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_page.py": "4a79383c6f9e48f2d9d6f30cf1266950a35889ac0a385e5715540731d3e3067d",
-  "test_geometry_page.py": "83c5429fc7fbc7693a693d61d915dc949a37174d485b04fb70010ff824ef449b"
+  "geometry_page.py": "549f41fb5c47b251162a745e199f2d9dd445ba6771811e46e79250394c4fe511",
+  "test_geometry_page.py": "8b1a2166dd3258b0fb90a961b0544582853ca6f3325cf123de865b88716c556b"
  },
  "suites": [
   "test_geometry_page.py"
@@ -28,8 +28,8 @@
   {
    "name": "제안이 없어도 페이지를 만든다",
    "file": "geometry_page.py",
-   "old": "    everything = _rows(os.path.join(proposals, PROPOSALS))\n    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))",
-   "new": "    everything = _rows(os.path.join(proposals, PROPOSALS))\n    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\"\n                         % os.path.join(proposals, PROPOSALS))"
+   "old": "    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\"",
+   "new": "    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\""
   },
   {
    "name": "읽은 값을 입력 칸에 미리 채워 둔다",
@@ -204,6 +204,42 @@
    "file": "geometry_page.py",
    "old": "WARN_TEXT.get(code, code)",
    "new": "WARN_TEXT.get(code, \"\")"
+  },
+  {
+   "name": "프레임 없는 패널을 페이지에 올리지 않는다",
+   "file": "geometry_page.py",
+   "old": "    for r in _rows(os.path.join(proposals, REFUSALS)):\n        r[\"_no_frame\"] = True\n        everything.append(r)",
+   "new": "    for r in []:\n        r[\"_no_frame\"] = True\n        everything.append(r)"
+  },
+  {
+   "name": "프레임 없는 카드를 제안 카드처럼 보인다",
+   "file": "geometry_page.py",
+   "old": "    no_frame = bool(row.get(\"_no_frame\"))\n    if no_frame:\n        w(\"<p class='sub'>",
+   "new": "    no_frame = bool(row.get(\"_no_frame\"))\n    if False:\n        w(\"<p class='sub'>"
+  },
+  {
+   "name": "프레임 없는 카드임을 논리에 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"noFrame\": bool(row.get(\"_no_frame\")),",
+   "new": "            \"noFrame\": False,"
+  },
+  {
+   "name": "영역을 논리에 넘기지 않는다",
+   "file": "geometry_page.py",
+   "old": "            \"region\": (row.get(\"Region\") or \"\").strip(),",
+   "new": "            \"region\": \"\","
+  },
+  {
+   "name": "그리는 단추를 감춘다",
+   "file": "geometry_page.py",
+   "old": "    w(\"<div class='vals frametools'><button class='pickbtn' data-arm-frame='%s'>%s</button>\"",
+   "new": "    w(\"<div class='vals frametools'><button class='pickbtn' data-arm-frame-off='%s'>%s</button>\""
+  },
+  {
+   "name": "그려야 하는 패널을 앞에서 이름 대지 않는다",
+   "file": "geometry_page.py",
+   "old": "    if no_frame:\n        w(\"<p class='warnlist'><b>프레임을 그려야 하는 패널 %d개</b>",
+   "new": "    if False:\n        w(\"<p class='warnlist'><b>프레임을 그려야 하는 패널 %d개</b>"
   }
  ]
 }

@@ -1184,6 +1184,91 @@ check("three labels off one grid are READ with the warning in its own column",
 check("the column is a proposal column, so it reaches the CSV and the page",
       "Y_Tick_Read_Warning" in GP.PROPOSAL_COLUMNS)
 
+print()
+print("a region with no frame is named, and a person can draw one")
+# REVERT: a NO_FRAME region is dropped from every file. It is still a panel a
+# person counted; a list that loses it between two files loses 33 of 975.
+_ref = GP.refusal_row("GP_NF", "fix.png", "abc", (40, 30, 220, 180),
+                      detail="no rule in the region", note="D1 p3 LINE")
+_refpath = os.path.join(ROOT, "refused.csv")
+GP.write_refusals(_refpath, [_ref])
+with open(_refpath, encoding="utf-8") as fh:
+    _refback = list(csv.DictReader(fh))
+check("a refusal carries the raster, its hash and the region - what drawing needs",
+      _refback and _refback[0]["Raster"] == "fix.png" and _refback[0]["Raster_SHA256"] == "abc"
+      and _refback[0]["Region"] == "40,30,220,180" and _refback[0]["Reason"] == GP.REFUSAL_NO_FRAME,
+      "%s" % (_refback,))
+check("the refusal file has its own name, not the proposal's",
+      GP.REFUSED != "geometry_proposal.csv" and set(GP.REFUSED_COLUMNS) >= {"Proposal_ID", "Raster", "Region"})
+_pic = GP.refusal_picture(_im, _ref, os.path.join(ROOT, "GP_NF.png"))
+_picim = Image.open(_pic)
+_ox, _oy = GP.overlay_origin(_ref)
+check("the refusal picture is cut at the overlay origin, so clicks land on raster pixels",
+      (_ox, _oy) == (40 - GP.overlay_pad(_ref), 30 - GP.overlay_pad(_ref))
+      and _picim.width == min(_im.width, 220 + GP.overlay_pad(_ref)) - _ox,
+      "%s %s %s" % ((_ox, _oy), _picim.size, GP.overlay_pad(_ref)))
+
+_drawn = GP.with_drawn_frame(_ref, [50.0, 200.0, 40.0, 170.0])
+check("a drawn frame becomes a proposal-shaped row standing on that frame",
+      (_drawn["Panel_X0"], _drawn["Panel_X1"], _drawn["Panel_Y0"], _drawn["Panel_Y1"]) == (50, 200, 40, 170)
+      and _drawn["Frame_Source"] == GP.FRAME_DRAWN and _drawn["Proposal_ID"] == "GP_NF"
+      and _drawn["Raster_SHA256"] == "abc" and _drawn["Region"] == "40,30,220,180",
+      "%s" % ({k: _drawn[k] for k in ("Panel_X0", "Frame_Source", "Region")},))
+# REVERT: the measurement made against the measured frame rides along under
+# the drawn one. The tick rows were found along a spine this frame may not
+# have, and the reading beside it; a person confirming values whose pixels
+# came from another frame is confirming arithmetic.
+_over = GP.with_drawn_frame(_row, [50.0, 200.0, 40.0, 170.0])
+check("drawing over a proposal keeps its identity and drops what was measured against the old frame",
+      _over["Proposal_ID"] == _row["Proposal_ID"] and _over["Y_Tick_Pixels"] == ""
+      and _over["Y_Tick_Count"] == 0 and _over["Group_Anchor_Pixels"] == ""
+      and _over["Y_Tick_Read_Status"] == GP.READ_NOT_ATTEMPTED
+      and _over["Y_Tick_Read_Values"] == "" and _over["Frame_Source"] == GP.FRAME_DRAWN,
+      "%s" % ({k: _over[k] for k in ("Y_Tick_Pixels", "Y_Tick_Read_Status", "Y_Tick_Read_Values")},))
+check("the label regions are rebuilt from the drawn frame, not carried",
+      _over["Axis_Y_Region"].split(",")[1] == "50" and _over["Axis_X_Region"].split(",")[2] == "170",
+      "%s / %s" % (_over["Axis_Y_Region"], _over["Axis_X_Region"]))
+check("no frame source is measured, and both sources are the vocabulary",
+      GP.FRAME_MEASURED == "" and GP.FRAME_DRAWN in GP.FRAME_SOURCES
+      and "Frame_Source" in GP.PROPOSAL_COLUMNS)
+
+_fp = lambda frame, region="40,30,220,180": [c for c, _w in GP.drawn_frame_problems(frame, region)]
+check("a frame inside its region stands", _fp([50, 200, 40, 170]) == [])
+check("a frame a little past the region's edge still stands",
+      _fp([35, 200, 40, 170]) == [], "%s" % _fp([35, 200, 40, 170]))
+# REVERT: a frame anywhere on the raster is accepted. A frame far outside the
+# region is a frame around a different panel, and values are filed by panel.
+check("a frame far outside the region is refused by name",
+      "FRAME_OUTSIDE_REGION" in _fp([300, 500, 40, 170]), "%s" % _fp([300, 500, 40, 170]))
+check("a click is not a frame",
+      "FRAME_DEGENERATE" in _fp([50, 60, 40, 45]), "%s" % _fp([50, 60, 40, 45]))
+check("three numbers are not a frame",
+      "FRAME_NOT_FOUR_NUMBERS" in _fp([50, 60, 40]) and GP.parse_frame("1,2,3") is None
+      and GP.parse_frame("50,200,40,170") == [50.0, 200.0, 40.0, 170.0])
+
+# REVERT: a drawn frame may sit on a PENDING row, or beside a machine reading.
+# Nobody measured a drawn frame and nobody has answered for it; and a READ
+# beside it was made beside another frame's spine.
+_pp = lambda rows: [c for _pid, c, _d in GP.proposal_problems(rows)]
+check("a drawn frame still PENDING is refused: nobody drew it and nobody answered",
+      "PROPOSAL_DRAWN_FRAME_PENDING" in _pp([_drawn]), "%s" % _pp([_drawn]))
+_conf = dict(_drawn, Human_Verification_Status="CONFIRMED", Verified_By="MC",
+             Verified_At="2026-09-18", Y_Tick_Top_Value="30", Y_Tick_Bottom_Value="10",
+             Confirmed_Tick_Values="30@50;10@160")
+check("a drawn frame a person confirmed, with pairs, stands", _pp([_conf]) == [], "%s" % _pp([_conf]))
+_readon = dict(_conf, Y_Tick_Read_Status=GP.READ_OK, Y_Tick_Read_Values="30@50;10@160")
+check("a machine reading beside a drawn frame is refused",
+      "PROPOSAL_DRAWN_FRAME_WITH_A_READING" in _pp([_readon]), "%s" % _pp([_readon]))
+_odd = dict(_conf, Frame_Source="GUESSED")
+check("a frame source outside the vocabulary is refused",
+      "PROPOSAL_FRAME_SOURCE_UNKNOWN" in _pp([_odd]), "%s" % _pp([_odd]))
+_asprop = GP.refusal_as_proposal(_ref)
+check("a refusal a person rejected is kept as a frameless row, accounted for",
+      _asprop["Proposal_ID"] == "GP_NF" and _asprop["Panel_X0"] == "" and _asprop["Frame_Source"] == ""
+      and _asprop["Y_Tick_Read_Status"] == GP.READ_NOT_ATTEMPTED
+      and _pp([dict(_asprop, Human_Verification_Status="REJECTED", Verified_By="MC", Verified_At="d")]) == [],
+      "%s" % _pp([dict(_asprop, Human_Verification_Status="REJECTED", Verified_By="MC", Verified_At="d")]))
+
 print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
 print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
 import shutil                                                    # noqa: E402

@@ -321,6 +321,82 @@ test('보류는 남은 일이 아니라 따로 센다', () => {
   assert.equal(L.held(['a', 'b'], st), 1);
 });
 
+/* 리더가 프레임을 못 찾은 카드. 사람이 그려야 답이 됩니다. */
+function noframe(over) {
+  return unread(Object.assign({ proposal: 'GP006', topPixel: '', bottomPixel: '',
+                                frameTop: '', frameBottom: '', noFrame: true,
+                                region: '300,30,480,180' }, over || {}));
+}
+/* REVERT: 프레임 없는 카드도 프레임 없이 확인이 된다. 값을 붙일 프레임이
+ * 없는 확인은 어디도 읽지 않는 확인입니다. */
+test('프레임 없는 패널은 프레임을 그려야 답이 된다', () => {
+  const got = L.verdictOf('GP006', noframe({ top: '30', bottom: '10',
+                                             pickedTopPixel: 50, pickedBottomPixel: 160 }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /프레임을 그려/);
+});
+test('그린 프레임과 찍은 눈금과 적은 값으로 답이 된다', () => {
+  const got = L.verdictOf('GP006', noframe({ frame: '310,470,40,170', top: '30', bottom: '10',
+                                             pickedTopPixel: 50, pickedBottomPixel: 160 }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Drawn_Frame, '310,470,40,170');
+  assert.equal(got.row.Confirmed_Tick_Values, '30@50;10@160');
+  assert.equal(got.row.Value_Source, 'TYPED_DRAWN');
+});
+test('프레임 없는 패널의 거절은 프레임 없이도 답이다', () => {
+  const got = L.verdictOf('GP006', noframe({ verdict: 'REJECTED' }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Drawn_Frame, '');
+});
+test('축 공유도 프레임을 그려야 한다', () => {
+  assert.equal(L.verdictOf('GP006', noframe({ verdict: 'SHARED', sharedWith: 'GP001' })).ready, false);
+  assert.equal(L.verdictOf('GP006', noframe({ verdict: 'SHARED', sharedWith: 'GP001',
+                                              frame: '310,470,40,170' })).ready, true);
+});
+/* REVERT: 영역 밖의 프레임을 받는다. 영역 밖의 프레임은 다른 패널의 프레임이고,
+ * 값은 패널로 묶여 적힙니다. */
+test('영역 밖의 프레임은 답이 아니다', () => {
+  const got = L.verdictOf('GP006', noframe({ frame: '10,200,40,170', top: '30', bottom: '10',
+                                             pickedTopPixel: 50, pickedBottomPixel: 160 }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /영역 밖/);
+});
+test('영역 가장자리를 조금 넘는 프레임은 받는다', () => {
+  assert.equal(L.frameProblem('295,470,40,170', '300,30,480,180'), '');
+});
+test('한 번 누른 것은 프레임이 아니다', () => {
+  assert.match(L.frameProblem('310,315,40,44', '300,30,480,180'), /너무 작습니다/);
+  assert.equal(L.frameText(470, 170, 310, 40), '310,470,40,170');
+});
+/* REVERT: 프레임을 새로 그려도 리더가 읽은 값을 그대로 쓴다. 그 값은 다른
+ * 프레임의 스파인 옆에서 읽은 것이라 이 프레임의 눈금에 붙는다는 근거가
+ * 없습니다. */
+test('제안 위에 프레임을 다시 그리면 리더의 값은 쓰이지 않는다', () => {
+  const got = L.verdictOf('GP001', state({ frame: '10,200,5,150' }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /리더가 읽은 값은 쓰지 않습니다/);
+  const typed = L.verdictOf('GP001', state({ frame: '10,200,5,150', top: '40', bottom: '20' }));
+  assert.equal(typed.ready, false);
+  assert.match(typed.why, /찍어 주세요/);
+  const done = L.verdictOf('GP001', state({ frame: '10,200,5,150', top: '40', bottom: '20',
+                                            pickedTopPixel: 20, pickedBottomPixel: 140 }));
+  assert.equal(done.ready, true, done.why);
+  assert.equal(done.row.Value_Source, 'TYPED_DRAWN');
+  assert.equal(done.row.Drawn_Frame, '10,200,5,150');
+});
+test('찍은 줄은 그린 프레임 안이어야 한다', () => {
+  const got = L.verdictOf('GP001', state({ frame: '10,200,5,150', top: '40', bottom: '20',
+                                           pickedTopPixel: 20, pickedBottomPixel: 400 }));
+  assert.equal(got.ready, false);
+  assert.match(got.why, /프레임 밖/);
+});
+test('그린 프레임은 csv로 나간다', () => {
+  assert.ok(L.CSV_COLUMNS.indexOf('Drawn_Frame') >= 0);
+  const csv = L.buildCsv(['GP006'], { GP006: noframe({ frame: '310,470,40,170', top: '30', bottom: '10',
+                                                       pickedTopPixel: 50, pickedBottomPixel: 160 }) });
+  assert.match(csv, /"310,470,40,170"/);
+});
+
 console.log('');
 console.log(pass + '/' + (pass + fails.length) + ' passed');
 if (fails.length) { console.log('FAILED: ' + fails.join(', ')); process.exit(1); }

@@ -40,6 +40,10 @@ from page_bits import CSS, esc                                   # noqa: E402
 import geometry_proposer as GP                                   # noqa: E402
 
 PROPOSALS = "geometry_proposal.csv"
+#: 리더가 프레임을 못 찾은 패널들. 제안이 아니라서 따로 적혀 있고, 이 페이지는
+#: 그것도 카드로 내밉니다 - 사람이 프레임을 그리는 길이 없으면 그 패널은
+#: 두 파일 사이에서 조용히 빠집니다 (975장 중 33장).
+REFUSALS = GP.REFUSED
 LOGIC = "geometry_page.js"
 
 #: 화면에 적는 말. `geometry_page.js`의 `VERDICTS`와 같아야 하고,
@@ -49,6 +53,16 @@ LABELS = (
     ("CONFIRMED", "맞다 — 이 프레임과 이 눈금으로 읽는다"),
     ("SHARED", "이 패널엔 축이 없다 — 같은 그림의 다른 패널 축을 쓴다"),
     ("REJECTED", "틀렸다 — 이 제안으로는 읽지 않는다"),
+    ("HOLD", "아직 못 정하겠다"),
+)
+
+#: 프레임이 없는 카드의 같은 네 답. 어휘는 같고 말만 다릅니다 - "이 제안"이
+#: 없는 카드에서 "이 제안으로는 읽지 않는다"는 무엇을 거절하는지 말하지
+#: 않습니다.
+LABELS_NO_FRAME = (
+    ("CONFIRMED", "프레임을 그렸다 — 그린 프레임과 찍은 눈금으로 읽는다"),
+    ("SHARED", "이 패널엔 축이 없다 — 프레임을 그리고, 같은 그림의 다른 패널 축을 쓴다"),
+    ("REJECTED", "이 영역엔 읽을 플롯이 없다"),
     ("HOLD", "아직 못 정하겠다"),
 )
 
@@ -75,6 +89,7 @@ def warning_of(row):
 
 
 KEYS = (("#c81e1e", "프레임 — 이 안이 읽을 자리"),
+        ("#1e64c8", "사람이 그린 프레임과 찍은 눈금 (파란 점선)"),
         ("#be3cbe", "리더가 잰 눈금과 읽은 값, 그리고 축 아래 상자 x 위치"),
         ("#149650", "잉크 기둥으로 찾은 x 위치 (다른 방법, 참고용)"),
         ("#e67814", "축 공유 후보 패널의 눈금 행 (점선) — 이 패널의 선과 맞는지 보세요"))
@@ -150,6 +165,11 @@ def chunk_of(rows, chunk, of):
 def build(proposals, log=print, chunk=1, of=1):
     """(html, 제안 수)."""
     everything = _rows(os.path.join(proposals, PROPOSALS))
+    # 프레임을 못 찾은 패널도 카드입니다. 제안의 열이 없으니 그 자리는 비고,
+    # 카드는 그림과 영역만 들고 나가 사람이 프레임을 그리게 합니다.
+    for r in _rows(os.path.join(proposals, REFUSALS)):
+        r["_no_frame"] = True
+        everything.append(r)
     if not everything:
         raise SystemExit("%s에 제안이 없습니다."
                          % os.path.join(proposals, PROPOSALS))
@@ -189,6 +209,9 @@ def build(proposals, log=print, chunk=1, of=1):
 .share select{max-width:100%}
 .pickwrap{position:relative;display:inline-block}
 .pickwrap.arming img{cursor:crosshair;outline:2px solid #1e64c8}
+.frame{position:absolute;border:2px dashed #1e64c8;pointer-events:none}
+.frame span{position:absolute;left:0;top:-14px;font-size:11px;color:#1e64c8;
+            background:#fff;padding:0 3px}
 .mark{position:absolute;left:0;right:0;height:0;border-top:2px dashed #1e64c8;
       pointer-events:none}
 .mark span{position:absolute;right:2px;top:-14px;font-size:11px;color:#1e64c8;
@@ -221,6 +244,12 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
       "안 잡힌 것)은 값을 붙일 자리가 없습니다. \"맨 위 눈금 찍기\"를 누른 뒤 그림에서 "
       "그 눈금을 누르고, 아래도 같이 찍은 다음 값을 적어 주세요. 찍은 줄이 프레임 "
       "밖이면 프레임이 틀린 것이니 <b>\"틀렸다\"</b>를 골라 주세요.</p>")
+    w("<p class='note'>리더가 <b>프레임을 못 찾은</b> 패널은 회색 영역만 그려져 있습니다. "
+      "\"프레임 그리기\"를 누른 뒤 플롯의 <b>왼쪽 위</b>와 <b>오른쪽 아래</b>를 차례로 "
+      "누르고, 맨 위·맨 아래 눈금을 찍고 값을 적어 주세요. 리더가 잰 프레임이 틀린 "
+      "패널에서도 같은 단추로 프레임을 다시 그릴 수 있습니다 — 그러면 리더가 읽은 "
+      "값은 쓰이지 않고, 눈금과 값을 직접 찍고 적어야 합니다. 영역 안에 읽을 플롯이 "
+      "없으면 <b>\"읽을 플롯이 없다\"</b>를 골라 주세요.</p>")
     w("<p class='note'><b>직접 보셨을 때만</b> 확인 칸을 눌러 주세요 — 고르는 "
       "것은 판단이고, 그 칸은 목격입니다. 그리고 <b>누가 보았는지</b>가 없는 "
       "확인은 확인이 아니라서, 이름을 적기 전에는 답이 되지 않습니다.</p>")
@@ -240,6 +269,12 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
     # 대신 여기서 바로 건너뜁니다.
     warned = [((r.get("Proposal_ID") or "").strip(), warning_of(r)[0])
               for r in rows if warning_of(r)[0]]
+    no_frame = [(r.get("Proposal_ID") or "").strip() for r in rows if r.get("_no_frame")]
+    if no_frame:
+        w("<p class='warnlist'><b>프레임을 그려야 하는 패널 %d개</b> (리더가 프레임을 "
+          "못 찾았습니다): %s</p>"
+          % (len(no_frame), ", ".join("<a href='#p-%s'>%s</a>" % (esc(pid), esc(pid))
+                                      for pid in no_frame)))
     if warned:
         w("<p class='warnlist'><b>먼저 보세요 — 리더가 자기 읽기를 의심하는 패널 "
           "%d개:</b> %s</p>"
@@ -278,6 +313,10 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
             "originY": GP.overlay_origin(row)[1],
             "frameTop": (row.get("Panel_Y0") or "").strip(),
             "frameBottom": (row.get("Panel_Y1") or "").strip(),
+            # 사람이 그리는 프레임이 있어야 하는 카드인가, 그리고 그 프레임이
+            # 들어 있어야 하는 영역. 영역 밖의 프레임은 다른 패널의 프레임입니다.
+            "noFrame": bool(row.get("_no_frame")),
+            "region": (row.get("Region") or "").strip(),
         }
         w(card(proposals, pid, row, read, meta[pid]["siblings"]))
 
@@ -301,11 +340,17 @@ def card(proposals, pid, row, read, siblings=()):
     w("<h2>%s <button class='hide' data-hide='%s' title='화면에서만 치웁니다. "
       "답은 그대로 세어지고 내려받기에 나갑니다'>이 패널 숨기기</button></h2>"
       % (esc(pid), esc(pid)))
-    w("<p class='sub'>%s · 프레임 %s,%s,%s,%s · 눈금 %s개 · 신뢰도 %s</p>"
-      % (esc(row.get("Raster") or ""), esc(row.get("Panel_X0")),
-         esc(row.get("Panel_X1")), esc(row.get("Panel_Y0")),
-         esc(row.get("Panel_Y1")), esc(row.get("Y_Tick_Count")),
-         esc(row.get("Confidence"))))
+    no_frame = bool(row.get("_no_frame"))
+    if no_frame:
+        w("<p class='sub'>%s · 영역 %s · <b>프레임 없음</b>%s</p>"
+          % (esc(row.get("Raster") or ""), esc(row.get("Region") or ""),
+             (" · %s" % esc(row.get("Note"))) if (row.get("Note") or "").strip() else ""))
+    else:
+        w("<p class='sub'>%s · 프레임 %s,%s,%s,%s · 눈금 %s개 · 신뢰도 %s</p>"
+          % (esc(row.get("Raster") or ""), esc(row.get("Panel_X0")),
+             esc(row.get("Panel_X1")), esc(row.get("Panel_Y0")),
+             esc(row.get("Panel_Y1")), esc(row.get("Y_Tick_Count")),
+             esc(row.get("Confidence"))))
 
     w("<div class='side'>")
     w("<div class='figs'><div class='fig'>")
@@ -314,15 +359,23 @@ def card(proposals, pid, row, read, siblings=()):
         # 그림 위에 사람이 눈금을 찍을 수 있습니다. 찍은 줄은 파란 점선으로
         # 그림 위에 남고, 래스터 행은 논리로 갑니다.
         w("<div class='pickwrap' data-pick='%s'><img src='%s' alt='%s'>"
+          "<div class='frame' data-frame='%s' hidden><span>그린 프레임</span></div>"
           "<div class='mark' data-mark-top='%s' hidden><span>맨 위</span></div>"
           "<div class='mark' data-mark-bottom='%s' hidden><span>맨 아래</span></div></div>"
-          % (esc(pid), src, esc(pid), esc(pid), esc(pid)))
+          % (esc(pid), src, esc(pid), esc(pid), esc(pid), esc(pid)))
     else:
         w("<div class='nofig'>오버레이 없음 — 확인할 그림이 없습니다</div>")
     w("</div></div>")
 
     w("<div class='pick'>")
-    if read:
+    if no_frame:
+        # 제안이 없는 카드. 거절이 아니라 "여기엔 리더가 댈 것이 없다"이고,
+        # 왜 없는지를 함께 보여 줍니다 - 사람이 무엇을 그리는지 알아야 합니다.
+        w("<div class='read refused'><b>리더가 프레임을 찾지 못했습니다.</b><br>"
+          "<span class='sub'>%s</span><br>플롯의 프레임을 그리고, 맨 위·맨 아래 눈금을 "
+          "찍은 뒤 값을 적어 주세요.</div>"
+          % esc((row.get("Detail") or "")[:180]))
+    elif read:
         w("<div class='read'><b>리더가 읽은 축:</b> %s<br><span class='sub'>%s</span></div>"
           % (esc(" · ".join("%g" % v for v, _px in read)),
              esc((row.get("Y_Tick_Read_Detail") or "")[:180])))
@@ -349,13 +402,20 @@ def card(proposals, pid, row, read, siblings=()):
     if (row.get("Confidence_Reason") or "").strip():
         w("<div class='meta'>%s</div>" % esc(row["Confidence_Reason"]))
 
-    for value, label in LABELS:
+    for value, label in (LABELS_NO_FRAME if no_frame else LABELS):
         w("<label class='opt'><input type='radio' name='v-%s' "
           "data-verdict='%s' value='%s'> %s</label>"
           % (esc(pid), esc(pid), esc(value), esc(label)))
     # 픽셀 행을 함께 적습니다. "맨 위"가 어느 줄인지는 그림에 그려져 있지만,
     # 숫자로도 보이면 사람이 자기가 어느 눈금을 말하는지 틀릴 수가 없습니다.
     marks = [m for m in (row.get("Y_Tick_Pixels") or "").split(";") if m]
+    # 프레임 그리기는 답과 상관없이 보입니다 - 공유도 프레임이 있어야 하고,
+    # 프레임을 그리고 나서 답을 고르는 순서가 자연스럽습니다.
+    w("<div class='vals frametools'><button class='pickbtn' data-arm-frame='%s'>%s</button>"
+      "<button class='pickbtn' data-unframe='%s'>그린 프레임 지우기</button> "
+      "<span data-framed='%s'></span></div>"
+      % (esc(pid), "프레임 그리기" if no_frame else "프레임 다시 그리기",
+         esc(pid), esc(pid)))
     w("<div class='vals'>맨 <b>위</b> 눈금%s "
       "<input type='text' data-top='%s' placeholder='예: 40'> "
       "맨 <b>아래</b> 눈금%s "
@@ -421,7 +481,8 @@ PAGE_JS = r"""
   function st(id) {
     if (!states[id]) {
       states[id] = { verdict: '', top: '', bottom: '', note: '', who: '',
-                     seen: false, sharedWith: '', pickedTopPixel: '', pickedBottomPixel: '' };
+                     seen: false, sharedWith: '', pickedTopPixel: '', pickedBottomPixel: '',
+                     frame: '' };
     }
     var m = META[id];
     // 리더가 읽은 값과 나갈 이름은 화면이 아니라 페이지가 심어 둔 것에서
@@ -434,6 +495,8 @@ PAGE_JS = r"""
       states[id].siblings = m.siblings || [];
       states[id].frameTop = m.frameTop;
       states[id].frameBottom = m.frameBottom;
+      states[id].noFrame = !!m.noFrame;
+      states[id].region = m.region;
       // 리더의 후보는 고르는 칸에 미리 들어갑니다. 판정은 사람이 고릅니다.
       if (!states[id].sharedWith && m.sharedCandidate) {
         states[id].sharedWith = m.sharedCandidate;
@@ -464,6 +527,7 @@ PAGE_JS = r"""
       box.textContent = got.ready
         ? '답이 되었습니다 — ' + got.row.Human_Verification_Status
           + (got.row.Y_Axis_Shared_With ? ' (' + got.row.Y_Axis_Shared_With + '의 축)' : '')
+          + (got.row.Drawn_Frame ? ' (그린 프레임 ' + got.row.Drawn_Frame + ')' : '')
           + (got.row.Confirmed_Tick_Values
              ? ' (위 ' + got.row.Y_Tick_Top_Value + ' … 아래 '
                + got.row.Y_Tick_Bottom_Value + ', ' + got.row.Value_Source
@@ -501,17 +565,40 @@ PAGE_JS = r"""
         mk.style.top = y + 'px';
         mk.hidden = false;
       });
+      // 그린 프레임. 래스터 좌표를 원점과 표시 배율로 화면에 옮깁니다.
+      var fr = wrap.querySelector('[data-frame]');
+      var f = parseFrame(s.frame);
+      if (fr) {
+        if (!f || !im.naturalHeight) { fr.hidden = true; }
+        else {
+          var kx = im.clientWidth / im.naturalWidth, ky = im.clientHeight / im.naturalHeight;
+          fr.style.left = ((f[0] - Number(m.originX || 0)) * kx) + 'px';
+          fr.style.top = ((f[2] - Number(m.originY || 0)) * ky) + 'px';
+          fr.style.width = ((f[1] - f[0]) * kx) + 'px';
+          fr.style.height = ((f[3] - f[2]) * ky) + 'px';
+          fr.hidden = false;
+        }
+      }
       wrap.classList.toggle('arming', !!arming[id]);
+      all("button[data-arm-frame=\"" + esc(id) + "\"]").forEach(function (b) { b.classList.toggle('on', arming[id] === 'frame' || arming[id] === 'frame2'); });
       all("button[data-arm-top=\"" + esc(id) + "\"]").forEach(function (b) { b.classList.toggle('on', arming[id] === 'top'); });
       all("button[data-arm-bottom=\"" + esc(id) + "\"]").forEach(function (b) { b.classList.toggle('on', arming[id] === 'bottom'); });
+    }
+    var fd = q("[data-framed=\"" + esc(id) + "\"]");
+    if (fd) {
+      var fhint = arming[id] === 'frame' ? '플롯의 왼쪽 위 모서리를 눌러 주세요'
+                : arming[id] === 'frame2' ? '이제 오른쪽 아래 모서리를 눌러 주세요' : '';
+      fd.textContent = (s.frame ? '그린 프레임 ' + s.frame + ' (리더의 프레임과 읽은 값 대신 이것을 씁니다)' : '')
+                       + (fhint ? ' — ' + fhint : '');
     }
     var pk = q("[data-picked=\"" + esc(id) + "\"]");
     if (pk) {
       var parts = [];
       if (s.pickedTopPixel !== '' && s.pickedTopPixel !== undefined) parts.push('맨 위 찍은 행 ' + s.pickedTopPixel);
       if (s.pickedBottomPixel !== '' && s.pickedBottomPixel !== undefined) parts.push('맨 아래 찍은 행 ' + s.pickedBottomPixel);
-      pk.textContent = parts.length ? parts.join(' · ') + ' (찍은 줄이 잰 눈금보다 앞섭니다)'
-                                    : (arming[id] ? '그림에서 그 눈금을 눌러 주세요' : '');
+      var hint = (arming[id] === 'top' || arming[id] === 'bottom') ? '그림에서 그 눈금을 눌러 주세요' : '';
+      pk.textContent = (parts.length ? parts.join(' · ') + ' (찍은 줄이 잰 눈금보다 앞섭니다)' : '')
+                       + (hint ? ' — ' + hint : '');
     }
     var sh = q("select[data-shared=\"" + esc(id) + "\"]");
     if (sh) { if (sh.value !== s.sharedWith) sh.value = s.sharedWith;
@@ -555,18 +642,35 @@ PAGE_JS = r"""
   }
   bind('button[data-arm-top]', 'data-arm-top', arm('top'), 'click');
   bind('button[data-arm-bottom]', 'data-arm-bottom', arm('bottom'), 'click');
+  // 프레임 그리기: 두 번 누릅니다 - 왼쪽 위, 오른쪽 아래. 첫 모서리는 상태가
+  // 아니라 여기 잠시 있고, 둘째 모서리가 오면 프레임이 상태에 들어갑니다.
+  var corner = {};
+  bind('button[data-arm-frame]', 'data-arm-frame', function (s, el) {
+    var id = el.getAttribute('data-arm-frame');
+    arming[id] = (arming[id] === 'frame' || arming[id] === 'frame2') ? '' : 'frame';
+    corner[id] = null;
+  }, 'click');
   bind('button[data-unpick]', 'data-unpick',
        function (s) { s.pickedTopPixel = ''; s.pickedBottomPixel = ''; }, 'click');
+  bind('button[data-unframe]', 'data-unframe',
+       function (s) { s.frame = ''; }, 'click');
   all('.pickwrap[data-pick]').forEach(function (wrap) {
     var id = wrap.getAttribute('data-pick');
     wrap.querySelector('img').addEventListener('click', function (ev) {
       if (!arming[id]) return;
       var im = ev.currentTarget, m = META[id] || {};
       var rect = im.getBoundingClientRect();
-      var yShown = ev.clientY - rect.top;
+      var yShown = ev.clientY - rect.top, xShown = ev.clientX - rect.left;
       var row = Math.round(Number(m.originY || 0) + yShown * (im.naturalHeight / im.clientHeight));
+      var col = Math.round(Number(m.originX || 0) + xShown * (im.naturalWidth / im.clientWidth));
       var s = st(id);
-      if (arming[id] === 'top') { s.pickedTopPixel = row; arming[id] = 'bottom'; }
+      if (arming[id] === 'frame') { corner[id] = [col, row]; arming[id] = 'frame2'; }
+      else if (arming[id] === 'frame2') {
+        var a = corner[id] || [col, row];
+        s.frame = frameText(a[0], a[1], col, row);
+        corner[id] = null; arming[id] = 'top';
+      }
+      else if (arming[id] === 'top') { s.pickedTopPixel = row; arming[id] = 'bottom'; }
       else { s.pickedBottomPixel = row; arming[id] = ''; }
       save(); IDS.forEach(paint);
     });

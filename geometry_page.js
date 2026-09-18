@@ -21,6 +21,10 @@
  *   5. 리더가 읽은 방향과 사람이 적은 방향이 반대이면 답이 아닙니다. 뒤집힌
  *      축은 이 코퍼스에 실제로 있어서 뒤집힘 자체는 막을 수 없지만, 기계와
  *      사람이 같은 축을 반대로 읽었다면 둘 중 하나가 틀렸습니다.
+ *   6. 프레임이 없는 패널(리더가 못 찾은 것)은 사람이 프레임을 그려야 답이
+ *      되고, 그린 프레임은 영역 안에 있어야 합니다. 프레임을 그렸으면 - 어느
+ *      카드에서든 - 리더가 읽은 값은 쓰이지 않습니다: 그 값은 다른 프레임의
+ *      스파인 옆에서 읽은 것입니다. 눈금은 찍고 값은 적습니다.
  */
 
 //: 사람이 이 제안에 대해 할 수 있는 말. `HOLD`는 "아직 못 정하겠다"이고,
@@ -68,6 +72,44 @@ function rowsInsideFrame(a, b, frameTop, frameBottom) {
   var slack = Math.abs(bt - t) * FRAME_SLACK;
   var lo = Math.min(t, bt) - slack, hi = Math.max(t, bt) + slack;
   return a >= lo && a <= hi && b >= lo && b <= hi;
+}
+
+/* 'x0,x1,y0,y1' -> [x0,x1,y0,y1] (제안의 Panel_X0,X1,Y0,Y1 순서), 아니면 null. */
+function parseFrame(text) {
+  var parts = String(text === null || text === undefined ? '' : text).split(',');
+  if (parts.length !== 4) return null;
+  var out = [];
+  for (var i = 0; i < 4; i++) {
+    if (!isNumber(parts[i].trim())) return null;
+    out.push(Number(parts[i]));
+  }
+  return out;
+}
+
+/* 두 모서리에서 프레임 문자열. 어느 모서리를 먼저 눌렀든 같은 프레임입니다. */
+function frameText(xa, ya, xb, yb) {
+  return [Math.min(xa, xb), Math.max(xa, xb), Math.min(ya, yb), Math.max(ya, yb)].join(',');
+}
+
+/* 그린 프레임이 설 수 있는가. `geometry_proposer.drawn_frame_problems`와 같은
+ * 규칙입니다: 네 수, 이만큼은 넓고 높아야 플롯, 영역 밖은 다른 패널. */
+var DRAWN_FRAME_MIN_PX = 20;
+var DRAWN_FRAME_SLACK = 0.10;
+function frameProblem(frame, regionText) {
+  var f = parseFrame(frame);
+  if (!f) return '그린 프레임이 네 수가 아닙니다';
+  if (f[1] - f[0] < DRAWN_FRAME_MIN_PX || f[3] - f[2] < DRAWN_FRAME_MIN_PX) {
+    return '그린 프레임이 너무 작습니다 (' + (f[1] - f[0]) + ' x ' + (f[3] - f[2]) + ' px) — 플롯의 왼쪽 위와 오른쪽 아래를 눌러 주세요';
+  }
+  var r = String(regionText || '').split(',');
+  if (r.length === 4 && r.every(function (v) { return isNumber(v.trim()); })) {
+    var rx0 = Number(r[0]), ry0 = Number(r[1]), rx1 = Number(r[2]), ry1 = Number(r[3]);
+    var sx = (rx1 - rx0) * DRAWN_FRAME_SLACK, sy = (ry1 - ry0) * DRAWN_FRAME_SLACK;
+    if (f[0] < rx0 - sx || f[1] > rx1 + sx || f[2] < ry0 - sy || f[3] > ry1 + sy) {
+      return '그린 프레임이 이 패널의 영역 밖입니다 — 영역 밖의 프레임은 다른 패널의 것입니다';
+    }
+  }
+  return '';
 }
 
 /* 'v@px;v@px' -> [[v,px],...]. 리더가 읽은 짝도, 사람이 확인한 짝도 같은 모양
@@ -118,6 +160,10 @@ function directionWord(pairs) {
  *   pickedTopPixel / pickedBottomPixel  사람이 그림에 찍은 두 줄(래스터 행).
  *               둘 다 있으면 잰 눈금 대신 이것에 값이 붙습니다.
  *   frameTop / frameBottom  프레임의 위·아래 행. 찍은 줄은 이 안이어야 합니다.
+ *   frame       사람이 그린 프레임 'x0,x1,y0,y1'. 있으면 리더의 프레임과 읽은 값을
+ *               대신하고, 찍은 줄은 이 안이어야 합니다.
+ *   noFrame     리더가 프레임을 못 찾은 카드. 프레임을 그려야 답이 됩니다.
+ *   region      그 카드의 영역 'x0,y0,x1,y1'. 그린 프레임은 이 안이어야 합니다.
  *
  * 돌려주는 것 = { ready, why, row }
  */
@@ -141,6 +187,19 @@ function verdictOf(id, state) {
   }
   var read = parsePairs(s.readPairs);
   var top = '', bottom = '', pairs = [], source = '', sharedWith = '';
+  // 프레임. 그렸으면 그린 것이 이 카드의 프레임이고, 그리지 않았는데 없으면
+  // 확인도 공유도 붙일 자리가 없습니다.
+  var drawn = String(s.frame === null || s.frame === undefined ? '' : s.frame).trim();
+  if (drawn) {
+    var fp = frameProblem(drawn, s.region);
+    if (fp) return { ready: false, why: fp, row: null };
+  } else if (s.noFrame && (verdict === 'CONFIRMED' || verdict === SHARED)) {
+    return { ready: false,
+             why: '리더가 프레임을 찾지 못한 패널입니다 — 프레임을 그려 주세요 (플롯의 왼쪽 위, 오른쪽 아래)',
+             row: null };
+  }
+  var frameTop = s.frameTop, frameBottom = s.frameBottom;
+  if (drawn) { var df = parseFrame(drawn); frameTop = df[2]; frameBottom = df[3]; }
   if (verdict === SHARED) {
     // 어느 패널의 축인지. 자기 자신은 공유가 아니고, 다른 그림의 패널은 픽셀
     // 행이 다른 래스터의 것이라 옮겨 올 수 없습니다. 이 패널의 값을 함께
@@ -168,7 +227,7 @@ function verdictOf(id, state) {
     var typedTop = String(s.top === null || s.top === undefined ? '' : s.top).trim();
     var typedBottom = String(s.bottom === null || s.bottom === undefined ? '' : s.bottom).trim();
     var typed = typedTop !== '' || typedBottom !== '';
-    if (!typed && read.length >= 2) {
+    if (!typed && read.length >= 2 && !drawn) {
       // 리더가 읽은 그대로. 짝은 리더의 것을 씁니다 - 리더가 맨 위·맨 아래
       // 눈금을 읽었다는 보장이 없고, 그 값을 맨 위·맨 아래 픽셀과 짝지으면
       // 축척이 조용히 어긋납니다.
@@ -179,22 +238,25 @@ function verdictOf(id, state) {
     } else {
       if (!isNumber(typedTop) || !isNumber(typedBottom)) {
         return { ready: false,
-                 why: '맨 위 눈금과 맨 아래 눈금이 무엇인지 적어 주세요 - 리더가 읽지 못했습니다',
+                 why: drawn ? '프레임을 그렸으니 리더가 읽은 값은 쓰지 않습니다 — 맨 위 눈금과 맨 아래 눈금을 적어 주세요'
+                            : '맨 위 눈금과 맨 아래 눈금이 무엇인지 적어 주세요 - 리더가 읽지 못했습니다',
                  row: null };
       }
       // 값이 붙는 행. 사람이 그림에 찍은 두 줄이 있으면 그것이고, 없으면
       // 리더가 잰 눈금의 양 끝입니다. 리더가 눈금을 못 잰 패널(프레임은
       // 맞는데 눈금이 없거나 안 잡힌 것)은 찍은 줄이 있어야 답이 됩니다.
+      // 프레임을 그렸으면 잰 눈금은 다른 프레임의 것이라, 찍은 줄만 됩니다.
       var picked = isNumber(s.pickedTopPixel) && isNumber(s.pickedBottomPixel);
-      var rowTop = picked ? Number(s.pickedTopPixel) : s.topPixel;
-      var rowBottom = picked ? Number(s.pickedBottomPixel) : s.bottomPixel;
+      var rowTop = picked ? Number(s.pickedTopPixel) : (drawn ? '' : s.topPixel);
+      var rowBottom = picked ? Number(s.pickedBottomPixel) : (drawn ? '' : s.bottomPixel);
       if (!isNumber(rowTop) || !isNumber(rowBottom) || Number(rowTop) === Number(rowBottom)) {
         return { ready: false,
                  why: picked ? '찍은 두 줄이 같은 행입니다'
-                             : '이 제안에는 값을 붙일 눈금 행이 없습니다 — 그림에서 맨 위·맨 아래 눈금을 찍어 주세요',
+                             : drawn ? '그린 프레임에는 잰 눈금이 없습니다 — 그림에서 맨 위·맨 아래 눈금을 찍어 주세요'
+                                     : '이 제안에는 값을 붙일 눈금 행이 없습니다 — 그림에서 맨 위·맨 아래 눈금을 찍어 주세요',
                  row: null };
       }
-      if (picked && !rowsInsideFrame(rowTop, rowBottom, s.frameTop, s.frameBottom)) {
+      if (picked && !rowsInsideFrame(rowTop, rowBottom, frameTop, frameBottom)) {
         // 찍은 줄이 프레임 밖이면 이 프레임의 눈금이 아닙니다. 프레임이
         // 틀린 것이면 답은 "틀렸다"이지, 다른 프레임의 눈금을 이 프레임에
         // 붙이는 것이 아닙니다.
@@ -206,7 +268,7 @@ function verdictOf(id, state) {
       bottom = typedBottom;
       pairs = [[Number(top), Number(rowTop)],
                [Number(bottom), Number(rowBottom)]];
-      source = picked ? 'TYPED_PICKED' : 'TYPED';
+      source = drawn ? 'TYPED_DRAWN' : picked ? 'TYPED_PICKED' : 'TYPED';
     }
     if (Number(top) === Number(bottom)) {
       return { ready: false, why: '맨 위 눈금과 맨 아래 눈금이 같으면 축이 아닙니다', row: null };
@@ -240,6 +302,9 @@ function verdictOf(id, state) {
     // 칸으로만 셀 수 있습니다.
     Value_Source: source,
     Y_Axis_Shared_With: sharedWith,
+    // 사람이 그린 프레임. 비어 있으면 리더의 프레임입니다. 관문은 이것으로
+    // 제안 모양의 행을 짓고 Frame_Source=DRAWN을 답니다.
+    Drawn_Frame: drawn,
     Note: String(s.note || '').trim()
   } };
 }
@@ -247,7 +312,7 @@ function verdictOf(id, state) {
 var CSV_COLUMNS = ['Proposal_ID', 'Human_Verification_Status',
                    'Y_Tick_Top_Value', 'Y_Tick_Bottom_Value',
                    'Confirmed_Tick_Values', 'Y_Axis_Shared_With',
-                   'Verified_By', 'Seen_By_Person', 'Value_Source', 'Note'];
+                   'Verified_By', 'Seen_By_Person', 'Value_Source', 'Drawn_Frame', 'Note'];
 
 function csvCell(s) {
   return '"' + String(s === null || s === undefined ? '' : s)
@@ -294,6 +359,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { VERDICTS: VERDICTS, NEEDS_VALUES: NEEDS_VALUES, HELD: HELD, SHARED: SHARED,
                      needsValues: needsValues, valueOf: valueOf,
                      parsePairs: parsePairs, slopeSign: slopeSign,
+                     parseFrame: parseFrame, frameText: frameText, frameProblem: frameProblem,
+                     DRAWN_FRAME_MIN_PX: DRAWN_FRAME_MIN_PX, DRAWN_FRAME_SLACK: DRAWN_FRAME_SLACK,
                      rowsInsideFrame: rowsInsideFrame, FRAME_SLACK: FRAME_SLACK,
                      directionWord: directionWord,
                      verdictOf: verdictOf, buildCsv: buildCsv,

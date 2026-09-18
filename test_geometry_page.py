@@ -66,6 +66,11 @@ OTHER = dict(READ, Proposal_ID="GP004", Raster="other.png")
 
 GP.write_proposals(os.path.join(PROP, GP.PROPOSALS if hasattr(GP, "PROPOSALS")
                                 else "geometry_proposal.csv"), [READ, REFUSED, SHARER, OTHER])
+#: 그리고 리더가 프레임을 못 찾은 패널 하나. 제안이 아니라 거절 목록에 있고,
+#: 그림은 같은 그림입니다 - 조각을 나눌 때 그 그림과 함께 가야 합니다.
+NOFRAME = GP.refusal_row("GP006", "fig.png", "abc", (300, 30, 480, 180),
+                         detail="영역 안에 축선이 하나도 없습니다", note="D1 p6 LINE")
+GP.write_refusals(os.path.join(PROP, GP.REFUSED), [NOFRAME])
 #: 오버레이 한 장만 둡니다. 없는 그림이 어떻게 나가는지도 이 페이지의 성질입니다.
 _png = base64.b64decode(
     b"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmM"
@@ -76,7 +81,8 @@ with io.open(os.path.join(PROP, "GP001.png"), "wb") as fh:
 HTML, COUNT = G.build(PROP, log=lambda *a: None)
 
 print("페이지가 제안을 카드로 내민다")
-check("제안마다 카드가 하나", COUNT == 4 and HTML.count("class='doc'") == 4,
+check("제안마다 카드가 하나, 프레임 없는 패널도 하나",
+      COUNT == 5 and HTML.count("class='doc'") == 5,
       "%s / %s" % (COUNT, HTML.count("class='doc'")))
 check("오버레이가 있으면 그림으로 실린다", "data:image/png;base64," in HTML)
 # REVERT: 오버레이가 없어도 조용히 넘어간다. 확인할 그림이 없는 카드는 확인을
@@ -147,9 +153,9 @@ check("같은 그림의 다른 패널만 고를 수 있다",
       and "value='GP003'" not in _sel3 and "value='GP004'" not in _sel3, _sel3)
 check("리더가 댄 후보는 논리로 건너간다",
       '"sharedCandidate": "GP001"' in HTML or '"sharedCandidate":"GP001"' in HTML)
-check("형제 목록도 논리로 건너간다",
-      re.search(r'"siblings": \["GP001", "GP002"\]', HTML) is not None
-      or '"siblings":["GP001","GP002"]' in HTML)
+check("형제 목록도 논리로 건너간다 - 프레임 없는 패널도 같은 그림의 형제다",
+      re.search(r'"siblings": \["GP001", "GP002", "GP006"\]', HTML) is not None
+      or '"siblings":["GP001","GP002","GP006"]' in HTML)
 check("후보와 그 까닭이 카드에 보인다",
       "축 공유 후보:</b> GP001" in HTML and "프레임 위아래 차 2 px" in HTML)
 check("후보의 눈금 색이 무슨 뜻인지 적혀 있다", "축 공유 후보 패널의 눈금 행" in HTML)
@@ -283,6 +289,33 @@ _card1 = _whtml[_whtml.index("id='p-GP001'"):_whtml.index("id='p-GP005'")]
 check("의심이 없는 카드에는 아무것도 붙지 않는다", "먼저 보세요" not in _card1)
 check("경고가 있어도 읽은 값은 그대로 논리로 건너간다",
       '"readPairs": "190@10;100@50;20@90"' in _whtml)
+
+print()
+print("프레임을 못 찾은 패널도 카드로 나가고, 사람이 프레임을 그린다")
+# REVERT: 거절 목록은 페이지에 없다. 975장 중 33장이 두 파일 사이에서 조용히
+# 빠지고, 페이지를 다 답해도 그 33장은 영영 없습니다.
+_c6 = HTML[HTML.index("id='p-GP006'"):]
+_c6 = _c6[:_c6.index("</main>")]
+check("프레임 없는 카드가 있고 왜 없는지 말한다",
+      "프레임 없음" in _c6 and "축선이 하나도 없습니다" in _c6 and "프레임을 찾지 못했습니다" in _c6)
+check("그리는 단추가 있다", "data-arm-frame='GP006'" in _c6 and "프레임 그리기" in _c6)
+check("제안 카드에도 다시 그리는 단추가 있다", "data-arm-frame='GP001'" in HTML and "프레임 다시 그리기" in HTML)
+check("프레임 없는 카드임과 그 영역이 논리로 건너간다",
+      ('"noFrame": true' in HTML or '"noFrame":true' in HTML)
+      and ('"region": "300,30,480,180"' in HTML or '"region":"300,30,480,180"' in HTML))
+check("프레임 없는 카드의 답도 같은 어휘다",
+      set(v for v, _l in G.LABELS_NO_FRAME) == set(v for v, _l in G.LABELS)
+      and "읽을 플롯이 없다" in _c6)
+check("먼저 그려야 하는 패널을 앞에서 이름 댄다", "프레임을 그려야 하는 패널 1개" in HTML)
+check("그린 프레임의 뜻이 색 설명에 있다", "사람이 그린 프레임" in HTML)
+_ref_rows = [dict(NOFRAME, _no_frame=True)]
+_mix = [READ, OTHER, SHARER] + _ref_rows
+_by_chunk = [G.chunk_of(_mix, i, 2) for i in (1, 2)]
+check("프레임 없는 패널은 자기 그림의 조각에 든다",
+      all(len({r["Raster"] for r in c}) <= 1 for c in _by_chunk)
+      and any("GP006" in [r["Proposal_ID"] for r in c] and "GP001" in [r["Proposal_ID"] for r in c]
+              for c in _by_chunk),
+      "%s" % [[r["Proposal_ID"] for r in c] for c in _by_chunk])
 
 print()
 print("빈 제안 폴더는 페이지가 아니다")

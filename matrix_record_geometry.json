@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_geometry.py": "7fcd08b8691c7efbd64f10dc67520318f4fd27218045b924453ef3ec10872f44",
-  "test_record_geometry.py": "1330ec457cba84808748eb626cde8a302aa6c1baca205c6f1985de88b8b65f80"
+  "record_geometry.py": "85d9b17c1f2fb04daf51b149eb0ffc63c59e592b98dcc75fd14f8aa08b662b96",
+  "test_record_geometry.py": "2db422bb73c160b906fb57a375e4522ef0300bad1ffbc9b3a5bcecfe9e44bdee"
  },
  "suites": [
   "test_record_geometry.py"
@@ -28,7 +28,7 @@
   {
    "name": "낸 적 없는 제안의 답도 적는다",
    "file": "record_geometry.py",
-   "old": "    if pid not in proposed:",
+   "old": "    if pid not in proposed and pid not in refused:",
    "new": "    if False:"
   },
   {
@@ -40,7 +40,7 @@
   {
    "name": "제안이 잰 것을 버리고 답만 적는다",
    "file": "record_geometry.py",
-   "old": "        row = dict(proposed[pid])",
+   "old": "        row = dict(base)",
    "new": "        row = {\"Proposal_ID\": pid}"
   },
   {
@@ -136,7 +136,7 @@
   {
    "name": "낸 적 없는 패널의 축도 적는다",
    "file": "record_geometry.py",
-   "old": "        elif shared not in proposed:\n            problems.append((\"SHARED_TARGET_UNKNOWN\",",
+   "old": "        elif shared not in proposed and shared not in refused:\n            problems.append((\"SHARED_TARGET_UNKNOWN\",",
    "new": "        elif False:\n            problems.append((\"SHARED_TARGET_UNKNOWN\","
   },
   {
@@ -144,12 +144,6 @@
    "file": "record_geometry.py",
    "old": "            if (mine.get(\"Raster\") or \"\") != (theirs.get(\"Raster\") or \"\"):",
    "new": "            if False:"
-  },
-  {
-   "name": "프레임이 어긋난 축도 적는다",
-   "file": "record_geometry.py",
-   "old": "                if not same:\n                    problems.append((\"SHARED_FRAME_MISALIGNED\",",
-   "new": "                if False:\n                    problems.append((\"SHARED_FRAME_MISALIGNED\","
   },
   {
    "name": "확인이면서 공유도 말하는 답을 적는다",
@@ -160,8 +154,8 @@
   {
    "name": "빌려주는 패널이 확인되지 않아도 적는다",
    "file": "record_geometry.py",
-   "old": "        if target is None:\n            refused.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\",",
-   "new": "        if target is None:\n            still.append(row); continue\n            refused.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\","
+   "old": "        if target is None:\n            turned_away.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\",",
+   "new": "        if target is None:\n            still.append(row); continue\n            turned_away.append((row[\"Proposal_ID\"], [(\"SHARED_TARGET_NOT_CONFIRMED\","
   },
   {
    "name": "짝을 옮겨 적지 않는다",
@@ -192,6 +186,48 @@
    "file": "record_geometry.py",
    "old": "    slack = abs(y1 - y0) * FRAME_SLACK",
    "new": "    slack = 0"
+  },
+  {
+   "name": "거절 목록의 패널에 온 답을 NOT_PROPOSED로 돌려보낸다",
+   "file": "record_geometry.py",
+   "old": "    if pid not in proposed and pid not in refused:",
+   "new": "    if pid not in proposed:"
+  },
+  {
+   "name": "그리지 않은 확인을 받는다",
+   "file": "record_geometry.py",
+   "old": "    if pid in refused and pid not in proposed and not drawn \\\n            and verdict in NEEDS_VALUES + (SHARED,):",
+   "new": "    if False:"
+  },
+  {
+   "name": "그린 프레임에 리더의 값을 그대로 붙인다",
+   "file": "record_geometry.py",
+   "old": "    if drawn and (answer.get(\"Value_Source\") or \"\").strip().upper() == \"READ\":",
+   "new": "    if False:"
+  },
+  {
+   "name": "그린 프레임의 문제를 삼킨다",
+   "file": "record_geometry.py",
+   "old": "    problems.extend(frame_problems)",
+   "new": "    pass"
+  },
+  {
+   "name": "짝의 행을 그린 프레임이 아니라 제안의 프레임에 댄다",
+   "file": "record_geometry.py",
+   "old": "                outside = rows_outside_frame(mine, [px for _v, px in pairs])",
+   "new": "                outside = rows_outside_frame(proposed.get(pid) or mine, [px for _v, px in pairs])"
+  },
+  {
+   "name": "빌려주는 패널의 프레임이 어긋나도 옮겨 적는다",
+   "file": "record_geometry.py",
+   "old": "        same, px = GP.frames_share_rows(row, target)\n        if not same:",
+   "new": "        same, px = GP.frames_share_rows(row, target)\n        if False:"
+  },
+  {
+   "name": "그린 프레임을 적을 때 제안의 행을 그대로 쓴다",
+   "file": "record_geometry.py",
+   "old": "        base, _fp = base_row_for(answer, proposed, refused)\n        if base is None:",
+   "new": "        base, _fp = proposed.get(pid), []\n        if base is None:"
   }
  ]
 }

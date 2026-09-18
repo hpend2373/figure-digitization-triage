@@ -50,6 +50,7 @@ table.
 """
 import argparse
 import csv
+import math
 import json
 import os
 import sys
@@ -133,7 +134,36 @@ PROPOSAL_COLUMNS = (
     # 래스터의 같은 픽셀 행이니 옮길 수 있고, 프레임이 어긋나 있으면 옮기지
     # 않습니다. 값 두 개는 비워 둡니다: 이 패널의 값이 아닙니다.
     "Y_Axis_Shared_With", "Note",
+    # WHERE THE FRAME CAME FROM. Empty is the proposer's measurement, as it
+    # always was. `DRAWN` is a frame a person dragged on the picture - on a
+    # panel the proposer found no frame in (33 of this corpus's 975), or on
+    # one whose measured frame the person overruled. A drawn frame carries no
+    # machine reading: the numerals were read beside a spine this frame does
+    # not have, so the person types the values and points at the ticks.
+    "Frame_Source",
 )
+
+#: The file the proposer names the panels it found NO FRAME in. A region with
+#: no long rule in it is not a proposal - there is nothing to confirm - but it
+#: is still a panel a person counted, and a list that drops it silently is a
+#: list that loses 33 panels between two files. The row carries what a person
+#: needs to draw the frame themselves: the raster and the region.
+REFUSED = "geometry_refused.csv"
+REFUSED_COLUMNS = ("Proposal_ID", "Raster", "Raster_SHA256", "Region",
+                   "Reason", "Detail", "Note")
+REFUSAL_NO_FRAME = "NO_FRAME"
+
+FRAME_MEASURED = ""
+FRAME_DRAWN = "DRAWN"
+FRAME_SOURCES = (FRAME_MEASURED, FRAME_DRAWN)
+
+#: A drawn frame narrower or shorter than this is a click, not a plot.
+DRAWN_FRAME_MIN_PX = 20
+#: How far past its region a drawn frame may reach, as a fraction of the
+#: region's own size - the region is where intake said the panel is, and a
+#: frame a little past its edge is the same panel; one far past it is a
+#: different panel.
+DRAWN_FRAME_SLACK = 0.10
 
 #: What `read_tick_values` can say. `REFUSED` is a reading that did not hold
 #: together; `NOT_ATTEMPTED` is one nobody asked for. Neither is a gap to fill.
@@ -899,6 +929,159 @@ def apply_reading(row, status, kept, detail, residual):
     return row
 
 
+def refusal_row(proposal_id, raster_path="", raster_sha256="", region=None,
+                reason=REFUSAL_NO_FRAME, detail="", note=""):
+    """The row for a region the proposer found no frame in."""
+    row = {c: "" for c in REFUSED_COLUMNS}
+    row.update({"Proposal_ID": proposal_id, "Raster": raster_path,
+                "Raster_SHA256": raster_sha256,
+                "Region": ("%d,%d,%d,%d" % tuple(int(v) for v in region))
+                if region else "",
+                "Reason": reason, "Detail": detail, "Note": note})
+    return row
+
+
+def write_refusals(path, rows):
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(REFUSED_COLUMNS))
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in REFUSED_COLUMNS})
+    return path
+
+
+def refusal_picture(image, row, out_path):
+    """The region the proposer found no frame in, cropped like an overlay.
+
+    Nothing is drawn on it but the region's own outline, in grey: the person
+    draws the frame, and the picture's origin is `overlay_origin`, the same as
+    a proposal's, so the corners they click land on raster pixels the same way.
+    """
+    from PIL import Image, ImageDraw
+    base = image if isinstance(image, Image.Image) else Image.open(image)
+    canvas = base.convert("RGB")
+    region = [int(v) for v in _s(row.get("Region")).split(",")]
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((region[0], region[1], region[2] - 1, region[3] - 1),
+                   outline=(170, 170, 170), width=1)
+    pad = overlay_pad(row)
+    ox, oy = overlay_origin(row)
+    canvas = canvas.crop((ox, oy, min(canvas.width, region[2] + pad),
+                          min(canvas.height, region[3] + pad)))
+    canvas.save(out_path)
+    return out_path
+
+
+def parse_frame(text):
+    """[x0, x1, y0, y1] from 'x0,x1,y0,y1', or None. The proposal's own order."""
+    parts = [p.strip() for p in str(text or "").split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError:
+        return None
+    return vals
+
+
+def drawn_frame_problems(frame, region_text):
+    """[(code, detail)] for a frame a person drew. Empty means it can stand.
+
+    A frame is four finite numbers, wide and tall enough to be a plot, and
+    inside the region the panel was counted in (with `DRAWN_FRAME_SLACK`). A
+    frame outside its region is a frame around a different panel, and this
+    package files values by panel.
+    """
+    if frame is None or len(frame) != 4 or not all(
+            math.isfinite(v) for v in frame):
+        return [("FRAME_NOT_FOUR_NUMBERS",
+                 "그린 프레임은 x0,x1,y0,y1 네 수여야 합니다: %r" % (frame,))]
+    x0, x1, y0, y1 = frame
+    out = []
+    if x1 - x0 < DRAWN_FRAME_MIN_PX or y1 - y0 < DRAWN_FRAME_MIN_PX:
+        out.append(("FRAME_DEGENERATE",
+                    "그린 프레임이 %g x %g px입니다. %d px보다 작은 프레임은 "
+                    "플롯이 아닙니다." % (x1 - x0, y1 - y0, DRAWN_FRAME_MIN_PX)))
+    region = [int(v) for v in _s(region_text).split(",")] \
+        if _s(region_text) else None
+    if region:
+        rx0, ry0, rx1, ry1 = region
+        sx = (rx1 - rx0) * DRAWN_FRAME_SLACK
+        sy = (ry1 - ry0) * DRAWN_FRAME_SLACK
+        if x0 < rx0 - sx or x1 > rx1 + sx or y0 < ry0 - sy or y1 > ry1 + sy:
+            out.append(("FRAME_OUTSIDE_REGION",
+                        "그린 프레임 %s이 이 패널의 영역 %s 밖입니다. 영역 밖의 "
+                        "프레임은 다른 패널의 프레임입니다."
+                        % (",".join("%g" % v for v in frame), region_text)))
+    return out
+
+
+#: Everything the proposer MEASURED against its own frame. A drawn frame
+#: replaces the frame, so these go with it - the tick rows were found along a
+#: spine this frame may not have, the anchors inside a box this frame is not.
+_MEASURED_AGAINST_THE_FRAME = (
+    "Axis_X_Region", "Axis_Y_Region",
+    "Y_Tick_Pixels", "Y_Tick_Count", "Y_Tick_Spacing_Px", "Y_Tick_Regularity",
+    "Y_Tick_Coverage", "X_Tick_Pixels", "X_Tick_Count",
+    "Group_Anchor_Pixels", "Group_Anchor_Count",
+    "Box_Anchor_Pixels", "Box_Anchor_Count", "Box_Anchor_Detail",
+    "Confidence", "Confidence_Reason",
+    "Y_Tick_Read_Values", "Y_Tick_Read_First", "Y_Tick_Read_Last",
+    "Y_Tick_Read_Residual_Px", "Y_Tick_Read_Detail", "Y_Tick_Read_Warning",
+    "Y_Axis_Spine_X", "Y_Axis_Shared_Candidate", "Y_Axis_Shared_Detail",
+)
+
+
+def refusal_as_proposal(row):
+    """A proposal-shaped row for a refusal, with NO frame: the person said
+    there is no plot here (REJECTED), and the record keeps that beside the
+    confirmations so the panel is accounted for rather than absent."""
+    out = {c: "" for c in PROPOSAL_COLUMNS}
+    for c in ("Proposal_ID", "Raster", "Raster_SHA256", "Region", "Note"):
+        out[c] = _s(row.get(c))
+    out["Y_Tick_Count"] = 0
+    out["X_Tick_Count"] = 0
+    out["Group_Anchor_Count"] = 0
+    out["Box_Anchor_Count"] = 0
+    out["Y_Tick_Read_Status"] = READ_NOT_ATTEMPTED
+    out["Confidence_Reason"] = "no frame was found in the region"
+    out["Human_Verification_Status"] = PROPOSAL_PENDING
+    return out
+
+
+def with_drawn_frame(row, frame):
+    """A proposal-shaped row standing on a frame a person drew.
+
+    `row` is a proposal (the person overruled its frame) or a refusal (there
+    was none). Either way the result carries the drawn frame, no measurement
+    and no reading - `Y_Tick_Read_Status` is NOT_ATTEMPTED, because nothing
+    was read beside THIS frame - and says so in `Frame_Source`.
+    """
+    x0, x1, y0, y1 = [int(round(v)) for v in frame]
+    out = {c: "" for c in PROPOSAL_COLUMNS}
+    for c in PROPOSAL_COLUMNS:
+        if c in _MEASURED_AGAINST_THE_FRAME:
+            continue
+        out[c] = _s(row.get(c))
+    region = [int(v) for v in _s(row.get("Region")).split(",")] \
+        if _s(row.get("Region")) else [x0, y0, x1 + 1, y1 + 1]
+    rx0, ry0, rx1, ry1 = region
+    out.update({
+        "Panel_X0": x0, "Panel_X1": x1, "Panel_Y0": y0, "Panel_Y1": y1,
+        "Axis_Y_Region": "%d,%d,%d,%d" % (min(rx0, x0), x0, y0, y1),
+        "Axis_X_Region": "%d,%d,%d,%d" % (x0, x1, y1, max(ry1, y1)),
+        "Y_Tick_Count": 0, "X_Tick_Count": 0,
+        "Group_Anchor_Count": 0, "Box_Anchor_Count": 0,
+        "Y_Tick_Read_Status": READ_NOT_ATTEMPTED,
+        "Confidence_Reason": "frame drawn by a person; nothing was measured "
+                             "against it",
+        "Frame_Source": FRAME_DRAWN,
+    })
+    if not _s(out.get("Human_Verification_Status")):
+        out["Human_Verification_Status"] = PROPOSAL_PENDING
+    return out
+
+
 WARN_TICK_STEP = "TICK_STEP_UNEVEN"
 WARN_OFF_THE_TICKS = "LABELS_OFF_THE_TICKS"
 
@@ -1066,6 +1249,22 @@ def proposal_problems(rows):
             out.append((pid, "PROPOSAL_STATUS_UNKNOWN",
                         "%r is not %s" % (status, "/".join(PROPOSAL_STATUSES))))
             continue
+        source = _s(row.get("Frame_Source")).upper()
+        if source not in FRAME_SOURCES:
+            out.append((pid, "PROPOSAL_FRAME_SOURCE_UNKNOWN",
+                        "%r is not %s" % (source, "/".join(s or "(measured)" for s in FRAME_SOURCES))))
+        elif source == FRAME_DRAWN:
+            # A DRAWN FRAME IS A PERSON'S. A PENDING row with one names nobody
+            # and was measured by nothing; and nothing can have been READ
+            # beside it, because the reader reads beside a measured spine.
+            if status == PROPOSAL_PENDING:
+                out.append((pid, "PROPOSAL_DRAWN_FRAME_PENDING",
+                            "%s stands on a drawn frame and nobody has answered "
+                            "for it" % pid))
+            if read == READ_OK:
+                out.append((pid, "PROPOSAL_DRAWN_FRAME_WITH_A_READING",
+                            "%s stands on a drawn frame and carries a machine "
+                            "reading made beside another" % pid))
         who = _s(row.get("Verified_By"))
         when = _s(row.get("Verified_At"))
         top = _s(row.get("Y_Tick_Top_Value"))

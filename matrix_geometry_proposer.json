@@ -1,7 +1,7 @@
 {
  "files": {
-  "geometry_proposer.py": "23f18be4bcf3efe0d0f36cafa9a628d19e264ac636556636ff0061a51d7bdd22",
-  "test_geometry_proposer.py": "dbcdc0a8684a441c6f7544c8c34da3062757f3f961a3e6b04b1a0ecab758f6ab"
+  "geometry_proposer.py": "55a4164e13e49bec4173224bf39541690cd4b1d357cb506c97c14d83392ee3a7",
+  "test_geometry_proposer.py": "95f683ffbe2c6111ef8cd71ada8c25cdcf7adcc1ae7321c72e2877871d709c7f"
  },
  "suites": [
   "test_geometry_proposer.py"
@@ -46,8 +46,8 @@
   {
    "name": "재기만 해도 읽었다고 적는다",
    "file": "geometry_proposer.py",
-   "old": "        \"Y_Tick_Read_Status\": READ_NOT_ATTEMPTED,",
-   "new": "        \"Y_Tick_Read_Status\": READ_OK,"
+   "old": "        \"Y_Tick_Read_Status\": READ_NOT_ATTEMPTED,\n        # The only status this module may write.",
+   "new": "        \"Y_Tick_Read_Status\": READ_OK,\n        # The only status this module may write."
   },
   {
    "name": "읽은 값을 프레임 밖에 적는다",
@@ -408,6 +408,54 @@
    "file": "geometry_proposer.py",
    "old": "            if any(abs(at_row - a) <= 0.25 * pitch for a in asked):\n                continue",
    "new": "            if False:\n                continue"
+  },
+  {
+   "name": "그린 프레임 위에 잰 것을 그대로 싣는다",
+   "file": "geometry_proposer.py",
+   "old": "        if c in _MEASURED_AGAINST_THE_FRAME:\n            continue",
+   "new": "        if False:\n            continue"
+  },
+  {
+   "name": "그린 프레임에 출처를 달지 않는다",
+   "file": "geometry_proposer.py",
+   "old": "        \"Frame_Source\": FRAME_DRAWN,\n    })",
+   "new": "        \"Frame_Source\": FRAME_MEASURED,\n    })"
+  },
+  {
+   "name": "영역 밖의 프레임을 받는다",
+   "file": "geometry_proposer.py",
+   "old": "        if x0 < rx0 - sx or x1 > rx1 + sx or y0 < ry0 - sy or y1 > ry1 + sy:",
+   "new": "        if False:"
+  },
+  {
+   "name": "한 번 누른 것도 프레임이다",
+   "file": "geometry_proposer.py",
+   "old": "    if x1 - x0 < DRAWN_FRAME_MIN_PX or y1 - y0 < DRAWN_FRAME_MIN_PX:",
+   "new": "    if False:"
+  },
+  {
+   "name": "PENDING인 그린 프레임을 받는다",
+   "file": "geometry_proposer.py",
+   "old": "            if status == PROPOSAL_PENDING:\n                out.append((pid, \"PROPOSAL_DRAWN_FRAME_PENDING\",",
+   "new": "            if False:\n                out.append((pid, \"PROPOSAL_DRAWN_FRAME_PENDING\","
+  },
+  {
+   "name": "그린 프레임 옆의 기계 읽기를 받는다",
+   "file": "geometry_proposer.py",
+   "old": "            if read == READ_OK:\n                out.append((pid, \"PROPOSAL_DRAWN_FRAME_WITH_A_READING\",",
+   "new": "            if False:\n                out.append((pid, \"PROPOSAL_DRAWN_FRAME_WITH_A_READING\","
+  },
+  {
+   "name": "모르는 프레임 출처를 받는다",
+   "file": "geometry_proposer.py",
+   "old": "        if source not in FRAME_SOURCES:\n            out.append((pid, \"PROPOSAL_FRAME_SOURCE_UNKNOWN\",",
+   "new": "        if False:\n            out.append((pid, \"PROPOSAL_FRAME_SOURCE_UNKNOWN\","
+  },
+  {
+   "name": "거절 그림을 원점이 아닌 데서 자른다",
+   "file": "geometry_proposer.py",
+   "old": "    pad = overlay_pad(row)\n    ox, oy = overlay_origin(row)\n    canvas = canvas.crop((ox, oy, min(canvas.width, region[2] + pad),",
+   "new": "    pad = overlay_pad(row)\n    ox, oy = region[0], region[1]\n    canvas = canvas.crop((ox, oy, min(canvas.width, region[2] + pad),"
   }
  ]
 }

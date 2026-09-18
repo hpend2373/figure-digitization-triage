@@ -37,7 +37,13 @@ if HERE not in sys.path:
 import geometry_proposer as GP                                   # noqa: E402
 
 PROPOSALS = "geometry_proposal.csv"
+#: 리더가 프레임을 못 찾은 패널들. 제안이 아니지만 답이 올 수 있는 자리이고,
+#: 그 답은 사람이 그린 프레임을 들고 옵니다.
+REFUSALS = GP.REFUSED
 DECISIONS = "geometry_decisions.csv"
+#: 답이 들고 오는, 사람이 그린 프레임 'x0,x1,y0,y1'. 비어 있으면 리더의
+#: 프레임입니다.
+DRAWN = "Drawn_Frame"
 
 #: 사람이 할 수 있는 말. `geometry_page.js`의 `VERDICTS`와 같아야 하고,
 #: `test_record_geometry.py`가 셋(논리·화면·관문)이 같은지 봅니다.
@@ -104,6 +110,35 @@ def load_proposals(proposals):
                 csv.DictReader(io.open(path, encoding="utf-8-sig")))
 
 
+def load_refusals(proposals):
+    """{Proposal_ID: 거절 행} - 프레임 없이 답이 올 수 있는 자리들."""
+    path = os.path.join(proposals, REFUSALS)
+    if not os.path.exists(path):
+        return {}
+    return dict((r["Proposal_ID"], r) for r in
+                csv.DictReader(io.open(path, encoding="utf-8-sig")))
+
+
+def base_row_for(answer, proposed, refused):
+    """(제안 모양의 행, 문제 목록) - 이 답이 서는 자리.
+
+    리더의 제안이면 그 행이고, 사람이 프레임을 그렸으면 그 프레임 위에 다시
+    지은 행입니다(제안이든 거절이든). 어느 쪽도 아니면 자리가 없습니다.
+    """
+    pid = (answer.get("Proposal_ID") or "").strip()
+    drawn = (answer.get(DRAWN) or "").strip()
+    origin = proposed.get(pid) if pid in proposed else refused.get(pid)
+    if origin is None:
+        return None, []
+    if not drawn:
+        return (origin if pid in proposed else None), []
+    frame = GP.parse_frame(drawn)
+    problems = GP.drawn_frame_problems(frame, origin.get("Region"))
+    if problems:
+        return None, problems
+    return GP.with_drawn_frame(origin, frame), []
+
+
 def load_recorded(out_path):
     """이미 적힌 판정들. 다시 적으려면 --replace가 필요합니다."""
     if not os.path.exists(out_path):
@@ -111,13 +146,14 @@ def load_recorded(out_path):
     return list(csv.DictReader(io.open(out_path, encoding="utf-8-sig")))
 
 
-def check_answer(answer, proposed):
+def check_answer(answer, proposed, refused=None):
     """(문제 목록). 빈 목록이면 이 답은 적힐 수 있습니다.
 
     문제는 코드와 사람이 읽을 말로 됩니다. 코드만 내면 사람은 무엇을 고쳐야
     하는지 모르고, 말만 내면 시나리오가 무엇을 붙잡는지 모릅니다.
     """
     problems = []
+    refused = refused or {}
     pid = (answer.get("Proposal_ID") or "").strip()
     verdict = (answer.get("Human_Verification_Status") or "").strip().upper()
     who = (answer.get("Verified_By") or "").strip()
@@ -147,11 +183,27 @@ def check_answer(answer, proposed):
 
     # 낸 적 없는 제안에 답이 왔습니다. 답이 틀렸다는 말이 아니라, 이 답이 어느
     # 그림의 어느 자리에 대한 것인지 이 관문이 알 수 없다는 말입니다.
-    if pid not in proposed:
+    if pid not in proposed and pid not in refused:
         problems.append(("NOT_PROPOSED",
-                         "%r은 이 폴더가 낸 제안이 아닙니다. 제안을 다시 낸 "
-                         "뒤의 답이거나, 다른 그림의 답입니다."
-                         % (pid or "(빈칸)")))
+                         "%r은 이 폴더가 낸 제안도, 프레임을 못 찾았다고 적은 "
+                         "패널도 아닙니다. 제안을 다시 낸 뒤의 답이거나, 다른 "
+                         "그림의 답입니다." % (pid or "(빈칸)")))
+    # 프레임. 사람이 그렸으면 그 프레임이 서는지 보고, 리더가 못 찾은 패널에
+    # 그리지 않은 확인은 붙일 자리가 없습니다.
+    mine, frame_problems = base_row_for(answer, proposed, refused)
+    problems.extend(frame_problems)
+    drawn = (answer.get(DRAWN) or "").strip()
+    if pid in refused and pid not in proposed and not drawn \
+            and verdict in NEEDS_VALUES + (SHARED,):
+        problems.append(("FRAME_NOT_DRAWN",
+                         "리더가 프레임을 찾지 못한 패널입니다. 프레임을 그리지 "
+                         "않은 %s은 붙일 자리가 없습니다." % verdict))
+    if drawn and (answer.get("Value_Source") or "").strip().upper() == "READ":
+        # 리더가 읽은 값은 리더의 프레임 옆에서 읽은 것입니다. 프레임을 새로
+        # 그렸으면 그 값이 이 프레임의 눈금에 붙는다는 근거가 없습니다.
+        problems.append(("READ_VALUES_ON_A_DRAWN_FRAME",
+                         "프레임을 그렸는데 값은 리더가 읽은 것을 그대로 "
+                         "씁니다. 그 값은 다른 프레임 옆에서 읽은 것입니다."))
 
     shared = (answer.get(TARGET) or "").strip()
     if verdict == SHARED:
@@ -168,24 +220,19 @@ def check_answer(answer, proposed):
         elif shared == pid:
             problems.append(("SHARED_WITH_ITSELF",
                              "자기 자신의 축을 쓴다는 것은 공유가 아닙니다."))
-        elif shared not in proposed:
+        elif shared not in proposed and shared not in refused:
             problems.append(("SHARED_TARGET_UNKNOWN",
-                             "%r은 이 폴더가 낸 제안이 아닙니다. 옮겨 올 축이 "
-                             "없습니다." % shared))
-        elif pid in proposed:
-            mine, theirs = proposed[pid], proposed[shared]
+                             "%r은 이 폴더가 낸 제안도 프레임을 못 찾은 패널도 "
+                             "아닙니다. 옮겨 올 축이 없습니다." % shared))
+        elif mine is not None:
+            # 빌려주는 패널의 프레임은 확인된 행의 것입니다 - 제안의 잰
+            # 프레임일 수도, 사람이 그린 것일 수도 있고, 어느 쪽이든 옮겨
+            # 적을 때(`record`) 그 행에 대고 봅니다. 여기서는 그림만 봅니다.
+            theirs = proposed.get(shared) or refused[shared]
             if (mine.get("Raster") or "") != (theirs.get("Raster") or ""):
                 problems.append(("SHARED_ACROSS_RASTERS",
                                  "%s은 다른 그림의 패널입니다. 픽셀 행은 그림의 "
                                  "것이라 옮겨 올 수 없습니다." % shared))
-            else:
-                same, px = GP.frames_share_rows(mine, theirs)
-                if not same:
-                    problems.append(("SHARED_FRAME_MISALIGNED",
-                                     "이 패널의 프레임이 %s의 프레임과 %s px "
-                                     "어긋나 있습니다. 그 패널의 눈금 행은 이 "
-                                     "패널의 행이 아닙니다."
-                                     % (shared, "%.0f" % px if px is not None else "?")))
     elif shared:
         problems.append(("TARGET_WITHOUT_SHARING",
                          "%s인데 다른 패널의 축(%s)을 쓴다고도 적혀 있습니다. "
@@ -231,14 +278,15 @@ def check_answer(answer, proposed):
             # 어디든 찍힐 수 있고, 페이지가 먼저 막지만 답 CSV는 손으로 고칠
             # 수 있는 파일입니다. 프레임 밖의 눈금은 이 프레임의 눈금이 아니고,
             # 프레임이 틀린 것의 답은 "틀렸다"입니다.
-            if pid in proposed:
-                outside = rows_outside_frame(proposed[pid], [px for _v, px in pairs])
+            if mine is not None:
+                outside = rows_outside_frame(mine, [px for _v, px in pairs])
                 if outside:
                     problems.append(("CALIBRATION_ROW_OUTSIDE_FRAME",
-                                     "짝의 픽셀 행 %s이 이 제안의 프레임(%s..%s) 밖입니다. "
+                                     "짝의 픽셀 행 %s이 이 %s의 프레임(%s..%s) 밖입니다. "
                                      "프레임이 틀렸다면 답은 REJECTED입니다."
                                      % (", ".join("%g" % r for r in outside),
-                                        proposed[pid].get("Panel_Y0"), proposed[pid].get("Panel_Y1"))))
+                                        "그린 프레임" if drawn else "제안",
+                                        mine.get("Panel_Y0"), mine.get("Panel_Y1"))))
     elif verdict != SHARED and (top or bottom or pairs):
         # 거절과 보류에 값이 붙어 왔습니다. 붙은 값이 무엇을 뜻하는지 - 틀린
         # 프레임에서 읽은 값인지, 고쳐 준 값인지 - 이 관문은 모릅니다.
@@ -268,6 +316,7 @@ def record(proposals, answers, when, out_path=None, replace=False,
         raise SystemExit("답 CSV에 %s 열이 없습니다. 확인 페이지가 내려준 "
                          "파일이 맞습니까?" % ", ".join(missing))
     proposed = load_proposals(proposals)
+    refused = load_refusals(proposals)
     out_path = out_path or os.path.join(proposals, DECISIONS)
     if answers_path and os.path.exists(answers_path) \
             and os.path.exists(out_path) \
@@ -278,22 +327,28 @@ def record(proposals, answers, when, out_path=None, replace=False,
     existing = load_recorded(out_path)
     settled = set(r["Proposal_ID"] for r in existing)
 
-    written, refused = [], []
+    written, turned_away = [], []
     for answer in answers:
         pid = (answer.get("Proposal_ID") or "").strip()
-        problems = check_answer(answer, proposed)
+        problems = check_answer(answer, proposed, refused)
         if problems:
-            refused.append((pid or "(빈칸)", problems))
+            turned_away.append((pid or "(빈칸)", problems))
             continue
         if pid in settled and not replace:
-            refused.append((pid, [("ALREADY_RECORDED",
-                                   "이 제안은 이미 판정되어 있습니다. 바꾸려면 "
-                                   "--replace를 주십시오.")]))
+            turned_away.append((pid, [("ALREADY_RECORDED",
+                                       "이 제안은 이미 판정되어 있습니다. 바꾸려면 "
+                                       "--replace를 주십시오.")]))
             continue
         # 제안의 행을 그대로 들고 가고, 사람이 준 것만 얹습니다. 새 모양으로
         # 다시 적으면 `calibration_from`이 읽는 눈금 픽셀이 사라지고, 확인된
-        # 기하가 계산으로 이어지지 않습니다.
-        row = dict(proposed[pid])
+        # 기하가 계산으로 이어지지 않습니다. 프레임을 그렸으면 그 프레임 위에
+        # 지은 행이고, 거절과 보류에는 그릴 것이 없으니 원래 행(거절 목록의
+        # 것이면 프레임 없는 제안 모양)입니다.
+        base, _fp = base_row_for(answer, proposed, refused)
+        if base is None:
+            # 프레임 없는 패널의 거절. 프레임은 없고, 있는 척도 하지 않습니다.
+            base = GP.refusal_as_proposal(refused[pid])
+        row = dict(base)
         row.update({
             "Human_Verification_Status": (
                 answer.get("Human_Verification_Status") or "").strip().upper(),
@@ -320,10 +375,18 @@ def record(proposals, answers, when, out_path=None, replace=False,
             continue
         target = confirmed.get(row.get(TARGET))
         if target is None:
-            refused.append((row["Proposal_ID"], [("SHARED_TARGET_NOT_CONFIRMED",
+            turned_away.append((row["Proposal_ID"], [("SHARED_TARGET_NOT_CONFIRMED",
                             "%s의 축을 쓴다는데 %s이 이 답 묶음에서도, 이미 적힌 "
                             "것에서도 CONFIRMED가 아닙니다. 그 패널이 확인된 뒤 "
                             "다시 내 주십시오." % (row.get(TARGET), row.get(TARGET)))]))
+            continue
+        # 확인된 행의 프레임에 대고 한 번 더. 빌려주는 패널이 사람이 그린
+        # 프레임 위에 섰으면 그 프레임은 여기서 처음 보입니다.
+        same, px = GP.frames_share_rows(row, target)
+        if not same:
+            turned_away.append((row["Proposal_ID"], [("SHARED_FRAME_MISALIGNED",
+                                "이 패널의 프레임이 %s의 확인된 프레임과 %s px 어긋나 "
+                                "있습니다." % (row.get(TARGET), "%.0f" % px if px is not None else "?"))]))
             continue
         row[PAIRS] = (target.get(PAIRS) or "").strip()
         still.append(row)
@@ -342,11 +405,11 @@ def record(proposals, answers, when, out_path=None, replace=False,
     GP.write_proposals(out_path, rows)
 
     log("적음 %d · 거절 %d · 이미 있던 것 %d"
-        % (len(written), len(refused), len(keep)))
-    for name, problems in refused:
+        % (len(written), len(turned_away), len(keep)))
+    for name, problems in turned_away:
         for code, why in problems:
             log("  거절 %s — %s: %s" % (name, code, why))
-    return written, refused, out_path
+    return written, turned_away, out_path
 
 
 def main(argv=None):

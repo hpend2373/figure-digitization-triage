@@ -60,6 +60,10 @@ GP.write_proposals(os.path.join(PROP, R.PROPOSALS),
                          Y_Tick_Read_First="", Y_Tick_Read_Last=""),
                     # 다른 그림
                     dict(PROPOSED, Proposal_ID="GP004", Raster="other.png")])
+#: 그리고 리더가 프레임을 못 찾은 패널 하나 - 같은 그림, GP001과 같은 행의 영역.
+GP.write_refusals(os.path.join(PROP, GP.REFUSED),
+                  [GP.refusal_row("GP006", "fig.png", "abc", (300, 0, 500, 160),
+                                  detail="영역 안에 축선이 하나도 없습니다")])
 
 
 def answer(**over):
@@ -251,6 +255,82 @@ check("축을 빌리면서 값도 적어 오면 거절한다",
       "SHARED_WITH_A_TICK_VALUE" in codes(run([answer(), share(Y_Tick_Bottom_Value="0")])[1]))
 check("확인이면서 다른 패널의 축도 쓴다는 답은 거절한다",
       "TARGET_WITHOUT_SHARING" in codes(run([dict(answer(), Y_Axis_Shared_With="GP002")])[1]))
+
+print()
+print("프레임을 못 찾은 패널은 사람이 그린 프레임으로 적힌다")
+# REVERT: 거절 목록의 패널에 온 답은 NOT_PROPOSED다. 그 33장은 페이지에서
+# 그려도 관문이 받지 않아 영영 빠집니다.
+def drawn(**over):
+    row = answer(Proposal_ID="GP006", Y_Tick_Top_Value="30", Y_Tick_Bottom_Value="10",
+                 Confirmed_Tick_Values="30@20;10@140", Value_Source="TYPED_DRAWN")
+    row["Drawn_Frame"] = "310,490,5,150"
+    row.update(over)
+    return row
+_wd, _rd, _ = run([drawn()])
+check("그린 프레임 위의 확인은 적힌다", len(_wd) == 1 and not _rd, "%s" % codes(_rd))
+check("적힌 줄은 그린 프레임 위에 서고 그렇다고 말한다",
+      _wd and _wd[0]["Panel_X0"] == 310 and _wd[0]["Panel_Y1"] == 150
+      and _wd[0]["Frame_Source"] == GP.FRAME_DRAWN and _wd[0]["Raster"] == "fig.png"
+      and _wd[0]["Y_Tick_Read_Status"] == GP.READ_NOT_ATTEMPTED,
+      "%s" % ({k: _wd[0].get(k) for k in ("Panel_X0", "Frame_Source", "Raster")} if _wd else None,))
+check("적힌 줄은 계산이 바로 읽는다", _wd and GP.calibration_from(_wd[0]) == [[30.0, 20.0], [10.0, 140.0]])
+check("프레임을 그리지 않은 확인은 붙일 자리가 없다",
+      "FRAME_NOT_DRAWN" in codes(run([drawn(Drawn_Frame="")])[1]),
+      "%s" % codes(run([drawn(Drawn_Frame="")])[1]))
+check("프레임을 그리지 않은 거절은 적힌다 - 프레임 없이, 있는 척 없이",
+      (lambda w: len(w) == 1 and w[0]["Panel_X0"] == "" and w[0]["Frame_Source"] == ""
+       and w[0]["Human_Verification_Status"] == "REJECTED")(
+          run([drawn(Human_Verification_Status="REJECTED", Y_Tick_Top_Value="",
+                     Y_Tick_Bottom_Value="", Confirmed_Tick_Values="", Drawn_Frame="",
+                     Value_Source="")])[0]))
+# REVERT: 영역 밖의 프레임을 받는다. 영역 밖의 프레임은 다른 패널의 것입니다.
+check("영역 밖의 프레임은 거절한다",
+      "FRAME_OUTSIDE_REGION" in codes(run([drawn(Drawn_Frame="10,200,5,150")])[1]),
+      "%s" % codes(run([drawn(Drawn_Frame="10,200,5,150")])[1]))
+check("한 번 누른 것은 프레임이 아니다",
+      "FRAME_DEGENERATE" in codes(run([drawn(Drawn_Frame="310,320,5,12", Confirmed_Tick_Values="30@6;10@11")])[1]))
+check("네 수가 아니면 프레임이 아니다",
+      "FRAME_NOT_FOUR_NUMBERS" in codes(run([drawn(Drawn_Frame="310,490,5")])[1]))
+check("짝의 행은 그린 프레임 안이어야 한다",
+      "CALIBRATION_ROW_OUTSIDE_FRAME" in codes(run([drawn(Confirmed_Tick_Values="30@20;10@400")])[1]))
+# REVERT: 프레임을 새로 그려도 리더가 읽은 값을 받는다. 그 값은 다른 프레임의
+# 스파인 옆에서 읽은 것입니다.
+check("그린 프레임에 리더가 읽은 값을 그대로 붙이면 거절한다",
+      "READ_VALUES_ON_A_DRAWN_FRAME" in codes(run([drawn(Value_Source="READ")])[1]))
+_wo, _ro, _ = run([dict(answer(), Drawn_Frame="12,198,6,148", Value_Source="TYPED_DRAWN",
+                        Confirmed_Tick_Values="30@20;10@140")])
+check("제안 위에 다시 그린 프레임은 그 제안의 이름으로 적히고, 잰 것은 버린다",
+      len(_wo) == 1 and _wo[0]["Proposal_ID"] == "GP001" and _wo[0]["Panel_X0"] == 12
+      and _wo[0]["Frame_Source"] == GP.FRAME_DRAWN and _wo[0]["Y_Tick_Pixels"] == ""
+      and _wo[0]["Y_Tick_Read_Values"] == "",
+      "%s %s" % (codes(_ro), {k: _wo[0].get(k) for k in ("Panel_X0", "Y_Tick_Pixels")} if _wo else None))
+_wfar, _rfar, _ = run([dict(answer(), Drawn_Frame="12,198,200,340", Value_Source="TYPED_DRAWN",
+                            Confirmed_Tick_Values="30@210;10@330")])
+check("짝의 행은 제안의 옛 프레임이 아니라 그린 프레임에 댄다",
+      len(_wfar) == 1 and not _rfar, "%s" % codes(_rfar))
+_wsh, _rsh, _ = run([drawn(), share(Y_Axis_Shared_With="GP006")])
+check("그린 프레임이 확인되면 그 축을 나눠 쓸 수 있다",
+      sorted(w["Proposal_ID"] for w in _wsh) == ["GP003", "GP006"] and not _rsh
+      and [w for w in _wsh if w["Proposal_ID"] == "GP003"][0]["Confirmed_Tick_Values"] == "30@20;10@140",
+      "%s %s" % ([w["Proposal_ID"] for w in _wsh], codes(_rsh)))
+_wsn, _rsn, _ = run([answer(), drawn(Human_Verification_Status="SHARED", Y_Tick_Top_Value="",
+                                     Y_Tick_Bottom_Value="", Confirmed_Tick_Values="",
+                                     Value_Source="SHARED", Y_Axis_Shared_With="GP001")])
+check("프레임 없는 패널도 프레임을 그리면 다른 패널의 축을 쓸 수 있다",
+      sorted(w["Proposal_ID"] for w in _wsn) == ["GP001", "GP006"] and not _rsn, "%s" % codes(_rsn))
+check("빌려주는 그린 프레임이 다른 행에 서 있으면 옮기지 않는다",
+      "SHARED_FRAME_MISALIGNED" in codes(run([drawn(Drawn_Frame="310,490,60,158",
+                                                     Confirmed_Tick_Values="30@70;10@150"),
+                                               share(Y_Axis_Shared_With="GP006")])[1]),
+      "%s" % codes(run([drawn(Drawn_Frame="310,490,60,158", Confirmed_Tick_Values="30@70;10@150"),
+                        share(Y_Axis_Shared_With="GP006")])[1]))
+check("그리지 않은 공유는 붙일 자리가 없다",
+      "FRAME_NOT_DRAWN" in codes(run([answer(), drawn(Human_Verification_Status="SHARED", Y_Tick_Top_Value="",
+                                                     Y_Tick_Bottom_Value="", Confirmed_Tick_Values="",
+                                                     Value_Source="SHARED", Y_Axis_Shared_With="GP001",
+                                                     Drawn_Frame="")])[1]))
+check("낸 적도 거절한 적도 없는 패널은 여전히 거절한다",
+      "NOT_PROPOSED" in codes(run([drawn(Proposal_ID="GP999")])[1]))
 
 print()
 print("두 번 적지 않는다")

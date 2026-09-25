@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_identity.py": "c03aadc1cf3ef8edf93aa633e3047fd8fd31b2177d39b6841c24f82074d8cde9",
-  "test_record_identity.py": "32e1150d00ed70e48552016109bd9d87ae3e5d3f6bb96c7ae50a6abb4ad7a77f"
+  "record_identity.py": "3f4c1fadc633b301902e3dbbc033400901e24b648e3f8b83196a2471c48bf80d",
+  "test_record_identity.py": "fd0d9eb68c50a2cdf02c8902b075f15b307ccceebe1d9b0f4ff4db9ecc84dd67"
  },
  "suites": [
   "test_record_identity.py"
@@ -64,7 +64,7 @@
   {
    "name": "색 없는 계열을 색 표에 적는다",
    "file": "record_identity.py",
-   "old": "        if mark in BM.COLOUR_MARK_TYPES and not colour:",
+   "old": "        if mark in BM.COLOUR_MARK_TYPES and not colour and not manual:",
    "new": "        if False:"
   },
   {
@@ -102,6 +102,60 @@
    "file": "record_identity.py",
    "old": "            \"X_Factor\": (answer.get(\"X_Factor\") or \"\").strip().upper(),",
    "new": "            \"X_Factor\": \"\","
+  },
+  {
+   "name": "사람이 읽는 경로에도 판독기의 구분 규칙을 건다",
+   "file": "record_identity.py",
+   "old": "                         str(e.get(\"cue\") or \"\").strip().casefold()))\n            continue\n",
+   "new": "                         str(e.get(\"cue\") or \"\").strip().casefold()))\n"
+  },
+  {
+   "name": "사람이 읽는 경로에서도 색으로 가르는 표의 색을 요구한다",
+   "file": "record_identity.py",
+   "old": "and not colour and not manual:",
+   "new": "and not colour:"
+  },
+  {
+   "name": "판독기가 모르는 모양을 사람이 읽는 경로에서도 거절한다",
+   "file": "record_identity.py",
+   "old": "shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if manual else ())",
+   "new": "shapes = BM.MARKER_SHAPES"
+  },
+  {
+   "name": "판독기가 모르는 모양을 어휘 밖이라고만 한다",
+   "file": "record_identity.py",
+   "old": "if value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual:",
+   "new": "if False:"
+  },
+  {
+   "name": "사람이 읽는 경로에서 계열 구분을 묻지 않는다",
+   "file": "record_identity.py",
+   "old": "keys.append((colour.upper(), style, marker, mfill, bfill,\n                         str(e.get(\"cue\") or \"\").strip().casefold()))",
+   "new": "keys.append(i)"
+  },
+  {
+   "name": "단서를 계열 구분에 넣지 않는다",
+   "file": "record_identity.py",
+   "old": "str(e.get(\"cue\") or \"\").strip().casefold()))",
+   "new": "\"\"))"
+  },
+  {
+   "name": "모르는 경로를 판독기 경로로 읽는다",
+   "file": "record_identity.py",
+   "old": "    if route not in READ_ROUTES:\n        problems.append((\"BAD_READ_ROUTE\"",
+   "new": "    if False:\n        problems.append((\"BAD_READ_ROUTE\""
+  },
+  {
+   "name": "경로를 적지 않는다",
+   "file": "record_identity.py",
+   "old": "\"Read_Route\": route_of(answer) if",
+   "new": "\"Read_Route\": \"\" if"
+  },
+  {
+   "name": "거절에도 경로를 적는다",
+   "file": "record_identity.py",
+   "old": "== \"CONFIRMED\" else \"\",",
+   "new": "!= \"\" else \"\","
   }
  ]
 }

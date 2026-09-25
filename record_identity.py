@@ -15,6 +15,10 @@
 
 적는 파일은 `identity_decisions.csv`이고 제안의 열을 그대로 씁니다 -
 `make_plan`이 그 행을 바로 읽습니다.
+
+판독기가 계열을 가를 수 없는 패널(색과 마커를 섞어 그린 것, 판독기가 모르는
+모양, 똑같이 그려진 계열)은 `Read_Route=MANUAL`로 확인합니다: 격자는 같은 규칙으로
+확인하고, 표시는 본 대로 적고, 값은 사람이 읽습니다. `READ_ROUTES`를 보세요.
 """
 import argparse
 import csv
@@ -43,6 +47,29 @@ COLOUR_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 BAR_TOPS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
 #: 프레임 너비의 이만큼은 밖이어도 x 위치로 봐줍니다.
 FRAME_SLACK = 0.10
+
+#: 값을 누가 읽는가. `AUTO`는 판독기가 읽고, `MANUAL`은 사람이 읽습니다.
+#:
+#: 판독기가 계열을 가르는 수단은 표 종류마다 하나입니다 - 색, 또는 마커, 또는
+#: 선 모양, 또는 채움 무늬. 그런데 그림은 둘을 섞어 그립니다: 주황 원·주황 삼각형·
+#: 파랑 원, 파랑 실선·파랑 점선·회색 실선·회색 점선. 이 코퍼스의 969 패널 중 133개가
+#: 그렇고, 그중 20개는 계열이 아예 똑같이 그려져 선 끝의 글자나 위아래 자리로만
+#: 갈립니다. 이런 패널을 확인할 길이 없으면 사람은 둘 중 하나를 합니다: 가를 수
+#: 있는 척 표시를 지어내거나(판독기는 그 거짓말을 믿고 읽습니다), 보류한 채로 둡니다
+#: (계획서에는 영영 셀이 서지 않습니다).
+#:
+#: `MANUAL`은 세 번째 길입니다. 격자(요인·수준·x 위치)는 그대로 확인하고, 계열이
+#: 어떻게 그려졌는지는 **본 대로** 적고, 값은 계획서가 사람의 판독 대기열로 보냅니다
+#: (`Panel_Mode=MANUAL`). 판독기가 못 가르는 것을 판독기에 맡기지 않는 것이지,
+#: 가르지 않아도 된다는 뜻이 아닙니다 - 사람도 가를 수 없는 두 계열은 여전히
+#: 거절합니다. 표시가 같으면 계열마다 **구분 단서**(`cue`: "위쪽 곡선, 끝에 D3")를
+#: 적어야 하고, 그 단서가 달라야 합니다.
+READ_ROUTES = ("AUTO", "MANUAL")
+MANUAL = "MANUAL"
+#: 사람이 읽는 경로에서만 적을 수 있는 마커 모양. 판독기(`mark_readers`)는 원·
+#: 삼각형·사각형·마름모만 구분하고, 이 모양들을 `AUTO`로 받으면 판독기가 모르는
+#: 모양을 찾으라는 계획서가 됩니다. 이 코퍼스에 실제로 인쇄된 것들입니다.
+MANUAL_ONLY_SHAPES = ("TRIANGLE_DOWN", "CROSS", "ASTERISK", "PENTAGON", "STAR")
 
 
 def is_true(v):
@@ -102,10 +129,12 @@ def positions_problems(positions, proposal):
     return out
 
 
-def series_problems(series, mark):
+def series_problems(series, mark, route="AUTO"):
     out = []
     if not series:
         return [("SERIES_MISSING", "확인인데 계열이 하나도 없습니다.")]
+    manual = route == MANUAL
+    shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if manual else ())
     names, keys = set(), []
     for i, e in enumerate(series, 1):
         name = str(e.get("name") or "").strip()
@@ -119,7 +148,7 @@ def series_problems(series, mark):
         colour = str(e.get("colour") or "").strip()
         if colour and not COLOUR_HEX.match(colour):
             out.append(("SERIES_COLOUR_BAD", "계열 %r의 색 %r은 #RRGGBB가 아닙니다." % (name, colour)))
-        if mark in BM.COLOUR_MARK_TYPES and not colour:
+        if mark in BM.COLOUR_MARK_TYPES and not colour and not manual:
             out.append(("SERIES_COLOUR_MISSING", "%s은 색으로 계열을 가르는데 계열 %r에 색이 없습니다."
                         % (mark, name or i)))
         style = str(e.get("line_style") or "").strip().upper()
@@ -127,12 +156,22 @@ def series_problems(series, mark):
         mfill = str(e.get("marker_fill") or "").strip().upper()
         bfill = str(e.get("bar_fill") or "").strip().upper()
         for value, vocab, what in ((style, BM.LINE_STYLES, "line_style"),
-                                   (marker, BM.MARKER_SHAPES, "marker"),
+                                   (marker, shapes, "marker"),
                                    (mfill, BM.MARKER_FILLS, "marker_fill"),
                                    (bfill, BM.BAR_FILL_PATTERNS, "bar_fill")):
-            if value and value not in vocab:
+            if value and value in MANUAL_ONLY_SHAPES and what == "marker" and not manual:
+                out.append(("SHAPE_NEEDS_MANUAL_ROUTE",
+                            "계열 %r의 마커 %s는 판독기가 모르는 모양입니다. 이 패널은 사람이 값을 "
+                            "읽는 경로(Read_Route=MANUAL)로만 확인할 수 있습니다." % (name, value)))
+            elif value and value not in vocab:
                 out.append(("SERIES_STYLE_UNKNOWN", "계열 %r의 %s=%r은 %s 중 하나가 아닙니다."
                             % (name, what, value, "/".join(vocab))))
+        if manual:
+            # 사람이 읽는 경로: 판독기의 구분 수단 규칙은 없고, 본 대로의 표시 전체와
+            # 단서가 계열을 가릅니다.
+            keys.append((colour.upper(), style, marker, mfill, bfill,
+                         str(e.get("cue") or "").strip().casefold()))
+            continue
         if mark == "LINE_MONO_STYLE" and style in ("", "NONE"):
             out.append(("SERIES_DISCRIMINANT_MISSING",
                         "LINE_MONO_STYLE은 선 모양으로 계열을 가르는데 계열 %r에 선 모양이 없습니다." % (name or i)))
@@ -144,8 +183,17 @@ def series_problems(series, mark):
                         "BAR_MONO는 채움 무늬로 계열을 가르는데 계열 %r에 무늬가 없습니다." % (name or i)))
         keys.append(colour.upper() if mark in BM.COLOUR_MARK_TYPES else (style, marker, mfill, bfill))
     if len(series) > 1 and len(set(keys)) != len(keys):
-        out.append(("SERIES_NOT_SEPARABLE", "두 계열을 가를 것이 없습니다 (같은 색이거나 같은 모양)."))
+        if manual:
+            out.append(("SERIES_NOT_SEPARABLE", "사람이 읽어도 두 계열을 가를 것이 없습니다 - 표시가 "
+                                                "같으면 계열마다 서로 다른 구분 단서(cue)를 적어 주세요."))
+        else:
+            out.append(("SERIES_NOT_SEPARABLE", "두 계열을 가를 것이 없습니다 (같은 색이거나 같은 모양)."))
     return out
+
+
+def route_of(answer):
+    """판독 경로. 빈칸은 `AUTO` - 이 열이 생기기 전에 내려받은 답도 뜻이 같습니다."""
+    return (answer.get("Read_Route") or "").strip().upper() or "AUTO"
 
 
 def check_answer(answer, proposed):
@@ -187,6 +235,10 @@ def check_answer(answer, proposed):
         problems.append(bad)
     else:
         problems.extend(positions_problems(positions, proposal))
+    route = route_of(answer)
+    if route not in READ_ROUTES:
+        problems.append(("BAD_READ_ROUTE", "Read_Route=%r은 %s 중 하나가 아닙니다."
+                         % (route, "/".join(READ_ROUTES))))
     mark = (answer.get("Mark_Type") or "").strip().upper()
     kind = (proposal.get("Panel_Kind") or "").strip().upper()
     allowed = IP.MARK_TYPES_FOR.get(kind, ()) + (("LINE_MONO_STYLE",) if kind == "LINE" else ())
@@ -200,7 +252,7 @@ def check_answer(answer, proposed):
     if bad:
         problems.append(bad)
     else:
-        problems.extend(series_problems(series, mark))
+        problems.extend(series_problems(series, mark, route))
         if not s_factor:
             problems.append(("SERIES_FACTOR_MISSING", "계열이 무슨 요인인지 적혀 있지 않습니다 - 하나뿐이어도 "
                                                      "그 계열이 어느 군인지가 셀의 이름입니다."))
@@ -258,6 +310,8 @@ def record(proposals, answers, when, out_path=None, replace=False, log=print, an
             "N_Outcome": (answer.get("N_Outcome") or "").strip(),
             "Bar_Top_Definition": (answer.get("Bar_Top_Definition") or "").strip().upper(),
             "Errorbar_Stem_Confirmed": (answer.get("Errorbar_Stem_Confirmed") or "").strip().upper(),
+            "Read_Route": route_of(answer) if (answer.get("Human_Verification_Status") or "").strip().upper()
+            == "CONFIRMED" else "",
             "Note": (answer.get("Note") or "").strip(),
         })
         written.append(row)

@@ -160,6 +160,66 @@ check("상자 표에는 값 정의를 묻지 않는다",
 check("줄기 확인은 TRUE/FALSE여야 한다", "STEM_BAD" in codes(run([answer(Errorbar_Stem_Confirmed="maybe")])[1]))
 
 print()
+print("판독기가 못 가르는 계열은 사람이 읽는 경로(MANUAL)로 확인한다 - 격자는 같은 규칙, 표시는 본 대로")
+_line = dict(Proposal_ID="GP002", Bar_Top_Definition="", Errorbar_Stem_Confirmed="")
+# 주황 원·주황 삼각형·파랑 원: 색도 마커도 혼자서는 못 가릅니다 (S41467 FIG5 b).
+_colour_marker = series({"name": "B3", "colour": "#E4860A", "marker": "CIRCLE", "marker_fill": "FILLED"},
+                        {"name": "B1", "colour": "#E4860A", "marker": "TRIANGLE", "marker_fill": "FILLED"},
+                        {"name": "D1", "colour": "#005493", "marker": "CIRCLE", "marker_fill": "FILLED"})
+check("색+마커 조합은 판독기 경로로는 거절한다 (색이 겹친다)",
+      "SERIES_NOT_SEPARABLE" in codes(run([answer(Mark_Type="LINE_COLOR", Series=_colour_marker, **_line)])[1]))
+# REVERT: 사람이 읽는 경로에도 판독기의 구분 규칙을 건다. 색+마커 패널은 영영 확인되지 않습니다.
+check("같은 조합을 사람이 읽는 경로로는 받는다",
+      not run([answer(Mark_Type="LINE_COLOR", Series=_colour_marker, Read_Route="MANUAL", **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_COLOR", Series=_colour_marker, Read_Route="MANUAL", **_line)])[1]))
+# REVERT: 사람이 읽는 경로에서도 색으로 가르는 표의 색을 요구한다. 흰 막대 계열은 색이 없습니다.
+check("사람이 읽는 경로는 색 없는 계열도 받는다 (색+무늬 막대의 흰 막대)",
+      not run([answer(Read_Route="MANUAL", Series=series({"name": "Fluid", "colour": "#DC2828", "bar_fill": "HATCHED"},
+                                                           {"name": "Control", "bar_fill": "OPEN"}))])[1])
+_cross = series({"name": "SUP", "marker": "CROSS"}, {"name": "STAND", "marker": "ASTERISK"})
+# REVERT: 판독기가 모르는 모양을 사람이 읽는 경로에서도 어휘 밖으로 거절한다. 인쇄된 모양을 적을 길이 없습니다.
+check("판독기가 모르는 모양(×·별표)은 사람이 읽는 경로에서 받는다",
+      not run([answer(Mark_Type="LINE_MONO", Series=_cross, Read_Route="MANUAL", **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_MONO", Series=_cross, Read_Route="MANUAL", **_line)])[1]))
+# REVERT: 그 모양을 판독기 경로에서 받거나, 어휘 밖이라고만 한다. 사람은 무엇을 해야 하는지 모릅니다.
+check("판독기가 모르는 모양을 판독기 경로로 적으면 경로를 바꾸라고 거절한다",
+      "SHAPE_NEEDS_MANUAL_ROUTE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_cross, **_line)])[1]))
+_same = series({"name": "D3", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"},
+               {"name": "B2", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"})
+# REVERT: 사람이 읽는 경로에서 계열 구분을 묻지 않는다. 똑같이 그려진 두 계열이 단서 없이 확인됩니다.
+check("똑같이 그려진 계열은 사람이 읽는 경로에서도 단서 없이는 거절한다",
+      "SERIES_NOT_SEPARABLE" in codes(run([answer(Mark_Type="LINE_COLOR", Series=_same, Read_Route="MANUAL", **_line)])[1]))
+_cued = json.dumps([dict(e, cue=c) for e, c in zip(json.loads(_same), ("위쪽 곡선, 끝에 D3", "아래쪽 곡선, 끝에 B2"))])
+# REVERT: 단서를 계열 구분에 넣지 않는다. 선 끝의 글자로만 갈리는 패널은 확인되지 않습니다.
+check("서로 다른 단서가 있으면 받는다",
+      not run([answer(Mark_Type="LINE_COLOR", Series=_cued, Read_Route="MANUAL", **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_COLOR", Series=_cued, Read_Route="MANUAL", **_line)])[1]))
+check("같은 단서 둘은 단서가 아니다",
+      "SERIES_NOT_SEPARABLE" in codes(run([answer(Mark_Type="LINE_COLOR", Read_Route="MANUAL", **dict(
+          _line, Series=json.dumps([dict(e, cue="곡선") for e in json.loads(_same)])))])[1]))
+_boxes = series({"name": "PRE", "colour": "#BEBEBE"}, {"name": "POST", "colour": "#1E1E1E"})
+check("상자 테두리 색으로만 갈리는 두 계열은 판독기 경로로는 거절한다",
+      "SERIES_NOT_SEPARABLE" in codes(run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="",
+                                                  Errorbar_Stem_Confirmed="", Series=_boxes)])[1]))
+check("사람이 읽는 경로는 색까지 보고 가른다",
+      not run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
+                      Series=_boxes, Read_Route="MANUAL")])[1])
+# REVERT: 모르는 경로를 판독기 경로로 읽는다. 오타 하나가 사람의 판단을 뒤집습니다.
+check("모르는 경로는 거절한다", "BAD_READ_ROUTE" in codes(run([answer(Read_Route="SOMETIMES")])[1]))
+check("경로 열이 없는 옛 답은 판독기 경로다", not run([answer()])[1] and not run([answer(Read_Route="")])[1])
+check("사람이 읽는 경로도 격자는 같은 규칙으로 본다",
+      "X_LABEL_DUPLICATE" in codes(run([answer(Read_Route="MANUAL", X_Labels=json.dumps(
+          [{"label": "Pre", "px": 175}, {"label": "pre", "px": 325}]))])[1]))
+# REVERT: 경로를 적지 않는다. 계획서가 사람이 읽을 패널을 판독기에 보냅니다.
+_wm = run([answer(Mark_Type="LINE_COLOR", Series=_colour_marker, Read_Route="manual", **_line)])[0]
+check("경로가 적힌다", len(_wm) == 1 and _wm[0]["Read_Route"] == "MANUAL" and _wm[0]["Series"] == _colour_marker,
+      "%s" % ([w.get("Read_Route") for w in _wm],))
+check("거절에는 경로가 없다",
+      (lambda w: len(w) == 1 and w[0]["Read_Route"] == "")(
+          run([answer(Human_Verification_Status="REJECTED", Read_Route="MANUAL", X_Factor="", X_Labels="",
+                      Series="", Outcome_Name="")])[0]))
+
+print()
 print("두 번 적지 않는다, 그리고 자기 출력을 답으로 읽지 않는다")
 _out = os.path.join(TMP, "twice.csv")
 R.record(PROP, [answer()], "2026-09-18", out_path=_out, log=lambda *a: None)

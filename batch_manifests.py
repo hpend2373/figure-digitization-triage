@@ -1717,6 +1717,13 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     # -------------------------------------------------------------- panels
     panel_index, panel_mark, mark_by_config = {}, {}, {}
     panel_config = {}
+    # WHO READS each panel. A MANUAL panel is read by a person, so the checks that
+    # exist because a READER must tell its series apart - a discriminant per
+    # series, two series told apart by it, one box per x - are not this panel's
+    # to pass. That is what the messages below have always told the author to do
+    # ("route the panel to MANUAL"), and what they did not honour: the flags
+    # fired on a MANUAL panel as on any other, so the advice was a dead end.
+    panel_modes = {}
     #: Unit_ID -> the panels whose rows name it. The other half of the v9.3
     #: bijection, collected here so the check below can be stated once over both
     #: manifests rather than inside either loop.
@@ -1760,6 +1767,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         panel_mark[pid] = mark
         panel_config[pid] = str(r.get("Config_ID", "")).strip()
         mode = str(r.get("Panel_Mode", "")).strip().upper() or "AUTO"
+        panel_modes[pid] = mode
         if mode not in PANEL_MODES:
             flag(line, "BAD_PANEL_MODE",
                  "Panel_Mode=%s (expected %s)" % (mode, "/".join(PANEL_MODES)))
@@ -2010,7 +2018,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         series_count[str(r.get("Panel_ID", "")).strip()] = series_count.get(
             str(r.get("Panel_ID", "")).strip(), 0) + 1
     for pid_, r in panel_mark.items():
-        if str(r).strip().upper() == "BOX_VIOLIN" and series_count.get(pid_, 0) > 1:
+        if str(r).strip().upper() == "BOX_VIOLIN" and series_count.get(pid_, 0) > 1 \
+                and panel_modes.get(pid_) != "MANUAL":
             flag("panel:%s" % pid_, "UNSUPPORTED_CAPABILITY",
                  "BOX_VIOLIN declares %d series. The released reader finds boxes "
                  "at declared x positions and cannot tell overlaid groups apart, "
@@ -2035,6 +2044,9 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             continue
         seen_series.add((pid, sid))
         mark = panel_mark.get(pid, "")
+        # the mark type as a READER will use it; a person reading the panel
+        # needs no discriminant column (see `panel_modes`)
+        read_mark = "" if panel_modes.get(pid) == "MANUAL" else mark
         if blank(r.get("Factor_Name")) or blank(r.get("Factor_Level")):
             flag(line, "MISSING_SERIES_IDENTITY",
                  "a series without a Factor_Name/Factor_Level cannot become a "
@@ -2068,8 +2080,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             if v and v not in vocab:
                 flag(line, "BAD_SERIES_%s" % col.upper(),
                      "%s=%s (expected %s)" % (col, v, "/".join(vocab)))
-        if mark in COLOUR_MARK_TYPES:
-            if mark == "BAR_COLOR":
+        if read_mark in COLOUR_MARK_TYPES:
+            if read_mark == "BAR_COLOR":
                 if blank(r.get("Mask_Key")) and blank(r.get("Colour_Hex")):
                     flag(line, "MISSING_SERIES_DISCRIMINANT",
                          "BAR_COLOR separates series by colour - give "
@@ -2097,19 +2109,19 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                              "say which" % (r.get("Mask_Key"), r.get("Colour_Hex")))
             elif blank(r.get("Colour_Hex")):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
-                     "%s separates series by colour - Colour_Hex required" % mark)
+                     "%s separates series by colour - Colour_Hex required" % read_mark)
         if not blank(r.get("Colour_Hex")):
             try:
                 parse_colour(r.get("Colour_Hex"))
             except ValueError as exc:
                 flag(line, "BAD_SERIES_COLOUR", str(exc))
-        if mark == "LINE_MONO_STYLE":
+        if read_mark == "LINE_MONO_STYLE":
             style = str(r.get("Line_Style", "")).strip().upper()
             if style in ("", "NONE"):
                 flag(line, "MISSING_SERIES_DISCRIMINANT",
                      "%s separates series by line style - declare Line_Style"
                      % mark)
-        elif mark == "LINE_MONO":
+        elif read_mark == "LINE_MONO":
             # The released LINE_MONO reader separates series by MARKER geometry
             # and never looks at Line_Style. Accepting a series declared purely
             # as SOLID-versus-DASHED let a manifest describe a figure the shipped
@@ -2128,7 +2140,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "does not use it; the series will be matched by marker "
                      "geometry alone. Blank it, or the manifest promises a "
                      "discriminant the run will not apply")
-        if mark == "BAR_MONO" and str(r.get("Bar_Fill_Pattern", "")).strip().upper() \
+        if read_mark == "BAR_MONO" and str(r.get("Bar_Fill_Pattern", "")).strip().upper() \
                 in ("", "NONE"):
             flag(line, "MISSING_SERIES_DISCRIMINANT",
                  "a monochrome bar series is told apart by its fill pattern - "
@@ -2141,7 +2153,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     marker_shapes = {}
     for _, r in series.iterrows():
         pid = str(r.get("Panel_ID", "")).strip()
-        if panel_mark.get(pid) != "LINE_MONO":
+        if panel_mark.get(pid) != "LINE_MONO" or panel_modes.get(pid) == "MANUAL":
             continue
         marker_shapes.setdefault(pid, []).append(
             (str(r.get("Series_ID", "")).strip(),
@@ -2180,6 +2192,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                 cfg.get("Value")
     # Two series of one panel that are told apart by nothing are not two series.
     for pid in panel_index:
+        if panel_modes.get(pid) == "MANUAL":
+            continue          # a person tells these series apart, by the cue in their Note
         mark = panel_mark.get(pid, "")
         rows = [r for _, r in series.iterrows()
                 if str(r.get("Panel_ID", "")).strip() == pid]

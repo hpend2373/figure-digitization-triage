@@ -1,7 +1,7 @@
 {
  "files": {
-  "identity_page.py": "967457b4a851888c59eade4f307f6e98fe89bcb44b8c2628818a376a20fff77b",
-  "test_identity_page.py": "feaf57524c891124e80161eb9882eb95f1e41e7467af650d799942bc0ad24cef"
+  "identity_page.py": "2aed3f0267eb691ecc13b6202b32d78ba0d1a785c6994bfc9b68f7abfbde0694",
+  "test_identity_page.py": "ab0e96dc399f79b670991aaef6e7e3ca8f12e844477e8e5af0f89e42eaefe8c1"
  },
  "suites": [
   "test_identity_page.py"
@@ -60,6 +60,18 @@
    "file": "identity_page.py",
    "old": "    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))",
    "new": "    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))"
+  },
+  {
+   "name": "사람이 읽는 경로를 물을 칸이 없다",
+   "file": "identity_page.py",
+   "old": "data-route='%s'> 판독기가",
+   "new": "data-noroute='%s'> 판독기가"
+  },
+  {
+   "name": "사람이 읽는 경로에 구분 단서 칸이 없다",
+   "file": "identity_page.py",
+   "old": "\" 단서 <input type='text' data-scue='\"",
+   "new": "\" 단서 <input type='text' data-nocue='\""
   }
  ]
 }

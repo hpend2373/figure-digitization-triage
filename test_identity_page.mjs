@@ -152,6 +152,60 @@ test('오차막대 줄기 확인은 연속형 표에만 나간다', () => {
   assert.equal(L.verdictOf('GP001', state({ stem: true })).row.Errorbar_Stem_Confirmed, 'TRUE');
   assert.equal(L.verdictOf('GP001', state({ kind: 'SCATTER', markProposed: 'SCATTER', barTop: '', seriesFactor: 'GROUP', readSeries: 'ALL@1,2,3' })).row.Errorbar_Stem_Confirmed, '');
 });
+/* 주황 원·주황 삼각형·파랑 원 (S41467 FIG5 b): 색도 마커도 혼자서는 못 가릅니다. */
+function colourMarker(over) {
+  return state(Object.assign({ kind: 'LINE', markType: 'LINE_COLOR', barTop: '', seriesFactor: 'TIMEPOINT_DAY', xFactor: 'CLOCK_TIME',
+    series: [{ name: 'B3', colour: [228, 134, 10], marker: 'CIRCLE', marker_fill: 'FILLED' },
+             { name: 'B1', colour: [228, 134, 10], marker: 'TRIANGLE', marker_fill: 'FILLED' },
+             { name: 'D1', colour: [0, 84, 147], marker: 'CIRCLE', marker_fill: 'FILLED' }] }, over || {}));
+}
+/* REVERT: 사람이 읽는 경로에도 판독기의 구분 규칙을 건다. 색+마커 패널은 영영 답이 되지 않습니다. */
+test('색+마커 조합은 판독기 경로로는 답이 아니고, 사람이 읽는 경로로는 답이다', () => {
+  assert.match(L.verdictOf('GP001', colourMarker()).why, /가를 것이 없습니다/);
+  const got = L.verdictOf('GP001', colourMarker({ route: 'MANUAL' }));
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Read_Route, 'MANUAL');
+  assert.deepEqual(JSON.parse(got.row.Series).map(e => [e.name, e.colour, e.marker]),
+                   [['B3', '#E4860A', 'CIRCLE'], ['B1', '#E4860A', 'TRIANGLE'], ['D1', '#005493', 'CIRCLE']]);
+  assert.equal(L.verdictOf('GP001', state()).row.Read_Route, 'AUTO');
+  assert.equal(L.routeOf({}), 'AUTO');
+});
+/* REVERT: 사람이 읽는 경로에서도 색으로 가르는 표의 색을 요구한다. 흰 막대 계열에는 색이 없습니다. */
+test('사람이 읽는 경로는 색 없는 계열도 받는다', () => {
+  const s = state({ route: 'MANUAL', series: [{ name: 'Fluid', colour: [220, 40, 40], bar_fill: 'HATCHED' }, { name: 'Control', colour: null, bar_fill: 'OPEN' }] });
+  assert.equal(L.verdictOf('GP001', s).ready, true, L.verdictOf('GP001', s).why);
+});
+/* REVERT: 판독기가 모르는 모양을 판독기 경로에서 받는다. 계획서가 판독기에 모르는 모양을 찾으라고 합니다. */
+test('판독기가 모르는 모양은 사람이 읽는 경로에서만 답이다', () => {
+  const s = state({ kind: 'LINE', markType: 'LINE_MONO', barTop: '', readSeries: '',
+                    series: [{ name: 'SUP', colour: null, marker: 'CROSS' }, { name: 'STAND', colour: null, marker: 'ASTERISK' }] });
+  const auto = L.verdictOf('GP001', s);
+  assert.equal(auto.ready, false);
+  assert.match(auto.why, /사람이 읽는다/);
+  s.route = 'MANUAL';
+  assert.equal(L.verdictOf('GP001', s).ready, true, L.verdictOf('GP001', s).why);
+});
+/* REVERT: 사람이 읽는 경로에서 단서를 계열 구분에 넣지 않는다 / 구분을 묻지 않는다. */
+test('똑같이 그려진 계열은 서로 다른 구분 단서가 있어야 답이다', () => {
+  const same = { colour: [233, 137, 10], marker: 'CIRCLE', marker_fill: 'OPEN', line_style: 'DOTTED' };
+  const s = state({ kind: 'LINE', markType: 'LINE_COLOR', barTop: '', route: 'MANUAL',
+                    series: [Object.assign({ name: 'D3' }, same), Object.assign({ name: 'B2' }, same)] });
+  assert.match(L.verdictOf('GP001', s).why, /구분 단서/);
+  s.series[0].cue = '곡선'; s.series[1].cue = ' 곡선 ';
+  assert.equal(L.verdictOf('GP001', s).ready, false);
+  s.series[0].cue = '위쪽 곡선, 끝에 D3'; s.series[1].cue = '아래쪽 곡선, 끝에 B2';
+  const got = L.verdictOf('GP001', s);
+  assert.equal(got.ready, true, got.why);
+  assert.deepEqual(JSON.parse(got.row.Series).map(e => e.cue), ['위쪽 곡선, 끝에 D3', '아래쪽 곡선, 끝에 B2']);
+  assert.equal('cue' in JSON.parse(L.verdictOf('GP001', state()).row.Series)[0], false);
+});
+test('경로는 csv로 나간다', () => {
+  assert.ok(L.CSV_COLUMNS.indexOf('Read_Route') >= 0);
+  const csv = L.buildCsv(['a'], { a: colourMarker({ route: 'MANUAL' }) });
+  const head = csv.split('\n')[0].split(','), line = csv.split('\n')[1];
+  assert.equal(head.indexOf('Read_Route') >= 0, true);
+  assert.match(line, /"MANUAL"/);
+});
 test('사람이 고친 것과 읽은 것을 가른다', () => {
   assert.equal(L.pick('', 'read'), 'read');
   assert.equal(L.pick(' typed ', 'read'), 'typed');

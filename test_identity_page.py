@@ -121,6 +121,13 @@ check("판정 논리가 페이지 안에 들어 있다", "function verdictOf(" i
 check("내려받는 이름은 관문이 적는 이름과 다르다", "identity_answers.csv" in HTML and R.DECISIONS not in HTML)
 _cols = re.search(r"var CSV_COLUMNS = \[(.*?)\]", LOGIC, re.S).group(1)
 check("관문이 요구하는 열이 전부 나간다", all(("'%s'" % c) in _cols for c in R.ANSWER_REQUIRED))
+# REVERT: 논리의 경로·모양 어휘가 관문과 어긋난다. 화면이 답이라고 한 것을 관문이 거절하거나 그 반대입니다.
+_routes = set(re.findall(r"'([A-Z_]+)'", re.search(r"var READ_ROUTES = \[(.*?)\]", LOGIC, re.S).group(1)))
+_manual_shapes = set(re.findall(r"'([A-Z_]+)'", re.search(r"var MANUAL_ONLY_SHAPES = \[(.*?)\]", LOGIC, re.S).group(1)))
+check("판독 경로와 사람만 적는 모양이 관문의 것과 같다",
+      _routes == set(R.READ_ROUTES) and _manual_shapes == set(R.MANUAL_ONLY_SHAPES),
+      "%s / %s" % (sorted(_routes), sorted(_manual_shapes)))
+check("경로가 csv로 나가고, 관문이 적는 열이다", "'Read_Route'" in _cols and "Read_Route" in IP.IDENTITY_COLUMNS)
 
 print()
 print("사람만 적는 것이 물어져 있다")
@@ -128,6 +135,10 @@ check("x 요인과 계열 요인을 묻는다", "data-xfactor='GP001'" in _c1 an
 check("막대의 값을 어디서 읽는지와 오차막대 줄기를 묻는다", "data-bartop='GP001'" in _c1 and "data-stem='GP001'" in _c1)
 check("x 위치를 찍고 계열을 더할 수 있다", "data-arm-x='GP001'" in _c1 and "data-s-add='GP001'" in _c1)
 check("목격과 이름을 묻는다", "data-seen='GP001'" in _c1 and "data-who='GP001'" in _c1)
+# REVERT: 사람이 읽는 경로를 물을 칸이 없다. 판독기가 못 가르는 패널은 보류로만 남습니다.
+check("판독기가 못 가르면 사람이 읽는다고 할 수 있다", "data-route='GP001'" in _c1 and "값은 사람이 읽는다" in _c1)
+check("그 경로에서는 본 대로의 색과 구분 단서를 적는다",
+      "data-scue=" in HTML and "data-shex=" in HTML and "MARKER_SHAPES.concat(MANUAL_ONLY_SHAPES)" in HTML)
 
 print()
 print("조각")

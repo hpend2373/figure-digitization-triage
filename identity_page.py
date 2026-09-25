@@ -115,6 +115,7 @@ def build(proposals, log=print, chunk=1, of=1):
 .pickwrap.arming img{cursor:crosshair;outline:2px solid #1e64c8}
 .xmark{position:absolute;top:0;bottom:0;width:0;border-left:2px dashed #1e64c8;pointer-events:none}
 .who{margin:8px 0}
+.route{margin:8px 0 0;padding-top:6px;border-top:1px dashed #e4e4e0}
 h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-align:2px}
 </style>""")
     w("<header><h1>정체 확인%s <span class='count' id='left'></span> "
@@ -134,6 +135,13 @@ h1 #guidetoggle{font-size:12px;font-weight:normal;margin-left:10px;vertical-alig
       "계열도 같습니다 — 이름을 고치거나 \"계열 추가\"로 적어 주세요. 색으로 가르는 표는 "
       "계열마다 색이 있어야 하고(리더가 찾은 색을 씁니다), 선 모양·마커·채움 무늬로 "
       "가르는 표는 그것을 골라 주세요.</p>")
+    w("<p class='note'>판독기는 표 종류마다 <b>한 가지</b>로만 계열을 가릅니다 — 색, 마커, 선 모양, "
+      "채움 무늬 중 하나. 색과 마커를 섞어 그렸거나(주황 원·주황 삼각형·파랑 원), 판독기가 "
+      "모르는 모양(×, 별표, 아래 삼각형)이거나, 계열이 똑같이 그려져 선 끝의 글자로만 "
+      "갈리면 <b>\"값은 사람이 읽는다\"</b>를 켜 주세요. 격자(요인·x 위치·계열 이름)는 "
+      "똑같이 확인하고, 계열의 표시는 본 대로 적고, 표시가 같은 계열은 서로 다른 "
+      "<b>구분 단서</b>(예: 위쪽 곡선, 끝에 D3)를 적습니다. 이 패널의 값은 계획서가 사람의 "
+      "판독 대기열로 보냅니다.</p>")
     w("<p class='note'>결과변수·단위·n은 비워 두면 리더가 읽은 것을 씁니다. n은 캡션에 "
       "없으면 비워 두세요 — 지어내지 않습니다. 막대 표는 값을 <b>어디서 읽는지</b>"
       "(윤곽선 중심 / 채움 가장자리)와 오차막대에 <b>세로 줄기</b>가 붙어 있는지도 "
@@ -242,7 +250,10 @@ def card(proposals, pid, row):
     w("<div class='sub'><button class='pickbtn' data-s-add='%s'>계열 추가</button>"
       "<button class='pickbtn' data-s-reset='%s'>읽은 대로 되돌리기</button></div>"
       % (esc(pid), esc(pid)))
-    w("<div class='plist' data-series='%s'></div></div>" % esc(pid))
+    w("<div class='plist' data-series='%s'></div>" % esc(pid))
+    w("<div class='route'><label><input type='checkbox' data-route='%s'> 판독기가 이 계열들을 가를 수 "
+      "없다 — <b>값은 사람이 읽는다</b></label> <span class='sub'>표시를 본 대로 적고, 표시가 같은 "
+      "계열에는 구분 단서를 적어 주세요</span></div></div>" % esc(pid))
     # ---- unit ----
     w("<div class='blk'><h4>결과변수 · 단위 · n</h4>")
     w("결과변수 <input type='text' data-outcome='%s' size='26' placeholder='%s'> "
@@ -298,7 +309,7 @@ PAGE_JS = r"""
     if (!states[id]) {
       states[id] = { verdict: '', who: '', seen: false, note: '', xFactor: '', positions: [],
                      seriesFactor: '', series: [], markType: '', outcome: '', unit: '', n: '',
-                     barTop: '', stem: false };
+                     barTop: '', stem: false, route: '' };
     }
     var m = META[id];
     if (m) {
@@ -352,10 +363,20 @@ PAGE_JS = r"""
     var mark = (s.markType || s.markProposed || '').toUpperCase();
     var list = seriesOf(s), typed = !!s.series.length, m = META[id] || {};
     var html = '';
+    var manual = routeOf(s) === 'MANUAL';
     list.forEach(function (e, i) {
       html += "<div>" + (i + 1) + ". "
             + (e.colour ? "<span class='chip' style='background:" + hexOf(e.colour) + "'></span>" : '')
             + "<input type='text' data-sname='" + h(i) + "' value='" + h(e.name) + "' size='14' placeholder='계열 이름'> ";
+      if (manual) {
+        // 사람이 읽는 경로: 본 대로의 표시 전부와 구분 단서.
+        html += "색 <input type='text' data-shex='" + h(i) + "' value='" + h(hexOf(e.colour)) + "' size='7' maxlength='7' placeholder='#RRGGBB'> "
+              + "마커 " + styleSelect('smarker', i, MARKER_SHAPES.concat(MANUAL_ONLY_SHAPES), e.marker) + " 채움 " + styleSelect('smfill', i, MARKER_FILLS, e.marker_fill)
+              + " 선 " + styleSelect('sline', i, LINE_STYLES, e.line_style) + " 무늬 " + styleSelect('sbar', i, BAR_FILLS, e.bar_fill)
+              + " 단서 <input type='text' data-scue='" + h(i) + "' value='" + h(e.cue || '') + "' size='22' placeholder='예: 위쪽 곡선, 끝에 D3'> "
+              + "<button class='pickbtn' data-sdel='" + h(i) + "'>지우기</button></div>";
+        return;
+      }
       if (COLOUR_MARKS.indexOf(mark) >= 0 && !e.colour && (m.colours || []).length) {
         html += "색 <select data-scolour='" + h(i) + "'><option value=''>—</option>" + m.colours.map(function (c, ci) {
           return "<option value='" + ci + "'>rgb(" + c.join(',') + ")</option>"; }).join('') + "</select> ";
@@ -379,6 +400,11 @@ PAGE_JS = r"""
     bindS('smarker', function (ser, i, el) { ser[i].marker = el.value; });
     bindS('smfill', function (ser, i, el) { ser[i].marker_fill = el.value; });
     bindS('sbar', function (ser, i, el) { ser[i].bar_fill = el.value; });
+    bindS('scue', function (ser, i, el) { ser[i].cue = el.value; });
+    bindS('shex', function (ser, i, el) {
+      var rgb = trim(el.value).match(/^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/);
+      if (rgb || !trim(el.value)) ser[i].colour = rgb ? rgb.slice(1).map(function (v) { return parseInt(v, 16); }) : null;
+    });
     bindS('sdel', function (ser, i) { ser.splice(i, 1); if (!ser.length) ser.push({ name: '', colour: null, line_style: '', marker: '', marker_fill: '', bar_fill: '' }); });
   }
 
@@ -418,6 +444,7 @@ PAGE_JS = r"""
     var sb = q("[data-stemblk=\"" + esc(id) + "\"]"); if (sb) sb.hidden = (mark === 'SCATTER' || mark === 'BOX_VIOLIN');
     var stc = q("input[data-stem=\"" + esc(id) + "\"]"); if (stc) stc.checked = !!s.stem;
     var sn = q("input[data-seen=\"" + esc(id) + "\"]"); if (sn) sn.checked = !!s.seen;
+    var rt = q("input[data-route=\"" + esc(id) + "\"]"); if (rt) rt.checked = routeOf(s) === 'MANUAL';
     if (!light) { renderPositions(id); renderSeries(id); }
     // 그림 위의 x 위치
     var wrap = q(".pickwrap[data-pick=\"" + esc(id) + "\"]");
@@ -456,6 +483,7 @@ PAGE_JS = r"""
   bind('input[data-stem]', 'data-stem', function (s, el) { s.stem = el.checked; }, 'change');
   bind('input[data-who]', 'data-who', function (s, el) { s.who = el.value; spreadWho(el.value); }, 'input', true);
   bind('input[data-seen]', 'data-seen', function (s, el) { s.seen = el.checked; }, 'change');
+  bind('input[data-route]', 'data-route', function (s, el) { s.route = el.checked ? 'MANUAL' : ''; }, 'change');
   bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; }, 'input', true);
   bind('button[data-arm-x]', 'data-arm-x', function (s, el) {
     var id = el.getAttribute('data-arm-x'); arming[id] = arming[id] === 'x' ? '' : 'x';

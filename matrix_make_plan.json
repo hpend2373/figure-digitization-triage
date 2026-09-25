@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "9ebcd6ad04565b162e7720545112e5d6b8782ccfd98ed2f8a38f51942ac80c50",
-  "test_make_plan.py": "b5120731dd1b76a72024dff7c2b366e0a6ed69fd6cbba751d6f792dc6fd6ad14"
+  "make_plan.py": "298c1f8e4f5b1800553f1e0e5f60209aadecc7aa6c1fa80a183413b52ef4f43f",
+  "test_make_plan.py": "d2cf31be3c5684c07c792c35f00d852f8f1810423eda551548216d48aabe57d2"
  },
  "suites": [
   "test_make_plan.py"
@@ -384,6 +384,24 @@
    "file": "make_plan.py",
    "old": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, panel_sheet)",
    "new": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, [])"
+  },
+  {
+   "name": "사람이 읽는 경로를 계획서로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "    if manual:\n        read[\"panel_mode\"] = \"MANUAL\"",
+   "new": "    if False:\n        read[\"panel_mode\"] = \"MANUAL\""
+  },
+  {
+   "name": "사람이 읽는 패널의 표시를 판독기의 칸에 적는다",
+   "file": "make_plan.py",
+   "old": "                if manual:\n                    drawn.append(",
+   "new": "                if False:\n                    drawn.append("
+  },
+  {
+   "name": "구분 단서를 메모에 적지 않는다",
+   "file": "make_plan.py",
+   "old": "\"cue: %s\" % cue if cue else \"\"",
+   "new": "\"\""
   }
  ]
 }

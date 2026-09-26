@@ -1,7 +1,7 @@
 {
  "files": {
-  "identity_page.py": "2aed3f0267eb691ecc13b6202b32d78ba0d1a785c6994bfc9b68f7abfbde0694",
-  "test_identity_page.py": "ab0e96dc399f79b670991aaef6e7e3ca8f12e844477e8e5af0f89e42eaefe8c1"
+  "identity_page.py": "6189a5181f26caa3f3604ecef0e5910b71e6463d0ef43642ce5abbafab63ddc4",
+  "test_identity_page.py": "c623d8ab94d1d41b711bc756492aa279d2faea1ddfe681b39600b08f2aacfdef"
  },
  "suites": [
   "test_identity_page.py"
@@ -72,6 +72,12 @@
    "file": "identity_page.py",
    "old": "\" 단서 <input type='text' data-scue='\"",
    "new": "\" 단서 <input type='text' data-nocue='\""
+  },
+  {
+   "name": "마커 표의 모양 칸에 ▼가 없다",
+   "file": "identity_page.py",
+   "old": "styleSelect('smarker', i, MARKER_SHAPES.concat(Object.keys(READER_CLASS)), e.marker)",
+   "new": "styleSelect('smarker', i, MARKER_SHAPES, e.marker)"
   }
  ]
 }

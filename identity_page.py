@@ -382,7 +382,7 @@ PAGE_JS = r"""
           return "<option value='" + ci + "'>rgb(" + c.join(',') + ")</option>"; }).join('') + "</select> ";
       }
       if (mark === 'LINE_MONO_STYLE') html += "선 " + styleSelect('sline', i, LINE_STYLES, e.line_style) + " ";
-      if (mark === 'LINE_MONO') html += "마커 " + styleSelect('smarker', i, MARKER_SHAPES, e.marker) + " 채움 " + styleSelect('smfill', i, MARKER_FILLS, e.marker_fill) + " ";
+      if (mark === 'LINE_MONO') html += "마커 " + styleSelect('smarker', i, MARKER_SHAPES.concat(Object.keys(READER_CLASS)), e.marker) + " 채움 " + styleSelect('smfill', i, MARKER_FILLS, e.marker_fill) + " ";
       if (mark === 'BAR_MONO') html += "무늬 " + styleSelect('sbar', i, BAR_FILLS, e.bar_fill) + " ";
       html += "<button class='pickbtn' data-sdel='" + h(i) + "'>지우기</button></div>";
     });

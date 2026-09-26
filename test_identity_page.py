@@ -139,6 +139,9 @@ check("목격과 이름을 묻는다", "data-seen='GP001'" in _c1 and "data-who=
 check("판독기가 못 가르면 사람이 읽는다고 할 수 있다", "data-route='GP001'" in _c1 and "값은 사람이 읽는다" in _c1)
 check("그 경로에서는 본 대로의 색과 구분 단서를 적는다",
       "data-scue=" in HTML and "data-shex=" in HTML and "MARKER_SHAPES.concat(MANUAL_ONLY_SHAPES)" in HTML)
+# REVERT: 마커 표의 모양 칸에 ▼가 없다. 판독기 경로로 받는 ▼를 고를 수 없고, 적어 둔 ▼는 빈칸으로 보입니다.
+check("마커로 가르는 표의 모양 칸에 판독기 부류가 있는 모양(▼)도 있다",
+      "styleSelect('smarker', i, MARKER_SHAPES.concat(Object.keys(READER_CLASS)), e.marker)" in HTML)
 
 print()
 print("조각")

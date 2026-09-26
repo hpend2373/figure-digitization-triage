@@ -549,10 +549,16 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
             if (e.get(src) or "").strip():
                 if manual:
                     drawn.append("%s=%s" % (dst, e[src].strip()))
+                elif src == "marker" and e[src].strip().upper() in RI.MANUAL_ONLY_SHAPES:
+                    # 색으로 가르는 표의 ▼ 같은 모양: 판독기 어휘에 없고 판독기는 모양을
+                    # 보지 않습니다. 본 것은 메모로 남기고 판독기 칸은 비웁니다.
+                    drawn.append("%s=%s (colour separates; not a reader shape)" % (dst, e[src].strip()))
                 else:
                     sp[dst] = e[src].strip()
         if name:
             sp["note"] = "legend: %s" % name
+        if drawn and not manual:
+            sp["note"] = "; ".join(x for x in (sp.get("note", ""), "drawn: %s" % ", ".join(drawn)) if x)
         if manual:
             cue = (e.get("cue") or "").strip()
             sp["note"] = "; ".join(x for x in (sp.get("note", ""), "drawn: %s" % ", ".join(drawn) if drawn else "",

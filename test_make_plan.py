@@ -700,6 +700,24 @@ check("its series carry what was drawn and the cue in the note, not in the reade
       and "cue" not in _m1["read"]["series"][0]["note"],
       "%s" % [q.get("note") for q in _m1["read"]["series"]])
 check("a reader-read identity is still AUTO", _p1["read"]["panel_mode"] == "AUTO")
+# A colour-separated line panel whose Control is drawn as a point-down triangle,
+# confirmed on the reader's route: the colour mask reads it, the shape is only seen.
+_tseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},
+                        {"name": "Control", "colour": "#818181", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED",
+                         "line_style": "DASHED"}])
+_tplan, _tsheet, _tfig, _tpanels = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Series=_tseries, Bar_Top_Definition="")])
+_t1 = [p for p in _tfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: the ▼ goes into the reader's marker column. TRIANGLE_DOWN is in no
+# reader's vocabulary and the batch layer refuses the whole manifest set
+# (BAD_SERIES_MARKER_SHAPE) for a shape the colour reader never looks at.
+check("a ▼ on a colour-separated panel stays AUTO: colour to the reader, the shape to the note",
+      _t1["read"]["panel_mode"] == "AUTO" and _t1["read"]["series"][1].get("colour") == "#818181"
+      and "marker" not in _t1["read"]["series"][1] and _t1["read"]["series"][1].get("line_style") == "DASHED"
+      and "marker=TRIANGLE_DOWN" in _t1["read"]["series"][1]["note"] and _t1["read"]["series"][0].get("marker") == "CIRCLE",
+      "%s" % _t1["read"]["series"])
+_tproblems = [q for q in CP.validate_plan(_tplan, file_root=RUN) if q["where"].startswith("figures[0]")]
+check("that figure validates as a plan", _tproblems == [], _tproblems[:3])
 _mproblems = [q for q in CP.validate_plan(_mplan, file_root=RUN) if q["where"].startswith("figures[0]")]
 check("the person-read figure validates as a plan", _mproblems == [], _mproblems[:3])
 _u1 = [u for u in _plan["units"] if u["panel_id"] == "PUB_D001_P1"][0]

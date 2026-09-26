@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_identity.py": "3f4c1fadc633b301902e3dbbc033400901e24b648e3f8b83196a2471c48bf80d",
-  "test_record_identity.py": "fd0d9eb68c50a2cdf02c8902b075f15b307ccceebe1d9b0f4ff4db9ecc84dd67"
+  "record_identity.py": "b504d325d887333355896937c4629834a46f40eb74832c9d977e19dd8e686c0b",
+  "test_record_identity.py": "421f8d7acdf976bde3a899c6106ecdbdd81a2bdb3ffe3c595c6d33a1ddf259f3"
  },
  "suites": [
   "test_record_identity.py"
@@ -118,13 +118,13 @@
   {
    "name": "판독기가 모르는 모양을 사람이 읽는 경로에서도 거절한다",
    "file": "record_identity.py",
-   "old": "shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if manual else ())",
+   "old": "shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())",
    "new": "shapes = BM.MARKER_SHAPES"
   },
   {
    "name": "판독기가 모르는 모양을 어휘 밖이라고만 한다",
    "file": "record_identity.py",
-   "old": "if value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual:",
+   "old": "if value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual and not colour_mark:",
    "new": "if False:"
   },
   {
@@ -156,6 +156,24 @@
    "file": "record_identity.py",
    "old": "== \"CONFIRMED\" else \"\",",
    "new": "!= \"\" else \"\","
+  },
+  {
+   "name": "색으로 가르는 표에서도 ▼를 판독기 경로에서 거절한다",
+   "file": "record_identity.py",
+   "old": "and what == \"marker\" and not manual and not colour_mark:",
+   "new": "and what == \"marker\" and not manual:"
+  },
+  {
+   "name": "색으로 가르는 표에서도 ▼를 어휘 밖이라 한다",
+   "file": "record_identity.py",
+   "old": "(MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())",
+   "new": "(MANUAL_ONLY_SHAPES if manual else ())"
+  },
+  {
+   "name": "마커로 가르는 표에서도 ▼를 판독기 경로로 받는다",
+   "file": "record_identity.py",
+   "old": "    colour_mark = mark in BM.COLOUR_MARK_TYPES\n",
+   "new": "    colour_mark = True\n"
   }
  ]
 }

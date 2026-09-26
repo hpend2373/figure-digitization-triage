@@ -184,6 +184,15 @@ check("판독기가 모르는 모양(×·별표)은 사람이 읽는 경로에�
 # REVERT: 그 모양을 판독기 경로에서 받거나, 어휘 밖이라고만 한다. 사람은 무엇을 해야 하는지 모릅니다.
 check("판독기가 모르는 모양을 판독기 경로로 적으면 경로를 바꾸라고 거절한다",
       "SHAPE_NEEDS_MANUAL_ROUTE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_cross, **_line)])[1]))
+_tri = series({"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},
+              {"name": "Control", "colour": "#818181", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED", "line_style": "DASHED"})
+# REVERT: 색으로 가르는 표에서도 ▼를 판독기 경로에서 거절한다. 대조군이 ▼로 그려진 색 구분 패널은
+# ▲로 틀리게 적거나 사람이 읽는 수밖에 없습니다 - 판독기는 모양을 보지 않는데도.
+check("색으로 가르는 표에서는 ▼를 판독기 경로로 받는다",
+      not run([answer(Mark_Type="LINE_COLOR", Series=_tri, **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_COLOR", Series=_tri, **_line)])[1]))
+check("같은 ▼를 마커로 가르는 표(LINE_MONO)의 판독기 경로에서는 여전히 거절한다",
+      "SHAPE_NEEDS_MANUAL_ROUTE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_tri, **_line)])[1]))
 _same = series({"name": "D3", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"},
                {"name": "B2", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"})
 # REVERT: 사람이 읽는 경로에서 계열 구분을 묻지 않는다. 똑같이 그려진 두 계열이 단서 없이 확인됩니다.

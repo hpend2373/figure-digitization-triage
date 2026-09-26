@@ -192,7 +192,8 @@ function verdictOf(id, state) {
     if (!nm) return { ready: false, why: (k + 1) + '번째 계열의 이름(수준)이 비어 있습니다 — 하나뿐이면 어느 군인지 적어 주세요 (예: ALL)', row: null };
     if (names[nm.toUpperCase()]) return { ready: false, why: '같은 계열 이름이 둘입니다: ' + nm, row: null };
     names[nm.toUpperCase()] = true;
-    if (!manual && MANUAL_ONLY_SHAPES.indexOf(trim(series[k].marker).toUpperCase()) >= 0) {
+    // 색으로 가르는 표에서는 모양이 계열을 가르지 않으므로 판독기가 모르는 모양도 본 대로 적습니다
+    if (!manual && COLOUR_MARKS.indexOf(markType) < 0 && MANUAL_ONLY_SHAPES.indexOf(trim(series[k].marker).toUpperCase()) >= 0) {
       return { ready: false, why: nm + ' 계열의 마커 ' + trim(series[k].marker).toUpperCase() + '는 판독기가 모르는 모양입니다 — "값은 사람이 읽는다"를 켜 주세요', row: null };
     }
     if (manual) continue;   // 사람이 읽는 경로: 판독기의 구분 수단 규칙이 없습니다

@@ -134,7 +134,11 @@ def series_problems(series, mark, route="AUTO"):
     if not series:
         return [("SERIES_MISSING", "확인인데 계열이 하나도 없습니다.")]
     manual = route == MANUAL
-    shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if manual else ())
+    # 색으로 가르는 표에서는 마커 모양이 계열을 가르지 않습니다 - 판독기는 색 마스크로
+    # 찾고 모양을 보지 않으므로, 판독기가 모르는 모양(▼ 등)도 본 대로 적을 수 있습니다.
+    # 계획서는 그 모양을 판독기 칸이 아니라 계열 메모로 보냅니다(`make_plan`).
+    colour_mark = mark in BM.COLOUR_MARK_TYPES
+    shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())
     names, keys = set(), []
     for i, e in enumerate(series, 1):
         name = str(e.get("name") or "").strip()
@@ -159,7 +163,7 @@ def series_problems(series, mark, route="AUTO"):
                                    (marker, shapes, "marker"),
                                    (mfill, BM.MARKER_FILLS, "marker_fill"),
                                    (bfill, BM.BAR_FILL_PATTERNS, "bar_fill")):
-            if value and value in MANUAL_ONLY_SHAPES and what == "marker" and not manual:
+            if value and value in MANUAL_ONLY_SHAPES and what == "marker" and not manual and not colour_mark:
                 out.append(("SHAPE_NEEDS_MANUAL_ROUTE",
                             "계열 %r의 마커 %s는 판독기가 모르는 모양입니다. 이 패널은 사람이 값을 "
                             "읽는 경로(Read_Route=MANUAL)로만 확인할 수 있습니다." % (name, value)))

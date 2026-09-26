@@ -185,6 +185,17 @@ test('판독기가 모르는 모양은 사람이 읽는 경로에서만 답이�
   s.route = 'MANUAL';
   assert.equal(L.verdictOf('GP001', s).ready, true, L.verdictOf('GP001', s).why);
 });
+/* REVERT: 색으로 가르는 표에서도 ▼를 판독기 경로에서 막는다. 판독기는 색으로 찾고 모양을 보지 않습니다. */
+test('색으로 가르는 표에서는 ▼도 판독기 경로에서 답이다', () => {
+  const s = state({ kind: 'LINE', markType: 'LINE_COLOR', barTop: '', readSeries: '',
+                    series: [{ name: 'Cocktail', colour: [218, 96, 0], marker: 'CIRCLE' }, { name: 'Control', colour: [129, 129, 129], marker: 'TRIANGLE_DOWN' }] });
+  const got = L.verdictOf('GP001', s);
+  assert.equal(got.ready, true, got.why);
+  assert.equal(got.row.Read_Route, 'AUTO');
+  assert.equal(JSON.parse(got.row.Series)[1].marker, 'TRIANGLE_DOWN');
+  s.markType = 'LINE_MONO';
+  assert.equal(L.verdictOf('GP001', s).ready, false);
+});
 /* REVERT: 사람이 읽는 경로에서 단서를 계열 구분에 넣지 않는다 / 구분을 묻지 않는다. */
 test('똑같이 그려진 계열은 서로 다른 구분 단서가 있어야 답이다', () => {
   const same = { colour: [233, 137, 10], marker: 'CIRCLE', marker_fill: 'OPEN', line_style: 'DOTTED' };

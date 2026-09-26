@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "298c1f8e4f5b1800553f1e0e5f60209aadecc7aa6c1fa80a183413b52ef4f43f",
-  "test_make_plan.py": "d2cf31be3c5684c07c792c35f00d852f8f1810423eda551548216d48aabe57d2"
+  "make_plan.py": "aeb07597d6fd2d35834736850bdef15656e960e5199c587d01d90cc437e561dd",
+  "test_make_plan.py": "4d45ef5bd3227e00a02e179944eda7f9c855d43d2bbd1109594a34fcbf7dd1bd"
  },
  "suites": [
   "test_make_plan.py"
@@ -402,6 +402,18 @@
    "file": "make_plan.py",
    "old": "\"cue: %s\" % cue if cue else \"\"",
    "new": "\"\""
+  },
+  {
+   "name": "색 구분 패널의 ▼를 판독기의 마커 칸에 넣는다",
+   "file": "make_plan.py",
+   "old": "                elif src == \"marker\" and e[src].strip().upper() in RI.MANUAL_ONLY_SHAPES:",
+   "new": "                elif False:"
+  },
+  {
+   "name": "판독기 칸에서 뺀 모양을 메모에도 남기지 않는다",
+   "file": "make_plan.py",
+   "old": "        if drawn and not manual:",
+   "new": "        if False:"
   }
  ]
 }

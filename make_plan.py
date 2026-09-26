@@ -550,9 +550,15 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
                 if manual:
                     drawn.append("%s=%s" % (dst, e[src].strip()))
                 elif src == "marker" and e[src].strip().upper() in RI.MANUAL_ONLY_SHAPES:
-                    # 색으로 가르는 표의 ▼ 같은 모양: 판독기 어휘에 없고 판독기는 모양을
-                    # 보지 않습니다. 본 것은 메모로 남기고 판독기 칸은 비웁니다.
-                    drawn.append("%s=%s (colour separates; not a reader shape)" % (dst, e[src].strip()))
+                    # 판독기 어휘 밖의 모양(▼ 등). 판독기 부류가 있으면(▼ -> TRIANGLE: 판독기의
+                    # 삼각형은 방향을 보지 않음) 판독기 칸에 그 부류를, 없으면(색 표의 ×·별표 등,
+                    # 색 판독기는 모양을 보지 않음) 판독기 칸을 비웁니다. 본 모양은 메모로.
+                    seen = e[src].strip().upper()
+                    if seen in RI.READER_CLASS:
+                        sp[dst] = RI.READER_CLASS[seen]
+                        drawn.append("%s=%s (read as the reader's %s)" % (dst, seen, RI.READER_CLASS[seen]))
+                    else:
+                        drawn.append("%s=%s (colour separates; not a reader shape)" % (dst, seen))
                 else:
                     sp[dst] = e[src].strip()
         if name:

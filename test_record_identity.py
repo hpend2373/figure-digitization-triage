@@ -191,8 +191,26 @@ _tri = series({"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "mar
 check("색으로 가르는 표에서는 ▼를 판독기 경로로 받는다",
       not run([answer(Mark_Type="LINE_COLOR", Series=_tri, **_line)])[1],
       "%s" % codes(run([answer(Mark_Type="LINE_COLOR", Series=_tri, **_line)])[1]))
-check("같은 ▼를 마커로 가르는 표(LINE_MONO)의 판독기 경로에서는 여전히 거절한다",
-      "SHAPE_NEEDS_MANUAL_ROUTE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_tri, **_line)])[1]))
+_colour_x = series({"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE"}, {"name": "Control", "colour": "#818181", "marker": "CROSS"})
+# REVERT: 색 표에서도 판독기 부류가 없는 모양(×)을 거절하거나 어휘 밖이라 한다. 색 판독기는 모양을 보지 않습니다.
+check("색으로 가르는 표에서는 ×도 판독기 경로로 받는다",
+      not run([answer(Mark_Type="LINE_COLOR", Series=_colour_x, **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_COLOR", Series=_colour_x, **_line)])[1]))
+_mono_dn = series({"name": "Control", "marker": "CIRCLE", "marker_fill": "OPEN"},
+                  {"name": "NFL-HDBR", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED"})
+# REVERT: 마커로 가르는 표에서 ▼를 판독기 경로에서 거절한다. 판독기의 삼각형은 방향을
+# 보지 않아 ▲가 없는 패널의 ▼를 그대로 읽는데도, 13개 패널이 사람 몫이 됩니다.
+check("마커로 가르는 표에서도 ▲가 없으면 ▼를 판독기 경로로 받는다 (판독기의 삼각형)",
+      not run([answer(Mark_Type="LINE_MONO", Series=_mono_dn, **_line)])[1],
+      "%s" % codes(run([answer(Mark_Type="LINE_MONO", Series=_mono_dn, **_line)])[1]))
+_updown = series({"name": "Up", "marker": "TRIANGLE", "marker_fill": "FILLED"},
+                 {"name": "Down", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED"})
+# REVERT: ▲와 ▼를 판독기 경로에서 서로 다른 모양으로 친다. 판독기는 둘을 한 삼각형으로 읽습니다.
+check("▲와 ▼가 함께 있으면 판독기 경로로는 가를 수 없다",
+      "SERIES_NOT_SEPARABLE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_updown, **_line)])[1]))
+_mono_x = series({"name": "SUP", "marker": "CIRCLE"}, {"name": "STAND", "marker": "CROSS"})
+check("판독기 부류가 없는 모양(×)은 마커로 가르는 표의 판독기 경로에서 여전히 거절한다",
+      "SHAPE_NEEDS_MANUAL_ROUTE" in codes(run([answer(Mark_Type="LINE_MONO", Series=_mono_x, **_line)])[1]))
 _same = series({"name": "D3", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"},
                {"name": "B2", "colour": "#E9890A", "marker": "CIRCLE", "marker_fill": "OPEN", "line_style": "DOTTED"})
 # REVERT: 사람이 읽는 경로에서 계열 구분을 묻지 않는다. 똑같이 그려진 두 계열이 단서 없이 확인됩니다.

@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "aeb07597d6fd2d35834736850bdef15656e960e5199c587d01d90cc437e561dd",
-  "test_make_plan.py": "4d45ef5bd3227e00a02e179944eda7f9c855d43d2bbd1109594a34fcbf7dd1bd"
+  "make_plan.py": "cb490ffe8b18ce82f164fbb9728e2f8e842a29ba6442a9d19bb717427743c8f7",
+  "test_make_plan.py": "7e8affb1aa54449cd452d76ba618881ea6c68f945bfaf98361733f2dfc4bb33d"
  },
  "suites": [
   "test_make_plan.py"
@@ -414,6 +414,12 @@
    "file": "make_plan.py",
    "old": "        if drawn and not manual:",
    "new": "        if False:"
+  },
+  {
+   "name": "▼를 판독기의 삼각형으로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "                    if seen in RI.READER_CLASS:",
+   "new": "                    if False:"
   }
  ]
 }

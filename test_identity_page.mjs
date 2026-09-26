@@ -194,6 +194,15 @@ test('색으로 가르는 표에서는 ▼도 판독기 경로에서 답이다',
   assert.equal(got.row.Read_Route, 'AUTO');
   assert.equal(JSON.parse(got.row.Series)[1].marker, 'TRIANGLE_DOWN');
   s.markType = 'LINE_MONO';
+  s.series[1].marker = 'CROSS';
+  assert.equal(L.verdictOf('GP001', s).ready, false);
+});
+/* REVERT: 마커 표에서 ▼를 막는다 / ▲와 ▼를 다른 모양으로 친다. 판독기의 삼각형은 방향을 보지 않습니다. */
+test('마커 표의 ▼는 ▲가 없을 때만 판독기 경로에서 답이다', () => {
+  const s = state({ kind: 'LINE', markType: 'LINE_MONO', barTop: '', readSeries: '',
+                    series: [{ name: 'Control', colour: null, marker: 'CIRCLE', marker_fill: 'OPEN' }, { name: 'NFL', colour: null, marker: 'TRIANGLE_DOWN', marker_fill: 'FILLED' }] });
+  assert.equal(L.verdictOf('GP001', s).ready, true, L.verdictOf('GP001', s).why);
+  s.series[0] = { name: 'Up', colour: null, marker: 'TRIANGLE', marker_fill: 'FILLED' };
   assert.equal(L.verdictOf('GP001', s).ready, false);
 });
 /* REVERT: 사람이 읽는 경로에서 단서를 계열 구분에 넣지 않는다 / 구분을 묻지 않는다. */

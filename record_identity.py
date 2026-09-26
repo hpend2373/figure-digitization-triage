@@ -70,6 +70,10 @@ MANUAL = "MANUAL"
 #: 삼각형·사각형·마름모만 구분하고, 이 모양들을 `AUTO`로 받으면 판독기가 모르는
 #: 모양을 찾으라는 계획서가 됩니다. 이 코퍼스에 실제로 인쇄된 것들입니다.
 MANUAL_ONLY_SHAPES = ("TRIANGLE_DOWN", "CROSS", "ASTERISK", "PENTAGON", "STAR")
+#: 판독기의 모양 부류로 옮겨 읽을 수 있는 모양. 판독기의 삼각형은 꼭짓점 수(셋)로
+#: 가를 뿐 방향을 보지 않으므로, ▼는 그 패널에 ▲가 함께 없을 때 판독기의 TRIANGLE로
+#: 읽힙니다. 계획서는 판독기 칸에 이 부류를, 메모에 본 모양을 적습니다(`make_plan`).
+READER_CLASS = {"TRIANGLE_DOWN": "TRIANGLE"}
 
 
 def is_true(v):
@@ -138,7 +142,7 @@ def series_problems(series, mark, route="AUTO"):
     # 찾고 모양을 보지 않으므로, 판독기가 모르는 모양(▼ 등)도 본 대로 적을 수 있습니다.
     # 계획서는 그 모양을 판독기 칸이 아니라 계열 메모로 보냅니다(`make_plan`).
     colour_mark = mark in BM.COLOUR_MARK_TYPES
-    shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())
+    shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else tuple(READER_CLASS))
     names, keys = set(), []
     for i, e in enumerate(series, 1):
         name = str(e.get("name") or "").strip()
@@ -163,7 +167,8 @@ def series_problems(series, mark, route="AUTO"):
                                    (marker, shapes, "marker"),
                                    (mfill, BM.MARKER_FILLS, "marker_fill"),
                                    (bfill, BM.BAR_FILL_PATTERNS, "bar_fill")):
-            if value and value in MANUAL_ONLY_SHAPES and what == "marker" and not manual and not colour_mark:
+            if (value and value in MANUAL_ONLY_SHAPES and what == "marker" and not manual
+                    and not colour_mark and value not in READER_CLASS):
                 out.append(("SHAPE_NEEDS_MANUAL_ROUTE",
                             "계열 %r의 마커 %s는 판독기가 모르는 모양입니다. 이 패널은 사람이 값을 "
                             "읽는 경로(Read_Route=MANUAL)로만 확인할 수 있습니다." % (name, value)))
@@ -185,7 +190,9 @@ def series_problems(series, mark, route="AUTO"):
         if mark == "BAR_MONO" and len(series) > 1 and bfill in ("", "NONE"):
             out.append(("SERIES_DISCRIMINANT_MISSING",
                         "BAR_MONO는 채움 무늬로 계열을 가르는데 계열 %r에 무늬가 없습니다." % (name or i)))
-        keys.append(colour.upper() if mark in BM.COLOUR_MARK_TYPES else (style, marker, mfill, bfill))
+        # 판독기가 보는 대로: ▼와 ▲는 판독기에게 같은 삼각형입니다.
+        keys.append(colour.upper() if mark in BM.COLOUR_MARK_TYPES
+                    else (style, READER_CLASS.get(marker, marker), mfill, bfill))
     if len(series) > 1 and len(set(keys)) != len(keys):
         if manual:
             out.append(("SERIES_NOT_SEPARABLE", "사람이 읽어도 두 계열을 가를 것이 없습니다 - 표시가 "

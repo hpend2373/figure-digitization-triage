@@ -39,6 +39,8 @@ var BAR_TOPS = ['OUTLINE_CENTER', 'FILL_EDGE', 'MARKER_CENTER', 'NOT_A_BAR'];
 //: `record_identity.READ_ROUTES`, `record_identity.MANUAL_ONLY_SHAPES`와 같아야 합니다.
 var READ_ROUTES = ['AUTO', 'MANUAL'];
 var MANUAL_ONLY_SHAPES = ['TRIANGLE_DOWN', 'CROSS', 'ASTERISK', 'PENTAGON', 'STAR'];
+//: `record_identity.READER_CLASS`와 같아야 합니다: 판독기의 삼각형은 방향을 보지 않습니다.
+var READER_CLASS = { TRIANGLE_DOWN: 'TRIANGLE' };
 
 /* 이 상태의 판독 경로. 이 칸이 생기기 전의 상태에는 없고, 없으면 판독기입니다. */
 function routeOf(s) {
@@ -193,7 +195,8 @@ function verdictOf(id, state) {
     if (names[nm.toUpperCase()]) return { ready: false, why: '같은 계열 이름이 둘입니다: ' + nm, row: null };
     names[nm.toUpperCase()] = true;
     // 색으로 가르는 표에서는 모양이 계열을 가르지 않으므로 판독기가 모르는 모양도 본 대로 적습니다
-    if (!manual && COLOUR_MARKS.indexOf(markType) < 0 && MANUAL_ONLY_SHAPES.indexOf(trim(series[k].marker).toUpperCase()) >= 0) {
+    var mk = trim(series[k].marker).toUpperCase();
+    if (!manual && COLOUR_MARKS.indexOf(markType) < 0 && MANUAL_ONLY_SHAPES.indexOf(mk) >= 0 && !READER_CLASS[mk]) {
       return { ready: false, why: nm + ' 계열의 마커 ' + trim(series[k].marker).toUpperCase() + '는 판독기가 모르는 모양입니다 — "값은 사람이 읽는다"를 켜 주세요', row: null };
     }
     if (manual) continue;   // 사람이 읽는 경로: 판독기의 구분 수단 규칙이 없습니다
@@ -217,7 +220,7 @@ function verdictOf(id, state) {
           + '|' + trim(e.cue).toLowerCase();
       }
       return COLOUR_MARKS.indexOf(markType) >= 0 ? hexOf(e.colour)
-        : [e.line_style, e.marker, e.marker_fill, e.bar_fill].map(function (v) { return trim(v).toUpperCase(); }).join('|');
+        : [e.line_style, READER_CLASS[trim(e.marker).toUpperCase()] || e.marker, e.marker_fill, e.bar_fill].map(function (v) { return trim(v).toUpperCase(); }).join('|');
     });
     for (var a = 0; a < keys.length; a++) {
       for (var b = a + 1; b < keys.length; b++) {

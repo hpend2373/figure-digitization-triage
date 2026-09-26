@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_identity.py": "b504d325d887333355896937c4629834a46f40eb74832c9d977e19dd8e686c0b",
-  "test_record_identity.py": "421f8d7acdf976bde3a899c6106ecdbdd81a2bdb3ffe3c595c6d33a1ddf259f3"
+  "record_identity.py": "4eac575f65e59fe9328cd69bc80de4d5bba81429bfbd098ed0fc96a423b43bd2",
+  "test_record_identity.py": "b0990bf63c71968925b7f42ae67cb33de84309b882f2ffd708fdde56c390c337"
  },
  "suites": [
   "test_record_identity.py"
@@ -118,14 +118,14 @@
   {
    "name": "판독기가 모르는 모양을 사람이 읽는 경로에서도 거절한다",
    "file": "record_identity.py",
-   "old": "shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())",
-   "new": "shapes = BM.MARKER_SHAPES"
+   "old": "shapes = BM.MARKER_SHAPES + (MANUAL_ONLY_SHAPES if (manual or colour_mark) else tuple(READER_CLASS))",
+   "new": "shapes = BM.MARKER_SHAPES + tuple(READER_CLASS)"
   },
   {
    "name": "판독기가 모르는 모양을 어휘 밖이라고만 한다",
    "file": "record_identity.py",
-   "old": "if value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual and not colour_mark:",
-   "new": "if False:"
+   "old": "            if (value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual\n",
+   "new": "            if (False and value and value in MANUAL_ONLY_SHAPES and what == \"marker\" and not manual\n"
   },
   {
    "name": "사람이 읽는 경로에서 계열 구분을 묻지 않는다",
@@ -160,20 +160,38 @@
   {
    "name": "색으로 가르는 표에서도 ▼를 판독기 경로에서 거절한다",
    "file": "record_identity.py",
-   "old": "and what == \"marker\" and not manual and not colour_mark:",
-   "new": "and what == \"marker\" and not manual:"
+   "old": "                    and not colour_mark and value not in READER_CLASS):",
+   "new": "                    and value not in READER_CLASS):"
   },
   {
    "name": "색으로 가르는 표에서도 ▼를 어휘 밖이라 한다",
    "file": "record_identity.py",
-   "old": "(MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())",
-   "new": "(MANUAL_ONLY_SHAPES if manual else ())"
+   "old": "(MANUAL_ONLY_SHAPES if (manual or colour_mark) else tuple(READER_CLASS))",
+   "new": "(MANUAL_ONLY_SHAPES if manual else tuple(READER_CLASS))"
   },
   {
    "name": "마커로 가르는 표에서도 ▼를 판독기 경로로 받는다",
    "file": "record_identity.py",
    "old": "    colour_mark = mark in BM.COLOUR_MARK_TYPES\n",
    "new": "    colour_mark = True\n"
+  },
+  {
+   "name": "마커 표의 ▼를 판독기 부류 없이 거절한다",
+   "file": "record_identity.py",
+   "old": "                    and not colour_mark and value not in READER_CLASS):",
+   "new": "                    and not colour_mark):"
+  },
+  {
+   "name": "▲와 ▼를 판독기 경로에서 다른 모양으로 친다",
+   "file": "record_identity.py",
+   "old": "else (style, READER_CLASS.get(marker, marker), mfill, bfill))",
+   "new": "else (style, marker, mfill, bfill))"
+  },
+  {
+   "name": "마커 표의 ▼를 어휘 밖이라 한다",
+   "file": "record_identity.py",
+   "old": "(MANUAL_ONLY_SHAPES if (manual or colour_mark) else tuple(READER_CLASS))",
+   "new": "(MANUAL_ONLY_SHAPES if (manual or colour_mark) else ())"
   }
  ]
 }

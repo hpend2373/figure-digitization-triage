@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "9ebcd6ad04565b162e7720545112e5d6b8782ccfd98ed2f8a38f51942ac80c50",
-  "test_make_plan.py": "b5120731dd1b76a72024dff7c2b366e0a6ed69fd6cbba751d6f792dc6fd6ad14"
+  "make_plan.py": "cb490ffe8b18ce82f164fbb9728e2f8e842a29ba6442a9d19bb717427743c8f7",
+  "test_make_plan.py": "7e8affb1aa54449cd452d76ba618881ea6c68f945bfaf98361733f2dfc4bb33d"
  },
  "suites": [
   "test_make_plan.py"
@@ -384,6 +384,42 @@
    "file": "make_plan.py",
    "old": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, panel_sheet)",
    "new": "    _write(os.path.join(out_dir, PANELS), PANEL_FIELDS, [])"
+  },
+  {
+   "name": "사람이 읽는 경로를 계획서로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "    if manual:\n        read[\"panel_mode\"] = \"MANUAL\"",
+   "new": "    if False:\n        read[\"panel_mode\"] = \"MANUAL\""
+  },
+  {
+   "name": "사람이 읽는 패널의 표시를 판독기의 칸에 적는다",
+   "file": "make_plan.py",
+   "old": "                if manual:\n                    drawn.append(",
+   "new": "                if False:\n                    drawn.append("
+  },
+  {
+   "name": "구분 단서를 메모에 적지 않는다",
+   "file": "make_plan.py",
+   "old": "\"cue: %s\" % cue if cue else \"\"",
+   "new": "\"\""
+  },
+  {
+   "name": "색 구분 패널의 ▼를 판독기의 마커 칸에 넣는다",
+   "file": "make_plan.py",
+   "old": "                elif src == \"marker\" and e[src].strip().upper() in RI.MANUAL_ONLY_SHAPES:",
+   "new": "                elif False:"
+  },
+  {
+   "name": "판독기 칸에서 뺀 모양을 메모에도 남기지 않는다",
+   "file": "make_plan.py",
+   "old": "        if drawn and not manual:",
+   "new": "        if False:"
+  },
+  {
+   "name": "▼를 판독기의 삼각형으로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "                    if seen in RI.READER_CLASS:",
+   "new": "                    if False:"
   }
  ]
 }

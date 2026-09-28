@@ -18,6 +18,10 @@
  *      한 요인이 두 축에 있으면 Cell_Key가 두 번 적힙니다.
  *   6. 결과변수 이름이 없으면 답이 아닙니다. n은 비워 둘 수 있고, 비면 계획서가
  *      그 자리를 이름 부릅니다.
+ *   7. 판독기가 계열을 가를 수 없는 패널(색+마커를 섞어 그린 것, 판독기가 모르는
+ *      모양, 똑같이 그려진 계열)은 "값은 사람이 읽는다"(Read_Route=MANUAL)로만
+ *      확인합니다. 그 경로에서는 표시를 본 대로 적고, 표시가 같은 계열은 서로 다른
+ *      구분 단서가 있어야 합니다 - 사람도 가를 수 없으면 답이 아닙니다.
  */
 
 var VERDICTS = ['CONFIRMED', 'REJECTED', 'HOLD'];
@@ -32,6 +36,16 @@ var MARKER_SHAPES = ['CIRCLE', 'TRIANGLE', 'SQUARE', 'DIAMOND', 'ANY', 'NONE'];
 var MARKER_FILLS = ['OPEN', 'FILLED', 'ANY'];
 var BAR_FILLS = ['SOLID', 'HATCHED', 'STIPPLED', 'OPEN', 'NONE'];
 var BAR_TOPS = ['OUTLINE_CENTER', 'FILL_EDGE', 'MARKER_CENTER', 'NOT_A_BAR'];
+//: `record_identity.READ_ROUTES`, `record_identity.MANUAL_ONLY_SHAPES`와 같아야 합니다.
+var READ_ROUTES = ['AUTO', 'MANUAL'];
+var MANUAL_ONLY_SHAPES = ['TRIANGLE_DOWN', 'CROSS', 'ASTERISK', 'PENTAGON', 'STAR'];
+//: `record_identity.READER_CLASS`와 같아야 합니다: 판독기의 삼각형은 방향을 보지 않습니다.
+var READER_CLASS = { TRIANGLE_DOWN: 'TRIANGLE' };
+
+/* 이 상태의 판독 경로. 이 칸이 생기기 전의 상태에는 없고, 없으면 판독기입니다. */
+function routeOf(s) {
+  return trim((s || {}).route).toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO';
+}
 
 function isNumber(v) {
   return v !== '' && v !== null && v !== undefined && isFinite(Number(v));
@@ -123,6 +137,7 @@ function verdictOf(id, state) {
     X_Factor: '', X_Labels: '', Series_Factor: '', Series: '', Mark_Type: '',
     Outcome_Name: '', Unit: '', N_Outcome: '', Bar_Top_Definition: '',
     Errorbar_Stem_Confirmed: '',
+    Read_Route: '',
     Verified_By: who, Seen_By_Person: '1', Value_Sources: '', Note: trim(s.note)
   };
   if (verdict !== 'CONFIRMED') return { ready: true, why: '', row: row };
@@ -172,12 +187,19 @@ function verdictOf(id, state) {
   if (seriesFactor && seriesFactor === xFactor) {
     return { ready: false, why: 'x 요인과 계열 요인이 같습니다 — 한 요인이 두 축에 있을 수 없습니다', row: null };
   }
+  var route = routeOf(s), manual = route === 'MANUAL';
   var names = {};
   for (var k = 0; k < series.length; k++) {
     var nm = trim(series[k].name);
     if (!nm) return { ready: false, why: (k + 1) + '번째 계열의 이름(수준)이 비어 있습니다 — 하나뿐이면 어느 군인지 적어 주세요 (예: ALL)', row: null };
     if (names[nm.toUpperCase()]) return { ready: false, why: '같은 계열 이름이 둘입니다: ' + nm, row: null };
     names[nm.toUpperCase()] = true;
+    // 색으로 가르는 표에서는 모양이 계열을 가르지 않으므로 판독기가 모르는 모양도 본 대로 적습니다
+    var mk = trim(series[k].marker).toUpperCase();
+    if (!manual && COLOUR_MARKS.indexOf(markType) < 0 && MANUAL_ONLY_SHAPES.indexOf(mk) >= 0 && !READER_CLASS[mk]) {
+      return { ready: false, why: nm + ' 계열의 마커 ' + trim(series[k].marker).toUpperCase() + '는 판독기가 모르는 모양입니다 — "값은 사람이 읽는다"를 켜 주세요', row: null };
+    }
+    if (manual) continue;   // 사람이 읽는 경로: 판독기의 구분 수단 규칙이 없습니다
     if (COLOUR_MARKS.indexOf(markType) >= 0 && !series[k].colour) {
       return { ready: false, why: markType + '은 색으로 계열을 가릅니다 — ' + (nm || (k + 1) + '번째') + ' 계열의 색이 없습니다', row: null };
     }
@@ -193,12 +215,19 @@ function verdictOf(id, state) {
   }
   if (series.length > 1) {
     var keys = series.map(function (e) {
+      if (manual) {
+        return [hexOf(e.colour), e.line_style, e.marker, e.marker_fill, e.bar_fill].map(function (v) { return trim(v).toUpperCase(); }).join('|')
+          + '|' + trim(e.cue).toLowerCase();
+      }
       return COLOUR_MARKS.indexOf(markType) >= 0 ? hexOf(e.colour)
-        : [e.line_style, e.marker, e.marker_fill, e.bar_fill].map(function (v) { return trim(v).toUpperCase(); }).join('|');
+        : [e.line_style, READER_CLASS[trim(e.marker).toUpperCase()] || e.marker, e.marker_fill, e.bar_fill].map(function (v) { return trim(v).toUpperCase(); }).join('|');
     });
     for (var a = 0; a < keys.length; a++) {
       for (var b = a + 1; b < keys.length; b++) {
         if (keys[a] === keys[b] && keys[a] !== '') {
+          if (manual) {
+            return { ready: false, why: '사람이 읽어도 두 계열을 가를 것이 없습니다 (' + series[a].name + ', ' + series[b].name + ') — 표시가 같으면 계열마다 서로 다른 구분 단서를 적어 주세요', row: null };
+          }
           return { ready: false, why: '두 계열을 가를 것이 없습니다 (' + series[a].name + ', ' + series[b].name + ')', row: null };
         }
       }
@@ -230,11 +259,14 @@ function verdictOf(id, state) {
   row.X_Labels = JSON.stringify(positions.map(function (p) { return { label: trim(p.label), px: Number(p.px) }; }));
   row.Series_Factor = seriesFactor;
   row.Series = JSON.stringify(series.map(function (e) {
-    return { name: trim(e.name), colour: e.colour ? hexOf(e.colour) : '',
-             line_style: trim(e.line_style).toUpperCase(), marker: trim(e.marker).toUpperCase(),
-             marker_fill: trim(e.marker_fill).toUpperCase(), bar_fill: trim(e.bar_fill).toUpperCase() };
+    var out = { name: trim(e.name), colour: e.colour ? hexOf(e.colour) : '',
+                line_style: trim(e.line_style).toUpperCase(), marker: trim(e.marker).toUpperCase(),
+                marker_fill: trim(e.marker_fill).toUpperCase(), bar_fill: trim(e.bar_fill).toUpperCase() };
+    if (manual) out.cue = trim(e.cue);
+    return out;
   }));
   row.Mark_Type = markType;
+  row.Read_Route = route;
   row.Outcome_Name = outcome;
   row.Unit = unit;
   row.N_Outcome = n;
@@ -246,7 +278,7 @@ function verdictOf(id, state) {
 
 var CSV_COLUMNS = ['Proposal_ID', 'Human_Verification_Status', 'X_Factor', 'X_Labels',
                    'Series_Factor', 'Series', 'Mark_Type', 'Outcome_Name', 'Unit', 'N_Outcome',
-                   'Bar_Top_Definition', 'Errorbar_Stem_Confirmed',
+                   'Bar_Top_Definition', 'Errorbar_Stem_Confirmed', 'Read_Route',
                    'Verified_By', 'Seen_By_Person', 'Value_Sources', 'Note'];
 
 function csvCell(s) {
@@ -283,6 +315,7 @@ function held(ids, states) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { VERDICTS: VERDICTS, HELD: HELD, MARK_TYPES: MARK_TYPES, COLOUR_MARKS: COLOUR_MARKS,
+                     READ_ROUTES: READ_ROUTES, MANUAL_ONLY_SHAPES: MANUAL_ONLY_SHAPES, routeOf: routeOf,
                      LINE_STYLES: LINE_STYLES, MARKER_SHAPES: MARKER_SHAPES, MARKER_FILLS: MARKER_FILLS,
                      BAR_FILLS: BAR_FILLS, BAR_TOPS: BAR_TOPS,
                      parseLabels: parseLabels, parseSeries: parseSeries, hexOf: hexOf,

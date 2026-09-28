@@ -525,6 +525,14 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
     for k in ("Axis_X_Region", "Axis_Y_Region"):
         if (geometry.get(k) or "").strip():
             read[k.lower()] = geometry[k].strip()
+    # 사람이 읽는 패널 (`record_identity.READ_ROUTES`). 격자는 똑같이 서고, 값은
+    # 판독 대기열로 갑니다. 계열의 표시는 판독기의 칸이 아니라 메모로 갑니다 - 그
+    # 표시는 판독기가 못 가르는 것이라서 사람이 확인한 것이고, 판독기의 칸에 적으면
+    # 배치층이 판독기의 규칙(구분 수단, 어휘)으로 다시 재판합니다.
+    manual = (identity.get("Read_Route") or "").strip().upper() == "MANUAL"
+    if manual:
+        read["panel_mode"] = "MANUAL"
+        read["note"] += "; values read by a person (Read_Route=MANUAL): no released reader separates these series"
     used = set()
     for i, e in enumerate(series, 1):
         name = (e.get("name") or "").strip()
@@ -535,12 +543,32 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         # Every series carries its factor and level, the single one too: a
         # series without a level is no Cell_Key (MISSING_SERIES_IDENTITY).
         sp = {"series_id": sid, "factor": s_factor, "level": name or sid}
+        drawn = []
         for src, dst in (("colour", "colour"), ("line_style", "line_style"), ("marker", "marker"),
                          ("marker_fill", "marker_fill"), ("bar_fill", "bar_fill")):
             if (e.get(src) or "").strip():
-                sp[dst] = e[src].strip()
+                if manual:
+                    drawn.append("%s=%s" % (dst, e[src].strip()))
+                elif src == "marker" and e[src].strip().upper() in RI.MANUAL_ONLY_SHAPES:
+                    # 판독기 어휘 밖의 모양(▼ 등). 판독기 부류가 있으면(▼ -> TRIANGLE: 판독기의
+                    # 삼각형은 방향을 보지 않음) 판독기 칸에 그 부류를, 없으면(색 표의 ×·별표 등,
+                    # 색 판독기는 모양을 보지 않음) 판독기 칸을 비웁니다. 본 모양은 메모로.
+                    seen = e[src].strip().upper()
+                    if seen in RI.READER_CLASS:
+                        sp[dst] = RI.READER_CLASS[seen]
+                        drawn.append("%s=%s (read as the reader's %s)" % (dst, seen, RI.READER_CLASS[seen]))
+                    else:
+                        drawn.append("%s=%s (colour separates; not a reader shape)" % (dst, seen))
+                else:
+                    sp[dst] = e[src].strip()
         if name:
             sp["note"] = "legend: %s" % name
+        if drawn and not manual:
+            sp["note"] = "; ".join(x for x in (sp.get("note", ""), "drawn: %s" % ", ".join(drawn)) if x)
+        if manual:
+            cue = (e.get("cue") or "").strip()
+            sp["note"] = "; ".join(x for x in (sp.get("note", ""), "drawn: %s" % ", ".join(drawn) if drawn else "",
+                                               "cue: %s" % cue if cue else "") if x)
         read["series"].append(sp)
     used = set()
     for i, p in enumerate(positions):

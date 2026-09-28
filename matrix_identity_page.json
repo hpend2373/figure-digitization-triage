@@ -1,7 +1,7 @@
 {
  "files": {
-  "identity_page.py": "967457b4a851888c59eade4f307f6e98fe89bcb44b8c2628818a376a20fff77b",
-  "test_identity_page.py": "feaf57524c891124e80161eb9882eb95f1e41e7467af650d799942bc0ad24cef"
+  "identity_page.py": "6189a5181f26caa3f3604ecef0e5910b71e6463d0ef43642ce5abbafab63ddc4",
+  "test_identity_page.py": "c623d8ab94d1d41b711bc756492aa279d2faea1ddfe681b39600b08f2aacfdef"
  },
  "suites": [
   "test_identity_page.py"
@@ -60,6 +60,24 @@
    "file": "identity_page.py",
    "old": "    if not everything:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))",
    "new": "    if False:\n        raise SystemExit(\"%s에 제안이 없습니다.\" % os.path.join(proposals, PROPOSALS))"
+  },
+  {
+   "name": "사람이 읽는 경로를 물을 칸이 없다",
+   "file": "identity_page.py",
+   "old": "data-route='%s'> 판독기가",
+   "new": "data-noroute='%s'> 판독기가"
+  },
+  {
+   "name": "사람이 읽는 경로에 구분 단서 칸이 없다",
+   "file": "identity_page.py",
+   "old": "\" 단서 <input type='text' data-scue='\"",
+   "new": "\" 단서 <input type='text' data-nocue='\""
+  },
+  {
+   "name": "마커 표의 모양 칸에 ▼가 없다",
+   "file": "identity_page.py",
+   "old": "styleSelect('smarker', i, MARKER_SHAPES.concat(Object.keys(READER_CLASS)), e.marker)",
+   "new": "styleSelect('smarker', i, MARKER_SHAPES, e.marker)"
   }
  ]
 }

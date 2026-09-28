@@ -1642,6 +1642,53 @@ check("UNSUPPORTED_CAPABILITY names the reader limit, not the figure",
               if p["check"] == "UNSUPPORTED_CAPABILITY"])
 
 
+print("a panel a PERSON reads is not held to what a reader needs to tell series apart")
+# The refusals above all end in the same advice - "route the panel to MANUAL" -
+# and none of them honoured it: a MANUAL panel was flagged exactly as an AUTO
+# one, so the one way out they named was a dead end. The identity page now
+# confirms such panels on the person-read route (orange circle / orange
+# triangle / blue circle, two identical curves told apart by their end labels),
+# and the plan authors them with Panel_Mode=MANUAL; the batch must let them
+# through to the queue with their cells declared.
+_man = edited(PANELS, {"Panel_ID": "P_LINE"}, Panel_Mode="MANUAL")
+_nocolour = edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Colour_Hex="")
+_samecolour = edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Colour_Hex="#2d50dc")
+# REVERT: ask every panel for a reader's discriminant. A person-read panel
+# carries its marks in the Note, and the whole manifest set is refused.
+check("a MANUAL colour panel needs no Colour_Hex per series",
+      "MISSING_SERIES_DISCRIMINANT" in validate(series_rows=_nocolour)
+      and "MISSING_SERIES_DISCRIMINANT" not in validate(panels=_man, series_rows=_nocolour),
+      "%s" % validate(panels=_man, series_rows=_nocolour))
+# REVERT: judge a MANUAL panel's separability by its reader columns. Two curves
+# drawn identically are exactly the panels that go to a person.
+check("two MANUAL series with the same colour are not refused as inseparable",
+      "SERIES_NOT_SEPARABLE" in validate(series_rows=_samecolour)
+      and "SERIES_NOT_SEPARABLE" not in validate(panels=_man, series_rows=_samecolour),
+      "%s" % validate(panels=_man, series_rows=_samecolour))
+_man_any = dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                              Config_ID="C_MONOLINE", Panel_Mode="MANUAL"),
+                series_rows=[dict(r, Colour_Hex="", Marker_Shape="ANY", Marker_Fill="OPEN", Line_Style="")
+                             if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+                configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold", Value="150", Note="")])
+check("nor two MANUAL LINE_MONO series that both say ANY",
+      "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES" not in validate(**_man_any), "%s" % validate(**_man_any))
+_bvm = validate(
+    panels=PANELS + [dict(_bv_panel, Panel_Mode="MANUAL")], units=UNITS + [_bv_unit],
+    series_rows=SERIES + [series("P_BOX", s, lv) for s, lv in (("S_A", "PRE"), ("S_B", "POST"))],
+    positions=POSITION_ROWS + [dict(r, Panel_ID="P_BOX")
+                               for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+    source_panels=SOURCE_PANELS + [_bv_source],
+    source_figures=[dict(f, Observed_Panel_Count=2) if f["Source_Figure_ID"] == "SF1" else f
+                    for f in SOURCE_FIGURES])
+# REVERT: refuse a grouped box panel whatever its mode. The message says "set
+# Panel_Mode=MANUAL" and then refuses the panel that did.
+check("a two-series box panel declared MANUAL goes through, as its refusal says it should",
+      "UNSUPPORTED_CAPABILITY" not in _bvm, "%s" % _bvm)
+check("the vocabulary still holds on a MANUAL panel - a shape nobody can name is still refused",
+      "BAD_SERIES_MARKER_SHAPE" in validate(panels=_man, series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Marker_Shape="BLOB")))
+
+
 print("a box drawn in colour is read through the colour its series declares")
 # Publication S41467-023-41990-4 draws every box in orange, grey 154 under the
 # reader's dark threshold of 100 - invisible. The series row already says what

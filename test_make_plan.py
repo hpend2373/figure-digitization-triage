@@ -676,6 +676,59 @@ check("positions carry the person's factor, level and pixel",
       [(q["factor"], q["level"], q["x_pixel"]) for q in _p1["read"]["positions"]] == [("TIMEPOINT", "Pre", 175.0), ("TIMEPOINT", "Post", 625.0)])
 check("series carry factor, level and colour",
       [(q["factor"], q["level"], q["colour"]) for q in _p1["read"]["series"]] == [("ARM", "Fluid", "#DC2828"), ("ARM", "Control", "#2850DC")])
+# A panel whose series no released reader can separate - orange circle, orange
+# triangle, blue circle - confirmed on the person-read route.
+_mseries = _json.dumps([{"name": "B3", "colour": "#E4860A", "marker": "CIRCLE", "marker_fill": "FILLED", "cue": ""},
+                        {"name": "B1", "colour": "#E4860A", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED",
+                         "cue": "lower curve"}])
+_mplan, _msheet, _mfig, _mpanels = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_mseries,
+                                     Bar_Top_Definition="")])
+_m1 = [p for p in _mfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: the route stays in the identity file. The plan sends to a reader a
+# panel whose series that reader cannot tell apart, and one mask reads both.
+check("a person-read identity is authored with panel_mode MANUAL - the grid stands, a person reads the values",
+      _m1["disposition"] == "AUTO_DIGITIZE" and _m1["read"]["panel_mode"] == "MANUAL"
+      and "Read_Route=MANUAL" in _m1["read"]["note"]
+      and [(q["factor"], q["level"]) for q in _m1["read"]["series"]] == [("ARM", "B3"), ("ARM", "B1")],
+      "%s" % {k: _m1.get("read", {}).get(k) for k in ("panel_mode", "note")})
+# REVERT: the drawn marks go into the reader's columns. TRIANGLE_DOWN is not a
+# shape any reader knows, and the batch layer refuses the manifest set.
+check("its series carry what was drawn and the cue in the note, not in the reader's columns",
+      all(not any(k in q for k in ("colour", "marker", "marker_fill", "line_style", "bar_fill")) for q in _m1["read"]["series"])
+      and "marker=TRIANGLE_DOWN" in _m1["read"]["series"][1]["note"] and "cue: lower curve" in _m1["read"]["series"][1]["note"]
+      and "cue" not in _m1["read"]["series"][0]["note"],
+      "%s" % [q.get("note") for q in _m1["read"]["series"]])
+check("a reader-read identity is still AUTO", _p1["read"]["panel_mode"] == "AUTO")
+# A colour-separated line panel whose Control is drawn as a point-down triangle,
+# confirmed on the reader's route: the colour mask reads it, the shape is only seen.
+_tseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},
+                        {"name": "Control", "colour": "#818181", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED",
+                         "line_style": "DASHED"}])
+_tplan, _tsheet, _tfig, _tpanels = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Series=_tseries, Bar_Top_Definition="")])
+_t1 = [p for p in _tfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: the ▼ goes into the reader's marker column. TRIANGLE_DOWN is in no
+# reader's vocabulary and the batch layer refuses the whole manifest set
+# (BAD_SERIES_MARKER_SHAPE) for a shape the colour reader never looks at.
+check("a ▼ on a colour-separated panel stays AUTO: the reader gets its TRIANGLE class, the note what was drawn",
+      _t1["read"]["panel_mode"] == "AUTO" and _t1["read"]["series"][1].get("colour") == "#818181"
+      and _t1["read"]["series"][1].get("marker") == "TRIANGLE" and _t1["read"]["series"][1].get("line_style") == "DASHED"
+      and "marker=TRIANGLE_DOWN" in _t1["read"]["series"][1]["note"] and _t1["read"]["series"][0].get("marker") == "CIRCLE",
+      "%s" % _t1["read"]["series"])
+_xseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE"},
+                        {"name": "Control", "colour": "#818181", "marker": "CROSS"}])
+_xplan, _xs, _xfig, _xp = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Series=_xseries, Bar_Top_Definition="")])
+_x1 = [p for p in _xfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: a shape with no reader class goes into the reader's column anyway.
+check("a × on a colour-separated panel: nothing in the reader's marker column, the × in the note",
+      "marker" not in _x1["read"]["series"][1] and "marker=CROSS" in _x1["read"]["series"][1]["note"],
+      "%s" % _x1["read"]["series"])
+_tproblems = [q for q in CP.validate_plan(_tplan, file_root=RUN) if q["where"].startswith("figures[0]")]
+check("that figure validates as a plan", _tproblems == [], _tproblems[:3])
+_mproblems = [q for q in CP.validate_plan(_mplan, file_root=RUN) if q["where"].startswith("figures[0]")]
+check("the person-read figure validates as a plan", _mproblems == [], _mproblems[:3])
 _u1 = [u for u in _plan["units"] if u["panel_id"] == "PUB_D001_P1"][0]
 _g1 = [g for g in _plan["grids"] if g["grid_id"] == _u1["grid_id"]][0]
 check("the unit binds the panel, names the outcome, unit, n, dispersion, bar top and stem",

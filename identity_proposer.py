@@ -79,7 +79,10 @@ IDENTITY_COLUMNS = (
     "Human_Verification_Status", "Verified_By", "Verified_At",
     "X_Factor", "X_Labels", "Series_Factor", "Series", "Mark_Type",
     "Outcome_Name", "Unit", "N_Outcome", "Bar_Top_Definition",
-    "Errorbar_Stem_Confirmed", "Note",
+    "Errorbar_Stem_Confirmed",
+    # AUTO: a reader reads the values; MANUAL: a person does, because no
+    # released reader can tell these series apart (`record_identity.READ_ROUTES`).
+    "Read_Route", "Note",
 )
 
 READ_OK, READ_REFUSED, READ_NOT_ATTEMPTED = GP.READ_OK, GP.READ_REFUSED, GP.READ_NOT_ATTEMPTED

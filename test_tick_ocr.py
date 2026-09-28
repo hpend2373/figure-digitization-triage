@@ -1012,12 +1012,19 @@ class TheSecondPass(unittest.TestCase):
             return [(5.0, (top + bottom) / 2.0, A.CLIP_STRIP),
                     (0.0, (top + bottom) / 2.0 + 1, A.CLIP_NONE)]
 
-        real = A._ocr_numerals
+        # THE BAND'S OCR IS THE FAKE, so this needs no tesseract - but
+        # `label_near` returns [] before it asks when pytesseract did not import,
+        # and that is the core profile: CI's core job failed here with [] for
+        # the fake it never reached. A stand-in for the module lets the fake be
+        # asked there too; nothing else in `label_near` touches it.
+        real, module = A._ocr_numerals, A.pytesseract
         A._ocr_numerals = fake
+        if A.pytesseract is None:
+            A.pytesseract = object()
         try:
             got = A.label_near(img, dark, box, sx, base, half=40)
         finally:
-            A._ocr_numerals = real
+            A._ocr_numerals, A.pytesseract = real, module
         self.assertEqual(sorted(set(v for v, _r in got)), [0.0], got)
         RUN[0] += 1
 
@@ -1220,7 +1227,18 @@ class TheSecondPass(unittest.TestCase):
         S41467-023-41990-4's CoP velocity panel is 703 px tall, so it is shown
         at x1.68, and its `50` comes back `90` at confidence 65 - one digit,
         and the whole axis refuses. The same pixels read 150 100 50 at
-        confidence 95 when the glyph is shown at its own size."""
+        confidence 95 when the glyph is shown at its own size.
+
+        THE MISREAD AT THE TUNED SIZE IS SUPPLIED; THE READ AT ITS OWN SIZE IS
+        TESSERACT'S. This fixture used to draw both halves, and the first half
+        is not a property of the drawing: tesseract 4.1.1 misreads it at the
+        magnifications the panel's height asks for, as it misread the corpus
+        panel, and tesseract 5.3.4 - Ubuntu 24.04's, CI's - reads it correctly
+        there, so the pass below is never reached and "the fixture no longer
+        shows the fault" was CI's red on every run since this was written.
+        Which tesseract misreads a given drawing is not something a test can
+        hold. What every tesseract here does is the other half: shown at its
+        own size, the glyph reads."""
         if not has_ocr():
             self.skipTest("no tesseract in this environment")
         if not os.path.exists(FONT):
@@ -1231,15 +1249,30 @@ class TheSecondPass(unittest.TestCase):
         glyph = A.label_height(dark, box, sx - reach, y0 - 10, base + 10)
         self.assertGreater(glyph, max(A._GLYPH_TARGETS),
                            "the fixture's labels are not set large")
-        real = A.smaller_scales
-        A.smaller_scales = lambda _h, _c: []
+        own = [round(float(s), 9) for s in A.smaller_scales(glyph, A.scale_for(y1 - y0, 3))]
+        self.assertTrue(own, "no magnification smaller than the tuned one")
+        misread = [(15.0, 92.0), (10.0, 422.0), (9.0, 752.0)]     # one digit, as 50 -> 90
+        real_search, real_scales = A._search, A.smaller_scales
+
+        def tuned_sizes_misread(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                                scale, comma, seen, **kw):
+            if round(float(scale), 9) in own:
+                return real_search(img_, dark_, box_, anchor_spine, anchor_edge, top,
+                                   bottom, scale, comma, seen, **kw)
+            return list(misread)
+
+        A._search = tuned_sizes_misread
         try:
-            tuned = A.y_tick_labels(img, dark, box, sx, base)
+            A.smaller_scales = lambda _h, _c: []
+            try:
+                tuned = A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A.smaller_scales = real_scales
+            got = A.y_tick_labels(img, dark, box, sx, base)
         finally:
-            A.smaller_scales = real
+            A._search = real_search
         self.assertFalse(A.ladder(tuned)[0],
-                         "the fixture no longer shows the fault: %s" % (tuned,))
-        got = A.y_tick_labels(img, dark, box, sx, base)
+                         "without the smaller pass the misread was accepted: %s" % (tuned,))
         self.assertEqual([v for v, _r in got], [15.0, 10.0, 5.0], got)
         RUN[0] += 1
 
@@ -1271,7 +1304,15 @@ class TheSecondPass(unittest.TestCase):
         tesseract answers changes with the size it is shown, which is the whole
         reason this pass exists - and an answer that does not ladder is not an
         answer. Two of the nine panels this corpus recovered laddered only at
-        the second magnification."""
+        the second magnification.
+
+        EVERY ANSWER HERE IS THE SPY'S, the tuned sizes' included. They used to
+        be tesseract's own, and this pass is only reached when those refuse:
+        tesseract 4.1.1 misreads this fixture there, 5.3.4 (CI's) reads it, and
+        on 5.3.4 the pass was never asked and the real 15 10 5 came back. The
+        tuned sizes now misread one digit the way the corpus panel did, so the
+        order of the smaller magnifications is what is tested, on any
+        tesseract."""
         if not has_ocr():
             self.skipTest("no tesseract in this environment")
         if not os.path.exists(FONT):
@@ -1283,6 +1324,7 @@ class TheSecondPass(unittest.TestCase):
                                   A.scale_for(y1 - y0, 3))
         self.assertEqual(len(scales), 2, scales)
         good = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+        misread = [(15.0, 92.0), (10.0, 422.0), (9.0, 752.0)]     # one digit, as 50 -> 90
         asked, real = [], A._search
 
         def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom, scale,
@@ -1292,8 +1334,7 @@ class TheSecondPass(unittest.TestCase):
                 return [(30.0, 100.0), (20.0, 200.0), (99.0, 300.0)]
             if abs(scale - scales[1]) < 1e-9:
                 return list(good)
-            return real(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
-                        scale, comma, seen, **kw)
+            return list(misread)
 
         A._search = spy
         try:

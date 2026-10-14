@@ -162,6 +162,14 @@ QUANTILE_DISPERSIONS = ("IQR", "RANGE")
 
 #: 정의의 출처. 어느 것이든 논문의 말이고, 어느 논문의 어디인지가 다릅니다.
 FROM_DECISION, FROM_CAPTION, FROM_DOCUMENT = "DECISION", "CAPTION", "DOCUMENT"
+#: 판정이 같은 논문의 다른 요소(표, 다른 그림)가 말한 정의를 이 그림에 쓴 것
+#: (`record_errorbar`의 Definition_Basis=BORROWED, run2 2026-10-14 결정 R9·R10).
+#: 인용문은 논문의 말 그대로이고, 그 말이 이 그림에 대한 것이라는 것이 가정입니다.
+#: 그 가정은 계획서의 단위 메모(`BORROWED_NOTE`)로 값까지 따라가서, 민감도 분석에서
+#: 이 값들만 뺄 수 있습니다.
+FROM_DECISION_BORROWED = "DECISION_BORROWED"
+BORROWED_NOTE = ("BORROWED_DEFINITION: the paper states this definition for another element (a table or "
+                 "another figure), not for this figure; exclude in a sensitivity analysis")
 
 WORKSHEET_FIELDS = ("Publication_ID", "Source_Figure_ID", "Draft_ID",
                     "Figure_Number", "Page", "Image", "Route", "Disposition",
@@ -213,8 +221,10 @@ def dispersion_for(draft_id, caption, decision):
         code = (decision.get("Dispersion_Type") or "").strip().upper()
         if code in RE.DISPOSITIONS:
             return code, "", FROM_DECISION, ""
+        kind = FROM_DECISION_BORROWED if (decision.get("Definition_Basis") or "").strip().upper() \
+            == RE.BORROWED else FROM_DECISION
         return (code, (decision.get("Errorbar_Definition_Source") or "").strip(),
-                FROM_DECISION, (decision.get("Found_On_Page") or "").strip())
+                kind, (decision.get("Found_On_Page") or "").strip())
     if not caption:
         return "", "", "", ""
     # 상자그림은 캡션이 표시마다 따로 말합니다("Box plots indicate minimum,
@@ -601,6 +611,9 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         "dispersion_type": code, "errorbar_source": errorbar_source,
         "extraction_method": "DIGITIZED",
     }
+    # 상자그림이 상자로서 IQR을 받았으면 빌린 정의는 이 단위에 쓰이지 않았습니다.
+    if kind == FROM_DECISION_BORROWED and not (mark == "BOX_VIOLIN" and dispersion[0] not in QUANTILE_DISPERSIONS):
+        unit["note"] = BORROWED_NOTE
     n = (identity.get("N_Outcome") or "").strip()
     if n.isdigit():
         unit["n_outcome"] = int(n)

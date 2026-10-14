@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "cb490ffe8b18ce82f164fbb9728e2f8e842a29ba6442a9d19bb717427743c8f7",
-  "test_make_plan.py": "7e8affb1aa54449cd452d76ba618881ea6c68f945bfaf98361733f2dfc4bb33d"
+  "make_plan.py": "2f2ea3cdfa24e4e883036df2855325f3caaa56b29aa282171c2222574045cc0d",
+  "test_make_plan.py": "02a7ce9cdf33068d9d392be60fddf439069465322be1291edb46c6bae4922126"
  },
  "suites": [
   "test_make_plan.py"
@@ -420,6 +420,24 @@
    "file": "make_plan.py",
    "old": "                    if seen in RI.READER_CLASS:",
    "new": "                    if False:"
+  },
+  {
+   "name": "borrowed: Definition_Basis read nowhere",
+   "file": "make_plan.py",
+   "old": "kind = FROM_DECISION_BORROWED if (decision.get(\"Definition_Basis\") or \"\").strip().upper() \\\n            == RE.BORROWED else FROM_DECISION",
+   "new": "kind = FROM_DECISION"
+  },
+  {
+   "name": "borrowed: the unit does not carry the assumption",
+   "file": "make_plan.py",
+   "old": "        unit[\"note\"] = BORROWED_NOTE",
+   "new": "        pass"
+  },
+  {
+   "name": "borrowed: a box that takes the IQR carries the note",
+   "file": "make_plan.py",
+   "old": "if kind == FROM_DECISION_BORROWED and not (mark == \"BOX_VIOLIN\" and dispersion[0] not in QUANTILE_DISPERSIONS):",
+   "new": "if kind == FROM_DECISION_BORROWED:"
   }
  ]
 }

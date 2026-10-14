@@ -790,6 +790,43 @@ check("a single series still carries its factor and level",
       [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"] == [
           {"series_id": "ALL", "factor": "GROUP", "level": "ALL", "colour": "#ED8B09", "note": "legend: ALL"}],
       [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"])
+# A definition borrowed from another element of the same paper (run2 2026-10-14
+# R9·R10): the quote is the paper's, the assumption that it speaks for this
+# figure is recorded, and it travels with the values so a sensitivity analysis
+# can leave them out.
+_BORROWED_SRC = "Table 4. Means (SD) and counts for all measures"
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SD", "Errorbar_Definition_Source": _BORROWED_SRC,
+        "Found_On_Page": "5", "Definition_Basis": "BORROWED"}])
+_plan7, _sheet7, _fig7, _panels7 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u7 = [u for u in _plan7["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read Definition_Basis nowhere. The borrowed SD then looks exactly like
+# one the figure's own caption stated, and no analysis can find it again.
+check("a borrowed definition is read, says where it came from, and the unit carries the assumption",
+      _u7["dispersion_type"] == "SD" and _u7["errorbar_source"] == _BORROWED_SRC
+      and _u7.get("note") == MP.BORROWED_NOTE and _sheet7["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION_BORROWED,
+      "%s %s" % (_u7, _sheet7["PUB_D001"]["Errorbar_Source_Kind"]))
+_problems7 = [q for q in CP.validate_plan(_plan7, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems7 == [], _problems7[:3])
+_plan8, _sheet8, _fig8, _panels8 = _confirm(
+    [_geom("PUB_D001__p3", Region="900,0,1800,500")],
+    [_ident("PUB_D001__p3", mark="BOX_VIOLIN", Panel_Kind="BOX", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
+            Series_Factor="GROUP", Series=_json.dumps([{"name": "ALL", "colour": "#ED8B09"}]))])
+_u8 = [u for u in _plan8["units"] if u["panel_id"] == "PUB_D001_P3"][0]
+# REVERT: note the borrowing on every unit of the figure. A box is the IQR by
+# construction, the borrowed SD is not used there, and its values would be
+# dropped from an analysis for an assumption they do not rest on.
+check("  a box in the same figure takes the IQR and does not carry the borrowed note",
+      _u8["dispersion_type"] == "IQR" and "note" not in _u8, "%s" % _u8)
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SD", "Errorbar_Definition_Source": _BORROWED_SRC,
+        "Found_On_Page": "5", "Definition_Basis": ""}])
+_plan9, _sheet9, _fig9, _panels9 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u9 = [u for u in _plan9["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+check("  a decision that borrows nothing carries no note", "note" not in _u9
+      and _sheet9["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION, "%s" % _u9)
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page"), [])
+
 # The reviewers file: a person registers once, and the inventory names them.
 _rev = os.path.join(ROOT, "reviewers.json")
 _json.dump({"reviewers": [{"reviewer_id": "RV_MC", "name": "M. C.", "record_type": "HUMAN", "contact_type": "ORCID",

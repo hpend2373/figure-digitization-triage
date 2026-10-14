@@ -120,6 +120,44 @@ check("표시가 없으면 통과하지 못한다",
 check("표시는 kernel이 참으로 치는 말이면 된다",
       codes(plain("D", "SD", SD_IN_FLAT, "2", verified="yes")) == []
       and codes(plain("D", "SD", SD_IN_FLAT, "2", verified="TRUE")) == [])
+# --- 사람이 승인한 관찰 (run2 2026-10-14) ------------------------------------
+# 사람이 원문을 직접 확인하지 않은 답은, 누가 무엇을 보았고 누가 어디서
+# 승인했는지를 모두 들고 올 때만 들어옵니다(`approval`). 셋 중 하나라도 비면
+# 그 답은 되돌아볼 곳이 없는 답입니다.
+APPROVED = {"Verified_By": "minyeop", "Observed_By": "Claude (PDF survey)",
+            "Approval_Ref": "minyeop chat 2026-10-14"}
+check("승인된 관찰은 통과한다", codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **APPROVED)) == [],
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **APPROVED)))
+# REVERT: take an answer that names what looked but not where it was approved.
+check("승인한 자리가 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Approval_Ref=""))) == ["APPROVAL_INCOMPLETE"])
+check("본 것이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Observed_By=""))) == ["APPROVAL_INCOMPLETE"])
+check("본 것과 승인한 사람이 같으면 본 답이지 승인된 관찰이 아니다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Observed_By="minyeop"))) == ["OBSERVER_IS_APPROVER"])
+# REVERT: let an approval through with nobody named as the approver. The record
+# then says someone approved it, and not who.
+check("누가 승인했는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Verified_By=""))) == ["UNATTRIBUTED"])
+check("승인된 관찰도 인용문은 원문에서 다시 찾아진다",
+      "QUOTE_NOT_IN_SOURCE" in codes(dict(plain("D", "SD", "Standard deviations are shown.", "2", verified="0"), **APPROVED)))
+
+# --- 다른 요소의 정의를 빌린 답 (run2 2026-10-14 R9·R10) -------------------------
+BORROW = {"Definition_Basis": "BORROWED", "Note": "Table 4 title; Fig. 3 bar lengths match the table's SD"}
+check("빌린 정의는 Note와 함께면 통과한다", codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **BORROW)) == [],
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **BORROW)))
+# REVERT: borrow without saying from where. The assumption the record exists to
+# keep is then nowhere.
+check("어디서 빌렸는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **dict(BORROW, Note=""))) == ["BORROWED_UNEXPLAINED"])
+check("빌린 것이 처분이면 통과하지 못한다",
+      codes(dict(plain("D", "DROP"), **BORROW)) == ["BORROWED_WITHOUT_DEFINITION"])
+check("빌린 것이 '막대 없음'이면 통과하지 못한다",
+      codes(dict(plain("D", "NO_ERRORBAR"), **BORROW)) == ["BORROWED_WITHOUT_DEFINITION"])
+check("빌림의 이름은 정해진 것 하나뿐이다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **dict(BORROW, Definition_Basis="GUESSED"))) == ["BAD_DEFINITION_BASIS"])
+check("빌린 인용문도 원문에서 다시 찾아진다",
+      "QUOTE_NOT_IN_SOURCE" in codes(dict(plain("D", "SD", "Means (SD) of all tables.", "2"), **BORROW)))
 check("어휘 밖의 종류는 그 자리에서 멈춘다",
       codes(plain("D", "STDEV", SD_IN_FLAT, "2")) == ["BAD_DISPERSION_TYPE"])
 check("추정하는 말은 harness의 이름으로 걸린다",
@@ -434,6 +472,32 @@ check("새 판정은 먼저 있던 판정에 더해진다",
       sorted(r["Draft_ID"] for r in _disk)
       == ["DOC_A_D001", "DOC_A_D002", "DOC_B_D001"],
       [r["Draft_ID"] for r in _disk])
+
+# --- an approved observation, a borrowed definition, one figure -------------
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", verified="0", **APPROVED)])
+check("승인된 관찰은 Verified_By_Person=0으로, 본 것·승인한 사람·자리와 함께 적힌다",
+      _r == [] and {(r["Verified_By_Person"], r["Verified_By"], r["Observed_By"], r["Approval_Ref"]) for r in _w}
+      == {("0", "minyeop", "Claude (PDF survey)", "minyeop chat 2026-10-14")}, (problems_of(_r), _w[:1]))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", **APPROVED)])
+check("사람이 직접 확인한 답에는 승인 칸이 남지 않는다",
+      {(r["Verified_By_Person"], r["Observed_By"], r["Approval_Ref"]) for r in _w} == {("1", "", "")}, _w[:1])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", **BORROW)])
+check("빌린 정의는 Definition_Basis=BORROWED로 적힌다",
+      {r["Definition_Basis"] for r in _w} == {"BORROWED"} and len(_w) == 2, _w[:1])
+_w, _r, _p, _o = run([answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D002")])
+# REVERT: ignore Draft_ID. One figure's answer then lands on every figure of
+# the paper, and a box plot takes the bar charts' definition, or the reverse.
+check("그림 하나의 답은 그 그림에만 적힌다", [r["Draft_ID"] for r in _w] == ["DOC_A_D002"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2"), answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D002")])
+check("문서의 답과 그림의 답이 함께면, 그 그림은 그림의 답을 받는다",
+      sorted((r["Draft_ID"], r["Dispersion_Type"]) for r in _w) == [("DOC_A_D001", "SD"), ("DOC_A_D002", "NO_ERRORBAR")],
+      sorted((r["Draft_ID"], r["Dispersion_Type"]) for r in _w))
+_w, _r, _p, _o = run([answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D009")])
+check("기다리는 목록에 없는 그림은 거절한다", problems_of(_r) == ["NOT_PENDING"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2"), answer("DOC_A", "NO_ERRORBAR")])
+# REVERT: let two answers for one place both through. The file then holds two
+# rows for one figure, and which one a plan reads depends on the order.
+check("한 자리에 답이 둘이면 둘 다 거절한다", problems_of(_r) == ["ANSWERED_TWICE", "ANSWERED_TWICE"] and _w == [], problems_of(_r))
 
 # --- what is not being asked ----------------------------------------------
 _w, _r, _p, _o = run([answer("DOC_Z", "SD", SD_LINE, "2")])

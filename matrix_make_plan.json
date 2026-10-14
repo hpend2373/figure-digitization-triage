@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "2f2ea3cdfa24e4e883036df2855325f3caaa56b29aa282171c2222574045cc0d",
-  "test_make_plan.py": "02a7ce9cdf33068d9d392be60fddf439069465322be1291edb46c6bae4922126"
+  "make_plan.py": "f036d03c899dbe3523354014ff7e648ffbb7630aa54d2c3ea433594cc6a96f6c",
+  "test_make_plan.py": "9313e3204041104e6135163ec3bda2a48616b060c67198e93da6cbcdcb3e4539"
  },
  "suites": [
   "test_make_plan.py"
@@ -40,8 +40,8 @@
   {
    "name": "풀에서 뺀 행도 기하를 쓸 대상으로 둔다",
    "file": "make_plan.py",
-   "old": "        if code in RE.DISPOSITIONS:\n            # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.\n            disposition = \"UNRESOLVED\"",
-   "new": "        if False:\n            disposition = \"UNRESOLVED\""
+   "old": "        if code in RE.DISPOSITIONS:\n            # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.\n            disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")",
+   "new": "        if False:\n            disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")"
   },
   {
    "name": "캡션이 말해도 문서 진술을 먼저 본다",
@@ -292,8 +292,8 @@
   {
    "name": "처분 파일이 없으면 멈춘다",
    "file": "make_plan.py",
-   "old": "    if not os.path.exists(path):\n        return out",
-   "new": "    if False:\n        return out"
+   "old": "    path = os.path.join(run, FIGURE_DECISIONS)\n    out = {}\n    if not os.path.exists(path):\n        return out",
+   "new": "    path = os.path.join(run, FIGURE_DECISIONS)\n    out = {}\n    if False:\n        return out"
   },
   {
    "name": "사람이 그린 패널 목록을 읽지 않는다",
@@ -438,6 +438,48 @@
    "file": "make_plan.py",
    "old": "if kind == FROM_DECISION_BORROWED and not (mark == \"BOX_VIOLIN\" and dispersion[0] not in QUANTILE_DISPERSIONS):",
    "new": "if kind == FROM_DECISION_BORROWED:"
+  },
+  {
+   "name": "R6: a dropped figure stays UNRESOLVED",
+   "file": "make_plan.py",
+   "old": "disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")",
+   "new": "disposition = \"UNRESOLVED\""
+  },
+  {
+   "name": "R7: the disposition file is not read",
+   "file": "make_plan.py",
+   "old": "    decided.update(load_figure_dispositions(run))\n",
+   "new": ""
+  },
+  {
+   "name": "R7: figure_decisions read after the dispositions",
+   "file": "make_plan.py",
+   "old": "    decided = load_figure_decisions(run)\n    decided.update(load_figure_dispositions(run))\n",
+   "new": "    decided = load_figure_dispositions(run)\n    decided.update(load_figure_decisions(run))\n"
+  },
+  {
+   "name": "R7: disposition names not understood",
+   "file": "make_plan.py",
+   "old": "    if choice in DECIDED_DISPOSITION:\n        return DECIDED_DISPOSITION[choice], None\n",
+   "new": ""
+  },
+  {
+   "name": "R7: a NON_TARGET figure still asked for its count",
+   "file": "make_plan.py",
+   "old": "SETTLED_DISPOSITIONS = (\"NOT_DATA\", \"UNRESOLVED\", \"NON_TARGET_OUTCOME\")",
+   "new": "SETTLED_DISPOSITIONS = (\"NOT_DATA\", \"UNRESOLVED\")"
+  },
+  {
+   "name": "R7: REDRAW unnamed",
+   "file": "make_plan.py",
+   "old": "    \"REDRAW\": \"패널을 다시 그리라고 하신 그림 — 패널 영역 다시 그리기\",\n",
+   "new": ""
+  },
+  {
+   "name": "R7: a run without the disposition file stops",
+   "file": "make_plan.py",
+   "old": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if not os.path.exists(path):\n        return out",
+   "new": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if False:\n        return out"
   }
  ]
 }

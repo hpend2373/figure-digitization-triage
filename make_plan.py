@@ -48,6 +48,9 @@ DECISIONS = "errorbar_decisions.csv"
 #: `record_decisions.py`가 적은 처분들. 사람이 그림을 보고 정한 것이고, 계획서가
 #: 그것을 읽지 않으면 판정은 파일 안에만 있습니다.
 FIGURE_DECISIONS = "figure_decisions.csv"
+#: 그림 하나의 처분 (`record_dispositions`, run2 2026-10-14 R7). 같은 그림에
+#: `figure_decisions.csv`의 판정이 있어도 이쪽이 이깁니다 - 나중에, 더 보고 정한 것.
+FIGURE_DISPOSITIONS = "figure_dispositions.csv"
 #: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
 #: 새로 짓지 않습니다 - 파이프라인이 이미 쓰는 이름이 따로 있는데 여기서만
 #: 다른 이름을 보면, 계수는 들어와 있는데 계획서는 영영 못 보게 됩니다.
@@ -87,7 +90,18 @@ DECIDED_NEEDS = {
     "RECROP": "다시 자르라고 하신 그림 — 재크롭",
     "COUNTABLE": "이제 셀 수 있다고 하신 그림 — 계수 다시",
     "PARTIAL": "일부 패널만 데이터라고 하신 그림 — 그 패널만 추출",
+    "REDRAW": "패널을 다시 그리라고 하신 그림 — 패널 영역 다시 그리기",
 }
+#: 처분 파일(`figure_dispositions.csv`)의 이름이 곧 계획서의 처분인 것들. DIGITIZE는
+#: `figure_decisions`의 DATA와 같은 말입니다.
+DECIDED_DISPOSITION = {"DIGITIZE": "DIGITIZE", "NON_TARGET": "NON_TARGET_OUTCOME",
+                       "ASSOCIATION": "ASSOCIATION_EXTRACT"}
+#: 사람이 이미 처분해서, 계수·캡션 어긋남을 더 묻지 않는 그림.
+SETTLED_DISPOSITIONS = ("NOT_DATA", "UNRESOLVED", "NON_TARGET_OUTCOME")
+#: 오차 정의 판정이 처분인 그림의 패널 처분 (run2 2026-10-14 R6). DROP은 목표
+#: 결과지만 요약 통계의 정의가 없어 닫는 것이고(397번 시험판의 선례), 그 그림을
+#: UNRESOLVED에 두면 계획서는 아무도 다시 볼 일이 없는 그림을 '미정'이라 부릅니다.
+ERRORBAR_DISPOSITION = {"DROP": "NO_SUMMARY_STATISTIC", "NOT_DATA": "NOT_DATA"}
 
 READINESS = "plan_readiness.csv"
 WORKSHEET = "plan_figures.csv"
@@ -314,7 +328,7 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", ""),
         if decided_need:
             needs.append(decided_need)
     #: 사람이 이미 처분한 그림. 아래의 물음들은 그 처분보다 앞설 수 없습니다.
-    settled = decided in ("NOT_DATA", "UNRESOLVED")
+    settled = decided in SETTLED_DISPOSITIONS
 
     if not settled and route == "MIXED_CAPTION_NOT_DECIDABLE" and count:
         # 할 일을 적지 않으면 이 그림들은 `UNRESOLVED`에 조용히 앉아 있습니다 -
@@ -324,7 +338,7 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", ""),
     if disposition == "GEOMETRY_NOT_AUTHORED":
         if code in RE.DISPOSITIONS:
             # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.
-            disposition = "UNRESOLVED"
+            disposition = ERRORBAR_DISPOSITION.get(code, "UNRESOLVED")
         elif count == 0:
             # 사람이 축 영역을 0개로 세었습니다. 기하는 패널마다 쓰는
             # 것이고 패널이 없으니 쓸 자리가 없습니다 - 여기에 할 일을
@@ -394,6 +408,17 @@ def load_figure_decisions(run):
     return out
 
 
+def load_figure_dispositions(run):
+    """{Draft_ID: 처분 행을 `decided_for`가 읽는 모양으로} - `record_dispositions`가 적은 것."""
+    path = os.path.join(run, FIGURE_DISPOSITIONS)
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for r in csv.DictReader(io.open(path, encoding="utf-8-sig")):
+        out[r["Draft_ID"]] = dict(r, Decision=r.get("Disposition", ""), Question="DISPOSITION")
+    return out
+
+
 def decided_for(figure_decision):
     """(처분, 할 일) - 사람의 판정이 계획서에서 무엇이 되는가.
 
@@ -408,6 +433,8 @@ def decided_for(figure_decision):
         return "NOT_DATA", None
     if choice == DECIDED_IS_DATA:
         return "DIGITIZE", None
+    if choice in DECIDED_DISPOSITION:
+        return DECIDED_DISPOSITION[choice], None
     need = DECIDED_NEEDS.get(choice)
     if need is None:
         return "", None
@@ -845,6 +872,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
     captions = _by(_rows(os.path.join(run, CAPTIONS)), "Draft_ID")
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
     decided = load_figure_decisions(run)
+    decided.update(load_figure_dispositions(run))
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers

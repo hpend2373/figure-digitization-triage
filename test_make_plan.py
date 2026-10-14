@@ -198,9 +198,14 @@ check("사람의 판정은 캡션 규칙을 이긴다",
       (_sheet["PUB_D001"]["Dispersion_Type"],
        _sheet["PUB_D001"]["Errorbar_Source_Kind"]) == ("SEM", MP.FROM_DECISION),
       _sheet["PUB_D001"]["Dispersion_Type"])
-check("풀에서 뺀 행은 기하를 쓸 일로 남기지 않는다",
-      _sheet["PUB_D002"]["Disposition"] == "UNRESOLVED",
-      _sheet["PUB_D002"]["Disposition"])
+# REVERT (run2 2026-10-14 R6): leave a dropped figure UNRESOLVED. The plan then
+# calls a figure nobody will look at again "undecided", and its panels stand as
+# SOURCE_PANEL_UNRESOLVED for ever. It is a target closed for want of a summary
+# statistic - the 397 pilot's NO_SUMMARY_STATISTIC.
+check("풀에서 뺀 행은 기하를 쓸 일로 남기지 않고, 요약 통계 없음으로 닫는다",
+      _sheet["PUB_D002"]["Disposition"] == "NO_SUMMARY_STATISTIC"
+      and "패널 기하" not in _sheet["PUB_D002"]["Needs"],
+      (_sheet["PUB_D002"]["Disposition"], _sheet["PUB_D002"]["Needs"]))
 check("풀에서 뺀 행은 셈에서도 빠진다", _ready[0]["Dropped"] == "1", _ready[0]["Dropped"])
 write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type",
                      "Errorbar_Definition_Source", "Found_On_Page"), [])
@@ -584,6 +589,37 @@ check("판정이 없으면 계수는 그대로 묻는다",
 
 _missing = MP.load_figure_decisions(os.path.join(ROOT, "no_such_run"))
 check("처분 파일이 없는 실행도 계획서를 만든다", _missing == {}, _missing)
+
+# --- 그림 처분 파일 (record_dispositions, run2 2026-10-14 R7) ---------------------
+# 연관 그림으로 심사된 그림이 사실은 집단 평균이거나(DIGITIZE), 이 리뷰의 결과가
+# 아니거나(NON_TARGET) - 이 처분이 계획서에 닿지 않으면 그 35개 그림은 계속
+# ASSOCIATION_EXTRACT로 남습니다.
+_scatter_cap = {"Caption_Full": SCATTER, "Errorbar_Definition": "UNSTATED", "Box_Elements": "", "Page": "5"}
+check("연관 그림으로 심사된 그림이 그대로면 연관 추출이다",
+      _decided("", cap=_scatter_cap)["disposition"] == "ASSOCIATION_EXTRACT", _decided("", cap=_scatter_cap))
+_dig = _decided("DIGITIZE", cap=_scatter_cap)
+# REVERT: read the disposition name as an unknown decision. The figure stays an
+# association figure, and its group means are never read.
+check("DIGITIZE는 보통 그림으로 돌린다 (figure_decisions의 DATA와 같다)",
+      _dig["route"] == "DIGITIZE" and _dig["disposition"] == "GEOMETRY_NOT_AUTHORED", _dig)
+_nt = _decided("NON_TARGET", cap=_scatter_cap, count=None)
+check("NON_TARGET은 NON_TARGET_OUTCOME으로 닫고, 계수도 더 묻지 않는다",
+      _nt["disposition"] == "NON_TARGET_OUTCOME" and _nt["needs"] == [], _nt)
+check("ASSOCIATION은 연관 추출로 둔다", _decided("ASSOCIATION", cap=_scatter_cap)["disposition"] == "ASSOCIATION_EXTRACT")
+check("REDRAW는 그 이름의 할 일로 적힌다",
+      any("패널 영역 다시 그리기" in n for n in _decided("REDRAW")["needs"]) and _decided("REDRAW")["disposition"] == "UNRESOLVED")
+write(MP.FIGURE_DISPOSITIONS, ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person"),
+      [{"Draft_ID": "PUB_D004", "Disposition": "NON_TARGET", "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "0"}])
+write(MP.FIGURE_DECISIONS, ("Draft_ID", "Question", "Decision", "Which_Panels"),
+      [{"Draft_ID": "PUB_D004", "Question": "MIXED", "Decision": "DATA", "Which_Panels": ""}])
+_plan_d, _sheet_d, _ready_d = build()
+# REVERT: read figure_decisions after the disposition file. The earlier answer
+# then wins over the one given later, with more seen.
+check("처분 파일은 계획서에 닿고, 같은 그림의 figure_decisions보다 이긴다",
+      _sheet_d["PUB_D004"]["Disposition"] == "NON_TARGET_OUTCOME", _sheet_d["PUB_D004"]["Disposition"])
+os.rename(os.path.join(RUN, MP.FIGURE_DISPOSITIONS), os.path.join(ROOT, "fd_moved_aside.csv"))
+os.rename(os.path.join(RUN, MP.FIGURE_DECISIONS), os.path.join(ROOT, "fdec_moved_aside.csv"))
+check("처분 파일이 없는 실행도 계획서를 만든다 (처분)", MP.load_figure_dispositions(RUN) == {})
 
 # ------------------------------------------ 사람이 확인한 기하·정체가 계획서가 된다
 print("confirmed geometry and identity become a read block; anything less is named")

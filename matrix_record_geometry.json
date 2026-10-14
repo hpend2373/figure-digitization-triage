@@ -1,18 +1,12 @@
 {
  "files": {
-  "record_geometry.py": "85d9b17c1f2fb04daf51b149eb0ffc63c59e592b98dcc75fd14f8aa08b662b96",
-  "test_record_geometry.py": "2db422bb73c160b906fb57a375e4522ef0300bad1ffbc9b3a5bcecfe9e44bdee"
+  "record_geometry.py": "75ac077b84420a246547efd942b5d909463f5305d744d004f4137d0c1fcfa804",
+  "test_record_geometry.py": "e6ee52e3b28b74a881caaebc0d41619d44c08475475d41735f02c733c4dc3c3b"
  },
  "suites": [
   "test_record_geometry.py"
  ],
  "mutations": [
-  {
-   "name": "본 표시를 보지 않는다",
-   "file": "record_geometry.py",
-   "old": "    if not is_true(answer.get(\"Seen_By_Person\")):",
-   "new": "    if False:"
-  },
   {
    "name": "누가 보았는지 묻지 않는다",
    "file": "record_geometry.py",

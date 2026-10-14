@@ -141,6 +141,10 @@ PROPOSAL_COLUMNS = (
     # machine reading: the numerals were read beside a spine this frame does
     # not have, so the person types the values and points at the ticks.
     "Frame_Source",
+    # WHO LOOKED: a person (Seen_By_Person=1), or something a person approved
+    # (Seen_By_Person=0, Observed_By, Approval_Ref - `approval`). Blank on rows
+    # recorded before 2026-10-14, when only a person's own look was accepted.
+    "Seen_By_Person", "Observed_By", "Approval_Ref",
 )
 
 #: The file the proposer names the panels it found NO FRAME in. A region with

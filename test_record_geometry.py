@@ -128,6 +128,26 @@ check("누가 보았는지 없으면 거절한다",
       "UNATTRIBUTED" in codes(run([answer(Verified_By="  ")])[1]))
 
 print()
+print("사람이 보지 않은 답은 사람이 승인한 관찰로만 들어오고, 기록에 그렇게 남는다")
+_APPROVED = dict(Seen_By_Person="0", Observed_By="Claude (PDF survey 2026-10-14)",
+                 Approval_Ref="chat 2026-10-14: 판정대로 기록", Verified_By="MC")
+_w, _r, _p = run([answer(**_APPROVED)])
+check("온전한 승인된 관찰은 적힌다", len(_w) == 1 and not _r, codes(_r))
+with io.open(_p, encoding="utf-8") as fh:
+    _back = list(csv.DictReader(fh))
+# REVERT: 승인된 관찰의 출처를 적지 않는다. 그러면 기록은 사람이 본 확인과 구별되지 않습니다.
+check("기록은 사람이 보지 않았고 누가 보았고 어디서 승인했는지를 들고 있다",
+      _back and (_back[0]["Seen_By_Person"], _back[0]["Observed_By"], _back[0]["Approval_Ref"])
+      == ("0", "Claude (PDF survey 2026-10-14)", "chat 2026-10-14: 판정대로 기록"),
+      _back and {k: _back[0].get(k) for k in ("Seen_By_Person", "Observed_By", "Approval_Ref")})
+check("본 것이 없는 승인은 거절한다",
+      "APPROVAL_INCOMPLETE" in codes(run([answer(**dict(_APPROVED, Observed_By=""))])[1]))
+check("승인한 곳이 없는 승인은 거절한다",
+      "APPROVAL_INCOMPLETE" in codes(run([answer(**dict(_APPROVED, Approval_Ref=" "))])[1]))
+check("본 사람과 승인한 사람이 같으면 거절한다",
+      "OBSERVER_IS_APPROVER" in codes(run([answer(**dict(_APPROVED, Observed_By="MC"))])[1]))
+
+print()
 print("확인은 값을 들고 와야 확인이다")
 # REVERT: 값 없는 확인을 적는다. 계산이 되지 않는 기하가 확인된 채로 앉아
 # 있고, 다음 사람은 그것이 쓸 수 있는 줄 압니다.

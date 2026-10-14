@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import approval                                                  # noqa: E402
 import batch_manifests as BM                                     # noqa: E402
 import identity_proposer as IP                                   # noqa: E402
 
@@ -212,9 +213,10 @@ def check_answer(answer, proposed):
     pid = (answer.get("Proposal_ID") or "").strip()
     verdict = (answer.get("Human_Verification_Status") or "").strip().upper()
     who = (answer.get("Verified_By") or "").strip()
-    if not is_true(answer.get("Seen_By_Person")):
-        problems.append(("NOT_SEEN_BY_PERSON", "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
-                                               "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
+    # 본 답이거나, 사람이 승인한 관찰이거나(`approval`). 승인된 관찰은 기록에
+    # 그렇게 남습니다 - 사람이 본 것처럼 적히지 않습니다.
+    problems.extend(approval.seen_problems(answer, who, "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
+                                                        "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
     if not who:
         problems.append(("UNATTRIBUTED", "누가 보았는지 적혀 있지 않습니다. 이름 없는 확인은 확인이 아닙니다."))
     if verdict not in VERDICTS:
@@ -252,7 +254,11 @@ def check_answer(answer, proposed):
                          % (route, "/".join(READ_ROUTES))))
     mark = (answer.get("Mark_Type") or "").strip().upper()
     kind = (proposal.get("Panel_Kind") or "").strip().upper()
-    allowed = IP.MARK_TYPES_FOR.get(kind, ()) + (("LINE_MONO_STYLE",) if kind == "LINE" else ())
+    # 산점으로 세어진 패널 중에는 x가 시점·조건(범주)이고 점이 집단 평균인 그림이 있습니다
+    # - 선 없이 찍은 평균. 판독기가 그것을 읽는 길은 LINE_MONO의 마커 찾기이고, SCATTER는
+    # 두 변수의 관계로 x 눈금과 연관 종류를 요구합니다(run2 2026-10-14 결정 R2: 63장).
+    allowed = IP.MARK_TYPES_FOR.get(kind, ()) + (("LINE_MONO_STYLE",) if kind == "LINE" else ()) \
+        + (("LINE_MONO",) if kind == "SCATTER" else ())
     if mark not in BM.BATCH_MARK_TYPES:
         problems.append(("MARK_TYPE_BAD", "표 종류 %r은 %s 중 하나가 아닙니다."
                          % (mark or "(빈칸)", "/".join(BM.BATCH_MARK_TYPES))))
@@ -325,6 +331,7 @@ def record(proposals, answers, when, out_path=None, replace=False, log=print, an
             == "CONFIRMED" else "",
             "Note": (answer.get("Note") or "").strip(),
         })
+        row.update(approval.provenance(answer))
         written.append(row)
     keep = [r for r in existing if r["Proposal_ID"] not in set(w["Proposal_ID"] for w in written)]
     rows = sorted(keep + written, key=lambda x: x["Proposal_ID"])

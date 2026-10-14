@@ -34,6 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import approval                                                  # noqa: E402
 import geometry_proposer as GP                                   # noqa: E402
 
 PROPOSALS = "geometry_proposal.csv"
@@ -163,11 +164,11 @@ def check_answer(answer, proposed, refused=None):
 
     # 사람이 오버레이를 보았다고 말하지 않은 답은 답이 아닙니다. 이 문이
     # 지키는 것은 값의 모양이 아니라 "누가 보았는가"이고, 그것은 에이전트가
-    # 대신 채울 수 없습니다.
-    if not is_true(answer.get("Seen_By_Person")):
-        problems.append(("NOT_SEEN_BY_PERSON",
-                         "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
-                         "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
+    # 대신 채울 수 없습니다. 사람이 보지 않은 답은 사람이 승인한 관찰로만
+    # 들어오고(`approval`), 기록에 그렇게 남습니다.
+    problems.extend(approval.seen_problems(answer, who,
+                                           "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
+                                           "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
     # 그리고 그 사람이 누구인지. 이름 없는 확인은 되돌아볼 곳이 없는 확인이고,
     # `proposal_problems`가 그것을 PROPOSAL_VERDICT_UNATTRIBUTED로 부릅니다.
     if not who:
@@ -360,6 +361,7 @@ def record(proposals, answers, when, out_path=None, replace=False,
             "Verified_At": when,
             "Note": (answer.get("Note") or "").strip(),
         })
+        row.update(approval.provenance(answer))
         written.append(row)
 
     # 축을 빌리는 줄은 빌려주는 패널이 확인된 뒤에야 적힙니다 - 이 묶음에서든,

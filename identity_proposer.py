@@ -83,6 +83,10 @@ IDENTITY_COLUMNS = (
     # AUTO: a reader reads the values; MANUAL: a person does, because no
     # released reader can tell these series apart (`record_identity.READ_ROUTES`).
     "Read_Route", "Note",
+    # who looked: a person (Seen_By_Person=1), or something a person approved
+    # (Seen_By_Person=0, Observed_By, Approval_Ref - `approval`). Blank on rows
+    # recorded before 2026-10-14, when only a person's own look was accepted.
+    "Seen_By_Person", "Observed_By", "Approval_Ref",
 )
 
 READ_OK, READ_REFUSED, READ_NOT_ATTEMPTED = GP.READ_OK, GP.READ_REFUSED, GP.READ_NOT_ATTEMPTED

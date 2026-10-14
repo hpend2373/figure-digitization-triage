@@ -37,6 +37,12 @@ WHAT IT REFUSES.
     naming two things is `AMBIGUOUS`, a "±" with no name is `PM_UNNAMED`, and
     silence is `UNSTATED`. The plan's `Errorbar_Definition_Source` is still
     written by a person who has read the paper.
+
+THREE WIDER READINGS (W1-W3, `wider_readings`) fill only what the rules above
+left empty: a document statement in forms the narrow rule does not see, kept
+only when it stands in the body (not in a legend, a table or a result); a
+caption that says it shows the same data presentation as another figure; a
+caption cut at a column edge. A W2 or W3 answer says so in its evidence.
 """
 import argparse
 import csv
@@ -481,6 +487,190 @@ def document_statement(blocks):
     return "", "", ""
 
 
+#: ---------------------------------------------------------------------------
+#: THREE WIDER READINGS (run2 2026-10-14, decision page R8). The two rules above
+#: left 22 papers whose bars nobody could name without opening the PDF. Read by
+#: hand, the text did name them in nine, in forms these rules do not see. Each
+#: reading below fills only what the rules above left empty - no answer they
+#: gave moves - and each was run over all 98 papers of run2 before it came here.
+#:
+#: W1 the document statement in wider forms, each seen in this corpus:
+#:      'Data provided as mean ± SD'                      (no copula)
+#:      'Means and standard errors (± SE) were calculated' (subject 'means')
+#:      'Data arc presented as mean =t= standard error'   (a scan's OCR of 'are')
+#:      'Values are means ± SE'                            (copula + mean)
+#:      'Error bars are ±standard error of mean'           (the bars as subject)
+#:    A wider net catches the wrong sentences too, so a found sentence is first
+#:    put where it stands: LEGEND (it opens 'Fig. n', or it is inside a caption
+#:    of the paper - a legend speaks for its own figure), TABLE (a table's title,
+#:    or a note under table cells - it speaks for its table), VALUE (a result with
+#:    its spread, '4.9 ± 1.1 s', or a sentence that names no mean or median), else
+#:    BODY. Only BODY sentences make a document statement.
+WIDE_STATEMENT = re.compile(
+    r"(?:"
+    r"%(in)s{0,120}\b(?:%(subj)s|means?|averages?)\b%(in)s{0,60}\b(?:are|were|is|was|be|arc)\b%(in)s{0,40}"
+    r"\b(?:presented|expressed|shown|given|reported|displayed|represented|plotted|depicted|summari[sz]ed|indicated|"
+    r"provided|calculated|computed)"
+    r"|"
+    r"\b(?:data|values?|results)\s+(?:presented|expressed|provided|given|shown|reported)\s+as\b"
+    r"|"
+    r"\b(?:data|values?|results?)\s+(?:are|were|is|represent)\s+(?:the\s+)?(?:[\w-]+\s+){0,5}?"
+    r"(?:means?|mean\s+values?|averages?)\b"
+    r"|"
+    r"\b(?:error\s+bars?|(?:vertical|horizontal)(?:\s+and\s+(?:vertical|horizontal))?\s+bars|whiskers)\s+"
+    r"(?:are|represent|indicate|denote|show|depict|correspond\s+to)\b"
+    r")%(in)s{0,200}" % {"in": _IN, "subj": _SUBJECT}, re.I)
+FIG_OPEN = re.compile(r"^\s*(?:Fig(?:ure)?s?\.?|FIGURE|FIG\.?)\s*(\d{1,2})\b")
+TABLE_OPEN = re.compile(r"^\s*(?:Table|TABLE)\s*[0-9IVX]+\b")
+TABLE_FOOTNOTE = re.compile(r"[*†‡§#]{1,3}\s*(?:Significant|significant|P\s*[<=]|p\s*[<=]|Different|different)")
+NOTE_OPEN = re.compile(r"^\s*(?:Values|Data|Results)\s+(?:are|were)\b", re.I)
+#: 'WASO, wakefulness after sleep onset; SWS, slow-wave sleep' - the abbreviation
+#: list that closes a table (a figure's own list is inside its caption, LEGEND first)
+ABBREVIATIONS = re.compile(r"\b[A-Z][A-Za-z0-9]{1,6}(?:\s?[A-Z0-9]{1,4})?,\s+[a-z]")
+#: a value with its spread ('4.9 6 1.1 s', '11.6 ± 3.0') - a result, not how the
+#: paper presents its values
+VALUE_WITH_SPREAD = re.compile(r"\d\s*(?:±|\+/-|\(cid:\d+\)|6)\s*\d")
+#: the statistic a statement presents. 'average' is left out: 'a subject of
+#: average weight' named it in a sentence about regression estimates (Moore 2014)
+CENTRE = re.compile(r"\b(?:means?|medians?)\b", re.I)
+#: W2 a caption that names nothing but shows 'the same (type of) data presentation
+#: as in Fig. n' (or the same error bars) takes Fig. n's caption definition. Only
+#: the data presentation counts: 'with same axes as in Fig. 4' (Westerhof 2006
+#: Fig. 8, which the first trial took), 'symbols as in Fig. 1' (Zuj 2012) and
+#: 'produced as in Figure 5' (Perhonen 2001) say nothing of the bars.
+SAME_AS = re.compile(r"\b(?:same|similar)\s+(?:(?:type|kind)\s+of\s+)?(?:data\s+presentation|presentation\s+of\s+(?:the\s+)?data"
+                     r"|error\s+bars?)\b%s{0,30}?\bas\s+(?:in\s+|for\s+)?Fig(?:ure)?s?\.?\s*(\d{1,2})\b"
+                     r"|\b(?:error\s+bars?|data\s+presentation)\s+(?:are\s+|is\s+)?(?:the\s+same\s+)?as\s+in\s+"
+                     r"Fig(?:ure)?s?\.?\s*(\d{1,2})\b" % _IN, re.I)
+#: W3 a caption cut at a column edge. The caption is its own block, and a caption
+#: set across two columns loses its second half: npj Microgravity 2024 Fig. 6
+#: ends '... (C, stage' and its 'Mean ± SEM.' stands in the next column. When the
+#: caption block ends without a full stop and the very next block starts at the
+#: same height (± CONTINUATION_DY pt) to its right and opens no figure or table,
+#: the two are read together. Applied before W2: a figure that defers to it
+#: inherits what it says.
+SENTENCE_END = re.compile(r"[.!?)\]]\s*$")
+CONTINUATION_DY = 6
+W2_PREFIX = "W2: caption defers to Fig. "
+W3_PREFIX = "W3: caption continues in the next column - "
+
+
+def _numeric_share(text):
+    toks = _norm(text).split()
+    if not toks:
+        return 0.0
+    return sum(1 for t in toks if re.fullmatch(r"[-−+]?[\d.,]+[*†‡§a-z]{0,3}|\(\d+\)|\(cid:\d+\)|mmHg|ms|%", t)) \
+        / float(len(toks))
+
+
+def _cell_like(text):
+    """a block of table cells: mostly numbers, or a two- or three-word header like 'Pre Post'"""
+    toks = _norm(text).split()
+    return bool(toks) and (_numeric_share(text) >= 0.5 or len(toks) <= 3)
+
+
+def wide_finds(blocks, captions):
+    """W1: every wider-form sentence that names one dispersion, as (code,
+    sentence, page, class); `captions` is [(figure number, caption text)]."""
+    caps = [(n, _norm(t)) for n, t in captions]
+    out = []
+    for i, (page, _x0, _y0, _x1, _y1, text) in enumerate(blocks):
+        flat = _norm(text)
+        prev = blocks[i - 1][5] if i else ""
+        for m in WIDE_STATEMENT.finditer(flat):
+            s = m.group(0).strip()
+            code, _ev = errorbar_definition(s)
+            if code in (DEF_UNSTATED, DEF_PM_UNNAMED, ""):
+                continue
+            fo = FIG_OPEN.match(flat)
+            inside = [n for n, c in caps if s[:60] in c]
+            if fo or inside:
+                cls = "LEGEND %s" % (fo.group(1) if fo else ",".join(sorted(set(inside))))
+            elif (TABLE_OPEN.match(flat) or (NOTE_OPEN.match(flat) and (_cell_like(prev) or TABLE_FOOTNOTE.search(flat)))
+                  or _numeric_share(prev) >= 0.5 or len(ABBREVIATIONS.findall(flat)) >= 2):
+                cls = "TABLE"
+            elif VALUE_WITH_SPREAD.search(s) or not CENTRE.search(s):
+                cls = "VALUE"
+            else:
+                cls = "BODY"
+            out.append((code, s[:300], str(page), cls))
+        # a table's own title: 'Table 4. Means (SD) and counts for all measures'
+        # (the word 'Table' may sit at the end of the block before)
+        tail = _norm(prev)[-12:]
+        if TABLE_OPEN.match(flat) or re.search(r"(?:Table|TABLE)\s*$", tail):
+            first = re.split(r"(?<=[.;])\s", flat, maxsplit=2)
+            t = " ".join(first[:2])[:300]
+            code, _ev = errorbar_definition(t)
+            if code not in (DEF_UNSTATED, DEF_PM_UNNAMED, DEF_AMBIGUOUS, "") and CENTRE.search(t) \
+                    and not any(o[1] == t for o in out):
+                out.append((code, t, str(page), "TABLE"))
+    return out
+
+
+def wide_statement(found):
+    """(code, sentence, page) from the BODY finds only; two kinds are AMBIGUOUS."""
+    body = [f for f in found if f[3] == "BODY"]
+    kinds = sorted({f[0] for f in body})
+    if not kinds:
+        return "", "", ""
+    if len(kinds) > 1:
+        return DEF_AMBIGUOUS, " | ".join("%s: %s" % (f[0], f[1][:80]) for f in body), body[0][2]
+    return kinds[0], body[0][1], body[0][2]
+
+
+def continuation(blocks, row):
+    """W3: the next-column text that continues `row`'s caption, or ''."""
+    page = str(row.get("Page") or "")
+    key = " ".join(_norm(row.get("Caption_Line") or "").split())[:30]
+    if not key:
+        return ""
+    for i, (pg, _x0, y0, x1, _y1, text) in enumerate(blocks):
+        if str(pg) != page or not " ".join(_norm(text).split()).startswith(key):
+            continue
+        if SENTENCE_END.search(_norm(text)) or i + 1 >= len(blocks):
+            return ""
+        npg, nx0, ny0, _nx1, _ny1, ntext = blocks[i + 1]
+        flat = _norm(ntext)
+        if str(npg) == page and abs(ny0 - y0) <= CONTINUATION_DY and nx0 >= x1 - 2 \
+                and not FIG_OPEN.match(flat) and not TABLE_OPEN.match(flat):
+            return flat
+        return ""
+    return ""
+
+
+def wider_readings(rows, blocks):
+    """W1, W3, W2 on one document's rows, in place; only empty answers move."""
+    if not rows[0]["Doc_Errorbar_Definition"].strip():
+        captions = [(re.sub(r"\D", "", r["Figure_Number"]) or "?", r["Caption_Full"] or r["Caption_Line"]) for r in rows]
+        code, ev, page = wide_statement(wide_finds(blocks, captions))
+        if code:
+            for r in rows:
+                r["Doc_Errorbar_Definition"], r["Doc_Errorbar_Evidence"], r["Doc_Errorbar_Page"] = code, ev[:300], page
+    for r in rows:
+        if r["Errorbar_Definition"] not in (DEF_UNSTATED, ""):
+            continue
+        cont = continuation(blocks, r)
+        if not cont:
+            continue
+        code, ev = errorbar_definition(_norm(r["Caption_Full"] or r["Caption_Line"]) + " " + cont)
+        if code in (DEF_UNSTATED, DEF_PM_UNNAMED, DEF_AMBIGUOUS, ""):
+            continue
+        r["Errorbar_Definition"], r["Errorbar_Evidence"] = code, W3_PREFIX + ev
+    fig = {re.sub(r"\D", "", r["Figure_Number"]): r for r in rows}
+    for r in rows:
+        if r["Errorbar_Definition"] not in (DEF_UNSTATED, ""):
+            continue
+        m = SAME_AS.search(_norm(r["Caption_Full"] or r["Caption_Line"]))
+        if not m:
+            continue
+        n = m.group(1) or m.group(2)
+        ref = fig.get(n)
+        if ref and ref["Errorbar_Definition"] not in (DEF_UNSTATED, DEF_AMBIGUOUS, DEF_PM_UNNAMED, ""):
+            r["Errorbar_Definition"] = ref["Errorbar_Definition"]
+            r["Errorbar_Evidence"] = '%s%s ("%s") - Fig. %s caption: %s' % (W2_PREFIX, n, m.group(0)[:80], n, ref["Errorbar_Evidence"])
+    return rows
+
+
 def resolve_source(pdf_root, name):
     """The file for a draft's bare `Source_File` name, searched one level of
     subdirectories deep, or None."""
@@ -555,6 +745,8 @@ def rows_for_document(doc_rows, blocks, failure=None, sha_ok=""):
             base["Box_Elements"] = box_elements_text(marks)
             base["Box_Evidence"] = mev
         out.append(base)
+    if blocks and out:
+        wider_readings(out, blocks)
     return out
 
 

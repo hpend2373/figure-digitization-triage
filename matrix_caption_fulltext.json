@@ -1,7 +1,7 @@
 {
  "files": {
-  "caption_fulltext.py": "793e7de5d1fa926a806c455901a0cb31df0d09bbc7e5976cb5f353089f1ec3bb",
-  "test_caption_fulltext.py": "c929394cfcc8cba45ad3a6f4f6a47303916ea1357e32a914b072032d9e0f3422"
+  "caption_fulltext.py": "6df2bcbe2eabaccac54dc09aa99093577670bed7015f8f550c9f616e77bf8aea",
+  "test_caption_fulltext.py": "09d5a5169fc45acc9c9700ae231033ef49ecf4ba90a03b3716911d0bff4396f3"
  },
  "suites": [
   "test_caption_fulltext.py"
@@ -234,6 +234,108 @@
    "file": "caption_fulltext.py",
    "old": "    if not out:\n        return {}, \"\"",
    "new": "    if False:\n        return {}, \"\""
+  },
+  {
+   "name": "R8 W1: a legend sentence counts as BODY",
+   "file": "caption_fulltext.py",
+   "old": "if fo or inside:\n                cls = \"LEGEND",
+   "new": "if False:\n                cls = \"LEGEND"
+  },
+  {
+   "name": "R8 W1: a table title or note counts as BODY",
+   "file": "caption_fulltext.py",
+   "old": "elif (TABLE_OPEN.match(flat) or (NOTE_OPEN.match(flat)",
+   "new": "elif False and (TABLE_OPEN.match(flat) or (NOTE_OPEN.match(flat)"
+  },
+  {
+   "name": "R8 W1: a result with its spread counts as BODY",
+   "file": "caption_fulltext.py",
+   "old": "elif VALUE_WITH_SPREAD.search(s) or not CENTRE.search(s):",
+   "new": "elif False:"
+  },
+  {
+   "name": "R8 W1: the statement is taken from every find, not BODY only",
+   "file": "caption_fulltext.py",
+   "old": "body = [f for f in found if f[3] == \"BODY\"]",
+   "new": "body = list(found)"
+  },
+  {
+   "name": "R8 W1: a wider find replaces the narrow rule's statement",
+   "file": "caption_fulltext.py",
+   "old": "if not rows[0][\"Doc_Errorbar_Definition\"].strip():",
+   "new": "if True:"
+  },
+  {
+   "name": "R8 W1: the copula+mean form left out",
+   "file": "caption_fulltext.py",
+   "old": "r\"\\b(?:data|values?|results?)\\s+(?:are|were|is|represent)\\s+(?:the\\s+)?(?:[\\w-]+\\s+){0,5}?\"",
+   "new": "r\"\\bNEVER_MATCHES_(?:data|values?|results?)\\s+(?:are|were|is|represent)\\s+(?:the\\s+)?(?:[\\w-]+\\s+){0,5}?\""
+  },
+  {
+   "name": "R8 W2: 'same axes / symbols as in Fig. n' taken",
+   "file": "caption_fulltext.py",
+   "old": "SAME_AS = re.compile(r\"\\b(?:same|similar)\\s+(?:(?:type|kind)\\s+of\\s+)?(?:data\\s+presentation",
+   "new": "SAME_AS = re.compile(r\"\\b(?:same|similar)?\\s*(?:(?:type|kind)\\s+of\\s+)?(?:axes|symbols|produced|data\\s+presentation"
+  },
+  {
+   "name": "R8 W2: a deferring caption inherits from a silent figure",
+   "file": "caption_fulltext.py",
+   "old": "if ref and ref[\"Errorbar_Definition\"] not in (DEF_UNSTATED, DEF_AMBIGUOUS, DEF_PM_UNNAMED, \"\"):",
+   "new": "if ref:"
+  },
+  {
+   "name": "R8 W2: a caption with its own definition is overwritten",
+   "file": "caption_fulltext.py",
+   "old": "    fig = {re.sub(r\"\\D\", \"\", r[\"Figure_Number\"]): r for r in rows}\n    for r in rows:\n        if r[\"Errorbar_Definition\"] not in (DEF_UNSTATED, \"\"):\n            continue",
+   "new": "    fig = {re.sub(r\"\\D\", \"\", r[\"Figure_Number\"]): r for r in rows}\n    for r in rows:\n        if False:\n            continue"
+  },
+  {
+   "name": "R8 W3: a caption that ended is read on",
+   "file": "caption_fulltext.py",
+   "old": "if SENTENCE_END.search(_norm(text)) or i + 1 >= len(blocks):",
+   "new": "if i + 1 >= len(blocks):"
+  },
+  {
+   "name": "R8 W3: any height",
+   "file": "caption_fulltext.py",
+   "old": "abs(ny0 - y0) <= CONTINUATION_DY and ",
+   "new": ""
+  },
+  {
+   "name": "R8 W3: a block to the left",
+   "file": "caption_fulltext.py",
+   "old": "nx0 >= x1 - 2",
+   "new": "True"
+  },
+  {
+   "name": "R8 W3: a next figure is read as the continuation",
+   "file": "caption_fulltext.py",
+   "old": "and not FIG_OPEN.match(flat) and not TABLE_OPEN.match(flat):",
+   "new": "and not TABLE_OPEN.match(flat):"
+  },
+  {
+   "name": "R8 W3: a table is read as the continuation",
+   "file": "caption_fulltext.py",
+   "old": "and not FIG_OPEN.match(flat) and not TABLE_OPEN.match(flat):",
+   "new": "and not FIG_OPEN.match(flat):"
+  },
+  {
+   "name": "R8 W3: across a page",
+   "file": "caption_fulltext.py",
+   "old": "if str(npg) == page and abs(",
+   "new": "if abs("
+  },
+  {
+   "name": "R8: W2 before W3",
+   "file": "caption_fulltext.py",
+   "old": "    for r in rows:\n        if r[\"Errorbar_Definition\"] not in (DEF_UNSTATED, \"\"):\n            continue\n        cont = continuation(blocks, r)\n        if not cont:\n            continue\n        code, ev = errorbar_definition(_norm(r[\"Caption_Full\"] or r[\"Caption_Line\"]) + \" \" + cont)\n        if code in (DEF_UNSTATED, DEF_PM_UNNAMED, DEF_AMBIGUOUS, \"\"):\n            continue\n        r[\"Errorbar_Definition\"], r[\"Errorbar_Evidence\"] = code, W3_PREFIX + ev\n    fig = {re.sub(r\"\\D\", \"\", r[\"Figure_Number\"]): r for r in rows}\n    for r in rows:\n        if r[\"Errorbar_Definition\"] not in (DEF_UNSTATED, \"\"):\n            continue\n        m = SAME_AS.search(_norm(r[\"Caption_Full\"] or r[\"Caption_Line\"]))\n        if not m:\n            continue\n        n = m.group(1) or m.group(2)\n        ref = fig.get(n)\n        if ref and ref[\"Errorbar_Definition\"] not in (DEF_UNSTATED, DEF_AMBIGUOUS, DEF_PM_UNNAMED, \"\"):\n            r[\"Errorbar_Definition\"] = ref[\"Errorbar_Definition\"]\n            r[\"Errorbar_Evidence\"] = '%s%s (\"%s\") - Fig. %s caption: %s' % (W2_PREFIX, n, m.group(0)[:80], n, ref[\"Errorbar_Evidence\"])\n",
+   "new": "    fig = {re.sub(r\"\\D\", \"\", r[\"Figure_Number\"]): r for r in rows}\n    for r in rows:\n        if r[\"Errorbar_Definition\"] not in (DEF_UNSTATED, \"\"):\n            continue\n        m = SAME_AS.search(_norm(r[\"Caption_Full\"] or r[\"Caption_Line\"]))\n        if not m:\n            continue\n        n = m.group(1) or m.group(2)\n        ref = fig.get(n)\n        if ref and ref[\"Errorbar_Definition\"] not in (DEF_UNSTATED, DEF_AMBIGUOUS, DEF_PM_UNNAMED, \"\"):\n            r[\"Errorbar_Definition\"] = ref[\"Errorbar_Definition\"]\n            r[\"Errorbar_Evidence\"] = '%s%s (\"%s\") - Fig. %s caption: %s' % (W2_PREFIX, n, m.group(0)[:80], n, ref[\"Errorbar_Evidence\"])\n    for r in rows:\n        if r[\"Errorbar_Definition\"] not in (DEF_UNSTATED, \"\"):\n            continue\n        cont = continuation(blocks, r)\n        if not cont:\n            continue\n        code, ev = errorbar_definition(_norm(r[\"Caption_Full\"] or r[\"Caption_Line\"]) + \" \" + cont)\n        if code in (DEF_UNSTATED, DEF_PM_UNNAMED, DEF_AMBIGUOUS, \"\"):\n            continue\n        r[\"Errorbar_Definition\"], r[\"Errorbar_Evidence\"] = code, W3_PREFIX + ev\n"
+  },
+  {
+   "name": "R8: rows_for_document without the wider readings",
+   "file": "caption_fulltext.py",
+   "old": "if blocks and out:\n        wider_readings(out, blocks)",
+   "new": "if False:\n        wider_readings(out, blocks)"
   }
  ]
 }

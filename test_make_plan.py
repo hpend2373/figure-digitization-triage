@@ -886,6 +886,109 @@ except SystemExit as exc:
 check("the demo reviewer carries a contact the registry can be asked about",
       all(_plan["reviewers"][0].get(k) for k in ("contact_type", "contact", "registered_by")))
 
+# --- 목록의 두 수 (record_inventory, run2 2026-10-15 R1) ------------------------------
+# 문서의 그림 수와 그림의 패널 수가 VISUALLY_VERIFIED가 되는 길이 사람이 그린
+# 패널 하나뿐이면, 그리지 않은 그림과 문서는 모두 PENDING이고 그 편은 값을 하나도
+# 읽지 않습니다. 사람이 센 수, 또는 사람이 승인한 관찰이 계획서에 닿아야 합니다.
+print("the inventory's two numbers reach the plan, and a person's own count comes first")
+import record_inventory as RV                                    # noqa: E402
+_json.dump({"reviewers": [{"reviewer_id": "RV_MC", "name": "M. C.", "record_type": "HUMAN", "contact_type": "ORCID",
+                           "contact": "0000-0002-1825-0097", "registered_by": "M. C.", "registration_date": "2026-08-01",
+                           "human_attestation": "HUMAN_CONFIRMED"}],
+            "names": {"minyeop": "RV_MC"}}, io.open(_rev, "w", encoding="utf-8"))
+_APPROVED = {"Verified_By": "minyeop", "Seen_By_Person": "0", "Observed_By": "Claude (PDF survey)",
+             "Approval_Ref": "minyeop chat", "Inspection_Date": "2026-08-29"}
+
+
+def _inv(rows):
+    write(MP.INVENTORY, RV.FIELDS, [dict(_APPROVED, Count_Method=RV.MACHINE_PLUS_HUMAN, **r) for r in rows])
+
+
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"),
+      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "4", "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D002", "Observed_Panel_Count": "2", "Entry_Status": "ENTERED"}])
+_inv([{"Level": "DOCUMENT", "Target_ID": "PUB", "Count": "6", "Article_Page_Range": "1-12"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D001", "Count": "5", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D002", "Count": "3", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D003", "Count": "1", "Count_Basis": "WHOLE"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D004", "Count": "2", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D005", "Count": "1", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D008", "Count": "1", "Count_Basis": "WHOLE"}])
+_D001_DRAWN = [{"Draft_ID": "PUB_D001", "Panel_Index": str(i), "Mark_Type": m, "Verdict": "PANELS", "Verified_By": "minyeop",
+                "Verified_At": "2026-09-13"} for i, m in ((1, "BAR"), (2, "NOT_DATA"), (3, "BOX"))]
+_seg_write(MP.PANEL_DECISIONS, ("Draft_ID", "Panel_Index", "Mark_Type", "Verdict", "Verified_By", "Verified_At"), _D001_DRAWN + [
+    # 사람이 "읽을 패널이 없다"고 답한 그림, 그리고 다시 자르라고 정해진 그림의 이전 그림.
+    {"Draft_ID": "PUB_D004", "Panel_Index": "0", "Verdict": "NO_PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"},
+    {"Draft_ID": "PUB_D005", "Panel_Index": "1", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"},
+    {"Draft_ID": "PUB_D005", "Panel_Index": "2", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"}])
+write(MP.FIGURE_DISPOSITIONS, ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person"),
+      [{"Draft_ID": "PUB_D005", "Disposition": "RECROP", "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "1"}])
+_iplan, _isheet, _ifig, _ipanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")], reviewers_path=_rev)
+_IF = dict((f["source_figure_id"], f) for f in _iplan["figures"])
+_doc = _iplan["documents"][0]
+# REVERT: read inventory_records.csv nowhere. Every document stays PENDING and
+# the publication reads nothing, however many counts were approved.
+check("a document's recorded count makes it VISUALLY_VERIFIED, with the method, approver, day and pages",
+      (_doc["inventory_status"], _doc["observed_figure_count"], _doc["figure_count_method"], _doc["reviewer_id"],
+       _doc["inspection_date"], _doc["page_range"]) == ("VISUALLY_VERIFIED", 6, "MACHINE_PLUS_HUMAN", "RV_MC", "2026-08-29", "1-12"), _doc)
+_f2 = _IF["PUB_D002"]
+check("a figure's recorded count is its panel count, over the count sheet's, and its panels are that many",
+      _f2["observed_panel_count"] == 3 and len(_f2["panels"]) == 3 and _f2["inventory_status"] == "VISUALLY_VERIFIED"
+      and _f2["panel_count_method"] == "MACHINE_PLUS_HUMAN" and _f2["reviewer_id"] == "RV_MC", _f2)
+check("  and the figure says what the count sheet said", "the count sheet said 2" in _f2.get("note", ""), _f2.get("note"))
+_f8 = _IF["PUB_D008"]
+# REVERT: leave a WHOLE figure GEOMETRY_NOT_AUTHORED. A photo then becomes a
+# TARGET panel that asks a person for an outcome name and a geometry.
+check("a WHOLE figure the caption route would read is one NOT_DATA panel labelled WHOLE",
+      [(p["label"], p["disposition"], p["target_status"]) for p in _f8["panels"]] == [("WHOLE", "NOT_DATA", "NOT_DATA")]
+      and _isheet["PUB_D008"]["Disposition"] == "NOT_DATA", _f8["panels"])
+check("  and nobody is asked for its geometry or error bars",
+      not [n for n in _isheet["PUB_D008"]["Needs"].split(" · ") if n == "오차 정의" or n.startswith("패널 기하")], _isheet["PUB_D008"]["Needs"])
+_f3 = _IF["PUB_D003"]
+check("a WHOLE figure already closed keeps its disposition, as one WHOLE panel",
+      [(p["label"], p["disposition"]) for p in _f3["panels"]] == [("WHOLE", "NOT_DATA")] and _f3["inventory_status"] == "VISUALLY_VERIFIED")
+_f1 = _IF["PUB_D001"]
+# REVERT: let the record win over the drawing. A person's panels, drawn and named
+# on the raster, give way to a count nobody drew.
+check("a person's drawn panels win over the recorded count",
+      _f1["observed_panel_count"] == 3 and [p["panel_id"] for p in _f1["panels"]] == ["PUB_D001_P1", "PUB_D001_P2", "PUB_D001_P3"]
+      and _f1["panel_count_method"] == "HUMAN_VISUAL" and _f1["inspection_date"] == "2026-09-13", _f1)
+_f4 = _IF["PUB_D004"]
+# REVERT: read NO_PANELS nowhere. The person's answer that the figure has no
+# panel to read stays in the file, and the figure waits for a count.
+check("a person's NO_PANELS is the inventory: one WHOLE panel, HUMAN_VISUAL, in their name and on their day",
+      (_f4["observed_panel_count"], _f4["panel_count_method"], _f4["inventory_status"], _f4["reviewer_id"], _f4["inspection_date"])
+      == (1, "HUMAN_VISUAL", "VISUALLY_VERIFIED", "RV_MC", "2026-09-12") and _f4["panels"][0]["label"] == "WHOLE", _f4)
+check("  and it keeps the figure's own disposition", _f4["panels"][0]["disposition"] == "ASSOCIATION_EXTRACT", _f4["panels"])
+_f5 = _IF["PUB_D005"]
+# REVERT: drop the RECROP/REDRAW exception. The panels drawn on the crop the
+# person rejected become the figure's inventory.
+check("a drawing superseded by RECROP is not the inventory; the recorded count is",
+      _f5["observed_panel_count"] == 1 and _f5["panel_count_method"] == "MACHINE_PLUS_HUMAN", _f5)
+_ip = [q for q in CP.validate_plan(_iplan, file_root=RUN) if q["check"] in ("PLAN_PANEL_COUNT_MISSING", "PLAN_PANEL_COUNT_MISMATCH")]
+check("the plan names no panel count missing or mismatched", _ip == [], _ip[:3])
+check("the methods are the batch's two names",
+      {_f2["panel_count_method"], _f4["panel_count_method"], _doc["figure_count_method"]} <= set(BM.SOURCE_PANEL_COUNT_METHODS))
+# A person's scope and a person's own document count come first.
+write(MP.DOCUMENT_SCOPE, ("Source_Document_ID", "Page_From", "Page_To"), [{"Source_Document_ID": "PUB", "Page_From": "2", "Page_To": "9"}])
+write(MP.DOCUMENT_STATUS, ("Source_Document_ID", "Observed_Figure_Count", "Document_Inventory_Status", "Inventoried_By", "Inventoried_At"),
+      [{"Source_Document_ID": "PUB", "Observed_Figure_Count": "7", "Document_Inventory_Status": "VISUALLY_VERIFIED",
+        "Inventoried_By": "minyeop", "Inventoried_At": "2026-08-20"}])
+_jplan = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")], reviewers_path=_rev)[0]
+check("a person's scope is the page range, and their own document count wins over the record",
+      (_jplan["documents"][0]["page_range"], _jplan["documents"][0]["observed_figure_count"], _jplan["documents"][0]["figure_count_method"])
+      == ("2-9", 7, "HUMAN_VISUAL"), _jplan["documents"][0])
+os.rename(os.path.join(RUN, MP.DOCUMENT_SCOPE), os.path.join(ROOT, "scope_aside.csv"))
+os.rename(os.path.join(RUN, MP.DOCUMENT_STATUS), os.path.join(ROOT, "status_aside.csv"))
+_kplan = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[0]
+# REVERT: write the record VISUALLY_VERIFIED whoever approved it. A name nobody
+# registered then stands in the batch as the inspector.
+check("an approver nobody registered leaves the document PENDING and says so",
+      _kplan["documents"][0]["inventory_status"] == "PENDING" and "검토자 등록: minyeop" in _kplan["documents"][0].get("note", ""),
+      _kplan["documents"][0])
+os.rename(os.path.join(RUN, MP.INVENTORY), os.path.join(ROOT, "inventory_aside.csv"))
+check("a run without the file has no inventory records", MP.load_inventory(RUN) == ({}, {}))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

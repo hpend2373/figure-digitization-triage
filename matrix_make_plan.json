@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "f036d03c899dbe3523354014ff7e648ffbb7630aa54d2c3ea433594cc6a96f6c",
-  "test_make_plan.py": "9313e3204041104e6135163ec3bda2a48616b060c67198e93da6cbcdcb3e4539"
+  "make_plan.py": "c9072e260e992ce77e9fec7ae1661d6818b5222d5ef4a174800bd97e2bdef315",
+  "test_make_plan.py": "dc5addac957cdb83435c9d79eedb048ec582eb90b8acae8c721e45d1e5d66f82"
  },
  "suites": [
   "test_make_plan.py"
@@ -364,8 +364,8 @@
   {
    "name": "등록되지 않은 이름으로 VISUALLY_VERIFIED를 적는다",
    "file": "make_plan.py",
-   "old": "            if rid:\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,",
-   "new": "            if who:\n                rid = rid or DEMO_REVIEWER\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,"
+   "old": "            rid = reviewer_for(who)\n            if rid:\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,",
+   "new": "            rid = reviewer_for(who)\n            if who:\n                rid = rid or DEMO_REVIEWER\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,"
   },
   {
    "name": "목록에 없는 검토자를 가리키는 이름을 받는다",
@@ -480,6 +480,90 @@
    "file": "make_plan.py",
    "old": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if not os.path.exists(path):\n        return out",
    "new": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if False:\n        return out"
+  },
+  {
+   "name": "목록 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    docs, figs = {}, {}\n    for r in _rows(os.path.join(run, INVENTORY)):",
+   "new": "    docs, figs = {}, {}\n    for r in []:"
+  },
+  {
+   "name": "목록 기록이 사람이 그린 패널을 이긴다",
+   "file": "make_plan.py",
+   "old": "        if (drawn_rows or no_panels) and not superseded:",
+   "new": "        if (drawn_rows or no_panels) and not superseded and not inv:"
+  },
+  {
+   "name": "NO_PANELS를 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "no_panels = bool(drawn_all) and not drawn_rows and all(",
+   "new": "no_panels = False and all("
+  },
+  {
+   "name": "다시 자르라고 한 그림의 이전 그림을 목록으로 쓴다",
+   "file": "make_plan.py",
+   "old": "superseded = (figure_decision or {}).get(\"Decision\", \"\").strip().upper() in DRAWING_SUPERSEDED",
+   "new": "superseded = False"
+  },
+  {
+   "name": "WHOLE 그림을 읽을 그림으로 둔다",
+   "file": "make_plan.py",
+   "old": "            if disposition == \"GEOMETRY_NOT_AUTHORED\":\n                disposition = \"NOT_DATA\"",
+   "new": "            if False:\n                disposition = \"NOT_DATA\""
+  },
+  {
+   "name": "WHOLE 그림에 기하·오차 정의를 묻는다",
+   "file": "make_plan.py",
+   "old": "                needs = [x for x in needs if x != \"오차 정의\" and not x.startswith(\"패널 기하\")]",
+   "new": "                pass"
+  },
+  {
+   "name": "WHOLE 패널에 이름을 붙이지 않는다",
+   "file": "make_plan.py",
+   "old": "                panel[\"label\"] = WHOLE_LABEL",
+   "new": "                pass"
+  },
+  {
+   "name": "등록되지 않은 승인자로 문서를 VISUALLY_VERIFIED로 적는다",
+   "file": "make_plan.py",
+   "old": "            rid = reviewer_for(inv.get(\"Verified_By\"))\n            if rid:\n                doc.update(",
+   "new": "            rid = reviewer_for(inv.get(\"Verified_By\")) or DEMO_REVIEWER\n            if rid:\n                doc.update("
+  },
+  {
+   "name": "그림 목록 기록의 방법을 HUMAN_VISUAL로 적는다",
+   "file": "make_plan.py",
+   "old": "            figure[\"panel_count_method\"] = (inv.get(\"Count_Method\") or \"\").strip().upper()",
+   "new": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\""
+  },
+  {
+   "name": "문서 목록 기록의 방법을 HUMAN_VISUAL로 적는다",
+   "file": "make_plan.py",
+   "old": "\"figure_count_method\": (inv.get(\"Count_Method\") or \"\").strip().upper(), \"reviewer_id\": rid,",
+   "new": "\"figure_count_method\": \"HUMAN_VISUAL\", \"reviewer_id\": rid,"
+  },
+  {
+   "name": "사람이 센 문서 수가 목록 기록에 진다",
+   "file": "make_plan.py",
+   "old": "        if not counted and inv and",
+   "new": "        if inv and"
+  },
+  {
+   "name": "사람이 정한 쪽 범위가 목록 기록에 진다",
+   "file": "make_plan.py",
+   "old": "        elif inv and (inv.get(\"Article_Page_Range\") or \"\").strip():\n            doc[\"page_range\"] = inv[\"Article_Page_Range\"].strip()",
+   "new": "        if inv and (inv.get(\"Article_Page_Range\") or \"\").strip():\n            doc[\"page_range\"] = inv[\"Article_Page_Range\"].strip()"
+  },
+  {
+   "name": "계수 시트가 다르게 센 것을 적지 않는다",
+   "file": "make_plan.py",
+   "old": "            if sheet is not None and sheet != count:",
+   "new": "            if False:"
+  },
+  {
+   "name": "닫힌 그림의 사람이 그린 목록을 PENDING으로 둔다",
+   "file": "make_plan.py",
+   "old": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if rid:",
+   "new": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if False:"
   }
  ]
 }

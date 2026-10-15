@@ -130,7 +130,7 @@ jobs:
                    test_split_grain \
                    test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
                    test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions test_record_dispositions \
+                   test_decision_page test_record_decisions test_record_dispositions test_record_inventory \
                    test_geometry_page test_record_geometry \
                    test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \
@@ -316,7 +316,7 @@ jobs:
                    test_split_grain \
                    test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
                    test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions test_record_dispositions \
+                   test_decision_page test_record_decisions test_record_dispositions test_record_inventory \
                    test_geometry_page test_record_geometry \
                    test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \

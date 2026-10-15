@@ -989,6 +989,23 @@ check("an approver nobody registered leaves the document PENDING and says so",
 os.rename(os.path.join(RUN, MP.INVENTORY), os.path.join(ROOT, "inventory_aside.csv"))
 check("a run without the file has no inventory records", MP.load_inventory(RUN) == ({}, {}))
 
+# --- 막음을 다시 본 답 (record_block_reviews, run2 2026-10-15) ------------------------------
+# 사람이 "이 차단이 틀렸다"고 한 행, 목록 조사에서 실제 그림으로 확인된 행. 막음 파일은
+# 시트를 지을 때마다 다시 쓰이므로, 답은 그 위에 얹힌 파일로만 남습니다.
+import record_block_reviews as RBR                               # noqa: E402
+write(MP.BLOCK_REVIEWS, RBR.FIELDS, [{"Draft_ID": "PUB_D006", "Decision": "UNBLOCK"},
+                                     {"Draft_ID": "PUB_D007", "Decision": "UNBLOCK"}])
+_BF = build()[0]
+_BF = dict((f["source_figure_id"], f) for f in _BF["figures"])
+# REVERT: read block_reviews.csv nowhere. The figure a person said was wrongly
+# blocked stays out of the plan, and its document's count never matches.
+check("a blocked row reviewed UNBLOCK is a figure of the plan", "PUB_D006" in _BF, sorted(_BF))
+# REVERT: let an unblock open a duplicate. One figure would be in the plan twice.
+check("  but a duplicate stays out, whatever the review says", "PUB_D007" not in _BF, sorted(_BF))
+write(MP.BLOCK_REVIEWS, RBR.FIELDS, [{"Draft_ID": "PUB_D006", "Decision": "KEEP"}])
+check("a block reviewed KEEP stays a block", "PUB_D006" not in dict((f["source_figure_id"], f) for f in build()[0]["figures"]))
+os.rename(os.path.join(RUN, MP.BLOCK_REVIEWS), os.path.join(ROOT, "block_reviews_aside.csv"))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

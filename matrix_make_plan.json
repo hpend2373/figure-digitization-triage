@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "c9072e260e992ce77e9fec7ae1661d6818b5222d5ef4a174800bd97e2bdef315",
-  "test_make_plan.py": "dc5addac957cdb83435c9d79eedb048ec582eb90b8acae8c721e45d1e5d66f82"
+  "make_plan.py": "a2ca1a75be1c00273fe76005c88e6e97f5dea57e4b4db60466d43fd7e5cb0066",
+  "test_make_plan.py": "5319499cb021a71387135cbdb764cb8c152e9ef3d0b422aaa565ddc0500bd4f4"
  },
  "suites": [
   "test_make_plan.py"
@@ -10,7 +10,7 @@
   {
    "name": "블록된 행도 계획서에 넣는다",
    "file": "make_plan.py",
-   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):\n            continue",
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered\n                and row[\"Draft_ID\"] not in unblocked):\n            continue",
    "new": "        if False:\n            continue"
   },
   {
@@ -208,8 +208,8 @@
   {
    "name": "이미 답해서 막아 둔 행도 계획서에서 뺀다",
    "file": "make_plan.py",
-   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):",
-   "new": "        if reason.get(\"Count_Blocked\") == \"1\":"
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered\n                and row[\"Draft_ID\"] not in unblocked):",
+   "new": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in unblocked):"
   },
   {
    "name": "막힌 행에 붙은 답이면 무엇이든 계획서에 넣는다",
@@ -564,6 +564,24 @@
    "file": "make_plan.py",
    "old": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if rid:",
    "new": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if False:"
+  },
+  {
+   "name": "막음을 다시 본 답을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "        r[\"Draft_ID\"] for r in _rows(os.path.join(run, BLOCK_REVIEWS))",
+   "new": "        r[\"Draft_ID\"] for r in []"
+  },
+  {
+   "name": "UNBLOCK이 중복 행도 연다",
+   "file": "make_plan.py",
+   "old": "        if (reason.get(\"Duplicate_Of\") or \"\").strip():\n            continue",
+   "new": "        if (reason.get(\"Duplicate_Of\") or \"\").strip() and row[\"Draft_ID\"] not in unblocked:\n            continue"
+  },
+  {
+   "name": "KEEP도 막음을 푼다",
+   "file": "make_plan.py",
+   "old": "        if (r.get(\"Decision\") or \"\").strip().upper() == RBR.UNBLOCK)",
+   "new": "        if (r.get(\"Decision\") or \"\").strip())"
   }
  ]
 }

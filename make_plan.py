@@ -41,9 +41,14 @@ import record_errorbar as RE                                     # noqa: E402
 import record_geometry as RG                                     # noqa: E402
 import record_identity as RI                                     # noqa: E402
 import record_inventory as RV                                    # noqa: E402
+import record_block_reviews as RBR                               # noqa: E402
 
 DRAFT = "figure_intake_draft.csv"
 BLOCKS = "block_reasons.csv"
+#: 막음 위에 얹는 답 (`record_block_reviews`, run2 2026-10-15). UNBLOCK으로 답한 행은
+#: 막힌 행으로 치지 않습니다 - 막음 파일은 시트를 지을 때마다 다시 쓰여서, 그 안을
+#: 고치는 것으로는 답이 남지 않습니다.
+BLOCK_REVIEWS = RBR.BLOCK_REVIEWS
 CAPTIONS = "caption_fulltext.csv"
 DECISIONS = "errorbar_decisions.csv"
 #: `record_decisions.py`가 적은 처분들. 사람이 그림을 보고 정한 것이고, 계획서가
@@ -223,11 +228,15 @@ def live_rows(run):
     answered = set(
         r["Draft_ID"] for r in _rows(os.path.join(run, COUNTS))
         if (r.get("Entry_Status") or "").strip() in ANSWERED_ON_AN_OPEN_ROW)
+    unblocked = set(
+        r["Draft_ID"] for r in _rows(os.path.join(run, BLOCK_REVIEWS))
+        if (r.get("Decision") or "").strip().upper() == RBR.UNBLOCK)
     out = []
     for row in draft:
         reason = reasons.get(row["Draft_ID"], {})
         if (reason.get("Count_Blocked") == "1"
-                and row["Draft_ID"] not in answered):
+                and row["Draft_ID"] not in answered
+                and row["Draft_ID"] not in unblocked):
             continue
         if (reason.get("Duplicate_Of") or "").strip():
             continue

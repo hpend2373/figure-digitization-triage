@@ -1,7 +1,7 @@
 {
  "files": {
-  "caption_fulltext.py": "6df2bcbe2eabaccac54dc09aa99093577670bed7015f8f550c9f616e77bf8aea",
-  "test_caption_fulltext.py": "09d5a5169fc45acc9c9700ae231033ef49ecf4ba90a03b3716911d0bff4396f3"
+  "caption_fulltext.py": "6dd92888f00823945a96ab21ed5f0442bc5e63997a421df6771885242f67bd68",
+  "test_caption_fulltext.py": "1e2cc02851ca95fe82a0e2617eb97ecf2946513589a4aa662dcb6be8935adb21"
  },
  "suites": [
   "test_caption_fulltext.py"
@@ -336,6 +336,24 @@
    "file": "caption_fulltext.py",
    "old": "if blocks and out:\n        wider_readings(out, blocks)",
    "new": "if False:\n        wider_readings(out, blocks)"
+  },
+  {
+   "name": "계산된 변수의 이름인 SD도 오차 정의로 읽는다",
+   "file": "caption_fulltext.py",
+   "old": "        m = next((x for x in rx.finditer(text) if not _names_a_measure(text, x)), None)\n",
+   "new": "        m = rx.search(text)\n"
+  },
+  {
+   "name": "뒤에 of가 없어도 변수의 이름으로 본다",
+   "file": "caption_fulltext.py",
+   "old": "                and _OF_AFTER.match(text, m.end()))\n",
+   "new": "                )\n"
+  },
+  {
+   "name": "앞의 동사 없이 of만 보고 변수의 이름으로 본다",
+   "file": "caption_fulltext.py",
+   "old": "    return bool(METRIC_BEFORE.search(text[max(0, m.start() - 40):m.start()])\n",
+   "new": "    return bool(True\n"
   }
  ]
 }

@@ -134,7 +134,19 @@ for _text, _want in (
         ("The SDS score improved after training.", CF.DEF_UNSTATED),
         ("SES was matched between groups.", CF.DEF_UNSTATED),
         ("Prices in USD were converted.", CF.DEF_UNSTATED),
-        ("Values are means and SDs.", "SD")):
+        ("Values are means and SDs.", "SD"),
+        # 2026-10-16: Inspiration4 Extended Data Fig. 7. The SD here is the
+        # name of the HRV measure (SDNN), not what the bars are; read as a
+        # definition it made the figure "SD" and the gate refused the SEM the
+        # caption gives two lines later.
+        # REVERT: take every "standard deviation" as a definition.
+        ("b, heart rate variability (HRV), derived from heart period data using "
+         "the standard deviation of R-R intervals across mission phases", CF.DEF_UNSTATED),
+        ("HRV was calculated as the SD of NN intervals; data are mean ± SEM.", "SEM"),
+        # and what it must not take away: no derivation verb, or no "of"
+        ("Values are mean ± standard deviation of three experiments.", "SD"),
+        ("Error bars show the standard deviation, calculated using all subjects.", "SD"),
+        ("Data were analysed using the standard deviation as the error bar.", "SD")):
     _code, _ev = CF.errorbar_definition(_text)
     check("%r -> %s" % (_text[:48], _want), _code == _want, "%s %r" % (_code, _ev))
 # REVERT: stop folding ligatures. "conﬁdence" then matches nothing, and a

@@ -363,6 +363,15 @@ where SD/SE confusion scales the meta-analytic weight by sqrt(n).
 `UNRESOLVED_ERRORBAR_DEFINITION` blocks the placeholder vocabulary. Quote the
 source, or record `NO_ERRORBAR` and keep the row out of the pooled variance.
 
+The opposite mistake is as costly: a word that names a dispersion is not always
+a statement about the bars. "HRV ... derived from heart period data using the
+standard deviation of R-R intervals" names how a plotted variable (SDNN) was
+computed; read as a definition, it made a figure whose caption goes on to say
+"mean ± SEM" an SD figure, and the error-bar gate then refused the SEM a person
+found, because the figure no longer looked undefined. `caption_fulltext` skips a
+match that a deriving verb ("using", "calculated as", "defined as") puts in
+front of and an "of" follows.
+
 The same logic applies to `Unlisted_Panels`: matching panel COUNTS are not
 agreement. Two rows of one figure that both say "6 of 5" while one names PAP and
 the other MAP describe different figures, so the normalized name sets must match

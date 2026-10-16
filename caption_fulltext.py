@@ -122,6 +122,29 @@ DEFINITIONS = (
 )
 PLUS_MINUS = re.compile(r"±|\+/-|\+/−|plus\s+or\s+minus", re.I)
 
+#: A STANDARD DEVIATION THAT IS A MEASURE, NOT A BAR. "heart rate variability
+#: (HRV) ... derived from heart period data using the standard deviation of R-R
+#: intervals" names how a variable was computed (SDNN), and the figure plots
+#: that variable; it says nothing about what the error bars are. Read as a
+#: definition it made Inspiration4's Extended Data Fig. 7 an "SD" figure, the
+#: error-bar gate then refused the SEM a person found in the same caption
+#: (NOT_PENDING), and every later reading of that figure would have used SD -
+#: a sqrt(n) error in its weight. The test is the words in front of the match:
+#: a verb that DERIVES a quantity ("using", "calculated as", "defined as") and
+#: an "of" after it. "mean ± standard deviation of three experiments" has
+#: neither verb, and stays a definition.
+METRIC_BEFORE = re.compile(
+    r"\b(?:using|calculated\s+as|computed\s+as|defined\s+as|derived\s+as|"
+    r"quantified\s+(?:as|by)|measured\s+as|estimated\s+as|indexed\s+by)"
+    r"\s+(?:the\s+|a\s+)?$", re.I)
+_OF_AFTER = re.compile(r"\s+of\b", re.I)
+
+
+def _names_a_measure(text, m):
+    """True when the match is the name of a computed variable, not a dispersion."""
+    return bool(METRIC_BEFORE.search(text[max(0, m.start() - 40):m.start()])
+                and _OF_AFTER.match(text, m.end()))
+
 DEF_AMBIGUOUS = "AMBIGUOUS"
 DEF_PM_UNNAMED = "PM_UNNAMED"
 DEF_UNSTATED = "UNSTATED"
@@ -395,7 +418,7 @@ def errorbar_definition(text):
     text = _norm(text)
     hits = []
     for code, rx in DEFINITIONS:
-        m = rx.search(text)
+        m = next((x for x in rx.finditer(text) if not _names_a_measure(text, x)), None)
         if m:
             a, b = max(0, m.start() - 30), min(len(text), m.end() + 30)
             hits.append((code, text[a:b].strip()))

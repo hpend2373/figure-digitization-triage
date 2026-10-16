@@ -175,13 +175,53 @@ except SystemExit as exc:
 check("a routed folder with no gate answers is refused", "관문 답 파일이 없습니다" in stopped, stopped)
 write(os.path.join(EMPTY, "errorbar_answers.csv"), ("Source_Document_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Verified_In_Source"),
       [{"Source_Document_ID": "DOC", "Dispersion_Type": "SEM", "Errorbar_Definition_Source": "mean ± SEM"}])
-try:
-    CC.main(["--run", RUN, "--routed", EMPTY, "--when", "2026-10-16", "--out", os.path.join(ROOT, "out5")], census_fn=stub)
-    stopped = ""
-except SystemExit as exc:
-    stopped = str(exc)
+CALLS = []
+
+
+def counted(run, out):
+    CALLS.append(run)
+    return stub(run, out)
+
+
+def stops(argv):
+    try:
+        CC.main(argv, census_fn=counted)
+        return ""
+    except SystemExit as exc:
+        return str(exc)
+
+
+stopped = stops(["--run", RUN, "--routed", EMPTY, "--when", "2026-10-16", "--out", os.path.join(ROOT, "out5")])
 # REVERT: record error-bar answers without the PDFs. Their quotes are re-found in the source or they are not answers.
-check("error-bar answers without --pdf-root stop", "--pdf-root" in stopped, stopped)
+check("error-bar answers without --pdf-root stop before any census", "--pdf-root" in stopped and not CALLS, stopped)
+stopped = stops(["--run", RUN, "--routed", EMPTY, "--when", "2026-10-16", "--out", os.path.join(ROOT, "out6"), "--pdf-root", ROOT])
+# REVERT: find out at the gate. The census before is minutes, and the gate then falls over on a file the run never had.
+check("error-bar answers on a run without the gate's pending list stop before any census, naming it",
+      "errorbar_unstated.csv" in stopped and not CALLS, stopped)
+
+import record_dispositions as RD                                 # noqa: E402
+real_rd = RD.record
+
+
+def falls(*_a, **_k):
+    raise OSError("disk gone")
+
+
+write(os.path.join(ROUTED, "figure_disposition_answers.csv"), ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person",
+                                                              "Observed_By", "Approval_Ref", "Note"),
+      [dict(APPROVED, Draft_ID="DOC_D001", Disposition="NON_TARGET")])
+os.remove(os.path.join(ROUTED, "identity_answers.csv"))
+OUT7 = os.path.join(ROOT, "out7")
+RD.record = falls
+try:
+    rc = CC.main(["--run", RUN, "--routed", ROUTED, "--when", "2026-10-16", "--out", OUT7], census_fn=stub)
+finally:
+    RD.record = real_rd
+got = json.load(io.open(os.path.join(OUT7, "recorded.json"), encoding="utf-8")) if os.path.exists(os.path.join(OUT7, "recorded.json")) else {}
+# REVERT: let a gate's exception through. Nothing says which gate fell or what the copy already holds.
+check("a gate that falls over is a refusal: recorded, named, and no 'after' census",
+      rc == 1 and got.get("dispositions", [None, [[None, [[""]]]]])[1][0][1][0][0] == "GATE_FAILED"
+      and not os.path.exists(os.path.join(OUT7, "compare.json")), got)
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

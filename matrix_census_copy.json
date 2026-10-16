@@ -1,7 +1,7 @@
 {
  "files": {
-  "census_copy.py": "587441ca313543f3c70751f9f23d7b77146e63a39bb2a4f7aafef2c4325144d5",
-  "test_census_copy.py": "64850bdb0675ad22577aa78fdd94be133134e43a19ad65c01dd8b24a24269ae7"
+  "census_copy.py": "f1d0dee8d9bf746d958a5d41ff37ada2b8ba29717f7ace0290a1541e3f60b919",
+  "test_census_copy.py": "2d9b18ebe150d98174ba805c204a24b8a1bc233b2633e9fa0724f4bd3c55e81e"
  },
  "suites": [
   "test_census_copy.py"
@@ -76,8 +76,8 @@
   {
    "name": "PDF 없이 오차 정의를 적는다",
    "file": "census_copy.py",
-   "old": "            if not pdf_root:\n",
-   "new": "            if False:\n"
+   "old": "        if not a.pdf_root:\n",
+   "new": "        if False:\n"
   },
   {
    "name": "사본이 아니라 런에 적는다",
@@ -90,6 +90,18 @@
    "file": "census_copy.py",
    "old": "    after_res, pan_a = run_census(after, os.path.join(out, \"after\"))",
    "new": "    after_res, pan_a = run_census(run, os.path.join(out, \"after\"))"
+  },
+  {
+   "name": "오차 정의 대기 목록을 점검 전에 보지 않는다",
+   "file": "census_copy.py",
+   "old": "        if not os.path.isfile(os.path.join(run, RE.UNSTATED)):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "넘어진 관문을 그대로 올려 보낸다",
+   "file": "census_copy.py",
+   "old": "        except Exception as exc:                                     # noqa: BLE001\n",
+   "new": "        except ZeroDivisionError as exc:\n"
   }
  ]
 }

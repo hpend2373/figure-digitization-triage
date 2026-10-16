@@ -110,16 +110,19 @@ def record_on_copy(after, routed, when, plans, gate_dirs, pdf_root=None, log=pri
         if not rows:
             continue
         quiet = lambda *_a: None
-        if gate == "dispositions":
-            w, refused, _p = RD.record(after, plans, rows, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
-        elif gate == "errorbar":
-            if not pdf_root:
-                raise SystemExit("오차 정의 답은 원문에서 다시 찾아야 합니다 - --pdf-root가 필요합니다.")
-            w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
-        else:
-            d = os.path.join(after, gate_dirs[gate])
-            mod = RI if gate == "identity" else RG
-            w, refused, _p = mod.record(d, rows, when, out_path=os.path.join(d, rec_name), replace=True, log=quiet)
+        try:
+            if gate == "dispositions":
+                w, refused, _p = RD.record(after, plans, rows, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
+            elif gate == "errorbar":
+                w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
+            else:
+                d = os.path.join(after, gate_dirs[gate])
+                mod = RI if gate == "identity" else RG
+                w, refused, _p = mod.record(d, rows, when, out_path=os.path.join(d, rec_name), replace=True, log=quiet)
+        except Exception as exc:                                     # noqa: BLE001
+            # 관문이 넘어진 것도 거절입니다. 그대로 올려 보내면 recorded.json이 없고,
+            # 앞선 관문이 사본에 적은 것과 점검 앞의 결과만 남습니다.
+            w, refused = [], [("(%s)" % gate, [("GATE_FAILED", "%s: %s" % (type(exc).__name__, exc))])]
         done[gate] = [len(w), [[n, [list(x) for x in ps]] for n, ps in refused]]
         log("%s: 적음 %d · 거절 %d" % (gate, len(w), len(refused)))
     return done
@@ -234,6 +237,13 @@ def main(argv=None, census_fn=None):
     want = [g for g in GATE_FILES if rd(os.path.join(a.routed, GATE_FILES[g][0]))]
     if not want:
         raise SystemExit("%s에 관문 답 파일이 없습니다." % a.routed)
+    if "errorbar" in want:
+        # 점검 앞에 멈춥니다 - 점검 한 번이 몇 분이고, 이 둘이 없으면 관문이 적지 못합니다.
+        import record_errorbar as RE
+        if not a.pdf_root:
+            raise SystemExit("오차 정의 답은 원문에서 다시 찾아야 합니다 - --pdf-root가 필요합니다.")
+        if not os.path.isfile(os.path.join(run, RE.UNSTATED)):
+            raise SystemExit("오차 정의 관문이 읽는 %s가 런에 없습니다." % RE.UNSTATED)
     guard = snapshot(run, written.values())
     os.makedirs(out)
     after = os.path.join(out, "run_after")

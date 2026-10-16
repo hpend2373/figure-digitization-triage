@@ -470,7 +470,10 @@ run, real-copies only the files the gates write, records with the gates
 themselves (not a re-implementation of them), and runs the same census before
 and after. The run's own gate files are hashed before and after, and a change is
 `RUN_CHANGED` - a gate wrote to the run instead of the copy. Any gate refusal
-stops it before the second census. Read `compare.json` - every problem code that
+stops it before the second census, and so does a gate that falls over
+(`GATE_FAILED`, written to `recorded.json` with the others). What a gate is known
+to need is checked before the first census, which takes minutes: error-bar
+answers need `--pdf-root` and the run's `errorbar_unstated.csv`. Read `compare.json` - every problem code that
 moves, by publication - before the gates touch the real run.
 
 **The page holds publisher figures.** It is a local file for the person

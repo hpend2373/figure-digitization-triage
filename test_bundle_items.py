@@ -180,6 +180,12 @@ check("a black bar beside a grey one is MANUAL", f5["machine"]["proposal"] == "M
 # REVERT: propose from the bars that could be measured. An empty bar is not a measured OPEN; it is not measured.
 check("a bar whose inside cannot be measured leaves the question to a look", Q["F:DOC_D012__p1:ALL"]["machine"] is None
       and Q["F:DOC_D012__p1:ALL"]["table"][3][1] == "속 칠 없음")
+labels = dict((o[0], o[1]) for o in f4["options"])
+# REVERT: label the options by their values alone ("SOLID", "OPEN"). A white-filled bar reads as a solid bar to a
+# person, and a person answered SOLID for white bars in the 2026-10-15 bundle; to the reader it is OPEN.
+check("each fill option says what the reader means by it: a white fill is OPEN, mixed fills in one series MANUAL",
+      "검정" in labels["SOLID"] and "흰색" in labels["OPEN"] and "흰색" not in labels["SOLID"]
+      and "x 위치마다 다름" in labels["MANUAL"], labels)
 check("the fill options write that series of that card, by the card's own name", f4["options"][2][2] ==
       {"gate": "identity", "proposal_id": "DOC_D004__p1", "series": [{"name": "All", "set": {"bar_fill": "OPEN"}}]})
 m6 = Q["M:DOC_D006__p1:MEAN"]

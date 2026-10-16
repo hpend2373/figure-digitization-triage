@@ -58,6 +58,13 @@ NEAR, ON, BOX_TOL = 12, 1.5, 5
 #: 판독기의 칠 띠(`mark_readers._FILL_BANDS`)와 같아야 합니다 - 시나리오가 둘을 대 봅니다.
 FILL_BANDS = {"SOLID": (0.72, 1.01), "HATCHED": (0.12, 0.60), "OPEN": (-0.01, 0.06)}
 MACHINE = "bundle_items.py (래스터에서 잰 것)"
+#: 칠의 이름은 판독기의 말입니다 - 막대 속의 어두운 비율로 나눕니다. "꽉 참/속 빔"은 흰 칠 막대를
+#: 꽉 찬 막대로 읽게 했습니다(2026-10-15 묶음: 흰·검정 칠을 둘 다 SOLID로 답함). 흰 칠은 OPEN입니다.
+FILL_WORDS = {
+    "SOLID": "SOLID — 검정·짙은 칠 (막대 속 어두운 비율 %.2f 이상)" % FILL_BANDS["SOLID"][0],
+    "HATCHED": "HATCHED — 빗금·점무늬 (어두운 비율 %.2f–%.2f)" % (FILL_BANDS["HATCHED"][0], FILL_BANDS["HATCHED"][1]),
+    "OPEN": "OPEN — 흰색·옅은 회색 칠, 또는 속 빈 막대 (어두운 비율 %.2f 이하)" % FILL_BANDS["OPEN"][1],
+}
 SECTION_TITLES = collections.OrderedDict([
     ("X", "그림 처분"), ("C", "결과 이름"), ("F", "흑백 막대의 칠"), ("M", "선의 기호"),
     ("L", "한 그림, 두 범례"), ("K", "눈금 짝이 상자 밖")])
@@ -318,6 +325,7 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
         hit = [s for s in ser if series_key(s.get("name")) == series_key(sid)]
         name = hit[0]["name"] if len(hit) == 1 else sid
         manual = ["MANUAL", "사람이 읽음 (MANUAL)", {"gate": "identity", "proposal_id": k, "set": {"Read_Route": "MANUAL"}}]
+        fill_manual = ["MANUAL", "MANUAL — 이 계열의 막대 칠이 x 위치마다 다름(예: 검정과 흰색): 사람이 읽음", manual[2]]
         png = box_picture(os.path.join(file_root, card["Raster"]), [frame(card)], ["p%s" % k.rsplit("__p", 1)[1]],
                           os.path.join(pics, "S_%s_%s.png" % (k, series_key(sid).replace(" ", "_"))))
         if "fill pattern" in r["detail"] or card.get("Mark_Type") == "BAR_MONO":
@@ -336,8 +344,8 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
                 now="%s · Bar_Fill_Pattern 비어 있음" % card.get("Mark_Type", ""), images=[{"path": png, "caption": "600 dpi"}],
                 table=[["x 위치"] + [b[0] for b in bars], ["속 회색"] + [("—" if b[1] is None else b[1]) for b in bars],
                        ["어두운 비율"] + [("—" if b[2] is None else b[2]) for b in bars], ["판독기 띠"] + [b[3] or "속 칠 없음" for b in bars]],
-                options=[[v, v, {"gate": "identity", "proposal_id": k, "series": [{"name": name, "set": {"bar_fill": v}}]}]
-                         for v in ("SOLID", "HATCHED", "OPEN")] + [manual], machine=machine)
+                options=[[v, FILL_WORDS[v], {"gate": "identity", "proposal_id": k, "series": [{"name": name, "set": {"bar_fill": v}}]}]
+                         for v in ("SOLID", "HATCHED", "OPEN")] + [fill_manual], machine=machine)
         else:
             opts = [[v, lab, {"gate": "identity", "proposal_id": k,
                               "series": [{"name": name, "set": {"marker": v.split("/")[0], "marker_fill": v.split("/")[1]}}]}]

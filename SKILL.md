@@ -419,7 +419,10 @@ pair moves onto one inside the panel, BOX otherwise - and BOX is a path still to
 build, because neither card gate takes a box from an answer (below). F measures each bar's dark
 fraction against the reader's own bands (`FILL_BANDS` must equal
 `mark_readers._FILL_BANDS`, and a scenario holds them together): one band is a
-proposal, mixed bands are MANUAL. Everything else needs someone to look at the
+proposal, mixed bands are MANUAL. The options are worded in the reader's terms,
+because the reader's terms are not a person's: a bar filled white looks "solid"
+and is OPEN to the reader, and a person who answered SOLID for black and white
+bars meant two plain fills, which in one series is MANUAL. Everything else needs someone to look at the
 figure, and `bundle_items.py` writes no spec while any question lacks a
 proposal - the questions, the measurements and the pictures go to
 `WORK/todo.json` for whoever (a person or an agent) writes them. A proposal for a

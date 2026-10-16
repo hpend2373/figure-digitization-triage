@@ -1,7 +1,7 @@
 {
  "files": {
-  "bundle_items.py": "764236a6ab016465d14a09c7a81838579ab7063ae9df9b31151fd3f32cfffd37",
-  "test_bundle_items.py": "c4c8cc8e9de21b7cca136f885d68b23fc8c2f52c5078755cb6f22257c9c69ca4"
+  "bundle_items.py": "eadecd6c9d374777896d4eeb7a7508fd3381efa93470adc9b792ec05a0b0b67b",
+  "test_bundle_items.py": "086d7270e1af5fd25ec433c79f75137982c9ab9f39550699ec81dd215e827ba0"
  },
  "suites": [
   "test_bundle_items.py"
@@ -144,6 +144,12 @@
    "file": "bundle_items.py",
    "old": "        box_effect = {\"gate\": None, \"needs\": \"상자 다시 그리기: 기하 페이지에서 y %d–%d로 그리고, 그 상자 위에서 정체 다시 확인\"\n",
    "new": "        box_effect = {\"gate\": \"geometry\", \"proposal_id\": k, \"set\": {\"Panel_Y0\": str(ny0)}, \"needs\": \"상자 다시 그리기: 기하 페이지에서 y %d–%d로 그리고, 그 상자 위에서 정체 다시 확인\"\n"
+  },
+  {
+   "name": "칠 선택지를 값으로만 적는다",
+   "file": "bundle_items.py",
+   "old": "                options=[[v, FILL_WORDS[v], {",
+   "new": "                options=[[v, v, {"
   }
  ]
 }

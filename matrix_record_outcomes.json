@@ -1,0 +1,144 @@
+{
+ "files": {
+  "record_outcomes.py": "a401ae53a1106ed6d8800d1404a2270327d1c7863ae81c542e5cd4b60566ad4b",
+  "record_legends.py": "e15d46e7c09414a0b1b863814fdb8c086afa5e2e29ce919a0f31d625c7106215",
+  "test_record_outcomes.py": "d70901f8d14103a56a27e372eca04bf71730aa80b6a49f08308f7e4366197a78"
+ },
+ "suites": [
+  "test_record_outcomes.py"
+ ],
+ "mutations": [
+  {
+   "name": "R4: 누가 보았는지 없이도 받는다",
+   "file": "record_outcomes.py",
+   "old": "    problems.extend(approval.seen_problems(answer, who, \"패널을 직접 보았다는 표시가 없습니다. 표시가 없는 답은 적지 않습니다.\"))\n",
+   "new": "\n"
+  },
+  {
+   "name": "R4: 이름 없는 답도 받는다",
+   "file": "record_outcomes.py",
+   "old": "    if not who:\n        problems.append((\"UNATTRIBUTED\"",
+   "new": "    if False:\n        problems.append((\"UNATTRIBUTED\""
+  },
+  {
+   "name": "R4: 계획서에 없는 패널도 받는다",
+   "file": "record_outcomes.py",
+   "old": "    if pid not in planned:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "R4: 닫힌 패널에도 이름을 붙인다",
+   "file": "record_outcomes.py",
+   "old": "    elif choice == LABEL and planned[pid][1] in CLOSED:\n",
+   "new": "    elif False:\n"
+  },
+  {
+   "name": "R4: 빈 이름을 따로 말하지 않는다",
+   "file": "record_outcomes.py",
+   "old": "        if not label:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "R4: 추정을 이름으로 받는다",
+   "file": "record_outcomes.py",
+   "old": "            marker = placeholder_in(label)\n",
+   "new": "            marker = \"\"\n"
+  },
+  {
+   "name": "R4: 빈칸 낱말(N/A)을 이름으로 받는다",
+   "file": "record_outcomes.py",
+   "old": "    if str(text or \"\").strip().upper() in kernel.FIG_NULL_TOKENS:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "R4: 목표 아님에 이름이 붙어도 받는다",
+   "file": "record_outcomes.py",
+   "old": "    elif choice == NON_TARGET and (label or (answer.get(\"Unit\") or \"\").strip()):\n",
+   "new": "    elif False:\n"
+  },
+  {
+   "name": "R4: 보류를 적는다",
+   "file": "record_outcomes.py",
+   "old": "    if choice == HELD:\n        problems.append((\"HELD\", \"아직 정하지 않은 답입니다. 적지 않고 목록에 남겨 둡니다.\"))\n",
+   "new": "\n"
+  },
+  {
+   "name": "R4: 한 패널의 두 답을 받는다",
+   "file": "record_outcomes.py",
+   "old": "            twice.add(p)\n",
+   "new": "            pass\n"
+  },
+  {
+   "name": "R4: 이미 적힌 패널을 그냥 덮는다",
+   "file": "record_outcomes.py",
+   "old": "        if pid in settled and not replace:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "R4: 답 파일이 기록이어도 받는다",
+   "file": "record_outcomes.py",
+   "old": "        raise SystemExit(\"답 파일과 적는 파일이 같습니다 (%s).\" % out_path)\n",
+   "new": "        pass\n"
+  },
+  {
+   "name": "R4: 열이 빠진 답 파일도 읽는다",
+   "file": "record_outcomes.py",
+   "old": "    if answers and missing:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "R4: 처분이 NON_TARGET_OUTCOME인 패널을 대상으로 본다",
+   "file": "record_outcomes.py",
+   "old": "                        else \"NON_TARGET\" if (p.get(\"disposition\") or \"\").upper() == \"NON_TARGET_OUTCOME\" else \"TARGET\"\n",
+   "new": "                        else \"TARGET\"\n"
+  },
+  {
+   "name": "범례: 누가 보았는지 없이도 받는다",
+   "file": "record_legends.py",
+   "old": "approval.seen_problems(answer, who, \"그림의 범례를 직접 보았다는 표시가 없습니다. 표시가 없는 답은 적지 않습니다.\")",
+   "new": "[]"
+  },
+  {
+   "name": "범례: 하나뿐인 범례를 적는다",
+   "file": "record_legends.py",
+   "old": "    if len(groups) < 2:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "범례: 두 범례에 든 패널을 받는다",
+   "file": "record_legends.py",
+   "old": "    twice = sorted(set(i for i in flat if flat.count(i) > 1))\n",
+   "new": "    twice = []\n"
+  },
+  {
+   "name": "범례: 그림에 없는 패널 번호를 받는다",
+   "file": "record_legends.py",
+   "old": "    unknown = sorted(set(flat) - planned[did][1])\n",
+   "new": "    unknown = []\n"
+  },
+  {
+   "name": "범례: 보류를 적는다",
+   "file": "record_legends.py",
+   "old": "    if choice == HELD:\n        problems.append((\"HELD\", \"아직 정하지 않은 답입니다. 적지 않습니다.\"))\n        return problems\n",
+   "new": "\n"
+  },
+  {
+   "name": "범례: 묶음을 받은 대로 적는다",
+   "file": "record_legends.py",
+   "old": "            \"Legend_Groups\": canonical(parse_groups(answer.get(\"Legend_Groups\"))[0]),\n",
+   "new": "            \"Legend_Groups\": answer.get(\"Legend_Groups\"),\n"
+  },
+  {
+   "name": "범례: 이미 적힌 그림을 그냥 덮는다",
+   "file": "record_legends.py",
+   "old": "        if did in settled and not replace:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "범례: 패널 번호가 아닌 것을 받는다",
+   "file": "record_legends.py",
+   "old": "            if not m:\n                return None, \"%r은 패널 번호(p1, p2 …)가 아닙니다\" % t\n",
+   "new": "            if not m:\n                continue\n"
+  }
+ ]
+}

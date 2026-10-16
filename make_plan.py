@@ -57,6 +57,10 @@ FIGURE_DECISIONS = "figure_decisions.csv"
 #: 그림 하나의 처분 (`record_dispositions`, run2 2026-10-14 R7). 같은 그림에
 #: `figure_decisions.csv`의 판정이 있어도 이쪽이 이깁니다 - 나중에, 더 보고 정한 것.
 FIGURE_DISPOSITIONS = "figure_dispositions.csv"
+#: 패널마다 사람이 정한 결과의 이름, 또는 "결과 아님" (`record_outcomes.py`, R4).
+OUTCOME_DECISIONS = "outcome_decisions.csv"
+#: 한 그림에 범례가 여럿일 때 어느 패널이 어느 범례를 쓰는가 (`record_legends.py`).
+LEGEND_DECISIONS = "legend_decisions.csv"
 #: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
 #: 새로 짓지 않습니다 - 파이프라인이 이미 쓰는 이름이 따로 있는데 여기서만
 #: 다른 이름을 보면, 계수는 들어와 있는데 계획서는 영영 못 보게 됩니다.
@@ -439,6 +443,46 @@ def load_figure_dispositions(run):
     return out
 
 
+def load_outcomes(run):
+    """{Panel_ID: 행} - `record_outcomes`가 적은 결과의 이름과 "결과 아님"."""
+    return _by(_rows(os.path.join(run, OUTCOME_DECISIONS)), "Panel_ID")
+
+
+def load_legends(run):
+    """{Draft_ID: [[패널 번호, ...], ...]} - `record_legends`가 적은 범례 묶음."""
+    out = {}
+    for r in _rows(os.path.join(run, LEGEND_DECISIONS)):
+        groups = [[int(x[1:]) for x in g.split(",") if x.strip()] for g in (r.get("Legend_Groups") or "").split("|") if g.strip()]
+        if groups:
+            out[r["Draft_ID"]] = groups
+    return out
+
+
+def legend_domain(view, groups, index):
+    """이 패널이 쓰는 범례의 Identity_Domain_ID. 범례 기록이 없으면 그림 하나가 범례 하나입니다."""
+    for k, g in enumerate(groups or [], 1):
+        if index in g:
+            return "%s__L%d" % (view, k)
+    return ""
+
+
+def apply_outcome(panel, said):
+    """사람이 정한 결과의 이름(또는 결과 아님)을 패널에 얹습니다.
+
+    읽을 준비가 된 패널(AUTO_DIGITIZE)에는 부르지 않습니다 - 그 이름은 정체 확인
+    (Outcome_Name)이 정한 것입니다. 닫힌 패널에 이름을 붙이지는 않습니다 - 관문이 그런
+    답을 받지 않지만, 처분이 나중에 바뀌었을 수 있습니다."""
+    if not said:
+        return
+    decision = (said.get("Decision") or "").strip().upper()
+    who = (said.get("Verified_By") or "").strip()
+    if decision == "NON_TARGET":
+        panel.update({"disposition": "NON_TARGET_OUTCOME", "target_status": "NON_TARGET",
+                      "reason": "outcome_decisions: %s — 이 리뷰의 결과가 아님" % who})
+    elif decision == "LABEL" and target_status_of(panel) == "TARGET":
+        panel["outcome_label"] = (said.get("Outcome_Label") or "").strip()
+
+
 def decided_for(figure_decision):
     """(처분, 할 일) - 사람의 판정이 계획서에서 무엇이 되는가.
 
@@ -751,7 +795,7 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
 
 def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
              run_date, said=None, decided=None, confirmations=None, reviewers=None,
-             documents_known=None, inventory=None):
+             documents_known=None, inventory=None, outcomes=None, legends=None):
     """(plan, 그림별 (figure_id, needs, ...), 패널 행). 한 편의 계획서."""
     first = rows[0]
     said = said or {}
@@ -912,9 +956,21 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                                              "label": "P%02d" % index, "disposition": "NOT_DATA",
                                              "reason": "panel_decisions: 사람이 데이터 아님으로 표시"})
                     continue
+                said_outcome = (outcomes or {}).get("%s_P%d" % (row["Draft_ID"], index))
+                if (said_outcome or {}).get("Decision", "").strip().upper() == "NON_TARGET":
+                    # 결과가 아닌 패널은 닫습니다 - 기하와 정체를 물을 패널이 아니고,
+                    # 읽을 준비가 되어 있었어도 읽지 않습니다.
+                    closed = {"panel_id": "%s_P%d" % (row["Draft_ID"], index), "label": "P%02d" % index}
+                    apply_outcome(closed, said_outcome)
+                    figure["panels"].append(closed)
+                    continue
                 plots += 1
                 panel, unit, grid, view, prow = panel_plan(
                     row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind)
+                if unit is not None and (legends or {}).get(row["Draft_ID"]):
+                    domain = legend_domain(panel["read"]["figure_view"], legends[row["Draft_ID"]], index)
+                    if domain:
+                        panel["read"]["identity_domain"] = domain
                 figure["panels"].append(panel)
                 prow["Publication_ID"] = publication
                 panel_rows.append(prow)
@@ -932,6 +988,8 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                 needs.append("패널 기하·정체 확인 — 기하 %d/%d · 정체 %d/%d · 읽을 준비 %d/%d"
                              % (done_g, plots, done_i, plots, authored, plots))
         for panel in figure["panels"]:
+            if (panel.get("disposition") or "") != AUTHORED:
+                apply_outcome(panel, (outcomes or {}).get(panel["panel_id"]))
             panel.setdefault("target_status", target_status_of(panel))
         figures.append(figure)
         notes.append((figure, needs, route, disposition, dispersion, row))
@@ -973,6 +1031,8 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
     decided = load_figure_decisions(run)
     decided.update(load_figure_dispositions(run))
+    outcomes = load_outcomes(run)
+    legends = load_legends(run)
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers
@@ -999,7 +1059,8 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
             continue
         plan, notes, panel_rows = plan_for(run, publication, pub_rows, captions, decisions,
                                            counts, crop_root, run_date, said, decided,
-                                           confirmations, reviewers, documents_known, inventory)
+                                           confirmations, reviewers, documents_known, inventory,
+                                           outcomes=outcomes, legends=legends)
         panel_sheet.extend(panel_rows)
         path = os.path.join(out_dir, "plan_%s.json" % publication)
         with io.open(path, "w", encoding="utf-8") as fh:

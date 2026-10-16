@@ -9,6 +9,8 @@
 사람이 보낸 답 줄마다 그 효과를 찾아, 기존 관문이 받는 답 파일로 옮깁니다:
 
     dispositions  -> figure_disposition_answers.csv   (record_dispositions.py)
+    outcomes      -> outcome_answers.csv              (record_outcomes.py)
+    legends       -> legend_answers.csv               (record_legends.py)
     errorbar      -> errorbar_answers.csv             (record_errorbar.py)
     identity      -> identity_answers.csv             (record_identity.py --replace)
     geometry      -> geometry_answers.csv             (record_geometry.py --replace)
@@ -63,9 +65,14 @@ from bundle_page import CARD_TAKES                               # noqa: E402
 
 HOLD, EDIT = "HOLD", "EDIT"
 OUT_FILES = {"dispositions": "figure_disposition_answers.csv", "errorbar": "errorbar_answers.csv",
+             "outcomes": "outcome_answers.csv", "legends": "legend_answers.csv",
              "identity": "identity_answers.csv", "geometry": "geometry_answers.csv"}
 DISPOSITION_FIELDS = ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person",
                       "Observed_By", "Approval_Ref", "Note")
+OUTCOME_FIELDS = ("Panel_ID", "Decision", "Outcome_Label", "Unit", "Verified_By", "Seen_By_Person",
+                  "Observed_By", "Approval_Ref", "Note")
+LEGEND_FIELDS = ("Draft_ID", "Legend_Groups", "Decision", "Verified_By", "Seen_By_Person", "Observed_By",
+                 "Approval_Ref", "Note")
 ERRORBAR_FIELDS = ("Source_Document_ID", "Draft_ID", "Figure_Number", "Page", "Dispersion_Type",
                    "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis", "Verified_In_Source",
                    "Verified_By", "Observed_By", "Approval_Ref", "Note")
@@ -156,8 +163,14 @@ def route_one(eff, a, iid, item, d, prov, who, out, unrouted, cards, touched):
                              Unit=a.get("Unit", ""), Needs=eff.get("needs", ""), Verified_By=who,
                              Decided_On=a.get("Decided_On", ""), Note=a.get("Note", ""), **prov))
         return []
-    if gate == "dispositions":
+    if gate in ("dispositions", "legends"):
         out[gate].append(dict(eff["row"], Verified_By=who, Note=note_of(a), **prov))
+        return []
+    if gate == "outcomes":
+        # 이름은 답이 들고 옵니다 - 제안한 이름이든 사람이 고친 이름이든 페이지가 Text에 싣습니다.
+        named = eff.get("uses_text")
+        out[gate].append(dict(eff["row"], Outcome_Label=a.get("Text", "") if named else "",
+                              Unit=a.get("Unit", "") if named else "", Verified_By=who, Note=note_of(a), **prov))
         return []
     if gate == "errorbar":
         out[gate].append(dict(eff["row"], Verified_By=who, Note=note_of(a),
@@ -292,7 +305,8 @@ def main(argv=None):
                 print("거절 %s — %s: %s" % (i, c, m))
         print("거절 %d줄 - 관문 파일을 쓰지 않았습니다." % len(refused))
         return 1
-    fields = {"dispositions": DISPOSITION_FIELDS, "errorbar": ERRORBAR_FIELDS}
+    fields = {"dispositions": DISPOSITION_FIELDS, "errorbar": ERRORBAR_FIELDS, "outcomes": OUTCOME_FIELDS,
+              "legends": LEGEND_FIELDS}
     for gate, rows in out.items():
         cols = fields.get(gate) or list(collections.OrderedDict((k, 1) for r in rows for k in r))
         wr(os.path.join(a.out, OUT_FILES[gate]), rows, cols)

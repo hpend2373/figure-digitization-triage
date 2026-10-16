@@ -1323,8 +1323,14 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
                              reviewers=None, resolutions=None, axes=None,
                              requested_run_mode=None,
-                             file_root=".", check_files=True):
+                             file_root=".", check_files=True, doc_root=None):
     """Reject an unrunnable batch before a single raster is opened.
+
+    `doc_root` is where the source DOCUMENTS are, when a corpus keeps its PDFs
+    apart from its rasters (run2: 98 PDFs in one download folder, the crops in
+    the run). Without it a document is looked for under `file_root` like any
+    other evidence, and every one of run2's 98 was SOURCE_DOCUMENT_FILE_NOT_FOUND
+    on the machine that held them.
 
     Returns a DataFrame of problems - empty means the run may proceed. The
     checks are deliberately cheap and total: reading 160 publications and
@@ -1437,6 +1443,29 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             return None
         return real if os.path.exists(real) else None
 
+    doc_base = os.path.realpath(doc_root) if doc_root else None
+
+    def resolve_document(name):
+        """The file a document row names: under `file_root` as before, or -
+        given `doc_root` - the bare name in that folder or one level of its
+        subfolders, the rule `caption_fulltext.resolve_source` read the same
+        documents by. Never outside the folder: a name with a path in it is
+        not a document name, and a link that leads out is refused."""
+        if doc_base is None:
+            return resolve(name)
+        n = str(name or "").strip()
+        if not n or os.path.basename(n) != n:
+            return None
+        try:
+            subs = sorted(d for d in os.listdir(doc_base) if os.path.isdir(os.path.join(doc_base, d)))
+        except OSError:
+            subs = []
+        for cand in [os.path.join(doc_base, n)] + [os.path.join(doc_base, d, n) for d in subs]:
+            real = os.path.realpath(cand)
+            if real.startswith(doc_base + os.sep) and os.path.isfile(real):
+                return real
+        return None
+
     unit_index = {}
     if units is not None:
         for _, u in units.iterrows():
@@ -1474,7 +1503,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         # the first release and this was a filename, so an inventory could not
         # tell a preprint from the version of record it was taken from.
         declared_doc_sha = str(r.get("Source_File_SHA256", "")).strip().lower()
-        held = resolve(r.get("Source_File"))
+        held = resolve_document(r.get("Source_File"))
         if declared_doc_sha == SOURCE_FILE_NOT_HELD.lower():
             # Not a way out of hashing a file you have. The corpus is asked
             # whether it is holding this document, and only its own answer
@@ -1485,7 +1514,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "Source_File_SHA256 says %s and %s is under %s. Hash the "
                      "file the corpus is holding; NOT_HELD is for a document "
                      "whose bytes this package does not have"
-                     % (SOURCE_FILE_NOT_HELD, r.get("Source_File"), root))
+                     % (SOURCE_FILE_NOT_HELD, r.get("Source_File"), doc_base or root))
         elif declared_doc_sha:
             if not SHA256_TEXT.match(declared_doc_sha):
                 flag(line, "BAD_SOURCE_FILE_SHA256",
@@ -1507,7 +1536,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                         flag(line, "SOURCE_DOCUMENT_FILE_NOT_FOUND",
                              "Source_File=%r declares a digest and is not on "
                              "disk under %s. Put the document in the corpus or "
-                             "say %s" % (r.get("Source_File"), root,
+                             "say %s" % (r.get("Source_File"), doc_base or root,
                                          SOURCE_FILE_NOT_HELD))
                     else:
                         actual = sha256_of_file(held)

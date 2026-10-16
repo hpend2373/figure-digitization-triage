@@ -23,6 +23,8 @@ import record_dispositions as RD                                 # noqa: E402
 import record_errorbar as RE                                     # noqa: E402
 import record_geometry as RG                                     # noqa: E402
 import record_identity as RI                                     # noqa: E402
+import record_legends as RLG                                     # noqa: E402
+import record_outcomes as RO                                     # noqa: E402
 
 FAILURES, PASSED = [], [0]
 
@@ -62,6 +64,12 @@ SPEC = {"schema": BP.SCHEMA, "answers_file": "bundle_answers.csv", "sections": [
     it("K01", "PAIRS", [["PAIRS", "pairs", {"gate": "geometry", "proposal_id": "P__p1", "set": {"Confirmed_Tick_Values": "22@273;4@1757.5"}}]]),
     it("C001", "LABEL", [["LABEL", "label", {"gate": None, "needs": "R4", "uses_text": True}],
                          ["EDIT", "edit", {"gate": None, "needs": "R4", "uses_text": True}]], text={"value": "Heart rate", "unit": "bpm"}),
+    it("C002", "LABEL", [["LABEL", "label", {"gate": "outcomes", "row": {"Panel_ID": "DOC_D002_P1", "Decision": "LABEL"}, "uses_text": True}],
+                         ["EDIT", "edit", {"gate": "outcomes", "row": {"Panel_ID": "DOC_D002_P1", "Decision": "LABEL"}, "uses_text": True}],
+                         ["NON_TARGET", "close", {"gate": "outcomes", "row": {"Panel_ID": "DOC_D002_P1", "Decision": "NON_TARGET"}}]],
+       text={"value": "Stroke volume", "unit": "mL"}),
+    it("L02", "LEGEND", [["LEGEND", "a legend per panel", {"gate": "legends", "row": {"Draft_ID": "DOC_D003", "Decision": "LEGENDS",
+                                                                                          "Legend_Groups": "p1|p2"}}]]),
 ]}]}
 _html, ITEMS = BP.render(SPEC, ROOT, log=lambda *_a: None)
 SHA = dict((i["id"], i["sha"]) for i in ITEMS["items"])
@@ -138,6 +146,19 @@ check("a geometry effect goes to the geometry gate", out["geometry"][0]["Confirm
 out, unrouted, _h, refused = go([ans("C001", Text="Heart rate", Unit="bpm")])
 check("an answer whose path does not exist yet is kept, with what it needs and its text", refused == [] and not out
       and (unrouted[0]["Item"], unrouted[0]["Needs"], unrouted[0]["Text"], unrouted[0]["Unit"]) == ("C001", "R4", "Heart rate", "bpm"))
+out, _u, _h, refused = go([ans("C002", Text="Stroke volume", Unit="mL")])
+# REVERT: route the decision without the name. The outcome gate would receive LABEL with nothing to write.
+check("a name goes to the outcome gate with the name and unit the page carried", refused == []
+      and (out["outcomes"][0]["Panel_ID"], out["outcomes"][0]["Decision"], out["outcomes"][0]["Outcome_Label"], out["outcomes"][0]["Unit"])
+      == ("DOC_D002_P1", "LABEL", "Stroke volume", "mL"), (refused, out.get("outcomes")))
+out, _u, _h, refused = go([ans("C002", "EDIT", seen=True, Text="SV", Unit="mL")])
+check("an edited name goes as the person typed it, as a seen answer", (out["outcomes"][0]["Outcome_Label"], out["outcomes"][0]["Seen_By_Person"])
+      == ("SV", "1"), out.get("outcomes"))
+out, _u, _h, refused = go([ans("C002", "NON_TARGET", seen=True)])
+check("'not a target' goes without a name", (out["outcomes"][0]["Decision"], out["outcomes"][0]["Outcome_Label"]) == ("NON_TARGET", ""))
+out, _u, _h, refused = go([ans("L02")])
+check("a legend split goes to the legend gate as an approved observation",
+      (out["legends"][0]["Draft_ID"], out["legends"][0]["Legend_Groups"], out["legends"][0]["Observed_By"]) == ("DOC_D003", "p1|p2", OBS))
 out, unrouted, held, refused = go([ans("A01", "HOLD")])
 check("HOLD is kept as held and written to no gate", refused == [] and not out and not unrouted and len(held) == 1)
 
@@ -248,16 +269,18 @@ ip, gp, itp = os.path.join(ROOT, "identity.csv"), os.path.join(ROOT, "geometry.c
 write(ip, IDENT); write(gp, GEOM)
 json.dump(ITEMS, io.open(itp, "w", encoding="utf-8"), ensure_ascii=False)
 ap, outd = os.path.join(ROOT, "answers.csv"), os.path.join(ROOT, "routed")
-write(ap, [ans("A01"), ans("A02"), ans("F01"), ans("K01"), ans("C001", Text="Heart rate", Unit="bpm"), ans("E03", "HOLD")])
+write(ap, [ans("A01"), ans("A02"), ans("F01"), ans("K01"), ans("C001", Text="Heart rate", Unit="bpm"), ans("E03", "HOLD"),
+           ans("C002", Text="Stroke volume", Unit="mL"), ans("L02")])
 rc = BR.main(["--items", itp, "--answers", ap, "--identity", ip, "--geometry", gp, "--out", outd])
 names = sorted(os.listdir(outd))
 check("a clean bundle writes one answer file per gate, the unrouted and held lists, and a log",
       rc == 0 and names == ["errorbar_answers.csv", "figure_disposition_answers.csv", "geometry_answers.csv", "held.csv",
-                            "identity_answers.csv", "route_log.json", "unrouted.csv"], names)
+                            "identity_answers.csv", "legend_answers.csv", "outcome_answers.csv", "route_log.json", "unrouted.csv"], names)
 head = lambda n: list(csv.reader(io.open(os.path.join(outd, n), encoding="utf-8")))[0]
 check("each gate file has the columns its gate requires",
       set(RD.ANSWER_REQUIRED) <= set(head("figure_disposition_answers.csv")) and set(RE.ANSWER_REQUIRED) <= set(head("errorbar_answers.csv"))
-      and set(RI.ANSWER_REQUIRED) <= set(head("identity_answers.csv")) and set(RG.ANSWER_REQUIRED) <= set(head("geometry_answers.csv")))
+      and set(RI.ANSWER_REQUIRED) <= set(head("identity_answers.csv")) and set(RG.ANSWER_REQUIRED) <= set(head("geometry_answers.csv"))
+      and set(RO.ANSWER_REQUIRED) <= set(head("outcome_answers.csv")) and set(RLG.ANSWER_REQUIRED) <= set(head("legend_answers.csv")))
 check("no file written is named like a record the gates write", not set(names) & set(BP.RECORD_FILES))
 log = json.load(io.open(os.path.join(outd, "route_log.json"), encoding="utf-8"))
 check("the log names the decision dates (the gates' --when)", log["decided_on"] == ["2026-10-16"] and log["refused"] == [])

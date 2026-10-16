@@ -1,0 +1,149 @@
+{
+ "files": {
+  "clip_frames.py": "a6190ab93ef7197537adb9a1c25a1f47562f480fc4269b7b8a4ac8c1641bd8bf",
+  "test_clip_frames.py": "177af3a77d95b9fb1b682f5bbd47d3712e6cfcedce9a9f76ad336f76b73d56d9"
+ },
+ "suites": [
+  "test_clip_frames.py"
+ ],
+ "mutations": [
+  {
+   "name": "E02: 그림 밖을 자르지 않는다",
+   "file": "clip_frames.py",
+   "old": "    return [max(0, x0), min(w, x1), max(0, y0), min(h, y1)]",
+   "new": "    return [max(0, x0), x1, max(0, y0), min(h, y1)]"
+  },
+  {
+   "name": "E02: 정체 제안의 프레임은 그대로 둔다",
+   "file": "clip_frames.py",
+   "old": "            r.update(dict(zip(FRAME, [str(v) for v in clip[r[\"Proposal_ID\"]]])))",
+   "new": "            pass"
+  },
+  {
+   "name": "E02: 기하 카드만 다시 적는다",
+   "file": "clip_frames.py",
+   "old": "        for src, dst in ((tg, gpath), (ti, ipath)):",
+   "new": "        for src, dst in ((tg, gpath),):"
+  },
+  {
+   "name": "E02: 사람의 확인을 제안에서 다시 짓는다",
+   "file": "clip_frames.py",
+   "old": "        gans.append(dict([(k, g.get(k, \"\")) for k in GEOMETRY_CARRY], Proposal_ID=pid,",
+   "new": "        gans.append(dict([(k, \"\") for k in GEOMETRY_CARRY], Human_Verification_Status=\"CONFIRMED\", Proposal_ID=pid,"
+  },
+  {
+   "name": "E02: 정체 확인을 옮기지 않는다",
+   "file": "clip_frames.py",
+   "old": "        ians.append(dict([(k, i.get(k, \"\")) for k in IDENTITY_CARRY], Proposal_ID=pid,",
+   "new": "        ians.append(dict([(k, i.get(k, \"\")) for k in IDENTITY_CARRY if k != \"Series\"], Proposal_ID=pid,"
+  },
+  {
+   "name": "E02: 처음 확인한 사람을 메모에서 뺀다",
+   "file": "clip_frames.py",
+   "old": "            return \" | \".join(x for x in (\"clip_frames: %s -> %s (그림 밖만 자름)\" % (frame_of(card), new), was,",
+   "new": "            return \" | \".join(x for x in (\"clip_frames: %s -> %s (그림 밖만 자름)\" % (frame_of(card), new),"
+  },
+  {
+   "name": "E02: 원래 제안 파일을 남기지 않는다",
+   "file": "clip_frames.py",
+   "old": "        if not os.path.exists(keep):\n            shutil.copy2(ppath, keep)",
+   "new": "        if False:\n            shutil.copy2(ppath, keep)"
+  },
+  {
+   "name": "E02: 답이 아니라 카드의 '본 사람'을 넘긴다",
+   "file": "clip_frames.py",
+   "old": "    clip = approval.provenance(answer)\n",
+   "new": "    clip = approval.provenance(card)\n"
+  },
+  {
+   "name": "E02: 카드가 없는 패널을 넘긴다",
+   "file": "clip_frames.py",
+   "old": "        if g is None or i is None:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "E02: 그림이 없어도 자른다",
+   "file": "clip_frames.py",
+   "old": "        if not os.path.isfile(raster):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "E02: 두 카드의 프레임이 달라도 자른다",
+   "file": "clip_frames.py",
+   "old": "        if gf is None or gf != if_:\n",
+   "new": "        if gf is None:\n"
+  },
+  {
+   "name": "E02: 자를 것이 없어도 다시 적는다",
+   "file": "clip_frames.py",
+   "old": "        if new == gf:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "E02: 프레임 밖의 칸이 달라져도 적는다",
+   "file": "clip_frames.py",
+   "old": "    return sorted(c for c in set(old) | set(new) if c not in MAY_CHANGE and (old.get(c) or \"\") != (new.get(c) or \"\"))",
+   "new": "    return []"
+  },
+  {
+   "name": "E02: 자르지 않는 카드가 바뀌어도 적는다",
+   "file": "clip_frames.py",
+   "old": "                elif old[side].get(pid) != new[side].get(pid):",
+   "new": "                elif False:"
+  },
+  {
+   "name": "E02: 리허설의 거절에도 쓴다",
+   "file": "clip_frames.py",
+   "old": "        if bad:\n            return [], [], bad\n        keep",
+   "new": "        if False:\n            return [], [], bad\n        keep"
+  },
+  {
+   "name": "E02: 관문의 멈춤을 그대로 내보낸다",
+   "file": "clip_frames.py",
+   "old": "        except SystemExit as exc:\n",
+   "new": "        except ZeroDivisionError as exc:\n"
+  },
+  {
+   "name": "E02: 거절이 있어도 0으로 끝난다",
+   "file": "clip_frames.py",
+   "old": "        print(\"거절이 있어 아무것도 고치지 않았습니다.\")\n        return 1\n",
+   "new": "        print(\"거절이 있어 아무것도 고치지 않았습니다.\")\n        return 0\n"
+  },
+  {
+   "name": "E02: 답 파일의 열을 보지 않는다",
+   "file": "clip_frames.py",
+   "old": "    if answers and missing:\n        raise SystemExit(\"답 CSV에 %s 열이 없습니다.\" % \", \".join(missing))\n    todo",
+   "new": "    if False:\n        raise SystemExit(\"답 CSV에 %s 열이 없습니다.\" % \", \".join(missing))\n    todo"
+  },
+  {
+   "name": "E02: 승인의 출처를 카드에 남기지 않는다",
+   "file": "clip_frames.py",
+   "old": "    clip = approval.provenance(answer)\n",
+   "new": "    clip = {\"Seen_By_Person\": \"1\", \"Observed_By\": \"\", \"Approval_Ref\": \"\"}\n"
+  },
+  {
+   "name": "E02: 자르기의 '본 사람'이 카드의 승인된 관찰을 덮는다",
+   "file": "clip_frames.py",
+   "old": "    if (card.get(\"Seen_By_Person\") or \"\").strip() != \"0\":\n        return clip\n",
+   "new": "    if True:\n        return clip\n"
+  },
+  {
+   "name": "E02: 본 자르기에서 카드의 관찰 대신 자르기의 것을 남긴다",
+   "file": "clip_frames.py",
+   "old": "    if clip[\"Seen_By_Person\"] == \"1\":\n        return dict((k, card.get(k, \"\")) for k in approval.APPROVAL_COLUMNS)\n",
+   "new": "    if clip[\"Seen_By_Person\"] == \"1\":\n        return dict(clip, Seen_By_Person=\"0\")\n"
+  },
+  {
+   "name": "E02: 두 관찰 중 자르기의 것만 남긴다",
+   "file": "clip_frames.py",
+   "old": "            \"Observed_By\": \" ; \".join(x for x in (card.get(\"Observed_By\", \"\"), clip[\"Observed_By\"]) if x),",
+   "new": "            \"Observed_By\": clip[\"Observed_By\"],"
+  },
+  {
+   "name": "E02: 칸이 생기기 전 기록을 승인된 관찰로 적는다",
+   "file": "clip_frames.py",
+   "old": "    return \"본 답\" if seen == \"1\" else \"본 답, 이 칸이 생기기 전 기록\" if not seen \\",
+   "new": "    return \"본 답\" if seen == \"1\" else \"승인된 관찰\" if not seen \\"
+  }
+ ]
+}

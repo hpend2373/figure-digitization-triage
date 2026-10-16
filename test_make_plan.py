@@ -1006,6 +1006,47 @@ write(MP.BLOCK_REVIEWS, RBR.FIELDS, [{"Draft_ID": "PUB_D006", "Decision": "KEEP"
 check("a block reviewed KEEP stays a block", "PUB_D006" not in dict((f["source_figure_id"], f) for f in build()[0]["figures"]))
 os.rename(os.path.join(RUN, MP.BLOCK_REVIEWS), os.path.join(ROOT, "block_reviews_aside.csv"))
 
+# --- 패널의 결과 이름과 범례 묶음 (record_outcomes·record_legends, run2 2026-10-16) ------------
+import record_outcomes as RO                                     # noqa: E402
+import record_legends as RLG                                     # noqa: E402
+_oplan, _osheet, _ofig, _opanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])
+_open = [p for p in _ofig["panels"] if p.get("target_status") == "TARGET" and not p.get("outcome_label")]
+_free = _open[0]["panel_id"] if _open else ""
+check("(fixture) a drawn target panel without an outcome name exists", bool(_free), [p["panel_id"] for p in _ofig["panels"]])
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": _free, "Decision": "LABEL", "Outcome_Label": "Stroke volume", "Unit": "mL"},
+                                        {"Panel_ID": "PUB_D001_P1", "Decision": "LABEL", "Outcome_Label": "Something else"}])
+_o2 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])
+# REVERT: read outcome_decisions.csv nowhere. The 110 names a person gave stay in a file and every one of
+# those panels is still MISSING_TARGET_OUTCOME_LABEL.
+check("a recorded outcome name lands on a panel that had none", _o2[_free].get("outcome_label") == "Stroke volume"
+      and _o2[_free].get("target_status") == "TARGET", _o2[_free])
+check("  but a panel read on a confirmed identity keeps the identity's name", _o2["PUB_D001_P1"].get("outcome_label") == "Heart rate")
+_closed = [p["panel_id"] for p in _ofig["panels"] if p.get("target_status") == "NOT_DATA"]
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": _closed[0], "Decision": "LABEL", "Outcome_Label": "Stroke volume"}] if _closed else [])
+_o4 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])
+# REVERT: name every panel the record names. A panel closed as not data would carry an outcome and be asked about.
+check("  and a panel the plan closed takes no name, whatever the record says",
+      bool(_closed) and not _o4[_closed[0]].get("outcome_label") and _o4[_closed[0]]["target_status"] == "NOT_DATA", _closed)
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": "PUB_D001_P1", "Decision": "NON_TARGET", "Verified_By": "minyeop"}])
+_o3plan, _o3s, _o3fig, _o3panels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])
+_o3 = dict((p["panel_id"], p) for p in _o3fig["panels"])["PUB_D001_P1"]
+# REVERT: let NON_TARGET reach only panels nobody has authored. A panel ready to read would be read, and its
+# values would enter a review whose outcome it is not.
+check("a panel recorded as not a target is closed, and nothing reads it", _o3["disposition"] == "NON_TARGET_OUTCOME"
+      and _o3["target_status"] == "NON_TARGET" and "read" not in _o3
+      and not any(u["unit_id"] == "U_PUB_D001_P1" for u in _o3plan["units"]), _o3)
+os.rename(os.path.join(RUN, MP.OUTCOME_DECISIONS), os.path.join(ROOT, "outcomes_aside.csv"))
+write(MP.LEGEND_DECISIONS, RLG.FIELDS, [{"Draft_ID": "PUB_D001", "Legend_Groups": "p1|p3"}])
+_lfig = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]
+_l1 = dict((p["panel_id"], p) for p in _lfig["panels"])["PUB_D001_P1"]
+# REVERT: give every panel of a figure one domain whatever the record says. Iwasaki's two legends - the same
+# hatch is 'pre-bed rest' in A and 'pre-furosemide' in B - stay one legend, and the batch refuses the figure.
+check("a panel of a figure with two legends reads in its own legend's domain",
+      _l1["read"].get("identity_domain") == "F_PUB_D001__L1", _l1["read"].get("identity_domain"))
+os.rename(os.path.join(RUN, MP.LEGEND_DECISIONS), os.path.join(ROOT, "legends_aside.csv"))
+_l0 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])["PUB_D001_P1"]
+check("  and without the record the figure is one legend, as before", "identity_domain" not in _l0["read"])
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

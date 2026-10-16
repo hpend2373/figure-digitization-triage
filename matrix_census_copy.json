@@ -1,7 +1,7 @@
 {
  "files": {
-  "census_copy.py": "f1d0dee8d9bf746d958a5d41ff37ada2b8ba29717f7ace0290a1541e3f60b919",
-  "test_census_copy.py": "2d9b18ebe150d98174ba805c204a24b8a1bc233b2633e9fa0724f4bd3c55e81e"
+  "census_copy.py": "f082b81f00b7d98c5711c45653ca3fad0ed1a66150b72a56805fb971823506e7",
+  "test_census_copy.py": "2e111b1408c45049a630c6f2eeb72633c88eb73fe20a72fc26a17c954e0c8870"
  },
  "suites": [
   "test_census_copy.py"
@@ -102,6 +102,12 @@
    "file": "census_copy.py",
    "old": "        except Exception as exc:                                     # noqa: BLE001\n",
    "new": "        except ZeroDivisionError as exc:\n"
+  },
+  {
+   "name": "결과 이름·범례 답을 사본에 적지 않는다",
+   "file": "census_copy.py",
+   "old": "            elif gate in (\"outcomes\", \"legends\"):\n",
+   "new": "            elif False:\n"
   }
  ]
 }

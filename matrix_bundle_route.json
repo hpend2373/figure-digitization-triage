@@ -1,8 +1,8 @@
 {
  "files": {
-  "bundle_route.py": "22eb7ff329bc994f1897f0e013cd15f7ff6d298f2de92f67939738bbce0572ab",
-  "test_bundle_route.py": "b3501a68d9235d9181a8a30d71a538c31bc66503e40b2d031e08f7520894a5e9",
-  "bundle_page.py": "09a0ed077a3d72a34d62ca8462c8b843044bad63615bdefd30027b969ee21748"
+  "bundle_route.py": "0ad744a94249f302b20f4224cd4791ed0cec4126daf1a6d7dbc1b8441264f07a",
+  "test_bundle_route.py": "e095c885ee8809438d998ba4e2144fc61ae911f130992b247456570a356be108",
+  "bundle_page.py": "375b711d872f92e6ac1ca8336a5873e42bd46793dbf8b8dfa8273fecec9d218d"
  },
  "suites": [
   "test_bundle_route.py"
@@ -193,6 +193,18 @@
    "file": "bundle_page.py",
    "old": "    \"identity\": (\"Human_Verification_Status\", \"X_Factor\",",
    "new": "    \"identity\": (\"Human_Verification_Status\", \"Panel_X1\", \"X_Factor\","
+  },
+  {
+   "name": "결과 이름을 싣지 않고 옮긴다",
+   "file": "bundle_route.py",
+   "old": "        out[gate].append(dict(eff[\"row\"], Outcome_Label=a.get(\"Text\", \"\") if named else \"\",\n",
+   "new": "        out[gate].append(dict(eff[\"row\"], Outcome_Label=\"\",\n"
+  },
+  {
+   "name": "범례 답을 줄 관문으로 옮기지 않는다",
+   "file": "bundle_route.py",
+   "old": "    if gate in (\"dispositions\", \"legends\"):\n",
+   "new": "    if gate == \"dispositions\":\n"
   }
  ]
 }

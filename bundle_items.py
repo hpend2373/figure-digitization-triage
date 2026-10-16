@@ -8,10 +8,10 @@ CENSUS는 계획서 점검의 출력입니다(`census_copy.py`의 before/ 또는
 폴더: man_<논문>/ 매니페스트와 out_<논문>/manifest_problems.csv). 문제 코드마다 물음 하나:
 
     X  SOURCE_PANEL_UNRESOLVED, SOURCE_PANEL_RUN_LINK_MISSING   그림 하나의 처분 (record_dispositions)
-    C  MISSING_TARGET_OUTCOME_LABEL (그려진 패널)              결과 이름, 또는 목표 아님 (R4 - 아직 길 없음)
+    C  MISSING_TARGET_OUTCOME_LABEL (그려진 패널)              결과 이름, 또는 목표 아님 (record_outcomes)
     F  MISSING_SERIES_DISCRIMINANT (BAR_MONO)                  막대 칠 (record_identity)
     M  MISSING_SERIES_DISCRIMINANT (선·기호)                   기호 모양 (record_identity)
-    L  IDENTITY_DOMAIN_FILL_CONFLICT                           한 그림 두 범례 (record_identity, 또는 길)
+    L  IDENTITY_DOMAIN_FILL_CONFLICT                           한 그림 두 범례 (record_legends, 또는 MANUAL)
     K  CALIBRATION_OUTSIDE_PANEL                               눈금 짝 (record_geometry), 또는 상자 (아직 길 없음)
 
 잴 수 있는 것은 잽니다(래스터에서): K는 짝 둘레 12 px 안의 눈금 표시(가시 왼쪽·오른쪽 짧은
@@ -81,6 +81,12 @@ def rd(path):
 def key_of(panel_id):
     base, i = panel_id.rsplit("_P", 1)
     return "%s__p%d" % (base, int(i))
+
+
+def outcome(key, decision):
+    """C의 효과 - `record_outcomes`가 받는 줄. 패널은 계획서의 이름(`<그림>_P<번호>`)으로."""
+    base, i = key.rsplit("__p", 1)
+    return {"gate": "outcomes", "row": {"Panel_ID": "%s_P%d" % (base, int(i)), "Decision": decision}}
 
 
 def series_key(name):
@@ -307,9 +313,9 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
                           os.path.join(pics, "C_%s.png" % k))
         Q["C:" + k] = dict(section="C", question="%s 결과 이름" % k, target=k, group="C:" + k.rsplit("__p", 1)[0],
                            now="결과 이름 없음 · %s" % r["row"].get("Panel_Disposition", ""), images=[{"path": png, "caption": "600 dpi"}],
-                           options=[["LABEL", "제안한 이름으로 적음", {"gate": None, "needs": "R4: 패널 결과 이름 기록", "uses_text": True}],
-                                    ["EDIT", "이름을 고쳐 적음", {"gate": None, "needs": "R4: 패널 결과 이름 기록", "uses_text": True}],
-                                    ["NON_TARGET", "목표 결과 아님 — 이 패널 닫음", {"gate": None, "needs": "R4: 패널 목표 여부 기록"}]],
+                           options=[["LABEL", "제안한 이름으로 적음", dict(outcome(k, "LABEL"), uses_text=True)],
+                                    ["EDIT", "이름을 고쳐 적음", dict(outcome(k, "LABEL"), uses_text=True)],
+                                    ["NON_TARGET", "목표 결과 아님 — 이 패널 닫음", outcome(k, "NON_TARGET")]],
                            text_needed=True, machine=None)
     if undrawn:
         tasks.append("결과 이름이 없는 그리지 않은 패널 %d개 — 패널을 그리고 정체를 확인하면 이름이 생깁니다." % undrawn)
@@ -372,7 +378,10 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
                            table=[["패널", "계열 요인", "계열 = 칠"]] + [["p%s" % k.rsplit("__p", 1)[1], I[k].get("Series_Factor", ""),
                                                                     ", ".join("%s=%s" % (s.get("name"), s.get("bar_fill", ""))
                                                                               for s in json.loads(I[k].get("Series") or "[]"))] for k in pks],
-                           options=[["MANUAL", "이 그림의 패널 모두 사람이 읽음 (MANUAL)",
+                           options=[["LEGEND", "패널마다 범례가 따로 인쇄됨 — 범례를 패널마다 둠",
+                                     {"gate": "legends", "row": {"Draft_ID": d, "Decision": "LEGENDS",
+                                                                 "Legend_Groups": "|".join("p%s" % k.rsplit("__p", 1)[1] for k in pks)}}],
+                                    ["MANUAL", "이 그림의 패널 모두 사람이 읽음 (MANUAL)",
                                      [{"gate": "identity", "proposal_id": k, "set": {"Read_Route": "MANUAL"}} for k in pks]]], machine=None)
     # K - calibration outside the box
     for r in rows:

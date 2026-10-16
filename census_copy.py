@@ -43,7 +43,9 @@ if HERE not in sys.path:
 GATE_FILES = {"dispositions": ("figure_disposition_answers.csv", "figure_dispositions.csv"),
               "errorbar": ("errorbar_answers.csv", "errorbar_decisions.csv"),
               "identity": ("identity_answers.csv", "identity_decisions.csv"),
-              "geometry": ("geometry_answers.csv", "geometry_decisions.csv")}
+              "geometry": ("geometry_answers.csv", "geometry_decisions.csv"),
+              "outcomes": ("outcome_answers.csv", "outcome_decisions.csv"),
+              "legends": ("legend_answers.csv", "legend_decisions.csv")}
 
 
 def rd(path):
@@ -104,6 +106,8 @@ def record_on_copy(after, routed, when, plans, gate_dirs, pdf_root=None, log=pri
     import record_errorbar as RE
     import record_geometry as RG
     import record_identity as RI
+    import record_legends as RLG
+    import record_outcomes as RO
     done = {}
     for gate, (ans_name, rec_name) in GATE_FILES.items():
         rows = rd(os.path.join(routed, ans_name))
@@ -113,6 +117,9 @@ def record_on_copy(after, routed, when, plans, gate_dirs, pdf_root=None, log=pri
         try:
             if gate == "dispositions":
                 w, refused, _p = RD.record(after, plans, rows, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
+            elif gate in ("outcomes", "legends"):
+                mod = RO if gate == "outcomes" else RLG
+                w, refused, _p = mod.record(after, plans, rows, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
             elif gate == "errorbar":
                 w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
             else:
@@ -233,7 +240,8 @@ def main(argv=None, census_fn=None):
     gate_dirs = {"identity": a.identity_dir, "geometry": a.geometry_dir}
     written = {"dispositions": GATE_FILES["dispositions"][1], "errorbar": GATE_FILES["errorbar"][1],
                "identity": os.path.join(a.identity_dir, GATE_FILES["identity"][1]),
-               "geometry": os.path.join(a.geometry_dir, GATE_FILES["geometry"][1])}
+               "geometry": os.path.join(a.geometry_dir, GATE_FILES["geometry"][1]),
+               "outcomes": GATE_FILES["outcomes"][1], "legends": GATE_FILES["legends"][1]}
     want = [g for g in GATE_FILES if rd(os.path.join(a.routed, GATE_FILES[g][0]))]
     if not want:
         raise SystemExit("%s에 관문 답 파일이 없습니다." % a.routed)

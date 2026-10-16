@@ -62,6 +62,8 @@ GATES = {
     "errorbar": ("row", ("Source_Document_ID", "Dispersion_Type", "Errorbar_Definition_Source")),
     "identity": ("proposal_id", ()),
     "geometry": ("proposal_id", ()),
+    "outcomes": ("row", ("Panel_ID", "Decision")),
+    "legends": ("row", ("Draft_ID", "Legend_Groups", "Decision")),
 }
 
 #: 카드 관문이 답에서 받는 칸. 나머지는 관문이 제안 행에서 다시 짓습니다 - `record_identity`는
@@ -78,7 +80,7 @@ CARD_TAKES = {
 #: 관문이 적는 파일 이름. 답 파일이 이 이름이면 거절합니다.
 RECORD_FILES = ("figure_dispositions.csv", "figure_decisions.csv", "errorbar_decisions.csv",
                 "identity_decisions.csv", "geometry_decisions.csv", "panel_decisions.csv",
-                "inventory_records.csv", "block_reviews.csv")
+                "inventory_records.csv", "block_reviews.csv", "outcome_decisions.csv", "legend_decisions.csv")
 
 
 def load_spec(path):

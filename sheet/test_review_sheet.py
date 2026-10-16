@@ -913,6 +913,9 @@ AV.main(RUN4)
 _m = _draft4(_d4["Draft_ID"])
 check("옆 쪽에 그린 상자로 행이 그 쪽으로 옮겨진다", _m["Page"] == str(_p4 + 1), _m["Page"])
 check("페이지 래스터도 그 쪽 것이 된다", _m["Page_Raster"] == _next_path, _m["Page_Raster"])
+# REVERT: move the raster and keep its fingerprint. The row would sit on the new page and name the old page's picture.
+check("래스터의 지문도 그 쪽 것이 된다", _m["Page_Raster_SHA256"] == _sha(_next_path),
+      (_m["Page_Raster_SHA256"][:12], _sha(_next_path)[:12]))
 check("캡션이 있던 쪽을 잊지 않는다",
       _m["Caption_Page"] == str(_p4) and _m["Moved_From_Page"] == str(_p4))
 check("옮긴 쪽의 크기는 PDF에 물어본 값이다 (캡션 쪽 크기가 아니다)",

@@ -103,6 +103,10 @@ def stub(run, out):
     os.makedirs(os.path.join(out, "plans"), exist_ok=True)
     write(os.path.join(out, "plans", "plan_figures.csv"), ("Draft_ID", "Figure_Number", "Page"),
           [{"Draft_ID": "DOC_D001", "Figure_Number": "FIG1", "Page": "3"}, {"Draft_ID": "DOC_D002", "Figure_Number": "FIG2", "Page": "4"}])
+    json.dump({"publication_id": "DOC", "figures": [{"source_figure_id": "DOC_D002", "panels": [
+        {"panel_id": "DOC_D002_P1", "disposition": "MANUAL_DIGITIZE", "target_status": "TARGET"},
+        {"panel_id": "DOC_D002_P2", "disposition": "MANUAL_DIGITIZE", "target_status": "TARGET"}]}]},
+        io.open(os.path.join(out, "plans", "plan_DOC.json"), "w", encoding="utf-8"))
     p = os.path.join(run, "figure_dispositions.csv")
     closed = set(r["Draft_ID"] for r in rd(p)) if os.path.exists(p) else set()
     return ({"DOC": {"plan_problems": {}, "manifest_problems": {"SOURCE_PANEL_UNRESOLVED": 2 - len(closed)}}},
@@ -175,6 +179,22 @@ except SystemExit as exc:
 check("a routed folder with no gate answers is refused", "관문 답 파일이 없습니다" in stopped, stopped)
 write(os.path.join(EMPTY, "errorbar_answers.csv"), ("Source_Document_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Verified_In_Source"),
       [{"Source_Document_ID": "DOC", "Dispersion_Type": "SEM", "Errorbar_Definition_Source": "mean ± SEM"}])
+# A name and a legend split, recorded on the copy by their own gates.
+NAMED = os.path.join(ROOT, "routed_named")
+write(os.path.join(NAMED, "outcome_answers.csv"), ("Panel_ID", "Decision", "Outcome_Label", "Unit") + tuple(APPROVED),
+      [dict(APPROVED, Panel_ID="DOC_D002_P1", Decision="LABEL", Outcome_Label="Heart rate", Unit="bpm")])
+write(os.path.join(NAMED, "legend_answers.csv"), ("Draft_ID", "Legend_Groups", "Decision") + tuple(APPROVED),
+      [dict(APPROVED, Draft_ID="DOC_D002", Legend_Groups="p1|p2", Decision="LEGENDS")])
+OUTN = os.path.join(ROOT, "out_named")
+rc = CC.main(["--run", RUN, "--routed", NAMED, "--when", "2026-10-16", "--out", OUTN], census_fn=stub)
+recn = json.load(io.open(os.path.join(OUTN, "recorded.json"), encoding="utf-8"))
+# REVERT: leave the two new gates out of the copy. The names would be routed and never recorded anywhere.
+check("a name and a legend split are recorded on the copy by their own gates, and not in the run",
+      rc == 0 and recn == {"outcomes": [1, []], "legends": [1, []]}
+      and rd(os.path.join(OUTN, "run_after", "outcome_decisions.csv"))[0]["Outcome_Label"] == "Heart rate"
+      and rd(os.path.join(OUTN, "run_after", "legend_decisions.csv"))[0]["Legend_Groups"] == "p1|p2"
+      and not os.path.exists(os.path.join(RUN, "outcome_decisions.csv")), recn)
+
 CALLS = []
 
 

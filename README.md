@@ -90,7 +90,16 @@ is wrong (`SKILL.md`, "Bundle what is left"):
       |                    what has no gate yet goes to unrouted.csv
       | census_copy.py     the gates on a COPY of the run, census before and after
       v
-    record_*.py            the real record, --when = the day it was decided
+    record_*.py            the real record, --when = the day it was decided:
+                           dispositions, error bars, the two cards, and a panel's
+                           outcome name or "not a target" (record_outcomes.py)
+                           and a figure's legend groups (record_legends.py),
+                           which make_plan.py reads into the plan
+
+Small fixes are tools of their own, run by hand once approved: `clip_frames.py`
+(a drawn frame past the picture's edge, cut back on both cards through their
+gates) and `rehash_moved_pages.py` (a figure row moved to the next page that
+still carries the old page's hash).
 
 ## What it does
 
@@ -142,7 +151,8 @@ defect in a reader stops the batch rather than arriving in somebody's queue as
     python3 pilot_397.py                     # pilot SKIPs and says which file
 
     python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root "$FDT_RASTER_ROOT"
-    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT"
+    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT" \
+        [--doc-root PDFS]                    # where the source PDFs are, if not under --file-root
     python3 finalize_batch.py OUT --template # then fill in the decisions
     python3 finalize_batch.py OUT
 
@@ -159,12 +169,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5237 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5422 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5339 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5524 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5237 scenarios on main after v9.28 under `requirements-lock.txt`, and 5422 with
+5339 scenarios on main after v9.28 under `requirements-lock.txt`, and 5524 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

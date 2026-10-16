@@ -193,7 +193,11 @@ check("a marker question has no measured proposal - it needs a look", m6["machin
 check("ANY/ANY is offered only on a one-series panel", "ANY/ANY" in [o[0] for o in m6["options"]]
       and "ANY/ANY" not in [o[0] for o in Q["M:DOC_D013__p1:A"]["options"]])
 l7 = Q["L:DOC_D007"]
-check("two legends: MANUAL writes every panel of the figure", [e["proposal_id"] for e in l7["options"][0][2]] == ["DOC_D007__p1", "DOC_D007__p2"])
+check("two legends: MANUAL writes every panel of the figure", [e["proposal_id"] for e in l7["options"][1][2]] == ["DOC_D007__p1", "DOC_D007__p2"])
+# REVERT: leave LEGEND as a path still to build. Iwasaki's two legends stay one, and the figure is refused.
+check("two legends: LEGEND gives each panel its own legend through record_legends", l7["options"][0][0] == "LEGEND"
+      and l7["options"][0][2] == {"gate": "legends", "row": {"Draft_ID": "DOC_D007", "Decision": "LEGENDS", "Legend_Groups": "p1|p2"}},
+      l7["options"][0])
 check("the fill bands are the reader's", BI.FILL_BANDS == __import__("mark_readers")._FILL_BANDS)
 
 # --- proposals and the spec -------------------------------------------------------------------
@@ -211,7 +215,7 @@ P = {"proposals": {
     "C:DOC_D002__p1": {"proposal": "LABEL", "why": "y-axis title", "observed_by": "Claude (label agent)", "text": {"value": "Heart rate", "unit": "bpm"}},
     "M:DOC_D006__p1:MEAN": {"proposal": "MANUAL", "why": "the mean has no marker", "observed_by": "Claude (600 dpi)"},
     "L:DOC_D007": {"proposal": "LEGEND", "why": "a legend per column", "observed_by": "Claude (600 dpi)",
-                   "extra_options": [["LEGEND", "split the legend", {"gate": None, "needs": "legend domains"}]]},
+                   "extra_options": [["LEGEND_OPEN", "split the legend, grey is OPEN", {"gate": None, "needs": "legend domains"}]]},
     "F:DOC_D004__p1:ALL": {"proposal": "MANUAL", "why": "overlapping individual lines", "observed_by": "Claude (600 dpi)"},
     "F:DOC_D012__p1:ALL": {"proposal": "MANUAL", "why": "an empty bar and a grey one", "observed_by": "Claude (600 dpi)"},
     "M:DOC_D013__p1:A": {"proposal": "CIRCLE/FILLED", "why": "filled circles", "observed_by": "Claude (600 dpi)"}},
@@ -236,7 +240,13 @@ check("a measured proposal says it was measured", (items["F:DOC_D005__p1:ALL"]["
       == ("MANUAL", BI.MACHINE) and items["K:DOC_D001__p1"]["why"].startswith("짝을"))
 check("a name question carries the proposed name", items["C:DOC_D002__p1"]["text"] == {"value": "Heart rate", "unit": "bpm"})
 check("every question ends with HOLD", all(it["options"][-1][0] == "HOLD" for s in spec["sections"] for it in s["items"]))
-check("an extra option from the proposals is offered", "LEGEND" in [o[0] for o in items["L:DOC_D007"]["options"]])
+check("an extra option from the proposals is offered", "LEGEND_OPEN" in [o[0] for o in items["L:DOC_D007"]["options"]])
+c2 = dict((o[0], o[2]) for o in items["C:DOC_D002__p1"]["options"] if len(o) > 2)
+# REVERT: leave the name a path still to build. 110 names a person gave would wait in unrouted.csv.
+check("a name goes to record_outcomes with the plan's panel id, carrying the text; 'not a target' without it",
+      c2["LABEL"] == {"gate": "outcomes", "row": {"Panel_ID": "DOC_D002_P1", "Decision": "LABEL"}, "uses_text": True}
+      and c2["EDIT"]["row"]["Decision"] == "LABEL" and c2["NON_TARGET"] == {"gate": "outcomes", "row": {"Panel_ID": "DOC_D002_P1", "Decision": "NON_TARGET"}},
+      c2)
 P2 = json.loads(json.dumps(P)); P2["proposals"]["K:DOC_D999__p1"] = {"proposal": "PAIRS", "why": "x", "observed_by": "y"}
 # REVERT: ignore a proposal for a question this census does not ask. It was written against another census.
 check("a proposal for a question this census does not ask is refused", "STALE_PROPOSAL" in [c for c, _m in BI.merge(Q, TASKS, P2)[2]])

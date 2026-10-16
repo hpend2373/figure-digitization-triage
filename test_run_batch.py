@@ -363,7 +363,7 @@ def fr(rows, cols):
 def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
              configs=CONFIGS, units=UNITS, source_figures=SOURCE_FIGURES,
              source_panels=SOURCE_PANELS, source_documents=SOURCE_DOCUMENTS,
-             reviewers=REVIEWERS):
+             reviewers=REVIEWERS, doc_root=None):
     p = BM.validate_batch_manifests(
         fr(panels, BM.panel_manifest_columns()),
         fr(series_rows, BM.series_manifest_columns()),
@@ -374,7 +374,7 @@ def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
         source_figures=fr(source_figures, BM.source_figure_manifest_columns()),
         source_panels=fr(source_panels, BM.source_panel_inventory_columns()),
         reviewers=fr(reviewers, BM.reviewer_registry_columns()),
-        file_root=ROOT)
+        file_root=ROOT, doc_root=doc_root)
     return sorted(set(p["check"])) if len(p) else []
 
 
@@ -479,6 +479,38 @@ check("a digest claimed for a document that is not in the corpus is refused",
                           for f in SOURCE_FIGURES]),
       "%s" % validate(source_documents=_doc(Source_File="absent.pdf",
                                             Source_File_SHA256=_DOC_SHA)))
+# A DOCUMENT FOLDER APART FROM THE RUN (run2 2026-10-16, E03). The corpus keeps
+# its 98 PDFs in one download folder, some one level down; the run holds the
+# rasters. Looked for under the run, every document was missing on the machine
+# that had all of them.
+_DOCS = os.path.join(os.path.dirname(ROOT), os.path.basename(ROOT) + "_docs")
+os.makedirs(os.path.join(_DOCS, "articles_api", "deeper"), exist_ok=True)
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "moved.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "below.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "deeper", "deep.pdf"))
+os.symlink(SOURCE_PDF, os.path.join(_DOCS, "leak.pdf"))
+
+
+def _docs_at(name, digest=_DOC_SHA, doc_root=_DOCS):
+    return validate(source_documents=_doc(Source_File=name, Source_File_SHA256=digest),
+                    source_figures=[dict(f, Source_File=name) for f in SOURCE_FIGURES], doc_root=doc_root)
+
+
+# REVERT: ignore --doc-root. The 98 documents are still looked for in the run and none is found.
+check("a document in the document folder is found there", _docs_at("moved.pdf") == [], "%s" % _docs_at("moved.pdf"))
+check("... and one folder down, as the caption reader found it", _docs_at("below.pdf") == [], "%s" % _docs_at("below.pdf"))
+# REVERT: search the whole tree. A same-named file anywhere below would be taken for the document.
+check("... but not two folders down", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("deep.pdf"))
+check("without the folder, the same document is not found in the run", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("moved.pdf", doc_root=None))
+# REVERT: accept a path in the name. '../' would walk out of the folder the run was told to read.
+check("a name with a path in it is not a document name", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("articles_api/below.pdf")
+      and "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("../" + os.path.basename(_DOCS) + "/moved.pdf"))
+# REVERT: follow a link out of the folder. A link is the easy way to put any file under any name.
+check("a link that leads out of the folder is refused", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("leak.pdf"))
+check("the digest is still checked against the file found there", "SOURCE_DOCUMENT_HASH_MISMATCH" in _docs_at("moved.pdf", digest="0" * 64))
+check("NOT_HELD about a document the folder holds is refused there too",
+      "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED" in _docs_at("moved.pdf", digest="NOT_HELD"))
+shutil.rmtree(_DOCS, ignore_errors=True)
 # NOT_HELD IS NOT A WAY OUT OF HASHING A FILE YOU HAVE. Without this the column
 # is optional in practice and the whole check is decoration: every producer that
 # does not want to hash its document writes NOT_HELD and nothing disagrees.
@@ -7486,6 +7518,30 @@ for _p in RB.emit_templates(_tdir):
     _fn = dict(BM.BATCH_TEMPLATES)[_name]
     check("%s template matches its column function" % _name,
           next(csv.reader(open(_p))) == _fn())
+
+# THE COMMAND LINE HANDS THE DOCUMENT FOLDER TO THE CHECK. The check reads it;
+# a run that took --doc-root and dropped it would look for the PDFs in the run.
+class _Seen(Exception):
+    pass
+
+
+_real_validate, _got = BM.validate_batch_manifests, {}
+
+
+def _spy(*_a, **kw):
+    _got.update(kw)
+    raise _Seen()
+
+
+BM.validate_batch_manifests = _spy
+try:
+    RB.main([MDIR, os.path.join(ROOT, "o_docroot"), "--file-root", ROOT, "--doc-root", "/docs/here"])
+except _Seen:
+    pass
+finally:
+    BM.validate_batch_manifests = _real_validate
+# REVERT: drop doc_root between the command line and the check.
+check("the command line's --doc-root reaches the manifest check", _got.get("doc_root") == "/docs/here", _got.get("doc_root"))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

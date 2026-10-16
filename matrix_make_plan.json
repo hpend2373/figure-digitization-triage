@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "a2ca1a75be1c00273fe76005c88e6e97f5dea57e4b4db60466d43fd7e5cb0066",
-  "test_make_plan.py": "5319499cb021a71387135cbdb764cb8c152e9ef3d0b422aaa565ddc0500bd4f4"
+  "make_plan.py": "455c3b9f8f9246043303d1a0b15aa666e730da1cb3673ccdf6f0fb626b121951",
+  "test_make_plan.py": "3564df669185bc0691ecc6b7baeb903fe57f4150115cd5ea6c1ce4613f4bda90"
  },
  "suites": [
   "test_make_plan.py"
@@ -582,6 +582,48 @@
    "file": "make_plan.py",
    "old": "        if (r.get(\"Decision\") or \"\").strip().upper() == RBR.UNBLOCK)",
    "new": "        if (r.get(\"Decision\") or \"\").strip())"
+  },
+  {
+   "name": "결과 이름 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    outcomes = load_outcomes(run)\n",
+   "new": "    outcomes = {}\n"
+  },
+  {
+   "name": "범례 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    legends = load_legends(run)\n",
+   "new": "    legends = {}\n"
+  },
+  {
+   "name": "읽을 준비가 된 패널은 목표 아님이어도 닫지 않는다",
+   "file": "make_plan.py",
+   "old": "                if (said_outcome or {}).get(\"Decision\", \"\").strip().upper() == \"NON_TARGET\":\n",
+   "new": "                if False:\n"
+  },
+  {
+   "name": "그리지 않은 패널에 결과 이름을 얹지 않는다",
+   "file": "make_plan.py",
+   "old": "                apply_outcome(panel, (outcomes or {}).get(panel[\"panel_id\"]))\n",
+   "new": "                pass\n"
+  },
+  {
+   "name": "닫힌 패널에도 이름을 붙인다",
+   "file": "make_plan.py",
+   "old": "    elif decision == \"LABEL\" and target_status_of(panel) == \"TARGET\":\n",
+   "new": "    elif decision == \"LABEL\":\n"
+  },
+  {
+   "name": "범례 묶음을 판독에 주지 않는다",
+   "file": "make_plan.py",
+   "old": "                if unit is not None and (legends or {}).get(row[\"Draft_ID\"]):\n",
+   "new": "                if False:\n"
+  },
+  {
+   "name": "읽을 준비가 된 패널의 이름도 결과 기록으로 덮는다",
+   "file": "make_plan.py",
+   "old": "            if (panel.get(\"disposition\") or \"\") != AUTHORED:\n",
+   "new": "            if True:\n"
   }
  ]
 }

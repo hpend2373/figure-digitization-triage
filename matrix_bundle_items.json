@@ -1,7 +1,8 @@
 {
  "files": {
-  "bundle_items.py": "eadecd6c9d374777896d4eeb7a7508fd3381efa93470adc9b792ec05a0b0b67b",
-  "test_bundle_items.py": "086d7270e1af5fd25ec433c79f75137982c9ab9f39550699ec81dd215e827ba0"
+  "bundle_items.py": "36bcb39dc5e5eb24417ea70900c22e5befc5ac07ab350d83bef1504be3d92e77",
+  "test_bundle_items.py": "89f8bab79c5e4fc7557ade4cedec56851a2dc5f9cc9a075e3b2f561c2711f40a",
+  "bundle_page.py": "375b711d872f92e6ac1ca8336a5873e42bd46793dbf8b8dfa8273fecec9d218d"
  },
  "suites": [
   "test_bundle_items.py"
@@ -150,6 +151,24 @@
    "file": "bundle_items.py",
    "old": "                options=[[v, FILL_WORDS[v], {",
    "new": "                options=[[v, v, {"
+  },
+  {
+   "name": "결과 이름을 아직 길 없는 답으로 둔다",
+   "file": "bundle_items.py",
+   "old": "    return {\"gate\": \"outcomes\", \"row\": {\"Panel_ID\": \"%s_P%d\" % (base, int(i)), \"Decision\": decision}}\n",
+   "new": "    return {\"gate\": None, \"needs\": \"R4\"}\n"
+  },
+  {
+   "name": "범례를 패널마다 두는 선택지를 길 없는 답으로 둔다",
+   "file": "bundle_items.py",
+   "old": "                                     {\"gate\": \"legends\", \"row\": {\"Draft_ID\": d, \"Decision\": \"LEGENDS\",\n",
+   "new": "                                     {\"gate\": None, \"needs\": \"legend\", \"row\": {\"Draft_ID\": d, \"Decision\": \"LEGENDS\",\n"
+  },
+  {
+   "name": "페이지가 결과 이름 관문을 모른다",
+   "file": "bundle_page.py",
+   "old": "    \"outcomes\": (\"row\", (\"Panel_ID\", \"Decision\")),\n",
+   "new": "\n"
   }
  ]
 }

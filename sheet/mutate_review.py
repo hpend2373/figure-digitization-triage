@@ -239,10 +239,15 @@ MUT = [
      '    moved["Page_Width_Pt"] = "%.2f" % said[0]\n    moved["Page_Height_Pt"] = "%.2f" % said[1]',
      '    moved["Page_Width_Pt"] = "%.2f" % pw\n    moved["Page_Height_Pt"] = "%.2f" % ph'),
     ("M67 옮긴 행의 필드를 초안에 안 씀", "apply_validated.py",
-     '                for col in ("Caption_Page", "Page", "Page_Raster",\n'
+     '                for col in ("Caption_Page", "Page", "Page_Raster", "Page_Raster_SHA256",\n'
      '                            "Page_Width_Pt", "Page_Height_Pt"):\n'
      '                    d[col] = moved[col]',
      '                pass'),
+    ("M67b 옮겨도 래스터 지문은 옛 쪽 것을 남김 (E01)", "apply_validated.py",
+     '    moved["Page_Raster_SHA256"] = hashlib.sha256(io.open(target, "rb").read()).hexdigest()\n',
+     ''),
+    ("M67c 옮긴 행의 지문만 초안에 안 씀 (E01)", "apply_validated.py",
+     '"Page", "Page_Raster", "Page_Raster_SHA256",\n', '"Page", "Page_Raster",\n'),
     ("M68 쪽 번호를 읽지 못해도 진행", "apply_validated.py",
      '        return None, "그린 쪽 번호를 읽을 수 없음 (%r)" % (human_page,)',
      '        return dict(d), ""'),
@@ -387,8 +392,8 @@ MUT = [
     ("M108 아무 글자나 번호로 받음", "apply_validated.py",
      'NUMBER_SPELLING = re.compile(', 'NUMBER_SPELLING = re.compile("^(?P<ext>x)?(?P<n>.*?)(?P<sub>x)?$") or re.compile('),
     ("M109 번호를 받은 행도 다시 잘렸다고 침", "apply_validated.py",
-     'if "BLOCKED" not in x and "중복" not in x and "(번호 " not in x}',
-     'if "BLOCKED" not in x and "중복" not in x}'),
+     '                 and "(번호 " not in x and "(캡션 확인)" not in x}',
+     '                 and "(캡션 확인)" not in x}'),
     ("M110 왜 다시 묻는지 말하지 않음", "review_packet.py",
      '            r["Ask_Again_Why"] = ask_again_why(\n'
      '                r, reg.get(ANSWERED_WINDOW, ""), reg.get(ANSWERED_REASON, ""))',

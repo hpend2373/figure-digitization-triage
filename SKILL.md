@@ -25,7 +25,7 @@ the repository too, with the rest of the pipeline built around them.
 ```
 INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
 COMPILE    python3 compile_plan.py PLAN.json MANIFESTS/ --file-root .
-RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root .        -> MACHINE_QC_PASSED
+RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root . [--doc-root PDFS/]  -> MACHINE_QC_PASSED
 REVIEW     for every row of OUT/review_queue.csv, open what its Review_Mode names
            (OVERLAY -> Overlay_File, WPD_ONLY -> WPD_Project_File in WebPlotDigitizer),
            then fill Review_ID / Decision / Reviewer_ID / Reviewed_At in value_review.csv
@@ -42,6 +42,14 @@ run produced for this panel and therefore what to look at:
 | `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
 | `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` and the `geometry-review/evidence__*` files it cites | all of the above, **and** each resolution's evidence really names that series |
 | anything else, or the named file is absent | — | **do not approve.** The finalizer refuses it anyway (`REVIEW_MODE_UNKNOWN` / `REVIEW_ARTIFACT_MISSING`) |
+
+`--doc-root` is where the source PDFs are when they are not under `--file-root`
+(a run folder holds crops and rasters; the papers usually sit in a library folder
+of their own). A `Source_File` is then a bare file name, looked up in that folder
+or one level below it, and its SHA-256 is still checked; a name carrying a path,
+or a link that leads out of the folder, is refused rather than followed. Without
+it every document is `SOURCE_DOCUMENT_FILE_NOT_FOUND`, which is a setting, not a
+finding.
 
 `WPD_ONLY` is uncommon: it means the picture could not be drawn, which never
 fails a panel that produced values but does change what a reviewer has to open.
@@ -193,6 +201,10 @@ bundle_page.py      the decision bundle: one page, a proposal on every line
 bundle_page.js      what counts as an answer on it (seen / approved / held)
 bundle_route.py     the page's answers -> each gate's answer file, all or nothing
 census_copy.py      the gates on a copy of the run, census before and after
+record_outcomes.py  a drawn panel's outcome name, or "not a target" (R4)
+record_legends.py   which panels of one figure share a printed legend
+clip_frames.py      a drawn frame past the picture's edge, cut back on both cards
+rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
 ```
 
 Everything below is the protocol: what each rule exists to prevent, stated
@@ -410,8 +422,8 @@ where the proposal is wrong.
       | census_copy.py            the gates write to a COPY of the run; the same
       v                           census before and after
     compare.json                  what the answers WOULD change, per problem code
-      | record_dispositions.py / record_errorbar.py /
-      | record_identity.py --replace / record_geometry.py --replace
+      | record_dispositions.py / record_errorbar.py / record_outcomes.py /
+      | record_legends.py / record_identity.py --replace / record_geometry.py --replace
       v                           on the real run, --when = the day it was decided
     the next census
 
@@ -420,10 +432,10 @@ The questions, by problem code (`bundle_items.py`):
 | section | problem | the question | gate |
 |---|---|---|---|
 | X | `SOURCE_PANEL_UNRESOLVED`, `SOURCE_PANEL_RUN_LINK_MISSING` | what to do with this figure | `record_dispositions` |
-| C | `MISSING_TARGET_OUTCOME_LABEL` on a drawn panel | the outcome's name and unit, or not a target | none yet (R4) |
+| C | `MISSING_TARGET_OUTCOME_LABEL` on a drawn panel | the outcome's name and unit, or not a target | `record_outcomes` |
 | F | `MISSING_SERIES_DISCRIMINANT`, monochrome bars | each series' fill | `record_identity` |
 | M | `MISSING_SERIES_DISCRIMINANT`, lines and markers | each series' marker | `record_identity` |
-| L | `IDENTITY_DOMAIN_FILL_CONFLICT` | one figure, two legends | `record_identity`, or none yet |
+| L | `IDENTITY_DOMAIN_FILL_CONFLICT` | one figure, two legends | `record_legends`, or `record_identity` (MANUAL) |
 | K | `CALIBRATION_OUTSIDE_PANEL` | move the tick pair, or the box | `record_geometry` (the box: none yet) |
 
 **Measure what can be measured; ask for the rest.** K looks for tick marks
@@ -491,10 +503,40 @@ drew is gone while only the pairs were meant to change. Both were found by
 recording a real bundle on a copy and diffing the cards - a census of problem
 counts did not show either.
 
-**No route is not a route.** An answer whose gate does not exist yet - an
-outcome name (R4), a legend area, a small fix - goes to `unrouted.csv` with what
-it needs. It is not dropped, and it is not written into a record where it does
-not belong.
+**No route is not a route.** An answer whose gate does not exist yet goes to
+`unrouted.csv` with what it needs. It is not dropped, and it is not written into
+a record where it does not belong. The small fixes (below) stay there: their
+answer is the approval, and the tool that does the fix is run by hand.
+
+**A panel's outcome and a figure's legends are records of their own.** A panel a
+person reads by hand (`MANUAL_DIGITIZE`), or one in a figure set aside for want of
+an error definition, never passes the identity page, so nothing gave it the name
+the plan requires of every target panel. `record_outcomes.py` takes, per panel
+(`<Draft_ID>_P<n>`, the plan's name), LABEL with the name the paper printed, or
+NON_TARGET; `make_plan.py` puts the name on a target panel that is not read
+automatically - an automatic panel keeps the name its identity card confirmed -
+and closes a NON_TARGET panel as `NON_TARGET_OUTCOME` before it gets a unit. A
+guess ("TBD", "unknown", "assumed") is refused as a name: a panel that looks named
+and is not is worse than one that is plainly unnamed. A name on a panel the plan
+has closed is refused too; reopening it is the figure's disposition's job.
+`record_legends.py` takes the legend groups of one figure (`p1,p3|p2`); `make_plan`
+gives each group its own `Identity_Domain_ID` (`F_<figure>__L<n>`), so the same
+hatching may mean "before bed rest" in panel A and "before diuretic" in panel B
+without the fill check stopping the figure. One group is the default and is not
+written; a panel in two groups is refused.
+
+**Small fixes are tools, each with the evidence it needs.** `clip_frames.py`
+cuts a drawn frame back to the picture (a frame drawn to a region that ends at
+the picture's edge can overshoot by a few pixels, and the reader stops on a box
+outside the image). It moves both cards together - `make_plan` reads identity
+only on the frame geometry stands on - by re-recording them through their own
+gates, rehearsed in a temporary folder first; a re-recorded card that differs
+from the old one anywhere but the frame and the record's who/when means the
+proposal was re-made since, and nothing is written. The card keeps the weaker
+provenance: a card that was an approved observation stays one even when a person
+saw the clip. `rehash_moved_pages.py` repairs rows the review sheet moved to the
+next page before it learned to move the page's hash with the page: it rewrites a
+hash only when it is exactly the moved-from page's, and stops on anything else.
 
 **Census on a copy, then record.** `census_copy.py` builds a link tree of the
 run, real-copies only the files the gates write, records with the gates
@@ -519,6 +561,12 @@ deciding; it is not committed, published or shared.
         --geometry RUN/seg/geometry600/geometry_decisions.csv --out ROUTED/
     python3 census_copy.py --run RUN --routed ROUTED/ --when YYYY-MM-DD \
         --reviewers reviewers.json --out CHECK/ [--pdf-root PDFS/]
+    # outcomes and legends are recorded against the plans they answered
+    python3 record_outcomes.py --run RUN --plans PLANS/ --answers ROUTED/outcome_answers.csv --when YYYY-MM-DD
+    python3 record_legends.py --run RUN --plans PLANS/ --answers ROUTED/legend_answers.csv --when YYYY-MM-DD
+    # small fixes, each approved on the page and run by hand
+    python3 clip_frames.py --run RUN --answers clip_answers.csv --when YYYY-MM-DD
+    python3 rehash_moved_pages.py --run RUN [--write]
 
 ## Provenance is per FIELD, not per row
 

@@ -1,11 +1,6 @@
 ---
 name: figure-digitization-triage
-description: >-
-  Plan, execute and QC graph-only data extraction for a systematic review or
-  meta-analysis. Screens figure captions into routes, compiles one typed plan
-  into eleven manifests, reads panels with declared readers, gates the values on
-  a universal factorial grid, puts every extraction in front of a named human,
-  and writes a poolable file only for what that person approved.
+description: "Plan, run and QC graph-only data extraction for a systematic review or meta-analysis: caption triage, typed plans, declared readers, a factorial gate, one-page decision bundles, and human approval before anything is pooled."
 ---
 
 # Figure digitization triage
@@ -15,6 +10,15 @@ to be recovered, at a scale where doing it by hand once per paper is not a
 protocol. It is a pipeline, not a helper: the point is that the number which
 ends up in a meta-analysis can be traced to a raster, a calibration, a reader
 version, an environment and a person who looked at the picture and said yes.
+
+## Get the code
+
+Every script named below lives in the repository, not in this skill:
+https://github.com/hpend2373/figure-digitization-triage (branch
+`approved-claude-checks` until it is merged into `main`). Clone it and run from
+the clone; `python3 test_*.py` there is the check that the clone is whole. The
+`kernel.py` and `test_kernel.py` that older copies of this skill carried are in
+the repository too, with the rest of the pipeline built around them.
 
 ## Run it
 
@@ -784,6 +788,29 @@ reads about 140 on the same figure. Thresholding both at 128 found every cap and
 no stem, so on publication 397 the reader confirmed nothing and returned no
 dispersion at all - a fail-closed answer produced by a measurement error rather
 than by the figure.
+
+## Caption screening, carried from the first version
+
+The first version of this skill was the caption screen and the row validator
+that `kernel.py` still is; `make_plan.py` calls the screen for every figure. What
+it learned still holds:
+
+- `fig_screen_caption` gives a route per figure: `DIGITIZE`,
+  `PARTIAL_PANEL_TARGET`, `ASSOCIATION_ONLY_NOT_TARGET`, `BINARY_EVENT_NOT_MEAN`,
+  `NO_TARGET_OUTCOME`, `NOT_DATA`. The last two are screening verdicts from
+  caption text, which is often truncated - a visual check closes them, not the
+  screen.
+- A scatter or regression plot read with the mean template fabricates a mean
+  difference out of an association; it needs its own schema.
+- Target terms name outcomes, never groups or timepoints ("presyncopal men" is a
+  cohort). Qualify an ambiguous noun rather than truncating it, and after any
+  term-list edit diff the routes of the whole corpus and read every caption whose
+  route changed.
+- `Exposure_Phase` is declared (`PRE` / `DURING` / `POST` / `RECOVERY` / `DELTA`),
+  never inferred from a label: `FD15` or `HDT30` is DURING, not follow-up.
+- No error bar is `NO_ERRORBAR`, never `NONE`, which the blank-token rule reads as
+  an empty cell. A CSV blank is float nan, whose `str()` is "NAN" - validate
+  through a CSV round-trip, never an in-memory frame.
 
 ## The four suites, and why there are four
 

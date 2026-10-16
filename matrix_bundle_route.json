@@ -1,0 +1,167 @@
+{
+ "files": {
+  "bundle_route.py": "ce0ef715a69f241b78ee5b2382d7c62ffd0eb2e32cb56db9e50c32fd898837dd",
+  "test_bundle_route.py": "26024c3398a6cdbf872c113a25fe79f11c75d0e58f553db70645f906b6cc465e"
+ },
+ "suites": [
+  "test_bundle_route.py"
+ ],
+ "mutations": [
+  {
+   "name": "항목 지문을 보지 않는다",
+   "file": "bundle_route.py",
+   "old": "    if (a.get(\"Item_SHA256\") or \"\").strip() != item.get(\"sha\"):\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "없는 항목을 받는다",
+   "file": "bundle_route.py",
+   "old": "    if item is None:\n        return [(\"UNKNOWN_ITEM\"",
+   "new": "    if item is None:\n        return []\n    if False:\n        return [(\"UNKNOWN_ITEM\""
+  },
+  {
+   "name": "한 항목의 두 답을 받는다",
+   "file": "bundle_route.py",
+   "old": "    if iid in twice:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "항목에 없는 답을 받는다",
+   "file": "bundle_route.py",
+   "old": "    if d not in [str(o[0]) for o in item.get(\"options\") or []]:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "이름 없는 답을 받는다",
+   "file": "bundle_route.py",
+   "old": "    if not who:\n        p.append((\"UNATTRIBUTED\"",
+   "new": "    if False:\n        p.append((\"UNATTRIBUTED\""
+  },
+  {
+   "name": "누가 보았는지를 보지 않는다",
+   "file": "bundle_route.py",
+   "old": "    p.extend(approval.seen_problems(a, who, \"%s: 직접 보았다는 표시도, 승인된 관찰의 세 칸도 없습니다.\" % iid))\n",
+   "new": "    pass\n"
+  },
+  {
+   "name": "보지 않고 바꾼 답을 받는다",
+   "file": "bundle_route.py",
+   "old": "        if d != str(item.get(\"proposal\") or \"\"):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "다른 이름의 관찰을 받는다",
+   "file": "bundle_route.py",
+   "old": "        if (a.get(\"Observed_By\") or \"\").strip() != str(item.get(\"observed_by\") or \"\").strip():\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "고친 이름을 승인으로 받는다",
+   "file": "bundle_route.py",
+   "old": "        if not seen:\n            p.append((\"EDIT_NOT_SEEN\"",
+   "new": "        if False:\n            p.append((\"EDIT_NOT_SEEN\""
+  },
+  {
+   "name": "빈 고친 이름을 받는다",
+   "file": "bundle_route.py",
+   "old": "        if not (a.get(\"Text\") or \"\").strip():\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "없는 카드를 넘어간다",
+   "file": "bundle_route.py",
+   "old": "    if base is None:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "없는 칸을 만든다",
+   "file": "bundle_route.py",
+   "old": "        if f not in base:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "같은 칸의 다른 값을 받는다",
+   "file": "bundle_route.py",
+   "old": "        if f in t[\"set\"] and t[\"set\"][f][0] != str(v):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "같은 계열 칸의 다른 값을 받는다",
+   "file": "bundle_route.py",
+   "old": "                if k in t[\"set\"] and t[\"set\"][k][0] != str(v):\n",
+   "new": "                if False:\n"
+  },
+  {
+   "name": "없는 계열을 넘어간다",
+   "file": "bundle_route.py",
+   "old": "            if len(hit) != 1:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "계열 효과를 모든 계열에 쓴다",
+   "file": "bundle_route.py",
+   "old": "                hit[0][f] = v\n",
+   "new": "                [x.__setitem__(f, v) for x in ser]\n"
+  },
+  {
+   "name": "섞인 출처를 한 행에 쓴다",
+   "file": "bundle_route.py",
+   "old": "        if len(kinds) > 1 or len(whos) > 1:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "카드의 옛 메모를 지운다",
+   "file": "bundle_route.py",
+   "old": "        row[\"Note\"] = (old + \" | \" if old else \"\") + \"; \".join(t[\"notes\"])\n",
+   "new": "        row[\"Note\"] = \"; \".join(t[\"notes\"])\n"
+  },
+  {
+   "name": "처분 행에 어느 항목인지 적지 않는다",
+   "file": "bundle_route.py",
+   "old": "        out[gate].append(dict(eff[\"row\"], Verified_By=who, Note=note_of(a), **prov))\n",
+   "new": "        out[gate].append(dict(eff[\"row\"], Verified_By=who, Note=a.get(\"Note\", \"\"), **prov))\n"
+  },
+  {
+   "name": "승인된 정의를 원문에서 확인했다고 적는다",
+   "file": "bundle_route.py",
+   "old": "Verified_In_Source=\"1\" if prov[\"Seen_By_Person\"] == \"1\" else \"\",",
+   "new": "Verified_In_Source=\"1\","
+  },
+  {
+   "name": "보류를 관문으로 보낸다",
+   "file": "bundle_route.py",
+   "old": "        if d == HOLD:\n            held.append(dict(a))\n            continue\n",
+   "new": ""
+  },
+  {
+   "name": "거절이 있어도 관문 파일을 쓴다",
+   "file": "bundle_route.py",
+   "old": "    if refused:\n        wr(os.path.join(a.out, \"refused.csv\")",
+   "new": "    if False:\n        wr(os.path.join(a.out, \"refused.csv\")"
+  },
+  {
+   "name": "페이지의 답 파일인지 보지 않는다",
+   "file": "bundle_route.py",
+   "old": "    if answers and \"Item_SHA256\" not in answers[0]:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "승인한 사람을 카드에 적지 않는다",
+   "file": "bundle_route.py",
+   "old": "        row[\"Verified_By\"] = t[\"prov\"][0][1]\n",
+   "new": ""
+  },
+  {
+   "name": "효과 목록의 첫 효과만 옮긴다",
+   "file": "bundle_route.py",
+   "old": "        for e in (eff if isinstance(eff, list) else [eff or {}]):\n",
+   "new": "        for e in (eff[:1] if isinstance(eff, list) else [eff or {}]):\n"
+  },
+  {
+   "name": "적었는데 없는 카드 파일을 빈 카드로 읽는다",
+   "file": "bundle_route.py",
+   "old": "        if path and not os.path.isfile(path):\n",
+   "new": "        if False:\n"
+  }
+ ]
+}

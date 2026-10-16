@@ -183,6 +183,12 @@ mark_readers.py     readers for line, marker, box/violin and scatter panels
 bar_reader.py       colour and monochrome bar readers
 review_overlay.py   the picture a person judges
 *_TEMPLATE.csv      every schema, generated from its column function
+
+bundle_items.py     census problems -> one question each, measured or proposed
+bundle_page.py      the decision bundle: one page, a proposal on every line
+bundle_page.js      what counts as an answer on it (seen / approved / held)
+bundle_route.py     the page's answers -> each gate's answer file, all or nothing
+census_copy.py      the gates on a copy of the run, census before and after
 ```
 
 Everything below is the protocol: what each rule exists to prevent, stated
@@ -363,6 +369,122 @@ the other MAP describe different figures, so the normalized name sets must match
 too (`UNLISTED_PANELS_INCONSISTENT_IN_FIGURE`). Normalized, not literal — "pap ,
 map" and "MAP;PAP" are the same answer, and a consistency check that says
 otherwise has become a spelling check.
+
+## Bundle what is left, so a person decides only what needs a person
+
+At a hundred publications the census of the plans (`make_plan.py` ->
+`compile_plan.py` -> `run_batch.py`, read for manifest problems only) leaves a
+few hundred open questions: a figure nobody has disposed of, a drawn panel whose
+outcome has no name, a monochrome bar whose fill was never declared, a marker
+shape nobody named, a tick pair that lands outside its panel. Asked one page at a
+time, each costs a person a context switch; asked without a proposal, each costs
+them the reading as well. The decision bundle asks all of them on one page, and
+**every line carries a proposal**, so the person's work shrinks to the lines
+where the proposal is wrong.
+
+    census_copy.py / any census   man_<pub>/ manifests + out_<pub>/manifest_problems.csv
+      | bundle_items.py           one question per problem code; measures what the
+      |                           raster can answer; the rest needs a proposal from
+      |                           someone who LOOKED -> exit 2 and WORK/todo.json
+      v                           until every question has one
+    spec.json
+      | bundle_page.py            one local page: picture, current state, options,
+      v                           proposal, reason, who proposed it
+    bundle_answers.csv            written by the page; nothing on it is pre-selected
+      | bundle_route.py           answers -> one answer file per existing gate,
+      v                           all or nothing
+    *_answers.csv, unrouted.csv, held.csv, route_log.json
+      | census_copy.py            the gates write to a COPY of the run; the same
+      v                           census before and after
+    compare.json                  what the answers WOULD change, per problem code
+      | record_dispositions.py / record_errorbar.py /
+      | record_identity.py --replace / record_geometry.py --replace
+      v                           on the real run, --when = the day it was decided
+    the next census
+
+The questions, by problem code (`bundle_items.py`):
+
+| section | problem | the question | gate |
+|---|---|---|---|
+| X | `SOURCE_PANEL_UNRESOLVED`, `SOURCE_PANEL_RUN_LINK_MISSING` | what to do with this figure | `record_dispositions` |
+| C | `MISSING_TARGET_OUTCOME_LABEL` on a drawn panel | the outcome's name and unit, or not a target | none yet (R4) |
+| F | `MISSING_SERIES_DISCRIMINANT`, monochrome bars | each series' fill | `record_identity` |
+| M | `MISSING_SERIES_DISCRIMINANT`, lines and markers | each series' marker | `record_identity` |
+| L | `IDENTITY_DOMAIN_FILL_CONFLICT` | one figure, two legends | `record_identity`, or none yet |
+| K | `CALIBRATION_OUTSIDE_PANEL` | move the tick pair, or the box | `record_geometry` (+ identity) |
+
+**Measure what can be measured; ask for the rest.** K looks for tick marks
+within 12 px of the pair (spine ticks, gridlines) and proposes PAIRS when every
+pair moves onto one inside the panel, BOX otherwise. F measures each bar's dark
+fraction against the reader's own bands (`FILL_BANDS` must equal
+`mark_readers._FILL_BANDS`, and a scenario holds them together): one band is a
+proposal, mixed bands are MANUAL. Everything else needs someone to look at the
+figure, and `bundle_items.py` writes no spec while any question lacks a
+proposal - the questions, the measurements and the pictures go to
+`WORK/todo.json` for whoever (a person or an agent) writes them. A proposal for a
+question this census did not ask is refused (`STALE_PROPOSAL`). Work that is not
+a question - drawing the panels of a PARTIAL figure, a RECROP, a REDRAW, naming an
+undrawn panel - goes into the spec's notes as a person's task.
+
+**Three kinds of answer, and `bundle_page.js` decides which.** The page moves
+values; the rules are a pure module with its own node suite, as on every other
+review page.
+
+- **seen** - the person pressed "직접 보았다" (I looked myself): `Seen_By_Person=1`.
+- **approved observation** - the person chose the proposal without looking:
+  `Seen_By_Person=0`, `Observed_By` = whoever made the proposal (planted on the
+  item), `Approval_Ref` = this answers file, the approver and the date. The gates
+  accept it as an approval (`approval.py`) and refuse it when the observer is the
+  approver (`OBSERVER_IS_APPROVER`).
+- **held** - HOLD writes nothing and claims nothing.
+
+An answer that differs from the proposal is not an answer without "seen": a
+choice nobody looked at is nobody's observation - the proposer did not see it
+that way, and the person did not see it. A rewritten name (EDIT) is text a person
+typed, so it is always seen. "Fill with the proposals" fills empty lines only;
+overwriting a line the person chose differently would turn it into an approval
+they never gave. The spec itself is refused before a page is built when a line
+has no proposal (`NO_PROPOSAL`), no reason (`NO_REASON`) or nobody who proposed
+it (`NO_OBSERVER`).
+
+**Every answer names the question it answers.** The CSV carries `Item_SHA256`
+(target, current state, options, proposal, reason, proposer) and `Image_SHA256`
+(the picture shown). `bundle_route.py` refuses an answer to a page built from
+another census (`STALE_ITEM`), an item answered twice, an unseen change
+(`UNSEEN_CHANGE`), an approval naming someone other than the proposer
+(`OBSERVER_MISMATCH`), an unseen EDIT, an edit to a card that does not exist
+(`MISSING_CARD`), two items setting one field differently
+(`CONFLICTING_EFFECTS`), and one card touched by a seen answer and an approval,
+or by two people (`MIXED_PROVENANCE`) - a card row carries one provenance. **One
+refused row and no gate file is written**: a bundle recorded half-way is worse
+than one not recorded. A card file named on the command line but absent stops
+it, rather than turning every card answer into `MISSING_CARD`.
+
+**No route is not a route.** An answer whose gate does not exist yet - an
+outcome name (R4), a legend area, a small fix - goes to `unrouted.csv` with what
+it needs. It is not dropped, and it is not written into a record where it does
+not belong.
+
+**Census on a copy, then record.** `census_copy.py` builds a link tree of the
+run, real-copies only the files the gates write, records with the gates
+themselves (not a re-implementation of them), and runs the same census before
+and after. The run's own gate files are hashed before and after, and a change is
+`RUN_CHANGED` - a gate wrote to the run instead of the copy. Any gate refusal
+stops it before the second census. Read `compare.json` - every problem code that
+moves, by publication - before the gates touch the real run.
+
+**The page holds publisher figures.** It is a local file for the person
+deciding; it is not committed, published or shared.
+
+    python3 bundle_items.py --census CENSUS/ --run RUN --plans PLANS/ --work WORK/ \
+        [--proposals proposals.json] --spec WORK/spec.json      # exit 2: WORK/todo.json
+    python3 bundle_page.py WORK/spec.json --out bundle.html --items WORK/items.json --root WORK
+    # the person answers on bundle.html and saves bundle_answers.csv
+    python3 bundle_route.py --items WORK/items.json --answers bundle_answers.csv \
+        --identity RUN/seg/identity600/identity_decisions.csv \
+        --geometry RUN/seg/geometry600/geometry_decisions.csv --out ROUTED/
+    python3 census_copy.py --run RUN --routed ROUTED/ --when YYYY-MM-DD \
+        --reviewers reviewers.json --out CHECK/ [--pdf-root PDFS/]
 
 ## Provenance is per FIELD, not per row
 

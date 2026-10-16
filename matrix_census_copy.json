@@ -1,0 +1,95 @@
+{
+ "files": {
+  "census_copy.py": "587441ca313543f3c70751f9f23d7b77146e63a39bb2a4f7aafef2c4325144d5",
+  "test_census_copy.py": "64850bdb0675ad22577aa78fdd94be133134e43a19ad65c01dd8b24a24269ae7"
+ },
+ "suites": [
+  "test_census_copy.py"
+ ],
+ "mutations": [
+  {
+   "name": "관문이 쓰는 파일도 링크로 둔다",
+   "file": "census_copy.py",
+   "old": "            elif r in real:\n                shutil.copy2(",
+   "new": "            elif r in real and False:\n                shutil.copy2("
+  },
+  {
+   "name": "관문 폴더를 링크로 둔다",
+   "file": "census_copy.py",
+   "old": "            if r in parents:\n                os.makedirs(os.path.join(dst, r))\n                walk(r)\n",
+   "new": "            if r in parents and False:\n                os.makedirs(os.path.join(dst, r))\n                walk(r)\n"
+  },
+  {
+   "name": "있는 사본 위에 짓는다",
+   "file": "census_copy.py",
+   "old": "    if os.path.exists(dst):\n        raise SystemExit",
+   "new": "    if False:\n        raise SystemExit"
+  },
+  {
+   "name": "합계만 낸다",
+   "file": "census_copy.py",
+   "old": "        cmp[\"grew\"][k] = dict((c, [a[c], b[c]]) for c in sorted(set(b)) if b[c] > a[c])\n",
+   "new": "        cmp[\"grew\"][k] = {}\n"
+  },
+  {
+   "name": "나타난 논문을 말하지 않는다",
+   "file": "census_copy.py",
+   "old": "        if pub not in before or pub not in after:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "사라진 패널을 말하지 않는다",
+   "file": "census_copy.py",
+   "old": "        if k not in pa or k not in pb:\n            cmp[\"panel_changes\"][k] = {\"present\": [k in pa, k in pb]}\n            continue\n",
+   "new": "        if k not in pa or k not in pb:\n            continue\n"
+  },
+  {
+   "name": "종료 코드 변화를 말하지 않는다",
+   "file": "census_copy.py",
+   "old": "        if x.get(\"run_exit\") != y.get(\"run_exit\"):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "거절이 있어도 점검을 돌린다",
+   "file": "census_copy.py",
+   "old": "    if refused:\n        print(\"관문이 사본에서",
+   "new": "    if False:\n        print(\"관문이 사본에서"
+  },
+  {
+   "name": "런이 바뀌어도 넘어간다",
+   "file": "census_copy.py",
+   "old": "    if changed:\n        raise SystemExit(\"RUN_CHANGED",
+   "new": "    if False:\n        raise SystemExit(\"RUN_CHANGED"
+  },
+  {
+   "name": "런 안의 출력 폴더를 받는다",
+   "file": "census_copy.py",
+   "old": "    if out == run or out.startswith(run + os.sep):\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "답 없는 폴더를 받는다",
+   "file": "census_copy.py",
+   "old": "    if not want:\n        raise SystemExit",
+   "new": "    if False:\n        raise SystemExit"
+  },
+  {
+   "name": "PDF 없이 오차 정의를 적는다",
+   "file": "census_copy.py",
+   "old": "            if not pdf_root:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "사본이 아니라 런에 적는다",
+   "file": "census_copy.py",
+   "old": "    recorded = record_on_copy(after, a.routed,",
+   "new": "    recorded = record_on_copy(run, a.routed,"
+  },
+  {
+   "name": "사본의 점검이 아니라 런을 두 번 잰다",
+   "file": "census_copy.py",
+   "old": "    after_res, pan_a = run_census(after, os.path.join(out, \"after\"))",
+   "new": "    after_res, pan_a = run_census(run, os.path.join(out, \"after\"))"
+  }
+ ]
+}

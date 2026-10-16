@@ -36,6 +36,11 @@
     OBSERVER_MISMATCH  승인된 줄의 Observed_By가 그 제안을 낸 것이 아님
     EDIT_NOT_SEEN / EDIT_WITHOUT_TEXT   사람이 쓴 이름은 본 답이어야 하고 글이 있어야 함
     MISSING_CARD / UNKNOWN_FIELD / UNKNOWN_SERIES   카드 효과가 가리키는 것이 기록에 없음
+    FIELD_NOT_TAKEN    관문이 답에서 받지 않는 칸을 바꾸는 효과 - 적어도 기록에 닿지 않음
+
+사람이 그린 프레임(Frame_Source=DRAWN)의 기하 카드는 그 프레임을 `Drawn_Frame`으로 들고 갑니다.
+`record_geometry`는 답에 그것이 없으면 리더의 제안 프레임 위에 행을 다시 짓습니다 - 눈금 짝만
+고치려던 답이 사람이 그린 프레임을 지웁니다.
     CONFLICTING_EFFECTS  한 카드의 한 칸을 두 항목이 다르게 바꿈
     MIXED_PROVENANCE   한 카드에 본 답과 승인된 관찰이 섞임 - 한 행에는 한 출처만 적힙니다
 """
@@ -54,6 +59,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import approval                                                  # noqa: E402
+from bundle_page import CARD_TAKES                               # noqa: E402
 
 HOLD, EDIT = "HOLD", "EDIT"
 OUT_FILES = {"dispositions": "figure_disposition_answers.csv", "errorbar": "errorbar_answers.csv",
@@ -168,6 +174,10 @@ def route_one(eff, a, iid, item, d, prov, who, out, unrouted, cards, touched):
         if f not in base:
             bad.append(("UNKNOWN_FIELD", "%s: %s 기록에 %s 칸이 없습니다." % (iid, gate, f)))
             continue
+        if f not in CARD_TAKES[gate]:
+            bad.append(("FIELD_NOT_TAKEN", "%s: %s 관문은 답에서 %s를 받지 않습니다 - 적어도 기록에 닿지 않습니다."
+                        % (iid, gate, f)))
+            continue
         if f in t["set"] and t["set"][f][0] != str(v):
             bad.append(("CONFLICTING_EFFECTS", "%s와 %s가 %s의 %s를 다르게 바꿉니다." % (t["set"][f][1], iid, pid, f)))
         t["set"].setdefault(f, (str(v), iid))
@@ -243,6 +253,8 @@ def route(items_doc, answers, identity_rows=(), geometry_rows=()):
         row["Approval_Ref"] = "; ".join(sorted(set(p["Approval_Ref"] for p, _w in t["prov"] if p["Approval_Ref"])))
         old = (row.get("Note") or "").strip()
         row["Note"] = (old + " | " if old else "") + "; ".join(t["notes"])
+        if gate == "geometry" and (row.get("Frame_Source") or "").strip().upper() == "DRAWN":
+            row["Drawn_Frame"] = ",".join(str(row.get(k) or "").strip() for k in ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1"))
         out[gate].append(row)
     return out, unrouted, held, refused
 

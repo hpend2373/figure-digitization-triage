@@ -170,7 +170,9 @@ k3 = Q["K:DOC_D003__p1"]
 check("with no mark near a pair the measured proposal is BOX", k3["machine"]["proposal"] == "BOX"
       and [o[0] for o in k3["options"]] == ["BOX"], (k3["machine"], [o[0] for o in k3["options"]]))
 box = k3["options"][-1][2]
-check("BOX widens the box to the pairs, on the geometry card", box[0]["gate"] == "geometry" and box[0]["set"] == {"Panel_Y0": "79", "Panel_Y1": "407"}, box)
+# REVERT: write the box as a card field. Neither gate takes a box from an answer, so the widened box would vanish.
+check("BOX is a path still to build: the box to draw, and identity confirmed again on it", box.get("gate") is None
+      and "y 79–407" in box.get("needs", "") and "정체 다시 확인" in box.get("needs", ""), box)
 f4, f5 = Q["F:DOC_D004__p1:ALL"], Q["F:DOC_D005__p1:ALL"]
 check("grey bars measure as OPEN, the band the reader sees", f4["machine"]["proposal"] == "OPEN" and f4["table"][3][1:] == ["OPEN", "OPEN"], f4["table"])
 # REVERT: propose the first bar's band for all. A black bar and a grey bar are two fills in one series.

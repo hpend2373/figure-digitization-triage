@@ -411,11 +411,12 @@ The questions, by problem code (`bundle_items.py`):
 | F | `MISSING_SERIES_DISCRIMINANT`, monochrome bars | each series' fill | `record_identity` |
 | M | `MISSING_SERIES_DISCRIMINANT`, lines and markers | each series' marker | `record_identity` |
 | L | `IDENTITY_DOMAIN_FILL_CONFLICT` | one figure, two legends | `record_identity`, or none yet |
-| K | `CALIBRATION_OUTSIDE_PANEL` | move the tick pair, or the box | `record_geometry` (+ identity) |
+| K | `CALIBRATION_OUTSIDE_PANEL` | move the tick pair, or the box | `record_geometry` (the box: none yet) |
 
 **Measure what can be measured; ask for the rest.** K looks for tick marks
 within 12 px of the pair (spine ticks, gridlines) and proposes PAIRS when every
-pair moves onto one inside the panel, BOX otherwise. F measures each bar's dark
+pair moves onto one inside the panel, BOX otherwise - and BOX is a path still to
+build, because neither card gate takes a box from an answer (below). F measures each bar's dark
 fraction against the reader's own bands (`FILL_BANDS` must equal
 `mark_readers._FILL_BANDS`, and a scenario holds them together): one band is a
 proposal, mixed bands are MANUAL. Everything else needs someone to look at the
@@ -459,6 +460,20 @@ or by two people (`MIXED_PROVENANCE`) - a card row carries one provenance. **One
 refused row and no gate file is written**: a bundle recorded half-way is worse
 than one not recorded. A card file named on the command line but absent stops
 it, rather than turning every card answer into `MISSING_CARD`.
+
+**A card answer can only change what the gate takes.** `record_identity` and
+`record_geometry` rebuild the card from their PROPOSAL row and lay on it only the
+fields a person gives - the series, the factors, the read route; the verdict, the
+tick values and pairs. A box, an axis region or anything else set in an answer
+is silently dropped, so `bundle_page.CARD_TAKES` lists what each gate copies, a
+scenario reads those names off the two gates' code, the page refuses an option
+that sets anything else (`BAD_EFFECT`) and the router refuses it again
+(`FIELD_NOT_TAKEN`). The same rebuild is why a geometry card on a frame a person
+drew (`Frame_Source=DRAWN`) goes with its frame as `Drawn_Frame`: without it the
+gate stands the new tick pairs on the READER's frame, and the frame the person
+drew is gone while only the pairs were meant to change. Both were found by
+recording a real bundle on a copy and diffing the cards - a census of problem
+counts did not show either.
 
 **No route is not a route.** An answer whose gate does not exist yet - an
 outcome name (R4), a legend area, a small fix - goes to `unrouted.csv` with what

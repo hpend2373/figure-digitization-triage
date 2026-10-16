@@ -1,7 +1,8 @@
 {
  "files": {
-  "bundle_route.py": "ce0ef715a69f241b78ee5b2382d7c62ffd0eb2e32cb56db9e50c32fd898837dd",
-  "test_bundle_route.py": "26024c3398a6cdbf872c113a25fe79f11c75d0e58f553db70645f906b6cc465e"
+  "bundle_route.py": "22eb7ff329bc994f1897f0e013cd15f7ff6d298f2de92f67939738bbce0572ab",
+  "test_bundle_route.py": "b3501a68d9235d9181a8a30d71a538c31bc66503e40b2d031e08f7520894a5e9",
+  "bundle_page.py": "09a0ed077a3d72a34d62ca8462c8b843044bad63615bdefd30027b969ee21748"
  },
  "suites": [
   "test_bundle_route.py"
@@ -162,6 +163,36 @@
    "file": "bundle_route.py",
    "old": "        if path and not os.path.isfile(path):\n",
    "new": "        if False:\n"
+  },
+  {
+   "name": "관문이 받지 않는 카드 칸도 옮긴다",
+   "file": "bundle_route.py",
+   "old": "        if f not in CARD_TAKES[gate]:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "그린 프레임을 들고 가지 않는다",
+   "file": "bundle_route.py",
+   "old": "        if gate == \"geometry\" and (row.get(\"Frame_Source\") or \"\").strip().upper() == \"DRAWN\":\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "관문이 받지 않는 칸을 바꾸는 선택지로도 페이지를 짓는다",
+   "file": "bundle_page.py",
+   "old": "            if not_taken:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "기하 카드의 계열 효과도 받는다",
+   "file": "bundle_page.py",
+   "old": "            if effect.get(\"series\") and \"Series\" not in CARD_TAKES[gate]:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "관문이 받지 않는 칸을 받는 칸 목록에 넣는다",
+   "file": "bundle_page.py",
+   "old": "    \"identity\": (\"Human_Verification_Status\", \"X_Factor\",",
+   "new": "    \"identity\": (\"Human_Verification_Status\", \"Panel_X1\", \"X_Factor\","
   }
  ]
 }

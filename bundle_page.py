@@ -64,6 +64,17 @@ GATES = {
     "geometry": ("proposal_id", ()),
 }
 
+#: 카드 관문이 답에서 받는 칸. 나머지는 관문이 제안 행에서 다시 짓습니다 - `record_identity`는
+#: 정체 제안의 행에, `record_geometry`는 기하 제안의 행(또는 `Drawn_Frame`으로 그린 프레임)에
+#: 사람이 준 칸만 얹습니다. 여기 없는 칸(예: Panel_X1)을 바꾸는 효과는 기록에 닿지 않고
+#: 조용히 사라지므로 받지 않습니다. `test_bundle_route.py`가 두 관문의 코드와 대 봅니다.
+CARD_TAKES = {
+    "identity": ("Human_Verification_Status", "X_Factor", "X_Labels", "Series_Factor", "Series", "Mark_Type",
+                 "Outcome_Name", "Unit", "N_Outcome", "Bar_Top_Definition", "Errorbar_Stem_Confirmed", "Read_Route"),
+    "geometry": ("Human_Verification_Status", "Y_Tick_Top_Value", "Y_Tick_Bottom_Value", "Confirmed_Tick_Values",
+                 "Y_Axis_Shared_With"),
+}
+
 #: 관문이 적는 파일 이름. 답 파일이 이 이름이면 거절합니다.
 RECORD_FILES = ("figure_dispositions.csv", "figure_decisions.csv", "errorbar_decisions.csv",
                 "identity_decisions.csv", "geometry_decisions.csv", "panel_decisions.csv",
@@ -104,6 +115,12 @@ def effect_problems(iid, value, effect, item):
                 out.append(("BAD_EFFECT", "%s의 %s: %s 효과에 Proposal_ID가 없습니다." % (iid, value, gate)))
             if not effect.get("set") and not effect.get("series"):
                 out.append(("BAD_EFFECT", "%s의 %s: 바꿀 칸(set)도 계열(series)도 없습니다." % (iid, value)))
+            not_taken = sorted(f for f in (effect.get("set") or {}) if f not in CARD_TAKES[gate])
+            if effect.get("series") and "Series" not in CARD_TAKES[gate]:
+                not_taken.append("Series")
+            if not_taken:
+                out.append(("BAD_EFFECT", "%s의 %s: %s 관문은 답에서 %s를 받지 않습니다 - 적어도 기록에 닿지 않습니다."
+                            % (iid, value, gate, ", ".join(not_taken))))
     if effect.get("uses_text") and not item.get("text"):
         out.append(("EDIT_WITHOUT_TEXT", "%s의 %s는 이름을 쓰는데 항목에 이름 칸이 없습니다." % (iid, value)))
     return out

@@ -12,7 +12,7 @@ CENSUS는 계획서 점검의 출력입니다(`census_copy.py`의 before/ 또는
     F  MISSING_SERIES_DISCRIMINANT (BAR_MONO)                  막대 칠 (record_identity)
     M  MISSING_SERIES_DISCRIMINANT (선·기호)                   기호 모양 (record_identity)
     L  IDENTITY_DOMAIN_FILL_CONFLICT                           한 그림 두 범례 (record_identity, 또는 길)
-    K  CALIBRATION_OUTSIDE_PANEL                               눈금 짝 또는 상자 (record_geometry·identity)
+    K  CALIBRATION_OUTSIDE_PANEL                               눈금 짝 (record_geometry), 또는 상자 (아직 길 없음)
 
 잴 수 있는 것은 잽니다(래스터에서): K는 짝 둘레 12 px 안의 눈금 표시(가시 왼쪽·오른쪽 짧은
 선, 가로선, 옅은 격자선), F는 x 위치마다 막대 속의 어두운 비율과 판독기의 띠
@@ -378,9 +378,11 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
         png = tick_picture(os.path.join(file_root, g["Raster"]), m, os.path.join(pics, "K_%s.png" % k))
         pairs_set = {"Confirmed_Tick_Values": m["proposed_ticks"]}
         x0, x1, ny0, ny1 = m["box"]
-        box_effect = [{"gate": "geometry", "proposal_id": k, "set": {"Panel_Y0": str(ny0), "Panel_Y1": str(ny1)}}]
-        if k in I:
-            box_effect.append({"gate": "identity", "proposal_id": k, "set": {"Panel_Y0": str(ny0), "Panel_Y1": str(ny1)}})
+        # 상자는 관문이 답에서 받는 칸이 아닙니다(`bundle_page.CARD_TAKES`): 기하 관문은 그린 프레임으로만,
+        # 정체 관문은 정체 제안의 상자로만 짓습니다. 두 카드의 상자가 다르면 make_plan이 정체를 다시
+        # 확인하라고 하므로, 상자를 넓히는 것은 아직 이 묶음이 적을 수 없는 일입니다.
+        box_effect = {"gate": None, "needs": "상자 다시 그리기: 기하 페이지에서 y %d–%d로 그리고, 그 상자 위에서 정체 다시 확인"
+                                               % (ny0, ny1)}
         moved = m["proposed_ticks"] != g["Confirmed_Tick_Values"]
         machine = ({"proposal": "PAIRS", "why": "짝을 바로 옆 눈금 표시로: " + "; ".join("%g: %s" % (p["value"], p["how"]) for p in m["pairs"])}
                    if moved and m["all_inside"] else
@@ -389,7 +391,8 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
                            facts=r["detail"], images=[{"path": png, "caption": "3배 확대. 빨강 지금 짝, 초록 옮긴 짝, 파랑 상자 끝"}],
                            options=([["PAIRS", "짝을 눈금 표시 위로: %s (상자 그대로)" % m["proposed_ticks"],
                                       {"gate": "geometry", "proposal_id": k, "set": pairs_set}]] if moved else [])
-                           + [["BOX", "상자를 넓힘: y %d–%d → %d–%d (정체 카드도)" % (m["frame"][2], m["frame"][3], ny0, ny1), box_effect]],
+                           + [["BOX", "상자를 넓힘: y %d–%d → %d–%d (다시 그리기, 정체 다시 확인)" % (m["frame"][2], m["frame"][3], ny0, ny1),
+                               box_effect]],
                            machine=machine)
     log("물음 %d (%s) · 사람의 일 %d" % (len(Q), ", ".join("%s %d" % kv for kv in collections.Counter(q["section"] for q in Q.values()).items()), len(tasks)))
     return Q, tasks

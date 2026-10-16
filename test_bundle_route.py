@@ -54,11 +54,11 @@ SPEC = {"schema": BP.SCHEMA, "answers_file": "bundle_answers.csv", "sections": [
     it("F01", "OPEN", [["OPEN", "open", CARD("P__p1", series=[{"name": "ALL", "set": {"bar_fill": "OPEN"}}])],
                        ["MANUAL", "manual", CARD("P__p1", set={"Read_Route": "MANUAL"})]]),
     it("F02", "SOLID", [["SOLID", "solid", CARD("P__p1", series=[{"name": "all", "set": {"bar_fill": "SOLID"}}])]]),
-    it("E02", "CLIP", [["CLIP", "clip", CARD("P__p1", set={"Panel_X1": "2156"})]]),
-    it("E03", "CLIP", [["CLIP", "clip", CARD("P__p1", set={"Panel_X1": "2150"})]]),
+    it("E02", "UNIT", [["UNIT", "unit", CARD("P__p1", set={"Unit": "mmHg"})]]),
+    it("E03", "UNIT", [["UNIT", "unit", CARD("P__p1", set={"Unit": "kPa"})]]),
     it("L01", "MANUAL", [["MANUAL", "both panels", [CARD("P__p1", set={"Read_Route": "MANUAL"}), CARD("P__p2", set={"Read_Route": "MANUAL"})]]]),
-    it("K02", "BOX", [["BOX", "box", [{"gate": "geometry", "proposal_id": "P__p1", "set": {"Panel_X1": "2150"}},
-                                      CARD("P__p1", set={"Panel_X1": "2150"}), {"gate": None, "needs": "a note for the person"}]]]),
+    it("K02", "TOP", [["TOP", "top", [{"gate": "geometry", "proposal_id": "P__p1", "set": {"Y_Tick_Top_Value": "25"}},
+                                      CARD("P__p1", set={"Mark_Type": "BAR_MONO"}), {"gate": None, "needs": "a note for the person"}]]]),
     it("K01", "PAIRS", [["PAIRS", "pairs", {"gate": "geometry", "proposal_id": "P__p1", "set": {"Confirmed_Tick_Values": "22@273;4@1757.5"}}]]),
     it("C001", "LABEL", [["LABEL", "label", {"gate": None, "needs": "R4", "uses_text": True}],
                          ["EDIT", "edit", {"gate": None, "needs": "R4", "uses_text": True}]], text={"value": "Heart rate", "unit": "bpm"}),
@@ -67,11 +67,14 @@ _html, ITEMS = BP.render(SPEC, ROOT, log=lambda *_a: None)
 SHA = dict((i["id"], i["sha"]) for i in ITEMS["items"])
 PROP = dict((i["id"], i["proposal"]) for i in ITEMS["items"])
 IDENT = [{"Proposal_ID": "P__p2", "Human_Verification_Status": "CONFIRMED", "Read_Route": "AUTO", "Panel_X1": "900", "Series": "[]",
+          "Unit": "", "Mark_Type": "",
           "Verified_By": "earlier reviewer", "Seen_By_Person": "1", "Observed_By": "", "Approval_Ref": "", "Note": ""},
          {"Proposal_ID": "P__p1", "Human_Verification_Status": "CONFIRMED", "Read_Route": "AUTO", "Panel_X1": "2159",
+          "Unit": "", "Mark_Type": "BAR",
           "Series": json.dumps([{"name": "ALL", "bar_fill": ""}, {"name": "Other", "bar_fill": "SOLID"}]),
           "Verified_By": "earlier reviewer", "Seen_By_Person": "1", "Observed_By": "", "Approval_Ref": "", "Note": "first look 09-23"}]
 GEOM = [{"Proposal_ID": "P__p1", "Human_Verification_Status": "CONFIRMED", "Confirmed_Tick_Values": "22@267.5;4@1751.67",
+         "Y_Tick_Top_Value": "22", "Frame_Source": "",
          "Panel_X1": "2159", "Verified_By": "minyeop", "Seen_By_Person": "1", "Observed_By": "", "Approval_Ref": "", "Note": ""}]
 
 
@@ -123,13 +126,13 @@ check("the card row says who approved it, as an approved observation", (card["Ve
 out, _u, _h, refused = go([ans("F01"), ans("E02")])
 card = out["identity"][0]
 check("two items on one card become one row with both changes", refused == [] and len(out["identity"]) == 1
-      and card["Panel_X1"] == "2156" and json.loads(card["Series"])[0]["bar_fill"] == "OPEN" and "F01" in card["Note"] and "E02" in card["Note"])
+      and card["Unit"] == "mmHg" and json.loads(card["Series"])[0]["bar_fill"] == "OPEN" and "F01" in card["Note"] and "E02" in card["Note"])
 out, _u, _h, refused = go([ans("L01")])
 check("one answer with a list of effects writes each card", refused == [] and sorted((r["Proposal_ID"], r["Read_Route"]) for r in out["identity"])
       == [("P__p1", "MANUAL"), ("P__p2", "MANUAL")], refused)
 out, unrouted, _h, refused = go([ans("K02")])
-check("a list may span gates and a path still to build", refused == [] and out["geometry"][0]["Panel_X1"] == "2150"
-      and out["identity"][0]["Panel_X1"] == "2150" and unrouted[0]["Needs"] == "a note for the person", refused)
+check("a list may span gates and a path still to build", refused == [] and out["geometry"][0]["Y_Tick_Top_Value"] == "25"
+      and out["identity"][0]["Mark_Type"] == "BAR_MONO" and unrouted[0]["Needs"] == "a note for the person", refused)
 out, _u, _h, refused = go([ans("K01")])
 check("a geometry effect goes to the geometry gate", out["geometry"][0]["Confirmed_Tick_Values"] == "22@273;4@1757.5")
 out, unrouted, _h, refused = go([ans("C001", Text="Heart rate", Unit="bpm")])
@@ -157,7 +160,7 @@ check("an observer approving its own observation is refused (approval)",
 check("an edited label must be a seen answer", "EDIT_NOT_SEEN" in codes(go([ans("C001", "EDIT", Text="HR", Observed_By=OBS)])[3]))
 check("an edited label without its text is refused", "EDIT_WITHOUT_TEXT" in codes(go([ans("C001", "EDIT", seen=True)])[3]))
 check("a card the record does not have is refused", codes(go([ans("F01")], ident=[])[3]) == ["MISSING_CARD"])
-check("a field the record does not have is refused", codes(go([ans("E02")], ident=[{k: v for k, v in IDENT[1].items() if k != "Panel_X1"}])[3])
+check("a field the record does not have is refused", codes(go([ans("E02")], ident=[{k: v for k, v in IDENT[1].items() if k != "Unit"}])[3])
       == ["UNKNOWN_FIELD"])
 check("a series the card does not have is refused",
       codes(go([ans("F01")], ident=[dict(IDENT[1], Series=json.dumps([{"name": "Male"}]))])[3]) == ["UNKNOWN_SERIES"])
@@ -168,6 +171,72 @@ check("two items setting one series field differently are refused (the series na
 # REVERT: write one provenance for a card two kinds of answer touched. One of them would be misfiled.
 check("a seen answer and an approval on one card are refused together",
       codes(go([ans("F01", seen=True), ans("E02")])[3]) == ["MIXED_PROVENANCE"])
+
+# --- what the gates take from an answer ------------------------------------------------
+ITEMS2 = json.loads(json.dumps(ITEMS))
+ITEMS2["items"].append({"id": "Z01", "sec": "X", "group": "Z01", "target": "P__p1", "now": "", "proposal": "CLIP",
+                        "observed_by": OBS, "text": None, "sha": "c" * 64, "img_sha": "",
+                        "options": [["CLIP", "clip", CARD("P__p1", set={"Panel_X1": "2156"})], ["HOLD", "hold"]]})
+z = dict(ans("A01"), Item="Z01", Proposal="CLIP", Decision="CLIP", Item_SHA256="c" * 64)
+# REVERT: route any field the card has. The identity gate rebuilds the card from its proposal and keeps only the
+# fields it takes, so a changed box would be routed, "recorded", and gone.
+check("a card field the gate does not take from an answer is refused",
+      codes(BR.route(ITEMS2, [z], [dict(r) for r in IDENT], [dict(r) for r in GEOM])[3]) == ["FIELD_NOT_TAKEN"])
+bad_spec = json.loads(json.dumps(SPEC))
+bad_spec["sections"][0]["items"].append(it("Z02", "CLIP", [["CLIP", "clip", CARD("P__p1", set={"Panel_X1": "2156"})]]))
+check("... and a page with such an option is not built",
+      any(c == "BAD_EFFECT" and "Panel_X1" in m for c, m in BP.check_spec(bad_spec, ROOT)))
+bad_spec = json.loads(json.dumps(SPEC))
+bad_spec["sections"][0]["items"].append(it("Z03", "OPEN", [["OPEN", "open", {"gate": "geometry", "proposal_id": "P__p1",
+                                                                            "series": [{"name": "ALL", "set": {"bar_fill": "OPEN"}}]}]]))
+check("... nor one that names series on a geometry card, which has none",
+      any(c == "BAD_EFFECT" and "Series" in m for c, m in BP.check_spec(bad_spec, ROOT)))
+
+
+def taken(module, fn_name):
+    """The answer fields a gate's record() copies into the card, read off its code."""
+    import inspect
+    import re
+    src = inspect.getsource(getattr(module, fn_name))
+    names = set(re.findall(r'answer\.get\("([A-Za-z_]+)"\)', src))
+    # a field copied through a helper - "Read_Route": route_of(answer)
+    names |= set(re.findall(r'"([A-Za-z_]+)":\s*[A-Za-z_]+\(answer\)', src))
+    for const in re.findall(r'answer\.get\(([A-Z_]+)\)', src):
+        names.add(getattr(module, const))
+    return names - {"Proposal_ID", "Verified_By", "Note"}
+
+
+# REVERT: list a field the gate does not copy. Its effect would pass this router and vanish in the gate.
+for gate, mod in (("identity", RI), ("geometry", RG)):
+    check("every card field this router passes is one the %s gate copies from an answer" % gate,
+          set(BP.CARD_TAKES[gate]) <= taken(mod, "record"), sorted(set(BP.CARD_TAKES[gate]) - taken(mod, "record")))
+
+GP = RG.GP
+GDIR = os.path.join(ROOT, "geometry_gate")
+os.makedirs(GDIR)
+READER = {"Proposal_ID": "P__p1", "Raster": "fig.png", "Region": "0,0,220,160",
+          "Panel_X0": "10", "Panel_X1": "200", "Panel_Y0": "5", "Panel_Y1": "150",
+          "Y_Tick_Pixels": "10;50;90", "Y_Tick_Count": "3", "Y_Tick_Read_Status": GP.READ_OK,
+          "Y_Tick_Read_Values": "30@10;20@50;10@90", "Y_Tick_Read_First": "30", "Y_Tick_Read_Last": "10",
+          "Human_Verification_Status": GP.PROPOSAL_PENDING}
+GP.write_proposals(os.path.join(GDIR, RG.PROPOSALS), [READER])
+DRAWN_CARD = dict(GP.with_drawn_frame(READER, [12, 198, 6, 148]), Human_Verification_Status="CONFIRMED",
+                  Y_Tick_Top_Value="30", Y_Tick_Bottom_Value="10", Confirmed_Tick_Values="30@20;10@140",
+                  Verified_By="minyeop", Verified_At="2026-09-23", Seen_By_Person="1", Observed_By="", Approval_Ref="", Note="")
+DRAWN_CARD = dict((k, str(v)) for k, v in DRAWN_CARD.items())
+out, _u, _h, refused = BR.route(ITEMS, [ans("K01")], [dict(r) for r in IDENT], [dict(DRAWN_CARD)])
+grow = (out.get("geometry") or [{}])[0]
+# REVERT: send a drawn card without its frame. record_geometry rebuilds the row on the reader's frame, and the
+# frame a person drew is replaced by the one the reader found - while only the tick pairs were meant to change.
+check("a card on a frame a person drew carries that frame", refused == [] and grow.get("Drawn_Frame") == "12,198,6,148", grow.get("Drawn_Frame"))
+written, turned, _p = RG.record(GDIR, [dict(grow, Confirmed_Tick_Values="30@22;10@140")], "2026-10-16",
+                                out_path=os.path.join(GDIR, RG.DECISIONS), replace=True, log=lambda *_a: None)
+wrow = (written or [{}])[0]
+check("... and the geometry gate records the new pairs on the drawn frame, not the reader's",
+      not turned and (str(wrow.get("Panel_X0")), str(wrow.get("Panel_Y1")), wrow.get("Frame_Source"), wrow.get("Confirmed_Tick_Values"))
+      == ("12", "148", GP.FRAME_DRAWN, "30@22;10@140"), (turned, {k: wrow.get(k) for k in ("Panel_X0", "Panel_Y1", "Frame_Source")}))
+out, _u, _h, refused = BR.route(ITEMS, [ans("K01")], [dict(r) for r in IDENT], [dict(GEOM[0])])
+check("a card on the reader's frame carries no drawn frame", "Drawn_Frame" not in out["geometry"][0])
 
 # --- the files ----------------------------------------------------------------------
 def write(path, rows):

@@ -1,7 +1,7 @@
 {
  "files": {
-  "bundle_items.py": "3079eabfde979f961b64976c50cd62f4d2b3a873223720b7f870cc1e1956a8c5",
-  "test_bundle_items.py": "981faf6d2450398d56d39173885dc00acc5d45e93f8317b6fc69c40ca490dbdd"
+  "bundle_items.py": "764236a6ab016465d14a09c7a81838579ab7063ae9df9b31151fd3f32cfffd37",
+  "test_bundle_items.py": "c4c8cc8e9de21b7cca136f885d68b23fc8c2f52c5078755cb6f22257c9c69ca4"
  },
  "suites": [
   "test_bundle_items.py"
@@ -138,6 +138,12 @@
    "file": "bundle_items.py",
    "old": "target=d, images=[{\"path\": crop, \"caption\": \"크롭\"}] if os.path.isfile(crop) else [],",
    "new": "target=d, images=[],"
+  },
+  {
+   "name": "상자를 카드 칸으로 적는다",
+   "file": "bundle_items.py",
+   "old": "        box_effect = {\"gate\": None, \"needs\": \"상자 다시 그리기: 기하 페이지에서 y %d–%d로 그리고, 그 상자 위에서 정체 다시 확인\"\n",
+   "new": "        box_effect = {\"gate\": \"geometry\", \"proposal_id\": k, \"set\": {\"Panel_Y0\": str(ny0)}, \"needs\": \"상자 다시 그리기: 기하 페이지에서 y %d–%d로 그리고, 그 상자 위에서 정체 다시 확인\"\n"
   }
  ]
 }

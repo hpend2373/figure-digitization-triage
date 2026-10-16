@@ -145,6 +145,16 @@ INVENTORY = RV.INVENTORY
 #: 사람이 그린 패널을 그림의 목록으로 쓰지 않는 처분. 그 그림은 다시 자르거나 다시
 #: 그리라고 정해졌고, 그린 것은 이전 크롭 위의 것입니다.
 DRAWING_SUPERSEDED = ("RECROP", "REDRAW")
+#: 그림을 다시 보라는 처분 가운데, 그 뒤에 사람이 그린 패널이 곧 그 처분의 답인 것
+#: (run2 2026-10-16). PARTIAL("일부 패널만 데이터")은 사람이 고른 패널을 종류로,
+#: 나머지를 '읽을 값 없음'으로 그리거나 결과 아님(`record_outcomes`)으로 닫으면
+#: 실행된 것이고, REDRAW("다시 그려라")는 그 뒤에 그린 것이 다시 그린 것입니다.
+#: RECROP은 아닙니다 - 크롭이 틀렸다는 처분이고, 같은 크롭 위에 다시 그려도 고쳐지지
+#: 않습니다. 두 기록은 날짜만 들고 있어서, REDRAW는 처분보다 **뒤의 날**에 그린 것만
+#: 받습니다(같은 날의 그림은 처분이 본 바로 그 그림일 수 있습니다). PARTIAL은 같은
+#: 날도 받습니다 - 그 그림이 처분 전의 것이어도 패널의 자리는 맞고, 무엇을 읽을지는
+#: 종류와 결과 기록이 정합니다.
+DRAWING_ANSWERS = {"PARTIAL": "SAME_DAY_OR_LATER", "REDRAW": "LATER_DAY"}
 #: 축 영역이 없는 그림의 한 패널. 읽을 축이 없으니 읽을 값도 없습니다.
 WHOLE_LABEL = "WHOLE"
 WHOLE_REASON = "make_plan: 축 영역이 없는 그림 (WHOLE) — 읽을 축이 없습니다 (캡션 경로 %s)"
@@ -481,6 +491,18 @@ def apply_outcome(panel, said):
                       "reason": "outcome_decisions: %s — 이 리뷰의 결과가 아님" % who})
     elif decision == "LABEL" and target_status_of(panel) == "TARGET":
         panel["outcome_label"] = (said.get("Outcome_Label") or "").strip()
+
+
+def drawing_answers(figure_decision, drawn_all):
+    """처분 뒤에 그린 패널이 그 처분을 대신하는가 (`DRAWING_ANSWERS`). 날짜가 빠진 쪽이 있으면 아닙니다."""
+    choice = ((figure_decision or {}).get("Decision") or "").strip().upper()
+    rule = DRAWING_ANSWERS.get(choice)
+    decided_at = ((figure_decision or {}).get("Recorded_At") or "").strip()
+    drawn_at = [(r.get("Verified_At") or "").strip() for r in drawn_all or []]
+    if not rule or not decided_at or not drawn_at:
+        return False
+    first = min(drawn_at)          # 날이 빠진 줄이 있으면 ""이 가장 작아 받지 않습니다
+    return first > decided_at if rule == "LATER_DAY" else first >= decided_at
 
 
 def decided_for(figure_decision):
@@ -870,6 +892,12 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
         drawn_rows = [r for r in drawn_all if (r.get("Verdict") or "").strip().upper() == PANELS_VERDICT]
         no_panels = bool(drawn_all) and not drawn_rows and all(
             (r.get("Verdict") or "").strip().upper() == NO_PANELS_VERDICT for r in drawn_all)
+        answered = drawing_answers(figure_decision, drawn_all)
+        if answered:
+            # 그린 것이 처분의 답입니다. 그림은 여느 읽을 그림처럼 그린 패널로 서고,
+            # 처분이 무엇이었는지는 그림의 메모에 남습니다.
+            said_before = figure_decision
+            figure_decision = dict(figure_decision, Decision=DECIDED_IS_DATA)
         superseded = (figure_decision or {}).get("Decision", "").strip().upper() in DRAWING_SUPERSEDED
         inv = inv_figs.get(row["Draft_ID"])
         # 패널 수는 어디서 오는가: 사람이 그린 것(서 있으면) > 목록 기록 > 계수 시트.
@@ -991,6 +1019,14 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
             if (panel.get("disposition") or "") != AUTHORED:
                 apply_outcome(panel, (outcomes or {}).get(panel["panel_id"]))
             panel.setdefault("target_status", target_status_of(panel))
+        if answered:
+            figure["note"] = "; ".join(x for x in (figure.get("note", ""), "figure_dispositions: %s%s (%s) answered by the "
+                                                   "panels drawn on %s" % (
+                                                       said_before.get("Decision", ""),
+                                                       (" " + said_before.get("Which_Panels", "").strip())
+                                                       if (said_before.get("Which_Panels") or "").strip() else "",
+                                                       said_before.get("Recorded_At", ""),
+                                                       min(r.get("Verified_At", "") for r in drawn_all))) if x)
         figures.append(figure)
         notes.append((figure, needs, route, disposition, dispersion, row))
     plan = {

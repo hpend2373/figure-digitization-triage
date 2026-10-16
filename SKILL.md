@@ -455,6 +455,21 @@ question this census did not ask is refused (`STALE_PROPOSAL`). Work that is not
 a question - drawing the panels of a PARTIAL figure, a RECROP, a REDRAW, naming an
 undrawn panel - goes into the spec's notes as a person's task.
 
+**Undrawn panels are drawn on the panel page, with a proposal on every box.**
+`panel_page.py` takes a queue (`pid,fig,axes`) and a proposals file (one JSON line
+per figure: crop size and SHA-256, boxes with kind and count, and a note from
+whoever proposed them); `record_panels.py` records the answers into
+`seg/panel_decisions.csv`. A drawing answers the disposition that asked for it:
+`make_plan.py` takes a PARTIAL figure drawn on or after the day of its disposition,
+and a REDRAW figure drawn on a later day, as an ordinary figure standing on the
+drawn panels, and notes on the figure which disposition the drawing answered
+(`drawing_answers`). The panels a PARTIAL figure does not read are drawn as
+"no values to read", or - when they hold data that is not a target - drawn with
+their kind and closed through `record_outcomes.py` as NON_TARGET. A RECROP is not
+answered by a drawing: the crop itself was judged wrong. The records keep days,
+not hours, so a REDRAW drawing from the decision's own day is not taken; it may
+be the drawing that was refused.
+
 **Three kinds of answer, and `bundle_page.js` decides which.** The page moves
 values; the rules are a pure module with its own node suite, as on every other
 review page.

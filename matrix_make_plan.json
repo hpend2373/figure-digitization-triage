@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "455c3b9f8f9246043303d1a0b15aa666e730da1cb3673ccdf6f0fb626b121951",
-  "test_make_plan.py": "3564df669185bc0691ecc6b7baeb903fe57f4150115cd5ea6c1ce4613f4bda90"
+  "make_plan.py": "2d5ff67ba3a8e46a28bdc581a9b3701e378688adb6d46540ad1bdb9edaa48ac7",
+  "test_make_plan.py": "c063a02e64b8454ba7a690d2562c3bfcb9ae6400b601f487381b599aaecd127f"
  },
  "suites": [
   "test_make_plan.py"
@@ -624,6 +624,48 @@
    "file": "make_plan.py",
    "old": "            if (panel.get(\"disposition\") or \"\") != AUTHORED:\n",
    "new": "            if True:\n"
+  },
+  {
+   "name": "R5: 처분 뒤에 그린 것을 답으로 보지 않는다",
+   "file": "make_plan.py",
+   "old": "        if answered:\n            # 그린 것이 처분의 답입니다.",
+   "new": "        if False:\n            # 그린 것이 처분의 답입니다."
+  },
+  {
+   "name": "R5: REDRAW도 같은 날의 그림을 받는다",
+   "file": "make_plan.py",
+   "old": "    return first > decided_at if rule == \"LATER_DAY\" else first >= decided_at",
+   "new": "    return first >= decided_at"
+  },
+  {
+   "name": "R5: 처분보다 앞선 그림도 받는다",
+   "file": "make_plan.py",
+   "old": "    return first > decided_at if rule == \"LATER_DAY\" else first >= decided_at",
+   "new": "    return True"
+  },
+  {
+   "name": "R5: RECROP도 뒤에 그린 것으로 풀린다",
+   "file": "make_plan.py",
+   "old": "DRAWING_ANSWERS = {\"PARTIAL\": \"SAME_DAY_OR_LATER\", \"REDRAW\": \"LATER_DAY\"}",
+   "new": "DRAWING_ANSWERS = {\"PARTIAL\": \"SAME_DAY_OR_LATER\", \"REDRAW\": \"LATER_DAY\", \"RECROP\": \"LATER_DAY\"}"
+  },
+  {
+   "name": "R5: 처분의 날이 없어도 받는다",
+   "file": "make_plan.py",
+   "old": "    if not rule or not decided_at or not drawn_at:\n",
+   "new": "    if not rule or not drawn_at:\n"
+  },
+  {
+   "name": "R5: 처분 이름의 대소문자를 가린다",
+   "file": "make_plan.py",
+   "old": "    choice = ((figure_decision or {}).get(\"Decision\") or \"\").strip().upper()\n    rule = DRAWING_ANSWERS.get(choice)",
+   "new": "    choice = ((figure_decision or {}).get(\"Decision\") or \"\").strip()\n    rule = DRAWING_ANSWERS.get(choice)"
+  },
+  {
+   "name": "R5: 무엇을 대신했는지 그림에 남기지 않는다",
+   "file": "make_plan.py",
+   "old": "        if answered:\n            figure[\"note\"]",
+   "new": "        if False:\n            figure[\"note\"]"
   }
  ]
 }

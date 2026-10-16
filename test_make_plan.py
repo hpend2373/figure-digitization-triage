@@ -1047,6 +1047,71 @@ os.rename(os.path.join(RUN, MP.LEGEND_DECISIONS), os.path.join(ROOT, "legends_as
 _l0 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])["PUB_D001_P1"]
 check("  and without the record the figure is one legend, as before", "identity_domain" not in _l0["read"])
 
+# --- 처분 뒤에 그린 패널 (PARTIAL·REDRAW, run2 2026-10-16) ---------------------------------
+# 일부 패널만 읽으라는 처분, 다시 그리라는 처분은 사람이 그 뒤에 그린 패널이 답입니다.
+_DISP = ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person", "Recorded_At")
+_PD = ("Draft_ID", "Panel_Index", "Mark_Type", "Verdict", "Verified_By", "Verified_At")
+
+
+def _redrawn(d2_at, d5_at, d5_choice="REDRAW", d2_choice="PARTIAL"):
+    write(MP.FIGURE_DISPOSITIONS, _DISP, [
+        {"Draft_ID": "PUB_D002", "Disposition": d2_choice, "Which_Panels": "a" if d2_choice == "PARTIAL" else "",
+         "Verified_By": "minyeop", "Seen_By_Person": "1", "Recorded_At": "2026-10-14"},
+        {"Draft_ID": "PUB_D005", "Disposition": d5_choice, "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "1",
+         "Recorded_At": "2026-10-14"}])
+    _seg_write(MP.PANEL_DECISIONS, _PD, _D001_DRAWN + [
+        {"Draft_ID": "PUB_D002", "Panel_Index": str(i), "Mark_Type": m, "Verdict": "PANELS", "Verified_By": "minyeop",
+         "Verified_At": d2_at} for i, m in ((1, "BAR"), (2, "NOT_DATA"), (3, "BOX"))] + [
+        {"Draft_ID": "PUB_D005", "Panel_Index": str(i), "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop",
+         "Verified_At": d5_at} for i in (1, 2)])
+    plan, sheet = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[:2]
+    return dict((f["source_figure_id"], f) for f in plan["figures"]), sheet
+
+
+_RF, _RS = _redrawn("2026-10-16", "2026-10-16")
+# REVERT: keep PARTIAL and REDRAW UNRESOLVED whatever is drawn afterwards. The panels a person drew to answer
+# them stay in a file, and the figure waits for a decision that was already carried out.
+check("a PARTIAL figure drawn after the decision stands on the drawing: its panels, their kinds, nothing unresolved",
+      [(p["panel_id"][-3:], p["disposition"]) for p in _RF["PUB_D002"]["panels"]]
+      == [("_P1", "GEOMETRY_NOT_AUTHORED"), ("_P2", "NOT_DATA"), ("_P3", "GEOMETRY_NOT_AUTHORED")], _RF["PUB_D002"]["panels"])
+check("  and the decision it answered stays on the figure, with both days",
+      "PARTIAL a (2026-10-14) answered by the panels drawn on 2026-10-16" in _RF["PUB_D002"].get("note", ""),
+      _RF["PUB_D002"].get("note"))
+check("  and nobody is asked to extract those panels again", "그 패널만 추출" not in _RS["PUB_D002"]["Needs"], _RS["PUB_D002"]["Needs"])
+check("a REDRAW figure drawn on a later day stands on the new drawing",
+      [p["disposition"] for p in _RF["PUB_D005"]["panels"]] == ["GEOMETRY_NOT_AUTHORED"] * 2
+      and _RF["PUB_D005"]["panel_count_method"] == "HUMAN_VISUAL", _RF["PUB_D005"]["panels"])
+_RF, _RS = _redrawn("2026-10-14", "2026-10-14")
+# REVERT: take a REDRAW drawing from the decision's own day. That may be the very drawing the person said to
+# redraw - the record keeps days, not hours.
+check("a REDRAW drawing from the decision's own day is not the answer - it may be the drawing that was refused",
+      all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D005"]["panels"]) and len(_RF["PUB_D005"]["panels"]) != 2
+      and "다시 그리기" in _RS["PUB_D005"]["Needs"],
+      (_RF["PUB_D005"]["panels"], _RS["PUB_D005"]["Needs"]))
+check("  but a PARTIAL drawing from that day is: the boxes are right whichever came first, and the kinds say what to read",
+      [p["disposition"] for p in _RF["PUB_D002"]["panels"]] == ["GEOMETRY_NOT_AUTHORED", "NOT_DATA", "GEOMETRY_NOT_AUTHORED"])
+_RF, _RS = _redrawn("2026-10-13", "2026-10-13")
+check("a drawing older than the decision answers neither",
+      all(p["disposition"] == "UNRESOLVED" for f in ("PUB_D002", "PUB_D005") for p in _RF[f]["panels"])
+      and "그 패널만 추출" in _RS["PUB_D002"]["Needs"], (_RF["PUB_D002"]["panels"], _RS["PUB_D002"]["Needs"]))
+_RF, _RS = _redrawn("2026-10-16", "2026-10-16", d5_choice="RECROP")
+# REVERT: let a later drawing answer RECROP too. The crop was judged wrong, and boxes on that same crop do not
+# fix it.
+check("RECROP is not answered by a later drawing on the same crop",
+      all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D005"]["panels"]) and len(_RF["PUB_D005"]["panels"]) != 2
+      and "재크롭" in _RS["PUB_D005"]["Needs"],
+      (_RF["PUB_D005"]["panels"], _RS["PUB_D005"]["Needs"]))
+_seg_write(MP.PANEL_DECISIONS, _PD, _D001_DRAWN + [
+    {"Draft_ID": "PUB_D002", "Panel_Index": "1", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": ""}])
+_RF = dict((f["source_figure_id"], f) for f in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[0]["figures"])
+check("a drawing without a day answers nothing", _RF["PUB_D002"]["panels"]
+      and all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D002"]["panels"]),
+      _RF["PUB_D002"]["panels"])
+check("MP.drawing_answers needs the decision's day too",
+      not MP.drawing_answers({"Decision": "PARTIAL"}, [{"Verified_At": "2026-10-16"}])
+      and MP.drawing_answers({"Decision": "partial", "Recorded_At": "2026-10-16"}, [{"Verified_At": "2026-10-16"}]))
+os.rename(os.path.join(RUN, MP.FIGURE_DISPOSITIONS), os.path.join(ROOT, "dispositions_redrawn_aside.csv"))
+
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

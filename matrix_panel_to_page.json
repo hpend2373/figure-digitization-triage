@@ -1,7 +1,7 @@
 {
  "files": {
-  "panel_to_page.py": "b0ff2987dee49401bbd7669af7ea030f0e06ab10eccd39d601ebaae5b235b5ea",
-  "test_panel_to_page.py": "50a13604d6f2aad0cdd7ac34540476929de920ebbdb761caff69ece8c3965a82"
+  "panel_to_page.py": "79c3ee17a2d40aad301bda151902ef17197c62ccb1a21fd0fe20559c40a4c21d",
+  "test_panel_to_page.py": "8e3718898ed5f43341526577b398d0da7c1df108be12aa32088701ce4742aee0"
  },
  "suites": [
   "test_panel_to_page.py"
@@ -90,6 +90,66 @@
    "file": "panel_to_page.py",
    "old": "        if deadline is not None and time.time() > deadline:\n            left.append(fid); continue\n",
    "new": ""
+  },
+  {
+   "name": "'/pages/' 뒤를 찾지 않는다",
+   "file": "panel_to_page.py",
+   "old": "    if pages and \"/pages/\" in path:",
+   "new": "    if False and pages and \"/pages/\" in path:"
+  },
+  {
+   "name": "대신 찾은 쪽 래스터의 지문을 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if moved and page_sha != (d.get(\"Page_Raster_SHA256\") or \"\").strip():",
+   "new": "        if False:"
+  },
+  {
+   "name": "있는 경로도 대신 찾은 것으로 친다",
+   "file": "panel_to_page.py",
+   "old": "    if os.path.isfile(here):\n        return here, False",
+   "new": "    if os.path.isfile(here):\n        return here, True"
+  },
+  {
+   "name": "목록에 없는 PDF를 --doc-root에서 찾지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if (not pdf or not os.path.isfile(pdf)) and doc_root:",
+   "new": "        if False:"
+  },
+  {
+   "name": "한 단계 아래 폴더를 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "    for folder in [base] + [os.path.join(base, d) for d in subs]:",
+   "new": "    for folder in [base]:"
+  },
+  {
+   "name": "이름을 NFC로 맞춰 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "            if nfc(f) != nfc(n):",
+   "new": "            if f != n:"
+  },
+  {
+   "name": "폴더 밖으로 나가는 링크도 따른다",
+   "file": "panel_to_page.py",
+   "old": "            if real.startswith(base + os.sep) and os.path.isfile(real):",
+   "new": "            if os.path.isfile(real):"
+  },
+  {
+   "name": "확인된 날을 보지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if verified_at and (r.get(\"Verified_At\") or \"\").strip() != verified_at:",
+   "new": "        if False:"
+  },
+  {
+   "name": "닫힌 패널을 빼지 않는다",
+   "file": "panel_to_page.py",
+   "old": "        if \"%s_P%s\" % (r.get(\"Draft_ID\"), r.get(\"Panel_Index\")) in closed:",
+   "new": "        if False:"
+  },
+  {
+   "name": "LABEL도 닫힌 패널로 친다",
+   "file": "panel_to_page.py",
+   "old": "            if (r.get(\"Decision\") or \"\").strip().upper() == \"NON_TARGET\"}",
+   "new": "            if True}"
   }
  ]
 }

@@ -17,6 +17,16 @@
 이 모듈은 판정하지 않습니다. 정의를 고르는 것도, 못 찾았다고 정하는 것도
 사람입니다. 이 모듈이 하는 일은 사람이 고른 답이 사람이 댄 근거와 맞는지
 보는 것뿐이고, 맞지 않으면 그 행을 적지 않습니다.
+
+run2 2026-10-14부터 세 가지를 더 받습니다.
+  * 사람이 원문을 직접 확인하지 않고 승인한 관찰(`approval`): Verified_In_Source가
+    비고 Verified_By(승인한 사람)·Observed_By(본 것)·Approval_Ref(승인한 자리)가
+    모두 있는 답. 기록에는 Verified_By_Person=0으로 남고, 인용문은 여전히 원문에서
+    다시 찾아집니다.
+  * 그림 하나의 답(Draft_ID): 같은 묶음의 문서 답보다 그 그림에서 이깁니다.
+  * 같은 논문의 다른 요소(표, 다른 그림)가 말한 정의를 이 그림에 쓰는 답
+    (Definition_Basis=BORROWED, Note에 어디서 왜). 계획서가 그 가정을 값까지
+    들고 갑니다(`make_plan.BORROWED_NOTE`).
 """
 import argparse
 import csv
@@ -29,6 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import approval                                                   # noqa: E402
 import corpus_intake as CI                                        # noqa: E402
 import caption_fulltext as CF                                     # noqa: E402
 import kernel                                                     # noqa: E402
@@ -58,7 +69,19 @@ CLAIM["RANGE"] = re.compile(r"\brange[sd]?\b|\bminimum\s+(?:and|to)\s+maximum\b"
 
 FIELDS = ("Draft_ID", "Source_Document_ID", "Figure_Number", "Page",
           "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page",
-          "Verified_By_Person", "Recorded_Via", "Recorded_At", "Note")
+          "Verified_By_Person", "Recorded_Via", "Recorded_At", "Note",
+          # run2 2026-10-14: 사람이 직접 확인하지 않은 답(승인된 관찰)이 들어올
+          # 길이 생기면서 붙은 칸들. 직접 확인한 답에서는 뒤의 둘이 비고,
+          # Verified_By_Person이 "0"이면 누가 무엇을 보았고 누가 어디서
+          # 승인했는지가 여기 있습니다(`approval`).
+          "Verified_By", "Observed_By", "Approval_Ref", "Definition_Basis")
+
+#: 정의가 이 그림이 아니라 같은 논문의 다른 요소(표, 다른 그림)에 대해 쓰인
+#: 문장에서 온 답(run2 2026-10-14 결정 R9·R10). 인용문은 여전히 원문에서 다시
+#: 찾아지고, 이 표시는 그 문장이 이 그림에 대한 것이라는 것이 가정임을 기록에
+#: 남깁니다 - 계획서가 그 가정을 값까지 들고 가서 민감도 분석에서 뺄 수 있게.
+BORROWED = "BORROWED"
+DEFINITION_BASES = ("", BORROWED)
 
 #: 답 CSV가 반드시 들고 와야 하는 열. 없는 열은 빈칸이 아니라 다른 파일이라는
 #: 뜻입니다 - 검토 페이지가 아닌 무언가를 먹이면 여기서 멎습니다.
@@ -162,14 +185,35 @@ def check_answer(answer, source, pending_pages=()):
     code = (answer.get("Dispersion_Type") or "").strip().upper()
     quote = (answer.get("Errorbar_Definition_Source") or "").strip()
     page = (answer.get("Found_On_Page") or "").strip()
+    who = (answer.get("Verified_By") or "").strip()
+    basis = (answer.get("Definition_Basis") or "").strip().upper()
 
-    # 사람이 직접 확인했다고 말하지 않은 답은 답이 아닙니다. 이 문이 지키는
-    # 것은 값의 모양이 아니라 "누가 보았는가"이고, 그것은 에이전트가 대신
-    # 채울 수 없습니다.
+    # 사람이 직접 확인했다고 말하지 않은 답은 답이 아닙니다 - 사람이 승인한
+    # 관찰(`approval`)이 아니라면. 이 문이 지키는 것은 값의 모양이 아니라 "누가
+    # 보았는가"이고, 그것은 에이전트가 대신 채울 수 없습니다. 승인된 관찰은
+    # 기록에 Verified_By_Person=0으로, 본 것과 승인한 사람과 승인한 자리와 함께
+    # 남습니다.
     if not is_true(answer.get("Verified_In_Source")):
-        problems.append(("NOT_VERIFIED_BY_PERSON",
-                         "검토 페이지에서 \"직접 확인했습니다\"를 표시하지 "
-                         "않았습니다. 표시가 없는 답은 적지 않습니다."))
+        for c, m in approval.seen_problems(dict(answer, Seen_By_Person=""), who,
+                                           "검토 페이지에서 \"직접 확인했습니다\"를 표시하지 "
+                                           "않았습니다. 표시가 없는 답은 적지 않습니다."):
+            problems.append(("NOT_VERIFIED_BY_PERSON" if c == "NOT_SEEN_BY_PERSON" else c, m))
+        if not who and (answer.get("Observed_By") or answer.get("Approval_Ref")):
+            problems.append(("UNATTRIBUTED", "사람이 확인하지 않은 답인데 누가 승인했는지"
+                                             "(Verified_By)가 없습니다."))
+
+    if basis not in DEFINITION_BASES:
+        problems.append(("BAD_DEFINITION_BASIS", "Definition_Basis=%r은 빈칸이나 %s여야 "
+                                                 "합니다." % (basis, BORROWED)))
+    elif basis == BORROWED:
+        if code not in DISPERSION_TYPES or code == "NO_ERRORBAR":
+            problems.append(("BORROWED_WITHOUT_DEFINITION",
+                             "다른 요소의 정의를 빌렸다면서 답이 %s입니다. 빌린 것은 "
+                             "분산의 종류여야 합니다." % (code or "(빈칸)")))
+        if not (answer.get("Note") or "").strip():
+            problems.append(("BORROWED_UNEXPLAINED",
+                             "어느 요소(표 몇, 그림 몇)의 정의를 왜 이 그림에 쓰는지 "
+                             "Note에 적어야 합니다. 그것이 이 답의 가정입니다."))
 
     if code in DISPOSITIONS:
         pass
@@ -305,14 +349,38 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
     settled = set(r["Draft_ID"] for r in existing)
 
     written, refused = [], []
+    # 한 그림만의 답(Draft_ID가 있는 줄). 같은 묶음에 문서 전체의 답이 함께
+    # 있으면, 그 그림은 문서의 답이 아니라 그림의 답을 받습니다 - 한 논문에서
+    # 그림 하나만 다른 경우(상자 그림 하나, 막대 없는 그림 하나)가 실제로
+    # 있습니다. 같은 자리에 답이 둘이면 어느 쪽인지 이 문은 모릅니다.
+    named, seen_keys, twice = set(), {}, set()
     for answer in answers:
         doc = (answer.get("Source_Document_ID") or "").strip()
+        did = (answer.get("Draft_ID") or "").strip()
+        if did:
+            named.add(did)
+        k = (doc, did)
+        if k in seen_keys:
+            twice.add(k)
+        seen_keys[k] = True
+    for answer in answers:
+        doc = (answer.get("Source_Document_ID") or "").strip()
+        did = (answer.get("Draft_ID") or "").strip()
+        if (doc, did) in twice:
+            refused.append((did or doc, [("ANSWERED_TWICE",
+                                          "%s에 답이 둘 있습니다. 하나만 내 주십시오."
+                                          % (did or doc))]))
+            continue
         rows = pending.get(doc)
+        if rows and did:
+            rows = [r for r in rows if r["Draft_ID"] == did]
+        elif rows:
+            rows = [r for r in rows if r["Draft_ID"] not in named]
         if not rows:
-            refused.append((doc, [("NOT_PENDING",
-                                   "%s는 정의를 기다리는 문서 목록에 없습니다. "
-                                   "이미 정해졌거나, 이 run의 문서가 "
-                                   "아닙니다." % doc)]))
+            refused.append((did or doc, [("NOT_PENDING",
+                                          "%s는 정의를 기다리는 목록에 없습니다. "
+                                          "이미 정해졌거나, 이 run의 것이 "
+                                          "아닙니다." % (did or doc))]))
             continue
         source, why = read_source(run, doc, pdf_root)
         problems = check_answer(answer, source)
@@ -330,6 +398,7 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
                                   "이 행은 이미 판정되어 있습니다. 바꾸려면 "
                                   "--replace로 다시 부르십시오.")]))
                 continue
+            prov = approval.provenance(dict(answer, Seen_By_Person=answer.get("Verified_In_Source")))
             written.append(dict(
                 Draft_ID=row["Draft_ID"], Source_Document_ID=doc,
                 Figure_Number=row.get("Figure_Number", ""),
@@ -337,8 +406,11 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
                 Errorbar_Definition_Source=(
                     answer.get("Errorbar_Definition_Source") or "").strip(),
                 Found_On_Page=(answer.get("Found_On_Page") or "").strip(),
-                Verified_By_Person="1", Recorded_Via=via, Recorded_At=when,
-                Note=(answer.get("Note") or "").strip()))
+                Verified_By_Person=prov["Seen_By_Person"], Recorded_Via=via, Recorded_At=when,
+                Note=(answer.get("Note") or "").strip(),
+                Verified_By=(answer.get("Verified_By") or "").strip(),
+                Observed_By=prov["Observed_By"], Approval_Ref=prov["Approval_Ref"],
+                Definition_Basis=(answer.get("Definition_Basis") or "").strip().upper()))
 
     keep = [r for r in existing
             if r["Draft_ID"] not in set(w["Draft_ID"] for w in written)]

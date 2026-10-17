@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "cb490ffe8b18ce82f164fbb9728e2f8e842a29ba6442a9d19bb717427743c8f7",
-  "test_make_plan.py": "7e8affb1aa54449cd452d76ba618881ea6c68f945bfaf98361733f2dfc4bb33d"
+  "make_plan.py": "2d5ff67ba3a8e46a28bdc581a9b3701e378688adb6d46540ad1bdb9edaa48ac7",
+  "test_make_plan.py": "c063a02e64b8454ba7a690d2562c3bfcb9ae6400b601f487381b599aaecd127f"
  },
  "suites": [
   "test_make_plan.py"
@@ -10,7 +10,7 @@
   {
    "name": "블록된 행도 계획서에 넣는다",
    "file": "make_plan.py",
-   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):\n            continue",
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered\n                and row[\"Draft_ID\"] not in unblocked):\n            continue",
    "new": "        if False:\n            continue"
   },
   {
@@ -40,8 +40,8 @@
   {
    "name": "풀에서 뺀 행도 기하를 쓸 대상으로 둔다",
    "file": "make_plan.py",
-   "old": "        if code in RE.DISPOSITIONS:\n            # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.\n            disposition = \"UNRESOLVED\"",
-   "new": "        if False:\n            disposition = \"UNRESOLVED\""
+   "old": "        if code in RE.DISPOSITIONS:\n            # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.\n            disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")",
+   "new": "        if False:\n            disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")"
   },
   {
    "name": "캡션이 말해도 문서 진술을 먼저 본다",
@@ -208,8 +208,8 @@
   {
    "name": "이미 답해서 막아 둔 행도 계획서에서 뺀다",
    "file": "make_plan.py",
-   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered):",
-   "new": "        if reason.get(\"Count_Blocked\") == \"1\":"
+   "old": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in answered\n                and row[\"Draft_ID\"] not in unblocked):",
+   "new": "        if (reason.get(\"Count_Blocked\") == \"1\"\n                and row[\"Draft_ID\"] not in unblocked):"
   },
   {
    "name": "막힌 행에 붙은 답이면 무엇이든 계획서에 넣는다",
@@ -292,8 +292,8 @@
   {
    "name": "처분 파일이 없으면 멈춘다",
    "file": "make_plan.py",
-   "old": "    if not os.path.exists(path):\n        return out",
-   "new": "    if False:\n        return out"
+   "old": "    path = os.path.join(run, FIGURE_DECISIONS)\n    out = {}\n    if not os.path.exists(path):\n        return out",
+   "new": "    path = os.path.join(run, FIGURE_DECISIONS)\n    out = {}\n    if False:\n        return out"
   },
   {
    "name": "사람이 그린 패널 목록을 읽지 않는다",
@@ -364,8 +364,8 @@
   {
    "name": "등록되지 않은 이름으로 VISUALLY_VERIFIED를 적는다",
    "file": "make_plan.py",
-   "old": "            if rid:\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,",
-   "new": "            if who:\n                rid = rid or DEMO_REVIEWER\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,"
+   "old": "            rid = reviewer_for(who)\n            if rid:\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,",
+   "new": "            rid = reviewer_for(who)\n            if who:\n                rid = rid or DEMO_REVIEWER\n                figure.update({\"inventory_status\": \"VISUALLY_VERIFIED\", \"reviewer_id\": rid,"
   },
   {
    "name": "목록에 없는 검토자를 가리키는 이름을 받는다",
@@ -420,6 +420,252 @@
    "file": "make_plan.py",
    "old": "                    if seen in RI.READER_CLASS:",
    "new": "                    if False:"
+  },
+  {
+   "name": "borrowed: Definition_Basis read nowhere",
+   "file": "make_plan.py",
+   "old": "kind = FROM_DECISION_BORROWED if (decision.get(\"Definition_Basis\") or \"\").strip().upper() \\\n            == RE.BORROWED else FROM_DECISION",
+   "new": "kind = FROM_DECISION"
+  },
+  {
+   "name": "borrowed: the unit does not carry the assumption",
+   "file": "make_plan.py",
+   "old": "        unit[\"note\"] = BORROWED_NOTE",
+   "new": "        pass"
+  },
+  {
+   "name": "borrowed: a box that takes the IQR carries the note",
+   "file": "make_plan.py",
+   "old": "if kind == FROM_DECISION_BORROWED and not (mark == \"BOX_VIOLIN\" and dispersion[0] not in QUANTILE_DISPERSIONS):",
+   "new": "if kind == FROM_DECISION_BORROWED:"
+  },
+  {
+   "name": "R6: a dropped figure stays UNRESOLVED",
+   "file": "make_plan.py",
+   "old": "disposition = ERRORBAR_DISPOSITION.get(code, \"UNRESOLVED\")",
+   "new": "disposition = \"UNRESOLVED\""
+  },
+  {
+   "name": "R7: the disposition file is not read",
+   "file": "make_plan.py",
+   "old": "    decided.update(load_figure_dispositions(run))\n",
+   "new": ""
+  },
+  {
+   "name": "R7: figure_decisions read after the dispositions",
+   "file": "make_plan.py",
+   "old": "    decided = load_figure_decisions(run)\n    decided.update(load_figure_dispositions(run))\n",
+   "new": "    decided = load_figure_dispositions(run)\n    decided.update(load_figure_decisions(run))\n"
+  },
+  {
+   "name": "R7: disposition names not understood",
+   "file": "make_plan.py",
+   "old": "    if choice in DECIDED_DISPOSITION:\n        return DECIDED_DISPOSITION[choice], None\n",
+   "new": ""
+  },
+  {
+   "name": "R7: a NON_TARGET figure still asked for its count",
+   "file": "make_plan.py",
+   "old": "SETTLED_DISPOSITIONS = (\"NOT_DATA\", \"UNRESOLVED\", \"NON_TARGET_OUTCOME\")",
+   "new": "SETTLED_DISPOSITIONS = (\"NOT_DATA\", \"UNRESOLVED\")"
+  },
+  {
+   "name": "R7: REDRAW unnamed",
+   "file": "make_plan.py",
+   "old": "    \"REDRAW\": \"패널을 다시 그리라고 하신 그림 — 패널 영역 다시 그리기\",\n",
+   "new": ""
+  },
+  {
+   "name": "R7: a run without the disposition file stops",
+   "file": "make_plan.py",
+   "old": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if not os.path.exists(path):\n        return out",
+   "new": "    path = os.path.join(run, FIGURE_DISPOSITIONS)\n    out = {}\n    if False:\n        return out"
+  },
+  {
+   "name": "목록 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    docs, figs = {}, {}\n    for r in _rows(os.path.join(run, INVENTORY)):",
+   "new": "    docs, figs = {}, {}\n    for r in []:"
+  },
+  {
+   "name": "목록 기록이 사람이 그린 패널을 이긴다",
+   "file": "make_plan.py",
+   "old": "        if (drawn_rows or no_panels) and not superseded:",
+   "new": "        if (drawn_rows or no_panels) and not superseded and not inv:"
+  },
+  {
+   "name": "NO_PANELS를 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "no_panels = bool(drawn_all) and not drawn_rows and all(",
+   "new": "no_panels = False and all("
+  },
+  {
+   "name": "다시 자르라고 한 그림의 이전 그림을 목록으로 쓴다",
+   "file": "make_plan.py",
+   "old": "superseded = (figure_decision or {}).get(\"Decision\", \"\").strip().upper() in DRAWING_SUPERSEDED",
+   "new": "superseded = False"
+  },
+  {
+   "name": "WHOLE 그림을 읽을 그림으로 둔다",
+   "file": "make_plan.py",
+   "old": "            if disposition == \"GEOMETRY_NOT_AUTHORED\":\n                disposition = \"NOT_DATA\"",
+   "new": "            if False:\n                disposition = \"NOT_DATA\""
+  },
+  {
+   "name": "WHOLE 그림에 기하·오차 정의를 묻는다",
+   "file": "make_plan.py",
+   "old": "                needs = [x for x in needs if x != \"오차 정의\" and not x.startswith(\"패널 기하\")]",
+   "new": "                pass"
+  },
+  {
+   "name": "WHOLE 패널에 이름을 붙이지 않는다",
+   "file": "make_plan.py",
+   "old": "                panel[\"label\"] = WHOLE_LABEL",
+   "new": "                pass"
+  },
+  {
+   "name": "등록되지 않은 승인자로 문서를 VISUALLY_VERIFIED로 적는다",
+   "file": "make_plan.py",
+   "old": "            rid = reviewer_for(inv.get(\"Verified_By\"))\n            if rid:\n                doc.update(",
+   "new": "            rid = reviewer_for(inv.get(\"Verified_By\")) or DEMO_REVIEWER\n            if rid:\n                doc.update("
+  },
+  {
+   "name": "그림 목록 기록의 방법을 HUMAN_VISUAL로 적는다",
+   "file": "make_plan.py",
+   "old": "            figure[\"panel_count_method\"] = (inv.get(\"Count_Method\") or \"\").strip().upper()",
+   "new": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\""
+  },
+  {
+   "name": "문서 목록 기록의 방법을 HUMAN_VISUAL로 적는다",
+   "file": "make_plan.py",
+   "old": "\"figure_count_method\": (inv.get(\"Count_Method\") or \"\").strip().upper(), \"reviewer_id\": rid,",
+   "new": "\"figure_count_method\": \"HUMAN_VISUAL\", \"reviewer_id\": rid,"
+  },
+  {
+   "name": "사람이 센 문서 수가 목록 기록에 진다",
+   "file": "make_plan.py",
+   "old": "        if not counted and inv and",
+   "new": "        if inv and"
+  },
+  {
+   "name": "사람이 정한 쪽 범위가 목록 기록에 진다",
+   "file": "make_plan.py",
+   "old": "        elif inv and (inv.get(\"Article_Page_Range\") or \"\").strip():\n            doc[\"page_range\"] = inv[\"Article_Page_Range\"].strip()",
+   "new": "        if inv and (inv.get(\"Article_Page_Range\") or \"\").strip():\n            doc[\"page_range\"] = inv[\"Article_Page_Range\"].strip()"
+  },
+  {
+   "name": "계수 시트가 다르게 센 것을 적지 않는다",
+   "file": "make_plan.py",
+   "old": "            if sheet is not None and sheet != count:",
+   "new": "            if False:"
+  },
+  {
+   "name": "닫힌 그림의 사람이 그린 목록을 PENDING으로 둔다",
+   "file": "make_plan.py",
+   "old": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if rid:",
+   "new": "            figure[\"panel_count_method\"] = \"HUMAN_VISUAL\"\n            if False:"
+  },
+  {
+   "name": "막음을 다시 본 답을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "        r[\"Draft_ID\"] for r in _rows(os.path.join(run, BLOCK_REVIEWS))",
+   "new": "        r[\"Draft_ID\"] for r in []"
+  },
+  {
+   "name": "UNBLOCK이 중복 행도 연다",
+   "file": "make_plan.py",
+   "old": "        if (reason.get(\"Duplicate_Of\") or \"\").strip():\n            continue",
+   "new": "        if (reason.get(\"Duplicate_Of\") or \"\").strip() and row[\"Draft_ID\"] not in unblocked:\n            continue"
+  },
+  {
+   "name": "KEEP도 막음을 푼다",
+   "file": "make_plan.py",
+   "old": "        if (r.get(\"Decision\") or \"\").strip().upper() == RBR.UNBLOCK)",
+   "new": "        if (r.get(\"Decision\") or \"\").strip())"
+  },
+  {
+   "name": "결과 이름 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    outcomes = load_outcomes(run)\n",
+   "new": "    outcomes = {}\n"
+  },
+  {
+   "name": "범례 기록을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    legends = load_legends(run)\n",
+   "new": "    legends = {}\n"
+  },
+  {
+   "name": "읽을 준비가 된 패널은 목표 아님이어도 닫지 않는다",
+   "file": "make_plan.py",
+   "old": "                if (said_outcome or {}).get(\"Decision\", \"\").strip().upper() == \"NON_TARGET\":\n",
+   "new": "                if False:\n"
+  },
+  {
+   "name": "그리지 않은 패널에 결과 이름을 얹지 않는다",
+   "file": "make_plan.py",
+   "old": "                apply_outcome(panel, (outcomes or {}).get(panel[\"panel_id\"]))\n",
+   "new": "                pass\n"
+  },
+  {
+   "name": "닫힌 패널에도 이름을 붙인다",
+   "file": "make_plan.py",
+   "old": "    elif decision == \"LABEL\" and target_status_of(panel) == \"TARGET\":\n",
+   "new": "    elif decision == \"LABEL\":\n"
+  },
+  {
+   "name": "범례 묶음을 판독에 주지 않는다",
+   "file": "make_plan.py",
+   "old": "                if unit is not None and (legends or {}).get(row[\"Draft_ID\"]):\n",
+   "new": "                if False:\n"
+  },
+  {
+   "name": "읽을 준비가 된 패널의 이름도 결과 기록으로 덮는다",
+   "file": "make_plan.py",
+   "old": "            if (panel.get(\"disposition\") or \"\") != AUTHORED:\n",
+   "new": "            if True:\n"
+  },
+  {
+   "name": "R5: 처분 뒤에 그린 것을 답으로 보지 않는다",
+   "file": "make_plan.py",
+   "old": "        if answered:\n            # 그린 것이 처분의 답입니다.",
+   "new": "        if False:\n            # 그린 것이 처분의 답입니다."
+  },
+  {
+   "name": "R5: REDRAW도 같은 날의 그림을 받는다",
+   "file": "make_plan.py",
+   "old": "    return first > decided_at if rule == \"LATER_DAY\" else first >= decided_at",
+   "new": "    return first >= decided_at"
+  },
+  {
+   "name": "R5: 처분보다 앞선 그림도 받는다",
+   "file": "make_plan.py",
+   "old": "    return first > decided_at if rule == \"LATER_DAY\" else first >= decided_at",
+   "new": "    return True"
+  },
+  {
+   "name": "R5: RECROP도 뒤에 그린 것으로 풀린다",
+   "file": "make_plan.py",
+   "old": "DRAWING_ANSWERS = {\"PARTIAL\": \"SAME_DAY_OR_LATER\", \"REDRAW\": \"LATER_DAY\"}",
+   "new": "DRAWING_ANSWERS = {\"PARTIAL\": \"SAME_DAY_OR_LATER\", \"REDRAW\": \"LATER_DAY\", \"RECROP\": \"LATER_DAY\"}"
+  },
+  {
+   "name": "R5: 처분의 날이 없어도 받는다",
+   "file": "make_plan.py",
+   "old": "    if not rule or not decided_at or not drawn_at:\n",
+   "new": "    if not rule or not drawn_at:\n"
+  },
+  {
+   "name": "R5: 처분 이름의 대소문자를 가린다",
+   "file": "make_plan.py",
+   "old": "    choice = ((figure_decision or {}).get(\"Decision\") or \"\").strip().upper()\n    rule = DRAWING_ANSWERS.get(choice)",
+   "new": "    choice = ((figure_decision or {}).get(\"Decision\") or \"\").strip()\n    rule = DRAWING_ANSWERS.get(choice)"
+  },
+  {
+   "name": "R5: 무엇을 대신했는지 그림에 남기지 않는다",
+   "file": "make_plan.py",
+   "old": "        if answered:\n            figure[\"note\"]",
+   "new": "        if False:\n            figure[\"note\"]"
   }
  ]
 }

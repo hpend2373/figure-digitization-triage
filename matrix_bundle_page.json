@@ -1,0 +1,179 @@
+{
+ "files": {
+  "bundle_page.py": "375b711d872f92e6ac1ca8336a5873e42bd46793dbf8b8dfa8273fecec9d218d",
+  "test_bundle_page.py": "e1e9773d464c6b99281862f28b4391999f532fdcbe0e7530731343bf4cf2e811"
+ },
+ "suites": [
+  "test_bundle_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "제안 없는 항목을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if not prop or prop == HOLD:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "선택지에 없는 제안을 받는다",
+   "file": "bundle_page.py",
+   "old": "        elif prop not in values:\n",
+   "new": "        elif False:\n"
+  },
+  {
+   "name": "이유 없는 제안을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if not str(it.get(\"why\") or \"\").strip():\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "낸 것이 없는 제안을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if not str(it.get(\"observed_by\") or \"\").strip():\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "보류 없는 물음을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if HOLD not in values:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "효과 없는 선택지를 받는다",
+   "file": "bundle_page.py",
+   "old": "    if not isinstance(effect, dict):\n        return [(\"NO_EFFECT\"",
+   "new": "    if not isinstance(effect, dict):\n        return []\n    if False:\n        return [(\"NO_EFFECT\""
+  },
+  {
+   "name": "모르는 관문을 받는다",
+   "file": "bundle_page.py",
+   "old": "    elif gate not in GATES:\n        out.append",
+   "new": "    elif gate not in GATES:\n        return out\n        out.append"
+  },
+  {
+   "name": "처분 행의 빈 칸을 보지 않는다",
+   "file": "bundle_page.py",
+   "old": "            if miss:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "카드 효과의 Proposal_ID를 보지 않는다",
+   "file": "bundle_page.py",
+   "old": "            if not str(effect.get(\"proposal_id\") or \"\").strip():\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "아무것도 바꾸지 않는 카드 효과를 받는다",
+   "file": "bundle_page.py",
+   "old": "            if not effect.get(\"set\") and not effect.get(\"series\"):\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "필요한 길을 말하지 않는 답을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if not str(effect.get(\"needs\") or \"\").strip():\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "이름 칸 없이 이름을 쓰는 선택지를 받는다",
+   "file": "bundle_page.py",
+   "old": "    if effect.get(\"uses_text\") and not item.get(\"text\"):\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "이름 칸 없이 EDIT를 받는다",
+   "file": "bundle_page.py",
+   "old": "        if EDIT in values and not it.get(\"text\"):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "없는 그림을 넘어간다",
+   "file": "bundle_page.py",
+   "old": "            if not os.path.isfile(p):\n",
+   "new": "            if False:\n"
+  },
+  {
+   "name": "이름이 겹치는 항목을 받는다",
+   "file": "bundle_page.py",
+   "old": "        if iid in seen:\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "겹친 선택지를 받는다",
+   "file": "bundle_page.py",
+   "old": "        if len(set(values)) != len(values):\n",
+   "new": "        if False:\n"
+  },
+  {
+   "name": "기록 이름의 답 파일을 받는다",
+   "file": "bundle_page.py",
+   "old": "    elif ans in RECORD_FILES:\n",
+   "new": "    elif False:\n"
+  },
+  {
+   "name": "다른 schema를 받는다",
+   "file": "bundle_page.py",
+   "old": "    if spec.get(\"schema\") != SCHEMA:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "물을 것 없는 묶음을 받는다",
+   "file": "bundle_page.py",
+   "old": "    if not n:\n        problems.append((\"NO_ITEMS\"",
+   "new": "    if False:\n        problems.append((\"NO_ITEMS\""
+  },
+  {
+   "name": "효과를 지문에서 뺀다",
+   "file": "bundle_page.py",
+   "old": "(\"id\", \"target\", \"now\", \"options\", \"proposal\", \"text\", \"why\", \"observed_by\")",
+   "new": "(\"id\", \"target\", \"now\", \"proposal\", \"text\", \"why\", \"observed_by\")"
+  },
+  {
+   "name": "이유를 지문에서 뺀다",
+   "file": "bundle_page.py",
+   "old": "(\"id\", \"target\", \"now\", \"options\", \"proposal\", \"text\", \"why\", \"observed_by\")",
+   "new": "(\"id\", \"target\", \"now\", \"options\", \"proposal\", \"text\", \"observed_by\")"
+  },
+  {
+   "name": "선택지를 골라 둔 채로 낸다",
+   "file": "bundle_page.py",
+   "old": "\"<label class='opt%s'><input type='radio' name='q_%s'",
+   "new": "\"<label class='opt%s'><input type='radio' checked name='q_%s'"
+  },
+  {
+   "name": "거절할 SPEC으로도 페이지를 짓는다",
+   "file": "bundle_page.py",
+   "old": "    if problems:\n        raise SystemExit(\"SPEC을 거절합니다",
+   "new": "    if False:\n        raise SystemExit(\"SPEC을 거절합니다"
+  },
+  {
+   "name": "그림 지문을 남기지 않는다",
+   "file": "bundle_page.py",
+   "old": "                shas.append(file_sha(p))\n",
+   "new": ""
+  },
+  {
+   "name": "제안을 낸 것을 보여 주지 않는다",
+   "file": "bundle_page.py",
+   "old": "% (esc(q[\"why\"]), esc(q[\"observed_by\"])))",
+   "new": "% (esc(q[\"why\"]), \"\"))"
+  },
+  {
+   "name": "같은 묶음이라고 말하지 않는다",
+   "file": "bundle_page.py",
+   "old": "    shared = q[\"group\"] != q[\"id\"]\n",
+   "new": "    shared = False\n"
+  },
+  {
+   "name": "효과 목록을 보지 않는다",
+   "file": "bundle_page.py",
+   "old": "                for e in eff:\n                    problems.extend(effect_problems(iid, o[0], e, it))\n",
+   "new": "                pass\n"
+  },
+  {
+   "name": "빈 효과 목록을 받는다",
+   "file": "bundle_page.py",
+   "old": "                if not eff:\n                    problems.append((\"NO_EFFECT\"",
+   "new": "                if False:\n                    problems.append((\"NO_EFFECT\""
+  }
+ ]
+}

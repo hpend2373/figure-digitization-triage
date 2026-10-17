@@ -3304,7 +3304,7 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
 
 
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
-              check_files=True, fault_after=None, run_mode=None):
+              check_files=True, fault_after=None, run_mode=None, doc_root=None):
     """Validate, read, convert, gate, and report. Returns a summary dict.
 
     The run mode is DERIVED from `reviewer_registry.csv`: if any reviewer the
@@ -3358,7 +3358,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         resolutions=m.get("resolutions"), axes=m.get("axes"),
         requested_run_mode=requested_run_mode,
         file_root=file_root,
-        check_files=check_files)
+        check_files=check_files, doc_root=doc_root)
     # Derived even when the batch is rejected, so the stamp on a failed run
     # still says which kind of run it would have been.
     derived = BM.derive_run_mode(m["reviewers"], m["source_documents"],
@@ -4149,6 +4149,9 @@ def main(argv=None):
     ap.add_argument("manifest_dir")
     ap.add_argument("output_dir")
     ap.add_argument("--file-root", default=".")
+    ap.add_argument("--doc-root", default=None,
+                    help="where the source documents (PDFs) are, when not under --file-root; "
+                         "a bare Source_File name is looked for there and one folder down")
     ap.add_argument("--date", default="")
     ap.add_argument("--no-file-check", action="store_true")
     mode = ap.add_mutually_exclusive_group()
@@ -4165,7 +4168,7 @@ def main(argv=None):
         summary = run_batch(args.manifest_dir, args.output_dir,
                             file_root=args.file_root, run_date=args.date,
                             check_files=not args.no_file_check,
-                            run_mode=requested)
+                            run_mode=requested, doc_root=args.doc_root)
     except InternalReaderError as exc:
         import traceback
         traceback.print_exc()

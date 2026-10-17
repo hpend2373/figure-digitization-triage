@@ -1,0 +1,77 @@
+{
+ "files": {
+  "axis_series_page.py": "cd4cb69fb62ad3967b247f28d9bf6973de2ca41f00d389b2ce2d888774b65c85",
+  "test_axis_series_page.py": "98fc03566d5d1612436de77f2806124ba38b9e80cf6448ea1527f94f347c2363"
+ },
+ "suites": [
+  "test_axis_series_page.py"
+ ],
+ "mutations": [
+  {
+   "name": "리더와 같은 결과 이름도 제안의 것으로 넣는다",
+   "file": "axis_series_page.py",
+   "old": "        ist[\"outcome\"] = \"\" if same_out else ci[\"outcome\"]",
+   "new": "        ist[\"outcome\"] = ci[\"outcome\"]"
+  },
+  {
+   "name": "다시 그린 프레임을 넘기지 않는다",
+   "file": "axis_series_page.py",
+   "old": "        gs.update(frame=cg[\"frame\"], pickedTopPixel=",
+   "new": "        gs.update(pickedTopPixel="
+  },
+  {
+   "name": "단위를 비우는 제안을 알리지 않는다",
+   "file": "axis_series_page.py",
+   "old": "        if not same_unit and ci[\"unit\"] == \"\":\n            ist[\"unitBlank\"] = True\n",
+   "new": ""
+  },
+  {
+   "name": "찍은 행만 있는 기하를 행 없이 넘긴다",
+   "file": "axis_series_page.py",
+   "old": "    elif cg.get(\"rows\"):",
+   "new": "    elif False:"
+  },
+  {
+   "name": "얹을 제안이 없는 패널을 그냥 둔다",
+   "file": "axis_series_page.py",
+   "old": "        if pid not in P:\n            stops.append((pid, \"NO_PROPOSAL\"",
+   "new": "        if False:\n            stops.append((pid, \"NO_PROPOSAL\""
+  },
+  {
+   "name": "두 카드의 프레임을 맞춰 보지 않는다",
+   "file": "axis_series_page.py",
+   "old": "            if want != have:",
+   "new": "            if False:"
+  },
+  {
+   "name": "멈출 것이 있어도 페이지를 짓는다",
+   "file": "axis_series_page.py",
+   "old": "    if stops:\n        raise SystemExit(\"\\n\".join(\"멈춤 %s — %s: %s\" % s for s in stops) + \"\\n페이지를 짓지 않았습니다.\")",
+   "new": "    if False:\n        pass"
+  },
+  {
+   "name": "제안대로를 미리 고르지 않는다",
+   "file": "axis_series_page.py",
+   "old": "val, \" checked\" if val == \"ACCEPT\" else \"\", lab))",
+   "new": "val, \"\", lab))"
+  },
+  {
+   "name": "제안한 쪽이 없으면 Claude라 부른다",
+   "file": "axis_series_page.py",
+   "old": "data.get(\"BY\") or \"제안\"",
+   "new": "data.get(\"BY\") or \"Claude\""
+  },
+  {
+   "name": "축을 빌려 올 후보를 넘기지 않는다",
+   "file": "axis_series_page.py",
+   "old": "                    \"siblings\": [s for s in by_raster[g[\"Raster\"]] if s != p],",
+   "new": "                    \"siblings\": [],"
+  },
+  {
+   "name": "--subset이어도 리더 제안 전부를 맞춰 본다",
+   "file": "axis_series_page.py",
+   "old": "    for pid in sorted(set(P) if subset else set(G) | set(I) | set(P)):",
+   "new": "    for pid in sorted(set(G) | set(I) | set(P)):"
+  }
+ ]
+}

@@ -134,7 +134,19 @@ for _text, _want in (
         ("The SDS score improved after training.", CF.DEF_UNSTATED),
         ("SES was matched between groups.", CF.DEF_UNSTATED),
         ("Prices in USD were converted.", CF.DEF_UNSTATED),
-        ("Values are means and SDs.", "SD")):
+        ("Values are means and SDs.", "SD"),
+        # 2026-10-16: Inspiration4 Extended Data Fig. 7. The SD here is the
+        # name of the HRV measure (SDNN), not what the bars are; read as a
+        # definition it made the figure "SD" and the gate refused the SEM the
+        # caption gives two lines later.
+        # REVERT: take every "standard deviation" as a definition.
+        ("b, heart rate variability (HRV), derived from heart period data using "
+         "the standard deviation of R-R intervals across mission phases", CF.DEF_UNSTATED),
+        ("HRV was calculated as the SD of NN intervals; data are mean ± SEM.", "SEM"),
+        # and what it must not take away: no derivation verb, or no "of"
+        ("Values are mean ± standard deviation of three experiments.", "SD"),
+        ("Error bars show the standard deviation, calculated using all subjects.", "SD"),
+        ("Data were analysed using the standard deviation as the error bar.", "SD")):
     _code, _ev = CF.errorbar_definition(_text)
     check("%r -> %s" % (_text[:48], _want), _code == _want, "%s %r" % (_code, _ev))
 # REVERT: stop folding ligatures. "conﬁdence" then matches nothing, and a
@@ -249,6 +261,129 @@ check("'changes'도 진술의 주어가 된다",
 check("a subject-age sentence with ± is not a presentation statement",
       CF.document_statement([(1, 0, 0, 1, 1, "Subjects were aged 32 ± 4 years.")])
       == ("", "", ""))
+
+# ---------------------------------------------------------------------------
+print("wider readings (run2 2026-10-14, R8): W1 statement forms, sorted by where they stand")
+
+
+def _w1(*texts, captions=()):
+    return CF.wide_statement(CF.wide_finds([(i + 1, 0, 0, 1, 1, t) for i, t in enumerate(texts)], list(captions)))
+
+
+for _text, _want in (
+        ("Data provided as mean ± SD for all subjects.", "SD"),
+        ("Means and standard errors (± SE) were calculated for each condition.", "SE"),
+        # a scanned journal's OCR of "are"
+        ("Data arc presented as mean ± standard error.", "SE"),
+        ("Values are means ± SE.", "SE"),
+        ("Error bars represent means ± SEM.", "SEM")):
+    # REVERT: drop the W1 branch this sentence needs. The paper's only sentence
+    # about its bars is then not a statement, and the figure waits for a person.
+    check("W1 reads %r as %s" % (_text[:44], _want), _w1(_text)[0] == _want, _w1(_text))
+check("W1 quotes the sentence and its page",
+      _w1("Fourteen men.", "Data provided as mean ± SD for all subjects.")[1:] == ("Data provided as mean ± SD for all subjects", "2"),
+      _w1("Fourteen men.", "Data provided as mean ± SD for all subjects."))
+# REVERT: count every find, not only BODY ones. A figure's legend then speaks
+# for every figure of the paper, a table note for every figure, and a result
+# ('11.6 ± 3.0') for how the paper presents its values.
+check("a sentence in a block that opens 'Fig. n' is that figure's legend, not a statement",
+      _w1("Fig. 2. Heart rate. Values are means ± SD.") == ("", "", ""))
+check("a sentence inside one of the paper's captions is a legend too",
+      _w1("Values are means ± SD for the tilt.", captions=[("3", "Fig. 3. Tilt. Values are means ± SD for the tilt.")]) == ("", "", ""))
+check("a table's title is the table's, not a statement",
+      _w1("Table 1 Values are means ± SD of resting data.") == ("", "", ""))
+check("a note under table cells is the table's",
+      _w1("12.1 13.4 11.0 10.9", "Values are means ± SE; *Significant vs pre.") == ("", "", ""))
+check("an abbreviation list marks a table note",
+      _w1("Values are means ± SD. WASO, wakefulness after sleep onset; SWS, slow-wave sleep.") == ("", "", ""))
+check("a result with its spread is not how the paper presents its values",
+      _w1("Values are means of 11.6 ± 3.0 (SD) beats per minute.") == ("", "", ""))
+check("a sentence that names no mean or median is not a presentation statement",
+      _w1("Error bars are SD.") == ("", "", ""))
+check("the classes are reported: LEGEND, TABLE, VALUE, BODY",
+      [f[3] for f in CF.wide_finds([(1, 0, 0, 1, 1, "Fig. 4. Data provided as mean ± SD."),
+                                    (2, 0, 0, 1, 1, "Table 2 Values are means ± SE of everything."),
+                                    (3, 0, 0, 1, 1, "Values are means of 4.9 ± 1.1 s (SEM)."),
+                                    (4, 0, 0, 1, 1, "Data provided as mean ± SD for all.")], [])]
+      == ["LEGEND 4", "TABLE", "TABLE", "VALUE", "BODY"])     # the table: its sentence, and its title
+check("a table's own title is found where 'Table' ends the block before",
+      [f[3] for f in CF.wide_finds([(1, 0, 0, 1, 1, "see the summary in Table"),
+                                    (1, 0, 0, 1, 1, "4 Means (SD) and counts for all measures.")], [])] == ["TABLE"])
+check("two kinds in BODY sentences are AMBIGUOUS, with both quoted",
+      _w1("Data provided as mean ± SD here.", "Values are means ± SE there.")[0] == CF.DEF_AMBIGUOUS)
+
+
+def _row(fig, caption, definition="UNSTATED", evidence="", page="3", doc=""):
+    return {"Figure_Number": "FIG%s" % fig, "Caption_Full": caption, "Caption_Line": caption.split(".  ")[0], "Page": page,
+            "Errorbar_Definition": definition, "Errorbar_Evidence": evidence,
+            "Doc_Errorbar_Definition": doc, "Doc_Errorbar_Evidence": "x" if doc else "", "Doc_Errorbar_Page": "1" if doc else ""}
+
+
+_rows = CF.wider_readings([_row(1, "Fig. 1. Heart rate.")], [(2, 0, 0, 1, 1, "Values are means ± SE.")])
+check("W1 fills the document statement of every row", (_rows[0]["Doc_Errorbar_Definition"], _rows[0]["Doc_Errorbar_Page"]) == ("SE", "2"))
+# REVERT: let W1 replace a statement the narrow rule found. An answer that was
+# right moves because a wider net caught another sentence.
+_rows = CF.wider_readings([_row(1, "Fig. 1. Heart rate.", doc="SD")], [(2, 0, 0, 1, 1, "Values are means ± SE.")])
+check("W1 fills only an empty statement; a found one stays", _rows[0]["Doc_Errorbar_Definition"] == "SD")
+
+print("wider readings: W2 a caption that defers to another figure's")
+_blocks0 = [(9, 0, 0, 1, 1, "Nothing here.")]
+_rows = CF.wider_readings([_row(2, "Fig. 2. Supine. Error bars are SD.", "SD", "SD"),
+                           _row(3, "Fig. 3. Standing. Same data presentation as in Fig. 2.")], _blocks0)
+check("'same data presentation as in Fig. 2' takes Fig. 2's definition",
+      _rows[1]["Errorbar_Definition"] == "SD" and _rows[1]["Errorbar_Evidence"].startswith(CF.W2_PREFIX + "2"), _rows[1])
+_rows = CF.wider_readings([_row(2, "Fig. 2. Supine. Error bars are SD.", "SD", "SD"),
+                           _row(3, "Fig. 3. Standing. Error bars are the same as in Fig. 2.")], _blocks0)
+check("'error bars are the same as in Fig. 2' too", _rows[1]["Errorbar_Definition"] == "SD")
+for _say in ("Delay distribution, with same axes as in Fig. 2.",
+             "Responses; symbols as in Fig. 2.",
+             "Maps produced as in Figure 2."):
+    # REVERT: the first trial's pattern ('same ... as in Fig. n', or any 'as in
+    # Fig. n'). Westerhof 2006 Fig. 8 then takes Fig. 4's bars for a delay
+    # distribution that has none.
+    _rows = CF.wider_readings([_row(2, "Fig. 2. Supine. Error bars are SD.", "SD", "SD"),
+                               _row(4, "Fig. 4. %s" % _say)], _blocks0)
+    check("W2 refuses %r - not about the bars" % _say[:36], _rows[1]["Errorbar_Definition"] == "UNSTATED", _rows[1])
+_rows = CF.wider_readings([_row(2, "Fig. 2. Supine."), _row(3, "Fig. 3. Standing. Same data presentation as in Fig. 2.")], _blocks0)
+# REVERT: inherit from any figure the caption names. The deferring caption then
+# carries "UNSTATED" with a W2 quote for evidence - a reading that read nothing.
+check("W2 takes nothing from a figure that says nothing, not even a quote",
+      (_rows[1]["Errorbar_Definition"], _rows[1]["Errorbar_Evidence"]) == ("UNSTATED", ""), _rows[1])
+_rows = CF.wider_readings([_row(2, "Fig. 2. Supine. Error bars are SD.", "SD", "SD"),
+                           _row(3, "Fig. 3. Standing, mean ± SEM. Same data presentation as in Fig. 2.", "SEM", "SEM")], _blocks0)
+check("W2 leaves a caption that names its own bars", _rows[1]["Errorbar_Definition"] == "SEM")
+
+print("wider readings: W3 a caption cut at a column edge")
+_cap = "Fig. 6. Heart rate during exercise (C, stage"
+
+
+def _w3(next_block, own=_cap):
+    return CF.continuation([(6, 50, 700, 290, 760, own), next_block], {"Page": "6", "Caption_Line": own})
+
+
+check("a caption block ending mid-sentence reads on into the next column at its height",
+      _w3((6, 300, 702, 540, 760, "8: 135 W). Mean ± SEM. Right: recovery.")).startswith("8: 135 W). Mean ± SEM."))
+# REVERT: read on from any caption. A caption that ended has no second half,
+# and the block to its right is body text.
+check("... not when the caption ends with a full stop",
+      _w3((6, 300, 702, 540, 760, "Mean ± SEM."), own=_cap + " 8.") == "")
+check("... not when the next block is at another height", _w3((6, 300, 640, 540, 690, "Mean ± SEM.")) == "")
+check("... not when the next block is to its left", _w3((6, 20, 702, 40, 760, "Mean ± SEM.")) == "")
+check("... not when the next block opens a figure", _w3((6, 300, 702, 540, 760, "Fig. 7. Mean ± SEM.")) == "")
+check("... not when the next block opens a table", _w3((6, 300, 702, 540, 760, "Table 2 Mean ± SEM.")) == "")
+check("... not across a page", _w3((7, 300, 702, 540, 760, "Mean ± SEM.")) == "")
+_b = [(6, 50, 700, 290, 760, _cap), (6, 300, 702, 540, 760, "8: 135 W). Mean ± SEM.")]
+_rows = CF.wider_readings([_row(6, _cap, page="6"), _row(7, "Fig. 7. Same data presentation as in Fig. 6.", page="6")], _b)
+check("W3 gives the cut caption its definition, marked as read on", _rows[0]["Errorbar_Definition"] == "SEM"
+      and _rows[0]["Errorbar_Evidence"].startswith(CF.W3_PREFIX), _rows[0])
+# REVERT: run W2 before W3. Fig. 7 then defers to a figure that, at that
+# moment, says nothing, and stays UNSTATED.
+check("W3 runs before W2: a figure that defers to the cut caption inherits it", _rows[1]["Errorbar_Definition"] == "SEM", _rows[1])
+_draft1 = [{"Draft_ID": "D1", "Source_Document_ID": "DOC", "Page": "", "Figure_Number": "FIG1", "Caption_Text": "Fig. 1. Heart rate."}]
+# REVERT: leave the wider readings out of `rows_for_document`. They then exist
+# and are tested, and the file the plan reads never carries them.
+check("the module's own rows carry the wider readings",
+      CF.rows_for_document(_draft1, [(2, 0, 0, 1, 1, "Values are means ± SE.")])[0]["Doc_Errorbar_Definition"] == "SE")
 
 # ---------------------------------------------------------------------------
 print("through a PDF, the way the intake read it")

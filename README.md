@@ -78,6 +78,46 @@ have been answered for it.
                            read block, a unit and a grid - and every panel
                            missing either answer is named in plan_panels.csv
 
+What the census of those plans still leaves open is asked once, on one page,
+with a proposal on every line - so the person decides only where the proposal
+is wrong (`SKILL.md`, "Bundle what is left"):
+
+    bundle_items.py        one question per census problem; measures what the
+                           raster can answer, and writes no spec until every
+                           other question has a proposal from someone who looked
+      | bundle_page.py     the person answers: seen, approved as proposed, or held
+      | bundle_route.py    answers -> each gate's answer file, all or nothing;
+      |                    what has no gate yet goes to unrouted.csv
+      | census_copy.py     the gates on a COPY of the run, census before and after
+      v
+    record_*.py            the real record, --when = the day it was decided:
+                           dispositions, error bars, the two cards, and a panel's
+                           outcome name or "not a target" (record_outcomes.py)
+                           and a figure's legend groups (record_legends.py),
+                           which make_plan.py reads into the plan
+
+Panels drawn on the panel page come to the two cards through one page that asks
+both at once, with a proposal on every panel and "as proposed" preselected
+(`SKILL.md`, "Drawn panels to axes and series, on one page"):
+
+    panel_to_page.py       the drawn boxes -> 600 DPI rasters and regions, in a new
+                           folder (--verified-at one page's drawings, --outcomes
+                           leaves closed panels out, --pages/--doc-root find inputs)
+      | propose_run.py     geometry and identity proposals, resumable under a
+      |                    time budget; `reframe` after a frame is redrawn
+      | axis_series_page.py  both proposals on one card; the person looks and
+      |                    answers "as proposed", "needs fixing" or "hold"
+      | axis_series_recheck.mjs  every answered row rebuilt from the page's proposals
+      | route_axis_series.py  answers -> geometry/identity gate answers, all or
+      v                    nothing, names against the registry; `merge` appends
+    record_geometry.py / record_identity.py   on a copy first, census, then the run
+      | bundle_items.py    what the copy's census still asks -> the next bundle page
+
+Small fixes are tools of their own, run by hand once approved: `clip_frames.py`
+(a drawn frame past the picture's edge, cut back on both cards through their
+gates) and `rehash_moved_pages.py` (a figure row moved to the next page that
+still carries the old page's hash).
+
 ## What it does
 
     reviewer_registry.csv        who may attest an inventory, and how to reach them
@@ -128,7 +168,8 @@ defect in a reader stops the batch rather than arriving in somebody's queue as
     python3 pilot_397.py                     # pilot SKIPs and says which file
 
     python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root "$FDT_RASTER_ROOT"
-    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT"
+    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT" \
+        [--doc-root PDFS]                    # where the source PDFs are, if not under --file-root
     python3 finalize_batch.py OUT --template # then fill in the decisions
     python3 finalize_batch.py OUT
 
@@ -145,12 +186,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4903 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5081 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5453 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5638 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-4903 scenarios on main after v9.28 under `requirements-lock.txt`, and 5081 with
+5453 scenarios on main after v9.28 under `requirements-lock.txt`, and 5638 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

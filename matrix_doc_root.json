@@ -1,0 +1,42 @@
+{
+ "files": {
+  "batch_manifests.py": "d626d5bf57e310e6bfe13e1a01d5c2f208b4d602a85c22ad9b36927e932ec374",
+  "run_batch.py": "42fc94247ac677e0a683432c9bed00d6626f9f4471fcdfd12db8b29c204efbde",
+  "test_run_batch.py": "cdd40ea8f615bd3300bbbaac6fd05b5a3f7b39d89f55e0f9eb1e6e59a9687f82"
+ },
+ "suites": [
+  "test_run_batch.py"
+ ],
+ "mutations": [
+  {
+   "name": "문서 폴더를 보지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        held = resolve_document(r.get(\"Source_File\"))\n",
+   "new": "        held = resolve(r.get(\"Source_File\"))\n"
+  },
+  {
+   "name": "경로가 든 이름도 문서 이름으로 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if not n or os.path.basename(n) != n:\n",
+   "new": "        if not n:\n"
+  },
+  {
+   "name": "폴더 밖으로 나가는 링크를 따라간다",
+   "file": "batch_manifests.py",
+   "old": "            if real.startswith(doc_base + os.sep) and os.path.isfile(real):\n",
+   "new": "            if os.path.isfile(real):\n"
+  },
+  {
+   "name": "한 단계 아래 폴더를 보지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        for cand in [os.path.join(doc_base, n)] + [os.path.join(doc_base, d, n) for d in subs]:\n",
+   "new": "        for cand in [os.path.join(doc_base, n)]:\n"
+  },
+  {
+   "name": "명령줄의 문서 폴더를 검사에 넘기지 않는다",
+   "file": "run_batch.py",
+   "old": "        check_files=check_files, doc_root=doc_root)\n",
+   "new": "        check_files=check_files)\n"
+  }
+ ]
+}

@@ -1,11 +1,6 @@
 ---
 name: figure-digitization-triage
-description: >-
-  Plan, execute and QC graph-only data extraction for a systematic review or
-  meta-analysis. Screens figure captions into routes, compiles one typed plan
-  into eleven manifests, reads panels with declared readers, gates the values on
-  a universal factorial grid, puts every extraction in front of a named human,
-  and writes a poolable file only for what that person approved.
+description: "Plan, run and QC graph-only data extraction for a systematic review or meta-analysis: caption triage, typed plans, declared readers, a factorial gate, one-page decision bundles, and human approval before anything is pooled."
 ---
 
 # Figure digitization triage
@@ -16,12 +11,21 @@ protocol. It is a pipeline, not a helper: the point is that the number which
 ends up in a meta-analysis can be traced to a raster, a calibration, a reader
 version, an environment and a person who looked at the picture and said yes.
 
+## Get the code
+
+Every script named below lives in the repository, not in this skill:
+https://github.com/hpend2373/figure-digitization-triage (branch
+`approved-claude-checks` until it is merged into `main`). Clone it and run from
+the clone; `python3 test_*.py` there is the check that the clone is whole. The
+`kernel.py` and `test_kernel.py` that older copies of this skill carried are in
+the repository too, with the rest of the pipeline built around them.
+
 ## Run it
 
 ```
 INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
 COMPILE    python3 compile_plan.py PLAN.json MANIFESTS/ --file-root .
-RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root .        -> MACHINE_QC_PASSED
+RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root . [--doc-root PDFS/]  -> MACHINE_QC_PASSED
 REVIEW     for every row of OUT/review_queue.csv, open what its Review_Mode names
            (OVERLAY -> Overlay_File, WPD_ONLY -> WPD_Project_File in WebPlotDigitizer),
            then fill Review_ID / Decision / Reviewer_ID / Reviewed_At in value_review.csv
@@ -38,6 +42,14 @@ run produced for this panel and therefore what to look at:
 | `BAR_MONO_GEOMETRY` | `geometry-review/index.html` — the panel picture, then every row crop | the drawn axis lines fall on the printed tick labels, and each bar's marked top and cap are where you would put them |
 | `BAR_MONO_GEOMETRY_RESOLVED` | the same, plus `geometry-review/identity__<Panel_ID>.csv` and the `geometry-review/evidence__*` files it cites | all of the above, **and** each resolution's evidence really names that series |
 | anything else, or the named file is absent | — | **do not approve.** The finalizer refuses it anyway (`REVIEW_MODE_UNKNOWN` / `REVIEW_ARTIFACT_MISSING`) |
+
+`--doc-root` is where the source PDFs are when they are not under `--file-root`
+(a run folder holds crops and rasters; the papers usually sit in a library folder
+of their own). A `Source_File` is then a bare file name, looked up in that folder
+or one level below it, and its SHA-256 is still checked; a name carrying a path,
+or a link that leads out of the folder, is refused rather than followed. Without
+it every document is `SOURCE_DOCUMENT_FILE_NOT_FOUND`, which is a setting, not a
+finding.
 
 `WPD_ONLY` is uncommon: it means the picture could not be drawn, which never
 fails a panel that produced values but does change what a reviewer has to open.
@@ -183,6 +195,25 @@ mark_readers.py     readers for line, marker, box/violin and scatter panels
 bar_reader.py       colour and monochrome bar readers
 review_overlay.py   the picture a person judges
 *_TEMPLATE.csv      every schema, generated from its column function
+
+bundle_items.py     census problems -> one question each, measured or proposed
+bundle_page.py      the decision bundle: one page, a proposal on every line
+bundle_page.js      what counts as an answer on it (seen / approved / held)
+bundle_route.py     the page's answers -> each gate's answer file, all or nothing
+census_copy.py      the gates on a copy of the run, census before and after
+record_outcomes.py  a drawn panel's outcome name, or "not a target" (R4)
+record_legends.py   which panels of one figure share a printed legend
+clip_frames.py      a drawn frame past the picture's edge, cut back on both cards
+rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
+
+panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and regions
+propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
+                    `reframe` re-proposes identity on a frame someone redrew
+axis_series_page.py the axis-and-series page: both proposals on one card, "as proposed" preselected
+axis_series_page.js what counts as an answer on it (the two pages' own verdictOf); `recheck`
+axis_series_recheck.mjs  the answers that came back, rebuilt from the page's proposals, row by row
+route_axis_series.py  its answers -> record_geometry / record_identity answers (registered names,
+                    a person's rename); `merge` appends the new proposals to the run's proposal files
 ```
 
 Everything below is the protocol: what each rule exists to prevent, stated
@@ -357,12 +388,379 @@ where SD/SE confusion scales the meta-analytic weight by sqrt(n).
 `UNRESOLVED_ERRORBAR_DEFINITION` blocks the placeholder vocabulary. Quote the
 source, or record `NO_ERRORBAR` and keep the row out of the pooled variance.
 
+The opposite mistake is as costly: a word that names a dispersion is not always
+a statement about the bars. "HRV ... derived from heart period data using the
+standard deviation of R-R intervals" names how a plotted variable (SDNN) was
+computed; read as a definition, it made a figure whose caption goes on to say
+"mean ± SEM" an SD figure, and the error-bar gate then refused the SEM a person
+found, because the figure no longer looked undefined. `caption_fulltext` skips a
+match that a deriving verb ("using", "calculated as", "defined as") puts in
+front of and an "of" follows.
+
 The same logic applies to `Unlisted_Panels`: matching panel COUNTS are not
 agreement. Two rows of one figure that both say "6 of 5" while one names PAP and
 the other MAP describe different figures, so the normalized name sets must match
 too (`UNLISTED_PANELS_INCONSISTENT_IN_FIGURE`). Normalized, not literal — "pap ,
 map" and "MAP;PAP" are the same answer, and a consistency check that says
 otherwise has become a spelling check.
+
+## Bundle what is left, so a person decides only what needs a person
+
+At a hundred publications the census of the plans (`make_plan.py` ->
+`compile_plan.py` -> `run_batch.py`, read for manifest problems only) leaves a
+few hundred open questions: a figure nobody has disposed of, a drawn panel whose
+outcome has no name, a monochrome bar whose fill was never declared, a marker
+shape nobody named, a tick pair that lands outside its panel. Asked one page at a
+time, each costs a person a context switch; asked without a proposal, each costs
+them the reading as well. The decision bundle asks all of them on one page, and
+**every line carries a proposal**, so the person's work shrinks to the lines
+where the proposal is wrong.
+
+    census_copy.py / any census   man_<pub>/ manifests + out_<pub>/manifest_problems.csv
+      | bundle_items.py           one question per problem code; measures what the
+      |                           raster can answer; the rest needs a proposal from
+      |                           someone who LOOKED -> exit 2 and WORK/todo.json
+      v                           until every question has one
+    spec.json
+      | bundle_page.py            one local page: picture, current state, options,
+      v                           proposal, reason, who proposed it
+    bundle_answers.csv            written by the page; nothing on it is pre-selected
+      | bundle_route.py           answers -> one answer file per existing gate,
+      v                           all or nothing
+    *_answers.csv, unrouted.csv, held.csv, route_log.json
+      | census_copy.py            the gates write to a COPY of the run; the same
+      v                           census before and after
+    compare.json                  what the answers WOULD change, per problem code
+      | record_dispositions.py / record_errorbar.py / record_outcomes.py /
+      | record_legends.py / record_identity.py --replace / record_geometry.py --replace
+      v                           on the real run, --when = the day it was decided
+    the next census
+
+The questions, by problem code (`bundle_items.py`):
+
+| section | problem | the question | gate |
+|---|---|---|---|
+| X | `SOURCE_PANEL_UNRESOLVED`, `SOURCE_PANEL_RUN_LINK_MISSING` | what to do with this figure | `record_dispositions` |
+| C | `MISSING_TARGET_OUTCOME_LABEL` on a drawn panel | the outcome's name and unit, or not a target | `record_outcomes` |
+| F | `MISSING_SERIES_DISCRIMINANT`, monochrome bars | each series' fill | `record_identity` |
+| M | `MISSING_SERIES_DISCRIMINANT`, lines and markers | each series' marker | `record_identity` |
+| L | `IDENTITY_DOMAIN_FILL_CONFLICT` | one figure, two legends | `record_legends`, or `record_identity` (MANUAL) |
+| K | `CALIBRATION_OUTSIDE_PANEL` | move the tick pair, or the box | `record_geometry` (the box: none yet) |
+
+**Measure what can be measured; ask for the rest.** K looks for tick marks
+within 12 px of the pair (spine ticks, gridlines) and proposes PAIRS when every
+pair moves onto one inside the panel, BOX otherwise - and BOX is a path still to
+build, because neither card gate takes a box from an answer (below). F measures each bar's dark
+fraction against the reader's own bands (`FILL_BANDS` must equal
+`mark_readers._FILL_BANDS`, and a scenario holds them together): one band is a
+proposal, mixed bands are MANUAL. The options are worded in the reader's terms,
+because the reader's terms are not a person's: a bar filled white looks "solid"
+and is OPEN to the reader, and a person who answered SOLID for black and white
+bars meant two plain fills, which in one series is MANUAL. Everything else needs someone to look at the
+figure, and `bundle_items.py` writes no spec while any question lacks a
+proposal - the questions, the measurements and the pictures go to
+`WORK/todo.json` for whoever (a person or an agent) writes them. A proposal for a
+question this census did not ask is refused (`STALE_PROPOSAL`). Work that is not
+a question - drawing the panels of a PARTIAL figure, a RECROP, a REDRAW, naming an
+undrawn panel - goes into the spec's notes as a person's task.
+
+**Undrawn panels are drawn on the panel page, with a proposal on every box.**
+`panel_page.py` takes a queue (`pid,fig,axes`) and a proposals file (one JSON line
+per figure: crop size and SHA-256, boxes with kind and count, and a note from
+whoever proposed them); `record_panels.py` records the answers into
+`seg/panel_decisions.csv`. A drawing answers the disposition that asked for it:
+`make_plan.py` takes a PARTIAL figure drawn on or after the day of its disposition,
+and a REDRAW figure drawn on a later day, as an ordinary figure standing on the
+drawn panels, and notes on the figure which disposition the drawing answered
+(`drawing_answers`). The panels a PARTIAL figure does not read are drawn as
+"no values to read", or - when they hold data that is not a target - drawn with
+their kind and closed through `record_outcomes.py` as NON_TARGET. A RECROP is not
+answered by a drawing: the crop itself was judged wrong. The records keep days,
+not hours, so a REDRAW drawing from the decision's own day is not taken; it may
+be the drawing that was refused.
+
+**Three kinds of answer, and `bundle_page.js` decides which.** The page moves
+values; the rules are a pure module with its own node suite, as on every other
+review page.
+
+- **seen** - the person pressed "직접 보았다" (I looked myself): `Seen_By_Person=1`.
+- **approved observation** - the person chose the proposal without looking:
+  `Seen_By_Person=0`, `Observed_By` = whoever made the proposal (planted on the
+  item), `Approval_Ref` = this answers file, the approver and the date. The gates
+  accept it as an approval (`approval.py`) and refuse it when the observer is the
+  approver (`OBSERVER_IS_APPROVER`).
+- **held** - HOLD writes nothing and claims nothing.
+
+An answer that differs from the proposal is not an answer without "seen": a
+choice nobody looked at is nobody's observation - the proposer did not see it
+that way, and the person did not see it. A rewritten name (EDIT) is text a person
+typed, so it is always seen. "Fill with the proposals" fills empty lines only;
+overwriting a line the person chose differently would turn it into an approval
+they never gave. The spec itself is refused before a page is built when a line
+has no proposal (`NO_PROPOSAL`), no reason (`NO_REASON`) or nobody who proposed
+it (`NO_OBSERVER`).
+
+**Every answer names the question it answers.** The CSV carries `Item_SHA256`
+(target, current state, options, proposal, reason, proposer) and `Image_SHA256`
+(the picture shown). `bundle_route.py` refuses an answer to a page built from
+another census (`STALE_ITEM`), an item answered twice, an unseen change
+(`UNSEEN_CHANGE`), an approval naming someone other than the proposer
+(`OBSERVER_MISMATCH`), an unseen EDIT, an edit to a card that does not exist
+(`MISSING_CARD`), two items setting one field differently
+(`CONFLICTING_EFFECTS`), and one card touched by a seen answer and an approval,
+or by two people (`MIXED_PROVENANCE`) - a card row carries one provenance. **One
+refused row and no gate file is written**: a bundle recorded half-way is worse
+than one not recorded. A card file named on the command line but absent stops
+it, rather than turning every card answer into `MISSING_CARD`.
+
+**A card answer can only change what the gate takes.** `record_identity` and
+`record_geometry` rebuild the card from their PROPOSAL row and lay on it only the
+fields a person gives - the series, the factors, the read route; the verdict, the
+tick values and pairs. A box, an axis region or anything else set in an answer
+is silently dropped, so `bundle_page.CARD_TAKES` lists what each gate copies, a
+scenario reads those names off the two gates' code, the page refuses an option
+that sets anything else (`BAD_EFFECT`) and the router refuses it again
+(`FIELD_NOT_TAKEN`). The same rebuild is why a geometry card on a frame a person
+drew (`Frame_Source=DRAWN`) goes with its frame as `Drawn_Frame`: without it the
+gate stands the new tick pairs on the READER's frame, and the frame the person
+drew is gone while only the pairs were meant to change. Both were found by
+recording a real bundle on a copy and diffing the cards - a census of problem
+counts did not show either.
+
+**No route is not a route.** An answer whose gate does not exist yet goes to
+`unrouted.csv` with what it needs. It is not dropped, and it is not written into
+a record where it does not belong. The small fixes (below) stay there: their
+answer is the approval, and the tool that does the fix is run by hand.
+
+**A panel's outcome and a figure's legends are records of their own.** A panel a
+person reads by hand (`MANUAL_DIGITIZE`), or one in a figure set aside for want of
+an error definition, never passes the identity page, so nothing gave it the name
+the plan requires of every target panel. `record_outcomes.py` takes, per panel
+(`<Draft_ID>_P<n>`, the plan's name), LABEL with the name the paper printed, or
+NON_TARGET; `make_plan.py` puts the name on a target panel that is not read
+automatically - an automatic panel keeps the name its identity card confirmed -
+and closes a NON_TARGET panel as `NON_TARGET_OUTCOME` before it gets a unit. A
+guess ("TBD", "unknown", "assumed") is refused as a name: a panel that looks named
+and is not is worse than one that is plainly unnamed. A name on a panel the plan
+has closed is refused too; reopening it is the figure's disposition's job.
+`record_legends.py` takes the legend groups of one figure (`p1,p3|p2`); `make_plan`
+gives each group its own `Identity_Domain_ID` (`F_<figure>__L<n>`), so the same
+hatching may mean "before bed rest" in panel A and "before diuretic" in panel B
+without the fill check stopping the figure. One group is the default and is not
+written; a panel in two groups is refused.
+
+**Small fixes are tools, each with the evidence it needs.** `clip_frames.py`
+cuts a drawn frame back to the picture (a frame drawn to a region that ends at
+the picture's edge can overshoot by a few pixels, and the reader stops on a box
+outside the image). It moves both cards together - `make_plan` reads identity
+only on the frame geometry stands on - by re-recording them through their own
+gates, rehearsed in a temporary folder first; a re-recorded card that differs
+from the old one anywhere but the frame and the record's who/when means the
+proposal was re-made since, and nothing is written. The card keeps the weaker
+provenance: a card that was an approved observation stays one even when a person
+saw the clip. `rehash_moved_pages.py` repairs rows the review sheet moved to the
+next page before it learned to move the page's hash with the page: it rewrites a
+hash only when it is exactly the moved-from page's, and stops on anything else.
+
+**Census on a copy, then record.** `census_copy.py` builds a link tree of the
+run, real-copies only the files the gates write, records with the gates
+themselves (not a re-implementation of them), and runs the same census before
+and after. The run's own gate files are hashed before and after, and a change is
+`RUN_CHANGED` - a gate wrote to the run instead of the copy. Any gate refusal
+stops it before the second census, and so does a gate that falls over
+(`GATE_FAILED`, written to `recorded.json` with the others). What a gate is known
+to need is checked before the first census, which takes minutes: error-bar
+answers need `--pdf-root` and the run's `errorbar_unstated.csv`. Read `compare.json` - every problem code that
+moves, by publication - before the gates touch the real run.
+
+**The page holds publisher figures.** It is a local file for the person
+deciding; it is not committed, published or shared.
+
+    python3 bundle_items.py --census CENSUS/ --run RUN --plans PLANS/ --work WORK/ \
+        [--proposals proposals.json] --spec WORK/spec.json      # exit 2: WORK/todo.json
+    python3 bundle_page.py WORK/spec.json --out bundle.html --items WORK/items.json --root WORK
+    # the person answers on bundle.html and saves bundle_answers.csv
+    python3 bundle_route.py --items WORK/items.json --answers bundle_answers.csv \
+        --identity RUN/seg/identity600/identity_decisions.csv \
+        --geometry RUN/seg/geometry600/geometry_decisions.csv --out ROUTED/
+    python3 census_copy.py --run RUN --routed ROUTED/ --when YYYY-MM-DD \
+        --reviewers reviewers.json --out CHECK/ [--pdf-root PDFS/]
+    # outcomes and legends are recorded against the plans they answered
+    python3 record_outcomes.py --run RUN --plans PLANS/ --answers ROUTED/outcome_answers.csv --when YYYY-MM-DD
+    python3 record_legends.py --run RUN --plans PLANS/ --answers ROUTED/legend_answers.csv --when YYYY-MM-DD
+    # small fixes, each approved on the page and run by hand
+    python3 clip_frames.py --run RUN --answers clip_answers.csv --when YYYY-MM-DD
+    python3 rehash_moved_pages.py --run RUN [--write]
+
+## Drawn panels to axes and series, on one page
+
+A panel drawn on the panel page is a box on a 200 DPI crop. Before `make_plan` can
+plan it, it needs a 600 DPI raster, a confirmed geometry (frame and a tick pair)
+and a confirmed identity (x positions and labels, series and their marks, outcome
+and unit) on the same frame. This is the path from the one to the other, and it
+asks the person one thing per panel: look at two pictures and say whether the
+proposal is right.
+
+    # 1. 600 DPI, into a NEW folder - nothing of the run changes
+    python3 panel_to_page.py --run RUN --decisions RUN/seg/panel_decisions.csv \
+        --pdfs RUN/seg/_pdf_locations.json --out RUN/seg/regions600_DATE \
+        --verified-at DATE --outcomes RUN/outcome_decisions.csv \
+        --pages RUN/pages --doc-root PDFS/ --budget 150 [--resume]
+    # 2. reader proposals (call again until "남음 0"; a remote shell that dies at 3 min is why)
+    python3 propose_run.py geometry --run RUN --regions RUN/seg/regions600_DATE/panel_regions_600.csv \
+        --out RUN/seg/geometry600_DATE --budget 150
+    python3 propose_run.py identity --run RUN --regions .../panel_regions_600.csv \
+        --geometry RUN/seg/geometry600_DATE/geometry_proposal.csv --out RUN/seg/identity600_DATE --budget 150
+    # 3. a proposal on every panel (PROPOSALS.json, schema in axis_series_page.py), then
+    python3 propose_run.py reframe --run RUN --geometry .../geometry_proposal.csv \
+        --identity RUN/seg/identity600_DATE --frames PROPOSALS.json
+    # 4. the page - a local file, it holds publisher figures
+    python3 axis_series_page.py --run RUN --geometry RUN/seg/geometry600_DATE \
+        --identity RUN/seg/identity600_DATE --proposals PROPOSALS.json --out axis_series.html --date DATE
+    # 5. the answers: rebuilt and compared, routed; the new proposals appended - on a COPY first
+    node axis_series_recheck.mjs axis_series.html axis_series_answers_DATE.csv
+    python3 route_axis_series.py route --answers axis_series_answers_DATE.csv --proposals PROPOSALS.json \
+        --geometry RUN/seg/geometry600_DATE --identity RUN/seg/identity600_DATE --out ROUTED/ \
+        --reviewers reviewers.json [--rename TYPED=REGISTERED]
+    python3 route_axis_series.py merge --run COPY --geometry ... --identity ... \
+        --regions .../panel_regions_600.csv --when DAY --write
+    python3 record_geometry.py --proposals COPY/seg/geometry600 --answers ROUTED/geometry_answers.csv --when DAY
+    python3 record_identity.py --proposals COPY/seg/identity600 --answers ROUTED/identity_answers.csv --when DAY
+    # census on the copy, compare, then the same on the run with backups
+
+**Only the panels that need it, from a new folder.** `--verified-at` takes one
+panel page's drawings; `--outcomes` leaves out the panels already closed as
+NON_TARGET, which would otherwise get proposals and come back to a person. The
+rasters, regions and proposals go into dated folders; the run's own
+`seg/regions600`, `seg/geometry600` and `seg/identity600` are touched only by
+`merge`, with a backup, after the answers.
+
+**Find the inputs; never guess them.** A draft's `Page_Raster` can be the absolute
+path of the session that made the run. `--pages` looks for the part after `/pages/`
+under the run's page folder and takes it only when its SHA-256 is the draft's
+`Page_Raster_SHA256` (`PAGE_RASTER_CHANGED` otherwise). A PDF missing from the
+locations file is found by name under `--doc-root` or one folder below it,
+compared in NFC because a Mac may store the name decomposed; its SHA-256 is
+checked against the draft as always.
+
+**The proposals are written by looking, not by reading numbers.** Whoever writes
+PROPOSALS.json (an agent, as a rule) looks at the whole figure and at both
+overlays of every panel, and measures on the raster what the picture shows. The
+rules that made the 2026-10-16 batch (96 panels, 27 figures) pass both gates:
+
+- **Precedent first.** The same paper's confirmed cards decide the factor names, the
+  series names and marks, the outcome naming (a breathing condition or a group in
+  the outcome's name, as the paper's other figures have it) and MANUAL. A new
+  factor name is taken from the corpus vocabulary before it is invented.
+- **The reader's tick values stand when they agree with the print.** When the reader
+  refused, or its residual is a few pixels, type the top and bottom values at the
+  reader's measured tick rows, or at the tick rows measured on the raster (`rows`).
+- **Redraw a frame that is not the plot**: one that takes in the title or the x
+  labels, or cuts a group in two. On the axis lines, in whole pixels (the geometry
+  gate rounds and the identity proposer truncates, so a .5 frame splits the two
+  cards), then `reframe` - `axis_series_page.py` stops on `FRAMES_DISAGREE` otherwise.
+- **Not read by the reader** (identity REJECTED, read by a person) when x is a
+  measured value per point (correlation scatters, Starling curves, anything on a
+  continuous measured axis) or the curve is a dense time course. Name the
+  precedent in `say`.
+- **Only what is drawn as a series is a series.** Individual lines are not series;
+  a mean drawn apart is ("Mean", R6). Series that share colour and marker, or use a
+  shape the reader does not know (TRIANGLE_DOWN, STAR, a circle with a cross), are
+  MANUAL with a `cue` for each.
+- **x is where the marks are**: group centres for bars and boxes, the mean symbol's
+  column when means are drawn beside the labels, the data columns when the axis is
+  numeric (`GRAVITY_LEVEL` at 0, 0.16, 0.38, 1 G). Measured on the raster - tick
+  marks, bar tops, error-bar columns - not from a screenshot.
+- **What a person must see goes in `look`**, not into the decision: a figure whose
+  values repeat another's, a one-position x axis, a group name taken from the
+  caption. Duplicates are closed later as outcomes, not here.
+- **SCATTER only when x is a measured value.** Individual points beside a mean, at
+  two or three category positions (before/after), are a positional mark: LINE_MONO
+  with the mean as the series, as the corpus's 54 such cards have it. SCATTER there
+  makes the plan an association and the census charges four codes per panel.
+- **Leave `line_style` blank on LINE_MONO.** Its reader matches by marker only, and a
+  line style it will not apply stops the plan (`LINE_STYLE_NOT_READ`); series that
+  differ only by line style are LINE_MONO_STYLE.
+
+**The page asks to look, and preselects the rest.** Every card opens with "as
+proposed" chosen for both parts; "I looked at both pictures" is never preselected,
+because choosing is judgement and looking is a witness. A wrong part is switched
+to "needs fixing" with a note, or held; those come back in `not_accepted.csv` and
+are asked again on a page of their own (`--subset`). "As proposed" exports the
+gate row the geometry and identity pages' own `verdictOf` build - the page adds no
+rule of its own except emptying a unit the reader read where the figure has none
+(`unitBlank`, written into the Note).
+
+**Route all or nothing; merge, then record, on a copy.** `route` refuses an answer
+that was not seen, has no name, answers a panel twice, or carries a gate row for a
+different panel, reviewer, witness or verdict than the proposal - and then writes
+nothing. `merge` refuses a Proposal_ID already in the run, a target that is a link,
+a column the target lacks that a new row fills (a column every new row leaves blank -
+a decision column the proposer gained after the run's file was written - is left
+out), a different picture under the same name, and a backup that already exists. In the 2026-10-16 batch the routed test answers were taken by
+both gates for all 96 panels on a copy, and every confirmed identity stood on the
+geometry's frame.
+
+## When the answers come back
+
+The page's answers are a person's claim; before anything is written, check that
+they answer the questions the page asked, under a name the records know, and find
+out what they will change - on a copy.
+
+1. **Rebuild every row.** `node axis_series_recheck.mjs PAGE.html ANSWERS.csv` takes the
+   proposals out of the page and rebuilds each "as proposed" gate row with this
+   checkout's `verdictOf`; every row must be the same, field for field, and "fix" or
+   "hold" rows must carry none. A difference means another page, another proposals
+   file or a hand-edited answer. (A page built by an older version may differ for
+   that reason alone - rebuild it with this version and compare again.)
+2. **Names against the registry.** `route --reviewers` stops on a name the registry
+   does not have (`UNREGISTERED_REVIEWER`). The 2026-10-17 answers came in as `miyeop`
+   for `minyeop`; the gates write names as typed, so a typo becomes a second person.
+   The fix is a person's call, made once (run2: "검토자 이름은 모두 minyeop으로 통일") and
+   passed as `--rename miyeop=minyeop`: the answer and its gate row change together,
+   the gate row's Note says so, and the downloaded file stays as it was typed.
+3. **Merge and record on a copy, then the census.** A link tree of the run with real
+   copies of the files `merge` and the two gates write (never a link to a directory
+   of the run); `merge --write`, `record_geometry`, `record_identity`; the run's own
+   `seg/*600` fingerprints compared before and after; `census_copy.census` on the run
+   and the copy, with `--file-root` the run itself (`compile_plan` refuses files that
+   resolve outside the file root, and a link tree's files do). On 2026-10-17: 192
+   rows, recheck 192/192, both gates 96/96 with nothing refused and no old row
+   changed, census 98 -> 70.
+4. **The next bundle comes from that copy's census.** What the census still asks is
+   the next page (`bundle_items.py` on the copy's census, with proposals): outcome
+   names of the panels a person will read, cards the census charged, error
+   definitions. Questions no question code covers go in as `extra_items` with an
+   effect on an existing gate, or `{"gate": null, "needs": ...}` when no gate takes
+   them yet. Answer the page with every proposal (name TEST) in a browser, route it,
+   and run `census_copy.py --run COPY --file-root RUN` on top of the first copy: on
+   2026-10-17, 56 items, nothing refused, census 70 -> 2 (one RECROP left, a person's).
+
+Rules that came out of that bundle:
+
+- **Names come from the axis title and the panel title**, so a name question shows
+  the panel with a margin wide enough for both (`bundle_items.NAME_PAD`).
+- **Close a panel whose y values repeat another's.** The same means plotted against a
+  second x (calf resistance against burst rate, then against total MSNA) is one
+  outcome twice: name the first, close the second as NON_TARGET with the reason.
+- **A continuous trace whose stage means are drawn elsewhere with their errors** (a
+  14-subject mean time course beside bars of the same stages) is proposed NON_TARGET:
+  reading it by hand adds no summary statistic. The person can still name it.
+- **"95% confidence intervals" in a caption is not always the error bar.** In a
+  caption about regression ("broken lines show the 95% confidence intervals") it is
+  the band of a fitted line; the bars are whatever the statistics section says
+  ("Data are given as the mean ± SD"). Two such figures read as CI95 in run2.
+
+Known gaps, written down so nobody trusts them silently:
+
+- `record_errorbar` takes only figures in `errorbar_unstated.csv`, made before the
+  panels were counted; a figure opened later, or one whose caption was misread, is
+  `NOT_PENDING`. Its answer goes to `unrouted.csv` with the row it would write.
+- `bundle_page` demands a quote on every error-bar effect, while `record_errorbar`
+  refuses one on DROP and does not ask one for NO_ERRORBAR.
+- `make_plan` falls back to the 200 dpi crop when a region's `Raster_600` file is
+  missing; the 600 dpi boxes then sit on the wrong picture, and the run stops at
+  reading time (`INTERNAL_ERROR`), not at planning time.
 
 ## Provenance is per FIELD, not per row
 
@@ -632,6 +1030,29 @@ reads about 140 on the same figure. Thresholding both at 128 found every cap and
 no stem, so on publication 397 the reader confirmed nothing and returned no
 dispersion at all - a fail-closed answer produced by a measurement error rather
 than by the figure.
+
+## Caption screening, carried from the first version
+
+The first version of this skill was the caption screen and the row validator
+that `kernel.py` still is; `make_plan.py` calls the screen for every figure. What
+it learned still holds:
+
+- `fig_screen_caption` gives a route per figure: `DIGITIZE`,
+  `PARTIAL_PANEL_TARGET`, `ASSOCIATION_ONLY_NOT_TARGET`, `BINARY_EVENT_NOT_MEAN`,
+  `NO_TARGET_OUTCOME`, `NOT_DATA`. The last two are screening verdicts from
+  caption text, which is often truncated - a visual check closes them, not the
+  screen.
+- A scatter or regression plot read with the mean template fabricates a mean
+  difference out of an association; it needs its own schema.
+- Target terms name outcomes, never groups or timepoints ("presyncopal men" is a
+  cohort). Qualify an ambiguous noun rather than truncating it, and after any
+  term-list edit diff the routes of the whole corpus and read every caption whose
+  route changed.
+- `Exposure_Phase` is declared (`PRE` / `DURING` / `POST` / `RECOVERY` / `DELTA`),
+  never inferred from a label: `FD15` or `HDT30` is DURING, not follow-up.
+- No error bar is `NO_ERRORBAR`, never `NONE`, which the blank-token rule reads as
+  an empty cell. A CSV blank is float nan, whose `str()` is "NAN" - validate
+  through a CSV round-trip, never an in-memory frame.
 
 ## The four suites, and why there are four
 

@@ -1,0 +1,125 @@
+{
+ "files": {
+  "route_axis_series.py": "a097606e07bf5c9abfe261f1260278599d9a3a29784710ab370683330141c50a",
+  "test_route_axis_series.py": "41ca1369273d79b920c44733d5e5c8f9063c528743baf710b5d7543ad55307ef"
+ },
+ "suites": [
+  "test_route_axis_series.py"
+ ],
+ "mutations": [
+  {
+   "name": "보았다는 말을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if (a.get(\"Seen_By_Person\") or \"\").strip() != \"1\":",
+   "new": "        if False:"
+  },
+  {
+   "name": "이름을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if not who:\n            stop(\"NO_REVIEWER\"",
+   "new": "        if False:\n            stop(\"NO_REVIEWER\""
+  },
+  {
+   "name": "같은 패널·부분의 답 둘을 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if (pid, part) in seen:",
+   "new": "        if False:"
+  },
+  {
+   "name": "제안 파일에 있는지 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if pid not in proposals:\n            stop(",
+   "new": "        if False:\n            stop("
+  },
+  {
+   "name": "관문이 받을 제안 CSV를 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if pid not in known[part]:",
+   "new": "        if False:"
+  },
+  {
+   "name": "관문 줄 없는 제안대로를 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if not raw:\n            stop(\"GATE_ROW_MISSING\"",
+   "new": "        if False:\n            stop(\"GATE_ROW_MISSING\""
+  },
+  {
+   "name": "고칠 곳에 붙은 관문 줄을 둔다",
+   "file": "route_axis_series.py",
+   "old": "            if raw:\n                stop(\"GATE_ROW_ON_NON_ACCEPT\"",
+   "new": "            if False:\n                stop(\"GATE_ROW_ON_NON_ACCEPT\""
+  },
+  {
+   "name": "관문 줄의 판정을 제안과 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Human_Verification_Status\", row.get(\"Human_Verification_Status\") == want)) if not ok]",
+   "new": "                               (\"Human_Verification_Status\", True)) if not ok]"
+  },
+  {
+   "name": "관문 줄의 이름을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Verified_By\", (row.get(\"Verified_By\") or \"\").strip() == who),",
+   "new": "                               (\"Verified_By\", True),"
+  },
+  {
+   "name": "관문 줄의 패널을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        bad = [k for k, ok in ((\"Proposal_ID\", row.get(\"Proposal_ID\") == pid),",
+   "new": "        bad = [k for k, ok in ((\"Proposal_ID\", True),"
+  },
+  {
+   "name": "관문 줄의 목격을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Seen_By_Person\", str(row.get(\"Seen_By_Person\")) == \"1\"),",
+   "new": "                               (\"Seen_By_Person\", True),"
+  },
+  {
+   "name": "멈춘 줄이 있어도 쓴다",
+   "file": "route_axis_series.py",
+   "old": "    if stops:\n        for s in stops:\n            print(\"멈춤 %s — %s: %s\" % s)\n        print(\"멈춘 줄이 있어 아무것도 쓰지 않았습니다.\")\n        return 1\n",
+   "new": ""
+  },
+  {
+   "name": "기본이 붙이기",
+   "file": "route_axis_series.py",
+   "old": "    if stops or not write_it:\n        return plan, pictures, stops",
+   "new": "    if stops:\n        return plan, pictures, stops"
+  },
+  {
+   "name": "백업을 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        shutil.copy2(target, \"%s.before_merge_%s\" % (target, when))\n",
+   "new": ""
+  },
+  {
+   "name": "이미 있는 패널을 다시 붙인다",
+   "file": "route_axis_series.py",
+   "old": "        if dup:\n            stops.append",
+   "new": "        if False:\n            stops.append"
+  },
+  {
+   "name": "이미 있는 백업을 덮는다",
+   "file": "route_axis_series.py",
+   "old": "        if os.path.lexists(backup):",
+   "new": "        if False:"
+  },
+  {
+   "name": "대상에 없는 열을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if extra:\n            stops.append",
+   "new": "        if False:\n            stops.append"
+  },
+  {
+   "name": "같은 이름의 다른 그림을 덮는다",
+   "file": "route_axis_series.py",
+   "old": "                    if a_.read() != b_.read():",
+   "new": "                    if False:"
+  },
+  {
+   "name": "링크인 대상을 따라 쓴다",
+   "file": "route_axis_series.py",
+   "old": "        if os.path.islink(target) or not os.path.isfile(target):",
+   "new": "        if not os.path.isfile(target):"
+  }
+ ]
+}

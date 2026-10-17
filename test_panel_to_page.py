@@ -186,6 +186,68 @@ rows, ref, left = P.convert(RUN, [panel("D1", 1)], {"D1": draft("D1")}, PDFS,
                             os.path.join(TMP, "late"), renderer=fake_renderer, deadline=0)
 check("시계가 지나면 손대지 않은 그림을 이름으로 낸다", not rows and not ref and left == ["D1"], (rows, ref, left))
 
+print()
+print("입력을 찾는 두 길")
+PAGE_SHA = P.sha256(os.path.join(RUN, "pages", "p1.png"))
+
+
+def moved_draft(fid="D1", sha=PAGE_SHA):
+    d = draft(fid)
+    d["Page_Raster"] = "/sessions/old-session/mnt/run/pages/p1.png"     # 다른 세션의 절대 경로
+    d["Page_Raster_SHA256"] = sha
+    return d
+
+
+rows, ref, _ = P.convert(RUN, [panel("D1", 1)], {"D1": moved_draft()}, PDFS,
+                         os.path.join(TMP, "pg0"), renderer=fake_renderer)
+check("옛 세션의 쪽 래스터 경로는 --pages 없이 거절", [c for _, c, _ in ref] == ["PAGE_RASTER_MISSING"], ref)
+# REVERT: '/pages/' 뒤를 찾지 않는다. 세션이 바뀐 런은 한 장도 옮기지 못합니다.
+rows, ref, _ = P.convert(RUN, [panel("D1", 1)], {"D1": moved_draft()}, PDFS,
+                         os.path.join(TMP, "pg1"), renderer=fake_renderer, pages=os.path.join(RUN, "pages"))
+check("--pages 아래에서 같은 지문의 쪽 래스터를 찾아 옮긴다", not ref and len(rows) == 1
+      and rows[0]["Page_Raster_SHA256"] == PAGE_SHA, ref)
+# REVERT: 대신 찾은 쪽 래스터의 지문을 보지 않는다. 다시 뽑은 래스터 위의 자리를 믿습니다.
+rows, ref, _ = P.convert(RUN, [panel("D1", 1)], {"D1": moved_draft(sha="2" * 64)}, PDFS,
+                         os.path.join(TMP, "pg2"), renderer=fake_renderer, pages=os.path.join(RUN, "pages"))
+check("대신 찾은 쪽 래스터의 지문이 다르면 거절", [c for _, c, _ in ref] == ["PAGE_RASTER_CHANGED"] and not rows, ref)
+check("경로에 '/pages/'가 없으면 대신 찾지 않는다",
+      P.resolve_page("/elsewhere/p1.png", RUN, os.path.join(RUN, "pages")) == ("", False))
+check("경로에 파일이 있으면 그것을 쓴다(대신 찾은 것 아님)",
+      P.resolve_page("pages/p1.png", RUN, os.path.join(RUN, "pages")) == (os.path.join(RUN, "pages", "p1.png"), False))
+
+import unicodedata                                               # noqa: E402
+LIB = os.path.join(TMP, "lib")
+os.makedirs(os.path.join(LIB, "sub"))
+NAME = "kamiya-α-adrénergique.pdf"          # é는 분해형(NFD)에서 두 글자
+shutil.copy(os.path.join(RUN, "doc.pdf"), os.path.join(LIB, "sub", unicodedata.normalize("NFD", NAME)))
+ldraft = dict(draft("D1"), Source_File=unicodedata.normalize("NFC", NAME))
+# REVERT: 한 단계 아래 폴더를 보지 않는다. 라이브러리의 하위 폴더에 든 논문을 못 찾습니다.
+rows, ref, _ = P.convert(RUN, [panel("D1", 1)], {"D1": ldraft}, {}, os.path.join(TMP, "doc1"),
+                         renderer=fake_renderer, doc_root=LIB)
+check("--doc-root 한 단계 아래에서, 분해형 이름도 NFC로 맞춰 찾는다", not ref and len(rows) == 1, ref)
+rows, ref, _ = P.convert(RUN, [panel("D1", 1)], {"D1": ldraft}, {}, os.path.join(TMP, "doc2"),
+                         renderer=fake_renderer)
+check("--doc-root 없이 목록에 없는 PDF는 거절", [c for _, c, _ in ref] == ["PDF_MISSING"], ref)
+check("경로가 든 이름은 찾지 않는다", P.find_document(LIB, "sub/" + NAME) == "")
+OUTSIDE = os.path.join(TMP, "outside.pdf")
+shutil.copy(os.path.join(RUN, "doc.pdf"), OUTSIDE)
+os.symlink(OUTSIDE, os.path.join(LIB, "link.pdf"))
+# REVERT: 링크가 가리키는 곳이 폴더 안인지 보지 않는다.
+check("폴더 밖으로 나가는 링크는 찾지 않는다", P.find_document(LIB, "link.pdf") == "")
+
+print()
+print("패널을 고르는 두 길")
+dec = [panel("D1", 1), dict(panel("D1", 2), Verified_At="2026-10-16"), dict(panel("D1", 3), Verified_At="2026-10-16")]
+OUTC = os.path.join(TMP, "outcome_decisions.csv")
+with io.open(OUTC, "w", encoding="utf-8") as fh:
+    fh.write("Panel_ID,Decision\nD1_P3,NON_TARGET\nD1_P2,LABEL\n")
+# REVERT: 날을 보지 않는다. 이미 옮긴 패널까지 다시 옮겨 제안이 두 벌이 됩니다.
+check("--verified-at: 그날 확인된 줄만", [r["Panel_Index"] for r in P.select(dec, "2026-10-16")] == ["2", "3"])
+# REVERT: 닫힌 패널을 빼지 않는다. 결과 아님으로 닫은 패널에 축·정체 제안이 납니다.
+check("--outcomes: NON_TARGET으로 닫힌 패널은 빼고, LABEL은 둔다",
+      [r["Panel_Index"] for r in P.select(dec, "2026-10-16", P.closed_panels(OUTC))] == ["2"])
+check("닫힌 패널 목록은 NON_TARGET만", P.closed_panels(OUTC) == {"D1_P3"} and P.closed_panels(None) == set())
+
 shutil.rmtree(TMP, ignore_errors=True)
 print()
 print("FDT_SCENARIOS_RUN=%d" % N[0])

@@ -37,6 +37,21 @@
 
 이 파일은 아무것도 판정하지 않습니다. 종류·개수·검토자는 `panel_decisions.csv`에서
 그대로 옮겨 적습니다.
+
+## 입력을 찾는 두 길, 패널을 고르는 두 길
+
+- `--pages DIR`: 초안의 `Page_Raster`는 그 런을 만든 세션의 **절대 경로**일 수 있고, 다음
+  세션에서는 그 자리에 없습니다. 그 경로에 파일이 없을 때만 경로의 `/pages/` 뒤를 DIR
+  아래에서 찾고(`rehash_moved_pages.resolve`와 같은 규칙), 찾은 파일의 지문이 초안의
+  `Page_Raster_SHA256`과 같을 때만 씁니다. 다르면 `PAGE_RASTER_CHANGED`로 거절합니다 -
+  다시 뽑은 쪽 래스터 위의 크롭 자리는 이 그림의 자리가 아닐 수 있습니다.
+- `--doc-root DIR`: `--pdfs`에 없는 PDF를 이름으로 찾습니다. DIR 안이나 한 단계 아래 폴더,
+  이름은 유니코드 NFC로 맞춰 봅니다(맥의 파일 이름은 분해형일 수 있습니다). 경로가 든
+  이름과 폴더 밖으로 나가는 링크는 찾지 않습니다(`run_batch --doc-root`와 같은 규칙). 지문은
+  늘 그렇듯 초안의 `Source_File_SHA256`과 대 봅니다.
+- `--verified-at DATE`: 그날 확인된 패널 줄만 옮깁니다 - 패널 페이지 한 번의 답만.
+- `--outcomes FILE`: `outcome_decisions.csv`에서 NON_TARGET으로 닫힌 패널은 옮기지 않습니다.
+  옮기면 그 패널에도 축·정체 제안이 나고, 닫힌 패널을 사람이 다시 봅니다.
 """
 import argparse
 import csv
@@ -47,6 +62,7 @@ import os
 import subprocess
 import sys
 import time
+import unicodedata
 
 import numpy as np
 
@@ -184,6 +200,71 @@ def roundtrip(raster, crop, shift_max=SHIFT_MAX + 3):
     return ncc, (int(dx), int(dy))
 
 
+def resolve_page(path, run, pages):
+    """초안의 Page_Raster가 가리키는 파일. (경로, 대신 찾았는가) 또는 ("", False)."""
+    path = str(path or "").strip()
+    if not path:
+        return "", False
+    here = path if os.path.isabs(path) else os.path.join(run, path)
+    if os.path.isfile(here):
+        return here, False
+    if pages and "/pages/" in path:
+        there = os.path.join(pages, *path.split("/pages/", 1)[1].split("/"))
+        if os.path.isfile(there):
+            return there, True
+    return "", False
+
+
+def nfc(text):
+    return unicodedata.normalize("NFC", str(text or ""))
+
+
+def find_document(doc_root, name):
+    """doc_root 안이나 한 단계 아래에서 `name`(NFC로 맞춰 봄)인 파일, 또는 ""."""
+    n = str(name or "").strip()
+    # 경로가 든 이름('sub/x.pdf', '../x.pdf')은 아래에서 폴더의 항목 이름과 맞춰 보므로
+    # 저절로 맞지 않습니다 - 따로 막는 줄을 두면 변이가 살아남는 장식이었습니다.
+    if not doc_root or not n:
+        return ""
+    base = os.path.realpath(doc_root)
+    try:
+        subs = sorted(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)))
+    except OSError:
+        return ""
+    for folder in [base] + [os.path.join(base, d) for d in subs]:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for f in sorted(names):
+            if nfc(f) != nfc(n):
+                continue
+            real = os.path.realpath(os.path.join(folder, f))
+            if real.startswith(base + os.sep) and os.path.isfile(real):
+                return real
+    return ""
+
+
+def select(decisions, verified_at="", closed=()):
+    """옮길 패널 줄. 그날 확인된 줄만(`verified_at`), 결과 아님으로 닫힌 패널은 빼고."""
+    out = []
+    for r in decisions:
+        if verified_at and (r.get("Verified_At") or "").strip() != verified_at:
+            continue
+        if "%s_P%s" % (r.get("Draft_ID"), r.get("Panel_Index")) in closed:
+            continue
+        out.append(r)
+    return out
+
+
+def closed_panels(path):
+    """outcome_decisions.csv에서 NON_TARGET으로 닫힌 Panel_ID들."""
+    if not path:
+        return set()
+    return {(r.get("Panel_ID") or "").strip() for r in load_csv(path)
+            if (r.get("Decision") or "").strip().upper() == "NON_TARGET"}
+
+
 def readable(rows):
     """그림별로, 옮길 패널 줄. NO_PANELS 그림과 읽을 값 없는 패널은 옮길 것이 없습니다."""
     by = {}
@@ -197,7 +278,7 @@ def readable(rows):
 
 
 def convert(run, decisions, drafts, pdfs, out_dir, renderer=render_region, dpi=DPI,
-            deadline=None):
+            deadline=None, pages=None, doc_root=None):
     """(rows, refusals, left). rows는 COLUMNS 순서의 dict, refusals는 (fid, code, detail),
     left는 `deadline`(time.time() 기준)이 지나 손대지 않은 그림들.
 
@@ -205,7 +286,7 @@ def convert(run, decisions, drafts, pdfs, out_dir, renderer=render_region, dpi=D
     보고 멈춥니다. 멈춘 자리는 `--resume`이 이어 갑니다. 그림 하나는 쪼개지 않습니다."""
     rows, refusals, left = [], [], []
     os.makedirs(out_dir, exist_ok=True)
-    pages = {}
+    seen_pages = {}
     for fid, panels in sorted(readable(decisions).items()):
         if deadline is not None and time.time() > deadline:
             left.append(fid); continue
@@ -214,6 +295,8 @@ def convert(run, decisions, drafts, pdfs, out_dir, renderer=render_region, dpi=D
             refusals.append((fid, "DRAFT_MISSING", "figure_intake_draft.csv에 없는 그림")); continue
         src = d.get("Source_File") or ""
         pdf = pdfs.get(src) or ""
+        if (not pdf or not os.path.isfile(pdf)) and doc_root:
+            pdf = find_document(doc_root, src)
         if not pdf or not os.path.isfile(pdf):
             refusals.append((fid, "PDF_MISSING", src)); continue
         pdf_sha = sha256(pdf)
@@ -228,14 +311,15 @@ def convert(run, decisions, drafts, pdfs, out_dir, renderer=render_region, dpi=D
             refusals.append((fid, "CROP_CHANGED",
                              "판정이 본 크롭 %s, 지금 크롭 %s" % (",".join(w[:12] for w in want), crop_sha[:12])))
             continue
-        page_path = d.get("Page_Raster") or ""
-        if page_path and not os.path.isabs(page_path):
-            page_path = os.path.join(run, page_path)
-        if not page_path or not os.path.isfile(page_path):
+        page_path, moved = resolve_page(d.get("Page_Raster"), run, pages)
+        if not page_path:
             refusals.append((fid, "PAGE_RASTER_MISSING", d.get("Page_Raster") or "(빈칸)")); continue
-        if page_path not in pages:
-            pages[page_path] = (gray(page_path), sha256(page_path))
-        page, page_sha = pages[page_path]
+        if page_path not in seen_pages:
+            seen_pages[page_path] = (gray(page_path), sha256(page_path))
+        page, page_sha = seen_pages[page_path]
+        if moved and page_sha != (d.get("Page_Raster_SHA256") or "").strip():
+            refusals.append((fid, "PAGE_RASTER_CHANGED",
+                             "%s의 지문이 초안의 Page_Raster_SHA256과 다릅니다" % page_path)); continue
         try:
             page_pt = (float(d["Page_Width_Pt"]), float(d["Page_Height_Pt"]))
             bbox = tuple(float(v) for v in str(d["Figure_BBox"]).split(","))
@@ -302,12 +386,17 @@ def main(argv=None):
                     help="이미 옮긴 그림은 건너뛰고, 있던 줄에 이어 적는다")
     ap.add_argument("--budget", type=float, default=0,
                     help="이 초가 지나면 그림 사이에서 멈춘다 (0 = 끝까지)")
+    ap.add_argument("--pages", help="Page_Raster 경로에 파일이 없을 때 '/pages/' 뒤를 찾을 폴더 (지문 확인)")
+    ap.add_argument("--doc-root", help="--pdfs에 없는 PDF를 이름으로 찾을 폴더 (한 단계 아래까지)")
+    ap.add_argument("--verified-at", default="", help="이날 확인된 패널 줄만")
+    ap.add_argument("--outcomes", help="outcome_decisions.csv - NON_TARGET으로 닫힌 패널은 빼고")
     a = ap.parse_args(argv)
     drafts = {r["Draft_ID"]: r for r in load_csv(os.path.join(a.run, "figure_intake_draft.csv"))}
     decisions = load_csv(a.decisions)
     if a.only:
         keep = set(a.only.split(","))
         decisions = [r for r in decisions if r["Draft_ID"] in keep]
+    decisions = select(decisions, a.verified_at, closed_panels(a.outcomes))
     kept_rows = []
     out_csv = os.path.join(a.out, "panel_regions_600.csv")
     ref_csv = os.path.join(a.out, "panel_regions_600_refused.csv")
@@ -322,7 +411,8 @@ def main(argv=None):
     # 상대 경로는 실행 폴더 기준입니다 - 세션마다 마운트 자리가 달라도 그대로 쓰게.
     pdfs = {k: (v if os.path.isabs(v) else os.path.join(a.run, v)) for k, v in pdfs.items()}
     deadline = time.time() + a.budget if a.budget else None
-    rows, refusals, left = convert(a.run, decisions, drafts, pdfs, a.out, deadline=deadline)
+    rows, refusals, left = convert(a.run, decisions, drafts, pdfs, a.out, deadline=deadline,
+                                   pages=a.pages, doc_root=a.doc_root)
     rows = kept_rows + rows
     rows.sort(key=lambda r: (r["Draft_ID"], int(r["Panel_Index"])))
     with io.open(out_csv, "w", encoding="utf-8", newline="") as fh:

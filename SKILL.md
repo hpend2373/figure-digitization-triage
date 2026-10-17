@@ -205,6 +205,14 @@ record_outcomes.py  a drawn panel's outcome name, or "not a target" (R4)
 record_legends.py   which panels of one figure share a printed legend
 clip_frames.py      a drawn frame past the picture's edge, cut back on both cards
 rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
+
+panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and regions
+propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
+                    `reframe` re-proposes identity on a frame someone redrew
+axis_series_page.py the axis-and-series page: both proposals on one card, "as proposed" preselected
+axis_series_page.js what counts as an answer on it (the two pages' own verdictOf)
+route_axis_series.py  its answers -> record_geometry / record_identity answers; `merge`
+                    appends the new proposals to the run's proposal files
 ```
 
 Everything below is the protocol: what each rule exists to prevent, stated
@@ -582,6 +590,105 @@ deciding; it is not committed, published or shared.
     # small fixes, each approved on the page and run by hand
     python3 clip_frames.py --run RUN --answers clip_answers.csv --when YYYY-MM-DD
     python3 rehash_moved_pages.py --run RUN [--write]
+
+## Drawn panels to axes and series, on one page
+
+A panel drawn on the panel page is a box on a 200 DPI crop. Before `make_plan` can
+plan it, it needs a 600 DPI raster, a confirmed geometry (frame and a tick pair)
+and a confirmed identity (x positions and labels, series and their marks, outcome
+and unit) on the same frame. This is the path from the one to the other, and it
+asks the person one thing per panel: look at two pictures and say whether the
+proposal is right.
+
+    # 1. 600 DPI, into a NEW folder - nothing of the run changes
+    python3 panel_to_page.py --run RUN --decisions RUN/seg/panel_decisions.csv \
+        --pdfs RUN/seg/_pdf_locations.json --out RUN/seg/regions600_DATE \
+        --verified-at DATE --outcomes RUN/outcome_decisions.csv \
+        --pages RUN/pages --doc-root PDFS/ --budget 150 [--resume]
+    # 2. reader proposals (call again until "남음 0"; a remote shell that dies at 3 min is why)
+    python3 propose_run.py geometry --run RUN --regions RUN/seg/regions600_DATE/panel_regions_600.csv \
+        --out RUN/seg/geometry600_DATE --budget 150
+    python3 propose_run.py identity --run RUN --regions .../panel_regions_600.csv \
+        --geometry RUN/seg/geometry600_DATE/geometry_proposal.csv --out RUN/seg/identity600_DATE --budget 150
+    # 3. a proposal on every panel (PROPOSALS.json, schema in axis_series_page.py), then
+    python3 propose_run.py reframe --run RUN --geometry .../geometry_proposal.csv \
+        --identity RUN/seg/identity600_DATE --frames PROPOSALS.json
+    # 4. the page - a local file, it holds publisher figures
+    python3 axis_series_page.py --run RUN --geometry RUN/seg/geometry600_DATE \
+        --identity RUN/seg/identity600_DATE --proposals PROPOSALS.json --out axis_series.html --date DATE
+    # 5. the answers, routed; the new proposals appended - on a COPY first
+    python3 route_axis_series.py route --answers axis_series_answers_DATE.csv --proposals PROPOSALS.json \
+        --geometry RUN/seg/geometry600_DATE --identity RUN/seg/identity600_DATE --out ROUTED/
+    python3 route_axis_series.py merge --run COPY --geometry ... --identity ... \
+        --regions .../panel_regions_600.csv --when DAY --write
+    python3 record_geometry.py --proposals COPY/seg/geometry600 --answers ROUTED/geometry_answers.csv --when DAY
+    python3 record_identity.py --proposals COPY/seg/identity600 --answers ROUTED/identity_answers.csv --when DAY
+    # census on the copy, compare, then the same on the run with backups
+
+**Only the panels that need it, from a new folder.** `--verified-at` takes one
+panel page's drawings; `--outcomes` leaves out the panels already closed as
+NON_TARGET, which would otherwise get proposals and come back to a person. The
+rasters, regions and proposals go into dated folders; the run's own
+`seg/regions600`, `seg/geometry600` and `seg/identity600` are touched only by
+`merge`, with a backup, after the answers.
+
+**Find the inputs; never guess them.** A draft's `Page_Raster` can be the absolute
+path of the session that made the run. `--pages` looks for the part after `/pages/`
+under the run's page folder and takes it only when its SHA-256 is the draft's
+`Page_Raster_SHA256` (`PAGE_RASTER_CHANGED` otherwise). A PDF missing from the
+locations file is found by name under `--doc-root` or one folder below it,
+compared in NFC because a Mac may store the name decomposed; its SHA-256 is
+checked against the draft as always.
+
+**The proposals are written by looking, not by reading numbers.** Whoever writes
+PROPOSALS.json (an agent, as a rule) looks at the whole figure and at both
+overlays of every panel, and measures on the raster what the picture shows. The
+rules that made the 2026-10-16 batch (96 panels, 27 figures) pass both gates:
+
+- **Precedent first.** The same paper's confirmed cards decide the factor names, the
+  series names and marks, the outcome naming (a breathing condition or a group in
+  the outcome's name, as the paper's other figures have it) and MANUAL. A new
+  factor name is taken from the corpus vocabulary before it is invented.
+- **The reader's tick values stand when they agree with the print.** When the reader
+  refused, or its residual is a few pixels, type the top and bottom values at the
+  reader's measured tick rows, or at the tick rows measured on the raster (`rows`).
+- **Redraw a frame that is not the plot**: one that takes in the title or the x
+  labels, or cuts a group in two. On the axis lines, in whole pixels (the geometry
+  gate rounds and the identity proposer truncates, so a .5 frame splits the two
+  cards), then `reframe` - `axis_series_page.py` stops on `FRAMES_DISAGREE` otherwise.
+- **Not read by the reader** (identity REJECTED, read by a person) when x is a
+  measured value per point (correlation scatters, Starling curves, anything on a
+  continuous measured axis) or the curve is a dense time course. Name the
+  precedent in `say`.
+- **Only what is drawn as a series is a series.** Individual lines are not series;
+  a mean drawn apart is ("Mean", R6). Series that share colour and marker, or use a
+  shape the reader does not know (TRIANGLE_DOWN, STAR, a circle with a cross), are
+  MANUAL with a `cue` for each.
+- **x is where the marks are**: group centres for bars and boxes, the mean symbol's
+  column when means are drawn beside the labels, the data columns when the axis is
+  numeric (`GRAVITY_LEVEL` at 0, 0.16, 0.38, 1 G). Measured on the raster - tick
+  marks, bar tops, error-bar columns - not from a screenshot.
+- **What a person must see goes in `look`**, not into the decision: a figure whose
+  values repeat another's, a one-position x axis, a group name taken from the
+  caption. Duplicates are closed later as outcomes, not here.
+
+**The page asks to look, and preselects the rest.** Every card opens with "as
+proposed" chosen for both parts; "I looked at both pictures" is never preselected,
+because choosing is judgement and looking is a witness. A wrong part is switched
+to "needs fixing" with a note, or held; those come back in `not_accepted.csv` and
+are asked again on a page of their own (`--subset`). "As proposed" exports the
+gate row the geometry and identity pages' own `verdictOf` build - the page adds no
+rule of its own except emptying a unit the reader read where the figure has none
+(`unitBlank`, written into the Note).
+
+**Route all or nothing; merge, then record, on a copy.** `route` refuses an answer
+that was not seen, has no name, answers a panel twice, or carries a gate row for a
+different panel, reviewer, witness or verdict than the proposal - and then writes
+nothing. `merge` refuses a Proposal_ID already in the run, a target that is a link,
+a column the target lacks, a different picture under the same name, and a backup
+that already exists. In the 2026-10-16 batch the routed test answers were taken by
+both gates for all 96 panels on a copy, and every confirmed identity stood on the
+geometry's frame.
 
 ## Provenance is per FIELD, not per row
 

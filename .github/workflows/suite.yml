@@ -98,6 +98,9 @@ jobs:
           # 남은 결정 묶음 페이지도 같은 나눔입니다: 화면은 값을 옮기고,
           # bundle_page.js가 무엇이 답이 되는지(본 답·승인된 관찰·보류) 정합니다.
           node test_bundle_page.mjs
+          # 축·계열 한 페이지도 같은 나눔입니다: 관문 줄은 geometry_page.js·identity_page.js가
+          # 짓고, axis_series_page.js는 카드의 답을 그 둘에 옮깁니다.
+          node test_axis_series_page.mjs
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: synthesis suites
@@ -139,7 +142,8 @@ jobs:
                    test_value_page test_panel_page test_record_panels \
                    test_panel_to_page \
                    test_bundle_page test_bundle_route test_census_copy test_bundle_items \
-                   test_record_outcomes test_clip_frames test_rehash_moved_pages; do
+                   test_record_outcomes test_clip_frames test_rehash_moved_pages \
+                   test_propose_run test_axis_series_page test_route_axis_series; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
@@ -327,7 +331,8 @@ jobs:
                    test_value_page test_panel_page test_record_panels \
                    test_panel_to_page \
                    test_bundle_page test_bundle_route test_census_copy test_bundle_items \
-                   test_record_outcomes test_clip_frames test_rehash_moved_pages; do
+                   test_record_outcomes test_clip_frames test_rehash_moved_pages \
+                   test_propose_run test_axis_series_page test_route_axis_series; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then
               printf '%s\n' "$out"

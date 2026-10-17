@@ -96,6 +96,21 @@ is wrong (`SKILL.md`, "Bundle what is left"):
                            and a figure's legend groups (record_legends.py),
                            which make_plan.py reads into the plan
 
+Panels drawn on the panel page come to the two cards through one page that asks
+both at once, with a proposal on every panel and "as proposed" preselected
+(`SKILL.md`, "Drawn panels to axes and series, on one page"):
+
+    panel_to_page.py       the drawn boxes -> 600 DPI rasters and regions, in a new
+                           folder (--verified-at one page's drawings, --outcomes
+                           leaves closed panels out, --pages/--doc-root find inputs)
+      | propose_run.py     geometry and identity proposals, resumable under a
+      |                    time budget; `reframe` after a frame is redrawn
+      | axis_series_page.py  both proposals on one card; the person looks and
+      |                    answers "as proposed", "needs fixing" or "hold"
+      | route_axis_series.py  answers -> geometry/identity gate answers, all or
+      v                    nothing; `merge` appends the new proposals to the run
+    record_geometry.py / record_identity.py   on a copy first, then the run
+
 Small fixes are tools of their own, run by hand once approved: `clip_frames.py`
 (a drawn frame past the picture's edge, cut back on both cards through their
 gates) and `rehash_moved_pages.py` (a figure row moved to the next page that
@@ -169,12 +184,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5349 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5534 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5441 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5626 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5349 scenarios on main after v9.28 under `requirements-lock.txt`, and 5534 with
+5441 scenarios on main after v9.28 under `requirements-lock.txt`, and 5626 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

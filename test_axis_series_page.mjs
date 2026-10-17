@@ -87,7 +87,8 @@ test('보지 않았거나 이름이 없으면 답이 아니다', () => {
   const C = AX.makeCheck(GEO, IDN, data());
   const b = C.broken();
   assert.equal(C.partState(st({ 'D1__p1': { geo: 'ACCEPT', idn: 'ACCEPT', seen: false, note: '' } }), 'MY', 'D1__p1', 'geo', b).done, false);
-  assert.equal(C.partState(st(), '  ', 'D1__p1', 'geo', b).done, false);
+  const noName = C.partState(st(), '  ', 'D1__p1', 'geo', b);
+  assert.equal(noName.done, false); assert.match(noName.text, /보신 분 이름/);
 });
 test("빈 답에만 '제안대로'를 채우고, 고른 답과 목격은 건드리지 않는다", () => {
   const C = AX.makeCheck(GEO, IDN, data());
@@ -122,7 +123,7 @@ test('관문 규칙에 걸리는 제안은 제안대로로 답이 되지 않고 
   const b = C.broken();
   assert.ok(b['D1__p1|idn']);
   const r = C.partState(st(), 'MY', 'D1__p1', 'idn', b);
-  assert.equal(r.done, false); assert.equal(r.bad, true);
+  assert.equal(r.done, false); assert.equal(r.bad, true); assert.match(r.text, /^제안이 관문 규칙에 걸립니다/);
   assert.equal(C.partState(st({ 'D1__p1': { geo: 'ACCEPT', idn: 'HOLD', seen: true, note: '' } }), 'MY', 'D1__p1', 'idn', b).done, true);
 });
 test('답 CSV는 답이 된 부분만, 관문 줄은 제안대로에만', () => {
@@ -144,6 +145,80 @@ test('남은 답과 다음 카드', () => {
   assert.equal(C.nextOpen(s, 'MY', C.broken()), 'D1__p2');
   s['D1__p2'].seen = true;
   assert.equal(C.nextOpen(s, 'MY', C.broken()), '');
+});
+
+// --- 들어온 답 다시 대 보기 (recheck) ---
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+const RC = await import('./axis_series_recheck.mjs');
+function answered(over) {
+  const C = AX.makeCheck(GEO, IDN, data());
+  return RC.parseCsv(C.answerCsv(st(over), 'MY', C.broken()).csv);
+}
+test('페이지가 낸 답은 다시 지은 줄과 모두 같다', () => {
+  const r = AX.recheck(GEO, IDN, data(), answered());
+  assert.deepEqual([r.rows, r.same, r.differ.length, r.unknown.length, r.unanswered.length], [4, 4, 0, 0, 0]);
+  assert.deepEqual(r.names, ['MY']);
+});
+test('메모가 있는 답도 같은 줄로 다시 짓는다', () => {
+  const rows = answered({ 'D1__p1': { geo: 'ACCEPT', idn: 'ACCEPT', seen: true, note: '눈금 확인함' } });
+  assert.match(rows[0].Gate_Row, /메모: 눈금 확인함/);
+  const r = AX.recheck(GEO, IDN, data(), rows);
+  assert.equal(r.differ.length, 0, JSON.stringify(r.differ));
+});
+test('관문 줄의 칸 하나가 다르면 다른 줄로 잡는다', () => {
+  const rows = answered();
+  const g = JSON.parse(rows[0].Gate_Row); g.Confirmed_Tick_Values = '100@51;0@450'; rows[0].Gate_Row = JSON.stringify(g);
+  const r = AX.recheck(GEO, IDN, data(), rows);
+  assert.equal(r.same, 3); assert.equal(r.differ.length, 1);
+  assert.match(r.differ[0][2], /다시 지은 줄과 다릅니다/);
+});
+test('다른 제안으로 지은 페이지의 답은 맞지 않는다', () => {
+  const d = data(); d.proposals['D1__p2'].geo = { verdict: 'CONFIRMED', top: '130', bottom: '60' };
+  const r = AX.recheck(GEO, IDN, d, answered());
+  assert.equal(r.differ.length, 1); assert.equal(r.differ[0][0], 'D1__p2');
+});
+test('보류·고칠 곳 줄에 관문 줄이 붙어 있으면 잡는다', () => {
+  const rows = answered({ 'D1__p2': { geo: 'HOLD', idn: 'ACCEPT', seen: true, note: '' } });
+  const hold = rows.find(x => x.Proposal_ID === 'D1__p2' && x.Part === 'GEOMETRY');
+  assert.equal(hold.Gate_Row, '');
+  assert.equal(AX.recheck(GEO, IDN, data(), rows).differ.length, 0);
+  hold.Gate_Row = rows[0].Gate_Row;
+  const r = AX.recheck(GEO, IDN, data(), rows);
+  assert.equal(r.differ.length, 1); assert.match(r.differ[0][2], /답이 아닌 줄에 관문 줄/);
+});
+test('보지 않은 제안대로 줄은 답이 아니다', () => {
+  const rows = answered(); rows[0].Seen_By_Person = '0'; rows[1].Seen_By_Person = '0';
+  const r = AX.recheck(GEO, IDN, data(), rows);
+  assert.equal(r.differ.length, 2); assert.match(r.differ[0][2], /답이 아닌 줄에 관문 줄/);
+});
+test('페이지에 없는 패널, 답하지 않은 패널, 읽지 못하는 관문 줄', () => {
+  const rows = answered();
+  rows.push(Object.assign({}, rows[0], { Proposal_ID: 'D9__p1' }));
+  rows[1].Gate_Row = '{not json';
+  const r = AX.recheck(GEO, IDN, data(), rows.filter(x => x.Proposal_ID !== 'D1__p2'));
+  assert.deepEqual(r.unknown, ['D9__p1']); assert.deepEqual(r.unanswered, ['D1__p2']);
+  assert.match(r.differ[0][2], /읽지 못합니다/);
+});
+test('명령: 페이지에서 제안을 꺼내 대 보고, 다르면 종료 코드 1', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fdt_recheck_'));
+  const page = path.join(dir, 'p.html'), ans = path.join(dir, 'a.csv');
+  fs.writeFileSync(page, '<html><script>var DATA = ' + JSON.stringify(data()) + ';\nvar GEO = 1;</script></html>');
+  const C = AX.makeCheck(GEO, IDN, data());
+  const csv = C.answerCsv(st(), 'MY', C.broken()).csv;
+  fs.writeFileSync(ans, '﻿' + csv.replace(/\n/g, '\r\n'));
+  const run = () => spawnSync(process.execPath, ['axis_series_recheck.mjs', page, ans], { encoding: 'utf8' });
+  let p = run();
+  assert.equal(p.status, 0, p.stdout + p.stderr);
+  assert.equal(JSON.parse(p.stdout.split('\n')[0]).same, 4);
+  fs.writeFileSync(ans, csv.replace('100@50', '100@52'));
+  p = run();
+  assert.equal(p.status, 1); assert.match(p.stdout, /DIFFER D1__p1 \| GEOMETRY/);
+  fs.writeFileSync(page, '<html></html>');
+  assert.notEqual(run().status, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log('');

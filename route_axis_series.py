@@ -2,7 +2,7 @@
 """축·계열 확인 페이지의 답을 관문의 답으로 나누고, 새 제안을 런의 제안 파일에 붙입니다.
 
     python3 route_axis_series.py route --answers ANSWERS.csv --proposals PROPOSALS.json \\
-        --geometry GDIR --identity IDIR --out OUT
+        --geometry GDIR --identity IDIR --out OUT [--reviewers reviewers.json] [--rename OLD=NEW ...]
     python3 route_axis_series.py merge --run RUN --geometry GDIR --identity IDIR \\
         --regions REGIONS.csv --when 2026-10-17 [--write]
 
@@ -18,6 +18,12 @@ Seen_By_Person, Note, Gate_Row`)를 받아
 보았다고 했는가, 이름이 있는가, 관문 줄이 그 패널·그 부분·그 이름의 것인가, 판정이 제안이 말한
 판정인가. 하나라도 어긋나면 아무것도 쓰지 않습니다 - 답 파일은 사람이 손으로 열 수 있는
 파일이고, 손댄 줄이 관문 줄과 어긋나면 어느 쪽이 사람의 말인지 이 도구가 정할 수 없습니다.
+
+`--reviewers`(make_plan의 등록부 JSON)를 주면 이름이 등록부에 있는지도 봅니다
+(UNREGISTERED_REVIEWER). 2026-10-17 run2의 답 192줄이 `miyeop`으로 들어왔고 기록과 등록부는
+`minyeop`이었습니다 - 관문은 이름을 그대로 적으므로, 오타는 기록에 사람 하나를 더 만듭니다.
+고치는 것은 사람이 정한 대로 `--rename miyeop=minyeop`: 답 줄과 관문 줄의 Verified_By를 함께
+바꾸고, 관문 줄의 Note에 바꾼 사실을 남깁니다. 원래 답 파일은 그대로 둡니다(무엇을 쳤는지의 증거).
 
 **merge.** 관문은 `--proposals DIR`의 제안 파일에 대해 답을 받고, `make_plan`은
 `seg/geometry600`·`seg/identity600`·`seg/regions600`을 읽습니다. 그래서 새 폴더(예:
@@ -80,13 +86,18 @@ def write(path, columns, rows):
 
 
 # ---------------------------------------------------------------- route
-def route(answers, proposals, geometry_ids, identity_ids):
-    """(기하 줄, 정체 줄, 받지 않은 줄, 멈춤 [(줄, 코드, 사유)])."""
+def route(answers, proposals, geometry_ids, identity_ids, names=None, renames=None):
+    """(기하 줄, 정체 줄, 받지 않은 줄, 멈춤 [(줄, 코드, 사유)]).
+
+    names: 등록부의 {소문자 이름: reviewer_id} - 주면 이름이 그 안에 있어야 합니다.
+    renames: {친 이름: 적을 이름} - 사람이 정한 이름 고침. 답과 관문 줄에 함께."""
     geo, idn, other, stops, seen = [], [], [], [], set()
     known = {"GEOMETRY": geometry_ids, "IDENTITY": identity_ids}
+    renames = renames or {}
     for n, a in enumerate(answers, 2):
         pid, part = (a.get("Proposal_ID") or "").strip(), (a.get("Part") or "").strip().upper()
-        ans, who = (a.get("Answer") or "").strip().upper(), (a.get("Verified_By") or "").strip()
+        ans, typed = (a.get("Answer") or "").strip().upper(), (a.get("Verified_By") or "").strip()
+        who = renames.get(typed, typed)
         where = "%d행 %s %s" % (n, pid, part)
 
         def stop(code, why):
@@ -106,12 +117,17 @@ def route(answers, proposals, geometry_ids, identity_ids):
             stop("NOT_SEEN", "두 그림을 직접 봤다고 하지 않은 답"); continue
         if not who:
             stop("NO_REVIEWER", "보신 분 이름이 없는 답"); continue
+        if names is not None and who.lower() not in names:
+            stop("UNREGISTERED_REVIEWER", "등록부에 없는 이름 %r - 오타라면 사람이 정한 대로 --rename %s=<등록된 이름>"
+                 % (who, typed)); continue
         raw = (a.get("Gate_Row") or "").strip()
         if ans != "ACCEPT":
             if raw:
                 stop("GATE_ROW_ON_NON_ACCEPT", "'%s'에 관문 줄이 붙어 있습니다" % ans); continue
-            other.append({"Proposal_ID": pid, "Part": part, "Answer": ans, "Verified_By": who,
-                          "Note": (a.get("Note") or "").strip()})
+            note = (a.get("Note") or "").strip()
+            if who != typed:
+                note = (note + " | 검토자 이름 %r → %r" % (typed, who)).lstrip(" |")
+            other.append({"Proposal_ID": pid, "Part": part, "Answer": ans, "Verified_By": who, "Note": note})
             continue
         if not raw:
             stop("GATE_ROW_MISSING", "'제안대로'인데 관문 줄이 없습니다"); continue
@@ -120,6 +136,10 @@ def route(answers, proposals, geometry_ids, identity_ids):
         except ValueError:
             stop("GATE_ROW_BROKEN", "관문 줄을 읽을 수 없습니다"); continue
         want = (proposals[pid].get(PARTS[part]) or {}).get("verdict", "")
+        if who != typed and (row.get("Verified_By") or "").strip() == typed:
+            row["Verified_By"] = who
+            row["Note"] = ((row.get("Note") or "") + " | 검토자 이름 %r → %r (사람이 정한 이름 고침, 원래 답 파일에 친 그대로 있음)"
+                           % (typed, who)).lstrip(" |")
         bad = [k for k, ok in (("Proposal_ID", row.get("Proposal_ID") == pid),
                                ("Verified_By", (row.get("Verified_By") or "").strip() == who),
                                ("Seen_By_Person", str(row.get("Seen_By_Person")) == "1"),
@@ -136,7 +156,17 @@ def run_route(a):
     gids = {r["Proposal_ID"] for r in load(os.path.join(a.geometry, "geometry_proposal.csv"))}
     import identity_proposer as IP
     iids = {r["Proposal_ID"] for r in load(os.path.join(a.identity, IP.PROPOSALS))}
-    geo, idn, other, stops = route(load(a.answers), proposals, gids, iids)
+    names = None
+    if a.reviewers:
+        import make_plan as MP
+        _r, names = MP.load_reviewers(a.reviewers)
+    renames = {}
+    for spec in a.rename or []:
+        old, sep, new = spec.partition("=")
+        if not sep or not old.strip() or not new.strip():
+            raise SystemExit("--rename은 친이름=적을이름 꼴입니다: %r" % spec)
+        renames[old.strip()] = new.strip()
+    geo, idn, other, stops = route(load(a.answers), proposals, gids, iids, names, renames)
     if stops:
         for s in stops:
             print("멈춤 %s — %s: %s" % s)
@@ -169,9 +199,13 @@ def merge_plan(run, geometry, identity, regions):
         if os.path.islink(target) or not os.path.isfile(target):
             stops.append((target, "TARGET_NOT_A_FILE", "붙일 파일이 보통 파일이 아닙니다")); continue
         cols = header(target)
+        # 대상에 없는 열은 새 줄이 모두 비워 둘 때만 두고 갑니다 - 제안기가 나중에 늘린 열(결정 칸 등)은
+        # 제안 줄에서 비어 있고, 옛 대상 파일에는 없습니다(2026-10-17 run2). 값이 하나라도 있으면 멈춥니다:
+        # 그 값이 조용히 버려집니다.
         extra = [c for c in new[0] if c not in cols]
-        if extra:
-            stops.append((target, "COLUMNS_DIFFER", "대상에 없는 열: %s" % ", ".join(extra))); continue
+        filled = [c for c in extra if any((r.get(c) or "").strip() for r in new)]
+        if filled:
+            stops.append((target, "COLUMNS_DIFFER", "대상에 없는 열(값이 있음): %s" % ", ".join(filled))); continue
         ident = (lambda r: r[key]) if key else (lambda r: "%s__p%s" % (r["Draft_ID"], r["Panel_Index"]))
         have = {ident(r) for r in load(target)}
         dup = sorted({ident(r) for r in new} & have)
@@ -230,6 +264,8 @@ def main(argv=None):
     r.add_argument("--answers", required=True); r.add_argument("--proposals", required=True)
     r.add_argument("--geometry", required=True); r.add_argument("--identity", required=True)
     r.add_argument("--out", required=True)
+    r.add_argument("--reviewers", help="make_plan의 등록부 JSON - 이름이 거기 있어야 함")
+    r.add_argument("--rename", action="append", metavar="OLD=NEW", help="사람이 정한 이름 고침 (여러 번)")
     m = sub.add_parser("merge")
     m.add_argument("--run", required=True); m.add_argument("--geometry", required=True)
     m.add_argument("--identity", required=True); m.add_argument("--regions", required=True)

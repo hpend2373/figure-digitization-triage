@@ -117,6 +117,28 @@ check("관문 줄이 다른 패널의 것이면 멈춤", codes([ans(gate=gate_ro
 check("관문 줄의 목격이 1이 아니면 멈춤", codes([ans(gate=gate_row("D1__p1", seen="0"))]) == ["GATE_ROW_MISMATCH"])
 
 print()
+print("이름 (등록부, 사람이 정한 고침)")
+NAMES = {"minyeop": "minyeop"}
+TYPO = lambda pid="D1__p1", part="GEOMETRY", answer="ACCEPT": ans(pid, part, answer, who="miyeop",
+                                                                  gate=gate_row(pid, who="miyeop") if answer == "ACCEPT" else "")
+# REVERT: 등록부를 보지 않는다. 오타 이름이 기록에 사람 하나를 더 만듭니다(run2 2026-10-17의 'miyeop').
+check("등록부에 없는 이름은 멈춤", [s[1] for s in RT.route([TYPO()], PROPS, IDS, IDS, NAMES)[3]] == ["UNREGISTERED_REVIEWER"])
+check("등록부의 이름은 대소문자와 관계없이", not RT.route([ans(who="Minyeop", gate=gate_row("D1__p1", who="Minyeop"))],
+                                                  PROPS, IDS, IDS, NAMES)[3])
+check("등록부를 주지 않으면 이름을 대 보지 않음", not RT.route([TYPO()], PROPS, IDS, IDS)[3])
+geo, idn, other, stops = RT.route([TYPO(), TYPO("D1__p2", "GEOMETRY", "HOLD")], PROPS, IDS, IDS, NAMES, {"miyeop": "minyeop"})
+# REVERT: 이름 고침을 관문 줄에 옮기지 않는다. 답과 관문 줄의 이름이 어긋나 멈춥니다.
+check("이름 고침은 답과 관문 줄에 함께, 관문 줄의 Note에 남는다", not stops and geo[0]["Verified_By"] == "minyeop"
+      and geo[0]["Note"].startswith("n | ") and "'miyeop' → 'minyeop'" in geo[0]["Note"], (stops, geo))
+check("받지 않은 줄의 이름도 고치고 메모에 남긴다", other and other[0]["Verified_By"] == "minyeop"
+      and "'miyeop' → 'minyeop'" in other[0]["Note"], other)
+check("이름 고침은 그 이름의 줄에만", RT.route([ans()], PROPS, IDS, IDS, None, {"miyeop": "minyeop"})[0][0]["Verified_By"] == "MY")
+# REVERT: 관문 줄의 이름이 무엇이든 고친다. 다른 사람의 관문 줄이 고친 이름으로 적힙니다.
+check("관문 줄의 이름이 친 이름과 다르면 고치지 않고 멈춤",
+      [s[1] for s in RT.route([ans(who="miyeop", gate=gate_row("D1__p1", who="OTHER"))], PROPS, IDS, IDS, None,
+                              {"miyeop": "minyeop"})[3]] == ["GATE_ROW_MISMATCH"])
+
+print()
 print("쓰기와 관문")
 TMP = tempfile.mkdtemp(prefix="fdt-route-")
 RUN = os.path.join(TMP, "run")
@@ -167,6 +189,27 @@ p = subprocess.run([sys.executable, os.path.join(HERE, "record_identity.py"), "-
 idec = PR.load(os.path.join(IDIR, "identity_decisions.csv"))
 check("나눈 정체 답을 record_identity가 그대로 받는다", p.returncode == 0 and len(idec) == 1
       and idec[0]["Human_Verification_Status"] == "REJECTED", (p.stdout[-400:], p.stderr[-400:]))
+REVS = os.path.join(TMP, "reviewers.json")
+with io.open(REVS, "w", encoding="utf-8") as fh:
+    json.dump({"reviewers": [{"reviewer_id": "minyeop", "name": "M", "record_type": "HUMAN"}], "names": {"minyeop": "minyeop"}}, fh)
+ANS2 = os.path.join(TMP, "answers_typo.csv")
+write_csv(ANS2, [ans(who="miyeop", gate=json.dumps(dict(geo_row, Verified_By="miyeop")))], list(RT.ANSWER_COLUMNS))
+OUT3 = os.path.join(TMP, "routed_named")
+base = ["route", "--answers", ANS2, "--proposals", PJ, "--geometry", GDIR, "--identity", IDIR, "--out", OUT3, "--reviewers", REVS]
+rc = RT.main(base)
+check("명령: 등록부에 없는 이름이면 아무것도 쓰지 않는다", rc == 1 and not os.path.exists(OUT3), rc)
+rc = RT.main(base + ["--rename", "miyeop=minyeop"])
+p = subprocess.run([sys.executable, os.path.join(HERE, "record_geometry.py"), "--proposals", GDIR,
+                    "--answers", os.path.join(OUT3, "geometry_answers.csv"), "--when", "2026-10-17",
+                    "--out", os.path.join(TMP, "geometry_decisions_named.csv")], capture_output=True, text=True)
+dn = PR.load(os.path.join(TMP, "geometry_decisions_named.csv"))
+check("명령: 고친 이름으로 나눈 답을 record_geometry가 받는다", rc == 0 and p.returncode == 0 and dn
+      and dn[0]["Verified_By"] == "minyeop" and "'miyeop' → 'minyeop'" in dn[0]["Note"], (rc, p.stdout[-300:], p.stderr[-300:]))
+try:
+    RT.main(base + ["--rename", "miyeop"])
+    check("명령: 꼴이 틀린 --rename은 멈춘다", False)
+except SystemExit:
+    check("명령: 꼴이 틀린 --rename은 멈춘다", True)
 BAD = os.path.join(TMP, "answers_bad.csv")
 write_csv(BAD, [ans(gate=json.dumps(geo_row)), ans(part="IDENTITY", seen="")], list(RT.ANSWER_COLUMNS))
 OUT2 = os.path.join(TMP, "routed_bad")
@@ -219,8 +262,15 @@ write_csv(os.path.join(RUN2, "seg", "geometry600", GP.REFUSED), [], list(GP.REFU
 write_csv(os.path.join(RUN2, "seg", "identity600", IP.PROPOSALS), [dict(i1, Proposal_ID="OLD__p1")], list(i1))
 write_csv(os.path.join(RUN2, "seg", "regions600", "panel_regions_600.csv"), [dict(r1, Draft_ID="OLD")], list(r1))
 _p, _q, stops = RT.merge(RUN2, GDIR, IDIR, REG, "2026-10-17")
-# REVERT: 대상에 없는 열을 보지 않는다. 새 제안의 그 열이 조용히 버려집니다.
-check("대상 파일에 없는 열이 있으면 멈춘다", [s[1] for s in stops] == ["COLUMNS_DIFFER"], stops)
+check("대상에 없는 열이 새 줄에서 모두 비어 있으면 두고 간다", not stops and gcols[-1] not in _p[0][3]
+      and not any((r.get(gcols[-1]) or "") for r in PR.load(os.path.join(GDIR, "geometry_proposal.csv"))), (stops, gcols[-1]))
+GDIR2 = os.path.join(TMP, "g_filled")
+shutil.copytree(GDIR, GDIR2)
+filled = [dict(r, **{gcols[-1]: "x"}) for r in PR.load(os.path.join(GDIR, "geometry_proposal.csv"))]
+write_csv(os.path.join(GDIR2, "geometry_proposal.csv"), filled, gcols)
+_p, _q, stops = RT.merge(RUN2, GDIR2, IDIR, REG, "2026-10-17")
+# REVERT: 대상에 없는 열을 보지 않는다. 새 제안의 그 열의 값이 조용히 버려집니다.
+check("대상에 없는 열에 값이 있으면 멈춘다", [s[1] for s in stops] == ["COLUMNS_DIFFER"] and gcols[-1] in stops[0][2], stops)
 with io.open(os.path.join(RUN2, "seg", "identity600", "D1__p1.png"), "wb") as fh:
     fh.write(b"other picture")
 write_csv(os.path.join(RUN2, "seg", "geometry600", "geometry_proposal.csv"), [dict(g1, Proposal_ID="OLD__p1")], gcols)

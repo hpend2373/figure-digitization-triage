@@ -55,6 +55,10 @@ if HERE not in sys.path:
 import bundle_page as BP                                         # noqa: E402
 
 NEAR, ON, BOX_TOL = 12, 1.5, 5
+#: 결과 이름을 묻는 그림의 여백(600 dpi 픽셀). 이름은 축 제목과 패널 제목에서 오는데 둘 다 프레임 밖에
+#: 있습니다 - 여백 60이던 2026-10-17 묶음의 그림 44장은 축 제목이 잘려, 사람이 이름을 그림에서 대 볼 수
+#: 없었습니다. 420이면 세로 축 제목과 위 제목이 들어옵니다.
+NAME_PAD = 420
 #: 판독기의 칠 띠(`mark_readers._FILL_BANDS`)와 같아야 합니다 - 시나리오가 둘을 대 봅니다.
 FILL_BANDS = {"SOLID": (0.72, 1.01), "HATCHED": (0.12, 0.60), "OPEN": (-0.01, 0.06)}
 MACHINE = "bundle_items.py (래스터에서 잰 것)"
@@ -310,9 +314,10 @@ def questions(cdir, run, plans, work, file_root=None, identity_dir=None, geometr
             undrawn += 1
             continue
         png = box_picture(os.path.join(file_root, g["Raster"]), [frame(g)], ["p%s" % k.rsplit("__p", 1)[1]],
-                          os.path.join(pics, "C_%s.png" % k))
+                          os.path.join(pics, "C_%s.png" % k), pad=NAME_PAD)
         Q["C:" + k] = dict(section="C", question="%s 결과 이름" % k, target=k, group="C:" + k.rsplit("__p", 1)[0],
-                           now="결과 이름 없음 · %s" % r["row"].get("Panel_Disposition", ""), images=[{"path": png, "caption": "600 dpi"}],
+                           now="결과 이름 없음 · %s" % r["row"].get("Panel_Disposition", ""),
+                           images=[{"path": png, "caption": "600 dpi, 빨간 상자 = 이 패널 (축 제목이 보이게 넓힘)"}],
                            options=[["LABEL", "제안한 이름으로 적음", dict(outcome(k, "LABEL"), uses_text=True)],
                                     ["EDIT", "이름을 고쳐 적음", dict(outcome(k, "LABEL"), uses_text=True)],
                                     ["NON_TARGET", "목표 결과 아님 — 이 패널 닫음", outcome(k, "NON_TARGET")]],

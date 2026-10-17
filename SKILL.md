@@ -210,9 +210,10 @@ panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and reg
 propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
                     `reframe` re-proposes identity on a frame someone redrew
 axis_series_page.py the axis-and-series page: both proposals on one card, "as proposed" preselected
-axis_series_page.js what counts as an answer on it (the two pages' own verdictOf)
-route_axis_series.py  its answers -> record_geometry / record_identity answers; `merge`
-                    appends the new proposals to the run's proposal files
+axis_series_page.js what counts as an answer on it (the two pages' own verdictOf); `recheck`
+axis_series_recheck.mjs  the answers that came back, rebuilt from the page's proposals, row by row
+route_axis_series.py  its answers -> record_geometry / record_identity answers (registered names,
+                    a person's rename); `merge` appends the new proposals to the run's proposal files
 ```
 
 Everything below is the protocol: what each rule exists to prevent, stated
@@ -616,9 +617,11 @@ proposal is right.
     # 4. the page - a local file, it holds publisher figures
     python3 axis_series_page.py --run RUN --geometry RUN/seg/geometry600_DATE \
         --identity RUN/seg/identity600_DATE --proposals PROPOSALS.json --out axis_series.html --date DATE
-    # 5. the answers, routed; the new proposals appended - on a COPY first
+    # 5. the answers: rebuilt and compared, routed; the new proposals appended - on a COPY first
+    node axis_series_recheck.mjs axis_series.html axis_series_answers_DATE.csv
     python3 route_axis_series.py route --answers axis_series_answers_DATE.csv --proposals PROPOSALS.json \
-        --geometry RUN/seg/geometry600_DATE --identity RUN/seg/identity600_DATE --out ROUTED/
+        --geometry RUN/seg/geometry600_DATE --identity RUN/seg/identity600_DATE --out ROUTED/ \
+        --reviewers reviewers.json [--rename TYPED=REGISTERED]
     python3 route_axis_series.py merge --run COPY --geometry ... --identity ... \
         --regions .../panel_regions_600.csv --when DAY --write
     python3 record_geometry.py --proposals COPY/seg/geometry600 --answers ROUTED/geometry_answers.csv --when DAY
@@ -671,6 +674,13 @@ rules that made the 2026-10-16 batch (96 panels, 27 figures) pass both gates:
 - **What a person must see goes in `look`**, not into the decision: a figure whose
   values repeat another's, a one-position x axis, a group name taken from the
   caption. Duplicates are closed later as outcomes, not here.
+- **SCATTER only when x is a measured value.** Individual points beside a mean, at
+  two or three category positions (before/after), are a positional mark: LINE_MONO
+  with the mean as the series, as the corpus's 54 such cards have it. SCATTER there
+  makes the plan an association and the census charges four codes per panel.
+- **Leave `line_style` blank on LINE_MONO.** Its reader matches by marker only, and a
+  line style it will not apply stops the plan (`LINE_STYLE_NOT_READ`); series that
+  differ only by line style are LINE_MONO_STYLE.
 
 **The page asks to look, and preselects the rest.** Every card opens with "as
 proposed" chosen for both parts; "I looked at both pictures" is never preselected,
@@ -685,10 +695,72 @@ rule of its own except emptying a unit the reader read where the figure has none
 that was not seen, has no name, answers a panel twice, or carries a gate row for a
 different panel, reviewer, witness or verdict than the proposal - and then writes
 nothing. `merge` refuses a Proposal_ID already in the run, a target that is a link,
-a column the target lacks, a different picture under the same name, and a backup
-that already exists. In the 2026-10-16 batch the routed test answers were taken by
+a column the target lacks that a new row fills (a column every new row leaves blank -
+a decision column the proposer gained after the run's file was written - is left
+out), a different picture under the same name, and a backup that already exists. In the 2026-10-16 batch the routed test answers were taken by
 both gates for all 96 panels on a copy, and every confirmed identity stood on the
 geometry's frame.
+
+## When the answers come back
+
+The page's answers are a person's claim; before anything is written, check that
+they answer the questions the page asked, under a name the records know, and find
+out what they will change - on a copy.
+
+1. **Rebuild every row.** `node axis_series_recheck.mjs PAGE.html ANSWERS.csv` takes the
+   proposals out of the page and rebuilds each "as proposed" gate row with this
+   checkout's `verdictOf`; every row must be the same, field for field, and "fix" or
+   "hold" rows must carry none. A difference means another page, another proposals
+   file or a hand-edited answer. (A page built by an older version may differ for
+   that reason alone - rebuild it with this version and compare again.)
+2. **Names against the registry.** `route --reviewers` stops on a name the registry
+   does not have (`UNREGISTERED_REVIEWER`). The 2026-10-17 answers came in as `miyeop`
+   for `minyeop`; the gates write names as typed, so a typo becomes a second person.
+   The fix is a person's call, made once (run2: "검토자 이름은 모두 minyeop으로 통일") and
+   passed as `--rename miyeop=minyeop`: the answer and its gate row change together,
+   the gate row's Note says so, and the downloaded file stays as it was typed.
+3. **Merge and record on a copy, then the census.** A link tree of the run with real
+   copies of the files `merge` and the two gates write (never a link to a directory
+   of the run); `merge --write`, `record_geometry`, `record_identity`; the run's own
+   `seg/*600` fingerprints compared before and after; `census_copy.census` on the run
+   and the copy, with `--file-root` the run itself (`compile_plan` refuses files that
+   resolve outside the file root, and a link tree's files do). On 2026-10-17: 192
+   rows, recheck 192/192, both gates 96/96 with nothing refused and no old row
+   changed, census 98 -> 70.
+4. **The next bundle comes from that copy's census.** What the census still asks is
+   the next page (`bundle_items.py` on the copy's census, with proposals): outcome
+   names of the panels a person will read, cards the census charged, error
+   definitions. Questions no question code covers go in as `extra_items` with an
+   effect on an existing gate, or `{"gate": null, "needs": ...}` when no gate takes
+   them yet. Answer the page with every proposal (name TEST) in a browser, route it,
+   and run `census_copy.py --run COPY --file-root RUN` on top of the first copy: on
+   2026-10-17, 56 items, nothing refused, census 70 -> 2 (one RECROP left, a person's).
+
+Rules that came out of that bundle:
+
+- **Names come from the axis title and the panel title**, so a name question shows
+  the panel with a margin wide enough for both (`bundle_items.NAME_PAD`).
+- **Close a panel whose y values repeat another's.** The same means plotted against a
+  second x (calf resistance against burst rate, then against total MSNA) is one
+  outcome twice: name the first, close the second as NON_TARGET with the reason.
+- **A continuous trace whose stage means are drawn elsewhere with their errors** (a
+  14-subject mean time course beside bars of the same stages) is proposed NON_TARGET:
+  reading it by hand adds no summary statistic. The person can still name it.
+- **"95% confidence intervals" in a caption is not always the error bar.** In a
+  caption about regression ("broken lines show the 95% confidence intervals") it is
+  the band of a fitted line; the bars are whatever the statistics section says
+  ("Data are given as the mean ± SD"). Two such figures read as CI95 in run2.
+
+Known gaps, written down so nobody trusts them silently:
+
+- `record_errorbar` takes only figures in `errorbar_unstated.csv`, made before the
+  panels were counted; a figure opened later, or one whose caption was misread, is
+  `NOT_PENDING`. Its answer goes to `unrouted.csv` with the row it would write.
+- `bundle_page` demands a quote on every error-bar effect, while `record_errorbar`
+  refuses one on DROP and does not ask one for NO_ERRORBAR.
+- `make_plan` falls back to the 200 dpi crop when a region's `Raster_600` file is
+  missing; the 600 dpi boxes then sit on the wrong picture, and the run stops at
+  reading time (`INTERNAL_ERROR`), not at planning time.
 
 ## Provenance is per FIELD, not per row
 

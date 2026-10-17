@@ -1,7 +1,7 @@
 {
  "files": {
-  "route_axis_series.py": "a097606e07bf5c9abfe261f1260278599d9a3a29784710ab370683330141c50a",
-  "test_route_axis_series.py": "41ca1369273d79b920c44733d5e5c8f9063c528743baf710b5d7543ad55307ef"
+  "route_axis_series.py": "b731cd2e533cc9bf81d349bc9e8265f799eac02090c509b8431b66ea72ef5246",
+  "test_route_axis_series.py": "f38896ba82eb0ac3826f4d2d813a017057934fb3c006045ce8c22d5ba1c82997"
  },
  "suites": [
   "test_route_axis_series.py"
@@ -106,8 +106,8 @@
   {
    "name": "대상에 없는 열을 보지 않는다",
    "file": "route_axis_series.py",
-   "old": "        if extra:\n            stops.append",
-   "new": "        if False:\n            stops.append"
+   "old": "        extra = [c for c in new[0] if c not in cols]",
+   "new": "        extra = []"
   },
   {
    "name": "같은 이름의 다른 그림을 덮는다",
@@ -120,6 +120,66 @@
    "file": "route_axis_series.py",
    "old": "        if os.path.islink(target) or not os.path.isfile(target):",
    "new": "        if not os.path.isfile(target):"
+  },
+  {
+   "name": "대상에 없는 열의 값을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        filled = [c for c in extra if any((r.get(c) or \"\").strip() for r in new)]",
+   "new": "        filled = []"
+  },
+  {
+   "name": "대상에 없는 열이면 비어 있어도 멈춘다",
+   "file": "route_axis_series.py",
+   "old": "        filled = [c for c in extra if any((r.get(c) or \"\").strip() for r in new)]",
+   "new": "        filled = list(extra)"
+  },
+  {
+   "name": "등록부를 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if names is not None and who.lower() not in names:",
+   "new": "        if False:"
+  },
+  {
+   "name": "등록부 이름을 대소문자대로 본다",
+   "file": "route_axis_series.py",
+   "old": "        if names is not None and who.lower() not in names:",
+   "new": "        if names is not None and who not in names:"
+  },
+  {
+   "name": "이름 고침을 쓰지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        who = renames.get(typed, typed)",
+   "new": "        who = typed"
+  },
+  {
+   "name": "이름 고침을 관문 줄에 옮기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if who != typed and (row.get(\"Verified_By\") or \"\").strip() == typed:",
+   "new": "        if False:"
+  },
+  {
+   "name": "관문 줄의 이름이 무엇이든 고친다",
+   "file": "route_axis_series.py",
+   "old": "        if who != typed and (row.get(\"Verified_By\") or \"\").strip() == typed:",
+   "new": "        if who != typed:"
+  },
+  {
+   "name": "이름 고침을 관문 줄의 Note에 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "            row[\"Note\"] = ((row.get(\"Note\") or \"\") + \" | 검토자 이름 %r → %r (사람이 정한 이름 고침, 원래 답 파일에 친 그대로 있음)\"\n                           % (typed, who)).lstrip(\" |\")\n",
+   "new": ""
+  },
+  {
+   "name": "받지 않은 줄의 이름 고침을 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                note = (note + \" | 검토자 이름 %r → %r\" % (typed, who)).lstrip(\" |\")",
+   "new": "                pass"
+  },
+  {
+   "name": "꼴이 틀린 --rename을 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if not sep or not old.strip() or not new.strip():",
+   "new": "        if False:"
   }
  ]
 }

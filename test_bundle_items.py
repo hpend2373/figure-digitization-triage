@@ -157,6 +157,10 @@ check("a figure already disposed PARTIAL is a person's task, not a question", "X
 # REVERT: ask the label of a panel nobody drew. There is no panel yet to name.
 check("an undrawn panel without a label is a task, not a question", "C:DOC_D002__p2" not in Q and any("그리지 않은 패널 1개" in t for t in TASKS))
 check("a figure's question shows its crop when there is one", Q["X:DOC_D008"]["images"] and not Q["X:DOC_D010"]["images"])
+from PIL import Image as _I                                         # noqa: E402
+_c = _I.open(Q["C:DOC_D002__p1"]["images"][0]["path"]).size
+# REVERT: crop a name question to the frame and a thin margin. The axis title is outside the frame, and the name is read off it.
+check("a name question's picture reaches past the frame to the axis titles", _c == (300, 200) and BI.NAME_PAD >= 400, (_c, BI.NAME_PAD))
 k1 = Q["K:DOC_D001__p1"]
 check("the tick pairs on the glyphs are measured onto the marks", k1["machine"]["proposal"] == "PAIRS"
       and k1["options"][0][2]["set"] == {"Confirmed_Tick_Values": "10@100;0@400"}, (k1["machine"], k1["options"][0][2]))

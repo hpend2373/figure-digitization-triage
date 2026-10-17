@@ -107,9 +107,11 @@ both at once, with a proposal on every panel and "as proposed" preselected
       |                    time budget; `reframe` after a frame is redrawn
       | axis_series_page.py  both proposals on one card; the person looks and
       |                    answers "as proposed", "needs fixing" or "hold"
+      | axis_series_recheck.mjs  every answered row rebuilt from the page's proposals
       | route_axis_series.py  answers -> geometry/identity gate answers, all or
-      v                    nothing; `merge` appends the new proposals to the run
-    record_geometry.py / record_identity.py   on a copy first, then the run
+      v                    nothing, names against the registry; `merge` appends
+    record_geometry.py / record_identity.py   on a copy first, census, then the run
+      | bundle_items.py    what the copy's census still asks -> the next bundle page
 
 Small fixes are tools of their own, run by hand once approved: `clip_frames.py`
 (a drawn frame past the picture's edge, cut back on both cards through their
@@ -184,12 +186,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5441 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5626 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5453 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5638 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5441 scenarios on main after v9.28 under `requirements-lock.txt`, and 5626 with
+5453 scenarios on main after v9.28 under `requirements-lock.txt`, and 5638 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

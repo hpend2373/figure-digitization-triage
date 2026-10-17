@@ -142,7 +142,42 @@ function makeCheck(GEO, IDN, data) {
            nextOpen: nextOpen };
 }
 
+/* 들어온 답 파일을, 같은 제안에서 이 논리가 다시 짓는 줄과 대 봅니다 - 답을 관문으로 나누기 전에.
+ * rows = 답 CSV의 줄들(열 이름 그대로). '제안대로' 줄의 관문 줄은 다시 지은 줄과 칸마다 같아야 하고,
+ * 고칠 곳·보류 줄과 답이 되지 못한 줄에는 관문 줄이 없어야 합니다. 다르면 그 답은 지금의 제안과
+ * 논리가 묻는 물음에 대한 답이 아닙니다(다른 날 지은 페이지, 손댄 파일, 다른 제안 파일).
+ * 돌려주는 것: { rows, same, differ: [[id, 부분, 까닭]], unknown: [id], unanswered: [id], names: [이름] } */
+function recheck(GEO, IDN, data, rows) {
+  var C = makeCheck(GEO, IDN, data), PART_OF = { GEOMETRY: 'geo', IDENTITY: 'idn' };
+  var st = {}, names = {}, out = { rows: rows.length, same: 0, differ: [], unknown: [], unanswered: [], names: [] };
+  rows.forEach(function (r) {
+    var id = trimmed(r.Proposal_ID), p = PART_OF[trimmed(r.Part)];
+    if (!data.proposals[id] || !p) { out.unknown.push(id); return; }
+    var s = st[id] = st[id] || { geo: '', idn: '', seen: false, note: '' };
+    s[p] = trimmed(r.Answer);
+    if (trimmed(r.Seen_By_Person) === '1') s.seen = true;
+    if (trimmed(r.Note)) s.note = trimmed(r.Note);
+    names[trimmed(r.Verified_By)] = true;
+  });
+  out.names = Object.keys(names).sort();
+  data.order.forEach(function (id) { if (!st[id]) out.unanswered.push(id); });
+  var brk = C.broken();
+  rows.forEach(function (r) {
+    var id = trimmed(r.Proposal_ID), p = PART_OF[trimmed(r.Part)];
+    if (!st[id] || !p) return;
+    var t = C.partState(st, trimmed(r.Verified_By), id, p, brk);
+    var want = t.row ? JSON.stringify(t.row) : '', got = trimmed(r.Gate_Row);
+    try { got = got ? JSON.stringify(JSON.parse(got)) : ''; } catch (e) {
+      out.differ.push([id, PART_NAME[p], '관문 줄을 읽지 못합니다']); return;
+    }
+    if (got === want) { out.same++; return; }
+    out.differ.push([id, PART_NAME[p], want ? (got ? '관문 줄이 다시 지은 줄과 다릅니다' : '관문 줄이 없습니다')
+                                            : (got ? '답이 아닌 줄에 관문 줄이 있습니다' : t.text)]);
+  });
+  return out;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { PARTS: PARTS, ANSWERS: ANSWERS, CSV_COLUMNS: CSV_COLUMNS, PART_NAME: PART_NAME,
-                     makeCheck: makeCheck };
+                     makeCheck: makeCheck, recheck: recheck };
 }

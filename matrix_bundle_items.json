@@ -1,7 +1,7 @@
 {
  "files": {
-  "bundle_items.py": "36bcb39dc5e5eb24417ea70900c22e5befc5ac07ab350d83bef1504be3d92e77",
-  "test_bundle_items.py": "89f8bab79c5e4fc7557ade4cedec56851a2dc5f9cc9a075e3b2f561c2711f40a",
+  "bundle_items.py": "84e733d38f5d2d50315f84fe70b4556598c6420e7a945437c58bdaea86263b15",
+  "test_bundle_items.py": "5b0731cd82a94dababa260c8a5e25f43c4393b07066770bf8e7de73c14ce7e4b",
   "bundle_page.py": "375b711d872f92e6ac1ca8336a5873e42bd46793dbf8b8dfa8273fecec9d218d"
  },
  "suites": [
@@ -169,6 +169,12 @@
    "file": "bundle_page.py",
    "old": "    \"outcomes\": (\"row\", (\"Panel_ID\", \"Decision\")),\n",
    "new": "\n"
+  },
+  {
+   "name": "결과 이름 그림을 프레임에 붙여 자른다",
+   "file": "bundle_items.py",
+   "old": "                          os.path.join(pics, \"C_%s.png\" % k), pad=NAME_PAD)",
+   "new": "                          os.path.join(pics, \"C_%s.png\" % k))"
   }
  ]
 }

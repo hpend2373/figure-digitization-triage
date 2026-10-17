@@ -99,7 +99,8 @@ jobs:
           # bundle_page.js가 무엇이 답이 되는지(본 답·승인된 관찰·보류) 정합니다.
           node test_bundle_page.mjs
           # 축·계열 한 페이지도 같은 나눔입니다: 관문 줄은 geometry_page.js·identity_page.js가
-          # 짓고, axis_series_page.js는 카드의 답을 그 둘에 옮깁니다.
+          # 짓고, axis_series_page.js는 카드의 답을 그 둘에 옮깁니다. 들어온 답을 다시 짓는
+          # axis_series_recheck.mjs도 이 묶음이 봅니다.
           node test_axis_series_page.mjs
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"

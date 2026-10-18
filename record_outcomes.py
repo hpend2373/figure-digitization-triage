@@ -24,6 +24,13 @@
 이름은 받지 않습니다 - 그런 이름이 붙은 패널은 이름이 없는 패널보다 나쁩니다.
 닫힌 패널(NOT_DATA, NON_TARGET)에 이름을 붙이는 답도 받지 않습니다: 그 패널을
 다시 여는 것은 그림의 처분(`record_dispositions`)이 할 일입니다.
+
+예외 하나 - **이 관문이 스스로 닫은 패널**(REOPEN). 패널이 닫힌 까닭이 이 파일의 NON_TARGET
+한 줄뿐이면(계획서의 그 패널 사유가 `outcome_decisions:`로 시작), `--replace`로 그 줄을 LABEL로
+바꾸는 답은 받습니다: 그 패널을 닫은 것도 이 관문의 답이었으니, 되돌리는 것도 이 관문의 답입니다.
+run2 2026-10-18: 한 그림의 SBP 패널을 다른 그림과 중복이라 닫았다가(H12), 그 다른 그림의 축을 믿을 수
+없다는 것이 드러나(N02) 다시 열어야 했습니다. 그림의 처분이 닫은 패널, NOT_DATA, `--replace` 없는 답,
+지금 기록에 NON_TARGET 줄이 없는 패널은 여전히 PANEL_CLOSED입니다.
 """
 import argparse
 import csv
@@ -53,8 +60,13 @@ FIELDS = ("Panel_ID", "Draft_ID", "Panel_Index", "Publication_ID", "Decision", "
 PANEL_ID = re.compile(r"^(?P<draft>.+)_P(?P<index>\d+)$")
 
 
+#: 계획서의 패널 사유가 이것으로 시작하면 그 패널을 닫은 것은 outcome_decisions의 NON_TARGET 줄입니다
+#: (`make_plan.apply_outcome`).
+CLOSED_BY_OUTCOME = "outcome_decisions:"
+
+
 def load_planned(plans):
-    """{Panel_ID: (Publication_ID, 계획서의 Target_Status)} - 계획서들의 모든 패널."""
+    """{Panel_ID: (Publication_ID, 계획서의 Target_Status, 이 관문의 NON_TARGET이 닫았는가)} - 계획서들의 모든 패널."""
     out = {}
     for path in sorted(glob.glob(os.path.join(plans, "plan_*.json"))):
         plan = json.load(io.open(path, encoding="utf-8"))
@@ -66,7 +78,8 @@ def load_planned(plans):
                 if not status:
                     status = "NOT_DATA" if (p.get("disposition") or "").upper() in ("NOT_DATA", "DUPLICATE_OR_DECORATIVE") \
                         else "NON_TARGET" if (p.get("disposition") or "").upper() == "NON_TARGET_OUTCOME" else "TARGET"
-                out[p["panel_id"]] = (plan.get("publication_id", ""), status)
+                by_outcome = status == "NON_TARGET" and str(p.get("reason") or "").startswith(CLOSED_BY_OUTCOME)
+                out[p["panel_id"]] = (plan.get("publication_id", ""), status, by_outcome)
     return out
 
 
@@ -87,8 +100,8 @@ def placeholder_in(text):
     return ""
 
 
-def check_answer(answer, planned):
-    """(문제 목록). 빈 목록이면 이 답은 적힐 수 있습니다."""
+def check_answer(answer, planned, reopen=()):
+    """(문제 목록). 빈 목록이면 이 답은 적힐 수 있습니다. `reopen` - 다시 열 수 있는 패널(`record`가 정함)."""
     problems = []
     pid = (answer.get("Panel_ID") or "").strip()
     choice = (answer.get("Decision") or "").strip().upper()
@@ -104,7 +117,7 @@ def check_answer(answer, planned):
     if pid not in planned:
         problems.append(("NOT_PLANNED", "%r은 계획서의 패널이 아닙니다. 계획서를 다시 낸 뒤의 답이거나, "
                                         "다른 run의 답입니다." % (pid or "(빈칸)")))
-    elif choice == LABEL and planned[pid][1] in CLOSED:
+    elif choice == LABEL and planned[pid][1] in CLOSED and pid not in reopen:
         problems.append(("PANEL_CLOSED", "%s는 계획서에서 %s로 닫힌 패널입니다. 다시 열려면 그림의 처분을 "
                                          "바꾸십시오(record_dispositions)." % (pid, planned[pid][1])))
     if choice == LABEL:
@@ -134,6 +147,11 @@ def record(run, plans, answers, when, out_path=None, via="BUNDLE", replace=False
         raise SystemExit("답 파일과 적는 파일이 같습니다 (%s)." % out_path)
     existing = load_recorded(out_path)
     settled = set(r["Panel_ID"] for r in existing)
+    # 이 관문이 닫은 패널만 이 관문이 다시 엽니다: --replace, 지금 기록의 NON_TARGET 줄, 계획서가 그 줄 때문에 닫음.
+    reopen = set()
+    if replace:
+        said_not = set(r["Panel_ID"] for r in existing if (r.get("Decision") or "").strip().upper() == NON_TARGET)
+        reopen = set(p for p in said_not if p in planned and planned[p][2])
     seen_here, twice = set(), set()
     for answer in answers:
         p = (answer.get("Panel_ID") or "").strip()
@@ -147,7 +165,7 @@ def record(run, plans, answers, when, out_path=None, via="BUNDLE", replace=False
         if pid in twice:
             refused.append((pid, [("ANSWERED_TWICE", "%s에 답이 둘 있습니다. 패널 하나에 답은 하나입니다." % pid)]))
             continue
-        problems = check_answer(answer, planned)
+        problems = check_answer(answer, planned, reopen)
         if problems:
             refused.append((pid or "(빈칸)", problems))
             continue

@@ -167,6 +167,8 @@ TARGET_OF = {
 
 #: 계획서가 실제로 읽게 되는 처분. 기하·정체·오차 정의가 다 있을 때만.
 AUTHORED = "AUTO_DIGITIZE"
+#: 확인이 선 600 DPI 래스터가 이 실행에 없음 - 크롭 위에 얹지 않고 계획 단계에서 멈춥니다.
+RASTER_600_MISSING = "RASTER_600_MISSING"
 
 #: 이 모듈이 적는 검토자. 사람이 아니고, 사람인 척하지 않습니다.
 DEMO_REVIEWER = "R_DEMO_MAKE_PLAN"
@@ -764,12 +766,16 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
     return read, unit, grid, view
 
 
-def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind=""):
+def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind="", raster_missing=""):
     """(panel, unit, grid, view, worksheet 행) - 한 패널의 처분과 남은 일.
 
     갖춘 것이 셋이어야 읽습니다: 확인된 기하(눈금 짝 둘), 확인된 정체(같은
     프레임 위의), 오차 정의. 하나라도 없으면 `GEOMETRY_NOT_AUTHORED`로 남고,
     무엇이 없는지는 worksheet 행에 적힙니다.
+
+    `raster_missing` - 확인이 서 있는 600 DPI 래스터가 이 실행에 없으면 그 경로. 그 확인의 상자와
+    눈금은 그 래스터의 픽셀이라, 200 DPI 크롭 위에서는 다른 그림의 자리입니다: 읽을 준비로 두지 않고
+    `RASTER_600_MISSING`을 남깁니다(전에는 크롭으로 말없이 돌아가 읽을 때 INTERNAL_ERROR로 드러났음).
     """
     pid = proposal_id_for(draft_id, index)
     panel_id = "%s_P%d" % (draft_id, index)
@@ -801,6 +807,8 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
             needs.append("오차 정의")
         elif code in RE.DISPOSITIONS:
             needs.append("오차 정의 없음으로 풀에서 뺀 그림")
+        if raster_missing:
+            needs.append("%s (%s)" % (RASTER_600_MISSING, raster_missing))
     panel = {"panel_id": panel_id, "label": "P%02d" % index, "disposition": disposition,
              "reason": reason or ("make_plan: %s%s" % (("%s · " % kind) if kind else "",
                                                        " · ".join(needs) if needs else "authored"))}
@@ -969,11 +977,17 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
             elif who:
                 needs.append("검토자 등록: %s (--reviewers)" % who)
             region_rows = regions.get(row["Draft_ID"]) or []
+            raster_missing = ""
             if region_rows:
                 raster = (region_rows[0].get("Raster_600") or "").strip()
                 if raster and os.path.isfile(os.path.join(crop_root, raster)):
                     figure["image"] = raster
                     figure["image_sha256"] = (region_rows[0].get("Raster_600_SHA256") or "").strip()
+                else:
+                    # 확인은 600 DPI 래스터 위의 것인데 그 파일이 없습니다. 크롭으로 돌아가면 상자와 눈금이
+                    # 다른 그림 위에 앉습니다 - 계획 단계에서 이름을 부르고 읽을 준비로 두지 않습니다.
+                    raster_missing = raster or "(Raster_600 칸이 비어 있음)"
+                    needs.append("%s: %s" % (RASTER_600_MISSING, raster_missing))
             figure["panels"] = []
             authored, plots = 0, 0
             for d in drawn_rows:
@@ -994,7 +1008,7 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                     continue
                 plots += 1
                 panel, unit, grid, view, prow = panel_plan(
-                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind)
+                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind, raster_missing)
                 if unit is not None and (legends or {}).get(row["Draft_ID"]):
                     domain = legend_domain(panel["read"]["figure_view"], legends[row["Draft_ID"]], index)
                     if domain:

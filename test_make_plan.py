@@ -708,6 +708,23 @@ check("a panel with confirmed geometry and identity is AUTO_DIGITIZE with a read
       and _p1["outcome_label"] == "Heart rate" and _p1["read"]["box"] == [100, 700, 60, 460]
       and _p1["read"]["y_ticks"] == [[100.0, 80.0], [0.0, 440.0]] and _p1["read"]["mark_type"] == "BAR_COLOR",
       "%s %s" % ({k: _p1.get(k) for k in ("disposition", "target_status")}, _p1.get("read", {}).get("box")))
+_aside = os.path.join(ROOT, "raster_600_aside.png")
+os.rename(os.path.join(RUN, _RASTER), _aside)
+try:
+    _rplan, _rsheet, _rfig, _rpanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+finally:
+    os.rename(_aside, os.path.join(RUN, _RASTER))
+_r1 = [p for p in _rfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: fall back to the 200 DPI crop quietly. The confirmed box and ticks are 600 DPI pixels; on the crop they sit on
+# another part of the picture, and the run found out only when the reader fell over (INTERNAL_ERROR).
+check("a confirmed panel whose 600 DPI raster is missing is not authored: RASTER_600_MISSING, named with the file",
+      _r1["disposition"] == "GEOMETRY_NOT_AUTHORED" and "read" not in _r1 and MP.RASTER_600_MISSING in _r1["reason"]
+      and _RASTER in _r1["reason"] and MP.RASTER_600_MISSING in _rpanels["PUB_D001_P1"]["Needs"]
+      and _rpanels["PUB_D001_P1"]["Authored"] == "0",
+      "%s %s" % ({k: _r1.get(k) for k in ("disposition", "reason")}, _rpanels["PUB_D001_P1"].get("Needs")))
+check("... and the figure says which file, and does not take the raster as its picture",
+      MP.RASTER_600_MISSING in _rsheet["PUB_D001"]["Needs"] and _RASTER in _rsheet["PUB_D001"]["Needs"]
+      and _rfig.get("image") != _RASTER, (_rsheet["PUB_D001"]["Needs"], _rfig.get("image")))
 check("positions carry the person's factor, level and pixel",
       [(q["factor"], q["level"], q["x_pixel"]) for q in _p1["read"]["positions"]] == [("TIMEPOINT", "Pre", 175.0), ("TIMEPOINT", "Post", 625.0)])
 check("series carry factor, level and colour",

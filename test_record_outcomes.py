@@ -42,7 +42,11 @@ json.dump({"publication_id": "PUB", "figures": [
         {"panel_id": "PUB_D001_P3", "disposition": "NO_SUMMARY_STATISTIC"}]},
     {"source_figure_id": "PUB_D002", "panels": [
         {"panel_id": "PUB_D002_P1", "disposition": "NON_TARGET_OUTCOME"},
-        {"panel_id": "PUB_D002_P2", "disposition": "GEOMETRY_NOT_AUTHORED", "target_status": "TARGET"}]}]},
+        {"panel_id": "PUB_D002_P2", "disposition": "GEOMETRY_NOT_AUTHORED", "target_status": "TARGET"},
+        {"panel_id": "PUB_D002_P3", "disposition": "NON_TARGET_OUTCOME", "target_status": "NON_TARGET",
+         "reason": "outcome_decisions: minyeop — 이 리뷰의 결과가 아님"},
+        {"panel_id": "PUB_D002_P4", "disposition": "NON_TARGET_OUTCOME", "target_status": "NON_TARGET",
+         "reason": "figure_dispositions: NON_TARGET"}]}]},
     io.open(os.path.join(PLANS, "plan_PUB.json"), "w", encoding="utf-8"))
 OUT = os.path.join(RUN, RO.DECISIONS)
 SEEN = {"Verified_By": "minyeop", "Seen_By_Person": "1"}
@@ -108,6 +112,32 @@ check("a panel already written is not rewritten without --replace",
 w, r, _p = run([ans("PUB_D001_P1", label="Stroke volume")], keep=True, replace=True)
 check("... and is with it, the other rows kept", not r and [x["Outcome_Label"] for x in csv.DictReader(io.open(OUT, encoding="utf-8"))]
       == ["Stroke volume"])
+# --- reopening a panel this gate closed ---------------------------------------------------
+def closed_first(*pids):
+    run([ans(p, "NON_TARGET") for p in pids])
+
+
+closed_first("PUB_D002_P3")
+w, r, _p = run([ans("PUB_D002_P3", label="Systolic blood pressure", unit="mmHg")], keep=True, replace=True)
+rows = dict((x["Panel_ID"], x) for x in csv.DictReader(io.open(OUT, encoding="utf-8")))
+# REVERT: refuse every name on a closed panel. A panel this gate closed by mistake could never be named again.
+check("a panel closed only by this gate's own NON_TARGET is reopened by --replace LABEL, the row replaced",
+      not r and (rows["PUB_D002_P3"]["Decision"], rows["PUB_D002_P3"]["Outcome_Label"]) == ("LABEL", "Systolic blood pressure"),
+      (r, rows.get("PUB_D002_P3")))
+closed_first("PUB_D002_P3")
+# REVERT: reopen without --replace. A second bundle would quietly undo a person's "not a target".
+check("... not without --replace", codes(run([ans("PUB_D002_P3")], keep=True)[1]) == ["PANEL_CLOSED"],
+      codes(run([ans("PUB_D002_P3")], keep=True)[1]))
+# REVERT: drop the check that the closure came from this gate. A figure's disposition would be overruled from here.
+run([ans("PUB_D002_P3", "NON_TARGET")])
+check("a panel the figure's disposition closed is not reopened here, even with a NON_TARGET row of its own",
+      codes(run([ans("PUB_D002_P4", "NON_TARGET")], keep=True)[1]) == [] and
+      codes(run([ans("PUB_D002_P4")], keep=True, replace=True)[1]) == ["PANEL_CLOSED"])
+# REVERT: reopen on the plan's word alone. A plan from before the record (or from another run) would reopen a panel
+# nobody here closed.
+check("a plan saying 'closed by outcome' with no NON_TARGET row in the record is not reopened",
+      codes(run([ans("PUB_D002_P3")], replace=True)[1]) == ["PANEL_CLOSED"])
+check("NOT_DATA is never reopened here", codes(run([ans("PUB_D001_P2")], replace=True)[1]) == ["PANEL_CLOSED"])
 ap = os.path.join(ROOT, "answers.csv")
 with io.open(OUT, encoding="utf-8") as fh:
     io.open(ap, "w", encoding="utf-8").write(fh.read())

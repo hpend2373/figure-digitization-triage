@@ -205,6 +205,8 @@ record_outcomes.py  a drawn panel's outcome name, or "not a target" (R4)
 record_legends.py   which panels of one figure share a printed legend
 clip_frames.py      a drawn frame past the picture's edge, cut back on both cards
 rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
+cross_check.py      a second check that never saw the proposals; agreed items written without the person
+move_panels.py      drawn panels credited to the wrong figure, moved with their boxes, cards and names
 
 panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and regions
 propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
@@ -769,10 +771,10 @@ the gate the census's own plans. `bundle_page` asks a quote only of an answer th
 names a dispersion: DROP must not carry one (`record_errorbar` refuses it) and
 NO_ERRORBAR needs none, so a bundle can route both.
 
-A known gap, written down so nobody trusts it silently: `make_plan` falls back to the
-200 dpi crop when a region's `Raster_600` file is missing; the 600 dpi boxes then sit
-on the wrong picture, and the run stops at reading time (`INTERNAL_ERROR`), not at
-planning time.
+`make_plan` no longer falls back to the 200 dpi crop when a region's `Raster_600` file
+is missing (the 600 dpi boxes then sat on the wrong picture, and the run stopped only at
+reading time, `INTERNAL_ERROR`): the panel stays unauthored with `RASTER_600_MISSING`
+and the file's path, on the panel and on the figure.
 
 ## A second check that did not see the proposal, before the person
 
@@ -853,6 +855,61 @@ and showed that reading them as SD makes a difference the paper calls non-signif
 come out at p < 0.01 - evidence the proposal had not weighed. Merged with the person's
 own answers to the other 11, the automatic file routes in one pass against the
 original items with nothing refused.
+
+## What the AI carries on without the person
+
+After the bundles of 2026-10-18 the person said the rest could go to the AI: "남은 건 ai로
+자동으로 넘길 수 있을 거 같은데". What was left was of three kinds, and they are not the
+same:
+
+1. **A path the person already approved on a page** (an item whose answer was BUILD,
+   FIX, MOVE, or whose effect was `needs`). It is built without asking again. The gate is
+   the package's own: scenarios for every way the path could write wrongly, a mutation
+   matrix with nothing unobserved, both CI profiles green. Then the answers that waited
+   for it are recorded the usual way - on a copy first, the run's own fingerprints
+   guarded, the census before and after, backups, then the runs - and the person gets a
+   report, not a page.
+2. **What the papers state**, missing from the records (a group's n, a unit). It goes
+   through an existing gate as a bundle item, and the cross-check rule above decides:
+   agreed, HIGH and evidenced is written; the rest is the person's page.
+3. **Still the person's**: a judgment the two checks do not share; anything that changes
+   the review's protocol; and **values entering the pool** - `finalize_batch` takes a
+   registered person's look at the overlay, and nothing here changes that without the
+   person deciding it in so many words.
+
+The three paths built under (1) on 2026-10-18:
+
+- **A panel this gate closed, reopened by this gate.** `record_outcomes --replace` takes
+  LABEL on a panel the plan closed *only* because of this file's own NON_TARGET row (the
+  plan's reason starts `outcome_decisions:`). A figure's disposition, NOT_DATA, an answer
+  without `--replace`, or a plan saying so with no NON_TARGET row in the record is still
+  `PANEL_CLOSED`. (run2: a panel closed as the duplicate of another figure's column had to
+  come back when that column's axis turned out to be borrowed.)
+- **`RASTER_600_MISSING`** in `make_plan` (above).
+- **`move_panels.py` - a drawn panel credited to the wrong figure.** A crop that holds two
+  figures gets panels drawn for both; the ones that belong to the other figure move to it
+  with everything that names them: the drawn boxes and 600 dpi regions (Draft_ID, index),
+  every geometry and identity CSV - proposals as well as decisions, because `--replace`
+  rebuilds a card from its proposal row - including other columns that name a moved card
+  (a shared axis), the outcome rows, and the overlay images (copied, not removed). The
+  target's "no panels" row goes. It refuses a move onto itself, across papers, of a panel
+  the source does not have, onto a figure already drawn, over any name already taken,
+  from a figure with legend groups (written by panel number), and without an approval
+  reference; and without `--write` it only shows. The target's disposition (a RECROP, say)
+  is changed through `record_dispositions`, not here.
+
+    python3 move_panels.py --run RUN --from DRAFT_A --panels 2,4 --to DRAFT_B --when YYYY-MM-DD \
+        --approval-ref "where the person chose MOVE" [--write] [--log moved.json]
+
+**What the census says about the values, before anyone reads them.** The census is not a
+reading run - it is read for manifest problems - but its runs do read, and on run2
+(2026-10-18, real crops, 98 papers) no value passed machine QC. The reasons are not the
+readers' alone: `N_Outcome` is missing on 804 units in 76 papers (nobody has entered the
+groups' n), 4,635 declared factor levels were never read (the reader found fewer marks
+than the card declares), and 705 grids miss cells. The n is category (2) above: stated
+in the papers, carried by the identity card (`N_Outcome` is a field the card gate takes),
+so it can go through a bundle and the cross-check. The unread levels are the reading
+path's (G01: Claude reads first; who confirms is the person's call, (3)).
 
 ## Provenance is per FIELD, not per row
 

@@ -1,0 +1,119 @@
+{
+ "files": {
+  "move_panels.py": "1e04406844f7feed3f9a56582bccf9e733a3586d3a05c0451cad44f5d0dff5d6",
+  "test_move_panels.py": "5893a8a14600e194bd8c718755b92e601438aa6f70a3b9b8943c463a48391303"
+ },
+ "suites": [
+  "test_move_panels.py"
+ ],
+ "mutations": [
+  {
+   "name": "--write 없이도 쓴다",
+   "file": "move_panels.py",
+   "old": "    if a.write:\n        apply_move(run, out, copies)",
+   "new": "    if True:\n        apply_move(run, out, copies)"
+  },
+  {
+   "name": "받는 그림의 '패널 없음' 줄을 남긴다",
+   "file": "move_panels.py",
+   "old": "        if r[\"Draft_ID\"] == dst and verdict(r) == NO_PANELS:",
+   "new": "        if False:"
+  },
+  {
+   "name": "옮긴 상자에 출처를 적지 않는다",
+   "file": "move_panels.py",
+   "old": "            if \"Note\" in pf:",
+   "new": "            if False:"
+  },
+  {
+   "name": "600 DPI 영역을 옮기지 않는다",
+   "file": "move_panels.py",
+   "old": "                r = dict(r, Draft_ID=dst, Panel_Index=str(index[int(r[\"Panel_Index\"])]))",
+   "new": "                pass"
+  },
+  {
+   "name": "제안 파일은 두고 결정 파일만 바꾼다",
+   "file": "move_panels.py",
+   "old": "            if \"Proposal_ID\" not in (fields or []):\n                continue",
+   "new": "            if \"Proposal_ID\" not in (fields or []) or \"proposal\" in name:\n                continue"
+  },
+  {
+   "name": "다른 칸의 같은 이름(공유 축)을 두고 간다",
+   "file": "move_panels.py",
+   "old": "                    r = dict((k, ids.get(v, v)) for k, v in r.items())\n                    if \"Note\" in fields:",
+   "new": "                    r = dict(r, Proposal_ID=ids[r[\"Proposal_ID\"]])\n                    if \"Note\" in fields:"
+  },
+  {
+   "name": "오버레이 그림을 새 이름으로 두지 않는다",
+   "file": "move_panels.py",
+   "old": "            if stem in ids:\n                copies.append(",
+   "new": "            if False:\n                copies.append("
+  },
+  {
+   "name": "결과 이름을 두고 간다",
+   "file": "move_panels.py",
+   "old": "        if changed:\n            out[OUTCOMES] = (of, new)",
+   "new": "        if False:\n            out[OUTCOMES] = (of, new)"
+  },
+  {
+   "name": "없는 패널도 옮긴다고 한다",
+   "file": "move_panels.py",
+   "old": "    if missing:\n        raise Refused(\"NO_SUCH_PANEL\"",
+   "new": "    if False:\n        raise Refused(\"NO_SUCH_PANEL\""
+  },
+  {
+   "name": "같은 번호를 두 번 받는다",
+   "file": "move_panels.py",
+   "old": "    if len(index) != len(panels):",
+   "new": "    if False:"
+  },
+  {
+   "name": "이미 그린 그림 위로 옮긴다",
+   "file": "move_panels.py",
+   "old": "    if any(r[\"Draft_ID\"] == dst and verdict(r) == PANELS for r in prow):",
+   "new": "    if False:"
+  },
+  {
+   "name": "이미 있는 카드 이름 위로 옮긴다",
+   "file": "move_panels.py",
+   "old": "            if taken:\n                raise Refused(\"ID_TAKEN\", \"%s에 %s가 이미 있습니다.\" % (os.path.join(d, name)",
+   "new": "            if False:\n                raise Refused(\"ID_TAKEN\", \"%s에 %s가 이미 있습니다.\" % (os.path.join(d, name)"
+  },
+  {
+   "name": "이미 있는 결과 이름 위로 옮긴다",
+   "file": "move_panels.py",
+   "old": "        if taken:\n            raise Refused(\"ID_TAKEN\", \"%s에 %s가 이미 있습니다.\" % (OUTCOMES",
+   "new": "        if False:\n            raise Refused(\"ID_TAKEN\", \"%s에 %s가 이미 있습니다.\" % (OUTCOMES"
+  },
+  {
+   "name": "이미 있는 그림 파일 위로 복사한다",
+   "file": "move_panels.py",
+   "old": "                if os.path.exists(os.path.join(folder, ids[stem] + ext)):",
+   "new": "                if False:"
+  },
+  {
+   "name": "범례 묶음이 있어도 옮긴다",
+   "file": "move_panels.py",
+   "old": "    if any(r.get(\"Draft_ID\") == src for r in legend_rows):",
+   "new": "    if False:"
+  },
+  {
+   "name": "다른 논문으로도 옮긴다",
+   "file": "move_panels.py",
+   "old": "    if doc[src] != doc[dst]:",
+   "new": "    if False:"
+  },
+  {
+   "name": "같은 그림으로 옮긴다",
+   "file": "move_panels.py",
+   "old": "    if src == dst:",
+   "new": "    if False:"
+  },
+  {
+   "name": "누가 정했는지 없이 옮긴다",
+   "file": "move_panels.py",
+   "old": "    if not approval_ref.strip():",
+   "new": "    if False:"
+  }
+ ]
+}

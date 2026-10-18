@@ -1,8 +1,8 @@
 {
  "files": {
-  "record_outcomes.py": "a401ae53a1106ed6d8800d1404a2270327d1c7863ae81c542e5cd4b60566ad4b",
+  "record_outcomes.py": "9c9e2f23ea97a8cf47a434b265c0470facaab505d03985bb4f0c1c2ced5ea0d8",
   "record_legends.py": "e15d46e7c09414a0b1b863814fdb8c086afa5e2e29ce919a0f31d625c7106215",
-  "test_record_outcomes.py": "d70901f8d14103a56a27e372eca04bf71730aa80b6a49f08308f7e4366197a78"
+  "test_record_outcomes.py": "cb71d030166017b4a5c79a9fffdc3f93a325dca876bf546b6ed51a7d24eea52f"
  },
  "suites": [
   "test_record_outcomes.py"
@@ -29,7 +29,7 @@
   {
    "name": "R4: 닫힌 패널에도 이름을 붙인다",
    "file": "record_outcomes.py",
-   "old": "    elif choice == LABEL and planned[pid][1] in CLOSED:\n",
+   "old": "    elif choice == LABEL and planned[pid][1] in CLOSED and pid not in reopen:\n",
    "new": "    elif False:\n"
   },
   {
@@ -139,6 +139,36 @@
    "file": "record_legends.py",
    "old": "            if not m:\n                return None, \"%r은 패널 번호(p1, p2 …)가 아닙니다\" % t\n",
    "new": "            if not m:\n                continue\n"
+  },
+  {
+   "name": "다시 열기: --replace 없이도 연다",
+   "file": "record_outcomes.py",
+   "old": "    if replace:\n        said_not",
+   "new": "    if True:\n        said_not"
+  },
+  {
+   "name": "다시 열기: 처분이 닫은 패널도 연다",
+   "file": "record_outcomes.py",
+   "old": "        reopen = set(p for p in said_not if p in planned and planned[p][2])",
+   "new": "        reopen = set(p for p in said_not if p in planned)"
+  },
+  {
+   "name": "다시 열기: 기록 없이 계획서 말만으로 연다",
+   "file": "record_outcomes.py",
+   "old": "        said_not = set(r[\"Panel_ID\"] for r in existing if (r.get(\"Decision\") or \"\").strip().upper() == NON_TARGET)",
+   "new": "        said_not = set(planned)"
+  },
+  {
+   "name": "다시 열기: 사유를 보지 않는다",
+   "file": "record_outcomes.py",
+   "old": "                by_outcome = status == \"NON_TARGET\" and str(p.get(\"reason\") or \"\").startswith(CLOSED_BY_OUTCOME)",
+   "new": "                by_outcome = status == \"NON_TARGET\""
+  },
+  {
+   "name": "다시 열기: 길을 막는다",
+   "file": "record_outcomes.py",
+   "old": "    elif choice == LABEL and planned[pid][1] in CLOSED and pid not in reopen:",
+   "new": "    elif choice == LABEL and planned[pid][1] in CLOSED:"
   }
  ]
 }

@@ -1,7 +1,7 @@
 {
  "files": {
-  "make_plan.py": "2d5ff67ba3a8e46a28bdc581a9b3701e378688adb6d46540ad1bdb9edaa48ac7",
-  "test_make_plan.py": "c063a02e64b8454ba7a690d2562c3bfcb9ae6400b601f487381b599aaecd127f"
+  "make_plan.py": "d92cdf164624752239ff6075d1931c26006372b9c212d679b2e0fe8a081448f8",
+  "test_make_plan.py": "dd98c02949396409be54eb6d89f25ac6b86ebab52b176d4dc4037ffda4133569"
  },
  "suites": [
   "test_make_plan.py"
@@ -666,6 +666,24 @@
    "file": "make_plan.py",
    "old": "        if answered:\n            figure[\"note\"]",
    "new": "        if False:\n            figure[\"note\"]"
+  },
+  {
+   "name": "G02: 600 DPI 래스터가 없으면 말없이 크롭으로",
+   "file": "make_plan.py",
+   "old": "                    raster_missing = raster or \"(Raster_600 칸이 비어 있음)\"\n                    needs.append(\"%s: %s\" % (RASTER_600_MISSING, raster_missing))",
+   "new": "                    pass"
+  },
+  {
+   "name": "G02: 패널을 읽을 준비로 둔다",
+   "file": "make_plan.py",
+   "old": "        if raster_missing:\n            needs.append(\"%s (%s)\" % (RASTER_600_MISSING, raster_missing))",
+   "new": "        if False:\n            needs.append(\"%s (%s)\" % (RASTER_600_MISSING, raster_missing))"
+  },
+  {
+   "name": "G02: 그림에 어느 파일인지 적지 않는다",
+   "file": "make_plan.py",
+   "old": "                    needs.append(\"%s: %s\" % (RASTER_600_MISSING, raster_missing))",
+   "new": "                    pass"
   }
  ]
 }

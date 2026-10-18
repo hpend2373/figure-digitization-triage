@@ -774,6 +774,86 @@ A known gap, written down so nobody trusts it silently: `make_plan` falls back t
 on the wrong picture, and the run stops at reading time (`INTERNAL_ERROR`), not at
 planning time.
 
+## A second check that did not see the proposal, before the person
+
+On 2026-10-18 the person answered a 54-item bundle, chose the proposal on 53, and
+said checks like these should be automated: "이 정도 검사는 ai로 자동화하는 게 좋을 거
+같아. 앞으로 그렇게 해주도록". The standing approval they chose: **an item is written
+without the person when a second check that never saw the proposal answers it the
+same way, with evidence and HIGH confidence; everything else goes to the person.**
+`cross_check.py` is that rule.
+
+    spec.json + items.json            (bundle_page.py, as before)
+      | cross_check.py brief          question, target, options WITHOUT effects, pictures,
+      v                               the review's rules - no proposal, why, facts, now,
+    brief.json                        or who proposed (BLINDED, checked by the scenarios)
+      | a second agent answers it     choice, HIGH/LOW, evidence (quote + page, a card or
+      v                               plan fact, what was measured), a name if it names
+    verdicts.json
+      | cross_check.py split          agreed + HIGH + evidence -> auto_answers.csv
+      v                               the rest -> person_spec.json (with the second
+    auto_answers.csv, person_spec.json, cross_check.json      check's answer in its facts)
+      | bundle_page.py person_spec.json -> the person answers only those
+      | cross_check.py merge          one answers file -> bundle_route.py with the
+      v                               ORIGINAL items.json, then census_copy, then the gates
+
+An automatic line is an **approved observation** (`approval`), never a seen one:
+`Seen_By_Person=0`, `Observed_By` = whoever proposed it (the item's own, so
+`bundle_route` checks it as it checks any approved line), `Verified_By` = the person
+who gave the standing approval, `Approval_Ref` = where that approval is, which second
+check agreed, and the hash of its verdicts file. Its `Note` carries the second
+check's evidence. A name (LABEL) is written as the proposal wrote it, and only when
+the second check wrote the same name and unit (case and spacing aside).
+
+Still the person's, however sure both checks are:
+
+- **new paths and code changes** - an item whose target is `fdt:...`, or one marked
+  `person_only`;
+- **a person's own text** - an EDIT proposal (`bundle_route` refuses an unseen EDIT);
+- **disagreement, LOW confidence, no evidence, a different name, a hold, no answer**;
+- **an item on the same identity or geometry card as an item the person still has**
+  (`SHARED_CARD`): two answer files built from one card row overwrite each other, so a
+  card is answered from one side only;
+- anything a gate takes only as seen (`record_panels`, the seen-box of any page) -
+  those gates never see an approved observation.
+
+`split` stops when the second check has the proposer's name, when the proposer has
+the approver's name, when the verdicts do not say who checked, when the standing
+approval or its reference is missing, on two answers to one item, on an answer to an
+item the brief did not ask, and on a spec and items file from different builds.
+
+What independence means here: the brief carries nothing of the proposal, and the
+prompt that starts the second check names what it may open - the brief, the
+pictures, the paper's text, the run's records (cards, plans, earlier decisions) - and
+what it may not: the spec, the items file, the bundle's own notes and answers. Two
+instances of one model are independent in what they saw, not in how they reason; a
+habit both share will agree with itself. That is why the evidence is kept on the
+line and the person's page shows the second check's answer next to the proposal.
+
+    python3 cross_check.py brief --spec WORK/spec.json --out WORK/brief.json --rules rules.md
+    # second check(s): answer WORK/brief.json -> verdicts.json {"verifier": ..., "verdicts": [...]}
+    python3 cross_check.py split --spec WORK/spec.json --items WORK/items.json --verdicts verdicts.json \
+        --approver NAME --approval-ref "where the standing approval is" --when YYYY-MM-DD \
+        --answers-file bundle_answers.csv --out XC/
+    python3 bundle_page.py XC/person_spec.json --out person.html --items XC/person_items.json --root WORK
+    python3 cross_check.py merge --auto XC/auto_answers.csv --person person_answers.csv \
+        --record XC/cross_check.json --out bundle_answers.csv
+    python3 bundle_route.py --items WORK/items.json --answers bundle_answers.csv ... --out ROUTED/
+
+**Measured once, on a bundle the person had already answered** (run2, 2026-10-18; four
+blinded agents, 52 verdicts for the 52 items that are not `fdt:` paths). The rule would
+have written 43 items without the person and sent 11: 2 new paths, 3 disagreements, 6
+LOW. Of the 43, 42 are what the person chose. The one that is not is the only item on
+which the person had departed from the proposal - a panel both checks closed as "not a
+before/after comparison", which the person chose to read. So agreement between two
+instances of one model is not agreement with the person; it is a cheaper first filter,
+and the line says so (`Seen_By_Person=0`, both names, the evidence). The three
+disagreements were worth a person's look: in one, the second check measured the bars
+and showed that reading them as SD makes a difference the paper calls non-significant
+come out at p < 0.01 - evidence the proposal had not weighed. Merged with the person's
+own answers to the other 11, the automatic file routes in one pass against the
+original items with nothing refused.
+
 ## Provenance is per FIELD, not per row
 
 One row can be two readings. The commonest real case is a correlation whose r

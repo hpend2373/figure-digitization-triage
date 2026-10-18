@@ -85,6 +85,10 @@ is wrong (`SKILL.md`, "Bundle what is left"):
     bundle_items.py        one question per census problem; measures what the
                            raster can answer, and writes no spec until every
                            other question has a proposal from someone who looked
+      | cross_check.py     a second check that never saw the proposals answers the
+      |                    same questions; agreed, HIGH and evidenced items are
+      |                    written without the person (an approved observation
+      |                    under a standing approval), the rest go to the page
       | bundle_page.py     the person answers: seen, approved as proposed, or held
       | bundle_route.py    answers -> each gate's answer file, all or nothing;
       |                    what has no gate yet goes to unrouted.csv
@@ -186,12 +190,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5458 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5653 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5507 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5702 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5458 scenarios on main after v9.28 under `requirements-lock.txt`, and 5653 with
+5507 scenarios on main after v9.28 under `requirements-lock.txt`, and 5702 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

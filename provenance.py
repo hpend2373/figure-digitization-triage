@@ -44,6 +44,19 @@ R4 is the one that cannot be bought with a signature. A reviewer looking at an
 overlay cannot tell a fitted y from a read one - that is exactly what the
 picture cannot show - so approving it would launder a model estimate into a
 pooled measurement.
+
+## A point an AI placed is R2, and says so
+
+A panel no reader can read (`Panel_Mode=MANUAL`) can be read from
+`supplied_readings.csv`: one pixel per cell, placed by an AI agent looking at the
+600 dpi figure, and the number is the panel's own calibration at that pixel. The
+arithmetic is checkable and is checked; WHERE the agent looked is not - no reader
+re-measures it. So the point and its error-bar ends are R2 (`AI_PLACED_POINT`,
+`AI_PLACED_CAP`), the series it was filed under is R2 when the panel has more than
+one (`AI_ASSIGNED_SERIES`), and the panel's reviewer says, beside the overlay
+that draws every placed point, that they checked them (`Inference_Checked`). The
+route has its own contract (`SUPPLIED_ROUTE`): a reader's panel cannot claim it,
+and a supplied panel cannot claim a reader's.
 """
 
 import collections
@@ -84,6 +97,12 @@ IDENTITY_METHODS = {
     "CONTINUITY_TRACK": "R3",
     # a person, on the cell-level channel that already exists for it
     "HUMAN_RESOLUTION": "R0",
+    # AN AI AGENT FILED THE POINT UNDER THIS SERIES, by reading the legend and the
+    # figure, on a panel with more than one series. Reasoned to, not measured off
+    # the ink - the R2 claim exactly - and named for who did the reasoning, so a
+    # reviewer is not told a reader looked. Only `supplied_readings.csv` produces
+    # it (`SUPPLIED_ROUTE`); one series on the panel is `DECLARED_SINGLE_SERIES`.
+    "AI_ASSIGNED_SERIES": "R2",
 }
 
 #: A gap between two supports that no blind mask covers: a dash gap, a dotted
@@ -174,6 +193,14 @@ VALUE_METHODS = {
     "POINT_CLOUD_ASSOCIATION": "R0",
     "DIRECT_CURVE_INK": "R0",
     "MANUAL_DIGITIZED": "R0",
+    # THE PIXEL AN AI AGENT PLACED ON THE MARK, by looking at the 600 dpi figure,
+    # and the panel's own calibration applied to it. The arithmetic is re-derived
+    # at finalization; where the agent looked is not re-measured by anything, so
+    # it is not R0 the way a person's `MANUAL_DIGITIZED` is. R2: the overlay
+    # draws every placed point and the reviewer confirms, for the panel, that
+    # they checked them. Not `MANUAL_DIGITIZED`, because that name says a person
+    # did it, and the value would then say something nobody did.
+    "AI_PLACED_POINT": "R2",
     # A GAP THIS READER MADE, no wider than the figure's own drawing scale. The
     # stem, rule or cap covering every column of it was removed so a tall glyph
     # could not be traced as a curve, and that removal takes the curve's own two
@@ -280,7 +307,31 @@ METHOD_CONTRACT = {
                 ("MEASURED_MARKER_SHAPE_FILL", "POINT_CLOUD_ASSOCIATION"),
                 ("MEASURED_MARKER_FILL", "POINT_CLOUD_ASSOCIATION"),
                 ("MEASURED_MARKER_SHAPE", "POINT_CLOUD_ASSOCIATION")},
+    # A PANEL READ FROM `supplied_readings.csv`, whatever its mark type. Keyed by
+    # the route rather than by `Mark_Type`, because the mark type still says
+    # what the figure IS (a bar is still a bar) while nothing of the reader's ran:
+    # listing these pairs under BAR_MONO would let a BAR_MONO reader's row claim
+    # a point an AI placed, and the other way round. `route_of` decides which key
+    # a panel is held to, from the verified panel manifest.
+    "SUPPLIED": {("AI_ASSIGNED_SERIES", "AI_PLACED_POINT"),
+                 ("DECLARED_SINGLE_SERIES", "AI_PLACED_POINT")},
 }
+
+#: The contract key of a panel whose values came from `supplied_readings.csv`.
+SUPPLIED_ROUTE = "SUPPLIED"
+
+
+def route_of(mark_type, panel_mode):
+    """Which contract a panel's values are held to.
+
+    `Panel_Mode=MANUAL` means a person decided no reader can read the panel, so a
+    value it carries came from the supplied readings or from nowhere: the
+    supplied route's contract, not the mark type's. Every other panel is held to
+    its reader's, exactly as before.
+    """
+    if str(panel_mode or "").strip().upper() == "MANUAL":
+        return SUPPLIED_ROUTE
+    return str(mark_type or "").strip().upper()
 
 
 #: And which dispersion methods each reader can reach. Separate from the pair
@@ -306,6 +357,9 @@ DISPERSION_CONTRACT = {
     "BAR_MONO": {"DIRECT_CONNECTED_CAP", "NO_DISPERSION"},
     "BOX_VIOLIN": {"DIRECT_BOX_GEOMETRY"},
     "SCATTER": {"NO_DISPERSION"},
+    # An end the agent placed, or none placed. Not `DIRECT_CONNECTED_CAP`: that
+    # names a reader following a stem, and no reader ran.
+    "SUPPLIED": {"AI_PLACED_CAP", "NO_DISPERSION"},
 }
 
 
@@ -321,6 +375,9 @@ DISPERSION_CONTRACT = {
 #: until it appears in both.
 MARK_JOIN_REQUIRED = frozenset((
     "LINE_COLOR", "LINE_MONO", "LINE_MONO_STYLE", "BAR_COLOR", "BOX_VIOLIN",
+    # The supplied route has nothing BUT its marks: the reading the agent made
+    # is in the mark, and the mark is joined to the declared reading.
+    "SUPPLIED",
 ))
 
 
@@ -1306,11 +1363,140 @@ def expected_box_violin_methods(mark, context=None):
 #: its own top row the way `BAR_COLOR`'s is. Written down rather than implied
 #: away - and `test_finalize` pins the two sets equal, so a verifier removed here
 #: is a failing scenario and not a quiet downgrade.
+#: Who may have placed a supplied reading. One kind for now, on purpose: a
+#: person's own readings would be `MANUAL_DIGITIZED` (R0) with a registered
+#: reviewer behind them, which is a different claim with a different check, and
+#: it is not built. A reading whose kind is anything else has no method here.
+SUPPLIED_READER_KINDS = ("AI_AGENT",)
+
+#: The reading's columns and the mark fields `run_batch` copies them into. One
+#: table, read by the runner when it builds the mark and by the verifier when it
+#: compares the two, so the pairing cannot drift between them.
+SUPPLIED_MARK_FIELDS = (
+    ("Reading_ID", "Reading_ID"), ("Series_ID", "series"),
+    ("Position_ID", "x_label"), ("Mark_X_Px", "x"),
+    ("Mark_Y_Px", "marker_center_px"), ("Upper_Y_Px", "Errorbar_Top_Px"),
+    ("Lower_Y_Px", "Errorbar_Bottom_Px"), ("Reader_Kind", "Reader_Kind"),
+    ("Read_By", "Read_By"), ("Read_At", "Read_At"),
+    ("Raster_SHA256", "Raster_SHA256"),
+)
+
+#: Which of those are pixels, and so compared as numbers.
+SUPPLIED_PIXEL_FIELDS = ("Mark_X_Px", "Mark_Y_Px", "Upper_Y_Px", "Lower_Y_Px")
+
+
+def supplied_numbers(axis, centre, top, bottom):
+    """(mean, dispersion, lower, upper) the panel's calibration gives a reading.
+
+    ONE FUNCTION, TWO CALLERS: `run_batch` makes the value with it and the
+    verifier re-makes it from the declared reading. The ends are where the
+    agent put them, top and bottom of the page; the bounds are their values in
+    order, so an inverted axis does not turn an upper bound into a lower one.
+
+        both ends   dispersion = |value(top) - value(bottom)| / 2
+        one end     dispersion = |value(end) - mean|, the other bound blank
+        none        no dispersion
+    """
+    mean = axis.pixel_to_value(centre)
+    ends = [axis.pixel_to_value(px) for px in (top, bottom) if px is not None]
+    if not ends:
+        return mean, None, None, None
+    if len(ends) == 2:
+        return (mean, abs(ends[0] - ends[1]) / 2.0, min(ends), max(ends))
+    end = ends[0]
+    spread = abs(end - mean)
+    return (mean, spread, end if end < mean else None,
+            end if end > mean else None)
+
+
+def expected_supplied_methods(mark, context=None):
+    """The three methods a supplied reading's mark implies, and its arithmetic.
+
+    The mark is checked against the DECLARED reading (`supplied_readings.csv`,
+    verified with the other manifests), field by field, and then its numbers are
+    re-made from the reading's pixels under the run's calibration. What this
+    cannot check is whether the pixel is on the printed mark - nothing can but a
+    look - which is why every method it returns is R2 and the panel asks for
+    `Inference_Checked`.
+    """
+    def field(name):
+        value = mark.get(name)
+        return "" if value is None else str(value).strip()
+
+    def number(name):
+        return finite_number(field(name))
+
+    out, problems = {}, []
+    context = context or {}
+    readings = context.get("Supplied_Readings") or {}
+    rid = field("Reading_ID")
+    reading = readings.get(rid) if rid else None
+    if not rid:
+        problems.append("the mark names no Reading_ID, so which supplied reading "
+                        "it was made from cannot be found")
+    elif reading is None:
+        problems.append("the mark cites reading %s and this run declares no such "
+                        "supplied reading for the panel" % rid)
+    else:
+        for column, key in SUPPLIED_MARK_FIELDS:
+            want = "" if reading.get(column) is None else str(reading.get(column)).strip()
+            got = field(key)
+            if column in SUPPLIED_PIXEL_FIELDS:
+                a, b = finite_number(want), finite_number(got)
+                if (a is None) != (b is None) or (a is not None and _off_by(b, a)):
+                    problems.append("the mark's %s is %s and reading %s declares "
+                                    "%s=%s" % (key, got or "nothing", rid, column,
+                                               want or "nothing"))
+            elif want != got:
+                problems.append("the mark's %s is %s and reading %s declares %s=%s"
+                                % (key, got or "nothing", rid, column,
+                                   want or "nothing"))
+    # WHO PLACED IT is the reading's `Reader_Kind`, compared above; the manifest
+    # layer refuses a kind with no method (`SUPPLIED_READER_KIND_UNKNOWN`) and the
+    # finalizer re-runs it, so the methods below are the AI agent's.
+    count = context.get("Series_Count")
+    out["Identity_Method"] = ("DECLARED_SINGLE_SERIES" if count == 1
+                              else "AI_ASSIGNED_SERIES")
+    out["Value_Method"] = "AI_PLACED_POINT"
+    top, bottom = number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px")
+    out["Dispersion_Method"] = ("NO_DISPERSION" if top is None and bottom is None
+                                else "AI_PLACED_CAP")
+    import mark_readers as MR                                      # noqa: E402
+    axis = MR.calibration_from_record(context.get("Y_Calibration"))
+    centre = number("marker_center_px")
+    if axis is None:
+        problems.append("this run declares no y calibration for the panel, so the "
+                        "reading's numbers cannot be re-made")
+    elif centre is None:
+        problems.append("the mark records no marker_center_px, so its number "
+                        "cannot be re-made from the pixel it was placed at")
+    else:
+        top, bottom = number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px")
+        mean, spread, lower, upper = supplied_numbers(axis, centre, top, bottom)
+        for key, want in (("mean", mean), ("dispersion", spread),
+                          ("errorbar_lower", lower), ("errorbar_upper", upper)):
+            got = number(key)
+            if (want is None) != (got is None) or (
+                    want is not None and _off_by(got, want)):
+                problems.append("the reading's pixels make %s=%s under this run's "
+                                "y calibration, and the mark reports %s"
+                                % (key, "nothing" if want is None else want,
+                                   field(key) or "nothing"))
+    # NOT the nearest-anchor question the marker verifiers ask. A supplied mark
+    # must equal its declared reading, field by field, and the declared reading
+    # was refused by the manifest layer if it is not nearest its own column
+    # (`SUPPLIED_READING_NOT_AT_ITS_POSITION`) - a layer the finalizer re-runs
+    # over the verified manifests. Asked again here it could never fire.
+    return EvidenceVerdict(out, problems)
+
+
 EVIDENCE_VERIFIERS = {"LINE_MONO_STYLE": expected_line_style_methods,
                       "BAR_COLOR": expected_bar_colour_methods,
                       "LINE_COLOR": expected_line_colour_methods,
                       "LINE_MONO": expected_line_mono_methods,
-                      "BOX_VIOLIN": expected_box_violin_methods}
+                      "BOX_VIOLIN": expected_box_violin_methods,
+                      # keyed by route, not mark type: see `route_of`
+                      "SUPPLIED": expected_supplied_methods}
 
 
 def evidence_failure(mark_type, mark, claimed, context=None):
@@ -1425,6 +1611,9 @@ DISPERSION_METHODS = {
     # Priced R0 because nothing is claimed: whether a value without a weight may
     # be pooled is the unit's question, and `NO_VARIANCE` already answers it.
     "NO_DISPERSION": "R0",
+    # An error-bar end an AI agent placed, the same claim `AI_PLACED_POINT`
+    # makes about the mean and priced the same way.
+    "AI_PLACED_CAP": "R2",
 }
 
 

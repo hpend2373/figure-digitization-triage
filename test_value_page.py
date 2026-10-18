@@ -10,6 +10,7 @@
 """
 import csv
 import io
+import json
 import os
 import re
 import shutil
@@ -143,6 +144,74 @@ try:
     check("값이 없으면 멈추고 말한다", False, "멈추지 않았다")
 except SystemExit as exc:
     check("값이 없으면 멈추고 말한다", "읽힌 값이 없습니다" in str(exc), str(exc))
+
+print()
+print("실행의 대기열 그대로 (--run): 패널이 요구하는 확인을 run_batch에게 묻는다")
+RUN = os.path.join(TMP, "run")
+os.makedirs(os.path.join(RUN, "review"))
+for _pid in ("P_AI", "P_R"):
+    with io.open(os.path.join(RUN, "review", "%s_overlay.png" % _pid), "wb") as fh:
+        fh.write(b"\x89PNG\r\n\x1a\n" + b"\x01" * 8)
+_qcols = ("Panel_ID", "Unit_ID", "Mark_Type", "Cells_Read", "Cells_Declared",
+          "Review_Mode", "Inference_Cells", "Overlay_File", "Review_Subject_SHA256")
+with io.open(os.path.join(RUN, V.QUEUE), "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(_qcols))
+    w.writeheader()
+    w.writerow(dict(Panel_ID="P_AI", Unit_ID="U_AI", Mark_Type="BAR_MONO",
+                    Cells_Read="2", Cells_Declared="2", Review_Mode="OVERLAY",
+                    Inference_Cells="2", Overlay_File="review/P_AI_overlay.png",
+                    Review_Subject_SHA256="fp_ai"))
+    w.writerow(dict(Panel_ID="P_R", Unit_ID="U_R", Mark_Type="LINE_COLOR",
+                    Cells_Read="1", Cells_Declared="1", Review_Mode="OVERLAY",
+                    Inference_Cells="0", Overlay_File="review/P_R_overlay.png",
+                    Review_Subject_SHA256="fp_r"))
+_vcols = ("Run_Panel_ID", "Cell_Key", "Mean", "Dispersion_Value", "Errorbar_Lower",
+          "Errorbar_Upper", "Identity_Method", "Value_Method", "Dispersion_Method")
+with io.open(os.path.join(RUN, V.MACHINE_QC), "w", encoding="utf-8", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(_vcols))
+    w.writeheader()
+    for _k in ("ARM=A", "ARM=B"):
+        w.writerow(dict(Run_Panel_ID="P_AI", Cell_Key=_k, Mean="31.5",
+                        Dispersion_Value="2.25", Errorbar_Upper="33.75",
+                        Identity_Method="AI_ASSIGNED_SERIES",
+                        Value_Method="AI_PLACED_POINT",
+                        Dispersion_Method="AI_PLACED_CAP"))
+    w.writerow(dict(Run_Panel_ID="P_R", Cell_Key="ARM=A", Mean="12",
+                    Dispersion_Value="1", Identity_Method="MEASURED_COLOUR",
+                    Value_Method="MARKER_CENTER",
+                    Dispersion_Method="DIRECT_CONNECTED_CAP"))
+RHTML, RCOUNT = V.build_run(RUN, when="2026-10-18", log=lambda *a: None)
+_meta = json.loads(re.search(r"var META = (\{.*?\});", RHTML, re.S).group(1))
+check("대기열의 패널마다 카드가 하나, 겹친 그림이 실린다",
+      RCOUNT == 2 and RHTML.count("class='doc'") == 2
+      and RHTML.count("data:image/png;base64,") == 2, RCOUNT)
+# REVERT: 확인 칸을 이 페이지가 고정해서 묻는다. AI가 놓은 점의 패널은
+# `Inference_Checked`가 없으면 `finalize_batch`가 하나도 받지 않고, 사람은 다
+# 보고 다 누른 뒤에야 그것을 압니다.
+check("AI가 놓은 점의 패널은 점을 보았다는 확인을 요구한다",
+      _meta["P_AI"]["required"] == ["Marks_Checked", "Inference_Checked"],
+      _meta["P_AI"]["required"])
+check("판독기가 읽은 패널은 모드가 요구하는 것만",
+      _meta["P_R"]["required"] == ["Marks_Checked"], _meta["P_R"]["required"])
+check("실행 지문은 대기열의 것이 META로 간다",
+      _meta["P_AI"]["subject"] == "fp_ai" and _meta["P_R"]["subject"] == "fp_r"
+      and "data-subject" not in RHTML)
+check("AI가 놓은 점이라고 카드가 말하고, 물음도 그렇게 적힌다",
+      "AI가 놓은 점 2개" in RHTML and V.RUN_ASKS["Inference_Checked"] in RHTML
+      and RHTML.count("AI가 놓은 점 ") == 1, "")
+check("값이 표로 함께 보인다", "31.5" in RHTML and "33.75" in RHTML)
+try:
+    V.main(["--values", VALS, "--run", RUN, "--out", os.path.join(TMP, "x.html")])
+    check("--values와 --run은 함께 받지 않는다", False, "받았다")
+except SystemExit as exc:
+    check("--values와 --run은 함께 받지 않는다", exc.code == 2, exc.code)
+_empty_run = os.path.join(TMP, "empty_run")
+os.makedirs(_empty_run)
+try:
+    V.build_run(_empty_run, log=lambda *a: None)
+    check("대기열이 없으면 멈추고 말한다", False, "멈추지 않았다")
+except SystemExit as exc:
+    check("대기열이 없으면 멈추고 말한다", "검토할 패널이 없습니다" in str(exc), str(exc))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

@@ -753,6 +753,44 @@ check("its series carry what was drawn and the cue in the note, not in the reade
       and "cue" not in _m1["read"]["series"][0]["note"],
       "%s" % [q.get("note") for q in _m1["read"]["series"]])
 check("a reader-read identity is still AUTO", _p1["read"]["panel_mode"] == "AUTO")
+# THE POINTS AN AGENT PLACED ON A PERSON-ROUTED PANEL (2026-10-18). Written by the
+# names the person confirmed - the legend name, the x label - and carried into the
+# plan under the plan's own ids; a name the identity does not have is carried as
+# written, so the batch layer refuses it out loud.
+os.makedirs(os.path.dirname(os.path.join(RUN, MP.READINGS)), exist_ok=True)
+_seg_write(MP.READINGS, MP.READING_FIELDS,
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "280", "Lower_Y_Px": "", "Reader_Kind": "AI_AGENT",
+             "Read_By": "claude-opus-5-5", "Read_At": "2026-10-18", "Raster_SHA256": _RASTER_SHA},
+            {"Proposal_ID": "PUB_D001__p1", "Series": "B9", "X_Label": "Pre", "Mark_X_Px": "175",
+             "Mark_Y_Px": "310", "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-18", "Raster_SHA256": _RASTER_SHA}])
+# A legend name whose plan id is not the name itself ("B 1" -> B_1), so the
+# carrying is the plan's ids and not a coincidence of spelling.
+_rseries = _json.dumps([{"name": "B3", "colour": "#E4860A", "marker": "CIRCLE", "marker_fill": "FILLED", "cue": ""},
+                        {"name": "B 1", "colour": "#E4860A", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED",
+                         "cue": "lower curve"}])
+try:
+    _rdplan, _rds, _rdfig, _rdp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_rd1 = [p for p in _rdfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+_rdr = _rd1["read"].get("readings") or []
+# REVERT: the readings file stays in the run. The manual panel's points never
+# reach the manifest, and every cell an agent read stays in the queue.
+check("an agent's readings reach the plan, under the plan's series and position ids, pixels as numbers",
+      len(_rdr) == 2 and _rdr[0]["series_id"] == "B_1" and _rdr[0]["position_id"] == "POST"
+      and _rdr[0]["y_px"] == 300.5 and _rdr[0]["upper_px"] == 280.0 and _rdr[0]["lower_px"] is None
+      and _rdr[0]["read_by"] == "claude-opus-5-5" and _rdr[0]["raster_sha256"] == _RASTER_SHA,
+      "%s" % _rdr)
+check("... and a reading by a name the identity does not have is carried as written, to be refused",
+      len(_rdr) == 2 and _rdr[1]["series_id"] == "B9", "%s" % _rdr)
+check("... and the compiled manifest holds them",
+      [r["Reading_ID"] for r in CP.reading_rows("PUB_D001_P1", _rd1["read"])]
+      == ["PUB_D001_P1__B_1__POST", "PUB_D001_P1__B9__PRE"])
+check("a panel with no readings carries none", "readings" not in _m1["read"])
 # A colour-separated line panel whose Control is drawn as a point-down triangle,
 # confirmed on the reader's route: the colour mask reads it, the shape is only seen.
 _tseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},

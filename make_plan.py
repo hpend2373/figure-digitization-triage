@@ -127,6 +127,15 @@ PANEL_FIELDS = ("Publication_ID", "Draft_ID", "Panel_ID", "Proposal_ID", "Dispos
 GEOMETRY_DIR = os.path.join("seg", "geometry600")
 IDENTITY_DIR = os.path.join("seg", "identity600")
 REGIONS = os.path.join("seg", "regions600", "panel_regions_600.csv")
+#: AI 에이전트가 사람이 MANUAL로 보낸 패널(`Read_Route=MANUAL`)의 표시를 600 DPI
+#: 래스터 위에 찍은 자리 (2026-10-18 "1로 가자"). 계열과 x 위치는 정체 확인의
+#: 이름(범례 이름, x 라벨)으로 적고, 이 모듈이 계획서의 계열·위치 id로 옮깁니다.
+#: 값은 여기 없습니다 - `run_batch`가 패널의 눈금으로 만들고, `finalize_batch`가
+#: 다시 만듭니다. 풀에 들어가려면 여전히 사람이 겹친 그림을 보고 승인합니다.
+READINGS = os.path.join("seg", "readings600", "supplied_readings.csv")
+READING_FIELDS = ("Proposal_ID", "Series", "X_Label", "Mark_X_Px", "Mark_Y_Px",
+                  "Upper_Y_Px", "Lower_Y_Px", "Reader_Kind", "Read_By", "Read_At",
+                  "Raster_SHA256", "Note")
 #: 사람이 600 DPI 래스터 위에서 패널마다 그린 상자와 종류 (`record_panels.py`).
 #: 이것이 있으면 그림의 패널 목록은 이것입니다 - 계수 시트의 수는 "몇 개"이고,
 #: 이것은 "어느 것이 어디에, 무엇으로"입니다. 둘이 다르면 그림의 메모에 적습니다.
@@ -576,6 +585,14 @@ def load_confirmations(run, geometry_dir=None, identity_dir=None, regions=None):
     return geometry, identity, regions, drawn
 
 
+def load_readings(run, path=None):
+    """{Proposal_ID: [판독 행]} - 없으면 빈 사전, 그러면 MANUAL 패널은 전처럼 대기열로."""
+    out = {}
+    for r in _rows(os.path.join(run, path or READINGS)):
+        out.setdefault((r.get("Proposal_ID") or "").strip(), []).append(r)
+    return out
+
+
 def load_inventory(run):
     """({Source_Document_ID: 행}, {Draft_ID: 행}) - `record_inventory`가 적은 것."""
     docs, figs = {}, {}
@@ -631,7 +648,7 @@ def geometry_state(row):
     return status or "PENDING", source
 
 
-def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
+def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, readings=()):
     """(read, unit, grid, view) - 기하·정체·오차 정의가 다 있는 패널의 계획.
 
     여기 있는 것은 전부 사람이 확인한 것에서 옮겨 온 것입니다: 프레임과 눈금
@@ -671,12 +688,14 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         read["panel_mode"] = "MANUAL"
         read["note"] += "; values read by a person (Read_Route=MANUAL): no released reader separates these series"
     used = set()
+    series_id_of, position_id_of = {}, {}
     for i, e in enumerate(series, 1):
         name = (e.get("name") or "").strip()
         sid = _slug(name, "S%d" % i)
         while sid in used:
             sid += "_"
         used.add(sid)
+        series_id_of[name or sid] = sid
         # Every series carries its factor and level, the single one too: a
         # series without a level is no Cell_Key (MISSING_SERIES_IDENTITY).
         sp = {"series_id": sid, "factor": s_factor, "level": name or sid}
@@ -714,8 +733,30 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         while pid_ in used:
             pid_ += "_"
         used.add(pid_)
+        position_id_of[label_text or pid_] = pid_
         read["positions"].append({"position_id": pid_, "factor": x_factor, "level": label_text,
                                   "x_pixel": float(p["px"]), "display_order": i})
+    # 판독은 이름으로 적혀 있고 계획서는 id로 씁니다. 모르는 이름은 그대로 두어
+    # 배치층이 크게 거절하게 합니다(SUPPLIED_READING_SERIES_UNKNOWN 등) - 조용히
+    # 버리면 읽은 칸이 사라진 줄 아무도 모릅니다. AUTO 패널의 판독도 그대로
+    # 옮겨서 거절되게 합니다(SUPPLIED_READING_ON_READER_PANEL).
+    if readings:
+        read["readings"] = []
+        for r in readings:
+            entry = {"series_id": series_id_of.get((r.get("Series") or "").strip(),
+                                                   (r.get("Series") or "").strip()),
+                     "position_id": position_id_of.get((r.get("X_Label") or "").strip(),
+                                                       (r.get("X_Label") or "").strip()),
+                     "reader_kind": (r.get("Reader_Kind") or "").strip(),
+                     "read_by": (r.get("Read_By") or "").strip(),
+                     "read_at": (r.get("Read_At") or "").strip(),
+                     "raster_sha256": (r.get("Raster_SHA256") or "").strip(),
+                     "note": (r.get("Note") or "").strip()}
+            for src, dst in (("Mark_X_Px", "x_px"), ("Mark_Y_Px", "y_px"),
+                             ("Upper_Y_Px", "upper_px"), ("Lower_Y_Px", "lower_px")):
+                text = (r.get(src) or "").strip()
+                entry[dst] = float(text) if _is_number(text) else (text or None)
+            read["readings"].append(entry)
     factors = {x_factor: [str(p.get("label") or "").strip() for p in positions],
                s_factor: [(e.get("name") or "").strip() or ("S%d" % (i + 1)) for i, e in enumerate(series)]}
     grid = {"grid_id": grid_id, "factors": factors}
@@ -766,7 +807,16 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
     return read, unit, grid, view
 
 
-def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind="", raster_missing=""):
+def _is_number(text):
+    try:
+        float(text)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind="", raster_missing="",
+               readings=None):
     """(panel, unit, grid, view, worksheet 행) - 한 패널의 처분과 남은 일.
 
     갖춘 것이 셋이어야 읽습니다: 확인된 기하(눈금 짝 둘), 확인된 정체(같은
@@ -814,7 +864,8 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
                                                        " · ".join(needs) if needs else "authored"))}
     unit = grid = view = None
     if disposition == "GEOMETRY_NOT_AUTHORED" and not needs:
-        read, unit, grid, view = authored_read(panel_id, draft_id, g, i, dispersion, panel["label"])
+        read, unit, grid, view = authored_read(panel_id, draft_id, g, i, dispersion, panel["label"],
+                                               (readings or {}).get(pid, ()))
         panel.update({"disposition": AUTHORED, "reason": "make_plan: geometry and identity confirmed",
                       "target_status": "TARGET", "outcome_label": unit["outcome_name"], "read": read})
     row = dict(Draft_ID=draft_id, Panel_ID=panel_id, Proposal_ID=pid, Disposition=panel["disposition"],
@@ -825,7 +876,8 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
 
 def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
              run_date, said=None, decided=None, confirmations=None, reviewers=None,
-             documents_known=None, inventory=None, outcomes=None, legends=None):
+             documents_known=None, inventory=None, outcomes=None, legends=None,
+             readings=None):
     """(plan, 그림별 (figure_id, needs, ...), 패널 행). 한 편의 계획서."""
     first = rows[0]
     said = said or {}
@@ -1008,7 +1060,8 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                     continue
                 plots += 1
                 panel, unit, grid, view, prow = panel_plan(
-                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind, raster_missing)
+                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind, raster_missing,
+                    readings=readings)
                 if unit is not None and (legends or {}).get(row["Draft_ID"]):
                     domain = legend_domain(panel["read"]["figure_view"], legends[row["Draft_ID"]], index)
                     if domain:
@@ -1083,6 +1136,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
     decided.update(load_figure_dispositions(run))
     outcomes = load_outcomes(run)
     legends = load_legends(run)
+    readings = load_readings(run)
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers
@@ -1110,7 +1164,8 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
         plan, notes, panel_rows = plan_for(run, publication, pub_rows, captions, decisions,
                                            counts, crop_root, run_date, said, decided,
                                            confirmations, reviewers, documents_known, inventory,
-                                           outcomes=outcomes, legends=legends)
+                                           outcomes=outcomes, legends=legends,
+                                           readings=readings)
         panel_sheet.extend(panel_rows)
         path = os.path.join(out_dir, "plan_%s.json" % publication)
         with io.open(path, "w", encoding="utf-8") as fh:

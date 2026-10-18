@@ -78,6 +78,19 @@ have been answered for it.
                            read block, a unit and a grid - and every panel
                            missing either answer is named in plan_panels.csv
 
+A panel the person routed to MANUAL (no released reader separates its series) is
+read by an AI agent and confirmed by the person (`SKILL.md`, "A panel no reader can
+read"):
+
+    seg/readings600/supplied_readings.csv   the agent's points: pixels on the 600 DPI
+      |                    raster, by the card's names, who placed them and when
+      | make_plan.py / compile_plan.py      -> supplied_readings.csv (a manifest)
+      | run_batch.py       the number is the panel's calibration at the pixel; every
+      |                    placed point is R2 and drawn with @ on the overlay
+      | value_page.py --run  the person's look: Marks_Checked and Inference_Checked
+      v
+    finalize_batch.py      the same door into the pool as every other value
+
 What the census of those plans still leaves open is asked once, on one page,
 with a proposal on every line - so the person decides only where the proposal
 is wrong (`SKILL.md`, "Bundle what is left"):
@@ -192,12 +205,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5543 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5738 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5625 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5820 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5543 scenarios on main after v9.28 under `requirements-lock.txt`, and 5738 with
+5625 scenarios on main after v9.28 under `requirements-lock.txt`, and 5820 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

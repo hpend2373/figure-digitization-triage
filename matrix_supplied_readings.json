@@ -1,0 +1,289 @@
+{
+ "files": {
+  "batch_manifests.py": "f816227b4c30c266d141915505930fdd8a0fd63905869e0bdf6db827ab8e20c2",
+  "compile_plan.py": "1a4d46c72c5631c0a6ab37f96f47d271045f9dc7dab3f488dace321b21f7df52",
+  "finalize_batch.py": "25c852e0a29c991037b835a8d09549659a48cde24d1060e3b2ffae37ea9f4dca",
+  "make_plan.py": "5a61f53a61de320c27bbf695fb24c832f3fec021626c9aeae6c3623f336147f8",
+  "provenance.py": "4fbf21e05b4ec53b965fc7e3a9c1a76be5d6291cb716afd61024535fa15f32c3",
+  "review_overlay.py": "3ea6059c39120bf6c15bd5b96f241c605a2793d89398e0f9995231d70a1627e3",
+  "run_batch.py": "9579a68624a223ae9e3fd1b4aa98e8a5f07b0bd24adb07ccfafc9412e27255a5",
+  "test_make_plan.py": "9ed4b26770aee08e48a114224a44c662b9947aac8a3376c48020e3716b47d34b",
+  "test_supplied_readings.py": "4ede74f70dada2ffafd0231934f272e61fd2ea9885411fcc340ff3a720a9468b"
+ },
+ "suites": [
+  "test_supplied_readings.py",
+  "test_make_plan.py"
+ ],
+ "mutations": [
+  {
+   "name": "놓은 점을 R0로 값매김",
+   "file": "provenance.py",
+   "old": "    \"AI_PLACED_POINT\": \"R2\",",
+   "new": "    \"AI_PLACED_POINT\": \"R0\","
+  },
+  {
+   "name": "AI가 붙인 계열을 R0로",
+   "file": "provenance.py",
+   "old": "    \"AI_ASSIGNED_SERIES\": \"R2\",",
+   "new": "    \"AI_ASSIGNED_SERIES\": \"R0\","
+  },
+  {
+   "name": "놓은 오차 끝을 R0로",
+   "file": "provenance.py",
+   "old": "    \"AI_PLACED_CAP\": \"R2\",",
+   "new": "    \"AI_PLACED_CAP\": \"R0\","
+  },
+  {
+   "name": "MANUAL 패널도 판독기 계약으로",
+   "file": "provenance.py",
+   "old": "    if str(panel_mode or \"\").strip().upper() == \"MANUAL\":\n        return SUPPLIED_ROUTE",
+   "new": "    if False:\n        return SUPPLIED_ROUTE"
+  },
+  {
+   "name": "계열 하나의 선언 짝을 계약에서 뺀다",
+   "file": "provenance.py",
+   "old": "    \"SUPPLIED\": {(\"AI_ASSIGNED_SERIES\", \"AI_PLACED_POINT\"),\n                 (\"DECLARED_SINGLE_SERIES\", \"AI_PLACED_POINT\")},",
+   "new": "    \"SUPPLIED\": {(\"AI_ASSIGNED_SERIES\", \"AI_PLACED_POINT\")},"
+  },
+  {
+   "name": "공급 경로가 판독기의 오차 방법을 낼 수 있다",
+   "file": "provenance.py",
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
+  },
+  {
+   "name": "검증기가 픽셀을 판독과 대조하지 않는다",
+   "file": "provenance.py",
+   "old": "                if (a is None) != (b is None) or (a is not None and _off_by(b, a)):",
+   "new": "                if False:"
+  },
+  {
+   "name": "검증기가 글자 칸을 판독과 대조하지 않는다",
+   "file": "provenance.py",
+   "old": "            elif want != got:\n                problems.append(\"the mark's %s is %s and reading %s declares %s=%s\"",
+   "new": "            elif False:\n                problems.append(\"the mark's %s is %s and reading %s declares %s=%s\""
+  },
+  {
+   "name": "검증기가 값을 다시 만들지 않는다",
+   "file": "provenance.py",
+   "old": "            if (want is None) != (got is None) or (\n                    want is not None and _off_by(got, want)):",
+   "new": "            if False:"
+  },
+  {
+   "name": "검증기가 계열 하나도 AI 배정으로 본다",
+   "file": "provenance.py",
+   "old": "    out[\"Identity_Method\"] = (\"DECLARED_SINGLE_SERIES\" if count == 1\n                              else \"AI_ASSIGNED_SERIES\")",
+   "new": "    out[\"Identity_Method\"] = \"AI_ASSIGNED_SERIES\""
+  },
+  {
+   "name": "검증기가 끝 없는 점도 놓은 오차로 본다",
+   "file": "provenance.py",
+   "old": "    out[\"Dispersion_Method\"] = (\"NO_DISPERSION\" if top is None and bottom is None\n                                else \"AI_PLACED_CAP\")",
+   "new": "    out[\"Dispersion_Method\"] = \"AI_PLACED_CAP\""
+  },
+  {
+   "name": "한 끝의 퍼짐을 반으로",
+   "file": "provenance.py",
+   "old": "    spread = abs(end - mean)\n",
+   "new": "    spread = abs(end - mean) / 2.0\n"
+  },
+  {
+   "name": "두 끝의 퍼짐을 반으로 나누지 않는다",
+   "file": "provenance.py",
+   "old": "        return (mean, abs(ends[0] - ends[1]) / 2.0, min(ends), max(ends))",
+   "new": "        return (mean, abs(ends[0] - ends[1]), min(ends), max(ends))"
+  },
+  {
+   "name": "판독기 패널에도 판독을 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if panel_modes.get(pid) != \"MANUAL\":\n            # A reader's panel is read by its reader.",
+   "new": "        if False:\n            # A reader's panel is read by its reader."
+  },
+  {
+   "name": "연속형이 아닌 단위도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if stat != \"CONTINUOUS\":\n            flag(line, \"SUPPLIED_READING_STATISTIC_UNSUPPORTED\",",
+   "new": "        if False:\n            flag(line, \"SUPPLIED_READING_STATISTIC_UNSUPPORTED\","
+  },
+  {
+   "name": "한 칸을 두 번 읽어도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if cell in seen_cells:",
+   "new": "        if False:"
+  },
+  {
+   "name": "Reading_ID가 겹쳐도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if rid in seen_ids:\n            flag(line, \"SUPPLIED_READING_DUPLICATE\",",
+   "new": "        if False:\n            flag(line, \"SUPPLIED_READING_DUPLICATE\","
+  },
+  {
+   "name": "모르는 계열도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if sid not in declared_series.get(pid, set()):",
+   "new": "        if False:"
+  },
+  {
+   "name": "모르는 위치도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if qid not in anchors.get(pid, {}):",
+   "new": "        if False:"
+  },
+  {
+   "name": "오차 끝이 뒤집혀도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if (up is not None and up >= y) or (low is not None and low <= y):",
+   "new": "        if False:"
+  },
+  {
+   "name": "다른 래스터의 판독도 받는다",
+   "file": "batch_manifests.py",
+   "old": "            if want and got != want:\n                flag(line, \"SUPPLIED_READING_RASTER_MISMATCH\",",
+   "new": "            if False:\n                flag(line, \"SUPPLIED_READING_RASTER_MISMATCH\","
+  },
+  {
+   "name": "제 위치에서 먼 점도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if columns and columns[0][1] != qid:",
+   "new": "        if False:"
+  },
+  {
+   "name": "상자 밖의 점도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if outside:\n            flag(line, \"SUPPLIED_READING_OUTSIDE_PANEL\",",
+   "new": "        if False:\n            flag(line, \"SUPPLIED_READING_OUTSIDE_PANEL\","
+  },
+  {
+   "name": "판독자 종류를 보지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        if kind not in _prov.SUPPLIED_READER_KINDS:",
+   "new": "        if False:"
+  },
+  {
+   "name": "날짜를 보지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        if not _READ_AT.match(str(r.get(\"Read_At\", \"\")).strip()):",
+   "new": "        if False:"
+  },
+  {
+   "name": "누가 놓았는지 묻지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        if blank(r.get(\"Read_By\")):\n            flag(line, \"MISSING_REQUIRED\", \"Read_By - who placed the points\")",
+   "new": "        if False:\n            flag(line, \"MISSING_REQUIRED\", \"Read_By - who placed the points\")"
+  },
+  {
+   "name": "숫자 아닌 픽셀도 받는다",
+   "file": "batch_manifests.py",
+   "old": "            if value is None:\n                flag(line, \"SUPPLIED_READING_PIXEL_BAD\",",
+   "new": "            if False:\n                flag(line, \"SUPPLIED_READING_PIXEL_BAD\","
+  },
+  {
+   "name": "판독이 있어도 MANUAL 대기열로",
+   "file": "run_batch.py",
+   "old": "    supplied = mode == \"MANUAL\" and len(readings) > 0",
+   "new": "    supplied = False"
+  },
+  {
+   "name": "놓지 않은 계열을 정체 미해결로",
+   "file": "run_batch.py",
+   "old": "    if series_level and mark != \"SCATTER\" and not supplied:",
+   "new": "    if series_level and mark != \"SCATTER\":"
+  },
+  {
+   "name": "공급된 BAR_MONO에 채움 정체 규칙",
+   "file": "run_batch.py",
+   "old": "        if PROV.route_of(mark, panel.get(\"Panel_Mode\")) != \"BAR_MONO\":",
+   "new": "        if mark != \"BAR_MONO\":"
+  },
+  {
+   "name": "계열 하나도 AI 배정으로 적는다",
+   "file": "run_batch.py",
+   "old": "            Identity_Method=(\"DECLARED_SINGLE_SERIES\" if series_count == 1\n                             else \"AI_ASSIGNED_SERIES\"),",
+   "new": "            Identity_Method=\"AI_ASSIGNED_SERIES\","
+  },
+  {
+   "name": "누가 읽었는지 실행 기록에 적지 않는다",
+   "file": "run_batch.py",
+   "old": "                             (\"\" if not supplied else\n                              \"read from %d supplied reading(s) by %s\"",
+   "new": "                             (\"\" if True else\n                              \"read from %d supplied reading(s) by %s\""
+  },
+  {
+   "name": "최종화가 공급 경로를 모른다",
+   "file": "finalize_batch.py",
+   "old": "        out[pid] = (route if route == PROV.SUPPLIED_ROUTE\n                    else _s(r.get(\"Mark_Type\")).upper())",
+   "new": "        out[pid] = _s(r.get(\"Mark_Type\")).upper()"
+  },
+  {
+   "name": "최종화가 판독을 검증기에 넘기지 않는다",
+   "file": "finalize_batch.py",
+   "old": "        readings[_s(item.get(\"Reading_ID\"))] = {k: _s(v) for k, v in item.items()}",
+   "new": "        pass"
+  },
+  {
+   "name": "최종화가 계열 수를 잘못 넘긴다",
+   "file": "finalize_batch.py",
+   "old": "                Series_Count=len(list(series_rows)))",
+   "new": "                Series_Count=2)"
+  },
+  {
+   "name": "겹친 그림이 놓은 점을 표시하지 않는다",
+   "file": "review_overlay.py",
+   "old": "    if tier == \"R2\" and placed(mark):\n        return label + PLACED_MARK_SUFFIX",
+   "new": "    if False:\n        return label + PLACED_MARK_SUFFIX"
+  },
+  {
+   "name": "겹친 그림 각주가 놓은 점을 세지 않는다",
+   "file": "review_overlay.py",
+   "old": "            if points:\n                lines.append(\"%s %s\" % (PLACED_MARK_SUFFIX.strip(),",
+   "new": "            if False:\n                lines.append(\"%s %s\" % (PLACED_MARK_SUFFIX.strip(),"
+  },
+  {
+   "name": "아래 끝을 그리지 않는다",
+   "file": "review_overlay.py",
+   "old": "            for cap in (mark.get(\"cap_px\"), mark.get(\"cap_low_px\")):",
+   "new": "            for cap in (mark.get(\"cap_px\"),):"
+  },
+  {
+   "name": "계획서의 판독을 매니페스트에 쓰지 않는다",
+   "file": "compile_plan.py",
+   "old": "            readings.extend(reading_rows(pid, read))\n",
+   "new": ""
+  },
+  {
+   "name": "계획서가 판독 키를 모른다",
+   "file": "compile_plan.py",
+   "old": "             \"readings\"),\n",
+   "new": "             ),\n"
+  },
+  {
+   "name": "판독 픽셀을 숫자로 옮기지 않는다",
+   "file": "compile_plan.py",
+   "old": "            Mark_X_Px=r.get(\"x_px\", \"\"), Mark_Y_Px=r.get(\"y_px\", \"\"),",
+   "new": "            Mark_X_Px=r.get(\"x_px\", \"\"), Mark_Y_Px=r.get(\"x_px\", \"\"),"
+  },
+  {
+   "name": "런의 판독 파일을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    readings = load_readings(run)\n",
+   "new": "    readings = {}\n"
+  },
+  {
+   "name": "판독의 계열 이름을 계획서 id로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "        series_id_of[name or sid] = sid\n",
+   "new": ""
+  },
+  {
+   "name": "판독의 x 라벨을 계획서 id로 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "        position_id_of[label_text or pid_] = pid_\n",
+   "new": ""
+  },
+  {
+   "name": "판독 픽셀을 숫자로 바꾸지 않는다",
+   "file": "make_plan.py",
+   "old": "                entry[dst] = float(text) if _is_number(text) else (text or None)",
+   "new": "                entry[dst] = text or None"
+  }
+ ]
+}

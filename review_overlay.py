@@ -234,6 +234,20 @@ TIER_MARK_SUFFIXES = (("R2", " *"), ("R3", " +"), ("R4", " x"))
 #: `~` for the spread, so the two are countable separately on the picture.
 SPREAD_MARK_SUFFIX = " ~"
 
+#: R2 IS TWO QUESTIONS TOO, from 2026-10-18. A row reaches it because its SERIES
+#: was reasoned to, or because the POINT itself was placed by an AI agent from
+#: `supplied_readings.csv` - and "series reasoned to" is not what a reviewer of a
+#: placed point is being asked. `@` for a placed point, counted on its own line.
+PLACED_MARK_SUFFIX = " @"
+
+PLACED_NOTE = ("%d point(s) PLACED by an AI agent, not read by a reader - check "
+               "each sits on its printed mark and bar end (Inference_Checked)")
+
+
+def placed(mark):
+    """True when this mark's point was placed by an agent, not read."""
+    return str(mark.get("Value_Method", "") or "").strip() == "AI_PLACED_POINT"
+
 #: How a reader names a provenance field. Everything matching this and not in
 #: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
 #: A convention can still be side-stepped by a field named nothing like this,
@@ -302,6 +316,12 @@ def inferred_note(marks):
     lines = []
     for tier, suffix in TIER_MARK_SUFFIXES:
         here = [m for m in marks if tier_of(m) == tier]
+        if tier == "R2":
+            points = [m for m in here if placed(m)]
+            if points:
+                lines.append("%s %s" % (PLACED_MARK_SUFFIX.strip(),
+                                        PLACED_NOTE % len(points)))
+            here = [m for m in here if not placed(m)]
         if tier == "R3":
             spread = [m for m in here if spread_only(m)]
             if spread:
@@ -342,6 +362,8 @@ def mark_label(mark):
     tier = tier_of(mark)
     if spread_only(mark):
         return label + SPREAD_MARK_SUFFIX
+    if tier == "R2" and placed(mark):
+        return label + PLACED_MARK_SUFFIX
     for known, suffix in TIER_MARK_SUFFIXES:
         if tier == known:
             label += suffix
@@ -461,8 +483,12 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
             else:
                 draw.line((mx - 9, my, mx + 9, my), fill=colour, width=2)
                 draw.line((mx, my - 5, mx, my + 5), fill=colour, width=2)
-            cap = mark.get("cap_px")
-            if cap is not None:
+            # The cap, and the end below the mark when one was placed there too
+            # (`cap_low_px`, supplied readings only): a reviewer asked whether a
+            # placed bar end sits on the printed one has to see both.
+            for cap in (mark.get("cap_px"), mark.get("cap_low_px")):
+                if cap is None:
+                    continue
                 cy = float(cap) - oy
                 draw.line((mx, my, mx, cy), fill=colour, width=1)
                 draw.line((mx - 5, cy, mx + 5, cy), fill=colour, width=1)

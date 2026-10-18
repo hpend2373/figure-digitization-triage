@@ -186,7 +186,7 @@ provenance intact. Resolve them against the run directory, not the working one.
 ## Files
 
 ```
-compile_plan.py     one typed plan  -> eleven manifests
+compile_plan.py     one typed plan  -> eleven manifests (+ the optional axis and supplied-readings ones)
 run_batch.py        manifests       -> values + review queue + artifact ledger
 finalize_batch.py   decisions       -> figure_values_accepted.csv
 grid_engine.py      the universal factorial gate
@@ -207,6 +207,7 @@ clip_frames.py      a drawn frame past the picture's edge, cut back on both card
 rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
 cross_check.py      a second check that never saw the proposals; agreed items written without the person
 move_panels.py      drawn panels credited to the wrong figure, moved with their boxes, cards and names
+supplied_readings_TEMPLATE.csv  the points an AI agent placed on a MANUAL panel (G01, read by run_batch)
 
 panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and regions
 propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
@@ -916,7 +917,64 @@ groups' n), 4,635 declared factor levels were never read (the reader found fewer
 than the card declares), and 705 grids miss cells. The n is category (2) above: stated
 in the papers, carried by the identity card (`N_Outcome` is a field the card gate takes),
 so it can go through a bundle and the cross-check. The unread levels are the reading
-path's (G01: Claude reads first; who confirms is the person's call, (3)).
+path's: G01, decided by the person on 2026-10-18 ("1로 가자") - the section below.
+
+## A panel no reader can read, read by an AI agent, confirmed by the person
+
+A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so
+`Panel_Mode=MANUAL`) used to stop at `MANUAL_POINT_READ` with every cell in the queue.
+The person chose (2026-10-18, option 1 of G01): **the AI agent reads the points first, on
+the 600 dpi raster, and the person confirms them on the overlay through the ordinary value
+review and `finalize_batch`.** Nothing about the door into the pool changed: a registered
+person's approval of the panel's overlay, bound to the run's fingerprint, is still the only
+way a value becomes poolable. What changed is that the person is confirming placed points
+instead of placing them.
+
+**What the agent writes.** `seg/readings600/supplied_readings.csv` in the run, one row per
+cell, by the names the person confirmed on the identity card:
+
+    Proposal_ID, Series (legend name), X_Label (x label as confirmed),
+    Mark_X_Px, Mark_Y_Px          the mark's centre / a bar's top edge, 600 dpi raster pixels
+    Upper_Y_Px, Lower_Y_Px        the error-bar ends above / below it; blank if not drawn
+                                  or hidden (a bar hiding its lower whisker)
+    Reader_Kind=AI_AGENT, Read_By (the agent, e.g. claude-opus-5-5), Read_At (YYYY-MM-DD),
+    Raster_SHA256 (the raster the pixels are on), Note
+
+No number is written. `make_plan` carries the rows into the plan under the plan's own
+series and position ids, `compile_plan` writes `supplied_readings.csv` (an optional manifest,
+empty when nothing was read, hashed into the stamp either way), and `run_batch` reads a
+MANUAL panel from its readings: the number is the panel's calibration at the pixel; the
+spread is half the distance between two placed ends, or one end's distance from the mean.
+A MANUAL panel with no readings is queued exactly as before.
+
+**What it costs the reviewer, and why.** Every placed point is R2: `AI_PLACED_POINT`, its
+ends `AI_PLACED_CAP`, and on a panel with more than one series `AI_ASSIGNED_SERIES` (one
+series is `DECLARED_SINGLE_SERIES`). The arithmetic is re-made at finalization; where the
+agent looked is not re-measured by anything, so it is not `MANUAL_DIGITIZED` (R0, a person's
+own digitizing - a different claim, not built). R2 means the panel's approval needs
+`Inference_Checked=CONFIRMED` beside `Marks_Checked`: the overlay draws every placed point
+and both placed ends, labels them with `@`, and its footer counts them as placed by an AI
+agent. An approval without it finalizes nothing.
+
+**What is refused, and where.** Before the run (`batch_manifests.check_supplied_readings`):
+a reading on a reader's (AUTO) panel, on a non-continuous unit, of an undeclared panel,
+series or position, a cell read twice, a Reading_ID used twice, a pixel that is not a finite
+number or lies outside the plot area, an upper end below the mark or a lower end above it,
+a point nearer another position's column than its own, a raster that is not the panel's, a
+`Reader_Kind` with no method, no `Read_By`, a `Read_At` that is not a date. At
+finalization: the route's own contract (`provenance.route_of` - a MANUAL panel is held to
+`SUPPLIED`, so a reader's panel cannot claim a placed point and a supplied panel cannot
+claim a reader's measurement), and a verifier that compares each mark with its declared
+reading field by field and re-makes every number from the reading's pixels. A reading edited
+after the run is a manifest the run did not validate (`RUN_MANIFEST_MODIFIED`).
+
+**What the agent should do to read well.** Place points on the 600 dpi raster the panel's
+box and ticks were confirmed on (the region raster in `panel_regions_600.csv`), never on the
+200 dpi crop. Put a bar's point on the top edge of its outline (the unit's
+`Bar_Top_Definition`), a marker's on its centre. Leave an end blank rather than guess one
+hidden by a bar or another series; leave a cell out rather than guess a mark it cannot see -
+an unread cell is a missing cell the queue names, not an error. One reading per printed mark.
+The agent does not fill the review's confirmation columns; those are the person's.
 
 ## Provenance is per FIELD, not per row
 

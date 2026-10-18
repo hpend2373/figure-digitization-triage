@@ -1,4 +1,4 @@
-"""One typed plan in, eleven manifests out.
+"""One typed plan in, eleven manifests out (and two optional ones, empty if unused).
 
     python3 compile_plan.py PLAN.json MANIFEST_DIR [--file-root DIR]
 
@@ -96,12 +96,18 @@ PLAN_KEYS = {
              # the value the paper prints beside the cloud, where it prints one
              "association_value_printed",
              "axis_x_region", "axis_y_region", "x_region", "y_region",
-             "note", "series", "positions"),
+             "note", "series", "positions",
+             # where an AI agent placed this MANUAL panel's marks; see
+             # `batch_manifests.supplied_readings_columns`
+             "readings"),
     "series": ("series_id", "factor", "level", "bar_fill", "marker",
                "marker_fill", "line_style", "colour", "colour_tolerance",
                "mask_key", "note"),
     "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
                  "display_order", "timepoint_label", "timepoint_days", "note"),
+    "reading": ("series_id", "position_id", "x_px", "y_px", "upper_px",
+                "lower_px", "reader_kind", "read_by", "read_at",
+                "raster_sha256", "note"),
     "unit": ("unit_id", "panel_id", "figure_view", "grid_id", "panel",
              "outcome_name",
              "outcome_variable", "domain", "unit", "statistic",
@@ -185,9 +191,36 @@ def _unknown_key_problems(plan):
             check("%s.read" % where, "read", read)
             if not isinstance(read, dict):
                 continue
-            for kind, key in (("series", "series"), ("position", "positions")):
+            for kind, key in (("series", "series"), ("position", "positions"),
+                              ("reading", "readings")):
                 for si, row in enumerate(rows(read.get(key))):
                     check("%s.read.%s[%d]" % (where, key, si), kind, row)
+    return out
+
+
+def reading_rows(panel_id, read):
+    """`supplied_readings.csv` rows for one panel's `read.readings`.
+
+    The Reading_ID is made, not written: `PANEL__SERIES__POSITION`, which is
+    unique because a cell is read once (the manifest layer refuses a second
+    reading of one cell), and readable on the overlay and in the review file.
+    The pixels go through as the plan wrote them; the manifest layer checks
+    them against the panel.
+    """
+    out = []
+    for r in (read or {}).get("readings") or []:
+        if not isinstance(r, dict):
+            continue
+        sid, qid = _s(r.get("series_id")), _s(r.get("position_id"))
+        out.append(dict(
+            Reading_ID="%s__%s__%s" % (panel_id, sid, qid), Panel_ID=panel_id,
+            Series_ID=sid, Position_ID=qid,
+            Mark_X_Px=r.get("x_px", ""), Mark_Y_Px=r.get("y_px", ""),
+            Upper_Y_Px="" if r.get("upper_px") is None else r.get("upper_px"),
+            Lower_Y_Px="" if r.get("lower_px") is None else r.get("lower_px"),
+            Reader_Kind=_s(r.get("reader_kind")).upper(),
+            Read_By=_s(r.get("read_by")), Read_At=_s(r.get("read_at")),
+            Raster_SHA256=_s(r.get("raster_sha256")), Note=_s(r.get("note"))))
     return out
 
 
@@ -859,7 +892,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                                   Note=_s(g.get("note"))))
 
     source_figures, source_panels, panels, series, positions = [], [], [], [], []
-    axes = []
+    axes, readings = [], []
     image_of_panel, ticks_of_panel, view_panels = {}, {}, {}
 
     for figure in plan["figures"]:
@@ -941,6 +974,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
             # empty axis manifest, which is what every publication in the corpus
             # but the twin-axis ones produces - the file exists so the batch's
             # shape does not depend on whether a figure needed it.
+            readings.extend(reading_rows(pid, read))
             for ax in read.get("axes") or []:
                 axes.append(dict(
                     Axis_ID=_s(ax.get("axis_id")), Panel_ID=pid,
@@ -1090,6 +1124,9 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         ("axis_manifest", axes, BM.axis_manifest_columns()),
         ("position_manifest", positions, BM.position_manifest_columns()),
         ("reader_config", configs, BM.reader_config_columns()),
+        # Written whether or not anything was read, like the axis manifest: the
+        # batch's shape does not depend on whether a panel was read this way.
+        ("supplied_readings", readings, BM.supplied_readings_columns()),
     )
     written = {}
     for name, rows, cols in tables:

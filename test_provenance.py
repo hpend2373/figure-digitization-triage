@@ -851,7 +851,8 @@ check("nan and inf are not measurements, in either verifier",
 check("every reader that joins to raw marks now re-derives its methods",
       set(P.EVIDENCE_VERIFIERS) == set(P.MARK_JOIN_REQUIRED)
       == {"LINE_MONO_STYLE", "BAR_COLOR", "LINE_COLOR", "LINE_MONO",
-          "BOX_VIOLIN"},
+          # 2026-10-18: and the supplied route, whose only evidence is its marks
+          "BOX_VIOLIN", "SUPPLIED"},
       "%s" % sorted(P.EVIDENCE_VERIFIERS))
 # AND THE JOIN ASKS IT THE SAME WAY IT ASKS THE OTHER ONE. The call site is table
 # driven - `EVIDENCE_VERIFIERS[mark_type]` - so what has to be checked here is

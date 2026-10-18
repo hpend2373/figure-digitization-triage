@@ -984,6 +984,36 @@ def axis_manifest_columns():
     ]
 
 
+def supplied_readings_columns():
+    """One row per CELL of a `Panel_Mode=MANUAL` panel, read by someone else.
+
+    A manual panel is one a person decided no reader can read: the grid is
+    declared, the box and the ticks are confirmed, and every value went to the
+    queue. This file is the other half - where each mark is, as pixels on the
+    panel's own raster, with who placed it:
+
+        Mark_X_Px, Mark_Y_Px     the mark's centre (a marker's centre, a bar's
+                                 top edge), in the panel's image pixels
+        Upper_Y_Px, Lower_Y_Px   the error-bar ends above and below it on the
+                                 page; blank where none is drawn or none can be
+                                 seen (a bar hiding its lower whisker)
+        Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure
+        Read_By, Read_At         who, and the date the reading was made
+        Raster_SHA256            the raster the pixels are on; it must be the
+                                 panel's own
+
+    The NUMBER is not here. `run_batch` makes it from the pixel and the panel's
+    calibration, and `finalize_batch` makes it again, so a value cannot drift
+    from the place it was read at. OPTIONAL, like the axis manifest: absent for
+    every batch with no manual panel read this way.
+    """
+    return [
+        "Reading_ID", "Panel_ID", "Series_ID", "Position_ID",
+        "Mark_X_Px", "Mark_Y_Px", "Upper_Y_Px", "Lower_Y_Px",
+        "Reader_Kind", "Read_By", "Read_At", "Raster_SHA256", "Note",
+    ]
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -995,6 +1025,7 @@ BATCH_TEMPLATES = (
     ("position_manifest", position_manifest_columns),
     ("reader_config", reader_config_columns),
     ("identity_resolution", identity_resolution_columns),
+    ("supplied_readings", supplied_readings_columns),
 )
 
 
@@ -1323,7 +1354,8 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
                              reviewers=None, resolutions=None, axes=None,
                              requested_run_mode=None,
-                             file_root=".", check_files=True, doc_root=None):
+                             file_root=".", check_files=True, doc_root=None,
+                             readings=None):
     """Reject an unrunnable batch before a single raster is opened.
 
     `doc_root` is where the source DOCUMENTS are, when a corpus keeps its PDFs
@@ -1352,8 +1384,11 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         reviewers = pd.DataFrame()
     if axes is None:
         axes = pd.DataFrame(columns=axis_manifest_columns())
+    if readings is None:
+        readings = pd.DataFrame(columns=supplied_readings_columns())
     frames = (("reviewers", reviewers, reviewer_registry_columns()),
               ("axes", axes, axis_manifest_columns()),
+              ("readings", readings, supplied_readings_columns()),
               ("source_documents", source_documents, source_document_manifest_columns()),
               ("source_figures", source_figures, source_figure_manifest_columns()),
               ("source_panels", source_panels, source_panel_inventory_columns()),
@@ -2526,6 +2561,12 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                               reviewer_index=reviewer_index,
                               file_root=file_root, check_files=check_files)
 
+    # ---------------------------------------------------- supplied readings
+    check_supplied_readings(
+        readings, panel_index, panel_modes, series, positions, unit_index,
+        flag, raster_sha=(lambda path: sha256_of_file(path) if path else ""),
+        resolve=resolve, check_files=check_files)
+
     # -------------------------------------------------------------- configs
     parsed = load_reader_configs(configs, mark_by_config, flag)
     for pid, r in panel_index.items():
@@ -2535,6 +2576,165 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Config_ID=%s has no rows in reader_config" % cid)
 
     return pd.DataFrame(problems)
+
+
+#: What a supplied reading's date looks like. A date, not a timestamp: the
+#: reading is a day's work, and `--when` across this package is a date.
+_READ_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def check_supplied_readings(readings, panel_index, panel_modes, series,
+                            positions, unit_index, flag, raster_sha=None,
+                            resolve=None, check_files=True):
+    """Every supplied reading names a cell a manual panel declares, once.
+
+    What is checked here is that the reading CAN be a value of this panel: its
+    panel is MANUAL and continuous, its series and position are the panel's own,
+    no cell is read twice, the pixels are numbers inside the plot area with the
+    ends on the right sides of the mark, the mark is nearest the column its
+    position declares, and the raster is the panel's. Whether the pixel is ON the
+    printed mark is not checkable here and is not pretended to be: that is the
+    overlay, and the reviewer's `Inference_Checked`.
+    """
+    import provenance as _prov
+    if readings is None or not len(readings):
+        return
+    declared_series = {}
+    for _, r in series.iterrows():
+        declared_series.setdefault(str(r.get("Panel_ID", "")).strip(), set()).add(
+            str(r.get("Series_ID", "")).strip())
+    anchors = {}
+    for _, r in positions.iterrows():
+        pid = str(r.get("Panel_ID", "")).strip()
+        qid = str(r.get("Position_ID", "")).strip()
+        anchors.setdefault(pid, {})[qid] = _as_float_or_none(r.get("X_Pixel"))
+    seen_ids, seen_cells = set(), {}
+    for i, r in readings.iterrows():
+        line = "readings:%d" % (i + 2)
+        rid = str(r.get("Reading_ID", "")).strip()
+        pid = str(r.get("Panel_ID", "")).strip()
+        sid = str(r.get("Series_ID", "")).strip()
+        qid = str(r.get("Position_ID", "")).strip()
+        if not rid or not SAFE_ID.match(rid):
+            flag(line, "SUPPLIED_READING_ID_BAD",
+                 "Reading_ID=%r: a reading is joined to its value by this name, "
+                 "so it must be a safe identifier" % rid)
+            continue
+        if rid in seen_ids:
+            flag(line, "SUPPLIED_READING_DUPLICATE",
+                 "Reading_ID=%s is declared twice" % rid)
+            continue
+        seen_ids.add(rid)
+        panel = panel_index.get(pid)
+        if panel is None:
+            flag(line, "SUPPLIED_READING_PANEL_UNKNOWN",
+                 "Panel_ID=%s is not in panel_manifest.csv" % pid)
+            continue
+        if panel_modes.get(pid) != "MANUAL":
+            # A reader's panel is read by its reader. Supplying points for it
+            # would put two readings behind one cell - the reader's and this -
+            # and the contract a value is held to could not say which.
+            flag(line, "SUPPLIED_READING_ON_READER_PANEL",
+                 "%s is Panel_Mode=%s; supplied readings are for panels a person "
+                 "routed to MANUAL" % (pid, panel_modes.get(pid) or "AUTO"))
+            continue
+        unit = unit_index.get(str(panel.get("Unit_ID", "")).strip())
+        stat = (str(unit.get("Statistic_Type", "")).strip().upper()
+                if unit is not None else "")
+        if stat != "CONTINUOUS":
+            flag(line, "SUPPLIED_READING_STATISTIC_UNSUPPORTED",
+                 "%s fills a %s unit; a supplied reading is a mean and its error "
+                 "bar, so only CONTINUOUS units can take one"
+                 % (pid, stat or "(no unit)"))
+            continue
+        if sid not in declared_series.get(pid, set()):
+            flag(line, "SUPPLIED_READING_SERIES_UNKNOWN",
+                 "Series_ID=%s is not a series of %s" % (sid or "(blank)", pid))
+            continue
+        if qid not in anchors.get(pid, {}):
+            flag(line, "SUPPLIED_READING_POSITION_UNKNOWN",
+                 "Position_ID=%s is not a position of %s" % (qid or "(blank)", pid))
+            continue
+        cell = (pid, sid, qid)
+        if cell in seen_cells:
+            flag(line, "SUPPLIED_READING_CELL_TWICE",
+                 "%s/%s/%s is already read by %s; one printed mark is one reading"
+                 % (pid, sid, qid, seen_cells[cell]))
+            continue
+        seen_cells[cell] = rid
+        kind = str(r.get("Reader_Kind", "")).strip().upper()
+        if kind not in _prov.SUPPLIED_READER_KINDS:
+            flag(line, "SUPPLIED_READER_KIND_UNKNOWN",
+                 "Reader_Kind=%s (expected %s)"
+                 % (kind or "(blank)", "/".join(_prov.SUPPLIED_READER_KINDS)))
+        if blank(r.get("Read_By")):
+            flag(line, "MISSING_REQUIRED", "Read_By - who placed the points")
+        if not _READ_AT.match(str(r.get("Read_At", "")).strip()):
+            flag(line, "SUPPLIED_READING_DATE_BAD",
+                 "Read_At=%r is not YYYY-MM-DD" % r.get("Read_At"))
+        pixels = {}
+        bad = False
+        for column in _prov.SUPPLIED_PIXEL_FIELDS:
+            text = r.get(column)
+            if blank(text):
+                pixels[column] = None
+                if column in ("Mark_X_Px", "Mark_Y_Px"):
+                    flag(line, "MISSING_REQUIRED", column)
+                    bad = True
+                continue
+            value = _prov.finite_number(text)
+            if value is None:
+                flag(line, "SUPPLIED_READING_PIXEL_BAD",
+                     "%s=%r is not a finite number" % (column, text))
+                bad = True
+            pixels[column] = value
+        if bad:
+            continue
+        try:
+            box = parse_box(",".join(str(panel.get(c)) for c in
+                                     ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")))
+        except ValueError:
+            continue                  # the panel row is already flagged
+        x, y = pixels["Mark_X_Px"], pixels["Mark_Y_Px"]
+        outside = [c for c, v in pixels.items() if v is not None and not (
+            (box[0] <= v <= box[1]) if c == "Mark_X_Px" else (box[2] <= v <= box[3]))]
+        if outside:
+            flag(line, "SUPPLIED_READING_OUTSIDE_PANEL",
+                 "%s lie outside the plot area %s" % (", ".join(outside), box))
+            continue
+        up, low = pixels["Upper_Y_Px"], pixels["Lower_Y_Px"]
+        if (up is not None and up >= y) or (low is not None and low <= y):
+            flag(line, "SUPPLIED_READING_ENDS_INVERTED",
+                 "Upper_Y_Px=%s and Lower_Y_Px=%s must lie above and below the "
+                 "mark at row %s on the page" % (up, low, y))
+            continue
+        # NEAREST ITS OWN COLUMN, the question `_nearest_anchor_problems` asks at
+        # finalization - asked here first, so a point filed under the wrong
+        # position is a manifest problem rather than a refusal after review.
+        columns = sorted((abs(x - px), q) for q, px in anchors[pid].items()
+                         if px is not None)
+        if columns and columns[0][1] != qid:
+            flag(line, "SUPPLIED_READING_NOT_AT_ITS_POSITION",
+                 "the mark at column %s is nearest %s, and it is filed under %s"
+                 % (x, columns[0][1], qid))
+            continue
+        if check_files and resolve is not None and raster_sha is not None:
+            img = resolve(panel.get("Image_Path"))
+            want = raster_sha(img) if img else ""
+            got = str(r.get("Raster_SHA256", "")).strip()
+            if want and got != want:
+                flag(line, "SUPPLIED_READING_RASTER_MISMATCH",
+                     "the reading was made on %s... and %s is read from %s...; "
+                     "a pixel is only a place on the raster it was read on"
+                     % (got[:16] or "(nothing)", pid, want[:16]))
+
+
+def _as_float_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
 
 
 def config_hash(configs):

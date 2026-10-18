@@ -55,6 +55,23 @@ ASKS = (
     ("Calibration_Checked", "그려진 값이 그 자리의 눈금과 맞는다"),
 )
 
+#: 실행의 대기열에서 만든 페이지(`--run`)가 묻는 말. 무엇을 묻는지는 이 표가
+#: 아니라 `run_batch`가 정합니다 - 패널의 모드가 요구하는 것
+#: (`REVIEW_CONFIRMATIONS`)과 그 패널의 값이 더 요구하는 것
+#: (`inference_confirmations`). 여기는 그 이름마다 사람에게 하는 말만 있습니다.
+RUN_ASKS = {
+    "Marks_Checked": "표시(+)가 그림에 인쇄된 점·막대 끝 위에 앉아 있고, 이름표가 맞는 계열·위치다",
+    "Axis_Labels_Checked": "축 눈금 숫자가 그림에 인쇄된 것과 같다",
+    "Calibration_Checked": "그려진 값이 그 자리의 눈금과 맞는다",
+    "Identity_Checked": "사람이 붙인 계열 이름이 범례와 맞는다",
+    "Inference_Checked": "@ 표시된 점은 AI가 놓은 것이다 — 점 하나하나와 오차 막대 끝이 "
+                         "인쇄된 표시 위에 있는지 보았다",
+}
+
+#: `--run` 페이지가 읽는 실행의 파일들.
+QUEUE = "review_queue.csv"
+MACHINE_QC = "figure_values_machine_qc.csv"
+
 
 def _rows(path):
     if not os.path.exists(path):
@@ -142,6 +159,132 @@ table.v th:first-child,table.v td:first-child{text-align:left}
     log("패널 %d개 · 값 %d줄 · 실행 지문이 있는 패널 %d"
         % (len(ids), len(rows), known))
     return "\n".join(out), len(ids)
+
+
+def build_run(run, when="", log=print):
+    """(html, 패널 수) - 실행의 검토 대기열 그대로, 패널마다 겹친 그림 한 장.
+
+    `--values` 페이지는 상자그림 판독용으로 따로 만든 값 폴더를 받습니다. 이것은
+    `run_batch`가 낸 실행을 받습니다: 대기열의 패널마다 그 겹친 그림, 그 패널의
+    값, 그리고 그 패널이 승인에 요구하는 확인 칸 - 모드의 것과 값의 것(AI가 놓은
+    점은 R2라 `Inference_Checked`) - 을 `run_batch`에게 물어서 심습니다. 실행
+    지문도 대기열의 것을 그대로 씁니다. 이 페이지도 관문이 아닙니다.
+    """
+    import run_batch as RB
+    queue = _rows(os.path.join(run, QUEUE))
+    if not queue:
+        raise SystemExit("%s에 검토할 패널이 없습니다." % os.path.join(run, QUEUE))
+    values = _rows(os.path.join(run, MACHINE_QC))
+    by_panel = {}
+    for v in values:
+        by_panel.setdefault((v.get("Run_Panel_ID") or "").strip(), []).append(v)
+
+    out, meta, ids = [], {}, []
+    w = out.append
+    w("<!doctype html><html lang='ko'><head><meta charset='utf-8'>")
+    w("<meta name='viewport' content='width=device-width,initial-scale=1'>")
+    w("<title>값 검토 — 패널 %d개</title>" % len(queue))
+    w(CSS)
+    w("""<style>
+[hidden]{display:none!important}
+.opt{display:block;font-size:13px;margin:3px 0}
+.side{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.side .pick{min-width:320px;flex:1}
+.side img{max-width:100%;border:1px solid #ddd}
+.chk{display:block;font-size:13px;margin:4px 0}
+table.v{border-collapse:collapse;font-size:12px;margin:8px 0}
+table.v th,table.v td{border:1px solid #e3e3e0;padding:2px 7px;text-align:right}
+table.v th:first-child,table.v td:first-child{text-align:left}
+.who{margin:8px 0}
+.placed{color:#9a5a00;font-size:13px}
+</style>""")
+    w("<header><h1>값 검토 <span class='count' id='left'></span></h1>")
+    w("<p class='note'>실행이 읽은 값이 <b>어디에 앉았는지</b>를 그림 위에 그렸습니다. "
+      "+ 가 점(막대 끝)이고, 세로선 끝의 짧은 가로선이 오차 막대 끝입니다. "
+      "<b>@</b> 가 붙은 이름표는 판독기가 아니라 <b>AI가 놓은 점</b>입니다 — "
+      "그 패널은 점 하나하나를 보았다는 확인 칸이 하나 더 있습니다.</p>")
+    w("<p class='note'><b>승인은 확인 칸이 전부 채워져야 승인입니다.</b> "
+      "정하기 어려우면 <b>아직 못 정하겠다</b>도 답입니다. 이 페이지는 "
+      "<b>관문이 아닙니다</b> — <code>finalize_batch</code>가 검토자가 등록된 "
+      "사람인지, 실행이 손대지 않았는지를 다시 봅니다.</p>")
+    w("<p style='margin:10px 0 0'><button id='dl'>CSV 내려받기</button> "
+      "<span class='count' id='msg'></span></p></header><main>")
+    for q in sorted(queue, key=lambda r: (r.get("Panel_ID") or "")):
+        pid = (q.get("Panel_ID") or "").strip()
+        mode = (q.get("Review_Mode") or "").strip()
+        mine = by_panel.get(pid, [])
+        required = list(RB.REVIEW_CONFIRMATIONS.get(mode, ()))
+        required += [c for c in RB.inference_confirmations(mine)
+                     if c not in required]
+        ids.append(pid)
+        meta[pid] = {"panel": pid,
+                     "subject": (q.get("Review_Subject_SHA256") or "").strip(),
+                     "required": required}
+        w(run_card(run, q, mine, required))
+    w("</main><script>")
+    w("var IDS = %s;" % json.dumps(ids, ensure_ascii=False))
+    w("var META = %s;" % json.dumps(meta, ensure_ascii=False))
+    w("var WHEN = %s;" % json.dumps(str(when or ""), ensure_ascii=False))
+    with io.open(os.path.join(HERE, LOGIC), encoding="utf-8") as fh:
+        w(fh.read())
+    w(PAGE_JS)
+    w("</script></body></html>")
+    log("패널 %d개 · 값 %d줄 · AI가 놓은 점이 있는 패널 %d"
+        % (len(ids), len(values),
+           sum(1 for pid in ids if any(
+               (v.get("Value_Method") or "") == "AI_PLACED_POINT"
+               for v in by_panel.get(pid, [])))))
+    return "\n".join(out), len(ids)
+
+
+def run_card(run, q, values, required):
+    pid = (q.get("Panel_ID") or "").strip()
+    out = []
+    w = out.append
+    w("<div class='doc' data-id='%s'>" % esc(pid))
+    w("<h2>%s · %s</h2>" % (esc(pid), esc(q.get("Unit_ID") or "")))
+    w("<p class='sub'>%s · 칸 %s / %s</p>"
+      % (esc(q.get("Mark_Type") or ""), esc(q.get("Cells_Read") or ""),
+         esc(q.get("Cells_Declared") or "")))
+    placed = [v for v in values
+              if (v.get("Value_Method") or "") == "AI_PLACED_POINT"]
+    if placed:
+        w("<p class='placed'>@ AI가 놓은 점 %d개 — 판독기가 읽은 것이 아닙니다.</p>"
+          % len(placed))
+    w("<div class='side'><div class='figs'><div class='fig'>")
+    overlay = (q.get("Overlay_File") or "").strip()
+    src = data_url(os.path.join(run, overlay)) if overlay else ""
+    if src:
+        w("<img src='%s' alt='%s'>" % (src, esc(pid)))
+    else:
+        w("<div class='nofig'>겹쳐 그린 그림 없음 — 확인할 것이 없습니다</div>")
+    w("</div></div><div class='pick'>")
+    w("<table class='v'><tr><th>칸</th><th>평균</th><th>퍼짐</th><th>아래</th>"
+      "<th>위</th></tr>")
+    for v in sorted(values, key=lambda r: r.get("Cell_Key") or ""):
+        w("<tr><td>%s%s</td>%s</tr>"
+          % (esc(v.get("Cell_Key")),
+             " @" if (v.get("Value_Method") or "") == "AI_PLACED_POINT" else "",
+             "".join("<td>%s</td>" % esc(_g(v.get(k)))
+                     for k in ("Mean", "Dispersion_Value", "Errorbar_Lower",
+                               "Errorbar_Upper"))))
+    w("</table>")
+    for value, label in LABELS:
+        w("<label class='opt'><input type='radio' name='d-%s' "
+          "data-decision='%s' value='%s'> %s</label>"
+          % (esc(pid), esc(pid), esc(value), esc(label)))
+    w("<div class='checks'>")
+    for name in required:
+        w("<label class='chk'><input type='checkbox' data-check='%s' "
+          "data-name='%s'> %s</label>"
+          % (esc(pid), esc(name), esc(RUN_ASKS.get(name, name))))
+    w("</div>")
+    w("<div class='who'>검토자 ID <input type='text' data-who='%s' size='16' "
+      "placeholder='reviewer_registry.csv의 ID'></div>" % esc(pid))
+    w("<label>메모 <input type='text' data-note='%s' size='28'></label>" % esc(pid))
+    w("<div class='state' data-state='%s'></div>" % esc(pid))
+    w("</div></div></div>")
+    return "\n".join(out)
 
 
 def card(values, pid, cells, subject):
@@ -287,7 +430,8 @@ PAGE_JS = r"""
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--values", required=True)
+    ap.add_argument("--values", help="상자그림 판독 값 폴더 (read_values.csv)")
+    ap.add_argument("--run", help="run_batch의 실행 폴더: 그 검토 대기열 그대로")
     ap.add_argument("--out", required=True)
     ap.add_argument("--when", default="",
                     help="사람이 그림을 본 날짜. 브라우저 시계로 채우지 "
@@ -296,6 +440,15 @@ def main(argv=None):
     ap.add_argument("--queue", help="run_batch가 낸 value_review.csv. "
                                     "패널마다의 실행 지문이 거기 있습니다.")
     a = ap.parse_args(argv)
+    if bool(a.values) == bool(a.run):
+        ap.error("--values와 --run 중 하나만 주세요")
+    if a.run:
+        html, _n = build_run(os.path.expanduser(a.run), when=a.when)
+        with io.open(os.path.expanduser(a.out), "w", encoding="utf-8") as fh:
+            fh.write(html)
+        print("페이지: %s (%.1f MB)"
+              % (a.out, os.path.getsize(os.path.expanduser(a.out)) / 1e6))
+        return 0
     subjects = {}
     if a.queue:
         for row in _rows(os.path.expanduser(a.queue)):

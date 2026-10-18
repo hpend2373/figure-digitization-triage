@@ -59,12 +59,17 @@ EDIT = "EDIT"
 #: 없다" - 그 답은 `bundle_route.py`가 옮기지 않고 할 일로 남깁니다.
 GATES = {
     "dispositions": ("row", ("Draft_ID", "Disposition")),
-    "errorbar": ("row", ("Source_Document_ID", "Dispersion_Type", "Errorbar_Definition_Source")),
+    "errorbar": ("row", ("Source_Document_ID", "Dispersion_Type")),
     "identity": ("proposal_id", ()),
     "geometry": ("proposal_id", ()),
     "outcomes": ("row", ("Panel_ID", "Decision")),
     "legends": ("row", ("Draft_ID", "Legend_Groups", "Decision")),
 }
+
+#: 오차 정의 답 가운데 인용문 없이 적는 것(`record_errorbar`의 DROP·NOT_DATA와 NO_ERRORBAR), 그리고 인용문이
+#: 있으면 안 되는 것. 시나리오가 `record_errorbar`의 값과 대 봅니다.
+ERRORBAR_WITHOUT_QUOTE = ("DROP", "NOT_DATA", "NO_ERRORBAR")
+ERRORBAR_NO_QUOTE_ALLOWED = ("DROP", "NOT_DATA")
 
 #: 카드 관문이 답에서 받는 칸. 나머지는 관문이 제안 행에서 다시 짓습니다 - `record_identity`는
 #: 정체 제안의 행에, `record_geometry`는 기하 제안의 행(또는 `Drawn_Frame`으로 그린 프레임)에
@@ -112,6 +117,16 @@ def effect_problems(iid, value, effect, item):
             miss = [c for c in required if not str(row.get(c) or "").strip()]
             if miss:
                 out.append(("BAD_EFFECT", "%s의 %s: %s 행에 %s가 없습니다." % (iid, value, gate, ", ".join(miss))))
+            if gate == "errorbar" and not miss:
+                # 인용문은 분산의 종류를 말하는 답에만 있습니다 - `record_errorbar`가 DROP·NOT_DATA에 붙은 인용문을
+                # 거절하고(…_WITH_QUOTE), NO_ERRORBAR는 그림을 본 사람의 말이라 문장을 요구하지 않습니다.
+                code = str(row.get("Dispersion_Type")).strip().upper()
+                quote = str(row.get("Errorbar_Definition_Source") or "").strip()
+                if code not in ERRORBAR_WITHOUT_QUOTE and not quote:
+                    out.append(("BAD_EFFECT", "%s의 %s: %s라고 적으려면 논문의 문장(Errorbar_Definition_Source)이 있어야 합니다."
+                                % (iid, value, code)))
+                if code in ERRORBAR_NO_QUOTE_ALLOWED and quote:
+                    out.append(("BAD_EFFECT", "%s의 %s: %s는 정의를 못 찾았다는 답인데 인용문이 있습니다." % (iid, value, code)))
         else:
             if not str(effect.get("proposal_id") or "").strip():
                 out.append(("BAD_EFFECT", "%s의 %s: %s 효과에 Proposal_ID가 없습니다." % (iid, value, gate)))

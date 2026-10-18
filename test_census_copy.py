@@ -195,6 +195,25 @@ check("a name and a legend split are recorded on the copy by their own gates, an
       and rd(os.path.join(OUTN, "run_after", "legend_decisions.csv"))[0]["Legend_Groups"] == "p1|p2"
       and not os.path.exists(os.path.join(RUN, "outcome_decisions.csv")), recn)
 
+import record_errorbar as REB                                    # noqa: E402
+_seen, _real_reb = {}, REB.record
+
+
+def _spy(*a, **k):
+    _seen.update(k)
+    return [], [], ""
+
+
+REB.record = _spy
+try:
+    CC.record_on_copy(os.path.join(ROOT, "spy_after"), EMPTY, "2026-10-17", os.path.join(ROOT, "spy_plans"), {}, pdf_root=ROOT,
+                      log=lambda *_a: None)
+finally:
+    REB.record = _real_reb
+# REVERT: record error definitions on the copy without the census's plans. The figures the plan is waiting for (opened after the
+# old pending list, or misread by the caption rule) are refused on the copy, and the census never shows what they change.
+check("the error-bar gate on the copy reads the plans the census made", _seen.get("plans") == os.path.join(ROOT, "spy_plans"), _seen)
+
 CALLS = []
 
 

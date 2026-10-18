@@ -48,6 +48,16 @@ DRAFT = "figure_intake_draft.csv"
 UNSTATED = "errorbar_unstated.csv"
 DECISIONS = "errorbar_decisions.csv"
 
+#: `--plans`(make_plan의 출력 폴더)를 주면 계획서도 기다리는 그림을 댑니다. `errorbar_unstated.csv`는
+#: 패널을 세기 전에 만든 목록이라 그 뒤의 일을 모릅니다 - run2(2026-10-17)에서 나중에 열린 그림
+#: 둘(막대 없는 그림, 정의 없는 막대)과 규칙이 캡션을 잘못 읽은 그림 둘(회귀선 띠의
+#: '95% confidence intervals'가 CI95로 읽힘)이 NOT_PENDING이었습니다.
+#: 계획서에서 오는 그림은 둘입니다: 어디서도 정의를 찾지 못한 그림(출처 빈칸), 그리고 규칙이 캡션·문서에서
+#: 읽은 정의를 단 그림(READ_BY_RULE) - 뒤의 것은 사람이 고치는 답만 받습니다(Note에 왜, 읽기와 다른 종류).
+#: 사람의 판정(DECISION)이 이미 있는 그림은 기다리는 그림이 아닙니다(--replace의 일).
+PLAN_FIGURES = "plan_figures.csv"
+READ_BY_RULE = ("CAPTION", "DOCUMENT")
+
 #: 계획서가 실제로 받는 분산 종류. `kernel`에서 가져옵니다 - 여기에 손으로
 #: 적어 두면 kernel이 바뀔 때 이 문만 옛 어휘를 받아들이게 됩니다.
 DISPERSION_TYPES = tuple(kernel.FIG_DISPERSION_TYPES)
@@ -299,12 +309,29 @@ def check_answer(answer, source, pending_pages=()):
     return problems
 
 
-def load_pending(run):
-    """{문서: [미정 행]} - 아직 정의가 없는 행들만."""
+def load_pending(run, plans=None):
+    """{문서: [미정 행]} - 아직 정의가 없는 행들. `plans`가 있으면 계획서가 기다리는 그림도
+    (`From_Plan`; 규칙이 읽은 정의가 있으면 `Reading`·`Reading_Type`)."""
     path = os.path.join(run, UNSTATED)
     pending = {}
-    for row in csv.DictReader(io.open(path, encoding="utf-8")):
-        pending.setdefault(row["Source_Document_ID"], []).append(row)
+    if plans is None or os.path.exists(path):
+        for row in csv.DictReader(io.open(path, encoding="utf-8")):
+            pending.setdefault(row["Source_Document_ID"], []).append(row)
+    if plans is None:
+        return pending
+    listed = set(r["Draft_ID"] for rows in pending.values() for r in rows)
+    drafts = dict((r["Draft_ID"], r) for r in csv.DictReader(io.open(os.path.join(run, DRAFT), encoding="utf-8")))
+    for r in csv.DictReader(io.open(os.path.join(plans, PLAN_FIGURES), encoding="utf-8")):
+        did = (r.get("Draft_ID") or "").strip()
+        kind = (r.get("Errorbar_Source_Kind") or "").strip().upper()
+        if did in listed or did not in drafts or kind not in ("",) + READ_BY_RULE:
+            continue
+        d = drafts[did]
+        pending.setdefault(d["Source_Document_ID"], []).append(dict(
+            Source_Document_ID=d["Source_Document_ID"], Draft_ID=did,
+            Page=(r.get("Page") or d.get("Page") or "").strip(),
+            Figure_Number=(r.get("Figure_Number") or d.get("Figure_Number") or "").strip(),
+            Reading=kind, Reading_Type=(r.get("Dispersion_Type") or "").strip().upper(), From_Plan="1"))
     return pending
 
 
@@ -337,13 +364,13 @@ def read_source(run, doc, pdf_root):
 
 
 def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
-           replace=False, log=print):
+           replace=False, log=print, plans=None):
     """(적힌 행, 거절된 (문서, 문제) 목록, 파일 경로)."""
     missing = [c for c in ANSWER_REQUIRED if c not in (answers[0] if answers else {})]
     if answers and missing:
         raise SystemExit("답 CSV에 %s 열이 없습니다. 검토 페이지가 내려준 "
                          "파일이 맞습니까?" % ", ".join(missing))
-    pending = load_pending(run)
+    pending = load_pending(run, plans)
     out_path = out_path or os.path.join(run, DECISIONS)
     existing = load_decisions(run, out_path)
     settled = set(r["Draft_ID"] for r in existing)
@@ -375,7 +402,9 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
         if rows and did:
             rows = [r for r in rows if r["Draft_ID"] == did]
         elif rows:
-            rows = [r for r in rows if r["Draft_ID"] not in named]
+            # 계획서에서 온 그림은 그림의 답만 받습니다. 문서의 답이 계획서의 그림까지 덮으면, 규칙이
+            # 캡션에서 맞게 읽은 그림의 정의가 같은 논문의 다른 그림을 위한 답으로 바뀝니다.
+            rows = [r for r in rows if r["Draft_ID"] not in named and not r.get("From_Plan")]
         if not rows:
             refused.append((did or doc, [("NOT_PENDING",
                                           "%s는 정의를 기다리는 목록에 없습니다. "
@@ -392,6 +421,18 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
             continue
         code = (answer.get("Dispersion_Type") or "").strip().upper()
         for row in rows:
+            if row.get("Reading") in READ_BY_RULE:
+                # 규칙이 읽은 정의를 사람이 고치는 답. 고친 까닭이 기록에 없으면 다음 사람은 규칙의
+                # 읽기와 사람의 답 가운데 어느 쪽이 맞는지 다시 찾아야 합니다.
+                if not (answer.get("Note") or "").strip():
+                    refused.append((row["Draft_ID"], [("CORRECTION_UNEXPLAINED",
+                                    "규칙이 %s에서 %s로 읽은 그림입니다. 고치는 까닭을 Note에 적어 주십시오."
+                                    % (row["Reading"], row.get("Reading_Type") or "(빈칸)"))]))
+                    continue
+                if code == row.get("Reading_Type"):
+                    refused.append((row["Draft_ID"], [("SAME_AS_READING",
+                                    "규칙의 읽기(%s)와 같은 답입니다 - 적을 것이 없습니다." % code)]))
+                    continue
             if row["Draft_ID"] in settled and not replace:
                 refused.append((row["Draft_ID"],
                                 [("ALREADY_DECIDED",
@@ -443,12 +484,14 @@ def main(argv=None):
                     help="사람이 확인한 날짜. 오늘로 채우지 않습니다 - "
                          "언제 보았는지는 이 프로그램이 아는 것이 아닙니다.")
     ap.add_argument("--replace", action="store_true")
+    ap.add_argument("--plans", help="make_plan의 출력 폴더 - 계획서가 기다리는 그림과 규칙이 읽은 정의를 고치는 답도 받음")
     args = ap.parse_args(argv)
     answers = list(csv.DictReader(io.open(args.answers, encoding="utf-8")))
     _w, refused, path = record(
         os.path.expanduser(args.run), answers,
         os.path.expanduser(args.pdf_root), args.when,
-        out_path=args.out, via=args.via, replace=args.replace)
+        out_path=args.out, via=args.via, replace=args.replace,
+        plans=os.path.expanduser(args.plans) if args.plans else None)
     print(path)
     return 1 if refused else 0
 

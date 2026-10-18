@@ -121,7 +121,8 @@ def record_on_copy(after, routed, when, plans, gate_dirs, pdf_root=None, log=pri
                 mod = RO if gate == "outcomes" else RLG
                 w, refused, _p = mod.record(after, plans, rows, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
             elif gate == "errorbar":
-                w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet)
+                w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via="BUNDLE", log=quiet,
+                                           plans=plans)
             else:
                 d = os.path.join(after, gate_dirs[gate])
                 mod = RI if gate == "identity" else RG

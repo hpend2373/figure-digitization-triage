@@ -1,7 +1,7 @@
 {
  "files": {
-  "census_copy.py": "f082b81f00b7d98c5711c45653ca3fad0ed1a66150b72a56805fb971823506e7",
-  "test_census_copy.py": "2e111b1408c45049a630c6f2eeb72633c88eb73fe20a72fc26a17c954e0c8870"
+  "census_copy.py": "9e16ff2d3e190e29a5fa3b51aea77759f8ecd969c0cd3030897bd84f6f987418",
+  "test_census_copy.py": "f74988f89224302380ca906e806334602f17aea34eb29199178a54ba23e223e6"
  },
  "suites": [
   "test_census_copy.py"
@@ -108,6 +108,12 @@
    "file": "census_copy.py",
    "old": "            elif gate in (\"outcomes\", \"legends\"):\n",
    "new": "            elif False:\n"
+  },
+  {
+   "name": "사본의 오차 정의 관문에 계획서를 주지 않는다",
+   "file": "census_copy.py",
+   "old": "                w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via=\"BUNDLE\", log=quiet,\n                                           plans=plans)",
+   "new": "                w, refused, _p = RE.record(after, rows, pdf_root, when, out_path=os.path.join(after, rec_name), via=\"BUNDLE\", log=quiet)"
   }
  ]
 }

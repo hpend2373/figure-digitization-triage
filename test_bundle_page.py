@@ -148,6 +148,21 @@ S4 = spec(); del item(S4, "B01")["options"][0][2]["row"]["Disposition"]
 check("a disposition effect without the disposition is refused", "BAD_EFFECT" in codes(S4))
 S4 = spec(); item(S4, "C002")["options"][0][2] = {"gate": "identity", "set": {"Read_Route": "MANUAL"}}
 check("a card effect without its Proposal_ID is refused", "BAD_EFFECT" in codes(S4))
+EB = lambda code, quote="": {"gate": "errorbar", "row": {"Source_Document_ID": "DOC", "Draft_ID": "DOC_D001", "Figure_Number": "FIG1",
+                                                         "Page": "3", "Dispersion_Type": code, "Errorbar_Definition_Source": quote,
+                                                         "Found_On_Page": "4" if quote else ""}}
+S4 = spec(); item(S4, "B01")["options"][0][2] = EB("DROP"); item(S4, "B01")["options"][1][2] = EB("NO_ERRORBAR")
+# REVERT: demand a quote of every error-bar answer. A figure with bars and no definition, or with no bars, cannot be answered.
+check("an error-bar answer that found no definition, or saw no bars, needs no quote", BP.check_spec(S4, ROOT) == [], BP.check_spec(S4, ROOT))
+S4 = spec(); item(S4, "B01")["options"][0][2] = EB("SD")
+# REVERT: let a dispersion type go without the sentence. The gate refuses it later (NO_ERRORBAR_SOURCE), after a person approved it.
+check("an error-bar answer that names a dispersion needs the paper's sentence", "BAD_EFFECT" in codes(S4))
+S4 = spec(); item(S4, "B01")["options"][0][2] = EB("DROP", "Values are mean ± SD.")
+# REVERT: let DROP carry a quote. The gate refuses DROP_WITH_QUOTE - one of the two is false.
+check("an answer that found no definition may not carry one", "BAD_EFFECT" in codes(S4))
+import record_errorbar as RE                                     # noqa: E402
+check("the quote-free error-bar answers are the gate's own", set(BP.ERRORBAR_WITHOUT_QUOTE) == (set(RE.DISPOSITIONS) - {RE.HOLD}) | {"NO_ERRORBAR"}
+      and set(BP.ERRORBAR_NO_QUOTE_ALLOWED) == set(RE.DISPOSITIONS) - {RE.HOLD}, (BP.ERRORBAR_WITHOUT_QUOTE, RE.DISPOSITIONS))
 S4 = spec(); item(S4, "C002")["options"][1][2] = {"gate": "identity", "proposal_id": "DOC_D002__p2"}
 check("a card effect that changes nothing is refused", "BAD_EFFECT" in codes(S4))
 S4 = spec(); item(S4, "C001")["options"][0][2] = {"gate": None, "uses_text": True}

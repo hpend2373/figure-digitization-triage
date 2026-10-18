@@ -1,7 +1,7 @@
 {
  "files": {
-  "bundle_page.py": "375b711d872f92e6ac1ca8336a5873e42bd46793dbf8b8dfa8273fecec9d218d",
-  "test_bundle_page.py": "e1e9773d464c6b99281862f28b4391999f532fdcbe0e7530731343bf4cf2e811"
+  "bundle_page.py": "a86d756b1fc0b928317f32da5d04f29e811b0ea28d1743bfe2a8e58050c1530b",
+  "test_bundle_page.py": "508dcc8827fd97fbb8961fcc875e6b7460b36d35428eb085dbe94fb4bb1a780e"
  },
  "suites": [
   "test_bundle_page.py"
@@ -174,6 +174,24 @@
    "file": "bundle_page.py",
    "old": "                if not eff:\n                    problems.append((\"NO_EFFECT\"",
    "new": "                if False:\n                    problems.append((\"NO_EFFECT\""
+  },
+  {
+   "name": "오차 정의 답마다 인용문을 요구한다",
+   "file": "bundle_page.py",
+   "old": "                if code not in ERRORBAR_WITHOUT_QUOTE and not quote:",
+   "new": "                if not quote:"
+  },
+  {
+   "name": "분산 종류를 말하는 답의 인용문을 보지 않는다",
+   "file": "bundle_page.py",
+   "old": "                if code not in ERRORBAR_WITHOUT_QUOTE and not quote:",
+   "new": "                if False:"
+  },
+  {
+   "name": "DROP에 붙은 인용문을 보지 않는다",
+   "file": "bundle_page.py",
+   "old": "                if code in ERRORBAR_NO_QUOTE_ALLOWED and quote:",
+   "new": "                if False:"
   }
  ]
 }

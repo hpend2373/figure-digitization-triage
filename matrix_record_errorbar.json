@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_errorbar.py": "cc4cbe18c262647aa8adc34489f78975dbe9b4446e842de4b6e90cd958e2b9dd",
-  "test_record_errorbar.py": "fc3fd61092abac1ebe3a5ea32cde5a67f9bc643f396580d156373b232ea804c9"
+  "record_errorbar.py": "6196e8a60295568d9efb7e2b6209bc3012e47a2a60d6603440f93af0510e4532",
+  "test_record_errorbar.py": "63280bd5a52e5948d8eaaf5ec4d056e0f8f238cc551c96a3ad5a1e46b3fd2253"
  },
  "suites": [
   "test_record_errorbar.py"
@@ -226,14 +226,56 @@
   {
    "name": "per figure: a document answer overrides the figure's",
    "file": "record_errorbar.py",
-   "old": "rows = [r for r in rows if r[\"Draft_ID\"] not in named]",
-   "new": "rows = list(rows)"
+   "old": "            rows = [r for r in rows if r[\"Draft_ID\"] not in named and not r.get(\"From_Plan\")]",
+   "new": "            rows = [r for r in rows if not r.get(\"From_Plan\")]"
   },
   {
    "name": "two answers for one place both taken",
    "file": "record_errorbar.py",
    "old": "if (doc, did) in twice:",
    "new": "if False:"
+  },
+  {
+   "name": "계획서를 읽지 않는다",
+   "file": "record_errorbar.py",
+   "old": "    if plans is None:\n        return pending\n",
+   "new": "    return pending\n"
+  },
+  {
+   "name": "계획서의 그림이 옛 목록의 행을 덮는다",
+   "file": "record_errorbar.py",
+   "old": "        if did in listed or did not in drafts or kind not in (\"\",) + READ_BY_RULE:",
+   "new": "        if did not in drafts or kind not in (\"\",) + READ_BY_RULE:"
+  },
+  {
+   "name": "사람이 정한 그림도 기다리는 그림으로 친다",
+   "file": "record_errorbar.py",
+   "old": "        if did in listed or did not in drafts or kind not in (\"\",) + READ_BY_RULE:",
+   "new": "        if did in listed or did not in drafts:"
+  },
+  {
+   "name": "초안에 없는 계획서 그림을 받는다",
+   "file": "record_errorbar.py",
+   "old": "        if did in listed or did not in drafts or kind not in (\"\",) + READ_BY_RULE:",
+   "new": "        if did in listed or kind not in (\"\",) + READ_BY_RULE:"
+  },
+  {
+   "name": "문서의 답이 계획서의 그림에 닿는다",
+   "file": "record_errorbar.py",
+   "old": "            rows = [r for r in rows if r[\"Draft_ID\"] not in named and not r.get(\"From_Plan\")]",
+   "new": "            rows = [r for r in rows if r[\"Draft_ID\"] not in named]"
+  },
+  {
+   "name": "고침의 까닭을 보지 않는다",
+   "file": "record_errorbar.py",
+   "old": "                if not (answer.get(\"Note\") or \"\").strip():\n                    refused.append((row[\"Draft_ID\"], [(\"CORRECTION_UNEXPLAINED\",",
+   "new": "                if False:\n                    refused.append((row[\"Draft_ID\"], [(\"CORRECTION_UNEXPLAINED\","
+  },
+  {
+   "name": "규칙의 읽기와 같은 답을 적는다",
+   "file": "record_errorbar.py",
+   "old": "                if code == row.get(\"Reading_Type\"):",
+   "new": "                if False:"
   }
  ]
 }

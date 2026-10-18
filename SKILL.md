@@ -751,16 +751,28 @@ Rules that came out of that bundle:
   the band of a fitted line; the bars are whatever the statistics section says
   ("Data are given as the mean ± SD"). Two such figures read as CI95 in run2.
 
-Known gaps, written down so nobody trusts them silently:
+**Error definitions the old pending list does not know.** `errorbar_unstated.csv` was
+made before the panels were counted, so a figure opened later, or one whose caption
+a rule misread, used to be `NOT_PENDING`. `record_errorbar --plans PLANS/` (the plan
+folder of the current census) also takes:
 
-- `record_errorbar` takes only figures in `errorbar_unstated.csv`, made before the
-  panels were counted; a figure opened later, or one whose caption was misread, is
-  `NOT_PENDING`. Its answer goes to `unrouted.csv` with the row it would write.
-- `bundle_page` demands a quote on every error-bar effect, while `record_errorbar`
-  refuses one on DROP and does not ask one for NO_ERRORBAR.
-- `make_plan` falls back to the 200 dpi crop when a region's `Raster_600` file is
-  missing; the 600 dpi boxes then sit on the wrong picture, and the run stops at
-  reading time (`INTERNAL_ERROR`), not at planning time.
+- a figure the plan is still waiting on - no definition found anywhere (in run2 one
+  figure with no bars, NO_ERRORBAR, and one with bars and no definition, DROP);
+- a figure whose definition a rule read from the caption or the document, as a
+  correction: a figure answer only, the reason in `Note` (`CORRECTION_UNEXPLAINED`),
+  and a type other than the reading (`SAME_AS_READING`). The two run2 figures read
+  as CI95 from a regression band are of this kind; their statistics sections say SD.
+
+A document-level answer never reaches a figure that came from the plan, and a figure
+a person already decided is not pending (that is `--replace`). `census_copy` gives
+the gate the census's own plans. `bundle_page` asks a quote only of an answer that
+names a dispersion: DROP must not carry one (`record_errorbar` refuses it) and
+NO_ERRORBAR needs none, so a bundle can route both.
+
+A known gap, written down so nobody trusts it silently: `make_plan` falls back to the
+200 dpi crop when a region's `Raster_600` file is missing; the 600 dpi boxes then sit
+on the wrong picture, and the run stops at reading time (`INTERNAL_ERROR`), not at
+planning time.
 
 ## Provenance is per FIELD, not per row
 

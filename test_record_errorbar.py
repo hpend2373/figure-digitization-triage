@@ -262,6 +262,13 @@ DRAFT = (
     ("DOC_C_D001", "DOC_C", "c.pdf", "FIG1", "1"),
     ("DOC_D_D001", "DOC_D", "d.pdf", "FIG1", "1", "JATS_FIGURE_ELEMENTS"),
 )
+#: 대기 목록을 만든 뒤에 생긴 그림들 - 초안에는 있고 errorbar_unstated.csv에는 없습니다.
+LATER = (
+    ("DOC_A_D003", "DOC_A", "a.pdf", "FIG3", "1"),
+    ("DOC_A_D004", "DOC_A", "a.pdf", "FIG4", "1"),
+    ("DOC_B_D002", "DOC_B", "b.pdf", "FIG2", "1"),
+    ("DOC_C_D002", "DOC_C", "c.pdf", "FIG2", "1"),
+)
 try:
     BACKEND = CI._default_backend()
 except CI.BackendUnavailable:
@@ -275,7 +282,7 @@ with io.open(os.path.join(RUN, RE.DRAFT), "w", encoding="utf-8", newline="") as 
     w.writerow(["Draft_ID", "Source_Document_ID", "Source_File",
                 "Source_File_SHA256", "Page", "Figure_Number",
                 "Extraction_Method"])
-    for row in DRAFT:
+    for row in DRAFT + LATER:
         did, doc, name, fig, page = row[:5]
         w.writerow([did, doc, name, sha(name), page, fig,
                     row[5] if len(row) > 5 else BACKEND])
@@ -498,6 +505,48 @@ _w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2"), answer("DOC_A", "NO_E
 # REVERT: let two answers for one place both through. The file then holds two
 # rows for one figure, and which one a plan reads depends on the order.
 check("한 자리에 답이 둘이면 둘 다 거절한다", problems_of(_r) == ["ANSWERED_TWICE", "ANSWERED_TWICE"] and _w == [], problems_of(_r))
+
+# --- what the plan is waiting for (run2 2026-10-17) -------------------------
+PLANS = os.path.join(ROOT, "plans")
+os.makedirs(PLANS)
+with io.open(os.path.join(PLANS, RE.PLAN_FIGURES), "w", encoding="utf-8", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(["Draft_ID", "Figure_Number", "Page", "Dispersion_Type", "Errorbar_Source_Kind"])
+    w.writerow(["DOC_A_D001", "FIG1", "1", "", ""])           # also in the old list - the old list's row stands
+    w.writerow(["DOC_A_D003", "FIG3", "1", "", ""])           # opened after the list was made, no definition anywhere
+    w.writerow(["DOC_A_D004", "FIG4", "1", "SD", "DECISION"])  # a person already decided
+    w.writerow(["DOC_B_D002", "FIG2", "1", "NO_ERRORBAR", "DOCUMENT"])
+    w.writerow(["DOC_C_D002", "FIG2", "1", "CI95", "CAPTION"])  # the rule read a regression band as the bars
+    w.writerow(["DOC_Z_D001", "FIG1", "1", "", ""])           # not in this draft
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D003")])
+check("계획서를 주지 않으면 목록 밖의 그림은 그대로 NOT_PENDING", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D003")], plans=PLANS)
+# REVERT: read the old list only. A figure opened after it was made can never get a definition.
+check("계획서가 정의를 기다리는 그림은 그림의 답으로 적힌다", [(r["Draft_ID"], r["Figure_Number"]) for r in _w] == [("DOC_A_D003", "FIG3")]
+      and _r == [], (problems_of(_r), _w))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D001")], plans=PLANS)
+# REVERT: add the plan's row for a figure the old list already has. The figure is then pending twice and written twice.
+check("옛 목록에도 있는 그림은 한 번만 적힌다", [r["Draft_ID"] for r in _w] == ["DOC_A_D001"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2")], plans=PLANS)
+# REVERT: let a document's answer reach the plan's figures. A figure whose caption the rule read right takes another figure's answer.
+check("문서의 답은 계획서에서 온 그림에 닿지 않는다", sorted(r["Draft_ID"] for r in _w) == ["DOC_A_D001", "DOC_A_D002"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SEM", SEM_LINE, "2", Draft_ID="DOC_A_D004")], plans=PLANS)
+check("사람이 이미 정한 그림은 기다리는 그림이 아니다", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_Z", "SD", SD_LINE, "2", Draft_ID="DOC_Z_D001")], plans=PLANS)
+check("초안에 없는 그림은 계획서에 있어도 받지 않는다", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+FIX = answer("DOC_C", "SD", "Data are presented as means and standard deviations.", "1", Draft_ID="DOC_C_D002",
+             Note="the caption's 95% CI is the regression band; the bars are SD per the statistics section")
+_w, _r, _p, _o = run([FIX], plans=PLANS)
+check("규칙의 읽기를 고치는 답은 까닭과 함께 적힌다", [(r["Draft_ID"], r["Dispersion_Type"]) for r in _w] == [("DOC_C_D002", "SD")]
+      and "regression band" in _w[0]["Note"], (problems_of(_r), _w))
+_w, _r, _p, _o = run([dict(FIX, Note="")], plans=PLANS)
+# REVERT: take a correction without its reason. The record then holds two readings and nothing says which is right.
+check("까닭 없는 고침은 적지 않는다", problems_of(_r) == ["CORRECTION_UNEXPLAINED"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_B", "NO_ERRORBAR", Draft_ID="DOC_B_D002", Note="no bars")], plans=PLANS)
+# REVERT: write an answer the rule already read. It looks like a person's decision and changes nothing.
+check("규칙의 읽기와 같은 답은 적을 것이 없다", problems_of(_r) == ["SAME_AS_READING"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_B", RE.DROP, Draft_ID="DOC_B_D002", Note="bars, no definition")], plans=PLANS)
+check("규칙의 읽기와 다른 처분도 고침이다", [(r["Draft_ID"], r["Dispersion_Type"]) for r in _w] == [("DOC_B_D002", "DROP")], problems_of(_r))
 
 # --- what is not being asked ----------------------------------------------
 _w, _r, _p, _o = run([answer("DOC_Z", "SD", SD_LINE, "2")])

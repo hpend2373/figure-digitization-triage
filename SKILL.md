@@ -901,6 +901,13 @@ The three paths built under (1) on 2026-10-18:
     python3 move_panels.py --run RUN --from DRAFT_A --panels 2,4 --to DRAFT_B --when YYYY-MM-DD \
         --approval-ref "where the person chose MOVE" [--write] [--log moved.json]
 
+Recorded the same day on run2, with no page: the reopened panel (an approved observation
+naming the answer that chose it) and the move with its RECROP withdrawn, rehearsed on a
+copy, then the container and the Mac with the same fingerprints. A run may hold old review
+CSVs among the cards that the copy did not have; the move renames inside them too, and
+their before and after go in the log rather than the comparison. The census on real crops
+went from 2 manifest problems to none: 98 of 98 papers compile and run clean.
+
 **What the census says about the values, before anyone reads them.** The census is not a
 reading run - it is read for manifest problems - but its runs do read, and on run2
 (2026-10-18, real crops, 98 papers) no value passed machine QC. The reasons are not the

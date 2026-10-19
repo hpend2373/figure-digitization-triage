@@ -895,6 +895,15 @@ whisker read on a point, bar styles that may or may not be one series. Where a c
 asked about the order of position labels, the printed axis was looked up and the
 answer written on the card as a fact with who checked it - not as a verdict.
 
+Found by `finalize_batch` after the person answered: all eight approved panels of
+publication 323 were refused for METHOD_EVIDENCE_INCOMPLETE. The colour bar reader
+asked its own mask about one pixel - the middle column, four rows under the top -
+and 323 draws two-sided black error bars down the middle of red and blue bars, so
+that pixel was black on all 141 bars and `own_mask_hit` was 0. It now asks at three
+points (the middle and a quarter of the width either side) on the first row of the
+bar's body, below the outline and its ramp; the 141 bars read the same numbers and
+now carry `own_mask_hit=1`, `mask_overlap=0`. `matrix_bar_colour_evidence.json`.
+
 Found while testing the page end to end, not by the checks: a value page built
 without `--when` exports `Reviewed_At=""`, which `finalize_batch` refuses on every
 row; the page exports HOLD, which `finalize_batch` takes only as APPROVED/REJECTED

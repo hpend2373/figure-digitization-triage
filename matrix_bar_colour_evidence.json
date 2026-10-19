@@ -1,0 +1,23 @@
+{
+ "suites": [
+  "test_bar_reader.py"
+ ],
+ "files": {
+  "bar_reader.py": "08f71097ec3a53826910ef777c17aa72df1eb79fc7932e58057ed392ba0008ec",
+  "test_bar_reader.py": "69be6c7c6b2357f6b90526812d0bc6466b2cdcdccddf053a237e08956258912b"
+ },
+ "mutations": [
+  {
+   "name": "자기 색을 가운데 한 점에서만 묻는다",
+   "file": "bar_reader.py",
+   "old": "            samples = [(float(c), sy) for c in (xlo + w // 4, xc, xhi - w // 4)]",
+   "new": "            samples = [(float(xc), top_c + (-4 if down else 4))]"
+  },
+  {
+   "name": "몸통이 아니라 윗변 바로 아래에서 묻는다",
+   "file": "bar_reader.py",
+   "old": "            if body is not None:\n                sy = float(body[-1] - 2 if down else body[0] + 2)",
+   "new": "            if False:\n                sy = float(body[-1] - 2 if down else body[0] + 2)"
+  }
+ ]
+}

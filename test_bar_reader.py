@@ -816,6 +816,52 @@ for _got in _gbars:
           and abs(_got["dispersion"] - _w["dispersion"]) <= 0.5,
           "read %s, drawn %.1f" % (_got["dispersion"], _w["dispersion"]))
 
+print()
+print("a bar's own colour is asked about inside its body, not on its whisker")
+# PUBLICATION 323 draws red and blue bars with a black outline and a TWO-SIDED
+# black error bar whose lower half runs down the middle of the bar. The reader
+# asked its own mask about one pixel - the middle column, four rows under the top
+# - which is that stem, so `own_mask_hit` was 0 on all 141 bars and the run's
+# `MEASURED_COLOUR` had nothing behind it; `finalize_batch` refused all eight
+# approved panels (METHOD_EVIDENCE_INCOMPLETE, 2026-10-19). The numbers were right.
+# REVERT: sample the middle column only. Every bar below reports own_mask_hit=0.
+def _whisker_in_bar_fixture():
+    im = Image.new("RGB", (600, 400), "white")
+    d = ImageDraw.Draw(im)
+    d.line((60, 360, 560, 360), fill="black", width=3)                 # x axis
+    tops = {"RED": [(150, 180), (330, 220)], "BLUE": [(240, 200), (420, 160)]}
+    fill = {"RED": (254, 0, 0), "BLUE": (87, 86, 249)}
+    for name, bars in tops.items():
+        for x, top in bars:
+            # A NINE-ROW OUTLINE AND A RAMP: 323's outline is six rows of black
+            # and then a ramp to red over four more (JPEG), so a few rows under
+            # the top is still not the bar's colour there either.
+            d.rectangle((x - 30, top, x + 30, 359), fill=fill[name], outline="black", width=9)
+            for k, t in enumerate((0.2, 0.35, 0.5, 0.6)):               # the ramp
+                d.line((x - 21, top + 9 + k, x + 21, top + 9 + k),
+                       fill=tuple(int(c * t) for c in fill[name]))
+            d.line((x, top - 30, x, top + 30), fill="black", width=4)   # through the top
+            for yy in (top - 30, top + 30):
+                d.line((x - 10, yy, x + 10, yy), fill="black", width=4)
+    return np.asarray(im).astype(int), tops
+_wimg, _wtops = _whisker_in_bar_fixture()
+_wcal = AxisCalibration.from_points([(0.0, 360.0), (100.0, 60.0)])
+_wbars = read_bar_colour_panel(
+    _wimg, (60, 560, 40, 362),
+    declared_colours={"RED": ("#FE0000", 40.0), "BLUE": ("#5756F9", 40.0)},
+    series={"RED": "RED", "BLUE": "BLUE"}, y_calibration=_wcal,
+    x_positions={"P%d" % i: x for i, x in enumerate((150, 240, 330, 420))})
+check("all four bars with a whisker through their middle are read",
+      len(_wbars) == 4, "%d" % len(_wbars))
+check("  and each records its own colour claiming its ink",
+      _wbars and all(b["own_mask_hit"] == 1 for b in _wbars),
+      "%s" % [(b["series"], b["own_mask_hit"]) for b in _wbars])
+# AND THE OTHER HALF STAYS HONEST: more sample points must not make a bar look
+# claimed by the other colour. The red and blue bars sit side by side.
+check("  and none is claimed by the other series' colour",
+      _wbars and all(b["mask_overlap"] == 0 for b in _wbars),
+      "%s" % [(b["series"], b["mask_overlap"]) for b in _wbars])
+
 # One line, one format, for the CI guard that checks the documented
 # scenario count against the measured one. The sentence above it is
 # for a person; this is for `verify_documented_status.py`, and a

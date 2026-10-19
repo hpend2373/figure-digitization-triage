@@ -885,6 +885,16 @@ found was mostly not for the person to reject one by one but for the code to fix
   neither the person nor the checks could see the ends. `review_overlay` now draws
   them for any mark that carries no cap of its own.
 
+After the fixes (816513b) the Mac census ran again (98 publications clean, 154
+panels, 1,329 values). The 103 panels whose overlay and values were byte-identical
+kept their checks; the 51 that changed were checked again by two fresh passes. The
+page then had 29 panels in front and 125 behind, against 69 and 87 before the
+fixes. What stayed in front is for the person: a few readers' marker centres 10-24
+px off (one paper), box rules read on rows of points (two panels), a collapsed lower
+whisker read on a point, bar styles that may or may not be one series. Where a check
+asked about the order of position labels, the printed axis was looked up and the
+answer written on the card as a fact with who checked it - not as a verdict.
+
 Found while testing the page end to end, not by the checks: a value page built
 without `--when` exports `Reviewed_At=""`, which `finalize_batch` refuses on every
 row; the page exports HOLD, which `finalize_batch` takes only as APPROVED/REJECTED

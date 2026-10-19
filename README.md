@@ -91,6 +91,16 @@ read"):
       v
     finalize_batch.py      the same door into the pool as every other value
 
+A unit whose series are groups of different size (women and men, finishers and
+non-finishers) has no single n; each group carries its own (`SKILL.md`, "A group's
+own n"):
+
+    identity card Series[].n   all series or none, never beside the card's N_Outcome
+      | make_plan.py / compile_plan.py      -> series_n.csv (a manifest)
+      | run_batch.py       each value carries its group's n as N_Cell
+      v
+    grid gate              N_Cell in place of the unit's N_Outcome; finalize re-gates it
+
 What the census of those plans still leaves open is asked once, on one page,
 with a proposal on every line - so the person decides only where the proposal
 is wrong (`SKILL.md`, "Bundle what is left"):
@@ -205,12 +215,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5626 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5821 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5672 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5867 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5626 scenarios on main after v9.28 under `requirements-lock.txt`, and 5821 with
+5672 scenarios on main after v9.28 under `requirements-lock.txt`, and 5867 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

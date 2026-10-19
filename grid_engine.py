@@ -159,7 +159,18 @@ def fig_unit_columns():
     ]
 
 
-def fig_values_columns():
+#: A value's OWN n, where its group has one (`batch_manifests.series_n_columns`).
+#: Optional: a values file without it is the values file it always was, and the
+#: unit's `N_Outcome` speaks for every cell.
+FIG_VALUES_OPTIONAL = ("N_Cell",)
+
+
+def fig_values_columns(cell_n=False):
+    """The value file's columns; with `cell_n`, the optional per-cell n as well."""
+    return _fig_values_columns() + (list(FIG_VALUES_OPTIONAL) if cell_n else [])
+
+
+def _fig_values_columns():
     return [
         "Unit_ID", "Cell_Key",
         "Mean_R1", "Dispersion_R1", "Mean_R2", "Dispersion_R2",
@@ -285,8 +296,12 @@ def fig_parse_cell_key(key):
 # universal checkers
 # --------------------------------------------------------------------------
 
-def validate_unit(row, kernel, flag, line, figure=None):
-    """N, dispersion vocabulary, extraction geometry, provenance for one unit."""
+def validate_unit(row, kernel, flag, line, figure=None, cell_n=False):
+    """N, dispersion vocabulary, extraction geometry, provenance for one unit.
+
+    `cell_n`: this unit's values carry their own n (`N_Cell`, one per group), so
+    a blank unit `N_Outcome` is not missing - each cell is checked for its own.
+    """
     blank, num, bad_num = kernel.fig_is_blank, kernel.fig_as_number, kernel.fig_is_bad_number
     unresolved = kernel.fig_unresolved_marker
 
@@ -326,7 +341,8 @@ def validate_unit(row, kernel, flag, line, figure=None):
     if st in ("CONTINUOUS", "QUANTILE_SUMMARY"):
         n = num(row.get("N_Outcome"))
         if blank(row.get("N_Outcome")):
-            flag(line, "MISSING_REQUIRED", "N_Outcome")
+            if not cell_n:
+                flag(line, "MISSING_REQUIRED", "N_Outcome")
         elif n is None:
             flag(line, "NON_NUMERIC_VALUE", "N_Outcome=%r" % row.get("N_Outcome"))
         elif n <= 0 or n != int(n):
@@ -592,7 +608,9 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                 flag(line, "ERRORBAR_BOUNDS_INVERTED", "lower %g > upper %g" % (lo, hi))
             elif m is not None and not (lo <= m <= hi):
                 flag(line, "MEAN_OUTSIDE_ERRORBAR", "mean %g outside [%g, %g]" % (m, lo, hi))
-        n = num(unit.get("N_Outcome"))
+        # The cell's own n where its group has one, the unit's otherwise.
+        n = (num(row.get("N_Cell")) if not kernel.fig_is_blank(row.get("N_Cell"))
+             else num(unit.get("N_Outcome")))
         ratio_scale = str(unit.get("Value_Scale", "")).strip().upper() == "RATIO"
         transform = str(unit.get("Analysis_Transformation", "")).strip().upper()
         shape = str(unit.get("Distribution_Shape", "")).strip().upper()
@@ -1097,6 +1115,15 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                 flag("grid:%s" % gid, "BAD_LEVEL_ORDER",
                      "%s: Level_Order is not contiguous %s" % (fac, sorted(os_)))
 
+    # A GROUP'S OWN n, per cell, where the values carry one. The unit is then not
+    # missing its n; each of its cells is checked for its own below.
+    has_cell_n = "N_Cell" in values.columns
+    cell_n_units = set()
+    if has_cell_n:
+        for _, r in values.iterrows():
+            if not blank(r.get("N_Cell")):
+                cell_n_units.add(str(r.get("Unit_ID", "")).strip())
+
     # --------------------------------------------------------------- units
     unit = {}
     for i, r in units.iterrows():
@@ -1113,7 +1140,8 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
             flag(line, "UNKNOWN_FIGURE_ID", fid)
         if gid and gid not in declared:
             flag(line, "UNKNOWN_GRID_ID", gid)
-        validate_unit(r, kernel, flag, line, figure=fig.get(fid))
+        validate_unit(r, kernel, flag, line, figure=fig.get(fid),
+                      cell_n=uid in cell_n_units)
 
     # -------------------------------------------------------------- values
     seen = {}
@@ -1161,6 +1189,24 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                  "Position_Assignment=%s - this cell's x identity was counted "
                  "off rather than matched to a declared pixel"
                  % r.get("Position_Assignment"))
+        if has_cell_n and str(u.get("Statistic_Type", "")).strip().upper() in (
+                "CONTINUOUS", "QUANTILE_SUMMARY"):
+            own = r.get("N_Cell")
+            if not blank(own):
+                nv = num(own)
+                if nv is None or nv <= 0 or nv != int(nv):
+                    flag(line, "N_INVALID",
+                         "N_Cell=%r must be a positive whole number of subjects" % own)
+                elif not blank(u.get("N_Outcome")):
+                    # One answer per cell: the batch layer refuses this pair
+                    # (SERIES_N_WITH_UNIT_N); a hand-made values file is told here.
+                    flag(line, "N_CELL_AND_UNIT_N",
+                         "the cell says n=%s and its unit N_Outcome=%s"
+                         % (str(own).strip(), str(u.get("N_Outcome")).strip()))
+            elif uid in cell_n_units and blank(u.get("N_Outcome")):
+                flag(line, "MISSING_REQUIRED",
+                     "N_Cell - the other cells of %s carry their group's n and "
+                     "this one has none" % uid)
         key = fig_cell_key(cell)
         if key in seen.setdefault(uid, {}):
             flag(line, "FACTORIAL_CELL_DUPLICATE",

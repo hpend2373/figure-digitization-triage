@@ -935,10 +935,34 @@ paper's statement). The two instances disagreed on individual-subject panels - t
 proposers wrote 1 per plotted point, the checkers the number of subjects drawn - which is
 exactly why that kind stays the person's.
 
-**What the card cannot hold.** `N_Outcome` is one number per card. A panel whose series are
-groups of different size (women and men, finishers and non-finishers) has no single n, and
-its values cannot pass machine QC however well they are read. A per-series n is a new path,
-and the person's to decide.
+**A group's own n (built 2026-10-19; the person: "1은 만들어주고").** `N_Outcome` is one
+number per card, and a panel whose series are groups of different size (women and men,
+finishers and non-finishers) has none - its values failed machine QC however well they
+were read. Each group now carries its own:
+
+    identity card    Series[i].n, a positive whole number; all series or none
+                     (SERIES_N_PARTIAL), never beside the card's N_Outcome (N_TWICE),
+                     never anything else (SERIES_N_BAD) - `record_identity`
+    make_plan        the plan's series get n_outcome and n_source; a bad value is
+                     carried as written so the batch layer refuses it out loud
+    compile_plan     series_n.csv (Panel_ID, Series_ID, N_Outcome, N_Source), an optional
+                     manifest written with its header when nobody has one, hashed either way
+    batch layer      unknown panel or series, a series twice, not a whole number, no
+                     source, some series but not all, beside the unit's n, a unit that is
+                     not continuous or a quantile summary - all refused before the run
+    run_batch        each value carries its group's n as N_Cell, found by the level its
+                     series puts in the Cell_Key (a value row names no series)
+    grid gate        a unit whose cells carry their n is not missing one; a cell without
+                     it beside cells with theirs is; N_Cell must be a whole number and is
+                     never beside the unit's n; the SE-implies-SD check reads the cell's n
+    finalize         re-gates the raw file with N_Cell, and a candidate whose N_Cell is
+                     not the raw row's is not derived from it
+
+Filled from the papers the same way as the card's n - a bundle item per card whose
+BY_SERIES answer is the text `name=n; name=n` in the card's series order, proposals with
+quotes, a second check that never saw them, the cross-check rule - and what it does not
+cover stays without n: an n that changes along the x axis (time points with dropouts,
+groups laid out on the x axis) is per cell, not per series.
 
 ## A panel no reader can read, read by an AI agent, confirmed by the person
 

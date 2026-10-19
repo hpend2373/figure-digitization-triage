@@ -1014,6 +1014,27 @@ def supplied_readings_columns():
     ]
 
 
+def series_n_columns():
+    """One row per SERIES whose group has its own n, where the unit's one n cannot say it.
+
+    `N_Outcome` on the unit is one number, and a panel whose series are groups of
+    different size - women and men, finishers and non-finishers - has none: every
+    value it produced failed machine QC on a missing n however well it was read.
+    Here each group carries its own:
+
+        Panel_ID, Series_ID   the series, as the series manifest declares it
+        N_Outcome             the number of subjects behind that series' means
+        N_Source              where it came from (the identity card, the caption)
+
+    All of a panel's series or none of them, and never beside the unit's
+    `N_Outcome` - one answer per cell. `run_batch` stamps each value with its
+    series' n (`N_Cell`), and the grid gate takes that in place of the unit's.
+    OPTIONAL, like the axis manifest: absent for every batch whose units each
+    have one n.
+    """
+    return ["Panel_ID", "Series_ID", "N_Outcome", "N_Source", "Note"]
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -1026,6 +1047,7 @@ BATCH_TEMPLATES = (
     ("reader_config", reader_config_columns),
     ("identity_resolution", identity_resolution_columns),
     ("supplied_readings", supplied_readings_columns),
+    ("series_n", series_n_columns),
 )
 
 
@@ -1355,7 +1377,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                              reviewers=None, resolutions=None, axes=None,
                              requested_run_mode=None,
                              file_root=".", check_files=True, doc_root=None,
-                             readings=None):
+                             readings=None, series_n=None):
     """Reject an unrunnable batch before a single raster is opened.
 
     `doc_root` is where the source DOCUMENTS are, when a corpus keeps its PDFs
@@ -1386,9 +1408,12 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         axes = pd.DataFrame(columns=axis_manifest_columns())
     if readings is None:
         readings = pd.DataFrame(columns=supplied_readings_columns())
+    if series_n is None:
+        series_n = pd.DataFrame(columns=series_n_columns())
     frames = (("reviewers", reviewers, reviewer_registry_columns()),
               ("axes", axes, axis_manifest_columns()),
               ("readings", readings, supplied_readings_columns()),
+              ("series_n", series_n, series_n_columns()),
               ("source_documents", source_documents, source_document_manifest_columns()),
               ("source_figures", source_figures, source_figure_manifest_columns()),
               ("source_panels", source_panels, source_panel_inventory_columns()),
@@ -2567,6 +2592,9 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         flag, raster_sha=(lambda path: sha256_of_file(path) if path else ""),
         resolve=resolve, check_files=check_files)
 
+    # ------------------------------------------------------ a group's own n
+    check_series_n(series_n, panel_index, series, unit_index, flag)
+
     # -------------------------------------------------------------- configs
     parsed = load_reader_configs(configs, mark_by_config, flag)
     for pid, r in panel_index.items():
@@ -2576,6 +2604,67 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Config_ID=%s has no rows in reader_config" % cid)
 
     return pd.DataFrame(problems)
+
+
+#: The statistics whose cells carry an n of their own. An association's n is
+#: its pairs (`N_Pairs`), and a count's is its denominator.
+SERIES_N_STATISTICS = ("CONTINUOUS", "QUANTILE_SUMMARY")
+
+
+def check_series_n(series_n, panel_index, series, unit_index, flag):
+    """Every group's n names a declared series, once, and a panel has them all or none.
+
+    And never beside the unit's own `N_Outcome`: a cell with two n's has none
+    anybody chose, and the run would pick one silently.
+    """
+    if series_n is None or not len(series_n):
+        return
+    declared = {}
+    for _, r in series.iterrows():
+        declared.setdefault(str(r.get("Panel_ID", "")).strip(), []).append(
+            str(r.get("Series_ID", "")).strip())
+    got = {}
+    for i, r in series_n.iterrows():
+        line = "series_n:%d" % (i + 2)
+        pid = str(r.get("Panel_ID", "")).strip()
+        sid = str(r.get("Series_ID", "")).strip()
+        if pid not in panel_index:
+            flag(line, "SERIES_N_PANEL_UNKNOWN", "Panel_ID=%r is not in panel_manifest" % pid)
+            continue
+        if sid not in declared.get(pid, []):
+            flag(line, "SERIES_N_SERIES_UNKNOWN",
+                 "%s has no series %r; its series are %s" % (pid, sid, declared.get(pid, [])))
+            continue
+        if sid in got.setdefault(pid, {}):
+            flag(line, "SERIES_N_DUPLICATE", "%s/%s has two n's" % (pid, sid))
+            continue
+        text = str(r.get("N_Outcome", "")).strip()
+        if not text.isdigit() or int(text) <= 0:
+            flag(line, "SERIES_N_BAD",
+                 "N_Outcome=%r for %s/%s is not a positive whole number" % (text, pid, sid))
+            continue
+        if blank(r.get("N_Source")):
+            flag(line, "MISSING_REQUIRED",
+                 "N_Source - where %s/%s's n was read" % (pid, sid))
+        got[pid][sid] = int(text)
+        unit = unit_index.get(str(panel_index[pid].get("Unit_ID", "")).strip())
+        if unit is not None:
+            statistic = str(unit.get("Statistic_Type", "")).strip().upper()
+            if statistic not in SERIES_N_STATISTICS:
+                flag(line, "SERIES_N_STATISTIC_UNSUPPORTED",
+                     "%s is a %s unit; a group's own n is for %s"
+                     % (pid, statistic or "(blank)", "/".join(SERIES_N_STATISTICS)))
+    for pid, have in got.items():
+        missing = [s_ for s_ in declared.get(pid, []) if s_ not in have]
+        if have and missing:
+            flag("panels:%s" % pid, "SERIES_N_PARTIAL",
+                 "%d of %d series have an n; %s do not - a group's n is all of a "
+                 "panel's series or none" % (len(have), len(declared.get(pid, [])), missing))
+        unit = unit_index.get(str(panel_index[pid].get("Unit_ID", "")).strip())
+        if have and unit is not None and not blank(unit.get("N_Outcome")):
+            flag("panels:%s" % pid, "SERIES_N_WITH_UNIT_N",
+                 "the unit says N_Outcome=%s and its series say %s - one answer per "
+                 "cell" % (str(unit.get("N_Outcome")).strip(), have))
 
 
 #: What a supplied reading's date looks like. A date, not a timestamp: the

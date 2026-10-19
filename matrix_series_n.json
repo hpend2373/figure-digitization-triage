@@ -1,0 +1,227 @@
+{
+ "suites": [
+  "test_series_n.py",
+  "test_make_plan.py"
+ ],
+ "files": {
+  "batch_manifests.py": "e8075ad4f32a7ad515c0229ca75adcaa1549e94d3a305825758fefe54a7037c2",
+  "compile_plan.py": "9a951e36b5e0928846433bc9b3bcd0cdf19b6b0104740ec4af1e5fd0a4802847",
+  "finalize_batch.py": "0339bafd9d2e02fe427fa6db01a18bdb61924267e59ab1c3ad50cdc31206f1df",
+  "grid_engine.py": "1cac3fa0117c962597ffdcb5505d398f2453dc83da81438d9b1e47a73689bcae",
+  "make_plan.py": "0a04bf3cbd46bf1e6f80e1e3ff1b9cc5a4913c08fcc02ed6ec99c6cfdcf1dd29",
+  "record_identity.py": "c1521ceb72b92fc99351ece0daa989ae55f8b41a17982538d7b795d787325a2b",
+  "run_batch.py": "111fd5d4ef605369a27bc8b434822b51bf7d399310aa090a432430afde5b2bdc"
+ },
+ "mutations": [
+  {
+   "name": "계열의 n을 검사하지 않는다",
+   "file": "record_identity.py",
+   "old": "        if not series_n_ok(e.get(\"n\")):\n            out.append((\"SERIES_N_BAD\"",
+   "new": "        if False:\n            out.append((\"SERIES_N_BAD\""
+  },
+  {
+   "name": "일부 계열에만 n이 있어도 받는다",
+   "file": "record_identity.py",
+   "old": "        if given and len(given) != len(per):",
+   "new": "        if False:"
+  },
+  {
+   "name": "카드의 n과 계열의 n이 둘 다 있어도 받는다",
+   "file": "record_identity.py",
+   "old": "        if given and n:",
+   "new": "        if False:"
+  },
+  {
+   "name": "0을 계열의 n으로 받는다",
+   "file": "record_identity.py",
+   "old": "    if isinstance(value, int):\n        return value > 0",
+   "new": "    if isinstance(value, int):\n        return value >= 0"
+  },
+  {
+   "name": "글자 0을 계열의 n으로 받는다",
+   "file": "record_identity.py",
+   "old": "value.strip().isdigit() and int(value.strip()) > 0",
+   "new": "value.strip().isdigit() and int(value.strip()) >= 0"
+  },
+  {
+   "name": "참·거짓을 계열의 n으로 받는다",
+   "file": "record_identity.py",
+   "old": "    if isinstance(value, bool):\n        return False",
+   "new": "    if False:\n        return False"
+  },
+  {
+   "name": "계열의 n을 계획서에 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "        if e.get(\"n\") not in (None, \"\"):",
+   "new": "        if False:"
+  },
+  {
+   "name": "잘못된 계열의 n을 조용히 버린다",
+   "file": "make_plan.py",
+   "old": "if RI.series_n_ok(e.get(\"n\")) else e.get(\"n\"))",
+   "new": "if RI.series_n_ok(e.get(\"n\")) else None)"
+  },
+  {
+   "name": "계열의 n이 어디서 왔는지 적지 않는다",
+   "file": "make_plan.py",
+   "old": "            sp[\"n_source\"] = \"identity card (per series)\"",
+   "new": "            sp[\"n_source\"] = \"\""
+  },
+  {
+   "name": "계획서가 계열의 n 키를 모른다",
+   "file": "compile_plan.py",
+   "old": "               \"n_outcome\", \"n_source\"),",
+   "new": "               ),"
+  },
+  {
+   "name": "계열의 n을 매니페스트에 쓰지 않는다",
+   "file": "compile_plan.py",
+   "old": "                if _s(sp.get(\"n_outcome\")):",
+   "new": "                if False:"
+  },
+  {
+   "name": "계열의 n의 출처를 매니페스트에 쓰지 않는다",
+   "file": "compile_plan.py",
+   "old": "                        N_Source=_s(sp.get(\"n_source\")), Note=\"\"))",
+   "new": "                        N_Source=\"\", Note=\"\"))"
+  },
+  {
+   "name": "배치가 계열의 n을 검사하지 않는다",
+   "file": "batch_manifests.py",
+   "old": "    check_series_n(series_n, panel_index, series, unit_index, flag)",
+   "new": "    pass"
+  },
+  {
+   "name": "모르는 패널의 n도 받는다",
+   "file": "batch_manifests.py",
+   "old": "            flag(line, \"SERIES_N_PANEL_UNKNOWN\", \"Panel_ID=%r is not in panel_manifest\" % pid)",
+   "new": "            pass"
+  },
+  {
+   "name": "모르는 계열의 n도 받는다",
+   "file": "batch_manifests.py",
+   "old": "            flag(line, \"SERIES_N_SERIES_UNKNOWN\",\n                 \"%s has no series %r; its series are %s\" % (pid, sid, declared.get(pid, [])))",
+   "new": "            pass"
+  },
+  {
+   "name": "한 계열에 n 둘을 받는다",
+   "file": "batch_manifests.py",
+   "old": "            flag(line, \"SERIES_N_DUPLICATE\", \"%s/%s has two n's\" % (pid, sid))",
+   "new": "            pass"
+  },
+  {
+   "name": "정수가 아닌 n을 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if not text.isdigit() or int(text) <= 0:",
+   "new": "        if False:"
+  },
+  {
+   "name": "n의 출처를 묻지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        if blank(r.get(\"N_Source\")):\n            flag(line, \"MISSING_REQUIRED\",",
+   "new": "        if False:\n            flag(line, \"MISSING_REQUIRED\","
+  },
+  {
+   "name": "패널의 일부 계열에만 n이 있어도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if have and missing:",
+   "new": "        if False:"
+  },
+  {
+   "name": "단위의 n 옆의 계열의 n을 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if have and unit is not None and not blank(unit.get(\"N_Outcome\")):",
+   "new": "        if False:"
+  },
+  {
+   "name": "연속형이 아닌 단위에도 계열의 n을 받는다",
+   "file": "batch_manifests.py",
+   "old": "            if statistic not in SERIES_N_STATISTICS:",
+   "new": "            if False:"
+  },
+  {
+   "name": "실행이 계열의 n 파일을 읽지 않는다",
+   "file": "run_batch.py",
+   "old": "    \"series_n\": \"series_n.csv\",\n}",
+   "new": "}"
+  },
+  {
+   "name": "검사에 계열의 n을 넘기지 않는다",
+   "file": "run_batch.py",
+   "old": "        readings=m.get(\"readings\"), series_n=m.get(\"series_n\"))",
+   "new": "        readings=m.get(\"readings\"))"
+  },
+  {
+   "name": "값에 셀의 n을 적지 않는다",
+   "file": "run_batch.py",
+   "old": "            record[\"N_Cell\"] = cell_n(cell_n_by_panel.get(pid), record.get(\"Cell_Key\"))",
+   "new": "            record[\"N_Cell\"] = \"\""
+  },
+  {
+   "name": "값 파일에 셀의 n 열이 없다",
+   "file": "run_batch.py",
+   "old": "        [{c: r.get(c, \"\") for c in GE.fig_values_columns(cell_n=True)} for r in values],\n        columns=GE.fig_values_columns(cell_n=True))",
+   "new": "        [{c: r.get(c, \"\") for c in GE.fig_values_columns()} for r in values],\n        columns=GE.fig_values_columns())"
+  },
+  {
+   "name": "셀의 n을 계열 수준과 대지 않고 첫 계열의 것으로",
+   "file": "run_batch.py",
+   "old": "    hits = [n for (factor, level), n in levels_n.items() if cell.get(factor) == level]",
+   "new": "    hits = [n for (factor, level), n in levels_n.items()][:1]"
+  },
+  {
+   "name": "계열의 n을 수준에 잇지 않는다",
+   "file": "run_batch.py",
+   "old": "        if key in level_of and _s(r.get(\"N_Outcome\")).isdigit():",
+   "new": "        if False:"
+  },
+  {
+   "name": "단위의 n이 비면 셀의 n을 보지 않는다",
+   "file": "grid_engine.py",
+   "old": "            if not cell_n:\n                flag(line, \"MISSING_REQUIRED\", \"N_Outcome\")",
+   "new": "            if True:\n                flag(line, \"MISSING_REQUIRED\", \"N_Outcome\")"
+  },
+  {
+   "name": "셀의 n 열을 보지 않는다",
+   "file": "grid_engine.py",
+   "old": "    has_cell_n = \"N_Cell\" in values.columns",
+   "new": "    has_cell_n = False"
+  },
+  {
+   "name": "셀의 n이 빠진 셀을 놓친다",
+   "file": "grid_engine.py",
+   "old": "            elif uid in cell_n_units and blank(u.get(\"N_Outcome\")):",
+   "new": "            elif False:"
+  },
+  {
+   "name": "셀의 n 값을 검사하지 않는다",
+   "file": "grid_engine.py",
+   "old": "                if nv is None or nv <= 0 or nv != int(nv):",
+   "new": "                if False:"
+  },
+  {
+   "name": "셀의 n과 단위의 n이 둘 다 있어도 받는다",
+   "file": "grid_engine.py",
+   "old": "                elif not blank(u.get(\"N_Outcome\")):\n                    # One answer per cell",
+   "new": "                elif False:\n                    # One answer per cell"
+  },
+  {
+   "name": "SE 검사가 단위의 n만 본다",
+   "file": "grid_engine.py",
+   "old": "        n = (num(row.get(\"N_Cell\")) if not kernel.fig_is_blank(row.get(\"N_Cell\"))\n             else num(unit.get(\"N_Outcome\")))",
+   "new": "        n = num(unit.get(\"N_Outcome\"))"
+  },
+  {
+   "name": "최종화가 셀의 n 열을 버린다",
+   "file": "finalize_batch.py",
+   "old": "    cols = GE.fig_values_columns(cell_n=\"N_Cell\" in raw.columns)",
+   "new": "    cols = GE.fig_values_columns()"
+  },
+  {
+   "name": "최종화가 후보의 셀 n을 원 파일과 대지 않는다",
+   "file": "finalize_batch.py",
+   "old": "    shared = [c for c in GE.fig_values_columns(cell_n=True) if c in raw.columns]",
+   "new": "    shared = [c for c in GE.fig_values_columns() if c in raw.columns]"
+  }
+ ]
+}

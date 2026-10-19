@@ -511,10 +511,12 @@ def grid_contract_failures(frames, machine, flag):
              % ", ".join(missing + ([] if raw is not None
                                     else ["figure_values_raw.csv"])))
         return {"*"}
+    # A group's own n travels with its cell (`N_Cell`) where the run wrote one;
+    # dropping the column here would re-gate those units as missing their n.
+    cols = GE.fig_values_columns(cell_n="N_Cell" in raw.columns)
     values = pd.DataFrame(
-        [{c: r.get(c, "") for c in GE.fig_values_columns()}
-         for r in raw.to_dict("records")],
-        columns=GE.fig_values_columns())
+        [{c: r.get(c, "") for c in cols} for r in raw.to_dict("records")],
+        columns=cols)
     # THE FIGURES FRAME THE RUNNER GAVE THE GATE, rebuilt. `run_batch` fills
     # `WPD_Project_File` on the figure from the projects its panels wrote before
     # it calls the gate - an automated run has no human-saved project, so it
@@ -602,7 +604,7 @@ def machine_candidate_failures(frames, machine, flag):
     # THE ROW, over the columns both files carry. Compared as a counted multiset
     # rather than as a set: two identical candidate rows against one raw row is
     # one value counted twice, which is the same class of defect.
-    shared = [c for c in GE.fig_values_columns() if c in raw.columns]
+    shared = [c for c in GE.fig_values_columns(cell_n=True) if c in raw.columns]
     raw_rows = collections.Counter(
         tuple(_s(r.get(c)) for c in shared) for r in raw.to_dict("records"))
     for row in rows:
@@ -621,6 +623,8 @@ def machine_candidate_failures(frames, machine, flag):
     # problems are kept: a `unit:` or `grid:` problem here would be about cells
     # the run's own gate legitimately dropped, which is the refusal the raw pass
     # exists to avoid manufacturing.
+    # The base columns: a candidate is the raw file's row (checked just above,
+    # N_Cell included), and the raw file was re-gated whole with its cells' n.
     values = pd.DataFrame(
         [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in rows],
         columns=GE.fig_values_columns())

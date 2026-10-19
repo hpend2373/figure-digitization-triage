@@ -791,6 +791,29 @@ check("... and the compiled manifest holds them",
       [r["Reading_ID"] for r in CP.reading_rows("PUB_D001_P1", _rd1["read"])]
       == ["PUB_D001_P1__B_1__POST", "PUB_D001_P1__B9__PRE"])
 check("a panel with no readings carries none", "readings" not in _m1["read"])
+# A GROUP'S OWN n (2026-10-19): a card whose series are groups of different size
+# carries each group's n on its series and none on the card.
+_nseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": 11},
+                        {"name": "Control", "colour": "#2850DC", "n": "9"}])
+_nplan, _ns, _nfig, _np = _confirm([_geom("PUB_D001__p1")],
+                                   [_ident("PUB_D001__p1", Series=_nseries, N_Outcome="")])
+_n1 = [p for p in _nfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+_nunit = [u for u in _nplan["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: the series' n stays on the card. Every value of the panel fails on the
+# unit's blank n however well it was read.
+check("each group's n reaches the plan on its series, as a number, saying where it came from",
+      [(q.get("n_outcome"), q.get("n_source")) for q in _n1["read"]["series"]]
+      == [(11, "identity card (per series)"), (9, "identity card (per series)")],
+      "%s" % [{k: q.get(k) for k in ("series_id", "n_outcome", "n_source")} for q in _n1["read"]["series"]])
+check("... and the unit carries no n of its own", "n_outcome" not in _nunit, "%s" % _nunit.get("n_outcome"))
+_bseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": "eleven"},
+                        {"name": "Control", "colour": "#2850DC", "n": 9}])
+_bplan, _bs, _bfig, _bp = _confirm([_geom("PUB_D001__p1")],
+                                   [_ident("PUB_D001__p1", Series=_bseries, N_Outcome="")])
+_b1 = [p for p in _bfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+check("... and an n that is not a whole number is carried as written, to be refused",
+      [q.get("n_outcome") for q in _b1["read"]["series"]] == ["eleven", 9],
+      "%s" % [q.get("n_outcome") for q in _b1["read"]["series"]])
 # A colour-separated line panel whose Control is drawn as a point-down triangle,
 # confirmed on the reader's route: the colour mask reads it, the shape is only seen.
 _tseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},

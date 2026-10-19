@@ -51,6 +51,14 @@ Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        priced R2 so its reviewer confirms the placed points - and
                        one without is queued as before. Absent for every batch
                        with no manual panel read this way.
+
+                       series_n.csv is OPTIONAL. One row per series whose group
+                       has its own n (women and men, finishers and non-
+                       finishers), for the units whose one N_Outcome cannot say
+                       it: all of a panel's series or none, never beside the
+                       unit's N_Outcome. Each value carries its group's n as
+                       N_Cell, which the gate takes in place of the unit's.
+                       Absent for every batch whose units each have one n.
 Output (OUTPUT_DIR):   figure_values_machine_qc.csv <- passed the gate; NOT poolable
                        review_queue.csv            <- one row per panel a person
                                                       must now look at
@@ -234,6 +242,10 @@ OPTIONAL_MANIFEST_FILES = {
     # every batch whose manual panels nobody has read, which is the queue as it
     # always was.
     "readings": "supplied_readings.csv",
+    # A GROUP'S OWN n, where the unit's one n cannot say it (women and men,
+    # finishers and non-finishers). Absent for every batch whose units each have
+    # one n.
+    "series_n": "series_n.csv",
 }
 
 RUN_MANIFEST_COLUMNS = [
@@ -620,7 +632,38 @@ class ManifestLoadError(Exception):
 #: with a message about the wrong file.
 _OPTIONAL_COLUMNS = {"resolutions": lambda: BM.identity_resolution_columns(),
                      "axes": lambda: BM.axis_manifest_columns(),
-                     "readings": lambda: BM.supplied_readings_columns()}
+                     "readings": lambda: BM.supplied_readings_columns(),
+                     "series_n": lambda: BM.series_n_columns()}
+
+
+def series_n_by_cell(series_n, series):
+    """{Panel_ID: {(FACTOR, LEVEL): n}} from `series_n.csv` and the series manifest.
+
+    A value row carries a Cell_Key, not a Series_ID, so a group's n is found by
+    the level its series puts in the key. Only rows the batch layer accepted reach
+    here (`check_series_n` refuses the batch otherwise).
+    """
+    out = {}
+    if series_n is None or not len(series_n):
+        return out
+    level_of = {}
+    for _, r in series.iterrows():
+        level_of[(_s(r.get("Panel_ID")), _s(r.get("Series_ID")))] = (
+            _upper(r.get("Factor_Name")), _upper(r.get("Factor_Level")))
+    for _, r in series_n.iterrows():
+        key = (_s(r.get("Panel_ID")), _s(r.get("Series_ID")))
+        if key in level_of and _s(r.get("N_Outcome")).isdigit():
+            out.setdefault(key[0], {})[level_of[key]] = int(_s(r.get("N_Outcome")))
+    return out
+
+
+def cell_n(levels_n, cell_key):
+    """The n of the group a value's Cell_Key names, as text; blank when none does."""
+    if not levels_n:
+        return ""
+    cell = GE.fig_parse_cell_key(cell_key) or {}
+    hits = [n for (factor, level), n in levels_n.items() if cell.get(factor) == level]
+    return str(hits[0]) if len(hits) == 1 else ""
 
 
 def load_manifests(directory):
@@ -3445,7 +3488,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         requested_run_mode=requested_run_mode,
         file_root=file_root,
         check_files=check_files, doc_root=doc_root,
-        readings=m.get("readings"))
+        readings=m.get("readings"), series_n=m.get("series_n"))
     # Derived even when the batch is rejected, so the stamp on a failed run
     # still says which kind of run it would have been.
     derived = BM.derive_run_mode(m["reviewers"], m["source_documents"],
@@ -3510,6 +3553,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
     readings_by_panel = {}
     for _, r in m.get("readings", pd.DataFrame()).iterrows():
         readings_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    # {panel: {(FACTOR, LEVEL): n}} - each group's own n, found on a value by the
+    # series level its Cell_Key carries (a value row names no Series_ID).
+    cell_n_by_panel = series_n_by_cell(m.get("series_n"), m["series"])
 
     values, run_rows = [], []
     # A panel gets exactly one queue entry, keyed so a later pass revises it
@@ -3653,6 +3699,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         for record in outcome.values:
             record["Run_Panel_ID"] = pid
             record["Source_Panel_ID"] = _s(panel.get("Source_Panel_ID"))
+            # THE CELL'S OWN n, where its group has one (`series_n.csv`). Blank
+            # everywhere else: the unit's N_Outcome speaks for the cell.
+            record["N_Cell"] = cell_n(cell_n_by_panel.get(pid), record.get("Cell_Key"))
             # Every path a value carries into the accepted file is recorded
             # relative to the run. They used to be absolute, so handing the
             # finished data to another folder or another machine left
@@ -3742,8 +3791,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         })
 
     values_df = pd.DataFrame(
-        [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in values],
-        columns=GE.fig_values_columns())
+        [{c: r.get(c, "") for c in GE.fig_values_columns(cell_n=True)} for r in values],
+        columns=GE.fig_values_columns(cell_n=True))
 
     # The gate requires a re-openable project on every digitized row, and it is
     # right to. An automated run has no human-saved one, so it saved its own -

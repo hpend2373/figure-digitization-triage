@@ -134,6 +134,26 @@ def positions_problems(positions, proposal):
     return out
 
 
+def series_n_ok(value):
+    """True for a blank (no n on this series) or a positive whole number - an int, or digits."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    return isinstance(value, str) and value.strip().isdigit() and int(value.strip()) > 0
+
+
+def series_n_of(series):
+    """[n or None per series] - what the card says each group's n is."""
+    out = []
+    for e in series or []:
+        v = e.get("n") if isinstance(e, dict) else None
+        out.append(None if v is None or (isinstance(v, str) and not v.strip()) else int(str(v).strip()))
+    return out
+
+
 def series_problems(series, mark, route="AUTO"):
     out = []
     if not series:
@@ -154,6 +174,12 @@ def series_problems(series, mark, route="AUTO"):
         elif name.upper() in names:
             out.append(("SERIES_NAME_DUPLICATE", "계열 이름 %r이 둘입니다." % name))
         names.add(name.upper())
+        # THE GROUP'S OWN n, where the card's one n cannot say it: series that are
+        # groups of different size (women and men, finishers and non-finishers).
+        # A positive whole number or nothing; that it is all-or-none, and never
+        # beside the card's N_Outcome, is the answer's check (`check_answer`).
+        if not series_n_ok(e.get("n")):
+            out.append(("SERIES_N_BAD", "계열 %r의 n=%r은 양의 정수가 아닙니다." % (name or i, e.get("n"))))
         colour = str(e.get("colour") or "").strip()
         if colour and not COLOUR_HEX.match(colour):
             out.append(("SERIES_COLOUR_BAD", "계열 %r의 색 %r은 #RRGGBB가 아닙니다." % (name, colour)))
@@ -278,6 +304,19 @@ def check_answer(answer, proposed):
     n = (answer.get("N_Outcome") or "").strip()
     if n and not (n.isdigit() and int(n) > 0):
         problems.append(("N_BAD", "n=%r은 양의 정수가 아닙니다." % n))
+    # ONE n FOR THE CARD, OR ONE PER SERIES - never both, never some. A card whose
+    # groups differ in size carries each group's n on its series; a half-filled
+    # set would leave cells with no n while looking answered, and two answers
+    # (the card's and a series') would leave the run to pick one.
+    if not bad and series and all(series_n_ok(e.get("n")) for e in series):
+        per = series_n_of(series)
+        given = [v for v in per if v is not None]
+        if given and len(given) != len(per):
+            problems.append(("SERIES_N_PARTIAL", "계열 %d개 가운데 %d개에만 n이 있습니다 - 계열마다 n을 적으면 모든 계열에 "
+                                                 "적어야 합니다." % (len(per), len(given))))
+        if given and n:
+            problems.append(("N_TWICE", "카드의 n(%s)과 계열마다의 n이 둘 다 있습니다 - 군마다 n이 다르면 카드의 n은 "
+                                        "비웁니다." % n))
     bar_top = (answer.get("Bar_Top_Definition") or "").strip().upper()
     if mark.startswith("BAR") and bar_top not in BAR_TOPS:
         problems.append(("BAR_TOP_MISSING", "막대 표인데 값을 어디서 읽는지(%s)가 없습니다." % "/".join(BAR_TOPS)))

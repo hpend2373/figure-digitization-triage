@@ -699,6 +699,13 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
         # Every series carries its factor and level, the single one too: a
         # series without a level is no Cell_Key (MISSING_SERIES_IDENTITY).
         sp = {"series_id": sid, "factor": s_factor, "level": name or sid}
+        # THE GROUP'S OWN n (`record_identity`: all series or none, never beside the
+        # card's N_Outcome). Carried as written when it is not a positive whole
+        # number, so the batch layer refuses it loudly (SERIES_N_BAD) rather than
+        # this module dropping it.
+        if e.get("n") not in (None, ""):
+            sp["n_outcome"] = (RI.series_n_of([e])[0] if RI.series_n_ok(e.get("n")) else e.get("n"))
+            sp["n_source"] = "identity card (per series)"
         drawn = []
         for src, dst in (("colour", "colour"), ("line_style", "line_style"), ("marker", "marker"),
                          ("marker_fill", "marker_fill"), ("bar_fill", "bar_fill")):

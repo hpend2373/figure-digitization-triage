@@ -1,7 +1,7 @@
 {
  "files": {
-  "batch_manifests.py": "f816227b4c30c266d141915505930fdd8a0fd63905869e0bdf6db827ab8e20c2",
-  "run_batch.py": "9579a68624a223ae9e3fd1b4aa98e8a5f07b0bd24adb07ccfafc9412e27255a5",
+  "batch_manifests.py": "e8075ad4f32a7ad515c0229ca75adcaa1549e94d3a305825758fefe54a7037c2",
+  "run_batch.py": "111fd5d4ef605369a27bc8b434822b51bf7d399310aa090a432430afde5b2bdc",
   "test_run_batch.py": "cdd40ea8f615bd3300bbbaac6fd05b5a3f7b39d89f55e0f9eb1e6e59a9687f82"
  },
  "suites": [
@@ -35,8 +35,8 @@
   {
    "name": "명령줄의 문서 폴더를 검사에 넘기지 않는다",
    "file": "run_batch.py",
-   "old": "        check_files=check_files, doc_root=doc_root,\n        readings=m.get(\"readings\"))\n",
-   "new": "        check_files=check_files,\n        readings=m.get(\"readings\"))\n"
+   "old": "        check_files=check_files, doc_root=doc_root,\n        readings=m.get(\"readings\"), series_n=m.get(\"series_n\"))\n",
+   "new": "        check_files=check_files,\n        readings=m.get(\"readings\"), series_n=m.get(\"series_n\"))\n"
   }
  ]
 }

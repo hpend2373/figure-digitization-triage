@@ -102,7 +102,10 @@ PLAN_KEYS = {
              "readings"),
     "series": ("series_id", "factor", "level", "bar_fill", "marker",
                "marker_fill", "line_style", "colour", "colour_tolerance",
-               "mask_key", "note"),
+               "mask_key", "note",
+               # the group's own n, where the unit's one n cannot say it; see
+               # `batch_manifests.series_n_columns`
+               "n_outcome", "n_source"),
     "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
                  "display_order", "timepoint_label", "timepoint_days", "note"),
     "reading": ("series_id", "position_id", "x_px", "y_px", "upper_px",
@@ -892,7 +895,7 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                                   Note=_s(g.get("note"))))
 
     source_figures, source_panels, panels, series, positions = [], [], [], [], []
-    axes, readings = [], []
+    axes, readings, series_n = [], [], []
     image_of_panel, ticks_of_panel, view_panels = {}, {}, {}
 
     for figure in plan["figures"]:
@@ -970,6 +973,15 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                     Axis_ID=_s(sp.get("axis_id")),
                     Factor_Name=_s(sp.get("factor")).upper(),
                     Factor_Level=_s(sp.get("level")), Note=_s(sp.get("note"))))
+                # A GROUP'S OWN n goes to its own table, not to a column of the
+                # series manifest: a batch without one is unchanged, and the
+                # batch layer checks it as a set (all series or none, never
+                # beside the unit's N_Outcome).
+                if _s(sp.get("n_outcome")):
+                    series_n.append(dict(
+                        Panel_ID=pid, Series_ID=_s(sp.get("series_id")),
+                        N_Outcome=_s(sp.get("n_outcome")),
+                        N_Source=_s(sp.get("n_source")), Note=""))
             # ONE ROW PER PRINTED SCALE. A plan that declares none compiles an
             # empty axis manifest, which is what every publication in the corpus
             # but the twin-axis ones produces - the file exists so the batch's
@@ -1127,6 +1139,8 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         # Written whether or not anything was read, like the axis manifest: the
         # batch's shape does not depend on whether a panel was read this way.
         ("supplied_readings", readings, BM.supplied_readings_columns()),
+        # Written whether or not a group has its own n, for the same reason.
+        ("series_n", series_n, BM.series_n_columns()),
     )
     written = {}
     for name, rows, cols in tables:

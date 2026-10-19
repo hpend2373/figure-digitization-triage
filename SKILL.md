@@ -1048,6 +1048,18 @@ different minute. The same path, one level down:
 
 `test_series_n.py` +27, `matrix_series_n.json` +13.
 
+Which minute an arrow counts against is a reading, not arithmetic, so check it against the
+figure. Count n(m) as the subjects still testing at some moment of the minute that ends at
+m, `#{finish > m-1}`, not `#{finish > m}`: under the stated rule a curve stops at the last
+minute with n > N/2, and in the figure this was built for the after-bed-rest curves of all
+three groups stop exactly there under (m-1, m] and none does under [m, m+1). The
+before-bed-rest curves run one or two minutes past it in two groups under either count;
+the card's note says so instead of bending the count to fit. Two blinded readers per
+figure read the arrows (counts equal to the caption's n, times within 0.05 min); an arrow
+within 0.15 min of a minute boundary can move that cell's n by one, and the note lists
+those cells. A cell whose two error ends are both hidden has a mean and no spread: it is
+left out of the card (the grid is SPARSE) rather than given a guessed end.
+
 ## A panel no reader can read, read by an AI agent, confirmed by the person
 
 A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so

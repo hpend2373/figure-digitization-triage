@@ -23,7 +23,7 @@
   {
    "name": "일부 계열에만 n이 있어도 받는다",
    "file": "record_identity.py",
-   "old": "        if given and len(given) != len(per):",
+   "old": "        if given and len(given) != len(series):",
    "new": "        if False:"
   },
   {
@@ -71,8 +71,8 @@
   {
    "name": "계획서가 계열의 n 키를 모른다",
    "file": "compile_plan.py",
-   "old": "               \"n_outcome\", \"n_source\"),",
-   "new": "               ),"
+   "old": "               \"n_outcome\", \"n_source\",\n               # and per cell",
+   "new": "\n               # and per cell"
   },
   {
    "name": "계열의 n을 매니페스트에 쓰지 않는다",
@@ -83,13 +83,13 @@
   {
    "name": "계열의 n의 출처를 매니페스트에 쓰지 않는다",
    "file": "compile_plan.py",
-   "old": "                        N_Source=_s(sp.get(\"n_source\")), Note=\"\"))",
-   "new": "                        N_Source=\"\", Note=\"\"))"
+   "old": "                        N_Outcome=_s(sp.get(\"n_outcome\")),\n                        N_Source=_s(sp.get(\"n_source\")), Note=\"\"))",
+   "new": "                        N_Outcome=_s(sp.get(\"n_outcome\")),\n                        N_Source=\"\", Note=\"\"))"
   },
   {
    "name": "배치가 계열의 n을 검사하지 않는다",
    "file": "batch_manifests.py",
-   "old": "    check_series_n(series_n, panel_index, series, unit_index, flag)",
+   "old": "    check_series_n(series_n, panel_index, series, unit_index, flag, positions=positions)",
    "new": "    pass"
   },
   {
@@ -107,7 +107,7 @@
   {
    "name": "한 계열에 n 둘을 받는다",
    "file": "batch_manifests.py",
-   "old": "            flag(line, \"SERIES_N_DUPLICATE\", \"%s/%s has two n's\" % (pid, sid))",
+   "old": "            flag(line, \"SERIES_N_DUPLICATE\", \"%s/%s%s has two n's\"\n                 % (pid, sid, \" at %s\" % qid if qid else \"\"))",
    "new": "            pass"
   },
   {
@@ -167,14 +167,14 @@
   {
    "name": "셀의 n을 계열 수준과 대지 않고 첫 계열의 것으로",
    "file": "run_batch.py",
-   "old": "    hits = [n for (factor, level), n in levels_n.items() if cell.get(factor) == level]",
-   "new": "    hits = [n for (factor, level), n in levels_n.items()][:1]"
+   "old": "    hits = [n for k, n in levels_n.items() if len(k) == 2 and cell.get(k[0]) == k[1]]",
+   "new": "    hits = [n for k, n in levels_n.items() if len(k) == 2][:1]"
   },
   {
    "name": "계열의 n을 수준에 잇지 않는다",
    "file": "run_batch.py",
-   "old": "        if key in level_of and _s(r.get(\"N_Outcome\")).isdigit():",
-   "new": "        if False:"
+   "old": "        if key not in level_of or not _s(r.get(\"N_Outcome\")).isdigit():",
+   "new": "        if True:"
   },
   {
    "name": "단위의 n이 비면 셀의 n을 보지 않는다",

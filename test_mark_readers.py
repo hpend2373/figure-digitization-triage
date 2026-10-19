@@ -666,7 +666,8 @@ for association_type in ("SPEARMAN_RHO", "KENDALL_TAU", "R_SQUARED", "SLOPE"):
           association_ok)
 
 
-def box_points_fixture(scale=1, dots=18, whiskers=True, grid=True):
+def box_points_fixture(scale=1, dots=18, whiskers=True, grid=True, caps=True,
+                       extremes=False):
     """A box plot as this corpus actually prints one.
 
     Three things here are not decoration, and each of them broke the reader:
@@ -681,6 +682,10 @@ def box_points_fixture(scale=1, dots=18, whiskers=True, grid=True):
       THE WHISKERS, optionally absent. A box drawn with no whiskers has no range
       to report, and reporting the box's own edges as the range would be a number
       nobody drew.
+
+    `extremes` draws the smallest and largest subject ON the caps, centred on
+    the stem - which is what "whiskers indicate minimum and maximum" prints, and
+    what S41467 does on every box. `caps=False` ends the whiskers in nothing.
     """
     W, H = 800 * scale, 520 * scale
     im = Image.new("RGB", (W, H), "white")
@@ -699,8 +704,13 @@ def box_points_fixture(scale=1, dots=18, whiskers=True, grid=True):
         if whiskers:
             d.line((x, yhi, x, yq3), fill="black", width=wide)
             d.line((x, yq1, x, ylo), fill="black", width=wide)
-            d.line((x - cap, yhi, x + cap, yhi), fill="black", width=wide)
-            d.line((x - cap, ylo, x + cap, ylo), fill="black", width=wide)
+            if caps:
+                d.line((x - cap, yhi, x + cap, yhi), fill="black", width=wide)
+                d.line((x - cap, ylo, x + cap, ylo), fill="black", width=wide)
+            if extremes:
+                r = max(3, 9 * scale)
+                for yy in (yhi, ylo):
+                    d.ellipse((x - r, yy - r, x + r, yy + r), fill="black")
         d.rectangle((x - half, yq3, x + half, yq1), outline="black", width=wide)
         d.line((x - half, ymed, x + half, ymed), fill="black", width=wide)
         for i in range(dots):
@@ -827,6 +837,52 @@ check("  at twice the size, with no number changed",
 check("  and the stem's ends are the whiskers, not the outermost point",
       all(r["whisker_upper"] > r["q3"] and r["whisker_lower"] < r["q1"]
           for r in prows))
+# THE SMALLEST AND LARGEST SUBJECT SIT ON THE CAPS. S41467 says its whiskers are
+# the minimum and maximum, and draws those two subjects centred on the caps; the
+# stem's ink then ends at the far edge of that point, a point's radius past the
+# cap. Both blinded overlay checks found every capped whisker of that paper 5-7
+# px outside its cap (2026-10-19).
+# REVERT: take the stem's last row as the whisker end. Here that is 9 px - 2.25
+# units - past every cap.
+for _scale in (1, 2):
+    xim, xxs, xycal, xtruth = box_points_fixture(scale=_scale, extremes=True)
+    xrows = read_box_violin_panel(
+        xim, panel_box=(120 * _scale, 680 * _scale, 40 * _scale, 460 * _scale),
+        x_positions={"G%d" % i: x for i, x in enumerate(xxs)},
+        y_calibration=xycal)
+    xerr = [abs(row[k] - want[i]) for row, want in zip(xrows, xtruth)
+            for i, k in ((0, "whisker_lower"), (4, "whisker_upper"))]
+    check("a whisker with a subject on its cap ends at the cap, not the point "
+          "(scale %d)" % _scale,
+          len(xrows) == 3 and max(xerr) < 1.0,
+          "got %d, max %.2f" % (len(xrows), max(xerr) if xerr else -1))
+# A WHISKER WITH NO CAP still ends where its ink ends: there is nothing else.
+# REVERT: refuse a whisker without a cap. Some figures draw none, and the end of
+# the stem is then exactly the number.
+ncim, ncxs, ncycal, nctruth = box_points_fixture(caps=False, dots=0, grid=False)
+ncrows = read_box_violin_panel(
+    ncim, panel_box=(120, 680, 40, 460),
+    x_positions={"G%d" % i: x for i, x in enumerate(ncxs)}, y_calibration=ncycal)
+check("  and a whisker with no cap still ends where its stem does",
+      len(ncrows) == 3 and max(abs(r["whisker_upper"] - t[4]) for r, t in zip(ncrows, nctruth)) < 1.0
+      and max(abs(r["whisker_lower"] - t[0]) for r, t in zip(ncrows, nctruth)) < 1.0,
+      "%s" % [(round(r["whisker_lower"], 2), round(r["whisker_upper"], 2)) for r in ncrows])
+# THE STEM STANDS AT THE BOX'S MIDDLE, wherever the position was declared. S41467
+# FIG6 B1 was declared 4 px left of its stem, the three-pixel column found only
+# the points stacked on it, and the whiskers came back 15 and 23 px short.
+# REVERT: look for the stem at the declared x. Four pixels off, it is not there,
+# and the box is refused - or worse, read short on a point that happens to sit
+# in the column.
+shrows = read_box_violin_panel(
+    pim, panel_box=(120, 680, 40, 460),
+    x_positions={"G%d" % i: x + 4 for i, x in enumerate(pxs)},
+    y_calibration=pycal)
+check("a box whose declared x is 4 px off its stem is read at the stem",
+      len(shrows) == 3
+      and max(abs(r[k] - t[i]) for r, t in zip(shrows, ptruth)
+              for i, k in enumerate(("whisker_lower", "q1", "median", "q3",
+                                     "whisker_upper"))) < 1.5,
+      "got %d" % len(shrows))
 # REVERT: take a rule that crosses the whole panel for a mark. Three gridlines
 # are three bands of one width, wider than any box, and a reader that ranks by
 # width and does not skip them reads the grid as the box.

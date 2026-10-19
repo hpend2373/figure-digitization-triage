@@ -1299,6 +1299,16 @@ def summarize_association(points, association_type="PEARSON_R"):
 #: 두 번 그립니다. 그 모양은 배율이 없습니다.
 BOX_LINE_WIDTH_TOLERANCE = 0.15
 
+#: 수염 끝의 캡이 무엇인가: 줄기를 가로지르는 한 조각의 잉크로, 상자 폭의 이만큼
+#: 이상인 것. 상자 폭에 대한 비율이라 배율이 없습니다. 이 코퍼스의 캡은 상자의
+#: 절반쯤(600 DPI에서 95 / 190px), 그 위에 앉은 점은 0.06쯤이고, 이웃한 점 둘이
+#: 붙어도 0.13입니다.
+CAP_MIN_FRACTION = 0.25
+#: 줄기 끝에서 안쪽으로 캡을 찾는 거리, 상자 폭에 대한 비율. 캡 위에 앉은 점이
+#: 줄기를 캡 너머로 늘리는 길이(점의 반지름, 0.03)보다 넉넉하고, 짧은 수염에서도
+#: 상자의 규칙까지는 가지 않게 아래에서 따로 막습니다.
+CAP_REACH_FRACTION = 0.15
+
 
 def box_line_split(widths):
     """(상자 자리, 수염 끝 자리) 또는 None - 다섯 폭 중 어느 셋이 상자인가.
@@ -1318,6 +1328,61 @@ def box_line_split(widths):
     if max(widths[i] for i in caps) >= min(wide):
         return None
     return sorted(box), sorted(caps)
+
+
+def _box_middle(window, bands, declared, box_width):
+    """상자 규칙 셋의 가운데 열(창 안), 셋이 없으면 선언된 열.
+
+    규칙마다 그 띠 가운데 줄에서, 상자 폭(`BOX_LINE_WIDTH_TOLERANCE` 안)인
+    조각 가운데 선언된 열에 가장 가까운 것의 가운데를 잽니다. 셋의 중앙값이
+    상자의 가운데입니다. 상자의 폭은 이미 셋이 같다고 확인된 폭이라, 점이
+    붙어 넓어진 규칙 하나가 가운데를 끌지 못합니다.
+    """
+    mids = []
+    for band in bands:
+        row = band[len(band) // 2]
+        runs = [(a, b) for a, b in _ink_runs(window[row])
+                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width]
+        if runs:
+            a, b = min(runs, key=lambda ab: abs((ab[0] + ab[1] - 1) / 2.0 - declared))
+            mids.append((a + b - 1) / 2.0)
+    if len(mids) != len(bands) or not mids:
+        return declared
+    return int(round(float(np.median(mids))))
+
+
+def _cap_at_stem_end(window, column, span, toward, rule_edge, box_width):
+    """(줄, 폭) 또는 None - 수염 줄기가 끝나는 캡의 가운데 줄과 그 폭.
+
+    `span`은 줄기의 줄들(창 안의 행), `toward`는 위 수염이면 -1(끝이 span[0]),
+    아래 수염이면 +1(끝이 span[-1]), `rule_edge`는 이 수염 쪽 상자 규칙의 첫 줄
+    입니다. 줄기 끝에서 안쪽으로 `CAP_REACH_FRACTION` × 상자 폭 안, 상자 규칙에
+    닿기 전까지에서, 줄기의 열을 지나는 한 조각이 `CAP_MIN_FRACTION` × 상자 폭
+    이상이고 상자보다 좁은 줄을 찾습니다. 그런 줄의 띠 가운데 끝에 가장 가까운
+    것의 가운데가 캡입니다. 폭은 줄기를 지나는 조각의 것이라, 옆에 떨어져 있는
+    점이나 글자는 캡이 되지 못합니다.
+    """
+    if not span or box_width <= 0:
+        return None
+    reach = max(2, int(round(CAP_REACH_FRACTION * box_width)))
+    end = span[0] if toward < 0 else span[-1]
+    if toward < 0:
+        rows = [r for r in span if r <= end + reach and r < rule_edge - 2]
+    else:
+        rows = [r for r in span if r >= end - reach and r > rule_edge + 2]
+    lo, hi = CAP_MIN_FRACTION * box_width, (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width
+    through = {}
+    for r in rows:
+        for start, stop in _ink_runs(window[r]):
+            if start - 1 <= column <= stop:
+                through[r] = stop - start
+                break
+    capped = [r for r in rows if lo <= through.get(r, 0) < hi]
+    if not capped:
+        return None
+    bands = _runs(capped, gap=1)
+    band = bands[0] if toward < 0 else bands[-1]
+    return float(np.mean(band)), max(through[r] for r in band)
 
 
 def _widest_runs(dark):
@@ -1441,7 +1506,14 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
         # THE STEM, which is what a whisker is. Ink standing at the group's own
         # x column: a point drawn over it does not break it, and the box's empty
         # interior does, which is why the two ends are looked for separately.
-        column = int(round(x)) - xa
+        #
+        # AT THE BOX'S OWN MIDDLE, not at the declared x. The declared x is
+        # where the position sits on the axis, measured once per panel; the stem
+        # is three pixels wide and stands at the middle of the box it belongs
+        # to. Four pixels between the two and the three-pixel column misses the
+        # stem and finds only the points stacked on it - S41467 FIG6 B1, whose
+        # upper whisker came back 15 px short and lower 23 px (2026-10-19).
+        column = _box_middle(window, bands, int(round(x)) - xa, box_width)
         stem = [row for row in range(window.shape[0])
                 if window[row, max(0, column - 1):column + 2].any()]
         spans = _runs(sorted(set(stem)), gap=2)
@@ -1452,8 +1524,20 @@ def read_box_violin_panel(image, panel_box, x_positions, y_calibration,
             # Three rules of one width and no stem reaching them: annotation
             # text, a legend, a bracket - not a box. Refused, not raised.
             continue
-        cap_rows = [top_row + float(upper[0][0]), top_row + float(lower[-1][-1])]
-        cap_widths = [centred.get(upper[0][0], 0), centred.get(lower[-1][-1], 0)]
+        # THE CAP, NOT THE END OF THE INK. The stem's last row was the whisker
+        # end, and on S41467 - "box plots indicate minimum ... maximum", so the
+        # smallest and largest subject are drawn ON the caps - the last row is
+        # the far edge of that subject's point, 5-7 px past the cap on every
+        # whisker that has one (both blinded overlay checks, 2026-10-19). The
+        # cap is the line the stem ends in; where there is one, its middle row
+        # is the end. Where there is none, the stem's end is all there is.
+        caps = [_cap_at_stem_end(window, column, upper[0], -1, first, box_width),
+                _cap_at_stem_end(window, column, lower[-1], +1, last, box_width)]
+        ends = [upper[0][0], lower[-1][-1]]
+        cap_rows = [top_row + (cap[0] if cap else float(end))
+                    for cap, end in zip(caps, ends)]
+        cap_widths = [cap[1] if cap else centred.get(end, 0)
+                      for cap, end in zip(caps, ends)]
         lines = sorted(zip(box_rows + cap_rows,
                            [box_width] * 3 + list(cap_widths)))
         if box_line_split([w for _r, w in lines]) is None:

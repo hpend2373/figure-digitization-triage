@@ -857,6 +857,39 @@ come out at p < 0.01 - evidence the proposal had not weighed. Merged with the pe
 own answers to the other 11, the automatic file routes in one pass against the
 original items with nothing refused.
 
+### The same idea before the value review: a second look at every overlay
+
+The value review asks a person to look at each queued panel's overlay. Before the
+page is built, two agents look at every overlay separately (run2, 2026-10-19: 156
+panels, two passes of eight agents). Each sees only the overlay and the read numbers
+of its panel - no reading notes, confidence or earlier answers - enlarges every mark,
+and answers OK or LOOK with the cells and a one-line reason in Korean. A panel goes to
+the front of the page when either pass says LOOK or is not HIGH. **This orders the
+page and says where to look; it approves nothing and fills no confirmation box.**
+
+On run2 the two passes agreed on 148 of 156 panels (87 OK, 61 LOOK), and what they
+found was mostly not for the person to reject one by one but for the code to fix:
+
+- **Box whiskers ended at the far edge of the point on the cap, not at the cap.**
+  S41467 draws its minimum and maximum subject on the caps; `read_box_violin_panel`
+  took the stem's last row, 5-7 px past the cap on every capped whisker. It now takes
+  the middle of the cap the stem ends in (`_cap_at_stem_end`; no cap, the stem's end).
+- **The stem was looked for at the declared x.** Four pixels off, the three-pixel
+  column found only the points stacked on it and read whiskers 15-23 px short. It is
+  now looked for at the middle of the box's own rules (`_box_middle`). Two grey-box
+  panels whose declared colour was the points' orange, read before as rows of points,
+  are now refused instead.
+- **A marker reader's error-bar ends were never drawn.** The line and point readers
+  report `Errorbar_Top_Px`/`Errorbar_Bottom_Px`; the overlay drew only `cap_px`, so
+  neither the person nor the checks could see the ends. `review_overlay` now draws
+  them for any mark that carries no cap of its own.
+
+Found while testing the page end to end, not by the checks: a value page built
+without `--when` exports `Reviewed_At=""`, which `finalize_batch` refuses on every
+row; the page exports HOLD, which `finalize_batch` takes only as APPROVED/REJECTED
+(it flags HOLD and goes on); and `finalize_batch` removes the previous run's stamp
+first, which a folder that forbids deletion (the Mac bridge) refuses - move it aside.
+
 ## What the AI carries on without the person
 
 After the bundles of 2026-10-18 the person said the rest could go to the AI: "남은 건 ai로

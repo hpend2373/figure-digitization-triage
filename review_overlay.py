@@ -486,7 +486,20 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
             # The cap, and the end below the mark when one was placed there too
             # (`cap_low_px`, supplied readings only): a reviewer asked whether a
             # placed bar end sits on the printed one has to see both.
-            for cap in (mark.get("cap_px"), mark.get("cap_low_px")):
+            #
+            # A MARKER READER'S ENDS TOO. The line and point readers measure
+            # both ends of the error bar and report them as `Errorbar_Top_Px`
+            # and `Errorbar_Bottom_Px`, never as `cap_px` - so their overlay
+            # showed a cross and no ends, and neither the person nor the blinded
+            # second check could see whether the measured ends sat on the
+            # printed caps (S41526, 310_PMC8576394, 2026-10-19). Taken only from
+            # a mark that carries no cap of its own: a placed reading names its
+            # ends in `cap_px`/`cap_low_px`, and a `None` there means "not
+            # placed", which this must not fill in.
+            ends = (mark.get("cap_px"), mark.get("cap_low_px"))
+            if "cap_px" not in mark and "cap_low_px" not in mark:
+                ends = (mark.get("Errorbar_Top_Px"), mark.get("Errorbar_Bottom_Px"))
+            for cap in ends:
                 if cap is None:
                     continue
                 cy = float(cap) - oy

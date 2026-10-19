@@ -1857,6 +1857,38 @@ check("the overlay draws all five of a box's lines",
 _widths = [max(_wide[y] for y in band) for band in _bands]
 check("  each at the width the reader measured",
       len(set(_widths)) == 2, "%s" % (_widths,))
+
+# A MARKER READER'S ERROR-BAR ENDS ARE DRAWN. The line and point readers report
+# `Errorbar_Top_Px`/`Errorbar_Bottom_Px` and no `cap_px`; the overlay drew the
+# cross and nothing else, so nobody could see whether the measured ends sat on
+# the printed caps.
+def _ticks_at(path, rows, x=200, box=(100, 300, 80, 280)):
+    """The rows (source coordinates) where the overlay has a short level tick."""
+    im = Image.open(path).convert("RGB")
+    px = im.load()
+    ox, oy = max(0, box[0] - _OV.PAD), max(0, box[2] - _OV.PAD)
+    return [r for r in rows
+            if sum(1 for xx in range(x - ox - 5, x - ox + 6)
+                   if px[xx, r - oy] != (255, 255, 255)) >= 8]
+_mk = {"series": "DI", "x": 200.0, "marker_center_px": 180.0,
+       "Errorbar_Top_Px": 130.0, "Errorbar_Bottom_Px": 230.0}
+_mpath = _OV.draw_panel_overlay(os.path.join(_odir, "m.png"), _oras,
+                                (100, 300, 80, 280), [_mk],
+                                series_order=["DI"], label_marks=False)
+check("the overlay draws both measured ends of a marker's error bar",
+      _mpath and _ticks_at(_mpath, [130, 230]) == [130, 230],
+      "%s" % (_ticks_at(_mpath, [130, 230]) if _mpath else None,))
+# REVERT: take the measured ends whenever `cap_px` is None. A placed reading
+# says which ends were placed in `cap_px`/`cap_low_px`; None there is "this end
+# was not placed", and drawing the measured one in its place shows the person
+# an end nobody put there.
+_ppath = _OV.draw_panel_overlay(os.path.join(_odir, "p.png"), _oras,
+                                (100, 300, 80, 280),
+                                [dict(_mk, cap_px=None, cap_low_px=None)],
+                                series_order=["DI"], label_marks=False)
+check("  and a placed reading with no end placed shows none",
+      _ppath and _ticks_at(_ppath, [130, 230]) == [],
+      "%s" % (_ticks_at(_ppath, [130, 230]) if _ppath else None,))
 shutil.rmtree(_odir, ignore_errors=True)
 check("  and a mark with an ordinary centre still gives one",
       RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}])["A"]

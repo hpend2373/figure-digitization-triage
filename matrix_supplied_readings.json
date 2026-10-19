@@ -240,8 +240,8 @@
   {
    "name": "아래 끝을 그리지 않는다",
    "file": "review_overlay.py",
-   "old": "            for cap in (mark.get(\"cap_px\"), mark.get(\"cap_low_px\")):",
-   "new": "            for cap in (mark.get(\"cap_px\"),):"
+   "old": "            ends = (mark.get(\"cap_px\"), mark.get(\"cap_low_px\"))",
+   "new": "            ends = (mark.get(\"cap_px\"),)"
   },
   {
    "name": "계획서의 판독을 매니페스트에 쓰지 않는다",

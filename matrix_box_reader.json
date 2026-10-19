@@ -1,7 +1,7 @@
 {
  "files": {
-  "mark_readers.py": "9cbaf2bbec4089fc8921df7d63a622df12a0b52bc1001300ce03292dc587b86b",
-  "test_mark_readers.py": "bdb8f99ae323581b344261331f0cf3c4aea7f54943b08ab56f296cb48d81a677"
+  "mark_readers.py": "f024b67b097102eefda5f45e20cbc1798d64008c8816921089037cdc4c02001f",
+  "test_mark_readers.py": "d7631e123f444b7847258c003196a4d1c1855d45ed8280cb4b1e23eaf1ccf6be"
  },
  "suites": [
   "test_mark_readers.py"
@@ -90,6 +90,12 @@
    "file": "mark_readers.py",
    "old": "    capped = [r for r in rows if lo <= through.get(r, 0) < hi]\n    if not capped:\n        return None",
    "new": "    capped = [r for r in rows if lo <= through.get(r, 0) < hi]\n    if not capped:\n        return (float('nan'), 0)"
+  },
+  {
+   "name": "상자 가운데를 선언된 열을 지나지 않는 조각에서도 잼",
+   "file": "mark_readers.py",
+   "old": "                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width\n                and a <= declared < b]",
+   "new": "                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width]"
   }
  ]
 }

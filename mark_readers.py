@@ -1333,18 +1333,24 @@ def box_line_split(widths):
 def _box_middle(window, bands, declared, box_width):
     """상자 규칙 셋의 가운데 열(창 안), 셋이 없으면 선언된 열.
 
-    규칙마다 그 띠 가운데 줄에서, 상자 폭(`BOX_LINE_WIDTH_TOLERANCE` 안)인
-    조각 가운데 선언된 열에 가장 가까운 것의 가운데를 잽니다. 셋의 중앙값이
-    상자의 가운데입니다. 상자의 폭은 이미 셋이 같다고 확인된 폭이라, 점이
-    붙어 넓어진 규칙 하나가 가운데를 끌지 못합니다.
+    규칙마다 그 띠 가운데 줄에서, 상자 폭(`BOX_LINE_WIDTH_TOLERANCE` 안)이고
+    **선언된 열을 지나는** 조각의 가운데를 잽니다. 셋의 중앙값이 상자의
+    가운데입니다. 상자의 폭은 이미 셋이 같다고 확인된 폭이라, 점이 붙어 넓어진
+    규칙 하나가 가운데를 끌지 못합니다.
+
+    선언된 열을 지나야 합니다. 그 열 옆에 찍힌 글자("<0.001")가 같은 폭의 세
+    줄을 이루면, 그 가운데로 옮겨 간 열은 글자의 줄 자체를 "줄기"로 찾고, 줄기
+    없는 세 줄을 거절하던 검사가 더는 걸리지 않습니다. 상자는 자기 위치의 x를
+    가로지르고, 글자는 그 옆에 있습니다.
     """
     mids = []
     for band in bands:
         row = band[len(band) // 2]
         runs = [(a, b) for a, b in _ink_runs(window[row])
-                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width]
+                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width
+                and a <= declared < b]
         if runs:
-            a, b = min(runs, key=lambda ab: abs((ab[0] + ab[1] - 1) / 2.0 - declared))
+            a, b = runs[0]
             mids.append((a + b - 1) / 2.0)
     if len(mids) != len(bands) or not mids:
         return declared

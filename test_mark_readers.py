@@ -942,6 +942,24 @@ check("  the fixture is the shape that raised: three bands of one width, no ink 
 check("three rules with no stem reaching them are refused, not raised",
       read_box_violin_panel(tim, panel_box=(120, 680, 40, 460),
                             x_positions=_tpos, y_calibration=cycal) == [])
+# A WHOLE LITTLE BOX BESIDE THE COLUMN - a legend's box glyph, three rules, a stem
+# and two caps - is still not the group's box. The stem is looked for at the
+# middle of the box's rules (S41467 FIG6 B1 was declared 4 px off its stem), and
+# only rules that cross the group's own column are a box there.
+# REVERT: take the middle of any rules of the box's width in the window. The
+# glyph is then read as the group: five numbers from a legend.
+gim = Image.new("RGB", (800, 520), "white")
+gd = ImageDraw.Draw(gim)
+for x in (200, 400, 600):
+    gx = x - 45
+    gd.line((gx, 150, gx, 260), fill="black", width=2)                  # stem
+    for yy in (150, 260):
+        gd.line((gx - 7, yy, gx + 7, yy), fill="black", width=2)         # caps
+    gd.rectangle((x - 60, 180, x - 30, 230), outline="black", width=2)  # box
+    gd.line((x - 60, 205, x - 30, 205), fill="black", width=2)          # median
+check("  and a whole box glyph beside the column is not that group's box",
+      read_box_violin_panel(gim, panel_box=(120, 680, 40, 460),
+                            x_positions=_tpos, y_calibration=cycal) == [])
 
 # REVERT: split five lines into box and caps by something other than one shared
 # width. Three lines of one width with two narrower ones is the shape; anything

@@ -876,7 +876,8 @@ found was mostly not for the person to reject one by one but for the code to fix
   the middle of the cap the stem ends in (`_cap_at_stem_end`; no cap, the stem's end).
 - **The stem was looked for at the declared x.** Four pixels off, the three-pixel
   column found only the points stacked on it and read whiskers 15-23 px short. It is
-  now looked for at the middle of the box's own rules (`_box_middle`). Two grey-box
+  now looked for at the middle of the box's own rules (`_box_middle`) - rules that
+  cross the group's column, so a box glyph beside it is still not its box. Two grey-box
   panels whose declared colour was the points' orange, read before as rows of points,
   are now refused instead.
 - **A marker reader's error-bar ends were never drawn.** The line and point readers

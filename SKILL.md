@@ -964,6 +964,14 @@ quotes, a second check that never saw them, the cross-check rule - and what it d
 cover stays without n: an n that changes along the x axis (time points with dropouts,
 groups laid out on the x axis) is per cell, not per series.
 
+Recorded on run2 the same day: of 267 cards where a check had said the n differs per
+mean, 185 agreed with HIGH and evidence - 103 got each group's n (303 series) and 82
+agreed the n changes along the axis - and 82 went to the person, merged with what was
+left from the first n bundle into one page whose every offered number goes through the
+identity gate. Rehearsed with `census_copy`, the same fingerprint on the container and the
+Mac; the Mac census (real crops, all 98 papers clean) went from 619 values passing machine
+QC to 1,195, 576 of them carrying a group's own n.
+
 ## A panel no reader can read, read by an AI agent, confirmed by the person
 
 A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so

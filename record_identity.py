@@ -154,6 +154,23 @@ def series_n_of(series):
     return out
 
 
+def series_n_by_x_ok(value):
+    """True for no per-cell n, or {x label: positive whole number} with at least one entry."""
+    if value is None:
+        return True
+    if not isinstance(value, dict) or not value:
+        return False
+    return all(isinstance(k, str) and k.strip() and v not in (None, "") and series_n_ok(v)
+               for k, v in value.items())
+
+
+def has_n(series_entry):
+    """Does this series say its n - one for the series, or one per x position."""
+    e = series_entry if isinstance(series_entry, dict) else {}
+    return (series_n_of([e])[0] is not None if series_n_ok(e.get("n")) else True) \
+        or e.get("n_by_x") is not None
+
+
 def series_problems(series, mark, route="AUTO"):
     out = []
     if not series:
@@ -180,6 +197,17 @@ def series_problems(series, mark, route="AUTO"):
         # beside the card's N_Outcome, is the answer's check (`check_answer`).
         if not series_n_ok(e.get("n")):
             out.append(("SERIES_N_BAD", "계열 %r의 n=%r은 양의 정수가 아닙니다." % (name or i, e.get("n"))))
+        # AND ITS n PER x POSITION, where the group shrinks along the axis - a
+        # time course drawn until half the subjects had finished, each finish
+        # marked. {x label: n}; an x it does not name is an x this series is not
+        # drawn at (`make_plan` makes such a panel's grid SPARSE). Not beside a
+        # series n: one answer per cell.
+        if not series_n_by_x_ok(e.get("n_by_x")):
+            out.append(("SERIES_N_BAD", "계열 %r의 n_by_x=%r은 {x 라벨: 양의 정수}가 아닙니다."
+                        % (name or i, e.get("n_by_x"))))
+        elif e.get("n_by_x") is not None and series_n_ok(e.get("n")) and series_n_of([e])[0] is not None:
+            out.append(("SERIES_N_TWICE", "계열 %r에 n과 n_by_x가 둘 다 있습니다 - 한 칸에 n은 하나입니다."
+                        % (name or i)))
         colour = str(e.get("colour") or "").strip()
         if colour and not COLOUR_HEX.match(colour):
             out.append(("SERIES_COLOUR_BAD", "계열 %r의 색 %r은 #RRGGBB가 아닙니다." % (name, colour)))
@@ -308,15 +336,23 @@ def check_answer(answer, proposed):
     # groups differ in size carries each group's n on its series; a half-filled
     # set would leave cells with no n while looking answered, and two answers
     # (the card's and a series') would leave the run to pick one.
-    if not bad and series and all(series_n_ok(e.get("n")) for e in series):
-        per = series_n_of(series)
-        given = [v for v in per if v is not None]
-        if given and len(given) != len(per):
+    if not bad and series and all(series_n_ok(e.get("n")) and series_n_by_x_ok(e.get("n_by_x"))
+                                  for e in series):
+        given = [e for e in series if has_n(e)]
+        if given and len(given) != len(series):
             problems.append(("SERIES_N_PARTIAL", "계열 %d개 가운데 %d개에만 n이 있습니다 - 계열마다 n을 적으면 모든 계열에 "
-                                                 "적어야 합니다." % (len(per), len(given))))
+                                                 "적어야 합니다." % (len(series), len(given))))
         if given and n:
             problems.append(("N_TWICE", "카드의 n(%s)과 계열마다의 n이 둘 다 있습니다 - 군마다 n이 다르면 카드의 n은 "
                                         "비웁니다." % n))
+        # A PER-CELL n NAMES CELLS THE CARD DECLARES: its keys are this card's
+        # x labels, as written. A key that is no label is a cell nobody drew.
+        labels = set(str(p.get("label") or "").strip() for p in positions or [])
+        for e in series:
+            for k in sorted((e.get("n_by_x") or {})):
+                if k.strip() not in labels:
+                    problems.append(("SERIES_N_X_UNKNOWN", "계열 %r의 n_by_x가 x 라벨에 없는 %r을 적었습니다."
+                                     % (str(e.get("name") or "").strip(), k)))
     bar_top = (answer.get("Bar_Top_Definition") or "").strip().upper()
     if mark.startswith("BAR") and bar_top not in BAR_TOPS:
         problems.append(("BAR_TOP_MISSING", "막대 표인데 값을 어디서 읽는지(%s)가 없습니다." % "/".join(BAR_TOPS)))

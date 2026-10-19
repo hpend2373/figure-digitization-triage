@@ -636,33 +636,54 @@ _OPTIONAL_COLUMNS = {"resolutions": lambda: BM.identity_resolution_columns(),
                      "series_n": lambda: BM.series_n_columns()}
 
 
-def series_n_by_cell(series_n, series):
-    """{Panel_ID: {(FACTOR, LEVEL): n}} from `series_n.csv` and the series manifest.
+def series_n_by_cell(series_n, series, positions=None):
+    """{Panel_ID: {key: n}} from `series_n.csv` and the series and position manifests.
 
     A value row carries a Cell_Key, not a Series_ID, so a group's n is found by
-    the level its series puts in the key. Only rows the batch layer accepted reach
-    here (`check_series_n` refuses the batch otherwise).
+    the level its series puts in the key: key (FACTOR, LEVEL) for a series' n,
+    and (FACTOR, LEVEL, X_FACTOR, X_LEVEL) for one cell's (a row with a
+    `Position_ID`). Only rows the batch layer accepted reach here
+    (`check_series_n` refuses the batch otherwise).
     """
     out = {}
     if series_n is None or not len(series_n):
         return out
-    level_of = {}
+    level_of, x_level_of = {}, {}
     for _, r in series.iterrows():
         level_of[(_s(r.get("Panel_ID")), _s(r.get("Series_ID")))] = (
             _upper(r.get("Factor_Name")), _upper(r.get("Factor_Level")))
+    for _, r in (positions.iterrows() if positions is not None else ()):
+        x_level_of[(_s(r.get("Panel_ID")), _s(r.get("Position_ID")))] = (
+            _upper(r.get("Factor_Name")), _upper(r.get("Factor_Level")))
     for _, r in series_n.iterrows():
         key = (_s(r.get("Panel_ID")), _s(r.get("Series_ID")))
-        if key in level_of and _s(r.get("N_Outcome")).isdigit():
-            out.setdefault(key[0], {})[level_of[key]] = int(_s(r.get("N_Outcome")))
+        qid = _s(r.get("Position_ID")) if "Position_ID" in r else ""
+        if key not in level_of or not _s(r.get("N_Outcome")).isdigit():
+            continue
+        if qid:
+            if (key[0], qid) not in x_level_of:
+                continue
+            levels = level_of[key] + x_level_of[(key[0], qid)]
+        else:
+            levels = level_of[key]
+        out.setdefault(key[0], {})[levels] = int(_s(r.get("N_Outcome")))
     return out
 
 
 def cell_n(levels_n, cell_key):
-    """The n of the group a value's Cell_Key names, as text; blank when none does."""
+    """The n of the group a value's Cell_Key names, as text; blank when none does.
+
+    A cell's own n (its series AND its x position) where there is one; else its
+    series' n. Exactly one match, or blank - two answers are no answer.
+    """
     if not levels_n:
         return ""
     cell = GE.fig_parse_cell_key(cell_key) or {}
-    hits = [n for (factor, level), n in levels_n.items() if cell.get(factor) == level]
+    cells = [n for k, n in levels_n.items()
+             if len(k) == 4 and cell.get(k[0]) == k[1] and cell.get(k[2]) == k[3]]
+    if cells:
+        return str(cells[0]) if len(cells) == 1 else ""
+    hits = [n for k, n in levels_n.items() if len(k) == 2 and cell.get(k[0]) == k[1]]
     return str(hits[0]) if len(hits) == 1 else ""
 
 
@@ -3555,7 +3576,7 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         readings_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
     # {panel: {(FACTOR, LEVEL): n}} - each group's own n, found on a value by the
     # series level its Cell_Key carries (a value row names no Series_ID).
-    cell_n_by_panel = series_n_by_cell(m.get("series_n"), m["series"])
+    cell_n_by_panel = series_n_by_cell(m.get("series_n"), m["series"], m.get("positions"))
 
     values, run_rows = [], []
     # A panel gets exactly one queue entry, keyed so a later pass revises it

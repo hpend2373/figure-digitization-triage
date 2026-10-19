@@ -1035,6 +1035,14 @@ def series_n_columns():
     return ["Panel_ID", "Series_ID", "N_Outcome", "N_Source", "Note"]
 
 
+#: Columns `series_n.csv` may carry beyond `series_n_columns()`. `Position_ID`
+#: makes a row one CELL's n - the series at that x position - for a group that
+#: shrinks along the axis (a time course drawn until half the subjects had
+#: finished). Optional, so every series_n.csv written before it, and every batch
+#: without such a cell, is unchanged and still complete.
+SERIES_N_OPTIONAL_COLUMNS = ("Position_ID",)
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -2593,7 +2601,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         resolve=resolve, check_files=check_files)
 
     # ------------------------------------------------------ a group's own n
-    check_series_n(series_n, panel_index, series, unit_index, flag)
+    check_series_n(series_n, panel_index, series, unit_index, flag, positions=positions)
 
     # -------------------------------------------------------------- configs
     parsed = load_reader_configs(configs, mark_by_config, flag)
@@ -2611,11 +2619,15 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
 SERIES_N_STATISTICS = ("CONTINUOUS", "QUANTILE_SUMMARY")
 
 
-def check_series_n(series_n, panel_index, series, unit_index, flag):
+def check_series_n(series_n, panel_index, series, unit_index, flag, positions=None):
     """Every group's n names a declared series, once, and a panel has them all or none.
 
     And never beside the unit's own `N_Outcome`: a cell with two n's has none
     anybody chose, and the run would pick one silently.
+
+    A row with a `Position_ID` is one CELL's n (`SERIES_N_OPTIONAL_COLUMNS`): the
+    position must be the panel's, each cell once, and a series says its n either
+    once for the series or per cell - not both.
     """
     if series_n is None or not len(series_n):
         return
@@ -2623,11 +2635,16 @@ def check_series_n(series_n, panel_index, series, unit_index, flag):
     for _, r in series.iterrows():
         declared.setdefault(str(r.get("Panel_ID", "")).strip(), []).append(
             str(r.get("Series_ID", "")).strip())
-    got = {}
+    declared_positions = {}
+    for _, r in (positions.iterrows() if positions is not None else ()):
+        declared_positions.setdefault(str(r.get("Panel_ID", "")).strip(), set()).add(
+            str(r.get("Position_ID", "")).strip())
+    got, level = {}, {}
     for i, r in series_n.iterrows():
         line = "series_n:%d" % (i + 2)
         pid = str(r.get("Panel_ID", "")).strip()
         sid = str(r.get("Series_ID", "")).strip()
+        qid = str(r.get("Position_ID", "") if "Position_ID" in r else "").strip()
         if pid not in panel_index:
             flag(line, "SERIES_N_PANEL_UNKNOWN", "Panel_ID=%r is not in panel_manifest" % pid)
             continue
@@ -2635,8 +2652,19 @@ def check_series_n(series_n, panel_index, series, unit_index, flag):
             flag(line, "SERIES_N_SERIES_UNKNOWN",
                  "%s has no series %r; its series are %s" % (pid, sid, declared.get(pid, [])))
             continue
-        if sid in got.setdefault(pid, {}):
-            flag(line, "SERIES_N_DUPLICATE", "%s/%s has two n's" % (pid, sid))
+        if qid and qid not in declared_positions.get(pid, set()):
+            flag(line, "SERIES_N_POSITION_UNKNOWN",
+                 "%s has no position %r; a cell's n names a declared x position" % (pid, qid))
+            continue
+        kind = "cell" if qid else "series"
+        if level.setdefault((pid, sid), kind) != kind:
+            flag(line, "SERIES_N_LEVEL_MIXED",
+                 "%s/%s says its n both for the whole series and per cell - one answer "
+                 "per cell" % (pid, sid))
+            continue
+        if (sid, qid) in got.setdefault(pid, {}):
+            flag(line, "SERIES_N_DUPLICATE", "%s/%s%s has two n's"
+                 % (pid, sid, " at %s" % qid if qid else ""))
             continue
         text = str(r.get("N_Outcome", "")).strip()
         if not text.isdigit() or int(text) <= 0:
@@ -2646,7 +2674,7 @@ def check_series_n(series_n, panel_index, series, unit_index, flag):
         if blank(r.get("N_Source")):
             flag(line, "MISSING_REQUIRED",
                  "N_Source - where %s/%s's n was read" % (pid, sid))
-        got[pid][sid] = int(text)
+        got[pid][(sid, qid)] = int(text)
         unit = unit_index.get(str(panel_index[pid].get("Unit_ID", "")).strip())
         if unit is not None:
             statistic = str(unit.get("Statistic_Type", "")).strip().upper()
@@ -2654,7 +2682,8 @@ def check_series_n(series_n, panel_index, series, unit_index, flag):
                 flag(line, "SERIES_N_STATISTIC_UNSUPPORTED",
                      "%s is a %s unit; a group's own n is for %s"
                      % (pid, statistic or "(blank)", "/".join(SERIES_N_STATISTICS)))
-    for pid, have in got.items():
+    for pid, cells in got.items():
+        have = sorted(set(s_ for s_, _q in cells))
         missing = [s_ for s_ in declared.get(pid, []) if s_ not in have]
         if have and missing:
             flag("panels:%s" % pid, "SERIES_N_PARTIAL",

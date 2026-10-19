@@ -623,6 +623,220 @@ check("a plan with one n per unit writes the file with its header and no rows",
       == BM.series_n_columns() and len(pd.read_csv(_w2["series_n"], dtype=object)) == 0,
       "%s" % _pp2[:3])
 
+# ==========================================================================
+print()
+print("a cell's own n: per x position, for a group that shrinks along the axis")
+# Decided 2026-10-19 ("화살표로 분마다 n"): a time course drawn until half the
+# subjects had finished, each finish marked by an arrow, has a different n at
+# every minute. The card says it per x label (Series[i].n_by_x); an x label a
+# series does not name is a cell it is not drawn at, and the grid is then SPARSE.
+
+
+def _series_x(a, b):
+    out = []
+    for (name, colour), by in zip((("Women", "#DC2828"), ("Men", "#2850DC")), (a, b)):
+        e = {"name": name, "colour": colour, "line_style": "", "marker": "",
+             "marker_fill": "", "bar_fill": ""}
+        e.update(by)
+        out.append(e)
+    return json.dumps(out)
+
+
+_wx, _cx = _record(_answer(Series=_series_x({"n_by_x": {"Pre": 11, "D1": 8}},
+                                            {"n_by_x": {"Pre": 10}})))
+check("a card whose groups say their n per x label is written",
+      len(_wx) == 1 and not _cx, "%s" % _cx)
+check("  and the decision keeps each cell's n on its series",
+      _wx and [e.get("n_by_x") for e in json.loads(_wx[0]["Series"])]
+      == [{"Pre": 11, "D1": 8}, {"Pre": 10}], "%s" % (_wx[0]["Series"] if _wx else None))
+# REVERT: let a per-cell n name an x the card does not declare. That n belongs
+# to a cell nobody drew, and the plan would carry it to the batch as an unknown
+# position - or worse, to the next panel's label.
+check("a per-cell n at an x label the card does not declare is refused",
+      "SERIES_N_X_UNKNOWN" in _record(_answer(
+          Series=_series_x({"n_by_x": {"Pre": 11, "D9": 8}}, {"n_by_x": {"Pre": 10}})))[1])
+check("a series' n and its per-cell n together are refused",
+      "SERIES_N_TWICE" in _record(_answer(
+          Series=_series_x({"n": 11, "n_by_x": {"Pre": 11}}, {"n": 10})))[1])
+check("a per-cell n that is not a positive whole number, or no mapping, is refused",
+      "SERIES_N_BAD" in _record(_answer(
+          Series=_series_x({"n_by_x": {"Pre": 0}}, {"n_by_x": {"Pre": 10}})))[1]
+      and "SERIES_N_BAD" in _record(_answer(
+          Series=_series_x({"n_by_x": {}}, {"n_by_x": {"Pre": 10}})))[1])
+check("a per-cell n on one series and nothing on the other is refused",
+      "SERIES_N_PARTIAL" in _record(_answer(
+          Series=_series_x({"n_by_x": {"Pre": 11}}, {})))[1])
+check("a per-cell n beside the card's n is refused",
+      "N_TWICE" in _record(_answer(
+          N_Outcome="21", Series=_series_x({"n_by_x": {"Pre": 11}}, {"n_by_x": {"Pre": 10}})))[1])
+check("one series per cell and the other per series is written",
+      not _record(_answer(Series=_series_x({"n_by_x": {"Pre": 11, "D1": 8}}, {"n": 10})))[1])
+
+# The batch layer: a cell's n is a series_n row with a Position_ID.
+CELL_N = ([dict(Panel_ID="P1", Series_ID="S_B", Position_ID=q, N_Outcome=str(n_),
+                N_Source="identity card (per cell)", Note="")
+           for q, n_ in zip(LABELS, (11, 10, 9, 8))]
+          + [dict(Panel_ID="P1", Series_ID="S_R", Position_ID=q, N_Outcome=str(n_),
+                  N_Source="identity card (per cell)", Note="")
+             for q, n_ in zip(LABELS, (9, 9, 7, 6))])
+_CELL_COLS = BM.series_n_columns() + list(BM.SERIES_N_OPTIONAL_COLUMNS)
+
+
+def _validate_cells(rows):
+    problems = BM.validate_batch_manifests(
+        frame(PANELS, BM.panel_manifest_columns()),
+        frame(SERIES, BM.series_manifest_columns()),
+        frame(POSITIONS, BM.position_manifest_columns()),
+        frame([], BM.reader_config_columns()),
+        units=frame(NO_UNIT_N, GE.fig_unit_columns()),
+        source_documents=frame(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
+        source_figures=frame(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
+        source_panels=frame(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+        reviewers=frame(REVIEWERS, BM.reviewer_registry_columns()),
+        readings=frame(READINGS, BM.supplied_readings_columns()),
+        series_n=frame(list(rows), _CELL_COLS), file_root=ROOT, doc_root=ROOT)
+    return set(problems["check"]) if len(problems) else set()
+
+
+check("Position_ID is an optional column: the required ones are unchanged",
+      "Position_ID" not in BM.series_n_columns()
+      and "Position_ID" in BM.SERIES_N_OPTIONAL_COLUMNS)
+check("every cell's own n validates with the unit's n left blank",
+      not _validate_cells(CELL_N), "%s" % _validate_cells(CELL_N))
+# REVERT: accept any Position_ID. A cell's n at an x the panel never declared is
+# an n nobody can attach to a value, and the cell it was meant for has none.
+check("a cell's n at a position the panel does not declare is refused",
+      "SERIES_N_POSITION_UNKNOWN" in _validate_cells(
+          CELL_N[:-1] + [dict(CELL_N[-1], Position_ID="T9")]))
+check("one series given its n both per series and per cell is refused",
+      "SERIES_N_LEVEL_MIXED" in _validate_cells(
+          CELL_N + [dict(SERIES_N[0])]))
+check("one cell given two n's is refused",
+      "SERIES_N_DUPLICATE" in _validate_cells(CELL_N + [dict(CELL_N[0], N_Outcome="7")]))
+check("cells of one series and nothing for the other is refused",
+      "SERIES_N_PARTIAL" in _validate_cells(CELL_N[:4]))
+
+_clev = RB.series_n_by_cell(frame(CELL_N, _CELL_COLS),
+                            frame(SERIES, BM.series_manifest_columns()),
+                            frame(POSITIONS, BM.position_manifest_columns()))
+# REVERT: look a value's n up by its series alone. Every cell of a shrinking
+# group then gets one n - or, with four of them to choose from, none.
+check("a cell's n is found by its series AND its x position in the Cell_Key",
+      RB.cell_n(_clev.get("P1"), "ARM=CONTROL;TIMEPOINT=T0") == "11"
+      and RB.cell_n(_clev.get("P1"), "ARM=CONTROL;TIMEPOINT=T3") == "8"
+      and RB.cell_n(_clev.get("P1"), "ARM=TREATED;TIMEPOINT=T2") == "7", "%s" % _clev)
+_mixed = RB.series_n_by_cell(frame(CELL_N[:4] + [dict(SERIES_N[1])], _CELL_COLS),
+                             frame(SERIES, BM.series_manifest_columns()),
+                             frame(POSITIONS, BM.position_manifest_columns()))
+check("  and a series' own n still answers for a series that has no cell n",
+      RB.cell_n(_mixed.get("P1"), "ARM=TREATED;TIMEPOINT=T2") == "9"
+      and RB.cell_n(_mixed.get("P1"), "ARM=CONTROL;TIMEPOINT=T2") == "9", "%s" % _mixed)
+
+
+def _fresh_cells(name, rows, units=None):
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    mdir = write_manifests(os.path.join(out, "manifests"),
+                           unit_manifest=units or NO_UNIT_N)
+    with open(os.path.join(mdir, "series_n.csv"), "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(_CELL_COLS)
+        for r in rows:
+            w.writerow([r.get(c, "") for c in _CELL_COLS])
+    return out, RB.run_batch(mdir, out, file_root=ROOT, run_date="2026-10-18")
+
+
+_co, _cs = _fresh_cells("by_cell", CELL_N)
+_cq = read(_co, "figure_values_machine_qc.csv") if _cs["status"] == "RAN" else pd.DataFrame()
+_want = dict(("ARM=%s;TIMEPOINT=%s" % ("CONTROL" if r["Series_ID"] == "S_B" else "TREATED",
+                                       r["Position_ID"]), r["N_Outcome"]) for r in CELL_N)
+check("a panel whose cells carry their own n passes the gate with every cell",
+      _cs["status"] == "RAN" and len(_cq) == 8, "%s / %d" % (_cs, len(_cq)))
+check("  and each value carries its own cell's n",
+      len(_cq) and all(r["N_Cell"] == _want.get(r["Cell_Key"]) for r in _cq.to_dict("records")),
+      "%s" % (_cq[["Cell_Key", "N_Cell"]].to_dict("records") if len(_cq) else None))
+_hole, _hs = _fresh_cells("cell_hole", CELL_N[:-1])
+_hraw = read(_hole, "figure_values_raw.csv") if _hs["status"] == "RAN" else pd.DataFrame()
+check("a value whose cell has no n, beside cells with theirs, is missing its n",
+      len(_hraw) and any("MISSING_REQUIRED" in r["QC_Codes"] and "TIMEPOINT=T3" in r["Cell_Key"]
+                         and "ARM=TREATED" in r["Cell_Key"] for r in _hraw.to_dict("records")),
+      "%s" % (_hs, ))
+
+# SPARSE: a series drawn at only some x positions. Without the rule the full
+# product demands the cells nobody drew.
+_SP_READ = [r for r in READINGS if not (r["Series_ID"] == "S_R" and r["Position_ID"] == "T3")]
+_SP_N = [r for r in CELL_N if not (r["Series_ID"] == "S_R" and r["Position_ID"] == "T3")]
+
+
+def _fresh_sparse(name, grid_rule):
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    units = [dict(NO_UNIT_N[0], Grid_Rule=grid_rule,
+                  Sparse_Justification=("identity card: each series is drawn only at the x "
+                                        "positions its per-cell n names" if grid_rule == "SPARSE" else ""))]
+    mdir = write_manifests(os.path.join(out, "manifests"), unit_manifest=units,
+                           supplied_readings=_SP_READ)
+    with open(os.path.join(mdir, "series_n.csv"), "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(_CELL_COLS)
+        for r in _SP_N:
+            w.writerow([r.get(c, "") for c in _CELL_COLS])
+    return out, RB.run_batch(mdir, out, file_root=ROOT, run_date="2026-10-18")
+
+
+_so, _ss = _fresh_sparse("sparse", "SPARSE")
+_sq = read(_so, "figure_values_machine_qc.csv") if _ss["status"] == "RAN" else pd.DataFrame()
+check("a SPARSE unit whose series stops before the last x passes with the cells it has",
+      _ss["status"] == "RAN" and len(_sq) == 7, "%s / %d" % (_ss, len(_sq)))
+_fo, _fs = _fresh_sparse("full_missing", "FULL")
+_fq = read(_fo, "figure_values_machine_qc.csv") if _fs["status"] == "RAN" else pd.DataFrame()
+check("  and the same cells under a FULL grid fail on the missing cell",
+      _fs["status"] == "RAN" and len(_fq) == 0, "%s / %d" % (_fs, len(_fq)))
+
+# The plan: make_plan turns the card's labels into position ids, compile_plan
+# writes one row per cell, and only then the Position_ID column.
+_cplan = json.loads(json.dumps(PLAN))
+for _sp in _cplan["figures"][0]["panels"][0]["read"]["series"]:
+    _sp.pop("n_outcome")
+    _sp["n_source"] = "identity card (per cell)"
+    _sp["n_by_position"] = dict((r["Position_ID"], int(r["N_Outcome"])) for r in CELL_N
+                                if r["Series_ID"] == _sp["series_id"])
+check("a cell's n is a key a plan's series may carry", "n_by_position" in CP.PLAN_KEYS["series"])
+_w3, _pp3 = CP.compile_plan(_cplan, os.path.join(_pdir, "cells"), file_root=ROOT,
+                            run_date="2026-10-19")
+_c3 = pd.read_csv(_w3["series_n"], dtype=object).fillna("") if not _pp3 else pd.DataFrame()
+check("the compiler writes one series_n row per cell, with its Position_ID",
+      not _pp3 and len(_c3) == 8 and "Position_ID" in _c3.columns
+      and dict(((r["Series_ID"], r["Position_ID"]), r["N_Outcome"]) for r in _c3.to_dict("records"))
+      == dict(((r["Series_ID"], r["Position_ID"]), r["N_Outcome"]) for r in CELL_N),
+      "%s / %s" % (_pp3[:3], _c3.to_dict("records")[:2] if len(_c3) else None))
+check("  and a plan with no cell n keeps the file's columns exactly as before",
+      list(pd.read_csv(_written["series_n"], dtype=object).columns) == BM.series_n_columns())
+
+import make_plan as MP                                                 # noqa: E402
+_ident = {"Proposal_ID": "GP001", "X_Factor": "TIMEPOINT", "Series_Factor": "SEX",
+          "X_Labels": json.dumps([{"label": "Pre", "px": 175}, {"label": "D1", "px": 325}]),
+          "Series": _series_x({"n_by_x": {"Pre": 11, "D1": 8}}, {"n_by_x": {"Pre": 10}}),
+          "Mark_Type": "LINE_COLOR", "Outcome_Name": "Heart rate", "Unit": "bpm",
+          "N_Outcome": "", "Read_Route": "MANUAL"}
+_geom = {"Proposal_ID": "GP001", "Panel_X0": "100", "Panel_X1": "700", "Panel_Y0": "60",
+         "Panel_Y1": "460", "Human_Verification_Status": "PENDING"}
+_rd, _un, _gr, _vw = MP.authored_read("P1", "D1", _geom, _ident, ("SD", "caption", "", ""), "P1")
+_by = dict((sp["level"], sp.get("n_by_position")) for sp in _rd["series"])
+_pids = dict((p_["level"], p_["position_id"]) for p_ in _rd["positions"])
+check("the plan carries each cell's n keyed by the position id of its x label",
+      _by == {"Women": {_pids["Pre"]: 11, _pids["D1"]: 8}, "Men": {_pids["Pre"]: 10}}
+      and all(sp.get("n_source") == "identity card (per cell)" for sp in _rd["series"]),
+      "%s / %s" % (_by, _pids))
+# REVERT: leave the grid FULL. The series drawn at Pre only would then be asked
+# for its D1 cell, which nobody drew, and the unit fails whole.
+check("  and a series drawn at fewer x positions makes the unit's grid SPARSE, with why",
+      _un.get("grid_rule") == "SPARSE" and "Men: 1 drawn, 1 not" in _un.get("sparse_justification", ""),
+      "%s" % {k: _un.get(k) for k in ("grid_rule", "sparse_justification")})
+_full = dict(_ident, Series=_series_x({"n_by_x": {"Pre": 11, "D1": 8}},
+                                      {"n_by_x": {"Pre": 10, "D1": 9}}))
+check("  and a card whose groups name every x leaves the grid as it was",
+      "grid_rule" not in MP.authored_read("P1", "D1", _geom, _full, ("SD", "caption", "", ""), "P1")[1])
 print()
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))

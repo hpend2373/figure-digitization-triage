@@ -706,6 +706,12 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
         if e.get("n") not in (None, ""):
             sp["n_outcome"] = (RI.series_n_of([e])[0] if RI.series_n_ok(e.get("n")) else e.get("n"))
             sp["n_source"] = "identity card (per series)"
+        # AND PER CELL, where the group shrinks along the axis. Keyed by x label
+        # here; turned into position ids below, once the positions have ids.
+        if e.get("n_by_x") is not None:
+            sp["n_by_position"] = dict(e.get("n_by_x")) if isinstance(e.get("n_by_x"), dict) \
+                else e.get("n_by_x")
+            sp["n_source"] = "identity card (per cell)"
         drawn = []
         for src, dst in (("colour", "colour"), ("line_style", "line_style"), ("marker", "marker"),
                          ("marker_fill", "marker_fill"), ("bar_fill", "bar_fill")):
@@ -743,6 +749,21 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
         position_id_of[label_text or pid_] = pid_
         read["positions"].append({"position_id": pid_, "factor": x_factor, "level": label_text,
                                   "x_pixel": float(p["px"]), "display_order": i})
+    # The per-cell n by POSITION ID, as `series_n.csv` names cells. A label that
+    # is no position stays as written, so the batch layer refuses it by name
+    # (SERIES_N_POSITION_UNKNOWN) rather than this module dropping a cell's n.
+    sparse = []
+    for sp in read["series"]:
+        if isinstance(sp.get("n_by_position"), dict):
+            by_label = sp["n_by_position"]
+            sp["n_by_position"] = dict(
+                (position_id_of.get(str(k).strip(), str(k).strip()),
+                 int(str(v).strip()) if RI.series_n_ok(v) and str(v).strip() else v)
+                for k, v in by_label.items())
+            absent = [p_["level"] for p_ in read["positions"] if p_["level"] not in
+                      set(str(k).strip() for k in by_label)]
+            if absent:
+                sparse.append((sp["level"], len(by_label), len(absent)))
     # 판독은 이름으로 적혀 있고 계획서는 id로 씁니다. 모르는 이름은 그대로 두어
     # 배치층이 크게 거절하게 합니다(SUPPLIED_READING_SERIES_UNKNOWN 등) - 조용히
     # 버리면 읽은 칸이 사라진 줄 아무도 모릅니다. AUTO 패널의 판독도 그대로
@@ -786,6 +807,15 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
         "dispersion_type": code, "errorbar_source": errorbar_source,
         "extraction_method": "DIGITIZED",
     }
+    # A SERIES DRAWN AT ONLY SOME x POSITIONS - the card's per-cell n names the
+    # cells it is drawn at, and an x it does not name is one it is not. The full
+    # product would then demand cells nobody drew (FACTORIAL_CELL_MISSING), so the
+    # grid is SPARSE, and says why in the words the card gives.
+    if sparse:
+        unit["grid_rule"] = "SPARSE"
+        unit["sparse_justification"] = (
+            "identity card: each series is drawn only at the x positions its per-cell n "
+            "names (%s)" % "; ".join("%s: %d drawn, %d not" % t for t in sparse))
     # 상자그림이 상자로서 IQR을 받았으면 빌린 정의는 이 단위에 쓰이지 않았습니다.
     if kind == FROM_DECISION_BORROWED and not (mark == "BOX_VIOLIN" and dispersion[0] not in QUANTILE_DISPERSIONS):
         unit["note"] = BORROWED_NOTE

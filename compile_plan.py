@@ -105,7 +105,9 @@ PLAN_KEYS = {
                "mask_key", "note",
                # the group's own n, where the unit's one n cannot say it; see
                # `batch_manifests.series_n_columns`
-               "n_outcome", "n_source"),
+               "n_outcome", "n_source",
+               # and per cell, where it shrinks along the axis: {position_id: n}
+               "n_by_position"),
     "position": ("position_id", "factor", "level", "x_pixel", "slot_index",
                  "display_order", "timepoint_label", "timepoint_days", "note"),
     "reading": ("series_id", "position_id", "x_px", "y_px", "upper_px",
@@ -982,6 +984,20 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
                         Panel_ID=pid, Series_ID=_s(sp.get("series_id")),
                         N_Outcome=_s(sp.get("n_outcome")),
                         N_Source=_s(sp.get("n_source")), Note=""))
+                # AND ONE ROW PER CELL, where the series says its n per x
+                # position: the same table, with the cell's Position_ID.
+                by_position = sp.get("n_by_position")
+                if isinstance(by_position, dict):
+                    for qid in sorted(by_position, key=str):
+                        series_n.append(dict(
+                            Panel_ID=pid, Series_ID=_s(sp.get("series_id")),
+                            Position_ID=_s(qid), N_Outcome=_s(by_position[qid]),
+                            N_Source=_s(sp.get("n_source")), Note=""))
+                elif by_position not in (None, ""):
+                    series_n.append(dict(
+                        Panel_ID=pid, Series_ID=_s(sp.get("series_id")),
+                        Position_ID="?", N_Outcome=_s(by_position),
+                        N_Source=_s(sp.get("n_source")), Note="n_by_position is not a mapping"))
             # ONE ROW PER PRINTED SCALE. A plan that declares none compiles an
             # empty axis manifest, which is what every publication in the corpus
             # but the twin-axis ones produces - the file exists so the batch's
@@ -1140,7 +1156,11 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         # batch's shape does not depend on whether a panel was read this way.
         ("supplied_readings", readings, BM.supplied_readings_columns()),
         # Written whether or not a group has its own n, for the same reason.
-        ("series_n", series_n, BM.series_n_columns()),
+        # `Position_ID` only when a cell has its own n: a batch without one is
+        # byte for byte what it was (`BM.SERIES_N_OPTIONAL_COLUMNS`).
+        ("series_n", series_n, BM.series_n_columns() + (
+            list(BM.SERIES_N_OPTIONAL_COLUMNS)
+            if any(_s(r.get("Position_ID")) for r in series_n) else [])),
     )
     written = {}
     for name, rows, cols in tables:

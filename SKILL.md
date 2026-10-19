@@ -1025,6 +1025,29 @@ identity gate. Rehearsed with `census_copy`, the same fingerprint on the contain
 Mac; the Mac census (real crops, all 98 papers clean) went from 619 values passing machine
 QC to 1,195, 576 of them carrying a group's own n.
 
+**And a cell's own n (built 2026-10-19; the person: "9개로 해야할 거 같아", "화살표로
+분마다 n").** A time course drawn "until 50% of the subjects had finished", with an arrow
+at each subject's finish, has a different n at every minute, and each group stops at a
+different minute. The same path, one level down:
+
+    identity card    Series[i].n_by_x = {x label: n}; keys are the card's x labels
+                     (SERIES_N_X_UNKNOWN), never beside the series' n (SERIES_N_TWICE)
+                     or the card's (N_TWICE); a series with n_by_x counts as having its
+                     n for SERIES_N_PARTIAL; a series may say n and another n_by_x
+    make_plan        n_by_position keyed by position id; an x label a series does not
+                     name is a cell it is not drawn at, so the unit's grid is SPARSE,
+                     with the justification spelled out per series
+    compile_plan     one series_n.csv row per cell, with Position_ID - a column written
+                     only when some cell has its own n, so every other batch is byte for
+                     byte what it was (BM.SERIES_N_OPTIONAL_COLUMNS)
+    batch layer      a position the panel does not declare (SERIES_N_POSITION_UNKNOWN),
+                     a series said both per series and per cell (SERIES_N_LEVEL_MIXED),
+                     a cell twice (SERIES_N_DUPLICATE)
+    run_batch        N_Cell from the cell's own row (series AND x level in the Cell_Key),
+                     else the series' row
+
+`test_series_n.py` +27, `matrix_series_n.json` +13.
+
 ## A panel no reader can read, read by an AI agent, confirmed by the person
 
 A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so

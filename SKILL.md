@@ -919,6 +919,27 @@ in the papers, carried by the identity card (`N_Outcome` is a field the card gat
 so it can go through a bundle and the cross-check. The unread levels are the reading
 path's: G01, decided by the person on 2026-10-18 ("1로 가자") - the section below.
 
+**The n, recorded on run2 (2026-10-19).** 808 units without `N_Outcome`, one item per
+identity card, options N (the number goes in the item's text, so the blinded check writes
+its own and `TEXT_DIFFERS` compares them), NOT_ONE_N, NOT_STATED, UNCLEAR. Four proposer
+instances read the papers' methods, captions, tables and results with quotes and pages;
+four checkers that never saw a proposal answered the same brief from the text, the panel
+and the packet. 627 agreed with HIGH and evidence: 411 cards got their n through
+`record_identity --replace` (rehearsed with `census_copy`, the same fingerprint on the
+container and the Mac), and 216 agreed there is no single n. 181 went to the person on a
+second page whose options carry both checks' numbers, so whichever the person picks goes
+through the same gate. Sent to the person whatever the checks said: a proposal of
+"unclear", an n derived only from an ANOVA's degrees of freedom, and an n of 1 on a panel of
+individual subjects (whether such panels enter the pool is the review's protocol, not a
+paper's statement). The two instances disagreed on individual-subject panels - the
+proposers wrote 1 per plotted point, the checkers the number of subjects drawn - which is
+exactly why that kind stays the person's.
+
+**What the card cannot hold.** `N_Outcome` is one number per card. A panel whose series are
+groups of different size (women and men, finishers and non-finishers) has no single n, and
+its values cannot pass machine QC however well they are read. A per-series n is a new path,
+and the person's to decide.
+
 ## A panel no reader can read, read by an AI agent, confirmed by the person
 
 A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so
@@ -975,6 +996,36 @@ box and ticks were confirmed on (the region raster in `panel_regions_600.csv`), 
 hidden by a bar or another series; leave a cell out rather than guess a mark it cannot see -
 an unread cell is a missing cell the queue names, not an error. One reading per printed mark.
 The agent does not fill the review's confirmation columns; those are the person's.
+
+**Recorded on run2 (2026-10-19).** 229 continuous MANUAL panels: 36 declared NO_ERRORBAR were
+not read; 20 were skipped whole because no error bar is drawn although a dispersion is
+declared (individual-subject lines or bars, step plots, fitted lines); 173 were read into
+1,676 readings. Every bar panel the automatic measurement passed was looked at again by a
+second instance (88 of 94 needed corrections), every failed one was read by hand, and every
+line panel was read by eye. Rehearsed on a copy, then the run gained one new file and no
+changed record. On the Mac (real crops, all 98 papers clean) 321 placed values pass machine
+QC; the rest wait on a group's n, on an end that could not be seen, or on cells left out.
+What reading taught, for the next agent:
+
+- **A cap is wider than its stem.** Counting any row a few pixels wide as cap takes a thick
+  stem's own rows, and the cap lands 1.5-2 px toward the mark - short whiskers lose up to a
+  tenth of their spread. Take the stem's width as the median over its rows (not the
+  narrowest: an antialias row is one pixel) and the cap as rows at least 4 px wider.
+- **A snap that cannot isolate a mark must say so.** Where ink fills the search window
+  (overlapping marks, a marker larger than the window) the "centre" is the pick itself.
+  Read those on a zoomed pixel ruler and give them as placed.
+- **Put the point where its own whisker is symmetric.** Triangles differ by plotting
+  program - some centre the data on the bounding box, some on the centroid - and the caps
+  say which. With two marks on one column, give each the pair of caps symmetric about it,
+  and only when the other pairing is clearly worse; otherwise leave both ends blank.
+- **Faint marks need their own threshold** (light-grey markers and whiskers vanish at the
+  usual dark cut), and blocky upsampled scans limit placement to about the block size.
+- **A drawn point nearer another position's column is refused by the run** (the anchor
+  check). Skip that cell and say why; do not move the point.
+- **A bar whose outline is the fill's colour** has no visible outline centre. These were
+  read at the fill edge, as the released readers read; a unit declaring OUTLINE_CENTER sits
+  half an outline (1.5-3.5 px here) further in. One rule for every reader is the person's
+  call.
 
 ## Provenance is per FIELD, not per row
 

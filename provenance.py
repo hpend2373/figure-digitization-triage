@@ -57,6 +57,15 @@ one (`AI_ASSIGNED_SERIES`), and the panel's reviewer says, beside the overlay
 that draws every placed point, that they checked them (`Inference_Checked`). The
 route has its own contract (`SUPPLIED_ROUTE`): a reader's panel cannot claim it,
 and a supplied panel cannot claim a reader's.
+
+## A point a person placed is the person's own, and says so
+
+The same file takes a point the registered reviewer placed themselves
+(`Reader_Kind=PERSON`, `Read_By` a HUMAN in `reviewer_registry.csv`): a printed
+symbol the agent could not read (both error ends merged into another series'),
+placed by the person who will approve the panel. That is `MANUAL_DIGITIZED`,
+`MANUAL_PLACED_CAP` and, on a panel of several series, `PERSON_ASSIGNED_SERIES` -
+R0, a person's own digitization - and the overlay marks it `P`, not `@`.
 """
 
 import collections
@@ -103,6 +112,11 @@ IDENTITY_METHODS = {
     # reviewer is not told a reader looked. Only `supplied_readings.csv` produces
     # it (`SUPPLIED_ROUTE`); one series on the panel is `DECLARED_SINGLE_SERIES`.
     "AI_ASSIGNED_SERIES": "R2",
+    # A PERSON FILED THE POINT UNDER THIS SERIES, placing it themselves on a panel
+    # with more than one series: the registered reviewer whose own reading it is
+    # (`Reader_Kind=PERSON`), the same claim `HUMAN_RESOLUTION` makes and priced
+    # the same way. Only `supplied_readings.csv` produces it.
+    "PERSON_ASSIGNED_SERIES": "R0",
 }
 
 #: A gap between two supports that no blind mask covers: a dash gap, a dotted
@@ -314,7 +328,12 @@ METHOD_CONTRACT = {
     # a point an AI placed, and the other way round. `route_of` decides which key
     # a panel is held to, from the verified panel manifest.
     "SUPPLIED": {("AI_ASSIGNED_SERIES", "AI_PLACED_POINT"),
-                 ("DECLARED_SINGLE_SERIES", "AI_PLACED_POINT")},
+                 ("DECLARED_SINGLE_SERIES", "AI_PLACED_POINT"),
+                 # and a person's own reading, placed by a registered reviewer
+                 # (`Reader_Kind=PERSON`). Not crossed with the agent's: a point a
+                 # person placed is not filed by an agent, and the other way round.
+                 ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED"),
+                 ("DECLARED_SINGLE_SERIES", "MANUAL_DIGITIZED")},
 }
 
 #: The contract key of a panel whose values came from `supplied_readings.csv`.
@@ -359,7 +378,7 @@ DISPERSION_CONTRACT = {
     "SCATTER": {"NO_DISPERSION"},
     # An end the agent placed, or none placed. Not `DIRECT_CONNECTED_CAP`: that
     # names a reader following a stem, and no reader ran.
-    "SUPPLIED": {"AI_PLACED_CAP", "NO_DISPERSION"},
+    "SUPPLIED": {"AI_PLACED_CAP", "MANUAL_PLACED_CAP", "NO_DISPERSION"},
 }
 
 
@@ -1363,11 +1382,43 @@ def expected_box_violin_methods(mark, context=None):
 #: its own top row the way `BAR_COLOR`'s is. Written down rather than implied
 #: away - and `test_finalize` pins the two sets equal, so a verifier removed here
 #: is a failing scenario and not a quiet downgrade.
-#: Who may have placed a supplied reading. One kind for now, on purpose: a
-#: person's own readings would be `MANUAL_DIGITIZED` (R0) with a registered
-#: reviewer behind them, which is a different claim with a different check, and
-#: it is not built. A reading whose kind is anything else has no method here.
-SUPPLIED_READER_KINDS = ("AI_AGENT",)
+
+#: Who may have placed a supplied reading, and the three methods (series when the
+#: panel has more than one, point, error-bar end) each kind's mark carries. ONE
+#: TABLE, read by `run_batch` when it makes the mark and by the finalizer when it
+#: re-derives it, so the two cannot name a kind differently.
+#:
+#:     AI_AGENT   an agent looked at the 600 dpi figure: R2, and the panel's
+#:                reviewer confirms the placed points (`Inference_Checked`)
+#:     PERSON     the registered reviewer placed the point themselves (built
+#:                2026-10-20; the person: "이거 내가 추가적으로 찍을 수 있게
+#:                해줘"): `MANUAL_DIGITIZED`, R0 - a person's own digitization.
+#:                The batch layer refuses one whose `Read_By` is not a HUMAN in
+#:                `reviewer_registry.csv` (SUPPLIED_READER_NOT_REGISTERED,
+#:                SUPPLIED_READER_NOT_HUMAN), so the name cannot be borrowed
+#:                by a process.
+#:
+#: A reading whose kind is anything else has no method here.
+SUPPLIED_KIND_METHODS = {
+    "AI_AGENT": ("AI_ASSIGNED_SERIES", "AI_PLACED_POINT", "AI_PLACED_CAP"),
+    "PERSON": ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "MANUAL_PLACED_CAP"),
+}
+SUPPLIED_READER_KINDS = tuple(SUPPLIED_KIND_METHODS)
+
+#: The kinds whose `Read_By` must be a registered person.
+SUPPLIED_PERSON_KINDS = ("PERSON",)
+
+
+def supplied_methods(reader_kind, series_count, has_dispersion):
+    """(Identity_Method, Value_Method, Dispersion_Method) of a supplied mark.
+
+    One series on the panel is `DECLARED_SINGLE_SERIES` whoever placed the
+    point; no end placed is `NO_DISPERSION`. A kind with no row raises KeyError -
+    the batch layer refuses it first (`SUPPLIED_READER_KIND_UNKNOWN`).
+    """
+    identity, value, cap = SUPPLIED_KIND_METHODS[str(reader_kind or "").strip().upper()]
+    return ("DECLARED_SINGLE_SERIES" if series_count == 1 else identity, value,
+            cap if has_dispersion else "NO_DISPERSION")
 
 #: The reading's columns and the mark fields `run_batch` copies them into. One
 #: table, read by the runner when it builds the mark and by the verifier when it
@@ -1416,8 +1467,9 @@ def expected_supplied_methods(mark, context=None):
     verified with the other manifests), field by field, and then its numbers are
     re-made from the reading's pixels under the run's calibration. What this
     cannot check is whether the pixel is on the printed mark - nothing can but a
-    look - which is why every method it returns is R2 and the panel asks for
-    `Inference_Checked`.
+    look - which is why every method it returns for an agent's reading is R2 and
+    the panel asks for `Inference_Checked`. A person's reading (`Reader_Kind=
+    PERSON`) is that person's own digitization, `MANUAL_DIGITIZED`.
     """
     def field(name):
         value = mark.get(name)
@@ -1451,16 +1503,22 @@ def expected_supplied_methods(mark, context=None):
                 problems.append("the mark's %s is %s and reading %s declares %s=%s"
                                 % (key, got or "nothing", rid, column,
                                    want or "nothing"))
-    # WHO PLACED IT is the reading's `Reader_Kind`, compared above; the manifest
-    # layer refuses a kind with no method (`SUPPLIED_READER_KIND_UNKNOWN`) and the
-    # finalizer re-runs it, so the methods below are the AI agent's.
+    # WHO PLACED IT is the DECLARED reading's `Reader_Kind` - the verified
+    # manifest, not the mark's copy, which is compared above - so a mark and its
+    # value relabelled together still answer to the reading. The manifest layer
+    # refuses a kind with no method (`SUPPLIED_READER_KIND_UNKNOWN`) and the
+    # finalizer re-runs it, so the kind has a row in `SUPPLIED_KIND_METHODS`.
     count = context.get("Series_Count")
-    out["Identity_Method"] = ("DECLARED_SINGLE_SERIES" if count == 1
-                              else "AI_ASSIGNED_SERIES")
-    out["Value_Method"] = "AI_PLACED_POINT"
     top, bottom = number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px")
-    out["Dispersion_Method"] = ("NO_DISPERSION" if top is None and bottom is None
-                                else "AI_PLACED_CAP")
+    kind = (str(reading.get("Reader_Kind") or "") if reading is not None
+            else field("Reader_Kind")).strip().upper()
+    if kind not in SUPPLIED_KIND_METHODS:
+        problems.append("the mark's Reader_Kind is %s, which has no supplied "
+                        "methods" % (kind or "nothing"))
+        kind = "AI_AGENT"
+    (out["Identity_Method"], out["Value_Method"],
+     out["Dispersion_Method"]) = supplied_methods(
+        kind, count, not (top is None and bottom is None))
     import mark_readers as MR                                      # noqa: E402
     axis = MR.calibration_from_record(context.get("Y_Calibration"))
     centre = number("marker_center_px")
@@ -1614,6 +1672,9 @@ DISPERSION_METHODS = {
     # An error-bar end an AI agent placed, the same claim `AI_PLACED_POINT`
     # makes about the mean and priced the same way.
     "AI_PLACED_CAP": "R2",
+    # An error-bar end the registered reviewer placed themselves, the same claim
+    # `MANUAL_DIGITIZED` makes about the mean and priced the same way.
+    "MANUAL_PLACED_CAP": "R0",
 }
 
 

@@ -1147,6 +1147,28 @@ What reading taught, for the next agent:
   half an outline (1.5-3.5 px here) further in. One rule for every reader is the person's
   call.
 
+**A point the person placed (built 2026-10-20; the person, holding one panel: "중간에
+빼먹은 거 있어서 이거 내가 추가적으로 찍을 수 있게 해줘").** Where the agent left a cell out
+- both error ends merged into the other series' caps, so no spread could be read - the
+person can place it, on the same raster, into the same `supplied_readings.csv`:
+
+    Reader_Kind=PERSON     Read_By must be a HUMAN in reviewer_registry.csv
+                           (SUPPLIED_READER_NOT_REGISTERED, SUPPLIED_READER_NOT_HUMAN);
+                           Read_At not after today (SUPPLIED_READING_DATE_FUTURE)
+    methods                MANUAL_DIGITIZED, MANUAL_PLACED_CAP, and PERSON_ASSIGNED_SERIES
+                           on a panel of several series - all R0, the person's own
+                           digitization. One table (`provenance.SUPPLIED_KIND_METHODS`)
+                           for the run and the finalizer, and the finalizer takes the
+                           kind from the DECLARED reading, not the mark's copy
+    overlay, value page    `P` where an agent's point is `@`; a panel with any agent's
+                           point still asks `Inference_Checked`
+
+The page the person places from shows the 600 dpi panel at 1-6x with the agent's points
+thin, a dashed guide at the cell's calibrated column, and three clicks per cell (centre,
+upper end, lower end - an end may be "not visible", both may not); the ID and the date are
+typed, never filled. The cell's n comes from the arrows like every other minute.
+`test_supplied_readings.py` +20, `matrix_supplied_readings.json` +17.
+
 ## Provenance is per FIELD, not per row
 
 One row can be two readings. The commonest real case is a correlation whose r

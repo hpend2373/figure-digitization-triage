@@ -997,7 +997,9 @@ def supplied_readings_columns():
         Upper_Y_Px, Lower_Y_Px   the error-bar ends above and below it on the
                                  page; blank where none is drawn or none can be
                                  seen (a bar hiding its lower whisker)
-        Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure
+        Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure;
+                                 PERSON - the registered reviewer placed it
+                                 themselves (Read_By a HUMAN in the registry)
         Read_By, Read_At         who, and the date the reading was made
         Raster_SHA256            the raster the pixels are on; it must be the
                                  panel's own
@@ -2598,7 +2600,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
     check_supplied_readings(
         readings, panel_index, panel_modes, series, positions, unit_index,
         flag, raster_sha=(lambda path: sha256_of_file(path) if path else ""),
-        resolve=resolve, check_files=check_files)
+        resolve=resolve, check_files=check_files, reviewer_index=reviewer_index)
 
     # ------------------------------------------------------ a group's own n
     check_series_n(series_n, panel_index, series, unit_index, flag, positions=positions)
@@ -2703,7 +2705,7 @@ _READ_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 def check_supplied_readings(readings, panel_index, panel_modes, series,
                             positions, unit_index, flag, raster_sha=None,
-                            resolve=None, check_files=True):
+                            resolve=None, check_files=True, reviewer_index=None):
     """Every supplied reading names a cell a manual panel declares, once.
 
     What is checked here is that the reading CAN be a value of this panel: its
@@ -2713,7 +2715,15 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
     position declares, and the raster is the panel's. Whether the pixel is ON the
     printed mark is not checkable here and is not pretended to be: that is the
     overlay, and the reviewer's `Inference_Checked`.
+
+    A PERSON's reading (`Reader_Kind=PERSON`) is that person's own digitization,
+    so `Read_By` must name a HUMAN in `reviewer_registry.csv`: not registered is
+    SUPPLIED_READER_NOT_REGISTERED, registered as anything else is
+    SUPPLIED_READER_NOT_HUMAN, and a date after today is
+    SUPPLIED_READING_DATE_FUTURE. Without a registry (`reviewer_index=None`) a
+    person's reading cannot be vouched for and is refused the same way.
     """
+    import datetime
     import provenance as _prov
     if readings is None or not len(readings):
         return
@@ -2787,9 +2797,32 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
                  % (kind or "(blank)", "/".join(_prov.SUPPLIED_READER_KINDS)))
         if blank(r.get("Read_By")):
             flag(line, "MISSING_REQUIRED", "Read_By - who placed the points")
+        elif kind in _prov.SUPPLIED_PERSON_KINDS:
+            who = str(r.get("Read_By", "")).strip()
+            entry = (reviewer_index or {}).get(who)
+            if entry is None:
+                flag(line, "SUPPLIED_READER_NOT_REGISTERED",
+                     "Read_By=%r: a point a person placed is that person's own "
+                     "reading, so they must be in reviewer_registry.csv" % who)
+            elif str(entry.get("Reviewer_Record_Type", "")).strip().upper() != "HUMAN":
+                flag(line, "SUPPLIED_READER_NOT_HUMAN",
+                     "%s is Reviewer_Record_Type=%s; Reader_Kind=PERSON is a person"
+                     % (who, str(entry.get("Reviewer_Record_Type", "")).strip()
+                        or "(blank)"))
         if not _READ_AT.match(str(r.get("Read_At", "")).strip()):
             flag(line, "SUPPLIED_READING_DATE_BAD",
                  "Read_At=%r is not YYYY-MM-DD" % r.get("Read_At"))
+        elif kind in _prov.SUPPLIED_PERSON_KINDS:
+            try:
+                when = datetime.date.fromisoformat(str(r.get("Read_At")).strip())
+            except ValueError:
+                flag(line, "SUPPLIED_READING_DATE_BAD",
+                     "Read_At=%r is not a date" % r.get("Read_At"))
+            else:
+                if when > datetime.date.today():
+                    flag(line, "SUPPLIED_READING_DATE_FUTURE",
+                         "Read_At=%s is after today; a reading is made on a day "
+                         "that has happened" % when)
         pixels = {}
         bad = False
         for column in _prov.SUPPLIED_PIXEL_FIELDS:

@@ -251,6 +251,11 @@ def run_card(run, q, values, required):
     if placed:
         w("<p class='placed'>@ AI가 놓은 점 %d개 — 판독기가 읽은 것이 아닙니다.</p>"
           % len(placed))
+    people = [v for v in values
+              if (v.get("Value_Method") or "") == "MANUAL_DIGITIZED"]
+    if people:
+        w("<p class='placed'>P 사람이 직접 찍은 점 %d개 — 등록된 검토자 본인의 판독입니다.</p>"
+          % len(people))
     w("<div class='side'><div class='figs'><div class='fig'>")
     overlay = (q.get("Overlay_File") or "").strip()
     src = data_url(os.path.join(run, overlay)) if overlay else ""
@@ -264,7 +269,8 @@ def run_card(run, q, values, required):
     for v in sorted(values, key=lambda r: r.get("Cell_Key") or ""):
         w("<tr><td>%s%s</td>%s</tr>"
           % (esc(v.get("Cell_Key")),
-             " @" if (v.get("Value_Method") or "") == "AI_PLACED_POINT" else "",
+             {"AI_PLACED_POINT": " @", "MANUAL_DIGITIZED": " P"}.get(
+                 v.get("Value_Method") or "", ""),
              "".join("<td>%s</td>" % esc(_g(v.get(k)))
                      for k in ("Mean", "Dispersion_Value", "Errorbar_Lower",
                                "Errorbar_Upper"))))

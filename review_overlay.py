@@ -248,6 +248,19 @@ def placed(mark):
     """True when this mark's point was placed by an agent, not read."""
     return str(mark.get("Value_Method", "") or "").strip() == "AI_PLACED_POINT"
 
+
+#: A point the registered reviewer placed themselves (`Reader_Kind=PERSON`) is R0
+#: and asks nothing more, but the picture still says whose it is: `P`, counted.
+PERSON_MARK_SUFFIX = " P"
+
+PERSON_NOTE = ("%d point(s) placed by a person (Reader_Kind=PERSON, "
+               "MANUAL_DIGITIZED) - their own reading, not an agent's")
+
+
+def person_placed(mark):
+    """True when this mark's point was placed by a registered person."""
+    return str(mark.get("Value_Method", "") or "").strip() == "MANUAL_DIGITIZED"
+
 #: How a reader names a provenance field. Everything matching this and not in
 #: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
 #: A convention can still be side-stepped by a field named nothing like this,
@@ -314,6 +327,9 @@ def tier_of(mark):
 def inferred_note(marks):
     """The footer key for starred and questioned marks, or "" if none."""
     lines = []
+    people = [m for m in marks if person_placed(m)]
+    if people:
+        lines.append("%s %s" % (PERSON_MARK_SUFFIX.strip(), PERSON_NOTE % len(people)))
     for tier, suffix in TIER_MARK_SUFFIXES:
         here = [m for m in marks if tier_of(m) == tier]
         if tier == "R2":
@@ -364,6 +380,8 @@ def mark_label(mark):
         return label + SPREAD_MARK_SUFFIX
     if tier == "R2" and placed(mark):
         return label + PLACED_MARK_SUFFIX
+    if person_placed(mark):
+        return label + PERSON_MARK_SUFFIX
     for known, suffix in TIER_MARK_SUFFIXES:
         if tier == known:
             label += suffix

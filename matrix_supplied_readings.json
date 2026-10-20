@@ -1,14 +1,15 @@
 {
  "files": {
-  "batch_manifests.py": "14fa758a48f2295e0ab2bc0dc15a97a79cb3d256352f5768b3fc520e5fe398df",
+  "batch_manifests.py": "5a2346845c74c9ac1640487dcd149283e8f43c94b66d2fc50e5f0b818a561c56",
   "compile_plan.py": "ef11f70560925baf8a6174d785c98263f96444a9bc71d6359854a0e14fca2e84",
   "finalize_batch.py": "0339bafd9d2e02fe427fa6db01a18bdb61924267e59ab1c3ad50cdc31206f1df",
   "make_plan.py": "94fc63f528142d55cd9fe1ec971f7408b25ff89bcea11393b6e169ff55350356",
-  "provenance.py": "4fbf21e05b4ec53b965fc7e3a9c1a76be5d6291cb716afd61024535fa15f32c3",
-  "review_overlay.py": "b1da9111684a4f770ffc54f1c580fdf4a7fef2bd6fff488bc60a128c1efb710b",
-  "run_batch.py": "0cd8f9718c3fc41475c4f86c1ad8b48f645f60c48948f0b9791e963f11f56ee8",
+  "provenance.py": "e2daf47f87c89fd2f6260234de6523f93bfac062bde01bf58ab7b4725a0c2553",
+  "review_overlay.py": "93ff915b7e4467509cbbb64a2aaedf7846b67f762c2866444607ce7797cb906c",
+  "run_batch.py": "46d42f30660284997bbd75fdd590b15c2e9f362f702e988e582a7fbfe937186f",
   "test_make_plan.py": "f772a3e0d7bbc6d5b2811a458ec07e357b352e7fe6c3f35a95ff982660567e53",
-  "test_supplied_readings.py": "4ede74f70dada2ffafd0231934f272e61fd2ea9885411fcc340ff3a720a9468b"
+  "test_supplied_readings.py": "f8e75d94227d9ca845d4046d60827ba0918357837fd16464535bca70a668483a",
+  "value_page.py": "9a9a30ab288eb4a3687c284f49f9ce135d129eb7aee490874fb4ced599601f15"
  },
  "suites": [
   "test_supplied_readings.py",
@@ -42,14 +43,14 @@
   {
    "name": "계열 하나의 선언 짝을 계약에서 뺀다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {(\"AI_ASSIGNED_SERIES\", \"AI_PLACED_POINT\"),\n                 (\"DECLARED_SINGLE_SERIES\", \"AI_PLACED_POINT\")},",
-   "new": "    \"SUPPLIED\": {(\"AI_ASSIGNED_SERIES\", \"AI_PLACED_POINT\")},"
+   "old": "                 (\"DECLARED_SINGLE_SERIES\", \"AI_PLACED_POINT\"),\n                 # and a person's own reading",
+   "new": "                 # and a person's own reading"
   },
   {
    "name": "공급 경로가 판독기의 오차 방법을 낼 수 있다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
   },
   {
    "name": "검증기가 픽셀을 판독과 대조하지 않는다",
@@ -72,14 +73,14 @@
   {
    "name": "검증기가 계열 하나도 AI 배정으로 본다",
    "file": "provenance.py",
-   "old": "    out[\"Identity_Method\"] = (\"DECLARED_SINGLE_SERIES\" if count == 1\n                              else \"AI_ASSIGNED_SERIES\")",
-   "new": "    out[\"Identity_Method\"] = \"AI_ASSIGNED_SERIES\""
+   "old": "        kind, count, not (top is None and bottom is None))",
+   "new": "        kind, 2, not (top is None and bottom is None))"
   },
   {
    "name": "검증기가 끝 없는 점도 놓은 오차로 본다",
    "file": "provenance.py",
-   "old": "    out[\"Dispersion_Method\"] = (\"NO_DISPERSION\" if top is None and bottom is None\n                                else \"AI_PLACED_CAP\")",
-   "new": "    out[\"Dispersion_Method\"] = \"AI_PLACED_CAP\""
+   "old": "        kind, count, not (top is None and bottom is None))",
+   "new": "        kind, count, True)"
   },
   {
    "name": "한 끝의 퍼짐을 반으로",
@@ -198,8 +199,8 @@
   {
    "name": "계열 하나도 AI 배정으로 적는다",
    "file": "run_batch.py",
-   "old": "            Identity_Method=(\"DECLARED_SINGLE_SERIES\" if series_count == 1\n                             else \"AI_ASSIGNED_SERIES\"),",
-   "new": "            Identity_Method=\"AI_ASSIGNED_SERIES\","
+   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None)",
+   "new": "            mark.get(\"Reader_Kind\"), 2, spread is not None)"
   },
   {
    "name": "누가 읽었는지 실행 기록에 적지 않는다",
@@ -284,6 +285,108 @@
    "file": "make_plan.py",
    "old": "                entry[dst] = float(text) if _is_number(text) else (text or None)",
    "new": "                entry[dst] = text or None"
+  },
+  {
+   "name": "사람이 붙인 계열을 R2로",
+   "file": "provenance.py",
+   "old": "    \"PERSON_ASSIGNED_SERIES\": \"R0\",",
+   "new": "    \"PERSON_ASSIGNED_SERIES\": \"R2\","
+  },
+  {
+   "name": "사람이 놓은 오차 끝을 R2로",
+   "file": "provenance.py",
+   "old": "    \"MANUAL_PLACED_CAP\": \"R0\",",
+   "new": "    \"MANUAL_PLACED_CAP\": \"R2\","
+  },
+  {
+   "name": "사람의 판독도 AI의 방법으로",
+   "file": "provenance.py",
+   "old": "    \"PERSON\": (\"PERSON_ASSIGNED_SERIES\", \"MANUAL_DIGITIZED\", \"MANUAL_PLACED_CAP\"),\n}",
+   "new": "    \"PERSON\": (\"AI_ASSIGNED_SERIES\", \"AI_PLACED_POINT\", \"AI_PLACED_CAP\"),\n}"
+  },
+  {
+   "name": "사람 종류를 받지 않는다",
+   "file": "provenance.py",
+   "old": "SUPPLIED_READER_KINDS = tuple(SUPPLIED_KIND_METHODS)",
+   "new": "SUPPLIED_READER_KINDS = (\"AI_AGENT\",)"
+  },
+  {
+   "name": "계약이 사람의 짝을 모른다",
+   "file": "provenance.py",
+   "old": "                 (\"PERSON_ASSIGNED_SERIES\", \"MANUAL_DIGITIZED\"),\n                 (\"DECLARED_SINGLE_SERIES\", \"MANUAL_DIGITIZED\")},",
+   "new": "                 },"
+  },
+  {
+   "name": "계약이 엇갈린 짝을 받는다",
+   "file": "provenance.py",
+   "old": "                 (\"DECLARED_SINGLE_SERIES\", \"MANUAL_DIGITIZED\")},",
+   "new": "                 (\"DECLARED_SINGLE_SERIES\", \"MANUAL_DIGITIZED\"),\n                 (\"AI_ASSIGNED_SERIES\", \"MANUAL_DIGITIZED\")},"
+  },
+  {
+   "name": "공급 경로가 사람의 오차 끝을 모른다",
+   "file": "provenance.py",
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\"},"
+  },
+  {
+   "name": "검증기가 판독 대신 표시의 종류를 본다",
+   "file": "provenance.py",
+   "old": "    kind = (str(reading.get(\"Reader_Kind\") or \"\") if reading is not None\n            else field(\"Reader_Kind\")).strip().upper()",
+   "new": "    kind = field(\"Reader_Kind\").strip().upper()"
+  },
+  {
+   "name": "사람의 판독도 등록을 묻지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        elif kind in _prov.SUPPLIED_PERSON_KINDS:\n            who = str(r.get(\"Read_By\", \"\")).strip()",
+   "new": "        elif False:\n            who = str(r.get(\"Read_By\", \"\")).strip()"
+  },
+  {
+   "name": "등록된 비인간도 사람으로 받는다",
+   "file": "batch_manifests.py",
+   "old": "            elif str(entry.get(\"Reviewer_Record_Type\", \"\")).strip().upper() != \"HUMAN\":",
+   "new": "            elif False:"
+  },
+  {
+   "name": "사람의 판독에서 미래 날짜를 받는다",
+   "file": "batch_manifests.py",
+   "old": "                if when > datetime.date.today():",
+   "new": "                if False:"
+  },
+  {
+   "name": "등록부를 판독 검사에 넘기지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        resolve=resolve, check_files=check_files, reviewer_index=reviewer_index)",
+   "new": "        resolve=resolve, check_files=check_files, reviewer_index=None)"
+  },
+  {
+   "name": "실행이 사람의 점을 AI의 것으로 적는다",
+   "file": "run_batch.py",
+   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None)",
+   "new": "            \"AI_AGENT\", series_count, spread is not None)"
+  },
+  {
+   "name": "겹친 그림이 사람의 점에 P를 붙이지 않는다",
+   "file": "review_overlay.py",
+   "old": "    if person_placed(mark):\n        return label + PERSON_MARK_SUFFIX",
+   "new": "    if False:\n        return label + PERSON_MARK_SUFFIX"
+  },
+  {
+   "name": "겹친 그림 각주가 사람의 점을 세지 않는다",
+   "file": "review_overlay.py",
+   "old": "    if people:\n        lines.append(",
+   "new": "    if False:\n        lines.append("
+  },
+  {
+   "name": "값 페이지가 사람의 점을 세지 않는다",
+   "file": "value_page.py",
+   "old": "    if people:\n        w(\"<p class='placed'>P",
+   "new": "    if False:\n        w(\"<p class='placed'>P"
+  },
+  {
+   "name": "값 표가 사람의 점에 P를 붙이지 않는다",
+   "file": "value_page.py",
+   "old": "{\"AI_PLACED_POINT\": \" @\", \"MANUAL_DIGITIZED\": \" P\"}",
+   "new": "{\"AI_PLACED_POINT\": \" @\"}"
   }
  ]
 }

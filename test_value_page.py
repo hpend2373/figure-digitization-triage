@@ -200,6 +200,14 @@ check("AI가 놓은 점이라고 카드가 말하고, 물음도 그렇게 적힌
       "AI가 놓은 점 2개" in RHTML and V.RUN_ASKS["Inference_Checked"] in RHTML
       and RHTML.count("AI가 놓은 점 ") == 1, "")
 check("값이 표로 함께 보인다", "31.5" in RHTML and "33.75" in RHTML)
+check("실행 페이지도 본 날짜를 심는다",
+      re.search(r"var WHEN = \"2026-10-18\";", RHTML) is not None,
+      re.findall(r"var WHEN = [^;]*;", RHTML))
+_nofig = V.run_card(RUN, dict(Panel_ID="P_X", Unit_ID="U_X", Mark_Type="LINE_COLOR",
+                              Cells_Read="1", Cells_Declared="1", Overlay_File=""),
+                    [], ["Marks_Checked"])
+check("겹쳐 그린 그림이 없는 실행 카드는 그렇다고 말한다",
+      "겹쳐 그린 그림 없음" in _nofig and "<img" not in _nofig, _nofig[:200])
 try:
     V.main(["--values", VALS, "--run", RUN, "--out", os.path.join(TMP, "x.html")])
     check("--values와 --run은 함께 받지 않는다", False, "받았다")

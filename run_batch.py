@@ -1661,6 +1661,11 @@ def supplied_marks(readings, ycal, series_count):
         top, bottom = mark["Errorbar_Top_Px"], mark["Errorbar_Bottom_Px"]
         mean, spread, lower, upper = PROV.supplied_numbers(
             ycal, mark["marker_center_px"], top, bottom)
+        # WHO PLACED IT decides the three methods: an agent's point is R2, a
+        # registered person's own is `MANUAL_DIGITIZED` (`PROV.SUPPLIED_KIND_METHODS`,
+        # the table the finalizer re-derives them from).
+        identity, value, cap = PROV.supplied_methods(
+            mark.get("Reader_Kind"), series_count, spread is not None)
         mark.update(
             mean=mean, dispersion=spread, errorbar_lower=lower,
             errorbar_upper=upper,
@@ -1668,11 +1673,7 @@ def supplied_marks(readings, ycal, series_count):
             # and the one below as well when both were placed.
             cap_px=top if top is not None else bottom,
             cap_low_px=bottom if top is not None else None,
-            Identity_Method=("DECLARED_SINGLE_SERIES" if series_count == 1
-                             else "AI_ASSIGNED_SERIES"),
-            Value_Method="AI_PLACED_POINT",
-            Dispersion_Method=("NO_DISPERSION" if spread is None
-                               else "AI_PLACED_CAP"),
+            Identity_Method=identity, Value_Method=value, Dispersion_Method=cap,
             calib_max_resid=float(getattr(ycal, "max_residual", 0.0)))
         out.append(mark)
     return out

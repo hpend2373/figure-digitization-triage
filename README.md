@@ -91,6 +91,12 @@ read"):
       v
     finalize_batch.py      the same door into the pool as every other value
 
+A symbol the agent could not read can be placed by the person themselves, in the
+same file: `Reader_Kind=PERSON`, `Read_By` a HUMAN in the reviewer registry. That
+point is the person's own digitization - `MANUAL_DIGITIZED`, R0, `P` on the
+overlay - and the panel's other points are still the agent's (`SKILL.md`, "A
+point the person placed").
+
 A unit whose series are groups of different size (women and men, finishers and
 non-finishers) has no single n; each group carries its own (`SKILL.md`, "A group's
 own n"):
@@ -215,12 +221,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5709 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5904 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5731 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5926 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5709 scenarios on main after v9.28 under `requirements-lock.txt`, and 5904 with
+5731 scenarios on main after v9.28 under `requirements-lock.txt`, and 5926 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

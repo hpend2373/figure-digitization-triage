@@ -11,6 +11,11 @@ So every scenario below is one of three kinds: a reading that must not become a
 value (refused before the run), a value that must say who made it and how
 (methods, numbers, overlay), and a value that must not reach the pool without the
 person (finalize).
+
+And since 2026-10-20 ("이거 내가 추가적으로 찍을 수 있게 해줘"), the same file takes
+a point the registered reviewer placed themselves (`Reader_Kind=PERSON`): their
+own digitization, `MANUAL_DIGITIZED` and R0, refused unless `Read_By` is a HUMAN
+in the registry, and marked `P` on the overlay rather than `@`.
 """
 import csv
 import datetime
@@ -218,7 +223,8 @@ def frame(rows, cols):
                           for c in cols} for r in rows], columns=cols)
 
 
-def validate(readings=READINGS, panels=PANELS, units=UNITS, series=SERIES):
+def validate(readings=READINGS, panels=PANELS, units=UNITS, series=SERIES,
+             reviewers=None):
     problems = BM.validate_batch_manifests(
         frame(panels, BM.panel_manifest_columns()),
         frame(series, BM.series_manifest_columns()),
@@ -228,7 +234,8 @@ def validate(readings=READINGS, panels=PANELS, units=UNITS, series=SERIES):
         source_documents=frame(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
         source_figures=frame(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
         source_panels=frame(SOURCE_PANELS, BM.source_panel_inventory_columns()),
-        reviewers=frame(REVIEWERS, BM.reviewer_registry_columns()),
+        reviewers=frame(REVIEWERS if reviewers is None else reviewers,
+                        BM.reviewer_registry_columns()),
         readings=frame(readings, BM.supplied_readings_columns()),
         file_root=ROOT, doc_root=ROOT)
     return set(problems["check"]) if len(problems) else set()
@@ -716,6 +723,138 @@ if not _pp:
 else:
     check("  and the batch compiled from it reads the manual panel from them",
           False, "the plan did not compile")
+
+# ==========================================================================
+print()
+print("a point the registered person placed is that person's own reading")
+
+
+def person(sid, i, **over):
+    return reading(sid, i, **dict(dict(Reader_Kind="PERSON", Read_By="RV_H",
+                                       Read_At="2026-10-18"), **over))
+
+
+_DEMO = dict(REVIEWERS[0], Reviewer_ID="RV_DEMO", Reviewer_Name="Demo Example",
+             Reviewer_Record_Type="DEMO_IDENTITY", Human_Attestation="DEMO_EXAMPLE")
+check("a person's reading by a registered person validates",
+      validate([person("S_B", 0)]) == set(), "%s" % sorted(validate([person("S_B", 0)])))
+check("  and one by somebody the registry does not know is refused",
+      "SUPPLIED_READER_NOT_REGISTERED" in validate([person("S_B", 0, Read_By="RV_X")]))
+check("  and one by a registry entry that is not a person is refused",
+      "SUPPLIED_READER_NOT_HUMAN"
+      in validate([person("S_B", 0, Read_By="RV_DEMO")], reviewers=REVIEWERS + [_DEMO]))
+check("  and one dated after today is refused",
+      "SUPPLIED_READING_DATE_FUTURE"
+      in validate([person("S_B", 0, Read_At=str(datetime.date.today()
+                                                 + datetime.timedelta(days=1)))]))
+check("  and an agent's reading is not asked to be a registered person",
+      validate([reading("S_B", 0)]) == set())
+check("the two kinds, and what each places",
+      PROV.SUPPLIED_READER_KINDS == ("AI_AGENT", "PERSON")
+      and PROV.supplied_methods("PERSON", 2, True)
+      == ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "MANUAL_PLACED_CAP")
+      and PROV.supplied_methods("person", 1, False)
+      == ("DECLARED_SINGLE_SERIES", "MANUAL_DIGITIZED", "NO_DISPERSION")
+      and PROV.supplied_methods("AI_AGENT", 2, True)
+      == ("AI_ASSIGNED_SERIES", "AI_PLACED_POINT", "AI_PLACED_CAP"))
+check("  and a person's point, series and end are R0",
+      PROV.identity_tier("PERSON_ASSIGNED_SERIES") == "R0"
+      and PROV.value_tier("MANUAL_DIGITIZED") == "R0"
+      and PROV.dispersion_tier("MANUAL_PLACED_CAP") == "R0")
+check("the route's contract takes a person's pair and not a crossed one",
+      not PROV.contract_failure("SUPPLIED", "PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED")
+      and not PROV.contract_failure("SUPPLIED", "DECLARED_SINGLE_SERIES",
+                                    "MANUAL_DIGITIZED")
+      and bool(PROV.contract_failure("SUPPLIED", "AI_ASSIGNED_SERIES", "MANUAL_DIGITIZED"))
+      and bool(PROV.contract_failure("SUPPLIED", "PERSON_ASSIGNED_SERIES",
+                                     "AI_PLACED_POINT"))
+      and not PROV.dispersion_contract_failure("SUPPLIED", "MANUAL_PLACED_CAP")
+      and bool(PROV.contract_failure("LINE_COLOR", "PERSON_ASSIGNED_SERIES",
+                                     "MANUAL_DIGITIZED")))
+
+# A panel the agent read but for one symbol it could not, which the person placed.
+_MIX = [r for r in READINGS if r["Reading_ID"] != "P1__S_R__T2"] + [person("S_R", 2)]
+_mx, _smx = fresh_run("mixed", supplied_readings=_MIX)
+_qm = read(_mx, "figure_values_machine_qc.csv")
+_pm = [r for r in _qm.to_dict("records") if "TREATED" in r["Cell_Key"]
+       and "TIMEPOINT=T2" in r["Cell_Key"]]
+check("the person's point is a value with the person's methods",
+      _smx["status"] == "RAN" and len(_qm) == 8 and len(_pm) == 1
+      and (_pm[0]["Identity_Method"], _pm[0]["Value_Method"],
+           _pm[0]["Dispersion_Method"])
+      == ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "MANUAL_PLACED_CAP")
+      and PROV.row_tier(_pm[0]) == "R0"
+      and abs(float(_pm[0]["Mean"]) - value_at(centre("S_R", 2)[1])) < 1e-9,
+      "%s" % _pm)
+_qq = read(_mx, "review_queue.csv")
+check("  and the agent's seven still ask the panel's confirmation, the person's does not",
+      int(_qq.loc[0, "Inference_Cells"]) == 7, "%s" % _qq.to_dict("records"))
+_mm = json.load(open(RB.resolve_artifact(_mx, _qq.loc[0, "Raw_Data_File"]),
+                     encoding="utf-8"))["marks"]
+_mine = [m for m in _mm if m.get("Reader_Kind") == "PERSON"]
+check("  and the overlay marks it P, keyed, and the agent's @",
+      len(_mine) == 1
+      and OVERLAY.mark_label(_mine[0]).endswith(OVERLAY.PERSON_MARK_SUFFIX)
+      and not OVERLAY.mark_label(_mine[0]).endswith(OVERLAY.PLACED_MARK_SUFFIX)
+      and sum(1 for m in _mm if OVERLAY.mark_label(m).endswith(
+          OVERLAY.PLACED_MARK_SUFFIX)) == 7
+      and "placed by a person" in OVERLAY.inferred_note(_mm),
+      OVERLAY.inferred_note(_mm))
+import value_page as VP                                            # noqa: E402
+_card = VP.run_card(_mx, _qq.to_dict("records")[0],
+                    [dict(r, Run_Panel_ID="P1") for r in _qm.to_dict("records")], [])
+check("  and the value page says the person placed one, and marks its row P",
+      "사람이 직접 찍은 점 1개" in _card and _card.count(" P</td>") == 1
+      and _card.count(" @</td>") == 7, _card[:300])
+_fmx = finalize(_mx)
+check("  and the panel finalizes on the same approval, keeping whose each point is",
+      _fmx["status"] == "FINALIZED" and _fmx["accepted"] == 8
+      and sorted(read(_mx, "figure_values_accepted.csv")["Value_Method"])
+      == ["AI_PLACED_POINT"] * 7 + ["MANUAL_DIGITIZED"], "%s" % _fmx)
+
+_all, _ = fresh_run("all_person", supplied_readings=[
+    person(r["Series_ID"], LABELS.index(r["Position_ID"])) for r in READINGS])
+_qa = read(_all, "review_queue.csv")
+check("a panel the person placed whole asks no inference confirmation",
+      int(_qa.loc[0, "Inference_Cells"]) == 0
+      and {PROV.row_tier(r) for r in read(_all, "figure_values_machine_qc.csv")
+           .to_dict("records")} == {"R0"}, "%s" % _qa.to_dict("records"))
+_fa = finalize(_all, Inference_Checked="")
+check("  and finalizes on the overlay approval alone",
+      _fa["status"] == "FINALIZED" and _fa["accepted"] == 8, "%s" % _fa)
+
+_cx = FIN.panel_expectations(dict(
+    RB.load_manifests(os.path.join(_mx, "manifests")),
+    outputs={"run_manifest.csv": read(_mx, "run_manifest.csv").to_dict("records")}))["P1"]
+_p0 = dict(_mine[0])
+_pc = {f: _p0.get(f) for f in PROV.METHOD_FIELDS}
+check("the verifier passes the person's own mark",
+      PROV.evidence_failure("SUPPLIED", _p0, _pc, _cx["context"]) == ("", ""),
+      "%s" % (PROV.evidence_failure("SUPPLIED", _p0, _pc, _cx["context"]),))
+got = PROV.evidence_failure(
+    "SUPPLIED", _p0, dict(_pc, Identity_Method="AI_ASSIGNED_SERIES",
+                          Value_Method="AI_PLACED_POINT",
+                          Dispersion_Method="AI_PLACED_CAP"), _cx["context"])
+check("  and refuses it claiming an agent placed it",
+      got[0] == "METHOD_CONTRADICTS_EVIDENCE", "%s" % (got,))
+got = PROV.evidence_failure("SUPPLIED", dict(_p0, Reader_Kind="AI_AGENT"), _pc,
+                            _cx["context"])
+check("  and refuses a mark whose kind is not its reading's",
+      got[0] == "METHOD_EVIDENCE_INCOMPLETE", "%s" % (got,))
+got = PROV.evidence_failure(
+    "SUPPLIED", dict(_p0, Reader_Kind="AI_AGENT"),
+    dict(_pc, Identity_Method="AI_ASSIGNED_SERIES", Value_Method="AI_PLACED_POINT",
+         Dispersion_Method="AI_PLACED_CAP"), _cx["context"])
+check("  and refuses a mark and value relabelled an agent's together: the reading says",
+      got[0] == "METHOD_CONTRADICTS_EVIDENCE", "%s" % (got,))
+_a0 = [m for m in _mm if m.get("Reader_Kind") == "AI_AGENT"][0]
+got = PROV.evidence_failure(
+    "SUPPLIED", _a0, dict({f: _a0.get(f) for f in PROV.METHOD_FIELDS},
+                          Identity_Method="PERSON_ASSIGNED_SERIES",
+                          Value_Method="MANUAL_DIGITIZED",
+                          Dispersion_Method="MANUAL_PLACED_CAP"), _cx["context"])
+check("  and refuses an agent's point claiming to be the person's",
+      got[0] == "METHOD_CONTRADICTS_EVIDENCE", "%s" % (got,))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))

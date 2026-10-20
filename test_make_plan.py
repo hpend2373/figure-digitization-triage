@@ -957,6 +957,76 @@ _plan9, _sheet9, _fig9, _panels9 = _confirm([_geom("PUB_D001__p1")], [_ident("PU
 _u9 = [u for u in _plan9["units"] if u["panel_id"] == "PUB_D001_P1"][0]
 check("  a decision that borrows nothing carries no note", "note" not in _u9
       and _sheet9["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION, "%s" % _u9)
+# ONE POSITION IS ONE SLOT (D14, 2026-10-20): its x calibration is that slot
+# alone, which the gate takes as a whole categorical calibration.
+_plan11, _sheet11, _fig11, _panels11 = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", X_Labels=_json.dumps([{"label": "Upright", "px": 400}]))])
+_u11 = [u for u in _plan11["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: write no x calibration for a single position. The gate then refuses it.
+check("a panel with one x position is calibrated on that one slot",
+      _u11.get("x_calibration") == [[0, 400.0]], "%s" % _u11.get("x_calibration"))
+_problems11 = [q for q in CP.validate_plan(_plan11, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems11 == [], _problems11[:3])
+# THE SHAPE AND THE SCALE (D15, 2026-10-20): what `record_shape` wrote reaches
+# the unit; nothing written leaves UNKNOWN and RATIO as before.
+import record_shape as RSH                                        # noqa: E402
+_card12 = _ident("PUB_D001__p1")
+_shape_cards = {"PUB_D001__p1": dict(_card12, Human_Verification_Status="CONFIRMED")}
+_SH = {"Proposal_ID": "PUB_D001__p1", "Distribution_Shape": "RIGHT_SKEWED", "Value_Scale": "RATIO",
+       "Shape_Basis": "spectral power in mmHg^2/Hz; the paper reports medians elsewhere for this measure",
+       "Verified_By": "minyeop", "Seen_By_Person": "0", "Observed_By": "Claude (two checks)",
+       "Approval_Ref": "minyeop decision D15 2026-10-20"}
+check("a shape answer with a basis and an approval passes", RSH.check_answer(_SH, _shape_cards) == [],
+      RSH.check_answer(_SH, _shape_cards))
+# REVERT: take a hedged basis. The record then says nothing more than UNKNOWN did.
+check("  a hedged basis does not",
+      [c for c, _m in RSH.check_answer(dict(_SH, Shape_Basis="probably skewed"), _shape_cards)]
+      == ["UNRESOLVED_SHAPE_BASIS"])
+check("  nor a shape outside the vocabulary",
+      [c for c, _m in RSH.check_answer(dict(_SH, Distribution_Shape="SKEWED"), _shape_cards)]
+      == ["BAD_DISTRIBUTION_SHAPE"])
+check("  nor a scale outside the vocabulary",
+      [c for c, _m in RSH.check_answer(dict(_SH, Value_Scale="INTERVAL"), _shape_cards)] == ["BAD_VALUE_SCALE"])
+check("  nor a panel with no confirmed card",
+      [c for c, _m in RSH.check_answer(dict(_SH, Proposal_ID="PUB_D009__p1"), _shape_cards)] == ["UNKNOWN_PANEL"])
+check("  nor an answer nobody saw or approved",
+      "NOT_SEEN_BY_PERSON" in [c for c, _m in RSH.check_answer(dict(_SH, Observed_By="", Approval_Ref=""),
+                                                                _shape_cards)])
+write(MP.SHAPE_DECISIONS, RSH.FIELDS, [dict(_SH, Value_Scale="CHANGE", Distribution_Shape="UNKNOWN",
+                                            Shape_Basis="the plotted values are changes from baseline")])
+_plan12, _sheet12, _fig12, _panels12 = _confirm([_geom("PUB_D001__p1")], [_card12])
+_u12 = [u for u in _plan12["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read shape_decisions nowhere. The change score stays on a ratio scale
+# and the gate goes on refusing it.
+check("a recorded shape and scale reach the unit, with the basis in its note",
+      _u12.get("value_scale") == "CHANGE" and _u12.get("distribution_shape") == "UNKNOWN"
+      and "changes from baseline" in (_u12.get("note") or ""), "%s" % _u12)
+_problems12 = [q for q in CP.validate_plan(_plan12, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems12 == [], _problems12[:3])
+write(MP.SHAPE_DECISIONS, RSH.FIELDS, [])
+_plan13, _s13, _f13, _p13 = _confirm([_geom("PUB_D001__p1")], [_card12])
+_u13 = [u for u in _plan13["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+check("  and with nothing recorded the unit says nothing", "value_scale" not in _u13
+      and "distribution_shape" not in _u13, "%s" % _u13)
+
+# A definition MEASURED on the figure (2026-10-20 decision D01): the paper says
+# SD, the bars are the SE of the plotted individual values. The record says what
+# was measured, and the unit carries that fact to the values.
+_MEASURED_SRC = "Measured on the figure: in 22 cells the bar is the SE of the five plotted values"
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SE", "Errorbar_Definition_Source": _MEASURED_SRC,
+        "Found_On_Page": "", "Definition_Basis": "MEASURED"}])
+_plan10, _sheet10, _fig10, _panels10 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u10 = [u for u in _plan10["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read MEASURED as an ordinary decision. The SE then looks like one the
+# paper stated, and the values cannot be found again for a sensitivity analysis.
+check("a definition measured on the figure is read and the unit carries the measured note",
+      _u10["dispersion_type"] == "SE" and _u10["errorbar_source"] == _MEASURED_SRC
+      and _u10.get("note") == MP.MEASURED_NOTE
+      and _sheet10["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION_MEASURED,
+      "%s %s" % (_u10, _sheet10["PUB_D001"]["Errorbar_Source_Kind"]))
+_problems10 = [q for q in CP.validate_plan(_plan10, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems10 == [], _problems10[:3])
 write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page"), [])
 
 # The reviewers file: a person registers once, and the inventory names them.

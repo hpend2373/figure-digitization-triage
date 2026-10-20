@@ -1,7 +1,8 @@
 {
  "files": {
-  "make_plan.py": "a4075afb903b7f2c7f8821ebe7c52da395c96085c9aaecad627a8ae3fe75a427",
-  "test_make_plan.py": "636ead4a26f4ede5780b11310da8fac50d63074496a1330e2e611a06dbfab50e"
+  "make_plan.py": "1e38715c9e89849697548321932e4ef6883339dfa0ae852b38eb2d8da2241738",
+  "test_make_plan.py": "9fd77bd831794a3e2128d2518d0d8e312527292ae05dd32f1f7024ef7bc9f851",
+  "record_shape.py": "d2bdfbb524d2aae5f8e8b643f8cbe1e49fd64823b688488f4b5f4bf4ce820ca8"
  },
  "suites": [
   "test_make_plan.py"
@@ -424,20 +425,20 @@
   {
    "name": "borrowed: Definition_Basis read nowhere",
    "file": "make_plan.py",
-   "old": "kind = FROM_DECISION_BORROWED if (decision.get(\"Definition_Basis\") or \"\").strip().upper() \\\n            == RE.BORROWED else FROM_DECISION",
+   "old": "kind = {RE.BORROWED: FROM_DECISION_BORROWED, RE.MEASURED: FROM_DECISION_MEASURED}.get(basis, FROM_DECISION)",
    "new": "kind = FROM_DECISION"
   },
   {
    "name": "borrowed: the unit does not carry the assumption",
    "file": "make_plan.py",
-   "old": "        unit[\"note\"] = BORROWED_NOTE",
+   "old": "        unit[\"note\"] = BORROWED_NOTE if kind == FROM_DECISION_BORROWED else MEASURED_NOTE",
    "new": "        pass"
   },
   {
    "name": "borrowed: a box that takes the IQR carries the note",
    "file": "make_plan.py",
-   "old": "if kind == FROM_DECISION_BORROWED and not (mark == \"BOX_VIOLIN\" and dispersion[0] not in QUANTILE_DISPERSIONS):",
-   "new": "if kind == FROM_DECISION_BORROWED:"
+   "old": "            and not (mark == \"BOX_VIOLIN\" and dispersion[0] not in QUANTILE_DISPERSIONS):",
+   "new": "            and True:"
   },
   {
    "name": "R6: a dropped figure stays UNRESOLVED",
@@ -684,6 +685,72 @@
    "file": "make_plan.py",
    "old": "                    needs.append(\"%s: %s\" % (RASTER_600_MISSING, raster_missing))",
    "new": "                    pass"
+  },
+  {
+   "name": "그림에서 잰 정의를 보통 판정으로 읽는다",
+   "file": "make_plan.py",
+   "old": "RE.MEASURED: FROM_DECISION_MEASURED}",
+   "new": "RE.MEASURED: FROM_DECISION}"
+  },
+  {
+   "name": "그림에서 잰 정의의 메모를 단위에 두지 않는다",
+   "file": "make_plan.py",
+   "old": "    if kind in (FROM_DECISION_BORROWED, FROM_DECISION_MEASURED) \\",
+   "new": "    if kind in (FROM_DECISION_BORROWED,) \\"
+  },
+  {
+   "name": "위치 하나인 패널에 x 보정을 쓰지 않는다",
+   "file": "make_plan.py",
+   "old": "    elif len(positions) == 1 and positions[0].get(\"px\") is not None:",
+   "new": "    elif False:"
+  },
+  {
+   "name": "분포·척도의 답을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "    for r in _rows(os.path.join(run, SHAPE_DECISIONS)):",
+   "new": "    for r in []:"
+  },
+  {
+   "name": "척도의 답을 단위에 옮기지 않는다",
+   "file": "make_plan.py",
+   "old": "        unit[\"value_scale\"] = (identity.get(\"Shape_Value_Scale\") or \"RATIO\").strip().upper()",
+   "new": "        unit[\"value_scale\"] = \"RATIO\""
+  },
+  {
+   "name": "분포 답의 근거를 메모에 두지 않는다",
+   "file": "make_plan.py",
+   "old": "        unit[\"note\"] = (unit[\"note\"] + \" | \" + said) if unit.get(\"note\") else said",
+   "new": "        pass"
+  },
+  {
+   "name": "추정의 근거도 받는다",
+   "file": "record_shape.py",
+   "old": "        if marker:\n            problems.append((\"UNRESOLVED_SHAPE_BASIS\",",
+   "new": "        if False:\n            problems.append((\"UNRESOLVED_SHAPE_BASIS\","
+  },
+  {
+   "name": "분포의 어휘를 묻지 않는다",
+   "file": "record_shape.py",
+   "old": "    if shape not in grid_engine.FIG_DISTRIBUTION_SHAPES:",
+   "new": "    if False:"
+  },
+  {
+   "name": "척도의 어휘를 묻지 않는다",
+   "file": "record_shape.py",
+   "old": "    if scale not in grid_engine.FIG_VALUE_SCALES:",
+   "new": "    if False:"
+  },
+  {
+   "name": "카드가 없는 패널에도 적는다",
+   "file": "record_shape.py",
+   "old": "    if card is None:\n        problems.append((\"UNKNOWN_PANEL\",",
+   "new": "    if False:\n        problems.append((\"UNKNOWN_PANEL\","
+  },
+  {
+   "name": "본 사람도 승인도 없는 답을 받는다",
+   "file": "record_shape.py",
+   "old": "    problems += approval.seen_problems(answer, who,",
+   "new": "    problems += [] or approval.seen_problems({\"Seen_By_Person\": \"1\"}, who,"
   }
  ]
 }

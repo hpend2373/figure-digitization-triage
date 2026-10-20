@@ -483,6 +483,22 @@ for _c, _w in (("WPD_Project_File", "MISSING_PROVENANCE"),):
 for _c in ("Axis_X_Scale", "Axis_Y_Scale"):
     check("blank %s -> MISSING_PROVENANCE" % _c,
           "MISSING_PROVENANCE" in run(unit={_c: ""}))
+# ONE CATEGORICAL SLOT (D14, 2026-10-20): a panel with a single x position is
+# calibrated on that slot alone - X1 = slot 0 at its pixel, X2 blank.
+# REVERT: ask for X2 on every unit. The single-slot panels are refused again.
+check("one categorical slot (X1 = 0 at a pixel, X2 blank) is a whole x calibration",
+      "MISSING_PROVENANCE" not in run(unit={"Axis_Calib_X2_Value": "", "Axis_Calib_X2_Pixel": ""}),
+      run(unit={"Axis_Calib_X2_Value": "", "Axis_Calib_X2_Pixel": ""}))
+check("  but X2 blank after a slot other than 0 is still missing",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X1_Value": 2, "Axis_Calib_X2_Value": "",
+                                        "Axis_Calib_X2_Pixel": ""}))
+check("  and so is half an X2",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X2_Value": ""}))
+check("  and a blank Y2 never is a slot",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_Y2_Value": "", "Axis_Calib_Y2_Pixel": ""}))
+check("  and with no pixel for slot 0 there is no calibration",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X1_Pixel": "", "Axis_Calib_X2_Value": "",
+                                        "Axis_Calib_X2_Pixel": ""}))
 check("an image path that is not on disk is flagged",
       "SOURCE_FILE_NOT_FOUND" in run(fig={"Source_Image": "no_such_image.png"}))
 check("a WPD project that is not on disk is flagged",

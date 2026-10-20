@@ -1196,6 +1196,26 @@ A mean's mark gets no box key at all - a null key would still have changed every
 `Mark_Record_SHA256`. A whisker that is not drawn because the extreme IS the box edge (a box
 sitting on zero) is that edge, not a blank: blank means nobody could see it.
 
+**Three paths the person opened on 2026-10-20 (decision page v8: D01, D14, D15).**
+
+    MEASURED definition   `record_errorbar` Definition_Basis=MEASURED: the dispersion type was
+                          measured on the figure, not read from a sentence (the paper said SD;
+                          two independent checks found the bars equal to the SE of the plotted
+                          individual values in 22 cells). The quote cell describes the
+                          measurement and is not looked up in the source; Note and Verified_By
+                          are required. `make_plan` carries MEASURED_NOTE to the unit, like
+                          BORROWED_NOTE, so a sensitivity analysis can drop those values.
+    one categorical slot  A panel with a single x position is calibrated on that slot alone:
+                          `make_plan` writes x_calibration [[0, px]] and the gate takes
+                          X1 = slot 0 at a pixel with X2 blank as a whole x calibration.
+                          Any other blank in the four X/Y cells is still MISSING_PROVENANCE.
+    shape and scale       `record_shape` writes `shape_decisions.csv` (run root):
+                          Distribution_Shape (RIGHT_SKEWED / LEFT_SKEWED / SYMMETRIC / UNKNOWN),
+                          Value_Scale (RATIO / CHANGE) and the basis (no hedging words), with
+                          the approval cells. `make_plan` puts them on the unit, the basis in its
+                          note. A large SE on a right-skewed outcome then passes
+                          DISPERSION_IMPLIES_SKEW, and a change score leaves the ratio-scale check.
+
 ## Provenance is per FIELD, not per row
 
 One row can be two readings. The commonest real case is a correlation whose r

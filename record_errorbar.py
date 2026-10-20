@@ -91,7 +91,12 @@ FIELDS = ("Draft_ID", "Source_Document_ID", "Figure_Number", "Page",
 #: 찾아지고, 이 표시는 그 문장이 이 그림에 대한 것이라는 것이 가정임을 기록에
 #: 남깁니다 - 계획서가 그 가정을 값까지 들고 가서 민감도 분석에서 뺄 수 있게.
 BORROWED = "BORROWED"
-DEFINITION_BASES = ("", BORROWED)
+#: 정의가 문장이 아니라 그림에서 잰 것인 답(2026-10-20, 사람의 결정 D01: 논문은 "mean ± SD"라고 하는데 그림의
+#: 막대가 그려진 개인 값들의 SE와 맞음 - 서로를 보지 않은 두 검사가 22칸에서). 인용문 자리에는 무엇을 어떻게
+#: 쟀는지를 적고, 그것은 원문에서 찾지 않습니다 - 원문에 없는 것이 이 답의 까닭입니다. 그래서 Note(잰 방법과
+#: 숫자)와 사람의 이름이 반드시 있어야 하고, 계획서가 그 사실을 값까지 들고 갑니다(`make_plan.MEASURED_NOTE`).
+MEASURED = "MEASURED"
+DEFINITION_BASES = ("", BORROWED, MEASURED)
 
 #: 답 CSV가 반드시 들고 와야 하는 열. 없는 열은 빈칸이 아니라 다른 파일이라는
 #: 뜻입니다 - 검토 페이지가 아닌 무언가를 먹이면 여기서 멎습니다.
@@ -214,7 +219,19 @@ def check_answer(answer, source, pending_pages=()):
 
     if basis not in DEFINITION_BASES:
         problems.append(("BAD_DEFINITION_BASIS", "Definition_Basis=%r은 빈칸이나 %s여야 "
-                                                 "합니다." % (basis, BORROWED)))
+                                                 "합니다." % (basis, "/".join(DEFINITION_BASES[1:]))))
+    elif basis == MEASURED:
+        if code not in DISPERSION_TYPES or code == "NO_ERRORBAR":
+            problems.append(("MEASURED_WITHOUT_DEFINITION",
+                             "그림에서 쟀다면서 답이 %s입니다. 잰 것은 분산의 종류여야 "
+                             "합니다." % (code or "(빈칸)")))
+        if not (answer.get("Note") or "").strip():
+            problems.append(("MEASURED_UNEXPLAINED",
+                             "무엇을 어떻게 쟀는지(칸 수, 비, 누가)를 Note에 적어야 "
+                             "합니다. 그것이 이 답의 근거입니다."))
+        if not who:
+            problems.append(("UNATTRIBUTED", "그림에서 잰 정의를 누가 정했는지"
+                                             "(Verified_By)가 없습니다."))
     elif basis == BORROWED:
         if code not in DISPERSION_TYPES or code == "NO_ERRORBAR":
             problems.append(("BORROWED_WITHOUT_DEFINITION",
@@ -264,6 +281,15 @@ def check_answer(answer, source, pending_pages=()):
     if code == "NO_ERRORBAR":
         # 막대가 없다는 것은 그림을 본 사람의 말이지 문장이 아닙니다.
         # 인용문을 요구하지 않습니다.
+        return problems
+
+    if basis == MEASURED:
+        # 인용문 자리는 잰 것의 기술입니다. 비어 있으면 harness가 막고(NO_ERRORBAR_SOURCE),
+        # 그 밖의 문장 검사(종류를 말하는가, 원문에 있는가, 몇 쪽인가)는 문장이 아니니 묻지 않습니다.
+        if not quote:
+            problems.append(("NO_ERRORBAR_SOURCE",
+                             "그림에서 잰 정의는 무엇을 어떻게 쟀는지를 인용문 자리에 "
+                             "적어야 합니다."))
         return problems
 
     if not quote:
@@ -413,8 +439,10 @@ def record(run, answers, pdf_root, when, out_path=None, via="REVIEW_PAGE",
             continue
         source, why = read_source(run, doc, pdf_root)
         problems = check_answer(answer, source)
-        if source is None and why and not any(c == "SOURCE_UNREADABLE"
-                                              for c, _m in problems):
+        # 그림에서 잰 답은 원문에서 아무것도 찾지 않으니 원문이 없어도 됩니다.
+        measured = (answer.get("Definition_Basis") or "").strip().upper() == MEASURED
+        if source is None and why and not measured and not any(c == "SOURCE_UNREADABLE"
+                                                               for c, _m in problems):
             problems.append(("SOURCE_UNREADABLE", why))
         if problems:
             refused.append((doc, problems))

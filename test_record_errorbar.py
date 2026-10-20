@@ -158,6 +158,28 @@ check("빌림의 이름은 정해진 것 하나뿐이다",
       codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **dict(BORROW, Definition_Basis="GUESSED"))) == ["BAD_DEFINITION_BASIS"])
 check("빌린 인용문도 원문에서 다시 찾아진다",
       "QUOTE_NOT_IN_SOURCE" in codes(dict(plain("D", "SD", "Means (SD) of all tables.", "2"), **BORROW)))
+
+# --- 그림에서 잰 정의 (2026-10-20 결정 D01) ------------------------------------
+# 논문은 SD라고 하는데 그림의 막대가 개인 값의 SE와 맞는 경우. 인용문 자리는 잰 것의
+# 기술이라 원문에서 찾지 않고, 대신 Note와 이름이 있어야 합니다.
+MEASURE = {"Definition_Basis": "MEASURED", "Verified_By": "minyeop",
+           "Note": "two independent checks, 22 cells, bar/SD median 0.453"}
+_MSRC = "Measured on the figure: in 22 cells the bar is the SE of the five plotted values"
+check("그림에서 잰 정의는 Note와 함께면 원문에 없어도 통과한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **MEASURE)) == [], codes(dict(plain("D", "SE", _MSRC, ""), **MEASURE)))
+check("  승인된 관찰로도 통과한다",
+      codes(dict(plain("D", "SE", _MSRC, "", verified="0"), **dict(MEASURE, **APPROVED))) == [])
+# REVERT: take a measured definition without saying how it was measured.
+check("  잰 방법이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **dict(MEASURE, Note=""))) == ["MEASURED_UNEXPLAINED"])
+check("  잰 것의 기술이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", "", ""), **MEASURE)) == ["NO_ERRORBAR_SOURCE"])
+check("  누가 정했는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **dict(MEASURE, Verified_By=""))) == ["UNATTRIBUTED"])
+check("  잰 것이 처분이면 통과하지 못한다",
+      codes(dict(plain("D", "DROP"), **MEASURE)) == ["MEASURED_WITHOUT_DEFINITION"])
+check("  잰 기술도 추정의 말이면 막힌다",
+      "UNRESOLVED_ERRORBAR_DEFINITION" in codes(dict(plain("D", "SE", "The bars are probably SE", ""), **MEASURE)))
 check("어휘 밖의 종류는 그 자리에서 멈춘다",
       codes(plain("D", "STDEV", SD_IN_FLAT, "2")) == ["BAD_DISPERSION_TYPE"])
 check("추정하는 말은 harness의 이름으로 걸린다",
@@ -491,6 +513,14 @@ check("사람이 직접 확인한 답에는 승인 칸이 남지 않는다",
 _w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", **BORROW)])
 check("빌린 정의는 Definition_Basis=BORROWED로 적힌다",
       {r["Definition_Basis"] for r in _w} == {"BORROWED"} and len(_w) == 2, _w[:1])
+_w, _r, _p = RE.record(RUN, [answer("DOC_A", "SE", _MSRC, "", verified="", Draft_ID="DOC_A_D002",
+                                     **dict(MEASURE, **APPROVED))], os.path.join(ROOT, "no_pdfs_here"), WHEN,
+                       out_path=os.path.join(ROOT, "measured.csv"), log=lambda *_a: None)
+# REVERT: ask for the source of a measured answer. The figure's measurement is
+# then refused for want of a document it never quoted.
+check("그림에서 잰 답은 원문이 없어도 MEASURED로, 승인 칸과 함께 적힌다",
+      _r == [] and [(r["Draft_ID"], r["Definition_Basis"], r["Verified_By_Person"]) for r in _w]
+      == [("DOC_A_D002", "MEASURED", "0")], (problems_of(_r), _w[:1]))
 _w, _r, _p, _o = run([answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D002")])
 # REVERT: ignore Draft_ID. One figure's answer then lands on every figure of
 # the paper, and a box plot takes the bar charts' definition, or the reverse.

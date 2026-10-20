@@ -59,6 +59,8 @@ FIGURE_DECISIONS = "figure_decisions.csv"
 FIGURE_DISPOSITIONS = "figure_dispositions.csv"
 #: 패널마다 사람이 정한 결과의 이름, 또는 "결과 아님" (`record_outcomes.py`, R4).
 OUTCOME_DECISIONS = "outcome_decisions.csv"
+#: 패널 값의 분포와 척도(`record_shape`, 결정 D15 2026-10-20). 런 바로 아래.
+SHAPE_DECISIONS = "shape_decisions.csv"
 #: 한 그림에 범례가 여럿일 때 어느 패널이 어느 범례를 쓰는가 (`record_legends.py`).
 LEGEND_DECISIONS = "legend_decisions.csv"
 #: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
@@ -228,6 +230,13 @@ FROM_DECISION, FROM_CAPTION, FROM_DOCUMENT = "DECISION", "CAPTION", "DOCUMENT"
 FROM_DECISION_BORROWED = "DECISION_BORROWED"
 BORROWED_NOTE = ("BORROWED_DEFINITION: the paper states this definition for another element (a table or "
                  "another figure), not for this figure; exclude in a sensitivity analysis")
+#: 판정이 그 종류를 문장이 아니라 그림에서 잰 것(`record_errorbar`의 Definition_Basis=MEASURED,
+#: 2026-10-20 결정 D01). 논문의 말과 다를 수 있다는 것이 이 답의 까닭이라, 값까지 따라가 민감도 분석에서
+#: 이 값들만 뺄 수 있게 합니다.
+FROM_DECISION_MEASURED = "DECISION_MEASURED"
+MEASURED_NOTE = ("MEASURED_DEFINITION: the dispersion type was measured on the figure (bar length against the "
+                 "plotted individual values), not taken from a sentence of the paper; exclude in a sensitivity "
+                 "analysis")
 
 WORKSHEET_FIELDS = ("Publication_ID", "Source_Figure_ID", "Draft_ID",
                     "Figure_Number", "Page", "Image", "Route", "Disposition",
@@ -283,8 +292,8 @@ def dispersion_for(draft_id, caption, decision):
         code = (decision.get("Dispersion_Type") or "").strip().upper()
         if code in RE.DISPOSITIONS:
             return code, "", FROM_DECISION, ""
-        kind = FROM_DECISION_BORROWED if (decision.get("Definition_Basis") or "").strip().upper() \
-            == RE.BORROWED else FROM_DECISION
+        basis = (decision.get("Definition_Basis") or "").strip().upper()
+        kind = {RE.BORROWED: FROM_DECISION_BORROWED, RE.MEASURED: FROM_DECISION_MEASURED}.get(basis, FROM_DECISION)
         return (code, (decision.get("Errorbar_Definition_Source") or "").strip(),
                 kind, (decision.get("Found_On_Page") or "").strip())
     if not caption:
@@ -577,6 +586,14 @@ def load_confirmations(run, geometry_dir=None, identity_dir=None, regions=None):
                    "Proposal_ID")
     identity = _by(_rows(os.path.join(run, identity_dir or IDENTITY_DIR, RI.DECISIONS)),
                    "Proposal_ID")
+    # 분포와 척도의 답은 그 패널의 정체 행에 얹어 단위까지 갑니다(`authored_read`). 카드의 열과
+    # 이름이 겹치지 않게 Shape_ 앞붙이로 - 카드를 다시 적을 때 섞여 들어가지 않습니다.
+    for r in _rows(os.path.join(run, SHAPE_DECISIONS)):
+        pid = (r.get("Proposal_ID") or "").strip()
+        if pid in identity:
+            identity[pid] = dict(identity[pid], Shape_Distribution=(r.get("Distribution_Shape") or "").strip(),
+                                 Shape_Value_Scale=(r.get("Value_Scale") or "").strip(),
+                                 Shape_Basis=(r.get("Shape_Basis") or "").strip())
     regions = {}
     for r in _rows(os.path.join(run, regions or REGIONS)):
         regions.setdefault(r["Draft_ID"], []).append(r)
@@ -827,8 +844,18 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
             "identity card: each series is drawn only at the x positions its per-cell n "
             "names (%s)" % "; ".join("%s: %d drawn, %d not" % t for t in sparse))
     # 상자그림이 상자로서 IQR을 받았으면 빌린 정의는 이 단위에 쓰이지 않았습니다.
-    if kind == FROM_DECISION_BORROWED and not (mark == "BOX_VIOLIN" and dispersion[0] not in QUANTILE_DISPERSIONS):
-        unit["note"] = BORROWED_NOTE
+    if kind in (FROM_DECISION_BORROWED, FROM_DECISION_MEASURED) \
+            and not (mark == "BOX_VIOLIN" and dispersion[0] not in QUANTILE_DISPERSIONS):
+        unit["note"] = BORROWED_NOTE if kind == FROM_DECISION_BORROWED else MEASURED_NOTE
+    # THE SHAPE AND THE SCALE someone said (`record_shape`, D15): a large SE on a
+    # right-skewed outcome is not an error, and a change score is not on a ratio
+    # scale. Unsaid, the manifest keeps UNKNOWN and RATIO as before.
+    if (identity.get("Shape_Distribution") or "").strip():
+        unit["distribution_shape"] = identity["Shape_Distribution"].strip().upper()
+        unit["value_scale"] = (identity.get("Shape_Value_Scale") or "RATIO").strip().upper()
+        said = "SHAPE: %s (%s, %s)" % (identity.get("Shape_Basis", "").strip(), unit["distribution_shape"],
+                                       unit["value_scale"])
+        unit["note"] = (unit["note"] + " | " + said) if unit.get("note") else said
     n = (identity.get("N_Outcome") or "").strip()
     if n.isdigit():
         unit["n_outcome"] = int(n)
@@ -840,6 +867,11 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
     if len(positions) >= 2:
         unit["x_calibration"] = [[0, float(positions[0]["px"])],
                                  [len(positions) - 1, float(positions[-1]["px"])]]
+    # ONE POSITION IS ONE SLOT, and its calibration is that one point - the gate
+    # takes X1 = slot 0 with X2 blank as a single categorical slot (D14,
+    # 2026-10-20). Without it the panel had no x calibration at all and was refused.
+    elif len(positions) == 1 and positions[0].get("px") is not None:
+        unit["x_calibration"] = [[0, float(positions[0]["px"])]]
     # WHERE THE VALUE IS READ. A bar's is the person's answer; a box has none
     # (`NOT_A_BAR`, the vocabulary's own word for it, never a blank); a line or
     # a scatter is read at its marker's centre.

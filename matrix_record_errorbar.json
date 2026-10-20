@@ -1,7 +1,7 @@
 {
  "files": {
-  "record_errorbar.py": "6196e8a60295568d9efb7e2b6209bc3012e47a2a60d6603440f93af0510e4532",
-  "test_record_errorbar.py": "63280bd5a52e5948d8eaaf5ec4d056e0f8f238cc551c96a3ad5a1e46b3fd2253"
+  "record_errorbar.py": "5c9d03c85e9d41559235b1a0a6adceb69513bf96de9b742bdcd8f5099d1fe27c",
+  "test_record_errorbar.py": "dccc19e51de01ba9a0ec73c23c6c3ee585a6edc9b1af461490663259979d2d62"
  },
  "suites": [
   "test_record_errorbar.py"
@@ -106,7 +106,7 @@
   {
    "name": "원문을 못 읽어도 넘어간다",
    "file": "record_errorbar.py",
-   "old": "        if source is None and why and not any(c == \"SOURCE_UNREADABLE\"\n                                              for c, _m in problems):",
+   "old": "        if source is None and why and not measured and not any(c == \"SOURCE_UNREADABLE\"\n                                                               for c, _m in problems):",
    "new": "        if False:"
   },
   {
@@ -202,8 +202,8 @@
   {
    "name": "borrowed: a disposition can be borrowed",
    "file": "record_errorbar.py",
-   "old": "if code not in DISPERSION_TYPES or code == \"NO_ERRORBAR\":",
-   "new": "if False:"
+   "old": "if code not in DISPERSION_TYPES or code == \"NO_ERRORBAR\":\n            problems.append((\"BORROWED_WITHOUT_DEFINITION\",",
+   "new": "if False:\n            problems.append((\"BORROWED_WITHOUT_DEFINITION\","
   },
   {
    "name": "borrowed: without a note",
@@ -276,6 +276,36 @@
    "file": "record_errorbar.py",
    "old": "                if code == row.get(\"Reading_Type\"):",
    "new": "                if False:"
+  },
+  {
+   "name": "그림에서 잰 정의의 Note를 묻지 않는다",
+   "file": "record_errorbar.py",
+   "old": "        if not (answer.get(\"Note\") or \"\").strip():\n            problems.append((\"MEASURED_UNEXPLAINED\",",
+   "new": "        if False:\n            problems.append((\"MEASURED_UNEXPLAINED\","
+  },
+  {
+   "name": "그림에서 잰 정의도 원문에서 찾는다",
+   "file": "record_errorbar.py",
+   "old": "    if basis == MEASURED:\n        # 인용문 자리는",
+   "new": "    if False:\n        # 인용문 자리는"
+  },
+  {
+   "name": "그림에서 잰 정의에 이름을 묻지 않는다",
+   "file": "record_errorbar.py",
+   "old": "        if not who:\n            problems.append((\"UNATTRIBUTED\", \"그림에서 잰 정의를",
+   "new": "        if False:\n            problems.append((\"UNATTRIBUTED\", \"그림에서 잰 정의를"
+  },
+  {
+   "name": "그림에서 잰 것이 처분이어도 받는다",
+   "file": "record_errorbar.py",
+   "old": "if code not in DISPERSION_TYPES or code == \"NO_ERRORBAR\":\n            problems.append((\"MEASURED_WITHOUT_DEFINITION\",",
+   "new": "if False:\n            problems.append((\"MEASURED_WITHOUT_DEFINITION\","
+  },
+  {
+   "name": "그림에서 잰 답도 원문을 요구한다",
+   "file": "record_errorbar.py",
+   "old": "and not measured and not any(",
+   "new": "and not any("
   }
  ]
 }

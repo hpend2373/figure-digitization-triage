@@ -425,8 +425,20 @@ def validate_unit(row, kernel, flag, line, figure=None, cell_n=False):
             elif stem is not True:
                 flag(line, "ERRORBAR_STEM_UNCONFIRMED",
                      "the whisker was not confirmed to connect to the mark")
+        # ONE CATEGORICAL SLOT. A categorical x axis is calibrated on its slots
+        # (the first declared position is slot 0, the last slot n-1), and a panel
+        # with a single position has one slot and no second point to give. Its
+        # whole x calibration is X1 = slot 0 at that position's pixel, X2 blank;
+        # the gate refused all seven such panels of the corpus for a point that
+        # cannot exist (decision D14, 2026-10-20). Any other blank still counts.
+        # (X1's own pixel is asked below like every other cell.)
+        one_slot = (num(row.get("Axis_Calib_X1_Value")) == 0
+                    and blank(row.get("Axis_Calib_X2_Value"))
+                    and blank(row.get("Axis_Calib_X2_Pixel")))
         for ax in ("X", "Y"):
             for n_ in (1, 2):
+                if ax == "X" and n_ == 2 and one_slot:
+                    continue
                 for kind in ("Value", "Pixel"):
                     c = "Axis_Calib_%s%d_%s" % (ax, n_, kind)
                     if blank(row.get(c)):

@@ -1,0 +1,29 @@
+{
+ "files": {
+  "grid_engine.py": "8925cb489cecf5f97bb52f6899db6c72f8328a94f813be1ca60d080d58b78b96",
+  "test_grid_engine.py": "253e3eed795f3a25bc82b33d4a85f8124279754ff9df38d1baa10e0745a70e9e"
+ },
+ "suites": [
+  "test_grid_engine.py"
+ ],
+ "mutations": [
+  {
+   "name": "x 보정점 하나(슬롯 0)를 받지 않는다",
+   "file": "grid_engine.py",
+   "old": "                if ax == \"X\" and n_ == 2 and one_slot:\n                    continue",
+   "new": "                if False:\n                    continue"
+  },
+  {
+   "name": "슬롯 0이 아니어도 하나로 받는다",
+   "file": "grid_engine.py",
+   "old": "        one_slot = (num(row.get(\"Axis_Calib_X1_Value\")) == 0\n",
+   "new": "        one_slot = (True\n"
+  },
+  {
+   "name": "X2의 반만 비어도 하나로 받는다",
+   "file": "grid_engine.py",
+   "old": "                    and blank(row.get(\"Axis_Calib_X2_Value\"))\n                    and blank(row.get(\"Axis_Calib_X2_Pixel\")))",
+   "new": "                    and blank(row.get(\"Axis_Calib_X2_Value\")))"
+  }
+ ]
+}

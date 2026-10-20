@@ -1169,6 +1169,27 @@ upper end, lower end - an end may be "not visible", both may not); the ID and th
 typed, never filled. The cell's n comes from the arrows like every other minute.
 `test_supplied_readings.py` +20, `matrix_supplied_readings.json` +17.
 
+**And a box (built 2026-10-20; the person: "1,2 둘다 하나로 만들어줘", where 1 was the 28
+MANUAL panels nobody had read - every one a box plot of two series, which the box reader
+cannot read: it takes one series per position).** The same file, two optional columns
+(`BM.SUPPLIED_OPTIONAL_COLUMNS`, written only when some reading is a box's, so every other
+batch is byte for byte what it was):
+
+    Mark_Y_Px                the median line
+    Box_Upper_Y_Px/Lower     the box's two edges on the page - required for a
+                             QUANTILE_SUMMARY unit (SUPPLIED_READING_BOX_EDGES_MISSING),
+                             refused on a mean (SUPPLIED_READING_BOX_ON_MEAN)
+    Upper_Y_Px/Lower_Y_Px    the whisker ends
+    order                    whisker, box top, median, box bottom, whisker, top to bottom
+                             (SUPPLIED_READING_BOX_INVERTED; the median may sit on an edge)
+
+The run makes the five numbers with `provenance.supplied_box_numbers` (quartiles sorted, so
+an inverted axis does not swap them; a lone whisker keeps its side and the grid gate says
+WHISKER_HALF_FILLED) and the finalizer makes them again; the overlay draws the five rows.
+A mean's mark gets no box key at all - a null key would still have changed every existing
+`Mark_Record_SHA256`. A whisker that is not drawn because the extreme IS the box edge (a box
+sitting on zero) is that edge, not a blank: blank means nobody could see it.
+
 ## Provenance is per FIELD, not per row
 
 One row can be two readings. The commonest real case is a correlation whose r

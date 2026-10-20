@@ -1650,20 +1650,47 @@ def supplied_marks(readings, ycal, series_count):
         raise ValueError("a supplied reading is a pixel, and this panel declares "
                          "no y calibration to make it a number")
     out = []
+    optional = set(BM.SUPPLIED_OPTIONAL_COLUMNS)
     for reading in readings:
         mark = {}
         for column, key in PROV.SUPPLIED_MARK_FIELDS:
             text = _s(reading.get(column))
+            if column in optional and not text:
+                # NOT A KEY AT ALL on a mean's mark: a null key would still
+                # change `Mark_Record_SHA256`, and with it the review subject of
+                # every panel read before boxes could be.
+                continue
             if column in PROV.SUPPLIED_PIXEL_FIELDS:
                 mark[key] = float(text) if text else None
             else:
                 mark[key] = text
         top, bottom = mark["Errorbar_Top_Px"], mark["Errorbar_Bottom_Px"]
-        mean, spread, lower, upper = PROV.supplied_numbers(
-            ycal, mark["marker_center_px"], top, bottom)
         # WHO PLACED IT decides the three methods: an agent's point is R2, a
         # registered person's own is `MANUAL_DIGITIZED` (`PROV.SUPPLIED_KIND_METHODS`,
         # the table the finalizer re-derives them from).
+        if mark.get("box_upper_px") is not None and mark.get("box_lower_px") is not None:
+            # A BOX: the median line, the box's two edges and the whisker ends -
+            # the five rows the box reader reports, so the same overlay draws
+            # them and the same conversion makes them a five-number summary.
+            nums = PROV.supplied_box_numbers(
+                ycal, mark["marker_center_px"], mark["box_upper_px"],
+                mark["box_lower_px"], top, bottom)
+            identity, value, cap = PROV.supplied_methods(
+                mark.get("Reader_Kind"), series_count, True)
+            rows = sorted(v for v in (top, mark["box_upper_px"], mark["marker_center_px"],
+                                      mark["box_lower_px"], bottom) if v is not None)
+            mark.update(
+                nums, Box_Line_Rows_Px=";".join("%r" % v for v in rows),
+                Summary_Type=("MEDIAN_IQR_RANGE" if top is not None and bottom is not None
+                              else "MEDIAN_IQR"),
+                cap_px=top if top is not None else bottom,
+                cap_low_px=bottom if top is not None else None,
+                Identity_Method=identity, Value_Method=value, Dispersion_Method=cap,
+                calib_max_resid=float(getattr(ycal, "max_residual", 0.0)))
+            out.append(mark)
+            continue
+        mean, spread, lower, upper = PROV.supplied_numbers(
+            ycal, mark["marker_center_px"], top, bottom)
         identity, value, cap = PROV.supplied_methods(
             mark.get("Reader_Kind"), series_count, spread is not None)
         mark.update(

@@ -136,6 +136,9 @@ READINGS = os.path.join("seg", "readings600", "supplied_readings.csv")
 READING_FIELDS = ("Proposal_ID", "Series", "X_Label", "Mark_X_Px", "Mark_Y_Px",
                   "Upper_Y_Px", "Lower_Y_Px", "Reader_Kind", "Read_By", "Read_At",
                   "Raster_SHA256", "Note")
+#: 상자그림 판독의 상자 두 변 (2026-10-20): 선택 열이라 이 열이 없는 판독 파일도 그대로 읽힙니다.
+#: 표시(Mark_Y_Px)는 중앙값 선, 위·아래 끝(Upper/Lower_Y_Px)은 수염 끝입니다.
+READING_BOX_FIELDS = (("Box_Upper_Y_Px", "box_upper_px"), ("Box_Lower_Y_Px", "box_lower_px"))
 #: 사람이 600 DPI 래스터 위에서 패널마다 그린 상자와 종류 (`record_panels.py`).
 #: 이것이 있으면 그림의 패널 목록은 이것입니다 - 계수 시트의 수는 "몇 개"이고,
 #: 이것은 "어느 것이 어디에, 무엇으로"입니다. 둘이 다르면 그림의 메모에 적습니다.
@@ -784,6 +787,13 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
                              ("Upper_Y_Px", "upper_px"), ("Lower_Y_Px", "lower_px")):
                 text = (r.get(src) or "").strip()
                 entry[dst] = float(text) if _is_number(text) else (text or None)
+            # A BOX's two edges, in the run file's optional columns
+            # (`READING_BOX_FIELDS`): only a box reading has them, and only it
+            # carries the keys, so every other plan is what it was.
+            for src, dst in READING_BOX_FIELDS:
+                text = (r.get(src) or "").strip()
+                if text:
+                    entry[dst] = float(text) if _is_number(text) else text
             read["readings"].append(entry)
     factors = {x_factor: [str(p.get("label") or "").strip() for p in positions],
                s_factor: [(e.get("name") or "").strip() or ("S%d" % (i + 1)) for i, e in enumerate(series)]}

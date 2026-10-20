@@ -997,6 +997,11 @@ def supplied_readings_columns():
         Upper_Y_Px, Lower_Y_Px   the error-bar ends above and below it on the
                                  page; blank where none is drawn or none can be
                                  seen (a bar hiding its lower whisker)
+        Box_Upper_Y_Px,          a BOX's two edges on the page (optional columns,
+        Box_Lower_Y_Px           `SUPPLIED_OPTIONAL_COLUMNS`): for a QUANTILE_SUMMARY
+                                 unit the mark is the median line, the ends are
+                                 the whisker ends, and these are the box -
+                                 required there, refused on a mean
         Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure;
                                  PERSON - the registered reviewer placed it
                                  themselves (Read_By a HUMAN in the registry)
@@ -1036,6 +1041,13 @@ def series_n_columns():
     """
     return ["Panel_ID", "Series_ID", "N_Outcome", "N_Source", "Note"]
 
+
+#: Columns `supplied_readings.csv` may carry beyond `supplied_readings_columns()`:
+#: a box plot's two box edges (built 2026-10-20 for the box panels a person sent
+#: to MANUAL - one box reader reads one series per position, and these carry
+#: two). Optional, so every batch without a box reading is byte for byte what it
+#: was.
+SUPPLIED_OPTIONAL_COLUMNS = ("Box_Upper_Y_Px", "Box_Lower_Y_Px")
 
 #: Columns `series_n.csv` may carry beyond `series_n_columns()`. `Position_ID`
 #: makes a row one CELL's n - the series at that x position - for a group that
@@ -2769,11 +2781,25 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
         unit = unit_index.get(str(panel.get("Unit_ID", "")).strip())
         stat = (str(unit.get("Statistic_Type", "")).strip().upper()
                 if unit is not None else "")
-        if stat != "CONTINUOUS":
+        if stat not in ("CONTINUOUS", "QUANTILE_SUMMARY"):
             flag(line, "SUPPLIED_READING_STATISTIC_UNSUPPORTED",
                  "%s fills a %s unit; a supplied reading is a mean and its error "
-                 "bar, so only CONTINUOUS units can take one"
-                 % (pid, stat or "(no unit)"))
+                 "bar, or a box's five lines, so only CONTINUOUS and "
+                 "QUANTILE_SUMMARY units can take one" % (pid, stat or "(no unit)"))
+            continue
+        # A BOX IS ITS EDGES. A quantile unit's reading without both is a
+        # median with nothing around it; a mean's reading with them is a box
+        # filed as a mean.
+        edges = [not blank(r.get(c)) for c in SUPPLIED_OPTIONAL_COLUMNS]
+        if stat == "QUANTILE_SUMMARY" and not all(edges):
+            flag(line, "SUPPLIED_READING_BOX_EDGES_MISSING",
+                 "%s is a QUANTILE_SUMMARY unit; a box reading gives both box edges "
+                 "(Box_Upper_Y_Px, Box_Lower_Y_Px)" % pid)
+            continue
+        if stat == "CONTINUOUS" and any(edges):
+            flag(line, "SUPPLIED_READING_BOX_ON_MEAN",
+                 "%s is a CONTINUOUS unit; box edges belong to a QUANTILE_SUMMARY "
+                 "unit" % pid)
             continue
         if sid not in declared_series.get(pid, set()):
             flag(line, "SUPPLIED_READING_SERIES_UNKNOWN",
@@ -2858,6 +2884,18 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
             flag(line, "SUPPLIED_READING_ENDS_INVERTED",
                  "Upper_Y_Px=%s and Lower_Y_Px=%s must lie above and below the "
                  "mark at row %s on the page" % (up, low, y))
+            continue
+        # THE FIVE LINES IN PAGE ORDER: whisker end, box edge, median, box
+        # edge, whisker end. The median may sit on an edge (a box whose median
+        # is its quartile), and the box may not be a line.
+        bt, bb = pixels.get("Box_Upper_Y_Px"), pixels.get("Box_Lower_Y_Px")
+        if bt is not None and bb is not None and not (
+                bt < bb and bt <= y <= bb
+                and (up is None or up <= bt) and (low is None or bb <= low)):
+            flag(line, "SUPPLIED_READING_BOX_INVERTED",
+                 "rows %s must run top to bottom: upper whisker end, box top, "
+                 "median, box bottom, lower whisker end"
+                 % ", ".join("%s" % v for v in (up, bt, y, bb, low)))
             continue
         # NEAREST ITS OWN COLUMN, the question `_nearest_anchor_problems` asks at
         # finalization - asked here first, so a point filed under the wrong

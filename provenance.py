@@ -1430,10 +1430,35 @@ SUPPLIED_MARK_FIELDS = (
     ("Lower_Y_Px", "Errorbar_Bottom_Px"), ("Reader_Kind", "Reader_Kind"),
     ("Read_By", "Read_By"), ("Read_At", "Read_At"),
     ("Raster_SHA256", "Raster_SHA256"),
+    # a box reading's two edges (`batch_manifests.SUPPLIED_OPTIONAL_COLUMNS`);
+    # blank on a mean's reading, so absent on its mark and equal to nothing
+    ("Box_Upper_Y_Px", "box_upper_px"), ("Box_Lower_Y_Px", "box_lower_px"),
 )
 
 #: Which of those are pixels, and so compared as numbers.
-SUPPLIED_PIXEL_FIELDS = ("Mark_X_Px", "Mark_Y_Px", "Upper_Y_Px", "Lower_Y_Px")
+SUPPLIED_PIXEL_FIELDS = ("Mark_X_Px", "Mark_Y_Px", "Upper_Y_Px", "Lower_Y_Px",
+                         "Box_Upper_Y_Px", "Box_Lower_Y_Px")
+
+
+def supplied_box_numbers(axis, median, box_top, box_bottom, top, bottom):
+    """{median, q1, q3, whisker_lower, whisker_upper} a box reading's rows give.
+
+    The quartiles are the box edges' values in order and the whiskers the ends'
+    (blank when none was placed), so an inverted axis does not swap them - the
+    same rule `supplied_numbers` keeps for a mean's bounds. One function for the
+    run and the finalizer.
+    """
+    mid = axis.pixel_to_value(median)
+    edges = sorted(axis.pixel_to_value(px) for px in (box_top, box_bottom))
+    ends = [axis.pixel_to_value(px) for px in (top, bottom) if px is not None]
+    # A LONE WHISKER keeps its side (below the median is the lower one) and the
+    # grid gate says the pair is half filled (WHISKER_HALF_FILLED), rather than
+    # this function quietly dropping what was read.
+    lower = [v for v in ends if v < mid]
+    upper = [v for v in ends if v >= mid]
+    return dict(median=mid, q1=edges[0], q3=edges[1],
+                whisker_lower=min(lower) if lower else None,
+                whisker_upper=max(upper) if upper else None)
 
 
 def supplied_numbers(axis, centre, top, bottom):
@@ -1510,6 +1535,8 @@ def expected_supplied_methods(mark, context=None):
     # finalizer re-runs it, so the kind has a row in `SUPPLIED_KIND_METHODS`.
     count = context.get("Series_Count")
     top, bottom = number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px")
+    box_top, box_bottom = number("box_upper_px"), number("box_lower_px")
+    is_box = box_top is not None or box_bottom is not None
     kind = (str(reading.get("Reader_Kind") or "") if reading is not None
             else field("Reader_Kind")).strip().upper()
     if kind not in SUPPLIED_KIND_METHODS:
@@ -1518,7 +1545,7 @@ def expected_supplied_methods(mark, context=None):
         kind = "AI_AGENT"
     (out["Identity_Method"], out["Value_Method"],
      out["Dispersion_Method"]) = supplied_methods(
-        kind, count, not (top is None and bottom is None))
+        kind, count, is_box or not (top is None and bottom is None))
     import mark_readers as MR                                      # noqa: E402
     axis = MR.calibration_from_record(context.get("Y_Calibration"))
     centre = number("marker_center_px")
@@ -1528,11 +1555,21 @@ def expected_supplied_methods(mark, context=None):
     elif centre is None:
         problems.append("the mark records no marker_center_px, so its number "
                         "cannot be re-made from the pixel it was placed at")
+    elif is_box and (box_top is None or box_bottom is None):
+        problems.append("the mark records one box edge and not the other, so its "
+                        "quartiles cannot be re-made")
     else:
         top, bottom = number("Errorbar_Top_Px"), number("Errorbar_Bottom_Px")
-        mean, spread, lower, upper = supplied_numbers(axis, centre, top, bottom)
-        for key, want in (("mean", mean), ("dispersion", spread),
-                          ("errorbar_lower", lower), ("errorbar_upper", upper)):
+        if is_box:
+            # A BOX's five numbers, from its five rows (`supplied_box_numbers`).
+            made = supplied_box_numbers(axis, centre, box_top, box_bottom, top, bottom)
+            wanted = [(k, made[k]) for k in ("median", "q1", "q3", "whisker_lower",
+                                             "whisker_upper")]
+        else:
+            mean, spread, lower, upper = supplied_numbers(axis, centre, top, bottom)
+            wanted = [("mean", mean), ("dispersion", spread),
+                      ("errorbar_lower", lower), ("errorbar_upper", upper)]
+        for key, want in wanted:
             got = number(key)
             if (want is None) != (got is None) or (
                     want is not None and _off_by(got, want)):

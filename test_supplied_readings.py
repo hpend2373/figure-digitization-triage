@@ -323,8 +323,11 @@ check("a pixel that is not a number is refused",
       in validate([reading("S_B", 0, Mark_Y_Px="nan")]))
 check("the mark's own pixels are required",
       "MISSING_REQUIRED" in validate([reading("S_B", 0, Mark_X_Px="")]))
-check("only a continuous unit takes a supplied reading",
+check("only a continuous or a box unit takes a supplied reading",
       "SUPPLIED_READING_STATISTIC_UNSUPPORTED"
+      in validate(units=[dict(UNITS[0], Statistic_Type="ASSOCIATION")]))
+check("  and a box unit's reading without its box edges is refused",
+      "SUPPLIED_READING_BOX_EDGES_MISSING"
       in validate(units=[dict(UNITS[0], Statistic_Type="QUANTILE_SUMMARY")]))
 check("an error bar end may be left blank",
       validate([reading("S_B", 0, Lower_Y_Px="")]) == set(),
@@ -855,6 +858,172 @@ got = PROV.evidence_failure(
                           Dispersion_Method="MANUAL_PLACED_CAP"), _cx["context"])
 check("  and refuses an agent's point claiming to be the person's",
       got[0] == "METHOD_CONTRADICTS_EVIDENCE", "%s" % (got,))
+
+# ==========================================================================
+print()
+print("a box plot's five lines, placed, are a five-number summary")
+BOX_IMG = os.path.join(ROOT, "boxes.png")
+
+
+def box_rows_of(sid, i):
+    """(whisker top, box top, median, box bottom, whisker bottom) the fixture draws."""
+    base = 330 - i * 30 - (0 if sid == "S_B" else 20)
+    return base - 60, base - 25, base, base + 20, base + 55
+
+
+def box_x(sid, i):
+    return XS[i] + 9 + (-18 if sid == "S_B" else 18)
+
+
+_bi = Image.new("RGB", (600, 480), "white")
+_bd = ImageDraw.Draw(_bi)
+_bd.line((100, 40, 100, 440), fill=(0, 0, 0))
+_bd.line((100, 440, 500, 440), fill=(0, 0, 0))
+for _i in range(len(XS)):
+    for _sid, _col in (("S_B", BLUE), ("S_R", RED)):
+        _x = box_x(_sid, _i)
+        _wt, _bt, _md, _bb, _wb = box_rows_of(_sid, _i)
+        _bd.rectangle((_x - 10, _bt, _x + 10, _bb), outline=_col, width=2)
+        _bd.line((_x - 10, _md, _x + 10, _md), fill=_col, width=2)
+        _bd.line((_x, _wt, _x, _bt), fill=_col, width=1)
+        _bd.line((_x, _bb, _x, _wb), fill=_col, width=1)
+        _bd.line((_x - 6, _wt, _x + 6, _wt), fill=_col, width=2)
+        _bd.line((_x - 6, _wb, _x + 6, _wb), fill=_col, width=2)
+_bi.save(BOX_IMG)
+BOX_SHA = MR.sha256_of(BOX_IMG)
+
+
+def box_reading(sid, i, **over):
+    wt, bt, md, bb, wb = box_rows_of(sid, i)
+    row = dict(Reading_ID="P1__%s__%s" % (sid, LABELS[i]), Panel_ID="P1", Series_ID=sid,
+               Position_ID=LABELS[i], Mark_X_Px=box_x(sid, i), Mark_Y_Px=md,
+               Upper_Y_Px=wt, Lower_Y_Px=wb, Box_Upper_Y_Px=bt, Box_Lower_Y_Px=bb,
+               Reader_Kind="AI_AGENT", Read_By="claude-opus-5-5", Read_At="2026-10-20",
+               Raster_SHA256=BOX_SHA, Note="")
+    row.update(over)
+    return row
+
+
+BOX_READINGS = [box_reading(sid, i) for sid in ("S_B", "S_R") for i in range(4)]
+BOX_COLS = BM.supplied_readings_columns() + list(BM.SUPPLIED_OPTIONAL_COLUMNS)
+BOX_UNITS = [dict(UNITS[0], Statistic_Type="QUANTILE_SUMMARY", Dispersion_Type="IQR",
+                  Errorbar_Definition_Source="box plot: median, IQR, whiskers min-max")]
+BOX_PANELS = [dict(PANELS[0], Mark_Type="BOX_VIOLIN", Image_Path=BOX_IMG)]
+BOX_FIGS = [dict(SOURCE_FIGURES[0], Source_Image=BOX_IMG, Source_Image_SHA256=BOX_SHA)]
+BOX_FIGURES = [dict(FIGURES[0], Source_Image=BOX_IMG,
+                    Image_Resolution_Or_Hash="600x480 sha256:" + BOX_SHA)]
+
+
+def box_validate(readings=BOX_READINGS, units=BOX_UNITS):
+    problems = BM.validate_batch_manifests(
+        frame(BOX_PANELS, BM.panel_manifest_columns()),
+        frame(SERIES, BM.series_manifest_columns()),
+        frame(POSITIONS, BM.position_manifest_columns()),
+        frame([], BM.reader_config_columns()),
+        units=frame(units, GE.fig_unit_columns()),
+        source_documents=frame(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
+        source_figures=frame(BOX_FIGS, BM.source_figure_manifest_columns()),
+        source_panels=frame(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+        reviewers=frame(REVIEWERS, BM.reviewer_registry_columns()),
+        readings=frame(readings, BOX_COLS), file_root=ROOT, doc_root=ROOT)
+    return set(problems["check"]) if len(problems) else set()
+
+
+def box_run(name, readings=BOX_READINGS):
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    mdir = write_manifests(os.path.join(out, "manifests"), panel_manifest=BOX_PANELS,
+                           unit_manifest=BOX_UNITS, source_figure_manifest=BOX_FIGS,
+                           figure_manifest=BOX_FIGURES, supplied_readings=None)
+    with open(os.path.join(mdir, "supplied_readings.csv"), "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(BOX_COLS)
+        for r in readings:
+            w.writerow([r.get(c, "") for c in BOX_COLS])
+    return out, RB.run_batch(mdir, out, file_root=ROOT, run_date="2026-10-20")
+
+
+check("a box unit's readings with their box edges validate",
+      box_validate() == set(), "%s" % sorted(box_validate()))
+check("  and box edges on a mean's reading are refused",
+      "SUPPLIED_READING_BOX_ON_MEAN" in box_validate(units=[UNITS[0]]))
+_wt0, _bt0, _md0, _bb0, _wb0 = box_rows_of("S_B", 0)
+check("  and a box whose edges are upside down is refused",
+      "SUPPLIED_READING_BOX_INVERTED"
+      in box_validate([box_reading("S_B", 0, Box_Upper_Y_Px=_bb0, Box_Lower_Y_Px=_bt0)]))
+check("  and a median outside its box is refused",
+      "SUPPLIED_READING_BOX_INVERTED"
+      in box_validate([box_reading("S_B", 0, Mark_Y_Px=_bt0 - 5, Upper_Y_Px=_wt0)]))
+check("  and a whisker end inside the box is refused",
+      "SUPPLIED_READING_BOX_INVERTED"
+      in box_validate([box_reading("S_B", 0, Upper_Y_Px=_bt0 + 5)]))
+check("  and a box edge outside the plot area is refused",
+      "SUPPLIED_READING_OUTSIDE_PANEL"
+      in box_validate([box_reading("S_B", 0, Box_Lower_Y_Px=460, Lower_Y_Px="")]))
+
+_bx, _sbx = box_run("boxes")
+_qb = read(_bx, "figure_values_machine_qc.csv")
+_rbx = read(_bx, "run_manifest.csv")
+check("a box panel read from its readings passes with every cell",
+      _sbx["status"] == "RAN" and _rbx.loc[0, "Run_State"] == "AUTO_PASS" and len(_qb) == 8,
+      "%s / %s" % (_rbx.to_dict("records"), len(_qb)))
+_ok_box = []
+for _sid in ("S_B", "S_R"):
+    for _i in range(4):
+        _lvl = dict(S_B="CONTROL", S_R="TREATED")[_sid]
+        _r = [r for r in _qb.to_dict("records") if "ARM=%s" % _lvl in r["Cell_Key"]
+              and "TIMEPOINT=%s" % LABELS[_i] in r["Cell_Key"]]
+        _wt, _bt, _md, _bb, _wb = box_rows_of(_sid, _i)
+        _ok_box.append(len(_r) == 1 and all(
+            abs(float(_r[0][k]) - value_at(px)) < 1e-9 for k, px in (
+                ("Median", _md), ("Q1", _bb), ("Q3", _bt), ("Whisker_Lower", _wb),
+                ("Whisker_Upper", _wt))))
+check("  and every five-number summary is the calibration at its five rows",
+      all(_ok_box), "%s" % _ok_box)
+check("  and the methods say an agent placed them, R2, and the panel asks the confirmation",
+      set(_qb["Value_Method"]) == {"AI_PLACED_POINT"}
+      and set(_qb["Dispersion_Method"]) == {"AI_PLACED_CAP"}
+      and {PROV.row_tier(r) for r in _qb.to_dict("records")} == {"R2"}
+      and int(read(_bx, "review_queue.csv").loc[0, "Inference_Cells"]) == 8)
+_bq = read(_bx, "review_queue.csv")
+_bm = json.load(open(RB.resolve_artifact(_bx, _bq.loc[0, "Raw_Data_File"]), encoding="utf-8"))["marks"]
+check("  and the overlay draws each box's five lines and marks it placed",
+      all(len(OVERLAY.box_rows(m)) == 5 for m in _bm)
+      and all(OVERLAY.mark_label(m).endswith(OVERLAY.PLACED_MARK_SUFFIX) for m in _bm))
+check("a mean's mark carries no box key, so its record is what it was",
+      not any("box_upper_px" in m or "box_lower_px" in m for m in _marks))
+_fb = finalize(_bx)
+check("  and the box panel finalizes on the same approval",
+      _fb["status"] == "FINALIZED" and _fb["accepted"] == 8, "%s" % _fb)
+_bctx = FIN.panel_expectations(dict(
+    RB.load_manifests(os.path.join(_bx, "manifests")),
+    outputs={"run_manifest.csv": _rbx.to_dict("records")}))["P1"]
+_b0 = dict(_bm[0])
+_bcl = {f: _b0.get(f) for f in PROV.METHOD_FIELDS}
+check("the verifier re-makes a box's five numbers and passes the run's own mark",
+      PROV.evidence_failure("SUPPLIED", _b0, _bcl, _bctx["context"]) == ("", ""),
+      "%s" % (PROV.evidence_failure("SUPPLIED", _b0, _bcl, _bctx["context"]),))
+for _name, _edit in (("a quartile that is not the calibration at its edge", dict(q1=_b0["q1"] + 1)),
+                     ("a box edge moved off its reading", dict(box_upper_px=_b0["box_upper_px"] - 4)),
+                     ("a median that is not the calibration at its line", dict(median=_b0["median"] + 1)),
+                     ("a whisker that is not its end's value",
+                      dict(whisker_upper=_b0["whisker_upper"] + 1))):
+    _got = PROV.evidence_failure("SUPPLIED", dict(_b0, **_edit), _bcl, _bctx["context"])
+    check("  and refuses %s" % _name, _got[0] == "METHOD_EVIDENCE_INCOMPLETE", "%s" % (_got,))
+
+_pbox = {"readings": [{"series_id": "S_B", "position_id": "T0", "x_px": 140, "y_px": 330,
+                       "upper_px": 270, "lower_px": 385, "box_upper_px": 305,
+                       "box_lower_px": 350, "reader_kind": "AI_AGENT",
+                       "read_by": "claude-opus-5-5", "read_at": "2026-10-20",
+                       "raster_sha256": SHA, "note": ""}]}
+check("the plan carries a box's edges to the manifest row",
+      CP.reading_rows("P1", _pbox)[0]["Box_Upper_Y_Px"] == 305
+      and CP.reading_rows("P1", _pbox)[0]["Box_Lower_Y_Px"] == 350
+      and "box_upper_px" in CP.PLAN_KEYS["reading"])
+_mdir2 = os.path.join(ROOT, "from_plan", "manifests")
+check("  and a batch with no box reading writes no box columns",
+      not _pp and open(os.path.join(_mdir2, "supplied_readings.csv"), encoding="utf-8")
+      .readline().strip().split(",") == BM.supplied_readings_columns())
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))

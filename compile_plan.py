@@ -112,7 +112,10 @@ PLAN_KEYS = {
                  "display_order", "timepoint_label", "timepoint_days", "note"),
     "reading": ("series_id", "position_id", "x_px", "y_px", "upper_px",
                 "lower_px", "reader_kind", "read_by", "read_at",
-                "raster_sha256", "note"),
+                "raster_sha256", "note",
+                # a box's two edges, where the reading is a box's
+                # (`batch_manifests.SUPPLIED_OPTIONAL_COLUMNS`)
+                "box_upper_px", "box_lower_px"),
     "unit": ("unit_id", "panel_id", "figure_view", "grid_id", "panel",
              "outcome_name",
              "outcome_variable", "domain", "unit", "statistic",
@@ -223,6 +226,8 @@ def reading_rows(panel_id, read):
             Mark_X_Px=r.get("x_px", ""), Mark_Y_Px=r.get("y_px", ""),
             Upper_Y_Px="" if r.get("upper_px") is None else r.get("upper_px"),
             Lower_Y_Px="" if r.get("lower_px") is None else r.get("lower_px"),
+            Box_Upper_Y_Px="" if r.get("box_upper_px") is None else r.get("box_upper_px"),
+            Box_Lower_Y_Px="" if r.get("box_lower_px") is None else r.get("box_lower_px"),
             Reader_Kind=_s(r.get("reader_kind")).upper(),
             Read_By=_s(r.get("read_by")), Read_At=_s(r.get("read_at")),
             Raster_SHA256=_s(r.get("raster_sha256")), Note=_s(r.get("note"))))
@@ -1154,7 +1159,12 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         ("reader_config", configs, BM.reader_config_columns()),
         # Written whether or not anything was read, like the axis manifest: the
         # batch's shape does not depend on whether a panel was read this way.
-        ("supplied_readings", readings, BM.supplied_readings_columns()),
+        # The box columns only when some reading is a box's
+        # (`BM.SUPPLIED_OPTIONAL_COLUMNS`), so a batch without one is unchanged.
+        ("supplied_readings", readings, BM.supplied_readings_columns() + (
+            list(BM.SUPPLIED_OPTIONAL_COLUMNS)
+            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_OPTIONAL_COLUMNS)
+            else [])),
         # Written whether or not a group has its own n, for the same reason.
         # `Position_ID` only when a cell has its own n: a batch without one is
         # byte for byte what it was (`BM.SERIES_N_OPTIONAL_COLUMNS`).

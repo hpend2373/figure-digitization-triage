@@ -95,7 +95,9 @@ A symbol the agent could not read can be placed by the person themselves, in the
 same file: `Reader_Kind=PERSON`, `Read_By` a HUMAN in the reviewer registry. That
 point is the person's own digitization - `MANUAL_DIGITIZED`, R0, `P` on the
 overlay - and the panel's other points are still the agent's (`SKILL.md`, "A
-point the person placed").
+point the person placed"). A box plot's reading adds the box's two edges
+(`Box_Upper_Y_Px`, `Box_Lower_Y_Px`): the mark is the median line and the ends are
+the whiskers (`SKILL.md`, "And a box").
 
 A unit whose series are groups of different size (women and men, finishers and
 non-finishers) has no single n; each group carries its own (`SKILL.md`, "A group's
@@ -221,12 +223,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5731 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5926 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5753 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 5948 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5731 scenarios on main after v9.28 under `requirements-lock.txt`, and 5926 with
+5753 scenarios on main after v9.28 under `requirements-lock.txt`, and 5948 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

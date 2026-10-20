@@ -791,6 +791,24 @@ check("... and the compiled manifest holds them",
       [r["Reading_ID"] for r in CP.reading_rows("PUB_D001_P1", _rd1["read"])]
       == ["PUB_D001_P1__B_1__POST", "PUB_D001_P1__B9__PRE"])
 check("a panel with no readings carries none", "readings" not in _m1["read"])
+check("... and a mean's reading carries no box keys", not any(
+    k in r for r in _rdr for k in ("box_upper_px", "box_lower_px")), "%s" % _rdr)
+# A BOX's two edges (2026-10-20), in the run file's optional columns.
+_seg_write(MP.READINGS, MP.READING_FIELDS + tuple(src for src, _dst in MP.READING_BOX_FIELDS),
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "260", "Lower_Y_Px": "340", "Box_Upper_Y_Px": "285",
+             "Box_Lower_Y_Px": "318.5", "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-20", "Raster_SHA256": _RASTER_SHA}])
+try:
+    _bxplan, _bxs, _bxfig, _bxp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_bxr = ([p for p in _bxfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]["read"].get("readings") or [])
+check("a box reading's two edges reach the plan as numbers",
+      len(_bxr) == 1 and _bxr[0].get("box_upper_px") == 285.0 and _bxr[0].get("box_lower_px") == 318.5,
+      "%s" % _bxr)
 # A GROUP'S OWN n (2026-10-19): a card whose series are groups of different size
 # carries each group's n on its series and none on the card.
 _nseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": 11},

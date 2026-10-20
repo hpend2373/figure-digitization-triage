@@ -387,6 +387,84 @@
    "file": "value_page.py",
    "old": "{\"AI_PLACED_POINT\": \" @\", \"MANUAL_DIGITIZED\": \" P\"}",
    "new": "{\"AI_PLACED_POINT\": \" @\"}"
+  },
+  {
+   "name": "상자 단위의 판독도 거절한다",
+   "file": "batch_manifests.py",
+   "old": "        if stat not in (\"CONTINUOUS\", \"QUANTILE_SUMMARY\"):",
+   "new": "        if stat != \"CONTINUOUS\":"
+  },
+  {
+   "name": "상자 변 없이도 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if stat == \"QUANTILE_SUMMARY\" and not all(edges):",
+   "new": "        if False:"
+  },
+  {
+   "name": "평균에 상자 변을 받는다",
+   "file": "batch_manifests.py",
+   "old": "        if stat == \"CONTINUOUS\" and any(edges):",
+   "new": "        if False:"
+  },
+  {
+   "name": "상자 다섯 줄의 순서를 보지 않는다",
+   "file": "batch_manifests.py",
+   "old": "        if bt is not None and bb is not None and not (",
+   "new": "        if False and bt is not None and bb is not None and not ("
+  },
+  {
+   "name": "사분위를 정렬하지 않는다",
+   "file": "provenance.py",
+   "old": "    edges = sorted(axis.pixel_to_value(px) for px in (box_top, box_bottom))",
+   "new": "    edges = [axis.pixel_to_value(px) for px in (box_top, box_bottom)]"
+  },
+  {
+   "name": "아래 수염을 버린다",
+   "file": "provenance.py",
+   "old": "    lower = [v for v in ends if v < mid]",
+   "new": "    lower = []"
+  },
+  {
+   "name": "평균의 표시에 빈 상자 열쇠를 남긴다",
+   "file": "run_batch.py",
+   "old": "            if column in optional and not text:",
+   "new": "            if False and column in optional and not text:"
+  },
+  {
+   "name": "상자 판독을 평균으로 만든다",
+   "file": "run_batch.py",
+   "old": "        if mark.get(\"box_upper_px\") is not None and mark.get(\"box_lower_px\") is not None:",
+   "new": "        if False:"
+  },
+  {
+   "name": "상자 다섯 줄을 겹친 그림에 넘기지 않는다",
+   "file": "run_batch.py",
+   "old": "                nums, Box_Line_Rows_Px=\";\".join(\"%r\" % v for v in rows),",
+   "new": "                nums, Box_Line_Rows_Px=\"\","
+  },
+  {
+   "name": "검증기가 상자의 다섯 수를 다시 만들지 않는다",
+   "file": "provenance.py",
+   "old": "        if is_box:\n            # A BOX's five numbers",
+   "new": "        if False:\n            # A BOX's five numbers"
+  },
+  {
+   "name": "계획서가 상자 변을 매니페스트 줄에 쓰지 않는다",
+   "file": "compile_plan.py",
+   "old": "            Box_Upper_Y_Px=\"\" if r.get(\"box_upper_px\") is None else r.get(\"box_upper_px\"),\n",
+   "new": ""
+  },
+  {
+   "name": "상자 열을 늘 쓴다",
+   "file": "compile_plan.py",
+   "old": "            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_OPTIONAL_COLUMNS)\n            else [])),",
+   "new": "            if True\n            else [])),"
+  },
+  {
+   "name": "런 파일의 상자 변을 읽지 않는다",
+   "file": "make_plan.py",
+   "old": "            for src, dst in READING_BOX_FIELDS:",
+   "new": "            for src, dst in ():"
   }
  ]
 }

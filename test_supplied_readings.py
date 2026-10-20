@@ -957,6 +957,15 @@ check("  and a median outside its box is refused",
 check("  and a whisker end inside the box is refused",
       "SUPPLIED_READING_BOX_INVERTED"
       in box_validate([box_reading("S_B", 0, Upper_Y_Px=_bt0 + 5)]))
+check("  and a box whose median is its lower quartile and its lowest value validates",
+      box_validate([box_reading("S_B", 0, Mark_Y_Px=_bb0, Lower_Y_Px=_bb0)]) == set(),
+      "%s" % sorted(box_validate([box_reading("S_B", 0, Mark_Y_Px=_bb0, Lower_Y_Px=_bb0)])))
+check("  and so does one whose highest value is its upper quartile",
+      box_validate([box_reading("S_B", 0, Upper_Y_Px=_bt0)]) == set())
+check("  while a mean whose lower end is on its mark is still refused",
+      "SUPPLIED_READING_ENDS_INVERTED"
+      in box_validate([dict(box_reading("S_B", 0, Lower_Y_Px=_md0), Box_Upper_Y_Px="",
+                            Box_Lower_Y_Px="")], units=[UNITS[0]]))
 check("  and a box edge outside the plot area is refused",
       "SUPPLIED_READING_OUTSIDE_PANEL"
       in box_validate([box_reading("S_B", 0, Box_Lower_Y_Px=460, Lower_Y_Px="")]))
@@ -990,6 +999,16 @@ _bm = json.load(open(RB.resolve_artifact(_bx, _bq.loc[0, "Raw_Data_File"]), enco
 check("  and the overlay draws each box's five lines and marks it placed",
       all(len(OVERLAY.box_rows(m)) == 5 for m in _bm)
       and all(OVERLAY.mark_label(m).endswith(OVERLAY.PLACED_MARK_SUFFIX) for m in _bm))
+_flat = [box_reading("S_B", 0, Mark_Y_Px=_bb0, Lower_Y_Px=_bb0)] + BOX_READINGS[1:]
+_fx, _sfx = box_run("boxes_flat", _flat)
+_qf = read(_fx, "figure_values_machine_qc.csv")
+_f0 = [r for r in _qf.to_dict("records") if "ARM=CONTROL" in r["Cell_Key"]
+       and "TIMEPOINT=%s" % LABELS[0] in r["Cell_Key"]]
+check("a box whose median, lower quartile and lowest value share a row runs and passes",
+      _sfx["status"] == "RAN" and read(_fx, "run_manifest.csv").loc[0, "Run_State"] == "AUTO_PASS"
+      and len(_qf) == 8 and len(_f0) == 1
+      and float(_f0[0]["Median"]) == float(_f0[0]["Q1"]) == float(_f0[0]["Whisker_Lower"]),
+      "%s / %s" % (read(_fx, "run_manifest.csv").to_dict("records"), _f0))
 check("a mean's mark carries no box key, so its record is what it was",
       not any("box_upper_px" in m or "box_lower_px" in m for m in _marks))
 _fb = finalize(_bx)

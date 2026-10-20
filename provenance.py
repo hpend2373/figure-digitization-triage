@@ -1451,14 +1451,25 @@ def supplied_box_numbers(axis, median, box_top, box_bottom, top, bottom):
     mid = axis.pixel_to_value(median)
     edges = sorted(axis.pixel_to_value(px) for px in (box_top, box_bottom))
     ends = [axis.pixel_to_value(px) for px in (top, bottom) if px is not None]
-    # A LONE WHISKER keeps its side (below the median is the lower one) and the
-    # grid gate says the pair is half filled (WHISKER_HALF_FILLED), rather than
-    # this function quietly dropping what was read.
-    lower = [v for v in ends if v < mid]
-    upper = [v for v in ends if v >= mid]
+    # TWO ENDS ARE THE LOWER AND THE UPPER, in value order. Sorting them by the
+    # median instead put an end that IS the median - a box whose median, first
+    # quartile and lowest value share a row - on the upper side with the real
+    # upper end, and the pair read as half filled (the first real box batch,
+    # 2026-10-20).
+    if len(ends) == 2:
+        lower, upper = min(ends), max(ends)
+    # A LONE WHISKER keeps its side (below the median is the lower one; on the
+    # median, the side of the quartile it shares) and the grid gate says the
+    # pair is half filled (WHISKER_HALF_FILLED), rather than this function
+    # quietly dropping what was read.
+    elif ends and (ends[0] < mid or (ends[0] == mid and mid <= edges[0])):
+        lower, upper = ends[0], None
+    elif ends:
+        lower, upper = None, ends[0]
+    else:
+        lower = upper = None
     return dict(median=mid, q1=edges[0], q3=edges[1],
-                whisker_lower=min(lower) if lower else None,
-                whisker_upper=max(upper) if upper else None)
+                whisker_lower=lower, whisker_upper=upper)
 
 
 def supplied_numbers(axis, centre, top, bottom):

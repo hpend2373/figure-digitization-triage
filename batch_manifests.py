@@ -2880,15 +2880,23 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
                  "%s lie outside the plot area %s" % (", ".join(outside), box))
             continue
         up, low = pixels["Upper_Y_Px"], pixels["Lower_Y_Px"]
-        if (up is not None and up >= y) or (low is not None and low <= y):
+        bt, bb = pixels.get("Box_Upper_Y_Px"), pixels.get("Box_Lower_Y_Px")
+        # A BOX IS ASKED ITS OWN ORDER, below, not a mean's: a box whose median
+        # is its first quartile and whose lowest value is that quartile too
+        # draws the median, the box bottom and the whisker end on one row, and
+        # the strict rule for a mean's two ends refused it (the first real box batch,
+        # 2026-10-20). Which one a reading is was settled above: a quantile
+        # unit's reading has both edges, a mean's has neither.
+        if (bt is None or bb is None) and (
+                (up is not None and up >= y) or (low is not None and low <= y)):
             flag(line, "SUPPLIED_READING_ENDS_INVERTED",
                  "Upper_Y_Px=%s and Lower_Y_Px=%s must lie above and below the "
                  "mark at row %s on the page" % (up, low, y))
             continue
         # THE FIVE LINES IN PAGE ORDER: whisker end, box edge, median, box
         # edge, whisker end. The median may sit on an edge (a box whose median
-        # is its quartile), and the box may not be a line.
-        bt, bb = pixels.get("Box_Upper_Y_Px"), pixels.get("Box_Lower_Y_Px")
+        # is its quartile), a whisker may have no length (an extreme that is
+        # its quartile), and the box may not be a line.
         if bt is not None and bb is not None and not (
                 bt < bb and bt <= y <= bb
                 and (up is None or up <= bt) and (low is None or bb <= low)):

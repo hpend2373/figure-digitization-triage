@@ -1,14 +1,14 @@
 {
  "files": {
-  "batch_manifests.py": "662a17344dc65f42fb886936f2b357ddb36f2d40d67d589642cb26b6d0f61b05",
+  "batch_manifests.py": "b2114beb154aa77d6bbce6bd6b9c3783911a14ec0ebdf3dafda14b83aa9d6cb6",
   "compile_plan.py": "4f44ce3e76107b62ed56e2e73e065398d1892df7b4a5e5e6ed47128dde92f43d",
   "finalize_batch.py": "0339bafd9d2e02fe427fa6db01a18bdb61924267e59ab1c3ad50cdc31206f1df",
   "make_plan.py": "a4075afb903b7f2c7f8821ebe7c52da395c96085c9aaecad627a8ae3fe75a427",
-  "provenance.py": "8cc9c3402830f7c19ef9e86a23d37377249507ff979eafd7927d65d687cce3ab",
+  "provenance.py": "a7cea95fa91d88be7a1d30e6776755860bafd0097695a0c813a7f7137d6f2c73",
   "review_overlay.py": "93ff915b7e4467509cbbb64a2aaedf7846b67f762c2866444607ce7797cb906c",
   "run_batch.py": "d8a7476fcba20367d3a383cecbfcddbee3b7ea1dcee3d0d1542c2f53adb63be4",
   "test_make_plan.py": "636ead4a26f4ede5780b11310da8fac50d63074496a1330e2e611a06dbfab50e",
-  "test_supplied_readings.py": "256da5ae42dc573ee5896dbf00a011c43c2c2daea6c178bc211a18246dabb97e",
+  "test_supplied_readings.py": "cc9f1c106d3de2208e7e1794b91fe96bd4b102bdc0e979baf1ddb70f0f67a835",
   "value_page.py": "9a9a30ab288eb4a3687c284f49f9ce135d129eb7aee490874fb4ced599601f15"
  },
  "suites": [
@@ -133,8 +133,8 @@
   {
    "name": "오차 끝이 뒤집혀도 받는다",
    "file": "batch_manifests.py",
-   "old": "        if (up is not None and up >= y) or (low is not None and low <= y):",
-   "new": "        if False:"
+   "old": "                (up is not None and up >= y) or (low is not None and low <= y)):",
+   "new": "                False):"
   },
   {
    "name": "다른 래스터의 판독도 받는다",
@@ -421,8 +421,8 @@
   {
    "name": "아래 수염을 버린다",
    "file": "provenance.py",
-   "old": "    lower = [v for v in ends if v < mid]",
-   "new": "    lower = []"
+   "old": "        lower, upper = min(ends), max(ends)",
+   "new": "        lower, upper = None, max(ends)"
   },
   {
    "name": "평균의 표시에 빈 상자 열쇠를 남긴다",
@@ -465,6 +465,18 @@
    "file": "make_plan.py",
    "old": "            for src, dst in READING_BOX_FIELDS:",
    "new": "            for src, dst in ():"
+  },
+  {
+   "name": "끝 둘을 중앙값으로 가른다(중앙값에 앉은 아래 끝이 위로)",
+   "file": "provenance.py",
+   "old": "    if len(ends) == 2:\n        lower, upper = min(ends), max(ends)",
+   "new": "    if len(ends) == 2 and min(ends) < mid:\n        lower, upper = min(ends), max(ends)"
+  },
+  {
+   "name": "상자 판독도 평균의 끝 규칙으로 묻는다",
+   "file": "batch_manifests.py",
+   "old": "        if (bt is None or bb is None) and (\n",
+   "new": "        if (\n"
   }
  ]
 }

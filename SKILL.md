@@ -1181,11 +1181,17 @@ batch is byte for byte what it was):
                              refused on a mean (SUPPLIED_READING_BOX_ON_MEAN)
     Upper_Y_Px/Lower_Y_Px    the whisker ends
     order                    whisker, box top, median, box bottom, whisker, top to bottom
-                             (SUPPLIED_READING_BOX_INVERTED; the median may sit on an edge)
+                             (SUPPLIED_READING_BOX_INVERTED; the median may sit on an edge
+                             and a whisker may have no length - a box is asked this order,
+                             never a mean's strict two-ends rule)
 
 The run makes the five numbers with `provenance.supplied_box_numbers` (quartiles sorted, so
-an inverted axis does not swap them; a lone whisker keeps its side and the grid gate says
-WHISKER_HALF_FILLED) and the finalizer makes them again; the overlay draws the five rows.
+an inverted axis does not swap them; two whisker ends are the lower and the upper in value
+order; a lone whisker keeps its side and the grid gate says WHISKER_HALF_FILLED) and the
+finalizer makes them again; the overlay draws the five rows. The first real batch found both
+rules too strict for a box whose median, first quartile and lowest value share one row: the
+mean's ends rule refused the whole batch, and sorting the ends by the median put the lowest
+value on the upper side (2026-10-20, `test_supplied_readings.py` +4).
 A mean's mark gets no box key at all - a null key would still have changed every existing
 `Mark_Record_SHA256`. A whisker that is not drawn because the extreme IS the box edge (a box
 sitting on zero) is that edge, not a blank: blank means nobody could see it.

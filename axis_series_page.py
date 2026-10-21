@@ -319,7 +319,7 @@ def card(p, g, i, prop, gm, im, prov, geometry, identity, by):
         extra = []
         if ci["markType"].startswith("BAR"):
             extra.append("막대 값: %s" % {"OUTLINE_CENTER": "윤곽선 중심", "FILL_EDGE": "채움 가장자리",
-                                          "MARKER_CENTER": "마커 중심"}.get(ci.get("barTop"), ci.get("barTop")))
+                                          "MARKER_CENTER": "마커 중심", "FILL_ONLY": "테두리 없음(채움 끝)"}.get(ci.get("barTop"), ci.get("barTop")))
         if ci["markType"] not in ("SCATTER", "BOX_VIOLIN"):
             extra.append("오차막대 줄기가 마크에 붙음: %s" % ("예" if ci.get("stem") else "아니오"))
         if ci.get("n"):

@@ -232,8 +232,13 @@ visible in the finished CSV unless it is recorded.
 stops inside the outline, so reading the fill edge puts every mean low by half
 the stroke width — on a 4 px stroke that was 1.2 units on a 150-unit axis, in the
 same direction on all 72 bars of one figure. Record `Bar_Top_Definition`:
-`OUTLINE_CENTER` / `FILL_EDGE` / `MARKER_CENTER` / `NOT_A_BAR`. `FILL_EDGE` is
-flagged, not forbidden — declare it and the bias is auditable.
+`OUTLINE_CENTER` / `FILL_EDGE` / `MARKER_CENTER` / `NOT_A_BAR` / `FILL_ONLY`. `FILL_EDGE` is
+flagged, not forbidden — declare it and the bias is auditable. `FILL_ONLY` is a bar
+drawn with no outline stroke at all: its fill edge is its data coordinate, so there
+is no half-stroke to lose and the gate takes it. The released bar reader measures an
+outline centre, so a `FILL_ONLY` card is read by a person or agent
+(`Read_Route=MANUAL`; `record_identity` refuses it on AUTO). Added on 2026-10-21 for
+nine panels whose bars have no stroke (the person's decision E04).
 
 `NOT_A_BAR`, not `NOT_APPLICABLE`: the latter is a null token, so `fig_is_blank`
 would read a filled-in answer as an empty cell. No controlled vocabulary in this

@@ -195,6 +195,14 @@ check("결과변수가 없으면 거절한다", "OUTCOME_MISSING" in codes(run([
 check("n은 비워도 된다", not run([answer(N_Outcome="")])[1])
 check("n이 양의 정수가 아니면 거절한다", "N_BAD" in codes(run([answer(N_Outcome="8.5")])[1]) and "N_BAD" in codes(run([answer(N_Outcome="0")])[1]))
 check("막대 표에 값 정의가 없으면 거절한다", "BAR_TOP_MISSING" in codes(run([answer(Bar_Top_Definition="")])[1]))
+# REVERT: FILL_ONLY를 BAR_TOPS에서 빼거나, 판독 경로를 묻지 않는다. 앞은 테두리 없는 막대를 적을 수 없고, 뒤는
+# 판독기(테두리 가운데를 잼)가 채움 끝이라고 적힌 막대를 읽게 됩니다 (결정 E04, 2026-10-21).
+check("테두리 없는 막대(FILL_ONLY)는 사람이 읽는 길이면 받는다",
+      not run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="MANUAL")])[1],
+      "%s" % codes(run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="MANUAL")])[1]))
+check("FILL_ONLY를 판독기(AUTO)에 맡기면 거절한다",
+      "BAR_TOP_FILL_ONLY_NEEDS_MANUAL" in codes(run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="AUTO")])[1])
+      and "BAR_TOP_FILL_ONLY_NEEDS_MANUAL" in codes(run([answer(Bar_Top_Definition="FILL_ONLY")])[1]))
 check("상자 표에는 값 정의를 묻지 않는다",
       not run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
                       Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1],

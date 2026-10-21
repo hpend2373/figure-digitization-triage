@@ -148,6 +148,16 @@ CASES = [
 for name, kw, want in CASES:
     check(name + " -> " + want, want in run(**kw), "%s" % run(**kw))
 
+# A BAR WITH NO OUTLINE (decision E04, 2026-10-21). Its fill edge is its data
+# coordinate, so the gate takes it - and FILL_EDGE, the half-stroke bias on a bar
+# that HAS a stroke, is still stopped.
+# REVERT: leave FILL_ONLY out of FIG_BAR_TOP_DEFS, or stop it with FILL_EDGE.
+_fo = run(unit={"Bar_Top_Definition": "FILL_ONLY"})
+check("FILL_ONLY (a bar with no outline) passes the bar-top checks",
+      not set(_fo) & {"BAD_BAR_TOP_DEFINITION", "BAR_TOP_READ_AT_FILL_EDGE", "MISSING_BAR_TOP_DEFINITION"}, "%s" % _fo)
+check("FILL_EDGE is still stopped beside it",
+      "BAR_TOP_READ_AT_FILL_EDGE" in run(unit={"Bar_Top_Definition": "FILL_EDGE"}))
+
 print("the counter-examples that used to pass clean")
 COUNTER = [
     ("Extraction_Method=BOGUS", dict(unit={"Extraction_Method": "BOGUS"}),

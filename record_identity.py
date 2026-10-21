@@ -45,7 +45,9 @@ ANSWER_REQUIRED = ("Proposal_ID", "Human_Verification_Status", "Verified_By", "S
 TRUE = ("1", "TRUE", "YES", "Y", "T")
 FACTOR_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 COLOUR_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
-BAR_TOPS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
+#: FILL_ONLY: 테두리 없이 채움만 있는 막대 - 채움 끝이 곧 값 (결정 E04, 2026-10-21). 출시된 막대 판독기는
+#: 테두리 가운데를 재므로, FILL_ONLY 카드는 사람이 읽는 길(Read_Route=MANUAL)이어야 합니다.
+BAR_TOPS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR", "FILL_ONLY")
 #: 프레임 너비의 이만큼은 밖이어도 x 위치로 봐줍니다.
 FRAME_SLACK = 0.10
 
@@ -358,6 +360,10 @@ def check_answer(answer, proposed):
         problems.append(("BAR_TOP_MISSING", "막대 표인데 값을 어디서 읽는지(%s)가 없습니다." % "/".join(BAR_TOPS)))
     if bar_top and bar_top not in BAR_TOPS:
         problems.append(("BAR_TOP_BAD", "Bar_Top_Definition=%r" % bar_top))
+    # 테두리 없는 막대의 채움 끝은 판독기가 재는 것(테두리 가운데)이 아닙니다 - 그 값은 사람이 놓은 판독에서만 옵니다.
+    if bar_top == "FILL_ONLY" and route_of(answer) != "MANUAL":
+        problems.append(("BAR_TOP_FILL_ONLY_NEEDS_MANUAL", "FILL_ONLY(테두리 없는 막대)는 판독기가 재지 않습니다 - "
+                                                          "Read_Route=MANUAL이어야 합니다."))
     stem = (answer.get("Errorbar_Stem_Confirmed") or "").strip().upper()
     if stem and stem not in ("TRUE", "FALSE"):
         problems.append(("STEM_BAD", "Errorbar_Stem_Confirmed=%r은 TRUE/FALSE가 아닙니다." % stem))

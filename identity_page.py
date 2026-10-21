@@ -265,6 +265,7 @@ def card(proposals, pid, row):
     w("<div data-barblk='%s'>막대의 값은 <select data-bartop='%s'><option value=''>— 고르세요 —</option>"
       "<option value='OUTLINE_CENTER'>윤곽선의 중심에서 읽는다 (보통)</option>"
       "<option value='FILL_EDGE'>채움의 가장자리에서 읽는다</option>"
+      "<option value='FILL_ONLY'>테두리가 없다 — 채움 끝이 값 (사람이 읽음)</option>"
       "<option value='MARKER_CENTER'>마커의 중심에서 읽는다</option></select></div>"
       % (esc(pid), esc(pid)))
     w("<div data-stemblk='%s'><label><input type='checkbox' data-stem='%s'> 오차막대에 세로 줄기가 "

@@ -876,7 +876,7 @@ On run2 the two passes agreed on 148 of 156 panels (87 OK, 61 LOOK), and what th
 found was mostly not for the person to reject one by one but for the code to fix:
 
 - **Box whiskers ended at the far edge of the point on the cap, not at the cap.**
-  S41467 draws its minimum and maximum subject on the caps; `read_box_violin_panel`
+  One paper draws its minimum and maximum subject on the caps; `read_box_violin_panel`
   took the stem's last row, 5-7 px past the cap on every capped whisker. It now takes
   the middle of the cap the stem ends in (`_cap_at_stem_end`; no cap, the stem's end).
 - **The stem was looked for at the declared x.** Four pixels off, the three-pixel
@@ -1233,6 +1233,119 @@ A cell with no error bar drawn at all has nothing to bound and stays out.
                           the approval cells. `make_plan` puts them on the unit, the basis in its
                           note. A large SE on a right-skewed outcome then passes
                           DISPERSION_IMPLIES_SKEW, and a change score leaves the ratio-scale check.
+
+## Finding every cell a hidden end left out, and asking about each bound
+
+`End_Basis=BOUND` (above) is the path; this is how it was used the first time (run2,
+2026-10-21). The person asked for a survey, not a fix of the cells at hand: "끝이 없는 칸도
+넣어줘야해. 당연히. 그거 전수조사해서 다시 넣어줘". And of the cells they had left unclicked on
+the click page: "ai 가 잘 찍은 칸은 일부로 비워둔거야" - an unclicked cell keeps the agent's
+reading; it is not a cell to read again.
+
+**Where the left-out cells are.** Two kinds, found from the run's own records:
+
+    whole panels   the grid gate's NO_VARIANCE: the reader found the means and confirmed no
+                   error bar anywhere. Every drawn cell is read again, means and ends, as a
+                   MANUAL panel (the standing approval for panels a reader missed); the
+                   card's series, labels and n stay as they were
+    single cells   cells left off a card because no end was visible - the agent's "both
+                   ends hidden" (the SPARSE grid above) and the person's NO_ENDS on the
+                   click page. Only those are read
+
+Not surveyed, each for a reason that is written down: a panel that draws no error bars by
+design (NO_ERRORBAR, or the paper shows none); a cell whose mark itself is covered (no mean,
+so nothing to bound); the baseline cell of a change-from-baseline axis, 0 ± 0 by definition,
+where a bound would invent a spread (the person's call, asked on the page); an
+individual-subject series of n = 1; a cell the run already holds the person's own reading of.
+
+**The reading spec, one entry per panel**: the image and its SHA-256, the plot box, the
+confirmed y ticks as [value, pixel row], the series (the name to write and how each is drawn),
+the positions (the label to write and its column), the dispersion type, the bar-top
+definition, the readings the run already has (context only), and for a cell the person
+placed, `given_mean` - used exactly as `Mark_X_Px`/`Mark_Y_Px`. The reader writes one row per
+cell, all CAP or all BOUND:
+
+    CAP     an end it can see whose stem visibly reaches this mark (or a cap in this
+            series' own colour where the stem is hidden); one end seen and the other hidden
+            is a CAP with one end
+    BOUND   no end of this cell can be seen. 1: hidden in its own marker - the marker's
+            outer top / bottom edge (a one-sided bar: the top only); 2: hidden under other
+            marks - the farthest row, in the direction the bar would go, of what covers the
+            place the cap would be; 3: a column whose caps cannot be given to one series -
+            the outermost visible cap above / below this mark; 4: CI95 needs both ends, each
+            by 1-3. The Note says which rule and what hides the end
+
+Before writing, the reader draws its own readings on the panel, bounds in another colour,
+and looks at the drawing.
+
+**Assembling the readings.** A cell whose mean the person placed and whose ends the person
+called invisible stays the person's (`Reader_Kind=PERSON`), and its end is a BOUND even where
+the agent thinks it sees a cap: the person said there was none, and a bound is asked about
+cell by cell. A whole-panel reading is `Read_Route=MANUAL`; a bar with no outline is
+`FILL_ONLY`, any other `OUTLINE_CENTER`; labels are ordered by pixel, not by the spec's order.
+Then as always: on a copy, the run's fingerprints before and after, backups, then the runs.
+
+**What the first survey found (run2).** 61 panels (47 whole, 14 by cell); 403 readings in 57
+panels, 323 caps and 80 bounds. Run again, 44 panels passed machine QC and went to the page,
+and 13 did not:
+
+- **No n** (10 panels): these cells reached the n check for the first time. Two checks that
+  never saw each other gave the same per-cell n, both MEDIUM (an n from the methods, not
+  stated for the figure; values the paper may have dropped), so under the standing rule it
+  was not written - the page asked.
+- **A bound meets a check made for a cap** (3 panels): `ERRORBAR_STEM_UNCONFIRMED` asks
+  whether a cap's stem reaches its mark, and a bound has no visible stem by definition;
+  `DISPERSION_IMPLIES_SKEW` reads SE×√n against the mean, and a bound is larger than the spread
+  it bounds. Whether the grid gate skips these two checks for `BOUND_HIDDEN_END` is a code
+  change the person was asked about (2026-10-21), not one made without them.
+- **SD or SE.** Where a paper says "means ± SD" for every figure, two blinded checks compared
+  bar lengths with the numbers in the text: in one figure the bars matched the text's SD/√n
+  and not its SD (MEDIUM: one panel to compare), in another the text gave no numbers to
+  compare. That is a MEASURED definition (the path above), asked of the person.
+
+**The page asks about each bound.** A bound is R3, so `finalize_batch` takes its panel only
+with `--inference-review`: one row per bounded cell, `Inference_ID` from the run's
+`inference-review/inference__<Panel_ID>.csv`, `Inference_Confirmed` CONFIRMED or REJECTED,
+`Reviewer_ID`, `Reviewed_At`. The run2 page put a small table under each card (cell, mean,
+the two ends, method, two choices) and exported one CSV with three kinds of row:
+
+    value rows                as before (Panel_ID, Review_Subject_SHA256, Decision, checks)
+    Panel_ID DECISION:<id>    a decision's choice; its subject is the hash of the decision's text
+    Panel_ID INFERENCE:<id>   one bounded cell; its subject is the PANEL's, its Note the panel
+
+It refuses to download while an approved panel has a bounded cell unanswered (`finalize_batch`
+would hold that panel). Splitting the file checks each INFERENCE row against the run's
+questions and writes `inference_review.csv` beside the publication's
+`value_review_answers.csv`. Tested on a copy of a real run: a REJECTED bound drops that cell
+only (`INFERENCE_REJECTED`; the panel's other values are accepted), a CONFIRMED one is accepted
+as `BOUND_HIDDEN_END`. The repository's `value_page.py` does not draw this table yet - the run2
+page was built on it outside the repository - so without that page, answer
+`inference_review.csv` directly (`finalize_batch --inference-review`; the run writes the
+questions).
+
+**A page that replaces an older one.** The survey added cells to panels that an unanswered
+page still showed, so the new page replaced it instead of standing beside it:
+
+- a panel whose values the survey changed: the new card; the old card is not asked;
+- a panel whose values are unchanged and whose overlay is pixel-identical in the new run (the
+  files' hashes differed; the pixels did not): carried over with the older page's second checks;
+- a panel whose cells equal a version the person already APPROVED (only the attestation hashes
+  differ): not asked again;
+- a panel the survey blocked: off the page, and the page's intro says why.
+
+Decisions the older page asked are restated on the new one with the one they replace named.
+
+**Known gap.** The overlay footer's line for `~` was written for a spread from a cap with no
+visible stem ("the SPREAD is not measured - the cap may be a cap or a significance glyph"), and
+a bound is drawn with the same `~`. A blinded check noticed that the footer contradicts its
+rules. The run2 page says in each card's table that every `~` there is a bound; the footer
+(`review_overlay.SPREAD_NOTE`) is to be split, and since that changes every overlay with a
+bound, it waits for the next code change that runs those panels again.
+
+**Second checks, in practice.** A pass that answers OK with MEDIUM confidence leaves its reason
+blank, as its rules say, so the page has nothing to show beside it: put the gist of its report
+on the card's note, credited to the check. A check that stops part-way (a usage limit) keeps
+its work; resume it rather than starting a new one.
 
 ## Provenance is per FIELD, not per row
 

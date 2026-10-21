@@ -132,6 +132,20 @@ def fig_is_bound(row):
     """True when this value's spread is an upper bound, not a read cap."""
     return str(row.get("Dispersion_Method", "") or "").strip().upper() == FIG_BOUND_DISPERSION_METHOD
 
+
+# AND A MEAN KEPT WITHOUT ITS SPREAD, BY DECISION (2026-10-21; the person:
+# "평균만이라도 넣어줘", then "평균만"). The reviewer keeps the mean of a cell whose
+# ends they will not record (`End_Basis=NONE` -> `provenance.SUPPLIED_MEAN_ONLY_METHOD`).
+# Its missing spread is a statement, not a miss, so MISSING_DISPERSION and
+# ASYMMETRIC_NEEDS_BOUNDS are not asked of it - and a "mean only" that carries a
+# spread anyway is refused, because then nobody can say which the value is.
+FIG_MEAN_ONLY_DISPERSION_METHOD = "MEAN_ONLY_DECLARED"
+
+
+def fig_is_mean_only(row):
+    """True when this value is a mean kept without its spread by decision."""
+    return str(row.get("Dispersion_Method", "") or "").strip().upper() == FIG_MEAN_ONLY_DISPERSION_METHOD
+
 _PAIR = re.compile(r"^\s*([^=]+?)\s*=\s*(.+?)\s*$")
 
 
@@ -625,13 +639,18 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
         dt = str(unit.get("Dispersion_Type", "")).strip().upper()
         sym, lo, hi = (num(row.get("Dispersion_Value")), num(row.get("Errorbar_Lower")),
                        num(row.get("Errorbar_Upper")))
+        mean_only = fig_is_mean_only(row)
+        if mean_only and (sym is not None or lo is not None or hi is not None):
+            flag(line, "MEAN_ONLY_WITH_SPREAD",
+                 "Dispersion_Method=%s but the row carries a spread: a mean kept "
+                 "without its error bar has none" % FIG_MEAN_ONLY_DISPERSION_METHOD)
         if dt in ("SD", "SE", "SEM"):
-            if sym is None and (lo is None or hi is None):
+            if sym is None and (lo is None or hi is None) and not mean_only:
                 flag(line, "MISSING_DISPERSION", "%s needs a value or both bounds" % dt)
             if sym is not None and sym <= 0:
                 flag(line, "DISPERSION_NONPOSITIVE", "Dispersion_Value=%g" % sym)
         elif dt in FIG_ASYMMETRIC_TYPES:
-            if lo is None or hi is None:
+            if (lo is None or hi is None) and not mean_only:
                 flag(line, "ASYMMETRIC_NEEDS_BOUNDS", "%s requires both bounds" % dt)
         elif dt == "NO_ERRORBAR":
             flag(line, "NONCONVERTIBLE_NO_VARIANCE",

@@ -1005,8 +1005,10 @@ def supplied_readings_columns():
         End_Basis                what the ends are (optional): blank or CAP - the
                                  printed caps; BOUND - the bar's own ends are
                                  hidden and these sit at the edge of what hides
-                                 them, an upper bound on the spread. A mean's
-                                 reading only, and with at least one end
+                                 them, an upper bound on the spread, with at
+                                 least one end; NONE - the reviewer keeps the
+                                 mean without its error bar, with no end. A
+                                 mean's reading only
         Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure;
                                  PERSON - the registered reviewer placed it
                                  themselves (Read_By a HUMAN in the registry)
@@ -1055,8 +1057,9 @@ def series_n_columns():
 SUPPLIED_BOX_COLUMNS = ("Box_Upper_Y_Px", "Box_Lower_Y_Px")
 #: And what a reading's ends ARE (built 2026-10-21): blank or `CAP` - the printed
 #: caps; `BOUND` - the bar's own ends are hidden and these were set at the edge of
-#: what hides them (`provenance.SUPPLIED_END_BASES`). Optional for the same
-#: reason: every reading of caps is byte for byte what it was.
+#: what hides them; `NONE` - the reviewer keeps the mean without its error bar
+#: (`provenance.SUPPLIED_END_BASES`). Optional for the same reason: every reading
+#: of caps is byte for byte what it was.
 SUPPLIED_END_BASIS_COLUMN = "End_Basis"
 SUPPLIED_OPTIONAL_COLUMNS = SUPPLIED_BOX_COLUMNS + (SUPPLIED_END_BASIS_COLUMN,)
 
@@ -2827,6 +2830,13 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
                  "%s is a QUANTILE_SUMMARY unit; End_Basis=BOUND is a mean's "
                  "hidden error bar, and a box's whiskers are not one" % pid)
             continue
+        # A MEAN ONLY is a mean's: a box without its whiskers and edges is not a
+        # box kept without its spread, it is no box.
+        if basis == _prov.SUPPLIED_END_NONE and stat == "QUANTILE_SUMMARY":
+            flag(line, "SUPPLIED_END_NONE_ON_BOX",
+                 "%s is a QUANTILE_SUMMARY unit; End_Basis=NONE keeps a mean "
+                 "without its error bar, and a box has no mean" % pid)
+            continue
         if sid not in declared_series.get(pid, set()):
             flag(line, "SUPPLIED_READING_SERIES_UNKNOWN",
                  "Series_ID=%s is not a series of %s" % (sid or "(blank)", pid))
@@ -2913,6 +2923,13 @@ def check_supplied_readings(readings, panel_index, panel_modes, series,
             flag(line, "SUPPLIED_END_BOUND_WITHOUT_END",
                  "End_Basis=BOUND with neither Upper_Y_Px nor Lower_Y_Px: a bound "
                  "is the end set at the edge of what hides the bar")
+            continue
+        # AND A MEAN ONLY HAS NO END. An end placed beside the word would be a
+        # spread the value then throws away - or keeps, depending on who reads it.
+        if basis == _prov.SUPPLIED_END_NONE and (up is not None or low is not None):
+            flag(line, "SUPPLIED_END_NONE_WITH_END",
+                 "End_Basis=NONE keeps the mean without its error bar, and this "
+                 "reading places an end: leave both ends blank, or say what they are")
             continue
         # A BOX IS ASKED ITS OWN ORDER, below, not a mean's: a box whose median
         # is its first quartile and whose lowest value is that quartile too

@@ -1,14 +1,14 @@
 {
  "files": {
-  "batch_manifests.py": "13dea7aee4a8a3a30ec546874e1dbfe0003e916713a621a72c4e55c2f1cc1ab7",
+  "batch_manifests.py": "8ce6dd414198258f87ee6f2c6b3b6e6b23736d3de62834dd9dc4997f52d16929",
   "compile_plan.py": "1258b8b2d666731790c86555be7e4fdda9e43c0cc12df07b213857380b784666",
   "finalize_batch.py": "0339bafd9d2e02fe427fa6db01a18bdb61924267e59ab1c3ad50cdc31206f1df",
   "make_plan.py": "66c4ab17700ca1cb726a7f85d5aeca5390c024c1e0c3286ffddaf2bbb829106c",
-  "provenance.py": "dd03043c7dff0fcd4fe3ea6c2247064ac2ca52d1f4b60f4268eae7b52c3394e2",
-  "review_overlay.py": "7eb84b9b4d9ac014a5c3cd9ed3fb654efd96f3e29b067e47eab4164203e2a8a9",
+  "provenance.py": "4e78d04461eb8ab2c3d58e6339f74bd218f39c31107da0afe496503977466192",
+  "review_overlay.py": "c36cbc69de2c48c5693c232d8f0ea3ee4892258b26742bbefae57c0b72cea2ce",
   "run_batch.py": "660113efbdca93b6296977814ba2923c3469e11ff197c3d154607294b9d2d9b9",
   "test_make_plan.py": "c39444a80b26f021cfdc8505a24596022ab9c56151fdacaf08adb1afe524f561",
-  "test_supplied_readings.py": "a75be32c2e246f770da6a57553e9db1e3be94662cb8f5ea88ffa4aaa32875219",
+  "test_supplied_readings.py": "1582418fa9ce3447ed1c10c38573a793e398f1fecc106ac35ff1a0cfa3966ba5",
   "value_page.py": "9a9a30ab288eb4a3687c284f49f9ce135d129eb7aee490874fb4ced599601f15"
  },
  "suites": [
@@ -49,8 +49,8 @@
   {
    "name": "공급 경로가 판독기의 오차 방법을 낼 수 있다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
   },
   {
    "name": "검증기가 픽셀을 판독과 대조하지 않는다",
@@ -325,8 +325,8 @@
   {
    "name": "공급 경로가 사람의 오차 끝을 모른다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\"},"
   },
   {
    "name": "검증기가 판독 대신 표시의 종류를 본다",

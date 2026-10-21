@@ -1214,6 +1214,19 @@ does not define (SUPPLIED_END_BASIS_UNKNOWN), a bound with neither end
 Written only when some reading has it, so every other batch is byte for byte what it was.
 A cell with no error bar drawn at all has nothing to bound and stays out.
 
+**And a mean kept without its error bar (built 2026-10-21; the person, of cells whose ends
+they had placed inside the marker and then dropped: "평균만이라도 넣어줘", and on the page that
+asked how: "평균만").** `End_Basis=NONE` with both ends blank keeps the mean and records that
+no end is placed on purpose. The value's `Dispersion_Method` is `MEAN_ONLY_DECLARED` (R0:
+nothing is claimed about a spread), the grid gate asks it for no spread (`MISSING_DISPERSION`,
+`ASYMMETRIC_NEEDS_BOUNDS`) and refuses one that carries a spread anyway
+(`MEAN_ONLY_WITH_SPREAD`); the overlay labels it `=` and foots it "MEAN ONLY". A blank-ended
+reading without the word is still a missing spread. Refused before the run: NONE with an end
+placed (SUPPLIED_END_NONE_WITH_END), NONE on a box (SUPPLIED_END_NONE_ON_BOX). Such a value has
+no weight in a variance-weighted pool; whether and how it enters an analysis (an imputed SD,
+a descriptive table) is the analysis plan's call, and the method says which values they are.
+`matrix_mean_only.json`.
+
 **Three paths the person opened on 2026-10-20 (decision page v8: D01, D14, D15).**
 
     MEASURED definition   `record_errorbar` Definition_Basis=MEASURED: the dispersion type was

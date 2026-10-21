@@ -378,6 +378,29 @@ _b9 = run(vals=[dict(v, Mean=60, Errorbar_Lower=65, Errorbar_Upper=70, Dispersio
 check("and a bound still has to hold its mean between its ends",
       "MEAN_OUTSIDE_ERRORBAR" in _b9, "%s" % _b9)
 
+# A MEAN KEPT WITHOUT ITS SPREAD, BY DECISION (2026-10-21; the person: "평균만").
+# MEAN_ONLY_DECLARED is not asked for a spread; a blank spread without it still is;
+# and a mean only that carries a spread is refused.
+# REVERT: let MISSING_DISPERSION or ASYMMETRIC_NEEDS_BOUNDS fire on it, or drop
+# MEAN_ONLY_WITH_SPREAD.
+print("a mean kept without its spread")
+_mo = [dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "PRE"}), Mean=60,
+            Dispersion_Value="", Dispersion_Method="MEAN_ONLY_DECLARED"),
+       dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "POST"}), Mean=62,
+            Dispersion_Value=3, Dispersion_Method="AI_PLACED_CAP")]
+_m1 = run(vals=_mo)
+check("a declared mean-only cell is not a missing spread", _m1 == [], "%s" % _m1)
+_m2 = run(vals=[dict(_mo[0], Dispersion_Method="NO_DISPERSION"), _mo[1]])
+check("  the same blank without the declaration still is",
+      "MISSING_DISPERSION" in _m2, "%s" % _m2)
+_m3 = run(unit={"Dispersion_Type": "CI95"},
+          vals=[_mo[0], dict(_mo[1], Dispersion_Value="", Errorbar_Lower=58, Errorbar_Upper=66)])
+check("  nor are its bounds asked under an asymmetric type",
+      "ASYMMETRIC_NEEDS_BOUNDS" not in _m3, "%s" % _m3)
+_m4 = run(vals=[dict(_mo[0], Dispersion_Value=2.0), _mo[1]])
+check("  and a mean only that carries a spread is refused",
+      "MEAN_ONLY_WITH_SPREAD" in _m4, "%s" % _m4)
+
 # REVERT: let the transformation go undeclared. A mean of log10(power) and a
 # mean of power carry the same axis label and differ by more than any effect
 # this review is looking for, and nothing in a raster distinguishes them.

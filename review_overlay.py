@@ -310,6 +310,20 @@ def bound_spread(mark):
             == PROV.SUPPLIED_BOUND_METHOD)
 
 
+#: A MEAN KEPT WITHOUT ITS ERROR BAR, by the reviewer's decision (`End_Basis=NONE`,
+#: 2026-10-21). No tick is drawn because none was placed on purpose; `=` says so on
+#: the label, so it does not read as an error bar somebody forgot.
+MEAN_ONLY_MARK_SUFFIX = " ="
+MEAN_ONLY_NOTE = ("%d mark(s): MEAN ONLY - the reviewer kept the mean without its error "
+                  "bar (End_Basis=NONE); no weight in a variance-weighted pool")
+
+
+def mean_only(mark):
+    """True when this mark is a mean kept without its spread by decision."""
+    return (str(mark.get("Dispersion_Method", "") or "").strip().upper()
+            == PROV.SUPPLIED_MEAN_ONLY_METHOD)
+
+
 def spread_only(mark):
     """True when this mark is R3 for its ERROR BAR and not for its number."""
     if tier_of(mark) not in ("R3",):
@@ -344,6 +358,9 @@ def inferred_note(marks):
     people = [m for m in marks if person_placed(m)]
     if people:
         lines.append("%s %s" % (PERSON_MARK_SUFFIX.strip(), PERSON_NOTE % len(people)))
+    alone = [m for m in marks if mean_only(m)]
+    if alone:
+        lines.append("%s %s" % (MEAN_ONLY_MARK_SUFFIX.strip(), MEAN_ONLY_NOTE % len(alone)))
     for tier, suffix in TIER_MARK_SUFFIXES:
         here = [m for m in marks if tier_of(m) == tier]
         if tier == "R2":
@@ -389,6 +406,8 @@ def mark_label(mark):
     value = mark.get("mean", mark.get("median"))
     if value is not None:
         label += " %.4g" % float(value)
+    if mean_only(mark):
+        label += MEAN_ONLY_MARK_SUFFIX
     # WHICH SERIES A MARK BELONGS TO IS NOT ALWAYS MEASURED. A monochrome line
     # reader whose window was too blinded to measure a stroke pattern names the
     # last curve by elimination, and that cell is the one a reviewer should

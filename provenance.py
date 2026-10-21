@@ -379,9 +379,11 @@ DISPERSION_CONTRACT = {
     # An end the agent placed, or none placed. Not `DIRECT_CONNECTED_CAP`: that
     # names a reader following a stem, and no reader ran. `BOUND_HIDDEN_END` is
     # an end set at the edge of what hides the bar (`End_Basis=BOUND`), and only
-    # a supplied reading can say that.
+    # a supplied reading can say that. `MEAN_ONLY_DECLARED` is a mean the reviewer
+    # decided to keep without its ends (`End_Basis=NONE`), and only a supplied
+    # reading can say that too.
     "SUPPLIED": {"AI_PLACED_CAP", "MANUAL_PLACED_CAP", "BOUND_HIDDEN_END",
-                 "NO_DISPERSION"},
+                 "MEAN_ONLY_DECLARED", "NO_DISPERSION"},
 }
 
 
@@ -1418,10 +1420,18 @@ SUPPLIED_PERSON_KINDS = ("PERSON",)
 #: marker, under other marks, or on a bar two series share - and the ends were set
 #: at the edge of what hides them. The spread is then at most that, and the value
 #: says so (`BOUND_HIDDEN_END`) instead of passing for a cap.
+#: `NONE` (built 2026-10-21; the person, of cells whose ends they had placed inside
+#: the marker and then dropped: "평균만이라도 넣어줘", and on the page that asked how:
+#: "평균만"): the reviewer decided this cell carries its MEAN ONLY - no end is
+#: placed, and none is missing by accident. The value says so
+#: (`MEAN_ONLY_DECLARED`), the grid gate does not take it for a forgotten spread,
+#: and a variance-weighted pool sees a mean with no weight.
 SUPPLIED_END_CAP = "CAP"
 SUPPLIED_END_BOUND = "BOUND"
-SUPPLIED_END_BASES = (SUPPLIED_END_CAP, SUPPLIED_END_BOUND)
+SUPPLIED_END_NONE = "NONE"
+SUPPLIED_END_BASES = (SUPPLIED_END_CAP, SUPPLIED_END_BOUND, SUPPLIED_END_NONE)
 SUPPLIED_BOUND_METHOD = "BOUND_HIDDEN_END"
+SUPPLIED_MEAN_ONLY_METHOD = "MEAN_ONLY_DECLARED"
 
 
 def supplied_methods(reader_kind, series_count, has_dispersion, end_basis=""):
@@ -1430,13 +1440,19 @@ def supplied_methods(reader_kind, series_count, has_dispersion, end_basis=""):
     One series on the panel is `DECLARED_SINGLE_SERIES` whoever placed the
     point; no end placed is `NO_DISPERSION`. Ends placed as a bound
     (`end_basis` = `BOUND`) are `BOUND_HIDDEN_END` whoever placed them - the
-    method names what the number is, an upper bound, not who drew it. A kind
-    with no row raises KeyError - the batch layer refuses it first
+    method names what the number is, an upper bound, not who drew it. A mean
+    kept without its ends by decision (`end_basis` = `NONE`, no end placed) is
+    `MEAN_ONLY_DECLARED`, never `NO_DISPERSION`: the blank is a choice, not a
+    miss. A kind with no row raises KeyError - the batch layer refuses it first
     (`SUPPLIED_READER_KIND_UNKNOWN`).
     """
     identity, value, cap = SUPPLIED_KIND_METHODS[str(reader_kind or "").strip().upper()]
-    if str(end_basis or "").strip().upper() == SUPPLIED_END_BOUND:
+    basis = str(end_basis or "").strip().upper()
+    if basis == SUPPLIED_END_BOUND:
         cap = SUPPLIED_BOUND_METHOD
+    if basis == SUPPLIED_END_NONE and not has_dispersion:
+        return ("DECLARED_SINGLE_SERIES" if series_count == 1 else identity, value,
+                SUPPLIED_MEAN_ONLY_METHOD)
     return ("DECLARED_SINGLE_SERIES" if series_count == 1 else identity, value,
             cap if has_dispersion else "NO_DISPERSION")
 
@@ -1758,6 +1774,10 @@ DISPERSION_METHODS = {
     # at a cap. Whoever placed it, one wrong bound in twenty does not show in a
     # panel-level answer, so it is asked about per cell, as a reconstruction is.
     "BOUND_HIDDEN_END": "R3",
+    # NO SPREAD, BY DECISION. The reviewer kept the mean and decided the ends are
+    # not recorded (`End_Basis=NONE`). Nothing is claimed about a spread, so
+    # nothing about one is doubted - priced as the cell with no error bar is.
+    "MEAN_ONLY_DECLARED": "R0",
 }
 
 

@@ -4,19 +4,19 @@
   "test_make_plan.py"
  ],
  "files": {
-  "batch_manifests.py": "13dea7aee4a8a3a30ec546874e1dbfe0003e916713a621a72c4e55c2f1cc1ab7",
+  "batch_manifests.py": "8ce6dd414198258f87ee6f2c6b3b6e6b23736d3de62834dd9dc4997f52d16929",
   "compile_plan.py": "1258b8b2d666731790c86555be7e4fdda9e43c0cc12df07b213857380b784666",
   "make_plan.py": "66c4ab17700ca1cb726a7f85d5aeca5390c024c1e0c3286ffddaf2bbb829106c",
-  "provenance.py": "dd03043c7dff0fcd4fe3ea6c2247064ac2ca52d1f4b60f4268eae7b52c3394e2",
+  "provenance.py": "4e78d04461eb8ab2c3d58e6339f74bd218f39c31107da0afe496503977466192",
   "run_batch.py": "660113efbdca93b6296977814ba2923c3469e11ff197c3d154607294b9d2d9b9",
-  "test_supplied_readings.py": "a75be32c2e246f770da6a57553e9db1e3be94662cb8f5ea88ffa4aaa32875219",
+  "test_supplied_readings.py": "1582418fa9ce3447ed1c10c38573a793e398f1fecc106ac35ff1a0cfa3966ba5",
   "test_make_plan.py": "c39444a80b26f021cfdc8505a24596022ab9c56151fdacaf08adb1afe524f561"
  },
  "mutations": [
   {
    "name": "provenance: BOUND을 보지 않고 늘 캡의 방법",
    "file": "provenance.py",
-   "old": "    if str(end_basis or \"\").strip().upper() == SUPPLIED_END_BOUND:\n        cap = SUPPLIED_BOUND_METHOD\n",
+   "old": "    if basis == SUPPLIED_END_BOUND:\n        cap = SUPPLIED_BOUND_METHOD\n",
    "new": "    pass\n"
   },
   {
@@ -28,8 +28,8 @@
   {
    "name": "provenance: 공급 판독의 계약에 상한이 없다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\",\n                 \"NO_DISPERSION\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\",\n                 \"MEAN_ONLY_DECLARED\", \"NO_DISPERSION\"},"
   },
   {
    "name": "provenance: 검증기가 판독의 End_Basis를 보지 않음",

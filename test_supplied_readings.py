@@ -1075,7 +1075,7 @@ check("End_Basis is an optional column beside the box edges",
       and "End_Basis" in BM.SUPPLIED_OPTIONAL_COLUMNS
       and "End_Basis" not in BM.SUPPLIED_BOX_COLUMNS
       and "End_Basis" not in BM.supplied_readings_columns()
-      and PROV.SUPPLIED_END_BASES == ("CAP", "BOUND"))
+      and PROV.SUPPLIED_END_BASES == ("CAP", "BOUND", "NONE"))
 check("a reading whose ends are a bound validates",
       bound_validate([reading("S_B", 0, End_Basis="BOUND")]) == set(),
       "%s" % sorted(bound_validate([reading("S_B", 0, End_Basis="BOUND")])))
@@ -1237,6 +1237,75 @@ check("  and a batch with a bound writes End_Basis and no box columns",
       not _bpp and open(_bwritten["supplied_readings"], encoding="utf-8").readline()
       .strip().split(",") == BM.supplied_readings_columns() + ["End_Basis"],
       "%s" % (_bpp[:3],))
+
+# ==========================================================================
+print()
+print("a mean kept without its error bar, by decision, says so and is not a miss")
+# Built 2026-10-21 (the person, of cells whose ends they had placed inside the
+# marker and then dropped: "평균만이라도 넣어줘", then "평균만"). `End_Basis=NONE`
+# keeps the mean and records that no end is placed on purpose: the value is
+# `MEAN_ONLY_DECLARED`, R0, and the grid gate does not take it for a forgotten
+# spread. A blank-ended reading WITHOUT the word is still a missing spread.
+# REVERT: let NONE carry an end, or sit on a box; return NO_DISPERSION for it;
+# price it above R0; or let the gate ask it for a spread.
+check("a mean-only reading with no end validates",
+      bound_validate([reading("S_B", 0, End_Basis="NONE", Upper_Y_Px="",
+                              Lower_Y_Px="")]) == set(),
+      "%s" % sorted(bound_validate([reading("S_B", 0, End_Basis="NONE", Upper_Y_Px="",
+                                            Lower_Y_Px="")])))
+check("  and one that places an end anyway is refused",
+      "SUPPLIED_END_NONE_WITH_END"
+      in bound_validate([reading("S_B", 0, End_Basis="NONE", Upper_Y_Px="")]))
+check("  and a mean only on a box is refused",
+      "SUPPLIED_END_NONE_ON_BOX"
+      in box_validate([box_reading("S_B", 0, End_Basis="NONE")]))
+check("the method says mean only, whoever placed it, and only where no end is placed",
+      PROV.supplied_methods("PERSON", 2, False, "NONE")
+      == ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "MEAN_ONLY_DECLARED")
+      and PROV.supplied_methods("AI_AGENT", 1, False, "none")
+      == ("DECLARED_SINGLE_SERIES", "AI_PLACED_POINT", "MEAN_ONLY_DECLARED")
+      and PROV.supplied_methods("PERSON", 2, False, "")
+      == ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "NO_DISPERSION")
+      and PROV.supplied_methods("PERSON", 2, True, "NONE")[2] == "MANUAL_PLACED_CAP")
+check("  and it is R0, and only a supplied reading can claim it",
+      PROV.dispersion_tier("MEAN_ONLY_DECLARED") == "R0"
+      and not PROV.dispersion_contract_failure("SUPPLIED", "MEAN_ONLY_DECLARED")
+      and bool(PROV.dispersion_contract_failure("LINE_COLOR", "MEAN_ONLY_DECLARED")))
+_MO = [dict(r, End_Basis="NONE", Upper_Y_Px="", Lower_Y_Px="")
+       if r["Reading_ID"] == "P1__S_B__T1" else r for r in READINGS]
+_mo, _smo = bound_run("mean_only", _MO)
+_qmo = read(_mo, "figure_values_machine_qc.csv")
+_rmo = read(_mo, "run_manifest.csv")
+_mcell = [r for r in _qmo.to_dict("records") if r["Dispersion_Method"] == "MEAN_ONLY_DECLARED"]
+check("a panel with a mean-only cell runs and passes with every cell",
+      _smo["status"] == "RAN" and _rmo.loc[0, "Run_State"] == "AUTO_PASS"
+      and len(_qmo) == 8, "%s / %d" % (_rmo.to_dict("records"), len(_qmo)))
+check("  and that cell is a mean with no spread, saying MEAN_ONLY_DECLARED, R2 for its point",
+      len(_mcell) == 1
+      and str(_mcell[0]["Dispersion_Value"]) in ("", "nan")
+      and abs(float(_mcell[0]["Mean"]) - value_at(centre("S_B", 1)[1])) < 1e-9
+      and PROV.row_tier(_mcell[0]) == "R2", "%s" % _mcell)
+_NE = [dict(r, Upper_Y_Px="", Lower_Y_Px="") if r["Reading_ID"] == "P1__S_B__T1" else r
+       for r in READINGS]
+_ne, _sne = bound_run("no_ends_unsaid", _NE)
+check("  while the same blank ends without the word are a missing spread",
+      read(_ne, "run_manifest.csv").loc[0, "Run_State"] == "QC_FAILED"
+      and "MISSING_DISPERSION" in set(read(_ne, "qc_problems.csv")["check"]),
+      "%s" % read(_ne, "run_manifest.csv").to_dict("records"))
+_mfin = FIN.finalize(_mo, review_path=review(_mo), run_date="2026-10-21",
+                     today=datetime.date(2026, 10, 21))
+check("  and the panel finalizes with the mean-only cell in it, still saying so",
+      _mfin["status"] == "FINALIZED" and _mfin["accepted"] == 8
+      and sorted(read(_mo, "figure_values_accepted.csv")["Dispersion_Method"])
+      == ["AI_PLACED_CAP"] * 7 + ["MEAN_ONLY_DECLARED"], "%s" % _mfin)
+_mmk = json.load(open(RB.resolve_artifact(_mo, read(_mo, "review_queue.csv").loc[0, "Raw_Data_File"]),
+                      encoding="utf-8"))["marks"]
+_mm = [m for m in _mmk if m.get("End_Basis") == "NONE"]
+check("  and its mark is labelled and footed as a mean only on the overlay",
+      len(_mm) == 1 and " =" in RB.OVERLAY.mark_label(_mm[0])
+      and "1 mark(s): MEAN ONLY" in RB.OVERLAY.inferred_note(_mmk)
+      and "MEAN ONLY" not in RB.OVERLAY.inferred_note([m for m in _mmk if m not in _mm]),
+      "%r" % RB.OVERLAY.inferred_note(_mmk))
 
 print()
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))

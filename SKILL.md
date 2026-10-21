@@ -1227,7 +1227,7 @@ no weight in a variance-weighted pool; whether and how it enters an analysis (an
 a descriptive table) is the analysis plan's call, and the method says which values they are.
 `matrix_mean_only.json` 12, unobserved none; the ten matrices that pin the changed files, re-run, all
 unobserved none. (Two copies of `test_kernel.py` running at once collide on its fixed temporary file
-`fdt_regression_tmp.csv` and fail two scenarios - a matrix baseline went red for that reason alone and was
+`fdt_regression_tmp.csv` and fail two of its checks - a matrix baseline went red for that reason alone and was
 re-run on its own.)
 
 **Three paths the person opened on 2026-10-20 (decision page v8: D01, D14, D15).**

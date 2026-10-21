@@ -336,6 +336,48 @@ check("and undeclared, the flag asks for the shape rather than accusing "
       "DISPERSION_IMPLIES_SKEW" in _unknown
       and "SE_IMPLIES_HUGE_SD" not in _unknown, "%s" % _unknown)
 
+# AN UPPER BOUND IS NOT A CAP (decision I02, 2026-10-21). A spread whose ends
+# could not be seen is set at the edge of what hides them; it is larger than the
+# spread by construction and has no visible stem, so the two checks written for
+# caps skip it - and only it.
+# REVERT: drop `not fig_is_bound(row)` from the SE x sqrt(n) check, `bound_only`
+# from the unit's stem check, the bound test from the cell's, or count units as
+# bound-only when one of their spreads is a read cap.
+print("an upper bound is not a cap")
+_B = dict(Dispersion_Method="BOUND_HIDDEN_END")
+_bhuge = [dict(v, **_B) for v in _HUGE_VALS]
+_b1 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="UNKNOWN"), vals=_bhuge)
+check("an upper bound is not read as SE x sqrt(n) against the mean",
+      "DISPERSION_IMPLIES_SKEW" not in _b1, "%s" % _b1)
+_b2 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="SYMMETRIC"), vals=_bhuge)
+check("nor on a symmetric outcome", "SE_IMPLIES_HUGE_SD" not in _b2, "%s" % _b2)
+_b3 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="UNKNOWN"),
+          vals=[_bhuge[0], dict(_HUGE_VALS[1], Dispersion_Method="AI_PLACED_CAP")])
+check("a read cap beside it is still checked", "DISPERSION_IMPLIES_SKEW" in _b3, "%s" % _b3)
+_bs = [dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": lv}), Mean=60,
+            Dispersion_Value=3, **_B) for lv in ("PRE", "POST")]
+_b4 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"}, vals=_bs)
+check("a unit whose every spread is a bound is not asked for a stem",
+      "ERRORBAR_STEM_UNCONFIRMED" not in _b4, "%s" % _b4)
+_b5 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"},
+          vals=[_bs[0], dict(_bs[1], Dispersion_Method="AI_PLACED_CAP")])
+check("one read cap among them and the unit's stem question stands",
+      "ERRORBAR_STEM_UNCONFIRMED" in _b5, "%s" % _b5)
+_b6 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"},
+          vals=[dict(v, Dispersion_Value="", Dispersion_Method="") for v in _bs])
+check("a unit with no spread at all is not taken for a bound-only one",
+      "ERRORBAR_STEM_UNCONFIRMED" in _b6, "%s" % _b6)
+_b7 = run(vals=[dict(v, Errorbar_Stem_Confirmed="FALSE") for v in _bs])
+check("a bounded cell whose reader found no stem is not a stem failure",
+      "CELL_ERRORBAR_STEM_UNCONFIRMED" not in _b7, "%s" % _b7)
+_b8 = run(vals=[dict(v, Errorbar_Stem_Confirmed="FALSE", Dispersion_Method="AI_PLACED_CAP")
+                for v in _bs])
+check("a read cap with no stem still is", "CELL_ERRORBAR_STEM_UNCONFIRMED" in _b8, "%s" % _b8)
+_b9 = run(vals=[dict(v, Mean=60, Errorbar_Lower=65, Errorbar_Upper=70, Dispersion_Value="")
+                for v in _bs])
+check("and a bound still has to hold its mean between its ends",
+      "MEAN_OUTSIDE_ERRORBAR" in _b9, "%s" % _b9)
+
 # REVERT: let the transformation go undeclared. A mean of log10(power) and a
 # mean of power carry the same axis label and differ by more than any effect
 # this review is looking for, and nothing in a raster distinguishes them.

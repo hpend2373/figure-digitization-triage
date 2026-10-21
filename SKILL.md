@@ -1296,8 +1296,11 @@ and 13 did not:
 - **A bound meets a check made for a cap** (3 panels): `ERRORBAR_STEM_UNCONFIRMED` asks
   whether a cap's stem reaches its mark, and a bound has no visible stem by definition;
   `DISPERSION_IMPLIES_SKEW` reads SE×√n against the mean, and a bound is larger than the spread
-  it bounds. Whether the grid gate skips these two checks for `BOUND_HIDDEN_END` is a code
-  change the person was asked about (2026-10-21), not one made without them.
+  it bounds. The person chose (decision I02, 2026-10-21) that both skip a bound:
+  `grid_engine.fig_is_bound`. The SE×√n comparison and the cell's stem check pass over a
+  `BOUND_HIDDEN_END` value; the unit's stem question is dropped only when every spread of
+  the unit is a bound (one read cap among them and it stands); the ends' order, the mean
+  between them and a positive spread are still asked of a bound. `matrix_bound_gate.json`.
 - **SD or SE.** Where a paper says "means ± SD" for every figure, two blinded checks compared
   bar lengths with the numbers in the text: in one figure the bars matched the text's SD/√n
   and not its SD (MEDIUM: one panel to compare), in another the text gave no numbers to
@@ -1335,12 +1338,14 @@ page still showed, so the new page replaced it instead of standing beside it:
 
 Decisions the older page asked are restated on the new one with the one they replace named.
 
-**Known gap.** The overlay footer's line for `~` was written for a spread from a cap with no
-visible stem ("the SPREAD is not measured - the cap may be a cap or a significance glyph"), and
-a bound is drawn with the same `~`. A blinded check noticed that the footer contradicts its
-rules. The run2 page says in each card's table that every `~` there is a bound; the footer
-(`review_overlay.SPREAD_NOTE`) is to be split, and since that changes every overlay with a
-bound, it waits for the next code change that runs those panels again.
+**The footer, fixed with I02.** The overlay footer's line for `~` was written for a spread from
+a cap with no visible stem ("the SPREAD is not measured - the cap may be a cap or a
+significance glyph"), and a bound is drawn with the same `~`; a blinded check noticed that
+the footer contradicted its rules, and the first page carrying bounds said so in each card's
+table. A bound now has its own footer line (`review_overlay.BOUND_NOTE`: no end visible, each
+end at the edge of what hides it, an UPPER BOUND), counted apart from unstemmed caps
+(`matrix_bound_footer.json`). It changes every overlay with a bound, so those panels' review
+subjects change with the next run.
 
 **Second checks, in practice.** A pass that answers OK with MEDIUM confidence leaves its reason
 blank, as its rules say, so the page has nothing to show beside it: put the gist of its report

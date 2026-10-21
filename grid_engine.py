@@ -115,6 +115,23 @@ FIG_TRANSFORMATIONS = ("UNTRANSFORMED", "LOG10", "LN", "LOG2", "SQRT", "RECIPROC
 # it, which trains a reader to ignore the check.
 FIG_DISTRIBUTION_SHAPES = ("SYMMETRIC", "RIGHT_SKEWED", "LEFT_SKEWED", "UNKNOWN")
 
+# AN UPPER BOUND IS NOT A CAP (decision I02, 2026-10-21). A value whose error-bar
+# ends could not be seen goes in with its ends at the edge of what hides them
+# (`End_Basis=BOUND` -> `provenance.SUPPLIED_BOUND_METHOD`, R3, confirmed cell by
+# cell). Two checks were written for caps and say nothing about such a value:
+# whether a whisker's stem reaches its mark (a bound has no visible stem, by
+# definition), and whether SE x sqrt(n) is implausibly large for the mean (a bound
+# is set larger than the spread it bounds). They skip a bound; every other check
+# - the ends' order, the mean between them, the dispersion being positive - still
+# applies to it. Spelled here rather than imported: provenance imports nothing
+# from this module and this module nothing from it.
+FIG_BOUND_DISPERSION_METHOD = "BOUND_HIDDEN_END"
+
+
+def fig_is_bound(row):
+    """True when this value's spread is an upper bound, not a read cap."""
+    return str(row.get("Dispersion_Method", "") or "").strip().upper() == FIG_BOUND_DISPERSION_METHOD
+
 _PAIR = re.compile(r"^\s*([^=]+?)\s*=\s*(.+?)\s*$")
 
 
@@ -298,11 +315,13 @@ def fig_parse_cell_key(key):
 # universal checkers
 # --------------------------------------------------------------------------
 
-def validate_unit(row, kernel, flag, line, figure=None, cell_n=False):
+def validate_unit(row, kernel, flag, line, figure=None, cell_n=False, bound_only=False):
     """N, dispersion vocabulary, extraction geometry, provenance for one unit.
 
     `cell_n`: this unit's values carry their own n (`N_Cell`, one per group), so
     a blank unit `N_Outcome` is not missing - each cell is checked for its own.
+    `bound_only`: every spread this unit's values carry is an upper bound
+    (`fig_is_bound`), so there is no whisker whose stem the unit could confirm.
     """
     blank, num, bad_num = kernel.fig_is_blank, kernel.fig_as_number, kernel.fig_is_bad_number
     unresolved = kernel.fig_unresolved_marker
@@ -424,7 +443,7 @@ def validate_unit(row, kernel, flag, line, figure=None, cell_n=False):
             if stem == "BAD":
                 flag(line, "BAD_ERRORBAR_STEM_FLAG",
                      "Errorbar_Stem_Confirmed=%r" % row.get("Errorbar_Stem_Confirmed"))
-            elif stem is not True:
+            elif stem is not True and not bound_only:
                 flag(line, "ERRORBAR_STEM_UNCONFIRMED",
                      "the whisker was not confirmed to connect to the mark")
         # ONE CATEGORICAL SLOT. A categorical x axis is calibrated on its slots
@@ -644,7 +663,8 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                  "the plotted values are on the %s scale; the pool is in "
                  "native units and nothing here back-transforms. Record them, "
                  "and pool them separately or not at all" % transform)
-        if ratio_scale and dt in ("SE", "SEM") and sym is not None and m is not None and n and n > 0:
+        if ratio_scale and dt in ("SE", "SEM") and sym is not None and m is not None and n and n > 0 \
+                and not fig_is_bound(row):
             sd = sym * (n ** 0.5)
             if sd > abs(m) * 1.5:
                 # WHICH of these two it is depends on the DISTRIBUTION, and
@@ -1137,6 +1157,14 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
         for _, r in values.iterrows():
             if not blank(r.get("N_Cell")):
                 cell_n_units.add(str(r.get("Unit_ID", "")).strip())
+    # AND UNITS WHOSE EVERY SPREAD IS AN UPPER BOUND: nothing there has a stem to
+    # confirm. One read cap among them and the unit's stem question stands.
+    spread_kinds = {}
+    for _, r in values.iterrows():
+        if not blank(r.get("Dispersion_Value")) or not blank(r.get("Errorbar_Lower")) \
+                or not blank(r.get("Errorbar_Upper")):
+            spread_kinds.setdefault(str(r.get("Unit_ID", "")).strip(), set()).add(fig_is_bound(r))
+    bound_only_units = set(u for u, kinds in spread_kinds.items() if kinds == {True})
 
     # --------------------------------------------------------------- units
     unit = {}
@@ -1155,7 +1183,7 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
         if gid and gid not in declared:
             flag(line, "UNKNOWN_GRID_ID", gid)
         validate_unit(r, kernel, flag, line, figure=fig.get(fid),
-                      cell_n=uid in cell_n_units)
+                      cell_n=uid in cell_n_units, bound_only=uid in bound_only_units)
 
     # -------------------------------------------------------------- values
     seen = {}
@@ -1193,7 +1221,7 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                 flag(line, "BAD_ERRORBAR_STEM_FLAG",
                      "Errorbar_Stem_Confirmed=%r on this cell"
                      % r.get("Errorbar_Stem_Confirmed"))
-            elif cell_stem is False:
+            elif cell_stem is False and not fig_is_bound(r):
                 flag(line, "CELL_ERRORBAR_STEM_UNCONFIRMED",
                      "the reader could not connect this cell's whisker to its "
                      "mark, whatever the unit row asserts")

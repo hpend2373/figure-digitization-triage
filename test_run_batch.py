@@ -6597,6 +6597,20 @@ check("  and the footer asks the two questions separately",
       len(_both.splitlines()) == 2
       and "SPREAD is not" in _both
       and "reconstructed from neighbouring ink" in _both, "%r" % _both)
+# A BOUND IS NOT AN UNSTEMMED CAP (decision I02, 2026-10-21). Same `~` on the
+# label, its own line in the footer: "the cap may be a significance glyph" is not
+# what a reviewer of a hidden end is asked.
+# REVERT: count bounds in SPREAD_NOTE's line, or drop BOUND_NOTE's.
+_BOUND_MARK = dict(_SPREAD_MARK, Dispersion_Method="BOUND_HIDDEN_END")
+_bnd = RB.OVERLAY.inferred_note([_BOUND_MARK, _BOUND_MARK, _SPREAD_MARK])
+check("a bound is marked ~ and footed as an upper bound, apart from an unstemmed cap",
+      RB.OVERLAY.mark_label(_BOUND_MARK).endswith(" ~")
+      and len(_bnd.splitlines()) == 2
+      and "2 mark(s): no end of the error bar is visible" in _bnd
+      and "1 mark(s): the number is measured and the SPREAD is not" in _bnd, "%r" % _bnd)
+_bnd1 = RB.OVERLAY.inferred_note([_BOUND_MARK])
+check("  and a panel of bounds alone never reads 'significance glyph'",
+      "UPPER BOUND" in _bnd1 and "glyph" not in _bnd1, "%r" % _bnd1)
 # THE TWO SHARED FIELDS ARE NOT "PROVENANCE THIS OVERLAY CANNOT READ". The
 # suffix check was case-sensitive against lower-case suffixes, so `Value_Method`
 # matched nothing and `Identity_Method` matched nothing - and the moment a reader

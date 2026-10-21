@@ -295,6 +295,20 @@ SPREAD_NOTE = ("%d mark(s): the number is measured and the SPREAD is not - the "
                "cap may be a cap or a significance glyph. Confirmed by name in "
                "inference_review.csv, like a reconstructed number")
 
+#: AND A BOUND IS A THIRD (decision I02, 2026-10-21). An end nobody could see, set
+#: at the edge of what hides it (`End_Basis=BOUND`), is drawn with the same `~` -
+#: but "the cap may be a significance glyph" is not the question it asks, and a
+#: blinded check reading the footer beside its rules found the two contradicting.
+BOUND_NOTE = ("%d mark(s): no end of the error bar is visible - each end is set at "
+              "the edge of what hides it, an UPPER BOUND on the spread. Confirmed by "
+              "name in inference_review.csv")
+
+
+def bound_spread(mark):
+    """True when this mark's spread is an upper bound, not a cap that was seen."""
+    return (str(mark.get("Dispersion_Method", "") or "").strip().upper()
+            == PROV.SUPPLIED_BOUND_METHOD)
+
 
 def spread_only(mark):
     """True when this mark is R3 for its ERROR BAR and not for its number."""
@@ -340,6 +354,11 @@ def inferred_note(marks):
             here = [m for m in here if not placed(m)]
         if tier == "R3":
             spread = [m for m in here if spread_only(m)]
+            bounds = [m for m in spread if bound_spread(m)]
+            if bounds:
+                lines.append("%s %s" % (SPREAD_MARK_SUFFIX.strip(),
+                                        BOUND_NOTE % len(bounds)))
+            spread = [m for m in spread if not bound_spread(m)]
             if spread:
                 lines.append("%s %s"
                              % (SPREAD_MARK_SUFFIX.strip(),

@@ -1,14 +1,14 @@
 {
  "files": {
-  "batch_manifests.py": "b2114beb154aa77d6bbce6bd6b9c3783911a14ec0ebdf3dafda14b83aa9d6cb6",
-  "compile_plan.py": "4f44ce3e76107b62ed56e2e73e065398d1892df7b4a5e5e6ed47128dde92f43d",
+  "batch_manifests.py": "13dea7aee4a8a3a30ec546874e1dbfe0003e916713a621a72c4e55c2f1cc1ab7",
+  "compile_plan.py": "1258b8b2d666731790c86555be7e4fdda9e43c0cc12df07b213857380b784666",
   "finalize_batch.py": "0339bafd9d2e02fe427fa6db01a18bdb61924267e59ab1c3ad50cdc31206f1df",
-  "make_plan.py": "1e38715c9e89849697548321932e4ef6883339dfa0ae852b38eb2d8da2241738",
-  "provenance.py": "a7cea95fa91d88be7a1d30e6776755860bafd0097695a0c813a7f7137d6f2c73",
+  "make_plan.py": "66c4ab17700ca1cb726a7f85d5aeca5390c024c1e0c3286ffddaf2bbb829106c",
+  "provenance.py": "dd03043c7dff0fcd4fe3ea6c2247064ac2ca52d1f4b60f4268eae7b52c3394e2",
   "review_overlay.py": "93ff915b7e4467509cbbb64a2aaedf7846b67f762c2866444607ce7797cb906c",
-  "run_batch.py": "d8a7476fcba20367d3a383cecbfcddbee3b7ea1dcee3d0d1542c2f53adb63be4",
-  "test_make_plan.py": "9fd77bd831794a3e2128d2518d0d8e312527292ae05dd32f1f7024ef7bc9f851",
-  "test_supplied_readings.py": "cc9f1c106d3de2208e7e1794b91fe96bd4b102bdc0e979baf1ddb70f0f67a835",
+  "run_batch.py": "660113efbdca93b6296977814ba2923c3469e11ff197c3d154607294b9d2d9b9",
+  "test_make_plan.py": "c39444a80b26f021cfdc8505a24596022ab9c56151fdacaf08adb1afe524f561",
+  "test_supplied_readings.py": "a75be32c2e246f770da6a57553e9db1e3be94662cb8f5ea88ffa4aaa32875219",
   "value_page.py": "9a9a30ab288eb4a3687c284f49f9ce135d129eb7aee490874fb4ced599601f15"
  },
  "suites": [
@@ -49,8 +49,8 @@
   {
    "name": "공급 경로가 판독기의 오차 방법을 낼 수 있다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\", \"DIRECT_CONNECTED_CAP\"},"
   },
   {
    "name": "검증기가 픽셀을 판독과 대조하지 않는다",
@@ -73,14 +73,14 @@
   {
    "name": "검증기가 계열 하나도 AI 배정으로 본다",
    "file": "provenance.py",
-   "old": "        kind, count, is_box or not (top is None and bottom is None))",
-   "new": "        kind, 2, is_box or not (top is None and bottom is None))"
+   "old": "        kind, count, is_box or not (top is None and bottom is None),",
+   "new": "        kind, 2, is_box or not (top is None and bottom is None),"
   },
   {
    "name": "검증기가 끝 없는 점도 놓은 오차로 본다",
    "file": "provenance.py",
-   "old": "        kind, count, is_box or not (top is None and bottom is None))",
-   "new": "        kind, count, True)"
+   "old": "        kind, count, is_box or not (top is None and bottom is None),",
+   "new": "        kind, count, True,"
   },
   {
    "name": "한 끝의 퍼짐을 반으로",
@@ -199,8 +199,8 @@
   {
    "name": "계열 하나도 AI 배정으로 적는다",
    "file": "run_batch.py",
-   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None)",
-   "new": "            mark.get(\"Reader_Kind\"), 2, spread is not None)"
+   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None,",
+   "new": "            mark.get(\"Reader_Kind\"), 2, spread is not None,"
   },
   {
    "name": "누가 읽었는지 실행 기록에 적지 않는다",
@@ -325,8 +325,8 @@
   {
    "name": "공급 경로가 사람의 오차 끝을 모른다",
    "file": "provenance.py",
-   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"NO_DISPERSION\"},",
-   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"NO_DISPERSION\"},"
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},"
   },
   {
    "name": "검증기가 판독 대신 표시의 종류를 본다",
@@ -361,8 +361,8 @@
   {
    "name": "실행이 사람의 점을 AI의 것으로 적는다",
    "file": "run_batch.py",
-   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None)",
-   "new": "            \"AI_AGENT\", series_count, spread is not None)"
+   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None,",
+   "new": "            \"AI_AGENT\", series_count, spread is not None,"
   },
   {
    "name": "겹친 그림이 사람의 점에 P를 붙이지 않는다",
@@ -457,8 +457,8 @@
   {
    "name": "상자 열을 늘 쓴다",
    "file": "compile_plan.py",
-   "old": "            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_OPTIONAL_COLUMNS)\n            else [])),",
-   "new": "            if True\n            else [])),"
+   "old": "            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_BOX_COLUMNS)\n            else []) + (",
+   "new": "            if True\n            else []) + ("
   },
   {
    "name": "런 파일의 상자 변을 읽지 않는다",

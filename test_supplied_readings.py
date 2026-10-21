@@ -1044,6 +1044,200 @@ check("  and a batch with no box reading writes no box columns",
       not _pp and open(os.path.join(_mdir2, "supplied_readings.csv"), encoding="utf-8")
       .readline().strip().split(",") == BM.supplied_readings_columns())
 
+# ==========================================================================
+print()
+print("an end set at the edge of what hides the bar is a bound, and says so")
+# Built 2026-10-21 (the person: "끝이 없는 칸도 넣어줘야해"). A cell whose error bar
+# cannot be seen - inside its marker, under other marks, or on a bar two series
+# share - goes in with its ends at the edge of what hides them: an UPPER BOUND on
+# the spread. The number is made the same way as a cap's; what changes is what
+# the value says it is (`BOUND_HIDDEN_END`, R3, asked about per cell).
+BOUND_COLS = BM.supplied_readings_columns() + list(BM.SUPPLIED_OPTIONAL_COLUMNS)
+
+
+def bound_validate(readings, units=UNITS):
+    problems = BM.validate_batch_manifests(
+        frame(PANELS, BM.panel_manifest_columns()),
+        frame(SERIES, BM.series_manifest_columns()),
+        frame(POSITIONS, BM.position_manifest_columns()),
+        frame([], BM.reader_config_columns()),
+        units=frame(units, GE.fig_unit_columns()),
+        source_documents=frame(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
+        source_figures=frame(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
+        source_panels=frame(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+        reviewers=frame(REVIEWERS, BM.reviewer_registry_columns()),
+        readings=frame(readings, BOUND_COLS), file_root=ROOT, doc_root=ROOT)
+    return set(problems["check"]) if len(problems) else set()
+
+
+check("End_Basis is an optional column beside the box edges",
+      BM.SUPPLIED_END_BASIS_COLUMN == "End_Basis"
+      and "End_Basis" in BM.SUPPLIED_OPTIONAL_COLUMNS
+      and "End_Basis" not in BM.SUPPLIED_BOX_COLUMNS
+      and "End_Basis" not in BM.supplied_readings_columns()
+      and PROV.SUPPLIED_END_BASES == ("CAP", "BOUND"))
+check("a reading whose ends are a bound validates",
+      bound_validate([reading("S_B", 0, End_Basis="BOUND")]) == set(),
+      "%s" % sorted(bound_validate([reading("S_B", 0, End_Basis="BOUND")])))
+check("  and so does one that says CAP, or says it in small letters",
+      bound_validate([reading("S_B", 0, End_Basis="CAP"),
+                      reading("S_R", 0, End_Basis="bound")]) == set())
+check("  and an End_Basis this file does not define is refused",
+      "SUPPLIED_END_BASIS_UNKNOWN"
+      in bound_validate([reading("S_B", 0, End_Basis="GUESS")]))
+check("  and a bound with no end placed is refused",
+      "SUPPLIED_END_BOUND_WITHOUT_END"
+      in bound_validate([reading("S_B", 0, End_Basis="BOUND", Upper_Y_Px="",
+                                 Lower_Y_Px="")]))
+check("  while a bound with one end is fine",
+      bound_validate([reading("S_B", 0, End_Basis="BOUND", Lower_Y_Px="")]) == set())
+check("  and a bound on a box's whiskers is refused",
+      "SUPPLIED_END_BOUND_ON_BOX"
+      in box_validate([box_reading("S_B", 0, End_Basis="BOUND")]))
+check("the method names the number, whoever placed it",
+      PROV.supplied_methods("AI_AGENT", 2, True, "BOUND")
+      == ("AI_ASSIGNED_SERIES", "AI_PLACED_POINT", "BOUND_HIDDEN_END")
+      and PROV.supplied_methods("PERSON", 2, True, "bound")
+      == ("PERSON_ASSIGNED_SERIES", "MANUAL_DIGITIZED", "BOUND_HIDDEN_END")
+      and PROV.supplied_methods("AI_AGENT", 2, True, "CAP")
+      == ("AI_ASSIGNED_SERIES", "AI_PLACED_POINT", "AI_PLACED_CAP")
+      and PROV.supplied_methods("PERSON", 1, False, "BOUND")
+      == ("DECLARED_SINGLE_SERIES", "MANUAL_DIGITIZED", "NO_DISPERSION")
+      and PROV.supplied_methods("AI_AGENT", 2, True)
+      == ("AI_ASSIGNED_SERIES", "AI_PLACED_POINT", "AI_PLACED_CAP"))
+check("  and a bound is R3, asked per cell, and only a supplied reading can claim one",
+      PROV.dispersion_tier("BOUND_HIDDEN_END") == "R3"
+      and "R3" in PROV.CELL_CONFIRMATION_TIERS
+      and not PROV.dispersion_contract_failure("SUPPLIED", "BOUND_HIDDEN_END")
+      and bool(PROV.dispersion_contract_failure("LINE_COLOR", "BOUND_HIDDEN_END"))
+      and bool(PROV.dispersion_contract_failure("BAR_COLOR", "BOUND_HIDDEN_END")))
+
+_BOUND = [dict(r, End_Basis="BOUND") if r["Reading_ID"] == "P1__S_B__T1" else r
+          for r in READINGS if r["Reading_ID"] != "P1__S_R__T2"] \
+    + [person("S_R", 2, End_Basis="BOUND", Upper_Y_Px="")]
+
+
+def bound_run(name, readings):
+    out = os.path.join(ROOT, name)
+    shutil.rmtree(out, ignore_errors=True)
+    mdir = write_manifests(os.path.join(out, "manifests"), supplied_readings=None)
+    with open(os.path.join(mdir, "supplied_readings.csv"), "w", newline="",
+              encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(BOUND_COLS)
+        for r in readings:
+            w.writerow([r.get(c, "") for c in BOUND_COLS])
+    return out, RB.run_batch(mdir, out, file_root=ROOT, run_date="2026-10-21")
+
+
+_bo, _sbo = bound_run("bounds", _BOUND)
+_qbo = read(_bo, "figure_values_machine_qc.csv")
+_rbo = read(_bo, "run_manifest.csv")
+_bcells = [r for r in _qbo.to_dict("records")
+           if r["Dispersion_Method"] == "BOUND_HIDDEN_END"]
+check("a panel with two bounded cells runs and passes with every cell",
+      _sbo["status"] == "RAN" and _rbo.loc[0, "Run_State"] == "AUTO_PASS"
+      and len(_qbo) == 8, "%s / %d" % (_rbo.to_dict("records"), len(_qbo)))
+check("  and exactly those two say BOUND_HIDDEN_END, an agent's and a person's, R3",
+      len(_bcells) == 2
+      and sorted(r["Value_Method"] for r in _bcells)
+      == ["AI_PLACED_POINT", "MANUAL_DIGITIZED"]
+      and {PROV.row_tier(r) for r in _bcells} == {"R3"}
+      and sorted(set(_qbo["Dispersion_Method"]))
+      == ["AI_PLACED_CAP", "BOUND_HIDDEN_END"], "%s" % _bcells)
+_b_ai = [r for r in _bcells if "CONTROL" in r["Cell_Key"]]
+check("  and the bound's number is made as a cap's would be, from the placed ends",
+      len(_b_ai) == 1
+      and abs(float(_b_ai[0]["Dispersion_Value"]) - 22 * 220.0 / 400.0) < 1e-9
+      and abs(float(_b_ai[0]["Mean"]) - value_at(centre("S_B", 1)[1])) < 1e-9,
+      "%s" % _b_ai)
+_bq = read(_bo, "review_queue.csv")
+_bmk = json.load(open(RB.resolve_artifact(_bo, _bq.loc[0, "Raw_Data_File"]),
+                      encoding="utf-8"))["marks"]
+check("  and the two marks carry End_Basis, and the six caps carry no such key",
+      sorted(m.get("End_Basis") for m in _bmk if "End_Basis" in m) == ["BOUND", "BOUND"]
+      and sum(1 for m in _bmk if "End_Basis" not in m) == 6, "%s" % _bmk[:2])
+_asked = FIN.collect_inference_manifests(_bo)
+check("the run asks about the two bounds per cell, and about no cap",
+      len(_asked) == 2
+      and sorted(r["Cell_Key"] for r in _asked) == sorted(r["Cell_Key"] for r in _bcells),
+      "%s" % _asked)
+_bcells_path = os.path.join(_bo, "inference_review.csv")
+
+
+def _bound_answers(rows):
+    with open(_bcells_path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIN.inference_review_columns())
+        for r in rows:
+            w.writerow([dict(Inference_ID=r["Inference_ID"], Panel_ID="P1",
+                             Unit_ID=r.get("Unit_ID", ""), Cell_Key=r["Cell_Key"],
+                             Reviewer_ID="RV_H", Inference_Confirmed="CONFIRMED",
+                             Reviewed_At="2026-10-21T10:00:00Z", Note="").get(c, "")
+                        for c in FIN.inference_review_columns()])
+    return _bcells_path
+
+
+def _bound_finalize():
+    return FIN.finalize(_bo, review_path=review(_bo), run_date="2026-10-21",
+                        today=datetime.date(2026, 10, 21),
+                        inference_review_path=_bcells_path)
+
+
+check("  and a blank end names the same question in memory (NaN) and in the file (blank)",
+      RB.inference_id(dict(_bcells[0], Errorbar_Upper=float("nan")), "P1")
+      == RB.inference_id(dict(_bcells[0], Errorbar_Upper=""), "P1")
+      and RB.inference_id(dict(_bcells[0], Errorbar_Upper=1.5), "P1")
+      != RB.inference_id(dict(_bcells[0], Errorbar_Upper=""), "P1"))
+_bound_answers([])
+_bnone = _bound_finalize()
+check("  so the panel approval alone finalizes nothing",
+      _bnone["status"] == "NOTHING_APPROVED"
+      and sum(1 for p in _bnone["problems"]
+              if p["check"] == "INFERENCE_CONFIRMATION_MISSING") == 2, "%s" % _bnone)
+_bound_answers(_asked)
+_ball = _bound_finalize()
+check("  and with each bound confirmed the panel finalizes, the bounds still saying so",
+      _ball["status"] == "FINALIZED" and _ball["accepted"] == 8
+      and sorted(read(_bo, "figure_values_accepted.csv")["Dispersion_Method"])
+      == ["AI_PLACED_CAP"] * 6 + ["BOUND_HIDDEN_END"] * 2, "%s" % _ball)
+_bcx = FIN.panel_expectations(dict(
+    RB.load_manifests(os.path.join(_bo, "manifests")),
+    outputs={"run_manifest.csv": _rbo.to_dict("records")}))["P1"]
+_bm0 = [m for m in _bmk if m.get("End_Basis") == "BOUND"
+        and m.get("Reader_Kind") == "AI_AGENT"][0]
+_bcl = {f: _bm0.get(f) for f in PROV.METHOD_FIELDS}
+check("the verifier passes a bound's own mark",
+      _bcl["Dispersion_Method"] == "BOUND_HIDDEN_END"
+      and PROV.evidence_failure("SUPPLIED", _bm0, _bcl, _bcx["context"]) == ("", ""),
+      "%s" % (PROV.evidence_failure("SUPPLIED", _bm0, _bcl, _bcx["context"]),))
+_got = PROV.evidence_failure("SUPPLIED", _bm0, dict(_bcl, Dispersion_Method="AI_PLACED_CAP"),
+                             _bcx["context"])
+check("  and refuses the bound's value claiming to be a cap",
+      _got[0] == "METHOD_CONTRADICTS_EVIDENCE", "%s" % (_got,))
+_got = PROV.evidence_failure(
+    "SUPPLIED", {k: v for k, v in _bm0.items() if k != "End_Basis"},
+    dict(_bcl, Dispersion_Method="AI_PLACED_CAP"), _bcx["context"])
+check("  and refuses a mark and value relabelled a cap together: the reading says",
+      _got[0] in ("METHOD_EVIDENCE_INCOMPLETE", "METHOD_CONTRADICTS_EVIDENCE"), "%s" % (_got,))
+
+_pbound = {"readings": [dict(PLAN["figures"][0]["panels"][0]["read"]["readings"][0],
+                             end_basis="bound")]}
+check("the plan carries what the ends are to the manifest row",
+      "end_basis" in CP.PLAN_KEYS["reading"]
+      and CP.reading_rows("P1", _pbound)[0]["End_Basis"] == "BOUND"
+      and CP.reading_rows("P1", PLAN["figures"][0]["panels"][0]["read"])[0]["End_Basis"] == "")
+_bplan = json.loads(json.dumps(PLAN))
+_bplan["figures"][0]["panels"][0]["read"]["readings"][1]["end_basis"] = "BOUND"
+_bpdir = os.path.join(ROOT, "from_plan_bound")
+shutil.rmtree(_bpdir, ignore_errors=True)
+_bwritten, _bpp = CP.compile_plan(_bplan, os.path.join(_bpdir, "manifests"),
+                                  file_root=ROOT, run_date="2026-10-21")
+check("  and a batch with a bound writes End_Basis and no box columns",
+      not _bpp and open(_bwritten["supplied_readings"], encoding="utf-8").readline()
+      .strip().split(",") == BM.supplied_readings_columns() + ["End_Basis"],
+      "%s" % (_bpp[:3],))
+
 print()
 print("FDT_SCENARIOS_RUN=%d" % len(RAN))
 print("%d scenarios run" % len(RAN))

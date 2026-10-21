@@ -141,6 +141,9 @@ READING_FIELDS = ("Proposal_ID", "Series", "X_Label", "Mark_X_Px", "Mark_Y_Px",
 #: 상자그림 판독의 상자 두 변 (2026-10-20): 선택 열이라 이 열이 없는 판독 파일도 그대로 읽힙니다.
 #: 표시(Mark_Y_Px)는 중앙값 선, 위·아래 끝(Upper/Lower_Y_Px)은 수염 끝입니다.
 READING_BOX_FIELDS = (("Box_Upper_Y_Px", "box_upper_px"), ("Box_Lower_Y_Px", "box_lower_px"))
+#: 끝이 무엇인지 (2026-10-21, 사람의 말: "끝이 없는 칸도 넣어줘야해"): 비었거나 CAP - 인쇄된 캡,
+#: BOUND - 막대의 끝이 가려져 가린 것의 가장자리에 둔 상한. 선택 열이라 이 열이 없는 판독 파일도 그대로입니다.
+READING_END_BASIS_FIELD = ("End_Basis", "end_basis")
 #: 사람이 600 DPI 래스터 위에서 패널마다 그린 상자와 종류 (`record_panels.py`).
 #: 이것이 있으면 그림의 패널 목록은 이것입니다 - 계수 시트의 수는 "몇 개"이고,
 #: 이것은 "어느 것이 어디에, 무엇으로"입니다. 둘이 다르면 그림의 메모에 적습니다.
@@ -811,6 +814,12 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, rea
                 text = (r.get(src) or "").strip()
                 if text:
                     entry[dst] = float(text) if _is_number(text) else text
+            # What the ends ARE, only where the run file says (`READING_END_BASIS_FIELD`):
+            # a reading of caps carries no key, so every other plan is what it was.
+            src, dst = READING_END_BASIS_FIELD
+            text = (r.get(src) or "").strip()
+            if text:
+                entry[dst] = text.upper()
             read["readings"].append(entry)
     factors = {x_factor: [str(p.get("label") or "").strip() for p in positions],
                s_factor: [(e.get("name") or "").strip() or ("S%d" % (i + 1)) for i, e in enumerate(series)]}

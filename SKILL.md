@@ -1177,7 +1177,7 @@ typed, never filled. The cell's n comes from the arrows like every other minute.
 **And a box (built 2026-10-20; the person: "1,2 둘다 하나로 만들어줘", where 1 was the 28
 MANUAL panels nobody had read - every one a box plot of two series, which the box reader
 cannot read: it takes one series per position).** The same file, two optional columns
-(`BM.SUPPLIED_OPTIONAL_COLUMNS`, written only when some reading is a box's, so every other
+(`BM.SUPPLIED_BOX_COLUMNS`, written only when some reading is a box's, so every other
 batch is byte for byte what it was):
 
     Mark_Y_Px                the median line
@@ -1200,6 +1200,19 @@ value on the upper side (2026-10-20, `test_supplied_readings.py` +4).
 A mean's mark gets no box key at all - a null key would still have changed every existing
 `Mark_Record_SHA256`. A whisker that is not drawn because the extreme IS the box edge (a box
 sitting on zero) is that edge, not a blank: blank means nobody could see it.
+
+**And an end nobody can see (built 2026-10-21; the person: "끝이 없는 칸도 넣어줘야해").** A
+mean whose error bar is hidden - inside its own marker, under other marks, or on a bar two
+series share - goes in with its ends set at the edge of what hides them, and the optional
+column `End_Basis` says so: blank or `CAP` = printed caps, as before; `BOUND` = an UPPER
+BOUND on the spread. The number is made exactly as a cap's; the value's `Dispersion_Method`
+is `BOUND_HIDDEN_END` (R3) whoever placed it, so a bound never passes for a cap, the run asks
+about each bounded cell on its own (`inference-review/`, `Inference_Confirmed` per cell), and a
+sensitivity analysis can drop them by method. Refused before the run: an End_Basis this file
+does not define (SUPPLIED_END_BASIS_UNKNOWN), a bound with neither end
+(SUPPLIED_END_BOUND_WITHOUT_END), a bound on a box's whiskers (SUPPLIED_END_BOUND_ON_BOX).
+Written only when some reading has it, so every other batch is byte for byte what it was.
+A cell with no error bar drawn at all has nothing to bound and stays out.
 
 **Three paths the person opened on 2026-10-20 (decision page v8: D01, D14, D15).**
 

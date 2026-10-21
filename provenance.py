@@ -377,8 +377,11 @@ DISPERSION_CONTRACT = {
     "BOX_VIOLIN": {"DIRECT_BOX_GEOMETRY"},
     "SCATTER": {"NO_DISPERSION"},
     # An end the agent placed, or none placed. Not `DIRECT_CONNECTED_CAP`: that
-    # names a reader following a stem, and no reader ran.
-    "SUPPLIED": {"AI_PLACED_CAP", "MANUAL_PLACED_CAP", "NO_DISPERSION"},
+    # names a reader following a stem, and no reader ran. `BOUND_HIDDEN_END` is
+    # an end set at the edge of what hides the bar (`End_Basis=BOUND`), and only
+    # a supplied reading can say that.
+    "SUPPLIED": {"AI_PLACED_CAP", "MANUAL_PLACED_CAP", "BOUND_HIDDEN_END",
+                 "NO_DISPERSION"},
 }
 
 
@@ -1408,15 +1411,32 @@ SUPPLIED_READER_KINDS = tuple(SUPPLIED_KIND_METHODS)
 #: The kinds whose `Read_By` must be a registered person.
 SUPPLIED_PERSON_KINDS = ("PERSON",)
 
+#: WHAT A READING'S ENDS ARE (`End_Basis`, an optional column of
+#: `supplied_readings.csv`; built 2026-10-21, the person: "끝이 없는 칸도
+#: 넣어줘야해"). Blank or `CAP`: the ends are the printed caps, as every reading
+#: before this column was. `BOUND`: the bar's own ends cannot be seen - inside the
+#: marker, under other marks, or on a bar two series share - and the ends were set
+#: at the edge of what hides them. The spread is then at most that, and the value
+#: says so (`BOUND_HIDDEN_END`) instead of passing for a cap.
+SUPPLIED_END_CAP = "CAP"
+SUPPLIED_END_BOUND = "BOUND"
+SUPPLIED_END_BASES = (SUPPLIED_END_CAP, SUPPLIED_END_BOUND)
+SUPPLIED_BOUND_METHOD = "BOUND_HIDDEN_END"
 
-def supplied_methods(reader_kind, series_count, has_dispersion):
+
+def supplied_methods(reader_kind, series_count, has_dispersion, end_basis=""):
     """(Identity_Method, Value_Method, Dispersion_Method) of a supplied mark.
 
     One series on the panel is `DECLARED_SINGLE_SERIES` whoever placed the
-    point; no end placed is `NO_DISPERSION`. A kind with no row raises KeyError -
-    the batch layer refuses it first (`SUPPLIED_READER_KIND_UNKNOWN`).
+    point; no end placed is `NO_DISPERSION`. Ends placed as a bound
+    (`end_basis` = `BOUND`) are `BOUND_HIDDEN_END` whoever placed them - the
+    method names what the number is, an upper bound, not who drew it. A kind
+    with no row raises KeyError - the batch layer refuses it first
+    (`SUPPLIED_READER_KIND_UNKNOWN`).
     """
     identity, value, cap = SUPPLIED_KIND_METHODS[str(reader_kind or "").strip().upper()]
+    if str(end_basis or "").strip().upper() == SUPPLIED_END_BOUND:
+        cap = SUPPLIED_BOUND_METHOD
     return ("DECLARED_SINGLE_SERIES" if series_count == 1 else identity, value,
             cap if has_dispersion else "NO_DISPERSION")
 
@@ -1430,9 +1450,12 @@ SUPPLIED_MARK_FIELDS = (
     ("Lower_Y_Px", "Errorbar_Bottom_Px"), ("Reader_Kind", "Reader_Kind"),
     ("Read_By", "Read_By"), ("Read_At", "Read_At"),
     ("Raster_SHA256", "Raster_SHA256"),
-    # a box reading's two edges (`batch_manifests.SUPPLIED_OPTIONAL_COLUMNS`);
+    # a box reading's two edges (`batch_manifests.SUPPLIED_BOX_COLUMNS`);
     # blank on a mean's reading, so absent on its mark and equal to nothing
     ("Box_Upper_Y_Px", "box_upper_px"), ("Box_Lower_Y_Px", "box_lower_px"),
+    # what the ends are (`SUPPLIED_END_BASES`); blank on a reading of caps, so
+    # absent on its mark like the box edges
+    ("End_Basis", "End_Basis"),
 )
 
 #: Which of those are pixels, and so compared as numbers.
@@ -1554,9 +1577,15 @@ def expected_supplied_methods(mark, context=None):
         problems.append("the mark's Reader_Kind is %s, which has no supplied "
                         "methods" % (kind or "nothing"))
         kind = "AI_AGENT"
+    # WHAT THE ENDS ARE is the declared reading's too, for the same reason: a
+    # bound relabelled a cap on the mark and the value together still answers
+    # to the reading that says it is a bound.
+    basis = (str(reading.get("End_Basis") or "") if reading is not None
+             else field("End_Basis"))
     (out["Identity_Method"], out["Value_Method"],
      out["Dispersion_Method"]) = supplied_methods(
-        kind, count, is_box or not (top is None and bottom is None))
+        kind, count, is_box or not (top is None and bottom is None),
+        "" if is_box else basis)
     import mark_readers as MR                                      # noqa: E402
     axis = MR.calibration_from_record(context.get("Y_Calibration"))
     centre = number("marker_center_px")
@@ -1723,6 +1752,12 @@ DISPERSION_METHODS = {
     # An error-bar end the registered reviewer placed themselves, the same claim
     # `MANUAL_DIGITIZED` makes about the mean and priced the same way.
     "MANUAL_PLACED_CAP": "R0",
+    # NO CAP WAS SEEN. The bar's own end is hidden - inside the marker, under
+    # other marks, or on a bar two series share - and the end was set at the edge
+    # of what hides it (`End_Basis=BOUND`): an upper bound on the spread, not ink
+    # at a cap. Whoever placed it, one wrong bound in twenty does not show in a
+    # panel-level answer, so it is asked about per cell, as a reconstruction is.
+    "BOUND_HIDDEN_END": "R3",
 }
 
 

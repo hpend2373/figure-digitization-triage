@@ -114,8 +114,9 @@ PLAN_KEYS = {
                 "lower_px", "reader_kind", "read_by", "read_at",
                 "raster_sha256", "note",
                 # a box's two edges, where the reading is a box's
-                # (`batch_manifests.SUPPLIED_OPTIONAL_COLUMNS`)
-                "box_upper_px", "box_lower_px"),
+                # (`batch_manifests.SUPPLIED_BOX_COLUMNS`), and what the ends are
+                # where they are a bound (`End_Basis`)
+                "box_upper_px", "box_lower_px", "end_basis"),
     "unit": ("unit_id", "panel_id", "figure_view", "grid_id", "panel",
              "outcome_name",
              "outcome_variable", "domain", "unit", "statistic",
@@ -228,6 +229,7 @@ def reading_rows(panel_id, read):
             Lower_Y_Px="" if r.get("lower_px") is None else r.get("lower_px"),
             Box_Upper_Y_Px="" if r.get("box_upper_px") is None else r.get("box_upper_px"),
             Box_Lower_Y_Px="" if r.get("box_lower_px") is None else r.get("box_lower_px"),
+            End_Basis=_s(r.get("end_basis")).upper(),
             Reader_Kind=_s(r.get("reader_kind")).upper(),
             Read_By=_s(r.get("read_by")), Read_At=_s(r.get("read_at")),
             Raster_SHA256=_s(r.get("raster_sha256")), Note=_s(r.get("note"))))
@@ -1160,10 +1162,15 @@ def compile_plan(plan, out_dir, file_root=".", run_date=""):
         # Written whether or not anything was read, like the axis manifest: the
         # batch's shape does not depend on whether a panel was read this way.
         # The box columns only when some reading is a box's
-        # (`BM.SUPPLIED_OPTIONAL_COLUMNS`), so a batch without one is unchanged.
+        # (`BM.SUPPLIED_BOX_COLUMNS`), and `End_Basis` only when some reading says
+        # what its ends are - each on its own, so a batch with neither is
+        # unchanged and a box batch is what it was before the second column.
         ("supplied_readings", readings, BM.supplied_readings_columns() + (
-            list(BM.SUPPLIED_OPTIONAL_COLUMNS)
-            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_OPTIONAL_COLUMNS)
+            list(BM.SUPPLIED_BOX_COLUMNS)
+            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_BOX_COLUMNS)
+            else []) + (
+            [BM.SUPPLIED_END_BASIS_COLUMN]
+            if any(_s(r.get(BM.SUPPLIED_END_BASIS_COLUMN)) for r in readings)
             else [])),
         # Written whether or not a group has its own n, for the same reason.
         # `Position_ID` only when a cell has its own n: a batch without one is

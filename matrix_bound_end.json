@@ -1,0 +1,131 @@
+{
+ "suites": [
+  "test_supplied_readings.py",
+  "test_make_plan.py"
+ ],
+ "files": {
+  "batch_manifests.py": "13dea7aee4a8a3a30ec546874e1dbfe0003e916713a621a72c4e55c2f1cc1ab7",
+  "compile_plan.py": "1258b8b2d666731790c86555be7e4fdda9e43c0cc12df07b213857380b784666",
+  "make_plan.py": "66c4ab17700ca1cb726a7f85d5aeca5390c024c1e0c3286ffddaf2bbb829106c",
+  "provenance.py": "dd03043c7dff0fcd4fe3ea6c2247064ac2ca52d1f4b60f4268eae7b52c3394e2",
+  "run_batch.py": "660113efbdca93b6296977814ba2923c3469e11ff197c3d154607294b9d2d9b9",
+  "test_supplied_readings.py": "a75be32c2e246f770da6a57553e9db1e3be94662cb8f5ea88ffa4aaa32875219",
+  "test_make_plan.py": "c39444a80b26f021cfdc8505a24596022ab9c56151fdacaf08adb1afe524f561"
+ },
+ "mutations": [
+  {
+   "name": "provenance: BOUND을 보지 않고 늘 캡의 방법",
+   "file": "provenance.py",
+   "old": "    if str(end_basis or \"\").strip().upper() == SUPPLIED_END_BOUND:\n        cap = SUPPLIED_BOUND_METHOD\n",
+   "new": "    pass\n"
+  },
+  {
+   "name": "provenance: 상한의 값이 R3이 아니라 R2",
+   "file": "provenance.py",
+   "old": "    \"BOUND_HIDDEN_END\": \"R3\",",
+   "new": "    \"BOUND_HIDDEN_END\": \"R2\","
+  },
+  {
+   "name": "provenance: 공급 판독의 계약에 상한이 없다",
+   "file": "provenance.py",
+   "old": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\", \"BOUND_HIDDEN_END\",\n                 \"NO_DISPERSION\"},",
+   "new": "    \"SUPPLIED\": {\"AI_PLACED_CAP\", \"MANUAL_PLACED_CAP\",\n                 \"NO_DISPERSION\"},"
+  },
+  {
+   "name": "provenance: 검증기가 판독의 End_Basis를 보지 않음",
+   "file": "provenance.py",
+   "old": "        \"\" if is_box else basis)",
+   "new": "        \"\")"
+  },
+  {
+   "name": "provenance: 표시가 End_Basis를 싣지 않음",
+   "file": "provenance.py",
+   "old": "    (\"End_Basis\", \"End_Basis\"),\n)",
+   "new": ")"
+  },
+  {
+   "name": "batch_manifests: 모르는 End_Basis를 받음",
+   "file": "batch_manifests.py",
+   "old": "        if basis and basis not in _prov.SUPPLIED_END_BASES:",
+   "new": "        if False:"
+  },
+  {
+   "name": "batch_manifests: 상자의 수염에 상한을 받음",
+   "file": "batch_manifests.py",
+   "old": "        if basis == _prov.SUPPLIED_END_BOUND and stat == \"QUANTILE_SUMMARY\":",
+   "new": "        if False:"
+  },
+  {
+   "name": "batch_manifests: 끝 없는 상한을 받음",
+   "file": "batch_manifests.py",
+   "old": "        if basis == _prov.SUPPLIED_END_BOUND and up is None and low is None:",
+   "new": "        if False:"
+  },
+  {
+   "name": "batch_manifests: End_Basis를 대문자로 읽지 않음",
+   "file": "batch_manifests.py",
+   "old": "                 else str(r.get(SUPPLIED_END_BASIS_COLUMN)).strip().upper())",
+   "new": "                 else str(r.get(SUPPLIED_END_BASIS_COLUMN)).strip())"
+  },
+  {
+   "name": "batch_manifests: End_Basis가 선택 열이 아님",
+   "file": "batch_manifests.py",
+   "old": "SUPPLIED_OPTIONAL_COLUMNS = SUPPLIED_BOX_COLUMNS + (SUPPLIED_END_BASIS_COLUMN,)",
+   "new": "SUPPLIED_OPTIONAL_COLUMNS = SUPPLIED_BOX_COLUMNS"
+  },
+  {
+   "name": "batch_manifests: 상자 변 검사가 End_Basis까지 상자로 봄",
+   "file": "batch_manifests.py",
+   "old": "        edges = [not blank(r.get(c)) for c in SUPPLIED_BOX_COLUMNS]",
+   "new": "        edges = [not blank(r.get(c)) for c in SUPPLIED_OPTIONAL_COLUMNS]"
+  },
+  {
+   "name": "run_batch: 표시의 End_Basis를 방법에 넘기지 않음",
+   "file": "run_batch.py",
+   "old": "            mark.get(\"Reader_Kind\"), series_count, spread is not None,\n            mark.get(\"End_Basis\"))",
+   "new": "            mark.get(\"Reader_Kind\"), series_count, spread is not None)"
+  },
+  {
+   "name": "run_batch: 빈 숫자 칸(NaN)이 질문 이름에서 빈칸이 아님",
+   "file": "run_batch.py",
+   "old": "    return \"\" if number != number else repr(number)",
+   "new": "    return repr(number)"
+  },
+  {
+   "name": "compile_plan: 판독 줄의 End_Basis를 대문자로 쓰지 않음",
+   "file": "compile_plan.py",
+   "old": "            End_Basis=_s(r.get(\"end_basis\")).upper(),",
+   "new": "            End_Basis=_s(r.get(\"end_basis\")),"
+  },
+  {
+   "name": "compile_plan: End_Basis 열을 쓰지 않음",
+   "file": "compile_plan.py",
+   "old": "            if any(_s(r.get(BM.SUPPLIED_END_BASIS_COLUMN)) for r in readings)",
+   "new": "            if False"
+  },
+  {
+   "name": "compile_plan: 계획서 판독 키에 end_basis가 없음",
+   "file": "compile_plan.py",
+   "old": "                \"box_upper_px\", \"box_lower_px\", \"end_basis\"),",
+   "new": "                \"box_upper_px\", \"box_lower_px\"),"
+  },
+  {
+   "name": "compile_plan: 상한만 있는 배치에도 상자 열을 씀",
+   "file": "compile_plan.py",
+   "old": "            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_BOX_COLUMNS)",
+   "new": "            if any(_s(r.get(c)) for r in readings for c in BM.SUPPLIED_OPTIONAL_COLUMNS)"
+  },
+  {
+   "name": "make_plan: 판독 파일의 End_Basis를 계획서에 옮기지 않음",
+   "file": "make_plan.py",
+   "old": "            if text:\n                entry[dst] = text.upper()\n",
+   "new": "            if False:\n                entry[dst] = text.upper()\n"
+  },
+  {
+   "name": "make_plan: End_Basis를 대문자로 옮기지 않음",
+   "file": "make_plan.py",
+   "old": "                entry[dst] = text.upper()\n",
+   "new": "                entry[dst] = text\n"
+  }
+ ]
+}

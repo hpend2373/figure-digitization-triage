@@ -809,6 +809,27 @@ _bxr = ([p for p in _bxfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]["read
 check("a box reading's two edges reach the plan as numbers",
       len(_bxr) == 1 and _bxr[0].get("box_upper_px") == 285.0 and _bxr[0].get("box_lower_px") == 318.5,
       "%s" % _bxr)
+check("... and a reading that says nothing about its ends carries no end_basis key",
+      len(_bxr) == 1 and "end_basis" not in _bxr[0], "%s" % _bxr)
+# WHAT THE ENDS ARE (2026-10-21): a bound set at the edge of what hides the bar,
+# in the run file's optional End_Basis column.
+_seg_write(MP.READINGS, MP.READING_FIELDS + (MP.READING_END_BASIS_FIELD[0],),
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "290", "Lower_Y_Px": "311", "End_Basis": "bound",
+             "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-21", "Raster_SHA256": _RASTER_SHA}])
+try:
+    _bdplan, _bds, _bdfig, _bdp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_bdr = ([p for p in _bdfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]["read"].get("readings") or [])
+check("a reading whose ends are a bound reaches the plan saying so, in capitals",
+      len(_bdr) == 1 and _bdr[0].get("end_basis") == "BOUND" and _bdr[0].get("upper_px") == 290.0,
+      "%s" % _bdr)
+check("... and the compiled manifest row carries it",
+      len(_bdr) == 1 and CP.reading_rows("PUB_D001_P1", {"readings": _bdr})[0]["End_Basis"] == "BOUND")
 # A GROUP'S OWN n (2026-10-19): a card whose series are groups of different size
 # carries each group's n on its series and none on the card.
 _nseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": 11},

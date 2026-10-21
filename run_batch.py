@@ -1063,14 +1063,21 @@ def _canon_field(value):
     derives them again from the file those records were written to, so `90.0` the
     float and `"90.0"` the string have to hash the same - and so do `"90"` and
     `"90.0"`, which is the same number written by two different writers.
+
+    AND A BLANK IS BLANK on both sides. In memory the values are a DataFrame's
+    records, where an empty numeric cell is NaN; the file the finalizer reads
+    gives `""` for it. A cell asked about per cell with one end blank - a bound
+    with only its lower end, 2026-10-21 - hashed `'nan'` in the run and `""` at
+    finalization, and the one question could never be answered.
     """
     text = _s(value)
     if not text:
         return ""
     try:
-        return repr(float(text))
+        number = float(text)
     except (TypeError, ValueError):
         return text
+    return "" if number != number else repr(number)
 
 
 def _blocked_detail(value, identity, method):
@@ -1691,8 +1698,12 @@ def supplied_marks(readings, ycal, series_count):
             continue
         mean, spread, lower, upper = PROV.supplied_numbers(
             ycal, mark["marker_center_px"], top, bottom)
+        # AND WHAT ITS ENDS ARE: a bound set at the edge of what hides the bar
+        # (`End_Basis=BOUND`) is `BOUND_HIDDEN_END`, R3, whoever placed it - the
+        # same number as a cap's, and never filed as one.
         identity, value, cap = PROV.supplied_methods(
-            mark.get("Reader_Kind"), series_count, spread is not None)
+            mark.get("Reader_Kind"), series_count, spread is not None,
+            mark.get("End_Basis"))
         mark.update(
             mean=mean, dispersion=spread, errorbar_lower=lower,
             errorbar_upper=upper,

@@ -1368,6 +1368,115 @@ blank, as its rules say, so the page has nothing to show beside it: put the gist
 on the card's note, credited to the check. A check that stops part-way (a usage limit) keeps
 its work; resume it rather than starting a new one.
 
+## The rest of the corpus: triage by gap, read by AI agents, checked blind, one page
+
+After the readers and the survey above, many panels are still unread: MANUAL panels, panels a
+reader missed, AUTO panels the reader failed on. The person extended the standing approval
+for missed panels to reader-failed AUTO panels (2026-10-22, "1,2부터 한번에"), and the aim
+stays the same: "내가 판단할 것을 줄여주는 게 목표". Reading every panel is not the aim. The
+aim is to read the panels that give the review something it lacks, and then hand the person
+one page. The run went through six steps.
+
+**1. Triage by gap.** Join the run's panels to the review's figure gate. P1 is a paper with
+no effect outside its figures, so any of its panels may be the only data. P2 is a paper
+whose figures could fill an outcome domain that its extracted data lack. Two agents assign
+each panel to one of the review's fixed outcome domains, or to NON_TARGET. They work from the
+caption, the outcome name, the series and the x labels, each with a confidence. Neither sees
+the other or the priorities. The decision is computed from their domains, not judged:
+
+    NON_TARGET               drop
+    P1                       read
+    P2                       read only if the paper lacks that domain
+    individual-subject panel drop (traces of single subjects have no spread to read;
+                             the person's precedent E01)
+
+When both agents give the same decision and both are HIGH, it is recorded. When they give
+the same decision but one is weaker, it goes on the page as a decision with the computation
+shown. When they disagree, the panel is read, because reading costs less than asking.
+
+**2. The reading round.** The spec is the one above ("The reading spec, one entry per
+panel"). The whole panel is read, and every end is a CAP or a BOUND under the same rules.
+Before the agents start:
+
+- Skip panels whose card declares NO_ERRORBAR, and write that list down.
+- Drop the panels the person excluded on an earlier page. This happens at assembly too.
+- Give each agent at most 9 panels or 70 cells, so it can hold every crop at once.
+
+An agent may skip a panel only for a reason from a fixed list: no error bars, individual
+subjects, a calibration that does not match the printed ticks, a broken axis, series that
+cannot be told apart, or a crop of the wrong panel. An agent stopped by a usage limit keeps
+its finished batches; resume it rather than starting a new one.
+
+**3. Assembling: what failed the first time.**
+
+- `Raster_SHA256` is required. When the manifest leaves the image hash blank, compute it
+  from the run's own raster file, not from the crop the agent saw. Otherwise every row
+  fails with `SUPPLIED_READING_RASTER_MISMATCH`.
+- Every panel that gets readings has its card's `Read_Route` changed from AUTO to MANUAL
+  (`SUPPLIED_READING_ON_READER_PANEL`).
+- A cell is dropped from a card through its n: SPARSE removes the cell from `n_by_x`, and
+  `n_by_x` takes positive integers only. A card without n therefore cannot drop a cell.
+  Keep that card whole and say so on its note. When the n is written later, write it only
+  for the cells that have readings, and that makes the card sparse.
+- A pixel outside the plot area is refused (`SUPPLIED_READING_OUTSIDE_PANEL`). A bound one
+  row past the plot edge moves to the edge, with a Note.
+- A step that only replaces readings must not re-run `record_identity`, which appends the
+  card's note a second time. If it did, restore the cards from the copy.
+- Reading dates are checked against today's date (`SUPPLIED_READING_DATE_FUTURE`,
+  `BAD_REGISTRATION_DATE`). On a machine whose clock is UTC, a reading dated in the
+  person's time zone can fall in the future. Set the time zone and pass the run date to
+  the run rather than writing it into a script.
+
+**4. n and unit, category (2).** Some panels pass reading but lack an n or a unit. Two
+blinded agents read the paper's methods, legend and tables. Each answers with ONE (one n for
+the panel), PER_SERIES or PER_CELL, and both answers are converted to per-cell values before
+they are compared. When they agree and both are HIGH, the n or unit is written under the
+standing category-2 approval. A ratio of two like quantities with no printed unit is written
+as 'ratio (unitless)' (the person's precedent I04). Everything else goes on the page.
+
+**5. Blinded overlay checks.** Two checks, A and B, look at each overlay in chunks. Neither
+sees the other or the readers' notes. Each answers OK or LOOK and names the cells it means.
+
+- A panel that both checks mark LOOK is held off the value cards and asked about as one
+  re-read decision.
+- A panel that one check marks LOOK goes on the page with that check's words on the card.
+
+The same reading faults came up again and again. In each one the reading was off, not the
+figure:
+
+- y ticks placed on the centre of the tick label, not on the tick mark. This shifts every
+  value in the panel by 2-7 px.
+- A page column rotated by 90°, so x and y were swapped.
+- Solid black bars whose outline cannot be told from the fill. Read these as `FILL_ONLY`.
+- Caps shared by two series in one column. One reader split them by symmetry; another made
+  both BOUND rule 3. That is the same panel read two ways, so the page says which was used.
+- One-sided error bars read as two-sided.
+- Upscaled scans with edges blurred over 2-3 px.
+
+**6. One page.** The page holds the value cards for the panels that passed, and the bound
+table under each card. It also holds the decisions: the weak triage calls, the re-read set
+and the n/unit calls that did not agree. The intro lists every blocked panel with its reason.
+The page refuses to download until every bounded cell of an approved panel is answered.
+
+**A click page must check the side.** On a page where the person clicks the edges of a box
+for a named series, one click file labelled a box with the wrong series. The page had not
+checked which side of the position tick the click fell on. The apply step now changes the
+label only when all three of these hold:
+
+- the click's x lies on the other series' side of the tick;
+- the agent had dropped that other series' cell, so there is no reading of it in the file;
+- the clicked box does not overlap the agent's box for the labelled series. The test uses
+  the box, not the whiskers, because whiskers overlap in a crowded column.
+
+If any of them fails, the step stops and does not apply the clicks. Answers the person
+rejected on an earlier page are checked against the new clicks.
+
+**When the person confirms without looking.** On 2026-10-22 the person said "더 이상 내가
+확인할 필요없이 이건 확정해줘". `finalize_batch` takes only a HUMAN reviewer, so Claude
+writes the answer rows under the person's ID, dated the day of those words. Each Note says
+that the person did not view these overlays and names who did: the blinded checks and
+Claude. The script refuses any panel whose review mode asks for more than an overlay.
+
 ## Provenance is per FIELD, not per row
 
 One row can be two readings. The commonest real case is a correlation whose r

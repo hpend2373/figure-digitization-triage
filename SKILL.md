@@ -1453,6 +1453,22 @@ figure:
 - One-sided error bars read as two-sided.
 - Upscaled scans with edges blurred over 2-3 px.
 
+**Missing and overlapping markers require source evidence.** Follow
+[`MARKER_REVIEW.md`](MARKER_REVIEW.md) when a marker appears absent, a crop looks
+clipped, or multiple series occupy the same location. Inspect the full source
+page and native crop; for vector PDFs, inspect separately painted source paths
+before concluding that a covered marker cannot be measured. The read-only
+`pdf_marker_evidence.py` helper records source hashes, path ranges, fills and
+centers as proposals. It cannot supply an approval, group assignment or accepted
+value. Preserve measured x/y pairs, unknown series and unticked axes explicitly.
+Recheck the actual revised overlay, distinguish leader-line labels from groups,
+require explicit target selection for direct clicks, and bind new or changed
+points to a new review subject. The review page shows all cards by default and
+keeps approved cards visible. Do not carry an earlier signature onto changed
+source evidence. Rehearse acceptance, compare actual accepted bytes and verify a
+clean rerun. Keep the sources, actual answers and source-specific forward checks
+outside this public repository.
+
 **6. One page.** The page holds the value cards for the panels that passed, and the bound
 table under each card. It also holds the decisions: the weak triage calls, the re-read set
 and the n/unit calls that did not agree. The intro lists every blocked panel with its reason.

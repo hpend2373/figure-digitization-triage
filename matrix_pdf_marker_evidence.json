@@ -1,0 +1,88 @@
+{
+  "suites": [
+    "test_pdf_marker_evidence.py"
+  ],
+  "files": {
+    "pdf_marker_evidence.py": "81d94840ad8a4722065986e3106c6d89080ee76c9d00e2b08daf71b92262e98b"
+  },
+  "mutations": [
+    {
+      "name": "bind_source_pdf",
+      "file": "pdf_marker_evidence.py",
+      "old": "if hashlib.sha256(pdf_bytes).hexdigest() != evidence.get(\"pdf_sha256\"):",
+      "new": "if False:"
+    },
+    {
+      "name": "known_evidence_method",
+      "file": "pdf_marker_evidence.py",
+      "old": "if evidence.get(\"schema\") != SCHEMA or evidence.get(\"method\") != METHOD:",
+      "new": "if False:"
+    },
+    {
+      "name": "bind_marker_geometry",
+      "file": "pdf_marker_evidence.py",
+      "old": "if evidence.get(\"marker\") not in report[\"markers\"]:",
+      "new": "if False:"
+    },
+    {
+      "name": "keep_same_position_fills",
+      "file": "pdf_marker_evidence.py",
+      "old": "paths.append(circle)",
+      "new": "\n                if not any(p[\"center\"] == circle[\"center\"] for p in paths):\n                    paths.append(circle)"
+    },
+    {
+      "name": "outline_belongs_to_fill",
+      "file": "pdf_marker_evidence.py",
+      "old": "if (previous and previous[\"operation_end\"]+1 == start",
+      "new": "if (False and previous and previous[\"operation_end\"]+1 == start"
+    },
+    {
+      "name": "apply_page_transform",
+      "file": "pdf_marker_evidence.py",
+      "old": "ctm = _multiply(ctm, _numbers(values, 6))",
+      "new": "ctm = [1, 0, 0, 1, 0, 0]"
+    },
+    {
+      "name": "invert_page_y",
+      "file": "pdf_marker_evidence.py",
+      "old": "(top-y)*scale-oy",
+      "new": "(y-bottom)*scale-oy"
+    },
+    {
+      "name": "proposal_json_only",
+      "file": "pdf_marker_evidence.py",
+      "old": "if args.out.suffix.lower() != \".json\":",
+      "new": "if False:"
+    },
+    {
+      "name": "do_not_overwrite",
+      "file": "pdf_marker_evidence.py",
+      "old": "args.out.open(\"x\", encoding=\"utf-8\")",
+      "new": "args.out.open(\"w\", encoding=\"utf-8\")"
+    },
+    {
+      "name": "closed_path_only",
+      "file": "pdf_marker_evidence.py",
+      "old": "closed = math.dist(points[0], points[-1]) <= 1e-7",
+      "new": "closed = True"
+    },
+    {
+      "name": "unknown_color_refused",
+      "file": "pdf_marker_evidence.py",
+      "old": "raise EvidenceError(\"FILL_COLOR_SPACE_UNSUPPORTED\")",
+      "new": "pass"
+    },
+    {
+      "name": "preserve_fill",
+      "file": "pdf_marker_evidence.py",
+      "old": "fill = _numbers(values, n)\n        elif op == \"cs\":",
+      "new": "fill = [0.0]*n\n        elif op == \"cs\":"
+    },
+    {
+      "name": "cmyk_initial_color",
+      "file": "pdf_marker_evidence.py",
+      "old": "fill = [0.0, 0.0, 0.0, 1.0] if space == \"CMYK\" else [0.0]*n",
+      "new": "fill = [0.0]*n"
+    }
+  ]
+}

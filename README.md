@@ -8,6 +8,11 @@ outcomes only as plots, so the numbers have to be read off the figures — and a
 number read off a figure is only usable if the pipeline that produced it can say
 exactly what it did.
 
+For missing marks and overlapping series, follow [the source review
+procedure](MARKER_REVIEW.md). `pdf_marker_evidence.py` can inspect separately
+painted marker paths in a source PDF and verify their source-bound evidence.
+Its output is a proposal report, with no series assignment or accepted values.
+
 **This repository carries no publisher figures.** It once did - rasters from
 three publications (323, 386, 397), held for reproducibility - while this line
 said "private research repository" and GitHub said `visibility: public`. A claim
@@ -223,12 +228,12 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 5837 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 6033 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5873 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 6069 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-5837 scenarios on main after v9.28 under `requirements-lock.txt`, and 6033 with
+5873 scenarios on main after v9.28 under `requirements-lock.txt`, and 6069 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`

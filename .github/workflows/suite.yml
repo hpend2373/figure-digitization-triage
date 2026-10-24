@@ -102,6 +102,20 @@ jobs:
           # 짓고, axis_series_page.js는 카드의 답을 그 둘에 옮깁니다. 들어온 답을 다시 짓는
           # axis_series_recheck.mjs도 이 묶음이 봅니다.
           node test_axis_series_page.mjs
+      - name: PDF marker guards in a scratch copy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil, subprocess, sys, tempfile
+          with tempfile.TemporaryDirectory() as tmp:
+              target = Path(tmp)
+              for name in ("pdf_marker_evidence.py", "test_pdf_marker_evidence.py",
+                           "matrix_pdf_marker_evidence.json", "mutate.py"):
+                  shutil.copy2(name, target / name)
+              subprocess.run([sys.executable, str(target / "mutate.py"),
+                              str(target / "matrix_pdf_marker_evidence.json")],
+                             cwd=target, check=True)
+          PY
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: synthesis suites
@@ -128,7 +142,7 @@ jobs:
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
                    test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
+                   test_geometry_proposer test_line_style_mono test_pdf_marker_evidence \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \
@@ -317,7 +331,7 @@ jobs:
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
                    test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
+                   test_geometry_proposer test_line_style_mono test_pdf_marker_evidence \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \

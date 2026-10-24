@@ -40,14 +40,29 @@ import kernel                                                    # noqa: E402
 import record_errorbar as RE                                     # noqa: E402
 import record_geometry as RG                                     # noqa: E402
 import record_identity as RI                                     # noqa: E402
+import record_inventory as RV                                    # noqa: E402
+import record_block_reviews as RBR                               # noqa: E402
 
 DRAFT = "figure_intake_draft.csv"
 BLOCKS = "block_reasons.csv"
+#: 막음 위에 얹는 답 (`record_block_reviews`, run2 2026-10-15). UNBLOCK으로 답한 행은
+#: 막힌 행으로 치지 않습니다 - 막음 파일은 시트를 지을 때마다 다시 쓰여서, 그 안을
+#: 고치는 것으로는 답이 남지 않습니다.
+BLOCK_REVIEWS = RBR.BLOCK_REVIEWS
 CAPTIONS = "caption_fulltext.csv"
 DECISIONS = "errorbar_decisions.csv"
 #: `record_decisions.py`가 적은 처분들. 사람이 그림을 보고 정한 것이고, 계획서가
 #: 그것을 읽지 않으면 판정은 파일 안에만 있습니다.
 FIGURE_DECISIONS = "figure_decisions.csv"
+#: 그림 하나의 처분 (`record_dispositions`, run2 2026-10-14 R7). 같은 그림에
+#: `figure_decisions.csv`의 판정이 있어도 이쪽이 이깁니다 - 나중에, 더 보고 정한 것.
+FIGURE_DISPOSITIONS = "figure_dispositions.csv"
+#: 패널마다 사람이 정한 결과의 이름, 또는 "결과 아님" (`record_outcomes.py`, R4).
+OUTCOME_DECISIONS = "outcome_decisions.csv"
+#: 패널 값의 분포와 척도(`record_shape`, 결정 D15 2026-10-20). 런 바로 아래.
+SHAPE_DECISIONS = "shape_decisions.csv"
+#: 한 그림에 범례가 여럿일 때 어느 패널이 어느 범례를 쓰는가 (`record_legends.py`).
+LEGEND_DECISIONS = "legend_decisions.csv"
 #: 계수 시트의 내보내기를 `sheet/merge_counts.py`가 합쳐 놓은 파일. 이름을
 #: 새로 짓지 않습니다 - 파이프라인이 이미 쓰는 이름이 따로 있는데 여기서만
 #: 다른 이름을 보면, 계수는 들어와 있는데 계획서는 영영 못 보게 됩니다.
@@ -87,7 +102,18 @@ DECIDED_NEEDS = {
     "RECROP": "다시 자르라고 하신 그림 — 재크롭",
     "COUNTABLE": "이제 셀 수 있다고 하신 그림 — 계수 다시",
     "PARTIAL": "일부 패널만 데이터라고 하신 그림 — 그 패널만 추출",
+    "REDRAW": "패널을 다시 그리라고 하신 그림 — 패널 영역 다시 그리기",
 }
+#: 처분 파일(`figure_dispositions.csv`)의 이름이 곧 계획서의 처분인 것들. DIGITIZE는
+#: `figure_decisions`의 DATA와 같은 말입니다.
+DECIDED_DISPOSITION = {"DIGITIZE": "DIGITIZE", "NON_TARGET": "NON_TARGET_OUTCOME",
+                       "ASSOCIATION": "ASSOCIATION_EXTRACT"}
+#: 사람이 이미 처분해서, 계수·캡션 어긋남을 더 묻지 않는 그림.
+SETTLED_DISPOSITIONS = ("NOT_DATA", "UNRESOLVED", "NON_TARGET_OUTCOME")
+#: 오차 정의 판정이 처분인 그림의 패널 처분 (run2 2026-10-14 R6). DROP은 목표
+#: 결과지만 요약 통계의 정의가 없어 닫는 것이고(397번 시험판의 선례), 그 그림을
+#: UNRESOLVED에 두면 계획서는 아무도 다시 볼 일이 없는 그림을 '미정'이라 부릅니다.
+ERRORBAR_DISPOSITION = {"DROP": "NO_SUMMARY_STATISTIC", "NOT_DATA": "NOT_DATA"}
 
 READINESS = "plan_readiness.csv"
 WORKSHEET = "plan_figures.csv"
@@ -103,6 +129,21 @@ PANEL_FIELDS = ("Publication_ID", "Draft_ID", "Panel_ID", "Proposal_ID", "Dispos
 GEOMETRY_DIR = os.path.join("seg", "geometry600")
 IDENTITY_DIR = os.path.join("seg", "identity600")
 REGIONS = os.path.join("seg", "regions600", "panel_regions_600.csv")
+#: AI 에이전트가 사람이 MANUAL로 보낸 패널(`Read_Route=MANUAL`)의 표시를 600 DPI
+#: 래스터 위에 찍은 자리 (2026-10-18 "1로 가자"). 계열과 x 위치는 정체 확인의
+#: 이름(범례 이름, x 라벨)으로 적고, 이 모듈이 계획서의 계열·위치 id로 옮깁니다.
+#: 값은 여기 없습니다 - `run_batch`가 패널의 눈금으로 만들고, `finalize_batch`가
+#: 다시 만듭니다. 풀에 들어가려면 여전히 사람이 겹친 그림을 보고 승인합니다.
+READINGS = os.path.join("seg", "readings600", "supplied_readings.csv")
+READING_FIELDS = ("Proposal_ID", "Series", "X_Label", "Mark_X_Px", "Mark_Y_Px",
+                  "Upper_Y_Px", "Lower_Y_Px", "Reader_Kind", "Read_By", "Read_At",
+                  "Raster_SHA256", "Note")
+#: 상자그림 판독의 상자 두 변 (2026-10-20): 선택 열이라 이 열이 없는 판독 파일도 그대로 읽힙니다.
+#: 표시(Mark_Y_Px)는 중앙값 선, 위·아래 끝(Upper/Lower_Y_Px)은 수염 끝입니다.
+READING_BOX_FIELDS = (("Box_Upper_Y_Px", "box_upper_px"), ("Box_Lower_Y_Px", "box_lower_px"))
+#: 끝이 무엇인지 (2026-10-21, 사람의 말: "끝이 없는 칸도 넣어줘야해"): 비었거나 CAP - 인쇄된 캡,
+#: BOUND - 막대의 끝이 가려져 가린 것의 가장자리에 둔 상한. 선택 열이라 이 열이 없는 판독 파일도 그대로입니다.
+READING_END_BASIS_FIELD = ("End_Basis", "end_basis")
 #: 사람이 600 DPI 래스터 위에서 패널마다 그린 상자와 종류 (`record_panels.py`).
 #: 이것이 있으면 그림의 패널 목록은 이것입니다 - 계수 시트의 수는 "몇 개"이고,
 #: 이것은 "어느 것이 어디에, 무엇으로"입니다. 둘이 다르면 그림의 메모에 적습니다.
@@ -114,6 +155,26 @@ NOT_A_PLOT = "NOT_DATA"
 #: 그리고 사람이 정한 쪽 범위.
 DOCUMENT_STATUS = "intake_document_status.csv"
 DOCUMENT_SCOPE = "document_scope.csv"
+#: 목록의 두 수(문서의 그림 수와 쪽 범위, 그림의 패널 수)를 적는 두 번째 길
+#: (`record_inventory`, run2 2026-10-15 R1): 사람이 센 수, 또는 사람이 승인한 관찰.
+#: 사람이 직접 센 것 - 인테이크의 문서 상태, 사람이 그린 패널 - 이 있으면 그것이 먼저입니다.
+INVENTORY = RV.INVENTORY
+#: 사람이 그린 패널을 그림의 목록으로 쓰지 않는 처분. 그 그림은 다시 자르거나 다시
+#: 그리라고 정해졌고, 그린 것은 이전 크롭 위의 것입니다.
+DRAWING_SUPERSEDED = ("RECROP", "REDRAW")
+#: 그림을 다시 보라는 처분 가운데, 그 뒤에 사람이 그린 패널이 곧 그 처분의 답인 것
+#: (run2 2026-10-16). PARTIAL("일부 패널만 데이터")은 사람이 고른 패널을 종류로,
+#: 나머지를 '읽을 값 없음'으로 그리거나 결과 아님(`record_outcomes`)으로 닫으면
+#: 실행된 것이고, REDRAW("다시 그려라")는 그 뒤에 그린 것이 다시 그린 것입니다.
+#: RECROP은 아닙니다 - 크롭이 틀렸다는 처분이고, 같은 크롭 위에 다시 그려도 고쳐지지
+#: 않습니다. 두 기록은 날짜만 들고 있어서, REDRAW는 처분보다 **뒤의 날**에 그린 것만
+#: 받습니다(같은 날의 그림은 처분이 본 바로 그 그림일 수 있습니다). PARTIAL은 같은
+#: 날도 받습니다 - 그 그림이 처분 전의 것이어도 패널의 자리는 맞고, 무엇을 읽을지는
+#: 종류와 결과 기록이 정합니다.
+DRAWING_ANSWERS = {"PARTIAL": "SAME_DAY_OR_LATER", "REDRAW": "LATER_DAY"}
+#: 축 영역이 없는 그림의 한 패널. 읽을 축이 없으니 읽을 값도 없습니다.
+WHOLE_LABEL = "WHOLE"
+WHOLE_REASON = "make_plan: 축 영역이 없는 그림 (WHOLE) — 읽을 축이 없습니다 (캡션 경로 %s)"
 
 #: 패널의 처분이 곧 정하는 대상 여부 (`batch_manifests.SOURCE_TARGET_STATUSES`).
 TARGET_OF = {
@@ -123,6 +184,8 @@ TARGET_OF = {
 
 #: 계획서가 실제로 읽게 되는 처분. 기하·정체·오차 정의가 다 있을 때만.
 AUTHORED = "AUTO_DIGITIZE"
+#: 확인이 선 600 DPI 래스터가 이 실행에 없음 - 크롭 위에 얹지 않고 계획 단계에서 멈춥니다.
+RASTER_600_MISSING = "RASTER_600_MISSING"
 
 #: 이 모듈이 적는 검토자. 사람이 아니고, 사람인 척하지 않습니다.
 DEMO_REVIEWER = "R_DEMO_MAKE_PLAN"
@@ -162,6 +225,21 @@ QUANTILE_DISPERSIONS = ("IQR", "RANGE")
 
 #: 정의의 출처. 어느 것이든 논문의 말이고, 어느 논문의 어디인지가 다릅니다.
 FROM_DECISION, FROM_CAPTION, FROM_DOCUMENT = "DECISION", "CAPTION", "DOCUMENT"
+#: 판정이 같은 논문의 다른 요소(표, 다른 그림)가 말한 정의를 이 그림에 쓴 것
+#: (`record_errorbar`의 Definition_Basis=BORROWED, run2 2026-10-14 결정 R9·R10).
+#: 인용문은 논문의 말 그대로이고, 그 말이 이 그림에 대한 것이라는 것이 가정입니다.
+#: 그 가정은 계획서의 단위 메모(`BORROWED_NOTE`)로 값까지 따라가서, 민감도 분석에서
+#: 이 값들만 뺄 수 있습니다.
+FROM_DECISION_BORROWED = "DECISION_BORROWED"
+BORROWED_NOTE = ("BORROWED_DEFINITION: the paper states this definition for another element (a table or "
+                 "another figure), not for this figure; exclude in a sensitivity analysis")
+#: 판정이 그 종류를 문장이 아니라 그림에서 잰 것(`record_errorbar`의 Definition_Basis=MEASURED,
+#: 2026-10-20 결정 D01). 논문의 말과 다를 수 있다는 것이 이 답의 까닭이라, 값까지 따라가 민감도 분석에서
+#: 이 값들만 뺄 수 있게 합니다.
+FROM_DECISION_MEASURED = "DECISION_MEASURED"
+MEASURED_NOTE = ("MEASURED_DEFINITION: the dispersion type was measured on the figure (bar length against the "
+                 "plotted individual values), not taken from a sentence of the paper; exclude in a sensitivity "
+                 "analysis")
 
 WORKSHEET_FIELDS = ("Publication_ID", "Source_Figure_ID", "Draft_ID",
                     "Figure_Number", "Page", "Image", "Route", "Disposition",
@@ -190,11 +268,15 @@ def live_rows(run):
     answered = set(
         r["Draft_ID"] for r in _rows(os.path.join(run, COUNTS))
         if (r.get("Entry_Status") or "").strip() in ANSWERED_ON_AN_OPEN_ROW)
+    unblocked = set(
+        r["Draft_ID"] for r in _rows(os.path.join(run, BLOCK_REVIEWS))
+        if (r.get("Decision") or "").strip().upper() == RBR.UNBLOCK)
     out = []
     for row in draft:
         reason = reasons.get(row["Draft_ID"], {})
         if (reason.get("Count_Blocked") == "1"
-                and row["Draft_ID"] not in answered):
+                and row["Draft_ID"] not in answered
+                and row["Draft_ID"] not in unblocked):
             continue
         if (reason.get("Duplicate_Of") or "").strip():
             continue
@@ -213,8 +295,10 @@ def dispersion_for(draft_id, caption, decision):
         code = (decision.get("Dispersion_Type") or "").strip().upper()
         if code in RE.DISPOSITIONS:
             return code, "", FROM_DECISION, ""
+        basis = (decision.get("Definition_Basis") or "").strip().upper()
+        kind = {RE.BORROWED: FROM_DECISION_BORROWED, RE.MEASURED: FROM_DECISION_MEASURED}.get(basis, FROM_DECISION)
         return (code, (decision.get("Errorbar_Definition_Source") or "").strip(),
-                FROM_DECISION, (decision.get("Found_On_Page") or "").strip())
+                kind, (decision.get("Found_On_Page") or "").strip())
     if not caption:
         return "", "", "", ""
     # 상자그림은 캡션이 표시마다 따로 말합니다("Box plots indicate minimum,
@@ -304,7 +388,7 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", ""),
         if decided_need:
             needs.append(decided_need)
     #: 사람이 이미 처분한 그림. 아래의 물음들은 그 처분보다 앞설 수 없습니다.
-    settled = decided in ("NOT_DATA", "UNRESOLVED")
+    settled = decided in SETTLED_DISPOSITIONS
 
     if not settled and route == "MIXED_CAPTION_NOT_DECIDABLE" and count:
         # 할 일을 적지 않으면 이 그림들은 `UNRESOLVED`에 조용히 앉아 있습니다 -
@@ -314,7 +398,7 @@ def figure_of(row, caption, decision, count, crop_root, answer=("", ""),
     if disposition == "GEOMETRY_NOT_AUTHORED":
         if code in RE.DISPOSITIONS:
             # 정의를 못 찾아 풀에서 뺀 행. 기하를 쓸 일이 없습니다.
-            disposition = "UNRESOLVED"
+            disposition = ERRORBAR_DISPOSITION.get(code, "UNRESOLVED")
         elif count == 0:
             # 사람이 축 영역을 0개로 세었습니다. 기하는 패널마다 쓰는
             # 것이고 패널이 없으니 쓸 자리가 없습니다 - 여기에 할 일을
@@ -384,6 +468,69 @@ def load_figure_decisions(run):
     return out
 
 
+def load_figure_dispositions(run):
+    """{Draft_ID: 처분 행을 `decided_for`가 읽는 모양으로} - `record_dispositions`가 적은 것."""
+    path = os.path.join(run, FIGURE_DISPOSITIONS)
+    out = {}
+    if not os.path.exists(path):
+        return out
+    for r in csv.DictReader(io.open(path, encoding="utf-8-sig")):
+        out[r["Draft_ID"]] = dict(r, Decision=r.get("Disposition", ""), Question="DISPOSITION")
+    return out
+
+
+def load_outcomes(run):
+    """{Panel_ID: 행} - `record_outcomes`가 적은 결과의 이름과 "결과 아님"."""
+    return _by(_rows(os.path.join(run, OUTCOME_DECISIONS)), "Panel_ID")
+
+
+def load_legends(run):
+    """{Draft_ID: [[패널 번호, ...], ...]} - `record_legends`가 적은 범례 묶음."""
+    out = {}
+    for r in _rows(os.path.join(run, LEGEND_DECISIONS)):
+        groups = [[int(x[1:]) for x in g.split(",") if x.strip()] for g in (r.get("Legend_Groups") or "").split("|") if g.strip()]
+        if groups:
+            out[r["Draft_ID"]] = groups
+    return out
+
+
+def legend_domain(view, groups, index):
+    """이 패널이 쓰는 범례의 Identity_Domain_ID. 범례 기록이 없으면 그림 하나가 범례 하나입니다."""
+    for k, g in enumerate(groups or [], 1):
+        if index in g:
+            return "%s__L%d" % (view, k)
+    return ""
+
+
+def apply_outcome(panel, said):
+    """사람이 정한 결과의 이름(또는 결과 아님)을 패널에 얹습니다.
+
+    읽을 준비가 된 패널(AUTO_DIGITIZE)에는 부르지 않습니다 - 그 이름은 정체 확인
+    (Outcome_Name)이 정한 것입니다. 닫힌 패널에 이름을 붙이지는 않습니다 - 관문이 그런
+    답을 받지 않지만, 처분이 나중에 바뀌었을 수 있습니다."""
+    if not said:
+        return
+    decision = (said.get("Decision") or "").strip().upper()
+    who = (said.get("Verified_By") or "").strip()
+    if decision == "NON_TARGET":
+        panel.update({"disposition": "NON_TARGET_OUTCOME", "target_status": "NON_TARGET",
+                      "reason": "outcome_decisions: %s — 이 리뷰의 결과가 아님" % who})
+    elif decision == "LABEL" and target_status_of(panel) == "TARGET":
+        panel["outcome_label"] = (said.get("Outcome_Label") or "").strip()
+
+
+def drawing_answers(figure_decision, drawn_all):
+    """처분 뒤에 그린 패널이 그 처분을 대신하는가 (`DRAWING_ANSWERS`). 날짜가 빠진 쪽이 있으면 아닙니다."""
+    choice = ((figure_decision or {}).get("Decision") or "").strip().upper()
+    rule = DRAWING_ANSWERS.get(choice)
+    decided_at = ((figure_decision or {}).get("Recorded_At") or "").strip()
+    drawn_at = [(r.get("Verified_At") or "").strip() for r in drawn_all or []]
+    if not rule or not decided_at or not drawn_at:
+        return False
+    first = min(drawn_at)          # 날이 빠진 줄이 있으면 ""이 가장 작아 받지 않습니다
+    return first > decided_at if rule == "LATER_DAY" else first >= decided_at
+
+
 def decided_for(figure_decision):
     """(처분, 할 일) - 사람의 판정이 계획서에서 무엇이 되는가.
 
@@ -398,6 +545,8 @@ def decided_for(figure_decision):
         return "NOT_DATA", None
     if choice == DECIDED_IS_DATA:
         return "DIGITIZE", None
+    if choice in DECIDED_DISPOSITION:
+        return DECIDED_DISPOSITION[choice], None
     need = DECIDED_NEEDS.get(choice)
     if need is None:
         return "", None
@@ -440,6 +589,14 @@ def load_confirmations(run, geometry_dir=None, identity_dir=None, regions=None):
                    "Proposal_ID")
     identity = _by(_rows(os.path.join(run, identity_dir or IDENTITY_DIR, RI.DECISIONS)),
                    "Proposal_ID")
+    # 분포와 척도의 답은 그 패널의 정체 행에 얹어 단위까지 갑니다(`authored_read`). 카드의 열과
+    # 이름이 겹치지 않게 Shape_ 앞붙이로 - 카드를 다시 적을 때 섞여 들어가지 않습니다.
+    for r in _rows(os.path.join(run, SHAPE_DECISIONS)):
+        pid = (r.get("Proposal_ID") or "").strip()
+        if pid in identity:
+            identity[pid] = dict(identity[pid], Shape_Distribution=(r.get("Distribution_Shape") or "").strip(),
+                                 Shape_Value_Scale=(r.get("Value_Scale") or "").strip(),
+                                 Shape_Basis=(r.get("Shape_Basis") or "").strip())
     regions = {}
     for r in _rows(os.path.join(run, regions or REGIONS)):
         regions.setdefault(r["Draft_ID"], []).append(r)
@@ -449,6 +606,26 @@ def load_confirmations(run, geometry_dir=None, identity_dir=None, regions=None):
     for rows_ in drawn.values():
         rows_.sort(key=lambda r: int(r["Panel_Index"]) if str(r.get("Panel_Index") or "").isdigit() else 0)
     return geometry, identity, regions, drawn
+
+
+def load_readings(run, path=None):
+    """{Proposal_ID: [판독 행]} - 없으면 빈 사전, 그러면 MANUAL 패널은 전처럼 대기열로."""
+    out = {}
+    for r in _rows(os.path.join(run, path or READINGS)):
+        out.setdefault((r.get("Proposal_ID") or "").strip(), []).append(r)
+    return out
+
+
+def load_inventory(run):
+    """({Source_Document_ID: 행}, {Draft_ID: 행}) - `record_inventory`가 적은 것."""
+    docs, figs = {}, {}
+    for r in _rows(os.path.join(run, INVENTORY)):
+        level = (r.get("Level") or "").strip().upper()
+        if level == RV.DOCUMENT:
+            docs[r["Target_ID"]] = r
+        elif level == RV.FIGURE:
+            figs[r["Target_ID"]] = r
+    return docs, figs
 
 
 def load_documents(run):
@@ -494,7 +671,7 @@ def geometry_state(row):
     return status or "PENDING", source
 
 
-def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
+def authored_read(panel_id, draft_id, geometry, identity, dispersion, label, readings=()):
     """(read, unit, grid, view) - 기하·정체·오차 정의가 다 있는 패널의 계획.
 
     여기 있는 것은 전부 사람이 확인한 것에서 옮겨 온 것입니다: 프레임과 눈금
@@ -534,15 +711,30 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         read["panel_mode"] = "MANUAL"
         read["note"] += "; values read by a person (Read_Route=MANUAL): no released reader separates these series"
     used = set()
+    series_id_of, position_id_of = {}, {}
     for i, e in enumerate(series, 1):
         name = (e.get("name") or "").strip()
         sid = _slug(name, "S%d" % i)
         while sid in used:
             sid += "_"
         used.add(sid)
+        series_id_of[name or sid] = sid
         # Every series carries its factor and level, the single one too: a
         # series without a level is no Cell_Key (MISSING_SERIES_IDENTITY).
         sp = {"series_id": sid, "factor": s_factor, "level": name or sid}
+        # THE GROUP'S OWN n (`record_identity`: all series or none, never beside the
+        # card's N_Outcome). Carried as written when it is not a positive whole
+        # number, so the batch layer refuses it loudly (SERIES_N_BAD) rather than
+        # this module dropping it.
+        if e.get("n") not in (None, ""):
+            sp["n_outcome"] = (RI.series_n_of([e])[0] if RI.series_n_ok(e.get("n")) else e.get("n"))
+            sp["n_source"] = "identity card (per series)"
+        # AND PER CELL, where the group shrinks along the axis. Keyed by x label
+        # here; turned into position ids below, once the positions have ids.
+        if e.get("n_by_x") is not None:
+            sp["n_by_position"] = dict(e.get("n_by_x")) if isinstance(e.get("n_by_x"), dict) \
+                else e.get("n_by_x")
+            sp["n_source"] = "identity card (per cell)"
         drawn = []
         for src, dst in (("colour", "colour"), ("line_style", "line_style"), ("marker", "marker"),
                          ("marker_fill", "marker_fill"), ("bar_fill", "bar_fill")):
@@ -577,8 +769,58 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         while pid_ in used:
             pid_ += "_"
         used.add(pid_)
+        position_id_of[label_text or pid_] = pid_
         read["positions"].append({"position_id": pid_, "factor": x_factor, "level": label_text,
                                   "x_pixel": float(p["px"]), "display_order": i})
+    # The per-cell n by POSITION ID, as `series_n.csv` names cells. A label that
+    # is no position stays as written, so the batch layer refuses it by name
+    # (SERIES_N_POSITION_UNKNOWN) rather than this module dropping a cell's n.
+    sparse = []
+    for sp in read["series"]:
+        if isinstance(sp.get("n_by_position"), dict):
+            by_label = sp["n_by_position"]
+            sp["n_by_position"] = dict(
+                (position_id_of.get(str(k).strip(), str(k).strip()),
+                 int(str(v).strip()) if RI.series_n_ok(v) and str(v).strip() else v)
+                for k, v in by_label.items())
+            absent = [p_["level"] for p_ in read["positions"] if p_["level"] not in
+                      set(str(k).strip() for k in by_label)]
+            if absent:
+                sparse.append((sp["level"], len(by_label), len(absent)))
+    # 판독은 이름으로 적혀 있고 계획서는 id로 씁니다. 모르는 이름은 그대로 두어
+    # 배치층이 크게 거절하게 합니다(SUPPLIED_READING_SERIES_UNKNOWN 등) - 조용히
+    # 버리면 읽은 칸이 사라진 줄 아무도 모릅니다. AUTO 패널의 판독도 그대로
+    # 옮겨서 거절되게 합니다(SUPPLIED_READING_ON_READER_PANEL).
+    if readings:
+        read["readings"] = []
+        for r in readings:
+            entry = {"series_id": series_id_of.get((r.get("Series") or "").strip(),
+                                                   (r.get("Series") or "").strip()),
+                     "position_id": position_id_of.get((r.get("X_Label") or "").strip(),
+                                                       (r.get("X_Label") or "").strip()),
+                     "reader_kind": (r.get("Reader_Kind") or "").strip(),
+                     "read_by": (r.get("Read_By") or "").strip(),
+                     "read_at": (r.get("Read_At") or "").strip(),
+                     "raster_sha256": (r.get("Raster_SHA256") or "").strip(),
+                     "note": (r.get("Note") or "").strip()}
+            for src, dst in (("Mark_X_Px", "x_px"), ("Mark_Y_Px", "y_px"),
+                             ("Upper_Y_Px", "upper_px"), ("Lower_Y_Px", "lower_px")):
+                text = (r.get(src) or "").strip()
+                entry[dst] = float(text) if _is_number(text) else (text or None)
+            # A BOX's two edges, in the run file's optional columns
+            # (`READING_BOX_FIELDS`): only a box reading has them, and only it
+            # carries the keys, so every other plan is what it was.
+            for src, dst in READING_BOX_FIELDS:
+                text = (r.get(src) or "").strip()
+                if text:
+                    entry[dst] = float(text) if _is_number(text) else text
+            # What the ends ARE, only where the run file says (`READING_END_BASIS_FIELD`):
+            # a reading of caps carries no key, so every other plan is what it was.
+            src, dst = READING_END_BASIS_FIELD
+            text = (r.get(src) or "").strip()
+            if text:
+                entry[dst] = text.upper()
+            read["readings"].append(entry)
     factors = {x_factor: [str(p.get("label") or "").strip() for p in positions],
                s_factor: [(e.get("name") or "").strip() or ("S%d" % (i + 1)) for i, e in enumerate(series)]}
     grid = {"grid_id": grid_id, "factors": factors}
@@ -601,6 +843,28 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
         "dispersion_type": code, "errorbar_source": errorbar_source,
         "extraction_method": "DIGITIZED",
     }
+    # A SERIES DRAWN AT ONLY SOME x POSITIONS - the card's per-cell n names the
+    # cells it is drawn at, and an x it does not name is one it is not. The full
+    # product would then demand cells nobody drew (FACTORIAL_CELL_MISSING), so the
+    # grid is SPARSE, and says why in the words the card gives.
+    if sparse:
+        unit["grid_rule"] = "SPARSE"
+        unit["sparse_justification"] = (
+            "identity card: each series is drawn only at the x positions its per-cell n "
+            "names (%s)" % "; ".join("%s: %d drawn, %d not" % t for t in sparse))
+    # 상자그림이 상자로서 IQR을 받았으면 빌린 정의는 이 단위에 쓰이지 않았습니다.
+    if kind in (FROM_DECISION_BORROWED, FROM_DECISION_MEASURED) \
+            and not (mark == "BOX_VIOLIN" and dispersion[0] not in QUANTILE_DISPERSIONS):
+        unit["note"] = BORROWED_NOTE if kind == FROM_DECISION_BORROWED else MEASURED_NOTE
+    # THE SHAPE AND THE SCALE someone said (`record_shape`, D15): a large SE on a
+    # right-skewed outcome is not an error, and a change score is not on a ratio
+    # scale. Unsaid, the manifest keeps UNKNOWN and RATIO as before.
+    if (identity.get("Shape_Distribution") or "").strip():
+        unit["distribution_shape"] = identity["Shape_Distribution"].strip().upper()
+        unit["value_scale"] = (identity.get("Shape_Value_Scale") or "RATIO").strip().upper()
+        said = "SHAPE: %s (%s, %s)" % (identity.get("Shape_Basis", "").strip(), unit["distribution_shape"],
+                                       unit["value_scale"])
+        unit["note"] = (unit["note"] + " | " + said) if unit.get("note") else said
     n = (identity.get("N_Outcome") or "").strip()
     if n.isdigit():
         unit["n_outcome"] = int(n)
@@ -612,6 +876,11 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
     if len(positions) >= 2:
         unit["x_calibration"] = [[0, float(positions[0]["px"])],
                                  [len(positions) - 1, float(positions[-1]["px"])]]
+    # ONE POSITION IS ONE SLOT, and its calibration is that one point - the gate
+    # takes X1 = slot 0 with X2 blank as a single categorical slot (D14,
+    # 2026-10-20). Without it the panel had no x calibration at all and was refused.
+    elif len(positions) == 1 and positions[0].get("px") is not None:
+        unit["x_calibration"] = [[0, float(positions[0]["px"])]]
     # WHERE THE VALUE IS READ. A bar's is the person's answer; a box has none
     # (`NOT_A_BAR`, the vocabulary's own word for it, never a blank); a line or
     # a scatter is read at its marker's centre.
@@ -626,12 +895,25 @@ def authored_read(panel_id, draft_id, geometry, identity, dispersion, label):
     return read, unit, grid, view
 
 
-def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind=""):
+def _is_number(text):
+    try:
+        float(text)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, kind="", raster_missing="",
+               readings=None):
     """(panel, unit, grid, view, worksheet 행) - 한 패널의 처분과 남은 일.
 
     갖춘 것이 셋이어야 읽습니다: 확인된 기하(눈금 짝 둘), 확인된 정체(같은
     프레임 위의), 오차 정의. 하나라도 없으면 `GEOMETRY_NOT_AUTHORED`로 남고,
     무엇이 없는지는 worksheet 행에 적힙니다.
+
+    `raster_missing` - 확인이 서 있는 600 DPI 래스터가 이 실행에 없으면 그 경로. 그 확인의 상자와
+    눈금은 그 래스터의 픽셀이라, 200 DPI 크롭 위에서는 다른 그림의 자리입니다: 읽을 준비로 두지 않고
+    `RASTER_600_MISSING`을 남깁니다(전에는 크롭으로 말없이 돌아가 읽을 때 INTERNAL_ERROR로 드러났음).
     """
     pid = proposal_id_for(draft_id, index)
     panel_id = "%s_P%d" % (draft_id, index)
@@ -663,12 +945,15 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
             needs.append("오차 정의")
         elif code in RE.DISPOSITIONS:
             needs.append("오차 정의 없음으로 풀에서 뺀 그림")
+        if raster_missing:
+            needs.append("%s (%s)" % (RASTER_600_MISSING, raster_missing))
     panel = {"panel_id": panel_id, "label": "P%02d" % index, "disposition": disposition,
              "reason": reason or ("make_plan: %s%s" % (("%s · " % kind) if kind else "",
                                                        " · ".join(needs) if needs else "authored"))}
     unit = grid = view = None
     if disposition == "GEOMETRY_NOT_AUTHORED" and not needs:
-        read, unit, grid, view = authored_read(panel_id, draft_id, g, i, dispersion, panel["label"])
+        read, unit, grid, view = authored_read(panel_id, draft_id, g, i, dispersion, panel["label"],
+                                               (readings or {}).get(pid, ()))
         panel.update({"disposition": AUTHORED, "reason": "make_plan: geometry and identity confirmed",
                       "target_status": "TARGET", "outcome_label": unit["outcome_name"], "read": read})
     row = dict(Draft_ID=draft_id, Panel_ID=panel_id, Proposal_ID=pid, Disposition=panel["disposition"],
@@ -679,12 +964,14 @@ def panel_plan(draft_id, index, geometry, identity, dispersion, caption_text, ki
 
 def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
              run_date, said=None, decided=None, confirmations=None, reviewers=None,
-             documents_known=None):
+             documents_known=None, inventory=None, outcomes=None, legends=None,
+             readings=None):
     """(plan, 그림별 (figure_id, needs, ...), 패널 행). 한 편의 계획서."""
     first = rows[0]
     said = said or {}
     registered, names = reviewers or ({}, {})
     doc_status, doc_scope = documents_known or ({}, {})
+    inv_docs, inv_figs = inventory or ({}, {})
     used_reviewers = set()
 
     def reviewer_for(who):
@@ -711,9 +998,13 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
         }
         status = doc_status.get(row["Source_Document_ID"]) or {}
         scope = doc_scope.get(row["Source_Document_ID"]) or {}
+        inv = inv_docs.get(row["Source_Document_ID"])
         if (scope.get("Page_From") or "").strip() and (scope.get("Page_To") or "").strip():
             doc["page_range"] = "%s-%s" % (scope["Page_From"].strip(), scope["Page_To"].strip())
+        elif inv and (inv.get("Article_Page_Range") or "").strip():
+            doc["page_range"] = inv["Article_Page_Range"].strip()
         count = (status.get("Observed_Figure_Count") or "").strip()
+        counted = False
         if (status.get("Document_Inventory_Status") or "").strip().upper() == "VISUALLY_VERIFIED" \
                 and count.isdigit():
             rid = reviewer_for(status.get("Inventoried_By") or status.get("Verified_By"))
@@ -721,6 +1012,17 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                 doc.update({"observed_figure_count": int(count), "inventory_status": "VISUALLY_VERIFIED",
                             "figure_count_method": "HUMAN_VISUAL", "reviewer_id": rid,
                             "inspection_date": (status.get("Inventoried_At") or status.get("Verified_At") or "").strip()})
+                counted = True
+        if not counted and inv and (inv.get("Count") or "").strip().isdigit():
+            # `record_inventory`가 적은 수. 방법은 그 관문이 누가 보았는지로 정한 것이고,
+            # 승인한 사람이 등록되지 않았으면 PENDING인 채로 이름을 부릅니다.
+            rid = reviewer_for(inv.get("Verified_By"))
+            if rid:
+                doc.update({"observed_figure_count": int(inv["Count"]), "inventory_status": "VISUALLY_VERIFIED",
+                            "figure_count_method": (inv.get("Count_Method") or "").strip().upper(), "reviewer_id": rid,
+                            "inspection_date": (inv.get("Inspection_Date") or "").strip()})
+            else:
+                doc["note"] = "검토자 등록: %s (--reviewers)" % (inv.get("Verified_By") or "").strip()
         documents.append(doc)
     geometry, identity, regions, drawn = confirmations or ({}, {}, {}, {})
     figures, notes, units, grids, views, panel_rows = [], [], [], [], {}, []
@@ -728,21 +1030,78 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
         cap = captions.get(row["Draft_ID"])
         dec = decisions.get(row["Draft_ID"])
         raw = counts.get(row["Draft_ID"])
-        count = int(raw) if str(raw or "").strip().isdigit() else None
+        sheet = int(raw) if str(raw or "").strip().isdigit() else None
+        figure_decision = (decided or {}).get(row["Draft_ID"])
+        # 사람이 그린 패널 (`record_panels`). PANELS 줄의 수가 그 사람이 센 패널
+        # 수이고, NO_PANELS는 "이 그림에는 읽을 패널이 없다" - 축 영역이 없는
+        # 그림(WHOLE)입니다. 다시 자르거나 다시 그리라고 정해진 그림의 것은
+        # 이전 크롭 위의 것이라 목록으로 쓰지 않습니다.
+        drawn_all = drawn.get(row["Draft_ID"]) or []
+        drawn_rows = [r for r in drawn_all if (r.get("Verdict") or "").strip().upper() == PANELS_VERDICT]
+        no_panels = bool(drawn_all) and not drawn_rows and all(
+            (r.get("Verdict") or "").strip().upper() == NO_PANELS_VERDICT for r in drawn_all)
+        answered = drawing_answers(figure_decision, drawn_all)
+        if answered:
+            # 그린 것이 처분의 답입니다. 그림은 여느 읽을 그림처럼 그린 패널로 서고,
+            # 처분이 무엇이었는지는 그림의 메모에 남습니다.
+            said_before = figure_decision
+            figure_decision = dict(figure_decision, Decision=DECIDED_IS_DATA)
+        superseded = (figure_decision or {}).get("Decision", "").strip().upper() in DRAWING_SUPERSEDED
+        inv = inv_figs.get(row["Draft_ID"])
+        # 패널 수는 어디서 오는가: 사람이 그린 것(서 있으면) > 목록 기록 > 계수 시트.
+        if (drawn_rows or no_panels) and not superseded:
+            count, count_from = (len(drawn_rows) if drawn_rows else 1), "DRAWN"
+        elif inv and (inv.get("Count") or "").strip().isdigit():
+            count, count_from = int(inv["Count"]), "INVENTORY"
+        else:
+            count, count_from = sheet, "SHEET"
         figure, needs, route, disposition, dispersion = figure_of(
             row, cap, dec, count, crop_root,
-            said.get(row["Draft_ID"], ("", "")),
-            (decided or {}).get(row["Draft_ID"]))
+            said.get(row["Draft_ID"], ("", "")), figure_decision)
+        whole = (count_from == "DRAWN" and no_panels) or (
+            count_from == "INVENTORY" and (inv.get("Count_Basis") or "").strip().upper() == RV.WHOLE)
+        if count_from == "DRAWN" and not (disposition == "GEOMETRY_NOT_AUTHORED" and drawn_rows):
+            # 사람이 그린 것이 그림의 목록이지만, 그 그림을 읽지는 않습니다 (닫힌
+            # 처분, 또는 패널이 없다는 답). 목록은 그 사람의 것으로 적습니다.
+            who = (drawn_all[0].get("Verified_By") or "").strip()
+            rid = reviewer_for(who)
+            figure["panel_count_method"] = "HUMAN_VISUAL"
+            if rid:
+                figure.update({"inventory_status": "VISUALLY_VERIFIED", "reviewer_id": rid,
+                               "inspection_date": (drawn_all[0].get("Verified_At") or "").strip()})
+            elif who:
+                needs.append("검토자 등록: %s (--reviewers)" % who)
+        elif count_from == "INVENTORY":
+            rid = reviewer_for(inv.get("Verified_By"))
+            figure["panel_count_method"] = (inv.get("Count_Method") or "").strip().upper()
+            if rid:
+                figure.update({"inventory_status": "VISUALLY_VERIFIED", "reviewer_id": rid,
+                               "inspection_date": (inv.get("Inspection_Date") or "").strip()})
+            else:
+                needs.append("검토자 등록: %s (--reviewers)" % (inv.get("Verified_By") or "").strip())
+            if sheet is not None and sheet != count:
+                figure["note"] = ("inventory_records.csv: %d (%s, %s); the count sheet said %d"
+                                  % (count, (inv.get("Count_Basis") or "").strip().upper(),
+                                     figure["panel_count_method"], sheet))
+        if whole:
+            # 축 영역이 없는 그림은 한 패널로 닫습니다. 캡션 심사가 읽을 그림으로
+            # 보았어도 읽을 축이 없으니 읽을 값이 없고, 그 패널을 TARGET으로 두면
+            # 사람에게 결과 이름과 기하를 묻는 줄이 생깁니다.
+            for panel in figure["panels"]:
+                panel["label"] = WHOLE_LABEL
+            if disposition == "GEOMETRY_NOT_AUTHORED":
+                disposition = "NOT_DATA"
+                for panel in figure["panels"]:
+                    panel.update({"disposition": "NOT_DATA", "reason": WHOLE_REASON % route})
+                needs = [x for x in needs if x != "오차 정의" and not x.startswith("패널 기하")]
         # 사람이 확인한 것이 있으면 패널마다 옮깁니다. 600 DPI 래스터 위에서
         # 확인했으니 계획서의 그림도 그 래스터입니다 - 상자와 눈금은 그 픽셀의
         # 것이고, 크롭 위에 얹으면 조용히 어긋납니다.
-        drawn_rows = [r for r in drawn.get(row["Draft_ID"]) or []
-                      if (r.get("Verdict") or "").strip().upper() == PANELS_VERDICT]
         if disposition == "GEOMETRY_NOT_AUTHORED" and drawn_rows:
             # 사람이 그린 패널 목록이 계수 시트의 수를 대신합니다. 계수는 "몇
             # 개"이고 이것은 "어느 것이 어디에, 무엇으로"입니다 - 그리고 이
             # 목록의 번호가 기하·정체 결정의 이름(`__p<번호>`)입니다.
-            counted = figure.get("observed_panel_count")
+            counted = sheet
             figure["observed_panel_count"] = len(drawn_rows)
             figure["panel_count_method"] = "HUMAN_VISUAL"
             if counted is not None and counted != len(drawn_rows):
@@ -758,11 +1117,17 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
             elif who:
                 needs.append("검토자 등록: %s (--reviewers)" % who)
             region_rows = regions.get(row["Draft_ID"]) or []
+            raster_missing = ""
             if region_rows:
                 raster = (region_rows[0].get("Raster_600") or "").strip()
                 if raster and os.path.isfile(os.path.join(crop_root, raster)):
                     figure["image"] = raster
                     figure["image_sha256"] = (region_rows[0].get("Raster_600_SHA256") or "").strip()
+                else:
+                    # 확인은 600 DPI 래스터 위의 것인데 그 파일이 없습니다. 크롭으로 돌아가면 상자와 눈금이
+                    # 다른 그림 위에 앉습니다 - 계획 단계에서 이름을 부르고 읽을 준비로 두지 않습니다.
+                    raster_missing = raster or "(Raster_600 칸이 비어 있음)"
+                    needs.append("%s: %s" % (RASTER_600_MISSING, raster_missing))
             figure["panels"] = []
             authored, plots = 0, 0
             for d in drawn_rows:
@@ -773,9 +1138,22 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                                              "label": "P%02d" % index, "disposition": "NOT_DATA",
                                              "reason": "panel_decisions: 사람이 데이터 아님으로 표시"})
                     continue
+                said_outcome = (outcomes or {}).get("%s_P%d" % (row["Draft_ID"], index))
+                if (said_outcome or {}).get("Decision", "").strip().upper() == "NON_TARGET":
+                    # 결과가 아닌 패널은 닫습니다 - 기하와 정체를 물을 패널이 아니고,
+                    # 읽을 준비가 되어 있었어도 읽지 않습니다.
+                    closed = {"panel_id": "%s_P%d" % (row["Draft_ID"], index), "label": "P%02d" % index}
+                    apply_outcome(closed, said_outcome)
+                    figure["panels"].append(closed)
+                    continue
                 plots += 1
                 panel, unit, grid, view, prow = panel_plan(
-                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind)
+                    row["Draft_ID"], index, geometry, identity, dispersion, figure["caption"], kind, raster_missing,
+                    readings=readings)
+                if unit is not None and (legends or {}).get(row["Draft_ID"]):
+                    domain = legend_domain(panel["read"]["figure_view"], legends[row["Draft_ID"]], index)
+                    if domain:
+                        panel["read"]["identity_domain"] = domain
                 figure["panels"].append(panel)
                 prow["Publication_ID"] = publication
                 panel_rows.append(prow)
@@ -793,7 +1171,17 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
                 needs.append("패널 기하·정체 확인 — 기하 %d/%d · 정체 %d/%d · 읽을 준비 %d/%d"
                              % (done_g, plots, done_i, plots, authored, plots))
         for panel in figure["panels"]:
+            if (panel.get("disposition") or "") != AUTHORED:
+                apply_outcome(panel, (outcomes or {}).get(panel["panel_id"]))
             panel.setdefault("target_status", target_status_of(panel))
+        if answered:
+            figure["note"] = "; ".join(x for x in (figure.get("note", ""), "figure_dispositions: %s%s (%s) answered by the "
+                                                   "panels drawn on %s" % (
+                                                       said_before.get("Decision", ""),
+                                                       (" " + said_before.get("Which_Panels", "").strip())
+                                                       if (said_before.get("Which_Panels") or "").strip() else "",
+                                                       said_before.get("Recorded_At", ""),
+                                                       min(r.get("Verified_At", "") for r in drawn_all))) if x)
         figures.append(figure)
         notes.append((figure, needs, route, disposition, dispersion, row))
     plan = {
@@ -829,9 +1217,14 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
     confirmations = load_confirmations(run, geometry_dir, identity_dir, regions)
     reviewers = load_reviewers(reviewers_path)
     documents_known = load_documents(run)
+    inventory = load_inventory(run)
     captions = _by(_rows(os.path.join(run, CAPTIONS)), "Draft_ID")
     decisions = _by(_rows(os.path.join(run, DECISIONS)), "Draft_ID")
     decided = load_figure_decisions(run)
+    decided.update(load_figure_dispositions(run))
+    outcomes = load_outcomes(run)
+    legends = load_legends(run)
+    readings = load_readings(run)
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers
@@ -858,7 +1251,9 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
             continue
         plan, notes, panel_rows = plan_for(run, publication, pub_rows, captions, decisions,
                                            counts, crop_root, run_date, said, decided,
-                                           confirmations, reviewers, documents_known)
+                                           confirmations, reviewers, documents_known, inventory,
+                                           outcomes=outcomes, legends=legends,
+                                           readings=readings)
         panel_sheet.extend(panel_rows)
         path = os.path.join(out_dir, "plan_%s.json" % publication)
         with io.open(path, "w", encoding="utf-8") as fh:

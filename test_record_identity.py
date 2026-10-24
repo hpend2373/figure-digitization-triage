@@ -97,6 +97,49 @@ check("모르는 답은 거절한다", "BAD_VERDICT" in codes(run([answer(Human_
 check("낸 적 없는 제안은 거절한다", "NOT_PROPOSED" in codes(run([answer(Proposal_ID="GP999")])[1]))
 
 print()
+print("산점으로 세어진 패널도 범주 x의 평균 점이면 LINE_MONO로 확인할 수 있다")
+_SC = os.path.join(TMP, "ip_sc")
+os.makedirs(_SC)
+IP.write_proposals(os.path.join(_SC, R.PROPOSALS), [dict(PROPOSED, Proposal_ID="GS001", Panel_Kind="SCATTER",
+                                                         Mark_Type_Proposed="SCATTER")])
+_one = series({"name": "ALL", "marker": "CIRCLE", "marker_fill": "FILLED"})
+_w, _r, _ = R.record(_SC, [answer(Proposal_ID="GS001", Mark_Type="LINE_MONO", Series_Factor="GROUP", Series=_one,
+                                  Bar_Top_Definition="")], "2026-10-14", out_path=os.path.join(_SC, "out.csv"),
+                     log=lambda *a: None)
+# REVERT: 산점 패널에는 SCATTER만 받는다. 범주 x의 평균 점이 관계 그림의 x 눈금을 요구받습니다.
+check("산점 패널의 LINE_MONO 확인은 적힌다", len(_w) == 1 and not _r, codes(_r))
+_w, _r, _ = R.record(_SC, [answer(Proposal_ID="GS001", Mark_Type="BAR_MONO", Series_Factor="GROUP", Series=_one)],
+                     "2026-10-14", out_path=os.path.join(_SC, "out2.csv"), log=lambda *a: None)
+check("산점 패널을 막대로 확인하는 것은 여전히 거절한다", "MARK_TYPE_NOT_FOR_KIND" in codes(_r), codes(_r))
+
+print()
+print("사람이 보지 않은 답은 사람이 승인한 관찰로만 들어오고, 기록에 그렇게 남는다")
+# run2 2026-10-14: Claude가 원문을 보고 판정했고, 사람은 그 판정들을 한 번에 승인했습니다.
+_APPROVED = dict(Seen_By_Person="0", Observed_By="Claude (PDF survey 2026-10-14)",
+                 Approval_Ref="chat 2026-10-14: 판정대로 기록", Verified_By="MC")
+_w, _r, _p = run([answer(**_APPROVED)])
+check("온전한 승인된 관찰은 적힌다", len(_w) == 1 and not _r, codes(_r))
+with io.open(_p, encoding="utf-8") as fh:
+    _back = list(csv.DictReader(fh))
+# REVERT: 승인된 관찰의 출처를 적지 않는다. 그러면 기록은 사람이 본 확인과 구별되지 않습니다.
+check("기록은 사람이 보지 않았고 누가 보았고 어디서 승인했는지를 들고 있다",
+      _back and (_back[0]["Seen_By_Person"], _back[0]["Observed_By"], _back[0]["Approval_Ref"], _back[0]["Verified_By"])
+      == ("0", "Claude (PDF survey 2026-10-14)", "chat 2026-10-14: 판정대로 기록", "MC"),
+      _back and {k: _back[0][k] for k in ("Seen_By_Person", "Observed_By", "Approval_Ref")})
+_w, _r, _p = run([answer()])
+with io.open(_p, encoding="utf-8") as fh:
+    _back = list(csv.DictReader(fh))
+check("본 답은 본 답으로 남는다", _back and (_back[0]["Seen_By_Person"], _back[0]["Observed_By"]) == ("1", ""))
+# REVERT: 누가 보았는지 없는 승인도 받는다.
+check("본 것이 없는 승인은 거절한다", "APPROVAL_INCOMPLETE" in codes(run([answer(**dict(_APPROVED, Observed_By=""))])[1]))
+# REVERT: 어디서 승인했는지 없는 승인도 받는다.
+check("승인한 곳이 없는 승인은 거절한다", "APPROVAL_INCOMPLETE" in codes(run([answer(**dict(_APPROVED, Approval_Ref=""))])[1]))
+# REVERT: 본 사람이 스스로 승인한 것도 승인된 관찰로 받는다. 그 사람은 본 답을 내야 합니다.
+check("본 사람과 승인한 사람이 같으면 거절한다",
+      "OBSERVER_IS_APPROVER" in codes(run([answer(**dict(_APPROVED, Observed_By="mc"))])[1]))
+check("승인된 관찰도 이름 없이는 거절한다", "UNATTRIBUTED" in codes(run([answer(**dict(_APPROVED, Verified_By=""))])[1]))
+
+print()
 print("확인은 계획서가 설 수 있는 정체를 들고 와야 한다")
 # REVERT: x 요인 없이 적는다. 격자가 설 이름이 없고, 계획서는 그 자리를 짐작할 수 없습니다.
 check("x 요인이 없으면 거절한다", "X_FACTOR_MISSING" in codes(run([answer(X_Factor="")])[1]))
@@ -152,6 +195,14 @@ check("결과변수가 없으면 거절한다", "OUTCOME_MISSING" in codes(run([
 check("n은 비워도 된다", not run([answer(N_Outcome="")])[1])
 check("n이 양의 정수가 아니면 거절한다", "N_BAD" in codes(run([answer(N_Outcome="8.5")])[1]) and "N_BAD" in codes(run([answer(N_Outcome="0")])[1]))
 check("막대 표에 값 정의가 없으면 거절한다", "BAR_TOP_MISSING" in codes(run([answer(Bar_Top_Definition="")])[1]))
+# REVERT: FILL_ONLY를 BAR_TOPS에서 빼거나, 판독 경로를 묻지 않는다. 앞은 테두리 없는 막대를 적을 수 없고, 뒤는
+# 판독기(테두리 가운데를 잼)가 채움 끝이라고 적힌 막대를 읽게 됩니다 (결정 E04, 2026-10-21).
+check("테두리 없는 막대(FILL_ONLY)는 사람이 읽는 길이면 받는다",
+      not run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="MANUAL")])[1],
+      "%s" % codes(run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="MANUAL")])[1]))
+check("FILL_ONLY를 판독기(AUTO)에 맡기면 거절한다",
+      "BAR_TOP_FILL_ONLY_NEEDS_MANUAL" in codes(run([answer(Bar_Top_Definition="FILL_ONLY", Read_Route="AUTO")])[1])
+      and "BAR_TOP_FILL_ONLY_NEEDS_MANUAL" in codes(run([answer(Bar_Top_Definition="FILL_ONLY")])[1]))
 check("상자 표에는 값 정의를 묻지 않는다",
       not run([answer(Proposal_ID="GP003", Mark_Type="BOX_VIOLIN", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
                       Series_Factor="GROUP", Series=series({"name": "ALL", "colour": "#DC2828"}))])[1],

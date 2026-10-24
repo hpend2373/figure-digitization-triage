@@ -363,7 +363,7 @@ def fr(rows, cols):
 def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
              configs=CONFIGS, units=UNITS, source_figures=SOURCE_FIGURES,
              source_panels=SOURCE_PANELS, source_documents=SOURCE_DOCUMENTS,
-             reviewers=REVIEWERS):
+             reviewers=REVIEWERS, doc_root=None):
     p = BM.validate_batch_manifests(
         fr(panels, BM.panel_manifest_columns()),
         fr(series_rows, BM.series_manifest_columns()),
@@ -374,7 +374,7 @@ def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
         source_figures=fr(source_figures, BM.source_figure_manifest_columns()),
         source_panels=fr(source_panels, BM.source_panel_inventory_columns()),
         reviewers=fr(reviewers, BM.reviewer_registry_columns()),
-        file_root=ROOT)
+        file_root=ROOT, doc_root=doc_root)
     return sorted(set(p["check"])) if len(p) else []
 
 
@@ -479,6 +479,38 @@ check("a digest claimed for a document that is not in the corpus is refused",
                           for f in SOURCE_FIGURES]),
       "%s" % validate(source_documents=_doc(Source_File="absent.pdf",
                                             Source_File_SHA256=_DOC_SHA)))
+# A DOCUMENT FOLDER APART FROM THE RUN (run2 2026-10-16, E03). The corpus keeps
+# its 98 PDFs in one download folder, some one level down; the run holds the
+# rasters. Looked for under the run, every document was missing on the machine
+# that had all of them.
+_DOCS = os.path.join(os.path.dirname(ROOT), os.path.basename(ROOT) + "_docs")
+os.makedirs(os.path.join(_DOCS, "articles_api", "deeper"), exist_ok=True)
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "moved.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "below.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "deeper", "deep.pdf"))
+os.symlink(SOURCE_PDF, os.path.join(_DOCS, "leak.pdf"))
+
+
+def _docs_at(name, digest=_DOC_SHA, doc_root=_DOCS):
+    return validate(source_documents=_doc(Source_File=name, Source_File_SHA256=digest),
+                    source_figures=[dict(f, Source_File=name) for f in SOURCE_FIGURES], doc_root=doc_root)
+
+
+# REVERT: ignore --doc-root. The 98 documents are still looked for in the run and none is found.
+check("a document in the document folder is found there", _docs_at("moved.pdf") == [], "%s" % _docs_at("moved.pdf"))
+check("... and one folder down, as the caption reader found it", _docs_at("below.pdf") == [], "%s" % _docs_at("below.pdf"))
+# REVERT: search the whole tree. A same-named file anywhere below would be taken for the document.
+check("... but not two folders down", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("deep.pdf"))
+check("without the folder, the same document is not found in the run", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("moved.pdf", doc_root=None))
+# REVERT: accept a path in the name. '../' would walk out of the folder the run was told to read.
+check("a name with a path in it is not a document name", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("articles_api/below.pdf")
+      and "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("../" + os.path.basename(_DOCS) + "/moved.pdf"))
+# REVERT: follow a link out of the folder. A link is the easy way to put any file under any name.
+check("a link that leads out of the folder is refused", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("leak.pdf"))
+check("the digest is still checked against the file found there", "SOURCE_DOCUMENT_HASH_MISMATCH" in _docs_at("moved.pdf", digest="0" * 64))
+check("NOT_HELD about a document the folder holds is refused there too",
+      "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED" in _docs_at("moved.pdf", digest="NOT_HELD"))
+shutil.rmtree(_DOCS, ignore_errors=True)
 # NOT_HELD IS NOT A WAY OUT OF HASHING A FILE YOU HAVE. Without this the column
 # is optional in practice and the whole check is decoration: every producer that
 # does not want to hash its document writes NOT_HELD and nothing disagrees.
@@ -1825,6 +1857,38 @@ check("the overlay draws all five of a box's lines",
 _widths = [max(_wide[y] for y in band) for band in _bands]
 check("  each at the width the reader measured",
       len(set(_widths)) == 2, "%s" % (_widths,))
+
+# A MARKER READER'S ERROR-BAR ENDS ARE DRAWN. The line and point readers report
+# `Errorbar_Top_Px`/`Errorbar_Bottom_Px` and no `cap_px`; the overlay drew the
+# cross and nothing else, so nobody could see whether the measured ends sat on
+# the printed caps.
+def _ticks_at(path, rows, x=200, box=(100, 300, 80, 280)):
+    """The rows (source coordinates) where the overlay has a short level tick."""
+    im = Image.open(path).convert("RGB")
+    px = im.load()
+    ox, oy = max(0, box[0] - _OV.PAD), max(0, box[2] - _OV.PAD)
+    return [r for r in rows
+            if sum(1 for xx in range(x - ox - 5, x - ox + 6)
+                   if px[xx, r - oy] != (255, 255, 255)) >= 8]
+_mk = {"series": "DI", "x": 200.0, "marker_center_px": 180.0,
+       "Errorbar_Top_Px": 130.0, "Errorbar_Bottom_Px": 230.0}
+_mpath = _OV.draw_panel_overlay(os.path.join(_odir, "m.png"), _oras,
+                                (100, 300, 80, 280), [_mk],
+                                series_order=["DI"], label_marks=False)
+check("the overlay draws both measured ends of a marker's error bar",
+      _mpath and _ticks_at(_mpath, [130, 230]) == [130, 230],
+      "%s" % (_ticks_at(_mpath, [130, 230]) if _mpath else None,))
+# REVERT: take the measured ends whenever `cap_px` is None. A placed reading
+# says which ends were placed in `cap_px`/`cap_low_px`; None there is "this end
+# was not placed", and drawing the measured one in its place shows the person
+# an end nobody put there.
+_ppath = _OV.draw_panel_overlay(os.path.join(_odir, "p.png"), _oras,
+                                (100, 300, 80, 280),
+                                [dict(_mk, cap_px=None, cap_low_px=None)],
+                                series_order=["DI"], label_marks=False)
+check("  and a placed reading with no end placed shows none",
+      _ppath and _ticks_at(_ppath, [130, 230]) == [],
+      "%s" % (_ticks_at(_ppath, [130, 230]) if _ppath else None,))
 shutil.rmtree(_odir, ignore_errors=True)
 check("  and a mark with an ordinary centre still gives one",
       RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}])["A"]
@@ -6533,6 +6597,20 @@ check("  and the footer asks the two questions separately",
       len(_both.splitlines()) == 2
       and "SPREAD is not" in _both
       and "reconstructed from neighbouring ink" in _both, "%r" % _both)
+# A BOUND IS NOT AN UNSTEMMED CAP (decision I02, 2026-10-21). Same `~` on the
+# label, its own line in the footer: "the cap may be a significance glyph" is not
+# what a reviewer of a hidden end is asked.
+# REVERT: count bounds in SPREAD_NOTE's line, or drop BOUND_NOTE's.
+_BOUND_MARK = dict(_SPREAD_MARK, Dispersion_Method="BOUND_HIDDEN_END")
+_bnd = RB.OVERLAY.inferred_note([_BOUND_MARK, _BOUND_MARK, _SPREAD_MARK])
+check("a bound is marked ~ and footed as an upper bound, apart from an unstemmed cap",
+      RB.OVERLAY.mark_label(_BOUND_MARK).endswith(" ~")
+      and len(_bnd.splitlines()) == 2
+      and "2 mark(s): no end of the error bar is visible" in _bnd
+      and "1 mark(s): the number is measured and the SPREAD is not" in _bnd, "%r" % _bnd)
+_bnd1 = RB.OVERLAY.inferred_note([_BOUND_MARK])
+check("  and a panel of bounds alone never reads 'significance glyph'",
+      "UPPER BOUND" in _bnd1 and "glyph" not in _bnd1, "%r" % _bnd1)
 # THE TWO SHARED FIELDS ARE NOT "PROVENANCE THIS OVERLAY CANNOT READ". The
 # suffix check was case-sensitive against lower-case suffixes, so `Value_Method`
 # matched nothing and `Identity_Method` matched nothing - and the moment a reader
@@ -7486,6 +7564,30 @@ for _p in RB.emit_templates(_tdir):
     _fn = dict(BM.BATCH_TEMPLATES)[_name]
     check("%s template matches its column function" % _name,
           next(csv.reader(open(_p))) == _fn())
+
+# THE COMMAND LINE HANDS THE DOCUMENT FOLDER TO THE CHECK. The check reads it;
+# a run that took --doc-root and dropped it would look for the PDFs in the run.
+class _Seen(Exception):
+    pass
+
+
+_real_validate, _got = BM.validate_batch_manifests, {}
+
+
+def _spy(*_a, **kw):
+    _got.update(kw)
+    raise _Seen()
+
+
+BM.validate_batch_manifests = _spy
+try:
+    RB.main([MDIR, os.path.join(ROOT, "o_docroot"), "--file-root", ROOT, "--doc-root", "/docs/here"])
+except _Seen:
+    pass
+finally:
+    BM.validate_batch_manifests = _real_validate
+# REVERT: drop doc_root between the command line and the check.
+check("the command line's --doc-root reaches the manifest check", _got.get("doc_root") == "/docs/here", _got.get("doc_root"))
 
 shutil.rmtree(ROOT, ignore_errors=True)
 print()

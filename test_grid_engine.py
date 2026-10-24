@@ -148,6 +148,16 @@ CASES = [
 for name, kw, want in CASES:
     check(name + " -> " + want, want in run(**kw), "%s" % run(**kw))
 
+# A BAR WITH NO OUTLINE (decision E04, 2026-10-21). Its fill edge is its data
+# coordinate, so the gate takes it - and FILL_EDGE, the half-stroke bias on a bar
+# that HAS a stroke, is still stopped.
+# REVERT: leave FILL_ONLY out of FIG_BAR_TOP_DEFS, or stop it with FILL_EDGE.
+_fo = run(unit={"Bar_Top_Definition": "FILL_ONLY"})
+check("FILL_ONLY (a bar with no outline) passes the bar-top checks",
+      not set(_fo) & {"BAD_BAR_TOP_DEFINITION", "BAR_TOP_READ_AT_FILL_EDGE", "MISSING_BAR_TOP_DEFINITION"}, "%s" % _fo)
+check("FILL_EDGE is still stopped beside it",
+      "BAR_TOP_READ_AT_FILL_EDGE" in run(unit={"Bar_Top_Definition": "FILL_EDGE"}))
+
 print("the counter-examples that used to pass clean")
 COUNTER = [
     ("Extraction_Method=BOGUS", dict(unit={"Extraction_Method": "BOGUS"}),
@@ -326,6 +336,71 @@ check("and undeclared, the flag asks for the shape rather than accusing "
       "DISPERSION_IMPLIES_SKEW" in _unknown
       and "SE_IMPLIES_HUGE_SD" not in _unknown, "%s" % _unknown)
 
+# AN UPPER BOUND IS NOT A CAP (decision I02, 2026-10-21). A spread whose ends
+# could not be seen is set at the edge of what hides them; it is larger than the
+# spread by construction and has no visible stem, so the two checks written for
+# caps skip it - and only it.
+# REVERT: drop `not fig_is_bound(row)` from the SE x sqrt(n) check, `bound_only`
+# from the unit's stem check, the bound test from the cell's, or count units as
+# bound-only when one of their spreads is a read cap.
+print("an upper bound is not a cap")
+_B = dict(Dispersion_Method="BOUND_HIDDEN_END")
+_bhuge = [dict(v, **_B) for v in _HUGE_VALS]
+_b1 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="UNKNOWN"), vals=_bhuge)
+check("an upper bound is not read as SE x sqrt(n) against the mean",
+      "DISPERSION_IMPLIES_SKEW" not in _b1, "%s" % _b1)
+_b2 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="SYMMETRIC"), vals=_bhuge)
+check("nor on a symmetric outcome", "SE_IMPLIES_HUGE_SD" not in _b2, "%s" % _b2)
+_b3 = run(unit=dict(_HUGE_UNIT, Distribution_Shape="UNKNOWN"),
+          vals=[_bhuge[0], dict(_HUGE_VALS[1], Dispersion_Method="AI_PLACED_CAP")])
+check("a read cap beside it is still checked", "DISPERSION_IMPLIES_SKEW" in _b3, "%s" % _b3)
+_bs = [dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": lv}), Mean=60,
+            Dispersion_Value=3, **_B) for lv in ("PRE", "POST")]
+_b4 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"}, vals=_bs)
+check("a unit whose every spread is a bound is not asked for a stem",
+      "ERRORBAR_STEM_UNCONFIRMED" not in _b4, "%s" % _b4)
+_b5 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"},
+          vals=[_bs[0], dict(_bs[1], Dispersion_Method="AI_PLACED_CAP")])
+check("one read cap among them and the unit's stem question stands",
+      "ERRORBAR_STEM_UNCONFIRMED" in _b5, "%s" % _b5)
+_b6 = run(unit={"Errorbar_Stem_Confirmed": "FALSE"},
+          vals=[dict(v, Dispersion_Value="", Dispersion_Method="") for v in _bs])
+check("a unit with no spread at all is not taken for a bound-only one",
+      "ERRORBAR_STEM_UNCONFIRMED" in _b6, "%s" % _b6)
+_b7 = run(vals=[dict(v, Errorbar_Stem_Confirmed="FALSE") for v in _bs])
+check("a bounded cell whose reader found no stem is not a stem failure",
+      "CELL_ERRORBAR_STEM_UNCONFIRMED" not in _b7, "%s" % _b7)
+_b8 = run(vals=[dict(v, Errorbar_Stem_Confirmed="FALSE", Dispersion_Method="AI_PLACED_CAP")
+                for v in _bs])
+check("a read cap with no stem still is", "CELL_ERRORBAR_STEM_UNCONFIRMED" in _b8, "%s" % _b8)
+_b9 = run(vals=[dict(v, Mean=60, Errorbar_Lower=65, Errorbar_Upper=70, Dispersion_Value="")
+                for v in _bs])
+check("and a bound still has to hold its mean between its ends",
+      "MEAN_OUTSIDE_ERRORBAR" in _b9, "%s" % _b9)
+
+# A MEAN KEPT WITHOUT ITS SPREAD, BY DECISION (2026-10-21; the person: "평균만").
+# MEAN_ONLY_DECLARED is not asked for a spread; a blank spread without it still is;
+# and a mean only that carries a spread is refused.
+# REVERT: let MISSING_DISPERSION or ASYMMETRIC_NEEDS_BOUNDS fire on it, or drop
+# MEAN_ONLY_WITH_SPREAD.
+print("a mean kept without its spread")
+_mo = [dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "PRE"}), Mean=60,
+            Dispersion_Value="", Dispersion_Method="MEAN_ONLY_DECLARED"),
+       dict(Unit_ID="U1", Cell_Key=G.fig_cell_key({"PHASE": "POST"}), Mean=62,
+            Dispersion_Value=3, Dispersion_Method="AI_PLACED_CAP")]
+_m1 = run(vals=_mo)
+check("a declared mean-only cell is not a missing spread", _m1 == [], "%s" % _m1)
+_m2 = run(vals=[dict(_mo[0], Dispersion_Method="NO_DISPERSION"), _mo[1]])
+check("  the same blank without the declaration still is",
+      "MISSING_DISPERSION" in _m2, "%s" % _m2)
+_m3 = run(unit={"Dispersion_Type": "CI95"},
+          vals=[_mo[0], dict(_mo[1], Dispersion_Value="", Errorbar_Lower=58, Errorbar_Upper=66)])
+check("  nor are its bounds asked under an asymmetric type",
+      "ASYMMETRIC_NEEDS_BOUNDS" not in _m3, "%s" % _m3)
+_m4 = run(vals=[dict(_mo[0], Dispersion_Value=2.0), _mo[1]])
+check("  and a mean only that carries a spread is refused",
+      "MEAN_ONLY_WITH_SPREAD" in _m4, "%s" % _m4)
+
 # REVERT: let the transformation go undeclared. A mean of log10(power) and a
 # mean of power carry the same axis label and differ by more than any effect
 # this review is looking for, and nothing in a raster distinguishes them.
@@ -483,6 +558,22 @@ for _c, _w in (("WPD_Project_File", "MISSING_PROVENANCE"),):
 for _c in ("Axis_X_Scale", "Axis_Y_Scale"):
     check("blank %s -> MISSING_PROVENANCE" % _c,
           "MISSING_PROVENANCE" in run(unit={_c: ""}))
+# ONE CATEGORICAL SLOT (D14, 2026-10-20): a panel with a single x position is
+# calibrated on that slot alone - X1 = slot 0 at its pixel, X2 blank.
+# REVERT: ask for X2 on every unit. The single-slot panels are refused again.
+check("one categorical slot (X1 = 0 at a pixel, X2 blank) is a whole x calibration",
+      "MISSING_PROVENANCE" not in run(unit={"Axis_Calib_X2_Value": "", "Axis_Calib_X2_Pixel": ""}),
+      run(unit={"Axis_Calib_X2_Value": "", "Axis_Calib_X2_Pixel": ""}))
+check("  but X2 blank after a slot other than 0 is still missing",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X1_Value": 2, "Axis_Calib_X2_Value": "",
+                                        "Axis_Calib_X2_Pixel": ""}))
+check("  and so is half an X2",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X2_Value": ""}))
+check("  and a blank Y2 never is a slot",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_Y2_Value": "", "Axis_Calib_Y2_Pixel": ""}))
+check("  and with no pixel for slot 0 there is no calibration",
+      "MISSING_PROVENANCE" in run(unit={"Axis_Calib_X1_Pixel": "", "Axis_Calib_X2_Value": "",
+                                        "Axis_Calib_X2_Pixel": ""}))
 check("an image path that is not on disk is flagged",
       "SOURCE_FILE_NOT_FOUND" in run(fig={"Source_Image": "no_such_image.png"}))
 check("a WPD project that is not on disk is flagged",

@@ -440,6 +440,7 @@ def value_contract_failures(run_dir, frames, machine, flag):
         pid = _s(panel.get("Panel_ID"))
         panel_index[pid] = {
             "Mark_Type": _s(panel.get("Mark_Type")),
+            "Panel_Mode": _s(panel.get("Panel_Mode")),
             "Unit_ID": _s(panel.get("Unit_ID")),
             "Source_Panel_ID": _s(panel.get("Source_Panel_ID")),
             "Figure_ID": _s(panel.get("Figure_ID")),
@@ -510,10 +511,12 @@ def grid_contract_failures(frames, machine, flag):
              % ", ".join(missing + ([] if raw is not None
                                     else ["figure_values_raw.csv"])))
         return {"*"}
+    # A group's own n travels with its cell (`N_Cell`) where the run wrote one;
+    # dropping the column here would re-gate those units as missing their n.
+    cols = GE.fig_values_columns(cell_n="N_Cell" in raw.columns)
     values = pd.DataFrame(
-        [{c: r.get(c, "") for c in GE.fig_values_columns()}
-         for r in raw.to_dict("records")],
-        columns=GE.fig_values_columns())
+        [{c: r.get(c, "") for c in cols} for r in raw.to_dict("records")],
+        columns=cols)
     # THE FIGURES FRAME THE RUNNER GAVE THE GATE, rebuilt. `run_batch` fills
     # `WPD_Project_File` on the figure from the projects its panels wrote before
     # it calls the gate - an automated run has no human-saved project, so it
@@ -601,7 +604,7 @@ def machine_candidate_failures(frames, machine, flag):
     # THE ROW, over the columns both files carry. Compared as a counted multiset
     # rather than as a set: two identical candidate rows against one raw row is
     # one value counted twice, which is the same class of defect.
-    shared = [c for c in GE.fig_values_columns() if c in raw.columns]
+    shared = [c for c in GE.fig_values_columns(cell_n=True) if c in raw.columns]
     raw_rows = collections.Counter(
         tuple(_s(r.get(c)) for c in shared) for r in raw.to_dict("records"))
     for row in rows:
@@ -620,6 +623,8 @@ def machine_candidate_failures(frames, machine, flag):
     # problems are kept: a `unit:` or `grid:` problem here would be about cells
     # the run's own gate legitimately dropped, which is the refusal the raw pass
     # exists to avoid manufacturing.
+    # The base columns: a candidate is the raw file's row (checked just above,
+    # N_Cell included), and the raw file was re-gated whole with its cells' n.
     values = pd.DataFrame(
         [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in rows],
         columns=GE.fig_values_columns())
@@ -1385,8 +1390,8 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag,
     not pretend otherwise.
     """
     withheld = set()
-    mark_of = {_s(r.get("Panel_ID")): _s(r.get("Mark_Type")).upper()
-               for _, r in queue.iterrows()}
+    expected = panel_expectations(frames)
+    mark_of = _routes(queue, expected)
     rows = (machine.to_dict("records") if hasattr(machine, "to_dict")
             else list(machine or ()))
     for row in rows:
@@ -1429,9 +1434,27 @@ def method_contract_failures(machine, queue, ledger_rows, run_dir, flag,
                                         artifacts=artifacts,
                                         series=(frames or {}).get("series"))
     withheld |= _mark_evidence_failures(machine, queue, ledger_rows, run_dir,
-                                        flag, panel_expectations(frames),
-                                        artifacts=artifacts)
+                                        flag, expected, artifacts=artifacts)
     return withheld
+
+
+def _routes(queue, expected):
+    """{Panel_ID: the contract key its values are held to}.
+
+    The queue's `Mark_Type` - the reader that read the panel - except where the
+    VERIFIED panel manifest says the panel is MANUAL, whose values can only have
+    come from `supplied_readings.csv` and are held to that route's contract
+    (`provenance.route_of`). Read from the manifest the run was validated
+    against, not from anything the run wrote, so a run cannot move a panel from
+    one contract to the other by what it puts in its own queue.
+    """
+    out = {}
+    for _, r in queue.iterrows():
+        pid = _s(r.get("Panel_ID"))
+        route = (expected or {}).get(pid, {}).get("route")
+        out[pid] = (route if route == PROV.SUPPLIED_ROUTE
+                    else _s(r.get("Mark_Type")).upper())
+    return out
 
 
 #: The value columns a MARK's own measurement decides, and the mark field each
@@ -1484,9 +1507,11 @@ def panel_expectations(frames):
     # The declared rows the measurement digest is taken over, grouped the way
     # the runner groups them.
     series_by_panel, positions_by_panel, configs_by_id = {}, {}, {}
+    readings_by_panel = {}
     for key, target, group in (("series", series_by_panel, "Panel_ID"),
                                ("positions", positions_by_panel, "Panel_ID"),
-                               ("configs", configs_by_id, "Config_ID")):
+                               ("configs", configs_by_id, "Config_ID"),
+                               ("readings", readings_by_panel, "Panel_ID")):
         frame = (frames or {}).get(key)
         if frame is None:
             continue
@@ -1519,18 +1544,23 @@ def panel_expectations(frames):
                 envelope = None
         out[pid] = {"cell_map": maps.get(pid, EMPTY_CELL_MAP),
                     "envelope": envelope,
+                    # Which contract the panel's values are held to, from the
+                    # verified panel row: see `_routes`.
+                    "route": (None if panel is None else PROV.route_of(
+                        panel.get("Mark_Type"), panel.get("Panel_Mode"))),
                     "context": (None if envelope is None else
                                 _verifier_context(
                                     envelope, panel,
                                     positions_by_panel.get(pid, []),
                                     configs_by_id.get(
                                         _s(panel.get("Config_ID")), []),
-                                    series_by_panel.get(pid, [])))}
+                                    series_by_panel.get(pid, []),
+                                    readings_by_panel.get(pid, [])))}
     return out
 
 
 def _verifier_context(envelope, panel, position_rows, config_rows,
-                      series_rows=()):
+                      series_rows=(), reading_rows=()):
     """What a verifier may re-derive a mark against: the run's own declaration.
 
     A SUPERSET of the hashed envelope, and deliberately not part of it. The
@@ -1581,10 +1611,20 @@ def _verifier_context(envelope, panel, position_rows, config_rows,
             "Marker_Fill": _s(row.get("Marker_Fill")),
             "Line_Style": _s(row.get("Line_Style")),
         }
+    # AND THE READINGS A SUPPLIED PANEL WAS MADE FROM, as declared and
+    # verified: the supplied verifier compares each mark with its reading field by
+    # field and re-makes its numbers from the reading's pixels. With the panel's
+    # series count, which decides whether its series was declared or assigned.
+    readings = {}
+    for row in reading_rows:
+        item = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+        readings[_s(item.get("Reading_ID"))] = {k: _s(v) for k, v in item.items()}
     return dict(envelope, Position_Anchors=anchors,
                 Slot_Tolerance_Px=tolerance,
                 Series_Discriminants=discriminants,
-                Baseline_Value=_s(panel.get("Baseline_Value")))
+                Baseline_Value=_s(panel.get("Baseline_Value")),
+                Supplied_Readings=readings,
+                Series_Count=len(list(series_rows)))
 
 
 def _canonical(value):
@@ -1700,8 +1740,7 @@ def _mark_evidence_failures(machine, queue, ledger_rows, run_dir, flag,
     to the join, which is weaker and is not pretended otherwise.
     """
     withheld = set()
-    mark_of = {_s(r.get("Panel_ID")): _s(r.get("Mark_Type")).upper()
-               for _, r in queue.iterrows()}
+    mark_of = _routes(queue, expected)
     by_hash, duplicated = {}, set()
     joinable = set()                  # panels whose marks can be joined to
     for _, art in ledger_rows.iterrows():

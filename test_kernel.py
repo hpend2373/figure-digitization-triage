@@ -706,6 +706,13 @@ expect("bar top definition missing on a digitized row",
        B(Bar_Top_Definition=""), want=["MISSING_BAR_TOP_DEFINITION"])
 expect("bar top definition off-vocabulary",
        B(Bar_Top_Definition="TOP_OF_BAR"), want=["BAD_BAR_TOP_DEFINITION"])
+# REVERT: drop FILL_ONLY from FIG_BAR_TOP_DEFS, or flag it with FILL_EDGE. A bar
+# with no outline stroke is then either refused as off-vocabulary or blamed for a
+# half-stroke bias it cannot have (decision E04, 2026-10-21).
+expect("a bar with no outline, read at its fill edge, is FILL_ONLY and carries no bias flag",
+       B(Bar_Top_Definition="FILL_ONLY"),
+       forbid=["MISSING_BAR_TOP_DEFINITION", "BAD_BAR_TOP_DEFINITION",
+               "BAR_TOP_READ_AT_FILL_EDGE"])
 expect("a line plot may declare NOT_A_BAR",
        B(Bar_Top_Definition="NOT_A_BAR"),
        forbid=["MISSING_BAR_TOP_DEFINITION", "BAD_BAR_TOP_DEFINITION",

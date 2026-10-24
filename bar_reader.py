@@ -533,6 +533,23 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 # reading is supposed to have.
                 cap_c = (caps[0] + caps[-1]) / 2.0 if caps else None
 
+            # WHERE THE BAR'S OWN INK IS ASKED ABOUT: inside its body, at a
+            # quarter of its width either side of the middle as well as at the
+            # middle. One pixel four rows under the top at the middle column was
+            # the whole sample, and the middle column is where the error bar's
+            # stem runs down into a bar: publication 323 draws two-sided black
+            # whiskers over red bars, so that pixel was black on all 141 bars,
+            # `own_mask_hit` was 0 on every one, and `finalize_batch` refused
+            # all eight approved panels for METHOD_EVIDENCE_INCOMPLETE
+            # (2026-10-19). The body row is the first row the series' colour
+            # spans half the bar at - below the outline, which is darker than
+            # the fill and in no colour mask.
+            if body is not None:
+                sy = float(body[-1] - 2 if down else body[0] + 2)
+            else:
+                sy = top_c + (-4 if down else 4)
+            samples = [(float(c), sy) for c in (xlo + w // 4, xc, xhi - w // 4)]
+
             out.append(dict(
                 series=sname, order=order, x=xc, bar_width=w,
                 top_px=top_c, fill_top_px=float(fill_top), cap_px=cap_c,
@@ -576,18 +593,17 @@ def read_bar_panel(masks, panel_box, ticks=None, series=None, min_bar_px=15,
                 # an outline a neighbouring colour's antialiasing can reach, and
                 # what is being asked is whether another series' mask claims this
                 # bar's own ink.
-                mask_overlap=_claimed_by_others(
-                    others_of.get(sname, ()), xc,
-                    top_c + (-4 if down else 4)),
+                mask_overlap=max(_claimed_by_others(others_of.get(sname, ()), sx, sy)
+                                 for sx, sy in samples),
                 # AND WHETHER THIS SERIES' OWN MASK CLAIMS IT, at the same
-                # pixel. `mask_overlap=0` says no OTHER declared colour covers
+                # points. `mask_overlap=0` says no OTHER declared colour covers
                 # this ink; it does not say the colour this series declares
                 # does. Without both, `MEASURED_COLOUR` rests on the reader
                 # having found the bar in its own mask - true, and not written
                 # down anywhere a checker could read. One number each, from the
-                # same sample point, so the pair is comparable.
-                own_mask_hit=int(_covers(masks[key], xc,
-                                         top_c + (-4 if down else 4))),
+                # same sample points, so the pair is comparable.
+                own_mask_hit=int(any(_covers(masks[key], sx, sy)
+                                     for sx, sy in samples)),
                 own_mask_key=key,
                 Errorbar_Stem_Confirmed="TRUE" if stem_ok else "FALSE",
                 calib_max_resid=resid,

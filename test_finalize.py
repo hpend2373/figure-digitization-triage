@@ -2184,7 +2184,10 @@ check("a value of a join reader that cites no mark at all is refused",
       _held_j == {"P1"} and "MARK_EVIDENCE_MISSING" in _seen_j, "%s" % _seen_j)
 check("  and the five readers named are the ones with no other durable route",
       PROV.MARK_JOIN_REQUIRED == {"LINE_COLOR", "LINE_MONO", "LINE_MONO_STYLE",
-                                  "BAR_COLOR", "BOX_VIOLIN"}
+                                  "BAR_COLOR", "BOX_VIOLIN",
+                                  # 2026-10-18: the supplied route's marks are the
+                                  # only record of where the agent placed a point
+                                  "SUPPLIED"}
       and not (PROV.MARK_JOIN_REQUIRED & {"BAR_MONO", "SCATTER"}),
       "%s" % sorted(PROV.MARK_JOIN_REQUIRED))
 # AND THE CONDITIONS THE MARKS WERE MEASURED UNDER ARE THE RUN'S, NOT THE

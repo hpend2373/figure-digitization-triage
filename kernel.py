@@ -57,7 +57,10 @@ FIG_EXTRACTION_METHODS = ("DIGITIZED", "TRANSCRIBED")
 # typical outline and biases every mean in the same direction.
 # "NOT_A_BAR", not "NOT_APPLICABLE": the latter is a NULL token, so fig_is_blank
 # would read a filled-in answer as an empty cell.
-FIG_BAR_TOP_DEFS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
+#: FILL_ONLY: a bar drawn with no outline stroke. Its fill edge IS the data
+#: coordinate, so reading it there is not the half-stroke bias FILL_EDGE names
+#: (decision E04, 2026-10-21: nine panels whose bars have no stroke at all).
+FIG_BAR_TOP_DEFS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR", "FILL_ONLY")
 FIG_PANEL_RECON = ("MATCHED", "UNLISTED_PANELS_FOUND", "WORKLIST_OVERCOUNTS", "PENDING")
 # WHO decided which series a value belongs to. A monochrome bar is identified by
 # its FILL, so the row heading of such a value is a claim of its own, separate

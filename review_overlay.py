@@ -234,6 +234,33 @@ TIER_MARK_SUFFIXES = (("R2", " *"), ("R3", " +"), ("R4", " x"))
 #: `~` for the spread, so the two are countable separately on the picture.
 SPREAD_MARK_SUFFIX = " ~"
 
+#: R2 IS TWO QUESTIONS TOO, from 2026-10-18. A row reaches it because its SERIES
+#: was reasoned to, or because the POINT itself was placed by an AI agent from
+#: `supplied_readings.csv` - and "series reasoned to" is not what a reviewer of a
+#: placed point is being asked. `@` for a placed point, counted on its own line.
+PLACED_MARK_SUFFIX = " @"
+
+PLACED_NOTE = ("%d point(s) PLACED by an AI agent, not read by a reader - check "
+               "each sits on its printed mark and bar end (Inference_Checked)")
+
+
+def placed(mark):
+    """True when this mark's point was placed by an agent, not read."""
+    return str(mark.get("Value_Method", "") or "").strip() == "AI_PLACED_POINT"
+
+
+#: A point the registered reviewer placed themselves (`Reader_Kind=PERSON`) is R0
+#: and asks nothing more, but the picture still says whose it is: `P`, counted.
+PERSON_MARK_SUFFIX = " P"
+
+PERSON_NOTE = ("%d point(s) placed by a person (Reader_Kind=PERSON, "
+               "MANUAL_DIGITIZED) - their own reading, not an agent's")
+
+
+def person_placed(mark):
+    """True when this mark's point was placed by a registered person."""
+    return str(mark.get("Value_Method", "") or "").strip() == "MANUAL_DIGITIZED"
+
 #: How a reader names a provenance field. Everything matching this and not in
 #: `IDENTITY_SOURCE_FIELDS` is provenance this picture cannot interpret.
 #: A convention can still be side-stepped by a field named nothing like this,
@@ -268,6 +295,34 @@ SPREAD_NOTE = ("%d mark(s): the number is measured and the SPREAD is not - the "
                "cap may be a cap or a significance glyph. Confirmed by name in "
                "inference_review.csv, like a reconstructed number")
 
+#: AND A BOUND IS A THIRD (decision I02, 2026-10-21). An end nobody could see, set
+#: at the edge of what hides it (`End_Basis=BOUND`), is drawn with the same `~` -
+#: but "the cap may be a significance glyph" is not the question it asks, and a
+#: blinded check reading the footer beside its rules found the two contradicting.
+BOUND_NOTE = ("%d mark(s): no end of the error bar is visible - each end is set at "
+              "the edge of what hides it, an UPPER BOUND on the spread. Confirmed by "
+              "name in inference_review.csv")
+
+
+def bound_spread(mark):
+    """True when this mark's spread is an upper bound, not a cap that was seen."""
+    return (str(mark.get("Dispersion_Method", "") or "").strip().upper()
+            == PROV.SUPPLIED_BOUND_METHOD)
+
+
+#: A MEAN KEPT WITHOUT ITS ERROR BAR, by the reviewer's decision (`End_Basis=NONE`,
+#: 2026-10-21). No tick is drawn because none was placed on purpose; `=` says so on
+#: the label, so it does not read as an error bar somebody forgot.
+MEAN_ONLY_MARK_SUFFIX = " ="
+MEAN_ONLY_NOTE = ("%d mark(s): MEAN ONLY - the reviewer kept the mean without its error "
+                  "bar (End_Basis=NONE); no weight in a variance-weighted pool")
+
+
+def mean_only(mark):
+    """True when this mark is a mean kept without its spread by decision."""
+    return (str(mark.get("Dispersion_Method", "") or "").strip().upper()
+            == PROV.SUPPLIED_MEAN_ONLY_METHOD)
+
 
 def spread_only(mark):
     """True when this mark is R3 for its ERROR BAR and not for its number."""
@@ -300,10 +355,27 @@ def tier_of(mark):
 def inferred_note(marks):
     """The footer key for starred and questioned marks, or "" if none."""
     lines = []
+    people = [m for m in marks if person_placed(m)]
+    if people:
+        lines.append("%s %s" % (PERSON_MARK_SUFFIX.strip(), PERSON_NOTE % len(people)))
+    alone = [m for m in marks if mean_only(m)]
+    if alone:
+        lines.append("%s %s" % (MEAN_ONLY_MARK_SUFFIX.strip(), MEAN_ONLY_NOTE % len(alone)))
     for tier, suffix in TIER_MARK_SUFFIXES:
         here = [m for m in marks if tier_of(m) == tier]
+        if tier == "R2":
+            points = [m for m in here if placed(m)]
+            if points:
+                lines.append("%s %s" % (PLACED_MARK_SUFFIX.strip(),
+                                        PLACED_NOTE % len(points)))
+            here = [m for m in here if not placed(m)]
         if tier == "R3":
             spread = [m for m in here if spread_only(m)]
+            bounds = [m for m in spread if bound_spread(m)]
+            if bounds:
+                lines.append("%s %s" % (SPREAD_MARK_SUFFIX.strip(),
+                                        BOUND_NOTE % len(bounds)))
+            spread = [m for m in spread if not bound_spread(m)]
             if spread:
                 lines.append("%s %s"
                              % (SPREAD_MARK_SUFFIX.strip(),
@@ -334,6 +406,8 @@ def mark_label(mark):
     value = mark.get("mean", mark.get("median"))
     if value is not None:
         label += " %.4g" % float(value)
+    if mean_only(mark):
+        label += MEAN_ONLY_MARK_SUFFIX
     # WHICH SERIES A MARK BELONGS TO IS NOT ALWAYS MEASURED. A monochrome line
     # reader whose window was too blinded to measure a stroke pattern names the
     # last curve by elimination, and that cell is the one a reviewer should
@@ -342,6 +416,10 @@ def mark_label(mark):
     tier = tier_of(mark)
     if spread_only(mark):
         return label + SPREAD_MARK_SUFFIX
+    if tier == "R2" and placed(mark):
+        return label + PLACED_MARK_SUFFIX
+    if person_placed(mark):
+        return label + PERSON_MARK_SUFFIX
     for known, suffix in TIER_MARK_SUFFIXES:
         if tier == known:
             label += suffix
@@ -461,8 +539,25 @@ def draw_panel_overlay(path, image_path, panel_box, marks, title="",
             else:
                 draw.line((mx - 9, my, mx + 9, my), fill=colour, width=2)
                 draw.line((mx, my - 5, mx, my + 5), fill=colour, width=2)
-            cap = mark.get("cap_px")
-            if cap is not None:
+            # The cap, and the end below the mark when one was placed there too
+            # (`cap_low_px`, supplied readings only): a reviewer asked whether a
+            # placed bar end sits on the printed one has to see both.
+            #
+            # A MARKER READER'S ENDS TOO. The line and point readers measure
+            # both ends of the error bar and report them as `Errorbar_Top_Px`
+            # and `Errorbar_Bottom_Px`, never as `cap_px` - so their overlay
+            # showed a cross and no ends, and neither the person nor the blinded
+            # second check could see whether the measured ends sat on the
+            # printed caps (S41526, 310_PMC8576394, 2026-10-19). Taken only from
+            # a mark that carries no cap of its own: a placed reading names its
+            # ends in `cap_px`/`cap_low_px`, and a `None` there means "not
+            # placed", which this must not fill in.
+            ends = (mark.get("cap_px"), mark.get("cap_low_px"))
+            if "cap_px" not in mark and "cap_low_px" not in mark:
+                ends = (mark.get("Errorbar_Top_Px"), mark.get("Errorbar_Bottom_Px"))
+            for cap in ends:
+                if cap is None:
+                    continue
                 cy = float(cap) - oy
                 draw.line((mx, my, mx, cy), fill=colour, width=1)
                 draw.line((mx - 5, cy, mx + 5, cy), fill=colour, width=1)

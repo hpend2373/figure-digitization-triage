@@ -24,6 +24,7 @@ as REVIEW_REQUIRED until somebody looks again.
 """
 import csv
 import datetime
+import hashlib
 import io
 import os
 import re
@@ -234,6 +235,10 @@ def moved_page(d, human_page, run, ledger, twins):
     moved["Caption_Page"] = moved.get("Caption_Page") or str(here)
     moved["Page"] = str(there)
     moved["Page_Raster"] = target
+    # 래스터를 바꾸면 그 지문도 바꿉니다. 옛 지문을 들고 가면 행은 새 쪽에 있으면서
+    # 옮겨 오기 전 쪽의 그림을 가리키고, 지문을 대 보는 곳마다 그림이 바뀌었다고
+    # 말합니다(run2 10_1038_S41467_023_41990_4 D004·D006, 결정 묶음 2026-10-15 E01).
+    moved["Page_Raster_SHA256"] = hashlib.sha256(io.open(target, "rb").read()).hexdigest()
     moved["Page_Width_Pt"] = "%.2f" % said[0]
     moved["Page_Height_Pt"] = "%.2f" % said[1]
     return moved, ""
@@ -394,7 +399,7 @@ def main(run):
                 # downstream - round-trip, the sheet's page view, the block
                 # rule's figure key - reads these fields and nothing else.
                 d["Moved_From_Page"] = d.get("Moved_From_Page") or d["Page"]
-                for col in ("Caption_Page", "Page", "Page_Raster",
+                for col in ("Caption_Page", "Page", "Page_Raster", "Page_Raster_SHA256",
                             "Page_Width_Pt", "Page_Height_Pt"):
                     d[col] = moved[col]
                 twins[(d["Source_Document_ID"], d["Figure_Number"], d["Page"])] = d["Draft_ID"]

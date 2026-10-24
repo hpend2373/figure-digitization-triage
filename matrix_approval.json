@@ -1,0 +1,81 @@
+{
+ "files": {
+  "approval.py": "95c6c39d8d751741230292c529138078e4454c5292137a930dc35b6f3e6006e1",
+  "record_identity.py": "d5bca7113fc98d89943b2aaf5bd6315bdb88d86d8ffbd74a263bc78d29617f89",
+  "record_geometry.py": "75ac077b84420a246547efd942b5d909463f5305d744d004f4137d0c1fcfa804",
+  "test_record_identity.py": "e918389b26297a3918dd0c08b5183ca44b8fa7fbe3f4db4edb4a9c8555aa5bfa",
+  "test_record_geometry.py": "e6ee52e3b28b74a881caaebc0d41619d44c08475475d41735f02c733c4dc3c3b"
+ },
+ "suites": [
+  "test_record_identity.py",
+  "test_record_geometry.py"
+ ],
+ "mutations": [
+  {
+   "name": "보지 않은 답도 적는다 (승인 없이)",
+   "file": "approval.py",
+   "old": "        return [(\"NOT_SEEN_BY_PERSON\", not_seen_why)]",
+   "new": "        return []"
+  },
+  {
+   "name": "누가 보았는지 없는 승인도 받는다",
+   "file": "approval.py",
+   "old": "    if not observed:\n        problems.append((\"APPROVAL_INCOMPLETE\",",
+   "new": "    if False:\n        problems.append((\"APPROVAL_INCOMPLETE\","
+  },
+  {
+   "name": "어디서 승인했는지 없는 승인도 받는다",
+   "file": "approval.py",
+   "old": "    if not ref:\n        problems.append((\"APPROVAL_INCOMPLETE\",",
+   "new": "    if False:\n        problems.append((\"APPROVAL_INCOMPLETE\","
+  },
+  {
+   "name": "본 사람이 스스로 승인한 것도 받는다",
+   "file": "approval.py",
+   "old": "    if observed and who and observed.casefold() == who.strip().casefold():",
+   "new": "    if False:"
+  },
+  {
+   "name": "승인된 관찰을 본 답으로 적는다",
+   "file": "approval.py",
+   "old": "\"Seen_By_Person\": \"1\" if seen else \"0\",",
+   "new": "\"Seen_By_Person\": \"1\","
+  },
+  {
+   "name": "누가 보았는지를 기록에서 지운다",
+   "file": "approval.py",
+   "old": "\"Observed_By\": \"\" if seen else (answer.get(\"Observed_By\") or \"\").strip(),",
+   "new": "\"Observed_By\": \"\","
+  },
+  {
+   "name": "승인한 곳을 기록에서 지운다",
+   "file": "approval.py",
+   "old": "\"Approval_Ref\": \"\" if seen else (answer.get(\"Approval_Ref\") or \"\").strip()}",
+   "new": "\"Approval_Ref\": \"\"}"
+  },
+  {
+   "name": "정체 관문이 출처를 적지 않는다",
+   "file": "record_identity.py",
+   "old": "        row.update(approval.provenance(answer))\n        written.append(row)",
+   "new": "        written.append(row)"
+  },
+  {
+   "name": "기하 관문이 출처를 적지 않는다",
+   "file": "record_geometry.py",
+   "old": "        row.update(approval.provenance(answer))\n        written.append(row)",
+   "new": "        written.append(row)"
+  },
+  {
+   "name": "정체 관문이 보았는지를 묻지 않는다",
+   "file": "record_identity.py",
+   "old": "    problems.extend(approval.seen_problems(answer, who,",
+   "new": "    problems.extend([] or approval.seen_problems({\"Seen_By_Person\": \"1\"}, who,"
+  },
+  {
+   "name": "기하 관문이 보았는지를 묻지 않는다",
+   "file": "record_geometry.py",
+   "old": "    problems.extend(approval.seen_problems(answer, who,",
+   "new": "    problems.extend([] or approval.seen_problems({\"Seen_By_Person\": \"1\"}, who,"
+  }
+ ]
+}

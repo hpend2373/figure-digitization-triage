@@ -1,8 +1,8 @@
 {
  "files": {
-  "review_overlay.py": "787a873d7d536c45678f32c37bcb67d3da172411d5677cc8f12d7dd13f340987",
-  "run_batch.py": "32066d5bc6ec84693ddf8fc0d366dff7296772580d414262094193ba71375cbf",
-  "test_run_batch.py": "fe0152329ff5eb77ff3c1dafdc5ef3c26a1e0f17ddc0a7c271225f0bda279702"
+  "review_overlay.py": "c36cbc69de2c48c5693c232d8f0ea3ee4892258b26742bbefae57c0b72cea2ce",
+  "run_batch.py": "660113efbdca93b6296977814ba2923c3469e11ff197c3d154607294b9d2d9b9",
+  "test_run_batch.py": "5b3161fbdb1521559fd1d5230dbda970958ad3063d2a2ff817654f5222d461cc"
  },
  "suites": [
   "test_run_batch.py"
@@ -43,6 +43,18 @@
    "file": "run_batch.py",
    "old": "            if box_colour:\n                kwargs = dict(kwargs, colour=box_colour,",
    "new": "            if False:\n                kwargs = dict(kwargs, colour=box_colour,"
+  },
+  {
+   "name": "점 판독기의 오차 끝을 그리지 않음",
+   "file": "review_overlay.py",
+   "old": "                ends = (mark.get(\"Errorbar_Top_Px\"), mark.get(\"Errorbar_Bottom_Px\"))",
+   "new": "                ends = (None, None)"
+  },
+  {
+   "name": "놓은 읽기의 None 끝을 잰 끝으로 채움",
+   "file": "review_overlay.py",
+   "old": "            if \"cap_px\" not in mark and \"cap_low_px\" not in mark:",
+   "new": "            if mark.get(\"cap_px\") is None and mark.get(\"cap_low_px\") is None:"
   }
  ]
 }

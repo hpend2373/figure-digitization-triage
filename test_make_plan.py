@@ -198,9 +198,14 @@ check("사람의 판정은 캡션 규칙을 이긴다",
       (_sheet["PUB_D001"]["Dispersion_Type"],
        _sheet["PUB_D001"]["Errorbar_Source_Kind"]) == ("SEM", MP.FROM_DECISION),
       _sheet["PUB_D001"]["Dispersion_Type"])
-check("풀에서 뺀 행은 기하를 쓸 일로 남기지 않는다",
-      _sheet["PUB_D002"]["Disposition"] == "UNRESOLVED",
-      _sheet["PUB_D002"]["Disposition"])
+# REVERT (run2 2026-10-14 R6): leave a dropped figure UNRESOLVED. The plan then
+# calls a figure nobody will look at again "undecided", and its panels stand as
+# SOURCE_PANEL_UNRESOLVED for ever. It is a target closed for want of a summary
+# statistic - the 397 pilot's NO_SUMMARY_STATISTIC.
+check("풀에서 뺀 행은 기하를 쓸 일로 남기지 않고, 요약 통계 없음으로 닫는다",
+      _sheet["PUB_D002"]["Disposition"] == "NO_SUMMARY_STATISTIC"
+      and "패널 기하" not in _sheet["PUB_D002"]["Needs"],
+      (_sheet["PUB_D002"]["Disposition"], _sheet["PUB_D002"]["Needs"]))
 check("풀에서 뺀 행은 셈에서도 빠진다", _ready[0]["Dropped"] == "1", _ready[0]["Dropped"])
 write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type",
                      "Errorbar_Definition_Source", "Found_On_Page"), [])
@@ -585,6 +590,37 @@ check("판정이 없으면 계수는 그대로 묻는다",
 _missing = MP.load_figure_decisions(os.path.join(ROOT, "no_such_run"))
 check("처분 파일이 없는 실행도 계획서를 만든다", _missing == {}, _missing)
 
+# --- 그림 처분 파일 (record_dispositions, run2 2026-10-14 R7) ---------------------
+# 연관 그림으로 심사된 그림이 사실은 집단 평균이거나(DIGITIZE), 이 리뷰의 결과가
+# 아니거나(NON_TARGET) - 이 처분이 계획서에 닿지 않으면 그 35개 그림은 계속
+# ASSOCIATION_EXTRACT로 남습니다.
+_scatter_cap = {"Caption_Full": SCATTER, "Errorbar_Definition": "UNSTATED", "Box_Elements": "", "Page": "5"}
+check("연관 그림으로 심사된 그림이 그대로면 연관 추출이다",
+      _decided("", cap=_scatter_cap)["disposition"] == "ASSOCIATION_EXTRACT", _decided("", cap=_scatter_cap))
+_dig = _decided("DIGITIZE", cap=_scatter_cap)
+# REVERT: read the disposition name as an unknown decision. The figure stays an
+# association figure, and its group means are never read.
+check("DIGITIZE는 보통 그림으로 돌린다 (figure_decisions의 DATA와 같다)",
+      _dig["route"] == "DIGITIZE" and _dig["disposition"] == "GEOMETRY_NOT_AUTHORED", _dig)
+_nt = _decided("NON_TARGET", cap=_scatter_cap, count=None)
+check("NON_TARGET은 NON_TARGET_OUTCOME으로 닫고, 계수도 더 묻지 않는다",
+      _nt["disposition"] == "NON_TARGET_OUTCOME" and _nt["needs"] == [], _nt)
+check("ASSOCIATION은 연관 추출로 둔다", _decided("ASSOCIATION", cap=_scatter_cap)["disposition"] == "ASSOCIATION_EXTRACT")
+check("REDRAW는 그 이름의 할 일로 적힌다",
+      any("패널 영역 다시 그리기" in n for n in _decided("REDRAW")["needs"]) and _decided("REDRAW")["disposition"] == "UNRESOLVED")
+write(MP.FIGURE_DISPOSITIONS, ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person"),
+      [{"Draft_ID": "PUB_D004", "Disposition": "NON_TARGET", "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "0"}])
+write(MP.FIGURE_DECISIONS, ("Draft_ID", "Question", "Decision", "Which_Panels"),
+      [{"Draft_ID": "PUB_D004", "Question": "MIXED", "Decision": "DATA", "Which_Panels": ""}])
+_plan_d, _sheet_d, _ready_d = build()
+# REVERT: read figure_decisions after the disposition file. The earlier answer
+# then wins over the one given later, with more seen.
+check("처분 파일은 계획서에 닿고, 같은 그림의 figure_decisions보다 이긴다",
+      _sheet_d["PUB_D004"]["Disposition"] == "NON_TARGET_OUTCOME", _sheet_d["PUB_D004"]["Disposition"])
+os.rename(os.path.join(RUN, MP.FIGURE_DISPOSITIONS), os.path.join(ROOT, "fd_moved_aside.csv"))
+os.rename(os.path.join(RUN, MP.FIGURE_DECISIONS), os.path.join(ROOT, "fdec_moved_aside.csv"))
+check("처분 파일이 없는 실행도 계획서를 만든다 (처분)", MP.load_figure_dispositions(RUN) == {})
+
 # ------------------------------------------ 사람이 확인한 기하·정체가 계획서가 된다
 print("confirmed geometry and identity become a read block; anything less is named")
 import json as _json                                             # noqa: E402
@@ -672,6 +708,23 @@ check("a panel with confirmed geometry and identity is AUTO_DIGITIZE with a read
       and _p1["outcome_label"] == "Heart rate" and _p1["read"]["box"] == [100, 700, 60, 460]
       and _p1["read"]["y_ticks"] == [[100.0, 80.0], [0.0, 440.0]] and _p1["read"]["mark_type"] == "BAR_COLOR",
       "%s %s" % ({k: _p1.get(k) for k in ("disposition", "target_status")}, _p1.get("read", {}).get("box")))
+_aside = os.path.join(ROOT, "raster_600_aside.png")
+os.rename(os.path.join(RUN, _RASTER), _aside)
+try:
+    _rplan, _rsheet, _rfig, _rpanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+finally:
+    os.rename(_aside, os.path.join(RUN, _RASTER))
+_r1 = [p for p in _rfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: fall back to the 200 DPI crop quietly. The confirmed box and ticks are 600 DPI pixels; on the crop they sit on
+# another part of the picture, and the run found out only when the reader fell over (INTERNAL_ERROR).
+check("a confirmed panel whose 600 DPI raster is missing is not authored: RASTER_600_MISSING, named with the file",
+      _r1["disposition"] == "GEOMETRY_NOT_AUTHORED" and "read" not in _r1 and MP.RASTER_600_MISSING in _r1["reason"]
+      and _RASTER in _r1["reason"] and MP.RASTER_600_MISSING in _rpanels["PUB_D001_P1"]["Needs"]
+      and _rpanels["PUB_D001_P1"]["Authored"] == "0",
+      "%s %s" % ({k: _r1.get(k) for k in ("disposition", "reason")}, _rpanels["PUB_D001_P1"].get("Needs")))
+check("... and the figure says which file, and does not take the raster as its picture",
+      MP.RASTER_600_MISSING in _rsheet["PUB_D001"]["Needs"] and _RASTER in _rsheet["PUB_D001"]["Needs"]
+      and _rfig.get("image") != _RASTER, (_rsheet["PUB_D001"]["Needs"], _rfig.get("image")))
 check("positions carry the person's factor, level and pixel",
       [(q["factor"], q["level"], q["x_pixel"]) for q in _p1["read"]["positions"]] == [("TIMEPOINT", "Pre", 175.0), ("TIMEPOINT", "Post", 625.0)])
 check("series carry factor, level and colour",
@@ -700,6 +753,106 @@ check("its series carry what was drawn and the cue in the note, not in the reade
       and "cue" not in _m1["read"]["series"][0]["note"],
       "%s" % [q.get("note") for q in _m1["read"]["series"]])
 check("a reader-read identity is still AUTO", _p1["read"]["panel_mode"] == "AUTO")
+# THE POINTS AN AGENT PLACED ON A PERSON-ROUTED PANEL (2026-10-18). Written by the
+# names the person confirmed - the legend name, the x label - and carried into the
+# plan under the plan's own ids; a name the identity does not have is carried as
+# written, so the batch layer refuses it out loud.
+os.makedirs(os.path.dirname(os.path.join(RUN, MP.READINGS)), exist_ok=True)
+_seg_write(MP.READINGS, MP.READING_FIELDS,
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "280", "Lower_Y_Px": "", "Reader_Kind": "AI_AGENT",
+             "Read_By": "claude-opus-5-5", "Read_At": "2026-10-18", "Raster_SHA256": _RASTER_SHA},
+            {"Proposal_ID": "PUB_D001__p1", "Series": "B9", "X_Label": "Pre", "Mark_X_Px": "175",
+             "Mark_Y_Px": "310", "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-18", "Raster_SHA256": _RASTER_SHA}])
+# A legend name whose plan id is not the name itself ("B 1" -> B_1), so the
+# carrying is the plan's ids and not a coincidence of spelling.
+_rseries = _json.dumps([{"name": "B3", "colour": "#E4860A", "marker": "CIRCLE", "marker_fill": "FILLED", "cue": ""},
+                        {"name": "B 1", "colour": "#E4860A", "marker": "TRIANGLE_DOWN", "marker_fill": "FILLED",
+                         "cue": "lower curve"}])
+try:
+    _rdplan, _rds, _rdfig, _rdp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_rd1 = [p for p in _rdfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+_rdr = _rd1["read"].get("readings") or []
+# REVERT: the readings file stays in the run. The manual panel's points never
+# reach the manifest, and every cell an agent read stays in the queue.
+check("an agent's readings reach the plan, under the plan's series and position ids, pixels as numbers",
+      len(_rdr) == 2 and _rdr[0]["series_id"] == "B_1" and _rdr[0]["position_id"] == "POST"
+      and _rdr[0]["y_px"] == 300.5 and _rdr[0]["upper_px"] == 280.0 and _rdr[0]["lower_px"] is None
+      and _rdr[0]["read_by"] == "claude-opus-5-5" and _rdr[0]["raster_sha256"] == _RASTER_SHA,
+      "%s" % _rdr)
+check("... and a reading by a name the identity does not have is carried as written, to be refused",
+      len(_rdr) == 2 and _rdr[1]["series_id"] == "B9", "%s" % _rdr)
+check("... and the compiled manifest holds them",
+      [r["Reading_ID"] for r in CP.reading_rows("PUB_D001_P1", _rd1["read"])]
+      == ["PUB_D001_P1__B_1__POST", "PUB_D001_P1__B9__PRE"])
+check("a panel with no readings carries none", "readings" not in _m1["read"])
+check("... and a mean's reading carries no box keys", not any(
+    k in r for r in _rdr for k in ("box_upper_px", "box_lower_px")), "%s" % _rdr)
+# A BOX's two edges (2026-10-20), in the run file's optional columns.
+_seg_write(MP.READINGS, MP.READING_FIELDS + tuple(src for src, _dst in MP.READING_BOX_FIELDS),
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "260", "Lower_Y_Px": "340", "Box_Upper_Y_Px": "285",
+             "Box_Lower_Y_Px": "318.5", "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-20", "Raster_SHA256": _RASTER_SHA}])
+try:
+    _bxplan, _bxs, _bxfig, _bxp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_bxr = ([p for p in _bxfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]["read"].get("readings") or [])
+check("a box reading's two edges reach the plan as numbers",
+      len(_bxr) == 1 and _bxr[0].get("box_upper_px") == 285.0 and _bxr[0].get("box_lower_px") == 318.5,
+      "%s" % _bxr)
+check("... and a reading that says nothing about its ends carries no end_basis key",
+      len(_bxr) == 1 and "end_basis" not in _bxr[0], "%s" % _bxr)
+# WHAT THE ENDS ARE (2026-10-21): a bound set at the edge of what hides the bar,
+# in the run file's optional End_Basis column.
+_seg_write(MP.READINGS, MP.READING_FIELDS + (MP.READING_END_BASIS_FIELD[0],),
+           [{"Proposal_ID": "PUB_D001__p1", "Series": "B 1", "X_Label": "Post", "Mark_X_Px": "625",
+             "Mark_Y_Px": "300.5", "Upper_Y_Px": "290", "Lower_Y_Px": "311", "End_Basis": "bound",
+             "Reader_Kind": "AI_AGENT", "Read_By": "claude-opus-5-5",
+             "Read_At": "2026-10-21", "Raster_SHA256": _RASTER_SHA}])
+try:
+    _bdplan, _bds, _bdfig, _bdp = _confirm(
+        [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="LINE_COLOR", Read_Route="MANUAL", Series=_rseries,
+                                         Bar_Top_Definition="")])
+finally:
+    os.remove(os.path.join(RUN, MP.READINGS))
+_bdr = ([p for p in _bdfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]["read"].get("readings") or [])
+check("a reading whose ends are a bound reaches the plan saying so, in capitals",
+      len(_bdr) == 1 and _bdr[0].get("end_basis") == "BOUND" and _bdr[0].get("upper_px") == 290.0,
+      "%s" % _bdr)
+check("... and the compiled manifest row carries it",
+      len(_bdr) == 1 and CP.reading_rows("PUB_D001_P1", {"readings": _bdr})[0]["End_Basis"] == "BOUND")
+# A GROUP'S OWN n (2026-10-19): a card whose series are groups of different size
+# carries each group's n on its series and none on the card.
+_nseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": 11},
+                        {"name": "Control", "colour": "#2850DC", "n": "9"}])
+_nplan, _ns, _nfig, _np = _confirm([_geom("PUB_D001__p1")],
+                                   [_ident("PUB_D001__p1", Series=_nseries, N_Outcome="")])
+_n1 = [p for p in _nfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+_nunit = [u for u in _nplan["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: the series' n stays on the card. Every value of the panel fails on the
+# unit's blank n however well it was read.
+check("each group's n reaches the plan on its series, as a number, saying where it came from",
+      [(q.get("n_outcome"), q.get("n_source")) for q in _n1["read"]["series"]]
+      == [(11, "identity card (per series)"), (9, "identity card (per series)")],
+      "%s" % [{k: q.get(k) for k in ("series_id", "n_outcome", "n_source")} for q in _n1["read"]["series"]])
+check("... and the unit carries no n of its own", "n_outcome" not in _nunit, "%s" % _nunit.get("n_outcome"))
+_bseries = _json.dumps([{"name": "Fluid", "colour": "#DC2828", "n": "eleven"},
+                        {"name": "Control", "colour": "#2850DC", "n": 9}])
+_bplan, _bs, _bfig, _bp = _confirm([_geom("PUB_D001__p1")],
+                                   [_ident("PUB_D001__p1", Series=_bseries, N_Outcome="")])
+_b1 = [p for p in _bfig["panels"] if p["panel_id"] == "PUB_D001_P1"][0]
+check("... and an n that is not a whole number is carried as written, to be refused",
+      [q.get("n_outcome") for q in _b1["read"]["series"]] == ["eleven", 9],
+      "%s" % [q.get("n_outcome") for q in _b1["read"]["series"]])
 # A colour-separated line panel whose Control is drawn as a point-down triangle,
 # confirmed on the reader's route: the colour mask reads it, the shape is only seen.
 _tseries = _json.dumps([{"name": "Cocktail", "colour": "#DA6000", "marker": "CIRCLE", "marker_fill": "FILLED"},
@@ -790,6 +943,113 @@ check("a single series still carries its factor and level",
       [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"] == [
           {"series_id": "ALL", "factor": "GROUP", "level": "ALL", "colour": "#ED8B09", "note": "legend: ALL"}],
       [p for p in _fig5["panels"] if p["panel_id"] == "PUB_D001_P3"][0]["read"]["series"])
+# A definition borrowed from another element of the same paper (run2 2026-10-14
+# R9·R10): the quote is the paper's, the assumption that it speaks for this
+# figure is recorded, and it travels with the values so a sensitivity analysis
+# can leave them out.
+_BORROWED_SRC = "Table 4. Means (SD) and counts for all measures"
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SD", "Errorbar_Definition_Source": _BORROWED_SRC,
+        "Found_On_Page": "5", "Definition_Basis": "BORROWED"}])
+_plan7, _sheet7, _fig7, _panels7 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u7 = [u for u in _plan7["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read Definition_Basis nowhere. The borrowed SD then looks exactly like
+# one the figure's own caption stated, and no analysis can find it again.
+check("a borrowed definition is read, says where it came from, and the unit carries the assumption",
+      _u7["dispersion_type"] == "SD" and _u7["errorbar_source"] == _BORROWED_SRC
+      and _u7.get("note") == MP.BORROWED_NOTE and _sheet7["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION_BORROWED,
+      "%s %s" % (_u7, _sheet7["PUB_D001"]["Errorbar_Source_Kind"]))
+_problems7 = [q for q in CP.validate_plan(_plan7, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems7 == [], _problems7[:3])
+_plan8, _sheet8, _fig8, _panels8 = _confirm(
+    [_geom("PUB_D001__p3", Region="900,0,1800,500")],
+    [_ident("PUB_D001__p3", mark="BOX_VIOLIN", Panel_Kind="BOX", Bar_Top_Definition="", Errorbar_Stem_Confirmed="",
+            Series_Factor="GROUP", Series=_json.dumps([{"name": "ALL", "colour": "#ED8B09"}]))])
+_u8 = [u for u in _plan8["units"] if u["panel_id"] == "PUB_D001_P3"][0]
+# REVERT: note the borrowing on every unit of the figure. A box is the IQR by
+# construction, the borrowed SD is not used there, and its values would be
+# dropped from an analysis for an assumption they do not rest on.
+check("  a box in the same figure takes the IQR and does not carry the borrowed note",
+      _u8["dispersion_type"] == "IQR" and "note" not in _u8, "%s" % _u8)
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SD", "Errorbar_Definition_Source": _BORROWED_SRC,
+        "Found_On_Page": "5", "Definition_Basis": ""}])
+_plan9, _sheet9, _fig9, _panels9 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u9 = [u for u in _plan9["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+check("  a decision that borrows nothing carries no note", "note" not in _u9
+      and _sheet9["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION, "%s" % _u9)
+# ONE POSITION IS ONE SLOT (D14, 2026-10-20): its x calibration is that slot
+# alone, which the gate takes as a whole categorical calibration.
+_plan11, _sheet11, _fig11, _panels11 = _confirm(
+    [_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", X_Labels=_json.dumps([{"label": "Upright", "px": 400}]))])
+_u11 = [u for u in _plan11["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: write no x calibration for a single position. The gate then refuses it.
+check("a panel with one x position is calibrated on that one slot",
+      _u11.get("x_calibration") == [[0, 400.0]], "%s" % _u11.get("x_calibration"))
+_problems11 = [q for q in CP.validate_plan(_plan11, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems11 == [], _problems11[:3])
+# THE SHAPE AND THE SCALE (D15, 2026-10-20): what `record_shape` wrote reaches
+# the unit; nothing written leaves UNKNOWN and RATIO as before.
+import record_shape as RSH                                        # noqa: E402
+_card12 = _ident("PUB_D001__p1")
+_shape_cards = {"PUB_D001__p1": dict(_card12, Human_Verification_Status="CONFIRMED")}
+_SH = {"Proposal_ID": "PUB_D001__p1", "Distribution_Shape": "RIGHT_SKEWED", "Value_Scale": "RATIO",
+       "Shape_Basis": "spectral power in mmHg^2/Hz; the paper reports medians elsewhere for this measure",
+       "Verified_By": "minyeop", "Seen_By_Person": "0", "Observed_By": "Claude (two checks)",
+       "Approval_Ref": "minyeop decision D15 2026-10-20"}
+check("a shape answer with a basis and an approval passes", RSH.check_answer(_SH, _shape_cards) == [],
+      RSH.check_answer(_SH, _shape_cards))
+# REVERT: take a hedged basis. The record then says nothing more than UNKNOWN did.
+check("  a hedged basis does not",
+      [c for c, _m in RSH.check_answer(dict(_SH, Shape_Basis="probably skewed"), _shape_cards)]
+      == ["UNRESOLVED_SHAPE_BASIS"])
+check("  nor a shape outside the vocabulary",
+      [c for c, _m in RSH.check_answer(dict(_SH, Distribution_Shape="SKEWED"), _shape_cards)]
+      == ["BAD_DISTRIBUTION_SHAPE"])
+check("  nor a scale outside the vocabulary",
+      [c for c, _m in RSH.check_answer(dict(_SH, Value_Scale="INTERVAL"), _shape_cards)] == ["BAD_VALUE_SCALE"])
+check("  nor a panel with no confirmed card",
+      [c for c, _m in RSH.check_answer(dict(_SH, Proposal_ID="PUB_D009__p1"), _shape_cards)] == ["UNKNOWN_PANEL"])
+check("  nor an answer nobody saw or approved",
+      "NOT_SEEN_BY_PERSON" in [c for c, _m in RSH.check_answer(dict(_SH, Observed_By="", Approval_Ref=""),
+                                                                _shape_cards)])
+write(MP.SHAPE_DECISIONS, RSH.FIELDS, [dict(_SH, Value_Scale="CHANGE", Distribution_Shape="UNKNOWN",
+                                            Shape_Basis="the plotted values are changes from baseline")])
+_plan12, _sheet12, _fig12, _panels12 = _confirm([_geom("PUB_D001__p1")], [_card12])
+_u12 = [u for u in _plan12["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read shape_decisions nowhere. The change score stays on a ratio scale
+# and the gate goes on refusing it.
+check("a recorded shape and scale reach the unit, with the basis in its note",
+      _u12.get("value_scale") == "CHANGE" and _u12.get("distribution_shape") == "UNKNOWN"
+      and "changes from baseline" in (_u12.get("note") or ""), "%s" % _u12)
+_problems12 = [q for q in CP.validate_plan(_plan12, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems12 == [], _problems12[:3])
+write(MP.SHAPE_DECISIONS, RSH.FIELDS, [])
+_plan13, _s13, _f13, _p13 = _confirm([_geom("PUB_D001__p1")], [_card12])
+_u13 = [u for u in _plan13["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+check("  and with nothing recorded the unit says nothing", "value_scale" not in _u13
+      and "distribution_shape" not in _u13, "%s" % _u13)
+
+# A definition MEASURED on the figure (2026-10-20 decision D01): the paper says
+# SD, the bars are the SE of the plotted individual values. The record says what
+# was measured, and the unit carries that fact to the values.
+_MEASURED_SRC = "Measured on the figure: in 22 cells the bar is the SE of the five plotted values"
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page", "Definition_Basis"),
+      [{"Draft_ID": "PUB_D001", "Dispersion_Type": "SE", "Errorbar_Definition_Source": _MEASURED_SRC,
+        "Found_On_Page": "", "Definition_Basis": "MEASURED"}])
+_plan10, _sheet10, _fig10, _panels10 = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])
+_u10 = [u for u in _plan10["units"] if u["panel_id"] == "PUB_D001_P1"][0]
+# REVERT: read MEASURED as an ordinary decision. The SE then looks like one the
+# paper stated, and the values cannot be found again for a sensitivity analysis.
+check("a definition measured on the figure is read and the unit carries the measured note",
+      _u10["dispersion_type"] == "SE" and _u10["errorbar_source"] == _MEASURED_SRC
+      and _u10.get("note") == MP.MEASURED_NOTE
+      and _sheet10["PUB_D001"]["Errorbar_Source_Kind"] == MP.FROM_DECISION_MEASURED,
+      "%s %s" % (_u10, _sheet10["PUB_D001"]["Errorbar_Source_Kind"]))
+_problems10 = [q for q in CP.validate_plan(_plan10, file_root=RUN) if q["where"].startswith("units")]
+check("  and that unit validates", _problems10 == [], _problems10[:3])
+write(MP.DECISIONS, ("Draft_ID", "Dispersion_Type", "Errorbar_Definition_Source", "Found_On_Page"), [])
+
 # The reviewers file: a person registers once, and the inventory names them.
 _rev = os.path.join(ROOT, "reviewers.json")
 _json.dump({"reviewers": [{"reviewer_id": "RV_MC", "name": "M. C.", "record_type": "HUMAN", "contact_type": "ORCID",
@@ -812,6 +1072,232 @@ except SystemExit as exc:
     check("a name pointing at no registered reviewer stops the build", "RV_X" in str(exc), str(exc))
 check("the demo reviewer carries a contact the registry can be asked about",
       all(_plan["reviewers"][0].get(k) for k in ("contact_type", "contact", "registered_by")))
+
+# --- 목록의 두 수 (record_inventory, run2 2026-10-15 R1) ------------------------------
+# 문서의 그림 수와 그림의 패널 수가 VISUALLY_VERIFIED가 되는 길이 사람이 그린
+# 패널 하나뿐이면, 그리지 않은 그림과 문서는 모두 PENDING이고 그 편은 값을 하나도
+# 읽지 않습니다. 사람이 센 수, 또는 사람이 승인한 관찰이 계획서에 닿아야 합니다.
+print("the inventory's two numbers reach the plan, and a person's own count comes first")
+import record_inventory as RV                                    # noqa: E402
+_json.dump({"reviewers": [{"reviewer_id": "RV_MC", "name": "M. C.", "record_type": "HUMAN", "contact_type": "ORCID",
+                           "contact": "0000-0002-1825-0097", "registered_by": "M. C.", "registration_date": "2026-08-01",
+                           "human_attestation": "HUMAN_CONFIRMED"}],
+            "names": {"minyeop": "RV_MC"}}, io.open(_rev, "w", encoding="utf-8"))
+_APPROVED = {"Verified_By": "minyeop", "Seen_By_Person": "0", "Observed_By": "Claude (PDF survey)",
+             "Approval_Ref": "minyeop chat", "Inspection_Date": "2026-08-29"}
+
+
+def _inv(rows):
+    write(MP.INVENTORY, RV.FIELDS, [dict(_APPROVED, Count_Method=RV.MACHINE_PLUS_HUMAN, **r) for r in rows])
+
+
+write(MP.COUNTS, ("Draft_ID", "Observed_Panel_Count", "Entry_Status"),
+      [{"Draft_ID": "PUB_D001", "Observed_Panel_Count": "4", "Entry_Status": "ENTERED"},
+       {"Draft_ID": "PUB_D002", "Observed_Panel_Count": "2", "Entry_Status": "ENTERED"}])
+_inv([{"Level": "DOCUMENT", "Target_ID": "PUB", "Count": "6", "Article_Page_Range": "1-12"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D001", "Count": "5", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D002", "Count": "3", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D003", "Count": "1", "Count_Basis": "WHOLE"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D004", "Count": "2", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D005", "Count": "1", "Count_Basis": "AXIS_REGIONS"},
+      {"Level": "FIGURE", "Target_ID": "PUB_D008", "Count": "1", "Count_Basis": "WHOLE"}])
+_D001_DRAWN = [{"Draft_ID": "PUB_D001", "Panel_Index": str(i), "Mark_Type": m, "Verdict": "PANELS", "Verified_By": "minyeop",
+                "Verified_At": "2026-09-13"} for i, m in ((1, "BAR"), (2, "NOT_DATA"), (3, "BOX"))]
+_seg_write(MP.PANEL_DECISIONS, ("Draft_ID", "Panel_Index", "Mark_Type", "Verdict", "Verified_By", "Verified_At"), _D001_DRAWN + [
+    # 사람이 "읽을 패널이 없다"고 답한 그림, 그리고 다시 자르라고 정해진 그림의 이전 그림.
+    {"Draft_ID": "PUB_D004", "Panel_Index": "0", "Verdict": "NO_PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"},
+    {"Draft_ID": "PUB_D005", "Panel_Index": "1", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"},
+    {"Draft_ID": "PUB_D005", "Panel_Index": "2", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": "2026-09-12"}])
+write(MP.FIGURE_DISPOSITIONS, ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person"),
+      [{"Draft_ID": "PUB_D005", "Disposition": "RECROP", "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "1"}])
+_iplan, _isheet, _ifig, _ipanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")], reviewers_path=_rev)
+_IF = dict((f["source_figure_id"], f) for f in _iplan["figures"])
+_doc = _iplan["documents"][0]
+# REVERT: read inventory_records.csv nowhere. Every document stays PENDING and
+# the publication reads nothing, however many counts were approved.
+check("a document's recorded count makes it VISUALLY_VERIFIED, with the method, approver, day and pages",
+      (_doc["inventory_status"], _doc["observed_figure_count"], _doc["figure_count_method"], _doc["reviewer_id"],
+       _doc["inspection_date"], _doc["page_range"]) == ("VISUALLY_VERIFIED", 6, "MACHINE_PLUS_HUMAN", "RV_MC", "2026-08-29", "1-12"), _doc)
+_f2 = _IF["PUB_D002"]
+check("a figure's recorded count is its panel count, over the count sheet's, and its panels are that many",
+      _f2["observed_panel_count"] == 3 and len(_f2["panels"]) == 3 and _f2["inventory_status"] == "VISUALLY_VERIFIED"
+      and _f2["panel_count_method"] == "MACHINE_PLUS_HUMAN" and _f2["reviewer_id"] == "RV_MC", _f2)
+check("  and the figure says what the count sheet said", "the count sheet said 2" in _f2.get("note", ""), _f2.get("note"))
+_f8 = _IF["PUB_D008"]
+# REVERT: leave a WHOLE figure GEOMETRY_NOT_AUTHORED. A photo then becomes a
+# TARGET panel that asks a person for an outcome name and a geometry.
+check("a WHOLE figure the caption route would read is one NOT_DATA panel labelled WHOLE",
+      [(p["label"], p["disposition"], p["target_status"]) for p in _f8["panels"]] == [("WHOLE", "NOT_DATA", "NOT_DATA")]
+      and _isheet["PUB_D008"]["Disposition"] == "NOT_DATA", _f8["panels"])
+check("  and nobody is asked for its geometry or error bars",
+      not [n for n in _isheet["PUB_D008"]["Needs"].split(" · ") if n == "오차 정의" or n.startswith("패널 기하")], _isheet["PUB_D008"]["Needs"])
+_f3 = _IF["PUB_D003"]
+check("a WHOLE figure already closed keeps its disposition, as one WHOLE panel",
+      [(p["label"], p["disposition"]) for p in _f3["panels"]] == [("WHOLE", "NOT_DATA")] and _f3["inventory_status"] == "VISUALLY_VERIFIED")
+_f1 = _IF["PUB_D001"]
+# REVERT: let the record win over the drawing. A person's panels, drawn and named
+# on the raster, give way to a count nobody drew.
+check("a person's drawn panels win over the recorded count",
+      _f1["observed_panel_count"] == 3 and [p["panel_id"] for p in _f1["panels"]] == ["PUB_D001_P1", "PUB_D001_P2", "PUB_D001_P3"]
+      and _f1["panel_count_method"] == "HUMAN_VISUAL" and _f1["inspection_date"] == "2026-09-13", _f1)
+_f4 = _IF["PUB_D004"]
+# REVERT: read NO_PANELS nowhere. The person's answer that the figure has no
+# panel to read stays in the file, and the figure waits for a count.
+check("a person's NO_PANELS is the inventory: one WHOLE panel, HUMAN_VISUAL, in their name and on their day",
+      (_f4["observed_panel_count"], _f4["panel_count_method"], _f4["inventory_status"], _f4["reviewer_id"], _f4["inspection_date"])
+      == (1, "HUMAN_VISUAL", "VISUALLY_VERIFIED", "RV_MC", "2026-09-12") and _f4["panels"][0]["label"] == "WHOLE", _f4)
+check("  and it keeps the figure's own disposition", _f4["panels"][0]["disposition"] == "ASSOCIATION_EXTRACT", _f4["panels"])
+_f5 = _IF["PUB_D005"]
+# REVERT: drop the RECROP/REDRAW exception. The panels drawn on the crop the
+# person rejected become the figure's inventory.
+check("a drawing superseded by RECROP is not the inventory; the recorded count is",
+      _f5["observed_panel_count"] == 1 and _f5["panel_count_method"] == "MACHINE_PLUS_HUMAN", _f5)
+_ip = [q for q in CP.validate_plan(_iplan, file_root=RUN) if q["check"] in ("PLAN_PANEL_COUNT_MISSING", "PLAN_PANEL_COUNT_MISMATCH")]
+check("the plan names no panel count missing or mismatched", _ip == [], _ip[:3])
+check("the methods are the batch's two names",
+      {_f2["panel_count_method"], _f4["panel_count_method"], _doc["figure_count_method"]} <= set(BM.SOURCE_PANEL_COUNT_METHODS))
+# A person's scope and a person's own document count come first.
+write(MP.DOCUMENT_SCOPE, ("Source_Document_ID", "Page_From", "Page_To"), [{"Source_Document_ID": "PUB", "Page_From": "2", "Page_To": "9"}])
+write(MP.DOCUMENT_STATUS, ("Source_Document_ID", "Observed_Figure_Count", "Document_Inventory_Status", "Inventoried_By", "Inventoried_At"),
+      [{"Source_Document_ID": "PUB", "Observed_Figure_Count": "7", "Document_Inventory_Status": "VISUALLY_VERIFIED",
+        "Inventoried_By": "minyeop", "Inventoried_At": "2026-08-20"}])
+_jplan = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")], reviewers_path=_rev)[0]
+check("a person's scope is the page range, and their own document count wins over the record",
+      (_jplan["documents"][0]["page_range"], _jplan["documents"][0]["observed_figure_count"], _jplan["documents"][0]["figure_count_method"])
+      == ("2-9", 7, "HUMAN_VISUAL"), _jplan["documents"][0])
+os.rename(os.path.join(RUN, MP.DOCUMENT_SCOPE), os.path.join(ROOT, "scope_aside.csv"))
+os.rename(os.path.join(RUN, MP.DOCUMENT_STATUS), os.path.join(ROOT, "status_aside.csv"))
+_kplan = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[0]
+# REVERT: write the record VISUALLY_VERIFIED whoever approved it. A name nobody
+# registered then stands in the batch as the inspector.
+check("an approver nobody registered leaves the document PENDING and says so",
+      _kplan["documents"][0]["inventory_status"] == "PENDING" and "검토자 등록: minyeop" in _kplan["documents"][0].get("note", ""),
+      _kplan["documents"][0])
+os.rename(os.path.join(RUN, MP.INVENTORY), os.path.join(ROOT, "inventory_aside.csv"))
+check("a run without the file has no inventory records", MP.load_inventory(RUN) == ({}, {}))
+
+# --- 막음을 다시 본 답 (record_block_reviews, run2 2026-10-15) ------------------------------
+# 사람이 "이 차단이 틀렸다"고 한 행, 목록 조사에서 실제 그림으로 확인된 행. 막음 파일은
+# 시트를 지을 때마다 다시 쓰이므로, 답은 그 위에 얹힌 파일로만 남습니다.
+import record_block_reviews as RBR                               # noqa: E402
+write(MP.BLOCK_REVIEWS, RBR.FIELDS, [{"Draft_ID": "PUB_D006", "Decision": "UNBLOCK"},
+                                     {"Draft_ID": "PUB_D007", "Decision": "UNBLOCK"}])
+_BF = build()[0]
+_BF = dict((f["source_figure_id"], f) for f in _BF["figures"])
+# REVERT: read block_reviews.csv nowhere. The figure a person said was wrongly
+# blocked stays out of the plan, and its document's count never matches.
+check("a blocked row reviewed UNBLOCK is a figure of the plan", "PUB_D006" in _BF, sorted(_BF))
+# REVERT: let an unblock open a duplicate. One figure would be in the plan twice.
+check("  but a duplicate stays out, whatever the review says", "PUB_D007" not in _BF, sorted(_BF))
+write(MP.BLOCK_REVIEWS, RBR.FIELDS, [{"Draft_ID": "PUB_D006", "Decision": "KEEP"}])
+check("a block reviewed KEEP stays a block", "PUB_D006" not in dict((f["source_figure_id"], f) for f in build()[0]["figures"]))
+os.rename(os.path.join(RUN, MP.BLOCK_REVIEWS), os.path.join(ROOT, "block_reviews_aside.csv"))
+
+# --- 패널의 결과 이름과 범례 묶음 (record_outcomes·record_legends, run2 2026-10-16) ------------
+import record_outcomes as RO                                     # noqa: E402
+import record_legends as RLG                                     # noqa: E402
+_oplan, _osheet, _ofig, _opanels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])
+_open = [p for p in _ofig["panels"] if p.get("target_status") == "TARGET" and not p.get("outcome_label")]
+_free = _open[0]["panel_id"] if _open else ""
+check("(fixture) a drawn target panel without an outcome name exists", bool(_free), [p["panel_id"] for p in _ofig["panels"]])
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": _free, "Decision": "LABEL", "Outcome_Label": "Stroke volume", "Unit": "mL"},
+                                        {"Panel_ID": "PUB_D001_P1", "Decision": "LABEL", "Outcome_Label": "Something else"}])
+_o2 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])
+# REVERT: read outcome_decisions.csv nowhere. The 110 names a person gave stay in a file and every one of
+# those panels is still MISSING_TARGET_OUTCOME_LABEL.
+check("a recorded outcome name lands on a panel that had none", _o2[_free].get("outcome_label") == "Stroke volume"
+      and _o2[_free].get("target_status") == "TARGET", _o2[_free])
+check("  but a panel read on a confirmed identity keeps the identity's name", _o2["PUB_D001_P1"].get("outcome_label") == "Heart rate")
+_closed = [p["panel_id"] for p in _ofig["panels"] if p.get("target_status") == "NOT_DATA"]
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": _closed[0], "Decision": "LABEL", "Outcome_Label": "Stroke volume"}] if _closed else [])
+_o4 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])
+# REVERT: name every panel the record names. A panel closed as not data would carry an outcome and be asked about.
+check("  and a panel the plan closed takes no name, whatever the record says",
+      bool(_closed) and not _o4[_closed[0]].get("outcome_label") and _o4[_closed[0]]["target_status"] == "NOT_DATA", _closed)
+write(MP.OUTCOME_DECISIONS, RO.FIELDS, [{"Panel_ID": "PUB_D001_P1", "Decision": "NON_TARGET", "Verified_By": "minyeop"}])
+_o3plan, _o3s, _o3fig, _o3panels = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])
+_o3 = dict((p["panel_id"], p) for p in _o3fig["panels"])["PUB_D001_P1"]
+# REVERT: let NON_TARGET reach only panels nobody has authored. A panel ready to read would be read, and its
+# values would enter a review whose outcome it is not.
+check("a panel recorded as not a target is closed, and nothing reads it", _o3["disposition"] == "NON_TARGET_OUTCOME"
+      and _o3["target_status"] == "NON_TARGET" and "read" not in _o3
+      and not any(u["unit_id"] == "U_PUB_D001_P1" for u in _o3plan["units"]), _o3)
+os.rename(os.path.join(RUN, MP.OUTCOME_DECISIONS), os.path.join(ROOT, "outcomes_aside.csv"))
+write(MP.LEGEND_DECISIONS, RLG.FIELDS, [{"Draft_ID": "PUB_D001", "Legend_Groups": "p1|p3"}])
+_lfig = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]
+_l1 = dict((p["panel_id"], p) for p in _lfig["panels"])["PUB_D001_P1"]
+# REVERT: give every panel of a figure one domain whatever the record says. Iwasaki's two legends - the same
+# hatch is 'pre-bed rest' in A and 'pre-furosemide' in B - stay one legend, and the batch refuses the figure.
+check("a panel of a figure with two legends reads in its own legend's domain",
+      _l1["read"].get("identity_domain") == "F_PUB_D001__L1", _l1["read"].get("identity_domain"))
+os.rename(os.path.join(RUN, MP.LEGEND_DECISIONS), os.path.join(ROOT, "legends_aside.csv"))
+_l0 = dict((p["panel_id"], p) for p in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1", mark="BAR_MONO")])[2]["panels"])["PUB_D001_P1"]
+check("  and without the record the figure is one legend, as before", "identity_domain" not in _l0["read"])
+
+# --- 처분 뒤에 그린 패널 (PARTIAL·REDRAW, run2 2026-10-16) ---------------------------------
+# 일부 패널만 읽으라는 처분, 다시 그리라는 처분은 사람이 그 뒤에 그린 패널이 답입니다.
+_DISP = ("Draft_ID", "Disposition", "Which_Panels", "Verified_By", "Seen_By_Person", "Recorded_At")
+_PD = ("Draft_ID", "Panel_Index", "Mark_Type", "Verdict", "Verified_By", "Verified_At")
+
+
+def _redrawn(d2_at, d5_at, d5_choice="REDRAW", d2_choice="PARTIAL"):
+    write(MP.FIGURE_DISPOSITIONS, _DISP, [
+        {"Draft_ID": "PUB_D002", "Disposition": d2_choice, "Which_Panels": "a" if d2_choice == "PARTIAL" else "",
+         "Verified_By": "minyeop", "Seen_By_Person": "1", "Recorded_At": "2026-10-14"},
+        {"Draft_ID": "PUB_D005", "Disposition": d5_choice, "Which_Panels": "", "Verified_By": "minyeop", "Seen_By_Person": "1",
+         "Recorded_At": "2026-10-14"}])
+    _seg_write(MP.PANEL_DECISIONS, _PD, _D001_DRAWN + [
+        {"Draft_ID": "PUB_D002", "Panel_Index": str(i), "Mark_Type": m, "Verdict": "PANELS", "Verified_By": "minyeop",
+         "Verified_At": d2_at} for i, m in ((1, "BAR"), (2, "NOT_DATA"), (3, "BOX"))] + [
+        {"Draft_ID": "PUB_D005", "Panel_Index": str(i), "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop",
+         "Verified_At": d5_at} for i in (1, 2)])
+    plan, sheet = _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[:2]
+    return dict((f["source_figure_id"], f) for f in plan["figures"]), sheet
+
+
+_RF, _RS = _redrawn("2026-10-16", "2026-10-16")
+# REVERT: keep PARTIAL and REDRAW UNRESOLVED whatever is drawn afterwards. The panels a person drew to answer
+# them stay in a file, and the figure waits for a decision that was already carried out.
+check("a PARTIAL figure drawn after the decision stands on the drawing: its panels, their kinds, nothing unresolved",
+      [(p["panel_id"][-3:], p["disposition"]) for p in _RF["PUB_D002"]["panels"]]
+      == [("_P1", "GEOMETRY_NOT_AUTHORED"), ("_P2", "NOT_DATA"), ("_P3", "GEOMETRY_NOT_AUTHORED")], _RF["PUB_D002"]["panels"])
+check("  and the decision it answered stays on the figure, with both days",
+      "PARTIAL a (2026-10-14) answered by the panels drawn on 2026-10-16" in _RF["PUB_D002"].get("note", ""),
+      _RF["PUB_D002"].get("note"))
+check("  and nobody is asked to extract those panels again", "그 패널만 추출" not in _RS["PUB_D002"]["Needs"], _RS["PUB_D002"]["Needs"])
+check("a REDRAW figure drawn on a later day stands on the new drawing",
+      [p["disposition"] for p in _RF["PUB_D005"]["panels"]] == ["GEOMETRY_NOT_AUTHORED"] * 2
+      and _RF["PUB_D005"]["panel_count_method"] == "HUMAN_VISUAL", _RF["PUB_D005"]["panels"])
+_RF, _RS = _redrawn("2026-10-14", "2026-10-14")
+# REVERT: take a REDRAW drawing from the decision's own day. That may be the very drawing the person said to
+# redraw - the record keeps days, not hours.
+check("a REDRAW drawing from the decision's own day is not the answer - it may be the drawing that was refused",
+      all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D005"]["panels"]) and len(_RF["PUB_D005"]["panels"]) != 2
+      and "다시 그리기" in _RS["PUB_D005"]["Needs"],
+      (_RF["PUB_D005"]["panels"], _RS["PUB_D005"]["Needs"]))
+check("  but a PARTIAL drawing from that day is: the boxes are right whichever came first, and the kinds say what to read",
+      [p["disposition"] for p in _RF["PUB_D002"]["panels"]] == ["GEOMETRY_NOT_AUTHORED", "NOT_DATA", "GEOMETRY_NOT_AUTHORED"])
+_RF, _RS = _redrawn("2026-10-13", "2026-10-13")
+check("a drawing older than the decision answers neither",
+      all(p["disposition"] == "UNRESOLVED" for f in ("PUB_D002", "PUB_D005") for p in _RF[f]["panels"])
+      and "그 패널만 추출" in _RS["PUB_D002"]["Needs"], (_RF["PUB_D002"]["panels"], _RS["PUB_D002"]["Needs"]))
+_RF, _RS = _redrawn("2026-10-16", "2026-10-16", d5_choice="RECROP")
+# REVERT: let a later drawing answer RECROP too. The crop was judged wrong, and boxes on that same crop do not
+# fix it.
+check("RECROP is not answered by a later drawing on the same crop",
+      all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D005"]["panels"]) and len(_RF["PUB_D005"]["panels"]) != 2
+      and "재크롭" in _RS["PUB_D005"]["Needs"],
+      (_RF["PUB_D005"]["panels"], _RS["PUB_D005"]["Needs"]))
+_seg_write(MP.PANEL_DECISIONS, _PD, _D001_DRAWN + [
+    {"Draft_ID": "PUB_D002", "Panel_Index": "1", "Mark_Type": "BAR", "Verdict": "PANELS", "Verified_By": "minyeop", "Verified_At": ""}])
+_RF = dict((f["source_figure_id"], f) for f in _confirm([_geom("PUB_D001__p1")], [_ident("PUB_D001__p1")])[0]["figures"])
+check("a drawing without a day answers nothing", _RF["PUB_D002"]["panels"]
+      and all(p["disposition"] == "UNRESOLVED" for p in _RF["PUB_D002"]["panels"]),
+      _RF["PUB_D002"]["panels"])
+check("MP.drawing_answers needs the decision's day too",
+      not MP.drawing_answers({"Decision": "PARTIAL"}, [{"Verified_At": "2026-10-16"}])
+      and MP.drawing_answers({"Decision": "partial", "Recorded_At": "2026-10-16"}, [{"Verified_At": "2026-10-16"}]))
+os.rename(os.path.join(RUN, MP.FIGURE_DISPOSITIONS), os.path.join(ROOT, "dispositions_redrawn_aside.csv"))
 
 # ---------------------------------------------------------------------------
 shutil.rmtree(ROOT, ignore_errors=True)

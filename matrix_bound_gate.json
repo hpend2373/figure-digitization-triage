@@ -1,0 +1,53 @@
+{
+ "suites": [
+  "test_grid_engine.py"
+ ],
+ "files": {
+  "grid_engine.py": "bc6f505fa8e613f159509bf63f75f88200817cb69ea91bb87ad238a720783ff3",
+  "test_grid_engine.py": "c22fa3d59702aaa3fbc831fe3bc6110765841401fba6985e4ec60f01bedcc941"
+ },
+ "mutations": [
+  {
+   "name": "grid: 상한에도 SE×√n을 평균과 견줌",
+   "file": "grid_engine.py",
+   "old": "        if ratio_scale and dt in (\"SE\", \"SEM\") and sym is not None and m is not None and n and n > 0 \\\n                and not fig_is_bound(row):\n",
+   "new": "        if ratio_scale and dt in (\"SE\", \"SEM\") and sym is not None and m is not None and n and n > 0:\n"
+  },
+  {
+   "name": "grid: 모든 퍼짐이 상한인 단위에도 줄기를 물음",
+   "file": "grid_engine.py",
+   "old": "            elif stem is not True and not bound_only:\n",
+   "new": "            elif stem is not True:\n"
+  },
+  {
+   "name": "grid: 상한 칸에도 칸의 줄기를 물음",
+   "file": "grid_engine.py",
+   "old": "            elif cell_stem is False and not fig_is_bound(r):\n",
+   "new": "            elif cell_stem is False:\n"
+  },
+  {
+   "name": "grid: 캡이 하나라도 상한이 있으면 상한만의 단위로 셈",
+   "file": "grid_engine.py",
+   "old": "    bound_only_units = set(u for u, kinds in spread_kinds.items() if kinds == {True})\n",
+   "new": "    bound_only_units = set(u for u, kinds in spread_kinds.items() if True in kinds)\n"
+  },
+  {
+   "name": "grid: 퍼짐이 없는 단위도 상한만의 단위로 셈",
+   "file": "grid_engine.py",
+   "old": "                      cell_n=uid in cell_n_units, bound_only=uid in bound_only_units)\n",
+   "new": "                      cell_n=uid in cell_n_units,\n                      bound_only=uid in bound_only_units or uid not in spread_kinds)\n"
+  },
+  {
+   "name": "grid: 상한을 알아보지 못함",
+   "file": "grid_engine.py",
+   "old": "    return str(row.get(\"Dispersion_Method\", \"\") or \"\").strip().upper() == FIG_BOUND_DISPERSION_METHOD\n",
+   "new": "    return False\n"
+  },
+  {
+   "name": "grid: 상한이면 끝 사이의 평균도 묻지 않음",
+   "file": "grid_engine.py",
+   "old": "            elif m is not None and not (lo <= m <= hi):\n",
+   "new": "            elif m is not None and not (lo <= m <= hi) and not fig_is_bound(row):\n"
+  }
+ ]
+}

@@ -8,6 +8,11 @@ outcomes only as plots, so the numbers have to be read off the figures — and a
 number read off a figure is only usable if the pipeline that produced it can say
 exactly what it did.
 
+For missing marks and overlapping series, follow [the source review
+procedure](MARKER_REVIEW.md). `pdf_marker_evidence.py` can inspect separately
+painted marker paths in a source PDF and verify their source-bound evidence.
+Its output is a proposal report, with no series assignment or accepted values.
+
 **This repository carries no publisher figures.** It once did - rasters from
 three publications (323, 386, 397), held for reproducibility - while this line
 said "private research repository" and GitHub said `visibility: public`. A claim
@@ -78,6 +83,83 @@ have been answered for it.
                            read block, a unit and a grid - and every panel
                            missing either answer is named in plan_panels.csv
 
+A panel the person routed to MANUAL (no released reader separates its series) is
+read by an AI agent and confirmed by the person (`SKILL.md`, "A panel no reader can
+read"):
+
+    seg/readings600/supplied_readings.csv   the agent's points: pixels on the 600 DPI
+      |                    raster, by the card's names, who placed them and when
+      | make_plan.py / compile_plan.py      -> supplied_readings.csv (a manifest)
+      | run_batch.py       the number is the panel's calibration at the pixel; every
+      |                    placed point is R2 and drawn with @ on the overlay
+      | value_page.py --run  the person's look: Marks_Checked and Inference_Checked
+      v
+    finalize_batch.py      the same door into the pool as every other value
+
+A symbol the agent could not read can be placed by the person themselves, in the
+same file: `Reader_Kind=PERSON`, `Read_By` a HUMAN in the reviewer registry. That
+point is the person's own digitization - `MANUAL_DIGITIZED`, R0, `P` on the
+overlay - and the panel's other points are still the agent's (`SKILL.md`, "A
+point the person placed"). A box plot's reading adds the box's two edges
+(`Box_Upper_Y_Px`, `Box_Lower_Y_Px`): the mark is the median line and the ends are
+the whiskers (`SKILL.md`, "And a box").
+
+A unit whose series are groups of different size (women and men, finishers and
+non-finishers) has no single n; each group carries its own (`SKILL.md`, "A group's
+own n"):
+
+    identity card Series[].n   all series or none, never beside the card's N_Outcome
+      | make_plan.py / compile_plan.py      -> series_n.csv (a manifest)
+      | run_batch.py       each value carries its group's n as N_Cell
+      v
+    grid gate              N_Cell in place of the unit's N_Outcome; finalize re-gates it
+
+What the census of those plans still leaves open is asked once, on one page,
+with a proposal on every line - so the person decides only where the proposal
+is wrong (`SKILL.md`, "Bundle what is left"):
+
+    bundle_items.py        one question per census problem; measures what the
+                           raster can answer, and writes no spec until every
+                           other question has a proposal from someone who looked
+      | cross_check.py     a second check that never saw the proposals answers the
+      |                    same questions; agreed, HIGH and evidenced items are
+      |                    written without the person (an approved observation
+      |                    under a standing approval), the rest go to the page
+      | bundle_page.py     the person answers: seen, approved as proposed, or held
+      | bundle_route.py    answers -> each gate's answer file, all or nothing;
+      |                    what has no gate yet goes to unrouted.csv - built
+      |                    later without asking again when the person approved
+      |                    the path (SKILL.md, "What the AI carries on")
+      | census_copy.py     the gates on a COPY of the run, census before and after
+      v
+    record_*.py            the real record, --when = the day it was decided:
+                           dispositions, error bars, the two cards, and a panel's
+                           outcome name or "not a target" (record_outcomes.py)
+                           and a figure's legend groups (record_legends.py),
+                           which make_plan.py reads into the plan
+
+Panels drawn on the panel page come to the two cards through one page that asks
+both at once, with a proposal on every panel and "as proposed" preselected
+(`SKILL.md`, "Drawn panels to axes and series, on one page"):
+
+    panel_to_page.py       the drawn boxes -> 600 DPI rasters and regions, in a new
+                           folder (--verified-at one page's drawings, --outcomes
+                           leaves closed panels out, --pages/--doc-root find inputs)
+      | propose_run.py     geometry and identity proposals, resumable under a
+      |                    time budget; `reframe` after a frame is redrawn
+      | axis_series_page.py  both proposals on one card; the person looks and
+      |                    answers "as proposed", "needs fixing" or "hold"
+      | axis_series_recheck.mjs  every answered row rebuilt from the page's proposals
+      | route_axis_series.py  answers -> geometry/identity gate answers, all or
+      v                    nothing, names against the registry; `merge` appends
+    record_geometry.py / record_identity.py   on a copy first, census, then the run
+      | bundle_items.py    what the copy's census still asks -> the next bundle page
+
+Small fixes are tools of their own, run by hand once approved: `clip_frames.py`
+(a drawn frame past the picture's edge, cut back on both cards through their
+gates) and `rehash_moved_pages.py` (a figure row moved to the next page that
+still carries the old page's hash).
+
 ## What it does
 
     reviewer_registry.csv        who may attest an inventory, and how to reach them
@@ -128,7 +210,8 @@ defect in a reader stops the batch rather than arriving in somebody's queue as
     python3 pilot_397.py                     # pilot SKIPs and says which file
 
     python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root "$FDT_RASTER_ROOT"
-    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT"
+    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT" \
+        [--doc-root PDFS]                    # where the source PDFs are, if not under --file-root
     python3 finalize_batch.py OUT --template # then fill in the decisions
     python3 finalize_batch.py OUT
 
@@ -145,16 +228,16 @@ Every test file is a standalone script:
 저장소에 없습니다 — `synthesis/README.md`를 보세요.
 
 <!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4903 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5081 -->
+<!-- CURRENT_SCENARIO_COUNT_CORE: 5873 -->
+<!-- CURRENT_SCENARIO_COUNT_FULL: 6069 -->
 <!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
 <!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
 
-4903 scenarios on main after v9.28 under `requirements-lock.txt`, and 5081 with
+5873 scenarios on main after v9.28 under `requirements-lock.txt`, and 6069 with
 the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
 renderer and crop sections where none is installed, and `test_tick_ocr` skips
 its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`
-skips three more). `intake-full` installs
+skips three more, and `test_record_errorbar` its quote-against-the-PDF section). `intake-full` installs
 both explicitly and records both versions in its log. **CI runs both**, in two
 jobs that install what their profile names rather than inheriting it from the
 runner image: `core` removes poppler-utils and the Python backends before it

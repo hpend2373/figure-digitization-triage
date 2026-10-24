@@ -984,6 +984,93 @@ def axis_manifest_columns():
     ]
 
 
+def supplied_readings_columns():
+    """One row per CELL of a `Panel_Mode=MANUAL` panel, read by someone else.
+
+    A manual panel is one a person decided no reader can read: the grid is
+    declared, the box and the ticks are confirmed, and every value went to the
+    queue. This file is the other half - where each mark is, as pixels on the
+    panel's own raster, with who placed it:
+
+        Mark_X_Px, Mark_Y_Px     the mark's centre (a marker's centre, a bar's
+                                 top edge), in the panel's image pixels
+        Upper_Y_Px, Lower_Y_Px   the error-bar ends above and below it on the
+                                 page; blank where none is drawn or none can be
+                                 seen (a bar hiding its lower whisker)
+        Box_Upper_Y_Px,          a BOX's two edges on the page (optional columns,
+        Box_Lower_Y_Px           `SUPPLIED_BOX_COLUMNS`): for a QUANTILE_SUMMARY
+                                 unit the mark is the median line, the ends are
+                                 the whisker ends, and these are the box -
+                                 required there, refused on a mean
+        End_Basis                what the ends are (optional): blank or CAP - the
+                                 printed caps; BOUND - the bar's own ends are
+                                 hidden and these sit at the edge of what hides
+                                 them, an upper bound on the spread, with at
+                                 least one end; NONE - the reviewer keeps the
+                                 mean without its error bar, with no end. A
+                                 mean's reading only
+        Reader_Kind              AI_AGENT - an agent looked at the 600 dpi figure;
+                                 PERSON - the registered reviewer placed it
+                                 themselves (Read_By a HUMAN in the registry)
+        Read_By, Read_At         who, and the date the reading was made
+        Raster_SHA256            the raster the pixels are on; it must be the
+                                 panel's own
+
+    The NUMBER is not here. `run_batch` makes it from the pixel and the panel's
+    calibration, and `finalize_batch` makes it again, so a value cannot drift
+    from the place it was read at. OPTIONAL, like the axis manifest: absent for
+    every batch with no manual panel read this way.
+    """
+    return [
+        "Reading_ID", "Panel_ID", "Series_ID", "Position_ID",
+        "Mark_X_Px", "Mark_Y_Px", "Upper_Y_Px", "Lower_Y_Px",
+        "Reader_Kind", "Read_By", "Read_At", "Raster_SHA256", "Note",
+    ]
+
+
+def series_n_columns():
+    """One row per SERIES whose group has its own n, where the unit's one n cannot say it.
+
+    `N_Outcome` on the unit is one number, and a panel whose series are groups of
+    different size - women and men, finishers and non-finishers - has none: every
+    value it produced failed machine QC on a missing n however well it was read.
+    Here each group carries its own:
+
+        Panel_ID, Series_ID   the series, as the series manifest declares it
+        N_Outcome             the number of subjects behind that series' means
+        N_Source              where it came from (the identity card, the caption)
+
+    All of a panel's series or none of them, and never beside the unit's
+    `N_Outcome` - one answer per cell. `run_batch` stamps each value with its
+    series' n (`N_Cell`), and the grid gate takes that in place of the unit's.
+    OPTIONAL, like the axis manifest: absent for every batch whose units each
+    have one n.
+    """
+    return ["Panel_ID", "Series_ID", "N_Outcome", "N_Source", "Note"]
+
+
+#: Columns `supplied_readings.csv` may carry beyond `supplied_readings_columns()`:
+#: a box plot's two box edges (built 2026-10-20 for the box panels a person sent
+#: to MANUAL - one box reader reads one series per position, and these carry
+#: two). Optional, so every batch without a box reading is byte for byte what it
+#: was.
+SUPPLIED_BOX_COLUMNS = ("Box_Upper_Y_Px", "Box_Lower_Y_Px")
+#: And what a reading's ends ARE (built 2026-10-21): blank or `CAP` - the printed
+#: caps; `BOUND` - the bar's own ends are hidden and these were set at the edge of
+#: what hides them; `NONE` - the reviewer keeps the mean without its error bar
+#: (`provenance.SUPPLIED_END_BASES`). Optional for the same reason: every reading
+#: of caps is byte for byte what it was.
+SUPPLIED_END_BASIS_COLUMN = "End_Basis"
+SUPPLIED_OPTIONAL_COLUMNS = SUPPLIED_BOX_COLUMNS + (SUPPLIED_END_BASIS_COLUMN,)
+
+#: Columns `series_n.csv` may carry beyond `series_n_columns()`. `Position_ID`
+#: makes a row one CELL's n - the series at that x position - for a group that
+#: shrinks along the axis (a time course drawn until half the subjects had
+#: finished). Optional, so every series_n.csv written before it, and every batch
+#: without such a cell, is unchanged and still complete.
+SERIES_N_OPTIONAL_COLUMNS = ("Position_ID",)
+
+
 BATCH_TEMPLATES = (
     ("reviewer_registry", reviewer_registry_columns),
     ("source_document_manifest", source_document_manifest_columns),
@@ -995,6 +1082,8 @@ BATCH_TEMPLATES = (
     ("position_manifest", position_manifest_columns),
     ("reader_config", reader_config_columns),
     ("identity_resolution", identity_resolution_columns),
+    ("supplied_readings", supplied_readings_columns),
+    ("series_n", series_n_columns),
 )
 
 
@@ -1323,8 +1412,15 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                              source_documents=None, source_figures=None, source_panels=None,
                              reviewers=None, resolutions=None, axes=None,
                              requested_run_mode=None,
-                             file_root=".", check_files=True):
+                             file_root=".", check_files=True, doc_root=None,
+                             readings=None, series_n=None):
     """Reject an unrunnable batch before a single raster is opened.
+
+    `doc_root` is where the source DOCUMENTS are, when a corpus keeps its PDFs
+    apart from its rasters (run2: 98 PDFs in one download folder, the crops in
+    the run). Without it a document is looked for under `file_root` like any
+    other evidence, and every one of run2's 98 was SOURCE_DOCUMENT_FILE_NOT_FOUND
+    on the machine that held them.
 
     Returns a DataFrame of problems - empty means the run may proceed. The
     checks are deliberately cheap and total: reading 160 publications and
@@ -1346,8 +1442,14 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         reviewers = pd.DataFrame()
     if axes is None:
         axes = pd.DataFrame(columns=axis_manifest_columns())
+    if readings is None:
+        readings = pd.DataFrame(columns=supplied_readings_columns())
+    if series_n is None:
+        series_n = pd.DataFrame(columns=series_n_columns())
     frames = (("reviewers", reviewers, reviewer_registry_columns()),
               ("axes", axes, axis_manifest_columns()),
+              ("readings", readings, supplied_readings_columns()),
+              ("series_n", series_n, series_n_columns()),
               ("source_documents", source_documents, source_document_manifest_columns()),
               ("source_figures", source_figures, source_figure_manifest_columns()),
               ("source_panels", source_panels, source_panel_inventory_columns()),
@@ -1437,6 +1539,29 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
             return None
         return real if os.path.exists(real) else None
 
+    doc_base = os.path.realpath(doc_root) if doc_root else None
+
+    def resolve_document(name):
+        """The file a document row names: under `file_root` as before, or -
+        given `doc_root` - the bare name in that folder or one level of its
+        subfolders, the rule `caption_fulltext.resolve_source` read the same
+        documents by. Never outside the folder: a name with a path in it is
+        not a document name, and a link that leads out is refused."""
+        if doc_base is None:
+            return resolve(name)
+        n = str(name or "").strip()
+        if not n or os.path.basename(n) != n:
+            return None
+        try:
+            subs = sorted(d for d in os.listdir(doc_base) if os.path.isdir(os.path.join(doc_base, d)))
+        except OSError:
+            subs = []
+        for cand in [os.path.join(doc_base, n)] + [os.path.join(doc_base, d, n) for d in subs]:
+            real = os.path.realpath(cand)
+            if real.startswith(doc_base + os.sep) and os.path.isfile(real):
+                return real
+        return None
+
     unit_index = {}
     if units is not None:
         for _, u in units.iterrows():
@@ -1474,7 +1599,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
         # the first release and this was a filename, so an inventory could not
         # tell a preprint from the version of record it was taken from.
         declared_doc_sha = str(r.get("Source_File_SHA256", "")).strip().lower()
-        held = resolve(r.get("Source_File"))
+        held = resolve_document(r.get("Source_File"))
         if declared_doc_sha == SOURCE_FILE_NOT_HELD.lower():
             # Not a way out of hashing a file you have. The corpus is asked
             # whether it is holding this document, and only its own answer
@@ -1485,7 +1610,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                      "Source_File_SHA256 says %s and %s is under %s. Hash the "
                      "file the corpus is holding; NOT_HELD is for a document "
                      "whose bytes this package does not have"
-                     % (SOURCE_FILE_NOT_HELD, r.get("Source_File"), root))
+                     % (SOURCE_FILE_NOT_HELD, r.get("Source_File"), doc_base or root))
         elif declared_doc_sha:
             if not SHA256_TEXT.match(declared_doc_sha):
                 flag(line, "BAD_SOURCE_FILE_SHA256",
@@ -1507,7 +1632,7 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                         flag(line, "SOURCE_DOCUMENT_FILE_NOT_FOUND",
                              "Source_File=%r declares a digest and is not on "
                              "disk under %s. Put the document in the corpus or "
-                             "say %s" % (r.get("Source_File"), root,
+                             "say %s" % (r.get("Source_File"), doc_base or root,
                                          SOURCE_FILE_NOT_HELD))
                     else:
                         actual = sha256_of_file(held)
@@ -2497,6 +2622,15 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                               reviewer_index=reviewer_index,
                               file_root=file_root, check_files=check_files)
 
+    # ---------------------------------------------------- supplied readings
+    check_supplied_readings(
+        readings, panel_index, panel_modes, series, positions, unit_index,
+        flag, raster_sha=(lambda path: sha256_of_file(path) if path else ""),
+        resolve=resolve, check_files=check_files, reviewer_index=reviewer_index)
+
+    # ------------------------------------------------------ a group's own n
+    check_series_n(series_n, panel_index, series, unit_index, flag, positions=positions)
+
     # -------------------------------------------------------------- configs
     parsed = load_reader_configs(configs, mark_by_config, flag)
     for pid, r in panel_index.items():
@@ -2506,6 +2640,348 @@ def validate_batch_manifests(panels, series, positions, configs, units=None,
                  "Config_ID=%s has no rows in reader_config" % cid)
 
     return pd.DataFrame(problems)
+
+
+#: The statistics whose cells carry an n of their own. An association's n is
+#: its pairs (`N_Pairs`), and a count's is its denominator.
+SERIES_N_STATISTICS = ("CONTINUOUS", "QUANTILE_SUMMARY")
+
+
+def check_series_n(series_n, panel_index, series, unit_index, flag, positions=None):
+    """Every group's n names a declared series, once, and a panel has them all or none.
+
+    And never beside the unit's own `N_Outcome`: a cell with two n's has none
+    anybody chose, and the run would pick one silently.
+
+    A row with a `Position_ID` is one CELL's n (`SERIES_N_OPTIONAL_COLUMNS`): the
+    position must be the panel's, each cell once, and a series says its n either
+    once for the series or per cell - not both.
+    """
+    if series_n is None or not len(series_n):
+        return
+    declared = {}
+    for _, r in series.iterrows():
+        declared.setdefault(str(r.get("Panel_ID", "")).strip(), []).append(
+            str(r.get("Series_ID", "")).strip())
+    declared_positions = {}
+    for _, r in (positions.iterrows() if positions is not None else ()):
+        declared_positions.setdefault(str(r.get("Panel_ID", "")).strip(), set()).add(
+            str(r.get("Position_ID", "")).strip())
+    got, level = {}, {}
+    for i, r in series_n.iterrows():
+        line = "series_n:%d" % (i + 2)
+        pid = str(r.get("Panel_ID", "")).strip()
+        sid = str(r.get("Series_ID", "")).strip()
+        qid = str(r.get("Position_ID", "") if "Position_ID" in r else "").strip()
+        if pid not in panel_index:
+            flag(line, "SERIES_N_PANEL_UNKNOWN", "Panel_ID=%r is not in panel_manifest" % pid)
+            continue
+        if sid not in declared.get(pid, []):
+            flag(line, "SERIES_N_SERIES_UNKNOWN",
+                 "%s has no series %r; its series are %s" % (pid, sid, declared.get(pid, [])))
+            continue
+        if qid and qid not in declared_positions.get(pid, set()):
+            flag(line, "SERIES_N_POSITION_UNKNOWN",
+                 "%s has no position %r; a cell's n names a declared x position" % (pid, qid))
+            continue
+        kind = "cell" if qid else "series"
+        if level.setdefault((pid, sid), kind) != kind:
+            flag(line, "SERIES_N_LEVEL_MIXED",
+                 "%s/%s says its n both for the whole series and per cell - one answer "
+                 "per cell" % (pid, sid))
+            continue
+        if (sid, qid) in got.setdefault(pid, {}):
+            flag(line, "SERIES_N_DUPLICATE", "%s/%s%s has two n's"
+                 % (pid, sid, " at %s" % qid if qid else ""))
+            continue
+        text = str(r.get("N_Outcome", "")).strip()
+        if not text.isdigit() or int(text) <= 0:
+            flag(line, "SERIES_N_BAD",
+                 "N_Outcome=%r for %s/%s is not a positive whole number" % (text, pid, sid))
+            continue
+        if blank(r.get("N_Source")):
+            flag(line, "MISSING_REQUIRED",
+                 "N_Source - where %s/%s's n was read" % (pid, sid))
+        got[pid][(sid, qid)] = int(text)
+        unit = unit_index.get(str(panel_index[pid].get("Unit_ID", "")).strip())
+        if unit is not None:
+            statistic = str(unit.get("Statistic_Type", "")).strip().upper()
+            if statistic not in SERIES_N_STATISTICS:
+                flag(line, "SERIES_N_STATISTIC_UNSUPPORTED",
+                     "%s is a %s unit; a group's own n is for %s"
+                     % (pid, statistic or "(blank)", "/".join(SERIES_N_STATISTICS)))
+    for pid, cells in got.items():
+        have = sorted(set(s_ for s_, _q in cells))
+        missing = [s_ for s_ in declared.get(pid, []) if s_ not in have]
+        if have and missing:
+            flag("panels:%s" % pid, "SERIES_N_PARTIAL",
+                 "%d of %d series have an n; %s do not - a group's n is all of a "
+                 "panel's series or none" % (len(have), len(declared.get(pid, [])), missing))
+        unit = unit_index.get(str(panel_index[pid].get("Unit_ID", "")).strip())
+        if have and unit is not None and not blank(unit.get("N_Outcome")):
+            flag("panels:%s" % pid, "SERIES_N_WITH_UNIT_N",
+                 "the unit says N_Outcome=%s and its series say %s - one answer per "
+                 "cell" % (str(unit.get("N_Outcome")).strip(), have))
+
+
+#: What a supplied reading's date looks like. A date, not a timestamp: the
+#: reading is a day's work, and `--when` across this package is a date.
+_READ_AT = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def check_supplied_readings(readings, panel_index, panel_modes, series,
+                            positions, unit_index, flag, raster_sha=None,
+                            resolve=None, check_files=True, reviewer_index=None):
+    """Every supplied reading names a cell a manual panel declares, once.
+
+    What is checked here is that the reading CAN be a value of this panel: its
+    panel is MANUAL and continuous, its series and position are the panel's own,
+    no cell is read twice, the pixels are numbers inside the plot area with the
+    ends on the right sides of the mark, the mark is nearest the column its
+    position declares, and the raster is the panel's. Whether the pixel is ON the
+    printed mark is not checkable here and is not pretended to be: that is the
+    overlay, and the reviewer's `Inference_Checked`.
+
+    A PERSON's reading (`Reader_Kind=PERSON`) is that person's own digitization,
+    so `Read_By` must name a HUMAN in `reviewer_registry.csv`: not registered is
+    SUPPLIED_READER_NOT_REGISTERED, registered as anything else is
+    SUPPLIED_READER_NOT_HUMAN, and a date after today is
+    SUPPLIED_READING_DATE_FUTURE. Without a registry (`reviewer_index=None`) a
+    person's reading cannot be vouched for and is refused the same way.
+    """
+    import datetime
+    import provenance as _prov
+    if readings is None or not len(readings):
+        return
+    declared_series = {}
+    for _, r in series.iterrows():
+        declared_series.setdefault(str(r.get("Panel_ID", "")).strip(), set()).add(
+            str(r.get("Series_ID", "")).strip())
+    anchors = {}
+    for _, r in positions.iterrows():
+        pid = str(r.get("Panel_ID", "")).strip()
+        qid = str(r.get("Position_ID", "")).strip()
+        anchors.setdefault(pid, {})[qid] = _as_float_or_none(r.get("X_Pixel"))
+    seen_ids, seen_cells = set(), {}
+    for i, r in readings.iterrows():
+        line = "readings:%d" % (i + 2)
+        rid = str(r.get("Reading_ID", "")).strip()
+        pid = str(r.get("Panel_ID", "")).strip()
+        sid = str(r.get("Series_ID", "")).strip()
+        qid = str(r.get("Position_ID", "")).strip()
+        if not rid or not SAFE_ID.match(rid):
+            flag(line, "SUPPLIED_READING_ID_BAD",
+                 "Reading_ID=%r: a reading is joined to its value by this name, "
+                 "so it must be a safe identifier" % rid)
+            continue
+        if rid in seen_ids:
+            flag(line, "SUPPLIED_READING_DUPLICATE",
+                 "Reading_ID=%s is declared twice" % rid)
+            continue
+        seen_ids.add(rid)
+        panel = panel_index.get(pid)
+        if panel is None:
+            flag(line, "SUPPLIED_READING_PANEL_UNKNOWN",
+                 "Panel_ID=%s is not in panel_manifest.csv" % pid)
+            continue
+        if panel_modes.get(pid) != "MANUAL":
+            # A reader's panel is read by its reader. Supplying points for it
+            # would put two readings behind one cell - the reader's and this -
+            # and the contract a value is held to could not say which.
+            flag(line, "SUPPLIED_READING_ON_READER_PANEL",
+                 "%s is Panel_Mode=%s; supplied readings are for panels a person "
+                 "routed to MANUAL" % (pid, panel_modes.get(pid) or "AUTO"))
+            continue
+        unit = unit_index.get(str(panel.get("Unit_ID", "")).strip())
+        stat = (str(unit.get("Statistic_Type", "")).strip().upper()
+                if unit is not None else "")
+        if stat not in ("CONTINUOUS", "QUANTILE_SUMMARY"):
+            flag(line, "SUPPLIED_READING_STATISTIC_UNSUPPORTED",
+                 "%s fills a %s unit; a supplied reading is a mean and its error "
+                 "bar, or a box's five lines, so only CONTINUOUS and "
+                 "QUANTILE_SUMMARY units can take one" % (pid, stat or "(no unit)"))
+            continue
+        # A BOX IS ITS EDGES. A quantile unit's reading without both is a
+        # median with nothing around it; a mean's reading with them is a box
+        # filed as a mean.
+        edges = [not blank(r.get(c)) for c in SUPPLIED_BOX_COLUMNS]
+        if stat == "QUANTILE_SUMMARY" and not all(edges):
+            flag(line, "SUPPLIED_READING_BOX_EDGES_MISSING",
+                 "%s is a QUANTILE_SUMMARY unit; a box reading gives both box edges "
+                 "(Box_Upper_Y_Px, Box_Lower_Y_Px)" % pid)
+            continue
+        if stat == "CONTINUOUS" and any(edges):
+            flag(line, "SUPPLIED_READING_BOX_ON_MEAN",
+                 "%s is a CONTINUOUS unit; box edges belong to a QUANTILE_SUMMARY "
+                 "unit" % pid)
+            continue
+        # WHAT THE ENDS ARE. A bound is a mean's error bar set at the edge of
+        # what hides it; a box's whiskers are not that question, and a word this
+        # file does not define would be read as a cap by everything downstream.
+        basis = ("" if blank(r.get(SUPPLIED_END_BASIS_COLUMN))
+                 else str(r.get(SUPPLIED_END_BASIS_COLUMN)).strip().upper())
+        if basis and basis not in _prov.SUPPLIED_END_BASES:
+            flag(line, "SUPPLIED_END_BASIS_UNKNOWN",
+                 "End_Basis=%s (expected blank, %s)"
+                 % (basis, " or ".join(_prov.SUPPLIED_END_BASES)))
+            continue
+        if basis == _prov.SUPPLIED_END_BOUND and stat == "QUANTILE_SUMMARY":
+            flag(line, "SUPPLIED_END_BOUND_ON_BOX",
+                 "%s is a QUANTILE_SUMMARY unit; End_Basis=BOUND is a mean's "
+                 "hidden error bar, and a box's whiskers are not one" % pid)
+            continue
+        # A MEAN ONLY is a mean's: a box without its whiskers and edges is not a
+        # box kept without its spread, it is no box.
+        if basis == _prov.SUPPLIED_END_NONE and stat == "QUANTILE_SUMMARY":
+            flag(line, "SUPPLIED_END_NONE_ON_BOX",
+                 "%s is a QUANTILE_SUMMARY unit; End_Basis=NONE keeps a mean "
+                 "without its error bar, and a box has no mean" % pid)
+            continue
+        if sid not in declared_series.get(pid, set()):
+            flag(line, "SUPPLIED_READING_SERIES_UNKNOWN",
+                 "Series_ID=%s is not a series of %s" % (sid or "(blank)", pid))
+            continue
+        if qid not in anchors.get(pid, {}):
+            flag(line, "SUPPLIED_READING_POSITION_UNKNOWN",
+                 "Position_ID=%s is not a position of %s" % (qid or "(blank)", pid))
+            continue
+        cell = (pid, sid, qid)
+        if cell in seen_cells:
+            flag(line, "SUPPLIED_READING_CELL_TWICE",
+                 "%s/%s/%s is already read by %s; one printed mark is one reading"
+                 % (pid, sid, qid, seen_cells[cell]))
+            continue
+        seen_cells[cell] = rid
+        kind = str(r.get("Reader_Kind", "")).strip().upper()
+        if kind not in _prov.SUPPLIED_READER_KINDS:
+            flag(line, "SUPPLIED_READER_KIND_UNKNOWN",
+                 "Reader_Kind=%s (expected %s)"
+                 % (kind or "(blank)", "/".join(_prov.SUPPLIED_READER_KINDS)))
+        if blank(r.get("Read_By")):
+            flag(line, "MISSING_REQUIRED", "Read_By - who placed the points")
+        elif kind in _prov.SUPPLIED_PERSON_KINDS:
+            who = str(r.get("Read_By", "")).strip()
+            entry = (reviewer_index or {}).get(who)
+            if entry is None:
+                flag(line, "SUPPLIED_READER_NOT_REGISTERED",
+                     "Read_By=%r: a point a person placed is that person's own "
+                     "reading, so they must be in reviewer_registry.csv" % who)
+            elif str(entry.get("Reviewer_Record_Type", "")).strip().upper() != "HUMAN":
+                flag(line, "SUPPLIED_READER_NOT_HUMAN",
+                     "%s is Reviewer_Record_Type=%s; Reader_Kind=PERSON is a person"
+                     % (who, str(entry.get("Reviewer_Record_Type", "")).strip()
+                        or "(blank)"))
+        if not _READ_AT.match(str(r.get("Read_At", "")).strip()):
+            flag(line, "SUPPLIED_READING_DATE_BAD",
+                 "Read_At=%r is not YYYY-MM-DD" % r.get("Read_At"))
+        elif kind in _prov.SUPPLIED_PERSON_KINDS:
+            try:
+                when = datetime.date.fromisoformat(str(r.get("Read_At")).strip())
+            except ValueError:
+                flag(line, "SUPPLIED_READING_DATE_BAD",
+                     "Read_At=%r is not a date" % r.get("Read_At"))
+            else:
+                if when > datetime.date.today():
+                    flag(line, "SUPPLIED_READING_DATE_FUTURE",
+                         "Read_At=%s is after today; a reading is made on a day "
+                         "that has happened" % when)
+        pixels = {}
+        bad = False
+        for column in _prov.SUPPLIED_PIXEL_FIELDS:
+            text = r.get(column)
+            if blank(text):
+                pixels[column] = None
+                if column in ("Mark_X_Px", "Mark_Y_Px"):
+                    flag(line, "MISSING_REQUIRED", column)
+                    bad = True
+                continue
+            value = _prov.finite_number(text)
+            if value is None:
+                flag(line, "SUPPLIED_READING_PIXEL_BAD",
+                     "%s=%r is not a finite number" % (column, text))
+                bad = True
+            pixels[column] = value
+        if bad:
+            continue
+        try:
+            box = parse_box(",".join(str(panel.get(c)) for c in
+                                     ("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1")))
+        except ValueError:
+            continue                  # the panel row is already flagged
+        x, y = pixels["Mark_X_Px"], pixels["Mark_Y_Px"]
+        outside = [c for c, v in pixels.items() if v is not None and not (
+            (box[0] <= v <= box[1]) if c == "Mark_X_Px" else (box[2] <= v <= box[3]))]
+        if outside:
+            flag(line, "SUPPLIED_READING_OUTSIDE_PANEL",
+                 "%s lie outside the plot area %s" % (", ".join(outside), box))
+            continue
+        up, low = pixels["Upper_Y_Px"], pixels["Lower_Y_Px"]
+        bt, bb = pixels.get("Box_Upper_Y_Px"), pixels.get("Box_Lower_Y_Px")
+        # A BOUND IS AN END. With neither end placed there is nothing it bounds,
+        # and the value would be a mean with no spread wearing the word.
+        if basis == _prov.SUPPLIED_END_BOUND and up is None and low is None:
+            flag(line, "SUPPLIED_END_BOUND_WITHOUT_END",
+                 "End_Basis=BOUND with neither Upper_Y_Px nor Lower_Y_Px: a bound "
+                 "is the end set at the edge of what hides the bar")
+            continue
+        # AND A MEAN ONLY HAS NO END. An end placed beside the word would be a
+        # spread the value then throws away - or keeps, depending on who reads it.
+        if basis == _prov.SUPPLIED_END_NONE and (up is not None or low is not None):
+            flag(line, "SUPPLIED_END_NONE_WITH_END",
+                 "End_Basis=NONE keeps the mean without its error bar, and this "
+                 "reading places an end: leave both ends blank, or say what they are")
+            continue
+        # A BOX IS ASKED ITS OWN ORDER, below, not a mean's: a box whose median
+        # is its first quartile and whose lowest value is that quartile too
+        # draws the median, the box bottom and the whisker end on one row, and
+        # the strict rule for a mean's two ends refused it (the first real box batch,
+        # 2026-10-20). Which one a reading is was settled above: a quantile
+        # unit's reading has both edges, a mean's has neither.
+        if (bt is None or bb is None) and (
+                (up is not None and up >= y) or (low is not None and low <= y)):
+            flag(line, "SUPPLIED_READING_ENDS_INVERTED",
+                 "Upper_Y_Px=%s and Lower_Y_Px=%s must lie above and below the "
+                 "mark at row %s on the page" % (up, low, y))
+            continue
+        # THE FIVE LINES IN PAGE ORDER: whisker end, box edge, median, box
+        # edge, whisker end. The median may sit on an edge (a box whose median
+        # is its quartile), a whisker may have no length (an extreme that is
+        # its quartile), and the box may not be a line.
+        if bt is not None and bb is not None and not (
+                bt < bb and bt <= y <= bb
+                and (up is None or up <= bt) and (low is None or bb <= low)):
+            flag(line, "SUPPLIED_READING_BOX_INVERTED",
+                 "rows %s must run top to bottom: upper whisker end, box top, "
+                 "median, box bottom, lower whisker end"
+                 % ", ".join("%s" % v for v in (up, bt, y, bb, low)))
+            continue
+        # NEAREST ITS OWN COLUMN, the question `_nearest_anchor_problems` asks at
+        # finalization - asked here first, so a point filed under the wrong
+        # position is a manifest problem rather than a refusal after review.
+        columns = sorted((abs(x - px), q) for q, px in anchors[pid].items()
+                         if px is not None)
+        if columns and columns[0][1] != qid:
+            flag(line, "SUPPLIED_READING_NOT_AT_ITS_POSITION",
+                 "the mark at column %s is nearest %s, and it is filed under %s"
+                 % (x, columns[0][1], qid))
+            continue
+        if check_files and resolve is not None and raster_sha is not None:
+            img = resolve(panel.get("Image_Path"))
+            want = raster_sha(img) if img else ""
+            got = str(r.get("Raster_SHA256", "")).strip()
+            if want and got != want:
+                flag(line, "SUPPLIED_READING_RASTER_MISMATCH",
+                     "the reading was made on %s... and %s is read from %s...; "
+                     "a pixel is only a place on the raster it was read on"
+                     % (got[:16] or "(nothing)", pid, want[:16]))
+
+
+def _as_float_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and abs(number) != float("inf") else None
 
 
 def config_hash(configs):

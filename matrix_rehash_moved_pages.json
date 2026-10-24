@@ -1,0 +1,65 @@
+{
+ "files": {
+  "rehash_moved_pages.py": "c1ce582008a209fcd630e515857af69b987b6be202987683199c4c650fe1de64",
+  "test_rehash_moved_pages.py": "c48ba99fb208e2d5a752cbb509f419727cc51b3c9a1eb6dc67df65d3efaedff2"
+ },
+ "suites": [
+  "test_rehash_moved_pages.py"
+ ],
+ "mutations": [
+  {
+   "name": "E01: 옮기지 않은 행도 고친다",
+   "file": "rehash_moved_pages.py",
+   "old": "        if not was:\n            continue\n",
+   "new": "        if False:\n            continue\n"
+  },
+  {
+   "name": "E01: 적힌 경로만 본다 (옛 세션 경로를 못 찾음)",
+   "file": "rehash_moved_pages.py",
+   "old": "    if \"/pages/\" in path:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "name": "E01: 어느 쪽 지문도 아니어도 고친다",
+   "file": "rehash_moved_pages.py",
+   "old": "        if prev and stored == sha256(prev):\n",
+   "new": "        if True:\n"
+  },
+  {
+   "name": "E01: 이미 맞는 행도 다시 적는다",
+   "file": "rehash_moved_pages.py",
+   "old": "        if stored == now:\n            fine += 1\n            continue\n",
+   "new": ""
+  },
+  {
+   "name": "E01: 래스터가 없어도 넘어간다",
+   "file": "rehash_moved_pages.py",
+   "old": "        if not cur:\n            stops.append",
+   "new": "        if not cur:\n            continue\n            stops.append"
+  },
+  {
+   "name": "E01: 멈춘 행이 있어도 나머지를 쓴다",
+   "file": "rehash_moved_pages.py",
+   "old": "    if stops:\n        print(\"멈춘 행이 있어 아무것도 쓰지 않았습니다.\")\n        return 1\n",
+   "new": ""
+  },
+  {
+   "name": "E01: --write 없이도 쓴다",
+   "file": "rehash_moved_pages.py",
+   "old": "    if not a.write or not fixes:\n",
+   "new": "    if not fixes:\n"
+  },
+  {
+   "name": "E01: 쪽 이름을 숫자로 읽지 않는다",
+   "file": "rehash_moved_pages.py",
+   "old": "        if m and int(m.group(1)) == int(page):\n",
+   "new": "        if m and m.group(1) == str(page):\n"
+  },
+  {
+   "name": "E01: 지문 대신 경로까지 고쳐 적는다",
+   "file": "rehash_moved_pages.py",
+   "old": "        rows[n][\"Page_Raster_SHA256\"] = new\n",
+   "new": "        rows[n][\"Page_Raster_SHA256\"] = new\n        rows[n][\"Page_Raster\"] = rows[n][\"Page_Raster\"].replace(\"/sessions/\", \"/\")\n"
+  }
+ ]
+}

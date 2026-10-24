@@ -120,6 +120,66 @@ check("표시가 없으면 통과하지 못한다",
 check("표시는 kernel이 참으로 치는 말이면 된다",
       codes(plain("D", "SD", SD_IN_FLAT, "2", verified="yes")) == []
       and codes(plain("D", "SD", SD_IN_FLAT, "2", verified="TRUE")) == [])
+# --- 사람이 승인한 관찰 (run2 2026-10-14) ------------------------------------
+# 사람이 원문을 직접 확인하지 않은 답은, 누가 무엇을 보았고 누가 어디서
+# 승인했는지를 모두 들고 올 때만 들어옵니다(`approval`). 셋 중 하나라도 비면
+# 그 답은 되돌아볼 곳이 없는 답입니다.
+APPROVED = {"Verified_By": "minyeop", "Observed_By": "Claude (PDF survey)",
+            "Approval_Ref": "minyeop chat 2026-10-14"}
+check("승인된 관찰은 통과한다", codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **APPROVED)) == [],
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **APPROVED)))
+# REVERT: take an answer that names what looked but not where it was approved.
+check("승인한 자리가 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Approval_Ref=""))) == ["APPROVAL_INCOMPLETE"])
+check("본 것이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Observed_By=""))) == ["APPROVAL_INCOMPLETE"])
+check("본 것과 승인한 사람이 같으면 본 답이지 승인된 관찰이 아니다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Observed_By="minyeop"))) == ["OBSERVER_IS_APPROVER"])
+# REVERT: let an approval through with nobody named as the approver. The record
+# then says someone approved it, and not who.
+check("누가 승인했는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2", verified="0"), **dict(APPROVED, Verified_By=""))) == ["UNATTRIBUTED"])
+check("승인된 관찰도 인용문은 원문에서 다시 찾아진다",
+      "QUOTE_NOT_IN_SOURCE" in codes(dict(plain("D", "SD", "Standard deviations are shown.", "2", verified="0"), **APPROVED)))
+
+# --- 다른 요소의 정의를 빌린 답 (run2 2026-10-14 R9·R10) -------------------------
+BORROW = {"Definition_Basis": "BORROWED", "Note": "Table 4 title; Fig. 3 bar lengths match the table's SD"}
+check("빌린 정의는 Note와 함께면 통과한다", codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **BORROW)) == [],
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **BORROW)))
+# REVERT: borrow without saying from where. The assumption the record exists to
+# keep is then nowhere.
+check("어디서 빌렸는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **dict(BORROW, Note=""))) == ["BORROWED_UNEXPLAINED"])
+check("빌린 것이 처분이면 통과하지 못한다",
+      codes(dict(plain("D", "DROP"), **BORROW)) == ["BORROWED_WITHOUT_DEFINITION"])
+check("빌린 것이 '막대 없음'이면 통과하지 못한다",
+      codes(dict(plain("D", "NO_ERRORBAR"), **BORROW)) == ["BORROWED_WITHOUT_DEFINITION"])
+check("빌림의 이름은 정해진 것 하나뿐이다",
+      codes(dict(plain("D", "SD", SD_IN_FLAT, "2"), **dict(BORROW, Definition_Basis="GUESSED"))) == ["BAD_DEFINITION_BASIS"])
+check("빌린 인용문도 원문에서 다시 찾아진다",
+      "QUOTE_NOT_IN_SOURCE" in codes(dict(plain("D", "SD", "Means (SD) of all tables.", "2"), **BORROW)))
+
+# --- 그림에서 잰 정의 (2026-10-20 결정 D01) ------------------------------------
+# 논문은 SD라고 하는데 그림의 막대가 개인 값의 SE와 맞는 경우. 인용문 자리는 잰 것의
+# 기술이라 원문에서 찾지 않고, 대신 Note와 이름이 있어야 합니다.
+MEASURE = {"Definition_Basis": "MEASURED", "Verified_By": "minyeop",
+           "Note": "two independent checks, 22 cells, bar/SD median 0.453"}
+_MSRC = "Measured on the figure: in 22 cells the bar is the SE of the five plotted values"
+check("그림에서 잰 정의는 Note와 함께면 원문에 없어도 통과한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **MEASURE)) == [], codes(dict(plain("D", "SE", _MSRC, ""), **MEASURE)))
+check("  승인된 관찰로도 통과한다",
+      codes(dict(plain("D", "SE", _MSRC, "", verified="0"), **dict(MEASURE, **APPROVED))) == [])
+# REVERT: take a measured definition without saying how it was measured.
+check("  잰 방법이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **dict(MEASURE, Note=""))) == ["MEASURED_UNEXPLAINED"])
+check("  잰 것의 기술이 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", "", ""), **MEASURE)) == ["NO_ERRORBAR_SOURCE"])
+check("  누가 정했는지 없으면 통과하지 못한다",
+      codes(dict(plain("D", "SE", _MSRC, ""), **dict(MEASURE, Verified_By=""))) == ["UNATTRIBUTED"])
+check("  잰 것이 처분이면 통과하지 못한다",
+      codes(dict(plain("D", "DROP"), **MEASURE)) == ["MEASURED_WITHOUT_DEFINITION"])
+check("  잰 기술도 추정의 말이면 막힌다",
+      "UNRESOLVED_ERRORBAR_DEFINITION" in codes(dict(plain("D", "SE", "The bars are probably SE", ""), **MEASURE)))
 check("어휘 밖의 종류는 그 자리에서 멈춘다",
       codes(plain("D", "STDEV", SD_IN_FLAT, "2")) == ["BAD_DISPERSION_TYPE"])
 check("추정하는 말은 harness의 이름으로 걸린다",
@@ -224,6 +284,13 @@ DRAFT = (
     ("DOC_C_D001", "DOC_C", "c.pdf", "FIG1", "1"),
     ("DOC_D_D001", "DOC_D", "d.pdf", "FIG1", "1", "JATS_FIGURE_ELEMENTS"),
 )
+#: 대기 목록을 만든 뒤에 생긴 그림들 - 초안에는 있고 errorbar_unstated.csv에는 없습니다.
+LATER = (
+    ("DOC_A_D003", "DOC_A", "a.pdf", "FIG3", "1"),
+    ("DOC_A_D004", "DOC_A", "a.pdf", "FIG4", "1"),
+    ("DOC_B_D002", "DOC_B", "b.pdf", "FIG2", "1"),
+    ("DOC_C_D002", "DOC_C", "c.pdf", "FIG2", "1"),
+)
 try:
     BACKEND = CI._default_backend()
 except CI.BackendUnavailable:
@@ -237,7 +304,7 @@ with io.open(os.path.join(RUN, RE.DRAFT), "w", encoding="utf-8", newline="") as 
     w.writerow(["Draft_ID", "Source_Document_ID", "Source_File",
                 "Source_File_SHA256", "Page", "Figure_Number",
                 "Extraction_Method"])
-    for row in DRAFT:
+    for row in DRAFT + LATER:
         did, doc, name, fig, page = row[:5]
         w.writerow([did, doc, name, sha(name), page, fig,
                     row[5] if len(row) > 5 else BACKEND])
@@ -434,6 +501,82 @@ check("새 판정은 먼저 있던 판정에 더해진다",
       sorted(r["Draft_ID"] for r in _disk)
       == ["DOC_A_D001", "DOC_A_D002", "DOC_B_D001"],
       [r["Draft_ID"] for r in _disk])
+
+# --- an approved observation, a borrowed definition, one figure -------------
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", verified="0", **APPROVED)])
+check("승인된 관찰은 Verified_By_Person=0으로, 본 것·승인한 사람·자리와 함께 적힌다",
+      _r == [] and {(r["Verified_By_Person"], r["Verified_By"], r["Observed_By"], r["Approval_Ref"]) for r in _w}
+      == {("0", "minyeop", "Claude (PDF survey)", "minyeop chat 2026-10-14")}, (problems_of(_r), _w[:1]))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", **APPROVED)])
+check("사람이 직접 확인한 답에는 승인 칸이 남지 않는다",
+      {(r["Verified_By_Person"], r["Observed_By"], r["Approval_Ref"]) for r in _w} == {("1", "", "")}, _w[:1])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", **BORROW)])
+check("빌린 정의는 Definition_Basis=BORROWED로 적힌다",
+      {r["Definition_Basis"] for r in _w} == {"BORROWED"} and len(_w) == 2, _w[:1])
+_w, _r, _p = RE.record(RUN, [answer("DOC_A", "SE", _MSRC, "", verified="", Draft_ID="DOC_A_D002",
+                                     **dict(MEASURE, **APPROVED))], os.path.join(ROOT, "no_pdfs_here"), WHEN,
+                       out_path=os.path.join(ROOT, "measured.csv"), log=lambda *_a: None)
+# REVERT: ask for the source of a measured answer. The figure's measurement is
+# then refused for want of a document it never quoted.
+check("그림에서 잰 답은 원문이 없어도 MEASURED로, 승인 칸과 함께 적힌다",
+      _r == [] and [(r["Draft_ID"], r["Definition_Basis"], r["Verified_By_Person"]) for r in _w]
+      == [("DOC_A_D002", "MEASURED", "0")], (problems_of(_r), _w[:1]))
+_w, _r, _p, _o = run([answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D002")])
+# REVERT: ignore Draft_ID. One figure's answer then lands on every figure of
+# the paper, and a box plot takes the bar charts' definition, or the reverse.
+check("그림 하나의 답은 그 그림에만 적힌다", [r["Draft_ID"] for r in _w] == ["DOC_A_D002"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2"), answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D002")])
+check("문서의 답과 그림의 답이 함께면, 그 그림은 그림의 답을 받는다",
+      sorted((r["Draft_ID"], r["Dispersion_Type"]) for r in _w) == [("DOC_A_D001", "SD"), ("DOC_A_D002", "NO_ERRORBAR")],
+      sorted((r["Draft_ID"], r["Dispersion_Type"]) for r in _w))
+_w, _r, _p, _o = run([answer("DOC_A", "NO_ERRORBAR", Draft_ID="DOC_A_D009")])
+check("기다리는 목록에 없는 그림은 거절한다", problems_of(_r) == ["NOT_PENDING"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2"), answer("DOC_A", "NO_ERRORBAR")])
+# REVERT: let two answers for one place both through. The file then holds two
+# rows for one figure, and which one a plan reads depends on the order.
+check("한 자리에 답이 둘이면 둘 다 거절한다", problems_of(_r) == ["ANSWERED_TWICE", "ANSWERED_TWICE"] and _w == [], problems_of(_r))
+
+# --- what the plan is waiting for (run2 2026-10-17) -------------------------
+PLANS = os.path.join(ROOT, "plans")
+os.makedirs(PLANS)
+with io.open(os.path.join(PLANS, RE.PLAN_FIGURES), "w", encoding="utf-8", newline="") as fh:
+    w = csv.writer(fh)
+    w.writerow(["Draft_ID", "Figure_Number", "Page", "Dispersion_Type", "Errorbar_Source_Kind"])
+    w.writerow(["DOC_A_D001", "FIG1", "1", "", ""])           # also in the old list - the old list's row stands
+    w.writerow(["DOC_A_D003", "FIG3", "1", "", ""])           # opened after the list was made, no definition anywhere
+    w.writerow(["DOC_A_D004", "FIG4", "1", "SD", "DECISION"])  # a person already decided
+    w.writerow(["DOC_B_D002", "FIG2", "1", "NO_ERRORBAR", "DOCUMENT"])
+    w.writerow(["DOC_C_D002", "FIG2", "1", "CI95", "CAPTION"])  # the rule read a regression band as the bars
+    w.writerow(["DOC_Z_D001", "FIG1", "1", "", ""])           # not in this draft
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D003")])
+check("계획서를 주지 않으면 목록 밖의 그림은 그대로 NOT_PENDING", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D003")], plans=PLANS)
+# REVERT: read the old list only. A figure opened after it was made can never get a definition.
+check("계획서가 정의를 기다리는 그림은 그림의 답으로 적힌다", [(r["Draft_ID"], r["Figure_Number"]) for r in _w] == [("DOC_A_D003", "FIG3")]
+      and _r == [], (problems_of(_r), _w))
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2", Draft_ID="DOC_A_D001")], plans=PLANS)
+# REVERT: add the plan's row for a figure the old list already has. The figure is then pending twice and written twice.
+check("옛 목록에도 있는 그림은 한 번만 적힌다", [r["Draft_ID"] for r in _w] == ["DOC_A_D001"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SD", SD_LINE, "2")], plans=PLANS)
+# REVERT: let a document's answer reach the plan's figures. A figure whose caption the rule read right takes another figure's answer.
+check("문서의 답은 계획서에서 온 그림에 닿지 않는다", sorted(r["Draft_ID"] for r in _w) == ["DOC_A_D001", "DOC_A_D002"], [r["Draft_ID"] for r in _w])
+_w, _r, _p, _o = run([answer("DOC_A", "SEM", SEM_LINE, "2", Draft_ID="DOC_A_D004")], plans=PLANS)
+check("사람이 이미 정한 그림은 기다리는 그림이 아니다", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_Z", "SD", SD_LINE, "2", Draft_ID="DOC_Z_D001")], plans=PLANS)
+check("초안에 없는 그림은 계획서에 있어도 받지 않는다", problems_of(_r) == ["NOT_PENDING"], problems_of(_r))
+FIX = answer("DOC_C", "SD", "Data are presented as means and standard deviations.", "1", Draft_ID="DOC_C_D002",
+             Note="the caption's 95% CI is the regression band; the bars are SD per the statistics section")
+_w, _r, _p, _o = run([FIX], plans=PLANS)
+check("규칙의 읽기를 고치는 답은 까닭과 함께 적힌다", [(r["Draft_ID"], r["Dispersion_Type"]) for r in _w] == [("DOC_C_D002", "SD")]
+      and "regression band" in _w[0]["Note"], (problems_of(_r), _w))
+_w, _r, _p, _o = run([dict(FIX, Note="")], plans=PLANS)
+# REVERT: take a correction without its reason. The record then holds two readings and nothing says which is right.
+check("까닭 없는 고침은 적지 않는다", problems_of(_r) == ["CORRECTION_UNEXPLAINED"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_B", "NO_ERRORBAR", Draft_ID="DOC_B_D002", Note="no bars")], plans=PLANS)
+# REVERT: write an answer the rule already read. It looks like a person's decision and changes nothing.
+check("규칙의 읽기와 같은 답은 적을 것이 없다", problems_of(_r) == ["SAME_AS_READING"] and _w == [], problems_of(_r))
+_w, _r, _p, _o = run([answer("DOC_B", RE.DROP, Draft_ID="DOC_B_D002", Note="bars, no definition")], plans=PLANS)
+check("규칙의 읽기와 다른 처분도 고침이다", [(r["Draft_ID"], r["Dispersion_Type"]) for r in _w] == [("DOC_B_D002", "DROP")], problems_of(_r))
 
 # --- what is not being asked ----------------------------------------------
 _w, _r, _p, _o = run([answer("DOC_Z", "SD", SD_LINE, "2")])

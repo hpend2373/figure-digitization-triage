@@ -39,7 +39,9 @@ FIG_DISPLAY_HINTS = ("A_CHALLENGE_TIMECOURSE", "B_CHALLENGE_2POINT",
                      "C_LONGITUDINAL_SERIAL", "D_SIMPLE_PREPOST",
                      "E_SCATTER_ASSOCIATION", "F_BINARY_EVENT",
                      "G_FACTORIAL_CONDITIONS", "UNSPECIFIED")
-FIG_BAR_TOP_DEFS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
+#: FILL_ONLY = a bar with no outline stroke, read at its fill edge, which is its
+#: data coordinate (kernel.FIG_BAR_TOP_DEFS; decision E04, 2026-10-21).
+FIG_BAR_TOP_DEFS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR", "FILL_ONLY")
 FIG_PANEL_RECON = ("MATCHED", "UNLISTED_PANELS_FOUND", "WORKLIST_OVERCOUNTS", "PENDING")
 FIG_EXTRACTION_METHODS = ("DIGITIZED", "TRANSCRIBED")
 FIG_DISPERSION_TYPES = ("SD", "SE", "SEM", "CI95", "IQR", "RANGE", "NO_ERRORBAR")
@@ -113,6 +115,37 @@ FIG_TRANSFORMATIONS = ("UNTRANSFORMED", "LOG10", "LN", "LOG2", "SQRT", "RECIPROC
 # it, which trains a reader to ignore the check.
 FIG_DISTRIBUTION_SHAPES = ("SYMMETRIC", "RIGHT_SKEWED", "LEFT_SKEWED", "UNKNOWN")
 
+# AN UPPER BOUND IS NOT A CAP (decision I02, 2026-10-21). A value whose error-bar
+# ends could not be seen goes in with its ends at the edge of what hides them
+# (`End_Basis=BOUND` -> `provenance.SUPPLIED_BOUND_METHOD`, R3, confirmed cell by
+# cell). Two checks were written for caps and say nothing about such a value:
+# whether a whisker's stem reaches its mark (a bound has no visible stem, by
+# definition), and whether SE x sqrt(n) is implausibly large for the mean (a bound
+# is set larger than the spread it bounds). They skip a bound; every other check
+# - the ends' order, the mean between them, the dispersion being positive - still
+# applies to it. Spelled here rather than imported: provenance imports nothing
+# from this module and this module nothing from it.
+FIG_BOUND_DISPERSION_METHOD = "BOUND_HIDDEN_END"
+
+
+def fig_is_bound(row):
+    """True when this value's spread is an upper bound, not a read cap."""
+    return str(row.get("Dispersion_Method", "") or "").strip().upper() == FIG_BOUND_DISPERSION_METHOD
+
+
+# AND A MEAN KEPT WITHOUT ITS SPREAD, BY DECISION (2026-10-21; the person:
+# "평균만이라도 넣어줘", then "평균만"). The reviewer keeps the mean of a cell whose
+# ends they will not record (`End_Basis=NONE` -> `provenance.SUPPLIED_MEAN_ONLY_METHOD`).
+# Its missing spread is a statement, not a miss, so MISSING_DISPERSION and
+# ASYMMETRIC_NEEDS_BOUNDS are not asked of it - and a "mean only" that carries a
+# spread anyway is refused, because then nobody can say which the value is.
+FIG_MEAN_ONLY_DISPERSION_METHOD = "MEAN_ONLY_DECLARED"
+
+
+def fig_is_mean_only(row):
+    """True when this value is a mean kept without its spread by decision."""
+    return str(row.get("Dispersion_Method", "") or "").strip().upper() == FIG_MEAN_ONLY_DISPERSION_METHOD
+
 _PAIR = re.compile(r"^\s*([^=]+?)\s*=\s*(.+?)\s*$")
 
 
@@ -159,7 +192,18 @@ def fig_unit_columns():
     ]
 
 
-def fig_values_columns():
+#: A value's OWN n, where its group has one (`batch_manifests.series_n_columns`).
+#: Optional: a values file without it is the values file it always was, and the
+#: unit's `N_Outcome` speaks for every cell.
+FIG_VALUES_OPTIONAL = ("N_Cell",)
+
+
+def fig_values_columns(cell_n=False):
+    """The value file's columns; with `cell_n`, the optional per-cell n as well."""
+    return _fig_values_columns() + (list(FIG_VALUES_OPTIONAL) if cell_n else [])
+
+
+def _fig_values_columns():
     return [
         "Unit_ID", "Cell_Key",
         "Mean_R1", "Dispersion_R1", "Mean_R2", "Dispersion_R2",
@@ -285,8 +329,14 @@ def fig_parse_cell_key(key):
 # universal checkers
 # --------------------------------------------------------------------------
 
-def validate_unit(row, kernel, flag, line, figure=None):
-    """N, dispersion vocabulary, extraction geometry, provenance for one unit."""
+def validate_unit(row, kernel, flag, line, figure=None, cell_n=False, bound_only=False):
+    """N, dispersion vocabulary, extraction geometry, provenance for one unit.
+
+    `cell_n`: this unit's values carry their own n (`N_Cell`, one per group), so
+    a blank unit `N_Outcome` is not missing - each cell is checked for its own.
+    `bound_only`: every spread this unit's values carry is an upper bound
+    (`fig_is_bound`), so there is no whisker whose stem the unit could confirm.
+    """
     blank, num, bad_num = kernel.fig_is_blank, kernel.fig_as_number, kernel.fig_is_bad_number
     unresolved = kernel.fig_unresolved_marker
 
@@ -326,7 +376,8 @@ def validate_unit(row, kernel, flag, line, figure=None):
     if st in ("CONTINUOUS", "QUANTILE_SUMMARY"):
         n = num(row.get("N_Outcome"))
         if blank(row.get("N_Outcome")):
-            flag(line, "MISSING_REQUIRED", "N_Outcome")
+            if not cell_n:
+                flag(line, "MISSING_REQUIRED", "N_Outcome")
         elif n is None:
             flag(line, "NON_NUMERIC_VALUE", "N_Outcome=%r" % row.get("N_Outcome"))
         elif n <= 0 or n != int(n):
@@ -406,11 +457,23 @@ def validate_unit(row, kernel, flag, line, figure=None):
             if stem == "BAD":
                 flag(line, "BAD_ERRORBAR_STEM_FLAG",
                      "Errorbar_Stem_Confirmed=%r" % row.get("Errorbar_Stem_Confirmed"))
-            elif stem is not True:
+            elif stem is not True and not bound_only:
                 flag(line, "ERRORBAR_STEM_UNCONFIRMED",
                      "the whisker was not confirmed to connect to the mark")
+        # ONE CATEGORICAL SLOT. A categorical x axis is calibrated on its slots
+        # (the first declared position is slot 0, the last slot n-1), and a panel
+        # with a single position has one slot and no second point to give. Its
+        # whole x calibration is X1 = slot 0 at that position's pixel, X2 blank;
+        # the gate refused all seven such panels of the corpus for a point that
+        # cannot exist (decision D14, 2026-10-20). Any other blank still counts.
+        # (X1's own pixel is asked below like every other cell.)
+        one_slot = (num(row.get("Axis_Calib_X1_Value")) == 0
+                    and blank(row.get("Axis_Calib_X2_Value"))
+                    and blank(row.get("Axis_Calib_X2_Pixel")))
         for ax in ("X", "Y"):
             for n_ in (1, 2):
+                if ax == "X" and n_ == 2 and one_slot:
+                    continue
                 for kind in ("Value", "Pixel"):
                     c = "Axis_Calib_%s%d_%s" % (ax, n_, kind)
                     if blank(row.get(c)):
@@ -576,13 +639,18 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
         dt = str(unit.get("Dispersion_Type", "")).strip().upper()
         sym, lo, hi = (num(row.get("Dispersion_Value")), num(row.get("Errorbar_Lower")),
                        num(row.get("Errorbar_Upper")))
+        mean_only = fig_is_mean_only(row)
+        if mean_only and (sym is not None or lo is not None or hi is not None):
+            flag(line, "MEAN_ONLY_WITH_SPREAD",
+                 "Dispersion_Method=%s but the row carries a spread: a mean kept "
+                 "without its error bar has none" % FIG_MEAN_ONLY_DISPERSION_METHOD)
         if dt in ("SD", "SE", "SEM"):
-            if sym is None and (lo is None or hi is None):
+            if sym is None and (lo is None or hi is None) and not mean_only:
                 flag(line, "MISSING_DISPERSION", "%s needs a value or both bounds" % dt)
             if sym is not None and sym <= 0:
                 flag(line, "DISPERSION_NONPOSITIVE", "Dispersion_Value=%g" % sym)
         elif dt in FIG_ASYMMETRIC_TYPES:
-            if lo is None or hi is None:
+            if (lo is None or hi is None) and not mean_only:
                 flag(line, "ASYMMETRIC_NEEDS_BOUNDS", "%s requires both bounds" % dt)
         elif dt == "NO_ERRORBAR":
             flag(line, "NONCONVERTIBLE_NO_VARIANCE",
@@ -592,7 +660,9 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                 flag(line, "ERRORBAR_BOUNDS_INVERTED", "lower %g > upper %g" % (lo, hi))
             elif m is not None and not (lo <= m <= hi):
                 flag(line, "MEAN_OUTSIDE_ERRORBAR", "mean %g outside [%g, %g]" % (m, lo, hi))
-        n = num(unit.get("N_Outcome"))
+        # The cell's own n where its group has one, the unit's otherwise.
+        n = (num(row.get("N_Cell")) if not kernel.fig_is_blank(row.get("N_Cell"))
+             else num(unit.get("N_Outcome")))
         ratio_scale = str(unit.get("Value_Scale", "")).strip().upper() == "RATIO"
         transform = str(unit.get("Analysis_Transformation", "")).strip().upper()
         shape = str(unit.get("Distribution_Shape", "")).strip().upper()
@@ -612,7 +682,8 @@ def validate_value_by_statistic(row, unit, kernel, flag, line,
                  "the plotted values are on the %s scale; the pool is in "
                  "native units and nothing here back-transforms. Record them, "
                  "and pool them separately or not at all" % transform)
-        if ratio_scale and dt in ("SE", "SEM") and sym is not None and m is not None and n and n > 0:
+        if ratio_scale and dt in ("SE", "SEM") and sym is not None and m is not None and n and n > 0 \
+                and not fig_is_bound(row):
             sd = sym * (n ** 0.5)
             if sd > abs(m) * 1.5:
                 # WHICH of these two it is depends on the DISTRIBUTION, and
@@ -1097,6 +1168,23 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                 flag("grid:%s" % gid, "BAD_LEVEL_ORDER",
                      "%s: Level_Order is not contiguous %s" % (fac, sorted(os_)))
 
+    # A GROUP'S OWN n, per cell, where the values carry one. The unit is then not
+    # missing its n; each of its cells is checked for its own below.
+    has_cell_n = "N_Cell" in values.columns
+    cell_n_units = set()
+    if has_cell_n:
+        for _, r in values.iterrows():
+            if not blank(r.get("N_Cell")):
+                cell_n_units.add(str(r.get("Unit_ID", "")).strip())
+    # AND UNITS WHOSE EVERY SPREAD IS AN UPPER BOUND: nothing there has a stem to
+    # confirm. One read cap among them and the unit's stem question stands.
+    spread_kinds = {}
+    for _, r in values.iterrows():
+        if not blank(r.get("Dispersion_Value")) or not blank(r.get("Errorbar_Lower")) \
+                or not blank(r.get("Errorbar_Upper")):
+            spread_kinds.setdefault(str(r.get("Unit_ID", "")).strip(), set()).add(fig_is_bound(r))
+    bound_only_units = set(u for u, kinds in spread_kinds.items() if kinds == {True})
+
     # --------------------------------------------------------------- units
     unit = {}
     for i, r in units.iterrows():
@@ -1113,7 +1201,8 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
             flag(line, "UNKNOWN_FIGURE_ID", fid)
         if gid and gid not in declared:
             flag(line, "UNKNOWN_GRID_ID", gid)
-        validate_unit(r, kernel, flag, line, figure=fig.get(fid))
+        validate_unit(r, kernel, flag, line, figure=fig.get(fid),
+                      cell_n=uid in cell_n_units, bound_only=uid in bound_only_units)
 
     # -------------------------------------------------------------- values
     seen = {}
@@ -1151,7 +1240,7 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                 flag(line, "BAD_ERRORBAR_STEM_FLAG",
                      "Errorbar_Stem_Confirmed=%r on this cell"
                      % r.get("Errorbar_Stem_Confirmed"))
-            elif cell_stem is False:
+            elif cell_stem is False and not fig_is_bound(r):
                 flag(line, "CELL_ERRORBAR_STEM_UNCONFIRMED",
                      "the reader could not connect this cell's whisker to its "
                      "mark, whatever the unit row asserts")
@@ -1161,6 +1250,24 @@ def fig_validate_bundle(figures, grids, units, values, kernel,
                  "Position_Assignment=%s - this cell's x identity was counted "
                  "off rather than matched to a declared pixel"
                  % r.get("Position_Assignment"))
+        if has_cell_n and str(u.get("Statistic_Type", "")).strip().upper() in (
+                "CONTINUOUS", "QUANTILE_SUMMARY"):
+            own = r.get("N_Cell")
+            if not blank(own):
+                nv = num(own)
+                if nv is None or nv <= 0 or nv != int(nv):
+                    flag(line, "N_INVALID",
+                         "N_Cell=%r must be a positive whole number of subjects" % own)
+                elif not blank(u.get("N_Outcome")):
+                    # One answer per cell: the batch layer refuses this pair
+                    # (SERIES_N_WITH_UNIT_N); a hand-made values file is told here.
+                    flag(line, "N_CELL_AND_UNIT_N",
+                         "the cell says n=%s and its unit N_Outcome=%s"
+                         % (str(own).strip(), str(u.get("N_Outcome")).strip()))
+            elif uid in cell_n_units and blank(u.get("N_Outcome")):
+                flag(line, "MISSING_REQUIRED",
+                     "N_Cell - the other cells of %s carry their group's n and "
+                     "this one has none" % uid)
         key = fig_cell_key(cell)
         if key in seen.setdefault(uid, {}):
             flag(line, "FACTORIAL_CELL_DUPLICATE",

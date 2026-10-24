@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import approval                                                  # noqa: E402
 import batch_manifests as BM                                     # noqa: E402
 import identity_proposer as IP                                   # noqa: E402
 
@@ -44,7 +45,9 @@ ANSWER_REQUIRED = ("Proposal_ID", "Human_Verification_Status", "Verified_By", "S
 TRUE = ("1", "TRUE", "YES", "Y", "T")
 FACTOR_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 COLOUR_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
-BAR_TOPS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR")
+#: FILL_ONLY: 테두리 없이 채움만 있는 막대 - 채움 끝이 곧 값 (결정 E04, 2026-10-21). 출시된 막대 판독기는
+#: 테두리 가운데를 재므로, FILL_ONLY 카드는 사람이 읽는 길(Read_Route=MANUAL)이어야 합니다.
+BAR_TOPS = ("OUTLINE_CENTER", "FILL_EDGE", "MARKER_CENTER", "NOT_A_BAR", "FILL_ONLY")
 #: 프레임 너비의 이만큼은 밖이어도 x 위치로 봐줍니다.
 FRAME_SLACK = 0.10
 
@@ -133,6 +136,43 @@ def positions_problems(positions, proposal):
     return out
 
 
+def series_n_ok(value):
+    """True for a blank (no n on this series) or a positive whole number - an int, or digits."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    return isinstance(value, str) and value.strip().isdigit() and int(value.strip()) > 0
+
+
+def series_n_of(series):
+    """[n or None per series] - what the card says each group's n is."""
+    out = []
+    for e in series or []:
+        v = e.get("n") if isinstance(e, dict) else None
+        out.append(None if v is None or (isinstance(v, str) and not v.strip()) else int(str(v).strip()))
+    return out
+
+
+def series_n_by_x_ok(value):
+    """True for no per-cell n, or {x label: positive whole number} with at least one entry."""
+    if value is None:
+        return True
+    if not isinstance(value, dict) or not value:
+        return False
+    return all(isinstance(k, str) and k.strip() and v not in (None, "") and series_n_ok(v)
+               for k, v in value.items())
+
+
+def has_n(series_entry):
+    """Does this series say its n - one for the series, or one per x position."""
+    e = series_entry if isinstance(series_entry, dict) else {}
+    return (series_n_of([e])[0] is not None if series_n_ok(e.get("n")) else True) \
+        or e.get("n_by_x") is not None
+
+
 def series_problems(series, mark, route="AUTO"):
     out = []
     if not series:
@@ -153,6 +193,23 @@ def series_problems(series, mark, route="AUTO"):
         elif name.upper() in names:
             out.append(("SERIES_NAME_DUPLICATE", "계열 이름 %r이 둘입니다." % name))
         names.add(name.upper())
+        # THE GROUP'S OWN n, where the card's one n cannot say it: series that are
+        # groups of different size (women and men, finishers and non-finishers).
+        # A positive whole number or nothing; that it is all-or-none, and never
+        # beside the card's N_Outcome, is the answer's check (`check_answer`).
+        if not series_n_ok(e.get("n")):
+            out.append(("SERIES_N_BAD", "계열 %r의 n=%r은 양의 정수가 아닙니다." % (name or i, e.get("n"))))
+        # AND ITS n PER x POSITION, where the group shrinks along the axis - a
+        # time course drawn until half the subjects had finished, each finish
+        # marked. {x label: n}; an x it does not name is an x this series is not
+        # drawn at (`make_plan` makes such a panel's grid SPARSE). Not beside a
+        # series n: one answer per cell.
+        if not series_n_by_x_ok(e.get("n_by_x")):
+            out.append(("SERIES_N_BAD", "계열 %r의 n_by_x=%r은 {x 라벨: 양의 정수}가 아닙니다."
+                        % (name or i, e.get("n_by_x"))))
+        elif e.get("n_by_x") is not None and series_n_ok(e.get("n")) and series_n_of([e])[0] is not None:
+            out.append(("SERIES_N_TWICE", "계열 %r에 n과 n_by_x가 둘 다 있습니다 - 한 칸에 n은 하나입니다."
+                        % (name or i)))
         colour = str(e.get("colour") or "").strip()
         if colour and not COLOUR_HEX.match(colour):
             out.append(("SERIES_COLOUR_BAD", "계열 %r의 색 %r은 #RRGGBB가 아닙니다." % (name, colour)))
@@ -212,9 +269,10 @@ def check_answer(answer, proposed):
     pid = (answer.get("Proposal_ID") or "").strip()
     verdict = (answer.get("Human_Verification_Status") or "").strip().upper()
     who = (answer.get("Verified_By") or "").strip()
-    if not is_true(answer.get("Seen_By_Person")):
-        problems.append(("NOT_SEEN_BY_PERSON", "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
-                                               "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
+    # 본 답이거나, 사람이 승인한 관찰이거나(`approval`). 승인된 관찰은 기록에
+    # 그렇게 남습니다 - 사람이 본 것처럼 적히지 않습니다.
+    problems.extend(approval.seen_problems(answer, who, "확인 페이지에서 \"이 오버레이를 직접 봤다\"를 "
+                                                        "표시하지 않았습니다. 표시가 없는 답은 적지 않습니다."))
     if not who:
         problems.append(("UNATTRIBUTED", "누가 보았는지 적혀 있지 않습니다. 이름 없는 확인은 확인이 아닙니다."))
     if verdict not in VERDICTS:
@@ -252,7 +310,11 @@ def check_answer(answer, proposed):
                          % (route, "/".join(READ_ROUTES))))
     mark = (answer.get("Mark_Type") or "").strip().upper()
     kind = (proposal.get("Panel_Kind") or "").strip().upper()
-    allowed = IP.MARK_TYPES_FOR.get(kind, ()) + (("LINE_MONO_STYLE",) if kind == "LINE" else ())
+    # 산점으로 세어진 패널 중에는 x가 시점·조건(범주)이고 점이 집단 평균인 그림이 있습니다
+    # - 선 없이 찍은 평균. 판독기가 그것을 읽는 길은 LINE_MONO의 마커 찾기이고, SCATTER는
+    # 두 변수의 관계로 x 눈금과 연관 종류를 요구합니다(run2 2026-10-14 결정 R2: 63장).
+    allowed = IP.MARK_TYPES_FOR.get(kind, ()) + (("LINE_MONO_STYLE",) if kind == "LINE" else ()) \
+        + (("LINE_MONO",) if kind == "SCATTER" else ())
     if mark not in BM.BATCH_MARK_TYPES:
         problems.append(("MARK_TYPE_BAD", "표 종류 %r은 %s 중 하나가 아닙니다."
                          % (mark or "(빈칸)", "/".join(BM.BATCH_MARK_TYPES))))
@@ -272,11 +334,36 @@ def check_answer(answer, proposed):
     n = (answer.get("N_Outcome") or "").strip()
     if n and not (n.isdigit() and int(n) > 0):
         problems.append(("N_BAD", "n=%r은 양의 정수가 아닙니다." % n))
+    # ONE n FOR THE CARD, OR ONE PER SERIES - never both, never some. A card whose
+    # groups differ in size carries each group's n on its series; a half-filled
+    # set would leave cells with no n while looking answered, and two answers
+    # (the card's and a series') would leave the run to pick one.
+    if not bad and series and all(series_n_ok(e.get("n")) and series_n_by_x_ok(e.get("n_by_x"))
+                                  for e in series):
+        given = [e for e in series if has_n(e)]
+        if given and len(given) != len(series):
+            problems.append(("SERIES_N_PARTIAL", "계열 %d개 가운데 %d개에만 n이 있습니다 - 계열마다 n을 적으면 모든 계열에 "
+                                                 "적어야 합니다." % (len(series), len(given))))
+        if given and n:
+            problems.append(("N_TWICE", "카드의 n(%s)과 계열마다의 n이 둘 다 있습니다 - 군마다 n이 다르면 카드의 n은 "
+                                        "비웁니다." % n))
+        # A PER-CELL n NAMES CELLS THE CARD DECLARES: its keys are this card's
+        # x labels, as written. A key that is no label is a cell nobody drew.
+        labels = set(str(p.get("label") or "").strip() for p in positions or [])
+        for e in series:
+            for k in sorted((e.get("n_by_x") or {})):
+                if k.strip() not in labels:
+                    problems.append(("SERIES_N_X_UNKNOWN", "계열 %r의 n_by_x가 x 라벨에 없는 %r을 적었습니다."
+                                     % (str(e.get("name") or "").strip(), k)))
     bar_top = (answer.get("Bar_Top_Definition") or "").strip().upper()
     if mark.startswith("BAR") and bar_top not in BAR_TOPS:
         problems.append(("BAR_TOP_MISSING", "막대 표인데 값을 어디서 읽는지(%s)가 없습니다." % "/".join(BAR_TOPS)))
     if bar_top and bar_top not in BAR_TOPS:
         problems.append(("BAR_TOP_BAD", "Bar_Top_Definition=%r" % bar_top))
+    # 테두리 없는 막대의 채움 끝은 판독기가 재는 것(테두리 가운데)이 아닙니다 - 그 값은 사람이 놓은 판독에서만 옵니다.
+    if bar_top == "FILL_ONLY" and route_of(answer) != "MANUAL":
+        problems.append(("BAR_TOP_FILL_ONLY_NEEDS_MANUAL", "FILL_ONLY(테두리 없는 막대)는 판독기가 재지 않습니다 - "
+                                                          "Read_Route=MANUAL이어야 합니다."))
     stem = (answer.get("Errorbar_Stem_Confirmed") or "").strip().upper()
     if stem and stem not in ("TRUE", "FALSE"):
         problems.append(("STEM_BAD", "Errorbar_Stem_Confirmed=%r은 TRUE/FALSE가 아닙니다." % stem))
@@ -325,6 +412,7 @@ def record(proposals, answers, when, out_path=None, replace=False, log=print, an
             == "CONFIRMED" else "",
             "Note": (answer.get("Note") or "").strip(),
         })
+        row.update(approval.provenance(answer))
         written.append(row)
     keep = [r for r in existing if r["Proposal_ID"] not in set(w["Proposal_ID"] for w in written)]
     rows = sorted(keep + written, key=lambda x: x["Proposal_ID"])

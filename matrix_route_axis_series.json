@@ -1,0 +1,185 @@
+{
+ "files": {
+  "route_axis_series.py": "b731cd2e533cc9bf81d349bc9e8265f799eac02090c509b8431b66ea72ef5246",
+  "test_route_axis_series.py": "f38896ba82eb0ac3826f4d2d813a017057934fb3c006045ce8c22d5ba1c82997"
+ },
+ "suites": [
+  "test_route_axis_series.py"
+ ],
+ "mutations": [
+  {
+   "name": "보았다는 말을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if (a.get(\"Seen_By_Person\") or \"\").strip() != \"1\":",
+   "new": "        if False:"
+  },
+  {
+   "name": "이름을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if not who:\n            stop(\"NO_REVIEWER\"",
+   "new": "        if False:\n            stop(\"NO_REVIEWER\""
+  },
+  {
+   "name": "같은 패널·부분의 답 둘을 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if (pid, part) in seen:",
+   "new": "        if False:"
+  },
+  {
+   "name": "제안 파일에 있는지 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if pid not in proposals:\n            stop(",
+   "new": "        if False:\n            stop("
+  },
+  {
+   "name": "관문이 받을 제안 CSV를 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if pid not in known[part]:",
+   "new": "        if False:"
+  },
+  {
+   "name": "관문 줄 없는 제안대로를 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if not raw:\n            stop(\"GATE_ROW_MISSING\"",
+   "new": "        if False:\n            stop(\"GATE_ROW_MISSING\""
+  },
+  {
+   "name": "고칠 곳에 붙은 관문 줄을 둔다",
+   "file": "route_axis_series.py",
+   "old": "            if raw:\n                stop(\"GATE_ROW_ON_NON_ACCEPT\"",
+   "new": "            if False:\n                stop(\"GATE_ROW_ON_NON_ACCEPT\""
+  },
+  {
+   "name": "관문 줄의 판정을 제안과 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Human_Verification_Status\", row.get(\"Human_Verification_Status\") == want)) if not ok]",
+   "new": "                               (\"Human_Verification_Status\", True)) if not ok]"
+  },
+  {
+   "name": "관문 줄의 이름을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Verified_By\", (row.get(\"Verified_By\") or \"\").strip() == who),",
+   "new": "                               (\"Verified_By\", True),"
+  },
+  {
+   "name": "관문 줄의 패널을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        bad = [k for k, ok in ((\"Proposal_ID\", row.get(\"Proposal_ID\") == pid),",
+   "new": "        bad = [k for k, ok in ((\"Proposal_ID\", True),"
+  },
+  {
+   "name": "관문 줄의 목격을 대 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                               (\"Seen_By_Person\", str(row.get(\"Seen_By_Person\")) == \"1\"),",
+   "new": "                               (\"Seen_By_Person\", True),"
+  },
+  {
+   "name": "멈춘 줄이 있어도 쓴다",
+   "file": "route_axis_series.py",
+   "old": "    if stops:\n        for s in stops:\n            print(\"멈춤 %s — %s: %s\" % s)\n        print(\"멈춘 줄이 있어 아무것도 쓰지 않았습니다.\")\n        return 1\n",
+   "new": ""
+  },
+  {
+   "name": "기본이 붙이기",
+   "file": "route_axis_series.py",
+   "old": "    if stops or not write_it:\n        return plan, pictures, stops",
+   "new": "    if stops:\n        return plan, pictures, stops"
+  },
+  {
+   "name": "백업을 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        shutil.copy2(target, \"%s.before_merge_%s\" % (target, when))\n",
+   "new": ""
+  },
+  {
+   "name": "이미 있는 패널을 다시 붙인다",
+   "file": "route_axis_series.py",
+   "old": "        if dup:\n            stops.append",
+   "new": "        if False:\n            stops.append"
+  },
+  {
+   "name": "이미 있는 백업을 덮는다",
+   "file": "route_axis_series.py",
+   "old": "        if os.path.lexists(backup):",
+   "new": "        if False:"
+  },
+  {
+   "name": "대상에 없는 열을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        extra = [c for c in new[0] if c not in cols]",
+   "new": "        extra = []"
+  },
+  {
+   "name": "같은 이름의 다른 그림을 덮는다",
+   "file": "route_axis_series.py",
+   "old": "                    if a_.read() != b_.read():",
+   "new": "                    if False:"
+  },
+  {
+   "name": "링크인 대상을 따라 쓴다",
+   "file": "route_axis_series.py",
+   "old": "        if os.path.islink(target) or not os.path.isfile(target):",
+   "new": "        if not os.path.isfile(target):"
+  },
+  {
+   "name": "대상에 없는 열의 값을 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        filled = [c for c in extra if any((r.get(c) or \"\").strip() for r in new)]",
+   "new": "        filled = []"
+  },
+  {
+   "name": "대상에 없는 열이면 비어 있어도 멈춘다",
+   "file": "route_axis_series.py",
+   "old": "        filled = [c for c in extra if any((r.get(c) or \"\").strip() for r in new)]",
+   "new": "        filled = list(extra)"
+  },
+  {
+   "name": "등록부를 보지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if names is not None and who.lower() not in names:",
+   "new": "        if False:"
+  },
+  {
+   "name": "등록부 이름을 대소문자대로 본다",
+   "file": "route_axis_series.py",
+   "old": "        if names is not None and who.lower() not in names:",
+   "new": "        if names is not None and who not in names:"
+  },
+  {
+   "name": "이름 고침을 쓰지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        who = renames.get(typed, typed)",
+   "new": "        who = typed"
+  },
+  {
+   "name": "이름 고침을 관문 줄에 옮기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "        if who != typed and (row.get(\"Verified_By\") or \"\").strip() == typed:",
+   "new": "        if False:"
+  },
+  {
+   "name": "관문 줄의 이름이 무엇이든 고친다",
+   "file": "route_axis_series.py",
+   "old": "        if who != typed and (row.get(\"Verified_By\") or \"\").strip() == typed:",
+   "new": "        if who != typed:"
+  },
+  {
+   "name": "이름 고침을 관문 줄의 Note에 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "            row[\"Note\"] = ((row.get(\"Note\") or \"\") + \" | 검토자 이름 %r → %r (사람이 정한 이름 고침, 원래 답 파일에 친 그대로 있음)\"\n                           % (typed, who)).lstrip(\" |\")\n",
+   "new": ""
+  },
+  {
+   "name": "받지 않은 줄의 이름 고침을 남기지 않는다",
+   "file": "route_axis_series.py",
+   "old": "                note = (note + \" | 검토자 이름 %r → %r\" % (typed, who)).lstrip(\" |\")",
+   "new": "                pass"
+  },
+  {
+   "name": "꼴이 틀린 --rename을 받는다",
+   "file": "route_axis_series.py",
+   "old": "        if not sep or not old.strip() or not new.strip():",
+   "new": "        if False:"
+  }
+ ]
+}

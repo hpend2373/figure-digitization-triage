@@ -95,6 +95,27 @@ jobs:
           # 패널 확인도 같은 나눔입니다: 화면은 값을 옮기고,
           # panel_page.js가 무엇이 답이 되는지 정합니다.
           node test_panel_page.mjs
+          # 남은 결정 묶음 페이지도 같은 나눔입니다: 화면은 값을 옮기고,
+          # bundle_page.js가 무엇이 답이 되는지(본 답·승인된 관찰·보류) 정합니다.
+          node test_bundle_page.mjs
+          # 축·계열 한 페이지도 같은 나눔입니다: 관문 줄은 geometry_page.js·identity_page.js가
+          # 짓고, axis_series_page.js는 카드의 답을 그 둘에 옮깁니다. 들어온 답을 다시 짓는
+          # axis_series_recheck.mjs도 이 묶음이 봅니다.
+          node test_axis_series_page.mjs
+      - name: PDF marker guards in a scratch copy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil, subprocess, sys, tempfile
+          with tempfile.TemporaryDirectory() as tmp:
+              target = Path(tmp)
+              for name in ("pdf_marker_evidence.py", "test_pdf_marker_evidence.py",
+                           "matrix_pdf_marker_evidence.json", "mutate.py"):
+                  shutil.copy2(name, target / name)
+              subprocess.run([sys.executable, str(target / "mutate.py"),
+                              str(target / "matrix_pdf_marker_evidence.json")],
+                             cwd=target, check=True)
+          PY
       - name: record what we are running on
         run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
       - name: synthesis suites
@@ -121,7 +142,7 @@ jobs:
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
                    test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
+                   test_geometry_proposer test_line_style_mono test_pdf_marker_evidence \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \
@@ -130,11 +151,14 @@ jobs:
                    test_split_grain \
                    test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
                    test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions \
+                   test_decision_page test_record_decisions test_record_dispositions test_record_inventory test_record_block_reviews \
                    test_geometry_page test_record_geometry \
                    test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \
-                   test_panel_to_page; do
+                   test_panel_to_page \
+                   test_bundle_page test_bundle_route test_census_copy test_bundle_items \
+                   test_record_outcomes test_clip_frames test_rehash_moved_pages \
+                   test_propose_run test_axis_series_page test_route_axis_series test_cross_check test_move_panels test_supplied_readings test_series_n; do
             echo "--- $t"
             # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
             # status, so a failing suite goes green - and this loop's whole job
@@ -307,7 +331,7 @@ jobs:
                    test_integration test_run_batch test_finalize \
                    test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
                    test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
+                   test_geometry_proposer test_line_style_mono test_pdf_marker_evidence \
                    test_documented_status test_provenance test_continuity \
                    test_harness_compare test_panel_geometry \
                    test_gate_trace test_y_scale_group test_tick_ocr \
@@ -316,11 +340,14 @@ jobs:
                    test_split_grain \
                    test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
                    test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions \
+                   test_decision_page test_record_decisions test_record_dispositions test_record_inventory test_record_block_reviews \
                    test_geometry_page test_record_geometry \
                    test_identity_proposer test_identity_page test_record_identity \
                    test_value_page test_panel_page test_record_panels \
-                   test_panel_to_page; do
+                   test_panel_to_page \
+                   test_bundle_page test_bundle_route test_census_copy test_bundle_items \
+                   test_record_outcomes test_clip_frames test_rehash_moved_pages \
+                   test_propose_run test_axis_series_page test_route_axis_series test_cross_check test_move_panels test_supplied_readings test_series_n; do
             echo "--- $t"
             if ! out="$(python "$t.py" 2>&1)"; then
               printf '%s\n' "$out"

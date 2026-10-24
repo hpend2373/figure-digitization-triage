@@ -1,7 +1,7 @@
 {
  "files": {
-  "mark_readers.py": "e50d5d7a001547850cd1816985a812863a7c23f0b11cba39a855181f89f8afea",
-  "test_mark_readers.py": "7abc40eeded1a100b3706b71addf066686644a9e22643b19a32c1d70078d0170"
+  "mark_readers.py": "f024b67b097102eefda5f45e20cbc1798d64008c8816921089037cdc4c02001f",
+  "test_mark_readers.py": "d7631e123f444b7847258c003196a4d1c1855d45ed8280cb4b1e23eaf1ccf6be"
  },
  "suites": [
   "test_mark_readers.py"
@@ -72,6 +72,30 @@
    "file": "mark_readers.py",
    "old": "        if not upper or not lower:\n            # Three rules of one width and no stem reaching them: annotation\n            # text, a legend, a bracket - not a box. Refused, not raised.\n            continue",
    "new": "        if False:\n            # Three rules of one width and no stem reaching them: annotation\n            # text, a legend, a bracket - not a box. Refused, not raised.\n            continue"
+  },
+  {
+   "name": "수염 끝을 캡이 아니라 줄기의 마지막 줄로",
+   "file": "mark_readers.py",
+   "old": "        cap_rows = [top_row + (cap[0] if cap else float(end))\n                    for cap, end in zip(caps, ends)]",
+   "new": "        cap_rows = [top_row + float(end)\n                    for cap, end in zip(caps, ends)]"
+  },
+  {
+   "name": "줄기를 상자 가운데가 아니라 선언된 x에서 찾음",
+   "file": "mark_readers.py",
+   "old": "        column = _box_middle(window, bands, int(round(x)) - xa, box_width)",
+   "new": "        column = int(round(x)) - xa"
+  },
+  {
+   "name": "캡이 없는 수염을 거절",
+   "file": "mark_readers.py",
+   "old": "    capped = [r for r in rows if lo <= through.get(r, 0) < hi]\n    if not capped:\n        return None",
+   "new": "    capped = [r for r in rows if lo <= through.get(r, 0) < hi]\n    if not capped:\n        return (float('nan'), 0)"
+  },
+  {
+   "name": "상자 가운데를 선언된 열을 지나지 않는 조각에서도 잼",
+   "file": "mark_readers.py",
+   "old": "                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width\n                and a <= declared < b]",
+   "new": "                if (b - a) >= (1.0 - BOX_LINE_WIDTH_TOLERANCE) * box_width]"
   }
  ]
 }

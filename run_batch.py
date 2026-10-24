@@ -42,6 +42,23 @@ Input  (MANIFEST_DIR): all eleven are mandatory - a missing one is
                        read on. Absent means the panel's own Axis_Y_Ticks is
                        the only scale, which is true of every batch in the
                        corpus but the twin-axis ones.
+
+                       supplied_readings.csv is OPTIONAL. One row per cell of a
+                       Panel_Mode=MANUAL panel: the pixels an AI agent placed on
+                       the mark and its error-bar ends, on the panel's own
+                       raster. A manual panel with readings is read from them -
+                       the number is the panel's calibration at the pixel,
+                       priced R2 so its reviewer confirms the placed points - and
+                       one without is queued as before. Absent for every batch
+                       with no manual panel read this way.
+
+                       series_n.csv is OPTIONAL. One row per series whose group
+                       has its own n (women and men, finishers and non-
+                       finishers), for the units whose one N_Outcome cannot say
+                       it: all of a panel's series or none, never beside the
+                       unit's N_Outcome. Each value carries its group's n as
+                       N_Cell, which the gate takes in place of the unit's.
+                       Absent for every batch whose units each have one n.
 Output (OUTPUT_DIR):   figure_values_machine_qc.csv <- passed the gate; NOT poolable
                        review_queue.csv            <- one row per panel a person
                                                       must now look at
@@ -221,6 +238,14 @@ OPTIONAL_MANIFEST_FILES = {
     # file is absent for every batch in the corpus but the twin-axis ones - and
     # a required file that is empty in 116 directories is a file nobody reads.
     "axes": "axis_manifest.csv",
+    # WHERE THE MARKS OF A MANUAL PANEL ARE, as an agent placed them. Absent for
+    # every batch whose manual panels nobody has read, which is the queue as it
+    # always was.
+    "readings": "supplied_readings.csv",
+    # A GROUP'S OWN n, where the unit's one n cannot say it (women and men,
+    # finishers and non-finishers). Absent for every batch whose units each have
+    # one n.
+    "series_n": "series_n.csv",
 }
 
 RUN_MANIFEST_COLUMNS = [
@@ -606,7 +631,60 @@ class ManifestLoadError(Exception):
 #: come back with `identity_resolution`'s columns and failed its schema check
 #: with a message about the wrong file.
 _OPTIONAL_COLUMNS = {"resolutions": lambda: BM.identity_resolution_columns(),
-                     "axes": lambda: BM.axis_manifest_columns()}
+                     "axes": lambda: BM.axis_manifest_columns(),
+                     "readings": lambda: BM.supplied_readings_columns(),
+                     "series_n": lambda: BM.series_n_columns()}
+
+
+def series_n_by_cell(series_n, series, positions=None):
+    """{Panel_ID: {key: n}} from `series_n.csv` and the series and position manifests.
+
+    A value row carries a Cell_Key, not a Series_ID, so a group's n is found by
+    the level its series puts in the key: key (FACTOR, LEVEL) for a series' n,
+    and (FACTOR, LEVEL, X_FACTOR, X_LEVEL) for one cell's (a row with a
+    `Position_ID`). Only rows the batch layer accepted reach here
+    (`check_series_n` refuses the batch otherwise).
+    """
+    out = {}
+    if series_n is None or not len(series_n):
+        return out
+    level_of, x_level_of = {}, {}
+    for _, r in series.iterrows():
+        level_of[(_s(r.get("Panel_ID")), _s(r.get("Series_ID")))] = (
+            _upper(r.get("Factor_Name")), _upper(r.get("Factor_Level")))
+    for _, r in (positions.iterrows() if positions is not None else ()):
+        x_level_of[(_s(r.get("Panel_ID")), _s(r.get("Position_ID")))] = (
+            _upper(r.get("Factor_Name")), _upper(r.get("Factor_Level")))
+    for _, r in series_n.iterrows():
+        key = (_s(r.get("Panel_ID")), _s(r.get("Series_ID")))
+        qid = _s(r.get("Position_ID")) if "Position_ID" in r else ""
+        if key not in level_of or not _s(r.get("N_Outcome")).isdigit():
+            continue
+        if qid:
+            if (key[0], qid) not in x_level_of:
+                continue
+            levels = level_of[key] + x_level_of[(key[0], qid)]
+        else:
+            levels = level_of[key]
+        out.setdefault(key[0], {})[levels] = int(_s(r.get("N_Outcome")))
+    return out
+
+
+def cell_n(levels_n, cell_key):
+    """The n of the group a value's Cell_Key names, as text; blank when none does.
+
+    A cell's own n (its series AND its x position) where there is one; else its
+    series' n. Exactly one match, or blank - two answers are no answer.
+    """
+    if not levels_n:
+        return ""
+    cell = GE.fig_parse_cell_key(cell_key) or {}
+    cells = [n for k, n in levels_n.items()
+             if len(k) == 4 and cell.get(k[0]) == k[1] and cell.get(k[2]) == k[3]]
+    if cells:
+        return str(cells[0]) if len(cells) == 1 else ""
+    hits = [n for k, n in levels_n.items() if len(k) == 2 and cell.get(k[0]) == k[1]]
+    return str(hits[0]) if len(hits) == 1 else ""
 
 
 def load_manifests(directory):
@@ -985,14 +1063,21 @@ def _canon_field(value):
     derives them again from the file those records were written to, so `90.0` the
     float and `"90.0"` the string have to hash the same - and so do `"90"` and
     `"90.0"`, which is the same number written by two different writers.
+
+    AND A BLANK IS BLANK on both sides. In memory the values are a DataFrame's
+    records, where an empty numeric cell is NaN; the file the finalizer reads
+    gives `""` for it. A cell asked about per cell with one end blank - a bound
+    with only its lower end, 2026-10-21 - hashed `'nan'` in the run and `""` at
+    finalization, and the one question could never be answered.
     """
     text = _s(value)
     if not text:
         return ""
     try:
-        return repr(float(text))
+        number = float(text)
     except (TypeError, ValueError):
         return text
+    return "" if number != number else repr(number)
 
 
 def _blocked_detail(value, identity, method):
@@ -1555,10 +1640,87 @@ def _axis_manifest(axis_rows):
     return out
 
 
+def supplied_marks(readings, ycal, series_count):
+    """The marks a manual panel's supplied readings make, one per reading.
+
+    Every field of the reading is copied onto the mark under the name
+    `provenance.SUPPLIED_MARK_FIELDS` gives it, so the mark carries the reading
+    whole - who placed it, when, on which raster - inside `Mark_Record_SHA256`.
+    The numbers are `provenance.supplied_numbers` under this panel's calibration,
+    the same function the finalizer re-makes them with.
+
+    A ValueError for a panel with no y calibration, which the panel loop turns
+    into PANEL_GEOMETRY_UNRESOLVED like any other panel whose axis cannot be
+    trusted.
+    """
+    if ycal is None:
+        raise ValueError("a supplied reading is a pixel, and this panel declares "
+                         "no y calibration to make it a number")
+    out = []
+    optional = set(BM.SUPPLIED_OPTIONAL_COLUMNS)
+    for reading in readings:
+        mark = {}
+        for column, key in PROV.SUPPLIED_MARK_FIELDS:
+            text = _s(reading.get(column))
+            if column in optional and not text:
+                # NOT A KEY AT ALL on a mean's mark: a null key would still
+                # change `Mark_Record_SHA256`, and with it the review subject of
+                # every panel read before boxes could be.
+                continue
+            if column in PROV.SUPPLIED_PIXEL_FIELDS:
+                mark[key] = float(text) if text else None
+            else:
+                mark[key] = text
+        top, bottom = mark["Errorbar_Top_Px"], mark["Errorbar_Bottom_Px"]
+        # WHO PLACED IT decides the three methods: an agent's point is R2, a
+        # registered person's own is `MANUAL_DIGITIZED` (`PROV.SUPPLIED_KIND_METHODS`,
+        # the table the finalizer re-derives them from).
+        if mark.get("box_upper_px") is not None and mark.get("box_lower_px") is not None:
+            # A BOX: the median line, the box's two edges and the whisker ends -
+            # the five rows the box reader reports, so the same overlay draws
+            # them and the same conversion makes them a five-number summary.
+            nums = PROV.supplied_box_numbers(
+                ycal, mark["marker_center_px"], mark["box_upper_px"],
+                mark["box_lower_px"], top, bottom)
+            identity, value, cap = PROV.supplied_methods(
+                mark.get("Reader_Kind"), series_count, True)
+            rows = sorted(v for v in (top, mark["box_upper_px"], mark["marker_center_px"],
+                                      mark["box_lower_px"], bottom) if v is not None)
+            mark.update(
+                nums, Box_Line_Rows_Px=";".join("%r" % v for v in rows),
+                Summary_Type=("MEDIAN_IQR_RANGE" if top is not None and bottom is not None
+                              else "MEDIAN_IQR"),
+                cap_px=top if top is not None else bottom,
+                cap_low_px=bottom if top is not None else None,
+                Identity_Method=identity, Value_Method=value, Dispersion_Method=cap,
+                calib_max_resid=float(getattr(ycal, "max_residual", 0.0)))
+            out.append(mark)
+            continue
+        mean, spread, lower, upper = PROV.supplied_numbers(
+            ycal, mark["marker_center_px"], top, bottom)
+        # AND WHAT ITS ENDS ARE: a bound set at the edge of what hides the bar
+        # (`End_Basis=BOUND`) is `BOUND_HIDDEN_END`, R3, whoever placed it - the
+        # same number as a cap's, and never filed as one.
+        identity, value, cap = PROV.supplied_methods(
+            mark.get("Reader_Kind"), series_count, spread is not None,
+            mark.get("End_Basis"))
+        mark.update(
+            mean=mean, dispersion=spread, errorbar_lower=lower,
+            errorbar_upper=upper,
+            # What the overlay draws: the end above the mark, else the one below,
+            # and the one below as well when both were placed.
+            cap_px=top if top is not None else bottom,
+            cap_low_px=bottom if top is not None else None,
+            Identity_Method=identity, Value_Method=value, Dispersion_Method=cap,
+            calib_max_resid=float(getattr(ycal, "max_residual", 0.0)))
+        out.append(mark)
+    return out
+
+
 def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
               file_root=".", project_dir=None, review_dir=None, geometry=None,
               geometry_refusal=None, resolutions=(), inference_dir=None,
-              config_rows=(), axis_rows=(), output_dir=None):
+              config_rows=(), axis_rows=(), output_dir=None, readings=()):
     """Read one declared panel. Returns a PanelOutcome; never raises for data."""
     pid = _s(panel.get("Panel_ID"))
     mark = _upper(panel.get("Mark_Type"))
@@ -1599,7 +1761,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
             "NO_READER_AVAILABLE", declared=declared,
             detail="%s: %s" % (mark, BM.UNRELEASED_MARK_TYPES[mark]),
             missing=all_cells)
-    if mode == "MANUAL":
+    # A MANUAL PANEL WITH SUPPLIED READINGS IS READ FROM THEM; one without is
+    # queued exactly as before. Decided here, before the image is opened, so a
+    # manual panel nobody has read never touches its raster.
+    supplied = mode == "MANUAL" and len(readings) > 0
+    if mode == "MANUAL" and not supplied:
         return PanelOutcome(
             "MANUAL_POINT_READ", declared=declared, missing=all_cells,
             detail="Panel_Mode=MANUAL: declared unreadable before the run")
@@ -1631,7 +1797,13 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     routed = None
 
     try:
-        if mark == "SCATTER":
+        if supplied:
+            # NOTHING OF THE READER'S RUNS. The marks are the readings, the
+            # number is the calibration at the pixel, and the methods say an
+            # agent placed them - whatever the panel's mark type, which still
+            # says what the figure is.
+            rows = supplied_marks(readings, ycal, len(series_level))
+        elif mark == "SCATTER":
             # The panel says where its annotations are; the manifest layer has
             # already checked each box meets the plot area and does not swallow
             # it, so this only has to parse.
@@ -1830,7 +2002,10 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
 
     # ---- a series that produced nothing while its neighbours did is not an
     # ---- empty series: it is an unresolved identity, and it says so.
-    if series_level and mark != "SCATTER":
+    # Not asked of supplied readings: a series nobody placed a point for is
+    # cells left unread, which the missing list says, and not a reader failing
+    # to tell two inks apart.
+    if series_level and mark != "SCATTER" and not supplied:
         produced = {r.get("series") for r in rows}
         silent = sorted(set(series_level) - produced)
         if silent and len(silent) < len(series_level):
@@ -1844,7 +2019,7 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     unit_id = _s(panel.get("Unit_ID"))
     raw_path = os.path.join(raw_dir, "%s_marks.json" % pid)
 
-    if mark == "SCATTER":
+    if mark == "SCATTER" and not supplied:
         return _scatter_outcome(rows, panel, series_level, series_factor, unit,
                                 statistic, resolved, xcal, ycal, raw_dir, declared,
                                 project_dir, review_dir=review_dir, box=box,
@@ -1956,9 +2131,14 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
     if review_dir:
         overlay = OVERLAY.draw_panel_overlay(
             os.path.join(review_dir, "%s_overlay.png" % pid), resolved, box, kept,
-            title="%s  %s  %s" % (pid, unit_id, mark),
-            subtitle="%d marks read of %d declared cells - approve only if each "
-                     "label sits on the mark a reader would give it"
+            title="%s  %s  %s%s" % (pid, unit_id, mark,
+                                    "  (points placed by an AI agent)"
+                                    if supplied else ""),
+            subtitle=("%d points placed of %d declared cells, from "
+                      "supplied_readings.csv - approve only if each sits on its "
+                      "printed mark and its bar end" if supplied else
+                      "%d marks read of %d declared cells - approve only if each "
+                      "label sits on the mark a reader would give it")
                      % (len(kept), declared),
             series_order=sorted(series_level))
     with_disp = sum(1 for r in records
@@ -2024,7 +2204,11 @@ def run_panel(panel, series_rows, position_rows, options, unit, raw_dir,
                             part for part in
                             (("" if not missing else
                               "%d of %d declared cells were not resolved"
-                              % (len(missing), declared)), contested_note)
+                              % (len(missing), declared)), contested_note,
+                             ("" if not supplied else
+                              "read from %d supplied reading(s) by %s"
+                              % (len(kept), ", ".join(sorted(
+                                  {_s(k.get("Read_By")) for k in kept})))))
                             if part))
 
 
@@ -2309,7 +2493,12 @@ def identity_provenance_problems(values, panel_index, geometry=None,
                         % (got_source or "blank", pid, want_source)))
             continue
         mark = _upper(panel.get("Mark_Type"))
-        if mark != "BAR_MONO":
+        # BY ROUTE, not by mark type alone: a BAR_MONO panel read from supplied
+        # readings has no geometry row and no measured fill - the agent placed
+        # the point and filed it under its series - so the fill-identity rules are
+        # not its rules, and their columns on its rows are a moved value exactly
+        # as on a colour panel's.
+        if PROV.route_of(mark, panel.get("Panel_Mode")) != "BAR_MONO":
             # A monochrome value re-stamped onto a panel of the SAME UNIT - which
             # this package allows several panels to build - passed the unit check
             # and then skipped every identity rule because the panel it now names
@@ -3304,7 +3493,7 @@ def write_stamp(path, status, run_date, cfg_hash="", manifest_hashes=None,
 
 
 def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
-              check_files=True, fault_after=None, run_mode=None):
+              check_files=True, fault_after=None, run_mode=None, doc_root=None):
     """Validate, read, convert, gate, and report. Returns a summary dict.
 
     The run mode is DERIVED from `reviewer_registry.csv`: if any reviewer the
@@ -3358,7 +3547,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         resolutions=m.get("resolutions"), axes=m.get("axes"),
         requested_run_mode=requested_run_mode,
         file_root=file_root,
-        check_files=check_files)
+        check_files=check_files, doc_root=doc_root,
+        readings=m.get("readings"), series_n=m.get("series_n"))
     # Derived even when the batch is rejected, so the stamp on a failed run
     # still says which kind of run it would have been.
     derived = BM.derive_run_mode(m["reviewers"], m["source_documents"],
@@ -3420,6 +3610,12 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         positions_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
     for _, r in m.get("axes", pd.DataFrame()).iterrows():
         axes_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    readings_by_panel = {}
+    for _, r in m.get("readings", pd.DataFrame()).iterrows():
+        readings_by_panel.setdefault(_s(r.get("Panel_ID")), []).append(r)
+    # {panel: {(FACTOR, LEVEL): n}} - each group's own n, found on a value by the
+    # series level its Cell_Key carries (a value row names no Series_ID).
+    cell_n_by_panel = series_n_by_cell(m.get("series_n"), m["series"], m.get("positions"))
 
     values, run_rows = [], []
     # A panel gets exactly one queue entry, keyed so a later pass revises it
@@ -3510,7 +3706,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
                 resolutions=resolutions_by_panel.get(pid, ()),
                 inference_dir=inference_dir,
                 axis_rows=axes_by_panel.get(pid, ()),
-                output_dir=output_dir)
+                output_dir=output_dir,
+                readings=readings_by_panel.get(pid, ()))
         except InternalReaderError as exc:
             # The whole batch stops. A defect in a reader is not confined to the
             # panel that happened to trip it, and 115 more publications read by
@@ -3562,6 +3759,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         for record in outcome.values:
             record["Run_Panel_ID"] = pid
             record["Source_Panel_ID"] = _s(panel.get("Source_Panel_ID"))
+            # THE CELL'S OWN n, where its group has one (`series_n.csv`). Blank
+            # everywhere else: the unit's N_Outcome speaks for the cell.
+            record["N_Cell"] = cell_n(cell_n_by_panel.get(pid), record.get("Cell_Key"))
             # Every path a value carries into the accepted file is recorded
             # relative to the run. They used to be absolute, so handing the
             # finished data to another folder or another machine left
@@ -3651,8 +3851,8 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         })
 
     values_df = pd.DataFrame(
-        [{c: r.get(c, "") for c in GE.fig_values_columns()} for r in values],
-        columns=GE.fig_values_columns())
+        [{c: r.get(c, "") for c in GE.fig_values_columns(cell_n=True)} for r in values],
+        columns=GE.fig_values_columns(cell_n=True))
 
     # The gate requires a re-openable project on every digitized row, and it is
     # right to. An automated run has no human-saved one, so it saved its own -
@@ -3704,6 +3904,9 @@ def run_batch(manifest_dir, output_dir, file_root=".", run_date="",
         _position_rows = positions_by_panel.get(_pid, [])
         _panel_provenance[_pid] = {
             "Mark_Type": _s(_panel_row.get("Mark_Type")),
+            # Which route read it: a MANUAL panel's values are supplied
+            # readings, and a fill identity is not theirs to carry.
+            "Panel_Mode": _s(_panel_row.get("Panel_Mode")),
             "Unit_ID": _s(_panel_row.get("Unit_ID")),
             "Source_Panel_ID": _s(_panel_row.get("Source_Panel_ID")),
             "Figure_ID": _s(_panel_row.get("Figure_ID")),
@@ -4149,6 +4352,9 @@ def main(argv=None):
     ap.add_argument("manifest_dir")
     ap.add_argument("output_dir")
     ap.add_argument("--file-root", default=".")
+    ap.add_argument("--doc-root", default=None,
+                    help="where the source documents (PDFs) are, when not under --file-root; "
+                         "a bare Source_File name is looked for there and one folder down")
     ap.add_argument("--date", default="")
     ap.add_argument("--no-file-check", action="store_true")
     mode = ap.add_mutually_exclusive_group()
@@ -4165,7 +4371,7 @@ def main(argv=None):
         summary = run_batch(args.manifest_dir, args.output_dir,
                             file_root=args.file_root, run_date=args.date,
                             check_files=not args.no_file_check,
-                            run_mode=requested)
+                            run_mode=requested, doc_root=args.doc_root)
     except InternalReaderError as exc:
         import traceback
         traceback.print_exc()

@@ -1,6 +1,6 @@
 ---
 name: figure-digitization-triage
-description: "Plan, run and QC graph-only data extraction for a systematic review or meta-analysis: caption triage, typed plans, declared readers, a factorial gate, one-page decision bundles, and human approval before anything is pooled."
+description: "Extract graph-only study data, reconcile accepted figures with analysis inputs, resolve source-backed facts under existing approvals, and escalate only genuine new decisions while preserving human attestation and synthesis gates."
 ---
 
 # Figure digitization triage
@@ -19,6 +19,14 @@ https://github.com/hpend2373/figure-digitization-triage (branch
 the clone; `python3 test_*.py` there is the check that the clone is whole. The
 `kernel.py` and `test_kernel.py` that older copies of this skill carried are in
 the repository too, with the rest of the pipeline built around them.
+
+## After numerical review
+
+For version authority, publication/cell linkage, duplicate measurements and
+synthesis readiness, read [ANALYSIS_RECONCILIATION.md](ANALYSIS_RECONCILIATION.md).
+Complete source checks and apply the user's existing policies before building a
+new decision page. Delegated AI findings, actual human attestations, numerical
+approval and synthesis eligibility are separate records.
 
 ## Run it
 
@@ -358,8 +366,9 @@ The mandatory equality is:
 It is evaluated only in the `Source_Figure_ID` namespace.  Counts on virtual
 `Figure_ID` rows cannot satisfy it.  The run emits `source_panel_coverage.csv`,
 one row per physical panel, so publication coverage and value acceptance remain
-separate claims.  `figure_values_accepted.csv` says which numbers may be pooled;
-it never says every source panel was considered.
+separate claims. `figure_values_accepted.csv` records accepted measurements; it
+does not establish clinical scope, independent cohorts, or synthesis readiness,
+and it never says every source panel was considered.
 
 For a large corpus, use two passes: (1) inventory every physical figure and close
 or route every panel, then (2) configure readers only for the routed target
@@ -918,8 +927,7 @@ first, which a folder that forbids deletion (the Mac bridge) refuses - move it a
 ## What the AI carries on without the person
 
 After the bundles of 2026-10-18 the person said the rest could go to the AI: "남은 건 ai로
-자동으로 넘길 수 있을 거 같은데". What was left was of three kinds, and they are not the
-same:
+자동으로 넘길 수 있을 거 같은데". What remains falls into four kinds:
 
 1. **A path the person already approved on a page** (an item whose answer was BUILD,
    FIX, MOVE, or whose effect was `needs`). It is built without asking again. The gate is
@@ -928,13 +936,22 @@ same:
    for it are recorded the usual way - on a copy first, the run's own fingerprints
    guarded, the census before and after, backups, then the runs - and the person gets a
    report, not a page.
-2. **What the papers state**, missing from the records (a group's n, a unit). It goes
-   through an existing gate as a bundle item, and the cross-check rule above decides:
-   agreed, HIGH and evidenced is written; the rest is the person's page.
-3. **Still the person's**: a judgment the two checks do not share; anything that changes
-   the review's protocol; and **values entering the pool** - `finalize_batch` takes a
-   registered person's look at the overlay, and nothing here changes that without the
-   person deciding it in so many words.
+2. **What the papers state**, missing from the records (a group's n, a unit). Use
+   the existing evidence and cross-check gates: agreed, HIGH and evidenced facts
+   may be recorded under the user's delegation. Finish source checks first.
+   An unresolved factual question stays on source hold unless the person has
+   information or a genuine choice that can resolve it; do not ask them to guess.
+3. **An existing analysis policy**, applied within its approved scope. Verify its
+   conditions and exceptions, apply it, and record the affected set and approval
+   reference. A new panel is not a reason to ask again about the same approved
+   category or method. A named-target approval does not expand itself to a category;
+   consult the actual rule and later delegation. The reconciliation reference above
+   gives the source, duplicate and variance checks needed before applying it.
+4. **Still the person's**: a consequential choice not covered by an existing rule
+   or delegation, a change to the review's protocol, and actual human value
+   attestation. `finalize_batch` takes a registered person's look at the overlay;
+   source-backed AI recording does not invent that claim or grant clinical
+   synthesis eligibility.
 
 The three paths built under (1) on 2026-10-18:
 

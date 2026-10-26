@@ -14,24 +14,33 @@ version, an environment, the actual observer and the applicable approval record.
 ## Get the code
 
 Every script named below lives in the repository, not in this skill:
-https://github.com/hpend2373/figure-digitization-triage (branch
-`approved-claude-checks` until it is merged into `main`). Clone it and run from
-the clone; `python3 test_*.py` there is the check that the clone is whole. The
-`kernel.py` and `test_kernel.py` that older copies of this skill carried are in
-the repository too, with the rest of the pipeline built around them.
+https://github.com/hpend2373/figure-digitization-triage. Clone it and run from
+the clone:
+
+    fdt/         the pipeline - every command below is `python3 fdt/<script>.py`
+    templates/   every CSV schema, generated from its column function
+    docs/        the step-by-step procedure and the review guides
+    tests/       the suites; `bash .github/run_suites.sh` is the check that
+                 the clone is whole
+    examples/    a synthetic figure taken through compile -> run -> review queue
+
+Start with [docs/PROCEDURE.md](docs/PROCEDURE.md) for the order of the steps and
+who does each one; this file is the protocol behind them. Keep publisher PDFs,
+figures, runs and review answers OUTSIDE the clone and point `--file-root` /
+`--doc-root` at them: the repository is public and refuses to track them.
 
 ## After numerical review
 
 For version authority, publication/cell linkage, duplicate measurements and
-synthesis readiness, read [ANALYSIS_RECONCILIATION.md](ANALYSIS_RECONCILIATION.md).
+synthesis readiness, read [ANALYSIS_RECONCILIATION.md](docs/ANALYSIS_RECONCILIATION.md).
 Complete source checks and apply the user's existing policies before building a
 new decision page. Delegated AI findings, actual human attestations, numerical
 approval and synthesis eligibility are separate records.
 
 For factor names, incomplete legends, cap/stem judgments, reframing and preserved
-review answers, read [IDENTITY_GEOMETRY_REVIEW.md](IDENTITY_GEOMETRY_REVIEW.md).
+review answers, read [IDENTITY_GEOMETRY_REVIEW.md](docs/IDENTITY_GEOMETRY_REVIEW.md).
 For connecting protocols, screening and risk-of-bias records to outcome-specific
-input tables, read [SYNTHESIS_HANDOFF.md](SYNTHESIS_HANDOFF.md). A numerical review
+input tables, read [SYNTHESIS_HANDOFF.md](docs/SYNTHESIS_HANDOFF.md). A numerical review
 completed for its declared scope does not establish completion of the whole review.
 
 For a preparation-only request with existing accepted records, start with those
@@ -43,12 +52,12 @@ are examples, not authority for another project or a new methodological choice.
 
 ```
 INPUT      one extraction-plan JSON  (schema figure-digitization-triage/extraction-plan/1)
-COMPILE    python3 compile_plan.py PLAN.json MANIFESTS/ --file-root .
-RUN        python3 run_batch.py MANIFESTS/ OUT/ --file-root . [--doc-root PDFS/]  -> MACHINE_QC_PASSED
+COMPILE    python3 fdt/compile_plan.py PLAN.json MANIFESTS/ --file-root RUN/
+RUN        python3 fdt/run_batch.py MANIFESTS/ OUT/ --file-root RUN/ [--doc-root PDFS/]  -> MACHINE_QC_PASSED
 REVIEW     for every row of OUT/review_queue.csv, open what its Review_Mode names
            (OVERLAY -> Overlay_File, WPD_ONLY -> WPD_Project_File in WebPlotDigitizer),
            then fill Review_ID / Decision / Reviewer_ID / Reviewed_At in value_review.csv
-FINALIZE   python3 finalize_batch.py OUT/ --review value_review.csv   -> FINALIZED
+FINALIZE   python3 fdt/finalize_batch.py OUT/ --review value_review.csv   -> FINALIZED
 ```
 
 Reviewing is a branch, not a single instruction. `Review_Mode` says what the
@@ -102,10 +111,10 @@ a stretch the ink does not cross, or taken from the edge of a run too thick to b
 one stroke. One wrong cell in twenty does not show up in a panel-level answer, so
 each one is asked about by name in `inference-review/inference__<Panel_ID>.csv`:
 
-    python3 finalize_batch.py OUT/ --template     # writes both review files
+    python3 fdt/finalize_batch.py OUT/ --template     # writes both review files
     # fill Reviewer_ID / Inference_Confirmed / Reviewed_At for EVERY row of
     # inference_review.csv - CONFIRMED or REJECTED
-    python3 finalize_batch.py OUT/ --review value_review.csv
+    python3 fdt/finalize_batch.py OUT/ --review value_review.csv
 
 `--template` pre-fills `Inference_ID` from the run, so nobody types a hash. The
 contract is an exact set: a missing answer, two answers for one cell, or an
@@ -125,7 +134,7 @@ arithmetic nobody can check.
 
 **Before a person starts, run the preflight.**
 
-    python3 review_preflight.py OUT/ --review value_review.csv
+    python3 fdt/review_preflight.py OUT/ --review value_review.csv
 
 It lists every cell that will be asked about and why, checks that each one has
 its manifest row and its picture, checks the answers for blanks, duplicates and
@@ -204,6 +213,8 @@ provenance intact. Resolve them against the run directory, not the working one.
 
 ## Files
 
+All in `fdt/` unless the line says otherwise.
+
 ```
 compile_plan.py     one typed plan  -> eleven manifests (+ the optional axis and supplied-readings ones)
 run_batch.py        manifests       -> values + review queue + artifact ledger
@@ -213,7 +224,7 @@ kernel.py           the field-level checks the gate is built from
 mark_readers.py     readers for line, marker, box/violin and scatter panels
 bar_reader.py       colour and monochrome bar readers
 review_overlay.py   the picture a person judges
-*_TEMPLATE.csv      every schema, generated from its column function
+templates/*_TEMPLATE.csv  every schema, generated from its column function
 
 bundle_items.py     census problems -> one question each, measured or proposed
 bundle_page.py      the decision bundle: one page, a proposal on every line
@@ -226,7 +237,7 @@ clip_frames.py      a drawn frame past the picture's edge, cut back on both card
 rehash_moved_pages.py  a row moved to the next page, still carrying the old page's hash
 cross_check.py      a second check that never saw the proposals; agreed items written without the person
 move_panels.py      drawn panels credited to the wrong figure, moved with their boxes, cards and names
-supplied_readings_TEMPLATE.csv  the points an AI agent placed on a MANUAL panel (G01, read by run_batch)
+templates/supplied_readings_TEMPLATE.csv  the points an AI agent placed on a MANUAL panel (G01, read by run_batch)
 
 panel_to_page.py    drawn panels (200 DPI crop boxes) -> 600 DPI rasters and regions
 propose_run.py      geometry / identity proposals on those regions, budgeted and resumable;
@@ -284,8 +295,9 @@ publisher's physical figure was covered.  A set of virtual figures can each say
 Do not write the CSVs by hand.  Write one `extraction-plan` JSON per
 publication and run `compile_plan.py`: hashes, figure rows and unit
 calibrations are derived from the plan rather than retyped, which is where
-several of this package's shipped defects came from.  `plan_397.json` is a
-worked example.  The four source manifests below are what the compiler emits,
+several of this package's shipped defects came from.
+`examples/quickstart/plan.json` is a worked example on a synthetic figure.  The
+four source manifests below are what the compiler emits,
 and what follows describes what the plan has to say.
 
 Create four source manifests before creating any reader row:
@@ -350,7 +362,7 @@ contact (EMAIL or a checksum-valid ORCID) and a `Human_Attestation` — a declar
 enum, not a cryptographic signature: it records that a person typed
 HUMAN_CONFIRMED next to a contact, which buys traceability, not proof.  Register
 each extractor once.  Names are compared after NFKC normalization on Unicode
-alphanumerics, so `김민엽` and `李明` are names like any other; what is refused is a
+alphanumerics, so `김영희` and `李明` are names like any other; what is refused is a
 row where nobody contactable stands behind the count.  Machine
 segmentation may propose boxes, but `Inventory_Status=VISUALLY_VERIFIED` is the
 gate because captions and layout detectors both miss unlabeled panels.
@@ -604,21 +616,21 @@ moves, by publication - before the gates touch the real run.
 **The page holds publisher figures.** It is a local file for the person
 deciding; it is not committed, published or shared.
 
-    python3 bundle_items.py --census CENSUS/ --run RUN --plans PLANS/ --work WORK/ \
+    python3 fdt/bundle_items.py --census CENSUS/ --run RUN --plans PLANS/ --work WORK/ \
         [--proposals proposals.json] --spec WORK/spec.json      # exit 2: WORK/todo.json
-    python3 bundle_page.py WORK/spec.json --out bundle.html --items WORK/items.json --root WORK
+    python3 fdt/bundle_page.py WORK/spec.json --out bundle.html --items WORK/items.json --root WORK
     # the person answers on bundle.html and saves bundle_answers.csv
-    python3 bundle_route.py --items WORK/items.json --answers bundle_answers.csv \
+    python3 fdt/bundle_route.py --items WORK/items.json --answers bundle_answers.csv \
         --identity RUN/seg/identity600/identity_decisions.csv \
         --geometry RUN/seg/geometry600/geometry_decisions.csv --out ROUTED/
-    python3 census_copy.py --run RUN --routed ROUTED/ --when YYYY-MM-DD \
+    python3 fdt/census_copy.py --run RUN --routed ROUTED/ --when YYYY-MM-DD \
         --reviewers reviewers.json --out CHECK/ [--pdf-root PDFS/]
     # outcomes and legends are recorded against the plans they answered
-    python3 record_outcomes.py --run RUN --plans PLANS/ --answers ROUTED/outcome_answers.csv --when YYYY-MM-DD
-    python3 record_legends.py --run RUN --plans PLANS/ --answers ROUTED/legend_answers.csv --when YYYY-MM-DD
+    python3 fdt/record_outcomes.py --run RUN --plans PLANS/ --answers ROUTED/outcome_answers.csv --when YYYY-MM-DD
+    python3 fdt/record_legends.py --run RUN --plans PLANS/ --answers ROUTED/legend_answers.csv --when YYYY-MM-DD
     # small fixes, each approved on the page and run by hand
-    python3 clip_frames.py --run RUN --answers clip_answers.csv --when YYYY-MM-DD
-    python3 rehash_moved_pages.py --run RUN [--write]
+    python3 fdt/clip_frames.py --run RUN --answers clip_answers.csv --when YYYY-MM-DD
+    python3 fdt/rehash_moved_pages.py --run RUN [--write]
 
 ## Drawn panels to axes and series, on one page
 
@@ -630,30 +642,30 @@ asks the person one thing per panel: look at two pictures and say whether the
 proposal is right.
 
     # 1. 600 DPI, into a NEW folder - nothing of the run changes
-    python3 panel_to_page.py --run RUN --decisions RUN/seg/panel_decisions.csv \
+    python3 fdt/panel_to_page.py --run RUN --decisions RUN/seg/panel_decisions.csv \
         --pdfs RUN/seg/_pdf_locations.json --out RUN/seg/regions600_DATE \
         --verified-at DATE --outcomes RUN/outcome_decisions.csv \
         --pages RUN/pages --doc-root PDFS/ --budget 150 [--resume]
     # 2. reader proposals (call again until "남음 0"; a remote shell that dies at 3 min is why)
-    python3 propose_run.py geometry --run RUN --regions RUN/seg/regions600_DATE/panel_regions_600.csv \
+    python3 fdt/propose_run.py geometry --run RUN --regions RUN/seg/regions600_DATE/panel_regions_600.csv \
         --out RUN/seg/geometry600_DATE --budget 150
-    python3 propose_run.py identity --run RUN --regions .../panel_regions_600.csv \
+    python3 fdt/propose_run.py identity --run RUN --regions .../panel_regions_600.csv \
         --geometry RUN/seg/geometry600_DATE/geometry_proposal.csv --out RUN/seg/identity600_DATE --budget 150
     # 3. a proposal on every panel (PROPOSALS.json, schema in axis_series_page.py), then
-    python3 propose_run.py reframe --run RUN --geometry .../geometry_proposal.csv \
+    python3 fdt/propose_run.py reframe --run RUN --geometry .../geometry_proposal.csv \
         --identity RUN/seg/identity600_DATE --frames PROPOSALS.json
     # 4. the page - a local file, it holds publisher figures
-    python3 axis_series_page.py --run RUN --geometry RUN/seg/geometry600_DATE \
+    python3 fdt/axis_series_page.py --run RUN --geometry RUN/seg/geometry600_DATE \
         --identity RUN/seg/identity600_DATE --proposals PROPOSALS.json --out axis_series.html --date DATE
     # 5. the answers: rebuilt and compared, routed; the new proposals appended - on a COPY first
     node axis_series_recheck.mjs axis_series.html axis_series_answers_DATE.csv
-    python3 route_axis_series.py route --answers axis_series_answers_DATE.csv --proposals PROPOSALS.json \
+    python3 fdt/route_axis_series.py route --answers axis_series_answers_DATE.csv --proposals PROPOSALS.json \
         --geometry RUN/seg/geometry600_DATE --identity RUN/seg/identity600_DATE --out ROUTED/ \
         --reviewers reviewers.json [--rename TYPED=REGISTERED]
-    python3 route_axis_series.py merge --run COPY --geometry ... --identity ... \
+    python3 fdt/route_axis_series.py merge --run COPY --geometry ... --identity ... \
         --regions .../panel_regions_600.csv --when DAY --write
-    python3 record_geometry.py --proposals COPY/seg/geometry600 --answers ROUTED/geometry_answers.csv --when DAY
-    python3 record_identity.py --proposals COPY/seg/identity600 --answers ROUTED/identity_answers.csv --when DAY
+    python3 fdt/record_geometry.py --proposals COPY/seg/geometry600 --answers ROUTED/geometry_answers.csv --when DAY
+    python3 fdt/record_identity.py --proposals COPY/seg/identity600 --answers ROUTED/identity_answers.csv --when DAY
     # census on the copy, compare, then the same on the run with backups
 
 **Only the panels that need it, from a new folder.** `--verified-at` takes one
@@ -858,15 +870,15 @@ instances of one model are independent in what they saw, not in how they reason;
 habit both share will agree with itself. That is why the evidence is kept on the
 line and the person's page shows the second check's answer next to the proposal.
 
-    python3 cross_check.py brief --spec WORK/spec.json --out WORK/brief.json --rules rules.md
+    python3 fdt/cross_check.py brief --spec WORK/spec.json --out WORK/brief.json --rules rules.md
     # second check(s): answer WORK/brief.json -> verdicts.json {"verifier": ..., "verdicts": [...]}
-    python3 cross_check.py split --spec WORK/spec.json --items WORK/items.json --verdicts verdicts.json \
+    python3 fdt/cross_check.py split --spec WORK/spec.json --items WORK/items.json --verdicts verdicts.json \
         --approver NAME --approval-ref "where the standing approval is" --when YYYY-MM-DD \
         --answers-file bundle_answers.csv --out XC/
-    python3 bundle_page.py XC/person_spec.json --out person.html --items XC/person_items.json --root WORK
-    python3 cross_check.py merge --auto XC/auto_answers.csv --person person_answers.csv \
+    python3 fdt/bundle_page.py XC/person_spec.json --out person.html --items XC/person_items.json --root WORK
+    python3 fdt/cross_check.py merge --auto XC/auto_answers.csv --person person_answers.csv \
         --record XC/cross_check.json --out bundle_answers.csv
-    python3 bundle_route.py --items WORK/items.json --answers bundle_answers.csv ... --out ROUTED/
+    python3 fdt/bundle_route.py --items WORK/items.json --answers bundle_answers.csv ... --out ROUTED/
 
 **Measured once, on a bundle the person had already answered** (run2, 2026-10-18; four
 blinded agents, 52 verdicts for the 52 items that are not `fdt:` paths). The rule would
@@ -927,7 +939,7 @@ and 323 draws two-sided black error bars down the middle of red and blue bars, s
 that pixel was black on all 141 bars and `own_mask_hit` was 0. It now asks at three
 points (the middle and a quarter of the width either side) on the first row of the
 bar's body, below the outline and its ramp; the 141 bars read the same numbers and
-now carry `own_mask_hit=1`, `mask_overlap=0`. `matrix_bar_colour_evidence.json`.
+now carry `own_mask_hit=1`, `mask_overlap=0`.
 
 Found while testing the page end to end, not by the checks: a value page built
 without `--when` exports `Reviewed_At=""`, which `finalize_batch` refuses on every
@@ -942,8 +954,9 @@ After the bundles of 2026-10-18 the person said the rest could go to the AI: "�
 
 1. **A path the person already approved on a page** (an item whose answer was BUILD,
    FIX, MOVE, or whose effect was `needs`). It is built without asking again. The gate is
-   the package's own: scenarios for every way the path could write wrongly, a mutation
-   matrix with nothing unobserved, both CI profiles green. Then the answers that waited
+   the package's own: scenarios for every way the path could write wrongly, each new
+   guard reverted once in a scratch copy to show a scenario turns red without it, both
+   CI profiles green. Then the answers that waited
    for it are recorded the usual way - on a copy first, the run's own fingerprints
    guarded, the census before and after, backups, then the runs - and the person gets a
    report, not a page.
@@ -985,7 +998,7 @@ The three paths built under (1) on 2026-10-18:
   reference; and without `--write` it only shows. The target's disposition (a RECROP, say)
   is changed through `record_dispositions`, not here.
 
-    python3 move_panels.py --run RUN --from DRAFT_A --panels 2,4 --to DRAFT_B --when YYYY-MM-DD \
+    python3 fdt/move_panels.py --run RUN --from DRAFT_A --panels 2,4 --to DRAFT_B --when YYYY-MM-DD \
         --approval-ref "where the person chose MOVE" [--write] [--log moved.json]
 
 Recorded the same day on run2, with no page: the reopened panel (an approved observation
@@ -1079,7 +1092,7 @@ different minute. The same path, one level down:
     run_batch        N_Cell from the cell's own row (series AND x level in the Cell_Key),
                      else the series' row
 
-`test_series_n.py` +27, `matrix_series_n.json` +13.
+Pinned in `tests/test_series_n.py`.
 
 Which minute an arrow counts against is a reading, not arithmetic, so check it against the
 figure. Count n(m) as the subjects still testing at some moment of the minute that ends at
@@ -1200,7 +1213,7 @@ The page the person places from shows the 600 dpi panel at 1-6x with the agent's
 thin, a dashed guide at the cell's calibrated column, and three clicks per cell (centre,
 upper end, lower end - an end may be "not visible", both may not); the ID and the date are
 typed, never filled. The cell's n comes from the arrows like every other minute.
-`test_supplied_readings.py` +20, `matrix_supplied_readings.json` +17.
+Pinned in `tests/test_supplied_readings.py`.
 
 **And a box (built 2026-10-20; the person: "1,2 둘다 하나로 만들어줘", where 1 was the 28
 MANUAL panels nobody had read - every one a box plot of two series, which the box reader
@@ -1253,10 +1266,6 @@ reading without the word is still a missing spread. Refused before the run: NONE
 placed (SUPPLIED_END_NONE_WITH_END), NONE on a box (SUPPLIED_END_NONE_ON_BOX). Such a value has
 no weight in a variance-weighted pool; whether and how it enters an analysis (an imputed SD,
 a descriptive table) is the analysis plan's call, and the method says which values they are.
-`matrix_mean_only.json` 12, unobserved none; the ten matrices that pin the changed files, re-run, all
-unobserved none. (Two copies of `test_kernel.py` running at once collide on its fixed temporary file
-`fdt_regression_tmp.csv` and fail two of its checks - a matrix baseline went red for that reason alone and was
-re-run on its own.)
 
 **Three paths the person opened on 2026-10-20 (decision page v8: D01, D14, D15).**
 
@@ -1344,7 +1353,7 @@ and 13 did not:
   `grid_engine.fig_is_bound`. The SE×√n comparison and the cell's stem check pass over a
   `BOUND_HIDDEN_END` value; the unit's stem question is dropped only when every spread of
   the unit is a bound (one read cap among them and it stands); the ends' order, the mean
-  between them and a positive spread are still asked of a bound. `matrix_bound_gate.json`.
+  between them and a positive spread are still asked of a bound.
 - **SD or SE.** Where a paper says "means ± SD" for every figure, two blinded checks compared
   bar lengths with the numbers in the text: in one figure the bars matched the text's SD/√n
   and not its SD (MEDIUM: one panel to compare), in another the text gave no numbers to
@@ -1387,8 +1396,8 @@ a cap with no visible stem ("the SPREAD is not measured - the cap may be a cap o
 significance glyph"), and a bound is drawn with the same `~`; a blinded check noticed that
 the footer contradicted its rules, and the first page carrying bounds said so in each card's
 table. A bound now has its own footer line (`review_overlay.BOUND_NOTE`: no end visible, each
-end at the edge of what hides it, an UPPER BOUND), counted apart from unstemmed caps
-(`matrix_bound_footer.json`). It changes every overlay with a bound, so those panels' review
+end at the edge of what hides it, an UPPER BOUND), counted apart from unstemmed caps.
+It changes every overlay with a bound, so those panels' review
 subjects change with the next run.
 
 **Second checks, in practice.** A pass that answers OK with MEDIUM confidence leaves its reason
@@ -1482,7 +1491,7 @@ figure:
 - Upscaled scans with edges blurred over 2-3 px.
 
 **Missing and overlapping markers require source evidence.** Follow
-[`MARKER_REVIEW.md`](MARKER_REVIEW.md) when a marker appears absent, a crop looks
+[`docs/MARKER_REVIEW.md`](docs/MARKER_REVIEW.md) when a marker appears absent, a crop looks
 clipped, or multiple series occupy the same location. Inspect the full source
 page and native crop; for vector PDFs, inspect separately painted source paths
 before concluding that a covered marker cannot be measured. The read-only
@@ -1821,49 +1830,52 @@ it learned still holds:
   an empty cell. A CSV blank is float nan, whose `str()` is "NAN" - validate
   through a CSV round-trip, never an in-memory frame.
 
-## The four suites, and why there are four
+## The suites, and how to run them
 
-    python3 test_kernel.py          # validator against hand-built rows
-    python3 test_grid_engine.py     # four-grain grid + value engine
-    python3 test_bar_reader.py      # colour bar reader against real rasters
-    python3 test_mark_readers.py    # non-bar readers, adapter, reader->gate chain
-    python3 test_mono_bar.py        # monochrome bars, fill patterns, cap trap
-    python3 test_integration.py     # template -> reader -> CSV -> validator
-    python3 test_run_batch.py       # source inventory -> manifests -> values -> gate -> queue
-    python3 test_reproducibility.py # clean-room import, no scipy
-    python3 crosscheck_id323.py     # second independent reading of one figure
-    python3 forward_test_397_mono_bar.py   # a real publisher raster
+    bash .github/run_suites.sh            # every Python suite, one marker each
+    for t in tests/test_*.mjs tests/sheet/test_*.mjs; do node "$t"; done
 
-Run all of them after ANY edit. They fail in different ways on purpose.
+Each suite is a standalone script (`python3 tests/test_kernel.py` works from any
+directory) that exits non-zero on its first failure and prints exactly one
+`FDT_SCENARIOS_RUN=N` line. CI runs them all twice: once in the pinned core
+environment with the PDF backends removed, once with poppler, tesseract and the
+intake extras installed. Run all of them after ANY edit. They fail in different
+ways on purpose:
 
-`test_run_batch.py` includes the completeness counterexample: a physical figure
-declares 36 visible panels while 14 virtual rows each appear internally complete.
-The batch must fail with `SOURCE_PANEL_COVERAGE_INCOMPLETE`.  A second fixture
-shows that unconfigured manual/no-reader panels survive in the source coverage
-ledger and queue instead of blocking readable panels or disappearing.
+    tests/test_kernel.py          the field-level validator against hand-built rows
+    tests/test_grid_engine.py     the four-grain grid + value engine
+    tests/test_bar_reader.py      colour bar reader against synthetic rasters with known truth
+    tests/test_mark_readers.py    non-bar readers, adapter, reader -> gate chain
+    tests/test_mono_bar.py        monochrome bars, fill patterns, the cap trap
+    tests/test_run_batch.py       source inventory -> manifests -> values -> gate -> queue
+    tests/test_finalize.py        decisions -> accepted values, and every way a decision is refused
+    tests/test_reproducibility.py clean-room import (no scipy), pinned environment, shipped
+                                  schemas, this file's contract, CI coverage, nothing private tracked
+    tests/test_runbook.py         every command, file and exit code docs/REVIEW_RUNBOOK.md promises
+    tests/sheet/                  the panel-count sheet
 
-A synthetic fixture proves a reader is self-consistent. It cannot prove the
-reader survives JPEG softening, a 1 px hatch outline that misses the threshold,
-or two panels of one figure whose axes are four pixels apart - and every one of
-those broke the monochrome bar reader the first time it met a real figure. That
-is what the forward tests are for, and why a reader without one is not released.
+`tests/test_run_batch.py` includes the completeness counterexample: a physical
+figure declares 36 visible panels while 14 virtual rows each appear internally
+complete. The batch must fail with `SOURCE_PANEL_COVERAGE_INCOMPLETE`. A second
+fixture shows that unconfigured manual/no-reader panels survive in the source
+coverage ledger and queue instead of blocking readable panels or disappearing.
 
-**A unit suite cannot see a template that disagrees with the validator.** The
-geometry checks above shipped once with `Extraction_Method` absent from
-`fig_template_columns()`. Every scenario passed, because the fixtures added the
-key from outside the template — and on a real 51-column CSV both checks silently
-skipped. `test_integration.py` exists for exactly that gap: it builds the CSV
-from `fig_template_columns()` and nothing else, and `crow()` now raises if a
-fixture references a column the template does not ship.
+**A synthetic fixture proves a reader is self-consistent, not that it survives a
+real figure.** JPEG softening, a 1 px hatch outline that misses the threshold,
+two panels of one figure whose axes are four pixels apart - every one of those
+broke the monochrome bar reader the first time it met a publisher figure. The
+publisher figures cannot ship in a public repository, so before a reader is
+trusted on a new kind of panel, run it on a few of your own figures against an
+independent reading (a different primitive - a column scan and median instead
+of a row profile and run centre - not the same method twice), and keep that
+check, with its rasters, outside this repository.
 
-**A frozen fixture proves stability, not accuracy.** `fixtures/id323_fig2_*` locks
-72 bars against whatever the reader currently produces; that catches regressions
-and nothing else. `crosscheck_id323.py` re-reads the same raster by a different
-primitive — column scan and median instead of row profile and run centre — and
-the two agree to **0.50 px** on the means. Independence belongs in the primitive,
-not in the definition: when the two used different cap definitions they differed
-by 3 px, and aligning the definition while keeping the methods distinct is what
-made the comparison meaningful.
+**A frozen fixture proves stability, not accuracy.** A fixture that locks bars
+against whatever the reader currently produces catches regressions and nothing
+else. Independence belongs in the primitive, not in the definition: when two
+readings used different cap definitions they differed by 3 px, and aligning the
+definition while keeping the methods distinct is what made the comparison
+meaningful.
 
 **Reproduce the defect, do not merely assert the fix.** `read_bar_panel` takes
 `stem_required=False` to restore the broken behaviour on demand, so the suite can

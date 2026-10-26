@@ -1,0 +1,229 @@
+{
+ "schema": "figure-digitization-triage/extraction-plan/1",
+ "publication_id": 1,
+ "reviewers": [
+  {
+   "reviewer_id": "RV_DEMO",
+   "name": "Josiah Carberry",
+   "record_type": "DEMO_IDENTITY",
+   "contact_type": "ORCID",
+   "contact": "0000-0002-1825-0097",
+   "registered_by": "Josiah Carberry",
+   "registration_date": "2026-01-05",
+   "human_attestation": "DEMO_EXAMPLE",
+   "note": "ORCID's fictional demonstration record. A real review registers a HUMAN reviewer here; a DEMO_IDENTITY run can never produce accepted values."
+  }
+ ],
+ "documents": [
+  {
+   "document_id": "SD1_MAIN",
+   "role": "MAIN_ARTICLE",
+   "source_file": "synthetic_article.pdf",
+   "source_file_sha256": "NOT_HELD",
+   "page_range": "page 1",
+   "observed_figure_count": 1,
+   "inventory_status": "VISUALLY_VERIFIED",
+   "figure_count_method": "HUMAN_VISUAL",
+   "reviewer_id": "RV_DEMO",
+   "inspection_date": "2026-01-05",
+   "note": "a synthetic article: the only figure is drawn by tests/make_bar_fixture.py"
+  }
+ ],
+ "grids": [
+  {
+   "grid_id": "G_HR",
+   "factors": {
+    "POSTURE": [
+     "SUPINE",
+     "ORTHOSTASIS"
+    ],
+    "TIMEPOINT": [
+     "B-1",
+     "DI7",
+     "DI14",
+     "DI19",
+     "R1",
+     "R5"
+    ]
+   }
+  }
+ ],
+ "reader_configs": [
+  {
+   "config_id": "C_BAR",
+   "options": {
+    "colour_tolerance": 70
+   }
+  }
+ ],
+ "figure_views": {
+  "FV1": {
+   "caption": "Heart rate in the supine and orthostatic posture at six sessions. Values are mean +/- SD, n = 10."
+  }
+ },
+ "figures": [
+  {
+   "source_figure_id": "SF1",
+   "document_id": "SD1_MAIN",
+   "figure_number": "FIG1",
+   "source_file": "synthetic_article.pdf",
+   "source_page": 1,
+   "image": "bar_fixture.png",
+   "observed_panel_count": 1,
+   "inventory_status": "VISUALLY_VERIFIED",
+   "panel_count_method": "HUMAN_VISUAL",
+   "reviewer_id": "RV_DEMO",
+   "inspection_date": "2026-01-05",
+   "caption": "Heart rate in the supine and orthostatic posture at six sessions. Values are mean +/- SD, n = 10.",
+   "note": "one axes region",
+   "panels": [
+    {
+     "panel_id": "P1",
+     "label": "P01",
+     "outcome_label": "Heart rate",
+     "target_status": "TARGET",
+     "disposition": "AUTO_DIGITIZE",
+     "reason": "colour bar reader configured",
+     "read": {
+      "mark_type": "BAR_COLOR",
+      "unit_id": "U_HR",
+      "figure_view": "FV1",
+      "box": [
+       110,
+       910,
+       20,
+       530
+      ],
+      "y_ticks": [
+       [
+        0.0,
+        520.0
+       ],
+       [
+        30.0,
+        432.0
+       ],
+       [
+        60.0,
+        344.0
+       ],
+       [
+        90.0,
+        256.0
+       ],
+       [
+        120.0,
+        168.0
+       ],
+       [
+        150.0,
+        80.0
+       ]
+      ],
+      "y_scale": "LINEAR",
+      "x_scale": "LINEAR",
+      "baseline": 0.0,
+      "config_id": "C_BAR",
+      "panel_mode": "AUTO",
+      "series": [
+       {
+        "series_id": "SUPINE",
+        "factor": "POSTURE",
+        "level": "SUPINE",
+        "mask_key": "blue",
+        "note": "legend: blue = supine"
+       },
+       {
+        "series_id": "ORTHOSTASIS",
+        "factor": "POSTURE",
+        "level": "ORTHOSTASIS",
+        "mask_key": "red",
+        "note": "legend: red = orthostasis"
+       }
+      ],
+      "positions": [
+       {
+        "position_id": "B-1",
+        "factor": "TIMEPOINT",
+        "level": "B-1",
+        "x_pixel": 193.5,
+        "display_order": 0,
+        "timepoint_label": "B-1"
+       },
+       {
+        "position_id": "DI7",
+        "factor": "TIMEPOINT",
+        "level": "DI7",
+        "x_pixel": 316.5,
+        "display_order": 1,
+        "timepoint_label": "DI7"
+       },
+       {
+        "position_id": "DI14",
+        "factor": "TIMEPOINT",
+        "level": "DI14",
+        "x_pixel": 439.5,
+        "display_order": 2,
+        "timepoint_label": "DI14"
+       },
+       {
+        "position_id": "DI19",
+        "factor": "TIMEPOINT",
+        "level": "DI19",
+        "x_pixel": 563.5,
+        "display_order": 3,
+        "timepoint_label": "DI19"
+       },
+       {
+        "position_id": "R1",
+        "factor": "TIMEPOINT",
+        "level": "R1",
+        "x_pixel": 686.5,
+        "display_order": 4,
+        "timepoint_label": "R1"
+       },
+       {
+        "position_id": "R5",
+        "factor": "TIMEPOINT",
+        "level": "R5",
+        "x_pixel": 809.5,
+        "display_order": 5,
+        "timepoint_label": "R5"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ],
+ "units": [
+  {
+   "unit_id": "U_HR",
+   "panel_id": "P1",
+   "figure_view": "FV1",
+   "grid_id": "G_HR",
+   "panel": "HR",
+   "outcome_name": "Heart rate",
+   "domain": "CV_HEMO",
+   "unit": "beats/min",
+   "statistic": "CONTINUOUS",
+   "dispersion_type": "SD",
+   "n_outcome": 10,
+   "n_source": "caption: n = 10",
+   "bar_top_definition": "OUTLINE_CENTER",
+   "errorbar_stem_confirmed": "TRUE",
+   "errorbar_source": "caption: 'Values are mean +/- SD'",
+   "x_calibration": [
+    [
+     0,
+     193.5
+    ],
+    [
+     5,
+     809.5
+    ]
+   ],
+   "note": "x_calibration maps the category index to its pixel column; the timepoints are categories, not days"
+  }
+ ]
+}

@@ -1,0 +1,699 @@
+# -*- coding: utf-8 -*-
+"""사람이 그림 위에 패널을 긋고, 패널마다 무엇이 그려졌는지 말하는 페이지.
+
+    python3 fdt/panel_page.py --run DIR --queue DIR/seg/dig.csv \\
+        --proposals DIR/seg/boxes.jsonl --out DIR/seg/panels_1.html \\
+        --chunk 1 --of 10
+
+계획서 뒤에 남은 일의 대부분이 이것입니다. 그림 297장에 패널 1019개가 있고,
+그 패널마다 **어디**인지와 **무엇**인지를 아무도 적어 두지 않았습니다. 고르는
+것은 기계의 몫입니다: 자리는 그림을 본 모형이 제안하고 잉크 분할이 축 틀에
+맞추며, 종류(막대냐 선이냐 상자냐 점이냐, 축은 있지만 읽을 값이 없는 패널이냐)도
+같은 제안에 들어 있습니다. 그 제안이 크롭 위에 그려지고 종류가 미리 골라진 채로
+나갑니다. 사람의 몫은 **확인**입니다 - 맞으면 그대로 두고, 틀리면 지우고 다시
+긋거나 종류를 바꿉니다. 그대로 받았는지 고쳤는지는 `Region_Source`·`Mark_Source`
+로 따로 적힙니다.
+
+눈금 값은 이 페이지에 없습니다. 확인된 자리가 600 DPI로 옮겨진 뒤
+`geometry_proposer`가 축을 읽고, 그것을 `geometry_page`가 사람에게 내밉니다.
+여기서 정하는 것은 자리와 종류뿐입니다.
+
+무엇이 답이 되는지는 여기 없고 `panel_page.js`에 있습니다. 좌표는 크롭 픽셀
+(200 DPI)이고, 화면은 그림을 줄여 보이되 좌표는 줄이기 전으로 돌려서 내보냅니다.
+
+내려받는 파일은 `panel_answers.csv`이고, `record_panels.py`가 그것을 받습니다.
+**이 페이지는 관문이 아닙니다** - 그 관문이 답이 실제로 낸 그림에 대한 것인지,
+상자가 실제 크롭 안에 드는지를 다시 봅니다.
+"""
+import argparse
+import base64
+import csv
+import io
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+from page_bits import CSS, esc                                   # noqa: E402
+
+DRAFTS = "figure_intake_draft.csv"
+LOGIC = "panel_page.js"
+
+#: 화면에 보이는 그림의 가장 큰 너비. 상자를 긋기엔 이만하면 되고, 크롭을
+#: 원본대로 실으면 한 묶음이 수십 MB가 됩니다.
+SHOW_WIDTH = 900
+
+#: 화면에 적는 말. `panel_page.js`의 `VERDICTS`·`MARKS`와 같아야 하고,
+#: `test_panel_page.py`가 둘이 같은지 봅니다.
+LABELS = (
+    ("PANELS", "패널이 있다 — 아래에 그은 상자가 패널이다"),
+    ("NO_PANELS", "이 그림에는 읽을 패널이 없다"),
+    ("HOLD", "아직 못 정하겠다"),
+)
+MARK_LABELS = (
+    ("BAR", "막대"),
+    ("LINE", "선"),
+    ("BOX", "상자(박스플롯)"),
+    ("SCATTER", "점"),
+    ("NOT_DATA", "축은 있지만 읽을 값 없음"),
+)
+
+
+def _rows(path):
+    if not os.path.exists(path):
+        return []
+    with io.open(path, encoding="utf-8-sig") as fh:
+        return list(csv.DictReader(fh))
+
+
+def load_proposals(path):
+    """{Draft_ID: {"size": [w, h], "verdict": ..., "boxes": [{x0,y0,x1,y1,mark}, ...]}}.
+
+    상자는 `[x0,y0,x1,y1]`(잉크 분할만 있던 때)이든 `{x0,y0,x1,y1,mark}`이든
+    받습니다 - 둘 다 이 그림의 크기 위의 좌표입니다."""
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    with io.open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            out[rec["fig"]] = rec
+    return out
+
+
+def crop_image(path):
+    """(data URL, 원본 (w, h), 보이는 (w, h)). 못 읽으면 ('', None, None).
+
+    화면에는 줄여서 싣고 원본 크기를 함께 돌려줍니다 - 상자 좌표는 원본
+    픽셀로 나가야 600 DPI로 옮길 수 있습니다.
+    """
+    if not path or not os.path.isfile(path):
+        return "", None, None
+    try:
+        from PIL import Image
+        im = Image.open(path)
+        size = im.size
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        if im.size[0] > SHOW_WIDTH:
+            h = int(round(im.size[1] * SHOW_WIDTH / float(im.size[0])))
+            im = im.resize((SHOW_WIDTH, h))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=80)
+    except Exception:                                   # noqa: BLE001
+        return "", None, None
+    return ("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(),
+            size, im.size)
+
+
+def pick_chunk(queue, chunk, of):
+    """묶음 `chunk`/`of`에 드는 줄. 순서는 대기열의 순서이고, 묶음은 앞에서부터
+    같은 크기로 자릅니다 - 같은 논문의 그림이 한 묶음에 모이도록."""
+    if of < 1 or chunk < 1 or chunk > of:
+        raise SystemExit("--chunk %s --of %s는 묶음이 아닙니다." % (chunk, of))
+    n = len(queue)
+    per = -(-n // of)
+    return queue[(chunk - 1) * per: chunk * per]
+
+
+def build(run, queue, proposals=None, chunk=1, of=1, log=print):
+    """(html, 그림 수). `queue`는 dig.csv의 줄들 (fig, axes, pid)."""
+    drafts = dict((r["Draft_ID"], r) for r in _rows(os.path.join(run, DRAFTS)))
+    proposals = proposals or {}
+    part = pick_chunk(queue, chunk, of)
+    if not part:
+        raise SystemExit("묶음 %d/%d에 드는 그림이 없습니다." % (chunk, of))
+
+    out, meta, ids = [], {}, []
+    w = out.append
+    w("<!doctype html><html lang='ko'><head><meta charset='utf-8'>")
+    w("<meta name='viewport' content='width=device-width,initial-scale=1'>")
+    w("<title>패널 확인 %d/%d — 그림 %d장</title>" % (chunk, of, len(part)))
+    w(CSS)
+    w("""<style>
+[hidden]{display:none!important}
+button.mini{font-size:12px;padding:1px 8px;margin-left:8px;vertical-align:1px}
+header{max-height:70vh;overflow:auto}
+/* 붙박이 머리말이 카드 위쪽을 덮지 않도록, 머리말 높이만큼 물러나 멈춥니다. */
+.doc{scroll-margin-top:calc(var(--hdr, 120px) + 10px)}
+.opt{display:block;font-size:13px;margin:3px 0}
+.wrap{position:relative;display:inline-block;border:1px solid #ccc;background:#fff}
+.wrap img{display:block;max-width:100%%;height:auto}
+.wrap canvas{position:absolute;left:0;top:0;width:100%%;height:100%%;cursor:crosshair;
+touch-action:none}
+.boxes{margin:8px 0;font-size:13px}
+.boxes .b{display:flex;gap:8px;align-items:center;margin:3px 0}
+.boxes .b.sel{background:#fff3c4}
+.boxes .tag{font-family:ui-monospace,Menlo,monospace;min-width:26px;cursor:pointer}
+.boxes input.xy{width:66px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
+.boxes input.cnt{width:62px;font:12px ui-monospace,Menlo,monospace;padding:2px 4px}
+.boxes .plus{color:#8a8a82}
+.boxes select.m2{font-size:12px;color:#55554f}
+.boxes .ovl{font-size:12px;color:#55554f;white-space:nowrap}
+.boxes .src{color:#8a8a82;font-size:12px}
+.who{margin:8px 0}
+.cap{font-size:12px;color:#55554f;margin:4px 0 10px;max-width:%dpx}
+.hint{font-size:12px;color:#8a8a82}
+.warn{font-size:13px;color:#8a4b00;background:#fff6e5;border:1px solid #efd9ac;
+border-radius:5px;padding:6px 9px;margin:8px 0;max-width:80ch}
+.said{font-size:12px;color:#55554f;margin:4px 0 0;max-width:80ch}
+.state.odd{color:#8a4b00}
+</style>""" % SHOW_WIDTH)
+    # 머리말은 붙박이(sticky)라 접지 않으면 그림 위쪽을 덮습니다. 설명은 처음
+    # 한 번 읽으면 되는 것이라 접어 둘 수 있게 하고, 접은 채로 두면 다음에 열
+    # 때도 접혀 있습니다.
+    w("<header><h1>패널 확인 <span class='count' id='left'></span> "
+      "<button id='help-toggle' class='mini'>설명 숨기기</button></h1>")
+    w("<div id='help'>")
+    w("<p class='note'>그림마다 <b>패널의 자리</b>와 <b>무엇이 그려졌는지</b>가 "
+      "기계의 제안으로 미리 채워져 있습니다 (파란 상자 = 제안). 맞으면 그대로 두고 "
+      "<b>직접 봤다</b>와 이름만 채우면 됩니다. 틀리면 상자를 눌러 고르고 "
+      "<b>지우기</b> 단추나 Delete로 지운 뒤 그림 위를 끌어 다시 긋고(주황 = 그음), "
+      "종류는 목록에서 바꿉니다.</p>")
+    w("<p class='note'>상자마다 <b>개수</b> 칸은 그 패널에서 읽어야 할 표시가 "
+      "몇인지입니다(선 몇 개·상자 몇 개·막대 몇 개·점 계열 몇 개). 리더가 찾아낸 "
+      "수와 대조할 유일한 수라 틀리면 고쳐 주시고, 모르겠으면 비워 두십시오 — "
+      "빈칸은 답을 막지 않습니다. 자리도 <b>숫자 칸에 직접 쳐서</b> 고칠 수 "
+      "있습니다.</p>")
+    w("<p class='note'>한 패널에 종류가 둘이면(막대 위에 선, 상자 옆에 선) "
+      "<b>+ 두 번째 종류</b>와 그 개수를 고르십시오 — 같은 자리를 리더 둘이 "
+      "읽습니다. 상자 위에 찍힌 개별 피험자의 점이나 막대 위의 개별 선은 두 번째 "
+      "종류가 아니라 <b>개별 점·선 겹침</b>입니다 — 읽을 요약값이 아니라 리더가 "
+      "비켜 가야 할 잉크라서, 따로 표시합니다.</p>")
+    w("<p class='note'>눈금 값은 여기서 묻지 않습니다 — 확인된 자리에서 리더가 "
+      "읽고, 다음 페이지가 그것을 다시 보입니다. 정하기 어려우면 "
+      "<b>아직 못 정하겠다</b>도 답입니다.</p>")
+    w("<p class='note'>이 페이지는 <b>관문이 아닙니다</b>. "
+      "<code>record_panels</code>가 답이 실제로 낸 그림에 대한 것인지, 상자가 "
+      "크롭 안에 드는지를 다시 봅니다.</p>")
+    w("</div>")
+    w("<p style='margin:10px 0 0'><button id='dl'>CSV 내려받기</button> "
+      "<span class='count' id='msg'></span></p></header><main>")
+
+    for q in part:
+        fid = q["fig"]
+        d = drafts.get(fid, {})
+        src, size, shown = crop_image(os.path.join(run, d.get("Figure_Crop") or ""))
+        prop = proposals.get(fid, {})
+        boxes = [proposed_box(b) for b in prop.get("boxes", [])]
+        # 제안의 상자는 제안이 잰 크기 위의 좌표입니다. 그 크기가 크롭의 크기와
+        # 다르면 그 제안은 이 그림의 것이 아니고, 싣지 않습니다.
+        if size and list(prop.get("size") or []) != list(size):
+            boxes = []
+        ids.append(fid)
+        verdict = str(prop.get("verdict") or "").upper()
+        crop = str(prop.get("crop_sha256") or "")
+        version = str(prop.get("proposal_version") or "")
+        meta[fid] = {"draft": fid,
+                     # 브라우저에 남은 답이 **이 크롭·이 제안**에 대한 것인지
+                     # 가리는 표. 다르면 화면이 그 답을 버립니다.
+                     "stamp": "%s/%s/%d" % (crop[:16], version, len(boxes)),
+                     "crop": crop, "proposalVersion": version,
+                     "note": str(prop.get("note") or ""),
+                     "size": {"w": size[0], "h": size[1]} if size else None,
+                     "shown": {"w": shown[0], "h": shown[1]} if shown else None,
+                     "declared": q.get("axes") or "",
+                     "proposed": boxes,
+                     # 제안된 판정도 미리 골라져 나갑니다. 사람이 하는 일은
+                     # "직접 봤다"와 이름이지, 이미 제안된 것을 다시 고르는 일이
+                     # 아닙니다. 다만 이 페이지의 어휘에 없는 판정은 싣지 않습니다.
+                     "proposedVerdict": verdict if verdict in dict(LABELS) else ""}
+        w(card(fid, d, q, src, shown, len(boxes), prop))
+
+    w("</main><script>")
+    w("var IDS = %s;" % json.dumps(ids, ensure_ascii=False))
+    w("var META = %s;" % json.dumps(meta, ensure_ascii=False))
+    with io.open(os.path.join(HERE, LOGIC), encoding="utf-8") as fh:
+        w(fh.read())
+    w(PAGE_JS)
+    w("</script></body></html>")
+    with_crop = sum(1 for fid in ids if meta[fid]["size"])
+    with_prop = sum(1 for fid in ids if meta[fid]["proposed"])
+    log("묶음 %d/%d · 그림 %d장 · 크롭 있음 %d · 제안 있음 %d"
+        % (chunk, of, len(ids), with_crop, with_prop))
+    return "\n".join(out), len(ids)
+
+
+def proposed_box(b):
+    """제안 상자 하나를 화면이 드는 모양으로. 종류가 딸려 오면 미리 골라집니다."""
+    if isinstance(b, dict):
+        mark = str(b.get("mark") or "").upper()
+        count = str(b.get("count") or "").strip()
+        mark2 = str(b.get("mark2") or "").upper()
+        count2 = str(b.get("count2") or "").strip()
+        # 두 번째 종류는 첫 번째와 다르고 "읽을 값 없음"이 아닐 때만 제안입니다.
+        ok2 = mark2 in dict(MARK_LABELS) and mark2 not in ("NOT_DATA", mark) \
+            and mark != "NOT_DATA"
+        return {"x0": b["x0"], "y0": b["y0"], "x1": b["x1"], "y1": b["y1"],
+                "mark": mark if mark in dict(MARK_LABELS) else "",
+                # 읽을 값이 없다고 제안한 패널에 개수를 함께 제안하지 않습니다.
+                # 그렇게 제안한 수가 종류를 고친 뒤에도 칸에 남아, 읽을 값이 없는
+                # 패널이 개수를 달고 기록된 적이 두 번 있습니다.
+                "count": count if count.isdigit() and int(count) >= 1
+                         and mark != "NOT_DATA" else "",
+                "mark2": mark2 if ok2 else "",
+                "count2": count2 if ok2 and count2.isdigit() and int(count2) >= 1 else "",
+                "overlay": "INDIVIDUAL" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
+                           and mark != "NOT_DATA" else "",
+                "source": "PROPOSED",
+                "markSource": "PROPOSED" if mark in dict(MARK_LABELS) else "",
+                "countSource": "PROPOSED" if count.isdigit() and mark != "NOT_DATA" else "",
+                "mark2Source": "PROPOSED" if ok2 else "",
+                "overlaySource": "PROPOSED" if str(b.get("overlay") or "").upper() == "INDIVIDUAL"
+                                 and mark != "NOT_DATA" else ""}
+    return {"x0": b[0], "y0": b[1], "x1": b[2], "y1": b[3], "mark": "", "count": "",
+            "mark2": "", "count2": "", "overlay": "", "source": "PROPOSED", "markSource": "",
+            "countSource": "", "mark2Source": "", "overlaySource": ""}
+
+
+def card(fid, draft, q, src, shown, n_prop, prop):
+    out = []
+    w = out.append
+    w("<div class='doc' data-id='%s'>" % esc(fid))
+    w("<h2>%s · %s</h2>" % (esc(fid), esc(draft.get("Figure_Number") or "")))
+    w("<p class='sub'>전에 센 패널 수 %s · 제안 상자 %d개</p>"
+      % (esc(q.get("axes") or "?"), n_prop))
+    cap = (draft.get("Caption_Text") or "").strip()
+    if cap:
+        w("<p class='cap'>%s</p>" % esc(cap[:400] + ("…" if len(cap) > 400 else "")))
+    said = (prop.get("note") or "").strip()
+    if said:
+        # 제안을 낸 쪽이 남긴 말. 이것을 감추면 사람은 기계가 스스로 의심한
+        # 자리를 모른 채 "맞다"를 누릅니다.
+        w("<p class='warn'>제안한 쪽의 말: %s</p>" % esc(said))
+    if src:
+        w("<div class='wrap' data-wrap='%s'><img src='%s' alt='%s' width='%d' "
+          "height='%d'><canvas data-canvas='%s' width='%d' height='%d'></canvas></div>"
+          % (esc(fid), src, esc(fid), shown[0], shown[1], esc(fid), shown[0], shown[1]))
+    else:
+        w("<div class='nofig'>크롭 없음 — 그을 그림이 없습니다</div>")
+    w("<div class='boxes' data-boxes='%s'></div>" % esc(fid))
+    w("<p class='hint'><button data-add='%s'>상자 추가</button> "
+      "<button data-del='%s'>고른 상자 지우기</button> "
+      "<button data-reset='%s'>제안으로 되돌리기</button> "
+      "끌어서 그리거나, 숫자 칸에 직접 쳐서 고칠 수 있습니다.</p>"
+      % (esc(fid), esc(fid), esc(fid)))
+    w("<div class='pick'>")
+    for value, label in LABELS:
+        w("<label class='opt'><input type='radio' name='v-%s' data-verdict='%s' "
+          "value='%s'> %s</label>" % (esc(fid), esc(fid), esc(value), esc(label)))
+    w("<label class='opt'><input type='checkbox' data-seen='%s'> "
+      "이 그림을 직접 봤다</label>" % esc(fid))
+    w("<div class='who'>본 사람 <input type='text' data-who='%s' size='16' "
+      "placeholder='reviewer_registry.csv의 ID'></div>" % esc(fid))
+    w("<label>메모 <input type='text' data-note='%s' size='28'></label>" % esc(fid))
+    w("<div class='state' data-state='%s'></div>" % esc(fid))
+    w("</div></div>")
+    return "\n".join(out)
+
+
+PAGE_JS = r"""
+(function () {
+  var KEY = 'fdt_panels';
+  var states = {};
+  try { states = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
+  catch (e) { states = {}; }
+  var MARK_LABELS = %s;
+
+  function fromProposal(m) {
+    return (m.proposed || []).map(function (b) {
+      return { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, mark: b.mark || '',
+               count: b.count || '', mark2: b.mark2 || '', count2: b.count2 || '',
+               overlay: b.overlay || '', source: 'PROPOSED',
+               markSource: b.mark ? 'PROPOSED' : '',
+               countSource: b.count ? 'PROPOSED' : '',
+               mark2Source: b.mark2 ? 'PROPOSED' : '',
+               overlaySource: b.overlay ? 'PROPOSED' : '' };
+    });
+  }
+  function st(id) {
+    var m = META[id] || {};
+    // 브라우저에 남아 있던 답이 다른 크롭·다른 제안에 대한 것이면 버립니다.
+    // 좌표가 그 그림의 좌표가 아니고, "봤다"도 그 그림을 본 것이 아닙니다.
+    if (states[id] && staleState(states[id], m)) { delete states[id]; }
+    if (!states[id]) {
+      // 처음 여는 그림은 제안의 상자를 들고 시작합니다. 사람이 지우거나 더
+      // 그으면 그때부터는 사람의 것입니다.
+      states[id] = { verdict: m.proposedVerdict || '', boxes: fromProposal(m),
+                     seen: false, who: '', note: '', sel: -1, stamp: m.stamp || '' };
+    }
+    // 그림의 크기와 이름은 화면이 아니라 페이지가 심어 둔 것에서 옵니다.
+    states[id].draft = m.draft; states[id].size = m.size; states[id].declared = m.declared;
+    states[id].crop = m.crop; states[id].proposalVersion = m.proposalVersion;
+    states[id].stamp = m.stamp || '';
+    if (!states[id].boxes) states[id].boxes = [];
+    return states[id];
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(states)); } catch (e) {} }
+  function q(sel) { return document.querySelector(sel); }
+  function all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function esc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
+  function scaleOf(id) {
+    var m = META[id] || {};
+    return (m.size && m.shown) ? m.size.w / m.shown.w : 1;
+  }
+
+  function drawBoxes(id) {
+    var c = q("canvas[data-canvas=\"" + esc(id) + "\"]");
+    if (!c) return;
+    var s = st(id), k = 1 / scaleOf(id), ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    s.boxes.forEach(function (b, i) {
+      ctx.lineWidth = i === s.sel ? 3 : 2;
+      ctx.strokeStyle = b.source === 'PROPOSED' ? '#2a7fd4' : '#d4572a';
+      ctx.strokeRect(b.x0 * k, b.y0 * k, (b.x1 - b.x0) * k, (b.y1 - b.y0) * k);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(String(i + 1) + (b.mark ? ' ' + b.mark : ''), b.x0 * k + 4, b.y0 * k + 16);
+    });
+    if (drag && drag.id === id) {
+      ctx.strokeStyle = '#d4572a'; ctx.setLineDash([4, 3]);
+      ctx.strokeRect(drag.x0 * k, drag.y0 * k,
+                     (drag.x1 - drag.x0) * k, (drag.y1 - drag.y0) * k);
+      ctx.setLineDash([]);
+    }
+  }
+
+  function listBoxes(id) {
+    var host = q("[data-boxes=\"" + esc(id) + "\"]");
+    if (!host) return;
+    var s = st(id);
+    var m = META[id] || {};
+    host.innerHTML = '';
+    s.boxes.forEach(function (b, i) {
+      var row = document.createElement('div');
+      row.className = 'b' + (i === s.sel ? ' sel' : '');
+      var tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = (i + 1) + ':';
+      tag.addEventListener('click', function () {
+        if (active && active !== id) { st(active).sel = -1; paint(active); }
+        active = id; s.sel = i; save(); paint(id);
+      });
+      row.appendChild(tag);
+      // 자리를 숫자로 칠 수 있어야 합니다. 끌기로는 한 픽셀을 맞추기 어렵고,
+      // 옆 패널에 한 뼘 걸친 상자를 고치는 일이 대부분 그런 일입니다.
+      ['x0', 'y0', 'x1', 'y1'].forEach(function (k) {
+        var n = document.createElement('input');
+        n.type = 'number'; n.step = '1'; n.className = 'xy';
+        n.value = Math.round(b[k]);
+        n.title = k;
+        n.addEventListener('input', function () {
+          var v = parseInt(n.value, 10);
+          if (!isFinite(v)) return;
+          var lim = (k === 'x0' || k === 'x1') ? (m.size ? m.size.w : v) : (m.size ? m.size.h : v);
+          b[k] = Math.max(0, Math.min(lim, v));
+          if (b.source === 'PROPOSED') { b.source = 'DRAWN'; }
+          active = id; s.sel = i; save(); paint(id);
+        });
+        row.appendChild(n);
+      });
+      var sel = document.createElement('select');
+      var none = document.createElement('option');
+      none.value = ''; none.textContent = '무엇이 그려졌나?';
+      sel.appendChild(none);
+      MARK_LABELS.forEach(function (ml) {
+        var o = document.createElement('option');
+        o.value = ml[0]; o.textContent = ml[1]; sel.appendChild(o);
+      });
+      sel.value = b.mark || '';
+      sel.addEventListener('change', function () {
+        // 사람이 바꾼 종류는 사람의 것입니다 - 제안과 같은 값으로 되돌려도.
+        b.mark = sel.value; b.markSource = 'TYPED';
+        // 읽을 값이 없다고 하면 개수칸은 물을 것이 없습니다. 남겨 두면 제안이
+        // 채워 둔 수가 그대로 답이 됩니다 - 실제로 두 번 그랬습니다.
+        if (b.mark === 'NOT_DATA') { b.count = ''; b.countSource = ''; }
+        save(); paint(id);
+      });
+      row.appendChild(sel);
+      // 개수: 그 패널에서 읽어야 할 표시가 몇인가. 리더가 찾아낸 수와 대조할
+      // 유일한 수이고, 끌기로는 말할 수 없습니다.
+      var cnt = document.createElement('input');
+      cnt.type = 'number'; cnt.min = '1'; cnt.step = '1'; cnt.className = 'cnt';
+      cnt.placeholder = '개수';
+      cnt.title = '이 패널에서 읽어야 할 표시(선·상자·막대·점)의 수';
+      cnt.hidden = (b.mark === 'NOT_DATA');
+      cnt.value = (b.count === null || b.count === undefined) ? '' : b.count;
+      cnt.addEventListener('input', function () {
+        b.count = cnt.value; b.countSource = 'TYPED';
+        active = id; save(); paint(id);
+      });
+      row.appendChild(cnt);
+      // 두 번째 종류: 막대 위에 선, 상자 옆에 선처럼 한 자리에 리더 둘이 필요한
+      // 패널. 개별 피험자의 점이 상자 위에 찍힌 것은 여기 적지 않습니다.
+      var plus = document.createElement('span'); plus.className = 'plus'; plus.textContent = '+';
+      row.appendChild(plus);
+      var sel2 = document.createElement('select'); sel2.className = 'm2';
+      var none2 = document.createElement('option');
+      none2.value = ''; none2.textContent = '두 번째 종류 없음';
+      sel2.appendChild(none2);
+      MARK_LABELS.forEach(function (ml) {
+        if (ml[0] === 'NOT_DATA') return;
+        var o = document.createElement('option');
+        o.value = ml[0]; o.textContent = ml[1]; sel2.appendChild(o);
+      });
+      sel2.value = b.mark2 || '';
+      sel2.addEventListener('change', function () {
+        b.mark2 = sel2.value; b.mark2Source = 'TYPED';
+        if (!b.mark2) { b.count2 = ''; }
+        active = id; save(); paint(id);
+      });
+      row.appendChild(sel2);
+      var cnt2 = document.createElement('input');
+      cnt2.type = 'number'; cnt2.min = '1'; cnt2.step = '1'; cnt2.className = 'cnt';
+      cnt2.placeholder = '개수'; cnt2.hidden = !b.mark2;
+      cnt2.value = (b.count2 === null || b.count2 === undefined) ? '' : b.count2;
+      cnt2.addEventListener('input', function () {
+        b.count2 = cnt2.value; b.mark2Source = b.mark2Source || 'TYPED';
+        active = id; save(); paint(id);
+      });
+      row.appendChild(cnt2);
+      // 개별 피험자의 점·선이 요약 표시 위에 겹쳐 있는가. 두 번째 종류가
+      // 아니라 리더가 비켜 가야 할 잉크입니다.
+      var ovl = document.createElement('label'); ovl.className = 'ovl';
+      var ovc = document.createElement('input'); ovc.type = 'checkbox';
+      ovc.checked = !!b.overlay;
+      ovc.addEventListener('change', function () {
+        b.overlay = ovc.checked ? 'INDIVIDUAL' : ''; b.overlaySource = 'TYPED';
+        active = id; save(); paint(id);
+      });
+      ovl.appendChild(ovc); ovl.appendChild(document.createTextNode(' 개별 점·선 겹침'));
+      row.appendChild(ovl);
+      var src = document.createElement('span');
+      src.className = 'src';
+      src.textContent = (b.source === 'PROPOSED' ? '제안' : '그음')
+        + (b.mark ? (b.markSource === 'PROPOSED' ? ' · 종류 제안' : ' · 종류 고름') : '')
+        + (String(b.count || '').trim()
+           ? (b.countSource === 'PROPOSED' ? ' · 개수 제안' : ' · 개수 침') : '')
+        + (b.mark2 ? (b.mark2Source === 'PROPOSED' ? ' · 둘째 제안' : ' · 둘째 고름') : '');
+      row.appendChild(src);
+      host.appendChild(row);
+    });
+  }
+
+  function paint(id) {
+    var s = st(id);
+    var got = panelsOf(id, s);
+    var box = q("[data-state=\"" + esc(id) + "\"]");
+    if (box) {
+      var say = got.ready
+        ? '답이 되었습니다 — ' + got.rows[0].Verdict + ' · 패널 '
+          + (got.rows[0].Verdict === 'PANELS' ? got.rows.length : 0) + '개'
+        : got.why;
+      // 답이 되었어도 말해 주어야 하는 것 둘: 상자가 겹친다, 전에 센 수와 다르다.
+      // 둘 다 답을 막지는 않습니다 - 인셋도 있고, 전에 센 수가 틀렸을 수도
+      // 있습니다. 다만 모르는 채로 넘기지는 않게 합니다.
+      var pairs = overlapPairs(s.boxes);
+      if (pairs.length) {
+        say += ' · 겹침 ' + pairs.map(function (p) {
+          return p.a + '·' + p.b + ' ' + Math.round(p.part * 100) + '%%'; }).join(', ');
+      }
+      var nc = missingCounts([id], states);
+      if (nc) { say += ' · 개수 안 적음 ' + nc; }
+      var dec = Number(s.declared);
+      if (s.verdict === 'PANELS' && isFinite(dec) && dec !== s.boxes.length) {
+        say += ' · 전에 센 수 ' + dec + ' ≠ 그린 수 ' + s.boxes.length;
+      }
+      box.textContent = say;
+      box.className = 'state' + (got.ready ? ' ready' : '')
+        + ((pairs.length || (isFinite(dec) && s.verdict === 'PANELS'
+            && dec !== s.boxes.length)) ? ' odd' : '');
+    }
+    var card = q(".doc[data-id=\"" + esc(id) + "\"]");
+    if (card) card.classList.toggle('done', got.ready);
+    all("input[data-verdict=\"" + esc(id) + "\"]").forEach(function (r) {
+      r.checked = r.value === s.verdict;
+    });
+    var seen = q("input[data-seen=\"" + esc(id) + "\"]");
+    if (seen) seen.checked = !!s.seen;
+    var ww = q("input[data-who=\"" + esc(id) + "\"]");
+    if (ww && ww.value !== s.who) ww.value = s.who;
+    var nn = q("input[data-note=\"" + esc(id) + "\"]");
+    if (nn && nn.value !== s.note) nn.value = s.note;
+    drawBoxes(id); listBoxes(id);
+    q('#left').textContent = '· 남은 것 ' + remaining(IDS, states)
+      + ' / ' + IDS.length + ' · 보류 ' + held(IDS, states)
+      + ' · 개수 안 적은 패널 ' + missingCounts(IDS, states);
+  }
+
+  function bind(sel, attr, read, ev) {
+    all(sel).forEach(function (el) {
+      var id = el.getAttribute(attr);
+      el.addEventListener(ev || 'input', function () {
+        read(st(id), el); save(); paint(id); IDS.forEach(function (o) { if (o !== id) paint(o); });
+      });
+    });
+  }
+  bind('input[data-verdict]', 'data-verdict', function (s, el) { s.verdict = el.value; }, 'change');
+  bind('input[data-seen]', 'data-seen', function (s, el) { s.seen = el.checked; }, 'change');
+  bind('input[data-who]', 'data-who', function (s, el) {
+    s.who = el.value;
+    IDS.forEach(function (o) { if (!st(o).who) st(o).who = el.value; });
+  });
+  bind('input[data-note]', 'data-note', function (s, el) { s.note = el.value; });
+  bind('button[data-add]', 'data-add', function (s, el) {
+    // 끌기가 어려울 때를 위한 자리. 그림 가운데에 상자를 하나 놓고, 숫자 칸에서
+    // 고치게 합니다.
+    var m = META[el.getAttribute('data-add')] || {};
+    var w = (m.size ? m.size.w : 100), h = (m.size ? m.size.h : 100);
+    s.boxes.push({ x0: Math.round(w * 0.25), y0: Math.round(h * 0.25),
+                   x1: Math.round(w * 0.75), y1: Math.round(h * 0.75),
+                   mark: '', source: 'DRAWN', markSource: 'TYPED' });
+    s.sel = s.boxes.length - 1;
+    active = el.getAttribute('data-add');
+  }, 'click');
+  bind('button[data-del]', 'data-del', function (s, el) {
+    active = el.getAttribute('data-del');
+    if (s.sel >= 0 && s.sel < s.boxes.length) { s.boxes.splice(s.sel, 1); s.sel = -1; }
+  }, 'click');
+  bind('button[data-reset]', 'data-reset', function (s, el) {
+    s.boxes = fromProposal(META[el.getAttribute('data-reset')] || {});
+    s.sel = -1;
+  }, 'click');
+
+  // 그림 위를 끌면 상자가 생깁니다. 끈 거리가 짧으면 상자가 아니라 고르기입니다.
+  // 자리는 캔버스가 **실제로 차지한 크기**로 재서 원본 픽셀로 옮깁니다 - 창이
+  // 좁으면 그림은 줄어도 캔버스의 좌표계는 줄지 않기 때문입니다. 옮기는 산수는
+  // 화면이 아니라 논리(`imagePoint`)가 합니다.
+  var drag = null;
+  //: 마지막으로 손댄 카드. Delete는 여기에만 듭니다 - 화면 밖 다른 그림의
+  //: 고른 상자까지 함께 지우면 사람은 지운 줄도 모릅니다.
+  var active = null;
+  function pos(c, ev) {
+    var m = META[c.getAttribute('data-canvas')] || {};
+    return imagePoint(c.getBoundingClientRect(), { w: c.width, h: c.height },
+                      m.size, ev.clientX, ev.clientY);
+  }
+  all('canvas[data-canvas]').forEach(function (c) {
+    var id = c.getAttribute('data-canvas');
+    c.addEventListener('pointerdown', function (ev) {
+      var p = pos(c, ev);
+      if (!p) return;
+      if (active && active !== id) { st(active).sel = -1; paint(active); }
+      active = id;
+      drag = { id: id, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+      c.setPointerCapture(ev.pointerId);
+    });
+    c.addEventListener('pointermove', function (ev) {
+      if (!drag || drag.id !== id) return;
+      var p = pos(c, ev);
+      if (!p) return;
+      drag.x1 = p.x; drag.y1 = p.y; drawBoxes(id);
+    });
+    c.addEventListener('pointerup', function (ev) {
+      if (!drag || drag.id !== id) return;
+      var s = st(id);
+      var x0 = Math.min(drag.x0, drag.x1), x1 = Math.max(drag.x0, drag.x1);
+      var y0 = Math.min(drag.y0, drag.y1), y1 = Math.max(drag.y0, drag.y1);
+      var thin = (scaleOf(id) || 1) * 6;
+      if (x1 - x0 < thin || y1 - y0 < thin) {
+        s.sel = boxAt(s.boxes, drag.x0, drag.y0);   // 고르기
+      } else {
+        s.boxes.push({ x0: Math.round(x0), y0: Math.round(y0),
+                       x1: Math.round(x1), y1: Math.round(y1),
+                       mark: '', source: 'DRAWN', markSource: 'TYPED' });
+        s.sel = s.boxes.length - 1;
+      }
+      drag = null; save(); paint(id);
+    });
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    if (!active) return;
+    var s = st(active);
+    if (s.sel >= 0 && s.sel < s.boxes.length) {
+      s.boxes.splice(s.sel, 1); s.sel = -1; save(); paint(active);
+    }
+  });
+
+  q('#dl').addEventListener('click', function () {
+    var csv = buildCsv(IDS, states);
+    var n = IDS.length - remaining(IDS, states);
+    if (!n) { q('#msg').textContent = '답이 된 그림이 아직 없습니다.'; return; }
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    // `record_panels`가 적는 파일은 `panel_decisions.csv`입니다. 같은 이름으로
+    // 내려받으면 사람이 그 자리에 두게 되고, 관문이 자기 출력을 답으로 읽습니다.
+    a.download = 'panel_answers.csv';
+    a.click();
+    q('#msg').textContent = n + '장의 답을 내려받았습니다.';
+  });
+
+  // 설명 접기. 붙박이 머리말이 길면 그림 위쪽을 덮고, 스크롤해서 맞춰 놓은
+  // 자리가 단추 하나로 다시 가려집니다.
+  var HELP = 'fdt_panels_help';
+  var help = q('#help'), toggle = q('#help-toggle');
+  function measure() {
+    var h = document.querySelector('header');
+    if (h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px');
+  }
+  function showHelp(on) {
+    if (help) help.hidden = !on;
+    if (toggle) toggle.textContent = on ? '설명 숨기기' : '설명 보기';
+    try { localStorage.setItem(HELP, on ? '1' : '0'); } catch (e) {}
+    measure();
+  }
+  var wasOpen = '1';
+  try { wasOpen = localStorage.getItem(HELP); } catch (e) {}
+  showHelp(wasOpen !== '0');
+  if (toggle) {
+    toggle.addEventListener('click', function () { showHelp(!!(help && help.hidden)); });
+  }
+  window.addEventListener('resize', measure);
+
+  IDS.forEach(paint);
+  measure();
+})();
+""" % json.dumps(MARK_LABELS, ensure_ascii=False)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--run", required=True, help="figure_intake_draft.csv와 crops/가 있는 폴더")
+    ap.add_argument("--queue", required=True, help="fig,axes 열이 있는 대기열 CSV")
+    ap.add_argument("--proposals", help="자동 분할의 boxes.jsonl")
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--chunk", type=int, default=1)
+    ap.add_argument("--of", type=int, default=1)
+    a = ap.parse_args(argv)
+    queue = _rows(os.path.expanduser(a.queue))
+    html, _n = build(os.path.expanduser(a.run), queue,
+                     load_proposals(os.path.expanduser(a.proposals) if a.proposals else None),
+                     chunk=a.chunk, of=a.of)
+    with io.open(os.path.expanduser(a.out), "w", encoding="utf-8") as fh:
+        fh.write(html)
+    print("페이지: %s (%.1f MB)"
+          % (a.out, os.path.getsize(os.path.expanduser(a.out)) / 1e6))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

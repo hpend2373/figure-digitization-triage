@@ -220,6 +220,16 @@ for _glob in ("tests/test_*.py", "tests/sheet/test_*.py", "tests/test_*.mjs",
     assert _glob in ci_text, "CI does not loop over %s" % _glob
     assert glob.glob(os.path.join(_paths.ROOT, _glob)), (
         "CI loops over %s and nothing matches it" % _glob)
+# AND EVERY SCRIPT THE WORKFLOW CALLS BY NAME EXISTS. A step that runs a file
+# that is not there exits 127 in CI and nowhere else - the suites cannot see it,
+# because no suite runs the workflow.
+import re as _re_ci                                                # noqa: E402
+_called = _re_ci.findall(r"(?:bash|python3?|node)\s+([\w./-]+\.(?:sh|py|mjs))\b",
+                         ci_text)
+_missing = sorted({c for c in _called if "*" not in c
+                   and not os.path.exists(os.path.join(_paths.ROOT, c))})
+assert _called, "found no script the workflow calls by name"
+assert not _missing, "the workflow calls scripts that do not exist: %s" % _missing
 assert "FDT_SCENARIOS_RUN" in ci_text, (
     "CI does not require the scenario marker, so a suite that ran nothing "
     "would go green")

@@ -9,7 +9,7 @@ Use this when a study reports its outcome only as a graph and the numbers have
 to be recovered, at a scale where doing it by hand once per paper is not a
 protocol. It is a pipeline, not a helper: the point is that the number which
 ends up in a meta-analysis can be traced to a raster, a calibration, a reader
-version, an environment and a person who looked at the picture and said yes.
+version, an environment, the actual observer and the applicable approval record.
 
 ## Get the code
 
@@ -27,6 +27,17 @@ synthesis readiness, read [ANALYSIS_RECONCILIATION.md](ANALYSIS_RECONCILIATION.m
 Complete source checks and apply the user's existing policies before building a
 new decision page. Delegated AI findings, actual human attestations, numerical
 approval and synthesis eligibility are separate records.
+
+For factor names, incomplete legends, cap/stem judgments, reframing and preserved
+review answers, read [IDENTITY_GEOMETRY_REVIEW.md](IDENTITY_GEOMETRY_REVIEW.md).
+For connecting protocols, screening and risk-of-bias records to outcome-specific
+input tables, read [SYNTHESIS_HANDOFF.md](SYNTHESIS_HANDOFF.md). A numerical review
+completed for its declared scope does not establish completion of the whole review.
+
+For a preparation-only request with existing accepted records, start with those
+references. Preserve the accepted extraction and validate the new linkage/output
+scope; re-extraction is not a prerequisite. Historical approvals described below
+are examples, not authority for another project or a new methodological choice.
 
 ## Run it
 
@@ -1504,11 +1515,15 @@ label only when all three of these hold:
 If any of them fails, the step stops and does not apply the clicks. Answers the person
 rejected on an earlier page are checked against the new clicks.
 
-**When the person confirms without looking.** On 2026-10-22 the person said "더 이상 내가
-확인할 필요없이 이건 확정해줘". `finalize_batch` takes only a HUMAN reviewer, so Claude
-writes the answer rows under the person's ID, dated the day of those words. Each Note says
-that the person did not view these overlays and names who did: the blinded checks and
-Claude. The script refuses any panel whose review mode asks for more than an overlay.
+**When the person delegates finalization without viewing.** Record the actual
+instruction, its scope and date as authorization, and record who inspected the
+evidence separately. A direction to finalize AI-reviewed results does not mean
+the person viewed an overlay or supplied a point. Do not manufacture a HUMAN
+reviewer, signature, `Seen_By_Person` or human-confirmation field to satisfy a
+recorder. If a legacy recorder accepts only a HUMAN review, use a separately
+authorized delegation/provenance route or leave that recording step blocked.
+Complete the evidence work and explain the specific schema limitation; a note
+cannot repair a falsely attributed structured field.
 
 ## Provenance is per FIELD, not per row
 
@@ -1662,13 +1677,17 @@ series produces marks and another produces none, the panel does not contribute
 half its cells - it contributes none. A reader that can find one of two curves
 cannot be trusted about which curve it found.
 
-## Only one output file is safe to pool from
+## Use the accepted file after numerical review
 
 A run writes **`figure_values_accepted.csv`** and **`figure_values_raw.csv`**,
 and deliberately nothing called `figure_values.csv`. The accepted file holds
 only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem;
 the raw file holds every reading, each row carrying `Value_Status`, `QC_Codes`
 and `Pooling_Eligible`.
+
+These are extraction-level gates. Accepted rows and a local `Pooling_Eligible`
+flag still require the applicable clinical, source, dependence, risk-of-bias and
+analysis-approval checks before entering a particular synthesis.
 
 The reason for two files rather than one flagged file is that the failure mode
 is a *script*, not a person. A single `figure_values.csv` once carried eight

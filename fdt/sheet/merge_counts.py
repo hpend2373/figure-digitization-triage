@@ -1,0 +1,236 @@
+# -*- coding: utf-8 -*-
+"""Put the sheets' CSV exports back together, or refuse to.
+
+THE SPLIT MADE THIS NECESSARY. The crops ride at the resolution they were cut
+at, so the sheet is several files, and each keeps its own entries and exports
+its own CSV. Joining them by hand is how a row gets counted twice or dropped
+between two spreadsheets - so it is done here, against the draft the sheets
+were built from, and it fails closed.
+
+What it refuses, and why each one is a way to be wrong:
+
+  BUILD_MIXED       exports from two different builds. The row a value was
+                    typed on is identified by a fingerprint from one draft;
+                    across builds the same Draft_ID can be a different figure.
+  ROW_IN_TWO_FILES  one row exported by two sheets. Sheets are disjoint by
+                    construction, so this is not a merge conflict to resolve -
+                    it means the files are not the set they claim to be.
+  ROW_UNKNOWN       an exported row the draft does not have.
+  ROW_MISSING       a draft row no export covers. A sheet was not downloaded,
+                    and the gap is silent in a pile of CSVs.
+  REASON_MISSING    a row marked "looked, cannot tell" with nothing said. That
+                    is not distinguishable from not having looked, which is
+                    the state it exists to separate.
+  VALUE_INVALID     a count that is not a whole number in range, or a count on
+                    a row the sheet had blocked.
+
+Usage:
+  python3 fdt/sheet/merge_counts.py --draft <figure_intake_draft.csv> \\
+                          --out <observed_panel_counts.csv> <part CSVs...>
+"""
+import argparse
+import collections
+import csv
+import io
+import json
+import os
+import sys
+
+PANEL_MAX = 40
+COLUMNS = ["Draft_ID", "Source_Document_ID", "Source_File", "Page",
+           "Figure_Number", "Crop_Quality_Status", "Row_Fingerprint",
+           "Observed_Panel_Count", "Entry_Status", "Uncountable_Reason",
+           "Objection_Reason", "Sheet_Build_ID"]
+#: 이의가 붙은 두 상태. `CROP_DISPUTED`는 열려 있던 행에 대고 "이 크롭은 대상
+#: 그림이 아니다", `BLOCK_DISPUTED`는 막힌 행에 대고 "이 차단이 틀렸다"입니다.
+#: 둘 다 계수가 아니라 이 시트에 대한 이의이고, 그래서 값을 달지 않습니다.
+DISPUTED = ("CROP_DISPUTED", "BLOCK_DISPUTED")
+#: 사람이 차단을 보고 맞다고 한 상태. 이의가 아니므로 `DISPUTED`에 넣지
+#: 않습니다 - 넣으면 이유를 요구하게 되고, 이미 카드에 적힌 사유에
+#: 동의하는 데까지 글을 쓰라고 하면 아무도 확인하지 않습니다.
+BLOCK_CONFIRMED = "BLOCK_CONFIRMED"
+STATUSES = ("ENTERED", "NOT_REVIEWED", "BLOCKED_BAD_CROP",
+            "SEEN_UNCOUNTABLE", BLOCK_CONFIRMED) + DISPUTED
+#: 사람이 답한 상태들. 나머지 둘은 답이 아닙니다 - `NOT_REVIEWED`는 아직 안
+#: 본 것이고 `BLOCKED_BAD_CROP`은 시트가 막아 둔 것입니다. `BLOCK_CONFIRMED`
+#: 는 답입니다: 사람이 그 카드를 보고 차단이 맞다고 했습니다.
+ANSWERS = ("ENTERED", "SEEN_UNCOUNTABLE", BLOCK_CONFIRMED) + DISPUTED
+
+
+def is_answer(row):
+    return (row or {}).get("Entry_Status", "").strip() in ANSWERS
+
+
+def read(path):
+    with io.open(path, encoding="utf-8-sig") as fh:
+        return list(csv.DictReader(fh))
+
+
+def merge(draft_rows, exports, carry=(), partial=False):
+    """(merged rows, problems). `exports` is [(name, rows)].
+
+    `carry`는 앞서 합쳐 둔 행들입니다. 시트가 열두 장이면 사람은 한 번에 다
+    세지 않습니다 - 세 장을 세어 합치고, 며칠 뒤 네 장을 더 셉니다. 앞의 답을
+    들고 오지 않으면 두 번째 합치기가 첫 번째를 지웁니다.
+
+    `partial`은 "아직 다 세지 않았다"를 사람이 밝히는 자리입니다. ROW_MISSING은
+    "시트 한 장을 내려받지 않았다"를 잡으려고 있는 문인데, 다 세지 않았다고
+    말한 사람에게는 그 문이 잡을 것이 없습니다 - 대신 몇 행이 남았는지 셉니다.
+    말하지 않으면 예전처럼 거부합니다: 조용한 빠짐이 이 문이 막는 것입니다.
+    """
+    problems = []
+    draft_ids = [d["Draft_ID"] for d in draft_rows]
+    known = set(draft_ids)
+
+    builds = {r.get("Sheet_Build_ID", "") for _n, rows in exports for r in rows}
+    if len(builds) > 1:
+        problems.append(("BUILD_MIXED",
+                         "내보내기가 서로 다른 빌드에서 나왔습니다: %s"
+                         % ", ".join(sorted(builds))))
+
+    seen, where = {}, {}
+    for name, rows in exports:
+        for r in rows:
+            did = r.get("Draft_ID", "")
+            if did not in known:
+                problems.append(("ROW_UNKNOWN",
+                                 "%s: 초안에 없는 행 %s" % (name, did)))
+                continue
+            if did in seen:
+                problems.append(("ROW_IN_TWO_FILES",
+                                 "%s이(가) %s와 %s 양쪽에 있습니다"
+                                 % (did, where[did], name)))
+                continue
+            seen[did] = r
+            where[did] = name
+
+    carried = {}
+    for r in carry:
+        did = (r.get("Draft_ID") or "").strip()
+        if did in known:
+            carried[did] = r
+    for did in draft_ids:
+        if did in seen or did in carried:
+            continue
+        if partial:
+            continue
+        problems.append(("ROW_MISSING", "어느 내보내기에도 없는 행 %s" % did))
+
+    for did, r in sorted(seen.items()):
+        status = (r.get("Entry_Status") or "").strip()
+        value = (r.get("Observed_Panel_Count") or "").strip()
+        if status not in STATUSES:
+            problems.append(("VALUE_INVALID",
+                             "%s: 알 수 없는 상태 %r" % (did, status)))
+            continue
+        if status == "ENTERED":
+            if not value.isdigit() or int(value) > PANEL_MAX:
+                problems.append(("VALUE_INVALID",
+                                 "%s: 입력값 %r은 0 이상 %d 이하의 정수가 "
+                                 "아닙니다" % (did, value, PANEL_MAX)))
+        elif value:
+            # A blocked or unreviewed row carrying a number is the two states
+            # the sheet exists to keep apart, collapsed.
+            problems.append(("VALUE_INVALID",
+                             "%s: 상태가 %s인데 값 %r을 달고 있습니다"
+                             % (did, status, value)))
+        why = (r.get("Uncountable_Reason") or "").strip()
+        if status == "SEEN_UNCOUNTABLE" and not why:
+            # Without one it is not distinguishable from not having looked,
+            # which is the state it exists to separate.
+            problems.append(("REASON_MISSING",
+                             "%s: 셀 수 없다고만 하고 이유가 없습니다" % did))
+        if status != "SEEN_UNCOUNTABLE" and why:
+            problems.append(("VALUE_INVALID",
+                             "%s: 상태가 %s인데 이유 %r을 달고 있습니다"
+                             % (did, status, why)))
+        # 이의도 이유가 있어야 합니다. 이유 없는 이의는 잘못 누른 것과
+        # 구별되지 않고, 잘못 누른 것이 이의로 보이면 없느니만 못합니다.
+        objection = (r.get("Objection_Reason") or "").strip()
+        if status in DISPUTED and not objection:
+            problems.append(("OBJECTION_REASON_MISSING",
+                             "%s: 이상하다고만 하고 무엇이 이상한지가 "
+                             "없습니다" % did))
+        if status not in DISPUTED and objection:
+            problems.append(("VALUE_INVALID",
+                             "%s: 상태가 %s인데 이의 %r을 달고 있습니다"
+                             % (did, status, objection)))
+        # 막힌 행의 이의는 막힘을 풀지 않습니다. 차단된 행에 대고 이의를
+        # 적으면서 값까지 달았다면, 값 검사가 이미 위에서 거부했습니다.
+
+    # 답이 아닌 것은 답을 지우지 못합니다.
+    #
+    # 이것을 처음에 "내보내기에 없는 행만 들고 온다"로 썼다가 사람의 답
+    # 열셋을 지웠습니다. 시트는 이미 답한 행을 막아서 보여 주므로, 그 행은
+    # 다음 내보내기에 `BLOCKED_BAD_CROP`으로 - 값 없이 - 다시 나옵니다.
+    # 새 내보내기가 무조건 이기면, 사람이 답했다는 이유로 막힌 행이 바로 그
+    # 답을 덮어씁니다. 답을 지울 수 있는 것은 다른 답뿐입니다.
+    def pick(d):
+        new, old = seen.get(d), carried.get(d)
+        if new is None:
+            return old
+        if old is not None and is_answer(old) and not is_answer(new):
+            return old
+        return new
+
+    merged = [pick(d) for d in draft_ids if d in seen or d in carried]
+    return merged, problems
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--draft", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--receipt", default="")
+    ap.add_argument("--carry", default="",
+                    help="앞서 합쳐 둔 파일. 여기 있는 행은 새 내보내기가 "
+                         "덮지 않는 한 그대로 남습니다.")
+    ap.add_argument("--partial", action="store_true",
+                    help="아직 다 세지 않았다고 밝힙니다. 남은 행을 "
+                         "ROW_MISSING으로 거부하지 않고 세기만 합니다.")
+    ap.add_argument("parts", nargs="+")
+    a = ap.parse_args(argv)
+
+    draft = read(a.draft)
+    exports = [(os.path.basename(p), read(p)) for p in a.parts]
+    carry = read(a.carry) if a.carry and os.path.exists(a.carry) else []
+    merged, problems = merge(draft, exports, carry=carry, partial=a.partial)
+
+    counts = collections.Counter(r.get("Entry_Status", "") for r in merged)
+    receipt = {"draft": os.path.abspath(a.draft),
+               "carry": os.path.abspath(a.carry) if a.carry else "",
+               "partial": bool(a.partial),
+               "not_yet_counted": len(draft) - len(merged),
+               "parts": [os.path.abspath(p) for p in a.parts],
+               "draft_rows": len(draft), "merged_rows": len(merged),
+               "by_status": dict(counts),
+               "problems": [list(x) for x in problems],
+               "verdict": "REFUSED" if problems else "MERGED"}
+    if a.receipt:
+        json.dump(receipt, io.open(a.receipt, "w", encoding="utf-8"),
+                  indent=2, ensure_ascii=False)
+
+    for code, detail in problems[:20]:
+        print("  %-18s %s" % (code, detail))
+    if len(problems) > 20:
+        print("  ... 그리고 %d건 더" % (len(problems) - 20))
+    if a.partial:
+        print("아직 세지 않은 행 %d개 — --partial이므로 거부하지 않습니다"
+              % (len(draft) - len(merged)))
+    print("초안 %d행 · 합쳐진 %d행 · %s"
+          % (len(draft), len(merged),
+             " · ".join("%s %d" % kv for kv in sorted(counts.items()))))
+    if problems:
+        print("판정: REFUSED — 합친 파일을 쓰지 않았습니다")
+        return 1
+
+    with io.open(a.out, "w", encoding="utf-8", newline="") as fh:
+        wr = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction="ignore")
+        wr.writeheader()
+        wr.writerows(merged)
+    print("판정: MERGED — %s" % a.out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,1368 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Scenarios for tick-anchored OCR.
+
+    python3 tests/test_tick_ocr.py
+
+Publication 177's figure 2 row 4 is labelled 4, 3, 2, 1 and the strip reader
+returned one of the four. Asking one crop per TICK recovers all four. The
+scenarios that matter most here are the ones about what this may NOT do: the
+arithmetic progression chooses among values that were READ, and never fills a
+gap or corrects a value into line. A reader that can do either is drawing an
+axis, not reading one.
+"""
+import _paths  # noqa: E402,F401  (puts fdt/ on sys.path)
+import inspect
+import os
+import sys
+import unittest
+
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import axis_reader as A                                          # noqa: E402
+import gate_trace as T                                          # noqa: E402
+import tick_ocr as O                                            # noqa: E402
+import y_scale_group as Y                                        # noqa: E402
+
+RUN = [0]
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def has_ocr():
+    try:
+        import pytesseract
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
+
+
+class ChoosingAmongWhatWasRead(unittest.TestCase):
+    """The progression is a tie-break, not a generator."""
+
+    def test_one_ladder_among_the_read_values_is_the_answer(self):
+        """177 figure 2's P10: four rows, one of which reads two candidates, and
+        exactly one combination is monotone with a constant step."""
+        pairs, detail = O.choose([843, 917, 992, 1068],
+                                 {843: [4.0], 917: [2.0, 3.0],
+                                  992: [2.0], 1068: [1.0]})
+        self.assertEqual(pairs, [(4.0, 843), (3.0, 917), (2.0, 992), (1.0, 1068)])
+        self.assertIn("one combination", detail)
+        RUN[0] += 1
+
+    def test_a_row_that_read_nothing_is_not_filled_from_the_sequence(self):
+        """The whole point. Three rows read 4, 2, 1 and the fourth read nothing;
+        3 is exactly what the progression would supply, and supplying it would be
+        inventing a measurement. Guard: `usable` skipping empty rows, and the
+        combination never adding a row."""
+        pairs, _d = O.choose([843, 917, 992, 1068],
+                             {843: [4.0], 917: [], 992: [2.0], 1068: [1.0]})
+        self.assertEqual([r for _v, r in pairs], [843, 992, 1068])
+        self.assertNotIn(917, [r for _v, r in pairs])
+        self.assertNotIn(3.0, [v for v, _r in pairs])
+        RUN[0] += 1
+
+    def test_a_value_off_the_line_is_refused_and_not_snapped_onto_it(self):
+        """A misread 9 where 3 belongs must break the ladder, not be corrected
+        into it. Guard: `A.ladder` deciding, with no repair step."""
+        pairs, detail = O.choose([100, 200, 300],
+                                 {100: [4.0], 200: [9.0], 300: [2.0]})
+        self.assertEqual(pairs, [])
+        self.assertIn("no combination", detail)
+        RUN[0] += 1
+
+    def test_a_misread_row_is_not_dropped_as_a_subset(self):
+        """`ladder` accepts a contiguous SUBSET when the full set fails, which is
+        right for a strip - a rotated title OCRs as a numeral and does not belong
+        on the axis. It is wrong here: every candidate is anchored to a tick that
+        was MEASURED, so a value that does not fit is a misread and dropping it
+        silently leaves that tick carrying a wrong number nobody sees.
+        Guard: allow_subset=False."""
+        # THE MISREAD IS AT AN END, which is the case a contiguous subset can
+        # quietly drop: 4, 3, 2 is a ladder and the fourth tick keeps its 9.
+        pairs, detail = O.choose([100, 200, 300, 400],
+                                 {100: [4.0], 200: [3.0], 300: [2.0],
+                                  400: [9.0]})
+        self.assertEqual(pairs, [], "the misread row was dropped as a subset")
+        self.assertIn("no combination", detail)
+        # and a combination that DOES fit is still found when one exists
+        ok, _d = O.choose([100, 200, 300, 400],
+                          {100: [4.0], 200: [3.0], 300: [2.0],
+                           400: [9.0, 1.0]})
+        self.assertEqual([v for v, _r in ok], [4.0, 3.0, 2.0, 1.0])
+        RUN[0] += 1
+
+    def test_too_few_rows_read_is_a_refusal_with_the_count_in_it(self):
+        """`MIN_LABELS` is the same floor every ladder in this package has.
+        Guard: the `len(usable) < A.MIN_LABELS` return."""
+        pairs, detail = O.choose([100, 200, 300], {100: [4.0], 200: [3.0]})
+        self.assertEqual(pairs, [])
+        self.assertIn("2 of 3", detail)
+        self.assertIn(str(A.MIN_LABELS), detail)
+        RUN[0] += 1
+
+    def test_two_combinations_that_both_work_are_refused(self):
+        """Picking one would be inventing the difference between them.
+        Guard: the distinct-winner check."""
+        pairs, detail = O.choose([100, 200, 300],
+                                 {100: [4.0], 200: [3.0], 300: [2.0, 2.0000001]})
+        # the two candidates differ, so two ladders exist and neither is chosen
+        self.assertEqual(pairs, [])
+        self.assertIn("different combinations", detail)
+        RUN[0] += 1
+
+    def test_the_check_is_the_packages_own_ladder(self):
+        """A monotone-only test would accept 4, 3, 1 - which is not an axis.
+        Guard: ladder() being the test rather than a local one."""
+        pairs, _d = O.choose([100, 200, 300],
+                             {100: [4.0], 200: [3.0], 300: [1.0]})
+        self.assertEqual(pairs, [])
+        RUN[0] += 1
+
+
+class OneCropPerTick(unittest.TestCase):
+
+    def test_the_crop_is_bounded_by_the_neighbouring_ticks(self):
+        """A crop tall enough to reach the label above it reads that label, and
+        the row then has a candidate that belongs to another tick.
+        Guard: half the SMALLEST measured gap."""
+        box = O.crop_box([100, 140, 180], 140, 50, "LEFT", (400, 400))
+        self.assertEqual(box[2:], (120, 161))
+        wide = O.crop_box([100, 300], 100, 50, "LEFT", (400, 400))
+        self.assertEqual(wide[3] - wide[2], 201)
+        RUN[0] += 1
+
+    def test_a_single_tick_falls_back_to_the_panels_own_bound(self):
+        """With one tick there is no gap to measure, and LABEL_BAND_MAX is the
+        only bound left rather than an invented one."""
+        box = O.crop_box([200], 200, 50, "LEFT", (400, 400))
+        self.assertEqual(box[3] - box[2], 2 * A.LABEL_BAND_MAX + 1)
+        RUN[0] += 1
+
+    def test_the_crop_is_on_the_label_side(self):
+        left = O.crop_box([100, 140], 100, 50, "LEFT", (400, 400))
+        right = O.crop_box([100, 140], 100, 50, "RIGHT", (400, 400))
+        self.assertEqual((left[0], left[1]), (max(0, 50 - A.LABEL_BAND_MAX), 50))
+        self.assertEqual((right[0], right[1]), (51, 51 + A.LABEL_BAND_MAX))
+        RUN[0] += 1
+
+    def test_agreeing_attempts_are_one_candidate_and_not_twelve(self):
+        """Twelve renderings reading 3 are one candidate. What matters downstream
+        is how many DIFFERENT numbers the crop could be.
+        Guard: best_per_value."""
+        raw = [(3.0, "3", 40, 4, "grey", "7"), (3.0, "3", 81, 8, "ink", "8"),
+               (8.0, "8", 30, 6, "grey", "10")]
+        got = O.best_per_value(raw)
+        self.assertEqual([v for v, *_ in got], [3.0, 8.0])
+        self.assertEqual(got[0][2], 81, "the best confidence was not kept")
+        RUN[0] += 1
+
+    def test_every_declared_magnification_is_actually_tried(self):
+        """The 177 row-4 reads came from 6x and 8x and none from 3x, which is
+        where the strip reader looks - so the sweep is the difference between
+        reading that panel and not. What a drawn fixture CAN hold is that every
+        declared scale is attempted; that the sweep changes the answer is a
+        corpus fact and is recorded in the release history rather than asserted here.
+        Guard: the loop over SCALES."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img = Image.new("L", (60, 40), 255)
+        ImageDraw.Draw(img).text((6, 6), "4",
+                                 font=ImageFont.truetype(FONT, 12), fill=0)
+        seen = {sc for _v, _s, _c, sc, _n, _p in O.read_box(img, (0, 60, 0, 40), 140)}
+        self.assertEqual(seen, set(O.SCALES))
+        self.assertGreater(len(O.SCALES), 1, "a sweep of one is not a sweep")
+        RUN[0] += 1
+
+    def test_the_binarisation_uses_the_figures_own_ink_threshold(self):
+        """A fixed threshold is the constant this package spent four rounds
+        removing from everything else. Guard: renderings() taking `ink`."""
+        img = Image.new("L", (40, 40), 255)
+        img.putpixel((10, 10), 150)
+        at140 = O.renderings(img, (0, 40, 0, 40), 140)
+        at200 = O.renderings(img, (0, 40, 0, 40), 200)
+        self.assertEqual(np.asarray(at140[1][1]).min(), 255)
+        self.assertEqual(np.asarray(at200[1][1]).min(), 0)
+        self.assertIn("ink=200", at200[1][0])
+        RUN[0] += 1
+
+    def test_the_shipped_ink_is_tried_as_well_as_the_passs_own(self):
+        """The pass chose its ink for SEGMENTATION. Publication 177's figure 2
+        wins on PLAIN at 173 because it came up short of its declared axes, and
+        at 173 its single digits erode: the "2" of row 4 reads nothing and the
+        "1" reads 4, 7 or 5. At the shipped 140 all four read. Guard: inks_for."""
+        self.assertEqual(O.inks_for(173), [173, A.INK_DEFAULT])
+        self.assertEqual(O.inks_for(A.INK_DEFAULT), [A.INK_DEFAULT],
+                         "the same threshold was rendered twice")
+        names = [n for n, _im in O.renderings(Image.new("L", (40, 40), 255),
+                                              (0, 40, 0, 40), 173)]
+        self.assertEqual(names, ["grey", "ink=173", "ink=%d" % A.INK_DEFAULT])
+        RUN[0] += 1
+
+
+class RecordsAndChangesNothing(unittest.TestCase):
+
+    def setUp(self):
+        T.reset(); T.context(pid="", fig="", png="", mode="", ink="")
+        self._on, self._o = T.ON, O.ON
+        T.ON, O.ON = True, True
+
+    def tearDown(self):
+        T.ON, O.ON = self._on, self._o
+
+    def test_it_is_never_handed_the_proposal_list(self):
+        """Like every other shadow here. Guard: the signature."""
+        self.assertEqual(list(inspect.signature(O.record).parameters),
+                         ["img", "dark", "label", "box", "spine_x", "side",
+                          "run", "ticks", "ink"])
+        RUN[0] += 1
+
+    def test_with_the_flag_off_nothing_is_recorded(self):
+        O.ON = False
+        img = Image.new("L", (40, 40), 255)
+        self.assertIsNone(O.record(img, np.zeros((40, 40), dtype=bool), "P01",
+                                   (0, 40, 0, 40), 20, "LEFT", (0, 40), [10, 20]))
+        self.assertEqual(T.ROWS, [])
+        RUN[0] += 1
+
+    def test_zero_turns_the_flag_off(self):
+        """`bool(os.environ.get("TICKOCR"))` is True for "0"."""
+        import importlib, os as _os
+        for value, want in ((None, False), ("0", False), ("1", True)):
+            old = _os.environ.pop("TICKOCR", None)
+            try:
+                if value is not None:
+                    _os.environ["TICKOCR"] = value
+                self.assertEqual(importlib.reload(O).ON, want,
+                                 "TICKOCR=%r read as %r" % (value, O.ON))
+            finally:
+                _os.environ.pop("TICKOCR", None)
+                if old is not None:
+                    _os.environ["TICKOCR"] = old
+        importlib.reload(O)
+        RUN[0] += 1
+
+    def test_a_row_that_read_nothing_is_recorded_as_such(self):
+        """An empty row that is silently skipped is indistinguishable from a row
+        nobody looked at. Guard: the NO_CANDIDATE outcome."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        img = Image.new("L", (200, 200), 255)
+        d = ImageDraw.Draw(img)
+        d.rectangle([120, 20, 121, 180], fill=0)          # a spine, no numerals
+        for y in (60, 110, 160):
+            d.rectangle([114, y, 119, y + 2], fill=0)
+        dark = np.asarray(img) <= 140
+        O.record(img, dark, "P01", (60, 200, 20, 190), 120, "LEFT", (20, 180),
+                 [61, 111, 161])
+        rows = [r for r in T.ROWS if r["kind"] == "TICK_OCR"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({r["outcome"] for r in rows}, {O.NO_CANDIDATE})
+        lad = [r for r in T.ROWS if r["kind"] == "TICK_OCR_LADDER"][0]
+        self.assertEqual(lad["outcome"], O.REFUSED)
+        RUN[0] += 1
+
+    def test_single_digit_labels_are_read_one_crop_at_a_time(self):
+        """The 177 row-4 shape, drawn: a spine, four ticks, and the single digits
+        4 3 2 1 beside them. The strip reader is what fails on this; this is the
+        route that does not."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img = Image.new("L", (280, 340), 255)
+        d = ImageDraw.Draw(img)
+        f = ImageFont.truetype(FONT, 34)
+        sx = 170
+        d.rectangle([sx, 40, sx + 1, 300], fill=0)
+        d.rectangle([sx, 298, 260, 300], fill=0)
+        for y, txt in zip((60, 130, 200, 270), ("4", "3", "2", "1")):
+            d.rectangle([sx - 7, y, sx - 1, y + 2], fill=0)
+            d.text((sx - 40, y - 17), txt, font=f, fill=0)
+        dark = np.asarray(img) <= 140
+        ticks = [(a + b) // 2 for a, b, _ln in
+                 Y.tick_runs(dark, (60, 270, 40, 310), sx, (40, 300), "LEFT")]
+        self.assertEqual(len(ticks), 4, "the fixture's own ticks were not found")
+        got = O.record(img, dark, "P01", (60, 270, 40, 310), sx, "LEFT",
+                       (40, 300), ticks)
+        lad = [r for r in T.ROWS if r["kind"] == "TICK_OCR_LADDER"][0]
+        self.assertEqual(lad["outcome"], O.READ, lad["detail"])
+        self.assertEqual([v for v, _r in got], [4.0, 3.0, 2.0, 1.0])
+        RUN[0] += 1
+
+
+_TUNED_H = A._TUNED_PANEL_PX
+
+
+def panel_with_labels(scale, labels=("3000", "2000", "1000"), tick=6, gap=95):
+    """A panel drawn at `scale`: a spine, three ticks and three WIDE numerals.
+
+    Everything in it is `scale` times the tuned render - which is what a 600 DPI
+    page is next to the 300 DPI one `_STRIPS` was measured on. `tick` is the
+    tick length and `gap` the label's distance from the spine, both at scale 1.
+    """
+    # The panel is the TUNED height at scale 1, so scale 2 is exactly the step
+    # from the 300 DPI render `_STRIPS` was measured on to a 600 DPI one.
+    w, h = int(300 * scale), int(460 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)                   # spine
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)  # baseline
+    ys = [int((top + off) * scale) for off in (60, 190, 320)]
+    for y, txt in zip(ys, labels):
+        d.rectangle([sx - int(tick * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((sx - int(gap * scale), y - int(11 * scale)), txt, font=f, fill=0)
+    box = (sx, w - int(20 * scale), top, bot)
+    return img, np.asarray(img) <= 140, box, sx, bot
+
+
+def panel_with_right_aligned_labels(scale=2.0, labels=("12", "11", "10", "9", "8", "7"),
+                                    tick=6, gap=6):
+    """A panel whose labels are RIGHT-aligned `gap` px from the tick marks.
+
+    That is how an axis running 17 down to 0 is printed, and it puts the lone
+    digits nearest the ticks - which is where the reading of them goes wrong.
+    """
+    w, h = int(300 * scale), int(560 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+    span = bot - top
+    step = span * 0.16
+    right = sx - int(tick * scale) - int(gap * scale)
+    for i, txt in enumerate(labels):
+        y = int(top + span * 0.08 + i * step)
+        d.rectangle([sx - int(tick * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((right - d.textlength(txt, font=f), y - int(11 * scale)), txt, font=f, fill=0)
+    return img, np.asarray(img) <= 140, (sx, w - int(20 * scale), top, bot), sx, bot
+
+
+def panel_with_labels_set_large(scale=2.0, size=76, labels=("15", "10", "5"),
+                                tick=14, gap=24):
+    """A panel drawn at `scale` whose labels are set LARGE for it.
+
+    `size` is the font in pixels, fixed, so it does not follow the render the
+    way `panel_with_labels` does: the panel is the tuned height twice over and
+    asks for x1.5, while the glyph is already 56 px. That is the shape of a
+    figure that sets its axis labels large, and of the panel `scale_for`'s
+    proxy is wrong about.
+    """
+    w = int(230 * scale)
+    h = int(_TUNED_H * scale) + 80
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, size)
+    sx, top = int(165 * scale), 30
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + 2, bot], fill=0)                    # spine
+    d.rectangle([sx, bot, w - 20, bot + 2], fill=0)                # baseline
+    for off, txt in zip((60, 390, 720), labels):
+        y = top + off
+        d.rectangle([sx - tick, y, sx - 1, y + 4], fill=0)
+        d.text((sx - tick - gap - d.textlength(txt, font=f),
+                y - int(size * 0.62)), txt, font=f, fill=0)
+    return (img.convert("RGB"), np.asarray(img) <= 140,
+            (sx, w - 20, top, bot), sx, bot)
+
+
+def panel_with_a_label_on_the_baseline(scale=2.0, labels=("30", "20", "10", "0")):
+    """A panel whose LOWEST label is printed centred on the baseline.
+
+    That is where a y axis puts its 0, and it is the label the strip search's
+    crop cuts in half - the reason `label_near` exists.
+    """
+    w, h = int(300 * scale), int(560 * scale)
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(20 * scale))
+    sx, top = int(150 * scale), int(20 * scale)
+    bot = top + int(_TUNED_H * scale)
+    d.rectangle([sx, top, sx + int(scale), bot], fill=0)
+    d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+    step = (bot - top) / float(len(labels) - 1)
+    for i, txt in enumerate(labels):
+        y = int(top + i * step)
+        d.rectangle([sx - int(6 * scale), y, sx - 1, y + max(1, int(2 * scale))], fill=0)
+        d.text((sx - int(95 * scale), y - int(11 * scale)), txt, font=f, fill=0)
+    return (img, np.asarray(img) <= 140, (sx, w - int(20 * scale), top, bot), sx, bot, step)
+
+
+class LabelStripsScaleWithTheRender(unittest.TestCase):
+    """`_STRIPS` is pixels, and pixels are a resolution."""
+
+    def test_at_the_tuned_height_the_strips_are_unchanged(self):
+        self.assertEqual(A.strips_for(A._TUNED_PANEL_PX), list(A._STRIPS))
+        self.assertEqual(A.strips_for(A._TUNED_PANEL_PX * 1.1), list(A._STRIPS))
+        RUN[0] += 1
+
+    def test_a_taller_panel_adds_wider_strips_after_the_tuned_ones(self):
+        got = A.strips_for(A._TUNED_PANEL_PX * 2)
+        self.assertEqual(got[:len(A._STRIPS)], list(A._STRIPS),
+                         "the tuned strips must still be tried first")
+        wider = got[len(A._STRIPS):]
+        self.assertEqual(wider, [(4, 88), (12, 120), (12, 220), (12, 340)], wider)
+        self.assertFalse(set(wider) & set(A._STRIPS), "a width was tried twice")
+        RUN[0] += 1
+
+    def test_a_height_that_is_not_a_number_is_not_a_scale(self):
+        self.assertEqual(A.strips_for(None), list(A._STRIPS))
+        self.assertEqual(A.strips_for(0), list(A._STRIPS))
+        RUN[0] += 1
+
+    def test_wide_labels_are_read_at_the_bigger_render(self):
+        """The defect, drawn. `3000` is wider than every tuned strip once the
+        page is rendered at twice the DPI, so the numerals are cut in half and
+        tesseract reads nothing - on 379 of this project's 600 DPI panels."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertTrue(A.ladder(pairs)[0], "the wide labels were not read: %s" % (pairs,))
+        self.assertEqual([v for v, _r in pairs], [3000.0, 2000.0, 1000.0], pairs)
+        RUN[0] += 1
+
+    def test_every_tuned_strip_at_both_anchors_comes_before_any_wider_one(self):
+        """REVERT: append the wider strips inside the anchor loop. Then the
+        spine's wide strips are tried before the block edge's narrow ones, and a
+        fallback that can change an answer an earlier pass already had is not a
+        fallback: two of thirty panels that read correctly came back with a
+        different, worse ladder. Observed on the STRIPS THE SEARCH ASKS FOR, so
+        it does not need tesseract and does not depend on a fixture happening to
+        exhibit it."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
+            asked.append(int(right) - int(left))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        widest_tuned = max(w for _g, w in A._STRIPS)
+        wide = [i for i, w in enumerate(asked) if w > widest_tuned]
+        self.assertTrue(wide, "no wider strip was ever tried: %s" % (asked,))
+        tuned_widths = {w for _g, w in A._STRIPS}
+        before = [w for w in asked[:wide[0]] if w in tuned_widths]
+        self.assertGreaterEqual(
+            len(before), 2 * len(A._STRIPS),
+            "a wider strip was tried before both anchors had had every tuned "
+            "strip: %s" % (asked[:wide[0] + 1],))
+        RUN[0] += 1
+
+
+#: ASEM-P577's y axis, as its proposal measured the ticks: 200 150 100 50 0
+#: at a 169 px pitch. `label at` rows are where OCR centred the numerals.
+_TICKS = (1870.5, 2039.5, 2208.0, 2377.5, 2546.0)
+_PRINTED = [(150.0, 2039.5), (100.0, 2208.0), (50.0, 2378.0)]
+_MISREAD = [(190.0, 2039.5), (100.0, 2208.0), (20.0, 2378.0)]   # what was read
+
+
+class TheTickGrid(unittest.TestCase):
+    """The ladder has slack; the tick grid the same proposal measured has none."""
+
+    def test_a_misread_the_ladder_passes_the_grid_refuses(self):
+        """REVERT: let the ladder be the only test. `190 100 20` is a ladder
+        by 6.4% - inside the 8% the wobbling OCR rows need - and stood as the
+        axis of ASEM-P577's panel, two labels wrong the same way. Against the
+        ticks the same proposal measured it is 11.8% per tick."""
+        self.assertTrue(A.ladder(_MISREAD)[0], "the fixture no longer shows the fault")
+        verdict, why = A.grid_verdict(_MISREAD, _TICKS)
+        self.assertEqual(verdict, A.GRID_CONTRADICTED, why)
+        self.assertIn("11.8%", why)
+        self.assertEqual(A.grid_verdict(_PRINTED, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_labels_rounded_on_the_page_are_not_a_misread(self):
+        """REVERT: demand exact equality per tick. Labels printed to three
+        digits - 33.3 66.7 100 - differ by 0.3% per tick and are an axis."""
+        rounded = [(100.0, 2039.5), (66.7, 2208.0), (33.3, 2378.0)]
+        self.assertEqual(A.grid_verdict(rounded, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_every_label_may_share_one_shift_from_its_tick(self):
+        """OCR centres a tall numeral a few pixels off the tick it belongs to,
+        on every label alike: 19 of 21 panels this corpus first flagged as "off
+        the ticks" were shifted 3-9 px as one. What no axis does is disagree
+        about the shift - EDGELL-2012's `9 7 1` has its middle label 34 px off
+        the other two, read beside a frame that was not the axis."""
+        shifted = [(v, r + 5.0) for v, r in _PRINTED]
+        self.assertEqual(A.grid_verdict(shifted, _TICKS)[0], A.GRID_CONSISTENT)
+        astray = [(30.0, 1870.5), (20.0, 2039.5), (8.0, 2248.0)]
+        verdict, why = A.grid_verdict(astray, _TICKS)
+        self.assertEqual(verdict, A.GRID_OFF, why)
+        self.assertIn("do not sit on one grid", why)
+        RUN[0] += 1
+
+    def test_a_label_at_a_tick_the_detector_missed_is_still_on_the_grid(self):
+        """REVERT: place each label by its nearest DETECTED tick. The end
+        ticks sit on the frame's corners and the detector misses them; 65 of
+        this corpus's read panels have a label a whole pitch from any tick it
+        found. The grid continues past the ticks that were seen."""
+        above = [(250.0, 1701.5)] + _PRINTED           # 1701.5 = one pitch above the first tick
+        self.assertEqual(A.grid_verdict(above, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_labels_two_ticks_apart_carry_two_steps(self):
+        """REVERT: count the value step per LABEL. Labels are printed on every
+        other tick as often as on every one."""
+        every_other = [(40.0, 1870.5), (20.0, 2208.0), (10.0, 2377.5)]
+        self.assertEqual(A.grid_verdict(every_other, _TICKS)[0], A.GRID_CONSISTENT)
+        RUN[0] += 1
+
+    def test_a_tick_list_that_is_not_a_grid_measures_nothing(self):
+        """REVERT: read whatever the tick list holds as a grid. Data marks get
+        into it - S41526's D006 lists 1720 1866 2014 2083 2142 2159 - and
+        against such a list an honest axis looks uneven. Silence is "not
+        measured", not "fine"."""
+        strays = (0.0, 100.0, 140.0, 200.0, 300.0, 400.0)
+        honest = [(40.0, 0.0), (26.0, 140.0), (0.0, 400.0)]      # 0.1 per px throughout
+        verdict, why = A.grid_verdict(honest, strays)
+        self.assertEqual(verdict, A.GRID_UNMEASURED, why)
+        self.assertIn("not a regular grid", why)
+        self.assertEqual(A.grid_verdict(_MISREAD, _TICKS[:2])[0], A.GRID_UNMEASURED)
+        self.assertEqual(A.grid_verdict(_MISREAD[:2], _TICKS)[0], A.GRID_UNMEASURED)
+        RUN[0] += 1
+
+    def test_the_grid_is_asked_about_the_labels_the_ladder_kept(self):
+        """REVERT: ask it about every numeral read. A stray numeral the ladder
+        dropped is not a label, and a stray numeral is off the grid, which
+        would hide a contradiction among the labels that were kept."""
+        with_stray = _MISREAD + [(7.0, 2460.0)]
+        self.assertEqual(A.ladder_run(with_stray), _MISREAD)
+        self.assertFalse(A.accepted(with_stray, _TICKS))
+        self.assertFalse(A.accepted(_MISREAD, _TICKS))
+        self.assertTrue(A.accepted(_PRINTED, _TICKS))
+        self.assertTrue(A.accepted(_MISREAD), "without a grid the ladder alone decides")
+        self.assertFalse(A.accepted([(1.0, 10.0), (5.0, 20.0)], _TICKS))
+        RUN[0] += 1
+
+    def test_a_strip_the_grid_contradicts_is_passed_over(self):
+        """REVERT: take the first strip that ladders. The search goes on to
+        the next strip and the next magnification, and what the grid
+        contradicted is returned only when nothing else was read."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(1.0)
+        answers = [_MISREAD, _PRINTED]
+        real = A._ocr_numerals
+
+        def fake(img_, dark_, left, right, top, bottom, scale=3, comma=False,
+                 with_clip=False, margin=0):
+            got = answers.pop(0) if answers else []
+            return [(v, r, False) for v, r in got]
+
+        A._ocr_numerals = fake
+        try:
+            got = A._search(img, dark, box, sx, box[0], box[2], box[3], 3,
+                            comma=False, seen={}, ticks=_TICKS)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(got, _PRINTED, "the contradicted strip was taken: %s" % (got,))
+        answers[:] = [_MISREAD, _PRINTED]
+        A._ocr_numerals = fake
+        try:
+            alone = A._search(img, dark, box, sx, box[0], box[2], box[3], 3,
+                              comma=False, seen={})
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(alone, _MISREAD, "without a grid the first ladder is the answer")
+        RUN[0] += 1
+
+    def test_the_second_pass_is_asked_when_the_grid_refused_the_first(self):
+        """REVERT: keep the first reading whenever it ladders. Refused by the
+        grid, the tuned reading is one that did not read, and the passes that
+        run only after a refusal - past the ticks, at the glyph's own size -
+        are where ASEM-P577's `150 100 50` was found."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom, scale,
+                comma, seen, **kw):
+            return list(_MISREAD if int(anchor_spine) == sx else _PRINTED)
+
+        A._search = spy
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base, ticks=_TICKS)
+            kept = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(got, _PRINTED, "the grid's refusal did not send the search on")
+        self.assertEqual(kept, _MISREAD, "without a grid the tuned ladder stands")
+        RUN[0] += 1
+
+    def test_the_label_column_may_be_as_wide_as_the_render_makes_it(self):
+        """REVERT: cap the measured column at 60 px whatever the render. That
+        is 60 px of a 300 DPI page, past which the column has swallowed the
+        rotated title; at 600 DPI a printed `150` is 73 px wide by itself, and
+        311 of this corpus's 694 read panels had a column the cap threw away -
+        with it, the glyph's height and the band at the baseline."""
+        self.assertEqual(A.band_max_for(A._TUNED_PANEL_PX), A.LABEL_BAND_MAX)
+        self.assertEqual(A.band_max_for(2 * A._TUNED_PANEL_PX), 2 * A.LABEL_BAND_MAX)
+        self.assertEqual(A.band_max_for(A._TUNED_PANEL_PX // 2), A.LABEL_BAND_MAX,
+                         "never narrower than the tuned cap")
+        self.assertEqual(A.band_max_for("tall"), A.LABEL_BAND_MAX)
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("3000", "2000", "1000"))
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        self.assertIsNone(A.label_band(dark, box, sx - reach, y0 - 10, base + 10),
+                          "the fixture's column no longer exceeds the tuned cap")
+        self.assertIsNotNone(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                             "the glyph was not measured on a 600 DPI column")
+        RUN[0] += 1
+
+
+class OneStripOneRead(unittest.TestCase):
+
+    def test_no_strip_is_read_twice_at_the_same_magnification(self):
+        """REVERT: call tesseract again for a strip it has already read. The
+        union pass re-reads every single-pass strip at x3, and the wider pass
+        repeats the pattern: a third of the calls on a refused panel, for
+        answers already in hand. tesseract is deterministic on the same pixels,
+        so the memo changes nothing but the clock."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
+            asked.append((int(left), int(right), int(top), int(bottom), round(float(scale), 3)))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertGreater(len(asked), 8, "the search hardly searched: %s" % (asked,))
+        self.assertEqual(len(asked), len(set(asked)),
+                         "%d of %d strip reads were repeats" % (len(asked) - len(set(asked)), len(asked)))
+        RUN[0] += 1
+
+
+class WhatAWordSays(unittest.TestCase):
+    """`numeral`: the string a tesseract word amounts to, or None."""
+
+    def test_the_regex_alone_is_what_it_was(self):
+        self.assertEqual(A.numeral("200"), "200")
+        self.assertEqual(A.numeral("-20"), "-20")
+        self.assertEqual(A.numeral("0.5"), "0.5")
+        self.assertIsNone(A.numeral("200-"))
+        self.assertIsNone(A.numeral("150,000"))
+        self.assertIsNone(A.numeral("0,90"))
+        RUN[0] += 1
+
+    def test_commas_are_thousands_or_decimals_and_nothing_else(self):
+        """REVERT: drop the comma handling. "150,000" and "0,90" then split
+        into two numerals each, and the whitelist never sees a comma."""
+        self.assertEqual(A.numeral("150,000", comma=True), "150000")
+        self.assertEqual(A.numeral("1,000,000", comma=True), "1000000")
+        self.assertEqual(A.numeral("0,90", comma=True), "0.90")
+        self.assertEqual(A.numeral("-2,5", comma=True), "-2.5")
+        self.assertIsNone(A.numeral("1,0000", comma=True))
+        self.assertIsNone(A.numeral("12,34,5", comma=True))
+        RUN[0] += 1
+
+
+class TheSecondPass(unittest.TestCase):
+    """Everything learnt at 600 DPI lives in a pass that runs only after the
+    tuned search refused - because put into the first pass, each of these
+    changed a reading that was right."""
+
+    def test_tick_reach_is_the_ticks_and_not_the_spine_or_the_gridlines(self):
+        """REVERT: take a percentile over every row. The spine is a rule
+        several pixels wide and `spine_x` a column inside it, so most rows
+        carry a 3 px run - publication 283's figure 2 had 647 of them against
+        25 tick rows - and the reach came out 3 where the ticks were 31."""
+        dark = np.zeros((400, 300), dtype=bool)
+        dark[:, 197:201] = True                               # a spine 4 px wide
+        for y in (50, 150, 250, 350):
+            dark[y:y + 3, 170:200] = True                     # 30 px ticks
+        dark[296:306, 0:200] = True                           # a gridline to the spine, 10 rows
+        self.assertEqual(A.tick_reach(dark, 200, 0, 400, cap=60), 30)
+        self.assertEqual(A.tick_reach(dark, 200, 0, 40, cap=60), 3,
+                         "no tick: the spine's own thickness is the reach")
+        RUN[0] += 1
+
+    def test_the_magnification_keeps_the_glyph_size_tesseract_was_tuned_on(self):
+        """REVERT: magnify x3 whatever the render. At 600 DPI that is where
+        `5` reads as `9`: publication 360's 3.5 read 3.9 at x3, 3.5 at x1.5."""
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX), 3.0)
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX * 2), 1.5)
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX * 10), 1.0, "never below none")
+        self.assertEqual(A.scale_for(A._TUNED_PANEL_PX / 2), 3.0, "never above the tuned")
+        self.assertEqual(A.scale_for(None), 3)
+        RUN[0] += 1
+
+    def test_the_second_pass_starts_only_after_the_first_refused(self):
+        """REVERT: run the second pass first, or fold its settings into the
+        first. A comma in the first pass's whitelist read one panel's 3.5 as
+        3.9; an anchor moved 2 px flipped a marginal read. Observed on the
+        calls the search makes, so it needs no tesseract."""
+        asked = []
+
+        def spy(img, dark, left, right, top, bottom, scale=3, **kw):
+            asked.append((bool(kw.get("comma")), int(right), float(scale)))
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0, tick=22, gap=72)
+        real = A._ocr_numerals
+        A._ocr_numerals = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        flags = [c for c, _r, _s in asked]
+        self.assertIn(True, flags, "the second pass never ran")
+        self.assertIn(False, flags, "the first pass never ran")
+        first_second = flags.index(True)
+        self.assertNotIn(True, flags[:first_second])
+        self.assertNotIn(False, flags[first_second:],
+                         "a first-pass call after the second pass began")
+        # and the second pass is the one with the 600 DPI settings
+        second = [(r, s) for c, r, s in asked if c]
+        reach = A.tick_reach(dark, sx, box[2], box[3], cap=max(10, (box[3] - box[2]) // 8))
+        self.assertGreater(reach, 20, "the fixture's ticks were not measured")
+        self.assertTrue(all(r <= sx - reach for r, _s in second),
+                        "a second-pass strip reaches into the ticks: %s" % (second[:4],))
+        self.assertEqual(second[0][1], 1.5,
+                         "the second pass did not magnify for the render: %s" % (sorted({s for _r, s in second}),))
+        # and what comes after it only ever shows the glyph SMALLER - the
+        # passes at the glyph's own size - never the x3 the first pass used
+        self.assertTrue(all(s <= 2.0 for _r, s in second),
+                        "a later pass enlarged past the render's magnification: %s" % (sorted({s for _r, s in second}),))
+        RUN[0] += 1
+
+    def test_a_cut_strip_is_dropped_whole(self):
+        """REVERT: drop only the words the guard flagged. A cut at the strip's
+        edge crosses every right-aligned label of that width whether the guard
+        can see it on each or not - a cut just after a decimal point leaves
+        nothing on the middle rows. Publication RS-5362092's `0.74 0.72 0.70
+        0.68` came back `74 72 70` unflagged beside a flagged `38`, and the
+        three were a ladder: every value in the panel a hundred times too
+        big. ("250 225 200" read as "50 25 0" is the same shape with every
+        word flagged.) The strips are faked so the rule is observed by
+        itself."""
+        calls = []
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            calls.append((int(left), int(right)))
+            if right - left < 100:                              # narrow: cut after the point
+                return [(74.0, 100.0, A.CLIP_NONE), (72.0, 200.0, A.CLIP_NONE),
+                        (70.0, 300.0, A.CLIP_NONE), (38.0, 400.0, A.CLIP_STRIP)]
+            return [(0.74, 100.0, A.CLIP_NONE), (0.72, 200.0, A.CLIP_NONE),
+                    (0.70, 300.0, A.CLIP_NONE)]
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual([v for v, _r in got], [0.74, 0.72, 0.70], got)
+        self.assertTrue(any(r - l < 100 for l, r in calls), "no narrow strip was tried first")
+        RUN[0] += 1
+
+    def test_a_dropped_glyph_costs_only_its_word(self):
+        """REVERT: a clipped numeral disqualifies its whole strip. Publication
+        S41467-023-41990-4's ECW axis, `5 0 -5 -10`: tesseract dropped the
+        minus of -5 in a strip that held all four labels whole, the guard
+        flagged the 5, the strip went out with 5, 0 and -10 in it, no other
+        strip read three, and the axis was refused. A glyph dropped INSIDE the
+        strip says nothing about the other words. Faked: the narrow strip is
+        that strip, the wide one reads nothing."""
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            if right - left < 100:
+                return [(5.0, 100.0, A.CLIP_NONE), (0.0, 200.0, A.CLIP_NONE),
+                        (5.0, 300.0, A.CLIP_WORD), (-10.0, 400.0, A.CLIP_NONE)]
+            return []
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertEqual(got, [(5.0, 100.0), (0.0, 200.0), (-10.0, 400.0)])
+        RUN[0] += 1
+
+    def test_a_cut_seen_at_either_magnification_condemns_the_union(self):
+        """The union pass reads one strip at two magnifications and merges by
+        row. The 0.74 strip above at x3 flags its `38` as a dropped glyph and
+        at x4 as a cut; merged by "first flag wins" the cut is lost and the
+        union is `74 72 70`, a ladder. The graver verdict has to win the
+        merge. Faked so no single magnification ladders on its own."""
+
+        def fake(img, dark, left, right, top, bottom, scale=3, **kw):
+            if right - left >= 100:
+                return []
+            if abs(float(scale) - 3.0) < 1e-6:
+                return [(74.0, 100.0, A.CLIP_NONE), (70.0, 300.0, A.CLIP_NONE),
+                        (38.0, 400.0, A.CLIP_WORD)]
+            return [(72.0, 200.0, A.CLIP_NONE), (38.0, 400.0, A.CLIP_STRIP)]
+
+        img, dark, box, sx, base = panel_with_labels(2.0)
+        real = A._ocr_numerals
+        A._ocr_numerals = fake
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._ocr_numerals = real
+        self.assertFalse(A.ladder(got)[0], "the cut strip's union was accepted: %s" % (got,))
+        RUN[0] += 1
+
+    def test_the_guard_tells_a_cut_from_a_dropped_glyph(self):
+        """The classification itself, on real ink with tesseract faked: `-5`
+        is drawn, and the reader is told only the `5` was read. With the strip
+        holding the minus the word is `CLIP_WORD`; with the strip's edge
+        between the minus and the 5 it is `CLIP_STRIP`. Same ink, same word,
+        one question: does the word start at the strip's edge?"""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        if A.pytesseract is None:
+            self.skipTest("axis_reader has no pytesseract to fake")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-5", "-15", "-25"), gap=100)
+        x0, x1, y0, y1 = box
+        rows = np.where(dark[y0:y1, :sx - 40].any(axis=1))[0] + y0
+        yt, yb = int(rows.min()), int(rows.min() + 40)             # the first label's rows
+        cols = np.where(dark[yt:yb, :sx - 40].any(axis=0))[0]
+        runs = [[cols[0]]]
+        for c in cols[1:]:
+            (runs[-1].append(c) if c - runs[-1][-1] <= 3 else runs.append([c]))
+        minus, digit = runs[0], runs[-1]                             # ink columns of - and 5
+        gl, gr = int(digit[0]), int(digit[-1]) + 1
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+
+        def faked(left, scale):
+            def image_to_data(big, config="", output_type=None):
+                return {"text": ["5"], "conf": ["90"],
+                        "left": [int((gl - left) * scale)], "top": [int((yt - top) * scale)],
+                        "width": [int((gr - gl) * scale)], "height": [int((yb - yt) * scale)]}
+            real = A.pytesseract.image_to_data
+            A.pytesseract.image_to_data = image_to_data
+            try:
+                return A._ocr_numerals(img, dark, left, sx - 40, top, bottom, scale, with_clip=True)
+            finally:
+                A.pytesseract.image_to_data = real
+
+        inside = faked(int(minus[0]) - 120, 1.5)
+        at_edge = faked(int(minus[-1]) + 2, 1.5)
+        self.assertEqual([(v, cl) for v, _r, cl in inside], [(5.0, A.CLIP_WORD)], inside)
+        self.assertEqual([(v, cl) for v, _r, cl in at_edge], [(5.0, A.CLIP_STRIP)], at_edge)
+        RUN[0] += 1
+
+    def test_a_cut_digit_is_seen_as_clipped(self):
+        """The clip test itself, on real ink: a strip whose left edge falls
+        inside the `1` of 1400 reads 400 and flags it; one that holds the
+        whole label reads 1400 and does not. (An edge that lands exactly in
+        the gap between two digits is not seen - that is the guard's limit,
+        and the overlay is where those are caught.)"""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("1400", "1200", "1000"), gap=100)
+        x0, x1, y0, y1 = box
+        cols = np.where(dark[y0:y1, :sx - 40].any(axis=0))[0]
+        ink_left = int(cols.min())
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+        whole = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        cut = A._ocr_numerals(img, dark, ink_left + 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        self.assertEqual([(v, cl) for v, _r, cl in whole], [(1400.0, False), (1200.0, False), (1000.0, False)])
+        self.assertEqual([(v, cl) for v, _r, cl in cut],
+                         [(400.0, A.CLIP_STRIP), (200.0, A.CLIP_STRIP), (0.0, A.CLIP_STRIP)])
+        RUN[0] += 1
+
+    def test_a_sign_left_of_the_strip_makes_the_word_untrusted(self):
+        """REVERT: look only two pixels past the edge. Publication
+        S0362119712070249 prints -10 -20 -30 -40 with the minus a third of an
+        em to the left; a strip starting between the two read 10 20 30 40 - a
+        ladder in good standing with the wrong sign, and every value in the
+        panel flipped. The same look catches `0.8` read as `8`."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-10", "-20", "-30"), gap=100)
+        x0, x1, y0, y1 = box
+        ink_left = int(np.where(dark[y0:y1, :sx - 40].any(axis=0))[0].min())
+        top, bottom = max(0, y0 - 10), min(img.height, y1 + 6)
+        signed = A._ocr_numerals(img, dark, ink_left - 20, sx - 40, top, bottom, 1.5, with_clip=True)
+        unsigned = A._ocr_numerals(img, dark, ink_left + 18, sx - 40, top, bottom, 1.5, with_clip=True)
+        self.assertEqual([(v, cl) for v, _r, cl in signed], [(-10.0, False), (-20.0, False), (-30.0, False)])
+        self.assertEqual([(v, cl) for v, _r, cl in unsigned],
+                         [(10.0, A.CLIP_STRIP), (20.0, A.CLIP_STRIP), (30.0, A.CLIP_STRIP)])
+        RUN[0] += 1
+
+    def test_ticks_inside_the_strip_are_read_past_in_the_second_pass(self):
+        """The 283 shape, drawn: 200 150 100 with 44 px ticks. The tuned strips
+        end 2 to 6 px from the spine and so hold the ticks; tesseract returns
+        "200-" at confidence 0 and the first pass refuses. The second pass
+        starts past the ticks and reads the axis."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("200", "150", "100"), tick=22, gap=72)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [200.0, 150.0, 100.0], pairs)
+        RUN[0] += 1
+
+    def test_a_negative_axis_is_read_with_its_sign(self):
+        """The whole read, not the one strip: -10 -20 -30 come back negative,
+        and an axis through zero (10, 0, -10) comes back as a ladder with a
+        negative step. The single-strip test above shows the guard; this one
+        shows the pass that runs in production keeps the sign it found."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("-10", "-20", "-30"), gap=100)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [-10.0, -20.0, -30.0], pairs)
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("10", "0", "-10"), gap=100)
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [10.0, 0.0, -10.0], pairs)
+        RUN[0] += 1
+
+    def test_a_rule_inside_the_frame_is_found_and_the_frame_edge_is_not(self):
+        """REVERT: measure the axis only at the frame's left edge. `find_frame`
+        returns the leftmost long rule in the REGION, and on a boxed panel that
+        is the box - publication PONE-0032854 puts the border at x 2 and the
+        plot's spine at x 499, with every numeral between them. Everything
+        measured from the border looks at blank paper."""
+        import numpy as _np
+        dark = _np.zeros((200, 400), bool)
+        dark[20:180, 5] = True                       # the frame's own left edge
+        dark[20:180, 120] = True                     # the plot's spine, inside it
+        self.assertEqual(A.inner_spine(dark, (5, 400, 20, 180)), 120)
+        # a frame drawn two pixels thick is not a rule inside the frame
+        thick = _np.zeros((200, 400), bool)
+        thick[20:180, 5] = True
+        thick[20:180, 11] = True
+        self.assertIsNone(A.inner_spine(thick, (5, 400, 20, 180)))
+        # and neither is a short line: a bar's edge, a gridline segment
+        short = _np.zeros((200, 400), bool)
+        short[20:180, 5] = True
+        short[110:180, 120] = True
+        self.assertIsNone(A.inner_spine(short, (5, 400, 20, 180)))
+        # the LEFTMOST rule inside, not the longest: the axis is the first one
+        two = _np.zeros((200, 400), bool)
+        two[20:180, 5] = True
+        two[30:180, 120] = True
+        two[20:180, 260] = True
+        self.assertEqual(A.inner_spine(two, (5, 400, 20, 180)), 120)
+        self.assertIsNone(A.inner_spine(dark, (5, 400, 20, 22)))   # no height, no rule
+        RUN[0] += 1
+
+    def test_the_label_sitting_on_the_baseline_is_read_from_its_own_band(self):
+        """REVERT: leave the label on the baseline to the strip search. Its
+        crop stops ten pixels past the baseline so a caption cannot leak in,
+        and a 0 printed CENTRED on the baseline is then half a glyph: 306 of
+        this corpus's 685 read panels have a 0 down there that went unread,
+        and it is the label a bar chart needs most - every bar starts at it.
+        (Widening the search's own crop reads it too, and costs a second full
+        search on every panel for a label on some.)"""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, bot, step = panel_with_a_label_on_the_baseline()
+        stops = A.y_tick_labels(img, dark, box, sx, bot)
+        self.assertNotIn(0.0, [v for v, _r in stops],
+                         "the cut label was read by the strip search after all: %s" % (stops,))
+        band = A.label_near(img, dark, box, sx, bot, half=int(step * 0.55))
+        self.assertIn(0.0, [v for v, _r in band], "the band missed it too: %s" % (band,))
+        # and it is read at the row it is printed on, not somewhere else
+        self.assertTrue(any(abs(r - bot) <= step * 0.3 for v, r in band if v == 0.0),
+                        "read at the wrong row: %s (baseline %s)" % (band, bot))
+        RUN[0] += 1
+
+    def test_a_cut_numeral_in_the_band_is_not_a_label(self):
+        """REVERT: take whatever the band's OCR returns. The band sits at the
+        edge of the crop by construction - that is why it exists - so a numeral
+        cut there is exactly the failure the strip search's guard was written
+        for, and a cut label that happens to fall on the ladder's line joins it
+        with a digit missing."""
+        img, dark, box, sx, base, _step = panel_with_a_label_on_the_baseline()
+
+        def fake(img_, dark_, left, right, top, bottom, scale=3, **kw):
+            return [(5.0, (top + bottom) / 2.0, A.CLIP_STRIP),
+                    (0.0, (top + bottom) / 2.0 + 1, A.CLIP_NONE)]
+
+        # THE BAND'S OCR IS THE FAKE, so this needs no tesseract - but
+        # `label_near` returns [] before it asks when pytesseract did not import,
+        # and that is the core profile: CI's core job failed here with [] for
+        # the fake it never reached. A stand-in for the module lets the fake be
+        # asked there too; nothing else in `label_near` touches it.
+        real, module = A._ocr_numerals, A.pytesseract
+        A._ocr_numerals = fake
+        if A.pytesseract is None:
+            A.pytesseract = object()
+        try:
+            got = A.label_near(img, dark, box, sx, base, half=40)
+        finally:
+            A._ocr_numerals, A.pytesseract = real, module
+        self.assertEqual(sorted(set(v for v, _r in got)), [0.0], got)
+        RUN[0] += 1
+
+    def test_a_band_with_nothing_printed_beside_it_reads_nothing(self):
+        """`label_band` measures the label column; where nothing is printed
+        there is no column, and this hands back nothing rather than a strip of
+        its own. What it does NOT do is decide whether what it read is a label
+        - a caption's numerals come back like any other, and `ladder` is what
+        refuses them (see `test_geometry_proposer`)."""
+        scale = 2.0
+        w, h = int(300 * scale), int(460 * scale)
+        img = Image.new("L", (w, h), 255)
+        d = ImageDraw.Draw(img)
+        sx, top = int(150 * scale), int(20 * scale)
+        bot = top + int(_TUNED_H * scale)
+        d.rectangle([sx, top, sx + int(scale), bot], fill=0)          # spine only
+        d.rectangle([sx, bot, w - int(20 * scale), bot + int(scale)], fill=0)
+        dark = np.asarray(img) <= 140
+        self.assertEqual(A.label_near(img, dark, (sx, w - int(20 * scale), top, bot),
+                                      sx, bot, half=40), [])
+        RUN[0] += 1
+
+    def test_a_lone_digit_beside_a_tick_needs_the_strip_moved_past_it(self):
+        """REVERT: keep the first reading whenever it ladders. The tuned strips
+        stand 6 px from the axis and this corpus's ticks reach further on 76%
+        of the panels it reads; a tick glued to a numeral comes back as
+        punctuation - "9." or "15-" - and `numeral` throws the word away. A
+        TWO-digit label survives it: psm 11 reads it cleanly on its own. A lone
+        digit psm 11 does not return at all, so only psm 6's "9." is left and
+        that is nothing. Publication S41467-023-41990-4's "Number of finishers"
+        axis read 16..10 and not one of 9..1."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        x0, x1, y0, y1 = box
+        self.assertGreater(A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8)),
+                           A._TUNED_GAP_MAX, "the fixture's ticks do not reach the strips")
+        tuned = A._search(img, dark, box, sx, x0, max(0, y0 - 10),
+                          min(img.height, y1 + 6), 3, comma=False, seen={})
+        got = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in tuned], [12.0, 11.0, 10.0],
+                         "the tuned strips no longer show the fault: %s" % (tuned,))
+        self.assertTrue(any(v < 10 for v, _r in got), "still no lone digit: %s" % (got,))
+        self.assertGreater(len(got), len(tuned), got)
+        RUN[0] += 1
+
+    def test_a_short_tick_leaves_the_tuned_reading_alone(self):
+        """REVERT: ask again on every panel. The tuned strips were measured to
+        clear a printed tick, and where the ticks are short they did: asking
+        again costs half a second a panel and can only answer with what the
+        first reading already said."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        asked = []
+        real = A._search
+
+        def spy(img, dark, box, anchor_spine, anchor_edge, top, bottom, scale, comma, seen, **kw):
+            asked.append(int(anchor_spine))
+            return real(img, dark, box, anchor_spine, anchor_edge, top, bottom,
+                        scale, comma, seen, **kw)
+
+        img, dark, box, sx, base = panel_with_right_aligned_labels(tick=1, gap=40)
+        A._search = spy
+        try:
+            A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(asked, [sx], "the strips were moved although the ticks are short")
+        RUN[0] += 1
+
+    def test_a_reading_from_somewhere_else_is_not_a_richer_one(self):
+        """REVERT: take the second reading whenever it has more labels. A strip
+        moved off the axis can read the x axis's numerals or the neighbouring
+        panel's and form its own perfectly good ladder; a RICHER reading of
+        this axis says the same thing about every row both of them saw."""
+        first = [(30.0, 100.0), (20.0, 200.0)]
+        self.assertEqual(A.richer_read(first, first + [(10.0, 300.0)]),
+                         first + [(10.0, 300.0)])
+        self.assertIsNone(A.richer_read(first, [(30.0, 100.0)]))
+        self.assertIsNone(A.richer_read(first, list(first)))
+        self.assertIsNone(A.richer_read(first, [(60.0, 100.0), (40.0, 200.0), (20.0, 300.0)]))
+        RUN[0] += 1
+
+    def test_the_labels_only_one_reading_saw_are_kept_too(self):
+        """REVERT: choose between the two readings. What the strips lose at one
+        end of the axis they can find at the other - S41467-023-41990-4's
+        "Number of finishers" reads 16..10 where the strips stand and 9..0 where
+        they move past the ticks - and either answer alone leaves half the
+        printed axis unmarked on the page the person confirms from. The two
+        agree about every row both saw, so the rest are labels."""
+        first = [(12.0, 100.0), (11.0, 200.0), (10.0, 300.0)]
+        second = [(9.0, 400.0), (8.0, 500.0), (7.0, 600.0)]
+        self.assertEqual(A.merged_read(first, second),
+                         first + second, "the merge is not in row order")
+        seen_twice = A.merged_read(first, [(11.0, 201.0)] + second)
+        self.assertEqual([v for v, _r in seen_twice],
+                         [12.0, 11.0, 10.0, 9.0, 8.0, 7.0])
+        self.assertEqual([r for v, r in seen_twice if v == 11.0], [201.0],
+                         "the same label was kept at two rows")
+        RUN[0] += 1
+
+    def test_a_merge_is_kept_only_while_it_lengthens_the_ladder(self):
+        """REVERT: keep the merge whenever there is one. The tuned reading can
+        hold a numeral that is no label - a rotated axis title, the x axis - and
+        `ladder` drops it from a reading of its own; merged into a longer one it
+        would be dropped again, taking the labels beside it with it. The merge
+        is kept only while the ladder in it is longer than the ladder it was
+        built on."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def reading(tuned, moved):
+            def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                    scale, comma, seen, **kw):
+                return list(tuned if int(anchor_spine) == sx else moved)
+            A._search = spy
+            try:
+                return A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A._search = real
+
+        first = [(12.0, 100.0), (11.0, 200.0), (10.0, 300.0)]
+        moved = [(9.0, 400.0), (8.0, 500.0), (7.0, 600.0), (6.0, 700.0)]
+        self.assertEqual(reading(first, moved), first + moved,
+                         "the two readings were not put together")
+        title = first + [(99.0, 350.0)]
+        self.assertEqual(A.ladder_size(A.merged_read(title, moved)),
+                         A.ladder_size(moved), "the fixture's stray numeral is free")
+        self.assertEqual(reading(title, moved), moved,
+                         "a merge that is no longer than what it was built on was kept")
+        RUN[0] += 1
+
+    def test_a_label_read_twice_is_not_a_richer_reading(self):
+        """REVERT: count the numerals. The reading a panel is calibrated from
+        is the LADDER, and a second look that reads one label at two rows has
+        more numerals and a shorter ladder: publication S41467-023-41990-4's
+        `600 450 300 150` came back with `450` at both 679 and 684, and the
+        ladder that survived it was three labels where four had stood."""
+        first = [(600.0, 558.3), (450.0, 678.8), (300.0, 799.3), (150.0, 919.8)]
+        twice = [(600.0, 558.3), (450.0, 679.0), (450.0, 684.5), (300.0, 799.3),
+                 (150.0, 920.0)]
+        self.assertGreater(len(twice), len(first))
+        self.assertEqual(A.ladder_size(first), 4)
+        self.assertEqual(A.ladder_size(twice), 3)
+        self.assertIsNone(A.richer_read(first, twice))
+        self.assertEqual(A.ladder_size([(3.0, 10.0), (1.0, 30.0)]), 0)
+        RUN[0] += 1
+
+    def test_a_second_look_is_kept_only_when_it_reads_this_axis_better(self):
+        """REVERT: keep the second look whenever it ladders, or whenever it is
+        longer. The strips move by the length of the ticks, and a strip that
+        moves can land on the x axis's numerals, on the neighbouring panel's,
+        or on nothing at all. A reading replaces the tuned one only when it is
+        a LADDER and says the same thing about every row both of them saw."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_right_aligned_labels()
+        real = A._search
+
+        def spy_with(second):
+            def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                    scale, comma, seen, **kw):
+                if int(anchor_spine) == sx:
+                    return real(img_, dark_, box_, anchor_spine, anchor_edge,
+                                top, bottom, scale, comma, seen, **kw)
+                return list(second)
+            return spy
+
+        def reading(second):
+            A._search = spy_with(second)
+            try:
+                return A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A._search = real
+
+        tuned = reading([])
+        self.assertTrue(A.ladder(tuned)[0], tuned)
+        longer_elsewhere = [(1.0, 50.0), (5.0, 150.0), (2.0, 250.0), (9.0, 350.0)]
+        self.assertFalse(A.ladder(longer_elsewhere)[0], "the fixture is a ladder")
+        self.assertEqual(reading(longer_elsewhere), tuned,
+                         "a longer reading that is no ladder was kept")
+        another_axis = [(120.0, 50.0), (110.0, 150.0), (100.0, 250.0)]
+        self.assertTrue(A.ladder(another_axis)[0], "the fixture is no ladder")
+        self.assertEqual(reading(another_axis), tuned,
+                         "a ladder that reads no more labels was kept")
+        RUN[0] += 1
+
+    def test_labels_set_large_are_shown_at_their_own_size(self):
+        """REVERT: read only at the magnification the panel's height asks for.
+        `scale_for` takes the panel height as a proxy for the glyph, and a
+        figure that sets its labels large breaks the proxy: publication
+        S41467-023-41990-4's CoP velocity panel is 703 px tall, so it is shown
+        at x1.68, and its `50` comes back `90` at confidence 65 - one digit,
+        and the whole axis refuses. The same pixels read 150 100 50 at
+        confidence 95 when the glyph is shown at its own size.
+
+        THE MISREAD AT THE TUNED SIZE IS SUPPLIED; THE READ AT ITS OWN SIZE IS
+        TESSERACT'S. This fixture used to draw both halves, and the first half
+        is not a property of the drawing: tesseract 4.1.1 misreads it at the
+        magnifications the panel's height asks for, as it misread the corpus
+        panel, and tesseract 5.3.4 - Ubuntu 24.04's, CI's - reads it correctly
+        there, so the pass below is never reached and "the fixture no longer
+        shows the fault" was CI's red on every run since this was written.
+        Which tesseract misreads a given drawing is not something a test can
+        hold. What every tesseract here does is the other half: shown at its
+        own size, the glyph reads."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large()
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        glyph = A.label_height(dark, box, sx - reach, y0 - 10, base + 10)
+        self.assertGreater(glyph, max(A._GLYPH_TARGETS),
+                           "the fixture's labels are not set large")
+        own = [round(float(s), 9) for s in A.smaller_scales(glyph, A.scale_for(y1 - y0, 3))]
+        self.assertTrue(own, "no magnification smaller than the tuned one")
+        misread = [(15.0, 92.0), (10.0, 422.0), (9.0, 752.0)]     # one digit, as 50 -> 90
+        real_search, real_scales = A._search, A.smaller_scales
+
+        def tuned_sizes_misread(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom,
+                                scale, comma, seen, **kw):
+            if round(float(scale), 9) in own:
+                return real_search(img_, dark_, box_, anchor_spine, anchor_edge, top,
+                                   bottom, scale, comma, seen, **kw)
+            return list(misread)
+
+        A._search = tuned_sizes_misread
+        try:
+            A.smaller_scales = lambda _h, _c: []
+            try:
+                tuned = A.y_tick_labels(img, dark, box, sx, base)
+            finally:
+                A.smaller_scales = real_scales
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real_search
+        self.assertFalse(A.ladder(tuned)[0],
+                         "without the smaller pass the misread was accepted: %s" % (tuned,))
+        self.assertEqual([v for v, _r in got], [15.0, 10.0, 5.0], got)
+        RUN[0] += 1
+
+    def test_the_glyph_is_measured_and_not_the_panel(self):
+        """The label column's ink, in rows. A measurement, so a panel with
+        nothing printed beside its axis has no height to give."""
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large(size=76)
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        self.assertAlmostEqual(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                               56, delta=8)
+        self.assertIsNone(A.label_height(dark, box, 0, y0 - 10, base + 10))
+        RUN[0] += 1
+
+    def test_the_smaller_pass_never_enlarges(self):
+        """A 40 px glyph is shown at its own size and then at seven tenths of
+        it; a 10 px one would want x4 and does not get it, because x3 was
+        already asked and this pass is here to shrink."""
+        self.assertEqual(A.smaller_scales(40.0, 3.0), [1.0, 0.7])
+        self.assertEqual(A.smaller_scales(10.0, 3.0), [2.8])
+        self.assertEqual(A.smaller_scales(10.0, 2.0), [])
+        self.assertEqual(A.smaller_scales(None, 3.0), [])
+        RUN[0] += 1
+
+    def test_each_measured_magnification_is_asked_and_only_a_ladder_kept(self):
+        """REVERT: keep whatever the first smaller magnification says. What
+        tesseract answers changes with the size it is shown, which is the whole
+        reason this pass exists - and an answer that does not ladder is not an
+        answer. Two of the nine panels this corpus recovered laddered only at
+        the second magnification.
+
+        EVERY ANSWER HERE IS THE SPY'S, the tuned sizes' included. They used to
+        be tesseract's own, and this pass is only reached when those refuse:
+        tesseract 4.1.1 misreads this fixture there, 5.3.4 (CI's) reads it, and
+        on 5.3.4 the pass was never asked and the real 15 10 5 came back. The
+        tuned sizes now misread one digit the way the corpus panel did, so the
+        order of the smaller magnifications is what is tested, on any
+        tesseract."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels_set_large()
+        x0, x1, y0, y1 = box
+        reach = A.tick_reach(dark, sx, y0, y1, cap=max(10, (y1 - y0) // 8))
+        scales = A.smaller_scales(A.label_height(dark, box, sx - reach, y0 - 10, base + 10),
+                                  A.scale_for(y1 - y0, 3))
+        self.assertEqual(len(scales), 2, scales)
+        good = [(30.0, 100.0), (20.0, 200.0), (10.0, 300.0)]
+        misread = [(15.0, 92.0), (10.0, 422.0), (9.0, 752.0)]     # one digit, as 50 -> 90
+        asked, real = [], A._search
+
+        def spy(img_, dark_, box_, anchor_spine, anchor_edge, top, bottom, scale,
+                comma, seen, **kw):
+            asked.append(round(float(scale), 3))
+            if abs(scale - scales[0]) < 1e-9:
+                return [(30.0, 100.0), (20.0, 200.0), (99.0, 300.0)]
+            if abs(scale - scales[1]) < 1e-9:
+                return list(good)
+            return list(misread)
+
+        A._search = spy
+        try:
+            got = A.y_tick_labels(img, dark, box, sx, base)
+        finally:
+            A._search = real
+        self.assertEqual(got, good, "the second magnification was not kept")
+        self.assertEqual(asked[-2:], [round(s, 3) for s in scales],
+                         "the magnifications asked for were %s" % (asked,))
+        RUN[0] += 1
+
+    def test_european_decimals_are_read_in_the_second_pass(self):
+        """PIIS1566070202001327's axes: 1,00 0,90 ... 0,00. Without the comma
+        they read as 1 00 0 90, and once as the ladder 9 .. 1 - ten times
+        the printed value, accepted."""
+        if not has_ocr():
+            self.skipTest("no tesseract in this environment")
+        if not os.path.exists(FONT):
+            self.skipTest("no DejaVu font to draw numerals with")
+        img, dark, box, sx, base = panel_with_labels(2.0, labels=("1,00", "0,90", "0,80"))
+        pairs = A.y_tick_labels(img, dark, box, sx, base)
+        self.assertEqual([v for v, _r in pairs], [1.0, 0.9, 0.8], pairs)
+        RUN[0] += 1
+
+
+if __name__ == "__main__":
+    result = unittest.TextTestRunner(verbosity=2).run(
+        unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__]))
+    print("FDT_SCENARIOS_RUN=%d" % RUN[0])
+    sys.exit(0 if result.wasSuccessful() else 1)

@@ -1,380 +1,129 @@
-# figure-digitization-triage
+# figure-digitization-triage (fdt)
 
-A reproducible figure-digitization and QC system for a systematic review of
-cardiovascular responses to spaceflight and head-down bed rest. The figure-level
-worklist holds 116 publications and 637 figure rows, of which 95 publications
-and 353 figures are to be digitized. Many of the included studies report their
-outcomes only as plots, so the numbers have to be read off the figures — and a
-number read off a figure is only usable if the pipeline that produced it can say
-exactly what it did.
+A reproducible pipeline for reading numbers off published figures for a
+systematic review, with quality control that fails closed. Many studies report
+their outcomes only as plots, and a number read off a plot is only usable if the
+pipeline that produced it can say exactly what it did: which raster, which
+calibration, which reader, which environment, and which person looked at it.
 
-**This repository carries no publisher figures.** It once did - rasters from
-three publications (323, 386, 397), held for reproducibility - while this line
-said "private research repository" and GitHub said `visibility: public`. A claim
-in a file is not a setting on a server, and nothing here was checking the two
-against each other. The rasters are gone from the tree and from its history.
+It was built for a review of cardiovascular responses to spaceflight and
+head-down bed rest, but nothing in it is specific to one paper or one field:
+every check is keyed on a declared data type or dimension, never on a
+publication.
 
-What stays is `raster_root.py`, which pins each one by SHA-256. Point
-`FDT_RASTER_ROOT` at a directory holding them and every section runs; without it
-they SKIP, loudly, naming the file they could not find - and a raster that IS
-present and hashes differently is REFUSED rather than measured, because
-coordinates taken on one render return a plausible number on another.
-
-The scenario counts below are what a **clone of this repository** runs, and a
-further 286 need the figures. CI fetches them from a private source when
-`FDT_RASTER_SOURCE` and `FDT_RASTER_TOKEN` are set on the repository, and passes
-`--rasters present` to the documentation guard only in a job that actually
-fetched them — so a fork with no secret is green at its own total rather than
-red for a reason it cannot fix, and a fetch that silently did nothing is red
-rather than green at the fork's number.
-
-    FDT_RASTER_SOURCE   owner/repo of a PRIVATE repository holding the figures,
-                        laid out exactly as the keys of `raster_root.RASTERS`
-                        (`fixtures/id323_fig1.jpeg` under `fixtures/`), AND the
-                        corpus beside them: `dig201.csv`, `clips201.csv` and
-                        `clips/`
-    FDT_RASTER_TOKEN    a token that can read it, and nothing else
-
-Neither secret is available to a workflow run from a fork, which is the
-behaviour wanted: a pull request from outside cannot make CI hand it the
-figures.
-
-## The path a number takes
-
-    plan_397.json                one typed document per publication
-      | compile_plan.py          hashes, figure rows and calibrations DERIVED
-      v
-    eleven manifests             validated before a raster is opened
-      | run_batch.py
-      v
-    figure_values_machine_qc.csv the gate found nothing wrong. NOT poolable.
-    review/<Panel_ID>_overlay.png what the reader saw, drawn on what it read
-      | a person looks, and fills value_review.csv
-      | finalize_batch.py
-      v
-    figure_values_accepted.csv   the only file to pool from
-
-## Before the plan: what a person confirms
-
-At a hundred publications the plan is not typed; it is assembled from what a
-person confirmed on two pages, and a panel reaches the plan only when both
-have been answered for it.
-
-    geometry_proposer.py   frame, tick rows, and what the y axis SAYS (OCR,
-                           checked against the tick grid) - or NO_FRAME
-      | geometry_page.py   the person looks; types only where the reader
-      |                    refused; DRAWS the frame where none was found
-      | record_geometry.py geometry_decisions.csv (who, when, the two
-      v                    value@pixel pairs, Frame_Source)
-    identity_proposer.py   x labels at one pitch, legend entries matched to the
-                           plot's colours, the y title split into outcome and
-                           unit, n from the caption - or refused
-      | identity_page.py   the person names the two FACTORS nobody can read
-      |                    (what the x axis is, what the series are), corrects
-      |                    the rest, declares bar-top and error-bar stems
-      | record_identity.py identity_decisions.csv
-      v
-    make_plan.py           GEOMETRY_NOT_AUTHORED becomes AUTO_DIGITIZE with a
-                           read block, a unit and a grid - and every panel
-                           missing either answer is named in plan_panels.csv
-
-## What it does
-
-    reviewer_registry.csv        who may attest an inventory, and how to reach them
-    source_document_manifest.csv one row per article / supplement / chapter
-    source_figure_manifest.csv   one row per physical publisher figure
-    source_panel_inventory.csv   one row per visible panel, including the ones
-                                 that will never be digitized
-    ────────────────────────────────────────────────────────────────────────────
-    figure_manifest.csv          the figure a value came from
-    grid_definitions.csv         the factors and levels a figure declares
-    unit_manifest.csv            Figure × Panel × Outcome × Statistic, naming
-                                 the panel that fills it
-    figure_values.csv            Unit_ID × Cell_Key
-    ────────────────────────────────────────────────────────────────────────────
-    panel_manifest.csv           panel box, mark type, axis calibration
-    series_manifest.csv          how the reader tells a series apart, and what
-                                 that series MEANS
-    position_manifest.csv        x pixel or slot, and what that position MEANS
-    reader_config.csv            long-form reader options, one row per option
-
-`compile_plan.py` writes all eleven from one plan. `run_batch.py` executes the
-run layer, gates the result against the data grains, and reports what it could
-not do. `finalize_batch.py` turns approved panels into poolable values, and
-nothing else does.
+```
+PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a person confirmed
+     ─▶ one extraction plan per paper ─▶ manifests ─▶ values that passed machine QC
+     ─▶ a person reviews the overlays ─▶ figure_values_accepted.csv
+```
 
 ## Three rules
 
-**No per-publication exception rules.** `Data_Shape` (A–G) is a display hint;
-validation is a universal factorial grid keyed on declared dimensions. Exception
-codes exist per *data type*, never per paper.
+1. **No per-publication exception rules.** Validation is one factorial grid keyed
+   on declared dimensions; exceptions exist per data type, never per paper.
+2. **Identity is declared, never inferred.** A series is a factor level because
+   the plan says so. When a reader cannot resolve a mark, the cell stays empty
+   and the gate names the hole.
+3. **Fail closed, and loudly.** Every panel ends in exactly one state, and
+   anything short of a pass goes to a queue with its reason. Machine QC is not
+   approval: only `finalize_batch.py`, given a registered person's review, writes
+   values you may pool.
 
-**Identity is declared, never inferred.** A series is a factor level because the
-manifest says so, not because it was drawn second. When a reader cannot resolve
-a mark, the cell stays empty and the grid gate names the hole — nothing shifts
-to fill it.
+## Install
 
-**Fail closed, and loudly.** Every panel lands on exactly one terminal state,
-and everything short of `AUTO_PASS` goes to `manual_queue.csv` with the reason
-attached. A panel the reader could not do is louder than one it could — and a
-defect in a reader stops the batch rather than arriving in somebody's queue as
-"go and look at this figure again".
+Python 3.11 and Node.js (for the review pages' logic tests).
 
-## Running it
+    git clone https://github.com/hpend2373/figure-digitization-triage
+    cd figure-digitization-triage
+    python3 -m pip install -r requirements-lock.txt     # the exact versions results are reproducible on
+    # only for reading PDFs (intake) and OCR of tick labels:
+    python3 -m pip install -r requirements-intake.txt
+    sudo apt-get install poppler-utils tesseract-ocr
 
-    pip install -r requirements-lock.txt     # the versions results were produced on
-    apt-get install fonts-noto-cjk           # the gallery's captions are Korean
-    export FDT_RASTER_ROOT=/where/the/figures/are   # see below; without it the
-    python3 pilot_397.py                     # pilot SKIPs and says which file
+No scipy: the statistics are written in NumPy so a missing scipy cannot silently
+change a number.
 
-    python3 compile_plan.py plan_397.json MANIFEST_DIR --file-root "$FDT_RASTER_ROOT"
-    python3 run_batch.py MANIFEST_DIR OUT --file-root "$FDT_RASTER_ROOT"
-    python3 finalize_batch.py OUT --template # then fill in the decisions
-    python3 finalize_batch.py OUT
+## Try it in two minutes
 
-Every test file is a standalone script:
+    python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart
 
-    for t in test_*.py; do python3 "$t"; done
+This draws a synthetic bar chart (heart rate, two postures, six sessions,
+mean ± SD — every true value known), compiles its plan, and reads it. Run as is,
+it ends in `DEMO_OUTPUT_REFUSED`: the plan's only reviewer is a demonstration
+identity, and a demonstration identity cannot stand behind a poolable value.
+Set your own name, ORCID and dates and it stops at `MACHINE_QC_PASSED` with an
+overlay for you to review — see [`examples/quickstart`](examples/quickstart/).
 
-## synthesis/
+## Use it on your papers
 
-같은 규율을 두 번째 파이프라인에 적용한 하네스입니다. 이 저장소가 그림에서 값을 읽는
-쪽이라면, `synthesis/`는 이미 추출된 값이 워크북·CSV·영수증 사이에서 어긋나지 않는지를
-지킵니다. 데이터를 읽지 않는 두 모듈(`route_gate.py`, `rowkey.py`)이 CI에서 돌고,
-나머지는 코퍼스가 있어야 실행됩니다. 코퍼스는 재배포할 수 없으므로 추정치와 인용문은
-저장소에 없습니다 — `synthesis/README.md`를 보세요.
+Follow **[docs/PROCEDURE.md](docs/PROCEDURE.md)** — nine stages from PDFs to
+accepted values, each marked with who does it (a script, an AI agent, or a
+person). The human review itself is in
+[docs/REVIEW_RUNBOOK.md](docs/REVIEW_RUNBOOK.md). The core of the last two
+stages is:
 
-<!-- CURRENT_PIPELINE_VERSION: 9.28 -->
-<!-- CURRENT_SCENARIO_COUNT_CORE: 4903 -->
-<!-- CURRENT_SCENARIO_COUNT_FULL: 5081 -->
-<!-- CURRENT_SCENARIO_COUNT_RASTER_ONLY: 286 -->
-<!-- CURRENT_INTAKE_FULL_SCENARIOS: 268 -->
+    python3 fdt/compile_plan.py PLAN.json MANIFESTS --file-root RUN
+    python3 fdt/run_batch.py MANIFESTS OUT --file-root RUN --doc-root PDFS
+    python3 fdt/finalize_batch.py OUT --template
+    #  a person opens what each row of OUT/review_queue.csv names, fills OUT/value_review.csv
+    python3 fdt/review_preflight.py OUT --review OUT/value_review.csv
+    python3 fdt/finalize_batch.py OUT --review OUT/value_review.csv
 
-4903 scenarios on main after v9.28 under `requirements-lock.txt`, and 5081 with
-the intake backends — `test_corpus_intake` skips its PDF adapter, per-status,
-renderer and crop sections where none is installed, and `test_tick_ocr` skips
-its fifteen glyph-reading scenarios where tesseract is not (`test_identity_proposer`
-skips three more). `intake-full` installs
-both explicitly and records both versions in its log. **CI runs both**, in two
-jobs that install what their profile names rather than inheriting it from the
-runner image: `core` removes poppler-utils and the Python backends before it
-starts, `intake-full` installs `requirements-intake.txt` and poppler-utils. A
-count that depends on what `ubuntu-latest` happens to ship is not a property of
-this repository.
+Success is `OUT/figure_values_accepted.csv` beside a `finalize_stamp.json` whose
+`Status` is `FINALIZED`. Nothing else is a result.
 
-**The core number is CI's measurement, not a local one.** A machine that
-strips the three backends by hand is not the core profile - it is that
-machine minus three backends, and the two differed by three scenarios when
-this was last checked. Whichever way such a gap points, the runner that
-declares the profile is the one that measures it. A local run is a smoke
-test; the marker is what stops either side asserting a count it did not
-run.
+**Keep papers, figures, runs and review answers outside the clone.** This
+repository is public, publisher material is not redistributable, and the test
+suite refuses a tracked PDF or any picture outside `tests/`.
 
-Those two numbers are what a **fresh clone** runs. A further 286 of them need
-the publisher figures, which this repository does not carry and cannot: they are
-not redistributable. `test_bar_reader` (24), `test_integration` (17),
-`test_compile_plan` (198), `test_reproducibility` (5) and
-`test_visual_verification` (42) skip those sections
-where `raster_root.py` cannot find the file, and say which file. Point
-`FDT_RASTER_ROOT` at a directory that mirrors the layout in `raster_root.py` —
-`fixtures/id323_fig1.jpeg` under `fixtures/`, the rest flat — and each total
-grows by that number. Every raster is pinned there by SHA-256, so a file that is not
-the one the coordinates were measured on is refused rather than read. CI passes
-`--rasters present` only in the job that actually fetched them, so a fork with
-no secret is green at the two markers rather than red for a reason it cannot fix.
+## For AI agents
 
-Both are verified in a clean room with scipy blocked — the statistics are
-hand-rolled in NumPy so a missing scipy cannot silently change a p-value. Every
-run records the Python, platform and library versions it used;
-`requirements-lock.txt` pins what the shipped results were produced on, because
-a bar top found at row 312 by one OpenCV and row 313 by the next is a different
-number in the accepted file.
+[`SKILL.md`](SKILL.md) is the whole protocol as an agent reads it, installable
+as a skill: the run contract, every review mode and failure state, what an agent
+may do without the person, and the defect behind each rule. An agent may run
+commands, propose, and record an independent check that agrees under a standing
+approval; it never fills in a person's review answer, signature, date or
+confirmation.
 
-## Attestation
+## Repository layout
 
-No software can count the panels in an arbitrary published figure, so the
-inventory reduces to a person having opened it and looked. `reviewer_registry.csv`
-records who that was, with a contact and `Reviewer_Record_Type` ∈
-`HUMAN | DEMO_IDENTITY`. A run resting on a `DEMO_IDENTITY` reviewer is
-`DEMO_ONLY` wherever it is launched from: it may produce a queue, a coverage
-ledger and a list of QC failures, but if it reaches the end holding values the
-gate accepted it writes none of them.
+    fdt/            the pipeline: every command is `python3 fdt/<script>.py` (--help for options)
+    fdt/sheet/      the panel-count contact sheet used during intake
+    templates/      every CSV schema, generated from the code's column functions
+    docs/           PROCEDURE.md, REVIEW_RUNBOOK.md and the review guides
+    examples/       quickstart: a synthetic figure through compile -> run -> review
+    tests/          the suites (standalone scripts) and their synthetic fixtures
+    SKILL.md        the protocol for agents
 
-`Human_Attestation` is a declared enum, not a cryptographic signature. It buys
-traceability — a row that can be asked about — not proof of authorship.
+## Tests
 
-Machine QC is not approval. `run_batch.py` stops at `MACHINE_QC_PASSED`, which
-means the gate found nothing wrong; it does not mean anybody looked at where
-the marks landed, and a reader that puts a plausible number on the wrong bar
-produces exactly the output the gate has nothing to say about. Each passing
-panel is queued with a `Review_Mode` naming what to open — an overlay PNG in
-almost every case, the WPD project when the picture could not be drawn — and
-`finalize_batch.py` writes the accepted file for panels a registered human
-approved against that specific extraction.
+    bash .github/run_suites.sh                                   # every Python suite
+    for t in tests/test_*.mjs tests/sheet/test_*.mjs; do node "$t"; done
 
-What the approval is bound to is `Review_Subject_SHA256`: the values themselves
-with their cell keys, every manifest, the raw marks, the WPD project and the
-environment that produced them. Change any of it — swap what `CONTROL` and
-`TREATED` mean, nudge a tick, upgrade OpenCV — and the approval is
-`APPROVAL_STALE`, not inherited. The finalizer also re-hashes everything it
-reads before consulting a decision, so editing a value after approving the
-overlay is `RUN_ARTIFACT_MODIFIED` rather than an input.
+Every suite is a standalone script that exits non-zero on its first failure and
+prints one `FDT_SCENARIOS_RUN=N` line. CI runs them in two environments: the
+pinned core with the PDF backends removed, and the full intake profile.
 
-**Hashed and parsed from the same bytes, once.** A hash check that re-opens the
-path names one file and decides from another, and a save landing between the two
-is all it takes. Every verified input goes through `read_verified_bytes` — one
-read, hash those bytes, parse those bytes, as CSV or as JSON — and the frames
-travel out of the decision as a `RunSnapshot` on the verdict: the run stamp, the
-registry, the machine rows, the queue, the artifact ledger and both decision
-files. `review_preflight.py` derives its questions, its bundle and answer
-diagnoses, its comparison and its identity checks from that snapshot rather than
-opening the paths again, and says `NOT EVALUATED` where a field is absent rather
-than falling back to a second read. So the finalizer's answer and everything
-printed beside it come from one moment.
+## Attestation, briefly
 
-That now reaches the structured artifacts the ledger points at — identity
-resolutions, inference manifests, raw marks, point data, the geometry file. Each
-is kept from the read that hashed it and handed to the contract check that
-interprets it, so a geometry file swapped after verification cannot become the
-evidence for a route it does not support. A picture or a contact sheet is hashed
-and nothing more: this module never parses one, so its digest is the whole of
-what the finalizer needs. The bytes are addressed by what the LEDGER recorded —
-type, panel, reference, run-relative path, digest — not by a realpath computed
-afterwards, so re-pointing a symlink between the hash and the read cannot move
-which entry a row resolves to.
+`reviewer_registry.csv` records who inspected a figure, with a contact (ORCID)
+and `Reviewer_Record_Type` ∈ `HUMAN | DEMO_IDENTITY`. A run resting on a demo
+identity is `DEMO_ONLY` and never writes accepted values. An approval is bound to
+`Review_Subject_SHA256` — the values, every manifest, the raw marks and the
+environment — so changing any of them after review makes it `APPROVAL_STALE`
+rather than inherited. `Human_Attestation` is a declared record, not a
+cryptographic signature: it buys traceability, not proof of authorship.
 
-To run the pilot as attested work:
+## 한국어 요약
 
-    export FDT_REVIEWER_NAME="..." FDT_REVIEWER_ORCID="0000-0000-0000-0000"
-    export FDT_INSPECTION_DATE=YYYY-MM-DD FDT_REGISTRATION_DATE=YYYY-MM-DD
-    python3 pilot_397.py
+체계적 문헌고찰에서 **그림으로만 보고된 수치**를 읽어 내는 파이프라인입니다.
+읽은 값마다 어느 그림·눈금·판독기·환경에서 나왔고 누가 확인했는지가 남으며,
+근거가 부족하면 값을 만들지 않고 이유와 함께 대기열로 보냅니다.
 
-All four or none. A partial attestation exits 2.
-
-## History
-
-Each commit is a packaged snapshot rather than an incremental patch, so the
-diffs are wider than a normal working history. What every commit does carry is a
-state the whole suite passed in, and a message naming the review round that
-produced it. Every fix in every round was reverted in a scratch copy and the
-suite re-run — a test that passes before and after a fix is decoration, and the
-commit messages record how many scenarios each revert broke.
-
-`INSTALL.md` is the long-form version of that record. `SKILL.md` is the whole
-protocol as an extractor - or an agent - reads it, standalone and installable;
-`MIGRATION.md` covers the schema changes; `PILOT.md` is the order a PERSON works
-in for the one part of this package a program may not do.
-
-That order now names its first subject and runs the preflight twice. Publication
-127, Verheyden 2007 Figure 4, is **the first production R2 + human-resolution
-pilot** — not an R3 partial-rejection pilot, and the runbook does not let anyone
-claim it was one. Before a figure is opened, `review_preflight.py` is run on the
-templates and is *expected* to exit 2: the finalizer cannot say `FINALIZED`
-before a person has answered anything, so what must be clean at that point is
-the bundle. Run again on the filled-in answers it must exit 0. Both numbers are
-read out of `PILOT.md` by the suite and checked against the tools, because a
-runbook that promises the wrong exit code sends every reviewer to fix a bundle
-that was never broken.
-
-127 is queued `BAR_MONO_GEOMETRY_RESOLVED`, which is not an overlay: three of
-the four confirmations that mode asks for cannot be made from a panel picture,
-so the runbook walks its reviewer through the seven artifacts it registers — the
-contact sheet, the calibration panels, the row crops, the identity resolution
-and its evidence, the overlay last — and a fifth confirmation the mode does not
-ask for at all. `Inference_Checked` is derived from the panel's own values, so
-the suite checks the runbook against `REVIEW_CONFIRMATIONS` *plus*
-`inference_confirmations` on a real prototype-matched panel, and requires every
-one to be paired against the picture that answers it.
-
-**Two people, and the tools now check it.** `--distinct-reviewers` on the
-finalizer and the preflight refuses `RESOLVER_IS_APPROVER` when the person who
-named a series in `identity_resolution.csv` is the person signing the panel that
-naming lands in — compared as PEOPLE, by normalized ORCID, because a
-`Reviewer_ID` identifies a row and one human registered twice under two IDs read
-as two reviewers. Where an ORCID is absent the contract refuses
-(`REVIEWER_IDENTITY_UNPROVABLE`) rather than treating two mailboxes as two
-people, and it applies to panels that carry a hand-resolved identity: a panel
-nobody resolved has no resolver for its approver to be distinct from. The policy
-itself is checked against `SEPARATION_POLICIES` and an unrecognised token stops
-the finalization, so the stamp's `Reviewer_Separation_Policy` can never name a
-contract that was applied to nothing.
-
-There is no `--second` fallback: that flag reads two `inference_review.csv`
-files, so it sees the per-cell channel and nothing else. It exits 2 unless every
-question was answered once on both sides, the two answers agree, the two files
-are two files, the two readers are two PEOPLE by ORCID, and the second file is a
-complete review record — this run's own panel, unit and cell on every row,
-matched exactly rather than "matching or blank", and a `Reviewed_At` that is a
-real past date. The registry those identity checks run against travels out of
-the finalizer's verdict, so it is the snapshot the decider verified rather than
-a second reading of the same path. It remains a read-only qualification check:
-the finalizer never reads the second file, so nothing in it is bound into
-`Review_Subject_SHA256` or stamped.
-
-## Status
-
-Publication 397 runs end to end: 26 panels, 384 declared cells, 123 read,
-**0 accepted**. That is the correct answer, not a failure — the running text
-gives "30-min means and SEMs" for the line figures, while the Figure 3/4
-captions say only "(3-min means)". Whether the bars are SD or SEM is not in the
-paper, so every read cell sits at `QC_FAILED` pending an author query.
-
-`LINE_MONO_STYLE` shipped and all twelve two-black-curve panels of Figures 1
-and 2 now read. Against an independent eye reading of Figure 1's MEN mean
-arterial pressure it lands 18 of 24 cells within 1.65 mmHg on a 50 mmHg axis
-and refuses the other 6, at the three positions where the two curves are one
-run of ink — nine to ten pixels thick where a stroke is three.
-
-**Four of those eighteen have their series named by elimination, and say so.**
-Furniture is dropped from the duty accounting, which hides a dashed curve's
-gaps and cannot invent them, so a curve running along a gridline measures a
-perfect solid line. A SOLID call made through a window that could not see half
-of itself is withheld; where the panel declares two styles and the reader found
-two curves, naming one names the other. Every such cell carries
-`line_style_source`, and the review overlay stars it.
-
-**123 of 384 declared cells is a low yield and the right one.** Several of
-these panels run their two curves within a stroke of each other for much of
-their length, and a cell nobody can attribute is a cell this reader does not
-emit. The geometry behind all twelve is checked against the rasters by
-`forward_test_397_line_geometry.py`: every declared calibration row is a
-printed gridline and every declared x is the centre of its category interval.
-
-`pilot_beckers.py` finishes the ladder on a different paper. Beckers 2007 plots
-approximate entropy as mean and 95% CI, and Table 1 of the same paper prints
-the same means, so there is a reader-independent answer at the end. Attested it
-runs `AUTO_EXTRACTED → MACHINE_QC_PASSED → HUMAN_APPROVED → POOLING_ELIGIBLE`
-and writes ten accepted values, worst mean 0.0057 and worst CI half-width
-0.0133 against 2.776 × the printed SEM. Unattested, `run_batch` deletes its own
-output and stamps `DEMO_OUTPUT_REFUSED` — a demonstration identity cannot stand
-behind a poolable value.
-
-**The twin-axis scatter reader is wired in, and 464 Figure 2 is still a
-refusal.** `marker_routing` tells four monochrome series apart by marker shape
-and fill, `axis_grain` lets one panel carry two y scales with every point saying
-which it was read on, and `scatter_points` is the durable file the pair leaves
-behind. A panel declares its scales in `axis_manifest.csv` — one row per printed
-axis, optional, absent for every batch in the corpus but the twin-axis ones —
-and a series names the one it sits on; the runner then routes the marks,
-calibrates each point against **its own** axis, and writes `scatter_points.csv`
-carrying the eighteen measurements the routing rested on. `finalize_batch` holds
-every value claiming `MEASURED_MARKER_SHAPE_FILL` against that file, and a point
-whose own recorded evidence says its blob held more than one marker is withheld
-however the status column reads.
-
-Three checks, and only one of them opens the figure: the file against itself,
-the file against the manifest, and the file against **the raster** —
-`current_evidence_failures` routes the panel again and compares. That last one
-is the only check a producer with an editor cannot satisfy.
-
-On the fixture it routes 16, 17 and 18 of 30 marks at 11, 22 and 33 px with no
-misroutes, scored by a minimum-cost maximum matching. On the real figure it does
-not read: 464 Figure 2's shape axis separates at index 4.33 and its fill axis
-does not, because the plainest cut in the interior-ink distribution puts six of
-thirty-one marks in the smaller class and the router refuses a class under a
-quarter. `forward_test_464_scatter.py` prints that measurement and changes no
-constant to make the figure read — whether six of thirty-one is an outlier or
-the smaller of four drawn series is a question for a person.
-
-Open work: publication 386 Figures 3–4, and five cells of publication 323 that
-need a human reading.
+- 처음이면 `python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart`로 합성 그림
+  하나를 끝까지 돌려 보세요.
+- 실제 논문에는 [docs/PROCEDURE.md](docs/PROCEDURE.md)의 9단계를 따르세요. 단계마다
+  누가(스크립트·AI·사람) 하는지 적혀 있습니다.
+- 사람이 하는 검토는 [docs/REVIEW_RUNBOOK.md](docs/REVIEW_RUNBOOK.md)에 있습니다.
+  검토자·날짜·확인 칸은 사람만 채웁니다.
+- 원문 PDF·그림·실행 결과·답안은 저장소 밖에 두세요(공개 저장소입니다).

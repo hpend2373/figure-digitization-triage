@@ -1,7 +1,13 @@
 # Every test file is a standalone script that exits non-zero on the first
-# failure, so CI is the same command a person runs. No pytest, no discovery, no
-# collection order: a scenario that only passes when something else ran first is
-# a scenario that proves nothing.
+# failure, so CI is the same command a person runs. No pytest, no discovery
+# framework, no collection order: a scenario that only passes when something
+# else ran first is a scenario that proves nothing.
+#
+# Two jobs, because `test_corpus_intake` and `test_tick_ocr` skip their PDF and
+# OCR sections where the backends are absent:
+#   core   the pinned environment only, with the PDF backends REMOVED, so the
+#          count does not depend on what `ubuntu-latest` happens to ship
+#   full   the pinned environment plus poppler, tesseract and the intake extras
 name: suite
 
 on:
@@ -10,50 +16,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  suite:
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # THE PUBLISHER RASTERS ARE NOT IN THIS REPOSITORY. It is public and they
-      # are not redistributable. When `FDT_RASTER_SOURCE` names a private
-      # repository and `FDT_RASTER_TOKEN` can read it, the figures are fetched
-      # into a directory outside the tree and `FDT_RASTER_ROOT` points there, so
-      # the suites and the worked examples run at full coverage. Without the
-      # secret every raster-dependent section SKIPS and says so, and the
-      # scenario counts fall - which is why the count check is the thing that
-      # notices, rather than a green run that read nothing.
-      - name: fetch the publisher rasters, if this runner is allowed to
-        env:
-          FDT_RASTER_SOURCE: ${{ secrets.FDT_RASTER_SOURCE }}
-          FDT_RASTER_TOKEN: ${{ secrets.FDT_RASTER_TOKEN }}
-        run: |
-          if [ -z "$FDT_RASTER_SOURCE" ] || [ -z "$FDT_RASTER_TOKEN" ]; then
-            echo "no raster source configured; raster-dependent sections will SKIP"
-            exit 0
-          fi
-          git clone --depth 1 \
-            "https://x-access-token:$FDT_RASTER_TOKEN@github.com/$FDT_RASTER_SOURCE" \
-            "$RUNNER_TEMP/rasters"
-          echo "FDT_RASTER_ROOT=$RUNNER_TEMP/rasters" >> "$GITHUB_ENV"
-          echo "rasters fetched from $FDT_RASTER_SOURCE"
       - name: install the pinned environment
-        run: |
-          python -m pip install -r requirements-lock.txt
-          # THE CJK FACE THE GALLERY'S CAPTIONS ARE SET IN. Not a backend and
-          # not part of the core/full split: both jobs draw the same pictures,
-          # and a font that changes the scenario COUNT would be a third
-          # environment for a README that names two. `png/capt.py` raises with
-          # this package's name when it is missing.
-          sudo apt-get install -y fonts-noto-cjk
-      # AND TAKE AWAY WHAT THE IMAGE HAPPENED TO SHIP. `test_corpus_intake`
-      # SKIPs its PDF sections where no backend is installed, so this job's
-      # scenario count depends on poppler and pdfminer being ABSENT - and
-      # `ubuntu-latest` is a moving image. Inherited, the core count is a
-      # property of GitHub's runner rather than of this repository, and main
-      # would go red one morning with no commit behind it.
+        run: python -m pip install -r requirements-lock.txt
       - name: take away what the core profile does not install
         run: |
           sudo apt-get remove -y poppler-utils >/dev/null 2>&1 || true
@@ -61,320 +32,44 @@ jobs:
           for b in pdftotext pdftoppm pdfinfo; do
             ! command -v "$b" || { echo "$b is still on PATH"; exit 1; }
           done
-          python - <<'PY'
-          import importlib.util, sys
-          present = [m for m in ("pdfminer", "pypdf")
-                     if importlib.util.find_spec(m)]
-          if present:
-              sys.exit("%s is still importable" % ", ".join(present))
-          print("core profile: no PDF backend, as declared")
-          PY
-      - name: sheet logic under node
-        run: |
-          # The decisions that can put a number on the wrong figure are pure
-          # functions in sheet/sheet_logic.js, and they had no runner here at
-          # all - 35 scenarios that only ever ran on a laptop. It prints its
-          # own verdict rather than the scenario marker, so it is a step of
-          # its own and not part of the core count.
-          node sheet/test_sheet_logic.mjs
-          # The same split for the error-definition review page: the page moves
-          # values, errorbar_page.js decides what counts as an answer. The one
-          # it guards is that `Verified_In_Source` can only come from a click.
-          node test_errorbar_page.mjs
-          # 처분 판정도 같은 나눔입니다: 화면은 값을 옮기고,
-          # decision_page.js가 무엇이 답이 되는지 정합니다.
-          node test_decision_page.mjs
-          # 기하 확인도 같은 나눔입니다: 화면은 값을 옮기고,
-          # geometry_page.js가 무엇이 답이 되는지 정합니다.
-          node test_geometry_page.mjs
-          # 정체 확인(x 라벨·계열·단위)도 같은 나눔입니다.
-          node test_identity_page.mjs
-          # 값 검토도 같은 나눔입니다: 화면은 값을 옮기고,
-          # value_page.js가 무엇이 승인이 되는지 정합니다.
-          node test_value_page.mjs
-          # 패널 확인도 같은 나눔입니다: 화면은 값을 옮기고,
-          # panel_page.js가 무엇이 답이 되는지 정합니다.
-          node test_panel_page.mjs
       - name: record what we are running on
-        run: python -c "import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
-      - name: synthesis suites
+        run: python -c "import sys; sys.path.insert(0, 'fdt'); import run_batch, json; print(json.dumps(run_batch.environment_record(), indent=1))"
+      - name: page logic under node
         run: |
           set -e
-          # The synthesis harness lives beside the corpus it guards, and the
-          # corpus cannot be published - so only the two modules that read no
-          # files run here. They are also the two that matter most: the route
-          # gate and the append guard are what stand between a rerun and a
-          # silently doubled effect table.
-          # Not a grep for the last line: that catches a suite that fails and
-          # not a suite that VANISHES. This runs them, requires exactly one
-          # count marker each, refuses a count of zero, checks that every
-          # test file here is classified, and compares the total to the README.
-          python3 synthesis/verify_synthesis_status.py
-
-      - name: suite
-        run: |
-          set -e
-          : > scenario-counts.tsv
-          for t in test_reproducibility test_kernel test_grid_engine \
-                   test_bar_reader test_mark_readers test_mono_bar \
-                   test_measure_mono_bars \
-                   test_integration test_run_batch test_finalize \
-                   test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
-                   test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
-                   test_documented_status test_provenance test_continuity \
-                   test_harness_compare test_panel_geometry \
-                   test_gate_trace test_y_scale_group test_tick_ocr \
-                   test_visual_verification test_marker_routing \
-                   test_axis_grain test_scatter_points \
-                   test_split_grain \
-                   test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
-                   test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions \
-                   test_geometry_page test_record_geometry \
-                   test_identity_proposer test_identity_page test_record_identity \
-                   test_value_page test_panel_page test_record_panels \
-                   test_panel_to_page; do
+          # The decisions that can put a number on the wrong figure are pure
+          # functions in the pages' .js files; the page only moves values.
+          for t in tests/test_*.mjs tests/sheet/test_*.mjs; do
             echo "--- $t"
-            # CAPTURED, NOT PIPED. `python "$t.py" | tee` reports tee's exit
-            # status, so a failing suite goes green - and this loop's whole job
-            # is to be the thing that cannot go green when a suite fails.
-            # Printed on the way out either way. Under `set -e` a failing
-            # suite ends the job here, and a diagnosis that only reached
-            # stdout would be lost with it.
-            if ! out="$(python "$t.py" 2>&1)"; then
-              printf '%s\n' "$out"
-              exit 1
-            fi
-            printf '%s\n' "$out"
-            # EXACTLY ONE marker. `tail -1` would take the last of two, and a
-            # suite printing its verdict twice is the defect that turned up in
-            # test_mark_readers - its verdict sat in the middle of the file
-            # with four scenarios running after it.
-            markers="$(printf '%s\n' "$out" \
-              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p')"
-            if [ "$(printf '%s\n' "$markers" | grep -c .)" -ne 1 ]; then
-              echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
-              exit 1
-            fi
-            # A SUITE THAT SKIPS ITS WHOLE FILE reports 0, and a zero is
-            # refused downstream unless the suite said why. `FDT_RASTER_ABSENT`
-            # is `raster_root.ABSENT_TOKEN`; `test_reproducibility` asserts this
-            # string and that one are the same.
-            skipped=""
-            if printf '%s\n' "$out" | grep -q 'FDT_RASTER_ABSENT'; then
-              skipped="RASTER_SKIPPED"
-            fi
-            printf '%s.py\t%s\t%s\n' "$t" "$markers" "$skipped" >> scenario-counts.tsv
+            node "$t"
           done
+      - name: python suites
+        run: bash .github/run_suites.sh
+      - name: quickstart example
+        run: python examples/quickstart/quickstart.py /tmp/quickstart
 
-      # The number in README is a claim about this package, and it followed the
-      # tree by hand until it did not: the file said 2184 after v7.43 while the
-      # tree ran 2282. A status line nobody can trust is worse than none.
-      - name: the documented status is the measured status
-        run: |
-          # THE FIGURES ARE PART OF THE ENVIRONMENT, like poppler. The fetch
-          # step above sets FDT_RASTER_ROOT when, and only when, this runner
-          # was given the secret; declaring it here is what makes a fetch that
-          # silently did nothing red instead of green at a fork's total.
-          if [ -n "${FDT_RASTER_ROOT:-}" ]; then R=present; else R=absent; fi
-          python verify_documented_status.py --profile core --rasters "$R" \
-            scenario-counts.tsv README.md run_batch.py
-      - name: forward tests and worked examples
-        run: |
-          set -e
-          for s in crosscheck_id323 build_id323 forward_test_397_mono_bar \
-                   forward_test_127_mono_bar forward_test_397_mono_geometry \
-                   forward_test_real_monochrome \
-                   forward_test_beckers_geometry forward_test_beckers_dpi \
-                   forward_test_397_line_style forward_test_397_line_geometry \
-                   forward_test_464_scatter \
-                   pilot_397 pilot_beckers; do
-            echo "--- $s"
-            python "$s.py"
-          done
-      # Publication 397 ships with its QC problems on purpose: its dispersion
-      # definition is unresolved. A run that reproduces them exactly has done
-      # its job, so this step asserts the expected verdict rather than a bare
-      # exit code - a green here that did not read 48 values would be worse
-      # than a red one.
-      - name: the plan compiles and runs to the pilot's numbers
-        run: |
-          set -e
-          # THE COMMAND-LINE PATH NEEDS THE FIGURES, and this repository does
-          # not carry them. Without a root, `compile_plan` is RIGHT to refuse -
-          # SOURCE_FILE_NOT_FOUND on all five - and a red here would be CI
-          # reporting the deliberate absence of a file as a defect. The root is
-          # where the fetch step put them, asked for by name rather than assumed
-          # to be the checkout: `--file-root .` was this step's whole bug.
-          root="$(python -c 'import raster_root as RR, os; p=RR.check("397_fig1.jpeg")[0]; print(os.path.dirname(p) if p else "")')"
-          if [ -z "$root" ]; then
-            python -c 'import raster_root as RR; print(RR.skip_note("397_fig1.jpeg"))'
-            exit 0
-          fi
-          python compile_plan.py plan_397.json /tmp/m --file-root "$root" --date 2026-08-07
-          python run_batch.py /tmp/m /tmp/o --file-root "$root" --date 2026-08-07
-          python - <<'PY'
-          import json
-          stamp = json.load(open("/tmp/o/run_stamp.json", encoding="utf-8"))
-          assert stamp["Status"] == "RAN", stamp["Status"]
-          assert stamp["Run_Mode"] == "DEMO_ONLY", stamp["Run_Mode"]
-          # THE COUNTS ARE PINNED IN test_compile_plan.py AND NOWHERE ELSE.
-          # They used to be pinned here as well, and v7.50 moved them: the
-          # suite went green with the new numbers and this step failed on the
-          # old ones, which is CI reporting a defect that is not there. One
-          # number, one place - the same rule `verify_documented_status.py`
-          # exists to enforce on the README, applied to this file.
-          #
-          # What this step proves that the suite does not is the COMMAND-LINE
-          # path: compile_plan and run_batch as a person invokes them, writing
-          # a stamp a person can read. So it asserts the invariants of that
-          # path and leaves the arithmetic to the suite.
-          assert stamp["Values_Read"] > 0, stamp["Values_Read"]
-          assert stamp["Values_Machine_QC_Passed"] == 0, stamp
-          # Nothing accepted, ever, on this publication: 397 does not say
-          # whether its error bars are SD or SEM, which no reader can fix.
-          assert stamp["Values_Accepted"] == 0, stamp
-          assert stamp["QC_Problems"] > 0, stamp["QC_Problems"]
-          assert stamp["Environment"]["Libraries"]["cv2"], stamp
-          print("plan -> run reproduces the pilot:", stamp["Status"],
-                stamp["Values_Read"], "read,", stamp["QC_Problems"], "qc problems")
-          PY
-
-  # THE 38 SCENARIOS THE CORE JOB CANNOT RUN. `test_corpus_intake` SKIPs its PDF
-  # adapter, per-status, renderer and crop sections without a backend, and that
-  # is the path where the last three rounds of real defects were found - a
-  # release gate that never opens a PDF does not gate it. This job installs the
-  # backends explicitly, so the full count is a property of this repository and
-  # not of whatever `ubuntu-latest` ships.
-  intake-full:
+  full:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # THE PUBLISHER RASTERS ARE NOT IN THIS REPOSITORY. It is public and they
-      # are not redistributable. When `FDT_RASTER_SOURCE` names a private
-      # repository and `FDT_RASTER_TOKEN` can read it, the figures are fetched
-      # into a directory outside the tree and `FDT_RASTER_ROOT` points there, so
-      # the suites and the worked examples run at full coverage. Without the
-      # secret every raster-dependent section SKIPS and says so, and the
-      # scenario counts fall - which is why the count check is the thing that
-      # notices, rather than a green run that read nothing.
-      - name: fetch the publisher rasters, if this runner is allowed to
-        env:
-          FDT_RASTER_SOURCE: ${{ secrets.FDT_RASTER_SOURCE }}
-          FDT_RASTER_TOKEN: ${{ secrets.FDT_RASTER_TOKEN }}
-        run: |
-          if [ -z "$FDT_RASTER_SOURCE" ] || [ -z "$FDT_RASTER_TOKEN" ]; then
-            echo "no raster source configured; raster-dependent sections will SKIP"
-            exit 0
-          fi
-          git clone --depth 1 \
-            "https://x-access-token:$FDT_RASTER_TOKEN@github.com/$FDT_RASTER_SOURCE" \
-            "$RUNNER_TEMP/rasters"
-          echo "FDT_RASTER_ROOT=$RUNNER_TEMP/rasters" >> "$GITHUB_ENV"
-          echo "rasters fetched from $FDT_RASTER_SOURCE"
       - name: install the pinned environment and the intake backends
         run: |
           sudo apt-get update -qq
-          # TESSERACT IS A BACKEND LIKE POPPLER. `test_tick_ocr` has fifteen
-          # scenarios that read real glyphs, and without it they skip - fifteen
-          # scenarios that never run in CI, which is the shape this loop's own
-          # count check exists to catch.
-          # AND THE CJK FACE THE GALLERY'S CAPTIONS ARE SET IN.
-          # `test_visual_verification` draws six pictures whose captions are
-          # Korean, and PIL's failure without it is `OSError: cannot open
-          # resource` four frames deep with nothing naming the font.
-          sudo apt-get install -y poppler-utils tesseract-ocr fonts-noto-cjk
+          sudo apt-get install -y poppler-utils tesseract-ocr
           python -m pip install -r requirements-lock.txt -r requirements-intake.txt
-      # poppler is not a Python package and cannot be pinned in a requirements
-      # file. Recorded, so a runner image that changes it is visible in the log
-      # rather than mysterious in a diff.
-      - name: record the backends this count belongs to
+      - name: record the backends this run belongs to
         run: |
           pdftotext -v 2>&1 | head -1
           tesseract --version 2>&1 | head -1
           python -c "import importlib.metadata as m; print('pdfminer.six', m.version('pdfminer.six')); print('pypdf', m.version('pypdf'))"
-      - name: suite
-        run: |
-          set -e
-          : > scenario-counts.tsv
-          for t in test_reproducibility test_kernel test_grid_engine \
-                   test_bar_reader test_mark_readers test_mono_bar \
-                   test_measure_mono_bars \
-                   test_integration test_run_batch test_finalize \
-                   test_compile_plan test_corpus_intake test_sheet_blocks test_crop_truth \
-                   test_sheet_build test_merge_counts \
-                   test_geometry_proposer test_line_style_mono \
-                   test_documented_status test_provenance test_continuity \
-                   test_harness_compare test_panel_geometry \
-                   test_gate_trace test_y_scale_group test_tick_ocr \
-                   test_visual_verification test_marker_routing \
-                   test_axis_grain test_scatter_points \
-                   test_split_grain \
-                   test_mutate test_caption_fulltext test_record_errorbar test_make_plan \
-                   test_errorbar_review_page test_worklist_page \
-                   test_decision_page test_record_decisions \
-                   test_geometry_page test_record_geometry \
-                   test_identity_proposer test_identity_page test_record_identity \
-                   test_value_page test_panel_page test_record_panels \
-                   test_panel_to_page; do
-            echo "--- $t"
-            if ! out="$(python "$t.py" 2>&1)"; then
-              printf '%s\n' "$out"
-              exit 1
-            fi
-            printf '%s\n' "$out"
-            markers="$(printf '%s\n' "$out" \
-              | sed -nE 's/^FDT_SCENARIOS_RUN=([0-9]+)$/\1/p')"
-            if [ "$(printf '%s\n' "$markers" | grep -c .)" -ne 1 ]; then
-              echo "$t printed $(printf '%s\n' "$markers" | grep -c .) FDT_SCENARIOS_RUN lines; it must print exactly one"
-              exit 1
-            fi
-            # A SUITE THAT SKIPS ITS WHOLE FILE reports 0, and a zero is
-            # refused downstream unless the suite said why. `FDT_RASTER_ABSENT`
-            # is `raster_root.ABSENT_TOKEN`; `test_reproducibility` asserts this
-            # string and that one are the same.
-            skipped=""
-            if printf '%s\n' "$out" | grep -q 'FDT_RASTER_ABSENT'; then
-              skipped="RASTER_SKIPPED"
-            fi
-            printf '%s.py\t%s\t%s\n' "$t" "$markers" "$skipped" >> scenario-counts.tsv
-          done
-
-      # And the intake suite specifically, so a regression that removes the PDF
-      # sections cannot be absorbed by a change elsewhere in the total.
+      - name: python suites
+        run: bash .github/run_suites.sh
       - name: the intake suite ran its PDF sections
         run: |
-          set -e
-          # ONE NUMBER, ONE PLACE - and this was not it. This literal sat at
-          # 149 through four rounds that added 102 scenarios to the suite, so
-          # the job that exists to prove the PDF sections ran was the job that
-          # went red for them running. The count now comes from README, beside
-          # every other count this repository publishes, and
-          # `verify_documented_status.py` is what keeps THAT honest.
-          want="$(sed -nE 's/^<!-- CURRENT_INTAKE_FULL_SCENARIOS: ([0-9]+) -->$/\1/p' README.md)"
-          test -n "$want" || { echo "README carries no CURRENT_INTAKE_FULL_SCENARIOS marker"; exit 1; }
-          got="$(awk -F'\t' '$1 == "test_corpus_intake.py" {print $2}' scenario-counts.tsv)"
-          test "$got" = "$want" || {
-            echo "test_corpus_intake reported $got with the backends installed;"
-            echo "README says CURRENT_INTAKE_FULL_SCENARIOS: $want."
-            echo "If the suite legitimately grew, update the marker in README."
-            exit 1
-          }
-          ! grep -q "SKIP the PDF adapter" <(python test_corpus_intake.py) || {
+          ! python tests/test_corpus_intake.py | grep -q "SKIP the PDF adapter" || {
             echo "the PDF adapter still skipped in a job that installed the backend"
             exit 1
           }
-
-      - name: the documented status is the measured status
-        run: |
-          # THE FIGURES ARE PART OF THE ENVIRONMENT, like poppler. The fetch
-          # step above sets FDT_RASTER_ROOT when, and only when, this runner
-          # was given the secret; declaring it here is what makes a fetch that
-          # silently did nothing red instead of green at a fork's total.
-          if [ -n "${FDT_RASTER_ROOT:-}" ]; then R=present; else R=absent; fi
-          python verify_documented_status.py --profile full --rasters "$R" \
-            scenario-counts.tsv README.md run_batch.py

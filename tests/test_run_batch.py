@@ -1,0 +1,7602 @@
+"""End-to-end gate for the declarative execution layer.
+
+    python3 tests/test_run_batch.py     # exit 0 = all scenarios pass
+
+A synthetic figure with four panels of three different mark types is driven
+entirely from CSV manifests through `run_batch` to a gate-clean values file.
+Nothing in this module names a publication: the manifests are the only thing
+that says what a mark means, which is the whole point of the layer.
+
+Three classes of scenario, in order:
+
+1. **The manifests are checked before a raster is opened.** Every rejection is
+   built by mutating a manifest that otherwise runs clean, so a check that has
+   quietly stopped firing shows up as a scenario that no longer fails.
+2. **The run produces the declared cells and nothing else.** Identity comes from
+   the manifest; an unreadable mark leaves a hole and a queue row.
+3. **Every failure state is reachable**, and a second run over the same inputs
+   is byte-identical.
+"""
+import _paths  # noqa: E402,F401  (puts fdt/ on sys.path)
+import csv
+import io
+import json
+import os
+import shutil
+import sys
+import types
+import ast
+import tarfile
+import tempfile
+import itertools
+
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import batch_manifests as BM        # noqa: E402
+import kernel as K                 # noqa: E402
+import grid_engine as GE            # noqa: E402
+import mark_readers as MR           # noqa: E402
+import run_batch as RB              # noqa: E402
+import bar_reader as BR             # noqa: E402
+import datetime                     # noqa: E402
+import finalize_batch as FIN        # noqa: E402
+import provenance as PROV           # noqa: E402
+import mono_bar_geometry as MONO    # noqa: E402
+
+FAILURES, PASSED = [], [0]
+
+
+def check(name, ok, detail=""):
+    print(("  ok   " if ok else "  FAIL ") + name + ("" if ok else "  <- " + detail))
+    if ok:
+        PASSED[0] += 1
+    else:
+        FAILURES.append(name)
+
+
+ROOT = tempfile.mkdtemp(prefix="fdt_batch_")
+IMAGES = os.path.join(ROOT, "images")
+os.makedirs(IMAGES, exist_ok=True)
+
+# THE DOCUMENT THE FIXTURE'S FOUR FIGURES CAME OUT OF, as bytes on disk. The
+# fixture named `synthetic.pdf` in `Source_File` for eleven releases and no such
+# file existed, which was fine while nothing hashed it. v9.2 hashes it, and the
+# scenarios that matter - a digest that disagrees with the file, a row saying
+# NOT_HELD about a file the corpus is holding - can only be written against a
+# document that is really there.
+SOURCE_PDF = os.path.join(ROOT, "synthetic.pdf")
+with open(SOURCE_PDF, "wb") as _fh:
+    _fh.write(b"%PDF-1.4\n% synthetic regression document, four figures\n%%EOF\n")
+
+BLUE, RED = (45, 80, 220), (215, 45, 45)
+XS = [140, 240, 340, 440]
+POSITIONS = ["T0", "T1", "T2", "T3"]
+LINE_TRUTH = {"S_BLUE": [55.0, 62.0, 68.0, 74.0], "S_RED": [34.0, 39.0, 45.0, 51.0]}
+LINE_SD = 5.0
+
+
+# --------------------------------------------------------------------------
+# rasters
+# --------------------------------------------------------------------------
+
+def draw_line_panel(path):
+    im = Image.new("RGB", (600, 480), "white")
+    d = ImageDraw.Draw(im)
+    cal = MR.AxisCalibration.from_points([(0, 420), (100, 60)])
+    sd_px = abs(cal.value_to_pixel(LINE_SD) - cal.value_to_pixel(0))
+    for name, values in LINE_TRUTH.items():
+        colour = BLUE if name == "S_BLUE" else RED
+        pts = [(x, cal.value_to_pixel(v)) for x, v in zip(XS, values)]
+        d.line(pts, fill=colour, width=3)
+        for x, y in pts:
+            d.line((x, y - sd_px, x, y + sd_px), fill=colour, width=2)
+            d.line((x - 8, y - sd_px, x + 8, y - sd_px), fill=colour, width=2)
+            d.line((x - 8, y + sd_px, x + 8, y + sd_px), fill=colour, width=2)
+            d.ellipse((x - 5, y - 5, x + 5, y + 5), fill=colour)
+    im.save(path)
+    return cal
+
+
+def draw_flat_line_panel(path):
+    """Both series present, neither with a whisker - no weight, not no series."""
+    im = Image.new("RGB", (600, 480), "white")
+    d = ImageDraw.Draw(im)
+    cal = MR.AxisCalibration.from_points([(0, 420), (100, 60)])
+    for colour, values in ((BLUE, (50.0, 52.0, 54.0, 56.0)),
+                           (RED, (30.0, 32.0, 34.0, 36.0))):
+        pts = [(x, cal.value_to_pixel(v)) for x, v in zip(XS, values)]
+        d.line(pts, fill=colour, width=3)
+        for x, y in pts:
+            d.ellipse((x - 6, y - 6, x + 6, y + 6), fill=colour)
+    im.save(path)
+    return cal
+
+
+SCATTER_XY = [(0.8, 3.0), (1.6, 4.2), (2.7, 7.1), (3.3, 6.8), (4.4, 9.6),
+              (5.2, 11.8), (6.4, 12.1), (7.5, 15.5), (8.1, 15.1), (9.3, 18.4)]
+
+
+def draw_scatter_panel(path):
+    im = Image.new("RGB", (800, 520), "white")
+    d = ImageDraw.Draw(im)
+    xcal = MR.AxisCalibration.from_points([(0, 80), (10, 720)])
+    ycal = MR.AxisCalibration.from_points([(0, 450), (20, 50)])
+    for x, y in SCATTER_XY:
+        px, py = xcal.value_to_pixel(x), ycal.value_to_pixel(y)
+        d.ellipse((px - 5, py - 5, px + 5, py + 5), fill=BLUE)
+    im.save(path)
+    return xcal, ycal
+
+
+def draw_blank_panel(path):
+    Image.new("RGB", (600, 480), "white").save(path)
+
+
+LINE_IMG = os.path.join(IMAGES, "line.png")
+FLAT_IMG = os.path.join(IMAGES, "flat.png")
+SCAT_IMG = os.path.join(IMAGES, "scatter.png")
+BLANK_IMG = os.path.join(IMAGES, "blank.png")
+LINE_CAL = draw_line_panel(LINE_IMG)
+draw_flat_line_panel(FLAT_IMG)
+SX_CAL, SY_CAL = draw_scatter_panel(SCAT_IMG)
+draw_blank_panel(BLANK_IMG)
+
+
+def ticks(cal, values):
+    return ";".join("%g:%g" % (v, cal.value_to_pixel(v)) for v in values)
+
+
+# Four ticks, not two. A calibration fitted on four is a different, checkable
+# object from one fitted on two - and the WPD project used to save only the
+# first two, so the artifact that exists for re-deriving a value could not
+# reproduce the fit behind it.
+Y_TICKS = ticks(LINE_CAL, (0, 25, 50, 100))
+SX_TICKS = ticks(SX_CAL, (0, 10))
+SY_TICKS = ticks(SY_CAL, (0, 20))
+
+
+# --------------------------------------------------------------------------
+# manifests
+# --------------------------------------------------------------------------
+
+FIGURES = [dict(Figure_ID="F1", Publication_ID=1, Figure_Number="FIG1",
+                Source_File="synthetic.pdf", Source_Page=1, Source_Image=LINE_IMG,
+                Source_Caption_Verbatim="synthetic four-panel figure",
+                Image_Resolution_Or_Hash="600x480 sha256:" + MR.sha256_of(LINE_IMG),
+                WPD_Project_File="", Observed_Panel_Count=4,
+                Worklist_Panel_Count=4, Unlisted_Panels="",
+                Panel_Reconciliation_Status="MATCHED", Note="")]
+
+REVIEWERS = [dict(
+    Reviewer_ID="RV_T1", Reviewer_Name="Test Fixture",
+    Reviewer_Record_Type="HUMAN", Contact_Type="EMAIL",
+    Reviewer_Contact="fixture@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="synthetic regression reviewer")]
+
+SOURCE_DOCUMENTS = [dict(
+    Source_Document_ID="SD1", Publication_ID=1, Document_Role="MAIN_ARTICLE",
+    Source_File="synthetic.pdf", Source_File_SHA256=MR.sha256_of(SOURCE_PDF),
+    Article_Page_Range="1-1",
+    Observed_Figure_Count=4, Inventory_Status="VISUALLY_VERIFIED",
+    Figure_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="four synthetic source figures")]
+
+# One source figure per raster. The fixture used to put all four panels under a
+# single Source_Figure_ID whose Source_Image was only one of the four files -
+# a physical figure that is four different files at once. Nothing noticed until
+# the hash chain was enforced, which is a fair result for the check: the first
+# thing it caught was an inventory that could not describe anything real.
+_SOURCE_RASTERS = (("SF1", "P_LINE", LINE_IMG), ("SF2", "P_SCAT", SCAT_IMG),
+                   ("SF3", "P_FLAT", FLAT_IMG), ("SF4", "P_MANUAL", BLANK_IMG))
+_FIGURE_OF_PANEL = {pid: sfid for sfid, pid, _ in _SOURCE_RASTERS}
+
+SOURCE_FIGURES = [dict(
+    Source_Figure_ID=sfid, Source_Document_ID="SD1",
+    Publication_ID=1, Figure_Number="FIG%s" % sfid[-1],
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=img,
+    Source_Image_SHA256=MR.sha256_of(img),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one visible axes region")
+    for sfid, _pid, img in _SOURCE_RASTERS]
+
+SOURCE_PANELS = [dict(
+    Source_Panel_ID=pid, Source_Figure_ID=_FIGURE_OF_PANEL[pid], Panel_Label=pid,
+    Outcome_Label=("Heart rate" if pid != "P_SCAT" else "Heart-rate association"),
+    Target_Status="TARGET",
+    Panel_Disposition=("MANUAL_DIGITIZE" if pid == "P_MANUAL" else
+                       "ASSOCIATION_EXTRACT" if pid == "P_SCAT" else
+                       "AUTO_DIGITIZE"),
+    Disposition_Reason="synthetic regression fixture", Note="")
+    for pid in ("P_LINE", "P_SCAT", "P_FLAT", "P_MANUAL")]
+
+GRIDS = ([dict(Grid_ID="G_TIME", Factor_Name="ARM", Factor_Level=lv,
+               Level_Order=i, Note="") for i, lv in enumerate(("CONTROL", "TREATED"))]
+         + [dict(Grid_ID="G_TIME", Factor_Name="TIMEPOINT", Factor_Level=lv,
+                 Level_Order=i, Note="") for i, lv in enumerate(POSITIONS)]
+         + [dict(Grid_ID="G_ONE", Factor_Name="ARM", Factor_Level="ALL",
+                 Level_Order=0, Note="")])
+
+
+def unit(uid, grid, statistic, **kw):
+    # `Panel_ID` follows this fixture's own naming - U_LINE is filled by P_LINE -
+    # and a derivation that gets it wrong is refused rather than silent: the
+    # v9.3 bijection check reports UNIT_PANEL_NOT_FOUND or PANEL_UNIT_MISMATCH.
+    base = dict(
+        Unit_ID=uid, Figure_ID="F1", Grid_ID=grid,
+        Panel_ID="P" + uid[1:], Source_Panel_ID="P" + uid[1:], Panel=uid,
+        Outcome_Variable="Heart rate", Outcome_Domain="CV", Unit="bpm",
+        Statistic_Type=statistic, Display_Hint="UNSPECIFIED", Grid_Rule="FULL",
+        Sparse_Justification="", Dispersion_Type="SD",
+        Errorbar_Definition_Source="caption: mean +/- SD", N_Outcome=12,
+        Value_Scale="RATIO", Analysis_Transformation="UNTRANSFORMED",
+        Distribution_Shape="SYMMETRIC", Transformation_Source="",
+        Extraction_Method="DIGITIZED",
+        Bar_Top_Definition="NOT_A_BAR", Errorbar_Stem_Confirmed="TRUE",
+        Axis_X_Scale="LINEAR", Axis_Y_Scale="LINEAR",
+        Axis_Calib_X1_Value=0, Axis_Calib_X1_Pixel=100,
+        Axis_Calib_X2_Value=1, Axis_Calib_X2_Pixel=500,
+        Axis_Calib_Y1_Value=0, Axis_Calib_Y1_Pixel=420,
+        Axis_Calib_Y2_Value=100, Axis_Calib_Y2_Pixel=60,
+        Extractor_1="run_batch", Extractor_2="", Independent_Verification_Status="",
+        Discrepancy_Note="", Date="2026-08-06", Note="")
+    base.update(kw)
+    return base
+
+
+UNITS = [
+    unit("U_LINE", "G_TIME", "CONTINUOUS"),
+    # The declared n is the number of points the figure actually carries. It
+    # used to be the shared default of 12 against a ten-point cloud, and the run
+    # recorded N_Pairs=10 beside N_Outcome=12 without a word.
+    unit("U_SCAT", "G_ONE", "ASSOCIATION", Bar_Top_Definition="NOT_A_BAR",
+         Errorbar_Stem_Confirmed="NOT_A_BAR", Dispersion_Type="",
+         N_Outcome=len(SCATTER_XY),
+         Errorbar_Definition_Source="NO_ERRORBAR"),
+    unit("U_FLAT", "G_TIME", "CONTINUOUS"),
+    unit("U_MANUAL", "G_TIME", "CONTINUOUS"),
+]
+
+
+def panel(pid, uid, mark, image, box, **kw):
+    # `Identity_Domain_ID` defaults to the figure, which is what one legend over
+    # one figure means - and it is DECLARED rather than inferred, because the
+    # two are only the same question when a figure has one legend.
+    base = dict(Panel_ID=pid, Source_Panel_ID=pid, Figure_ID="F1",
+                Identity_Domain_ID=kw.get("Figure_ID", "F1"),
+                Unit_ID=uid, Panel_Label=pid,
+                Mark_Type=mark, Image_Path=image,
+                Panel_X0=box[0], Panel_X1=box[1], Panel_Y0=box[2], Panel_Y1=box[3],
+                Axis_X_Region="", Axis_Y_Region="",
+                Axis_X_Scale="LINEAR", Axis_Y_Scale="LINEAR",
+                Axis_X_Ticks="", Axis_Y_Ticks=Y_TICKS, Baseline_Value="",
+                Association_Type="", Config_ID="C_DEFAULT", Panel_Mode="AUTO",
+                Note="")
+    base.update(kw)
+    return base
+
+
+PANELS = [
+    panel("P_LINE", "U_LINE", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440)),
+    panel("P_SCAT", "U_SCAT", "SCATTER", SCAT_IMG, (70, 730, 40, 460),
+          Axis_X_Ticks=SX_TICKS, Axis_Y_Ticks=SY_TICKS,
+          Association_Type="PEARSON_R", Config_ID="C_SCATTER"),
+    panel("P_FLAT", "U_FLAT", "LINE_COLOR", FLAT_IMG, (100, 500, 40, 440)),
+    panel("P_MANUAL", "U_MANUAL", "LINE_COLOR", BLANK_IMG, (100, 500, 40, 440),
+          Panel_Mode="MANUAL"),
+]
+
+
+def series(pid, sid, level, **kw):
+    base = dict(Panel_ID=pid, Series_ID=sid, Colour_Hex="", Colour_Tolerance="",
+                Mask_Key="", Marker_Shape="CIRCLE", Marker_Fill="ANY",
+                Line_Style="SOLID", Bar_Fill_Pattern="", Factor_Name="ARM",
+                Factor_Level=level, Note="")
+    base.update(kw)
+    return base
+
+
+SERIES = [
+    series("P_LINE", "S_BLUE", "CONTROL", Colour_Hex="#2d50dc"),
+    series("P_LINE", "S_RED", "TREATED", Colour_Hex="#d72d2d"),
+    series("P_SCAT", "S_BLUE", "ALL", Colour_Hex="#2d50dc"),
+    series("P_FLAT", "S_BLUE", "CONTROL", Colour_Hex="#2d50dc"),
+    series("P_FLAT", "S_RED", "TREATED", Colour_Hex="#d72d2d"),
+    series("P_MANUAL", "S_BLUE", "CONTROL", Colour_Hex="#2d50dc"),
+    series("P_MANUAL", "S_RED", "TREATED", Colour_Hex="#d72d2d"),
+]
+
+POSITION_ROWS = [
+    dict(Panel_ID=pid, Position_ID=q, X_Pixel=x, Slot_Index=i, Display_Order=i,
+         Factor_Name="TIMEPOINT", Factor_Level=q, Timepoint_Label=q,
+         Timepoint_Days=i * 7, Note="")
+    for pid in ("P_LINE", "P_FLAT", "P_MANUAL")
+    for i, (q, x) in enumerate(zip(POSITIONS, XS))
+]
+
+CONFIGS = [
+    dict(Config_ID="C_DEFAULT", Option="x_window", Value="12", Note=""),
+    dict(Config_ID="C_DEFAULT", Option="colour_tolerance", Value="70", Note=""),
+    dict(Config_ID="C_SCATTER", Option="colour_tolerance", Value="70", Note=""),
+    dict(Config_ID="C_SCATTER", Option="min_marker_area", Value="12", Note=""),
+]
+
+
+def write_manifests(directory, panels=PANELS, series_rows=SERIES,
+                    positions=POSITION_ROWS, configs=CONFIGS, units=UNITS,
+                    figures=FIGURES, grids=GRIDS,
+                    source_documents=SOURCE_DOCUMENTS,
+                    source_figures=SOURCE_FIGURES, source_panels=SOURCE_PANELS,
+                    reviewers=REVIEWERS):
+    os.makedirs(directory, exist_ok=True)
+    for name, rows, cols in (
+            ("reviewer_registry", reviewers, BM.reviewer_registry_columns()),
+            ("source_document_manifest", source_documents,
+             BM.source_document_manifest_columns()),
+            ("source_figure_manifest", source_figures, BM.source_figure_manifest_columns()),
+            ("source_panel_inventory", source_panels, BM.source_panel_inventory_columns()),
+            ("figure_manifest", figures, GE.fig_figure_columns()),
+            ("grid_definitions", grids, GE.fig_grid_columns()),
+            ("unit_manifest", units, GE.fig_unit_columns()),
+            ("panel_manifest", panels, BM.panel_manifest_columns()),
+            ("series_manifest", series_rows, BM.series_manifest_columns()),
+            ("position_manifest", positions, BM.position_manifest_columns()),
+            ("reader_config", configs, BM.reader_config_columns())):
+        path = os.path.join(directory, "%s.csv" % name)
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(cols)
+            for r in rows:
+                w.writerow([r.get(c, "") for c in cols])
+    return directory
+
+
+def fr(rows, cols):
+    return pd.DataFrame([{c: str(d.get(c, "")) for c in cols} for d in rows],
+                        columns=cols)
+
+
+def validate(panels=PANELS, series_rows=SERIES, positions=POSITION_ROWS,
+             configs=CONFIGS, units=UNITS, source_figures=SOURCE_FIGURES,
+             source_panels=SOURCE_PANELS, source_documents=SOURCE_DOCUMENTS,
+             reviewers=REVIEWERS, doc_root=None):
+    p = BM.validate_batch_manifests(
+        fr(panels, BM.panel_manifest_columns()),
+        fr(series_rows, BM.series_manifest_columns()),
+        fr(positions, BM.position_manifest_columns()),
+        fr(configs, BM.reader_config_columns()),
+        units=fr(units, GE.fig_unit_columns()),
+        source_documents=fr(source_documents, BM.source_document_manifest_columns()),
+        source_figures=fr(source_figures, BM.source_figure_manifest_columns()),
+        source_panels=fr(source_panels, BM.source_panel_inventory_columns()),
+        reviewers=fr(reviewers, BM.reviewer_registry_columns()),
+        file_root=ROOT, doc_root=doc_root)
+    return sorted(set(p["check"])) if len(p) else []
+
+
+def edited(rows, match, **changes):
+    """Copy a manifest with one row changed, so a scenario states its own delta."""
+    out = []
+    for r in rows:
+        if all(str(r.get(k, "")) == str(v) for k, v in match.items()):
+            r = dict(r, **changes)
+        out.append(r)
+    return out
+
+
+# --------------------------------------------------------------------------
+print("the manifests are checked before any raster is opened")
+check("the reference batch validates clean", validate() == [], "%s" % validate())
+
+check("an entire physical figure omitted from a document is rejected",
+      "SOURCE_FIGURE_COVERAGE_INCOMPLETE" in validate(
+          source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=2)]))
+
+check("a physical figure with only part of its visible panels inventoried is rejected",
+      "SOURCE_PANEL_COVERAGE_INCOMPLETE" in validate(
+          source_panels=SOURCE_PANELS[:2]))
+_virtual14 = [dict(SOURCE_PANELS[i % len(SOURCE_PANELS)],
+                   Source_Panel_ID="V%02d" % i, Panel_Label="P%02d" % i,
+                   Panel_Disposition="NO_READER_AVAILABLE") for i in range(14)]
+check("fourteen virtual declarations cannot satisfy a 36-panel physical figure",
+      "SOURCE_PANEL_COVERAGE_INCOMPLETE" in validate(
+          source_figures=[dict(SOURCE_FIGURES[0], Observed_Panel_Count=36)],
+          source_panels=_virtual14),
+      "%s" % validate(
+          source_figures=[dict(SOURCE_FIGURES[0], Observed_Panel_Count=36)],
+          source_panels=_virtual14))
+# The inventory's correctness reduces to one human act: somebody opened the
+# figure and counted. No software can check the count, so the attestation is
+# the only thing standing behind it - and requiring it to be non-blank let
+# Inspector=TBD and Inspection_Date=soon straight through, which is the hedged
+# non-answer defect in the field that can least afford it.
+for _fld, _val, _want in (
+        ("Reviewer_ID", "TBD", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Reviewer_ID", "TODO", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Reviewer_ID", "?", "REVIEWER_NOT_REGISTERED"),
+        ("Reviewer_ID", "x", "REVIEWER_NOT_REGISTERED"),
+        ("Inspection_Date", "TBD", "UNRESOLVED_INVENTORY_ATTESTATION"),
+        ("Inspection_Date", "soon", "BAD_INSPECTION_DATE"),
+        ("Inspection_Date", "later", "BAD_INSPECTION_DATE"),
+        ("Inspection_Date", "2026-13-45", "BAD_INSPECTION_DATE"),
+        ("Inspection_Date", "07/08/2026", "BAD_INSPECTION_DATE"),
+        ("Inspection_Date", "2099-01-01", "BAD_INSPECTION_DATE")):
+    check("figure inventory attested with %s=%r is refused" % (_fld, _val),
+          _want in validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, **{_fld: _val})),
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, **{_fld: _val})))
+    check("document inventory attested with %s=%r is refused" % (_fld, _val),
+          _want in validate(source_documents=[dict(SOURCE_DOCUMENTS[0],
+                                                   **{_fld: _val})]))
+for _fld, _val in (("Reviewer_ID", "RV_T1"), ("Inspection_Date", "2026-08-06")):
+    check("a real attestation %s=%r passes" % (_fld, _val),
+          validate(source_figures=edited(SOURCE_FIGURES,
+                                         {"Source_Figure_ID": "SF1"},
+                                         **{_fld: _val})) == [],
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, **{_fld: _val})))
+
+# --------------------------------------------------------------------------
+# WHICH DOCUMENT THE INVENTORY IS OF (v9.2)
+# --------------------------------------------------------------------------
+# Every raster in this package has been hashed since the first release. The
+# article they were cut out of was a filename, so "this publication has four
+# figures and these are they" was a claim about a string: a preprint and its
+# version of record produce the same manifest, the same counts and the same
+# attestation, and the inventory reads as verified against whichever one the
+# reviewer happened to have open.
+_DOC_SHA = MR.sha256_of(SOURCE_PDF)
+
+
+def _doc(**changes):
+    return [dict(SOURCE_DOCUMENTS[0], **changes)]
+
+
+check("the document's own bytes are required",
+      "MISSING_REQUIRED" in validate(source_documents=_doc(Source_File_SHA256="")),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="")))
+for _bad in ("yes", "sha256:" + _DOC_SHA, _DOC_SHA[:32], "NOT HELD", "PENDING"):
+    check("Source_File_SHA256=%r is neither a digest nor NOT_HELD" % _bad,
+          "BAD_SOURCE_FILE_SHA256" in validate(
+              source_documents=_doc(Source_File_SHA256=_bad)),
+          "%s" % validate(source_documents=_doc(Source_File_SHA256=_bad)))
+check("a digest that disagrees with the file on disk is refused",
+      "SOURCE_DOCUMENT_HASH_MISMATCH" in validate(
+          source_documents=_doc(Source_File_SHA256="0" * 64)),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="0" * 64)))
+# The CLAIM is what makes the absence a problem. A row that says NOT_HELD about
+# a document nobody holds is the ordinary case and passes below.
+check("a digest claimed for a document that is not in the corpus is refused",
+      "SOURCE_DOCUMENT_FILE_NOT_FOUND" in validate(
+          source_documents=_doc(Source_File="absent.pdf",
+                                Source_File_SHA256=_DOC_SHA),
+          source_figures=[dict(f, Source_File="absent.pdf")
+                          for f in SOURCE_FIGURES]),
+      "%s" % validate(source_documents=_doc(Source_File="absent.pdf",
+                                            Source_File_SHA256=_DOC_SHA)))
+# A DOCUMENT FOLDER APART FROM THE RUN (run2 2026-10-16, E03). The corpus keeps
+# its 98 PDFs in one download folder, some one level down; the run holds the
+# rasters. Looked for under the run, every document was missing on the machine
+# that had all of them.
+_DOCS = os.path.join(os.path.dirname(ROOT), os.path.basename(ROOT) + "_docs")
+os.makedirs(os.path.join(_DOCS, "articles_api", "deeper"), exist_ok=True)
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "moved.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "below.pdf"))
+shutil.copyfile(SOURCE_PDF, os.path.join(_DOCS, "articles_api", "deeper", "deep.pdf"))
+os.symlink(SOURCE_PDF, os.path.join(_DOCS, "leak.pdf"))
+
+
+def _docs_at(name, digest=_DOC_SHA, doc_root=_DOCS):
+    return validate(source_documents=_doc(Source_File=name, Source_File_SHA256=digest),
+                    source_figures=[dict(f, Source_File=name) for f in SOURCE_FIGURES], doc_root=doc_root)
+
+
+# REVERT: ignore --doc-root. The 98 documents are still looked for in the run and none is found.
+check("a document in the document folder is found there", _docs_at("moved.pdf") == [], "%s" % _docs_at("moved.pdf"))
+check("... and one folder down, as the caption reader found it", _docs_at("below.pdf") == [], "%s" % _docs_at("below.pdf"))
+# REVERT: search the whole tree. A same-named file anywhere below would be taken for the document.
+check("... but not two folders down", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("deep.pdf"))
+check("without the folder, the same document is not found in the run", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("moved.pdf", doc_root=None))
+# REVERT: accept a path in the name. '../' would walk out of the folder the run was told to read.
+check("a name with a path in it is not a document name", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("articles_api/below.pdf")
+      and "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("../" + os.path.basename(_DOCS) + "/moved.pdf"))
+# REVERT: follow a link out of the folder. A link is the easy way to put any file under any name.
+check("a link that leads out of the folder is refused", "SOURCE_DOCUMENT_FILE_NOT_FOUND" in _docs_at("leak.pdf"))
+check("the digest is still checked against the file found there", "SOURCE_DOCUMENT_HASH_MISMATCH" in _docs_at("moved.pdf", digest="0" * 64))
+check("NOT_HELD about a document the folder holds is refused there too",
+      "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED" in _docs_at("moved.pdf", digest="NOT_HELD"))
+shutil.rmtree(_DOCS, ignore_errors=True)
+# NOT_HELD IS NOT A WAY OUT OF HASHING A FILE YOU HAVE. Without this the column
+# is optional in practice and the whole check is decoration: every producer that
+# does not want to hash its document writes NOT_HELD and nothing disagrees.
+check("NOT_HELD about a document the corpus is holding is refused",
+      "SOURCE_DOCUMENT_BYTES_HELD_BUT_UNHASHED" in validate(
+          source_documents=_doc(Source_File_SHA256="NOT_HELD")),
+      "%s" % validate(source_documents=_doc(Source_File_SHA256="NOT_HELD")))
+check("NOT_HELD about a document nobody holds is the ordinary case",
+      validate(source_documents=_doc(Source_File="elsewhere.pdf",
+                                     Source_File_SHA256="NOT_HELD"),
+               source_figures=[dict(f, Source_File="elsewhere.pdf")
+                               for f in SOURCE_FIGURES]) == [],
+      "%s" % validate(source_documents=_doc(Source_File="elsewhere.pdf",
+                                            Source_File_SHA256="NOT_HELD"),
+                      source_figures=[dict(f, Source_File="elsewhere.pdf")
+                                      for f in SOURCE_FIGURES]))
+check("lower and upper case are the same digest",
+      validate(source_documents=_doc(
+          Source_File_SHA256=_DOC_SHA.upper())) == [],
+      "%s" % validate(source_documents=_doc(Source_File_SHA256=_DOC_SHA.upper())))
+# One article inventoried under two IDs counts its figures twice in every
+# coverage check below this line.
+check("two document IDs over one set of bytes are refused",
+      "DUPLICATE_SOURCE_DOCUMENT_BYTES" in validate(
+          source_documents=SOURCE_DOCUMENTS + _doc(Source_Document_ID="SD1_AGAIN")),
+      "%s" % validate(
+          source_documents=SOURCE_DOCUMENTS + _doc(Source_Document_ID="SD1_AGAIN")))
+# And the binding that makes the document digest reach the rasters: a figure
+# carries its own Source_File, so it can name a different article while pointing
+# at a document row whose bytes are hashed.
+check("a figure cut out of a different file than its document is refused",
+      "SOURCE_FIGURE_DOCUMENT_FILE_MISMATCH" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_File="other.pdf")),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Source_File="other.pdf")))
+
+# ONE FIGURE NUMBER PER DOCUMENT (v9.3). Coverage counts ROWS against
+# Observed_Figure_Count, so a document whose figure numbers repeat satisfies its
+# own count while one of its figures is missing entirely - which is the exact
+# failure the source layer exists to prevent, passing every gate.
+check("two rows claiming one figure number of one document are refused",
+      "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                Figure_Number="FIG2")),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF3"}, Figure_Number="FIG2")))
+for _spelling in ("fig2", "FIG 2", "Fig. 2", "  FIG2  "):
+    check("and %r is the same figure number as FIG2" % _spelling,
+          "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+              source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                    Figure_Number=_spelling)),
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+              Figure_Number=_spelling)))
+check("  and the count still agrees, which is why the check is needed",
+      len([f for f in SOURCE_FIGURES]) == int(SOURCE_DOCUMENTS[0]["Observed_Figure_Count"]),
+      "%d rows against Observed_Figure_Count=%s"
+      % (len(SOURCE_FIGURES), SOURCE_DOCUMENTS[0]["Observed_Figure_Count"]))
+# The same number under two DIFFERENT documents is a different thing: an article
+# and its supplement both have a Figure 1.
+check("one figure number under two documents is not a duplicate",
+      validate(source_documents=SOURCE_DOCUMENTS + [dict(
+          SOURCE_DOCUMENTS[0], Source_Document_ID="SD2",
+          Document_Role="SUPPLEMENT", Source_File="supplement.pdf",
+          Source_File_SHA256="NOT_HELD", Observed_Figure_Count=1,
+          Note="one supplementary figure")],
+               source_figures=SOURCE_FIGURES + [dict(
+                   SOURCE_FIGURES[0], Source_Figure_ID="SF_S1",
+                   Source_Document_ID="SD2", Source_File="supplement.pdf",
+                   Figure_Number="FIG1")],
+               source_panels=SOURCE_PANELS + [dict(
+                   SOURCE_PANELS[0], Source_Panel_ID="P_S1",
+                   Source_Figure_ID="SF_S1", Panel_Label="P_S1",
+                   Panel_Disposition="NO_READER_AVAILABLE",
+                   Disposition_Reason="supplementary figure, no reader")]) == [],
+      "%s" % validate(source_documents=SOURCE_DOCUMENTS + [dict(
+          SOURCE_DOCUMENTS[0], Source_Document_ID="SD2",
+          Document_Role="SUPPLEMENT", Source_File="supplement.pdf",
+          Source_File_SHA256="NOT_HELD", Observed_Figure_Count=1,
+          Note="one supplementary figure")],
+          source_figures=SOURCE_FIGURES + [dict(
+              SOURCE_FIGURES[0], Source_Figure_ID="SF_S1",
+              Source_Document_ID="SD2", Source_File="supplement.pdf",
+              Figure_Number="FIG1")],
+          source_panels=SOURCE_PANELS + [dict(
+              SOURCE_PANELS[0], Source_Panel_ID="P_S1",
+              Source_Figure_ID="SF_S1", Panel_Label="P_S1",
+              Panel_Disposition="NO_READER_AVAILABLE",
+              Disposition_Reason="supplementary figure, no reader")]))
+
+# --------------------------------------------------------------------------
+# THE PANEL <-> UNIT BIJECTION AT THE GRAIN A THIRD PARTY WRITES (v9.3)
+# --------------------------------------------------------------------------
+# v9.1 closed the panel-unit exchange in `validate_plan`, which protects plans
+# the compiler wrote and nothing else: `unit_manifest` carried a free-text
+# `Panel` label and no `Panel_ID`, so a hand-written, migrated or third-party
+# manifest set could exchange the units of two panels of one figure and every
+# check still passed. The measurements are right, the hashes match, the factor
+# sets and cell counts are identical - and the SAP panel's numbers arrive under
+# the DAP outcome.
+_swapped = [dict(u, Panel_ID={"U_LINE": "P_FLAT", "U_FLAT": "P_LINE"}.get(
+    u["Unit_ID"], u["Panel_ID"])) for u in UNITS]
+check("two units of one figure with their panels exchanged are refused",
+      "PANEL_UNIT_MISMATCH" in validate(units=_swapped),
+      "%s" % validate(units=_swapped))
+check("a unit that does not say which panel fills it is refused",
+      "UNIT_NAMES_NO_PANEL" in validate(
+          units=[dict(u, Panel_ID="") for u in UNITS]),
+      "%s" % validate(units=[dict(u, Panel_ID="") for u in UNITS]))
+check("a unit naming a panel that is not in the manifest is refused",
+      "UNIT_PANEL_NOT_FOUND" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Panel_ID="P_NOWHERE")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Panel_ID="P_NOWHERE")))
+check("a unit and its panel disagreeing about the physical panel is refused",
+      "PANEL_UNIT_SOURCE_PANEL_MISMATCH" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Source_Panel_ID="P_FLAT")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Source_Panel_ID="P_FLAT")))
+check("a unit and its panel disagreeing about the figure view is refused",
+      "PANEL_UNIT_VIEW_MISMATCH" in validate(
+          units=edited(UNITS, {"Unit_ID": "U_LINE"}, Figure_ID="F_ELSEWHERE")),
+      "%s" % validate(units=edited(UNITS, {"Unit_ID": "U_LINE"},
+                                   Figure_ID="F_ELSEWHERE")))
+check("two panels reading one unit are refused",
+      "UNIT_FILLED_TWICE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Unit_ID="U_LINE")),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                                    Unit_ID="U_LINE")))
+# v9.3 compared the physical grain only when BOTH sides filled it in, so a unit
+# row could leave it blank and the second half of the pairing went unstated.
+check("a unit that does not say which physical panel it is, is refused",
+      "UNIT_NAMES_NO_SOURCE_PANEL" in validate(
+          units=[dict(u, Source_Panel_ID="") for u in UNITS]),
+      "%s" % validate(units=[dict(u, Source_Panel_ID="") for u in UNITS]))
+
+# TWO MARKS, ONE CELL, BEFORE THE RASTER (v9.4). `DUPLICATE_SERIES_ID` is about
+# the identifier; this is about what the identifier means. Two series declaring
+# `ARM=CONTROL` are two readings of one cell, and the grid gate only says so
+# after both have been measured - when which number belongs in the cell is no
+# longer a question it can answer.
+check("two series of one panel declaring one level are refused",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Factor_Level="CONTROL")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+          Factor_Level="CONTROL")))
+check("  and case is not a second cell",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Factor_Level="control")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+          Factor_Level="control")))
+check("two positions of one panel declaring one level are refused",
+      "DUPLICATE_FACTOR_LEVEL_ASSIGNMENT" in validate(
+          positions=edited(POSITION_ROWS,
+                           {"Panel_ID": "P_LINE", "Position_ID": "T1"},
+                           Factor_Level="T0")),
+      "%s" % validate(positions=edited(
+          POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": "T1"},
+          Factor_Level="T0")))
+check("  and the same level under two panels is not a duplicate",
+      validate() == [], "%s" % validate())
+
+# ONE FIGURE, HOWEVER IT IS SPELLED (v9.4). v9.3 stripped punctuation, so FIG2
+# and FIGURE2 came out as two figures and the missing-figure hole reopened by
+# spelling. The corpus has both: `corpus_intake.CAPTION_RE` accepts Fig, Figure,
+# 图 and 圖 because the China Astronaut Research and Training Center papers print
+# `图 1.` with an English `Fig. 1.` underneath.
+check("Fig/Figure/图/圖 and a bare number are one figure number",
+      len({BM.normalize_figure_number(x)
+           for x in ("2", "FIG2", "Fig. 2", "Figure 2", "图 2", "圖2", "２")}) == 1,
+      "%s" % sorted({BM.normalize_figure_number(x)
+                     for x in ("2", "FIG2", "Fig. 2", "Figure 2", "图 2",
+                               "圖2", "２")}))
+check("  and a panel suffix stays part of the identity",
+      BM.normalize_figure_number("Figure 2A") == "2A" != "2",
+      "%s" % BM.normalize_figure_number("Figure 2A"))
+for _spelling in ("Figure 2", "图 2", "圖 2", "2", "２"):
+    check("a document with FIG2 and %r has one figure twice" % _spelling,
+          "DUPLICATE_SOURCE_FIGURE_NUMBER" in validate(
+              source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+                                    Figure_Number=_spelling)),
+          "%s" % validate(source_figures=edited(
+              SOURCE_FIGURES, {"Source_Figure_ID": "SF3"},
+              Figure_Number=_spelling)))
+
+# What the run stamp will say, derived from the same column.
+_mixed = (_doc(Source_File="elsewhere.pdf", Source_File_SHA256="NOT_HELD")
+          + _doc(Source_Document_ID="SD2", Source_File_SHA256=_DOC_SHA))
+for _rows, _want in ((SOURCE_DOCUMENTS, "ALL"),
+                     (_doc(Source_File_SHA256="NOT_HELD"), "NONE"),
+                     (_mixed, "PARTIAL"),
+                     ([], "NO_DOCUMENTS"),
+                     (_doc(Source_File_SHA256=""), "UNDECLARED")):
+    _got = BM.document_bytes_bound(
+        fr(_rows, BM.source_document_manifest_columns()))
+    check("an inventory of %d document(s) is %s-bound" % (len(_rows), _want),
+          _got == _want, _got)
+
+# --------------------------------------------------------------------------
+# the reviewer registry
+# --------------------------------------------------------------------------
+# The attestation check used to read a free-text `Inspector` and test it with
+# `re.sub(r"[^0-9A-Za-z]", "", who)`, which is a statement that reviewers are
+# named in the Latin alphabet. It rejected the name of the person who actually
+# did this inventory and accepted the name of the software that cannot do it.
+
+
+def _reviewer(**changes):
+    return edited(REVIEWERS, {"Reviewer_ID": "RV_T1"}, **changes)
+
+
+for _name in ("김영희", "李明", "홍길동", "Ólafur Þórsson", "О. Иванов",
+              "Nguyễn Thị Hoa", "ＫＩＭ", "JS", "Claude Bernard"):
+    check("a reviewer named %s can register" % _name,
+          validate(reviewers=_reviewer(Reviewer_Name=_name)) == [],
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+for _name in ("AI", "BOT", "LLM", "Codex", "Claude", "GPT-4", "gpt4",
+              "auto script", "automated agent"):
+    check("a reviewer named %r is refused as non-human" % _name,
+          "REVIEWER_NOT_HUMAN" in validate(reviewers=_reviewer(Reviewer_Name=_name)),
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+for _name in ("x", "", "12", "-"):
+    check("a reviewer named %r is not a name" % _name,
+          set(validate(reviewers=_reviewer(Reviewer_Name=_name)))
+          & {"UNRESOLVED_REVIEWER_IDENTITY", "MISSING_REQUIRED"},
+          "%s" % validate(reviewers=_reviewer(Reviewer_Name=_name)))
+check("a reviewer registering under a placeholder is refused",
+      "UNRESOLVED_REVIEWER_IDENTITY" in validate(reviewers=_reviewer(Reviewer_Name="TBD")))
+check("a registrar named as software is refused",
+      "REVIEWER_NOT_HUMAN" in validate(reviewers=_reviewer(Registered_By="Claude")))
+
+# The registry is the only place a person is described, so an attestation that
+# points nowhere is the whole defect coming back one level up.
+check("an inventory naming an unregistered reviewer is refused",
+      "REVIEWER_NOT_REGISTERED" in validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Reviewer_ID="RV_NOBODY")))
+check("a document naming an unregistered reviewer is refused",
+      "REVIEWER_NOT_REGISTERED" in validate(
+          source_documents=[dict(SOURCE_DOCUMENTS[0], Reviewer_ID="RV_NOBODY")]))
+check("an empty registry cannot back any inventory",
+      "REVIEWER_NOT_REGISTERED" in validate(reviewers=[]))
+check("two rows claiming one Reviewer_ID are refused",
+      "DUPLICATE_REVIEWER_ID" in validate(
+          reviewers=REVIEWERS + [dict(REVIEWERS[0], Reviewer_Name="Someone Else")]))
+
+check("a reviewer declared AUTOMATED_AGENT cannot hold the attestation",
+      "REVIEWER_NOT_HUMAN" in validate(
+          reviewers=_reviewer(Human_Attestation="AUTOMATED_AGENT")))
+check("an invented attestation value is refused",
+      "BAD_HUMAN_ATTESTATION" in validate(
+          reviewers=_reviewer(Human_Attestation="PROBABLY_HUMAN")))
+for _ct, _contact, _want in (
+        ("EMAIL", "not-an-address", "BAD_REVIEWER_CONTACT"),
+        ("EMAIL", "someone@localhost", "BAD_REVIEWER_CONTACT"),
+        ("ORCID", "0000-0002-1825-0097", None),
+        ("ORCID", "0000-0002-9000-005X", None),
+        ("ORCID", "0000-0002-1825-0098", "BAD_REVIEWER_CONTACT"),
+        ("ORCID", "0000-0002-1825", "BAD_REVIEWER_CONTACT"),
+        ("POSTCARD", "somewhere", "BAD_CONTACT_TYPE")):
+    _got = validate(reviewers=_reviewer(Contact_Type=_ct, Reviewer_Contact=_contact))
+    check("%s contact %r %s" % (_ct, _contact, "passes" if _want is None else "is refused"),
+          (_got == []) if _want is None else (_want in _got), "%s" % _got)
+check("a registration dated in the future is refused",
+      "BAD_REGISTRATION_DATE" in validate(reviewers=_reviewer(Registration_Date="2099-01-01")))
+check("a free-text registration date is refused",
+      "BAD_REGISTRATION_DATE" in validate(reviewers=_reviewer(Registration_Date="last week")))
+
+# A renamed column is the one schema change that can pass in silence: the old
+# column is ignored, so a manifest that still records who looked reads as one
+# where nobody did.
+check("a manifest still carrying the old Inspector column is refused",
+      "LEGACY_INSPECTOR_COLUMN" in (
+          lambda p: sorted(set(p["check"])) if len(p) else [])(
+          BM.validate_batch_manifests(
+              fr(PANELS, BM.panel_manifest_columns()),
+              fr(SERIES, BM.series_manifest_columns()),
+              fr(POSITION_ROWS, BM.position_manifest_columns()),
+              fr(CONFIGS, BM.reader_config_columns()),
+              units=fr(UNITS, GE.fig_unit_columns()),
+              source_documents=fr(
+                  [dict(SOURCE_DOCUMENTS[0], Inspector="test fixture")],
+                  BM.source_document_manifest_columns() + ["Inspector"]),
+              source_figures=fr(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
+              source_panels=fr(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+              reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()),
+              file_root=ROOT)))
+check("a registered reviewer who inspected nothing is not an error",
+      validate(reviewers=REVIEWERS + [dict(
+          Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
+          Reviewer_Record_Type="HUMAN", Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Registered_By="Test Fixture", Registration_Date="2026-08-01",
+          Human_Attestation="HUMAN_CONFIRMED", Note="")]) == [],
+      "%s" % validate(reviewers=REVIEWERS + [dict(
+          Reviewer_ID="RV_T2", Reviewer_Name="Second Extractor",
+          Reviewer_Record_Type="HUMAN", Contact_Type="ORCID", Reviewer_Contact="0000-0002-1825-0097",
+          Registered_By="Test Fixture", Registration_Date="2026-08-01",
+          Human_Attestation="HUMAN_CONFIRMED", Note="")]))
+
+# The CLI docstring is the only place a user learns what the runner needs, and
+# it silently fell one file behind `MANIFEST_FILES` the moment a manifest was
+# added. Documentation that can drift is documentation that will.
+_doc = RB.__doc__ or ""
+_undocumented = sorted(n for n in RB.MANIFEST_FILES.values() if n not in _doc)
+check("every mandatory manifest is named in the runner's usage text",
+      _undocumented == [], "undocumented: %s" % _undocumented)
+check("the usage text says how many there are",
+      "eleven" in _doc and len(RB.MANIFEST_FILES) == 11,
+      "%d manifests" % len(RB.MANIFEST_FILES))
+# And the optional one, said to be optional. A file the runner reads and the
+# usage text does not mention is a file nobody writes; one mentioned without the
+# word OPTIONAL is eleven manifests turning into twelve mandatory ones in the
+# reader's head.
+_opt = sorted(n for n in RB.OPTIONAL_MANIFEST_FILES.values() if n not in _doc)
+check("the optional manifest is documented too, and as optional",
+      _opt == [] and "OPTIONAL" in _doc, "undocumented: %s" % _opt)
+
+check("an unverified visual inventory blocks the run",
+      "SOURCE_INVENTORY_NOT_VERIFIED" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Inventory_Status="PENDING")))
+check("an unresolved source panel blocks the run",
+      "SOURCE_PANEL_UNRESOLVED" in validate(
+          source_panels=edited(SOURCE_PANELS, {"Source_Panel_ID": "P_FLAT"},
+                               Target_Status="UNCERTAIN",
+                               Panel_Disposition="UNRESOLVED")))
+check("an auto-digitized source panel must link to a run panel",
+      "SOURCE_PANEL_RUN_LINK_MISSING" in validate(
+          panels=[r for r in PANELS if r["Panel_ID"] != "P_FLAT"]))
+check("a run panel absent from the source inventory is rejected",
+      "SOURCE_PANEL_NOT_IN_INVENTORY" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                        Source_Panel_ID="P_NOT_INVENTORIED")))
+
+for _name, _kw, _want in (
+        ("a panel box that does not fit its image",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Panel_X1=9000)),
+         "PANEL_BOX_OUTSIDE_IMAGE"),
+        ("an inverted panel box",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Panel_X1=50)),
+         "BAD_PANEL_BOX"),
+        ("an image that is not on disk",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Image_Path="/nope/missing.png")),
+         "SOURCE_FILE_NOT_FOUND"),
+        ("a mark type outside the vocabulary",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="SANKEY")),
+         "BAD_MARK_TYPE"),
+        ("a Config_ID with no options behind it",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Config_ID="C_GHOST")),
+         "CONFIG_NOT_FOUND"),
+        ("one tick where two are needed",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Axis_Y_Ticks="0:420")),
+         "BAD_AXIS_CALIBRATION"),
+        ("no y calibration at all",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Axis_Y_Ticks="")),
+         "MISSING_AXIS_CALIBRATION"),
+        ("ticks that sit outside the panel they calibrate",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Axis_Y_Ticks="0:4000;100:4200")),
+         "CALIBRATION_OUTSIDE_PANEL"),
+        ("a scatter that does not say which association it yields",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Association_Type="")),
+         "MISSING_ASSOCIATION_TYPE"),
+        # AN ANNOTATION BOX IS A CLAIM ABOUT A PANEL and is checked against it.
+        # It exists because a journal prints `r` and `P` inside the axes and the
+        # glyphs are marker-sized - `0` IS a small circle - so only a
+        # declaration separates them. A declaration written by hand off a figure
+        # can be wrong in exactly these ways, and every one of them fails
+        # SILENTLY otherwise: the run reads fewer marks and does not say why.
+        # THE VALUE THE PAPER PRINTS, checked as a declaration before it is
+        # checked against the points. A correlation outside [-1, 1] is a
+        # transcription slip that would otherwise reach the run and refuse
+        # every panel it sits on for a reason invisible from the manifest.
+        ("a printed association that is not a number",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Association_Value_Printed="strong")),
+         "BAD_PRINTED_ASSOCIATION"),
+        ("a printed correlation outside its own range",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Association_Value_Printed="1.4")),
+         "BAD_PRINTED_ASSOCIATION"),
+        ("a printed association on a panel that yields none",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Association_Value_Printed="0.9")),
+         "ASSOCIATION_NOT_APPLICABLE"),
+        ("an annotation box that is inverted",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="600,500,60,120")),
+         "BAD_ANNOTATION_BOX"),
+        ("an annotation box that misses the plot area",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="740,900,60,120")),
+         "ANNOTATION_BOX_OUTSIDE_PANEL"),
+        ("an annotation box that swallows the plot area",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="70,730,40,460")),
+         "ANNOTATION_BOX_COVERS_PANEL"),
+        ("the same annotation box declared twice",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                            Annotation_Boxes="600,700,60,120;600,700,60,120")),
+         "DUPLICATE_ANNOTATION_BOX"),
+        ("an association type on a line panel",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Association_Type="PEARSON_R")),
+         "ASSOCIATION_TYPE_NOT_APPLICABLE"),
+        ("a bar reader pointed at an association unit",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Mark_Type="BAR_COLOR")),
+         "MARK_TYPE_CONTRADICTS_STATISTIC"),
+        ("a panel naming a unit that does not exist",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Unit_ID="U_GHOST")),
+         "UNIT_NOT_FOUND"),
+        ("a series with no factor level",
+         dict(series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                                 Factor_Level="")),
+         "MISSING_SERIES_IDENTITY"),
+        ("a colour series with no colour",
+         dict(series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                                 Colour_Hex="")),
+         "MISSING_SERIES_DISCRIMINANT"),
+        ("a malformed colour",
+         dict(series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                                 Colour_Hex="#zzz")),
+         "BAD_SERIES_COLOUR"),
+        ("two series told apart by nothing",
+         dict(series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                                 Colour_Hex="#2d50dc")),
+         "SERIES_NOT_SEPARABLE"),
+        ("a marker shape outside the vocabulary",
+         dict(series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                                 Marker_Shape="BLOB")),
+         "BAD_SERIES_MARKER_SHAPE"),
+        ("the same factor on both the series and the position axis",
+         dict(positions=edited(POSITION_ROWS, {"Panel_ID": "P_LINE"},
+                               Factor_Name="ARM")),
+         "FACTOR_ON_BOTH_AXES"),
+        ("a position outside the panel box",
+         dict(positions=edited(POSITION_ROWS, {"Panel_ID": "P_LINE",
+                                               "Position_ID": "T0"}, X_Pixel=5)),
+         "POSITION_OUTSIDE_PANEL"),
+        ("a position with neither pixel nor slot",
+         dict(positions=edited(POSITION_ROWS, {"Panel_ID": "P_LINE",
+                                               "Position_ID": "T0"},
+                               X_Pixel="", Slot_Index="")),
+         "MISSING_POSITION_GEOMETRY"),
+        ("declared positions on a scatter",
+         dict(positions=POSITION_ROWS + [dict(Panel_ID="P_SCAT", Position_ID="T0",
+                                              X_Pixel=200, Slot_Index=0,
+                                              Display_Order=0, Factor_Name="TIMEPOINT",
+                                              Factor_Level="T0", Timepoint_Label="T0",
+                                              Timepoint_Days=0, Note="")]),
+         "POSITION_NOT_APPLICABLE"),
+        ("a misspelled reader option",
+         dict(configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="treshold",
+                                      Value="150", Note="")]),
+         "UNKNOWN_READER_OPTION"),
+        ("an option that does not apply to this reader",
+         dict(configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="stem_required",
+                                      Value="FALSE", Note="")]),
+         "OPTION_WRONG_FOR_MARK_TYPE"),
+        ("an option value of the wrong type",
+         dict(configs=edited(CONFIGS, {"Config_ID": "C_DEFAULT",
+                                       "Option": "x_window"}, Value="wide")),
+         "BAD_READER_OPTION_VALUE"),
+        ("the same option set twice in one config",
+         dict(configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="x_window",
+                                      Value="20", Note="")]),
+         "DUPLICATE_READER_OPTION"),
+        # slot_tolerance_px is a BAR_COLOR keyword; the monochrome bar reader
+        # has no such parameter, so accepting it here bought a TypeError at run
+        # time reported as a figure problem. (`n_slots` used to be the example.
+        # It is gone: it existed so BAR_COLOR could rebuild its own x spacing
+        # from the bars it happened to detect, which is inference.)
+        ("slot_tolerance_px on a monochrome bar panel",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
+                            Config_ID="C_MONO"),
+              series_rows=[dict(r, Colour_Hex="", Bar_Fill_Pattern=(
+                  "SOLID" if r["Series_ID"] == "S_BLUE" else "HATCHED"))
+                  if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONO",
+                                      Option="slot_tolerance_px",
+                                      Value="4", Note="")]),
+         "OPTION_WRONG_FOR_MARK_TYPE"),
+        # Ranges, not just types. Each of these parsed cleanly and then selected
+        # nothing at all, which reads downstream as an unreadable figure.
+        ("a negative grey threshold",
+         dict(configs=CONFIGS + [dict(Config_ID="C_SCATTER", Option="threshold",
+                                      Value="-1", Note="")]),
+         "BAD_READER_OPTION_VALUE"),
+        ("a grey threshold above 255",
+         dict(configs=CONFIGS + [dict(Config_ID="C_SCATTER", Option="threshold",
+                                      Value="300", Note="")]),
+         "BAD_READER_OPTION_VALUE"),
+        ("a zero-width matching window",
+         dict(configs=edited(CONFIGS, {"Config_ID": "C_DEFAULT",
+                                       "Option": "x_window"}, Value="0")),
+         "BAD_READER_OPTION_VALUE"),
+        ("a negative colour tolerance",
+         dict(configs=edited(CONFIGS, {"Config_ID": "C_SCATTER",
+                                       "Option": "colour_tolerance"}, Value="-5")),
+         "BAD_READER_OPTION_VALUE"),
+        ("a marker area window that excludes everything",
+         dict(configs=edited(edited(CONFIGS, {"Config_ID": "C_SCATTER",
+                                              "Option": "min_marker_area"},
+                                    Value="500"),
+                             {"Config_ID": "C_SCATTER", "Option": "min_marker_area"},
+                             Value="500")
+              + [dict(Config_ID="C_SCATTER", Option="max_marker_area",
+                      Value="10", Note="")]),
+         "READER_OPTIONS_CONTRADICT"),
+        # The released LINE_MONO reader matches by marker geometry and never
+        # looks at Line_Style, so a manifest describing a solid-versus-dashed
+        # figure must not validate against it.
+        ("a LINE_MONO series told apart only by line style",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE"
+                                            else "DASHED"))
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "MISSING_SERIES_DISCRIMINANT"),
+        ("a LINE_MONO series promising a line style the reader ignores",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="CIRCLE",
+                                Marker_Fill=("OPEN" if r["Series_ID"] == "S_BLUE"
+                                             else "FILLED"),
+                                Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE"
+                                            else "DASHED"))
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "LINE_STYLE_NOT_READ"),
+        # LINE_MONO_STYLE separates series by SOLID/DASHED and looks at
+        # nothing else, so a marker shape does not make two of them separable.
+        # REVERT: let `Marker_Shape=ANY` through on any panel. ANY says "there
+        # is nothing here to tell apart", which is a claim about the panel: two
+        # series both declaring it are two series the reader cannot separate,
+        # and it would return whichever candidate it found first.
+        ("two LINE_MONO series that both decline to be told apart",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                            Config_ID="C_MONOLINE"),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="ANY",
+                                Marker_Fill="OPEN", Line_Style="")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+              configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold",
+                                      Value="150", Note="")]),
+         "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES"),
+        ("two LINE_MONO_STYLE series that share a line style",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Mark_Type="LINE_MONO_STYLE", Config_ID=""),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style="SOLID")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES]),
+         "SERIES_NOT_SEPARABLE"),
+        ("a LINE_MONO_STYLE series that declares no line style",
+         dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                            Mark_Type="LINE_MONO_STYLE", Config_ID=""),
+              series_rows=[dict(r, Colour_Hex="", Marker_Shape="NONE",
+                                Line_Style="NONE")
+                           if r["Panel_ID"] == "P_LINE" else r for r in SERIES]),
+         "MISSING_SERIES_DISCRIMINANT"),
+):
+    _got = validate(**_kw)
+    check(_name + " is rejected", _want in _got, "got %s" % _got)
+
+# ...AND A CORRECT ONE PASSES. Four refusals with nothing that survives them is
+# a column that can only ever be got wrong.
+_ann_ok = dict(panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                             Annotation_Boxes="600,700,60,120"))
+check("an annotation box inside the plot area validates",
+      not validate(**_ann_ok), "%s" % validate(**_ann_ok))
+
+# `Mask_Key` names one of the reader's three built-in masks and was accepted
+# unchecked. The masks are keyed in lower case, so BLUE - the natural way to
+# write it - validated, reached `masks["BLUE"]`, raised KeyError inside the
+# reader, and became an InternalReaderError, which aborts the whole batch. A
+# manifest typo must not be reported as a defect in the reader.
+def _bar_series(**kw):
+    return dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                              Mark_Type="BAR_COLOR", Config_ID="C_DEFAULT"),
+                series_rows=[dict(r, **kw) if r["Panel_ID"] == "P_LINE" else r
+                             for r in SERIES],
+                positions=POSITION_ROWS)
+
+
+def _two_masks(first, second, hex_=""):
+    return dict(_bar_series(), series_rows=[
+        dict(r, Colour_Hex=hex_,
+             Mask_Key=(first if r["Series_ID"] == "S_BLUE" else second))
+        if r["Panel_ID"] == "P_LINE" else r for r in SERIES])
+
+
+for _name, _kw, _want in (
+        ("Mask_Key naming a mask that does not exist",
+         _two_masks("GREEN", "red"), "BAD_MASK_KEY"),
+        ("Mask_Key that is not a mask name at all",
+         _two_masks("foo", "red"), "BAD_MASK_KEY"),
+        # Two discriminants means the manifest says two things and the run
+        # believes whichever the code checks first.
+        ("a series declaring both a mask and a colour",
+         _two_masks("blue", "red", hex_="#2d50dc"),
+         "SERIES_DISCRIMINANT_AMBIGUOUS")):
+    _got = validate(**_kw)
+    check(_name + " is rejected", _want in _got, "got %s" % _got)
+for _spelling in ("blue", "BLUE", "Blue", " blue "):
+    _got = validate(**_two_masks(_spelling, "red"))
+    check("Mask_Key=%r is accepted, whatever the case" % _spelling,
+          "BAD_MASK_KEY" not in _got and "SERIES_DISCRIMINANT_AMBIGUOUS" not in _got,
+          "got %s" % _got)
+check("the validator's mask list is the reader's own",
+      tuple(sorted(BM.BAR_COLOR_MASK_KEYS)) == tuple(sorted(BR.BUILTIN_MASK_KEYS)),
+      "%s vs %s" % (BM.BAR_COLOR_MASK_KEYS, BR.BUILTIN_MASK_KEYS))
+
+check("a panel with no series declared is rejected",
+      "PANEL_HAS_NO_SERIES" in validate(
+          series_rows=[r for r in SERIES if r["Panel_ID"] != "P_FLAT"]))
+check("a positional panel with no positions is rejected",
+      "PANEL_HAS_NO_POSITIONS" in validate(
+          positions=[r for r in POSITION_ROWS if r["Panel_ID"] != "P_LINE"]))
+check("a duplicate Panel_ID is rejected",
+      "DUPLICATE_PANEL_ID" in validate(panels=PANELS + [PANELS[0]]))
+check("a series pointing at no panel is rejected",
+      "PANEL_NOT_FOUND" in validate(
+          series_rows=SERIES + [series("P_GHOST", "S_X", "CONTROL",
+                                       Colour_Hex="#2d50dc")]))
+check("a manifest missing a column is rejected as a schema error",
+      "SCHEMA_INCOMPLETE" in (lambda p: sorted(set(p["check"])) if len(p) else [])(
+          BM.validate_batch_manifests(
+              fr(PANELS, [c for c in BM.panel_manifest_columns() if c != "Mark_Type"]),
+              fr(SERIES, BM.series_manifest_columns()),
+              fr(POSITION_ROWS, BM.position_manifest_columns()),
+              fr(CONFIGS, BM.reader_config_columns()),
+              source_documents=fr(SOURCE_DOCUMENTS,
+                                  BM.source_document_manifest_columns()),
+              source_figures=fr(SOURCE_FIGURES, BM.source_figure_manifest_columns()),
+              source_panels=fr(SOURCE_PANELS, BM.source_panel_inventory_columns()),
+              reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()),
+              file_root=ROOT)))
+
+
+# --------------------------------------------------------------------------
+print("a run turns declared panels into declared cells")
+MDIR = write_manifests(os.path.join(ROOT, "manifests"))
+ODIR = os.path.join(ROOT, "out")
+summary = RB.run_batch(MDIR, ODIR, file_root=ROOT, run_date="2026-08-06")
+check("the batch ran", summary["status"] == "RAN", "%s" % summary)
+
+values = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"), dtype=object).fillna("")
+accepted = pd.read_csv(os.path.join(ODIR, "figure_values_machine_qc.csv"), dtype=object).fillna("")
+run = pd.read_csv(os.path.join(ODIR, "run_manifest.csv"), dtype=object).fillna("")
+queue = pd.read_csv(os.path.join(ODIR, "manual_queue.csv"), dtype=object).fillna("")
+qc = pd.read_csv(os.path.join(ODIR, "qc_problems.csv"), dtype=object).fillna("")
+coverage = pd.read_csv(os.path.join(ODIR, "source_panel_coverage.csv"),
+                       dtype=object).fillna("")
+states = dict(zip(run["Panel_ID"], run["Run_State"]))
+
+check("the source coverage ledger has one row per physical panel",
+      len(coverage) == 4 and coverage["Source_Panel_ID"].is_unique,
+      "%d rows" % len(coverage))
+check("manual panels remain visible in source coverage rather than disappearing",
+      dict(zip(coverage["Source_Panel_ID"], coverage["Coverage_Status"]))[
+          "P_MANUAL"] == "QUEUED_OR_FAILED")
+
+check("the line panel produced its eight declared cells",
+      len(values[values["Unit_ID"] == "U_LINE"]) == 8,
+      "%d" % len(values[values["Unit_ID"] == "U_LINE"]))
+check("cell keys come from the manifest, not from the reader's labels",
+      set(values[values["Unit_ID"] == "U_LINE"]["Cell_Key"]) ==
+      {GE.fig_cell_key({"ARM": a, "TIMEPOINT": t})
+       for a in ("CONTROL", "TREATED") for t in POSITIONS},
+      "%s" % sorted(set(values[values["Unit_ID"] == "U_LINE"]["Cell_Key"]))[:3])
+_means = {r["Cell_Key"]: float(r["Mean"])
+          for _, r in values[values["Unit_ID"] == "U_LINE"].iterrows()}
+_err = max(abs(_means[GE.fig_cell_key({"ARM": arm, "TIMEPOINT": t})] - v)
+           for arm, name in (("CONTROL", "S_BLUE"), ("TREATED", "S_RED"))
+           for t, v in zip(POSITIONS, LINE_TRUTH[name]))
+check("the values are the reader's, recovered within 1 unit", _err < 1.0,
+      "max %.3f" % _err)
+check("the scatter panel produced one association cell",
+      len(values[values["Unit_ID"] == "U_SCAT"]) == 1,
+      "%d" % len(values[values["Unit_ID"] == "U_SCAT"]))
+_scat = values[values["Unit_ID"] == "U_SCAT"].iloc[0]
+check("the association carries its point file and its provenance",
+      bool(_scat["Point_Data_Reference"]) and bool(_scat["P_Value_Extraction_Method"])
+      and bool(_scat["Ties_Present"]),
+      "%r" % dict(_scat))
+# Recorded relative to the run, so handing the accepted file to another folder
+# or another machine does not leave every provenance link pointing at a
+# directory that exists only where the run happened.
+_scat_points = RB.resolve_artifact(ODIR, _scat["Point_Data_Reference"])
+check("the value's point reference is relative to the run, not to this machine",
+      not os.path.isabs(_scat["Point_Data_Reference"])
+      and _scat["Point_Data_Reference"].startswith("raw/"),
+      "%r" % _scat["Point_Data_Reference"])
+check("the point file the run wrote is on disk and re-derivable",
+      _scat_points and os.path.exists(_scat_points)
+      and MR.read_point_data(_scat_points)["Unit_ID"] == "U_SCAT",
+      "%r" % _scat_points)
+check("the point file names the cell it backs",
+      MR.read_point_data(_scat_points)["Cell_Key"] == _scat["Cell_Key"])
+check("and so is every other output-facing path the run recorded",
+      not any(os.path.isabs(v) for v in
+              list(values["WPD_Project_File"]) + list(values["Point_Data_Reference"])
+              + list(run["Raw_Data_File"]) + list(run["WPD_Project_File"]) if v),
+      "%s" % [v for v in list(values["WPD_Project_File"])
+              + list(run["Raw_Data_File"]) if v and os.path.isabs(v)][:3])
+# `N_Pairs` is how many blobs survived the area filter. On its own it cannot
+# say whether that is the study's sample: it IS the number the association was
+# computed from, so it agrees with itself by construction.
+check("the association records the count it was measured against",
+      int(_scat["Expected_N_From_Source"]) == len(SCATTER_XY)
+      and int(_scat["Detected_Unique_Point_Count"]) == len(SCATTER_XY)
+      and _scat["Point_Count_Agreement"] == "MATCH",
+      "%r" % {k: _scat[k] for k in ("Expected_N_From_Source",
+                                    "Detected_Unique_Point_Count",
+                                    "Point_Count_Agreement")})
+check("and says nothing is hiding behind anything",
+      _scat["Overplotting_Possible"] == "FALSE"
+      and int(_scat["Series_Mask_Overlap_Count"]) == 0,
+      "%r" % dict(_scat))
+check("the p is the Pearson t, named for the test that produced it",
+      _scat["P_Value_Method"] == "PEARSON_T_TEST", "%r" % _scat["P_Value_Method"])
+# The two queued panels produced nothing, and the gate says so - that is the
+# fail-closed property working, not a defect. What must be true is that the
+# complaints are confined to those units and never touch the ones that ran.
+_blamed = set()
+for _, _p in qc.iterrows():
+    _w = str(_p["where"])
+    if _w.startswith("unit:"):
+        _blamed.add(_w.split(":", 1)[1])
+    elif _w.startswith("values:"):
+        _blamed.add(values.iloc[int(_w.split(":", 1)[1]) - 2]["Unit_ID"])
+check("the units that ran are clean through the gate",
+      not (_blamed & {"U_LINE", "U_SCAT"}), "%s" % sorted(_blamed))
+check("the gate names the holes the queued panels left",
+      _blamed == {"U_FLAT", "U_MANUAL"}, "%s" % sorted(_blamed))
+check("and it names them as missing cells, not as bad values",
+      set(qc["check"]) <= {"FACTOR_LEVEL_MISSING", "FACTORIAL_CELL_MISSING"},
+      "%s" % sorted(set(qc["check"])))
+
+print("every panel lands on exactly one state, and says why")
+check("the readable line panel is AUTO_PASS", states.get("P_LINE") == "AUTO_PASS",
+      "%s" % states)
+check("the scatter panel is AUTO_PASS", states.get("P_SCAT") == "AUTO_PASS",
+      "%s" % states)
+check("markers with no whiskers are NO_VARIANCE",
+      states.get("P_FLAT") == "NO_VARIANCE", "%s" % states)
+check("a panel declared MANUAL is never read",
+      states.get("P_MANUAL") == "MANUAL_POINT_READ", "%s" % states)
+check("every non-passing panel is in the manual queue",
+      set(queue["Panel_ID"]) == {"P_FLAT", "P_MANUAL"},
+      "%s" % sorted(set(queue["Panel_ID"])))
+check("a queue row carries the image and box a human needs to open",
+      all(q["Image_Path"] and q["Panel_Box"] for _, q in queue.iterrows()
+          if q["Run_State"] != "MANUAL_POINT_READ" or q["Panel_ID"] == "P_FLAT"))
+check("no state outside the declared vocabulary",
+      set(run["Run_State"]) <= set(BM.RUN_STATES),
+      "%s" % (set(run["Run_State"]) - set(BM.RUN_STATES)))
+check("a panel that failed produced no values",
+      not len(values[values["Unit_ID"].isin(["U_FLAT", "U_MANUAL"])]),
+      "%d rows" % len(values[values["Unit_ID"].isin(["U_FLAT", "U_MANUAL"])]))
+
+print("nothing unaccepted can reach master by reading one file")
+check("there is no file called figure_values.csv at all",
+      not os.path.exists(os.path.join(ODIR, "figure_values.csv")),
+      "the ambiguous name is back - a downstream reader will pool from it")
+check("every raw row carries its own verdict, so no join is needed",
+      {"Value_Status", "QC_Codes", "Pooling_Eligible"} <= set(values.columns),
+      "%s" % sorted(values.columns)[-4:])
+check("every raw status is in the declared vocabulary",
+      set(values["Value_Status"]) <= {"MACHINE_QC_PASSED", "QC_FAILED", "PANEL_NOT_PASSED"},
+      "%s" % sorted(set(values["Value_Status"])))
+# Nothing this module writes is poolable. MACHINE_QC_PASSED means the machine
+# found nothing wrong, which is a different claim from a person having looked
+# at where the reader put its marks - and it was the same column before, so
+# "the gate is happy" and "somebody checked" were indistinguishable downstream.
+check("no row the run writes claims to be poolable",
+      set(values["Pooling_Eligible"]) == {"FALSE"},
+      "%s" % sorted(set(values["Pooling_Eligible"])))
+check("the run writes no accepted file at all",
+      not os.path.exists(os.path.join(ODIR, "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(ODIR)))
+check("the machine-QC file is the MACHINE_QC_PASSED subset, nothing more",
+      len(accepted) == sum(values["Value_Status"] == "MACHINE_QC_PASSED")
+      and set(accepted["Cell_Key"]) ==
+      set(values[values["Value_Status"] == "MACHINE_QC_PASSED"]["Cell_Key"]),
+      "%d vs %d" % (len(accepted),
+                    sum(values["Value_Status"] == "MACHINE_QC_PASSED")))
+check("every accepted row belongs to an AUTO_PASS panel",
+      all(states.get(_p) == "AUTO_PASS"
+          for _p, _u in zip(run["Panel_ID"], run["Unit_ID"])
+          if _u in set(accepted["Unit_ID"])),
+      "%s" % states)
+
+# A unit whose dispersion definition is a placeholder is read fine and rejected
+# by the gate. Its numbers are real; they are also unpoolable, and the whole
+# point of the split is that a downstream script cannot get at them by accident.
+_unresolved = [dict(u, Errorbar_Definition_Source=(
+    "UNRESOLVED - the caption does not say whether these are SD or SEM"))
+    if u["Unit_ID"] == "U_LINE" else u for u in UNITS]
+_mdir = write_manifests(os.path.join(ROOT, "m_unres"), units=_unresolved)
+_o = os.path.join(ROOT, "o_unres")
+_su = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+_acc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
+                   dtype=object).fillna("")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("an unresolved SD/SEM unit is still read into the raw file",
+      len(_raw[_raw["Unit_ID"] == "U_LINE"]) == 8,
+      "%d" % len(_raw[_raw["Unit_ID"] == "U_LINE"]))
+check("and every one of its rows is marked QC_FAILED",
+      set(_raw[_raw["Unit_ID"] == "U_LINE"]["Value_Status"]) == {"QC_FAILED"},
+      "%s" % sorted(set(_raw[_raw["Unit_ID"] == "U_LINE"]["Value_Status"])))
+check("and names the gate code that rejected it",
+      all("UNRESOLVED_ERRORBAR_DEFINITION" in c
+          for c in _raw[_raw["Unit_ID"] == "U_LINE"]["QC_Codes"]),
+      "%s" % sorted(set(_raw[_raw["Unit_ID"] == "U_LINE"]["QC_Codes"])))
+check("and none of them reaches the accepted file",
+      not len(_acc[_acc["Unit_ID"] == "U_LINE"]), "%d rows" % len(_acc))
+check("the panel is QC_FAILED in the run manifest too",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "QC_FAILED",
+      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+check("the clean scatter unit is unaffected and still accepted",
+      set(_acc["Unit_ID"]) == {"U_SCAT"}, "%s" % sorted(set(_acc["Unit_ID"])))
+
+# The whole-figure case the review named: publication 397, every panel rejected.
+# The scatter panel is dropped from this fixture, so ITS UNIT GOES WITH IT: since
+# v9.3 a unit names the panel that fills it, and a unit left behind naming a panel
+# this manifest set does not have is `UNIT_PANEL_NOT_FOUND`.
+_all_bad = [dict(u, Errorbar_Definition_Source="TBD") for u in UNITS
+            if u["Unit_ID"] != "U_SCAT"]
+_mdir = write_manifests(os.path.join(ROOT, "m_allbad"), units=_all_bad,
+                        panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
+                        series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"],
+                        source_panels=edited(
+                            SOURCE_PANELS, {"Source_Panel_ID": "P_SCAT"},
+                            Panel_Disposition="NO_SUMMARY_STATISTIC",
+                            Disposition_Reason="excluded from this all-bad fixture"))
+_o = os.path.join(ROOT, "o_allbad")
+_sa = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+_acc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
+                   dtype=object).fillna("")
+_raw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("when every panel fails QC the accepted file has zero rows",
+      len(_acc) == 0, "%d rows" % len(_acc))
+check("while the raw file still holds every reading, for the audit trail",
+      len(_raw) == 8, "%d rows" % len(_raw))
+check("the summary reports both counts, so a caller cannot read only one",
+      _sa["values"] == 8 and _sa["accepted"] == 0, "%s" % _sa)
+check("the stamp records read and accepted separately",
+      json.load(open(os.path.join(_o, "run_stamp.json")))["Values_Accepted"] == 0)
+
+
+print("a failed re-run leaves no trace of the run before it")
+# The sequence that matters: a good run, then a rejected one into the SAME
+# directory. Clearing up at the end of a successful run is not enough - the
+# rejected run never gets to the end, and the previous accepted file sits there
+# looking like the current answer.
+_seq = os.path.join(ROOT, "o_seq")
+_good = write_manifests(os.path.join(ROOT, "m_seq_good"))
+_first = RB.run_batch(_good, _seq, file_root=ROOT, run_date="2026-08-06")
+check("the first run leaves a machine-QC file with rows in it",
+      _first["machine_qc"] > 0
+      and len(pd.read_csv(os.path.join(_seq, "figure_values_machine_qc.csv"))) > 0,
+      "%s" % _first)
+_bad_seq = write_manifests(
+    os.path.join(ROOT, "m_seq_bad"),
+    configs=CONFIGS + [dict(Config_ID="C_DEFAULT", Option="x_window",
+                            Value="14", Note="")])
+_second = RB.run_batch(_bad_seq, _seq, file_root=ROOT, run_date="2026-08-07")
+check("the second run is rejected", _second["status"] == "MANIFEST_REJECTED",
+      "%s" % _second)
+for _name in ("figure_values_machine_qc.csv", "figure_values_raw.csv",
+              "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
+    check("a rejected re-run leaves no stale %s" % _name,
+          not os.path.exists(os.path.join(_seq, _name)),
+          "the previous run's file survived and now reads as current")
+for _name in ("raw", "projects"):
+    check("a rejected re-run leaves no stale %s/ directory" % _name,
+          not os.path.isdir(os.path.join(_seq, _name)))
+_stamp_path = os.path.join(_seq, "run_stamp.json")
+check("a rejected run still writes a stamp", os.path.exists(_stamp_path),
+      "no stamp at all - the directory now says nothing about why it is empty")
+_stamp = json.load(open(_stamp_path)) if os.path.exists(_stamp_path) else {}
+check("the stamp records the rejection rather than the last success",
+      _stamp.get("Status") == "MANIFEST_REJECTED", "%r" % _stamp)
+check("and reports zero read and zero accepted",
+      _stamp.get("Values_Read") == 0 and _stamp.get("Values_Accepted") == 0,
+      "%r" % _stamp)
+check("and counts the manifest problems that stopped it",
+      _stamp.get("Manifest_Problems") == _second["problems"], "%r" % _stamp)
+check("the rejection summary reports zero values too, not a missing key",
+      _second["values"] == 0 and _second["accepted"] == 0, "%s" % _second)
+check("manifest_problems.csv is written and names the cause",
+      "DUPLICATE_READER_OPTION" in set(pd.read_csv(
+          os.path.join(_seq, "manifest_problems.csv"))["check"]))
+check("no staging directory is left behind",
+      not os.path.isdir(os.path.join(_seq, RB.STAGING)))
+# And the reverse order: a good run into a directory holding a rejection.
+_third = RB.run_batch(_good, _seq, file_root=ROOT, run_date="2026-08-08")
+check("a good run after a rejection clears the rejection's own outputs",
+      _third["status"] == "RAN"
+      and not os.path.exists(os.path.join(_seq, "manifest_problems.csv")))
+check("and its stamp says RAN",
+      json.load(open(os.path.join(_seq, "run_stamp.json")))["Status"] == "RAN")
+check("every canonical output name is one the run actually clears",
+      {"figure_values_machine_qc.csv", "figure_values_raw.csv", "run_manifest.csv",
+       "manual_queue.csv", "qc_problems.csv", "manifest_problems.csv",
+       "run_stamp.json"} <= set(RB.CANONICAL_OUTPUTS),
+      "%s" % sorted(RB.CANONICAL_OUTPUTS))
+
+
+print("an input that cannot even be loaded is a failure, not a silence")
+# The clearing has to be the FIRST thing a run does. Reading the manifests
+# first looked harmless: a missing directory, a malformed CSV or an unreadable
+# file raised before anything was cleared, so the previous run's accepted file
+# and its Status=RAN stamp both survived a run that never happened.
+_load = os.path.join(ROOT, "o_load")
+RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
+check("the setup run leaves an accepted file to go stale",
+      len(pd.read_csv(os.path.join(_load, "figure_values_machine_qc.csv"))) > 0)
+
+for _name, _break in (
+        ("a manifest directory that does not exist",
+         lambda d: "/nope/no/such/manifests"),
+        ("a manifest file deleted from the set",
+         lambda d: (os.remove(os.path.join(d, "unit_manifest.csv")), d)[1]),
+        ("a malformed CSV in the set",
+         lambda d: (open(os.path.join(d, "panel_manifest.csv"), "w").write(
+             'a,b\n1,2,3,4\n"unclosed\n'), d)[1])):
+    _md = os.path.join(ROOT, "m_load_%d" % len(_name))
+    shutil.rmtree(_md, ignore_errors=True)
+    shutil.copytree(_good, _md)
+    _target = _break(_md)
+    _raised = None
+    try:
+        RB.run_batch(_target, _load, file_root=ROOT, run_date="2026-08-07")
+    except BaseException as exc:      # BaseException on purpose - see next check
+        _raised = exc
+    check("%s raises rather than returning a result" % _name,
+          _raised is not None, "the run returned normally")
+    # SystemExit derives from BaseException, so `except Exception` sails past
+    # it. If the loader ever goes back to raising one, this fails here rather
+    # than taking the suite down with it.
+    check("%s is a catchable Exception, not SystemExit" % _name,
+          isinstance(_raised, Exception)
+          and not isinstance(_raised, SystemExit), "%r" % type(_raised))
+    for _f in ("figure_values_machine_qc.csv", "figure_values_raw.csv",
+               "run_manifest.csv", "qc_problems.csv"):
+        check("%s leaves no stale %s" % (_name, _f),
+              not os.path.exists(os.path.join(_load, _f)),
+              "the previous run's file survived an input failure")
+    _st = os.path.join(_load, "run_stamp.json")
+    check("%s still writes a stamp" % _name, os.path.exists(_st))
+    _sj = json.load(open(_st)) if os.path.exists(_st) else {}
+    check("%s records INPUT_LOAD_FAILED with zero counts" % _name,
+          _sj.get("Status") == "INPUT_LOAD_FAILED"
+          and _sj.get("Values_Read") == 0 and _sj.get("Values_Accepted") == 0,
+          "%r" % _sj)
+    check("%s says what went wrong" % _name, bool(_sj.get("Detail")), "%r" % _sj)
+    # restore for the next case
+    RB.run_batch(_good, _load, file_root=ROOT, run_date="2026-08-06")
+
+check("every status a stamp can carry is declared",
+      {"RAN", "MANIFEST_REJECTED", "INPUT_LOAD_FAILED", "PROMOTE_FAILED",
+       "DEMO_OUTPUT_REFUSED", "GEOMETRY_REVIEW_FAILED",
+       "INTERNAL_ERROR"} == set(RB.RUN_STATUSES),
+      "%s" % sorted(RB.RUN_STATUSES))
+
+
+print("a panel nobody can read still says how much work it is")
+# `Panel_Mode=MANUAL` returned before the series and position maps were built,
+# and so did an unopenable raster and an unparseable box - so those panels
+# reported Cells_Declared=0 and Missing_Cells="". A manual panel with 24 cells
+# came out "MANUAL_POINT_READ 0 / 0": the queue understated the hand-digitizing
+# left to do, on exactly the panels that are nothing but hand-digitizing.
+_declared_expect = len({r["Series_ID"] for r in SERIES
+                        if r["Panel_ID"] == "P_MANUAL"}) * len(
+    {r["Position_ID"] for r in POSITION_ROWS if r["Panel_ID"] == "P_MANUAL"})
+_rm_now = pd.read_csv(os.path.join(ODIR, "run_manifest.csv"), dtype=object).fillna("")
+_manual = _rm_now[_rm_now["Panel_ID"] == "P_MANUAL"].iloc[0]
+check("a MANUAL panel declares its cells",
+      int(_manual["Cells_Declared"]) == _declared_expect,
+      "%s declared, expected %d" % (_manual["Cells_Declared"], _declared_expect))
+_q_now = pd.read_csv(os.path.join(ODIR, "manual_queue.csv"), dtype=object).fillna("")
+_mq = _q_now[_q_now["Panel_ID"] == "P_MANUAL"]
+check("and its queue row counts every cell a person has to read",
+      len(_mq) and int(_mq.iloc[0]["Missing_Cell_Count"]) == _declared_expect,
+      "%r" % (_mq.iloc[0]["Missing_Cell_Count"] if len(_mq) else None))
+# The list itself is rows, not a delimited string: cell keys ARE ";"-joined
+# FACTOR=LEVEL pairs, so "ARM=A;T=1;ARM=B;T=1" could not be split back into the
+# two cells it came from.
+_qc = pd.read_csv(os.path.join(ODIR, "manual_queue_cells.csv"), dtype=object).fillna("")
+check("and every one of them is a row of its own",
+      len(_qc[_qc["Panel_ID"] == "P_MANUAL"]) == _declared_expect,
+      "%d rows" % len(_qc[_qc["Panel_ID"] == "P_MANUAL"]))
+check("each parsing as a whole cell key, not half of one",
+      all(GE.fig_parse_cell_key(k) is not None for k in _qc["Cell_Key"]),
+      "%s" % [k for k in _qc["Cell_Key"] if GE.fig_parse_cell_key(k) is None][:2])
+check("Missing_Cells the ambiguous string is gone",
+      "Missing_Cells" not in RB.MANUAL_QUEUE_COLUMNS,
+      "%s" % RB.MANUAL_QUEUE_COLUMNS)
+
+# Validation normally catches a bad box or a degenerate calibration first, which
+# is right. `check_files=False` is how a caller skips the raster checks, and it
+# is the path where the runner meets the geometry itself.
+_d = os.path.join(ROOT, "o_decl_geometry")
+_s2 = RB.run_batch(write_manifests(
+    os.path.join(ROOT, "m_decl_geometry"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                  Image_Path=os.path.join(IMAGES, "vanished_for_geometry.png"))),
+    _d, file_root=ROOT, run_date="2026-08-06", check_files=False)
+_r2 = pd.read_csv(os.path.join(_d, "run_manifest.csv"), dtype=object).fillna("")
+_row = _r2[_r2["Panel_ID"] == "P_LINE"].iloc[0]
+check("a raster the runner cannot open is PANEL_GEOMETRY_UNRESOLVED",
+      _row["Run_State"] == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _row["Run_State"])
+check("and it still declares its cells",
+      int(_row["Cells_Declared"]) > 0, "%s" % _row["Cells_Declared"])
+_qc2 = pd.read_csv(os.path.join(_d, "manual_queue_cells.csv"), dtype=object).fillna("")
+check("and names every one of them for the person who now has to read it",
+      len(_qc2[_qc2["Panel_ID"] == "P_LINE"]) == int(_row["Cells_Declared"]),
+      "%d rows for %s declared" % (len(_qc2[_qc2["Panel_ID"] == "P_LINE"]),
+                                   _row["Cells_Declared"]))
+
+check("every panel in the run declares at least one cell",
+      all(int(v) > 0 for v in _rm_now["Cells_Declared"]),
+      "%s" % dict(zip(_rm_now["Panel_ID"], _rm_now["Cells_Declared"])))
+
+
+print("a position without a pixel is not a position")
+# The validator accepted X_Pixel OR Slot_Index. `_x_positions` only ever passes
+# rows that have an X_Pixel, and no released reader is slot-based - so a
+# Slot_Index-only manifest validated, reached the reader as an empty position
+# map, and came back as an unreadable figure.
+_slot_only = edited(POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+                    X_Pixel="")
+check("a Slot_Index-only position is refused as a capability, not geometry",
+      "UNSUPPORTED_CAPABILITY" in validate(positions=_slot_only),
+      "%s" % validate(positions=_slot_only))
+check("and a position with neither is still missing geometry",
+      "MISSING_POSITION_GEOMETRY" in validate(
+          positions=edited(POSITION_ROWS,
+                           {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+                           X_Pixel="", Slot_Index="")),
+      "%s" % validate(positions=edited(
+          POSITION_ROWS, {"Panel_ID": "P_LINE", "Position_ID": POSITIONS[0]},
+          X_Pixel="", Slot_Index="")))
+check("Slot_Index remains in the schema, as the ordering hint it is",
+      "Slot_Index" in BM.position_manifest_columns())
+
+
+print("a statistic the runner cannot execute is a sentence, not a discovery")
+# `grid_engine` validates four statistic types; the batch layer has raster
+# readers for three. BINARY_EVENT has a source-panel disposition and a
+# validator and no reader, and `run_batch` sends every AUTO panel to a raster
+# reader - so a coherent declaration went to a reader that could not produce it
+# and came back as a difficult figure.
+check("every statistic the gate validates has a capability entry",
+      set(BM.CAPABILITY_MATRIX) == set(GE.FIG_STATISTIC_TYPES),
+      "%s" % sorted(set(BM.CAPABILITY_MATRIX) ^ set(GE.FIG_STATISTIC_TYPES)))
+check("and every entry says AUTO_SUPPORTED or VALIDATOR_ONLY",
+      all(v[0] in ("AUTO_SUPPORTED", "VALIDATOR_ONLY")
+          for v in BM.CAPABILITY_MATRIX.values()),
+      "%s" % sorted({v[0] for v in BM.CAPABILITY_MATRIX.values()}))
+_bin_unit = unit("U_BIN", "G_TIME", "BINARY_EVENT")
+_bin_panel = panel("P_BIN", "U_BIN", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440))
+_bin_source = dict(Source_Panel_ID="P_BIN", Source_Figure_ID="SF1",
+                   Panel_Label="P_BIN", Outcome_Label="Presyncope",
+                   Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                   Disposition_Reason="binary fixture", Note="")
+
+
+def _bin(mode):
+    return validate(
+        panels=PANELS + [dict(_bin_panel, Panel_Mode=mode)],
+        units=UNITS + [_bin_unit],
+        series_rows=SERIES + [series("P_BIN", "S_A", "CONTROL")],
+        positions=POSITION_ROWS + [dict(r, Panel_ID="P_BIN")
+                                   for r in POSITION_ROWS
+                                   if r["Panel_ID"] == "P_LINE"],
+        source_panels=SOURCE_PANELS + [
+            dict(_bin_source,
+                 Panel_Disposition="MANUAL_DIGITIZE" if mode == "MANUAL"
+                 else "AUTO_DIGITIZE")],
+        source_figures=[dict(f, Observed_Panel_Count=2)
+                        if f["Source_Figure_ID"] == "SF1" else f
+                        for f in SOURCE_FIGURES])
+
+
+check("an AUTO panel declaring a validator-only statistic is refused",
+      "UNSUPPORTED_CAPABILITY" in _bin("AUTO"), "%s" % _bin("AUTO"))
+check("and the same panel declared MANUAL is allowed through to the queue",
+      "UNSUPPORTED_CAPABILITY" not in _bin("MANUAL"), "%s" % _bin("MANUAL"))
+check("BINARY_EVENT is the validator-only one",
+      BM.VALIDATOR_ONLY_STATISTICS == ("BINARY_EVENT",),
+      "%s" % (BM.VALIDATOR_ONLY_STATISTICS,))
+
+
+print("every allowed declaration is either read exactly, or refused")
+# The batch layer requires a series row on every positional panel. The released
+# box/violin reader returns positions and no series at all. So a two-series box
+# panel validated, ran, and produced half a grid - every cell of the second
+# series missing, reported as a difficult figure rather than as a capability
+# the package does not have.
+_bv_panel = panel("P_BOX", "U_BOX", "BOX_VIOLIN", LINE_IMG, (100, 500, 40, 440))
+_bv_unit = unit("U_BOX", "G_TIME", "QUANTILE_SUMMARY")
+_bv_source = dict(Source_Panel_ID="P_BOX", Source_Figure_ID="SF1",
+                  Panel_Label="P_BOX", Outcome_Label="Heart rate",
+                  Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                  Disposition_Reason="box fixture", Note="")
+
+
+def _bv(series_ids):
+    return validate(
+        panels=PANELS + [_bv_panel], units=UNITS + [_bv_unit],
+        series_rows=SERIES + [series("P_BOX", s, lv) for s, lv in series_ids],
+        positions=POSITION_ROWS + [dict(r, Panel_ID="P_BOX")
+                                   for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+        source_panels=SOURCE_PANELS + [_bv_source],
+        source_figures=[dict(f, Observed_Panel_Count=2)
+                        if f["Source_Figure_ID"] == "SF1" else f
+                        for f in SOURCE_FIGURES])
+
+
+check("a two-series box panel is refused before the run, not read into holes",
+      "UNSUPPORTED_CAPABILITY" in _bv([("S_A", "CONTROL"), ("S_B", "TREATED")]),
+      "%s" % _bv([("S_A", "CONTROL"), ("S_B", "TREATED")]))
+check("and a one-series box panel is allowed",
+      "UNSUPPORTED_CAPABILITY" not in _bv([("S_A", "ALL")]),
+      "%s" % _bv([("S_A", "ALL")]))
+_bv_problems = BM.validate_batch_manifests(
+    fr(PANELS + [_bv_panel], BM.panel_manifest_columns()),
+    fr(SERIES + [series("P_BOX", s, lv)
+                 for s, lv in (("S_A", "CONTROL"), ("S_B", "TREATED"))],
+       BM.series_manifest_columns()),
+    fr(POSITION_ROWS + [dict(r, Panel_ID="P_BOX") for r in POSITION_ROWS
+                        if r["Panel_ID"] == "P_LINE"],
+       BM.position_manifest_columns()),
+    fr(CONFIGS, BM.reader_config_columns()),
+    units=fr(UNITS + [_bv_unit], GE.fig_unit_columns()),
+    source_documents=fr(SOURCE_DOCUMENTS, BM.source_document_manifest_columns()),
+    source_figures=fr([dict(f, Observed_Panel_Count=2)
+                       if f["Source_Figure_ID"] == "SF1" else f
+                       for f in SOURCE_FIGURES],
+                      BM.source_figure_manifest_columns()),
+    source_panels=fr(SOURCE_PANELS + [_bv_source],
+                     BM.source_panel_inventory_columns()),
+    reviewers=fr(REVIEWERS, BM.reviewer_registry_columns()), file_root=ROOT)
+check("UNSUPPORTED_CAPABILITY names the reader limit, not the figure",
+      any("grouped box reader" in str(p["detail"])
+          for _, p in _bv_problems.iterrows()
+          if p["check"] == "UNSUPPORTED_CAPABILITY"),
+      "%s" % [p["detail"] for _, p in _bv_problems.iterrows()
+              if p["check"] == "UNSUPPORTED_CAPABILITY"])
+
+
+print("a panel a PERSON reads is not held to what a reader needs to tell series apart")
+# The refusals above all end in the same advice - "route the panel to MANUAL" -
+# and none of them honoured it: a MANUAL panel was flagged exactly as an AUTO
+# one, so the one way out they named was a dead end. The identity page now
+# confirms such panels on the person-read route (orange circle / orange
+# triangle / blue circle, two identical curves told apart by their end labels),
+# and the plan authors them with Panel_Mode=MANUAL; the batch must let them
+# through to the queue with their cells declared.
+_man = edited(PANELS, {"Panel_ID": "P_LINE"}, Panel_Mode="MANUAL")
+_nocolour = edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Colour_Hex="")
+_samecolour = edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Colour_Hex="#2d50dc")
+# REVERT: ask every panel for a reader's discriminant. A person-read panel
+# carries its marks in the Note, and the whole manifest set is refused.
+check("a MANUAL colour panel needs no Colour_Hex per series",
+      "MISSING_SERIES_DISCRIMINANT" in validate(series_rows=_nocolour)
+      and "MISSING_SERIES_DISCRIMINANT" not in validate(panels=_man, series_rows=_nocolour),
+      "%s" % validate(panels=_man, series_rows=_nocolour))
+# REVERT: judge a MANUAL panel's separability by its reader columns. Two curves
+# drawn identically are exactly the panels that go to a person.
+check("two MANUAL series with the same colour are not refused as inseparable",
+      "SERIES_NOT_SEPARABLE" in validate(series_rows=_samecolour)
+      and "SERIES_NOT_SEPARABLE" not in validate(panels=_man, series_rows=_samecolour),
+      "%s" % validate(panels=_man, series_rows=_samecolour))
+_man_any = dict(panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="LINE_MONO",
+                              Config_ID="C_MONOLINE", Panel_Mode="MANUAL"),
+                series_rows=[dict(r, Colour_Hex="", Marker_Shape="ANY", Marker_Fill="OPEN", Line_Style="")
+                             if r["Panel_ID"] == "P_LINE" else r for r in SERIES],
+                configs=CONFIGS + [dict(Config_ID="C_MONOLINE", Option="threshold", Value="150", Note="")])
+check("nor two MANUAL LINE_MONO series that both say ANY",
+      "MARKER_SHAPE_ANY_NEEDS_ONE_SERIES" not in validate(**_man_any), "%s" % validate(**_man_any))
+_bvm = validate(
+    panels=PANELS + [dict(_bv_panel, Panel_Mode="MANUAL")], units=UNITS + [_bv_unit],
+    series_rows=SERIES + [series("P_BOX", s, lv) for s, lv in (("S_A", "PRE"), ("S_B", "POST"))],
+    positions=POSITION_ROWS + [dict(r, Panel_ID="P_BOX")
+                               for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+    source_panels=SOURCE_PANELS + [_bv_source],
+    source_figures=[dict(f, Observed_Panel_Count=2) if f["Source_Figure_ID"] == "SF1" else f
+                    for f in SOURCE_FIGURES])
+# REVERT: refuse a grouped box panel whatever its mode. The message says "set
+# Panel_Mode=MANUAL" and then refuses the panel that did.
+check("a two-series box panel declared MANUAL goes through, as its refusal says it should",
+      "UNSUPPORTED_CAPABILITY" not in _bvm, "%s" % _bvm)
+check("the vocabulary still holds on a MANUAL panel - a shape nobody can name is still refused",
+      "BAD_SERIES_MARKER_SHAPE" in validate(panels=_man, series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Marker_Shape="BLOB")))
+
+
+print("a box drawn in colour is read through the colour its series declares")
+# Publication S41467-023-41990-4 draws every box in orange, grey 154 under the
+# reader's dark threshold of 100 - invisible. The series row already says what
+# colour the box is; the runner hands it to the reader.
+def _coloured_box_image(path, colour=(237, 139, 9)):
+    im = Image.new("RGB", (600, 480), "white")
+    d = ImageDraw.Draw(im)
+    for i, x in enumerate(XS):
+        lo, q1, med, q3, hi = [LINE_CAL.value_to_pixel(v) for v in (20 + 5 * i, 35 + 5 * i, 45 + 5 * i, 58 + 5 * i, 75 + 5 * i)]
+        d.line((x, hi, x, lo), fill=colour, width=2)
+        d.line((x - 7, hi, x + 7, hi), fill=colour, width=2)
+        d.line((x - 7, lo, x + 7, lo), fill=colour, width=2)
+        d.rectangle((x - 14, q3, x + 14, q1), outline=colour, width=2)
+        d.line((x - 14, med, x + 14, med), fill=colour, width=2)
+    im.save(path)
+    return path
+_CBOX_IMG = _coloured_box_image(os.path.join(IMAGES, "coloured_box.png"))
+_cbox_panel = panel("P_CBOX", "U_CBOX", "BOX_VIOLIN", _CBOX_IMG, (100, 500, 40, 440))
+_cbox_unit = unit("U_CBOX", "G_ONE_TIME", "QUANTILE_SUMMARY", Dispersion_Type="IQR")
+_cbox_positions = [dict(r, Panel_ID="P_CBOX") for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"]
+_cbox_raw = os.path.join(ROOT, "raw_cbox")
+os.makedirs(_cbox_raw, exist_ok=True)
+_cbox_with = RB.run_panel(_cbox_panel, [series("P_CBOX", "S_ALL", "ALL", Colour_Hex="#ED8B09")],
+                          _cbox_positions, {}, _cbox_unit, _cbox_raw, file_root=ROOT)
+check("with Colour_Hex on its series, every coloured box is read",
+      len(_cbox_with.values) == 4, "%s: %s (%d values)" % (_cbox_with.state, _cbox_with.detail, len(_cbox_with.values)))
+# REVERT: ignore the series colour and threshold on grey. The orange boxes are
+# then invisible, and the four cells come back missing with nothing wrong named.
+_cbox_without = RB.run_panel(_cbox_panel, [series("P_CBOX", "S_ALL", "ALL")],
+                             _cbox_positions, {}, _cbox_unit, _cbox_raw, file_root=ROOT)
+check("without one, the dark-ink default sees no box - the colour is what made the difference",
+      len(_cbox_without.values) == 0, "%d values" % len(_cbox_without.values))
+
+print("a figure with more than one digitized panel keeps every project")
+# `projects_by_figure.setdefault(Figure_ID, outcome.project)` recorded whichever
+# panel of a figure finished first, and the gate then looked the project up ON
+# THE FIGURE. On publication 397's Figure 3 that meant six panels' values all
+# named the MEN panel's tar - somebody else's marks, read off somebody else's
+# calibration - and the five WOMEN panels' projects were simply not written
+# down anywhere the gate could see.
+# Two AUTO panels of the same Figure_ID, on different rasters - which is what a
+# publisher figure with MEN and WOMEN sides actually is.
+_multi = write_manifests(
+    os.path.join(ROOT, "m_multi"),
+    units=UNITS + [unit("U_LINE_B", "G_TIME", "CONTINUOUS")],
+    panels=PANELS + [panel("P_LINE_B", "U_LINE_B", "LINE_COLOR", LINE_IMG,
+                           (100, 500, 40, 440))],
+    series_rows=SERIES + [series("P_LINE_B", s, lv, Colour_Hex=hx)
+                          for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                            ("S_RED", "TREATED", "#d72d2d"))],
+    positions=POSITION_ROWS + [dict(r, Panel_ID="P_LINE_B")
+                               for r in POSITION_ROWS if r["Panel_ID"] == "P_LINE"],
+    source_panels=SOURCE_PANELS + [dict(
+        Source_Panel_ID="P_LINE_B", Source_Figure_ID="SF1", Panel_Label="P_LINE_B",
+        Outcome_Label="Heart rate", Target_Status="TARGET",
+        Panel_Disposition="AUTO_DIGITIZE",
+        Disposition_Reason="second digitized panel of one figure", Note="")],
+    source_figures=[dict(f, Observed_Panel_Count=2)
+                    if f["Source_Figure_ID"] == "SF1" else f
+                    for f in SOURCE_FIGURES])
+_mo = os.path.join(ROOT, "o_multi")
+RB.run_batch(_multi, _mo, file_root=ROOT, run_date="2026-08-06")
+_raw = pd.read_csv(os.path.join(_mo, "figure_values_raw.csv"), dtype=object).fillna("")
+_rm = pd.read_csv(os.path.join(_mo, "run_manifest.csv"), dtype=object).fillna("")
+def _runs_of(values, gap=1):
+    out, cur = [], []
+    for v in values:
+        if cur and v - cur[-1] > gap:
+            out.append(cur); cur = []
+        cur.append(v)
+    if cur:
+        out.append(cur)
+    return out
+
+
+print("a box's five rows are its mark, in the project and on the overlay")
+import review_overlay as _OV                                     # noqa: E402
+# ROWS OUT OF ORDER on purpose: the reader emits them sorted today and nothing
+# promises it will, and every consumer here asks "which is the median" and
+# "which is the top" by position.
+_box_mark = {"series": "DI", "x": 200.0,
+             "Box_Line_Rows_Px": "180.0;100.0;260.0;140.0;220.0",
+             "Box_Line_Widths_Px": "88;44;44;88;88"}
+# REVERT: look only for a single centre pixel. A box reports FIVE rows and no
+# centre, so `point_px_y`/`top_px`/`marker_center_px` are all absent - the
+# project came back None for every box panel and the gate refused all thirty of
+# its values for MISSING_PROVENANCE, and the overlay drew a picture of the
+# figure with nothing marked on it.
+check("a box's median is its middle rule", _OV._mark_y(_box_mark) == 180.0,
+      "%s" % (_OV._mark_y(_box_mark),))
+check("  and all five rows are available to draw",
+      _OV.box_rows(_box_mark) == [100.0, 140.0, 180.0, 220.0, 260.0],
+      "%s" % (_OV.box_rows(_box_mark),))
+check("  each with the width the reader measured it at",
+      _OV._box_widths(_box_mark) == [44.0, 88.0, 88.0, 88.0, 44.0],
+      "%s" % (_OV._box_widths(_box_mark),))
+check("  and a mark with no box rows is unchanged",
+      _OV.box_rows({"top_px": 12.0}) == []
+      and _OV._mark_y({"top_px": 12.0}) == 12.0)
+# REVERT: give the project one point per box instead of one per LINE. The
+# question about a box is whether its three rules and two caps sit on printed
+# lines, and one point in the middle cannot be asked it.
+check("the project writer emits one point per box row",
+      [p["y"] for p in RB.project_points([_box_mark])["DI"]]
+      == [100.0, 140.0, 180.0, 220.0, 260.0],
+      "%s" % (RB.project_points([_box_mark]),))
+# REVERT: draw a cross at the median instead of the five lines. A cross says
+# nothing about whether the box's own edges were found, and that is the whole
+# question about a box. The reviewer was handed the figure with one tick on it.
+_odir = tempfile.mkdtemp(prefix="fdt-boxover-")
+_oras = os.path.join(_odir, "r.png")
+Image.new("RGB", (400, 320), "white").save(_oras)
+_opath = _OV.draw_panel_overlay(os.path.join(_odir, "o.png"), _oras,
+                                (100, 300, 80, 280), [_box_mark],
+                                series_order=["DI"], label_marks=False)
+_oim = Image.open(_opath).convert("RGB") if _opath else None
+_px, _ow, _oh = (_oim.load(), _oim.width, _oim.height) if _oim else (None, 0, 0)
+# 가로로 그은 줄만 셉니다. 세로 줄기는 한두 픽셀이고, 바닥의 설명글도
+# 잉크입니다 - 둘 다 "상자의 줄"이 아닙니다.
+_wide = {}
+# 그림만 봅니다. 바닥의 설명글은 이 오버레이의 잉크이지만 상자의 줄이
+# 아니고, 세는 것은 줄입니다.
+for _y in range(_oh - 70) if _px else []:
+    _n = sum(1 for _x in range(_ow)
+             if _px[_x, _y] not in ((255, 255, 255), (160, 160, 160)))
+    if _n >= 30:
+        _wide[_y] = _n
+_bands = _runs_of(sorted(_wide))
+check("the overlay draws all five of a box's lines",
+      len(_bands) == 5, "%d band(s): %s" % (len(_bands), _bands[:6]))
+# REVERT: draw every line the same length. The box's rules and its whisker caps
+# are different widths, and a reviewer checking "is this the box" is checking
+# exactly that difference.
+_widths = [max(_wide[y] for y in band) for band in _bands]
+check("  each at the width the reader measured",
+      len(set(_widths)) == 2, "%s" % (_widths,))
+
+# A MARKER READER'S ERROR-BAR ENDS ARE DRAWN. The line and point readers report
+# `Errorbar_Top_Px`/`Errorbar_Bottom_Px` and no `cap_px`; the overlay drew the
+# cross and nothing else, so nobody could see whether the measured ends sat on
+# the printed caps.
+def _ticks_at(path, rows, x=200, box=(100, 300, 80, 280)):
+    """The rows (source coordinates) where the overlay has a short level tick."""
+    im = Image.open(path).convert("RGB")
+    px = im.load()
+    ox, oy = max(0, box[0] - _OV.PAD), max(0, box[2] - _OV.PAD)
+    return [r for r in rows
+            if sum(1 for xx in range(x - ox - 5, x - ox + 6)
+                   if px[xx, r - oy] != (255, 255, 255)) >= 8]
+_mk = {"series": "DI", "x": 200.0, "marker_center_px": 180.0,
+       "Errorbar_Top_Px": 130.0, "Errorbar_Bottom_Px": 230.0}
+_mpath = _OV.draw_panel_overlay(os.path.join(_odir, "m.png"), _oras,
+                                (100, 300, 80, 280), [_mk],
+                                series_order=["DI"], label_marks=False)
+check("the overlay draws both measured ends of a marker's error bar",
+      _mpath and _ticks_at(_mpath, [130, 230]) == [130, 230],
+      "%s" % (_ticks_at(_mpath, [130, 230]) if _mpath else None,))
+# REVERT: take the measured ends whenever `cap_px` is None. A placed reading
+# says which ends were placed in `cap_px`/`cap_low_px`; None there is "this end
+# was not placed", and drawing the measured one in its place shows the person
+# an end nobody put there.
+_ppath = _OV.draw_panel_overlay(os.path.join(_odir, "p.png"), _oras,
+                                (100, 300, 80, 280),
+                                [dict(_mk, cap_px=None, cap_low_px=None)],
+                                series_order=["DI"], label_marks=False)
+check("  and a placed reading with no end placed shows none",
+      _ppath and _ticks_at(_ppath, [130, 230]) == [],
+      "%s" % (_ticks_at(_ppath, [130, 230]) if _ppath else None,))
+shutil.rmtree(_odir, ignore_errors=True)
+check("  and a mark with an ordinary centre still gives one",
+      RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}])["A"]
+      == [dict(x=5.0, y=9.0, value=None)],
+      "%s" % (RB.project_points([{"series": "A", "x": 5.0, "top_px": 9.0}]),))
+
+
+_by_panel = dict(zip(_rm["Panel_ID"], _rm["WPD_Project_File"]))
+check("every value names the project that can re-derive it",
+      len(_raw) and all(str(v).strip() for v in _raw["WPD_Project_File"]),
+      "%d blank of %d" % (sum(1 for v in _raw["WPD_Project_File"]
+                              if not str(v).strip()), len(_raw)))
+check("and it is its own panel's project, not a sibling's",
+      all(r["WPD_Project_File"] == _by_panel.get(r["Run_Panel_ID"], "")
+          for _, r in _raw.iterrows() if r["Run_Panel_ID"] in _by_panel),
+      "%s" % {r["Run_Panel_ID"]: os.path.basename(r["WPD_Project_File"])
+              for _, r in _raw.iterrows()})
+_fm = pd.read_csv(os.path.join(_mo, "figure_manifest.csv"), dtype=object).fillna("")
+_listed = [p for p in str(_fm.loc[0, "WPD_Project_File"]).split(";") if p]
+check("and the figure lists every panel project it produced, not just the first",
+      len(_listed) == sum(1 for v in _by_panel.values() if str(v).strip()),
+      "%s" % [os.path.basename(p) for p in _listed])
+check("and each one is on disk, resolved against the run it belongs to",
+      all(RB.resolve_artifact(_mo, p)
+          and os.path.exists(RB.resolve_artifact(_mo, p)) for p in _listed),
+      "%s" % _listed)
+
+# Two ticks were saved out of however many the calibration was fitted on, so the
+# artifact that exists for re-deriving a value could not reproduce the fit.
+_proj = RB.resolve_artifact(_mo, _listed[0])
+with tarfile.open(_proj) as _tf:
+    _info = json.loads(_tf.extractfile("info.json").read().decode("utf-8")) \
+        if "info.json" in _tf.getnames() else {}
+    _wpd = json.loads(_tf.extractfile(
+        next(n for n in _tf.getnames() if n.endswith("wpd.json"))).read().decode("utf-8"))
+_declared_ticks = len(BM.parse_ticks(PANELS[0]["Axis_Y_Ticks"]))
+_saved = sum(1 for a in _wpd.get("axesColl", [])
+             for _c in a.get("calibrationPoints", []) if _c.get("dy") != "")
+check("the project saves every declared tick, not the first two",
+      _saved >= _declared_ticks, "%d saved of %d declared" % (_saved, _declared_ticks))
+
+
+print("a defect in a reader is not a difficult figure")
+# Every reader call sat inside `except Exception`, and whatever came out was
+# reported as PANEL_GEOMETRY_UNRESOLVED. A TypeError from a misspelled keyword
+# and a genuinely unreadable axis reached a human as the same queue row: go and
+# look at this figure again. Over 116 publications that turns a defect in this
+# package into hours of correct manual work nobody knows was unnecessary.
+_orig_read_panel = MR.read_panel
+_real_calibration = MR.AxisCalibration.from_points
+
+
+def _raising(exc):
+    def _fake(*a, **k):
+        raise exc
+    return _fake
+
+
+for _label, _exc, _want_state, _aborts in (
+        ("a KeyError from a renamed field", KeyError("Series_ID"), None, True),
+        ("a TypeError from a misspelled keyword",
+         TypeError("read_panel() got an unexpected keyword 'n_slot'"), None, True),
+        ("an IndexError walking off a list", IndexError("list index out of range"),
+         None, True),
+        ("an axis the reader cannot fit",
+         MR.GeometryResolutionError("axis calibration needs two distinct pixels"),
+         "PANEL_GEOMETRY_UNRESOLVED", False),
+        ("two series the reader cannot tell apart",
+         MR.SeriesIdentityError("S_BLUE and S_RED share every mark"),
+         "SERIES_IDENTITY_UNRESOLVED", False),
+        ("a declaration no released reader honours",
+         MR.UnsupportedCapabilityError("stacked bars are not released"),
+         "NO_READER_AVAILABLE", False)):
+    _out = os.path.join(ROOT, "o_exc_%d" % (abs(hash(_label)) % 10 ** 6))
+    MR.read_panel = _raising(_exc)
+    try:
+        _summary = RB.run_batch(_good, _out, file_root=ROOT, run_date="2026-08-06")
+        _raised = None
+    except RB.InternalReaderError as exc:
+        _summary, _raised = None, exc
+    except Exception as exc:                                   # pragma: no cover
+        _summary, _raised = None, exc
+    finally:
+        MR.read_panel = _orig_read_panel
+    if _aborts:
+        check("%s stops the batch" % _label,
+              isinstance(_raised, RB.InternalReaderError), "%r" % _raised)
+        _js = json.load(open(os.path.join(_out, "run_stamp.json")))
+        check("  and the stamp says INTERNAL_ERROR, not a figure problem",
+              _js.get("Status") == "INTERNAL_ERROR", "%r" % _js.get("Status"))
+        check("  and names the exception so it can be fixed",
+              type(_exc).__name__ in _js.get("Detail", ""), "%r" % _js.get("Detail"))
+        check("  and leaves nothing poolable behind",
+              not os.path.exists(os.path.join(_out, RB.COMMIT_MARKER))
+              and not os.path.exists(os.path.join(_out, "figure_values_accepted.csv")),
+              "%s" % sorted(os.listdir(_out)))
+    else:
+        check("%s is a panel state, not a crash" % _label,
+              _raised is None and _summary and _summary["status"] == "RAN",
+              "%r %s" % (_raised, _summary))
+        _rm = pd.read_csv(os.path.join(_out, "run_manifest.csv"), dtype=object)
+        check("  and every auto panel lands on %s" % _want_state,
+              _want_state in set(_rm["Run_State"]), "%s" % sorted(set(_rm["Run_State"])))
+
+
+print("a demonstration identity cannot stand behind a poolable value")
+# The worked example needs a reviewer, and a fictional one is the honest choice
+# - but the only thing that kept it harmless was that ID397's dispersion
+# definition happened to be unresolved, so nothing was accepted. Resolve it and
+# the same fictional row signs off real numbers. This batch DOES accept values,
+# which is what makes it the right fixture: the gate has to be what stops them.
+_demo = os.path.join(ROOT, "o_demo")
+_demo_summary = RB.run_batch(_good, _demo, file_root=ROOT,
+                             run_date="2026-08-06", run_mode="DEMO_ONLY")
+_demo_files = sorted(os.listdir(_demo)) if os.path.isdir(_demo) else []
+_demo_stamp = json.load(open(os.path.join(_demo, "run_stamp.json")))
+check("a DEMO_ONLY run that accepts values is refused",
+      _demo_summary["status"] == "DEMO_OUTPUT_REFUSED", "%s" % _demo_summary)
+check("and says how many values it refused to write",
+      _demo_summary["would_accept"] > 0 and _demo_summary["accepted"] == 0,
+      "%s" % _demo_summary)
+check("and writes no accepted file",
+      RB.COMMIT_MARKER not in _demo_files, "%s" % _demo_files)
+check("and writes no raw values file either",
+      "figure_values_raw.csv" not in _demo_files, "%s" % _demo_files)
+check("and leaves nothing but the stamp behind",
+      _demo_files == ["run_stamp.json"], "%s" % _demo_files)
+check("and the review overlays go with it - no picture of a refused run",
+      not os.path.isdir(os.path.join(_demo, "review")),
+      "%s" % _demo_files)
+check("and the stamp records DEMO_ONLY, not a silent ATTESTED",
+      _demo_stamp.get("Run_Mode") == "DEMO_ONLY"
+      and _demo_stamp.get("Status") == "DEMO_OUTPUT_REFUSED"
+      and _demo_stamp.get("Values_Accepted") == 0, "%r" % _demo_stamp)
+check("and the stamp says why", "DEMO_ONLY" in _demo_stamp.get("Detail", ""),
+      "%r" % _demo_stamp)
+
+# A demo that accepts nothing is the normal case and must still run - otherwise
+# the mode is unusable for the thing it exists for.
+_demo_ok = os.path.join(ROOT, "o_demo_ok")
+_demo_ok_summary = RB.run_batch(
+    write_manifests(os.path.join(ROOT, "m_demo_ok"), units=_all_bad,
+                    panels=[p for p in PANELS if p["Panel_ID"] != "P_SCAT"],
+                    series_rows=[s for s in SERIES if s["Panel_ID"] != "P_SCAT"],
+                    source_panels=edited(
+                        SOURCE_PANELS, {"Source_Panel_ID": "P_SCAT"},
+                        Panel_Disposition="NO_SUMMARY_STATISTIC",
+                        Disposition_Reason="excluded from this all-bad fixture")),
+    _demo_ok, file_root=ROOT, run_date="2026-08-06", run_mode="DEMO_ONLY")
+check("a DEMO_ONLY run that accepts nothing still runs",
+      _demo_ok_summary["status"] == "RAN"
+      and _demo_ok_summary["accepted"] == 0, "%s" % _demo_ok_summary)
+check("and still writes everything that is not a poolable value",
+      {"figure_values_raw.csv", "run_manifest.csv", "manual_queue.csv",
+       "qc_problems.csv", "source_panel_coverage.csv"}
+      <= set(os.listdir(_demo_ok)), "%s" % sorted(os.listdir(_demo_ok)))
+check("and its stamp still records DEMO_ONLY",
+      json.load(open(os.path.join(_demo_ok, "run_stamp.json"))).get("Run_Mode")
+      == "DEMO_ONLY")
+
+_attested = os.path.join(ROOT, "o_attested")
+RB.run_batch(_good, _attested, file_root=ROOT, run_date="2026-08-06")
+check("the default run mode is ATTESTED",
+      json.load(open(os.path.join(_attested, "run_stamp.json"))).get("Run_Mode")
+      == "ATTESTED")
+_bad_mode = "caught"
+try:
+    RB.run_batch(_good, os.path.join(ROOT, "o_badmode"), file_root=ROOT,
+                 run_mode="PROBABLY_FINE")
+except ValueError as exc:
+    _bad_mode = str(exc)
+except Exception as exc:                                  # pragma: no cover
+    _bad_mode = "wrong exception: %r" % exc
+check("an invented run mode is a programming error, not a default",
+      "run_mode must be" in _bad_mode and "PROBABLY_FINE" in _bad_mode, _bad_mode)
+
+
+print("what the reader found for a cell outranks what a person typed for the unit")
+# The readers produce Errorbar_Stem_Confirmed per MARK. `run_panel` only flagged
+# NO_VARIANCE when ALL marks were False, and `to_value_records` then copied
+# mean, dispersion and bounds and dropped everything else - so the gate fell
+# back to a single human-typed field on the unit manifest. Three confirmed
+# whiskers and one unconfirmed passed on the strength of the three.
+_prov = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"),
+                    dtype=object).fillna("")
+for _col in ("Errorbar_Stem_Confirmed", "Bar_Top_Definition", "Bar_Direction",
+             "Position_Assignment", "Calibration_Max_Residual",
+             "Slot_Assignment_Residual_Px",
+             # v7.60. No gate can read a tier that is not in the file, and until
+             # this release the two questions every reader answers - how the
+             # series was named, how the number was got - stopped at the raw
+             # marks. The tier itself is NOT here: it is derived from these two
+             # by whoever needs it.
+             "Identity_Method", "Value_Method"):
+    check("the value schema has room for %s" % _col,
+          _col in _prov.columns, "%s" % sorted(_prov.columns))
+# BLANK IS THE HONEST ANSWER FOR A READER THAT HAS NOT BEEN TAUGHT, and blank is
+# priced at the tier that asks the most. So adding these columns can only ever
+# make a value harder to pool, never easier - which is what makes it safe to put
+# them on every mark type before every reader can fill them.
+#
+# Asserted PER MARK TYPE, and it used to assert that every row in this run was
+# blank. v7.64 taught the two marker readers, so that assertion became a claim
+# about which readers happen to be untaught rather than about the schema - and it
+# would have gone red on every release that teaches one. What has to hold is that
+# a reader answers for every mark it reads or for none of them: a half-answering
+# reader puts blanks beside methods in one panel, and blank is the tier that asks
+# the most, so the panel would price at R4 for a reason nobody could see.
+_mark_of_panel = {str(r["Panel_ID"]): str(r["Mark_Type"]) for _, r in run.iterrows()}
+_by_mark = {}
+for _, _r in _prov.iterrows():
+    _by_mark.setdefault(_mark_of_panel.get(str(_r["Run_Panel_ID"]), "?"), []).append(
+        (str(_r["Identity_Method"]).strip(), str(_r["Value_Method"]).strip()))
+_split = {m: pairs for m, pairs in _by_mark.items()
+          if len({bool(i and v) for i, v in pairs}) != 1}
+check("a reader answers for every mark it reads, or for none of them",
+      not _split, "%s" % {m: sorted(set(p)) for m, p in _split.items()})
+for _mark, _want in (("LINE_COLOR", ("MEASURED_COLOUR", "MARKER_CENTER")),
+                     # And the one whose VALUE is not a mark at all: an r over a
+                     # set of measured marker centres. The points each carry how
+                     # their series was named; the association carries how the
+                     # NUMBER was got, and the two are different claims.
+                     ("SCATTER", ("MEASURED_COLOUR",
+                                  "POINT_CLOUD_ASSOCIATION"))):
+    check("  and %s answers with %s / %s" % ((_mark,) + _want),
+          set(_by_mark.get(_mark, ())) == {_want},
+          "%s" % sorted(set(_by_mark.get(_mark, ()))))
+# And a reader with nothing to say says nothing, rather than being given a
+# default on the way through the adapter. Asserted on the adapter rather than by
+# finding an untaught reader in this run: every mark type this fixture holds now
+# answers, so a scenario that looked for a blank row would keep passing for
+# whichever reader happened to be last.
+_blank_carry = MR.to_value_records(
+    [dict(x_label=POSITIONS[0], mean=1.0, dispersion=0.1)], "CONTINUOUS", "U_X",
+    x_factor="TIMEPOINT")
+check("  while a reader with nothing to say gets no default put in its mouth",
+      not str(_blank_carry[0].get("Identity_Method") or "").strip()
+      and not str(_blank_carry[0].get("Value_Method") or "").strip(),
+      "%s" % _blank_carry[0])
+check("and no reader can invent a method the registry has not heard of",
+      all(i in PROV.IDENTITY_METHODS and v in PROV.VALUE_METHODS
+          for pairs in _by_mark.values() for i, v in pairs if i or v),
+      "%s" % sorted({p for pairs in _by_mark.values() for p in pairs}))
+check("and blank is priced at R4, not R0",
+      PROV.review_tier("", "") == "R4"
+      and "R4" not in PROV.FINALIZABLE_TIERS)
+# Room is not the same as carried. The calibration residual is stamped on every
+# row by the runner, so it is blank only if the carry is broken - it was
+# computed inside `bar_reader` and returned under a name nothing read.
+check("every value row carries the residual of the calibration that produced it",
+      len(_prov) and all(str(v).strip() for v in _prov["Calibration_Max_Residual"]),
+      "%d of %d blank" % (sum(1 for v in _prov["Calibration_Max_Residual"]
+                              if not str(v).strip()), len(_prov)))
+
+_mixed = GE.fig_validate_bundle(
+    fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+    fr([dict(UNITS[0], Errorbar_Stem_Confirmed="TRUE")], GE.fig_unit_columns()),
+    fr([dict(Unit_ID=UNITS[0]["Unit_ID"], Cell_Key="ARM=CONTROL;TIMEPOINT=%s" % q,
+             Mean=50 + i, Dispersion_Value=2,
+             Errorbar_Stem_Confirmed="TRUE" if i else "FALSE",
+             Bar_Top_Definition="NOT_A_BAR", Verification_Status="SINGLE")
+        for i, q in enumerate(POSITIONS)], GE.fig_values_columns()),
+    K, check_files=False)
+_codes = sorted(set(_mixed["check"])) if len(_mixed) else []
+check("one unconfirmed whisker in a panel of confirmed ones is caught",
+      "CELL_ERRORBAR_STEM_UNCONFIRMED" in _codes, "%s" % _codes)
+check("and only that cell is named",
+      sum(1 for _, p in _mixed.iterrows()
+          if p["check"] == "CELL_ERRORBAR_STEM_UNCONFIRMED") == 1,
+      "%s" % _mixed[_mixed["check"] == "CELL_ERRORBAR_STEM_UNCONFIRMED"].to_dict("records"))
+
+_inferred = GE.fig_validate_bundle(
+    fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+    fr([UNITS[0]], GE.fig_unit_columns()),
+    fr([dict(Unit_ID=UNITS[0]["Unit_ID"], Cell_Key="ARM=CONTROL;TIMEPOINT=%s" % q,
+             Mean=50, Dispersion_Value=2, Errorbar_Stem_Confirmed="TRUE",
+             Bar_Top_Definition="NOT_A_BAR", Position_Assignment="SEQUENTIAL",
+             Verification_Status="SINGLE")
+        for q in POSITIONS], GE.fig_values_columns()),
+    K, check_files=False)
+check("a cell whose x identity was counted off rather than declared is caught",
+      "POSITION_INFERRED" in (sorted(set(_inferred["check"])) if len(_inferred) else []),
+      "%s" % (sorted(set(_inferred["check"])) if len(_inferred) else []))
+
+
+print("one raster, one hash, checked end to end")
+# The same fact was declared in four places and joined in none: the source
+# figure's image, the figure manifest's image, the panel's Image_Path, and the
+# hash written beside them. Each file was individually valid, so a panel could
+# read raster A while its inventory row, its reconciliation and its provenance
+# all described raster B.
+check("a source figure must declare the hash of its own raster",
+      "MISSING_REQUIRED" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_Image_SHA256="")))
+check("a declared hash that is not the file's hash is refused",
+      "SOURCE_IMAGE_HASH_MISMATCH" in validate(
+          source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+                                Source_Image_SHA256="0" * 64)),
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"}, Source_Image_SHA256="0" * 64)))
+check("a panel reading a raster its source figure does not own is refused",
+      "PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                                    Image_Path=FLAT_IMG)))
+check("and swapping the panel's Source_Panel_ID instead does not help",
+      "PANEL_IMAGE_NOT_ITS_SOURCE_FIGURE" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                        Source_Panel_ID="P_FLAT")),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                                    Source_Panel_ID="P_FLAT")))
+check("moving the raster and its hash together is fine",
+      validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+          Source_Image=FLAT_IMG, Source_Image_SHA256=MR.sha256_of(FLAT_IMG)),
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)) == [],
+      "%s" % validate(source_figures=edited(
+          SOURCE_FIGURES, {"Source_Figure_ID": "SF1"},
+          Source_Image=FLAT_IMG, Source_Image_SHA256=MR.sha256_of(FLAT_IMG)),
+          panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=FLAT_IMG)))
+
+
+print("an identifier that becomes a filename cannot leave the output directory")
+# Panel_ID and Series_ID are interpolated into {Panel_ID}_marks.json,
+# {Panel_ID}.tar and {Panel_ID}_{Series_ID}_points.json with nothing checking
+# them. Panel_ID="../../escaped" wrote escaped.tar and escaped_marks.json two
+# directories above the output root - and the run still reported ACCEPTED.
+for _bad in ("../../escaped", "/etc/passwd", "a/b", "..", ".hidden", "",
+             "x" * 200):
+    if not _bad:
+        continue
+    check("Panel_ID=%r is refused before anything is written" % _bad,
+          "UNSAFE_ID" in validate(
+              panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Panel_ID=_bad)),
+          "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Panel_ID=_bad)))
+check("Series_ID is checked too, not just Panel_ID",
+      "UNSAFE_ID" in validate(
+          series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                             Series_ID="../x")),
+      "%s" % validate(series_rows=edited(
+          SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"}, Series_ID="../x")))
+for _ok in ("P_FLAT", "P3_TPR_MEN", "id323.fig2-b", "A1"):
+    check("a normal identifier like %r still passes" % _ok,
+          not BM.SAFE_ID.match(_ok) is None)
+
+# The image path is the other half: an absolute path anywhere on the machine
+# used to resolve, because the resolver tried the string as given first.
+_outside = os.path.join(tempfile.gettempdir(), "fdt_outside_root.png")
+Image.new("RGB", (40, 40), "white").save(_outside)
+check("an image outside file_root is not found, however it is spelled",
+      "SOURCE_FILE_NOT_FOUND" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Image_Path=_outside)),
+      "%s" % validate(panels=edited(PANELS, {"Panel_ID": "P_FLAT"}, Image_Path=_outside)))
+check("and neither is one reached by walking out and back in",
+      "SOURCE_FILE_NOT_FOUND" in validate(
+          panels=edited(PANELS, {"Panel_ID": "P_FLAT"},
+                        Image_Path="../%s" % os.path.basename(_outside))))
+
+
+print("a problem charged to a figure condemns every value read from it")
+# The gate reports IMAGE_HASH_MISMATCH at `figures:2` - the raster on disk is
+# not the raster the manifest names, so nothing measured from it is evidence of
+# anything. `_units_named_by` read only `unit:`, `units:` and `values:`, so the
+# figure grain fell on the floor and every value was still ACCEPTED. On the
+# dispersion-resolved ID397 copy that was 48 poolable rows from an image the
+# batch had been told, nine times, was the wrong one.
+for _label, _figs, _want in (
+        ("a figure hash that does not match the raster",
+         [dict(FIGURES[0], Image_Resolution_Or_Hash="600x480 sha256:" + "0" * 64)],
+         "IMAGE_HASH_MISMATCH"),
+        ("a figure whose panel count is still unreconciled",
+         [dict(FIGURES[0], Panel_Reconciliation_Status="PENDING")],
+         None),
+        ("a figure whose source image is not on disk",
+         [dict(FIGURES[0], Source_Image=os.path.join(ROOT, "no_such_figure.png"))],
+         None)):
+    _d = os.path.join(ROOT, "o_fig_" + str(abs(hash(_label)) % 10 ** 8))
+    _sm = RB.run_batch(write_manifests(os.path.join(ROOT, "m_fig_%d"
+                                                    % (abs(hash(_label)) % 10 ** 8)),
+                                       figures=_figs),
+                       _d, file_root=ROOT, run_date="2026-08-06")
+    _qc = pd.read_csv(os.path.join(_d, "qc_problems.csv")) if os.path.exists(
+        os.path.join(_d, "qc_problems.csv")) else pd.DataFrame(columns=["where", "check"])
+    _acc = pd.read_csv(os.path.join(_d, "figure_values_machine_qc.csv"),
+                       dtype=object) if os.path.exists(
+        os.path.join(_d, "figure_values_machine_qc.csv")) else pd.DataFrame()
+    check("%s is caught at the figure grain" % _label,
+          any(str(w).startswith("figures:") for w in _qc.get("where", [])),
+          "%s" % _qc.to_dict("records")[:4])
+    if _want:
+        check("and the code is %s" % _want, _want in set(_qc.get("check", [])),
+              "%s" % sorted(set(_qc.get("check", []))))
+    check("and not one value from that figure is poolable (%s)" % _label,
+          len(_acc) == 0, "%d accepted" % len(_acc))
+    _rm = pd.read_csv(os.path.join(_d, "run_manifest.csv"))
+    check("and its auto panels are QC_FAILED, not AUTO_PASS (%s)" % _label,
+          "AUTO_PASS" not in set(_rm["Run_State"]), "%s" % sorted(set(_rm["Run_State"])))
+
+# A grid problem is the same argument one grain along: every unit that declares
+# the grid inherits it.
+_gd = os.path.join(ROOT, "o_grid_scope")
+_gs = RB.run_batch(
+    write_manifests(os.path.join(ROOT, "m_grid_scope"),
+                    grids=GRIDS + [dict(Grid_ID="G_TIME", Factor_Name="ARM",
+                                        Factor_Level="CONTROL", Level_Order=0,
+                                        Note="duplicate level")]),
+    _gd, file_root=ROOT, run_date="2026-08-06")
+_gq = pd.read_csv(os.path.join(_gd, "qc_problems.csv"))
+_g_scoped = any(str(w).startswith(("grid:", "grids:")) for w in _gq["where"])
+if _g_scoped:
+    _ga = pd.read_csv(os.path.join(_gd, "figure_values_machine_qc.csv"), dtype=object)
+    _units_on_g_time = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] == "G_TIME"}
+    _units_elsewhere = {u["Unit_ID"] for u in UNITS if u["Grid_ID"] != "G_TIME"}
+    check("a grid-grain problem blocks every unit declaring that grid",
+          not (set(_ga["Unit_ID"]) & _units_on_g_time),
+          "%s still accepted" % sorted(set(_ga["Unit_ID"]) & _units_on_g_time))
+    # Inheritance is downward, not sideways. A unit on another grid was not
+    # measured any less carefully because this one is broken.
+    check("and leaves units on other grids alone",
+          bool(set(_ga["Unit_ID"]) & _units_elsewhere) or not _units_elsewhere,
+          "accepted=%s other=%s" % (sorted(set(_ga["Unit_ID"])), sorted(_units_elsewhere)))
+else:
+    check("a grid-grain problem blocks every unit declaring that grid",
+          _gs["status"] == "MANIFEST_REJECTED", "%s" % _gs)
+
+# The failure above was silent because an unknown prefix simply did not match.
+# The next grain the gate grows must not repeat it.
+_fake = pd.DataFrame([dict(where="constellations:2", check="INVENTED_SCOPE",
+                           detail="a grain this function has never seen")])
+_charged = RB._units_named_by(_fake, pd.DataFrame(), fr(UNITS, GE.fig_unit_columns()))
+check("a QC scope nobody taught the runner condemns every unit",
+      set(_charged) == {str(u["Unit_ID"]) for u in UNITS} and all(
+          any(c.startswith("UNATTRIBUTED_QC_SCOPE") for c in codes)
+          for codes in _charged.values()),
+      "%s" % _charged)
+check("every scope the gate emits is one the runner resolves",
+      {"unit", "units", "values", "figures", "grids", "grid"} == set(RB.QC_SCOPES),
+      "%s" % sorted(RB.QC_SCOPES))
+
+
+print("the run mode belongs to the registry, not to the caller")
+# The replay: run the demonstration, then hand its own manifests to the plain
+# CLI. `run_mode` was an argument, so the promise stayed at the first call site
+# and the files walked away without it - Status=RAN, Run_Mode=ATTESTED, same
+# fictional reviewer. This fixture DOES accept values, which is the point.
+_demo_reg = [dict(REVIEWERS[0], Reviewer_ID="RV_DEMO",
+                  Reviewer_Name="Josiah Carberry",
+                  Reviewer_Record_Type="DEMO_IDENTITY",
+                  Contact_Type="ORCID",
+                  Reviewer_Contact="0000-0002-1825-0097",
+                  Registered_By="Josiah Carberry",
+                  Human_Attestation="DEMO_EXAMPLE")]
+_demo_mdir = write_manifests(
+    os.path.join(ROOT, "m_demo_identity"), reviewers=_demo_reg,
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Reviewer_ID="RV_DEMO")],
+    source_figures=[dict(f, Reviewer_ID="RV_DEMO") for f in SOURCE_FIGURES])
+
+_replay = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_replay"),
+                       file_root=ROOT, run_date="2026-08-06")
+check("replaying a demo manifest set through the plain runner is still DEMO_ONLY",
+      _replay["run_mode"] == "DEMO_ONLY", "%s" % _replay)
+check("and its accepted values are refused, not written",
+      _replay["status"] == "DEMO_OUTPUT_REFUSED" and _replay["would_accept"] > 0,
+      "%s" % _replay)
+check("and no accepted file survives the replay",
+      RB.COMMIT_MARKER not in os.listdir(os.path.join(ROOT, "o_replay")),
+      "%s" % sorted(os.listdir(os.path.join(ROOT, "o_replay"))))
+check("and the stamp on the replay says DEMO_ONLY",
+      json.load(open(os.path.join(ROOT, "o_replay", "run_stamp.json"))
+                )["Run_Mode"] == "DEMO_ONLY")
+
+# THE ONE NUMBER A REFUSED RUN IS ABOUT (v9.2). `Values_Machine_QC_Passed` is
+# how many gate-passing values the run KEPT, and a refusal keeps none - so it is
+# 0, correctly. Until v9.2 that was the only tally in the stamp, and the gate's
+# own count survived in the `Detail` sentence: `test_compile_plan` had to parse
+# English out of the prose to assert that 323 put 102 values through the gate.
+_refused_stamp = json.load(open(os.path.join(ROOT, "o_replay", "run_stamp.json")))
+check("a refusal keeps nothing, and Values_Machine_QC_Passed says so",
+      _refused_stamp["Values_Machine_QC_Passed"] == 0, "%s" % _refused_stamp)
+check("and the gate's own tally survives the refusal in a field, not a sentence",
+      _refused_stamp["Values_Gate_Passed"] == _replay["would_accept"] > 0,
+      "Values_Gate_Passed=%r would_accept=%r"
+      % (_refused_stamp.get("Values_Gate_Passed"), _replay["would_accept"]))
+check("and it is the number the refusal's own sentence quotes",
+      str(_refused_stamp["Values_Gate_Passed"]) in _refused_stamp["Detail"],
+      "%s" % _refused_stamp["Detail"])
+_ran_stamp = json.load(open(os.path.join(ODIR, "run_stamp.json")))
+check("on a run that kept its results the two tallies are the same number",
+      _ran_stamp["Values_Gate_Passed"] == _ran_stamp["Values_Machine_QC_Passed"] > 0,
+      "%s" % _ran_stamp)
+# And what the inventory rested on, on every outcome. The fixture hashes the
+# document its four figures came out of, so this one is ALL; publications 323
+# and 397 ship rasters without their articles and stamp NONE.
+check("a run stamp says which bytes its inventory rested on",
+      _ran_stamp["Source_Document_Bytes_Bound"] == "ALL", "%s" % _ran_stamp)
+check("and so does a refusal",
+      _refused_stamp["Source_Document_Bytes_Bound"] == "ALL", "%s" % _refused_stamp)
+_unbound = write_manifests(
+    os.path.join(ROOT, "m_notheld"),
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Source_File="elsewhere.pdf",
+                           Source_File_SHA256="NOT_HELD")],
+    source_figures=[dict(f, Source_File="elsewhere.pdf") for f in SOURCE_FIGURES])
+RB.run_batch(_unbound, os.path.join(ROOT, "o_notheld"), file_root=ROOT,
+             run_date="2026-08-06")
+check("a run over an article nobody holds stamps NONE rather than nothing",
+      json.load(open(os.path.join(ROOT, "o_notheld", "run_stamp.json"))
+                )["Source_Document_Bytes_Bound"] == "NONE",
+      "%s" % json.load(open(os.path.join(ROOT, "o_notheld", "run_stamp.json"))))
+check("the stamp schema moved with the two fields",
+      _ran_stamp["schema"] == "figure-digitization-triage/run-stamp/8",
+      "%s" % _ran_stamp["schema"])
+
+_promote = RB.run_batch(_demo_mdir, os.path.join(ROOT, "o_promote"),
+                        file_root=ROOT, run_date="2026-08-06",
+                        run_mode="ATTESTED")
+check("the caller cannot promote a demo identity to ATTESTED",
+      _promote["status"] == "MANIFEST_REJECTED"
+      and "RUN_MODE_REVIEWER_MISMATCH" in _promote["detail"], "%s" % _promote)
+check("but the caller may still demote a real registry",
+      RB.run_batch(_good, os.path.join(ROOT, "o_demote"), file_root=ROOT,
+                   run_date="2026-08-06",
+                   run_mode="DEMO_ONLY")["run_mode"] == "DEMO_ONLY")
+
+check("a DEMO_IDENTITY row must not claim HUMAN_CONFIRMED",
+      "REVIEWER_RECORD_TYPE_MISMATCH" in validate(
+          reviewers=_reviewer(Reviewer_Record_Type="DEMO_IDENTITY",
+                              Human_Attestation="HUMAN_CONFIRMED")),
+      "%s" % validate(reviewers=_reviewer(Reviewer_Record_Type="DEMO_IDENTITY",
+                                          Human_Attestation="HUMAN_CONFIRMED")))
+check("a HUMAN row must not hide behind DEMO_EXAMPLE",
+      "REVIEWER_RECORD_TYPE_MISMATCH" in validate(
+          reviewers=_reviewer(Human_Attestation="DEMO_EXAMPLE")))
+check("an invented record type is refused",
+      "BAD_REVIEWER_RECORD_TYPE" in validate(
+          reviewers=_reviewer(Reviewer_Record_Type="PROBABLY_REAL")))
+check("a missing record type is refused",
+      "MISSING_REQUIRED" in validate(reviewers=_reviewer(Reviewer_Record_Type="")))
+check("a demo row nobody attested with does not demote the run",
+      RB.run_batch(write_manifests(os.path.join(ROOT, "m_unused_demo"),
+                                   reviewers=REVIEWERS + _demo_reg),
+                   os.path.join(ROOT, "o_unused_demo"), file_root=ROOT,
+                   run_date="2026-08-06")["run_mode"] == "ATTESTED")
+
+
+print("a promotion that dies partway leaves nothing poolable")
+# promote() moves files one at a time, so it is not atomic. What it can be is
+# ORDERED: the accepted file goes last and works as a commit marker, and a
+# failure withdraws it. The fault is injected rather than argued about.
+_fault = os.path.join(ROOT, "o_fault")
+RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-06")
+_full = sorted(f for f in os.listdir(_fault) if os.path.isfile(os.path.join(_fault, f)))
+check("a clean run commits the marker last and it is present",
+      RB.COMMIT_MARKER in _full, "%s" % _full)
+for _n in (1, 2, 3):
+    _raised = None
+    try:
+        RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-07",
+                     fault_after=_n)
+    except Exception as exc:
+        _raised = exc
+    check("a fault after %d promoted files raises" % _n, _raised is not None)
+    check("and leaves no accepted file to pool from (fault after %d)" % _n,
+          not os.path.exists(os.path.join(_fault, RB.COMMIT_MARKER)),
+          "the commit marker survived a failed promotion")
+    check("and no staging directory (fault after %d)" % _n,
+          not os.path.isdir(os.path.join(_fault, RB.STAGING)))
+    _sp = os.path.join(_fault, "run_stamp.json")
+    _sj = json.load(open(_sp)) if os.path.exists(_sp) else {}
+    check("and a stamp saying PROMOTE_FAILED (fault after %d)" % _n,
+          _sj.get("Status") == "PROMOTE_FAILED"
+          and _sj.get("Values_Accepted") == 0,
+          "no stamp at all" if not _sj else "%r" % _sj)
+check("the marker is the values file a downstream reader would pool",
+      RB.COMMIT_MARKER == "figure_values_machine_qc.csv", RB.COMMIT_MARKER)
+
+# Ordering and withdrawal each cover the other, so neither is proven by the
+# end-to-end runs above. Exercise them separately, on a directory of stubs.
+_stage = os.path.join(ROOT, "promote_unit")
+_dest = os.path.join(ROOT, "promote_dest")
+for _d in (_stage, _dest):
+    shutil.rmtree(_d, ignore_errors=True)
+    os.makedirs(_d)
+for _f in ("aaa_first.csv", RB.COMMIT_MARKER, "zzz_last.csv", "run_stamp.json"):
+    open(os.path.join(_stage, _f), "w").write("stub")
+_raised = None
+# Two files in, deliberately: sorted() puts `figure_values_machine_qc.csv` SECOND
+# among these stubs, so a run that promotes in listing order has already moved
+# the marker by here and a run that orders it last has not. Faulting at one
+# would pass either way and prove nothing.
+try:
+    RB.promote(_stage, _dest, fault_after=2)
+except Exception as exc:
+    _raised = exc
+check("promote() raises when a move fails partway", _raised is not None)
+check("and the commit marker was never moved, whatever the filenames sort to",
+      os.path.exists(os.path.join(_stage, RB.COMMIT_MARKER))
+      and not os.path.exists(os.path.join(_dest, RB.COMMIT_MARKER)),
+      "the marker is not ordered last - alphabetical order put it first")
+check("while the files that explain a result did move first",
+      os.path.exists(os.path.join(_dest, "aaa_first.csv")))
+open(os.path.join(_dest, RB.COMMIT_MARKER), "w").write("stub")
+RB.withdraw_commit(_dest, "2026-08-06", "unit test")
+check("withdraw_commit() removes a marker that did land",
+      not os.path.exists(os.path.join(_dest, RB.COMMIT_MARKER)))
+check("and leaves a PROMOTE_FAILED stamp behind it",
+      json.load(open(os.path.join(_dest, "run_stamp.json")))["Status"]
+      == "PROMOTE_FAILED")
+# A promotion that silently loses a file must not commit either.
+shutil.rmtree(_stage, ignore_errors=True)
+os.makedirs(_stage)
+open(os.path.join(_stage, RB.COMMIT_MARKER), "w").write("stub")
+_orig_move = shutil.move
+
+
+def _lossy_move(src, dst):
+    if os.path.basename(src) == RB.COMMIT_MARKER:
+        os.remove(src)                       # "moved" but never arrived
+        return dst
+    return _orig_move(src, dst)
+
+
+shutil.move = _lossy_move
+try:
+    RB.promote(_stage, _dest)
+    _lost = "committed anyway"
+except Exception as exc:
+    _lost = str(exc)
+finally:
+    shutil.move = _orig_move
+check("a file that vanishes mid-promotion is caught by the verify pass",
+      "missing" in _lost, _lost)
+_recovered = RB.run_batch(_good, _fault, file_root=ROOT, run_date="2026-08-08")
+check("a clean run after a failed promotion commits normally",
+      _recovered["status"] == "RAN"
+      and os.path.exists(os.path.join(_fault, RB.COMMIT_MARKER))
+      and json.load(open(os.path.join(_fault, "run_stamp.json")))["Status"] == "RAN")
+
+
+print("a value is judged by the panel that produced it, not by its unit's last")
+check("every raw row names both its run panel and physical source panel",
+      all(values["Run_Panel_ID"]) and all(values["Source_Panel_ID"]),
+      "%s / %s" % (sorted(set(values["Run_Panel_ID"])),
+                     sorted(set(values["Source_Panel_ID"]))))
+check("and the run panel it names really ran",
+      set(values["Run_Panel_ID"]) <= set(run["Panel_ID"]),
+      "%s" % sorted(set(values["Run_Panel_ID"]) - set(run["Panel_ID"])))
+check("and the physical panel exists in the source inventory",
+      set(values["Source_Panel_ID"]) <= {r["Source_Panel_ID"] for r in SOURCE_PANELS})
+
+# Two panels, one unit: the first cannot be read, the second reads cleanly.
+# Keying panel state by Unit_ID let the second overwrite the first and the whole
+# unit came out ACCEPTED - including the half nobody could read.
+_split_panels = [
+    panel("P_HALF_A", "U_SPLIT", "LINE_COLOR", BLANK_IMG, (100, 500, 40, 440)),
+    panel("P_HALF_B", "U_SPLIT", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440)),
+]
+_split_series = [series(p, s, lv, Colour_Hex=hx)
+                 for p in ("P_HALF_A", "P_HALF_B")
+                 for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                   ("S_RED", "TREATED", "#d72d2d"))]
+_split_positions = [
+    dict(Panel_ID=p, Position_ID=q, X_Pixel=x, Slot_Index=i, Display_Order=i,
+         Factor_Name="TIMEPOINT", Factor_Level=q, Timepoint_Label=q,
+         Timepoint_Days=i * 7, Note="")
+    for p in ("P_HALF_A", "P_HALF_B") for i, (q, x) in enumerate(zip(POSITIONS, XS))]
+_split_units = UNITS + [unit("U_SPLIT", "G_TIME", "CONTINUOUS")]
+# P_HALF_A is drawn on BLANK_IMG and P_HALF_B on LINE_IMG, so they belong to
+# different physical figures - which is the point of the fixture: one unit fed
+# by two panels the reader treats independently.
+_split_source_panels = SOURCE_PANELS + [dict(
+    Source_Panel_ID=p, Source_Figure_ID=sf, Panel_Label=p,
+    Outcome_Label="Heart rate", Target_Status="TARGET",
+    Panel_Disposition="AUTO_DIGITIZE",
+    Disposition_Reason="two-panel one-unit regression fixture", Note="")
+    for p, sf in (("P_HALF_A", "SF4"), ("P_HALF_B", "SF1"))]
+_mdir = write_manifests(os.path.join(ROOT, "m_split"),
+                        panels=PANELS + _split_panels,
+                        series_rows=SERIES + _split_series,
+                        positions=POSITION_ROWS + _split_positions,
+                        units=_split_units,
+                        source_figures=[
+                            dict(f, Observed_Panel_Count=2)
+                            if f["Source_Figure_ID"] in ("SF1", "SF4") else f
+                            for f in SOURCE_FIGURES],
+                        source_panels=_split_source_panels)
+_o = os.path.join(ROOT, "o_split")
+_split_summary = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+# AND SINCE v9.3 THIS FIXTURE CANNOT RUN AT ALL. v9.1 made one-panel-per-unit a
+# contract in the plan layer - the unit's calibration comes from the first panel
+# that claimed it, so a second claimant's marks are priced against an axis they
+# were not measured on - and v9.3 carries that rule down to the manifests, where
+# a third party's or a hand-written set lives. The scenarios below therefore keep
+# the pre-v9.1 fixture and assert the refusal; the run-time behaviour they used to
+# pin is re-pinned underneath on two panels with a unit each.
+check("two panels of one unit are refused before the run",
+      _split_summary["status"] == "MANIFEST_REJECTED"
+      and "UNIT_FILLED_TWICE" in _split_summary["detail"],
+      "%s" % _split_summary)
+check("and nothing is written for them",
+      not os.path.exists(os.path.join(_o, "figure_values_raw.csv")),
+      "%s" % sorted(os.listdir(_o)))
+
+# The same two panels, each with its own unit: the blank one cannot be read and
+# the readable one reads cleanly. Keying panel state by Unit_ID once let the
+# second overwrite the first, so a half nobody could read came out ACCEPTED.
+_pair_panels = [
+    panel("P_HALF_A", "U_HALF_A", "LINE_COLOR", BLANK_IMG, (100, 500, 40, 440)),
+    panel("P_HALF_B", "U_HALF_B", "LINE_COLOR", LINE_IMG, (100, 500, 40, 440)),
+]
+_pair_series = [series(p, s, lv, Colour_Hex=hx)
+                for p in ("P_HALF_A", "P_HALF_B")
+                for s, lv, hx in (("S_BLUE", "CONTROL", "#2d50dc"),
+                                  ("S_RED", "TREATED", "#d72d2d"))]
+_pair_units = UNITS + [unit("U_HALF_A", "G_TIME", "CONTINUOUS",
+                            Panel_ID="P_HALF_A", Source_Panel_ID="P_HALF_A"),
+                       unit("U_HALF_B", "G_TIME", "CONTINUOUS",
+                            Panel_ID="P_HALF_B", Source_Panel_ID="P_HALF_B")]
+_mdir = write_manifests(os.path.join(ROOT, "m_pair"),
+                        panels=PANELS + _pair_panels,
+                        series_rows=SERIES + _pair_series,
+                        positions=POSITION_ROWS + [
+                            dict(p, Panel_ID=pid)
+                            for pid in ("P_HALF_A", "P_HALF_B")
+                            for p in _split_positions
+                            if p["Panel_ID"] == "P_HALF_A"],
+                        units=_pair_units,
+                        source_figures=[
+                            dict(f, Observed_Panel_Count=2)
+                            if f["Source_Figure_ID"] in ("SF1", "SF4") else f
+                            for f in SOURCE_FIGURES],
+                        source_panels=_split_source_panels)
+_o = os.path.join(ROOT, "o_pair")
+_split_summary = RB.run_batch(_mdir, _o, file_root=ROOT, run_date="2026-08-06")
+check("the two-panel fixture actually ran",
+      _split_summary["status"] == "RAN", "%s" % _split_summary)
+_sr = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_sraw = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+_sacc = pd.read_csv(os.path.join(_o, "figure_values_machine_qc.csv"),
+                    dtype=object).fillna("")
+_sstates = dict(zip(_sr["Panel_ID"], _sr["Run_State"]))
+check("two panels of one figure keep two separate run rows",
+      _sstates.get("P_HALF_A") and _sstates.get("P_HALF_B"), "%s" % _sstates)
+check("the blank panel of the pair did not pass",
+      _sstates.get("P_HALF_A") != "AUTO_PASS", "%s" % _sstates)
+check("the readable panel's rows name the readable panel",
+      set(_sraw[_sraw["Unit_ID"] == "U_HALF_B"]["Run_Panel_ID"]) == {"P_HALF_B"},
+      "%s" % sorted(set(_sraw[_sraw["Unit_ID"] == "U_HALF_B"]["Run_Panel_ID"])))
+check("and the unreadable panel's unit accepts nothing on its neighbour's strength",
+      not len(_sacc[_sacc["Unit_ID"] == "U_HALF_A"]),
+      "%d rows accepted for a unit whose panel could not be read"
+      % len(_sacc[_sacc["Unit_ID"] == "U_HALF_A"]))
+
+
+print("the run records what would have to match for it to be reproducible")
+stamp = json.load(open(os.path.join(ODIR, "run_stamp.json")))
+check("the stamp carries the reader version and the config hash",
+      stamp["Reader_Version"] == MR.READER_VERSION and len(stamp["Config_SHA256"]) == 64)
+# Compare against the constant, not a literal. Pinning "7.7" here meant the
+# scenario failed on the next version bump for no reason a reader could act on -
+# a test that has to be edited every release teaches people to edit tests.
+check("the stamp distinguishes pipeline revisions from reader revisions",
+      stamp["Pipeline_Version"] == RB.PIPELINE_VERSION
+      and stamp["Pipeline_Version"] != stamp["Reader_Version"]
+      and len(stamp["Pipeline_Code_SHA256"]) == 64,
+      "pipeline %r vs reader %r" % (stamp.get("Pipeline_Version"),
+                                    stamp.get("Reader_Version")))
+check("the stamp hashes every input manifest",
+      set(stamp["Manifest_SHA256"])
+      == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
+      "%s" % sorted(stamp["Manifest_SHA256"]))
+# The optional one included, and this batch has no identity_resolution.csv at
+# all. A file that may be absent still has to be hashed when it is there - a
+# resolution that can be edited after the values were approved silently
+# re-labels a series between the review and the pool - and the only way to hash
+# "it was absent" is to hash the empty frame the loader substitutes. So the
+# stamp records a digest for it either way, and an added file changes the
+# fingerprint that every approval is bound to.
+check("including the one that may be absent, so adding it later is visible",
+      "resolutions" in stamp["Manifest_SHA256"]
+      and len(stamp["Manifest_SHA256"]["resolutions"]) == 64,
+      "%r" % stamp["Manifest_SHA256"].get("resolutions"))
+
+# REVERT: drop "mono_bar_geometry.py" from PIPELINE_CODE_FILES. Every other
+# scenario in this file still passes, because the hash is still 64 hex
+# characters and still changes whenever run_batch.py does. What breaks is the
+# only thing the stamp is for: that module holds the WHOLE monochrome bar
+# measurement - stroke, footprint, extent, cap, texture - so the function
+# deciding where a bar top is could be rewritten between two batches and the
+# stamp would say the two runs were produced by identical code.
+#
+# The list is derived here rather than typed out again: a hand-written second
+# copy of the same names agrees with the first by construction and catches
+# nothing.
+#
+# WHAT IT WALKS CHANGED IN v7.54, BECAUSE THE FIRST VERSION HAD A BLIND SPOT
+# THE SIZE OF A READER. It followed the module OBJECTS bound as attributes of
+# each module, and `run_batch.reader_functions()` does
+# `from line_style_mono import read_monochrome_line_panel` INSIDE the function -
+# so what run_batch binds is the function, `line_style_mono` never appears in
+# `vars(run_batch)`, and the whole LINE_MONO_STYLE reader plus `provenance`
+# went unhashed from v7.44 to v7.53 while this scenario passed.
+#
+# So it follows the imports each file DECLARES instead. Where an import
+# statement sits - module level, inside a function, inside a try - is a
+# property of the code that has nothing to do with whether the module decides a
+# number, and a guard that depends on it is a guard that fails the moment
+# somebody moves an import to break a cycle. Which is exactly why that import
+# is where it is.
+def _declared_imports(path):
+    """Local package modules this FILE imports, wherever the import sits."""
+    out = set()
+    for node in ast.walk(ast.parse(open(path, encoding="utf-8").read(), path)):
+        if isinstance(node, ast.Import):
+            out.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            out.add(node.module.split(".")[0])
+    return {name for name in out
+            if os.path.exists(os.path.join(_paths.CODE, name + ".py"))}
+
+
+_seen, _reachable = set(), []
+# Seeded with run_batch alone. Seeding it with `reader_functions()`'s modules as
+# well was written first and removed: the AST walk already finds them, because a
+# dispatch table cannot name a reader it does not import, and a revert of the
+# seeding failed nothing. An unobservable belt beside a working brace is
+# decoration.
+_stack = ["run_batch"]
+while _stack:
+    _name = _stack.pop()
+    if _name in _seen:
+        continue
+    _seen.add(_name)
+    _path = os.path.join(_paths.CODE, _name + ".py")
+    if not os.path.exists(_path):
+        continue                       # numpy, pandas, the standard library
+    _reachable.append(_name + ".py")
+    _stack.extend(_declared_imports(_path))
+_unhashed = sorted(set(_reachable) - set(RB.PIPELINE_CODE_FILES))
+check("every module of this package that run_batch reaches is in the hash",
+      not _unhashed, "not hashed: %r" % _unhashed)
+check("and mono_bar_geometry - the whole monochrome bar measurement - is one",
+      "mono_bar_geometry.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+# The two the old walk could not see. Named as well as derived, because the
+# derivation is the thing that was wrong and a scenario that only checks the
+# derived set cannot say which module the walk lost.
+check("so is line_style_mono, which decides the mean of a line panel's cells",
+      "line_style_mono.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+check("and provenance, which decides what evidence every cell claims to have",
+      "provenance.py" in RB.PIPELINE_CODE_FILES,
+      repr(RB.PIPELINE_CODE_FILES))
+check("the walk reaches a reader imported inside a function, and what it imports",
+      "line_style_mono.py" in _reachable and "provenance.py" in _reachable,
+      "%r" % sorted(_reachable))
+# Not "the hash is 64 characters" but "editing this file moves it". One byte,
+# in a comment, in the module that was missing.
+_geo_path = os.path.join(_paths.CODE, "mono_bar_geometry.py")
+_before = RB.pipeline_code_sha256()
+with open(_geo_path, "rb") as _fh:
+    _original = _fh.read()
+try:
+    with open(_geo_path, "wb") as _fh:
+        _fh.write(_original + b"\n# one byte\n")
+    _after = RB.pipeline_code_sha256()
+finally:
+    with open(_geo_path, "wb") as _fh:
+        _fh.write(_original)
+check("changing one byte of the bar measurement changes the pipeline hash",
+      _after != _before, "%s ... %s" % (_before[:16], _after[:16]))
+check("and putting it back puts the hash back",
+      RB.pipeline_code_sha256() == _before)
+# THE SAME TEST FOR THE TWO FILES THE WALK COULD NOT SEE. Named per file rather
+# than looped over PIPELINE_CODE_FILES: the loop passes for every file in the
+# tuple by construction, which is exactly what it was doing while these two
+# were absent from it.
+for _name, _why in (("line_style_mono.py", "the mean of a line panel's cells"),
+                    ("provenance.py", "what evidence a cell claims to have")):
+    _p = os.path.join(_paths.CODE, _name)
+    _was = open(_p, "rb").read()
+    _b4 = RB.pipeline_code_sha256()
+    try:
+        with open(_p, "wb") as _fh:
+            _fh.write(_was + b"\n# one byte\n")
+        _aft = RB.pipeline_code_sha256()
+    finally:
+        with open(_p, "wb") as _fh:
+            _fh.write(_was)
+    check("changing one byte of %s - %s - changes the pipeline hash"
+          % (_name, _why), _aft != _b4, "%s ... %s" % (_b4[:16], _aft[:16]))
+    check("and %s restored puts it back" % _name,
+          RB.pipeline_code_sha256() == _b4)
+check("each run row carries the image hash it read",
+      all(len(h) == 64 for h in run["Image_SHA256"] if h), "%s" % list(run["Image_SHA256"]))
+
+ODIR2 = os.path.join(ROOT, "out2")
+RB.run_batch(MDIR, ODIR2, file_root=ROOT, run_date="2026-08-06")
+_same = []
+for name in ("figure_values_raw.csv", "figure_values_machine_qc.csv",
+             "run_manifest.csv", "manual_queue.csv", "qc_problems.csv"):
+    # The output directory is embedded in the paths a run writes, so compare the
+    # runs with their own root removed. Everything else must match exactly.
+    _a = open(os.path.join(ODIR, name)).read().replace(ODIR, "<OUT>")
+    _b = open(os.path.join(ODIR2, name)).read().replace(ODIR2, "<OUT>")
+    _same.append((name, _a == _b))
+check("a second run over the same inputs is identical but for its own path",
+      all(ok for _, ok in _same), "%s" % [n for n, ok in _same if not ok])
+_p1 = MR.read_point_data(RB.resolve_artifact(ODIR, _scat["Point_Data_Reference"]))
+_p2 = MR.read_point_data(RB.resolve_artifact(ODIR2, _scat["Point_Data_Reference"]))
+check("and the point clouds it wrote are identical pixel for pixel",
+      _p1["points"] == _p2["points"])
+_changed = json.load(open(os.path.join(ODIR2, "run_stamp.json")))
+# Every field but the ones that ARE the output directory. `Output_SHA256` hashes
+# files whose rows carry absolute paths, so two runs into two directories
+# legitimately differ there - and comparing them anyway would have quietly
+# turned this into a test that the paths are equal.
+_ignore = {"Output_SHA256"}
+check("and its stamp agrees",
+      {k: v for k, v in _changed.items() if k not in _ignore}
+      == {k: v for k, v in stamp.items() if k not in _ignore},
+      "%s" % sorted(k for k in set(_changed) | set(stamp)
+                    if k not in _ignore and _changed.get(k) != stamp.get(k)))
+check("and the hashes it recorded are of the files it actually wrote",
+      all(RB.sha256_of_text(open(os.path.join(ODIR2, n), encoding="utf-8").read())
+          == h for n, h in _changed["Output_SHA256"].items()),
+      "%s" % sorted(_changed["Output_SHA256"]))
+
+print("a changed input is visible in the stamp, not silent")
+MDIR3 = write_manifests(os.path.join(ROOT, "manifests3"),
+                        configs=CONFIGS + [dict(Config_ID="C_DEFAULT",
+                                                Option="x_window", Value="14",
+                                                Note="")])
+ODIR3 = os.path.join(ROOT, "out3")
+_s3 = RB.run_batch(MDIR3, ODIR3, file_root=ROOT, run_date="2026-08-06")
+check("a duplicated option is caught at validation, before any reading",
+      _s3["status"] == "MANIFEST_REJECTED"
+      and "DUPLICATE_READER_OPTION" in _s3["detail"], "%s" % _s3)
+check("a rejected batch writes its reasons and no values",
+      os.path.exists(os.path.join(ODIR3, "manifest_problems.csv"))
+      and not os.path.exists(os.path.join(ODIR3, "figure_values_raw.csv"))
+      and not os.path.exists(os.path.join(ODIR3, "figure_values_machine_qc.csv")))
+
+MDIR4 = write_manifests(os.path.join(ROOT, "manifests4"),
+                        configs=[dict(c, Value=("30" if c["Option"] == "x_window"
+                                                else c["Value"])) for c in CONFIGS])
+ODIR4 = os.path.join(ROOT, "out4")
+RB.run_batch(MDIR4, ODIR4, file_root=ROOT, run_date="2026-08-06")
+_st4 = json.load(open(os.path.join(ODIR4, "run_stamp.json")))
+check("changing an option changes the config hash",
+      _st4["Config_SHA256"] != stamp["Config_SHA256"])
+
+print("the failure states the reader can reach are reachable")
+# With check_files off - the deliberate choice for validating a manifest set
+# away from its rasters - a missing image survives validation and fails in the
+# reader. That is the state the runner must reach rather than crash on.
+_bad_geom = write_manifests(
+    os.path.join(ROOT, "m_geom"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"},
+                  Image_Path=os.path.join(IMAGES, "vanished.png")))
+_o = os.path.join(ROOT, "o_geom")
+RB.run_batch(_bad_geom, _o, file_root=ROOT, run_date="2026-08-06",
+             check_files=False)
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("a calibration the reader cannot use is PANEL_GEOMETRY_UNRESOLVED",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "PANEL_GEOMETRY_UNRESOLVED",
+      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+
+_one_colour = write_manifests(
+    os.path.join(ROOT, "m_series"),
+    series_rows=edited(SERIES, {"Panel_ID": "P_LINE", "Series_ID": "S_RED"},
+                       Colour_Hex="#0a7a10"))
+_o = os.path.join(ROOT, "o_series")
+RB.run_batch(_one_colour, _o, file_root=ROOT, run_date="2026-08-06")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("a series the reader cannot find is SERIES_IDENTITY_UNRESOLVED, not a hole",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "SERIES_IDENTITY_UNRESOLVED",
+      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("and it contributes no half-panel of values",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+
+# Switching a panel to BAR_MONO invalidates a config written for a colour line
+# reader, and the validator says so first - so this scenario gives the panel a
+# config that actually fits it. That the mismatch was caught is itself the
+# behaviour the OPTION_WRONG_FOR_MARK_TYPE scenario above asserts.
+_mono_series = [
+    dict(r, Colour_Hex="",
+         Bar_Fill_Pattern=("SOLID" if r["Series_ID"] == "S_BLUE" else "HATCHED"))
+    if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
+_mono = write_manifests(
+    os.path.join(ROOT, "m_mono"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
+                  Config_ID="C_BARMONO"),
+    series_rows=_mono_series,
+    configs=CONFIGS + [dict(Config_ID="C_BARMONO", Option="threshold",
+                            Value="150", Note="")])
+_o = os.path.join(ROOT, "o_mono")
+RB.run_batch(_mono, _o, file_root=ROOT, run_date="2026-08-06")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+# PANEL_GEOMETRY_UNRESOLVED, with the geometry pass's own reason on it. It was
+# MANUAL_POINT_READ - "the reader resolved no marks in this panel" - which is
+# true and useless: the reasons were on the geometry rows and only findable by
+# opening mono_bar_geometry.csv.
+_lr = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("a bar reader pointed at a line panel says what it could not find",
+      _lr["P_LINE"] == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _lr)
+check("and names it, rather than reporting an empty panel",
+      "UNRESOLVED" in dict(zip(_r["Panel_ID"], _r["Detail"]))["P_LINE"],
+      "%s" % dict(zip(_r["Panel_ID"], _r["Detail"]))["P_LINE"])
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("and it invents no bars from the line markers",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+
+print("a fill the manifest declares and the reader can now read")
+# STIPPLED is in the manifest vocabulary because publication 127 prints it and
+# a manifest that cannot say so forces its author to declare the nearest lie.
+# The reader refuses it - and WHICH refusal it raises decides what the audit
+# record says. A plain ValueError maps to PANEL_GEOMETRY_UNRESOLVED, which would
+# put "this reader has no STIPPLED" on the record as "this panel's geometry
+# cannot be trusted": fail-closed with the wrong reason, which is the kind of
+# thing a reviewer acts on and a maintainer chases.
+#
+# REVERT: raise ValueError from the UNIMPLEMENTED_FILL_PATTERNS branch in
+# mark_readers. The state below becomes PANEL_GEOMETRY_UNRESOLVED and every
+# other assertion in this scenario still passes.
+_stipple_series = [
+    dict(r, Colour_Hex="",
+         Bar_Fill_Pattern=("SOLID" if r["Series_ID"] == "S_BLUE" else "STIPPLED"))
+    if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
+_stip = write_manifests(
+    os.path.join(ROOT, "m_stipple"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type="BAR_MONO",
+                  Config_ID="C_BARMONO"),
+    series_rows=_stipple_series,
+    configs=CONFIGS + [dict(Config_ID="C_BARMONO", Option="threshold",
+                            Value="150", Note="")])
+_o = os.path.join(ROOT, "o_stipple")
+_ss = RB.run_batch(_stip, _o, file_root=ROOT, run_date="2026-08-06")
+check("a batch declaring a stipple still runs", _ss["status"] == "RAN",
+      "%s" % _ss)
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+# This scenario used to assert NO_READER_AVAILABLE, and it was right to: the
+# old reader classified fills by absolute density and STIPPLED had no band, so
+# a stippled bar would have been assigned to whichever band it fell in.
+# `read_monochrome_bar_geometry` reads stipples - "some rows of the interior
+# are blank" is a structural property, not a density - so the refusal is gone
+# and declaring STIPPLED is no longer declaring the unreadable. What is left
+# here is a bar reader pointed at a LINE panel, which finds no bars.
+#
+# REVERT: point BAR_MONO back at `read_monochrome_bar_panel`. The state below
+# becomes NO_READER_AVAILABLE again, and publication 127 - three panels of
+# OPEN/STIPPLED/SOLID - goes back to being unreadable by this pipeline.
+check("a stipple is no longer a fill the pipeline refuses",
+      _st.get("P_LINE") == "PANEL_GEOMETRY_UNRESOLVED", "%s" % _st)
+check("and the other panels in the batch are unaffected",
+      _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("no values are invented for the unreadable fill",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+check("STIPPLED is declarable in the manifest vocabulary",
+      "STIPPLED" in BM.BAR_FILL_PATTERNS, "%s" % (BM.BAR_FILL_PATTERNS,))
+# `UNIMPLEMENTED_FILL_PATTERNS` still says STIPPLED, and still should: it is
+# `read_monochrome_bar_panel`'s limitation and that reader still has it. What
+# changed is which reader BAR_MONO goes to.
+check("the old reader still refuses it, and is no longer the one BAR_MONO uses",
+      "STIPPLED" in MR.UNIMPLEMENTED_FILL_PATTERNS
+      and RB.reader_functions()["BAR_MONO"] is not MR.read_monochrome_bar_panel,
+      "%s" % (RB.reader_functions()["BAR_MONO"],))
+
+_wrong_grid = write_manifests(
+    os.path.join(ROOT, "m_qc"),
+    grids=[g for g in GRIDS if not (g["Grid_ID"] == "G_TIME"
+                                    and g["Factor_Level"] == "T3")])
+_o = os.path.join(ROOT, "o_qc")
+_sq = RB.run_batch(_wrong_grid, _o, file_root=ROOT, run_date="2026-08-06")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("values the gate rejects flip the panel to QC_FAILED",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_LINE"] == "QC_FAILED",
+      "%s / qc=%d" % (dict(zip(_r["Panel_ID"], _r["Run_State"])), _sq["qc_problems"]))
+_q = pd.read_csv(os.path.join(_o, "manual_queue.csv"), dtype=object).fillna("")
+check("and the run manifest and the queue tell the same story",
+      "P_LINE" in set(_q["Panel_ID"]), "%s" % sorted(set(_q["Panel_ID"])))
+
+_sparse_img = os.path.join(IMAGES, "sparse.png")
+_si = Image.new("RGB", (800, 520), "white")
+_sd = ImageDraw.Draw(_si)
+for _x, _y in SCATTER_XY[:2]:
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
+_si.save(_sparse_img)
+# Swapping the raster under a panel means swapping the physical figure it is a
+# panel of - the hash chain will not let the two drift apart, which is what it
+# is for.
+_sparse = write_manifests(
+    os.path.join(ROOT, "m_sparse"),
+    panels=edited(PANELS, {"Panel_ID": "P_SCAT"}, Image_Path=_sparse_img),
+    source_figures=edited(SOURCE_FIGURES, {"Source_Figure_ID": "SF2"},
+                          Source_Image=_sparse_img,
+                          Source_Image_SHA256=MR.sha256_of(_sparse_img)))
+_o = os.path.join(ROOT, "o_sparse")
+RB.run_batch(_sparse, _o, file_root=ROOT, run_date="2026-08-06")
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+check("a cloud too sparse to summarize is NOT_CONVERTIBLE, not a shaky r",
+      dict(zip(_r["Panel_ID"], _r["Run_State"]))["P_SCAT"] == "NOT_CONVERTIBLE",
+      "%s" % dict(zip(_r["Panel_ID"], _r["Run_State"])))
+
+print("an automated extraction is re-openable by hand")
+_proj = {p: RB.resolve_artifact(ODIR, v) if v else ""
+         for p, v in zip(run["Panel_ID"], run["WPD_Project_File"])}
+check("every passing panel saved a WPD project",
+      all(_proj[p] and os.path.exists(_proj[p]) for p in ("P_LINE", "P_SCAT")),
+      "%s" % _proj)
+import tarfile  # noqa: E402
+with tarfile.open(_proj["P_LINE"]) as _tf:
+    _names = _tf.getnames()
+    _wpd = json.loads(_tf.extractfile(
+        [n for n in _names if n.endswith("wpd.json")][0]).read())
+check("the project is a real tar carrying the raster it was read from",
+      any(n.endswith(".png") for n in _names), "%s" % _names)
+check("it carries one dataset per declared series",
+      sorted(d["name"] for d in _wpd["datasetColl"]) == ["S_BLUE", "S_RED"],
+      "%s" % [d["name"] for d in _wpd["datasetColl"]])
+check("and every mark the reader placed, so a reviewer can see where it looked",
+      sum(len(d["data"]) for d in _wpd["datasetColl"]) == 8,
+      "%d" % sum(len(d["data"]) for d in _wpd["datasetColl"]))
+check("the run filled the figure manifest's WPD_Project_File itself",
+      "WPD_Project_File" in pd.read_csv(
+          os.path.join(ODIR, "figure_manifest.csv"), dtype=object).fillna("").columns
+      and bool(pd.read_csv(os.path.join(ODIR, "figure_manifest.csv"),
+                           dtype=object).fillna("").iloc[0]["WPD_Project_File"]))
+
+print("a mark type with no reader is queued, not treated as a bad manifest")
+# One panel nobody can read yet must not stop every panel that can be. On
+# publication 397 that was two line figures against twenty-four readable bar
+# cells - rejecting the batch would have cost the twenty-four.
+#
+# `UNRELEASED_MARK_TYPES` IS EMPTY TODAY: LINE_MONO_STYLE was its last entry and
+# shipped, and there is no honest second name to put in it - that table is a
+# public statement to manifest authors about what this package can do, and a
+# placeholder in it would be a false one. So the machinery is driven from a
+# name installed here for the length of this section. What is under test is the
+# routing, not the name: a declared mark type the runner has no reader for must
+# reach the manual queue with a reason, and must not take the batch with it.
+_FAKE_UNRELEASED = "HEATMAP_CELL"
+BM.UNRELEASED_MARK_TYPES[_FAKE_UNRELEASED] = (
+    "a fixture for the no-reader route, installed by test_run_batch. See "
+    "wip/ for where a real one would live")
+_unreleased_series = [
+    dict(r, Colour_Hex="", Marker_Shape="NONE",
+         Line_Style=("SOLID" if r["Series_ID"] == "S_BLUE" else "DASHED"))
+    if r["Panel_ID"] == "P_LINE" else r for r in SERIES]
+_ur = write_manifests(
+    os.path.join(ROOT, "m_unreleased"),
+    panels=edited(PANELS, {"Panel_ID": "P_LINE"}, Mark_Type=_FAKE_UNRELEASED,
+                  Config_ID=""),
+    series_rows=_unreleased_series)
+_o = os.path.join(ROOT, "o_unreleased")
+_su = RB.run_batch(_ur, _o, file_root=ROOT, run_date="2026-08-06")
+check("a batch containing an unreleased mark type still runs",
+      _su["status"] == "RAN", "%s" % _su)
+_r = pd.read_csv(os.path.join(_o, "run_manifest.csv"), dtype=object).fillna("")
+_st = dict(zip(_r["Panel_ID"], _r["Run_State"]))
+check("the unreleased panel is NO_READER_AVAILABLE, not a manifest error",
+      _st.get("P_LINE") == "NO_READER_AVAILABLE", "%s" % _st)
+check("and the readable panels in the same batch still pass",
+      _st.get("P_SCAT") == "AUTO_PASS", "%s" % _st)
+_q = pd.read_csv(os.path.join(_o, "manual_queue.csv"), dtype=object).fillna("")
+_qrow = _q[_q["Panel_ID"] == "P_LINE"]
+check("its queue row names the cells nobody can read yet",
+      len(_qrow) and int(_qrow.iloc[0]["Missing_Cell_Count"]) > 0,
+      "%s" % (list(_qrow["Missing_Cell_Count"]) if len(_qrow) else "no queue row"))
+check("and says why, pointing at where the work stands",
+      len(_qrow) and "wip/" in _qrow.iloc[0]["Detail"],
+      "%s" % (list(_qrow["Detail"]) if len(_qrow) else ""))
+_v = pd.read_csv(os.path.join(_o, "figure_values_raw.csv"), dtype=object).fillna("")
+check("it contributes no values at all",
+      not len(_v[_v["Unit_ID"] == "U_LINE"]), "%d rows" % len(_v))
+check("NO_READER_AVAILABLE is in the declared state vocabulary",
+      "NO_READER_AVAILABLE" in BM.RUN_STATES)
+del BM.UNRELEASED_MARK_TYPES[_FAKE_UNRELEASED]
+check("and a released mark type takes the reader route, not that one",
+      not (set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)),
+      "%s" % sorted(set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)))
+
+
+# ---------------------------------------------------------------------------
+# The four artifacts a BAR_MONO geometry review needs, written as one bundle.
+#
+# An overlay is a review AID: a panel with values and no picture is still
+# reviewable through its WPD project, so `draw_panel_overlay` never raises.
+# These are the review ITSELF - the numbers, the pictures and the index tying
+# them together - and a panel missing one of them cannot be approved at all.
+#
+# REVERT: log a failure and carry on, the way the overlay does. The run then
+# queues a panel whose approval has nothing to be an approval of, and the
+# finalizer discovers it after a person has already typed APPROVED.
+print()
+print("a BAR_MONO geometry review is four artifacts or it is not a review")
+_gt = json.load(open(os.path.join(HERE, "mono_bar_fixture_truth.json"),
+                     encoding="utf-8"))
+_gimg = os.path.join(HERE, "mono_bar_fixture.png")
+_grows = MR.read_monochrome_bar_geometry(
+    Image.open(_gimg), tuple(_gt["panel_box"]),
+    dict(zip(_gt["groups"], _gt["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
+    _gt["patterns"], group_window=60, panel_id="P_GEO", identity_domain_id="F_GEO")
+_gdir = os.path.join(ROOT, "geo_review")
+os.makedirs(_gdir, exist_ok=True)
+try:
+    RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
+    _exc = None
+except Exception as _caught:                 # deliberately broad - see below
+    _exc = _caught
+check("the bundle refuses rows the figure has not answered",
+      _exc is not None and "AUTO_IDENTITY_MISSING" in str(_exc),
+      "it wrote a geometry file before the identities existed"
+      if _exc is None else str(_exc))
+# And refuses it under its OWN exception type. `canonical_artifact_rows` and
+# `verify_artifact` raise ValueError, `run_batch` catches GeometryReviewError,
+# so a bare ValueError from the writer leaves the runner as an unhandled
+# exception - the caller cannot tell "this bundle cannot be written" from a
+# defect. Caught as `Exception` above so this reads as a failed scenario rather
+# than a traceback that stops the file.
+check("and under its own exception type, so the runner can catch it",
+      isinstance(_exc, RB.GeometryReviewError), "%r" % (_exc,))
+RB.MONO_GEOMETRY.fill_identities_by_figure(_grows)
+_gart = RB.write_geometry_review(_gdir, [(_gimg, r) for r in _grows])
+check("every panel it covers gets all four artifact types",
+      set(_gart) == {"P_GEO"}
+      and [t for t, _p in _gart["P_GEO"]][:4]
+      == list(RB.GEOMETRY_ARTIFACT_TYPES),
+      "%s" % {k: [t for t, _p in v] for k, v in _gart.items()})
+# REVERT: register the four and stop. The index links to a picture per ROW and
+# the finalizer re-hashes only what the ledger names, so a row crop left out of
+# it can be swapped for a picture of a different bar and the approval still
+# verifies. There is no count to declare - a panel has as many as it has rows -
+# which is why it is a type of its own rather than a fifth fixed entry.
+_crops = [p for t, p in _gart["P_GEO"]
+          if t == RB.GEOMETRY_ROW_ARTIFACT_TYPE]
+check("and one registered picture per geometry row, by name",
+      len(_crops) == len(_grows)
+      and sorted(os.path.basename(p) for p in _crops)
+      == sorted(RB.OVERLAY.row_crop_name(r) for r in _grows),
+      "%d crops for %d rows" % (len(_crops), len(_grows)))
+check("every row crop the ledger names links from the index",
+      all(os.path.basename(p) in open(
+          dict(_gart["P_GEO"])["GEOMETRY_REVIEW_INDEX"],
+          encoding="utf-8").read() for p in _crops))
+check("and every one of them is a file that exists",
+      all(os.path.exists(p) for _t, p in _gart["P_GEO"]),
+      "%s" % [(t, os.path.exists(p)) for t, p in _gart["P_GEO"]])
+_gcsv = dict(_gart["P_GEO"])["MONO_BAR_GEOMETRY"]
+with open(_gcsv, encoding="utf-8") as _fh:
+    _gback = list(csv.DictReader(_fh))
+check("the numbers file is canonical and verifies on the way back in",
+      len(_gback) == len(_grows)
+      and len(RB.MONO_GEOMETRY.verify_artifact(_gback)["records"]) == len(_grows),
+      "%d rows" % len(_gback))
+check("the index names the panel picture beside the rows",
+      "panel__P_GEO.png" in open(dict(_gart["P_GEO"])["GEOMETRY_REVIEW_INDEX"],
+                                 encoding="utf-8").read())
+_gmeta = json.load(open(dict(_gart["P_GEO"])["CALIBRATION_PANEL_META"],
+                        encoding="utf-8"))
+check("and the panel metadata carries the points somebody typed",
+      [t["value"] for t in _gmeta["declared_calibration_points"]]
+      == [v for v, _p in _gt["y_ticks"]],
+      "%s" % _gmeta["declared_calibration_points"])
+# REVERT: return the artifacts that could be written. A panel whose picture
+# failed then reaches the queue declaring a review nobody can perform.
+_real_panel_draw = RB.OVERLAY.draw_panel_geometry
+try:
+    RB.OVERLAY.draw_panel_geometry = lambda *a, **k: None
+    _broke = os.path.join(ROOT, "geo_broken")
+    try:
+        RB.write_geometry_review(_broke, [(_gimg, r) for r in _grows])
+    except RB.GeometryReviewError as _exc:
+        check("a panel whose picture could not be drawn is refused, not queued",
+              "panel__P_GEO.png" in str(_exc), str(_exc))
+    else:
+        check("a panel whose picture could not be drawn is refused, not queued",
+              False, "it returned a bundle")
+finally:
+    RB.OVERLAY.draw_panel_geometry = _real_panel_draw
+# REVERT: leave the bundle off CANONICAL_OUTPUTS/CANONICAL_DIRS. A second run
+# into the same directory then keeps the first run's panel pictures and row
+# crops, and the writer's existence check passes on them - so an approval can
+# be given against a picture of a different measurement.
+check("the geometry bundle is on the cleanup list, both halves",
+      "mono_bar_geometry.csv" in RB.CANONICAL_OUTPUTS
+      and "geometry-review" in RB.CANONICAL_DIRS,
+      "%r %r" % (RB.CANONICAL_OUTPUTS[-2:], RB.CANONICAL_DIRS))
+_stale = os.path.join(ROOT, "geo_stale")
+os.makedirs(os.path.join(_stale, "geometry-review"), exist_ok=True)
+with open(os.path.join(_stale, "geometry-review", "panel__P_GEO.png"), "w") as _fh:
+    _fh.write("a picture from a previous run")
+with open(os.path.join(_stale, "mono_bar_geometry.csv"), "w") as _fh:
+    _fh.write("numbers from a previous run")
+RB.clear_outputs(_stale)
+check("and a new run removes both before it starts",
+      not os.path.exists(os.path.join(_stale, "mono_bar_geometry.csv"))
+      and not os.path.isdir(os.path.join(_stale, "geometry-review")),
+      "%r" % sorted(os.listdir(_stale)))
+# THE SAME FOR THE LIST OF RECONSTRUCTED CELLS. Left behind, a previous run's
+# `inference__<Panel_ID>.csv` sits where the finalizer looks for this run's - a
+# list of questions about measurements that no longer exist, and its ids are the
+# ones a person's answers would still name.
+_inf_stale = os.path.join(ROOT, "inf_stale")
+os.makedirs(os.path.join(_inf_stale, "inference-review"), exist_ok=True)
+with open(os.path.join(_inf_stale, "inference-review", "inference__P1.csv"),
+          "w") as _fh:
+    _fh.write("questions about a previous run's numbers")
+RB.clear_outputs(_inf_stale)
+check("the list of reconstructed cells is on the cleanup list too",
+      "inference-review" in RB.CANONICAL_DIRS
+      and not os.path.isdir(os.path.join(_inf_stale, "inference-review")),
+      "%r %r" % (RB.CANONICAL_DIRS, sorted(os.listdir(_inf_stale))))
+# AND SO IS THE WORK LIST. A previous run's `method_blocked_cells.csv` beside
+# this run's values is a list of re-digitization jobs for measurements that no
+# longer exist, and the person working through it has no way to tell.
+_mb_stale = os.path.join(ROOT, "mb_stale")
+os.makedirs(_mb_stale, exist_ok=True)
+with open(os.path.join(_mb_stale, "method_blocked_cells.csv"), "w") as _fh:
+    _fh.write("work items from a previous run")
+RB.clear_outputs(_mb_stale)
+check("and the list of values a model made does not survive a re-run",
+      "method_blocked_cells.csv" in RB.CANONICAL_OUTPUTS
+      and not os.path.exists(os.path.join(_mb_stale,
+                                          "method_blocked_cells.csv")),
+      "%r" % sorted(os.listdir(_mb_stale)))
+# REVERT: `OVERLAY.reset_failures()` inside write_geometry_review. The run's
+# overlay log is global, so a helper that clears it erases every panel overlay
+# failure that happened before it - and the run reports a clean drawing pass it
+# did not have.
+RB.OVERLAY.reset_failures()
+RB.OVERLAY._FAILURES.append("P_EARLIER: an overlay that could not be drawn")
+RB.write_geometry_review(os.path.join(ROOT, "geo_keep"),
+                         [(_gimg, r) for r in _grows])
+check("writing the bundle does not erase the run's earlier drawing failures",
+      any("P_EARLIER" in f for f in RB.OVERLAY.failures()),
+      "%r" % RB.OVERLAY.failures())
+RB.OVERLAY.reset_failures()
+# REVERT: drop review_crop_box from the successor's signature. A caller with
+# Axis_X_Region and Axis_Y_Region in hand then has to bypass the shared entry
+# point and call geometry_rows directly, which is most of why it exists.
+import inspect as _inspect                                          # noqa: E402
+check("the reader BAR_MONO now dispatches to can be told where the axis is",
+      "review_crop_box" in _inspect.signature(
+          RB.reader_functions()["BAR_MONO"]).parameters
+      and "review_crop_box" not in BM.READER_OPTIONS,
+      repr(sorted(_inspect.signature(
+          RB.reader_functions()["BAR_MONO"]).parameters)))
+_boxed = MR.read_monochrome_bar_geometry(
+    Image.open(_gimg), tuple(_gt["panel_box"]),
+    dict(zip(_gt["groups"], _gt["group_x"])),
+    MR.AxisCalibration.from_points([(v, p) for v, p in _gt["y_ticks"]]),
+    _gt["patterns"], group_window=60, review_crop_box=[10, 20, 30, 40],
+    panel_id="P_GEO", identity_domain_id="F_GEO")
+check("and it reaches the record, so the picture can use it",
+      all(r.get("review_crop_box") == [10, 20, 30, 40] for r in _boxed),
+      repr(_boxed[0].get("review_crop_box")))
+
+check("the artifact types are declared, not spelled at each call site",
+      RB.GEOMETRY_ARTIFACT_TYPES
+      == ("MONO_BAR_GEOMETRY", "GEOMETRY_REVIEW_INDEX", "CALIBRATION_PANEL",
+          "CALIBRATION_PANEL_META"))
+
+
+# ---------------------------------------------------------------------------
+# A BAR_MONO panel that actually reads, driven from manifests.
+#
+# Every BAR_MONO scenario above this point either calls the reader directly or
+# points it at a raster with no bars in it, so the whole runner path - the
+# pre-pass, the review bundle, the refusal branches, the cleanup - was only
+# ever exercised on a panel that returned nothing. The four checks that follow
+# are about what the runner does with a panel that returns TWELVE things, and
+# none of them can be written against a panel that returns none.
+# ---------------------------------------------------------------------------
+print()
+print("a monochrome bar panel read end to end from its manifests")
+MONO_IMG = os.path.join(IMAGES, "mono.png")
+shutil.copyfile(os.path.join(HERE, "mono_bar_fixture.png"), MONO_IMG)
+_MONO_BOX = tuple(_gt["panel_box"])
+# Where the printed axis lives, in the manifest's own words. The y labels sit
+# left of the plot box and the x labels below it; both are outside `_MONO_BOX`,
+# which is the point of declaring them.
+_MONO_YREG = "30,%d,%d,%d" % (_MONO_BOX[0], _MONO_BOX[2], _MONO_BOX[3])
+_MONO_XREG = "%d,%d,%d,470" % (_MONO_BOX[0], _MONO_BOX[1], _MONO_BOX[3])
+_MONO_FILLS = ("SOLID", "HATCHED", "OPEN")
+_MONO_ARMS = dict(zip(_MONO_FILLS, ("PRE", "EARLY", "LATE")))
+_mono_figure = dict(
+    Figure_ID="F_MONO", Publication_ID=1, Figure_Number="FIG5",
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=MONO_IMG,
+    Source_Caption_Verbatim="synthetic monochrome bar panel",
+    Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(MONO_IMG),
+    WPD_Project_File="", Observed_Panel_Count=1, Worklist_Panel_Count=1,
+    Unlisted_Panels="", Panel_Reconciliation_Status="MATCHED", Note="")
+_mono_source_figure = dict(
+    Source_Figure_ID="SF_MONO", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG5", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=MONO_IMG, Source_Image_SHA256=MR.sha256_of(MONO_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one monochrome axes region")
+_mono_source_panel = dict(
+    Source_Panel_ID="P_MONO", Source_Figure_ID="SF_MONO", Panel_Label="P_MONO",
+    Outcome_Label="Stroke volume", Target_Status="TARGET",
+    Panel_Disposition="AUTO_DIGITIZE",
+    Disposition_Reason="synthetic monochrome fixture", Note="")
+_mono_grids = GRIDS + (
+    [dict(Grid_ID="G_MONO", Factor_Name="ARM", Factor_Level=lv, Level_Order=i,
+          Note="") for i, lv in enumerate(("PRE", "EARLY", "LATE"))]
+    + [dict(Grid_ID="G_MONO", Factor_Name="TIMEPOINT", Factor_Level=lv,
+            Level_Order=i, Note="") for i, lv in enumerate(_gt["groups"])])
+# Stroke volume, not the heart rate every other unit in the fixture carries:
+# the fixture's shortest bar is 27, and 27 bpm is outside the plausibility
+# range for a heart rate - correctly. The gate is not the thing under test here.
+_mono_unit = unit("U_MONO", "G_MONO", "CONTINUOUS", Figure_ID="F_MONO",
+                  Panel="U_MONO", Bar_Top_Definition="OUTLINE_CENTER",
+                  Outcome_Variable="Stroke volume", Unit="ml",
+                  Axis_Calib_Y1_Value=_gt["y_ticks"][0][0],
+                  Axis_Calib_Y1_Pixel=_gt["y_ticks"][0][1],
+                  Axis_Calib_Y2_Value=_gt["y_ticks"][1][0],
+                  Axis_Calib_Y2_Pixel=_gt["y_ticks"][1][1])
+_mono_panel = panel("P_MONO", "U_MONO", "BAR_MONO", MONO_IMG, _MONO_BOX,
+                    Figure_ID="F_MONO", Config_ID="",
+                    Axis_X_Region=_MONO_XREG, Axis_Y_Region=_MONO_YREG,
+                    Axis_Y_Ticks=";".join("%g:%g" % (v, p)
+                                          for v, p in _gt["y_ticks"]))
+_mono_series = [series("P_MONO", "S_%s" % f, _MONO_ARMS[f], Bar_Fill_Pattern=f)
+                for f in _MONO_FILLS]
+_mono_positions = [
+    dict(Panel_ID="P_MONO", Position_ID=q, X_Pixel=x, Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+         Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+    for i, (q, x) in enumerate(zip(_gt["groups"], _gt["group_x"]))]
+
+
+def mono_manifests(directory, **kw):
+    """The four-panel fixture batch plus one readable monochrome bar panel."""
+    fields = dict(
+        panels=PANELS + [_mono_panel], series_rows=SERIES + _mono_series,
+        positions=POSITION_ROWS + _mono_positions,
+        units=UNITS + [_mono_unit], figures=FIGURES + [_mono_figure],
+        grids=_mono_grids, source_figures=SOURCE_FIGURES + [_mono_source_figure],
+        source_panels=SOURCE_PANELS + [_mono_source_panel],
+        source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+    fields.update(kw)
+    return write_manifests(directory, **fields)
+
+
+_mm = mono_manifests(os.path.join(ROOT, "m_monoreal"))
+_mo = os.path.join(ROOT, "o_monoreal")
+_ms = RB.run_batch(_mm, _mo, file_root=ROOT, run_date="2026-08-06")
+check("the batch runs", _ms["status"] == "RAN", "%s" % _ms)
+_mr = pd.read_csv(os.path.join(_mo, "run_manifest.csv"), dtype=object).fillna("")
+_mrow = _mr[_mr["Panel_ID"] == "P_MONO"]
+check("and the monochrome panel passes automatically",
+      len(_mrow) and _mrow.iloc[0]["Run_State"] == "AUTO_PASS",
+      "%s" % (list(_mrow["Run_State"]) + list(_mrow["Detail"]) if len(_mrow)
+              else "no row"))
+check("with all twelve declared cells read",
+      len(_mrow) and _mrow.iloc[0]["Cells_Declared"] == "12"
+      and _mrow.iloc[0]["Cells_Read"] == "12",
+      "%s" % (list(zip(_mrow["Cells_Declared"], _mrow["Cells_Read"]))
+              if len(_mrow) else "no row"))
+_mv = pd.read_csv(os.path.join(_mo, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_mv = _mv[_mv["Unit_ID"] == "U_MONO"]
+_worst = 0.0
+for _f in _MONO_FILLS:
+    for _q in _gt["groups"]:
+        _hit = _mv[_mv["Cell_Key"] == "ARM=%s;TIMEPOINT=%s" % (_MONO_ARMS[_f], _q)]
+        if not len(_hit):
+            _worst = float("inf")
+            continue
+        _worst = max(_worst, abs(float(_hit.iloc[0]["Mean"])
+                                 - _gt["series"][_f][_q]["mean"]))
+check("and every value lands on the bar the figure drew, not near it",
+      _worst < 0.6, "worst error %s units" % _worst)
+
+# REVERT: pass no `review_crop_box` from `measure_bar_mono_figures`. The crop
+# falls back to a fraction of the plot box, `crop_source` reads ESTIMATED, and
+# the picture a reviewer approves against no longer contains the printed
+# numbers the calibration was read off - which is the one error arithmetic
+# cannot catch, because a misread tick VALUE rescales every bar in the panel
+# self-consistently.
+_mmeta = json.load(open([
+    os.path.join(_mo, "geometry-review", f)
+    for f in sorted(os.listdir(os.path.join(_mo, "geometry-review")))
+    if f.startswith("panel__P_MONO") and f.endswith(".json")][0],
+    encoding="utf-8"))
+check("the panel picture is cropped to the axis the MANIFEST declared",
+      _mmeta["crop_source"] == "DECLARED", "%s" % _mmeta["crop_source"])
+# The exact rectangle, because the estimate is not far off - it is a fraction
+# of the plot box, and on THIS panel it happens to reach further left than the
+# declared y region does. "The crop is wide enough" therefore passes either
+# way; what distinguishes them is whose rectangle it is.
+_want_crop = [max(0, min(30, _MONO_BOX[0]) - 24),
+              max(0, min(_MONO_BOX[2], _MONO_BOX[2]) - 24),
+              min(Image.open(MONO_IMG).width, max(_MONO_BOX[1], _MONO_BOX[1]) + 24),
+              min(Image.open(MONO_IMG).height, max(470, _MONO_BOX[3]) + 24)]
+check("and the rectangle is the declared one, not a fraction of the plot box",
+      _mmeta["crop_box"] == _want_crop,
+      "%s, from y-region %s and x-region %s, wanted %s"
+      % (_mmeta["crop_box"], _MONO_YREG, _MONO_XREG, _want_crop))
+check("a panel with no regions declared says the crop was estimated",
+      RB._review_crop(dict(Axis_X_Region="", Axis_Y_Region=""),
+                      list(_MONO_BOX)) is None)
+# A declared region that does not parse refuses the panel. Ignored, the field a
+# person filled in is silently not the field the picture used.
+_bad_region = mono_manifests(
+    os.path.join(ROOT, "m_monobadregion"),
+    panels=PANELS + [dict(_mono_panel, Axis_Y_Region="left of the bars")])
+_bo = os.path.join(ROOT, "o_monobadregion")
+_bs = RB.run_batch(_bad_region, _bo, file_root=ROOT, run_date="2026-08-06")
+_br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"), dtype=object).fillna("")
+_brow = _br[_br["Panel_ID"] == "P_MONO"]
+check("an axis region that does not parse refuses the panel by name",
+      len(_brow) and _brow.iloc[0]["Run_State"] == "PANEL_GEOMETRY_UNRESOLVED"
+      and "Axis_Y_Region" in _brow.iloc[0]["Detail"],
+      "%s" % (list(zip(_brow["Run_State"], _brow["Detail"])) if len(_brow)
+              else "no row"))
+# REVERT: return the refusal from the panel LOOP instead of inside `run_panel`.
+# The outcome then carries Cells_Declared=0 and no missing cells, so twelve
+# unread cells are reported as "0 of 0" and nothing is queued for them.
+check("and still counts the cells it did not read",
+      len(_brow) and _brow.iloc[0]["Cells_Declared"] == "12"
+      and _brow.iloc[0]["Cells_Read"] == "0",
+      "%s" % (list(zip(_brow["Cells_Declared"], _brow["Cells_Read"]))
+              if len(_brow) else "no row"))
+_bq = pd.read_csv(os.path.join(_bo, "manual_queue.csv"), dtype=object).fillna("")
+_bq = _bq[_bq["Panel_ID"] == "P_MONO"]
+check("and queues all twelve of them for a person",
+      len(_bq) and _bq.iloc[0]["Missing_Cell_Count"] == "12",
+      "%s" % (list(_bq["Missing_Cell_Count"]) if len(_bq) else "no queue row"))
+
+# REVERT: remove three named directories in the DEMO branch instead of calling
+# `clear_outputs`. `mono_bar_geometry.csv` and `geometry-review/` are not among
+# them, so a run that refused to write a single value leaves twelve means,
+# twelve dispersions and their auto identities on disk under a demonstration
+# reviewer.
+_md = os.path.join(ROOT, "o_monodemo")
+_mds = RB.run_batch(_mm, _md, file_root=ROOT, run_date="2026-08-06",
+                    run_mode="DEMO_ONLY")
+check("a DEMO_ONLY run over a readable bar panel is refused",
+      _mds["status"] == "DEMO_OUTPUT_REFUSED" and _mds["would_accept"] > 0,
+      "%s" % _mds)
+check("and the measurements go with the values it refused to write",
+      sorted(os.listdir(_md)) == ["run_stamp.json"], "%s" % sorted(os.listdir(_md)))
+
+# REVERT: drop the GEOMETRY_REVIEW_FAILED branch from `main`. The status is
+# real - the run stops before there are any states, qc problems or queue rows -
+# and the summary print below it reads all three, so the run reaches a person
+# as a KeyError traceback instead of a sentence about the review bundle.
+_real_panel_draw2 = RB.OVERLAY.draw_panel_geometry
+
+
+def _draw_refuses(*a, **kw):
+    raise ValueError("the panel picture could not be drawn")
+
+
+_gf = os.path.join(ROOT, "o_monogeofail")
+RB.OVERLAY.draw_panel_geometry = _draw_refuses
+try:
+    _code, _crash = RB.main([_mm, _gf, "--file-root", ROOT,
+                             "--date", "2026-08-06"]), None
+except Exception as _caught:     # broad on purpose: a crash IS the failure
+    _code, _crash = None, _caught
+finally:
+    RB.OVERLAY.draw_panel_geometry = _real_panel_draw2
+check("a review bundle that cannot be written is a run status, not a traceback",
+      _code == 5, "exit %r%s" % (_code, "" if _crash is None
+                                 else ", raised %r" % (_crash,)))
+_gstamp = json.load(open(os.path.join(_gf, "run_stamp.json"), encoding="utf-8"))
+check("and the stamp says GEOMETRY_REVIEW_FAILED",
+      _gstamp.get("Status") == "GEOMETRY_REVIEW_FAILED", "%r" % _gstamp)
+check("and it is a declared status, so `verify_run` knows it",
+      "GEOMETRY_REVIEW_FAILED" in RB.RUN_STATUSES)
+check("and nothing partial is left to review or to pool",
+      sorted(os.listdir(_gf)) == ["run_stamp.json"], "%s" % sorted(os.listdir(_gf)))
+# The ValueError above is not a GeometryReviewError. Passed through, it leaves
+# `run_batch` as an unhandled exception - the writer's own validators
+# (`canonical_artifact_rows`, `verify_artifact`) raise ValueError too, so this
+# is the normal way a bundle fails, not an exotic one.
+check("the failure is named as the bundle's own, whatever raised it",
+      "ValueError" in _gstamp.get("Detail", ""), "%r" % _gstamp.get("Detail"))
+
+
+# ---------------------------------------------------------------------------
+# A bar whose FILL could not be sampled, named by a person.
+#
+# Publication 127 prints two bars fifteen pixels tall. They have a mean, they
+# have an SE, and once the outline is taken off there is no interior left to
+# classify - so the reader has a geometry with no identity, and naming them from
+# the pixels would mean "first slot, therefore OPEN": identity by position.
+#
+# The fixture reproduces exactly that, by drawing one bar of the mono panel at 3
+# units instead of 27. The scenario is then the real two-phase workflow: run,
+# read the row out of `mono_bar_geometry.csv`, write `identity_resolution.csv`
+# against that row's hash, run again.
+# ---------------------------------------------------------------------------
+print()
+print("a bar with no interior to sample, named by a person instead")
+import make_mono_bar_fixture as MF                                  # noqa: E402
+
+SHORT_IMG = os.path.join(IMAGES, "mono_short.png")
+_short_truth = os.path.join(IMAGES, "mono_short_truth.json")
+MF.draw(SHORT_IMG, _short_truth, overrides={("OPEN", "T3"): 3.0})
+_st_truth = json.load(open(_short_truth, encoding="utf-8"))
+# The legend crop a reviewer read the fill off. It is evidence, so it is a real
+# file with a real hash: `check_identity_resolution` re-hashes it, which is what
+# stops a resolution from pointing at something that changed afterwards.
+LEGEND_IMG = os.path.join(IMAGES, "legend_crop.png")
+Image.open(SHORT_IMG).crop((90, 40, 400, 120)).save(LEGEND_IMG)
+_short_figure = dict(_mono_figure, Figure_ID="F_SHORT", Figure_Number="FIG6",
+                     Source_Image=SHORT_IMG,
+                     Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(SHORT_IMG))
+_short_source_figure = dict(_mono_source_figure, Source_Figure_ID="SF_SHORT",
+                            Figure_Number="FIG6", Source_Image=SHORT_IMG,
+                            Source_Image_SHA256=MR.sha256_of(SHORT_IMG))
+_short_source_panel = dict(_mono_source_panel, Source_Panel_ID="P_SHORT",
+                           Source_Figure_ID="SF_SHORT", Panel_Label="P_SHORT")
+# Total peripheral resistance, whose plausible range starts at 0.3: the short
+# bar is a real 3-unit reading and a 3-unit STROKE VOLUME is implausible, so
+# reusing the previous unit would have made this scenario about the plausibility
+# table instead of about the identity.
+_short_unit = dict(_mono_unit, Unit_ID="U_SHORT", Figure_ID="F_SHORT",
+                   Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+                   Panel="U_SHORT",
+                   Outcome_Variable="Total peripheral resistance",
+                   Unit="mmHg/L/min")
+_short_panel = dict(_mono_panel, Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+                    Figure_ID="F_SHORT", Identity_Domain_ID="F_SHORT",
+                    Unit_ID="U_SHORT",
+                    Panel_Label="P_SHORT", Image_Path=SHORT_IMG)
+_short_series = [dict(r, Panel_ID="P_SHORT") for r in _mono_series]
+_short_positions = [dict(r, Panel_ID="P_SHORT") for r in _mono_positions]
+
+
+def short_manifests(directory, resolutions=None, **kw):
+    """Both monochrome panels in one batch, only one of them resolvable.
+
+    P_MONO's fills are all measurable and P_SHORT's are not, so this batch is
+    what says the identity channel is per PANEL: one review mode asks three
+    questions and the other four, from the same run.
+    """
+    fields = dict(
+        panels=PANELS + [_mono_panel, _short_panel],
+        series_rows=SERIES + _mono_series + _short_series,
+        positions=POSITION_ROWS + _mono_positions + _short_positions,
+        units=UNITS + [_mono_unit, _short_unit],
+        figures=FIGURES + [_mono_figure, _short_figure],
+        grids=_mono_grids,
+        source_figures=SOURCE_FIGURES + [_mono_source_figure,
+                                         _short_source_figure],
+        source_panels=SOURCE_PANELS + [_mono_source_panel, _short_source_panel],
+        source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=6)])
+    fields.update(kw)
+    out = write_manifests(directory, **fields)
+    if resolutions is not None:
+        with open(os.path.join(out, "identity_resolution.csv"), "w",
+                  newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=BM.identity_resolution_columns())
+            w.writeheader()
+            for row in resolutions:
+                w.writerow({c: row.get(c, "")
+                            for c in BM.identity_resolution_columns()})
+    return out
+
+
+# REVERT: `identity_resolution.csv` in MANIFEST_FILES rather than
+# OPTIONAL_MANIFEST_FILES. Every batch in this file, and every manifest
+# directory in the field, then fails to load - and the fix that suggests itself
+# is an empty file in each of them, which is how a required manifest becomes one
+# nobody reads.
+_s1 = short_manifests(os.path.join(ROOT, "m_short1"))
+_o1 = os.path.join(ROOT, "o_short1")
+_su1 = RB.run_batch(_s1, _o1, file_root=ROOT, run_date="2026-08-06")
+check("a batch with no identity_resolution.csv runs",
+      _su1["status"] == "RAN", "%s" % _su1)
+_r1 = pd.read_csv(os.path.join(_o1, "run_manifest.csv"), dtype=object).fillna("")
+_row1 = _r1[_r1["Panel_ID"] == "P_SHORT"].iloc[0]
+# REVERT: skip on `record["error"]` in `_geometry_marks` instead of
+# `measurement_usable`. BAR_TOO_SMALL_TO_SAMPLE is a complaint about the FILL -
+# the mean comes from the top edge and the dispersion from the cap, measured as
+# on any other bar - so filing it with the refusals drops a readable value for a
+# reason that was never about the value. Eleven of twelve becomes eleven either
+# way; what changes is that the twelfth can never be recovered.
+check("eleven of the twelve cells read; the short bar has no series",
+      (_row1["Cells_Declared"], _row1["Cells_Read"]) == ("12", "11"),
+      "%s" % dict(_row1))
+_geo1 = pd.read_csv(os.path.join(_o1, "mono_bar_geometry.csv"),
+                    dtype=object).fillna("")
+_short_row = _geo1[(_geo1["Panel_ID"] == "P_SHORT")
+                   & (_geo1["Group_ID"] == "T3")
+                   & (_geo1["Geometry_Slot"] == "2")]
+check("the geometry file records the bar, its number and why it has no fill",
+      len(_short_row) == 1
+      and _short_row.iloc[0]["Geometry_Error_Code"] == "BAR_TOO_SMALL_TO_SAMPLE"
+      and float(_short_row.iloc[0]["Mean"]) > 0
+      and _short_row.iloc[0]["Auto_Fill_Pattern"] == ""
+      and _short_row.iloc[0]["Auto_Identity_Status"] == "UNRESOLVED_NO_FILL",
+      "%s" % (_short_row.to_dict("records") or "no row"))
+_short_hash = _short_row.iloc[0]["Geometry_Row_SHA256"]
+
+
+def _ghash(group, slot):
+    """The hash a person copying a row out of mono_bar_geometry.csv would use."""
+    hit = _geo1[(_geo1["Panel_ID"] == "P_SHORT")
+                & (_geo1["Group_ID"] == group)
+                & (_geo1["Geometry_Slot"] == str(slot))]
+    return hit.iloc[0]["Geometry_Row_SHA256"] if len(hit) else ""
+_q1 = pd.read_csv(os.path.join(_o1, "manual_queue_cells.csv"),
+                  dtype=object).fillna("")
+check("and the cell it could not name is queued by name",
+      any(r["Panel_ID"] == "P_SHORT" and "LATE" in r["Cell_Key"]
+          for _, r in _q1.iterrows()),
+      "%s" % [r["Cell_Key"] for _, r in _q1.iterrows()
+              if r["Panel_ID"] == "P_SHORT"])
+
+
+def _resolution(**kw):
+    base = dict(Resolution_ID="IR1", Panel_ID="P_SHORT", Group_ID="T3",
+                Geometry_Slot="2", Geometry_Row_SHA256=_short_hash,
+                Resolved_Series_ID="S_OPEN", Resolved_Fill_Pattern="OPEN",
+                Evidence_Type="LEGEND_DECLARED",
+                Evidence_Artifact=os.path.relpath(LEGEND_IMG, ROOT),
+                Evidence_Artifact_SHA256=MR.sha256_of(LEGEND_IMG),
+                Reviewer_ID="RV_T1", Reviewed_At="2026-08-07",
+                Note="the legend labels the open bar Late post-flight")
+    base.update(kw)
+    return base
+
+
+_s2 = short_manifests(os.path.join(ROOT, "m_short2"), resolutions=[_resolution()])
+_o2 = os.path.join(ROOT, "o_short2")
+_su2 = RB.run_batch(_s2, _o2, file_root=ROOT, run_date="2026-08-06")
+check("with the resolution in place the batch still runs",
+      _su2["status"] == "RAN", "%s" % _su2)
+_r2 = pd.read_csv(os.path.join(_o2, "run_manifest.csv"), dtype=object).fillna("")
+_row2 = _r2[_r2["Panel_ID"] == "P_SHORT"].iloc[0]
+check("and all twelve cells are read",
+      (_row2["Cells_Declared"], _row2["Cells_Read"]) == ("12", "12"),
+      "%s: %s" % (dict(_row2)["Cells_Read"], _row2["Detail"]))
+_v2 = pd.read_csv(os.path.join(_o2, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_v2 = _v2[_v2["Unit_ID"] == "U_SHORT"]
+_named = _v2[_v2["Cell_Key"] == "ARM=LATE;TIMEPOINT=T3"]
+# REVERT: leave IDENTITY_CARRIED out of `to_value_records`, or the six columns
+# out of `fig_values_columns`. The value is still produced and still correct;
+# what is gone is any way to ask the pooled file which row it was measured from
+# and who decided it was this series.
+check("the value a person named says so, and points at the row they signed",
+      len(_named) == 1
+      and _named.iloc[0]["Identity_Source"] == "HUMAN"
+      and _named.iloc[0]["Identity_Evidence_Type"] == "LEGEND_DECLARED"
+      and _named.iloc[0]["Resolution_ID"] == "IR1"
+      and _named.iloc[0]["Resolved_Fill_Pattern"] == "OPEN",
+      "%s" % (_named.to_dict("records") or "no row"))
+check("and it is bound to the anonymous measurement it came from",
+      len(_named) and _named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
+      "%r vs %r" % (_named.iloc[0]["Geometry_Row_SHA256"] if len(_named) else None,
+                    _short_hash))
+# REVERT: write the person's answer into `Auto_Fill_Pattern` as well - the
+# obvious way to make the column "complete". It is the audit trail saying the
+# machine measured something a person read off a legend, and the gate then
+# cannot tell the two apart.
+check("and the reader is not credited with a fill it never measured",
+      len(_named) and _named.iloc[0]["Auto_Fill_Pattern"] == "",
+      "%r" % (_named.iloc[0]["Auto_Fill_Pattern"] if len(_named) else None))
+_auto = _v2[_v2["Cell_Key"] == "ARM=LATE;TIMEPOINT=T0"]
+check("a cell the FIGURE named still says AUTO, with the measured fill",
+      len(_auto) == 1 and _auto.iloc[0]["Identity_Source"] == "AUTO"
+      and _auto.iloc[0]["Identity_Evidence_Type"] == "FILL_MEASURED"
+      and _auto.iloc[0]["Auto_Fill_Pattern"] == "OPEN"
+      and not _auto.iloc[0]["Resolution_ID"],
+      "%s" % (_auto.to_dict("records") or "no row"))
+# The geometry artifact is what the FIGURE said and must not learn the answer.
+_geo2 = pd.read_csv(os.path.join(_o2, "mono_bar_geometry.csv"),
+                    dtype=object).fillna("")
+_grow2 = _geo2[(_geo2["Panel_ID"] == "P_SHORT") & (_geo2["Group_ID"] == "T3")
+               & (_geo2["Geometry_Slot"] == "2")].iloc[0]
+check("the geometry file is unchanged by the resolution, hash and all",
+      _grow2["Auto_Fill_Pattern"] == ""
+      and _grow2["Auto_Identity_Status"] == "UNRESOLVED_NO_FILL"
+      and _grow2["Geometry_Row_SHA256"] == _short_hash,
+      "%s" % dict(_grow2))
+
+# REVERT: keep one review mode for every BAR_MONO panel. The panel with a
+# human-named cell is then approved without anybody being asked about the one
+# claim in it that has no measurement behind it.
+_rq2 = pd.read_csv(os.path.join(_o2, "review_queue.csv"), dtype=object).fillna("")
+_qrow2 = _rq2[_rq2["Panel_ID"] == "P_SHORT"]
+check("the panel is queued under the mode that asks about the naming",
+      len(_qrow2) and _qrow2.iloc[0]["Review_Mode"] == "BAR_MONO_GEOMETRY_RESOLVED",
+      "%s" % (list(_qrow2["Review_Mode"]) if len(_qrow2) else "not queued"))
+check("and that mode requires the resolution rows as an artifact",
+      "IDENTITY_RESOLUTION" in RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"]
+      and "Identity_Checked"
+      in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"],
+      "%s / %s" % (RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"],
+                   RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]))
+_art2 = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_ident = _art2[(_art2["Panel_ID"] == "P_SHORT")
+               & (_art2["Artifact_Type"] == "IDENTITY_RESOLUTION")]
+check("which the run wrote, hashed, into the ledger",
+      len(_ident) == 1 and len(_ident.iloc[0]["SHA256"]) == 64
+      and os.path.exists(os.path.join(_o2, _ident.iloc[0]["Artifact_Path"])),
+      "%s" % (_ident.to_dict("records") or "no ledger row"))
+check("and the file a reviewer opens is the row that was signed",
+      len(_ident) and [r["Resolution_ID"] for r in csv.DictReader(
+          open(os.path.join(_o2, _ident.iloc[0]["Artifact_Path"]),
+               encoding="utf-8"))] == ["IR1"],
+      "%s" % (_ident.iloc[0]["Artifact_Path"] if len(_ident) else ""))
+check("a panel with nothing resolved keeps the plain geometry mode",
+      set(_rq2[_rq2["Panel_ID"] == "P_MONO"]["Review_Mode"]) <= {"BAR_MONO_GEOMETRY"},
+      "%s" % sorted(set(_rq2["Review_Mode"])))
+
+# The three things only the measurement can refuse, each of them the whole panel.
+for _label, _kw, _code in (
+        ("a row the measurement does not have",
+         dict(Group_ID="T9"), "IDENTITY_RESOLUTION_NO_SUCH_ROW"),
+        # REVERT: apply a resolution over `resolved_fill_pattern`. This file
+        # then becomes an override channel: a person can re-label any bar the
+        # reader read, and the geometry file's Auto_Fill_Pattern no longer means
+        # anything downstream.
+        ("a bar the figure named itself",
+         dict(Group_ID="T0", Geometry_Row_SHA256=_ghash("T0", 2)),
+         "IDENTITY_RESOLUTION_OVERRIDES_MEASUREMENT"),
+        # REVERT: join on (Panel_ID, Group_ID, Geometry_Slot) alone. The triple
+        # is a POSITION: re-run after a threshold change or a re-scan and the
+        # resolution silently names whatever bar now sits in slot 2, which is
+        # identity by position one level up.
+        ("a resolution written against a different measurement",
+         dict(Geometry_Row_SHA256="0" * 64), "IDENTITY_RESOLUTION_STALE")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_short_%s" % _code.lower()),
+        resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_short_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    check("%s refuses the panel, not just the cell" % _label,
+          _bs["status"] == "RAN", "%s" % _bs)
+    _br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"),
+                      dtype=object).fillna("")
+    _brow = _br[_br["Panel_ID"] == "P_SHORT"]
+    check("  and says %s" % _code,
+          len(_brow) and _brow.iloc[0]["Run_State"] == "SERIES_IDENTITY_UNRESOLVED"
+          and _code in _brow.iloc[0]["Detail"], "%s" % (
+              list(zip(_brow["Run_State"], _brow["Detail"])) if len(_brow)
+              else "no row"))
+    _bv = pd.read_csv(os.path.join(_bo, "figure_values_raw.csv"),
+                      dtype=object).fillna("")
+    check("  and contributes no values at all",
+          not len(_bv[_bv["Unit_ID"] == "U_SHORT"]),
+          "%d rows" % len(_bv[_bv["Unit_ID"] == "U_SHORT"]))
+
+# Everything that can be refused before a raster is opened. Each of these is a
+# manifest problem, which means the batch does not run at all: a resolution is
+# an INPUT, and an input that cannot be trusted is not a panel to queue.
+for _label, _kw, _code in (
+        ("FILL_MEASURED typed into the human channel",
+         dict(Evidence_Type="FILL_MEASURED"), "IDENTITY_EVIDENCE_NOT_HUMAN"),
+        ("an evidence type nobody declared",
+         dict(Evidence_Type="I_JUST_KNOW"), "BAD_IDENTITY_EVIDENCE_TYPE"),
+        ("a series this panel does not declare",
+         dict(Resolved_Series_ID="S_MISSING"),
+         "IDENTITY_RESOLUTION_UNKNOWN_SERIES"),
+        ("a fill that contradicts the series manifest",
+         dict(Resolved_Fill_Pattern="SOLID"),
+         "IDENTITY_RESOLUTION_FILL_CONTRADICTS_SERIES"),
+        ("evidence that is not on disk",
+         dict(Evidence_Artifact="no_such_legend.png"),
+         "IDENTITY_EVIDENCE_ARTIFACT_MISSING"),
+        ("evidence whose hash moved since it was signed",
+         dict(Evidence_Artifact_SHA256="0" * 64),
+         "IDENTITY_EVIDENCE_ARTIFACT_HASH_MISMATCH"),
+        ("a reviewer's own reading with nothing written down",
+         dict(Evidence_Type="REVIEWER_INSPECTION", Note="",
+              Evidence_Artifact="", Evidence_Artifact_SHA256=""),
+         "IDENTITY_EVIDENCE_UNEXPLAINED"),
+        ("a reviewer who is not in the registry",
+         dict(Reviewer_ID="RV_NOBODY"), "REVIEWER_NOT_REGISTERED"),
+        ("a date that is not a date",
+         dict(Reviewed_At="soon"), "BAD_REVIEWED_AT"),
+        ("a resolution against a panel that is not BAR_MONO",
+         dict(Panel_ID="P_SCAT", Resolved_Series_ID="S_BLUE",
+              Resolved_Fill_Pattern=""),
+         "IDENTITY_RESOLUTION_WRONG_MARK_TYPE"),
+        # A manifest names evidence inside the corpus. An absolute path would
+        # let it point at any file on the machine that happens to hash right -
+        # the same escape the source rasters are confined against.
+        ("evidence outside the corpus",
+         dict(Evidence_Artifact=os.path.join(tempfile.gettempdir(),
+                                             "outside_the_root.png"),
+              Evidence_Artifact_SHA256="0" * 64),
+         "IDENTITY_EVIDENCE_ARTIFACT_OUTSIDE_ROOT")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_ir_%s" % _code.lower()),
+        resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_ir_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                             dtype=object).fillna("")["check"]) \
+        if _bs["status"] == "MANIFEST_REJECTED" else set()
+    check("%s is a manifest problem, before any raster is opened" % _label,
+          _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+          "%s %s" % (_bs["status"], sorted(_codes)))
+
+# A resolution signed by something that is not a person. `FILL_MEASURED` is what
+# a program's answer is called and it lives in the geometry file; a registry row
+# that is not Reviewer_Record_Type=HUMAN signing this one is the audit trail
+# saying a person did what a program did.
+_demo_reg = REVIEWERS + [dict(
+    Reviewer_ID="RV_BOT", Reviewer_Name="Digitizer",
+    Reviewer_Record_Type="DEMO_IDENTITY", Contact_Type="EMAIL",
+    Reviewer_Contact="bot@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="DEMO_EXAMPLE",
+    Note="not a person")]
+_bad = short_manifests(os.path.join(ROOT, "m_ir_nothuman"),
+                       resolutions=[_resolution(Reviewer_ID="RV_BOT")],
+                       reviewers=_demo_reg)
+_bo = os.path.join(ROOT, "o_ir_nothuman")
+_bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+_codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                         dtype=object).fillna("")["check"]) \
+    if _bs["status"] == "MANIFEST_REJECTED" else set()
+check("a resolution signed by a non-person is refused",
+      _bs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_RESOLUTION_NOT_HUMAN" in _codes,
+      "%s %s" % (_bs["status"], sorted(_codes)))
+
+# Two rows for one bar, and two slots of one group named as the same series.
+for _label, _rows, _code in (
+        ("the same bar resolved twice",
+         [_resolution(), _resolution(Resolution_ID="IR2")],
+         "IDENTITY_RESOLUTION_DUPLICATE"),
+        ("the same Resolution_ID used twice",
+         [_resolution(), _resolution(Group_ID="T2",
+                                     Geometry_Row_SHA256=_ghash("T2", 2))],
+         "DUPLICATE_RESOLUTION_ID"),
+        ("one series named twice in one group",
+         [_resolution(), _resolution(Resolution_ID="IR2", Geometry_Slot="1",
+                                     Geometry_Row_SHA256=_ghash("T3", 1))],
+         "IDENTITY_RESOLUTION_SERIES_TWICE_IN_GROUP")):
+    _bad = short_manifests(
+        os.path.join(ROOT, "m_irdup_%s" % _code.lower()), resolutions=_rows)
+    _bo = os.path.join(ROOT, "o_irdup_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                             dtype=object).fillna("")["check"]) \
+        if _bs["status"] == "MANIFEST_REJECTED" else set()
+    check("%s is refused" % _label,
+          _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+          "%s %s" % (_bs["status"], sorted(_codes)))
+
+# And an approval of that panel has to say the naming was checked. Driven
+# through `approved_panels` with the run's OWN queue and ledger, because the
+# requirement is per panel: P_MONO in the same batch is asked three questions
+# and P_SHORT four.
+#
+# REVERT: leave `Identity_Checked` out of REVIEW_CONFIRMATIONS for the resolved
+# mode. The approval below goes through with the identity column blank, and the
+# one claim in the panel with no measurement behind it is approved by silence.
+_fq2 = pd.read_csv(os.path.join(_o2, "review_queue.csv"), dtype=object).fillna("")
+_fa2 = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                   dtype=object).fillna("")
+_types2 = {}
+for _, _row_ in _fa2.iterrows():
+    _types2.setdefault(_row_["Panel_ID"], set()).add(_row_["Artifact_Type"])
+_reviewers2 = pd.read_csv(os.path.join(_s2, "reviewer_registry.csv"),
+                          dtype=object).fillna("")
+
+
+def _approve(panel, **extra):
+    """One filled review row for `panel`, against this run's own subject hash."""
+    hit = _fq2[_fq2["Panel_ID"] == panel]
+    base = dict(Review_ID="R_%s" % panel, Panel_ID=panel,
+                Review_Subject_SHA256=(hit.iloc[0]["Review_Subject_SHA256"]
+                                       if len(hit) else ""),
+                Reviewer_ID="RV_T1", Decision="APPROVED",
+                Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+                Calibration_Checked="CONFIRMED", Identity_Checked="",
+                Reviewed_At="2026-08-07T10:00:00Z", Note="")
+    base.update(extra)
+    return pd.DataFrame([base])
+
+
+for _label, _extra, _want in (
+        ("with the naming left blank", {}, False),
+        ("with the naming confirmed", dict(Identity_Checked="CONFIRMED"), True)):
+    _probs = []
+    _got = FIN.approved_panels(
+        _approve("P_SHORT", **_extra), _fq2, _reviewers2,
+        lambda w, c, d: _probs.append(c),
+        today=datetime.date(2026, 8, 8), artifact_types=_types2)
+    check("a resolved panel approved %s -> %s"
+          % (_label, "accepted" if _want else "refused"),
+          bool(_got) == _want
+          and (_want or "REVIEW_CONFIRMATION_MISSING" in _probs), "%s" % _probs)
+_probs = []
+FIN.approved_panels(_approve("P_MONO"), _fq2, _reviewers2,
+                    lambda w, c, d: _probs.append(c),
+                    today=datetime.date(2026, 8, 8), artifact_types=_types2)
+check("and a panel with nothing resolved is not asked about a naming",
+      not _probs, "%s" % _probs)
+# REVERT: drop IDENTITY_RESOLUTION from the resolved mode's artifact tuple. The
+# approval then stands with nothing in the ledger for the rows that were signed,
+# so "the naming was checked" points at no file.
+_probs = []
+_thin = {p: {t for t in ts if t != "IDENTITY_RESOLUTION"}
+         for p, ts in _types2.items()}
+FIN.approved_panels(_approve("P_SHORT", Identity_Checked="CONFIRMED"), _fq2,
+                    _reviewers2, lambda w, c, d: _probs.append(c),
+                    today=datetime.date(2026, 8, 8), artifact_types=_thin)
+check("and the resolution rows have to be in the ledger to be approved against",
+      "REVIEW_ARTIFACT_MISSING" in _probs, "%s" % _probs)
+check("every review mode declares the confirmations it asks for",
+      set(RB.REVIEW_CONFIRMATIONS) == set(RB.REVIEW_MODES),
+      "%s" % sorted(set(RB.REVIEW_CONFIRMATIONS) ^ set(RB.REVIEW_MODES)))
+check("and the template ships every column any mode can ask for",
+      all(c in FIN.value_review_columns()
+          for cols in RB.REVIEW_CONFIRMATIONS.values() for c in cols)
+      and "Identity_Checked" in open(
+          os.path.join(_paths.TEMPLATES, "value_review_TEMPLATE.csv"),
+          encoding="utf-8").readline(),
+      "%s" % FIN.value_review_columns())
+
+# A BAR_MONO value must CARRY its provenance, not merely be consistent about it.
+#
+# The gate's identity block only fires when one of the columns is filled, which
+# is right for a file that cannot know what drew the panel - a line panel's rows
+# say nothing about fills - and wrong as the only defence. With the six columns
+# gone the mean and the SE are still fine, the gate says nothing, and the value
+# is reviewable and poolable with no way to ask which bar it came from.
+#
+# REVERT: delete the `identity_provenance_problems` call from `run_batch`, or
+# the function. Every scenario above still passes, because the runner fills the
+# columns today; what is gone is the check that it still does.
+print()
+print("a monochrome value has to carry where it came from, not just agree with itself")
+# What a cell of this panel is made of: the group the bar was measured in
+# decides the position level, the identity decides the series level.
+_SHORT_CELL_MAP = {
+    "position_factor": "TIMEPOINT",
+    "position_levels": {q: q for q in ("T0", "T1", "T2", "T3")},
+    "series_factor": "ARM",
+    "series_levels": {"S_SOLID": "PRE", "S_HATCHED": "EARLY",
+                      "S_OPEN": "LATE"},
+    "series_by_fill": {"SOLID": "S_SOLID", "HATCHED": "S_HATCHED",
+                       "OPEN": "S_OPEN"},
+}
+_MONO_PANELS = {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                            "Source_Panel_ID": "P_SHORT",
+                            "Cell_Map": _SHORT_CELL_MAP},
+                # The same unit, a different mark type. This package lets several
+                # panels build one unit, so the unit check cannot catch a value
+                # moved between them.
+                "P_TWIN": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_SHORT",
+                           "Source_Panel_ID": "P_TWIN",
+                           "Cell_Map": _SHORT_CELL_MAP},
+                "P_LINE": {"Mark_Type": "LINE_COLOR", "Unit_ID": "U_LINE",
+                           "Source_Panel_ID": "P_LINE",
+                           "Cell_Map": _SHORT_CELL_MAP}}
+_MONO_RESOLUTIONS = {
+    ("P_SHORT", "IR1"): dict(Resolution_ID="IR1", Panel_ID="P_SHORT",
+                             Group_ID="T3", Geometry_Slot="2",
+                             Geometry_Row_SHA256="e" * 64,
+                             Resolved_Series_ID="S_OPEN",
+                             Resolved_Fill_Pattern="OPEN",
+                             Evidence_Type="LEGEND_DECLARED"),
+    ("P_SHORT", "IR2"): dict(Resolution_ID="IR2", Panel_ID="P_SHORT",
+                             Group_ID="T2", Geometry_Slot="2",
+                             Geometry_Row_SHA256="f" * 64,
+                             Resolved_Series_ID="S_OPEN",
+                             Resolved_Fill_Pattern="OPEN",
+                             Evidence_Type="LEGEND_DECLARED"),
+}
+# One measured bar, in the shape `mono_bar_geometry.csv` holds it, so the value
+# below has a row to be the value OF.
+_MONO_GEO = RB.geometry_index([
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="a" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="OPEN", Group_ID="T3",
+         Geometry_Slot="2"),
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="b" * 64, Mean="58.056",
+         Dispersion_Value="5.833", Auto_Fill_Pattern="SOLID", Group_ID="T3",
+         Geometry_Slot="0"),
+    dict(Panel_ID="P_MONO", Geometry_Row_SHA256="c" * 64, Mean="30.0",
+         Dispersion_Value="3.889", Auto_Fill_Pattern="OPEN", Group_ID="T0",
+         Geometry_Slot="2"),
+    # The same numbers as the first row and NO measured fill: the short bar,
+    # which is the only kind of row a human identity may name.
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="e" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="", Group_ID="T3",
+         Geometry_Slot="2"),
+    dict(Panel_ID="P_SHORT", Geometry_Row_SHA256="f" * 64, Mean="3.056",
+         Dispersion_Value="3.611", Auto_Fill_Pattern="", Group_ID="T2",
+         Geometry_Slot="2")])
+
+
+def _human(**kw):
+    """A value named by a person, citing the row whose fill was not measured."""
+    base = dict(Geometry_Row_SHA256="e" * 64, Auto_Fill_Pattern="",
+                Identity_Source="HUMAN",
+                Identity_Evidence_Type="LEGEND_DECLARED", Resolution_ID="IR1")
+    base.update(kw)
+    return _prov(**base)
+
+
+def _prov(_rows=None, **kw):
+    base = dict(Run_Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+                Unit_ID="U_SHORT",
+                Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
+                Dispersion_Value="3.611",
+                Geometry_Row_SHA256="a" * 64, Auto_Fill_Pattern="OPEN",
+                Resolved_Fill_Pattern="OPEN", Identity_Source="AUTO",
+                Identity_Evidence_Type="FILL_MEASURED", Resolution_ID="")
+    base.update(kw)
+    return [c for _w, c, _d in RB.identity_provenance_problems(
+        _rows or [base], _MONO_PANELS, geometry=_MONO_GEO,
+        resolutions=_MONO_RESOLUTIONS)]
+
+
+check("a complete automatic provenance passes", _prov() == [], "%s" % _prov())
+_blanked = {c: "" for c in ("Geometry_Row_SHA256", "Auto_Fill_Pattern",
+                            "Resolved_Fill_Pattern", "Identity_Source",
+                            "Identity_Evidence_Type", "Resolution_ID")}
+check("all six columns gone is IDENTITY_PROVENANCE_MISSING",
+      _prov(**_blanked) == ["IDENTITY_PROVENANCE_MISSING"], "%s" % _prov(**_blanked))
+check("and so is the row hash alone going missing",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Geometry_Row_SHA256=""),
+      "%s" % _prov(Geometry_Row_SHA256=""))
+check("a row hash that is not a hash is refused too",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Geometry_Row_SHA256="see the csv"),
+      "%s" % _prov(Geometry_Row_SHA256="see the csv"))
+check("a fill this reader does not distinguish is refused",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Resolved_Fill_Pattern="NONE",
+                                             Auto_Fill_Pattern="NONE"),
+      "%s" % _prov(Resolved_Fill_Pattern="NONE", Auto_Fill_Pattern="NONE"))
+check("an automatic identity whose two fills disagree is refused",
+      _prov(Auto_Fill_Pattern="SOLID") == ["IDENTITY_FILL_MISMATCH"],
+      "%s" % _prov(Auto_Fill_Pattern="SOLID"))
+check("AUTO carrying a resolution, or a human's evidence, is refused",
+      _prov(Resolution_ID="IR1") == ["IDENTITY_SOURCE_INCONSISTENT"]
+      and _prov(Identity_Evidence_Type="LEGEND_DECLARED")
+      == ["IDENTITY_SOURCE_INCONSISTENT"],
+      "%s %s" % (_prov(Resolution_ID="IR1"),
+                 _prov(Identity_Evidence_Type="LEGEND_DECLARED")))
+check("a complete human provenance passes", _human() == [], "%s" % _human())
+check("a human identity with no row signed is refused",
+      # And a blank Resolution_ID is not a resolution of this panel either, so
+      # the foreign key says so too.
+      set(_human(Resolution_ID="")) == {"IDENTITY_RESOLUTION_UNIDENTIFIED",
+                                        "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"},
+      "%s" % _human(Resolution_ID=""))
+check("and a measured fill beside a human identity is refused",
+      _human(Auto_Fill_Pattern="OPEN") == ["IDENTITY_OVERRODE_MEASUREMENT"],
+      "%s" % _human(Auto_Fill_Pattern="OPEN"))
+check("a source nobody declared is refused",
+      "IDENTITY_PROVENANCE_MISSING" in _prov(Identity_Source="MACHINE"),
+      "%s" % _prov(Identity_Source="MACHINE"))
+# And the same six blanks on a panel nothing drew fills for. This is the reason
+# the requirement cannot live in the gate: it is not a property of a values row,
+# it is a property of a values row FROM A MONOCHROME BAR PANEL.
+check("a colour panel's value says nothing about fills, quite legitimately",
+      not _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
+                            Source_Panel_ID="P_LINE", Mean="55")]),
+      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_LINE", Unit_ID="U_LINE",
+                               Source_Panel_ID="P_LINE", Mean="55")]))
+
+# The PANEL BINDING, checked for every value and not only the monochrome ones,
+# because it is what decides which rules apply. A row stamped with a colour
+# panel's ID skips the identity rules entirely and is then selected by the
+# finalizer under THAT panel's approval - reviewed as somebody else's panel and
+# pooled.
+#
+# REVERT: branch straight to `Mark_Type == BAR_MONO` and skip everything else.
+# The three scenarios below are the only place it shows; every other scenario in
+# this file passes, because the runner stamps the right panel today.
+check("a value that names no panel at all is refused",
+      _prov(Run_Panel_ID="") == ["IDENTITY_PANEL_BINDING_MISSING"],
+      "%s" % _prov(Run_Panel_ID=""))
+check("a value naming a panel nobody declared is refused",
+      _prov(Run_Panel_ID="P_GHOST") == ["IDENTITY_PANEL_BINDING_UNKNOWN"],
+      "%s" % _prov(Run_Panel_ID="P_GHOST"))
+check("a monochrome value re-stamped onto a colour panel is refused",
+      _prov(Run_Panel_ID="P_LINE")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Run_Panel_ID="P_LINE"))
+check("and so is a panel whose unit is not this value's unit",
+      _prov(Unit_ID="U_MONO") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Unit_ID="U_MONO"))
+# REVERT: `if want_unit and got_unit and ...`. A DELETED Unit_ID then passes,
+# and the finalizer selects values by Run_Panel_ID alone - so a unit-less row
+# under an approved panel reaches the accepted file. The same shape as the
+# Source_Panel_ID case below it.
+check("a deleted Unit_ID is refused too",
+      _prov(Unit_ID="") == ["IDENTITY_PANEL_BINDING_CONTRADICTS_UNIT"],
+      "%s" % _prov(Unit_ID=""))
+_unbound = {"P_SHORT": {"Mark_Type": "BAR_MONO"}}
+check("and a panel that declares no source panel cannot bind anything either",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_PANEL_DECLARATION_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+check("and a panel that declares no unit cannot bind anything",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          _unbound, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_PANEL_DECLARATION_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(Run_Panel_ID="P_SHORT", Unit_ID="U_SHORT", Mean="3.056")],
+          _unbound, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+
+# `Geometry_Row_SHA256` as a FOREIGN KEY, not a format. Sixty-four hex
+# characters establish that the value carries something hash-shaped; a
+# fabricated digest and another bar's real one pass a format check exactly as
+# well. What the column is for is "this mean came out of that measurement", and
+# only a join can say so.
+#
+# REVERT: drop the `geometry` argument, or the block that uses it. Every
+# scenario above still passes and the five below are the whole difference.
+check("a hash that names no row of this panel is refused",
+      _prov(Geometry_Row_SHA256="d" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % _prov(Geometry_Row_SHA256="d" * 64))
+check("and a real hash belonging to another panel is refused",
+      _prov(Geometry_Row_SHA256="c" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % _prov(Geometry_Row_SHA256="c" * 64))
+check("another bar's real hash is caught by the numbers it names",
+      _prov(Geometry_Row_SHA256="b" * 64)
+      == ["IDENTITY_GEOMETRY_ROW_MISMATCH"] * 3,
+      "%s" % _prov(Geometry_Row_SHA256="b" * 64))
+check("a mean edited away from the row it cites is refused",
+      _prov(Mean="9.99") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _prov(Mean="9.99"))
+check("and so is a dispersion that is not the one measured",
+      _prov(Dispersion_Value="1.0") == ["IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _prov(Dispersion_Value="1.0"))
+_twice = dict(Run_Panel_ID="P_SHORT", Source_Panel_ID="P_SHORT",
+              Unit_ID="U_SHORT",
+              Cell_Key="ARM=LATE;TIMEPOINT=T3", Mean="3.056",
+              Dispersion_Value="3.611", Geometry_Row_SHA256="a" * 64,
+              Auto_Fill_Pattern="OPEN", Resolved_Fill_Pattern="OPEN",
+              Identity_Source="AUTO", Identity_Evidence_Type="FILL_MEASURED",
+              Resolution_ID="")
+check("two values claiming one bar is refused",
+      _prov(_rows=[_twice, dict(_twice)]) == ["IDENTITY_GEOMETRY_ROW_REUSED"],
+      "%s" % _prov(_rows=[_twice, dict(_twice)]))
+# The blank `Auto_Fill_Pattern` says the reader measured no fill for this bar.
+# The MEASUREMENT is what decides whether that is true, and it says the fill was
+# read - so this is a bar that did not need naming by hand, caught even though
+# every column agrees with every other column.
+check("a human identity on a bar the measurement DID read is refused",
+      "IDENTITY_OVERRODE_MEASUREMENT" in _human(Geometry_Row_SHA256="a" * 64),
+      "%s" % _human(Geometry_Row_SHA256="a" * 64))
+# A value moved to another panel OF THE SAME UNIT. Several panels may build one
+# unit - the package says so in as many words - so the unit check cannot see this
+# one, and the panel it now names is a line panel, which skips every identity
+# rule. What gives it away is the provenance columns themselves: only a
+# monochrome bar has them.
+#
+# REVERT: `continue` on a non-BAR_MONO panel without looking at the row. The
+# scenario below is the only place it shows, because the fixture batch's colour
+# panels have their own units.
+check("a monochrome value moved to a line panel of the SAME unit is refused",
+      _prov(Run_Panel_ID="P_TWIN", Source_Panel_ID="P_TWIN")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_MARK_TYPE"],
+      "%s" % _prov(Run_Panel_ID="P_TWIN", Source_Panel_ID="P_TWIN"))
+check("and a line panel's own value is still none of its business",
+      not _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
+                            Source_Panel_ID="P_TWIN", Mean="55")]),
+      "%s" % _prov(_rows=[dict(Run_Panel_ID="P_TWIN", Unit_ID="U_SHORT",
+                               Source_Panel_ID="P_TWIN", Mean="55")]))
+check("a value whose Source_Panel_ID is not the panel's own is refused",
+      _prov(Source_Panel_ID="P_ELSEWHERE")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE"],
+      "%s" % _prov(Source_Panel_ID="P_ELSEWHERE"))
+# REVERT: `if want_source and got_source and ...`. A DELETED Source_Panel_ID
+# then passes, and that column is the physical panel in the publisher's figure.
+check("and one whose Source_Panel_ID was deleted is refused too",
+      _prov(Source_Panel_ID="")
+      == ["IDENTITY_PANEL_BINDING_CONTRADICTS_SOURCE"],
+      "%s" % _prov(Source_Panel_ID=""))
+
+# THE CELL. Everything above ties a value to a measurement; none of it says the
+# value is filed under the right heading. Two bars, each citing its own row with
+# its own mean and its own fill, and their Cell_Keys exchanged: every other check
+# passes, the grid is complete because both timepoints are present, and the two
+# numbers are swapped. This is the failure with no arithmetic signature at all.
+#
+# REVERT: drop the cell block, or stop keeping Group_ID in `geometry_index`.
+# Nothing else in this file notices.
+check("a value filed under another group's timepoint is refused",
+      _prov(Cell_Key="ARM=LATE;TIMEPOINT=T1")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _prov(Cell_Key="ARM=LATE;TIMEPOINT=T1"))
+check("and one filed under another series is refused",
+      _prov(Cell_Key="ARM=PRE;TIMEPOINT=T3")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _prov(Cell_Key="ARM=PRE;TIMEPOINT=T3"))
+check("a whole pair of exchanged cells is caught, both rows",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice, Geometry_Row_SHA256="a" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T0"),
+           dict(_twice, Geometry_Row_SHA256="c" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T3")],
+          _MONO_PANELS, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH",
+          "IDENTITY_GEOMETRY_ROW_UNKNOWN"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice, Cell_Key="ARM=LATE;TIMEPOINT=T0"),
+           dict(_twice, Geometry_Row_SHA256="c" * 64,
+                Cell_Key="ARM=LATE;TIMEPOINT=T3")],
+          _MONO_PANELS, geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+check("and a caller who supplies no cell map gets no free pass",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_CELL_MAP_MISSING"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)],
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT"}},
+          geometry=_MONO_GEO, resolutions=_MONO_RESOLUTIONS)])
+# REVERT: `if not geometry: continue`. A caller that hands over no measurements
+# then disables the foreign key AND the cell check silently - the strictness the
+# cell map already gets, applied to the other input.
+check("a BAR_MONO value with no measurements to check against is refused",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _MONO_PANELS, resolutions=_MONO_RESOLUTIONS)]
+      == ["IDENTITY_GEOMETRY_INDEX_MISSING"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _MONO_PANELS, resolutions=_MONO_RESOLUTIONS)])
+# REVERT: skip the position or series check when the map does not cover the row.
+# A map with a hole in it is then indistinguishable from a map that agrees.
+_holey = {"P_SHORT": dict(_MONO_PANELS["P_SHORT"],
+                          Cell_Map=dict(_SHORT_CELL_MAP,
+                                        position_levels={"T0": "T0"}))}
+check("a cell map that does not cover this row is refused, not skipped",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)] == ["IDENTITY_CELL_MAP_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)])
+_holey2 = {"P_SHORT": dict(_MONO_PANELS["P_SHORT"],
+                           Cell_Map=dict(_SHORT_CELL_MAP, series_levels={}))}
+check("and so is one that knows the group but not the series",
+      [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey2, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)] == ["IDENTITY_CELL_MAP_INCOMPLETE"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          [dict(_twice)], _holey2, geometry=_MONO_GEO,
+          resolutions=_MONO_RESOLUTIONS)])
+
+check("a human value's cell comes from the series the RESOLUTION names",
+      _human(Cell_Key="ARM=PRE;TIMEPOINT=T3")
+      == ["IDENTITY_GEOMETRY_CELL_MISMATCH"],
+      "%s" % _human(Cell_Key="ARM=PRE;TIMEPOINT=T3"))
+
+# `Resolution_ID` as a FOREIGN KEY. Checked only for being non-blank it is a
+# label: swap two of a panel's resolutions on their values and the numbers, the
+# hash and the fill all still agree, while the accepted file cites the wrong
+# evidence, the wrong reviewer and the wrong reading.
+#
+# REVERT: keep the non-blank test and drop the lookup. The four below are the
+# whole difference.
+check("a resolution nobody wrote is refused",
+      _human(Resolution_ID="IR_NOBODY")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Resolution_ID="IR_NOBODY"))
+check("another resolution of the same panel is refused",
+      _human(Resolution_ID="IR2")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Resolution_ID="IR2"))
+check("and the refusal names the row hash the two disagree about",
+      any("Geometry_Row_SHA256" in _d for _w, _c, _d in
+          RB.identity_provenance_problems(
+              [dict(_twice, Identity_Source="HUMAN",
+                    Identity_Evidence_Type="LEGEND_DECLARED",
+                    Auto_Fill_Pattern="", Resolution_ID="IR2",
+                    Geometry_Row_SHA256="e" * 64)],
+              _MONO_PANELS, geometry=_MONO_GEO,
+              resolutions=_MONO_RESOLUTIONS)))
+check("an evidence type that is not the one the resolution declares is refused",
+      _human(Identity_Evidence_Type="TEXT_DECLARED")
+      == ["IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % _human(Identity_Evidence_Type="TEXT_DECLARED"))
+
+check("the index reads a geometry RECORD as well as a CSV row",
+      set(RB.geometry_index([dict(figure="P_X", geometry_row_sha256="e" * 64,
+                                  value=1.0, dispersion=0.5,
+                                  resolved_fill_pattern="solid")]))
+      == {("P_X", "e" * 64)},
+      "%s" % RB.geometry_index([dict(figure="P_X",
+                                     geometry_row_sha256="e" * 64)]))
+# Wired, not merely present: with the carrier removed the whole panel fails the
+# gate rather than passing with blank provenance.
+_real_carried = MR.IDENTITY_CARRIED
+try:
+    MR.IDENTITY_CARRIED = ()
+    _po = os.path.join(ROOT, "o_short_noprov")
+    _ps = RB.run_batch(_s2, _po, file_root=ROOT, run_date="2026-08-06")
+finally:
+    MR.IDENTITY_CARRIED = _real_carried
+_pqc = set(pd.read_csv(os.path.join(_po, "qc_problems.csv"),
+                       dtype=object).fillna("")["check"]) \
+    if os.path.exists(os.path.join(_po, "qc_problems.csv")) else set()
+_pr = pd.read_csv(os.path.join(_po, "run_manifest.csv"), dtype=object).fillna("")
+check("a run whose marks lost their provenance fails the gate",
+      "IDENTITY_PROVENANCE_MISSING" in _pqc, "%s" % sorted(_pqc))
+check("and both monochrome panels are QC_FAILED, not AUTO_PASS",
+      set(_pr[_pr["Panel_ID"].isin(["P_MONO", "P_SHORT"])]["Run_State"])
+      == {"QC_FAILED"},
+      "%s" % _pr[["Panel_ID", "Run_State"]].to_dict("records"))
+check("and the colour panels in the same batch are unaffected",
+      _pr[_pr["Panel_ID"] == "P_SCAT"].iloc[0]["Run_State"] == "AUTO_PASS",
+      "%s" % _pr[["Panel_ID", "Run_State"]].to_dict("records"))
+
+# The evidence BYTES travel with the run.
+#
+# `check_identity_resolution` hashes the legend crop at validation time, which
+# protects the hash STRING in the manifest and nothing else: edit or delete the
+# file afterwards and identity__<Panel_ID>.csv, the ledger and
+# Review_Subject_SHA256 are all unchanged, so Identity_Checked=CONFIRMED could
+# be given against evidence that no longer exists. And a run directory handed to
+# somebody else did not contain the picture its own review mode tells them to
+# open.
+#
+# REVERT: register the resolution rows and not the evidence. The two scenarios
+# below are the only place it shows.
+print()
+print("the evidence a person read the series off travels with the run")
+_ev = _art2[(_art2["Panel_ID"] == "P_SHORT")
+            & (_art2["Artifact_Type"] == "IDENTITY_EVIDENCE")]
+check("the legend crop is copied into the run and hashed into the ledger",
+      len(_ev) == 1 and len(_ev.iloc[0]["SHA256"]) == 64
+      and os.path.exists(os.path.join(_o2, _ev.iloc[0]["Artifact_Path"])),
+      "%s" % (_ev.to_dict("records") or "no ledger row"))
+check("byte for byte, and named after the resolution that cites it",
+      len(_ev)
+      and open(os.path.join(_o2, _ev.iloc[0]["Artifact_Path"]), "rb").read()
+      == open(LEGEND_IMG, "rb").read()
+      and "IR1" in os.path.basename(_ev.iloc[0]["Artifact_Path"]),
+      "%s" % (_ev.iloc[0]["Artifact_Path"] if len(_ev) else ""))
+# And the finalizer re-hashes it with everything else in the ledger, so editing
+# the copy after the review is RUN_ARTIFACT_MODIFIED rather than an approval of
+# something nobody saw.
+# Guarded on the ledger row existing, so removing the copy is two failed
+# scenarios rather than a traceback that stops the file here.
+_ev_path = os.path.join(_o2, _ev.iloc[0]["Artifact_Path"]) if len(_ev) else ""
+
+
+def _verify_run():
+    problems = []
+    ok = FIN.verify_run_outputs(
+        _o2, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                            encoding="utf-8")),
+        _s2, lambda w, c, d: problems.append(c))
+    return ok, problems
+
+
+_before, _probs = _verify_run()
+check("the run verifies as written", _before and not _probs, "%s" % _probs)
+if _ev_path:
+    _ev_bytes = open(_ev_path, "rb").read()
+    try:
+        with open(_ev_path, "wb") as _fh:
+            _fh.write(_ev_bytes + b"a different crop")
+        _after, _probs = _verify_run()
+    finally:
+        with open(_ev_path, "wb") as _fh:
+            _fh.write(_ev_bytes)
+else:
+    _after, _probs = True, []
+check("and evidence edited after the run is RUN_ARTIFACT_MODIFIED",
+      not _after and "RUN_ARTIFACT_MODIFIED" in _probs,
+      "%s" % (_probs if _ev_path else "no evidence artifact to tamper with"))
+
+# And the FINALIZER re-derives the requirement rather than trusting the run.
+# The review mode's artifact tuple cannot express "and the evidence for every
+# file-backed resolution", because a panel resolved only by REVIEWER_INSPECTION
+# has no evidence file - so a run made before the copy existed, or by a producer
+# that skipped it, presented a complete-looking ledger. The condition is in the
+# resolution rows, so the check reads them.
+#
+# REVERT: delete `identity_contract_failures` from the finalizer, or its call.
+# Every scenario above still passes, because this run's producer copied the
+# evidence in; what is gone is the finalizer's own reason to believe it.
+_led = pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                   dtype=object).fillna("")
+_machine2 = pd.read_csv(os.path.join(_o2, "figure_values_machine_qc.csv"),
+                        dtype=object).fillna("")
+# The frames `verify_manifest_inputs` hands the checks, built the same way.
+def _verified_bundle(run_dir, manifest_dir=None):
+    """Manifests plus the run's own verified output rows - the bundle
+    `finalize` hands its contract checks. See `test_finalize._verified`."""
+    frames = RB.load_manifests(manifest_dir
+                               or os.path.join(run_dir, "manifests"))
+    path = os.path.join(run_dir, "run_manifest.csv")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            frames["outputs"] = {"run_manifest.csv": list(csv.DictReader(fh))}
+    return frames
+
+
+_FRAMES2 = _verified_bundle(_o2, _s2)
+_probs = []
+check("a run that copied its evidence in withholds nothing",
+      not FIN.identity_contract_failures(_o2, _led, _machine2,
+                                         lambda w, c, d: _probs.append(c),
+                                         frames=_FRAMES2)
+      and not _probs, "%s" % _probs)
+check("the ledger names which resolution each copy belongs to",
+      "Artifact_Reference" in RB.PANEL_ARTIFACT_COLUMNS
+      and set(_led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"]
+              ["Artifact_Reference"]) == {"IR1"},
+      "%s" % _led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"].to_dict("records"))
+# A 7.29-shaped run: the resolution rows are there, the evidence copy is not.
+_probs = []
+_old_shape = _led[_led["Artifact_Type"] != "IDENTITY_EVIDENCE"]
+check("a run without the copy is withheld from approval, by panel",
+      FIN.identity_contract_failures(_o2, _old_shape, _machine2,
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+# And a copy that is in the ledger under a hash the resolution never declared.
+_probs = []
+_wrong = _led.copy()
+_wrong.loc[_wrong["Artifact_Type"] == "IDENTITY_EVIDENCE", "SHA256"] = "0" * 64
+check("and so is a copy that is not the file that was signed",
+      FIN.identity_contract_failures(_o2, _wrong, _machine2,
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+# End to end through `finalize`, because the two checks above call the helper
+# directly and the wiring is the thing a revert removes. A full run, a real
+# approval with all four confirmations - and the same run with the evidence copy
+# taken out of the ledger, which must not finalize.
+_fin_dir = os.path.join(ROOT, "o_short_final")
+shutil.rmtree(_fin_dir, ignore_errors=True)
+shutil.copytree(_o2, _fin_dir)
+_fin_review = os.path.join(_fin_dir, "value_review.csv")
+
+
+def _write_review(path, panels):
+    rows = []
+    for i, panel in enumerate(panels):
+        hit = _fq2[_fq2["Panel_ID"] == panel]
+        rows.append(dict(
+            Review_ID="R%03d" % (i + 1), Panel_ID=panel,
+            Review_Subject_SHA256=(hit.iloc[0]["Review_Subject_SHA256"]
+                                   if len(hit) else ""),
+            Reviewer_ID="RV_T1", Decision="APPROVED",
+            Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+            Calibration_Checked="CONFIRMED", Identity_Checked="CONFIRMED",
+            # v7.65. This panel's short bar has no fill to sample, which makes
+            # its group incomplete - so the bars beside it were named by matching
+            # the FIGURE's prototypes rather than by relations inside their own
+            # group, and that is R2. The question follows the values, so a
+            # BAR_MONO panel gets it exactly as an overlay panel would; before
+            # the modes were folded together, no mode name could ask it here.
+            Inference_Checked="CONFIRMED",
+            Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIN.value_review_columns())
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
+_fr = FIN.finalize(_fin_dir, review_path=_write_review(_fin_review, ["P_SHORT"]),
+                   manifest_dir=_s2, run_date="2026-08-06",
+                   today=datetime.date(2026, 8, 8))
+check("a resolved panel with its evidence finalizes",
+      _fr["status"] == "FINALIZED" and _fr["accepted"] == 12,
+      "%s" % _fr)
+_acc = pd.read_csv(os.path.join(_fin_dir, "figure_values_accepted.csv"),
+                   dtype=object).fillna("")
+_acc_named = _acc[_acc["Cell_Key"] == "ARM=LATE;TIMEPOINT=T3"]
+check("and the pooled value still says a person named its series",
+      len(_acc_named) == 1
+      and _acc_named.iloc[0]["Identity_Source"] == "HUMAN"
+      and _acc_named.iloc[0]["Resolution_ID"] == "IR1"
+      and _acc_named.iloc[0]["Geometry_Row_SHA256"] == _short_hash,
+      "%s" % (_acc_named.to_dict("records") or "no row"))
+# WHAT A PREFLIGHT SAYS ABOUT THIS PANEL, WHICH IS THE FIRST PILOT'S MODE. v7.95.
+# `REVIEW_RUNBOOK.md` sends publication 127's reviewer through six geometry artifacts, so
+# the preflight has to agree the bundle holding them is complete - and has to NOT
+# ask for the one thing this tier does not have. An R2 identity is answered AT
+# THE PANEL: no `Inference_ID`, no cell crop. v7.94's runbook promised "every
+# question has its manifest row and its context picture", which describes a
+# bundle the first pilot cannot produce, and would have read as broken.
+import review_preflight as PF                                      # noqa: E402
+_gq = PF.questions(_fin_dir)
+check("the first pilot's mode asks an R2 identity question, at the panel",
+      _gq and {q["Tier"] for q in _gq} == {"R2"}
+      and not any(q["Inference_ID"] for q in _gq), "%s" % _gq)
+check("  so its bundle needs no context crop and reports no problem",
+      PF.bundle_problems(_fin_dir) == [], "%s" % PF.bundle_problems(_fin_dir))
+_gled = pd.read_csv(os.path.join(_fin_dir, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_gshort = set(_gled[_gled["Panel_ID"] == "P_SHORT"]["Artifact_Type"])
+_gwant = set(RB.REVIEW_MODES["BAR_MONO_GEOMETRY_RESOLVED"])
+check("  and every artifact the runbook sends them to is in the panel's ledger",
+      _gwant <= _gshort, "%s missing" % sorted(_gwant - _gshort))
+
+# THE MODE IS NOT THE PRODUCER'S TO CHOOSE (v9.7). It decides which
+# confirmations an approval must carry - four for this panel, one for OVERLAY -
+# and the review subject does not cover it: the subject hashes the artifacts and
+# the values, so downgrading the queue's `Review_Mode` leaves every fingerprint
+# in the run intact. An approval saying only `Marks_Checked` then finalizes a
+# panel whose axis and calibration nobody confirmed.
+_mode_dir = os.path.join(ROOT, "o_short_mode")
+shutil.rmtree(_mode_dir, ignore_errors=True)
+shutil.copytree(_o2, _mode_dir)
+_mode_queue = os.path.join(_mode_dir, "review_queue.csv")
+_mode_frame = pd.read_csv(_mode_queue, dtype=object).fillna("")
+_mode_frame["Review_Mode"] = ["OVERLAY"] * len(_mode_frame)
+_mode_frame.to_csv(_mode_queue, index=False)
+_mode_stamp_path = os.path.join(_mode_dir, "run_stamp.json")
+_mode_stamp = json.load(open(_mode_stamp_path, encoding="utf-8"))
+_mode_stamp["Output_SHA256"]["review_queue.csv"] = RB.file_sha256(_mode_queue)
+with open(_mode_stamp_path, "w", encoding="utf-8") as _fh:
+    json.dump(_mode_stamp, _fh, indent=1, sort_keys=True)
+_mode_review = os.path.join(_mode_dir, "value_review.csv")
+with open(_mode_review, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_fq2[_fq2["Panel_ID"] == "P_SHORT"].iloc[0][
+            "Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mode_fin = FIN.finalize(_mode_dir, review_path=_mode_review, manifest_dir=_s2,
+                         run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("a queue that downgrades its own review mode is refused",
+      _mode_fin["status"] != "FINALIZED"
+      and any(p["check"] == "QUEUE_REVIEW_MODE_CONTRADICTS_RUN"
+              for p in _mode_fin["problems"]),
+      "%s / %s" % (_mode_fin["status"],
+                   sorted({p["check"] for p in _mode_fin["problems"]})))
+check("  and the refusal names both modes and what each one asks",
+      any("BAR_MONO_GEOMETRY_RESOLVED" in p["detail"]
+          and "Calibration_Checked" in p["detail"]
+          for p in _mode_fin["problems"]
+          if p["check"] == "QUEUE_REVIEW_MODE_CONTRADICTS_RUN"),
+      "%s" % [p["detail"][:90] for p in _mode_fin["problems"]])
+check("  and nothing is accepted from it",
+      not os.path.exists(os.path.join(_mode_dir, "figure_values_accepted.csv")),
+      "%s" % sorted(os.listdir(_mode_dir)))
+# ONE ROW PER PANEL, IN EITHER ORDER. `review_mode` and the expected-subject map
+# are dict comprehensions over the queue, so two rows for one panel resolve to
+# whichever comes last - and the two rows can declare different modes. Both
+# orders are refused, because a scientific result must not depend on row order.
+for _order, _label in ((["BAR_MONO_GEOMETRY_RESOLVED", "OVERLAY"], "downgrade last"),
+                       (["OVERLAY", "BAR_MONO_GEOMETRY_RESOLVED"], "downgrade first")):
+    _dup_dir = os.path.join(ROOT, "o_short_dup_%s" % _order[0][:4].lower())
+    shutil.rmtree(_dup_dir, ignore_errors=True)
+    shutil.copytree(_o2, _dup_dir)
+    _dup_queue = os.path.join(_dup_dir, "review_queue.csv")
+    _dup_src = pd.read_csv(_dup_queue, dtype=object).fillna("")
+    _dup_row = _dup_src[_dup_src["Panel_ID"] == "P_SHORT"].iloc[0].to_dict()
+    _dup_rows = [dict(_dup_row, Review_Mode=m) for m in _order]
+    pd.DataFrame(_dup_rows, columns=list(_dup_src.columns)).to_csv(
+        _dup_queue, index=False)
+    _dup_stamp_path = os.path.join(_dup_dir, "run_stamp.json")
+    _dup_stamp = json.load(open(_dup_stamp_path, encoding="utf-8"))
+    _dup_stamp["Output_SHA256"]["review_queue.csv"] = RB.file_sha256(_dup_queue)
+    with open(_dup_stamp_path, "w", encoding="utf-8") as _fh:
+        json.dump(_dup_stamp, _fh, indent=1, sort_keys=True)
+    _dup_fin = FIN.finalize(
+        _dup_dir, review_path=_write_review(
+            os.path.join(_dup_dir, "value_review.csv"), ["P_SHORT"]),
+        manifest_dir=_s2, run_date="2026-08-06",
+        today=datetime.date(2026, 8, 8))
+    check("a queue asking about one panel twice is refused (%s)" % _label,
+          _dup_fin["status"] != "FINALIZED"
+          and any(p["check"] == "QUEUE_DUPLICATE_PANEL"
+                  for p in _dup_fin["problems"]),
+          "%s / %s" % (_dup_fin["status"],
+                       sorted({p["check"] for p in _dup_fin["problems"]})))
+# AND THE TEMPLATE ASKS FOR THE IDENTITY. `Identity_Checked` is the one claim in
+# the pipeline with no measurement behind it, and an unanswered template has to
+# name it as missing - otherwise the reviewer who skips it is the reviewer the
+# mode exists for.
+_gtmpl = os.path.join(_fin_dir, "template_value_review.csv")
+FIN.write_review_template(_gtmpl, pd.read_csv(
+    os.path.join(_fin_dir, "review_queue.csv"), dtype=object).fillna(""))
+_gmiss = [why for _w, why in PF.answer_problems(
+    _fin_dir, _gtmpl, os.path.join(_fin_dir, "no_such_inference.csv"))]
+check("  the unfilled template is missing every confirmation this mode asks for",
+      all(any(c in why for why in _gmiss)
+          for c in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]),
+      "%s" % _gmiss)
+# AND THE MODE IS NOT THE WHOLE LIST. v7.96. A panel's own VALUES add
+# `Inference_Checked` when one of them was reasoned to - `inference_confirmations`
+# derives it from the rows, which is why it composes with every mode instead of
+# doubling the mode table. This panel has a prototype-matched cell, so it asks
+# FIVE things, and `REVIEW_RUNBOOK.md` mapped four: the static tuple is what the runbook
+# test reads, and a runbook checked against it alone can leave the reviewer with
+# no picture for the one question the first pilot is actually about.
+_gvalues = [v for v in pd.read_csv(
+    os.path.join(_fin_dir, "figure_values_machine_qc.csv"),
+    dtype=object).fillna("").to_dict("records")
+    if str(v.get("Run_Panel_ID") or "").strip() == "P_SHORT"]
+_gextra = RB.inference_confirmations(_gvalues)
+check("this panel's own values ask for a confirmation its mode does not",
+      _gextra == (RB.INFERENCE_CONFIRMATION,)
+      and RB.INFERENCE_CONFIRMATION
+      not in RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"],
+      "%s" % (_gextra,))
+_pilot = open(os.path.join(_paths.ROOT, "docs", "REVIEW_RUNBOOK.md"), encoding="utf-8").read()
+_sec = [s for s in _pilot.split("\n## ")
+        if "BAR_MONO_GEOMETRY_RESOLVED" in s]
+_arrows = " ".join(l for l in "".join(_sec).splitlines()
+                   if l.strip().startswith("->"))
+_wanted = tuple(RB.REVIEW_CONFIRMATIONS["BAR_MONO_GEOMETRY_RESOLVED"]) + _gextra
+check("  and the runbook pairs all FIVE against the picture that answers it",
+      len(_sec) == 1 and all(c in _arrows for c in _wanted),
+      "%s missing from %r" % ([c for c in _wanted if c not in _arrows], _arrows))
+
+# THE STRUCTURED ARTIFACTS ARE INTERPRETED FROM THE BYTES THAT WERE HASHED.
+# v8.2. `verify_run_outputs` hashed every file the ledger names and then every
+# contract check that reads one opened it AGAIN: the identity resolutions, the
+# inference manifest, the raw marks, the point cloud and the geometry file. Swap
+# the geometry between the two and it becomes the evidence for a route it does
+# not support, while the ledger still names the file that was hashed - the whole
+# BAR_MONO identity chain deciding from bytes nobody recorded.
+#
+# HOOKED BELOW THE READER, not on it. The swap lands when `read_verified_bytes`
+# hashes the target - which is the moment `verify_run_outputs` takes its copy -
+# so a check that uses the copy is unaffected and one that opens the path sees
+# the swapped file. Hooking `artifact_data` instead would have tested the
+# function under test.
+
+
+def _swap_artifact_after_hash(target, swapped_bytes):
+    """Rewrite `target` the moment verification finishes. Returns an undo.
+
+    Between `verify_run_outputs` and the contract checks is the window: the file
+    has been hashed against the ledger and every reader that opens the path
+    again gets whatever is there now. A reader using the kept bytes is immune,
+    which is the difference this measures. Hooking the reader itself would have
+    measured the function under test; hooking a single hash call would land the
+    swap inside the verification loop, where a ledger naming the same file for
+    two panels hashes it twice and reports the swap as tampering - true, and not
+    the thing being asked.
+    """
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        with open(target, "wb") as fh:
+            fh.write(swapped_bytes)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
+def _artifact_race(name, artifact_type, mutate, expect_reruns, **kw):
+    """Finalize a copy of the short run with one artifact swapped as it is read."""
+    where = os.path.join(ROOT, "o_race_%s" % name)
+    shutil.rmtree(where, ignore_errors=True)
+    shutil.copytree(_o2, where)
+    review_path = _write_review(os.path.join(where, "value_review.csv"),
+                                ["P_SHORT"])
+    led = pd.read_csv(os.path.join(where, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+    hit = led[led["Artifact_Type"] == artifact_type]
+    target = RB.resolve_artifact(where, hit.iloc[0]["Artifact_Path"])
+    with open(target, "rb") as fh:
+        before = fh.read()
+    undo = _swap_artifact_after_hash(target, mutate(before))
+    try:
+        got = FIN.finalize(where, review_path=review_path, manifest_dir=_s2,
+                           run_date="2026-08-06",
+                           today=datetime.date(2026, 8, 8), **kw)
+    finally:
+        undo()
+    with open(target, "rb") as fh:
+        after = fh.read()
+    check(name,
+          got["status"] == "FINALIZED" and after != before,
+          "%s / swapped=%s / %s" % (got["status"], after != before,
+                                    [p["check"]
+                                     for p in got.get("problems", [])]))
+    return got
+
+
+def _rewrite_column(column, value):
+    def mutate(before):
+        frame = pd.read_csv(io.BytesIO(before), dtype=object).fillna("")
+        frame[column] = [value] * len(frame)
+        return frame.to_csv(index=False).encode("utf-8")
+    return mutate
+
+
+_artifact_race("a geometry file rewritten as it is hashed decides no route",
+               "MONO_BAR_GEOMETRY",
+               _rewrite_column("Geometry_Row_SHA256", "e" * 64), 1)
+# AND THE ROUTE CHECK SPECIFICALLY. The geometry file has two readers -
+# `_geometry_route_failures`, which compares each value's `Identity_Method`
+# against the figure's own answer, and `geometry_index_of`, which the value
+# contract uses. v8.2's race changed `Geometry_Row_SHA256`, which the second
+# reader notices first, so reverting the FIRST alone was silent. This swap
+# leaves every row hash alone and changes only `Auto_Identity_Method`: nothing
+# but the route check can see it.
+_artifact_race("a geometry route is checked against the bytes that were hashed",
+               "MONO_BAR_GEOMETRY",
+               _rewrite_column("Auto_Identity_Method", "FIGURE_PROTOTYPE_MATCH"),
+               1)
+_artifact_race("nor does a resolution file rewritten as it is hashed",
+               "IDENTITY_RESOLUTION",
+               _rewrite_column("Resolved_Fill_Pattern", "SOLID"), 1)
+
+
+# The raw-mark join is not exercised here on purpose: P_SHORT is BAR_MONO, which
+# is not in `MARK_JOIN_REQUIRED`, so a swapped marks file changes nothing on this
+# fixture and a scenario asserting otherwise would pass for the wrong reason.
+# The join's own snapshot is pinned in `test_finalize` against a reader that has
+# one.
+
+# AND THE SNAPSHOT IS ADDRESSED BY WHAT THE LEDGER RECORDED, not by asking the
+# filesystem again. v8.3. The bytes were keyed on `os.path.realpath(path)` and
+# looked up the same way, so the ADDRESS was recomputed against the filesystem
+# after verification: re-point a symlink in between and the lookup misses -
+# evidence that is present reads as absent - or lands on another artifact's
+# entry. The bytes were immutable and the way to find them was not.
+_lnk_dir = os.path.join(ROOT, "o_short_symlink")
+shutil.rmtree(_lnk_dir, ignore_errors=True)
+shutil.copytree(_o2, _lnk_dir)
+_lnk_review = _write_review(os.path.join(_lnk_dir, "value_review.csv"),
+                            ["P_SHORT"])
+_lnk_led_path = os.path.join(_lnk_dir, "panel_artifacts.csv")
+_lnk_led = pd.read_csv(_lnk_led_path, dtype=object).fillna("")
+_lnk_row = _lnk_led[_lnk_led["Artifact_Type"] == "IDENTITY_RESOLUTION"].iloc[0]
+_lnk_real = RB.resolve_artifact(_lnk_dir, _lnk_row["Artifact_Path"])
+# The ledger points at a SYMLINK inside the run; the link points at the real
+# file. Nothing about the recorded path or its hash changes.
+_lnk_target = os.path.join(os.path.dirname(_lnk_real), "resolution_target.csv")
+_lnk_decoy = os.path.join(os.path.dirname(_lnk_real), "resolution_decoy.csv")
+shutil.move(_lnk_real, _lnk_target)
+_decoy = pd.read_csv(_lnk_target, dtype=object).fillna("")
+_decoy["Resolved_Fill_Pattern"] = ["SOLID"] * len(_decoy)
+_decoy.to_csv(_lnk_decoy, index=False)
+os.symlink(_lnk_target, _lnk_real)
+_lnk_stamp = json.load(open(os.path.join(_lnk_dir, "run_stamp.json"),
+                            encoding="utf-8"))
+_lnk_stamp["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(_lnk_led_path)
+with open(os.path.join(_lnk_dir, "run_stamp.json"), "w",
+          encoding="utf-8") as _fh:
+    json.dump(_lnk_stamp, _fh, indent=1, sort_keys=True)
+check("the run reads the resolution through a symlink, hash unchanged",
+      os.path.islink(_lnk_real)
+      and RB.file_sha256(_lnk_real) == _lnk_row["SHA256"])
+
+
+def _repoint_after_verification(link, new_target):
+    real_verify = FIN.verify_run_outputs
+
+    def hooked(*a, **kw):
+        got = real_verify(*a, **kw)
+        os.remove(link)
+        os.symlink(new_target, link)
+        return got
+
+    FIN.verify_run_outputs = hooked
+
+    def undo():
+        FIN.verify_run_outputs = real_verify
+
+    return undo
+
+
+_undo_l = _repoint_after_verification(_lnk_real, _lnk_decoy)
+try:
+    _lnk_result = FIN.finalize(_lnk_dir, review_path=_lnk_review,
+                               manifest_dir=_s2, run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8))
+finally:
+    _undo_l()
+check("a symlink re-pointed after verification finds the bytes that were hashed",
+      _lnk_result["status"] == "FINALIZED"
+      and os.path.realpath(_lnk_real) == os.path.realpath(_lnk_decoy),
+      "%s / now points at %s / %s"
+      % (_lnk_result["status"], os.path.basename(os.path.realpath(_lnk_real)),
+         [p["check"] for p in _lnk_result.get("problems", [])]))
+
+# RESOLVER AND APPROVER, AND WHETHER THEY MAY BE ONE PERSON. v7.96.
+#
+# `REVIEW_RUNBOOK.md` says two people for the first pilot and, until now, nothing checked
+# it: `identity_resolution.csv` carries the Reviewer_ID of the person who named
+# a series the reader could not, `value_review.csv` carries the Reviewer_ID of
+# the person approving the panel that naming lands in, and the finalizer never
+# compared them. One person filling in both is `Identity_Checked=CONFIRMED`
+# meaning "yes, I am still of the same opinion" - a reading of a legend
+# confirming itself - and it finalized.
+#
+# DECLARED, not defaulted. Whether one person may hold both roles is a decision
+# this package has not made, so the default is `NOT_DECLARED` and says so in the
+# stamp. What v7.96 adds is that a run which DOES declare the contract has it
+# enforced instead of merely written down.
+_TWO = REVIEWERS + [dict(
+    Reviewer_ID="RV_T2", Reviewer_Name="Second Reviewer",
+    Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+    Reviewer_Contact="0000-0002-1825-0097", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="the approver, who did not write the resolution")]
+_ORCID_T1 = "0000-0001-5109-3700"
+
+
+def _orcid_reviewer(rid, orcid, note):
+    return dict(Reviewer_ID=rid, Reviewer_Name="Reviewer %s" % rid,
+                Reviewer_Record_Type="HUMAN", Contact_Type="ORCID",
+                Reviewer_Contact=orcid, Registered_By="Test Fixture",
+                Registration_Date="2026-08-01",
+                Human_Attestation="HUMAN_CONFIRMED", Note=note)
+
+
+# THE RESOLVER NEEDS AN ORCID TOO, under the declared contract. The registry
+# fixture reaches everything in this module, so the separation batch gets its own
+# copy with both people identified rather than changing what every other scenario
+# runs against.
+_TWO = [_orcid_reviewer("RV_T1", _ORCID_T1, "the resolver")] + _TWO[1:]
+_sep_m = short_manifests(os.path.join(ROOT, "m_short_sep"),
+                         resolutions=[_resolution()], reviewers=_TWO)
+_sep_o = os.path.join(ROOT, "o_short_sep")
+shutil.rmtree(_sep_o, ignore_errors=True)
+RB.run_batch(_sep_m, _sep_o, file_root=ROOT, run_date="2026-08-06")
+_sep_q = pd.read_csv(os.path.join(_sep_o, "review_queue.csv"),
+                     dtype=object).fillna("")
+_sep_led = pd.read_csv(os.path.join(_sep_o, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+check("the run knows who resolved each panel's identities",
+      FIN.resolution_reviewers(_sep_o, _sep_led) == {"P_SHORT": {"RV_T1"}},
+      "%s" % FIN.resolution_reviewers(_sep_o, _sep_led))
+
+
+def _sep_review(path, reviewer):
+    hit = _sep_q[_sep_q["Panel_ID"] == "P_SHORT"]
+    rows = [dict(Review_ID="R001", Panel_ID="P_SHORT",
+                 Review_Subject_SHA256=hit.iloc[0]["Review_Subject_SHA256"],
+                 Reviewer_ID=reviewer, Decision="APPROVED",
+                 Marks_Checked="CONFIRMED", Axis_Labels_Checked="CONFIRMED",
+                 Calibration_Checked="CONFIRMED", Identity_Checked="CONFIRMED",
+                 Inference_Checked="CONFIRMED",
+                 Reviewed_At="2026-08-07T10:00:00Z", Note="")]
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=FIN.value_review_columns())
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
+_same = _sep_review(os.path.join(_sep_o, "review_same.csv"), "RV_T1")
+_sep_undeclared = FIN.finalize(_sep_o, review_path=_same, manifest_dir=_sep_m,
+                               run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8))
+check("one person resolving and signing finalizes while nothing is declared",
+      _sep_undeclared["status"] == "FINALIZED", "%s" % _sep_undeclared)
+check("  and the stamp says which policy that was, rather than staying silent",
+      json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                     encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == "NOT_DECLARED")
+_sep_declared = FIN.finalize(_sep_o, review_path=_same, manifest_dir=_sep_m,
+                             run_date="2026-08-06",
+                             today=datetime.date(2026, 8, 8),
+                             separation_policy=FIN.DISTINCT_RESOLVERS)
+check("the same signature under the declared contract is refused, by name",
+      _sep_declared["status"] != "FINALIZED"
+      and any(p["check"] == "RESOLVER_IS_APPROVER" and "RV_T1" in p["detail"]
+              for p in _sep_declared.get("problems", [])),
+      "%s %s" % (_sep_declared["status"], _sep_declared.get("problems")))
+check("  and it writes no accepted file",
+      not os.path.exists(os.path.join(_sep_o, "figure_values_accepted.csv")))
+_two_people = _sep_review(os.path.join(_sep_o, "review_two.csv"), "RV_T2")
+_sep_ok = FIN.finalize(_sep_o, review_path=_two_people, manifest_dir=_sep_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("while a second person signing the same panel finalizes under it",
+      _sep_ok["status"] == "FINALIZED"
+      and json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                         encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == FIN.DISTINCT_RESOLVERS, "%s" % _sep_ok)
+# AND THE PREFLIGHT ASKS THE SAME QUESTION IN ADVANCE, or the reviewer meets the
+# refusal after signing - the failure the whole preflight exists to prevent.
+import review_preflight as PF2                                     # noqa: E402
+check("the preflight refuses it in advance, and only when asked to",
+      PF2.would_refuse(_sep_o, _same, None, today=datetime.date(2026, 8, 8),
+                       manifest_dir=_sep_m,
+                       separation_policy=FIN.DISTINCT_RESOLVERS)[0]
+      != "FINALIZED"
+      and PF2.would_refuse(_sep_o, _same, None,
+                           today=datetime.date(2026, 8, 8),
+                           manifest_dir=_sep_m)[0] == "FINALIZED",
+      "%s" % (PF2.would_refuse(_sep_o, _same, None,
+                               today=datetime.date(2026, 8, 8),
+                               manifest_dir=_sep_m,
+                               separation_policy=FIN.DISTINCT_RESOLVERS),))
+check("  and both CLIs carry the same flag under the same name",
+      PF2.main([_sep_o, "--review", _same, "--manifests", _sep_m,
+                "--distinct-reviewers"]) == 2
+      and PF2.main([_sep_o, "--review", _two_people, "--manifests", _sep_m,
+                    "--distinct-reviewers"]) == 0)
+# AND THE RESOLVER IDS THE SEPARATION CONTRACT COMPARES, which come out of the
+# same file. Swapped to the approver's own id after verification, a path-reading
+# check refuses the panel `RESOLVER_IS_APPROVER` under the declared contract; a
+# snapshot check never sees the swap.
+_rid_o = os.path.join(ROOT, "o_short_rid_race")
+shutil.rmtree(_rid_o, ignore_errors=True)
+shutil.copytree(_sep_o, _rid_o)
+_rid_review = _sep_review(os.path.join(_rid_o, "review_two.csv"), "RV_T2")
+_rid_led = pd.read_csv(os.path.join(_rid_o, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_rid_path = RB.resolve_artifact(
+    _rid_o, _rid_led[_rid_led["Artifact_Type"] == "IDENTITY_RESOLUTION"]
+    .iloc[0]["Artifact_Path"])
+_rid_swapped = pd.read_csv(_rid_path, dtype=object).fillna("")
+_rid_swapped["Reviewer_ID"] = ["RV_T2"] * len(_rid_swapped)
+_undo = _swap_artifact_after_hash(
+    _rid_path, _rid_swapped.to_csv(index=False).encode("utf-8"))
+try:
+    _rid_result = FIN.finalize(_rid_o, review_path=_rid_review,
+                               manifest_dir=_sep_m, run_date="2026-08-06",
+                               today=datetime.date(2026, 8, 8),
+                               separation_policy=FIN.DISTINCT_RESOLVERS)
+finally:
+    _undo()
+check("resolver ids swapped after verification do not decide the contract",
+      _rid_result["status"] == "FINALIZED"
+      and set(pd.read_csv(_rid_path, dtype=object).fillna("")["Reviewer_ID"])
+      == {"RV_T2"},
+      "%s / %s" % (_rid_result["status"],
+                   [p["check"] for p in _rid_result.get("problems", [])]))
+
+# TWO Reviewer_IDs ARE TWO ROWS, NOT TWO PEOPLE. v7.97. The registry refuses a
+# duplicated Reviewer_ID and nothing refuses a duplicated PERSON, so one human
+# registered twice - by a registry merge, an ID-convention change, or on purpose
+# - satisfied a check that compares identifiers. The comparison is on the
+# normalized contact now, and an ORCID is what makes it a comparison about a
+# person at all.
+_TWICE = [_orcid_reviewer("RV_T1", _ORCID_T1, "the resolver"),
+          _orcid_reviewer("RV_SAME", _ORCID_T1, "the same human, second row")]
+_twice_m = short_manifests(os.path.join(ROOT, "m_short_twice"),
+                           resolutions=[_resolution()], reviewers=_TWICE)
+_twice_o = os.path.join(ROOT, "o_short_twice")
+shutil.rmtree(_twice_o, ignore_errors=True)
+RB.run_batch(_twice_m, _twice_o, file_root=ROOT, run_date="2026-08-06")
+_twice_q = pd.read_csv(os.path.join(_twice_o, "review_queue.csv"),
+                       dtype=object).fillna("")
+_twice_rev = os.path.join(_twice_o, "value_review.csv")
+_hit_tw = _twice_q[_twice_q["Panel_ID"] == "P_SHORT"]
+with open(_twice_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_hit_tw.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_SAME", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+check("the two rows really are two different Reviewer_IDs",
+      FIN.resolution_reviewers(
+          _twice_o, pd.read_csv(os.path.join(_twice_o, "panel_artifacts.csv"),
+                                dtype=object).fillna("")) == {"P_SHORT": {"RV_T1"}})
+_twice_r = FIN.finalize(_twice_o, review_path=_twice_rev,
+                        manifest_dir=_twice_m, run_date="2026-08-06",
+                        today=datetime.date(2026, 8, 8),
+                        separation_policy=FIN.DISTINCT_RESOLVERS)
+check("  but one human registered twice does not become two people",
+      _twice_r["status"] != "FINALIZED"
+      and any(p["check"] == "RESOLVER_IS_APPROVER" and _ORCID_T1 in p["detail"]
+              for p in _twice_r.get("problems", [])),
+      "%s %s" % (_twice_r["status"], _twice_r.get("problems")))
+# AND WITHOUT AN ORCID THE QUESTION CANNOT BE ANSWERED AT ALL, so the contract
+# refuses instead of assuming. Two email addresses are two mailboxes.
+_MAIL = REVIEWERS + [dict(
+    Reviewer_ID="RV_T2", Reviewer_Name="Second Reviewer",
+    Reviewer_Record_Type="HUMAN", Contact_Type="EMAIL",
+    Reviewer_Contact="second@example.org", Registered_By="Test Fixture",
+    Registration_Date="2026-08-01", Human_Attestation="HUMAN_CONFIRMED",
+    Note="a different mailbox, which is not the same as a different person")]
+_mail_m = short_manifests(os.path.join(ROOT, "m_short_mail"),
+                          resolutions=[_resolution()], reviewers=_MAIL)
+_mail_o = os.path.join(ROOT, "o_short_mail")
+shutil.rmtree(_mail_o, ignore_errors=True)
+RB.run_batch(_mail_m, _mail_o, file_root=ROOT, run_date="2026-08-06")
+_mail_q = pd.read_csv(os.path.join(_mail_o, "review_queue.csv"),
+                      dtype=object).fillna("")
+_mail_rev = os.path.join(_mail_o, "value_review.csv")
+_hit_ml = _mail_q[_mail_q["Panel_ID"] == "P_SHORT"]
+with open(_mail_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_SHORT",
+        Review_Subject_SHA256=_hit_ml.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T2", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mail_r = FIN.finalize(_mail_o, review_path=_mail_rev, manifest_dir=_mail_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("two email addresses cannot establish two people, so the panel is refused",
+      _mail_r["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEWER_IDENTITY_UNPROVABLE"
+              for p in _mail_r.get("problems", [])),
+      "%s %s" % (_mail_r["status"], _mail_r.get("problems")))
+check("  and the same run finalizes when no separation is declared",
+      FIN.finalize(_mail_o, review_path=_mail_rev, manifest_dir=_mail_m,
+                   run_date="2026-08-06",
+                   today=datetime.date(2026, 8, 8))["status"] == "FINALIZED")
+# AND THE CONTRACT APPLIES WHERE THE PAIR EXISTS. v7.98. P_MONO's fills are all
+# measurable, so nobody hand-resolved anything on it and there is no resolver for
+# its approver to be distinct FROM. v7.97 checked every approved panel anyway,
+# which quietly turned `DISTINCT_RESOLVER_APPROVER` into "and every approver
+# under this policy holds an ORCID" - a wider rule than its name, arrived at by
+# accident. The same EMAIL-only reviewer that is refused on the resolved panel
+# signs this one and it finalizes.
+_mono_rev = os.path.join(_mail_o, "value_review_mono.csv")
+_hit_mono = _mail_q[_mail_q["Panel_ID"] == "P_MONO"]
+check("the unresolved panel really has no human resolution behind it",
+      len(_hit_mono) == 1
+      and "P_MONO" not in FIN.resolution_reviewers(
+          _mail_o, pd.read_csv(os.path.join(_mail_o, "panel_artifacts.csv"),
+                               dtype=object).fillna("")),
+      "%s" % _hit_mono[["Panel_ID", "Review_Mode"]].to_dict("records"))
+with open(_mono_rev, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerow(dict(
+        Review_ID="R001", Panel_ID="P_MONO",
+        Review_Subject_SHA256=_hit_mono.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Inference_Checked="CONFIRMED",
+        Reviewed_At="2026-08-07T10:00:00Z", Note=""))
+_mono_r = FIN.finalize(_mail_o, review_path=_mono_rev, manifest_dir=_mail_m,
+                       run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                       separation_policy=FIN.DISTINCT_RESOLVERS)
+check("  so an EMAIL-only approver signs it under the declared contract",
+      _mono_r["status"] == "FINALIZED"
+      and not any(p["check"] in ("REVIEWER_IDENTITY_UNPROVABLE",
+                                 "RESOLVER_IS_APPROVER")
+                  for p in _mono_r.get("problems", [])),
+      "%s %s" % (_mono_r["status"], _mono_r.get("problems")))
+# A POLICY THE ENFORCEMENT DOES NOT RECOGNISE IS NOT A POLICY. v7.97.
+# SEPARATION_POLICIES was declared in v7.96 and never consulted: enforcement was
+# one exact comparison and the stamp echoed the caller's string, so a library
+# caller passing "DISTINCT_REVIEWERS" got an accepted file whose stamp named a
+# strict-sounding contract that was applied to nothing. That is the one way a
+# governance record can lie - the record itself is the thing that is wrong.
+_bad = FIN.finalize(_sep_o, review_path=_two_people, manifest_dir=_sep_m,
+                    run_date="2026-08-06", today=datetime.date(2026, 8, 8),
+                    separation_policy="DISTINCT_REVIEWERS")
+check("a policy token this package does not enforce stops the finalization",
+      _bad["status"] == "RUN_NOT_FINALIZABLE"
+      and any(p["check"] == "BAD_REVIEWER_SEPARATION_POLICY"
+              and "DISTINCT_REVIEWERS" in p["detail"]
+              for p in _bad.get("problems", [])), "%s" % _bad)
+check("  and the stamp does not echo it back as though it had been applied",
+      json.load(open(os.path.join(_sep_o, "finalize_stamp.json"),
+                     encoding="utf-8"))["Reviewer_Separation_Policy"]
+      == "UNRECOGNIZED"
+      and not os.path.exists(os.path.join(_sep_o,
+                                          "figure_values_accepted.csv")))
+check("  while every name the vocabulary does carry is accepted",
+      all(FIN.canonical_policy(p) == p for p in FIN.SEPARATION_POLICIES)
+      and FIN.canonical_policy(None) == FIN.NO_POLICY
+      and FIN.canonical_policy("DISTINCT_REVIEWERS") is None)
+# AND HOW, in the registry's vocabulary. v7.65. A person's answer is
+# HUMAN_RESOLUTION; the bars beside it were named against prototypes formed in
+# another group of the FIGURE, because this panel's short bar left its group
+# incomplete - so this one BAR_MONO panel holds both routes at once.
+_acc_methods = set(zip(_acc["Identity_Method"], _acc["Value_Method"]))
+check("and every accepted bar says which route named it",
+      ("HUMAN_RESOLUTION", "BAR_OUTLINE_CENTER") in _acc_methods
+      and ("FIGURE_PROTOTYPE_MATCH", "BAR_OUTLINE_CENTER") in _acc_methods
+      and all(i and v for i, v in _acc_methods),
+      "%s" % sorted(_acc_methods))
+# AND AN ASSOCIATION IS CHECKED AGAINST ITS OWN POINT CLOUD. v7.70. The scatter
+# reader names each POINT and the summary copies the answer; until the durable
+# file carried it, a summary claiming MEASURED_COLOUR over a cloud read from a
+# grey threshold could not be refuted from the artifact.
+_pt_led = pd.read_csv(os.path.join(ODIR, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+_pt_vals = pd.read_csv(os.path.join(ODIR, "figure_values_raw.csv"),
+                       dtype=object).fillna("")
+_assoc = _pt_vals[_pt_vals["Point_Data_Reference"] != ""]
+_pt_probs = []
+check("an association whose cloud agrees with it is not withheld",
+      not FIN.method_contract_failures(
+          _assoc, pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
+          frames=_verified_bundle(ODIR, MDIR))
+      and not _pt_probs, "%s" % _pt_probs)
+_pt_probs = []
+_lying_assoc = _assoc.copy()
+_lying_assoc["Identity_Method"] = "DECLARED_SINGLE_SERIES"
+check("and one that disagrees with the cloud it was computed from is refused",
+      FIN.method_contract_failures(
+          _lying_assoc,
+          pd.DataFrame([dict(Panel_ID="P_SCAT", Mark_Type="SCATTER")]),
+          _pt_led, ODIR, lambda w, c, d: _pt_probs.append(c),
+          frames=_verified_bundle(ODIR, MDIR))
+      and "METHOD_CONTRADICTS_POINTS" in _pt_probs, "%s" % _pt_probs)
+
+# AND THE ROUTE ON THE VALUE IS CHECKED AGAINST THE FIGURE'S OWN ANSWER. v7.68.
+# `MEASURED_FILL_RELATION` and `FIGURE_PROTOTYPE_MATCH` are the same word at two
+# tiers - R0 and R2 - so a producer writing the stronger one buys a panel
+# confirmation it never had to ask for, with every file hash in the run correct.
+# `mono_bar_geometry.csv` now carries `Auto_Identity_Method` per row, inside
+# `Auto_Identity_SHA256`, which makes that the one lie the durable geometry can
+# refuse.
+_geo_rows = list(csv.DictReader(open(os.path.join(_fin_dir,
+                                                  "mono_bar_geometry.csv"),
+                                     encoding="utf-8")))
+check("the geometry file records which route named each bar, and both happen",
+      {r["Auto_Identity_Method"] for r in _geo_rows if r["Auto_Fill_Pattern"]}
+      == {"FIGURE_PROTOTYPE_MATCH", "MEASURED_FILL_RELATION"},
+      "%s" % sorted({r["Auto_Identity_Method"] for r in _geo_rows}))
+check("  and a bar the figure could not name claims no route",
+      all(not r["Auto_Identity_Method"] for r in _geo_rows
+          if not r["Auto_Fill_Pattern"]),
+      "%s" % [(r["Auto_Fill_Pattern"], r["Auto_Identity_Method"])
+              for r in _geo_rows])
+check("  inside the attestation, so it cannot be edited without saying so",
+      "Auto_Identity_Method" in MONO.GEOMETRY_ARTIFACT_COLUMNS
+      and MONO.auto_identity_sha256(dict(identity_method="A"))
+      != MONO.auto_identity_sha256(dict(identity_method="B")))
+_acc_geo = pd.read_csv(os.path.join(_fin_dir, "figure_values_accepted.csv"),
+                       dtype=object).fillna("")
+_lied = _acc_geo.copy()
+_lied["Identity_Method"] = _lied["Identity_Method"].replace(
+    "FIGURE_PROTOTYPE_MATCH", "MEASURED_FILL_RELATION")
+_led_geo = pd.read_csv(os.path.join(_fin_dir, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_pg = []
+_held_geo = FIN.method_contract_failures(
+    _lied, pd.DataFrame([dict(Panel_ID="P_SHORT", Mark_Type="BAR_MONO")]),
+    _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
+check("a value claiming the stronger route is refused by the geometry it cites",
+      _held_geo == {"P_SHORT"} and "METHOD_CONTRADICTS_GEOMETRY" in _pg,
+      "%s" % _pg)
+_pg = []
+check("  while the run's own values agree with it",
+      not FIN.method_contract_failures(
+          _acc_geo, pd.DataFrame([dict(Panel_ID="P_SHORT",
+                                       Mark_Type="BAR_MONO")]),
+          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
+      and not _pg, "%s" % _pg)
+# AND A PANEL THAT HAS JOINABLE MARKS IS HELD TO THEM WHATEVER ITS TYPE. v7.75.
+# `BAR_MONO` is not in `MARK_JOIN_REQUIRED` - it has the geometry artifact as its
+# own durable route - but this run's marks carry a record hash for every bar, so a
+# value of it that cites none has dropped evidence the run says was there. Read as
+# "a reader that does not stamp its marks", that blank was an exemption any row
+# could take.
+_pg = []
+_unbound = _acc_geo.copy()
+_unbound["Mark_Record_SHA256"] = ""
+_unbound["Method_Attestation_SHA256"] = ""
+check("a value that drops its mark hash on a panel whose marks carry one is "
+      "refused",
+      FIN.method_contract_failures(
+          _unbound, pd.DataFrame([dict(Panel_ID="P_SHORT",
+                                       Mark_Type="BAR_MONO")]),
+          _led_geo, _fin_dir, lambda w, c, d: _pg.append(c), frames=_FRAMES2)
+      == {"P_SHORT"} and "MARK_EVIDENCE_MISSING" in _pg, "%s" % _pg)
+# REVERT: fold `Inference_Checked` back into a mode. This panel is queued
+# BAR_MONO_GEOMETRY_RESOLVED and holds a prototype-matched cell, so the question
+# has to reach it through the VALUES - a mode named after an overlay cannot.
+_fq_short = pd.read_csv(os.path.join(_fin_dir, "review_queue.csv"),
+                        dtype=object).fillna("")
+check("the geometry queue row says how many of its cells were reasoned to",
+      int(_fq_short[_fq_short["Panel_ID"] == "P_SHORT"].iloc[0]
+          .get("Inference_Cells") or -1) > 0
+      and _fq_short[_fq_short["Panel_ID"] == "P_SHORT"].iloc[0]["Review_Mode"]
+      == "BAR_MONO_GEOMETRY_RESOLVED",
+      "%s" % _fq_short[["Panel_ID", "Review_Mode", "Inference_Cells"]]
+      .to_dict("records"))
+_rows_noinf = []
+for _i, _panel in enumerate(["P_SHORT"]):
+    _hit = _fq2[_fq2["Panel_ID"] == _panel]
+    _rows_noinf.append(dict(
+        Review_ID="R%03d" % (_i + 1), Panel_ID=_panel,
+        Review_Subject_SHA256=_hit.iloc[0]["Review_Subject_SHA256"],
+        Reviewer_ID="RV_T1", Decision="APPROVED", Marks_Checked="CONFIRMED",
+        Axis_Labels_Checked="CONFIRMED", Calibration_Checked="CONFIRMED",
+        Identity_Checked="CONFIRMED", Reviewed_At="2026-08-07T10:00:00Z",
+        Note=""))
+_noinf_path = os.path.join(_fin_dir, "value_review_noinf.csv")
+with open(_noinf_path, "w", newline="", encoding="utf-8") as _fh:
+    _w = csv.DictWriter(_fh, fieldnames=FIN.value_review_columns())
+    _w.writeheader()
+    _w.writerows(_rows_noinf)
+_fr_no = FIN.finalize(_fin_dir, review_path=_noinf_path, manifest_dir=_s2,
+                      run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("and an approval that skips the inference question is refused there too",
+      _fr_no["status"] == "NOTHING_APPROVED"
+      and any(p["check"] == "REVIEW_CONFIRMATION_MISSING"
+              and "Inference_Checked" in p["detail"]
+              for p in _fr_no["problems"]), "%s" % _fr_no)
+# Put the finalized state back: the scenarios below read this run's accepted
+# file, and the refusal above deleted it.
+FIN.finalize(_fin_dir, review_path=_fin_review, manifest_dir=_s2,
+             run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+# The same run with the copy struck from the ledger - a 7.29-shaped run - and a
+# re-hashed stamp, so the only thing wrong with it is the missing evidence.
+_fin2 = os.path.join(ROOT, "o_short_final_noev")
+shutil.rmtree(_fin2, ignore_errors=True)
+shutil.copytree(_o2, _fin2)
+_led2 = pd.read_csv(os.path.join(_fin2, "panel_artifacts.csv"),
+                    dtype=object).fillna("")
+_led2[_led2["Artifact_Type"] != "IDENTITY_EVIDENCE"].to_csv(
+    os.path.join(_fin2, "panel_artifacts.csv"), index=False)
+_stamp2 = json.load(open(os.path.join(_fin2, "run_stamp.json"), encoding="utf-8"))
+_stamp2["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(
+    os.path.join(_fin2, "panel_artifacts.csv"))
+with open(os.path.join(_fin2, "run_stamp.json"), "w", encoding="utf-8") as _fh:
+    json.dump(_stamp2, _fh, indent=1)
+_fr2 = FIN.finalize(_fin2,
+                    review_path=_write_review(
+                        os.path.join(_fin2, "value_review.csv"), ["P_SHORT"]),
+                    manifest_dir=_s2, run_date="2026-08-06",
+                    today=datetime.date(2026, 8, 8))
+check("a run whose evidence was never copied in does not finalize",
+      _fr2["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEW_EVIDENCE_MISSING"
+              for p in _fr2.get("problems", [])),
+      "%s %s" % (_fr2["status"], _fr2.get("problems")))
+check("and it writes no accepted file",
+      not os.path.exists(os.path.join(_fin2, "figure_values_accepted.csv")))
+# AND THE SAME FOR THE OVERLAY, which this mode did not require until v7.96.
+# Both geometry modes ask for `Marks_Checked` - "the labels sit on the marks a
+# reader would give them" - and the only picture that shows a LABEL ON A MARK is
+# the panel overlay: a row crop shows one bar with no label, and the calibration
+# panel shows the axis. So the mode demanded a claim and required no artifact a
+# person could make it from. A run holding the five geometry files and no
+# overlay finalized, and `REVIEW_RUNBOOK.md` sent its reviewer to a picture the mode did
+# not guarantee. Same shape as the evidence case above: struck from the ledger,
+# stamp re-hashed, so the only thing wrong with it is the missing picture.
+_fin_noov = os.path.join(ROOT, "o_short_final_noov")
+shutil.rmtree(_fin_noov, ignore_errors=True)
+shutil.copytree(_o2, _fin_noov)
+_ledov = pd.read_csv(os.path.join(_fin_noov, "panel_artifacts.csv"),
+                     dtype=object).fillna("")
+check("the geometry run really does carry an overlay for its panel",
+      "OVERLAY" in set(_ledov[_ledov["Panel_ID"] == "P_SHORT"]["Artifact_Type"]),
+      "%s" % sorted(set(_ledov[_ledov["Panel_ID"] == "P_SHORT"]
+                        ["Artifact_Type"])))
+_ledov[~((_ledov["Artifact_Type"] == "OVERLAY")
+         & (_ledov["Panel_ID"] == "P_SHORT"))].to_csv(
+    os.path.join(_fin_noov, "panel_artifacts.csv"), index=False)
+_stampov = json.load(open(os.path.join(_fin_noov, "run_stamp.json"),
+                          encoding="utf-8"))
+_stampov["Output_SHA256"]["panel_artifacts.csv"] = RB.file_sha256(
+    os.path.join(_fin_noov, "panel_artifacts.csv"))
+with open(os.path.join(_fin_noov, "run_stamp.json"), "w",
+          encoding="utf-8") as _fh:
+    json.dump(_stampov, _fh, indent=1)
+_frov = FIN.finalize(_fin_noov,
+                     review_path=_write_review(
+                         os.path.join(_fin_noov, "value_review.csv"),
+                         ["P_SHORT"]),
+                     manifest_dir=_s2, run_date="2026-08-06",
+                     today=datetime.date(2026, 8, 8))
+check("  and a geometry approval with no overlay behind it is refused by name",
+      _frov["status"] != "FINALIZED"
+      and any(p["check"] == "REVIEW_ARTIFACT_MISSING" and "OVERLAY" in p["detail"]
+              for p in _frov.get("problems", [])),
+      "%s %s" % (_frov["status"], _frov.get("problems")))
+
+# And the value-to-resolution join, re-derived by the finalizer as well: a value
+# whose Resolution_ID was exchanged for the panel's other one keeps every number
+# and every hash while citing the wrong evidence and the wrong reading.
+#
+# REVERT: drop the machine-value loop from `identity_contract_failures`. The
+# runner still catches it at run time; what is gone is the durable finalizer's
+# own reason to believe a run it did not produce.
+_probs = []
+_swapped = _machine2.copy()
+_swapped.loc[_swapped["Identity_Source"] == "HUMAN", "Resolution_ID"] = "IR_OTHER"
+check("a value citing a resolution this run never recorded is withheld",
+      FIN.identity_contract_failures(_o2, _led, _swapped,
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_RESOLUTION_UNKNOWN" in _probs, "%s" % _probs)
+_probs = []
+_wrongfill = _machine2.copy()
+_wrongfill.loc[_wrongfill["Identity_Source"] == "HUMAN",
+               "Resolved_Fill_Pattern"] = "SOLID"
+check("and one that disagrees with the resolution it cites is withheld",
+      FIN.identity_contract_failures(_o2, _led, _wrongfill,
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# THE MANIFESTS THE FINALIZER RE-DERIVES FROM HAVE TO BE THE ONES THE RUN USED.
+#
+# `Manifest_SHA256` has been in the run stamp since the beginning and this
+# module never read it - defensible while the finalizer only read the registry,
+# and not defensible now that it recomputes the value contract from the panel,
+# series and position manifests. Exchange two Factor_Levels in
+# `position_manifest.csv` after the run and the cell check is done against a
+# mapping nobody approved: it either refuses a correct run or blesses a wrong
+# one.
+#
+# REVERT: drop `verify_manifest_inputs` or its call. Nothing else notices.
+_tamper_m = os.path.join(ROOT, "m_short2_edited")
+shutil.rmtree(_tamper_m, ignore_errors=True)
+shutil.copytree(_s2, _tamper_m)
+_pos = pd.read_csv(os.path.join(_tamper_m, "position_manifest.csv"),
+                   dtype=object).fillna("")
+_i0 = _pos.index[(_pos["Panel_ID"] == "P_SHORT") & (_pos["Position_ID"] == "T0")][0]
+_i1 = _pos.index[(_pos["Panel_ID"] == "P_SHORT") & (_pos["Position_ID"] == "T1")][0]
+_pos.loc[_i0, "Factor_Level"], _pos.loc[_i1, "Factor_Level"] = "T1", "T0"
+_pos.to_csv(os.path.join(_tamper_m, "position_manifest.csv"), index=False)
+_probs = []
+check("a manifest edited after the run is caught before anything is re-derived",
+      not FIN.verify_manifest_inputs(
+          _tamper_m, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                                    encoding="utf-8")),
+          lambda w, c, d: _probs.append(c))
+      and _probs == ["RUN_MANIFEST_MODIFIED"], "%s" % _probs)
+_probs = []
+check("and the untouched set passes",
+      FIN.verify_manifest_inputs(
+          _s2, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                              encoding="utf-8")),
+          lambda w, c, d: _probs.append(c)) and not _probs, "%s" % _probs)
+_fr4 = FIN.finalize(_fin_dir, review_path=_fin_review, manifest_dir=_tamper_m,
+                    run_date="2026-08-06", today=datetime.date(2026, 8, 8))
+check("and a finalization against edited manifests is refused",
+      _fr4["status"] == "RUN_ARTIFACT_MODIFIED", "%s" % _fr4["status"])
+# An added or removed manifest is a changed SET, not a silent extra: the
+# optional one is hashed as an empty frame when it is absent.
+_probs = []
+_no_ir = os.path.join(ROOT, "m_short2_nores")
+shutil.rmtree(_no_ir, ignore_errors=True)
+shutil.copytree(_s2, _no_ir)
+os.remove(os.path.join(_no_ir, "identity_resolution.csv"))
+check("and removing the resolutions after the run is caught as well",
+      not FIN.verify_manifest_inputs(
+          _no_ir, json.load(open(os.path.join(_o2, "run_stamp.json"),
+                                 encoding="utf-8")),
+          lambda w, c, d: _probs.append(c))
+      and _probs == ["RUN_MANIFEST_MODIFIED"], "%s" % _probs)
+
+# The verified frames TRAVEL. Between "these bytes hash correctly" and "open
+# them again and re-derive the contract from them" is a second read of the same
+# file - so the verification hands its frames to the checks instead of dropping
+# them, and a check handed no frames refuses rather than proceeding.
+#
+# REVERT: drop the `verified` out-parameter, or let the checks re-open the
+# manifest directory. The two below are what say the contract runs on what was
+# verified.
+_verified = {}
+_probs = []
+FIN.verify_run_outputs(
+    _o2, json.load(open(os.path.join(_o2, "run_stamp.json"), encoding="utf-8")),
+    _s2, lambda w, c, d: _probs.append(c), verified=_verified)
+check("verifying the manifests hands the frames on, all twelve of them",
+      set(_verified) - {"outputs", "frames", "artifact_bytes"}
+      == set(RB.MANIFEST_FILES) | set(RB.OPTIONAL_MANIFEST_FILES),
+      "%s" % sorted(_verified))
+# AND THE OUTPUTS IT HASHED, as rows. v7.81: `panel_expectations` re-derives the
+# conditions a panel was measured under from `run_manifest.csv`, and it opened
+# that path again after this function had hashed it - the same hash-then-reopen
+# window closed everywhere else.
+check("  and the rows of every output it hashed, so nothing is opened twice",
+      set(_verified.get("outputs", {})) == set(FIN.VERIFIED_OUTPUTS)
+      and [r["Panel_ID"] for r in _verified["outputs"]["run_manifest.csv"]]
+      == list(pd.read_csv(os.path.join(_o2, "run_manifest.csv"),
+                          dtype=object).fillna("")["Panel_ID"]),
+      "%s / %s" % (sorted(_verified.get("outputs", {})),
+                   [r["Panel_ID"]
+                    for r in _verified.get("outputs", {})
+                    .get("run_manifest.csv", [])]))
+# AND AS FRAMES, which is what the decider now consumes. v8.0: the outputs were
+# hashed here and re-read with `pd.read_csv` inside `validate_finalization`, so
+# the queue and the artifact ledger the decision ran on were never the bytes the
+# run stamp approved.
+# AND THE STRUCTURED ARTIFACTS THE LEDGER POINTS AT. v8.2: hashed here and then
+# re-opened by every contract check that interprets one, so a geometry file
+# swapped between the two became the evidence for a route it does not support.
+_art_types = set(pd.read_csv(os.path.join(_o2, "panel_artifacts.csv"),
+                             dtype=object).fillna("")["Artifact_Type"])
+check("  and the bytes of every structured artifact it hashed",
+      set(FIN.STRUCTURED_ARTIFACTS) & _art_types
+      and len(_verified.get("artifact_bytes", {})) > 0
+      and all(isinstance(v, bytes)
+              for v in _verified["artifact_bytes"].values()),
+      "%s / %s" % (sorted(_art_types),
+                   len(_verified.get("artifact_bytes", {}))))
+check("  and nothing it only hashed - a picture is not parsed here",
+      not [p for p in _verified.get("artifact_bytes", {})
+           if p.lower().endswith((".png", ".html"))],
+      "%s" % [os.path.basename(p)
+              for p in _verified.get("artifact_bytes", {})])
+check("  and as frames, one per verified output, parsed from those same bytes",
+      set(_verified.get("frames", {})) == set(FIN.VERIFIED_OUTPUTS)
+      and list(_verified["frames"]["run_manifest.csv"]["Panel_ID"])
+      == list(pd.read_csv(os.path.join(_o2, "run_manifest.csv"),
+                          dtype=object).fillna("")["Panel_ID"]),
+      "%s" % sorted(_verified.get("frames", {})))
+_probs = []
+check("and a value check handed no verified frames refuses the run",
+      FIN.value_contract_failures(_o2, {}, _machine2,
+                                  lambda w, c, d: _probs.append(c)) == {"*"}
+      and "RUN_NOT_FINALIZABLE" in _probs, "%s" % _probs)
+
+# THE RUNNER'S OWN CONTRACT, RE-RUN BY THE FINALIZER.
+#
+# A run this module did not produce is the case it exists for, and nothing pins
+# a minimum pipeline version: a run made before a check existed arrives looking
+# complete. The exchanged-Cell_Key failure - per-bar hashes and means that all
+# agree, two headings swapped - is the one with no arithmetic signature, so if
+# the finalizer does not re-derive it, every earlier run keeps it.
+#
+# REVERT: delete `value_contract_failures` or its call. The runner still catches
+# this at run time; what is gone is the durable check on runs it did not make.
+_swap_dir = os.path.join(ROOT, "o_short_swapped")
+shutil.rmtree(_swap_dir, ignore_errors=True)
+shutil.copytree(_o2, _swap_dir)
+_sm = pd.read_csv(os.path.join(_swap_dir, "figure_values_machine_qc.csv"),
+                  dtype=object).fillna("")
+# P_SHORT's rows specifically: P_MONO carries the same Cell_Keys, and picking
+# the first match swapped the wrong panel's headings.
+_mine = _sm["Run_Panel_ID"] == "P_SHORT"
+_a = _sm.index[_mine & (_sm["Cell_Key"] == "ARM=PRE;TIMEPOINT=T0")][0]
+_b = _sm.index[_mine & (_sm["Cell_Key"] == "ARM=PRE;TIMEPOINT=T1")][0]
+_sm.loc[_a, "Cell_Key"], _sm.loc[_b, "Cell_Key"] = ("ARM=PRE;TIMEPOINT=T1",
+                                                    "ARM=PRE;TIMEPOINT=T0")
+_sm.to_csv(os.path.join(_swap_dir, "figure_values_machine_qc.csv"), index=False)
+_sstamp = json.load(open(os.path.join(_swap_dir, "run_stamp.json"),
+                         encoding="utf-8"))
+_sstamp["Output_SHA256"]["figure_values_machine_qc.csv"] = RB.file_sha256(
+    os.path.join(_swap_dir, "figure_values_machine_qc.csv"))
+with open(os.path.join(_swap_dir, "run_stamp.json"), "w", encoding="utf-8") as _fh:
+    json.dump(_sstamp, _fh, indent=1)
+_probs = []
+_swap_rows = _sm[_mine].to_dict("records")
+check("the swap really is invisible to everything except the cell check",
+      not [c for _w, c, _d in RB.identity_provenance_problems(
+          _swap_rows,
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT",
+                       "Cell_Map": _SHORT_CELL_MAP}},
+          geometry=RB.geometry_index_from_run(_swap_dir),
+          resolutions=RB.resolution_index({}))
+          if c != "IDENTITY_GEOMETRY_CELL_MISMATCH"
+          and c != "IDENTITY_RESOLUTION_FOREIGN_KEY_MISMATCH"],
+      "%s" % [c for _w, c, _d in RB.identity_provenance_problems(
+          _swap_rows,
+          {"P_SHORT": {"Mark_Type": "BAR_MONO", "Unit_ID": "U_SHORT",
+                       "Source_Panel_ID": "P_SHORT",
+                       "Cell_Map": _SHORT_CELL_MAP}},
+          geometry=RB.geometry_index_from_run(_swap_dir),
+          resolutions=RB.resolution_index({}))])
+_probs = []
+_withheld = FIN.value_contract_failures(_swap_dir, _FRAMES2, _sm,
+                                        lambda w, c, d: _probs.append(c))
+check("a run whose two headings were exchanged is withheld by the finalizer",
+      _withheld == {"P_SHORT"} and "IDENTITY_GEOMETRY_CELL_MISMATCH" in _probs,
+      "withheld=%s probs=%s" % (_withheld, _probs))
+_fr3 = FIN.finalize(_swap_dir,
+                    review_path=_write_review(
+                        os.path.join(_swap_dir, "value_review.csv"), ["P_SHORT"]),
+                    manifest_dir=_s2, run_date="2026-08-06",
+                    today=datetime.date(2026, 8, 8))
+check("and does not finalize",
+      _fr3["status"] != "FINALIZED"
+      and not os.path.exists(os.path.join(_swap_dir,
+                                          "figure_values_accepted.csv")),
+      "%s" % _fr3["status"])
+_probs = []
+check("an untouched run is not withheld by the same check",
+      not FIN.value_contract_failures(_o2, _FRAMES2, _machine2,
+                                      lambda w, c, d: _probs.append(c))
+      and not _probs, "%s" % _probs)
+# A panel with human-named values and no resolution artifact at all fell out of
+# the evidence loop entirely, because that loop was driven from the ledger.
+_probs = []
+_noart = _led[_led["Artifact_Type"] != "IDENTITY_RESOLUTION"]
+check("human-named values with no resolution artifact are withheld",
+      FIN.identity_contract_failures(_o2, _noart, _machine2,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
+# The resolution rows are an INPUT to the finalizer, so they are read like one.
+# A dict comprehension over them let the last row of a repeated Resolution_ID
+# win, and a blank key field made a row a wildcard - the comparisons skip an
+# empty `want`, so a resolution missing its row hash matched any value citing it.
+#
+# REVERT: build `declared` with a dict comprehension and drop the blank check.
+_rescopy = os.path.join(ROOT, "o_short_badrows")
+
+
+def _with_resolution_rows(rows):
+    """The run again, with `identity__P_SHORT.csv` replaced by `rows`."""
+    shutil.rmtree(_rescopy, ignore_errors=True)
+    shutil.copytree(_o2, _rescopy)
+    path = os.path.join(_rescopy, "geometry-review", "identity__P_SHORT.csv")
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=BM.identity_resolution_columns())
+        w.writeheader()
+        w.writerows(rows)
+    led = pd.read_csv(os.path.join(_rescopy, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+    led.loc[led["Artifact_Type"] == "IDENTITY_RESOLUTION", "SHA256"] = \
+        RB.file_sha256(path)
+    return led
+
+
+_signed = _resolution()
+for _label, _rows, _extra in (
+        ("the same Resolution_ID twice", [_signed, dict(_signed)], None),
+        ("a row with no measurement hash on it",
+         [dict(_signed, Geometry_Row_SHA256="")], None),
+        ("a row filed under another panel",
+         [dict(_signed, Panel_ID="P_MONO")], None)):
+    _probs = []
+    _led3 = _with_resolution_rows(_rows)
+    check("%s is withheld, not resolved by file order" % _label,
+          FIN.identity_contract_failures(
+              _rescopy, _led3, _machine2, lambda w, c, d: _probs.append(c),
+              frames=_FRAMES2)
+          == {"P_SHORT"}
+          and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+# And the run's copy of the rows goes through the RUNNER's own checker, so the
+# durable side checks the same dozen fields the manifest side does rather than a
+# hand-picked six.
+#
+# REVERT: drop `resolution_row_failures`. Each of these passes the finalizer's
+# own field list and fails the manifest contract.
+for _label, _row in (
+        ("evidence with no hash to compare against",
+         dict(_signed, Evidence_Artifact_SHA256="")),
+        ("a resolution nobody signed", dict(_signed, Reviewer_ID="")),
+        ("a reviewer who is not in the registry",
+         dict(_signed, Reviewer_ID="RV_NOBODY")),
+        ("a reading dated in the future",
+         dict(_signed, Reviewed_At="2099-01-01")),
+        ("a slot that is not a slot", dict(_signed, Geometry_Slot="left one")),
+        ("a fill the series manifest does not declare",
+         dict(_signed, Resolved_Fill_Pattern="STIPPLED"))):
+    _probs = []
+    _led4 = _with_resolution_rows([_row])
+    check("%s is withheld by the durable contract" % _label,
+          FIN.identity_contract_failures(
+              _rescopy, _led4, _machine2, lambda w, c, d: _probs.append(c),
+              frames=_FRAMES2) == {"P_SHORT"}
+          and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+_probs = []
+check("and the rows this run actually wrote pass it",
+      not FIN.identity_contract_failures(
+          _o2, _led, _machine2, lambda w, c, d: _probs.append(c),
+          frames=_FRAMES2) and not _probs, "%s" % _probs)
+
+# REVERT: take the first IDENTITY_RESOLUTION artifact and carry on. A panel read
+# under two sets of resolutions has no single set to check a value against.
+_probs = []
+_two = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_RESOLUTION"]],
+                 ignore_index=True)
+check("two resolution artifacts for one panel is withheld",
+      FIN.identity_contract_failures(_o2, _two, _machine2,
+                                     lambda w, c, d: _probs.append(c),
+                                     frames=_FRAMES2)
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
+# `Resolution_ID` IS UNIQUE ACROSS THE RUN, NOT WITHIN A PANEL.
+#
+# `check_identity_resolution` keeps the identifier unique across the frame it is
+# handed, so calling it per panel made it unique per panel and global nowhere:
+# two panels could both hold IR1, one identifier naming two different decisions,
+# and the evidence filenames are built from that identifier too.
+#
+# REVERT: call the shared checker once per panel. Each call sees one IR1 and is
+# happy.
+_probs = []
+_two_panels = {"P_SHORT": [_signed],
+               "P_MONO": [dict(_signed, Panel_ID="P_MONO", Group_ID="T3",
+                               Resolved_Series_ID="S_OPEN")]}
+check("one Resolution_ID in two panels is refused",
+      FIN.resolution_copy_failures(_two_panels, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      >= {"P_SHORT", "P_MONO"}
+      and "REVIEW_IDENTITY_RESOLUTION_MISMATCH" in _probs, "%s" % _probs)
+
+# A duplicate identifier is a property of BOTH panels. The shared checker
+# reports it on the second occurrence, so charging it to that row's panel let
+# the first one through - and neither panel can be said to own IR1.
+#
+# REVERT: drop the pre-scan and let the checker's own report decide. The
+# scenario below withholds one panel instead of two, and which one depends on
+# the order the panels are visited in.
+_probs = []
+_same_id = {"P_SHORT": [_signed],
+            "P_MONO": [dict(_signed, Panel_ID="P_MONO")]}
+_frames_two = dict(_FRAMES2)
+_frames_two["resolutions"] = pd.DataFrame(
+    [_signed, dict(_signed, Panel_ID="P_MONO")],
+    columns=BM.identity_resolution_columns())
+check("a duplicated Resolution_ID withholds every panel that uses it",
+      FIN.resolution_copy_failures(_same_id, _frames_two,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT", "P_MONO"}, "%s" % _probs)
+# And the same the other way round, so the verdict does not depend on which
+# panel the checker happens to reach first.
+_probs = []
+check("and the verdict does not depend on the order the panels come in",
+      FIN.resolution_copy_failures(dict(reversed(list(_same_id.items()))),
+                                   _frames_two,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT", "P_MONO"}, "%s" % _probs)
+# REVERT: compare the copy and the manifest as dicts keyed by Resolution_ID. A
+# repeated identifier then collapses to one entry on both sides and two rows
+# compare equal to one.
+_probs = []
+_frames_dup = dict(_FRAMES2)
+_frames_dup["resolutions"] = pd.DataFrame(
+    [_signed], columns=BM.identity_resolution_columns())
+check("a copy holding one row twice is not equal to a manifest holding it once",
+      FIN.resolution_copy_failures({"P_SHORT": [_signed, dict(_signed)]},
+                                   _frames_dup,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
+
+# THE COPY IS THE MANIFEST.
+#
+# identity_resolution.csv is verified against the run stamp and
+# identity__<Panel_ID>.csv against the artifact ledger, and nothing compared the
+# two - so the run copy could name a different reviewer, a different evidence
+# file or a different date, be internally valid, hash correctly, and leave
+# Resolution_ID pointing at two different rows.
+#
+# REVERT: drop the copy-versus-manifest comparison. The two below are the only
+# place it shows, because everything else about both files is valid.
+_probs = []
+check("the copy the reviewer reads is the manifest the run validated",
+      not FIN.resolution_copy_failures({"P_SHORT": [_signed]}, _FRAMES2,
+                                       lambda w, c, d: _probs.append(c))
+      and not _probs, "%s" % _probs)
+for _label, _edit in (("a different reviewer", dict(Reviewer_ID="RV_OTHER")),
+                      ("a different date", dict(Reviewed_At="2026-08-06")),
+                      ("a different note", dict(Note="something else")),
+                      ("a resolution the manifest does not have",
+                       dict(Resolution_ID="IR9"))):
+    _probs = []
+    check("a run copy with %s is refused" % _label,
+          FIN.resolution_copy_failures(
+              {"P_SHORT": [dict(_signed, **_edit)]}, _FRAMES2,
+              lambda w, c, d: _probs.append(c)) == {"P_SHORT"}
+          and "IDENTITY_RESOLUTION_COPY_MISMATCH" in _probs, "%s" % _probs)
+_probs = []
+check("and so is a panel whose resolutions were dropped from the copy",
+      FIN.resolution_copy_failures({"P_SHORT": []}, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
+# REVERT: walk `rows_by_panel` instead of the union. The panel above keeps an
+# empty list, so it still has a KEY and is still compared; this one has no key
+# at all, which is what a run made by a producer that never wrote the file
+# looks like - and it was compared against nothing.
+_probs = []
+check("a panel the manifest resolves and the run never copied is refused too",
+      FIN.resolution_copy_failures({}, _FRAMES2,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}, "%s" % _probs)
+_probs = []
+FIN.resolution_copy_failures({}, _FRAMES2, lambda w, c, d: _probs.append(d))
+check("and the message says the run copied none of them",
+      any("copied none of them" in d for d in _probs), "%s" % _probs)
+
+# REVERT: `if frames is not None: withheld |= resolution_copy_failures(...)`.
+# The helper refuses when it is handed no frames, and the caller then never
+# calls it - so the contract the helper states is not the contract that runs.
+_probs = []
+check("a copy check with no verified frames refuses rather than being skipped",
+      FIN.identity_contract_failures(_o2, _led, _machine2,
+                                     lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"} and "RUN_NOT_FINALIZABLE" in _probs, "%s" % _probs)
+
+# THE REGISTRY'S OWN PROBLEMS ARE NOT SWALLOWED.
+#
+# The index was built with a callback that threw every problem away, and
+# `check_reviewer_registry` indexes a row BEFORE it validates it - so an entry
+# with a malformed ORCID or a mismatched record type still counted as "a
+# registered HUMAN" for a resolution.
+#
+# REVERT: pass `lambda *a: None` again. The scenario below is the only place it
+# shows, because the resolution itself is valid and points at a row that exists.
+_probs = []
+_bad_reg = dict(_FRAMES2)
+_bad_reg["reviewers"] = _FRAMES2["reviewers"].copy()
+_bad_reg["reviewers"].loc[0, "Contact_Type"] = "ORCID"
+_bad_reg["reviewers"].loc[0, "Reviewer_Contact"] = "0000-0002-1825-0000"
+check("a registry the run's own checker rejects withholds the panels",
+      FIN.resolution_copy_failures({"P_SHORT": [_signed]}, _bad_reg,
+                                   lambda w, c, d: _probs.append(c))
+      == {"P_SHORT"}
+      and "REVIEW_IDENTITY_REVIEWER_INVALID" in _probs, "%s" % _probs)
+
+# REVERT: key the evidence by reference with an assignment rather than a list.
+# A second entry for one Resolution_ID then replaces the first, so which of two
+# files a panel was approved against depends on the ledger's ORDER.
+_probs = []
+_dupe = pd.concat([_led, _led[_led["Artifact_Type"] == "IDENTITY_EVIDENCE"]],
+                  ignore_index=True)
+check("two evidence copies for one resolution is refused, not resolved by order",
+      FIN.identity_contract_failures(
+          _o2, _dupe, _machine2, lambda w, c, d: _probs.append(c),
+          frames=_FRAMES2)
+      == {"P_SHORT"} and "REVIEW_EVIDENCE_MISSING" in _probs, "%s" % _probs)
+
+# A panel resolved only by a reviewer's own reading has no evidence file, and
+# must not be withheld for not having one - the whole reason this is a row-level
+# condition and not an artifact tuple.
+_ri = short_manifests(
+    os.path.join(ROOT, "m_short_ri"),
+    resolutions=[_resolution(Evidence_Type="REVIEWER_INSPECTION",
+                             Evidence_Artifact="",
+                             Evidence_Artifact_SHA256="",
+                             Note="the printed legend labels the open bar "
+                                  "Late post-flight")])
+_rio = os.path.join(ROOT, "o_short_ri")
+_ris = RB.run_batch(_ri, _rio, file_root=ROOT, run_date="2026-08-06")
+_riled = pd.read_csv(os.path.join(_rio, "panel_artifacts.csv"),
+                     dtype=object).fillna("")
+_probs = []
+check("a reviewer's own reading needs no evidence file and is not withheld",
+      _ris["status"] == "RAN"
+      and not FIN.identity_contract_failures(
+          _rio, _riled,
+          pd.read_csv(os.path.join(_rio, "figure_values_machine_qc.csv"),
+                      dtype=object).fillna(""),
+          lambda w, c, d: _probs.append(c), frames=RB.load_manifests(_ri))
+      and "IDENTITY_EVIDENCE" not in set(_riled["Artifact_Type"]),
+      "%s %s" % (_ris["status"], _probs))
+_riq = pd.read_csv(os.path.join(_rio, "review_queue.csv"),
+                   dtype=object).fillna("")
+check("and it is still the resolved review mode, still asked about the naming",
+      set(_riq[_riq["Panel_ID"] == "P_SHORT"]["Review_Mode"])
+      == {"BAR_MONO_GEOMETRY_RESOLVED"},
+      "%s" % _riq[["Panel_ID", "Review_Mode"]].to_dict("records"))
+# REVERT: allow an artifact on REVIEWER_INSPECTION. Validation hashed it and the
+# writer - which copies only FILE_EVIDENCE_TYPES - left it out of the run, so the
+# evidence was checked once and then not shipped.
+_ria = short_manifests(
+    os.path.join(ROOT, "m_short_ria"),
+    resolutions=[_resolution(Evidence_Type="REVIEWER_INSPECTION",
+                             Note="I read the legend")])
+_riao = os.path.join(ROOT, "o_short_ria")
+_rias = RB.run_batch(_ria, _riao, file_root=ROOT, run_date="2026-08-06")
+_riacodes = set(pd.read_csv(os.path.join(_riao, "manifest_problems.csv"),
+                            dtype=object).fillna("")["check"]) \
+    if _rias["status"] == "MANIFEST_REJECTED" else set()
+check("a reviewer's own reading may not carry a file it never ships",
+      _rias["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_EVIDENCE_NOT_A_FILE" in _riacodes,
+      "%s %s" % (_rias["status"], sorted(_riacodes)))
+
+# The copy is verified after it is made, so the two ways it can be wrong are
+# refusals of the review bundle rather than a ledger entry nobody can trust.
+# Both need --no-file-check, because with file checking on the manifest
+# validator catches them first - which is the point: this is the second line.
+# A real file outside the corpus, so the copy would otherwise succeed. The
+# validator's confinement rule sits behind `check_files`, and skipping a CONTENT
+# hash when file checking is off is a defensible choice while letting a path
+# escape the corpus is not - so the writer, which is the code that actually opens
+# the file, enforces it again.
+#
+# REVERT: drop the realpath confinement from `write_identity_resolutions`. With
+# --no-file-check any absolute path on the machine can be copied into the run and
+# registered as evidence.
+_OUTSIDE = os.path.join(tempfile.gettempdir(), "fdt_outside_evidence.png")
+Image.open(LEGEND_IMG).save(_OUTSIDE)
+for _label, _kw, _fix in (
+        ("evidence that is not there to copy",
+         dict(Evidence_Artifact="gone_before_the_copy.png"), "copied"),
+        ("evidence whose bytes do not match the resolution",
+         dict(Evidence_Artifact_SHA256="b" * 64), "reproduced"),
+        ("evidence from outside the corpus, with file checks off",
+         dict(Evidence_Artifact=_OUTSIDE,
+              Evidence_Artifact_SHA256=MR.sha256_of(_OUTSIDE)),
+         "IDENTITY_EVIDENCE_OUTSIDE_ROOT")):
+    _bad = short_manifests(os.path.join(ROOT, "m_ev_%s" % _fix.lower()),
+                           resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_ev_%s" % _fix.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06",
+                       check_files=False)
+    check("%s refuses the whole review bundle" % _label,
+          _bs["status"] == "GEOMETRY_REVIEW_FAILED"
+          and _fix in _bs.get("detail", ""),
+          "%s %r" % (_bs["status"], _bs.get("detail")))
+    check("  and leaves nothing to review or to pool",
+          sorted(os.listdir(_bo)) == ["run_stamp.json"],
+          "%s" % sorted(os.listdir(_bo)))
+check("only evidence that IS a file is copied; a reviewer's own reading is not",
+      BM.FILE_EVIDENCE_TYPES == ("LEGEND_DECLARED", "TEXT_DECLARED")
+      and "REVIEWER_INSPECTION" not in BM.FILE_EVIDENCE_TYPES
+      and set(BM.FILE_EVIDENCE_TYPES) < set(BM.HUMAN_IDENTITY_EVIDENCE),
+      "%s" % (BM.FILE_EVIDENCE_TYPES,))
+
+# Three more ways a resolution can be wrong, each found where it can be found.
+for _label, _kw, _code, _rows in (
+        # An auto identity and a human one naming the same series in one group.
+        # Neither row breaks a rule alone - the human's target really was
+        # unnamed - and the pair puts two values in one cell, which used to
+        # surface much later as a duplicate factorial cell: fail-closed, but
+        # blaming the grid for something the identities did.
+        ("a human identity that collides with a measured one",
+         dict(Resolved_Series_ID="S_SOLID", Resolved_Fill_Pattern="SOLID"),
+         "IDENTITY_RESOLUTION_CONFLICTS_WITH_MEASUREMENT", "run"),
+        # The registry and the final approval already refuse a future date. A
+        # reading that has not happened is not a reading.
+        ("a reading dated in the future",
+         dict(Reviewed_At="2099-01-01"), "BAD_REVIEWED_AT", "manifest"),
+        # Half a declaration: a path with no hash is an unverifiable file, a
+        # hash with no path is a claim about nothing.
+        ("evidence declared by half",
+         dict(Evidence_Type="REVIEWER_INSPECTION", Evidence_Artifact_SHA256="",
+              Note="the legend labels it Late post-flight"),
+         "IDENTITY_EVIDENCE_HALF_DECLARED", "manifest")):
+    _bad = short_manifests(os.path.join(ROOT, "m_x_%s" % _code.lower()),
+                           resolutions=[_resolution(**_kw)])
+    _bo = os.path.join(ROOT, "o_x_%s" % _code.lower())
+    _bs = RB.run_batch(_bad, _bo, file_root=ROOT, run_date="2026-08-06")
+    if _rows == "manifest":
+        _codes = set(pd.read_csv(os.path.join(_bo, "manifest_problems.csv"),
+                                 dtype=object).fillna("")["check"]) \
+            if _bs["status"] == "MANIFEST_REJECTED" else set()
+        check("%s is refused before any raster is opened" % _label,
+              _bs["status"] == "MANIFEST_REJECTED" and _code in _codes,
+              "%s %s" % (_bs["status"], sorted(_codes)))
+    else:
+        _br = pd.read_csv(os.path.join(_bo, "run_manifest.csv"),
+                          dtype=object).fillna("")
+        _brow = _br[_br["Panel_ID"] == "P_SHORT"]
+        check("%s refuses the panel, naming the collision" % _label,
+              len(_brow)
+              and _brow.iloc[0]["Run_State"] == "SERIES_IDENTITY_UNRESOLVED"
+              and _code in _brow.iloc[0]["Detail"],
+              "%s" % (list(zip(_brow["Run_State"], _brow["Detail"]))
+                      if len(_brow) else "no row"))
+
+# WHICH PANELS SHARE A PRINTED LEGEND is its own declaration.
+#
+# `Figure_ID` was doing this job by accident - it is a provenance view, and
+# `fill_identities_by_figure` groups by it. On publication 127 the three
+# sub-panels of Figure 4 share one legend; giving each its own view left the
+# middle panel with one complete group where prototypes need two, and a bar
+# whose fill WAS measured came out unnamed. The reverse is worse: two panels
+# with different legends under one view would calibrate each other's fills.
+#
+# REVERT: read `Figure_ID` in `measure_bar_mono_figures` again. The first
+# scenario below still passes - the domain defaults to the view - and the
+# second stops separating panels that must not calibrate each other.
+print()
+print("a printed legend covers the panels that say it does")
+check("the domain reaches the reader, and defaults to the figure view",
+      "Identity_Domain_ID" in BM.panel_manifest_columns()
+      and pd.read_csv(os.path.join(_mm, "panel_manifest.csv"),
+                      dtype=object).fillna("")
+      .set_index("Panel_ID")["Identity_Domain_ID"]["P_MONO"] == "F_MONO",
+      "%s" % pd.read_csv(os.path.join(_mm, "panel_manifest.csv"),
+                         dtype=object).fillna("")[
+                             ["Panel_ID", "Figure_ID", "Identity_Domain_ID"]]
+      .to_dict("records"))
+_geo_rows = pd.read_csv(os.path.join(_mo, "mono_bar_geometry.csv"),
+                        dtype=object).fillna("")
+check("and the geometry rows are grouped by the domain, not by the panel",
+      set(_geo_rows["Figure_ID"]) == {"F_MONO"},
+      "%s" % sorted(set(_geo_rows["Figure_ID"])))
+# Two panels of one domain that print different things for one fill: the
+# calibration set disagreeing with itself.
+_conflict = short_manifests(
+    os.path.join(ROOT, "m_domainconflict"),
+    series_rows=SERIES + _mono_series + [
+        dict(r, Factor_Level=("EARLY" if _MONO_ARMS[f] == "PRE" else "PRE"))
+        for f, r in zip(_MONO_FILLS, _short_series)],
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO",
+                          Image_Path=MONO_IMG)])
+_co = os.path.join(ROOT, "o_domainconflict")
+_cs = RB.run_batch(_conflict, _co, file_root=ROOT, run_date="2026-08-06")
+_ccodes = set(pd.read_csv(os.path.join(_co, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _cs["status"] == "MANIFEST_REJECTED" else set()
+check("one fill meaning two things inside a domain is refused",
+      _cs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_FILL_CONFLICT" in _ccodes,
+      "%s %s" % (_cs["status"], sorted(_ccodes)))
+_spans = short_manifests(
+    os.path.join(ROOT, "m_domainspans"),
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO")])
+_so = os.path.join(ROOT, "o_domainspans")
+_ss2 = RB.run_batch(_spans, _so, file_root=ROOT, run_date="2026-08-06")
+_scodes = set(pd.read_csv(os.path.join(_so, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _ss2["status"] == "MANIFEST_REJECTED" else set()
+check("and a domain that spans two rasters is refused",
+      _ss2["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_SPANS_RASTERS" in _scodes,
+      "%s %s" % (_ss2["status"], sorted(_scodes)))
+_nodomain = short_manifests(
+    os.path.join(ROOT, "m_nodomain"),
+    panels=PANELS + [_mono_panel, dict(_short_panel, Identity_Domain_ID="")])
+_no = os.path.join(ROOT, "o_nodomain")
+_ns = RB.run_batch(_nodomain, _no, file_root=ROOT, run_date="2026-08-06")
+_ncodes = set(pd.read_csv(os.path.join(_no, "manifest_problems.csv"),
+                          dtype=object).fillna("")["check"]) \
+    if _ns["status"] == "MANIFEST_REJECTED" else set()
+check("a BAR_MONO panel that names no domain is refused",
+      _ns["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_MISSING" in _ncodes,
+      "%s %s" % (_ns["status"], sorted(_ncodes)))
+# And a colour panel is not asked for one: its series is told apart by
+# something printed on the mark itself, so nothing about it calibrates against
+# a neighbour.
+_colour_blank = short_manifests(
+    os.path.join(ROOT, "m_colournodomain"),
+    panels=[dict(p, Identity_Domain_ID="") if p["Mark_Type"] != "BAR_MONO"
+            else p for p in PANELS + [_mono_panel, _short_panel]])
+_cbs = RB.run_batch(_colour_blank, os.path.join(ROOT, "o_colournodomain"),
+                    file_root=ROOT, run_date="2026-08-06")
+check("and a colour panel is not asked - its series is not a fill",
+      _cbs["status"] == "RAN", "%s" % _cbs)
+
+# The scenario that makes the domain more than a rename: TWO views, ONE legend.
+#
+# The short raster's four groups are split into two panels with their own units
+# and their own figure views. The left panel holds two complete groups; the
+# right holds one complete group and the group with the two fifteen-pixel bars.
+# Prototypes need two complete groups, so the right panel ALONE cannot name the
+# one stippled bar it did sample - and with the two panels in one domain, the
+# figure can.
+#
+# REVERT: group by `Figure_ID` in `measure_bar_mono_figures`. The left panel is
+# unaffected and the right panel loses a cell.
+_HALF = {"LEFT": dict(box=[90, 400, 40, 430], groups=("T0", "T1")),
+         "RIGHT": dict(box=[400, 720, 40, 430], groups=("T2", "T3"))}
+_half_panels, _half_units, _half_series, _half_positions = [], [], [], []
+_half_figures, _half_source_figures, _half_source_panels = [], [], []
+for _side, _spec in _HALF.items():
+    _pid, _uid, _fid = "P_%s" % _side, "U_%s" % _side, "F_%s" % _side
+    _half_panels.append(panel(
+        _pid, _uid, "BAR_MONO", SHORT_IMG, _spec["box"], Figure_ID=_fid,
+        # One printed legend over both halves, and it is said out loud.
+        Identity_Domain_ID="F_SHORT_LEGEND", Source_Panel_ID=_pid,
+        Config_ID="", Axis_Y_Ticks=";".join("%g:%g" % (v, p)
+                                            for v, p in _gt["y_ticks"])))
+    _half_units.append(dict(_short_unit, Unit_ID=_uid, Figure_ID=_fid,
+                            Panel_ID=_pid, Source_Panel_ID=_pid,
+                            Panel=_side, Grid_ID="G_%s" % _side))
+    _half_series += [series(_pid, "S_%s" % f, _MONO_ARMS[f], Bar_Fill_Pattern=f)
+                     for f in _MONO_FILLS]
+    _half_positions += [
+        dict(Panel_ID=_pid, Position_ID=q, X_Pixel=x, Slot_Index=i,
+             Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+             Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+        for i, (q, x) in enumerate(zip(_gt["groups"], _gt["group_x"]))
+        if q in _spec["groups"]]
+    _half_figures.append(dict(_short_figure, Figure_ID=_fid,
+                              Figure_Number="FIG6%s" % _side[0]))
+    # ONE source figure for both halves, because that is what "one printed
+    # legend" means physically: two views and two panels of a single printed
+    # figure. The domain is bound to the source figure, so declaring two here
+    # would be declaring two legends - a scenario below does exactly that and
+    # is refused.
+    _half_source_panels.append(dict(_short_source_panel, Source_Panel_ID=_pid,
+                                    Source_Figure_ID="SF_HALF",
+                                    Panel_Label=_pid))
+_half_source_figures.append(dict(_short_source_figure,
+                                 Source_Figure_ID="SF_HALF",
+                                 Figure_Number="FIG6", Observed_Panel_Count=2))
+_half_grids = _mono_grids + [
+    dict(Grid_ID="G_%s" % side, Factor_Name=f, Factor_Level=lv, Level_Order=i,
+         Note="")
+    for side, spec in _HALF.items()
+    for f, levels in (("ARM", ("PRE", "EARLY", "LATE")),
+                      ("TIMEPOINT", spec["groups"]))
+    for i, lv in enumerate(levels)]
+_hm = write_manifests(
+    os.path.join(ROOT, "m_halves"), panels=PANELS + _half_panels,
+    series_rows=SERIES + _half_series, positions=POSITION_ROWS + _half_positions,
+    units=UNITS + _half_units, figures=FIGURES + _half_figures,
+    grids=_half_grids, source_figures=SOURCE_FIGURES + _half_source_figures,
+    source_panels=SOURCE_PANELS + _half_source_panels,
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+# REVERT: bound the domain by `Image_Path` again. The corpus renders a whole
+# page at 600 DPI, so figure 3 and figure 4 arrive as one PNG: two printed
+# legends under one domain then calibrate each other's fills and the raster
+# comparison has nothing to say, because there is only one raster.
+_twofig = write_manifests(
+    os.path.join(ROOT, "m_twofigures"), panels=PANELS + _half_panels,
+    series_rows=SERIES + _half_series, positions=POSITION_ROWS + _half_positions,
+    units=UNITS + _half_units, figures=FIGURES + _half_figures,
+    grids=_half_grids,
+    source_figures=SOURCE_FIGURES + [
+        dict(_short_source_figure, Source_Figure_ID="SF_%s" % side,
+             Figure_Number="FIG6%s" % side[0], Observed_Panel_Count=1)
+        for side in _HALF],
+    source_panels=SOURCE_PANELS + [
+        dict(_short_source_panel, Source_Panel_ID="P_%s" % side,
+             Source_Figure_ID="SF_%s" % side, Panel_Label="P_%s" % side)
+        for side in _HALF],
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=6)])
+_tfs = RB.run_batch(_twofig, os.path.join(ROOT, "o_twofigures"),
+                    file_root=ROOT, run_date="2026-08-06")
+_tfcodes = set(pd.read_csv(os.path.join(ROOT, "o_twofigures",
+                                        "manifest_problems.csv"),
+                           dtype=object).fillna("")["check"]) \
+    if _tfs["status"] == "MANIFEST_REJECTED" else set()
+check("one domain over two SOURCE FIGURES is refused, one raster or not",
+      _tfs["status"] == "MANIFEST_REJECTED"
+      and "IDENTITY_DOMAIN_SPANS_SOURCE_FIGURES" in _tfcodes,
+      "%s %s" % (_tfs["status"], sorted(_tfcodes)))
+check("and it is not the raster rule doing it - both halves read one PNG",
+      "IDENTITY_DOMAIN_SPANS_RASTERS" not in _tfcodes, "%s" % sorted(_tfcodes))
+
+# REVERT: compare `Factor_Level` alone in the domain's fill map. Two panels can
+# then give one fill two different CELLS - TIMEPOINT:PRE here, ARM:PRE there -
+# and pass, because both level strings read "PRE".
+_samelevel = short_manifests(
+    os.path.join(ROOT, "m_domainfactor"),
+    series_rows=SERIES + _mono_series + [
+        dict(r, Factor_Name="PHASE") for r in _short_series],
+    panels=PANELS + [_mono_panel,
+                     dict(_short_panel, Identity_Domain_ID="F_MONO",
+                          Image_Path=MONO_IMG)])
+_slo = os.path.join(ROOT, "o_domainfactor")
+_sls = RB.run_batch(_samelevel, _slo, file_root=ROOT, run_date="2026-08-06")
+_slcodes = set(pd.read_csv(os.path.join(_slo, "manifest_problems.csv"),
+                           dtype=object).fillna("")["check"]) \
+    if _sls["status"] == "MANIFEST_REJECTED" else set()
+_sldetail = " ".join(
+    pd.read_csv(os.path.join(_slo, "manifest_problems.csv"),
+                dtype=object).fillna("")["detail"]) \
+    if _sls["status"] == "MANIFEST_REJECTED" else ""
+check("one fill standing for two FACTORS at the same level is refused",
+      "IDENTITY_DOMAIN_FILL_CONFLICT" in _slcodes, "%s" % sorted(_slcodes))
+check("and the message names the factor, not only the level",
+      "PHASE=" in _sldetail and "ARM=" in _sldetail, _sldetail[:200])
+
+_ho = os.path.join(ROOT, "o_halves")
+_hs = RB.run_batch(_hm, _ho, file_root=ROOT, run_date="2026-08-06")
+_hr = pd.read_csv(os.path.join(_ho, "run_manifest.csv"), dtype=object).fillna("")
+_hcells = dict(zip(_hr["Panel_ID"], _hr["Cells_Read"]))
+check("the batch of two half panels runs", _hs["status"] == "RAN", "%s" % _hs)
+check("the left half reads all six of its cells",
+      _hcells.get("P_LEFT") == "6", "%s" % _hcells)
+# Five of six: the short bar of T3 has no fill to sample and no resolution
+# here, and the other five are named - including the two of T3's partial group,
+# which only the left half's prototypes can name.
+check("and the right half is named by the OTHER half's prototypes",
+      _hcells.get("P_RIGHT") == "5", "%s" % _hcells)
+_hg = pd.read_csv(os.path.join(_ho, "mono_bar_geometry.csv"),
+                  dtype=object).fillna("")
+_hpm = pd.read_csv(os.path.join(_hm, "panel_manifest.csv"),
+                   dtype=object).fillna("")
+_hgh = _hg[_hg["Panel_ID"].isin(["P_LEFT", "P_RIGHT"])]
+check("because both halves measured into one identity domain",
+      set(_hgh["Identity_Domain_ID"]) == {"F_SHORT_LEGEND"},
+      "%s" % sorted(set(_hgh["Identity_Domain_ID"])))
+# REVERT: hand the reader one identifier again. `Figure_ID` in the durable
+# artifact then holds the DOMAIN the moment two views share a legend - which is
+# this row exactly - so the geometry file loses the provenance view, disagrees
+# with the panel manifest under a column of the same name, and
+# `Domain_Identity_SHA256` is a domain verdict wearing a figure's name.
+check("and the artifact still says which VIEW each panel is of",
+      set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"]))
+      == {("P_LEFT", "F_LEFT"), ("P_RIGHT", "F_RIGHT")},
+      "%s" % sorted(set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"]))))
+check("so the two columns are not the same column",
+      set(_hgh["Figure_ID"]) != set(_hgh["Identity_Domain_ID"]),
+      "%s" % sorted(set(_hgh["Figure_ID"])))
+check("and both agree with the panel manifest they came from",
+      all((r["Figure_ID"], r["Identity_Domain_ID"])
+          == tuple(_hpm.loc[_hpm["Panel_ID"] == r["Panel_ID"],
+                            ["Figure_ID", "Identity_Domain_ID"]].iloc[0])
+          for _, r in _hgh.iterrows()),
+      "%s" % sorted(set(zip(_hgh["Panel_ID"], _hgh["Figure_ID"],
+                            _hgh["Identity_Domain_ID"]))))
+
+# REVERT: drop the two identifier comparisons from the geometry foreign key.
+# The artifact is where a reviewer and the finalizer look up which figure a
+# measurement belongs to and which panels calibrated each other's fills; a
+# geometry row that names a different view or a different domain from the panel
+# manifest answers both questions wrongly while every hash still recomputes.
+_fk_geo = RB.geometry_index_from_run(_ho)
+_fk_key = next(k for k in _fk_geo if k[0] == "P_LEFT")
+check("the geometry index carries both identifiers, not one",
+      (_fk_geo[_fk_key][0]["Figure_ID"],
+       _fk_geo[_fk_key][0]["Identity_Domain_ID"])
+      == ("F_LEFT", "F_SHORT_LEGEND"), "%s" % _fk_geo[_fk_key][0])
+for _field, _wrong, _label in (("Figure_ID", "F_RIGHT", "figure view"),
+                               ("Identity_Domain_ID", "F_OTHER_LEGEND",
+                                "identity domain")):
+    _bent = {k: [dict(r, **{_field: _wrong}) if k == _fk_key else dict(r)
+                 for r in v] for k, v in _fk_geo.items()}
+    _vrows = [r for r in pd.read_csv(
+        os.path.join(_ho, "figure_values_raw.csv"), dtype=object).fillna("")
+        .to_dict("records") if str(r.get("Run_Panel_ID", "")).strip() == "P_LEFT"]
+    _fkp = RB.identity_provenance_problems(
+        _vrows, {p["Panel_ID"]: dict(Mark_Type=p["Mark_Type"],
+                                     Unit_ID=p["Unit_ID"],
+                                     Source_Panel_ID=p["Source_Panel_ID"],
+                                     Figure_ID=p["Figure_ID"],
+                                     Identity_Domain_ID=p["Identity_Domain_ID"])
+                for p in _hpm.to_dict("records")},
+        geometry=_bent)
+    check("a geometry row whose %s is not the panel's is refused" % _label,
+          any(c == "IDENTITY_GEOMETRY_ROW_MISMATCH" and _label in d
+              for _w, c, d in _fkp), "%s" % _fkp[:2])
+_clean = RB.identity_provenance_problems(
+    [r for r in pd.read_csv(os.path.join(_ho, "figure_values_raw.csv"),
+                            dtype=object).fillna("").to_dict("records")
+     if str(r.get("Run_Panel_ID", "")).strip() == "P_LEFT"],
+    {p["Panel_ID"]: dict(Mark_Type=p["Mark_Type"], Unit_ID=p["Unit_ID"],
+                         Source_Panel_ID=p["Source_Panel_ID"],
+                         Figure_ID=p["Figure_ID"],
+                         Identity_Domain_ID=p["Identity_Domain_ID"])
+     for p in _hpm.to_dict("records")}, geometry=_fk_geo)
+check("and the run's own rows pass the same comparison",
+      not [p for p in _clean if p[1] == "IDENTITY_GEOMETRY_ROW_MISMATCH"],
+      "%s" % _clean[:2])
+
+check("the identity vocabulary has one definition, in the layer both can see",
+      BM.AUTO_IDENTITY_EVIDENCE is K.FIG_AUTO_IDENTITY_EVIDENCE
+      and BM.HUMAN_IDENTITY_EVIDENCE is K.FIG_HUMAN_IDENTITY_EVIDENCE
+      and BM.IDENTITY_EVIDENCE_RANK is K.FIG_IDENTITY_EVIDENCE_RANK,
+      "%s" % (BM.IDENTITY_EVIDENCE,))
+check("and only BAR_MONO's own facts are in the identity half of MARK_CARRIED",
+      set(dict(MR.IDENTITY_CARRIED)) == {
+          "Geometry_Row_SHA256", "Auto_Fill_Pattern", "Resolved_Fill_Pattern",
+          "Identity_Source", "Identity_Evidence_Type", "Resolution_ID"}
+      and not set(dict(MR.MARK_CARRIED)) & set(dict(MR.IDENTITY_CARRIED)),
+      "%s" % sorted(dict(MR.IDENTITY_CARRIED)))
+check("and every one of them has a column in the values file",
+      all(c in GE.fig_values_columns()
+          for _src, c in MR.MARK_CARRIED + MR.IDENTITY_CARRIED),
+      "%s" % [c for _s_, c in MR.MARK_CARRIED + MR.IDENTITY_CARRIED
+              if c not in GE.fig_values_columns()])
+
+
+print("the option table is checked against the readers it configures")
+# Declaring that an option "applies to" a mark type is a promise about a
+# function signature. `n_slots` was declared for BAR_MONO, whose reader has no
+# such parameter: the manifest validated, the run raised TypeError, and the
+# runner reported PANEL_GEOMETRY_UNRESOLVED - a message about the figure for a
+# defect in a table. Introspection closes the class, not the instance.
+import inspect  # noqa: E402
+
+_readers = RB.reader_functions()
+check("every batch mark type has a reader function to introspect",
+      set(_readers) == set(BM.BATCH_MARK_TYPES),
+      "%s" % sorted(set(_readers) ^ set(BM.BATCH_MARK_TYPES)))
+_mismatch = []
+for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items()):
+    if _keyword is None:
+        continue                    # consumed by the runner, not by a reader
+    for _mark in _applies:
+        if _keyword not in inspect.signature(_readers[_mark]).parameters:
+            _mismatch.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
+check("every reader option names a parameter its reader actually accepts",
+      not _mismatch, "; ".join(_mismatch))
+
+# The same promise, made to the reader that has not been wired in yet. Checking
+# it only at the switchover means finding out then that `threshold`,
+# `stem_threshold` and `min_bar_px` are declared for BAR_MONO and not accepted
+# by `read_monochrome_bar_geometry` - and the tempting fix at that point is to
+# filter the options down to the ones it takes, which turns three settings a
+# person wrote in a manifest into three settings nobody applies.
+#
+# REVERT: delete SUCCESSOR_READERS and this block. Every other scenario passes,
+# because the successor is not called by anything yet.
+_ahead = []
+for _opt, (_parse, _applies, _keyword, _check) in sorted(BM.READER_OPTIONS.items()):
+    if _keyword is None:
+        continue
+    for _mark in _applies:
+        _next = RB.SUCCESSOR_READERS.get(_mark)
+        if _next is not None and _keyword not in inspect.signature(_next).parameters:
+            _ahead.append("%s -> %s(%s)" % (_opt, _mark, _keyword))
+check("and so does the reader that is going to replace it",
+      not _ahead, "; ".join(_ahead))
+# SUCCESSOR_READERS is empty now: the reader it held IS the BAR_MONO reader.
+# It stays because the next reader built before it can be wired goes there and
+# gets its option contract checked several commits before the switchover
+# instead of at it.
+check("BAR_MONO dispatches to the geometry reader, and it takes all five options",
+      RB.reader_functions()["BAR_MONO"] is MR.read_monochrome_bar_geometry
+      and not RB.SUCCESSOR_READERS
+      and {"threshold", "stem_threshold", "group_window", "min_bar_px",
+           "baseline_value"} <= set(inspect.signature(
+               RB.reader_functions()["BAR_MONO"]).parameters),
+      repr(sorted(inspect.signature(
+          RB.reader_functions()["BAR_MONO"]).parameters)))
+# And it does not take them as decoration: the two ink thresholds have to reach
+# the measurement, or a manifest could set them and read the same numbers.
+with open(os.path.join(HERE, "mono_bar_fixture_truth.json"), encoding="utf-8") as _fh:
+    _MONO_TRUTH = json.load(_fh)
+_probe_kw = dict(image=Image.open(os.path.join(HERE, "mono_bar_fixture.png")),
+                 panel_box=tuple(_MONO_TRUTH["panel_box"]),
+                 x_positions=dict(zip(_MONO_TRUTH["groups"],
+                                      _MONO_TRUTH["group_x"])),
+                 y_calibration=MR.AxisCalibration.from_points(
+                     [(v, p) for v, p in _MONO_TRUTH["y_ticks"]]),
+                 fills=_MONO_TRUTH["patterns"], group_window=60,
+                 panel_id="P", identity_domain_id="F")
+_at_128 = MR.read_monochrome_bar_geometry(**_probe_kw)
+_at_0 = MR.read_monochrome_bar_geometry(threshold=0, **_probe_kw)
+check("threshold reaches the measurement rather than sitting in the signature",
+      len(_at_128) == 12
+      and [r.get("error") for r in _at_0] == ["STROKE_SCALE_UNRESOLVED"],
+      "%r against %d rows" % ([r.get("error") for r in _at_0], len(_at_128)))
+# This fixture is pure black on pure white, so any threshold between the two
+# reads the same figure - which is why the scenario that shows the threshold
+# reaching the CAP classification, and stem_threshold with it, is drawn in grey
+# in `test_measure_mono_bars`. Here the point is only that the option is not
+# accepted and dropped.
+_wide = MR.read_monochrome_bar_geometry(min_bar_px=400, **_probe_kw)
+_narrow = [r for r in _wide if r.get("error") == "BAR_TOO_NARROW"]
+check("min_bar_px refuses the bars it excludes and names them",
+      len(_narrow) == 12 and all(r.get("footprint_width") for r in _narrow),
+      repr([(r.get("slot"), r.get("error"), r.get("footprint_width"))
+            for r in _wide][:4]))
+# REVERT: `continue` on a bar that fails the width gate, which is what the old
+# reader did with the group-level form of this option. The panel comes back with
+# fewer records than it declared and nothing says why - the failure NO_SEED_
+# SUPPORT exists to close, re-entering through a config file.
+check("and the panel still reports every bar it declared",
+      len([r for r in _wide if r.get("slot") is not None]) == 12,
+      "%d rows" % len([r for r in _wide if r.get("slot") is not None]))
+check("slot_tolerance_px is offered to BAR_COLOR only",
+      BM.READER_OPTIONS["slot_tolerance_px"][1] == ("BAR_COLOR",),
+      "%s" % (BM.READER_OPTIONS["slot_tolerance_px"][1],))
+check("n_slots is gone - a reader does not reconstruct its own x spacing",
+      "n_slots" not in BM.READER_OPTIONS
+      and all("n_slots" not in inspect.signature(f).parameters
+              for f in _readers.values()),
+      "%s" % sorted(BM.READER_OPTIONS))
+check("every positional reader takes the declared x pixels",
+      all("x_positions" in inspect.signature(_readers[m]).parameters
+          for m in BM.POSITIONAL_MARK_TYPES),
+      "%s" % [m for m in BM.POSITIONAL_MARK_TYPES
+              if "x_positions" not in inspect.signature(_readers[m]).parameters])
+check("every option has a range check, not just a parser",
+      all(callable(v[3]) for v in BM.READER_OPTIONS.values()))
+# The two tables must never both claim a mark type: one says "this runs" and
+# the other says "this does not", and a name in both means the answer depends
+# on which check the code reaches first.
+check("no mark type is both released and unreleased",
+      not (set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)),
+      "%s" % sorted(set(BM.UNRELEASED_MARK_TYPES) & set(BM.BATCH_MARK_TYPES)))
+check("and the two modules agree on what is released",
+      set(BM.BATCH_MARK_TYPES) == set(MR.MARK_TYPES),
+      "%s" % sorted(set(BM.BATCH_MARK_TYPES) ^ set(MR.MARK_TYPES)))
+
+
+print("a scatter whose marks do not add up to the declared sample is not computed")
+# An association is a function of a point set. If the reader's point set is not
+# the study's point set, the r it produces is not the study's r - and the run
+# used to publish it anyway, with `N_Pairs` set to however many contours had
+# survived the area filter, which agrees with itself by construction.
+for _label, _n, _agreement in (("more subjects than marks", 14, "FEWER_DETECTED"),
+                               ("fewer subjects than marks", 7, "MORE_DETECTED")):
+    _cdir = os.path.join(ROOT, "count_%d" % _n)
+    _cmd = write_manifests(os.path.join(_cdir, "manifests"),
+                           units=edited(UNITS, {"Unit_ID": "U_SCAT"}, N_Outcome=_n))
+    _csum = RB.run_batch(_cmd, os.path.join(_cdir, "out"), file_root=ROOT,
+                         run_date="2026-08-06")
+    _crun = pd.read_csv(os.path.join(_cdir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _cvals = pd.read_csv(os.path.join(_cdir, "out", "figure_values_raw.csv"),
+                         dtype=object).fillna("")
+    _crow = _crun[_crun["Panel_ID"] == "P_SCAT"].iloc[0]
+    check("%s sends the panel to a person, not to the values file" % _label,
+          _crow["Run_State"] == "MANUAL_POINT_READ"
+          and not len(_cvals[_cvals["Unit_ID"] == "U_SCAT"]),
+          "%s / %d rows" % (_crow["Run_State"],
+                            len(_cvals[_cvals["Unit_ID"] == "U_SCAT"])))
+    check("and says which two numbers disagree (%s)" % _label,
+          "n=%d" % _n in _crow["Detail"] and "%d distinct" % len(SCATTER_XY)
+          in _crow["Detail"], "%s" % _crow["Detail"])
+    # The validator must be able to reach the same verdict from the file alone,
+    # because a hand-edited values file never went through the runner.
+    _forced = dict(Unit_ID="U_SCAT", Cell_Key="ARM=SINGLE",
+                   Association_Type="PEARSON_R", Association_Value=0.9,
+                   P_Value=0.01, P_Value_Method="PEARSON_T_TEST", N_Pairs=10,
+                   P_Value_Extraction_Method="DIGITIZED", Ties_Present="FALSE",
+                   Point_Data_Reference="points.json",
+                   Expected_N_From_Source=_n, Detected_Unique_Point_Count=10,
+                   Point_Count_Agreement=_agreement,
+                   Overplotting_Possible="TRUE", Series_Mask_Overlap_Count=0)
+    _cp = GE.fig_validate_bundle(
+        fr(FIGURES, GE.fig_figure_columns()), fr(GRIDS, GE.fig_grid_columns()),
+        fr([u for u in UNITS if u["Unit_ID"] == "U_SCAT"], GE.fig_unit_columns()),
+        fr([_forced], GE.fig_values_columns()), kernel=K)
+    check("the gate reaches the same verdict from the file alone (%s)" % _label,
+          "POINT_COUNT_DISAGREES_WITH_SOURCE" in set(_cp["check"]),
+          "%s" % sorted(set(_cp["check"])))
+
+
+print("a queued panel has something a person can actually open")
+# The protocol says: open review/<Panel_ID>_overlay.png for every row of the
+# review queue and approve only if each mark sits where a reader would put it.
+# `_scatter_outcome` was never passed a review directory, so a scatter reached
+# the queue with Overlay_File="" and no OVERLAY artifact - and that instruction
+# pointed at nothing. The overlay code has handled point_px_x/point_px_y all
+# along; nobody called it.
+_rq = pd.read_csv(os.path.join(ODIR, "review_queue.csv"), dtype=object).fillna("")
+_art = pd.read_csv(os.path.join(ODIR, "panel_artifacts.csv"), dtype=object).fillna("")
+_by_panel = {}
+for _, _a in _art.iterrows():
+    _by_panel.setdefault(_a["Panel_ID"], set()).add(_a["Artifact_Type"])
+check("the scatter panel reached the review queue",
+      "P_SCAT" in set(_rq["Panel_ID"]), "%s" % sorted(set(_rq["Panel_ID"])))
+check("and it has an overlay, like every other queued panel",
+      all(r["Overlay_File"]
+          and os.path.exists(RB.resolve_artifact(ODIR, r["Overlay_File"]) or "")
+          for _, r in _rq.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Overlay_File"]) for _, r in _rq.iterrows()])
+check("named relative to the run, so the queue survives being moved",
+      not any(os.path.isabs(r["Overlay_File"]) or os.path.isabs(r["WPD_Project_File"])
+              for _, r in _rq.iterrows()),
+      "%s" % [(r["Overlay_File"], r["WPD_Project_File"]) for _, r in _rq.iterrows()])
+check("the overlay is in the ledger too, so tampering with it is caught",
+      all("OVERLAY" in _by_panel.get(p, set()) for p in _rq["Panel_ID"]),
+      "%s" % {p: sorted(_by_panel.get(p, ())) for p in _rq["Panel_ID"]})
+_scat_overlay = os.path.join(ODIR, "review", "P_SCAT_overlay.png")
+check("and the scatter's overlay is a real image of its panel",
+      os.path.exists(_scat_overlay)
+      and Image.open(_scat_overlay).size[0] > 100,
+      "%s" % sorted(os.listdir(os.path.join(ODIR, "review"))))
+# Every queued panel declares HOW it can be reviewed, and the artifact it names
+# must be one the run actually produced.
+check("every queued panel declares its review mode",
+      set(_rq["Review_Mode"]) <= set(RB.REVIEW_MODES) and len(set(_rq["Review_Mode"])),
+      "%s" % sorted(set(_rq["Review_Mode"])))
+check("and the mode it declares is backed by a ledger artifact",
+      all(set(RB.REVIEW_MODES[r["Review_Mode"]])
+          <= _by_panel.get(r["Panel_ID"], set())
+          for _, r in _rq.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Review_Mode"]) for _, r in _rq.iterrows()])
+
+
+print("two colours that cannot be told apart do not name two series")
+# v7.69. A colour reader builds one mask per series and reads each on its own.
+# Declare two colours closer than the sum of their tolerances and one printed
+# mark falls in both masks - the grid then comes out COMPLETE, with two series
+# holding the same mark: no cell missing, no count wrong, and one number under a
+# series that was never there. `read_scatter_panel` has measured this since it
+# shipped; the two colour readers did not.
+_close = [dict(SERIES[0], Series_ID="S_A", Colour_Hex="#2d50dc",
+               Colour_Tolerance="80", Factor_Level="CONTROL"),
+          dict(SERIES[0], Series_ID="S_B", Colour_Hex="#3050d0",
+               Colour_Tolerance="80", Factor_Level="TREATED")]
+# THE READER MEASURES IT, on the marks it actually found. Two masks built from
+# one colour claim every mark twice, which is the degenerate case of the thing
+# the manifest check computes in the abstract.
+_ov_img = Image.new("RGB", (300, 200), "white")
+_ovd = ImageDraw.Draw(_ov_img)
+for _x in (80, 160, 240):
+    _ovd.ellipse((_x - 6, 96, _x + 6, 108), fill=(45, 80, 220))
+_ov_cal = MR.AxisCalibration.from_points([(10.0, 40.0), (0.0, 160.0)])
+_ov_x = {"T%d" % i: x for i, x in enumerate((80, 160, 240))}
+_ov_same = MR.read_line_marker_panel(
+    _ov_img, panel_box=(20, 280, 20, 180), x_positions=_ov_x,
+    y_calibration=_ov_cal,
+    series=[MR.SeriesSpec("S_A", rgb=(45, 80, 220), tolerance=60),
+            MR.SeriesSpec("S_B", rgb=(45, 80, 220), tolerance=60)])
+check("the reader counts the other colours that claim each mark it found",
+      _ov_same and all(r.get("mask_overlap") == 1 for r in _ov_same),
+      "%s" % [(r["series"], r.get("mask_overlap")) for r in _ov_same])
+_ov_apart = MR.read_line_marker_panel(
+    _ov_img, panel_box=(20, 280, 20, 180), x_positions=_ov_x,
+    y_calibration=_ov_cal,
+    series=[MR.SeriesSpec("S_A", rgb=(45, 80, 220), tolerance=60),
+            MR.SeriesSpec("S_B", rgb=(215, 45, 45), tolerance=60)])
+check("  and reports none when only one colour reaches the ink",
+      _ov_apart and all(r.get("mask_overlap") == 0 for r in _ov_apart),
+      "%s" % [(r["series"], r.get("mask_overlap")) for r in _ov_apart])
+# AND THE BATCH LAYER DROPS THEM, end to end: the cell goes missing, is queued,
+# and the run says why. Reachable through `Mask_Key`, where two BUILT-IN masks
+# can cover one bar and no declared colour exists for the manifest arithmetic to
+# refuse - `dark` covers every outline, including a blue bar's.
+_ov_masked = [dict(SERIES[0], Colour_Hex="", Mask_Key="blue"),
+              dict(SERIES[1], Colour_Hex="", Mask_Key="dark")]
+_ov_panels = [dict(PANELS[0], Mark_Type="BAR_COLOR")]
+check("a manifest naming two built-in masks passes the colour arithmetic",
+      "SERIES_COLOURS_OVERLAP" not in validate(series_rows=_ov_masked,
+                                               panels=_ov_panels),
+      "%s" % validate(series_rows=_ov_masked, panels=_ov_panels))
+check("  which is why the reader measures the overlap as well as the manifest",
+      "mask_overlap" in _ov_same[0],
+      "%s" % sorted(_ov_same[0]))
+check("a manifest whose two colours overlap at their tolerances is refused",
+      "SERIES_COLOURS_OVERLAP" in validate(series_rows=_close),
+      "%s" % validate(series_rows=_close))
+check("  while the fixture's own two colours, 246 apart, are not",
+      "SERIES_COLOURS_OVERLAP" not in validate(), "%s" % validate())
+# THE TOLERANCES DECIDE, not the colours alone. The fixture's own two colours
+# are 246 apart and separate at their defaults; give each of them a net of 200
+# and they meet in the middle, on the same manifest and the same figure.
+_wide = [dict(r, Colour_Tolerance="200") for r in SERIES]
+check("  and it is the TOLERANCES that decide, not the colours alone",
+      "SERIES_COLOURS_OVERLAP" in validate(series_rows=_wide),
+      "%s" % validate(series_rows=_wide))
+# AND THE RASTER GETS A VOTE TOO. A manifest can pass the arithmetic above and
+# still print two colours that meet on the page - antialiasing, a scanner, a
+# figure redrawn between the manifest and the render. The reader measures which
+# marks another series' mask also claims, and the batch layer drops them: the
+# cell goes missing, is queued, and is read by a person.
+_shared = np.zeros((40, 40), dtype=bool)
+_shared[18:22, 18:22] = True
+check("a mark another series' mask claims is counted by the reader",
+      MR._pixel_claimed_by([_shared], 20, 20) == 1
+      and MR._pixel_claimed_by([_shared], 5, 5) == 0)
+# AND THE BATCH LAYER DROPS THEM, in a run: the cell goes missing, is queued for
+# a person, and the run manifest says why. Simulated at the reader boundary,
+# because for DECLARED colours the manifest arithmetic above is complete - a mark
+# in two masks needs the two centres within the sum of the tolerances - so the
+# reachable raster case is `Mask_Key`, where two built-in masks overlap and no
+# declared colour exists for the arithmetic to refuse.
+_real_rp = MR.read_panel
+
+
+def _one_contested(*a, **kw):
+    rows = _real_rp(*a, **kw)
+    for r in rows[:1]:
+        r["mask_overlap"] = 1
+    return rows
+
+
+_cont_out = os.path.join(ROOT, "contested_run")
+try:
+    MR.read_panel = _one_contested
+    _cont = RB.run_batch(write_manifests(os.path.join(_cont_out, "manifests")),
+                         _cont_out, file_root=ROOT, run_date="2026-08-06")
+finally:
+    MR.read_panel = _real_rp
+_cont_values = pd.read_csv(os.path.join(_cont_out, "figure_values_raw.csv"),
+                           dtype=object).fillna("")
+_cont_run = pd.read_csv(os.path.join(_cont_out, "run_manifest.csv"),
+                        dtype=object).fillna("")
+_cont_cells = pd.read_csv(os.path.join(_cont_out, "manual_queue_cells.csv"),
+                          dtype=object).fillna("")
+check("a mark two colours claim produces no value at all",
+      len(_cont_values) == len(values) - 1,
+      "%d against %d" % (len(_cont_values), len(values)))
+check("  and the run says why, rather than reporting a cell that went missing",
+      any("claimed by more than one declared colour" in str(r["Detail"])
+          for _, r in _cont_run.iterrows()),
+      "%s" % sorted({str(r["Detail"]) for _, r in _cont_run.iterrows()}))
+check("  and the cell is queued for a person, like any other unread cell",
+      any(r["Panel_ID"] == "P_LINE" for _, r in _cont_cells.iterrows()),
+      "%s" % _cont_cells.to_dict("records"))
+check("  and the panel is refused by the gate, not quietly one cell short",
+      any(r["Panel_ID"] == "P_LINE" and r["Run_State"] == "QC_FAILED"
+          for _, r in _cont_run.iterrows()),
+      "%s" % [(r["Panel_ID"], r["Run_State"]) for _, r in _cont_run.iterrows()])
+
+# AND THE BAR_MONO CROP NAMES THE ROUTE. That crop is the whole evidence a
+# BAR_MONO reviewer has, and its panel is asked for `Inference_Checked` precisely
+# because some of its bars were named against another group's prototypes - so
+# without this the question had no visible subject. The caption is a function so
+# that what the picture says can be asserted without reading pixels back.
+_cap_match = RB.OVERLAY.row_caption(dict(
+    figure="P1", group="G", slot=0, value=1.0, dispersion=0.1,
+    resolved_fill_pattern="SOLID", identity_method="FIGURE_PROTOTYPE_MATCH"))
+_cap_own = RB.OVERLAY.row_caption(dict(
+    figure="P1", group="G", slot=0, value=1.0, dispersion=0.1,
+    resolved_fill_pattern="SOLID", identity_method="MEASURED_FILL_RELATION"))
+check("the row crop says which route named the bar it pictures",
+      "other groups" in _cap_match[1] and "relation" in _cap_own[1],
+      "%r / %r" % (_cap_match[1], _cap_own[1]))
+check("  and says nothing where the figure named nothing",
+      "[" not in RB.OVERLAY.row_caption(dict(figure="P1", group="G", slot=0))[1],
+      "%r" % RB.OVERLAY.row_caption(dict(figure="P1", group="G", slot=0))[1])
+
+print("the picture says which marks had their series reasoned to, not measured")
+# THE OVERLAY IS THE ARTIFACT A REVIEWER APPROVES. Its whole question is "did
+# it put the marks in the right places", and after v7.50 some marks are in a
+# place the ink did not name: a monochrome line reader whose window was too
+# blinded to measure a stroke pattern names the last curve by elimination.
+# Unmarked, such a cell looked exactly like one read off the ink, and the
+# reviewer who most needed to look twice had no reason to.
+_MEASURED = dict(series="S_A", x_label="T1", mean=9.5, x=120.0,
+                 marker_center_px=80.0, line_style_source="MEASURED")
+_NAMED = dict(_MEASURED, series="S_B", marker_center_px=95.0,
+              line_style_source="COMPLEMENT_OF_DECLARED_STYLES")
+check("a measured mark's label is the label it always was",
+      RB.OVERLAY.mark_label(_MEASURED) == "S_A/T1 9.5",
+      "%r" % RB.OVERLAY.mark_label(_MEASURED))
+check("and an inferred one is starred",
+      RB.OVERLAY.mark_label(_NAMED) == "S_B/T1 9.5 *",
+      "%r" % RB.OVERLAY.mark_label(_NAMED))
+check("a mark with no provenance at all is not accused of being inferred",
+      RB.OVERLAY.mark_label(dict(series="S_A", x_label="T1")) == "S_A/T1")
+check("no star, no key",
+      RB.OVERLAY.inferred_note([_MEASURED, _MEASURED]) == "",
+      "%r" % RB.OVERLAY.inferred_note([_MEASURED, _MEASURED]))
+check("a star, and the key counts them",
+      RB.OVERLAY.inferred_note([_MEASURED, _NAMED]).startswith("* 1 mark(s)"),
+      "%r" % RB.OVERLAY.inferred_note([_MEASURED, _NAMED]))
+# A provenance token this file has never heard of must read as an inference,
+# not as a measurement: a reader that grows a new way of naming a series is
+# added to IDENTITY_SOURCE_FIELDS on purpose, and until it is, the picture errs
+# towards asking the reviewer to look.
+check("an unfamiliar provenance token counts as an inference",
+      RB.OVERLAY.inferred_note([dict(_MEASURED, line_style_source="SOMETHING_NEW")])
+      != "")
+# AND A FIELD IT HAS NEVER HEARD OF, which the whitelist above cannot see. The
+# comment beside IDENTITY_SOURCE_FIELDS used to claim it could - "a provenance
+# field this file has never heard of would otherwise pass as a measurement" -
+# which is exactly backwards, and a guarantee written down and not implemented
+# is worse than the gap it describes. A future reader emitting
+# `marker_identity_source` and forgetting to register it drew a plain mark.
+_STRANGE = dict(_MEASURED, marker_identity_source="ELIMINATION")
+check("a provenance FIELD the overlay does not know makes the mark unreadable",
+      RB.OVERLAY.unreadable_provenance(_STRANGE) == ["marker_identity_source"],
+      "%r" % (RB.OVERLAY.unreadable_provenance(_STRANGE),))
+check("and the mark is questioned on the picture rather than drawn as measured",
+      RB.OVERLAY.mark_label(_STRANGE).endswith("?"),
+      "%r" % RB.OVERLAY.mark_label(_STRANGE))
+check("the key names the field, because registering it is the fix",
+      "marker_identity_source" in RB.OVERLAY.inferred_note([_STRANGE]),
+      "%r" % RB.OVERLAY.inferred_note([_STRANGE]))
+check("a registered field is not questioned",
+      RB.OVERLAY.unreadable_provenance(_NAMED) == [],
+      "%r" % (RB.OVERLAY.unreadable_provenance(_NAMED),))
+check("nor is an ordinary reader field that is not provenance",
+      RB.OVERLAY.unreadable_provenance(dict(_MEASURED, top_px=3.0)) == [])
+# AND THE SHARED VOCABULARY, which is what this picture should have been reading
+# all along. v7.69. `line_style_source` is one reader's own field: it stars a
+# LINE_MONO_STYLE series named by elimination and says nothing about a BAR_MONO
+# bar named against another group's prototypes, or about a NUMBER that was
+# interpolated rather than read - both of which the ladder prices exactly as it
+# prices the first. Three marks, because they are three different questions.
+_R2_MARK = dict(_MEASURED, Identity_Method="FIGURE_PROTOTYPE_MATCH",
+                Value_Method="BAR_OUTLINE_CENTER")
+_R3_MARK = dict(_MEASURED, Identity_Method="MEASURED_LINE_STYLE",
+                Value_Method="LOCAL_BRACKETED_INTERPOLATION")
+_R4_MARK = dict(_MEASURED, Identity_Method="MEASURED_LINE_STYLE",
+                Value_Method="FIT_FALLBACK")
+_R0_MARK = dict(_MEASURED, Identity_Method="MEASURED_COLOUR",
+                Value_Method="MARKER_CENTER")
+for _label, _mark, _want in (("a series reasoned to", _R2_MARK, " *"),
+                             ("a number reconstructed", _R3_MARK, " +"),
+                             ("a number no signature can buy", _R4_MARK, " x")):
+    check("%s is marked, off the two fields every reader now answers" % _label,
+          RB.OVERLAY.mark_label(_mark).endswith(_want),
+          "%r" % RB.OVERLAY.mark_label(_mark))
+check("and a mark measured both ways is left alone",
+      RB.OVERLAY.mark_label(_R0_MARK) == "S_A/T1 9.5",
+      "%r" % RB.OVERLAY.mark_label(_R0_MARK))
+check("the tier is derived from the mark, never read off it",
+      RB.OVERLAY.tier_of(_R3_MARK) == "R3"
+      and RB.OVERLAY.tier_of(dict(_R3_MARK, Review_Tier="R0")) == "R3"
+      and RB.OVERLAY.tier_of(dict(series="S")) == "",
+      RB.OVERLAY.tier_of(_R3_MARK))
+_key = RB.OVERLAY.inferred_note([_R2_MARK, _R3_MARK, _R3_MARK, _R4_MARK])
+check("and the footer counts each kind separately, in the reviewer's words",
+      len(_key.splitlines()) == 3 and "2 mark(s)" in _key
+      and "inference_review.csv" in _key
+      and "method_blocked_cells.csv" in _key, "%r" % _key)
+# R3 IS TWO QUESTIONS. v7.71. A row reaches it because its NUMBER was
+# reconstructed or because its SPREAD came off a cap nothing connects to the mark,
+# and a footer that said only the first described a question the reviewer was not
+# being asked. `~` for the spread, so the two are countable on the picture.
+_SPREAD_MARK = dict(_MEASURED, Identity_Method="MEASURED_COLOUR",
+                    Value_Method="MARKER_CENTER", dispersion=1.2,
+                    Dispersion_Method="UNSTEMMED_CAP")
+check("a mark that is R3 for its ERROR BAR is marked as that, not as a "
+      "reconstructed number",
+      RB.OVERLAY.mark_label(_SPREAD_MARK).endswith(" ~")
+      and RB.OVERLAY.spread_only(_SPREAD_MARK)
+      and not RB.OVERLAY.spread_only(_R3_MARK),
+      "%r" % RB.OVERLAY.mark_label(_SPREAD_MARK))
+_both = RB.OVERLAY.inferred_note([_SPREAD_MARK, _R3_MARK])
+check("  and the footer asks the two questions separately",
+      len(_both.splitlines()) == 2
+      and "SPREAD is not" in _both
+      and "reconstructed from neighbouring ink" in _both, "%r" % _both)
+# A BOUND IS NOT AN UNSTEMMED CAP (decision I02, 2026-10-21). Same `~` on the
+# label, its own line in the footer: "the cap may be a significance glyph" is not
+# what a reviewer of a hidden end is asked.
+# REVERT: count bounds in SPREAD_NOTE's line, or drop BOUND_NOTE's.
+_BOUND_MARK = dict(_SPREAD_MARK, Dispersion_Method="BOUND_HIDDEN_END")
+_bnd = RB.OVERLAY.inferred_note([_BOUND_MARK, _BOUND_MARK, _SPREAD_MARK])
+check("a bound is marked ~ and footed as an upper bound, apart from an unstemmed cap",
+      RB.OVERLAY.mark_label(_BOUND_MARK).endswith(" ~")
+      and len(_bnd.splitlines()) == 2
+      and "2 mark(s): no end of the error bar is visible" in _bnd
+      and "1 mark(s): the number is measured and the SPREAD is not" in _bnd, "%r" % _bnd)
+_bnd1 = RB.OVERLAY.inferred_note([_BOUND_MARK])
+check("  and a panel of bounds alone never reads 'significance glyph'",
+      "UPPER BOUND" in _bnd1 and "glyph" not in _bnd1, "%r" % _bnd1)
+# THE TWO SHARED FIELDS ARE NOT "PROVENANCE THIS OVERLAY CANNOT READ". The
+# suffix check was case-sensitive against lower-case suffixes, so `Value_Method`
+# matched nothing and `Identity_Method` matched nothing - and the moment a reader
+# answered them, every mark in every panel would have carried a question mark.
+check("the shared fields are readable, and the check is case-folded",
+      RB.OVERLAY.unreadable_provenance(_R3_MARK) == []
+      and RB.OVERLAY.unreadable_provenance(
+          dict(_MEASURED, Marker_Identity_Source="ELIMINATION"))
+      == ["Marker_Identity_Source"],
+      "%r" % RB.OVERLAY.unreadable_provenance(_R3_MARK))
+# Two keys, two footer lines, and the canvas grows for both.
+_two = RB.OVERLAY.inferred_note([_NAMED, _STRANGE])
+check("a picture with both kinds of doubt says both",
+      len(_two.splitlines()) == 2, "%r" % _two)
+# And the key reaches the drawn picture: appended to the subtitle it ran off
+# the right edge and read "* 4 of them: the SERIE", so it has a line of its own
+# and the canvas grows to hold it.
+_ov_dir = os.path.join(ROOT, "overlay_note")
+os.makedirs(_ov_dir, exist_ok=True)
+_ov_src = os.path.join(_ov_dir, "panel.png")
+Image.new("RGB", (240, 200), "white").save(_ov_src)
+_plain = RB.OVERLAY.draw_panel_overlay(
+    os.path.join(_ov_dir, "plain.png"), _ov_src, (10, 200, 10, 160), [_MEASURED])
+_starred = RB.OVERLAY.draw_panel_overlay(
+    os.path.join(_ov_dir, "starred.png"), _ov_src, (10, 200, 10, 160),
+    [_MEASURED, _NAMED])
+_hp = Image.open(_plain).height if _plain else 0
+_hs = Image.open(_starred).height if _starred else 0
+check("the picture with an inferred mark carries the extra line that explains it",
+      _hs - _hp == RB.OVERLAY.INFERRED_NOTE_HEIGHT, "%d against %d" % (_hs, _hp))
+
+# NO TWO LABELS SHARE A ROW. v8.6, found by running the pilot procedure on a real
+# figure. The placement was `my - 5 + (index % 4 - 1.5) * 13`: a fixed fan added
+# to each mark's OWN row, which assumes the marks are at the same height. On 397
+# Figure 4's `P4_HR_MEN` the POST pair sits 11 px apart and the fan moved the
+# lower one 13 px down - 2 px of separation for an 11 px glyph, and
+# `FLUID/POST 81.22` was unreadable under `NON_FLUID/POST 83.47`. A reviewer is
+# asked whether each label sits on the mark a reader would give it, and cannot
+# answer that about a label they cannot read.
+#
+# The fixture is the real geometry: four marks, two x slots 67 px apart so the
+# labels overlap horizontally, and the second of each pair 11 px above the first.
+
+
+def _label_boxes(marks, box=(10, 300, 10, 200)):
+    """Where `draw_panel_overlay` ACTUALLY put each label, as (left, right, top).
+
+    Through the drawer, not beside it. The first version of this helper called
+    `label_row` itself with the same arguments the drawer uses - so reverting the
+    DRAWER to the old fan left `label_row` in place, every scenario passed, and
+    the revert harness reported SILENT. A placement contract has to be observed
+    where the pixels are decided.
+    """
+    seen = []
+    real = RB.OVERLAY.label_row
+
+    def recording(left, right, wanted, mark_row, placed, height):
+        top = real(left, right, wanted, mark_row, placed, height)
+        seen.append((left, right, top))
+        return top
+
+    RB.OVERLAY.label_row = recording
+    try:
+        drawn = RB.OVERLAY.draw_panel_overlay(
+            os.path.join(_ov_dir, "placed.png"), _ov_src, box, marks)
+    finally:
+        RB.OVERLAY.label_row = real
+    assert drawn, "the overlay was not drawn, so nothing was placed"
+    return [(l, r, t, RB.OVERLAY.mark_label(m))
+            for (l, r, t), m in zip(seen, marks)]
+
+
+def _sharing_a_row(boxes, glyph=11):
+    return [(a[3], b[3]) for a, b in itertools.combinations(boxes, 2)
+            if a[0] < b[1] and b[0] < a[1] and abs(a[2] - b[2]) < glyph]
+
+
+# A BAR, so `_mark_y` reads `top_px` and the four marks are at four heights.
+# Built from `_MEASURED` at first, whose `marker_center_px` wins over `top_px`
+# and put all four at the same row - where the fan is CORRECT, and the scenario
+# passed against the old code as well.
+_BARM = dict(x_label="T1", mean=9.5, x=120.0, top_px=150.0)
+_PAIR = [dict(_BARM, series="FLUID", x=152.0, top_px=147.0,
+              x_label="PRE", mean=73.06),
+         dict(_BARM, series="NON_FLUID", x=219.0, top_px=136.0,
+              x_label="PRE", mean=74.29),
+         dict(_BARM, series="FLUID", x=375.0, top_px=107.0,
+              x_label="POST", mean=81.22),
+         dict(_BARM, series="NON_FLUID", x=442.0, top_px=96.0,
+              x_label="POST", mean=83.47)]
+_pair_boxes = _label_boxes(_PAIR)
+check("two marks a glyph apart get two rows, not one",
+      len(_pair_boxes) == len(_PAIR) and _sharing_a_row(_pair_boxes) == [],
+      "%d placed / %s" % (len(_pair_boxes), _sharing_a_row(_pair_boxes)))
+# AND THE FIXTURE REALLY IS THE CASE THE FAN GOT WRONG, so this cannot pass
+# because the marks were too far apart to collide in the first place.
+_fanned = []
+for _i, _m in enumerate(_PAIR):
+    _mx = float(_m["x"]) - max(0, 10 - RB.OVERLAY.PAD)
+    _my = float(RB.OVERLAY._mark_y(_m)) - max(0, 10 - RB.OVERLAY.PAD)
+    _lab = RB.OVERLAY.mark_label(_m)
+    _l = _mx + 18
+    _fanned.append((_l, _l + RB.OVERLAY._text_width(
+        ImageDraw.Draw(Image.new("RGB", (10, 10))), _lab, RB.OVERLAY._font()),
+        _my - 5 + (_i % 4 - 1.5) * 13, _lab))
+check("  and the fan this replaces put both pairs on one row",
+      len(_sharing_a_row(_fanned)) == 2,
+      "%s" % _sharing_a_row(_fanned))
+# THE ROW BESIDE ITS OWN MARK when nothing is in the way, because a label three
+# rows from the mark it belongs to is a label a reviewer has to trace.
+_alone = _label_boxes([_PAIR[0]])
+check("a mark with no neighbour keeps the row beside itself",
+      _alone[0][2] == float(RB.OVERLAY._mark_y(_PAIR[0])) - 5
+      - RB.OVERLAY.LABEL_ROW_HEIGHT,
+      "%s" % _alone[0][2])
+# UP FIRST, DOWN WHEN UP RUNS OUT. Upward is where the white is above a bar top;
+# a dense line panel has more labels than the space above its topmost curve, and
+# upward-only left 397 Figure 1's `P1_MAP_MEN` with 12 pairs sharing a row.
+_CROWD = [dict(_BARM, series="S_%d" % _i, x=120.0 + _i, top_px=30.0,
+               x_label="T%d" % _i, mean=10.0 + _i) for _i in range(9)]
+_crowded = _label_boxes(_CROWD)
+check("  and the drawer asked the placement for every one of them",
+      len(_crowded) == len(_CROWD), "%d of %d" % (len(_crowded), len(_CROWD)))
+check("nine labels crowding one corner still get nine rows",
+      _sharing_a_row(_crowded) == []
+      and min(b[2] for b in _crowded) >= 4,
+      "%s / top %s" % (_sharing_a_row(_crowded),
+                       min(b[2] for b in _crowded)))
+check("  and the ones that could not go up went down, below the mark",
+      max(b[2] for b in _crowded) > float(RB.OVERLAY._mark_y(_CROWD[0])) - 5,
+      "%s" % sorted(b[2] for b in _crowded))
+
+
+# `draw_panel_overlay` never raises: a picture that cannot be painted must not
+# fail a panel that produced values. That is right, and it means any panel can
+# reach the queue with no overlay - so the contract has to be enforced rather
+# than assumed. Injected here, because a drawing failure cannot be provoked
+# from a manifest.
+_no_overlay = lambda *a, **k: None                                  # noqa: E731
+_real_overlay = RB.OVERLAY.draw_panel_overlay
+_real_project = RB.write_panel_project
+try:
+    RB.OVERLAY.draw_panel_overlay = _no_overlay
+    _wpd_md = write_manifests(os.path.join(ROOT, "wpdonly", "manifests"))
+    _wpd_sum = RB.run_batch(_wpd_md, os.path.join(ROOT, "wpdonly", "out"),
+                            file_root=ROOT, run_date="2026-08-06")
+    _wq = pd.read_csv(os.path.join(ROOT, "wpdonly", "out", "review_queue.csv"),
+                      dtype=object).fillna("")
+    check("a panel whose picture could not be drawn is still reviewable in WPD",
+          len(_wq) and set(_wq["Review_Mode"]) == {"WPD_ONLY"}
+          and all(r["WPD_Project_File"] for _, r in _wq.iterrows()),
+          "%s" % _wq[["Panel_ID", "Review_Mode", "Overlay_File"]].to_dict("records"))
+    # Neither a picture nor a project: nothing a reviewer could open.
+    RB.write_panel_project = lambda *a, **k: None
+    _none_md = write_manifests(os.path.join(ROOT, "noreview", "manifests"))
+    RB.run_batch(_none_md, os.path.join(ROOT, "noreview", "out"),
+                 file_root=ROOT, run_date="2026-08-06")
+    _nq = pd.read_csv(os.path.join(ROOT, "noreview", "out", "review_queue.csv"),
+                      dtype=object).fillna("")
+    _nr = pd.read_csv(os.path.join(ROOT, "noreview", "out", "run_manifest.csv"),
+                      dtype=object).fillna("")
+    _nm = pd.read_csv(os.path.join(ROOT, "noreview", "out", "manual_queue.csv"),
+                      dtype=object).fillna("")
+    check("a panel with neither is not queued for a review nobody can perform",
+          "P_LINE" not in set(_nq["Panel_ID"]),
+          "%s" % _nq[["Panel_ID", "Review_Mode"]].to_dict("records"))
+    # It is the grid gate that catches this one, not the review contract: a
+    # digitized value with no saved project is MISSING_PROVENANCE, so the panel
+    # is QC_FAILED before anything asks whether it could be reviewed. Worth
+    # writing down, because it is why the runner has no separate demotion for
+    # the case - an unreachable branch is decoration - and why the finalizer
+    # refuses a blank Review_Mode instead of trusting that ordering to hold.
+    check("  it is refused with its reason on the record",
+          dict(zip(_nr["Panel_ID"], _nr["Run_State"]))["P_LINE"] != "AUTO_PASS"
+          and len(_nm[_nm["Panel_ID"] == "P_LINE"]) == 1
+          and _nm[_nm["Panel_ID"] == "P_LINE"]["Detail"].iloc[0],
+          "%s" % _nm[_nm["Panel_ID"] == "P_LINE"][["Run_State", "Detail"]].to_dict("records"))
+    check("  and its values are not machine-QC-passed either",
+          not len(pd.read_csv(
+              os.path.join(ROOT, "noreview", "out", "figure_values_machine_qc.csv"),
+              dtype=object).fillna("").query("Unit_ID == 'U_LINE'")),
+          "some survived")
+finally:
+    RB.OVERLAY.draw_panel_overlay = _real_overlay
+    RB.write_panel_project = _real_project
+
+# The finalizer holds the same contract from its own side, because a review
+# queue is a file and a file can come from anywhere.
+_fake_queue = pd.DataFrame([dict(Panel_ID="PX", Review_Mode="OVERLAY",
+                                 Review_Subject_SHA256="a" * 64)])
+_fake_reviews = pd.DataFrame([dict(Review_ID="R001", Panel_ID="PX",
+                                   Review_Subject_SHA256="a" * 64,
+                                   Reviewer_ID="RV_H", Decision="APPROVED",
+                                   Marks_Checked="CONFIRMED",
+                                   Reviewed_At="2026-08-06T10:00:00Z", Note="")])
+_fake_reviewers = pd.DataFrame([dict(Reviewer_ID="RV_H",
+                                     Reviewer_Record_Type="HUMAN")])
+for _label, _have, _ok in (("with the overlay the queue promised", {"OVERLAY"}, True),
+                           ("with only a project behind it", {"WPD_PROJECT"}, False),
+                           ("with nothing behind it", set(), False)):
+    pass
+# And a queue row that declares no mode at all - which is what a panel with
+# neither artifact would produce - is refused rather than approved.
+_blank_mode = pd.DataFrame([dict(Panel_ID="PX", Review_Mode="",
+                                 Review_Subject_SHA256="a" * 64)])
+_bm_probs = []
+check("an approval for a panel that declared no review mode is refused",
+      not FIN.approved_panels(
+          _fake_reviews, _blank_mode, _fake_reviewers,
+          lambda w, c, d: _bm_probs.append(c), today=datetime.date(2026, 8, 6),
+          artifact_types={"PX": {"OVERLAY"}})
+      and "REVIEW_MODE_UNKNOWN" in _bm_probs, "%s" % _bm_probs)
+for _label, _have, _ok in (("with the overlay the queue promised", {"OVERLAY"}, True),
+                           ("with only a project behind it", {"WPD_PROJECT"}, False),
+                           ("with nothing behind it", set(), False)):
+    _probs = []
+    _got = FIN.approved_panels(
+        _fake_reviews, _fake_queue, _fake_reviewers,
+        lambda w, c, d: _probs.append(c), today=datetime.date(2026, 8, 6),
+        artifact_types={"PX": _have})
+    check("an OVERLAY approval %s -> %s" % (_label, "approved" if _ok else "refused"),
+          bool(_got) == _ok
+          and (_ok or "REVIEW_ARTIFACT_MISSING" in _probs), "%s" % _probs)
+
+
+print("overplotting with nothing to check the count against is not computed")
+# The audit detected a blob too wide to be one marker and set
+# Overplotting_Possible=TRUE - and then the runner computed the association
+# anyway, because only a COUNT MISMATCH halted it. With no declared n there is
+# no count to mismatch, so an r of 0.99 reached MACHINE_QC_PASSED off a cloud
+# that may have had points hidden inside other points.
+_OVER_IMG = os.path.join(IMAGES, "scatter_overplot.png")
+_oim = Image.open(SCAT_IMG).convert("RGB")
+_od = ImageDraw.Draw(_oim)
+_opx, _opy = SX_CAL.value_to_pixel(4.4), SY_CAL.value_to_pixel(9.6)
+_od.ellipse((_opx - 10, _opy - 10, _opx + 10, _opy + 10), fill=BLUE)
+_oim.save(_OVER_IMG)
+_over_panels = edited(PANELS, {"Panel_ID": "P_SCAT"}, Image_Path=_OVER_IMG)
+_over_sfigs = [dict(f, Source_Image=_OVER_IMG,
+                    Source_Image_SHA256=MR.sha256_of(_OVER_IMG))
+               if f["Source_Figure_ID"] == "SF2" else f for f in SOURCE_FIGURES]
+for _label, _n, _want in (("with no declared n", "", "MANUAL_POINT_READ"),
+                          ("with a matching declared n", len(SCATTER_XY), "AUTO_PASS")):
+    _od_dir = os.path.join(ROOT, "overplot_%s" % (_n or "none"))
+    _omd = write_manifests(
+        os.path.join(_od_dir, "manifests"), panels=_over_panels,
+        source_figures=_over_sfigs,
+        units=edited(UNITS, {"Unit_ID": "U_SCAT"}, N_Outcome=_n))
+    _osum = RB.run_batch(_omd, os.path.join(_od_dir, "out"), file_root=ROOT,
+                         run_date="2026-08-06")
+    _orun = pd.read_csv(os.path.join(_od_dir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _ostate = dict(zip(_orun["Panel_ID"], _orun["Run_State"]))
+    check("a blob too wide to be one marker %s -> %s" % (_label, _want),
+          _ostate["P_SCAT"] == _want,
+          "%s | %s" % (_ostate.get("P_SCAT"),
+                       dict(zip(_orun["Panel_ID"], _orun["Detail"])).get("P_SCAT")))
+    _ovals = pd.read_csv(os.path.join(_od_dir, "out", "figure_values_raw.csv"),
+                         dtype=object).fillna("")
+    _scat_rows = _ovals[_ovals["Unit_ID"] == "U_SCAT"]
+    if _want == "MANUAL_POINT_READ":
+        check("  and no association was computed from it",
+              not len(_scat_rows), "%d rows" % len(_scat_rows))
+        # Nothing may be left on disk that the ledger does not name: the point
+        # files used to be written inside the series loop, so a panel a later
+        # series sent to manual left JSONs nothing referenced.
+        _oart = pd.read_csv(os.path.join(_od_dir, "out", "panel_artifacts.csv"),
+                            dtype=object).fillna("")
+        _ledgered = {os.path.basename(p) for p in _oart["Artifact_Path"]}
+        _on_disk = set(os.listdir(os.path.join(_od_dir, "out", "raw")))
+        check("  and the run left no point file the ledger does not name",
+              _on_disk <= _ledgered, "%s" % sorted(_on_disk - _ledgered))
+    else:
+        check("  and a corroborated count still yields its association",
+              len(_scat_rows) == 1
+              and _scat_rows.iloc[0]["Overplotting_Possible"] == "TRUE",
+              "%s" % _scat_rows.to_dict("records"))
+
+
+print("the paper prints the answer, and the run is held to it")
+# A COUNT SAYS HOW MANY MARKS WERE FOUND AND NOTHING ABOUT WHERE THEY ARE.
+# Publication 177 panel C matches its declared 48 pairs EXACTLY and computes
+# r = 0.25 against a printed 0.17, because two dozen overlapping rings resolve
+# into the right NUMBER of seeds in the wrong places. Where the figure prints
+# its own r there is a second declaration to be held to, and it catches what the
+# count cannot. The synthetic panel's pairs give 0.9917.
+for _label, _printed, _want in (
+        ("that agrees with the digitized points", "0.99", "AUTO_PASS"),
+        ("that the digitized points do not reproduce", "0.40",
+         "MANUAL_POINT_READ")):
+    _pdir = os.path.join(ROOT, "printed_%s" % _printed.replace(".", "_"))
+    _pmd = write_manifests(
+        os.path.join(_pdir, "manifests"),
+        panels=edited(PANELS, {"Panel_ID": "P_SCAT"},
+                      Association_Value_Printed=_printed))
+    RB.run_batch(_pmd, os.path.join(_pdir, "out"), file_root=ROOT,
+                 run_date="2026-08-06")
+    _prun = pd.read_csv(os.path.join(_pdir, "out", "run_manifest.csv"),
+                        dtype=object).fillna("")
+    _pstate = dict(zip(_prun["Panel_ID"], _prun["Run_State"]))
+    _pdetail = dict(zip(_prun["Panel_ID"], _prun["Detail"]))
+    check("a printed association %s -> %s" % (_label, _want),
+          _pstate.get("P_SCAT") == _want,
+          "%s | %s" % (_pstate.get("P_SCAT"), _pdetail.get("P_SCAT")))
+    if _want == "MANUAL_POINT_READ":
+        # The refusal has to SAY BOTH NUMBERS. "could not be reconciled" sends a
+        # person to a panel with nothing to check against.
+        check("  and the refusal names the printed value and the computed one",
+              "0.4" in _pdetail.get("P_SCAT", "")
+              and "0.99" in _pdetail.get("P_SCAT", ""),
+              "%r" % _pdetail.get("P_SCAT"))
+        _pv = pd.read_csv(os.path.join(_pdir, "out", "figure_values_raw.csv"),
+                          dtype=object).fillna("")
+        check("  and no association was written from it",
+              not len(_pv[_pv["Unit_ID"] == "U_SCAT"]),
+              "%d rows" % len(_pv[_pv["Unit_ID"] == "U_SCAT"]))
+
+print("a run leaves nothing on disk its ledger does not name")
+# The point files were written inside the per-series loop, so a two-series
+# scatter whose SECOND series could not be reconciled returned
+# MANUAL_POINT_READ with the FIRST series' point JSON already on disk - a file
+# the run produced, that no ledger names, that no run row references, and that
+# a later reader would find sitting in raw/ looking like data.
+_TWO_IMG = os.path.join(IMAGES, "scatter_two_series.png")
+_tim = Image.new("RGB", (800, 520), "white")
+_td = ImageDraw.Draw(_tim)
+for _x, _y in SCATTER_XY:
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _td.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
+_RED_XY = [(0.9, 2.0), (2.0, 3.1), (3.1, 4.0), (4.2, 5.4), (5.3, 6.1),
+           (6.4, 7.7), (7.5, 8.2), (8.6, 9.9)]
+for _i, (_x, _y) in enumerate(_RED_XY):
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    # One red marker twice the size: a blob too wide to be a single point.
+    _r = 10 if _i == 3 else 5
+    _td.ellipse((_px - _r, _py - _r, _px + _r, _py + _r), fill=RED)
+_tim.save(_TWO_IMG)
+_two_grids = GRIDS + [dict(Grid_ID="G_TWO", Factor_Name="ARM", Factor_Level=lv,
+                           Level_Order=i, Note="")
+                      for i, lv in enumerate(("BLUE", "RED"))]
+_two_units = UNITS + [unit("U_TWO", "G_TWO", "ASSOCIATION",
+                           Bar_Top_Definition="NOT_A_BAR",
+                           Errorbar_Stem_Confirmed="NOT_A_BAR", Dispersion_Type="",
+                           N_Outcome="",
+                           Errorbar_Definition_Source="NO_ERRORBAR")]
+_two_panels = PANELS + [panel("P_TWO", "U_TWO", "SCATTER", _TWO_IMG,
+                              (70, 730, 40, 460), Axis_X_Ticks=SX_TICKS,
+                              Axis_Y_Ticks=SY_TICKS, Association_Type="PEARSON_R",
+                              Config_ID="C_SCATTER", Source_Panel_ID="P_TWO")]
+_two_series = SERIES + [series("P_TWO", "S_B2", "BLUE", Colour_Hex="#2d50dc"),
+                        series("P_TWO", "S_R2", "RED", Colour_Hex="#d72d2d")]
+_two_sfigs = SOURCE_FIGURES + [dict(
+    Source_Figure_ID="SF5", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG5", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=_TWO_IMG, Source_Image_SHA256=MR.sha256_of(_TWO_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one visible axes region")]
+_two_spanels = SOURCE_PANELS + [dict(
+    Source_Panel_ID="P_TWO", Source_Figure_ID="SF5", Panel_Label="P_TWO",
+    Outcome_Label="Heart-rate association", Target_Status="TARGET",
+    Panel_Disposition="ASSOCIATION_EXTRACT", Disposition_Reason="configured",
+    Note="")]
+_two_docs = [dict(d, Observed_Figure_Count=5) for d in SOURCE_DOCUMENTS]
+_two_md = write_manifests(os.path.join(ROOT, "twoseries", "manifests"),
+                          panels=_two_panels, series_rows=_two_series,
+                          units=_two_units, grids=_two_grids,
+                          source_figures=_two_sfigs, source_panels=_two_spanels,
+                          source_documents=_two_docs)
+_two_out = os.path.join(ROOT, "twoseries", "out")
+_two_sum = RB.run_batch(_two_md, _two_out, file_root=ROOT, run_date="2026-08-06")
+_two_run = pd.read_csv(os.path.join(_two_out, "run_manifest.csv"),
+                       dtype=object).fillna("")
+_two_state = dict(zip(_two_run["Panel_ID"], _two_run["Run_State"]))
+# The same panel, but with the second series too SPARSE rather than
+# unreconcilable. This exit ran AFTER the point files were written, so the
+# first series' JSON was on disk, named by no ledger and referenced by no run
+# row, while `missing` held only the sparse series - so the queue told a hand
+# digitizer to read series B and said nothing about series A, whose numbers had
+# just been discarded. Cells_Read said 1; figure_values_raw.csv had none.
+_SHORT_IMG = os.path.join(IMAGES, "scatter_short.png")
+_sim = Image.new("RGB", (800, 520), "white")
+_sd = ImageDraw.Draw(_sim)
+for _x, _y in SCATTER_XY:
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=BLUE)
+for _x, _y in ((1.0, 2.0), (5.0, 6.0)):     # two red points: below the minimum
+    _px, _py = SX_CAL.value_to_pixel(_x), SY_CAL.value_to_pixel(_y)
+    _sd.ellipse((_px - 5, _py - 5, _px + 5, _py + 5), fill=RED)
+_sim.save(_SHORT_IMG)
+_short_md = write_manifests(
+    os.path.join(ROOT, "shortseries", "manifests"),
+    panels=[dict(p, Image_Path=_SHORT_IMG) if p["Panel_ID"] == "P_TWO" else p
+            for p in _two_panels],
+    series_rows=_two_series, units=_two_units, grids=_two_grids,
+    source_figures=[dict(f, Source_Image=_SHORT_IMG,
+                         Source_Image_SHA256=MR.sha256_of(_SHORT_IMG))
+                    if f["Source_Figure_ID"] == "SF5" else f for f in _two_sfigs],
+    source_panels=_two_spanels, source_documents=_two_docs)
+_short_out = os.path.join(ROOT, "shortseries", "out")
+RB.run_batch(_short_md, _short_out, file_root=ROOT, run_date="2026-08-06")
+_sh_run = pd.read_csv(os.path.join(_short_out, "run_manifest.csv"),
+                      dtype=object).fillna("")
+_sh = _sh_run[_sh_run["Panel_ID"] == "P_TWO"].iloc[0]
+_sh_vals = pd.read_csv(os.path.join(_short_out, "figure_values_raw.csv"),
+                       dtype=object).fillna("")
+_sh_art = pd.read_csv(os.path.join(_short_out, "panel_artifacts.csv"),
+                      dtype=object).fillna("")
+_sh_q = pd.read_csv(os.path.join(_short_out, "manual_queue.csv"),
+                    dtype=object).fillna("")
+_sh_cells = pd.read_csv(os.path.join(_short_out, "manual_queue_cells.csv"),
+                        dtype=object).fillna("")
+_sh_raw = sorted(f for f in os.listdir(os.path.join(_short_out, "raw"))
+                 if f.startswith("P_TWO"))
+check("one sparse series sends the whole panel to a person",
+      _sh["Run_State"] == "MANUAL_POINT_READ", "%s" % _sh["Run_State"])
+check("  and the panel reports nothing read, because nothing was kept",
+      _sh["Cells_Read"] == "0" and not len(_sh_vals[_sh_vals["Unit_ID"] == "U_TWO"]),
+      "Cells_Read=%s, %d value rows"
+      % (_sh["Cells_Read"], len(_sh_vals[_sh_vals["Unit_ID"] == "U_TWO"])))
+check("  and no point file was written for the series that could have passed",
+      not _sh_raw, "%s" % _sh_raw)
+check("  and the ledger names no artifact for the panel",
+      not len(_sh_art[_sh_art["Panel_ID"] == "P_TWO"]),
+      "%s" % _sh_art[_sh_art["Panel_ID"] == "P_TWO"].to_dict("records"))
+check("  and EVERY declared cell is queued for hand reading, not just the sparse one",
+      set(_sh_cells[_sh_cells["Panel_ID"] == "P_TWO"]["Cell_Key"])
+      == {GE.fig_cell_key({"ARM": lv}) for lv in ("BLUE", "RED")},
+      "%s" % sorted(_sh_cells[_sh_cells["Panel_ID"] == "P_TWO"]["Cell_Key"]))
+check("  and the count agrees with the cell ledger",
+      _sh_q[_sh_q["Panel_ID"] == "P_TWO"]["Missing_Cell_Count"].iloc[0] == "2",
+      "%s" % _sh_q[_sh_q["Panel_ID"] == "P_TWO"].to_dict("records"))
+
+check("one unreconcilable series sends the whole panel to a person",
+      _two_state.get("P_TWO") == "MANUAL_POINT_READ",
+      "%s | %s" % (_two_state.get("P_TWO"),
+                   dict(zip(_two_run["Panel_ID"], _two_run["Detail"])).get("P_TWO")))
+_two_art = pd.read_csv(os.path.join(_two_out, "panel_artifacts.csv"),
+                       dtype=object).fillna("")
+_two_ledgered = {os.path.basename(p) for p in _two_art["Artifact_Path"]}
+_two_on_disk = set(os.listdir(os.path.join(_two_out, "raw")))
+check("and the series that DID reconcile left no unledgered point file",
+      not any(f.startswith("P_TWO") for f in _two_on_disk - _two_ledgered),
+      "%s on disk, ledger has %s"
+      % (sorted(f for f in _two_on_disk if f.startswith("P_TWO")),
+         sorted(f for f in _two_ledgered if f.startswith("P_TWO"))))
+check("and nothing in raw/ anywhere is missing from the ledger",
+      _two_on_disk <= _two_ledgered, "%s" % sorted(_two_on_disk - _two_ledgered))
+
+
+print("one panel, one terminal state, in every file that names it")
+# A panel that read most of its cells returns AUTO_PASS with a missing list, so
+# it entered the manual queue as AUTO_PASS. The grid gate then found the same
+# missing cells, flipped the run row to QC_FAILED, and APPENDED a second queue
+# row - with the removed `Missing_Cells` key, so its count came out blank. One
+# panel, two rows, two contradictory states, and `manual_queue_cells.csv`
+# filing the missing cells under the state `run_manifest.csv` had withdrawn.
+_PART_IMG = os.path.join(IMAGES, "partial_line.png")
+_pim = Image.open(LINE_IMG).convert("RGB")
+# Erase the last two timepoints, so the panel reads four of its eight cells.
+ImageDraw.Draw(_pim).rectangle((XS[-2] - 20, 30, 700, 470), fill="white")
+_pim.save(_PART_IMG)
+_part_panels = edited(PANELS, {"Panel_ID": "P_LINE"}, Image_Path=_PART_IMG)
+_part_sfigs = [dict(f, Source_Image=_PART_IMG,
+                    Source_Image_SHA256=MR.sha256_of(_PART_IMG))
+               if f["Source_Figure_ID"] == "SF1" else f for f in SOURCE_FIGURES]
+_pmd = write_manifests(os.path.join(ROOT, "partial", "manifests"),
+                       panels=_part_panels, source_figures=_part_sfigs)
+_psum = RB.run_batch(_pmd, os.path.join(ROOT, "partial", "out"), file_root=ROOT,
+                     run_date="2026-08-06")
+_pq = pd.read_csv(os.path.join(ROOT, "partial", "out", "manual_queue.csv"),
+                  dtype=object).fillna("")
+_pr = pd.read_csv(os.path.join(ROOT, "partial", "out", "run_manifest.csv"),
+                  dtype=object).fillna("")
+_pc = pd.read_csv(os.path.join(ROOT, "partial", "out", "manual_queue_cells.csv"),
+                  dtype=object).fillna("")
+_pstate = dict(zip(_pr["Panel_ID"], _pr["Run_State"]))
+check("the fixture really produces a partial read",
+      _pstate["P_LINE"] == "QC_FAILED"
+      and 0 < len(_pc[_pc["Panel_ID"] == "P_LINE"]) < 8,
+      "%s / %d cells" % (_pstate.get("P_LINE"), len(_pc[_pc["Panel_ID"] == "P_LINE"])))
+check("the manual queue names each panel exactly once",
+      list(_pq[_pq["Panel_ID"] != ""]["Panel_ID"]).count("P_LINE") == 1,
+      "%s" % _pq[["Panel_ID", "Run_State", "Missing_Cell_Count"]].to_dict("records"))
+check("and the state it gives is the one the run manifest ended on",
+      set(_pq[_pq["Panel_ID"] == "P_LINE"]["Run_State"]) == {_pstate["P_LINE"]},
+      "%s vs %s" % (set(_pq[_pq["Panel_ID"] == "P_LINE"]["Run_State"]),
+                    _pstate["P_LINE"]))
+check("the missing cells survive the state change rather than being blanked",
+      _pq[_pq["Panel_ID"] == "P_LINE"]["Missing_Cell_Count"].iloc[0]
+      == str(len(_pc[_pc["Panel_ID"] == "P_LINE"])),
+      "%r vs %d cells"
+      % (_pq[_pq["Panel_ID"] == "P_LINE"]["Missing_Cell_Count"].iloc[0],
+         len(_pc[_pc["Panel_ID"] == "P_LINE"])))
+check("and the cell ledger agrees with the state too",
+      set(_pc[_pc["Panel_ID"] == "P_LINE"]["Run_State"]) == {_pstate["P_LINE"]},
+      "%s" % set(_pc[_pc["Panel_ID"] == "P_LINE"]["Run_State"]))
+check("every queued panel's state matches the run manifest, not just this one",
+      all(_pstate[p] == s for p, s in zip(_pq["Panel_ID"], _pq["Run_State"]) if p),
+      "%s" % [(p, s, _pstate.get(p)) for p, s in
+              zip(_pq["Panel_ID"], _pq["Run_State"]) if p and _pstate.get(p) != s])
+check("and the count column stays a whole number of cells",
+      all(v == "" or v.isdigit() for v in _pq["Missing_Cell_Count"]),
+      "%s" % list(_pq["Missing_Cell_Count"]))
+
+
+print("a mask name in the wrong case is a manifest problem, not a batch abort")
+# `Mask_Key` chose one of the reader's three built-in masks and nothing checked
+# it against them. The masks are keyed in lower case, so `Mask_Key=BLUE` - the
+# obvious way to write it, and the way every other vocabulary column in these
+# manifests is written - validated, reached `masks["BLUE"]` inside the reader,
+# raised KeyError, and became an InternalReaderError. That aborts the ENTIRE
+# batch: 115 other publications stop because one manifest cell has capitals.
+#
+# The raster is the frozen bar fixture the reader suite measures against, so
+# the numbers below are known independently of this file.
+_BARIMG = os.path.join(IMAGES, "bar_fixture.png")
+shutil.copy2(os.path.join(HERE, "bar_fixture.png"), _BARIMG)
+_BARTRUTH = json.load(open(os.path.join(HERE, "bar_fixture_truth.json")))
+_BAR_SESSIONS = sorted({b["session"] for b in _BARTRUTH["bars"]},
+                       key=lambda s: min(b["x_pixel"] for b in _BARTRUTH["bars"]
+                                         if b["session"] == s))
+_BAR_ANCHOR = {s: sum(b["x_pixel"] for b in _BARTRUTH["bars"] if b["session"] == s)
+               / sum(1 for b in _BARTRUTH["bars"] if b["session"] == s)
+               for s in _BAR_SESSIONS}
+_BAR_MEAN = {(b["series"], b["session"]): b["true_mean"] for b in _BARTRUTH["bars"]}
+
+_bar_panels = [panel("P_BAR", "U_BAR", "BAR_COLOR", _BARIMG,
+                     tuple(_BARTRUTH["panel_box"]), Figure_ID="F_BAR",
+                     Source_Panel_ID="P_BAR", Baseline_Value="0",
+                     Axis_Y_Ticks=";".join("%g:%g" % (v, y)
+                                           for v, y in _BARTRUTH["ticks"]),
+                     Config_ID="C_BAR")]
+_bar_units = [unit("U_BAR", "G_BAR", "CONTINUOUS", Figure_ID="F_BAR",
+                   Bar_Top_Definition="OUTLINE_CENTER",
+                   Errorbar_Stem_Confirmed="TRUE", Dispersion_Type="SD",
+                   Errorbar_Definition_Source="caption: mean +/- SD",
+                   Axis_Calib_Y1_Value=_BARTRUTH["ticks"][0][0],
+                   Axis_Calib_Y1_Pixel=_BARTRUTH["ticks"][0][1],
+                   Axis_Calib_Y2_Value=_BARTRUTH["ticks"][-1][0],
+                   Axis_Calib_Y2_Pixel=_BARTRUTH["ticks"][-1][1])]
+_bar_grids = [dict(Grid_ID="G_BAR", Factor_Name=f, Factor_Level=lv,
+                   Level_Order=i, Note="")
+              for f, levels in (("ARM", ["SUPINE", "ORTHOSTASIS"]),
+                                ("TIMEPOINT", _BAR_SESSIONS))
+              for i, lv in enumerate(levels)]
+_bar_positions = [
+    dict(Panel_ID="P_BAR", Position_ID=s, X_Pixel=_BAR_ANCHOR[s], Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=s,
+         Timepoint_Label=s, Timepoint_Days=i * 7, Note="")
+    for i, s in enumerate(_BAR_SESSIONS)]
+_bar_figures = [dict(Figure_ID="F_BAR", Publication_ID=1,
+                     Source_Figure_ID="SF_BAR", Figure_Number="FIGBAR",
+                     Source_File="synthetic.pdf", Source_Page=1,
+                     Source_Image=_BARIMG,
+                     Source_Image_SHA256=MR.sha256_of(_BARIMG),
+                     Panel_Count_Declared=1, Panel_Count_Observed=1,
+                     Panel_Count_Reconciliation="MATCHED",
+                     Unlisted_Panels="", Note="")]
+_bar_sfigs = [dict(Source_Figure_ID="SF_BAR", Source_Document_ID="SD1",
+                   Publication_ID=1, Figure_Number="FIGBAR",
+                   Source_File="synthetic.pdf", Source_Page=1,
+                   Source_Image=_BARIMG,
+                   Source_Image_SHA256=MR.sha256_of(_BARIMG),
+                   Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+                   Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+                   Inspection_Date="2026-08-06", Note="one visible axes region")]
+_bar_spanels = [dict(Source_Panel_ID="P_BAR", Source_Figure_ID="SF_BAR",
+                     Panel_Label="P_BAR", Outcome_Label="Heart rate",
+                     Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+                     Disposition_Reason="reader configured", Note="")]
+_bar_docs = [dict(d, Observed_Figure_Count=1) for d in SOURCE_DOCUMENTS]
+
+
+def _mask_run(spelling, name):
+    rows = [series("P_BAR", "S_SUP", "SUPINE", Mask_Key=spelling),
+            series("P_BAR", "S_ORT", "ORTHOSTASIS", Mask_Key="red")]
+    md = write_manifests(
+        os.path.join(ROOT, name, "manifests"), panels=_bar_panels,
+        series_rows=rows, positions=_bar_positions, units=_bar_units,
+        grids=_bar_grids, figures=_bar_figures, source_figures=_bar_sfigs,
+        source_panels=_bar_spanels, source_documents=_bar_docs,
+        configs=[dict(Config_ID="C_BAR", Option="colour_tolerance",
+                      Value="70", Note="")])
+    try:
+        summary = RB.run_batch(md, os.path.join(ROOT, name, "out"),
+                               file_root=ROOT, run_date="2026-08-06")
+    except Exception as exc:
+        # A reader that cannot find a declared mask aborts the whole batch as
+        # an InternalReaderError. Catching it here is how this scenario reports
+        # "the batch died" rather than taking the suite down with it.
+        summary = dict(status="RAISED %s: %s" % (type(exc).__name__, exc))
+    return summary, os.path.join(ROOT, name, "out")
+
+
+_mask_means = {}
+for _spelling in ("blue", "BLUE", " Blue "):
+    _bs, _bout = _mask_run(_spelling, "maskrun_%d" % (abs(hash(_spelling)) % 10 ** 6))
+    check("Mask_Key=%r runs instead of aborting the batch" % _spelling,
+          _bs["status"] == "RAN", "%s" % _bs)
+    if _bs["status"] != "RAN":
+        check("  and reads all twelve bars (%r)" % _spelling, False, "%s" % _bs)
+        check("  and recovers the fixture's true means (%r)" % _spelling, False,
+              "%s" % _bs)
+        continue
+    _brun = pd.read_csv(os.path.join(_bout, "run_manifest.csv"),
+                        dtype=object).fillna("")
+    check("  and reads all twelve bars (%r)" % _spelling,
+          int(_brun.loc[0, "Cells_Read"]) == 12, "%s" % _brun.loc[0].to_dict())
+    _bv = pd.read_csv(os.path.join(_bout, "figure_values_raw.csv"),
+                      dtype=object).fillna("")
+    _mask_means[_spelling] = {r["Cell_Key"]: round(float(r["Mean"]), 6)
+                              for _, r in _bv.iterrows()}
+    _err = max(abs(float(r["Mean"]) - _BAR_MEAN[(
+        dict(p.split("=") for p in r["Cell_Key"].split(";"))["ARM"],
+        dict(p.split("=") for p in r["Cell_Key"].split(";"))["TIMEPOINT"])])
+        for _, r in _bv.iterrows())
+    check("  and recovers the fixture's true means (%r)" % _spelling, _err < 1.0,
+          "max %.3f" % _err)
+check("the spelling of the mask changes nothing about the numbers",
+      len({tuple(sorted(v.items())) for v in _mask_means.values()}) == 1,
+      "%s" % {k: sorted(v.items())[:1] for k, v in _mask_means.items()})
+
+
+print("a run with nothing automatic in it is still fully audited")
+# The figure manifest's WRITE sat inside `if projects_by_panel and ...`, so a
+# batch where every panel was manual or unreadable produced no
+# `figure_manifest.csv` at all - while CANONICAL_OUTPUTS and the documentation
+# both call it a run output. The runs with nothing automatic in them are
+# exactly the ones somebody audits by hand.
+_am_md = write_manifests(os.path.join(ROOT, "allmanual", "manifests"),
+                         panels=[dict(p, Panel_Mode="MANUAL") for p in PANELS])
+_am_out = os.path.join(ROOT, "allmanual", "out")
+_am = RB.run_batch(_am_md, _am_out, file_root=ROOT, run_date="2026-08-06")
+check("an all-manual batch still runs",
+      _am["status"] == "RAN" and set(_am["states"]) == {"MANUAL_POINT_READ"},
+      "%s" % _am)
+check("  and it produced no WPD project at all, which is the trigger",
+      not os.path.exists(os.path.join(_am_out, "projects"))
+      or not os.listdir(os.path.join(_am_out, "projects")),
+      "%s" % (os.path.exists(os.path.join(_am_out, "projects"))
+              and os.listdir(os.path.join(_am_out, "projects"))))
+_am_missing = [f for f in RB.CANONICAL_OUTPUTS
+               if f not in ("figure_values_accepted.csv", "finalize_stamp.json",
+                            "figure_values.csv", "manifest_problems.csv",
+                            # Written only when the batch holds a BAR_MONO
+                            # panel, and on the cleanup list regardless: a
+                            # previous run's geometry file left beside this
+                            # run's numbers is the thing that must not survive.
+                            "mono_bar_geometry.csv",
+                            # And the same for the routed scatter's three
+                            # files - the points and the two grains beneath
+                            # them - written only where a panel declares an
+                            # axis manifest.
+                            "scatter_points.csv",
+                            "scatter_marker_candidates.csv",
+                            "scatter_fill_groups.csv")
+               and not os.path.exists(os.path.join(_am_out, f))]
+check("  and every canonical output a completed run owns is on disk",
+      not _am_missing, "%s" % _am_missing)
+_am_fig = pd.read_csv(os.path.join(_am_out, "figure_manifest.csv"),
+                      dtype=object).fillna("")
+check("  including the figure manifest, with its rows intact",
+      set(_am_fig["Figure_ID"]) == {f["Figure_ID"] for f in FIGURES},
+      "%s" % sorted(set(_am_fig["Figure_ID"])))
+
+
+print("a run's overlay failures are its own")
+# `_FAILURES` is module state with no reset, and an agent working through 116
+# publications in one process is the normal case - so the second run's stamp
+# inherited the first run's "3 overlays could not be drawn", naming panels that
+# run never saw.
+RB.OVERLAY._FAILURES.append("leftover_from_a_previous_publication.png: boom")
+check("the fixture really seeds a stale failure",
+      any("leftover" in f for f in RB.OVERLAY.failures()))
+_clean_md = write_manifests(os.path.join(ROOT, "freshfail", "manifests"))
+RB.run_batch(_clean_md, os.path.join(ROOT, "freshfail", "out"), file_root=ROOT,
+             run_date="2026-08-06")
+_fresh_stamp = json.load(open(os.path.join(ROOT, "freshfail", "out",
+                                           "run_stamp.json")))
+check("a new run does not inherit the last one's overlay failures",
+      "leftover" not in _fresh_stamp.get("Detail", ""),
+      "%r" % _fresh_stamp.get("Detail"))
+check("and the module state is the run's own by the end of it",
+      not any("leftover" in f for f in RB.OVERLAY.failures()),
+      "%s" % RB.OVERLAY.failures()[:2])
+
+
+print("a channel for identities the reader cannot measure")
+# Publication 127 prints two bars fifteen pixels tall: a mean, an SE, and no
+# interior to sample. A BAR_MONO series is identified by its fill, so naming
+# them from the pixels would mean "first slot, therefore OPEN" - identity by
+# position. A person names them instead, and the naming is an INPUT with its own
+# evidence, not a decision folded into an approval: an approval says "the number
+# the reader produced is right" and this says "here is something the reader did
+# not produce".
+_ir = BM.identity_resolution_columns()
+check("the identity channel is a manifest of its own",
+      "identity_resolution" in dict(BM.BATCH_TEMPLATES), "%s" % (BM.BATCH_TEMPLATES,))
+check("it is keyed by the geometry the reader DID produce",
+      all(c in _ir for c in ("Panel_ID", "Group_ID", "Geometry_Slot")), "%s" % _ir)
+check("and it names a series rather than a slot order",
+      "Resolved_Series_ID" in _ir and not [c for c in _ir if "Order" in c], "%s" % _ir)
+check("every resolution says where the identity came from",
+      all(c in _ir for c in ("Evidence_Type", "Evidence_Artifact",
+                             "Evidence_Artifact_SHA256")), "%s" % _ir)
+check("and who said so, and when",
+      all(c in _ir for c in ("Reviewer_ID", "Reviewed_At")), "%s" % _ir)
+check("a reviewer's own reading is one evidence type among several, not the only one",
+      set(BM.HUMAN_IDENTITY_EVIDENCE) == {"LEGEND_DECLARED", "TEXT_DECLARED",
+                                          "REVIEWER_INSPECTION"},
+      "%s" % (BM.HUMAN_IDENTITY_EVIDENCE,))
+# REVERT: one enum holding both halves. A person can then type FILL_MEASURED
+# into identity_resolution.csv for a cell where the reader explicitly could NOT
+# measure a fill, and the record says an automatic measurement was made.
+check("what the reader produces is not what a person may enter",
+      "FILL_MEASURED" in BM.AUTO_IDENTITY_EVIDENCE
+      and "FILL_MEASURED" not in BM.HUMAN_IDENTITY_EVIDENCE,
+      "%s / %s" % (BM.AUTO_IDENTITY_EVIDENCE, BM.HUMAN_IDENTITY_EVIDENCE))
+check("and the two halves together are the whole vocabulary",
+      set(BM.IDENTITY_EVIDENCE) == set(BM.AUTO_IDENTITY_EVIDENCE)
+      | set(BM.HUMAN_IDENTITY_EVIDENCE))
+# REVERT: read the trust order off the tuple. Its last entry is the WEAKEST
+# evidence there is - a reviewer's own reading, with no legend and no sentence
+# --------------------------------------------------------------------------
+# a LINE_MONO_STYLE panel read END TO END, and the reader's reason with it
+# --------------------------------------------------------------------------
+# v9.14 folded the line reader's panel note into the NO-MARKS outcome and pinned
+# that structurally, saying in the release notes that a behavioural pin needed a manifest
+# set this file did not have. This is that manifest set, written because v9.15
+# needs the other case: a panel that emits rows AND refuses some, where a note
+# gated on silence reports neither.
+#
+# The figure declares two series, solid and dashed, and DRAWS ONLY THE DASHED
+# ONE. Its data covers the middle 70% of the panel - an inset, a legend column, a
+# wide y label - so the 100 mmHg gridline is inked across every column of the data
+# span and across only three quarters of the panel width: below recognition, never
+# removed, and the only SOLID candidate at every x. It came out as eight cells of
+# exactly 100.00 mmHg for a series the figure does not contain, and reverting the
+# refusal puts all eight of them back into `figure_values_raw.csv` as
+# ARM=FLUID;TIMEPOINT=T1..T8. The run marks that panel QC_FAILED - but for a
+# DIFFERENT reason, that a gridline has no error bar under it and so carries no
+# weight - which is not the same as knowing the numbers are furniture, and leaves
+# them in the file every downstream step reads.
+print()
+print("a LINE_MONO_STYLE panel whose gridline cannot be removed")
+LSTYLE_IMG = os.path.join(IMAGES, "line_style_inset.png")
+_LS_LABELS = tuple("T%d" % i for i in range(1, 9))
+_LS_TRUTH = (86.0, 88.0, 90.0, 92.0, 94.0, 95.0, 94.0, 95.0)
+_LS_RULE = 100.0
+_LS_SD = 2.0
+_LS_TOP, _LS_BOT = 120.0, 70.0
+_LS_YTOP, _LS_YBOT = 30, 290
+_LS_AX0, _LS_AX1 = 60, 560
+
+
+def _ls_yof(v):
+    return _LS_YTOP + (_LS_YBOT - _LS_YTOP) * (_LS_TOP - v) / (_LS_TOP - _LS_BOT)
+
+
+def _draw_line_style_inset(path, spread=0.7):
+    """One dashed curve, one gridline, and data that stops short of the axes."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    im = Image.new("RGB", (600, 320), "white")
+    d = ImageDraw.Draw(im)
+    d.line([_LS_AX0, _ls_yof(_LS_RULE), _LS_AX1, _ls_yof(_LS_RULE)],
+           fill=(0, 0, 0), width=1)
+    d.line([_LS_AX0, _LS_YTOP, _LS_AX0, _LS_YBOT], fill=(0, 0, 0), width=3)
+    d.line([_LS_AX0, _LS_YBOT, _LS_AX1, _LS_YBOT], fill=(0, 0, 0), width=3)
+    lo = _LS_AX0 + (_LS_AX1 - _LS_AX0) * (1.0 - spread) / 2.0
+    hi = _LS_AX1 - (_LS_AX1 - _LS_AX0) * (1.0 - spread) / 2.0
+    xs = [lo + (hi - lo) * i / (len(_LS_LABELS) - 1)
+          for i in range(len(_LS_LABELS))]
+    pts = [(xs[i], _ls_yof(_LS_TRUTH[i])) for i in range(len(_LS_LABELS))]
+    # ERROR BARS ON THE SERIES THE FIGURE DRAWS. Without them the panel carries no
+    # weight, the runner refuses it as NO_VARIANCE whatever the reader did, and a
+    # scenario about values reaching the output file could not fail. The gridline
+    # has no stem under it, which is the figure being honest: furniture has no
+    # dispersion, so the check that the refusal is what stopped it stays sharp.
+    for i, (x, y) in enumerate(pts):
+        top, bottom = _ls_yof(_LS_TRUTH[i] + _LS_SD), _ls_yof(_LS_TRUTH[i] - _LS_SD)
+        d.line([x, top, x, bottom], fill=(0, 0, 0), width=3)
+        for cap in (top, bottom):
+            d.line([x - 6, cap, x + 6, cap], fill=(0, 0, 0), width=3)
+    for a, b in zip(pts, pts[1:]):
+        length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+        t = 0.0
+        while t < length:
+            e = min(length, t + 9)
+            d.line([(a[0] + (b[0] - a[0]) * t / length,
+                     a[1] + (b[1] - a[1]) * t / length),
+                    (a[0] + (b[0] - a[0]) * e / length,
+                     a[1] + (b[1] - a[1]) * e / length)], fill=(0, 0, 0), width=3)
+            t = e + 6
+    im.save(path)
+    return xs
+
+
+_LS_XS = _draw_line_style_inset(LSTYLE_IMG)
+_LS_BOX = (_LS_AX0 + 3, _LS_AX1, _LS_YTOP, _LS_YBOT - 3)
+_LS_STYLES = (("S_SOLID", "FLUID", "SOLID"), ("S_DASHED", "NO_FLUID", "DASHED"))
+_ls_figure = dict(
+    Figure_ID="F_LSTYLE", Publication_ID=1, Figure_Number="FIG6",
+    Source_File="synthetic.pdf", Source_Page=1, Source_Image=LSTYLE_IMG,
+    Source_Caption_Verbatim="synthetic solid-versus-dashed line panel",
+    Image_Resolution_Or_Hash="sha256:" + MR.sha256_of(LSTYLE_IMG),
+    WPD_Project_File="", Observed_Panel_Count=1, Worklist_Panel_Count=1,
+    Unlisted_Panels="", Panel_Reconciliation_Status="MATCHED", Note="")
+_ls_source_figure = dict(
+    Source_Figure_ID="SF_LSTYLE", Source_Document_ID="SD1", Publication_ID=1,
+    Figure_Number="FIG6", Source_File="synthetic.pdf", Source_Page=1,
+    Source_Image=LSTYLE_IMG, Source_Image_SHA256=MR.sha256_of(LSTYLE_IMG),
+    Observed_Panel_Count=1, Inventory_Status="VISUALLY_VERIFIED",
+    Panel_Count_Method="HUMAN_VISUAL", Reviewer_ID="RV_T1",
+    Inspection_Date="2026-08-06", Note="one line axes region")
+_ls_source_panel = dict(
+    Source_Panel_ID="P_LSTYLE", Source_Figure_ID="SF_LSTYLE",
+    Panel_Label="P_LSTYLE", Outcome_Label="Mean arterial pressure",
+    Target_Status="TARGET", Panel_Disposition="AUTO_DIGITIZE",
+    Disposition_Reason="synthetic line-style fixture", Note="")
+_ls_grids = GRIDS + (
+    [dict(Grid_ID="G_LSTYLE", Factor_Name="ARM", Factor_Level=lv,
+          Level_Order=i, Note="") for i, (_s_, lv, _y_) in enumerate(_LS_STYLES)]
+    + [dict(Grid_ID="G_LSTYLE", Factor_Name="TIMEPOINT", Factor_Level=lv,
+            Level_Order=i, Note="") for i, lv in enumerate(_LS_LABELS)])
+_ls_unit = unit("U_LSTYLE", "G_LSTYLE", "CONTINUOUS", Figure_ID="F_LSTYLE",
+                Panel="U_LSTYLE", Bar_Top_Definition="NOT_A_BAR",
+                Outcome_Variable="Mean arterial pressure", Unit="mmHg",
+                Axis_Calib_Y1_Value=_LS_TOP, Axis_Calib_Y1_Pixel=_ls_yof(_LS_TOP),
+                Axis_Calib_Y2_Value=_LS_BOT, Axis_Calib_Y2_Pixel=_ls_yof(_LS_BOT))
+_ls_panel = panel("P_LSTYLE", "U_LSTYLE", "LINE_MONO_STYLE", LSTYLE_IMG, _LS_BOX,
+                  Figure_ID="F_LSTYLE", Config_ID="",
+                  Axis_Y_Ticks="%g:%g;%g:%g" % (_LS_TOP, _ls_yof(_LS_TOP),
+                                                _LS_BOT, _ls_yof(_LS_BOT)))
+_ls_series = [series("P_LSTYLE", sid, level, Colour_Hex="", Marker_Shape="NONE",
+                     Marker_Fill="", Line_Style=style)
+              for sid, level, style in _LS_STYLES]
+_ls_positions = [
+    dict(Panel_ID="P_LSTYLE", Position_ID=q, X_Pixel=x, Slot_Index=i,
+         Display_Order=i, Factor_Name="TIMEPOINT", Factor_Level=q,
+         Timepoint_Label=q, Timepoint_Days=i * 7, Note="")
+    for i, (q, x) in enumerate(zip(_LS_LABELS, _LS_XS))]
+_lm = write_manifests(
+    os.path.join(ROOT, "m_lstyle"),
+    panels=PANELS + [_ls_panel], series_rows=SERIES + _ls_series,
+    positions=POSITION_ROWS + _ls_positions, units=UNITS + [_ls_unit],
+    figures=FIGURES + [_ls_figure], grids=_ls_grids,
+    source_figures=SOURCE_FIGURES + [_ls_source_figure],
+    source_panels=SOURCE_PANELS + [_ls_source_panel],
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+_lo = os.path.join(ROOT, "o_lstyle")
+_lstat = RB.run_batch(_lm, _lo, file_root=ROOT, run_date="2026-08-06")
+_lr = pd.read_csv(os.path.join(_lo, "run_manifest.csv"), dtype=object).fillna("")
+_lrow = _lr[_lr["Panel_ID"] == "P_LSTYLE"]
+check("the line panel runs end to end from its manifests",
+      _lstat["status"] == "RAN" and len(_lrow), "%s" % _lstat)
+_ldetail = _lrow.iloc[0]["Detail"] if len(_lrow) else ""
+_lstate = _lrow.iloc[0]["Run_State"] if len(_lrow) else ""
+check("  and the run manifest carries the refusal, not just a count",
+      "LINE_VALUE_ON_UNREMOVABLE_RULE" in _ldetail,
+      "state %s, detail %r" % (_lstate, _ldetail))
+# WHAT THE STATE HAS TO BE. The solid series is refused everywhere and the dashed
+# one reads, which is a panel whose series the reader could not separate - so the
+# runner withholds the whole panel and queues it. Before v9.15 the solid series
+# was not silent: it held eight cells of exactly 100.00 mmHg, the panel passed
+# automatically, and those eight numbers reached `figure_values_raw.csv`.
+check("  and the panel is withheld because one declared series went silent",
+      _lstate == "SERIES_IDENTITY_UNRESOLVED", "%s" % _lstate)
+_lv = pd.read_csv(os.path.join(_lo, "figure_values_raw.csv"),
+                  dtype=object).fillna("")
+_lv = _lv[_lv["Unit_ID"] == "U_LSTYLE"]
+# Compared against the DRAWN gridline value, and the file writes it as
+# 99.99999999999997 - so a string comparison would pass while the number is the
+# rule. The refusal is what keeps it out; nothing downstream would have known.
+check("  and not one gridline value reaches the values file",
+      not [v for v in _lv["Mean"] if abs(float(v) - _LS_RULE) < 0.5],
+      "%s" % sorted(zip(_lv["Cell_Key"], _lv["Mean"])))
+_lq = pd.read_csv(os.path.join(_lo, "manual_queue.csv"), dtype=object).fillna("")
+_lq = _lq[_lq["Panel_ID"] == "P_LSTYLE"]
+check("  and all sixteen declared cells are queued for a person",
+      len(_lq) and _lq.iloc[0]["Missing_Cell_Count"] == "16",
+      "%s" % (list(_lq["Missing_Cell_Count"]) if len(_lq) else "no queue row"))
+
+# THE NOTE IS THIS PANEL'S. `panel_notes` is module state read once per panel by
+# a loop over 116 publications, and it was cleared inside the reader dispatch -
+# which a panel the runner returns before dispatching never reaches. The panel
+# after a line panel was then folded the PREVIOUS panel's diagnosis, with nothing
+# on the row to say the note was not its own. A `Panel_Mode=MANUAL` panel is the
+# case: it is a legitimate manifest row, it returns before any reader runs, and it
+# is the panel a person is about to digitize by hand.
+_ls_manual = dict(_ls_panel, Panel_ID="P_LSTYLE_M", Source_Panel_ID="P_LSTYLE_M",
+                  Unit_ID="U_LSTYLE_M", Panel_Label="P_LSTYLE_M",
+                  Panel_Mode="MANUAL")
+_lm2 = write_manifests(
+    os.path.join(ROOT, "m_lstyle2"),
+    panels=PANELS + [_ls_panel, _ls_manual],
+    series_rows=SERIES + _ls_series + [dict(r, Panel_ID="P_LSTYLE_M")
+                                       for r in _ls_series],
+    positions=POSITION_ROWS + _ls_positions + [dict(r, Panel_ID="P_LSTYLE_M")
+                                               for r in _ls_positions],
+    units=UNITS + [_ls_unit, unit(
+        "U_LSTYLE_M", "G_LSTYLE", "CONTINUOUS", Figure_ID="F_LSTYLE",
+        Panel="U_LSTYLE_M", Bar_Top_Definition="NOT_A_BAR",
+        Outcome_Variable="Mean arterial pressure", Unit="mmHg",
+        Axis_Calib_Y1_Value=_LS_TOP, Axis_Calib_Y1_Pixel=_ls_yof(_LS_TOP),
+        Axis_Calib_Y2_Value=_LS_BOT, Axis_Calib_Y2_Pixel=_ls_yof(_LS_BOT))],
+    figures=FIGURES + [_ls_figure], grids=_ls_grids,
+    source_figures=SOURCE_FIGURES + [dict(_ls_source_figure,
+                                          Observed_Panel_Count=2)],
+    source_panels=SOURCE_PANELS + [_ls_source_panel,
+                                   dict(_ls_source_panel,
+                                        Source_Panel_ID="P_LSTYLE_M",
+                                        Panel_Label="P_LSTYLE_M",
+                                        Panel_Disposition="MANUAL_DIGITIZE")],
+    source_documents=[dict(SOURCE_DOCUMENTS[0], Observed_Figure_Count=5)])
+_lo2 = os.path.join(ROOT, "o_lstyle2")
+_lstat2 = RB.run_batch(_lm2, _lo2, file_root=ROOT, run_date="2026-08-06")
+_lr2 = (pd.read_csv(os.path.join(_lo2, "run_manifest.csv"), dtype=object).fillna("")
+        if os.path.exists(os.path.join(_lo2, "run_manifest.csv"))
+        else pd.DataFrame(columns=["Panel_ID", "Run_State", "Detail"]))
+_l2 = _lr2[_lr2["Panel_ID"] == "P_LSTYLE_M"]
+check("a panel the runner never dispatched inherits no diagnosis",
+      len(_l2) and "LINE_VALUE_ON_UNREMOVABLE_RULE" not in _l2.iloc[0]["Detail"],
+      "%s / %s" % (_lstat2, list(zip(_l2["Run_State"], _l2["Detail"]))
+                   if len(_l2) else "no row for P_LSTYLE_M"))
+# AND THE READER STILL OFFERS THE CHANNEL, so the scenarios above cannot pass
+# against a module that dropped it and a batch layer that stopped asking.
+import line_style_mono as _LSM_LN                                  # noqa: E402
+
+check("  and the reader offers every part of that channel",
+      callable(getattr(_LSM_LN, "reset_panel_notes", None))
+      and callable(getattr(_LSM_LN, "panel_notes", None))
+      and callable(getattr(_LSM_LN, "rule_coverage_ceiling", None))
+      and callable(getattr(_LSM_LN, "unremovable_rule_rows", None))
+      and callable(getattr(_LSM_LN, "value_sits_on_rule", None)))
+
+# behind it - so tuple position says the opposite of the truth.
+check("the trust order is written out, not implied by tuple position",
+      BM.IDENTITY_EVIDENCE_RANK["REVIEWER_INSPECTION"]
+      < BM.IDENTITY_EVIDENCE_RANK["TEXT_DECLARED"]
+      < BM.IDENTITY_EVIDENCE_RANK["LEGEND_DECLARED"]
+      < BM.IDENTITY_EVIDENCE_RANK["FILL_MEASURED"],
+      "%s" % (BM.IDENTITY_EVIDENCE_RANK,))
+check("the artifact is hashed, so a resolution cannot change after approval",
+      "Evidence_Artifact_SHA256" in _ir)
+
+print("templates are generated from the column functions, never typed")
+_tdir = os.path.join(ROOT, "templates")
+for _p in RB.emit_templates(_tdir):
+    _name = os.path.basename(_p).replace("_TEMPLATE.csv", "")
+    _fn = dict(BM.BATCH_TEMPLATES)[_name]
+    check("%s template matches its column function" % _name,
+          next(csv.reader(open(_p))) == _fn())
+
+# THE COMMAND LINE HANDS THE DOCUMENT FOLDER TO THE CHECK. The check reads it;
+# a run that took --doc-root and dropped it would look for the PDFs in the run.
+class _Seen(Exception):
+    pass
+
+
+_real_validate, _got = BM.validate_batch_manifests, {}
+
+
+def _spy(*_a, **kw):
+    _got.update(kw)
+    raise _Seen()
+
+
+BM.validate_batch_manifests = _spy
+try:
+    RB.main([MDIR, os.path.join(ROOT, "o_docroot"), "--file-root", ROOT, "--doc-root", "/docs/here"])
+except _Seen:
+    pass
+finally:
+    BM.validate_batch_manifests = _real_validate
+# REVERT: drop doc_root between the command line and the check.
+check("the command line's --doc-root reaches the manifest check", _got.get("doc_root") == "/docs/here", _got.get("doc_root"))
+
+shutil.rmtree(ROOT, ignore_errors=True)
+print()
+# One line, one format, for the CI suite runner (.github/run_suites.sh),
+# which requires exactly one of these from every suite and refuses a zero.
+print("FDT_SCENARIOS_RUN=%d" % (PASSED[0] + len(FAILURES)))
+print("%d scenarios run" % (PASSED[0] + len(FAILURES)))
+if FAILURES:
+    print("%d FAILED: %s" % (len(FAILURES), FAILURES))
+    sys.exit(1)
+print("all scenarios passed")

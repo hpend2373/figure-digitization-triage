@@ -154,6 +154,18 @@ For a bar or line panel with confirmed identity and calibration and
 
     python3 fdt/manual_digitize.py --run RUN --panel PROPOSAL_ID --out RUN/manual.html
 
+For several confirmed panels, build a single offline workbench.
+
+    python3 fdt/workbench.py --run RUN --panel PROPOSAL_A PROPOSAL_B --out RUN/workbench.html
+
+The workbench shows a panel list, the source raster crop and a reading table.
+Draft coordinates stay in the current browser, keyed to the panel definitions
+and raster fingerprints in that page. Reopen the same file in the same browser
+to resume. Download the readings before changing browser or clearing its data.
+The table shows a calibrated preview. The plan and extraction gates consume the
+exported pixels and apply the recorded calibration. Regenerate the page after
+changing the frame, calibration or series definitions.
+
 Open the page locally. Choose a series and x position, click the marker center
 or bar end, and mark each visible error end separately. Leave unreadable ends
 blank. Enter the actual reader ID and reading date, then download the CSV

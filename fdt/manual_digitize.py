@@ -13,8 +13,7 @@ from geometry_proposer import calibration_from
 from page_bits import esc
 
 
-def build(run, proposal_id):
-    geometry, identities, _, _ = plan.load_confirmations(str(run), None, None, None)
+def panel_data(run, proposal_id, geometry, identities):
     identity = identities[proposal_id]
     frame = geometry[proposal_id]
     if (identity["Human_Verification_Status"] != "CONFIRMED"
@@ -42,10 +41,19 @@ def build(run, proposal_id):
              for position in json.loads(identity["X_Labels"])]
     if not cells or any(not all(cell) for cell in cells) or len(set(map(tuple, cells))) != len(cells):
         raise ValueError("Panel must have unique named cells")
-    data = json.dumps({"id": proposal_id, "hash": digest, "cells": cells,
-                       "columns": plan.READING_FIELDS, "x0": x0, "y0": y0,
-                       "x1": x1, "y1": y1}).replace("<", "\\u003c")
-    png = base64.b64encode(crop.getvalue()).decode("ascii")
+    return {"id": proposal_id, "hash": digest, "cells": cells,
+            "columns": plan.READING_FIELDS, "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+            "ticks": calibration_from(frame), "outcome": identity.get("Outcome_Name", ""),
+            "unit": identity.get("Unit", ""), "bar_top": identity.get("Bar_Top_Definition", ""),
+            "image": base64.b64encode(crop.getvalue()).decode("ascii")}
+
+
+def build(run, proposal_id):
+    geometry, identities, _, _ = plan.load_confirmations(str(run), None, None, None)
+    panel = panel_data(run, proposal_id, geometry, identities)
+    x0, y0, x1, y1 = (panel[key] for key in ("x0", "y0", "x1", "y1"))
+    png = panel.pop("image")
+    data = json.dumps(panel).replace("<", "\\u003c")
     logic = Path(__file__).with_suffix(".js").read_text(encoding="utf-8")
     return f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -56,8 +64,8 @@ label,button {{ display: inline-block; margin: .4rem; }}
 svg {{ display: block; width: 100%; max-width: 1200px; height: auto; cursor: crosshair; }}
 </style>
 <h1>Manual plot digitizer</h1>
-<p>{esc(proposal_id)} · {esc(identity.get("Outcome_Name"))} · {esc(identity.get("Unit"))}
- · {esc(identity.get("Bar_Top_Definition"))}</p>
+<p>{esc(proposal_id)} · {esc(panel["outcome"])} · {esc(panel["unit"])}
+ · {esc(panel["bar_top"])}</p>
 <p>Select a cell and click its bar end or marker center. Place the visible error ends separately.
 Leave unreadable ends blank. Download your pixel readings before closing the page.</p>
 <label>Cell <select id="cell"></select></label>

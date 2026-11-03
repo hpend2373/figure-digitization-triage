@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plot Digitizer · 작업대</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#edf1f4;color:#192b3b;font:15px/1.5 system-ui,sans-serif}
+header{background:#142637;color:white;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+header h1{font-size:21px;margin:0}header small{color:#bacbd9}
+main{display:grid;grid-template-columns:minmax(156px,220px) minmax(0,1fr) minmax(310px,370px);gap:14px;padding:14px;align-items:start}
+section,nav{background:white;border:1px solid #d4dfe7;border-radius:12px;padding:15px;min-width:0}
+h2{font-size:16px;margin:0 0 10px}p{margin:6px 0 12px}.muted{color:#526777;font-size:13px}
+button,input{font:inherit;border:1px solid #b8cad6;border-radius:7px;background:white;color:inherit;padding:7px 10px}
+button{cursor:pointer}button:disabled{opacity:.45;cursor:default}button[aria-pressed=true],.primary{background:#146271;border-color:#146271;color:white}
+button:focus-visible,input:focus-visible{outline:3px solid #43a2b4;outline-offset:2px}
+nav button{display:block;width:100%;text-align:left;margin:6px 0;overflow-wrap:anywhere}
+.tools,.fields{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.tools{margin:10px 0}.zoom{margin-left:auto}
+.viewport{height:clamp(330px,56vh,780px);overflow:auto;background:#e5ecf1;border:1px solid #d1dde5;border-radius:8px}
+svg{display:block;max-width:none;cursor:crosshair;background:white}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 4px;text-align:left;border-bottom:1px solid #e4ecf1;overflow-wrap:anywhere}
+th{color:#526777}td button{padding:3px 5px;font-size:inherit;text-align:left;width:100%}
+.table{max-height:45vh;overflow:auto;margin:10px 0}label{font-size:13px;display:grid;gap:3px}.fields input{width:144px}
+#status{min-height:3em;color:#526777}#panel-title{overflow-wrap:anywhere}
+@media(max-width:1050px){main{grid-template-columns:155px minmax(0,1fr)}.readings{grid-column:2}}
+@media(max-width:650px){main{grid-template-columns:minmax(0,1fr)}.readings{grid-column:auto}.viewport{height:48vh}}
+</style>
+</head>
+<body>
+<header><div><h1>Plot Digitizer <small>· 작업대</small></h1><small>원본 좌표를 확인하고 판독 CSV로 내보냅니다</small></div><small id="saved" role="status"></small></header>
+<main>
+<nav aria-label="패널 목록"><h2>패널</h2><div id="panels"></div></nav>
+<section aria-labelledby="panel-title">
+<h2 id="panel-title"></h2><p id="axis" class="muted"></p>
+<div class="tools" aria-label="판독 도구">
+<button data-mark="mean" aria-pressed="true">값</button>
+<button data-mark="upper" aria-pressed="false">위쪽 끝</button>
+<button data-mark="lower" aria-pressed="false">아래쪽 끝</button>
+<button id="clear">선택 표시 지우기</button>
+<div class="tools zoom"><button id="minus" aria-label="축소">−</button><button id="fit">맞춤</button><button id="plus" aria-label="확대">+</button></div>
+</div>
+<div id="viewport" class="viewport"><svg id="plot" aria-label="원본 플롯"><image id="raster"/><g id="marks" pointer-events="none"/></svg></div>
+<p class="muted">판독표에서 셀을 고른 뒤 그림을 클릭하세요. 보이지 않는 오차막대 끝은 비워 두세요.</p>
+</section>
+<section class="readings" aria-labelledby="readings-title">
+<h2 id="readings-title">판독표</h2><p id="count" class="muted"></p>
+<div class="table"><table><thead><tr><th>계열 · 위치</th><th>값</th><th>위쪽</th><th>아래쪽</th></tr></thead><tbody id="cells"></tbody></table></div>
+<p class="muted">표의 숫자는 축 교정에 따른 미리보기입니다. CSV에는 원본 픽셀을 담습니다.</p>
+<div class="fields"><label>판독자 ID<input id="reader" autocomplete="off"></label><label>판독일<input id="date" type="date"></label></div>
+<p id="status" role="status"></p>
+<button id="download" class="primary" disabled>판독 CSV 내보내기</button>
+</section>
+</main>
+<script type="application/json" id="data">/* WORKBENCH_DATA */</script>
+<script>/* WORKBENCH_JS */</script>
+</body>
+</html>

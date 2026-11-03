@@ -1212,7 +1212,8 @@ def plan_for(run, publication, rows, captions, decisions, counts, crop_root,
 
 
 def build(run, out_dir, crop_root, run_date, only=None, log=print,
-          geometry_dir=None, identity_dir=None, regions=None, reviewers_path=None):
+          geometry_dir=None, identity_dir=None, regions=None, reviewers_path=None,
+          readings_path=None):
     rows = live_rows(run)
     confirmations = load_confirmations(run, geometry_dir, identity_dir, regions)
     reviewers = load_reviewers(reviewers_path)
@@ -1224,7 +1225,7 @@ def build(run, out_dir, crop_root, run_date, only=None, log=print,
     decided.update(load_figure_dispositions(run))
     outcomes = load_outcomes(run)
     legends = load_legends(run)
-    readings = load_readings(run)
+    readings = load_readings(run, readings_path)
     answers = _rows(os.path.join(run, COUNTS))
     counts = dict((r["Draft_ID"], r.get("Observed_Panel_Count"))
                   for r in answers
@@ -1328,13 +1329,18 @@ def main(argv=None):
     ap.add_argument("--regions", help="panel_regions_600.csv (런 기준, 기본 %s)" % REGIONS)
     ap.add_argument("--reviewers", help="사람이 적은 검토자 등록 JSON (load_reviewers 참고). "
                                         "없으면 그림 인벤토리는 PENDING으로 남습니다.")
+    ap.add_argument("--readings", type=os.path.abspath,
+                    help="Use this complete intake readings CSV instead of the default.")
     args = ap.parse_args(argv)
+    if args.readings and not os.path.isfile(args.readings):
+        ap.error("--readings must name an existing CSV")
     run = os.path.expanduser(args.run)
     build(run, os.path.expanduser(args.out),
           os.path.expanduser(args.crop_root or run), args.run_date,
           only=set(args.only or ()) or None,
           geometry_dir=args.geometry, identity_dir=args.identity, regions=args.regions,
-          reviewers_path=os.path.expanduser(args.reviewers) if args.reviewers else None)
+          reviewers_path=os.path.expanduser(args.reviewers) if args.reviewers else None,
+          readings_path=args.readings)
     return 0
 
 

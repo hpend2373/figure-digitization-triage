@@ -3858,7 +3858,7 @@ check("and the accepted file carries the values", len(_acc) == _ok["accepted"] >
 check("and every row says who approved it and when",
       set(_acc["Reviewer_ID"]) == {"RV_H"} and set(_acc["Review_ID"]) == {"R001"}
       and set(_acc["Value_Status"]) == {"HUMAN_APPROVED"}
-      and set(_acc["Pooling_Eligible"]) == {"TRUE"},
+      and set(_acc["Pooling_Eligible"]) == {"FALSE"},
       "%s" % _acc.head(1).to_dict("records"))
 
 for _label, _rows, _want in (

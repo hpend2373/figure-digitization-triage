@@ -1,7 +1,7 @@
 # figure-digitization-triage (fdt)
 
-A reproducible pipeline for reading numbers off published figures for a
-systematic review, with quality control that fails closed. Many studies report
+A plot digitizer for published figures, with automatic reading, direct point
+entry, visual review, and a traceable CSV export. Many studies report
 their outcomes only as plots, and a number read off a plot is only usable if the
 pipeline that produced it can say exactly what it did: which raster, which
 calibration, which reader, which environment, and which person looked at it.
@@ -27,7 +27,7 @@ PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a p
 3. **Fail closed, and loudly.** Every panel ends in exactly one state, and
    anything short of a pass goes to a queue with its reason. Machine QC is not
    approval: only `finalize_batch.py`, given a registered person's review, writes
-   values you may pool.
+   approved figure readings. Synthesis eligibility is assessed separately.
 
 ## Install
 
@@ -50,7 +50,7 @@ change a number.
 This draws a synthetic bar chart (heart rate, two postures, six sessions,
 mean ± SD — every true value known), compiles its plan, and reads it. Run as is,
 it ends in `DEMO_OUTPUT_REFUSED`: the plan's only reviewer is a demonstration
-identity, and a demonstration identity cannot stand behind a poolable value.
+identity, and a demonstration identity cannot stand behind an approved extraction.
 Set your own name, ORCID and dates and it stops at `MACHINE_QC_PASSED` with an
 overlay for you to review — see [`examples/quickstart`](examples/quickstart/).
 
@@ -75,6 +75,18 @@ Success is `OUT/figure_values_accepted.csv` beside a `finalize_stamp.json` whose
 **Keep papers, figures, runs and review answers outside the clone.** This
 repository is public, publisher material is not redistributable, and the test
 suite refuses a tracked PDF or any picture outside `tests/`.
+
+## Digitize a panel by hand
+
+For a calibrated panel routed to MANUAL, open an offline point-entry page and
+click the marks on the original raster. The exported coordinates go through the
+same calibration and review as other readings. See the
+[direct digitization workflow](docs/PROCEDURE.md#7-manual-digitization).
+
+Finalized exports carry `Value_Status=HUMAN_APPROVED` and
+`Pooling_Eligible=FALSE`. Older exports can carry `TRUE` for extraction
+approval. Use the [synthesis handoff](docs/SYNTHESIS_HANDOFF.md) to establish
+eligibility for a specific analysis.
 
 ## For AI agents
 

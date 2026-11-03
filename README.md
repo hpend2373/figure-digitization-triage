@@ -76,11 +76,15 @@ Success is `OUT/figure_values_accepted.csv` beside a `finalize_stamp.json` whose
 repository is public, publisher material is not redistributable, and the test
 suite refuses a tracked PDF or any picture outside `tests/`.
 
-## Digitize a panel by hand
+## Open the plot digitizer
 
-For a calibrated panel routed to MANUAL, open an offline point-entry page and
-click the marks on the original raster. The exported coordinates go through the
-same calibration and review as other readings. See the
+For calibrated panels routed to MANUAL, open the offline workbench to select a
+panel, zoom the plot, place marks, save drafts in the browser, and export CSV.
+
+    python3 fdt/workbench.py --run RUN --panel PROPOSAL_A PROPOSAL_B --out RUN/workbench.html
+
+The workbench and single-panel page share compact controls. Exported coordinates
+go through the existing calibration and review stages. See the
 [direct digitization workflow](docs/PROCEDURE.md#7-manual-digitization).
 
 Finalized exports carry `Value_Status=HUMAN_APPROVED` and

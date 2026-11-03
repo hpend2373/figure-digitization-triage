@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 import make_plan
-from manual_digitize import panel_data
+from manual_digitize import digitizer_style, panel_data
 
 
 def build(run, proposals):
@@ -21,6 +21,7 @@ def build(run, proposals):
     template = Path(__file__).with_suffix(".html").read_text(encoding="utf-8")
     script = Path(__file__).with_suffix(".js").read_text(encoding="utf-8")
     payload = json.dumps({"key": key, "panels": panels}, ensure_ascii=False)
+    template = template.replace("/* DIGITIZER_CSS */", digitizer_style())
     return template.replace("/* WORKBENCH_JS */", script).replace(
         "/* WORKBENCH_DATA */", payload.replace("<", "\\u003c"))
 

@@ -48,6 +48,10 @@ def panel_data(run, proposal_id, geometry, identities):
             "image": base64.b64encode(crop.getvalue()).decode("ascii")}
 
 
+def digitizer_style():
+    return Path(__file__).with_name("digitizer.css").read_text(encoding="utf-8")
+
+
 def build(run, proposal_id):
     geometry, identities, _, _ = plan.load_confirmations(str(run), None, None, None)
     panel = panel_data(run, proposal_id, geometry, identities)
@@ -58,27 +62,38 @@ def build(run, proposal_id):
     return f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Manual plot digitizer</title>
-<style>
-body {{ font: 16px system-ui; margin: 2rem; color: #18303e; }}
-label,button {{ display: inline-block; margin: .4rem; }}
-svg {{ display: block; width: 100%; max-width: 1200px; height: auto; cursor: crosshair; }}
-</style>
-<h1>Manual plot digitizer</h1>
-<p>{esc(proposal_id)} · {esc(panel["outcome"])} · {esc(panel["unit"])}
- · {esc(panel["bar_top"])}</p>
-<p>Select a cell and click its bar end or marker center. Place the visible error ends separately.
-Leave unreadable ends blank. Download your pixel readings before closing the page.</p>
-<label>Cell <select id="cell"></select></label>
-<label>Mark <select id="mark"><option value="mean">Center or bar end</option>
-<option value="upper">Top error end</option><option value="lower">Bottom error end</option></select></label>
-<button id="clear">Clear selected mark</button>
+<style>{digitizer_style()}</style>
+<body>
+<header><h1>Plot Digitizer <small>· Single panel</small></h1></header>
+<main class="single-panel">
+<section aria-labelledby="panel-title">
+<h2 id="panel-title">{esc(panel["outcome"] or proposal_id)}</h2>
+<p class="muted">{esc(proposal_id)} · {esc(panel["unit"])} · {esc(panel["bar_top"])}</p>
+<div class="viewport">
 <svg id="plot" viewBox="{x0 - .5} {y0 - .5} {x1 - x0 + 1} {y1 - y0 + 1}"
      aria-label="Panel for manual digitization">
 <image href="data:image/png;base64,{png}" x="{x0 - .5}" y="{y0 - .5}"
  width="{x1 - x0 + 1}" height="{y1 - y0 + 1}"/><g id="marks" pointer-events="none"/></svg>
-<label>Reader ID <input id="reader"></label><label>Date <input id="date" type="date"></label>
-<button id="download" disabled>Download pixel readings</button><p id="status" role="status"></p>
-<script type="application/json" id="config">{data}</script><script>{logic}</script></html>
+</div>
+<p class="muted">Click the center or bar end and any visible error ends. Leave unreadable ends blank.</p>
+</section>
+<section aria-labelledby="reading-title">
+<h2 id="reading-title">Reading</h2>
+<div class="fields">
+<label>Cell <select id="cell"></select></label>
+<label>Mark <select id="mark"><option value="mean">Center or bar end</option>
+<option value="upper">Top error end</option><option value="lower">Bottom error end</option></select></label>
+</div>
+<div class="tools"><button id="clear">Clear mark</button></div>
+<div class="fields">
+<label>Reader ID <input id="reader" autocomplete="off"></label>
+<label>Date <input id="date" type="date"></label>
+</div>
+<p id="status" role="status"></p>
+<button id="download" class="primary" disabled>Export CSV</button>
+</section>
+</main>
+<script type="application/json" id="config">{data}</script><script>{logic}</script></body></html>
 """
 
 

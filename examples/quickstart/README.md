@@ -5,13 +5,21 @@ heart rate in two postures at six sessions, mean ± SD, n = 10. The figure itsel
 is drawn by `tests/make_bar_fixture.py`, so every true value is known
 (`bar_fixture_truth.json` is written beside it).
 
-## As a demonstration
+## Try clicking a plot
+
+    python3 examples/quickstart/quickstart.py --workbench /tmp/fdt-workbench-demo
+
+Open `/tmp/fdt-workbench-demo/workbench.html` and follow the
+[three practice steps](../../README.md#start-with-a-sample-plot). Each invocation
+takes a new output directory.
+
+## Try the automatic reader
 
     python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart
 
 Compiles the plan, reads the figure, and ends in `DEMO_OUTPUT_REFUSED`. That is
 the expected result: the plan's only reviewer is ORCID's fictional demo record,
-and a demonstration identity can never stand behind a poolable value. CI runs
+and a demonstration identity can never stand behind an approved extraction. CI runs
 exactly this.
 
 ## As your own review
@@ -23,7 +31,7 @@ has one panel. Then run again as yourself — all four variables or none:
     FDT_REVIEWER_ORCID="0000-0000-0000-0000" \
     FDT_INSPECTION_DATE=YYYY-MM-DD \
     FDT_REGISTRATION_DATE=YYYY-MM-DD \
-    python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart
+    python3 examples/quickstart/quickstart.py /tmp/fdt-own-review
 
 The run is now `ATTESTED` and stops at `MACHINE_QC_PASSED` with:
 
@@ -34,8 +42,8 @@ The run is now `ATTESTED` and stops at `MACHINE_QC_PASSED` with:
 The rest is yours, as in a real review ([docs/REVIEW_RUNBOOK.md](../../docs/REVIEW_RUNBOOK.md)):
 look at the overlay, fill in `value_review.csv`, then
 
-    python3 fdt/review_preflight.py /tmp/fdt-quickstart/out --review /tmp/fdt-quickstart/out/value_review.csv
-    python3 fdt/finalize_batch.py /tmp/fdt-quickstart/out --review /tmp/fdt-quickstart/out/value_review.csv
+    python3 fdt/review_preflight.py /tmp/fdt-own-review/out --review /tmp/fdt-own-review/out/value_review.csv
+    python3 fdt/finalize_batch.py /tmp/fdt-own-review/out --review /tmp/fdt-own-review/out/value_review.csv
 
 and compare `figure_values_accepted.csv` with `bar_fixture_truth.json`.
 

@@ -7,13 +7,14 @@ WORK_DIR is created; nothing is written inside the repository. The figure is a
 colour bar chart drawn by `tests/make_bar_fixture.py` (heart rate, two postures,
 six sessions, mean +/- SD), so every number on it is known exactly.
 
-THERE ARE TWO WAYS TO RUN IT, and the difference is the point of the package.
+Use --workbench to open the synthetic figure for manual practice. Without
+that option, the example runs the automatic extraction and review workflow:
 
 1. As a DEMONSTRATION (the default). The plan's only reviewer is ORCID's
    fictional demo record, so the run is `DEMO_ONLY`. The figure is read, the
    values pass the gate - and `run_batch` then refuses to leave them behind
    (`DEMO_OUTPUT_REFUSED`), because a demonstration identity cannot stand behind
-   a poolable value. That refusal is the expected result.
+   an approved extraction. That refusal is the expected result.
 
 2. As YOUR review, attested by you. Open the figure the script draws
    (`WORK_DIR/bar_fixture.png`), check that it has one panel, then run again
@@ -30,11 +31,13 @@ THERE ARE TWO WAYS TO RUN IT, and the difference is the point of the package.
    preflight and the finalizer (the script prints the commands). Nothing here
    fills in a review answer for you.
 """
+import argparse
+import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -74,11 +77,41 @@ def attested_plan(plan, env):
     return plan
 
 
+def demo_workbench(work, plan):
+    """Render the known calibration and labels of the synthetic figure."""
+    sys.path.insert(0, FDT)
+    from manual_digitize import panel_data
+    from workbench import render
+
+    run = Path(work)
+    read = plan["figures"][0]["panels"][0]["read"]
+    panel_id = "DEMO_P1"
+    raster = "bar_fixture.png"
+    digest = hashlib.sha256((run / raster).read_bytes()).hexdigest()
+    identity = {
+        "Human_Verification_Status": "CONFIRMED", "Read_Route": "MANUAL",
+        "Mark_Type": read["mark_type"], "Raster": raster, "Raster_SHA256": digest,
+        "Outcome_Name": "Heart rate (synthetic demo)", "Unit": "beats/min",
+        "Series": json.dumps([{"name": row["level"]} for row in read["series"]]),
+        "X_Labels": json.dumps([{"label": row["level"]} for row in read["positions"]]),
+    }
+    frame = dict(zip(("Panel_X0", "Panel_X1", "Panel_Y0", "Panel_Y1"), read["box"]))
+    frame.update(Human_Verification_Status="CONFIRMED", Raster_SHA256=digest,
+                 Confirmed_Tick_Values=";".join(
+                     f"{value}@{pixel}" for value, pixel in (read["y_ticks"][0], read["y_ticks"][-1])))
+    panel = panel_data(run, panel_id, {panel_id: frame}, {panel_id: identity})
+    page = run / "workbench.html"
+    page.write_text(render([panel]), encoding="utf-8")
+    print(f"Open {page} in a browser. Use DEMO as the reader ID for practice.")
+    return 0
+
+
 def main(argv):
-    if len(argv) != 1:
-        print(__doc__)
-        return 2
-    work = os.path.abspath(argv[0])
+    parser = argparse.ArgumentParser(description="Try the digitizer with a synthetic plot.")
+    parser.add_argument("work_dir", help="New output directory outside the repository")
+    parser.add_argument("--workbench", action="store_true", help="Open a manual practice workflow")
+    args = parser.parse_args(argv)
+    work = os.path.abspath(args.work_dir)
     given = [k for k in ATTESTATION if os.environ.get(k, "").strip()]
     if given and len(given) != len(ATTESTATION):
         print("partial attestation: set all four of %s, or none"
@@ -86,13 +119,16 @@ def main(argv):
         return 2
     attested = bool(given)
 
-    if os.path.exists(work):
-        shutil.rmtree(work)
-    os.makedirs(work)
+    try:
+        os.makedirs(work)
+    except FileExistsError:
+        parser.error("Output already exists. Choose a new directory.")
     FIXTURE.build(path=os.path.join(work, "bar_fixture.png"),
                   meta_path=os.path.join(work, "bar_fixture_truth.json"))
     with open(os.path.join(HERE, "plan.json"), encoding="utf-8") as fh:
         plan = json.load(fh)
+    if args.workbench:
+        return demo_workbench(work, plan)
     if attested:
         plan = attested_plan(plan, os.environ)
     plan_path = os.path.join(work, "plan.json")
@@ -117,7 +153,7 @@ def main(argv):
         print("""
 That refusal is the expected end of a demonstration: the figure was read and
 the values passed the gate, but the only reviewer is a demo identity, so the run
-leaves nothing that could be pooled.
+does not write an accepted extraction.
 
 To take it through a real review, open %s,
 check it has one panel, and run again with FDT_REVIEWER_NAME, FDT_REVIEWER_ORCID,
@@ -133,7 +169,7 @@ See docs/PROCEDURE.md for the full order of steps."""
     if tool("finalize_batch.py", out, "--template"):
         return 1
     print("""
-The run stopped at MACHINE_QC_PASSED. Nothing is poolable yet - that needs you.
+The run stopped at MACHINE_QC_PASSED. Review the extraction next.
 
   4. open   %(out)s/review_queue.csv          (Review_Mode says what to look at)
      open   %(out)s/review/P1_overlay.png     (is every label on the right bar?)

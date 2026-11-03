@@ -17,6 +17,30 @@ PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a p
      ─▶ a person reviews the overlays ─▶ figure_values_accepted.csv
 ```
 
+## Start with a sample plot
+
+From a terminal with Git and Python 3.11 installed:
+
+    git clone https://github.com/hpend2373/figure-digitization-triage
+    cd figure-digitization-triage
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -r requirements-lock.txt
+    python examples/quickstart/quickstart.py --workbench /tmp/fdt-workbench-demo
+
+1. Open `/tmp/fdt-workbench-demo/workbench.html` in a browser.
+2. Pick a cell from the reading table, then click the corresponding bar top.
+   Pick an error-end tool to mark a visible endpoint.
+3. Enter `DEMO` as the reader ID and today's date. Click **CSV 내보내기**
+   (Export CSV) to download `manual_readings.csv`. The file contains raster
+   pixels and the synthetic source fingerprint.
+
+This sample supplies a ready-to-use axis calibration and series labels. Use a
+new output directory if you run the command again. For automatic reading of the
+same chart, see the [automatic quickstart](examples/quickstart/). Node.js is used
+for development tests. PDF intake and tick OCR have
+[separate setup steps](docs/PROCEDURE.md#0-set-up).
+
 ## Three rules
 
 1. **No per-publication exception rules.** Validation is one factorial grid keyed
@@ -28,31 +52,6 @@ PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a p
    anything short of a pass goes to a queue with its reason. Machine QC is not
    approval: only `finalize_batch.py`, given a registered person's review, writes
    approved figure readings. Synthesis eligibility is assessed separately.
-
-## Install
-
-Python 3.11 and Node.js (for the review pages' logic tests).
-
-    git clone https://github.com/hpend2373/figure-digitization-triage
-    cd figure-digitization-triage
-    python3 -m pip install -r requirements-lock.txt     # the exact versions results are reproducible on
-    # only for reading PDFs (intake) and OCR of tick labels:
-    python3 -m pip install -r requirements-intake.txt
-    sudo apt-get install poppler-utils tesseract-ocr
-
-No scipy: the statistics are written in NumPy so a missing scipy cannot silently
-change a number.
-
-## Try it in two minutes
-
-    python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart
-
-This draws a synthetic bar chart (heart rate, two postures, six sessions,
-mean ± SD — every true value known), compiles its plan, and reads it. Run as is,
-it ends in `DEMO_OUTPUT_REFUSED`: the plan's only reviewer is a demonstration
-identity, and a demonstration identity cannot stand behind an approved extraction.
-Set your own name, ORCID and dates and it stops at `MACHINE_QC_PASSED` with an
-overlay for you to review — see [`examples/quickstart`](examples/quickstart/).
 
 ## Use it on your papers
 
@@ -78,8 +77,11 @@ suite refuses a tracked PDF or any picture outside `tests/`.
 
 ## Open the plot digitizer
 
-For calibrated panels routed to MANUAL, open the offline workbench to select a
-panel, zoom the plot, place marks, save drafts in the browser, and export CSV.
+For your own figures, complete the intake, panel and axis/series confirmation
+steps first. The workbench takes a run directory (`RUN`) produced by those
+steps. Copy the `Proposal_ID` of a confirmed row with `Read_Route=MANUAL`
+from `RUN/seg/identity600/identity_decisions.csv`. Supply one or more of
+those IDs to open the corresponding plots.
 
     python3 fdt/workbench.py --run RUN --panel PROPOSAL_A PROPOSAL_B --out RUN/workbench.html
 

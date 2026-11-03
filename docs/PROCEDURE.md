@@ -42,7 +42,7 @@ is a working folder for one corpus, both outside the repository.
 | 5 | Plans, and what is left | AI → Person | `make_plan.py`, `bundle_items.py` → `cross_check.py` → `bundle_page.py` → `bundle_route.py` → `census_copy.py` | one extraction plan per paper; one page of remaining questions |
 | 6 | Compile and read | AI | `compile_plan.py` → `run_batch.py` | values that passed machine QC, overlays, a review queue |
 | 7 | Panels no reader can read | AI → Person | supplied readings → `run_batch.py` → `value_page.py` | agent-placed points, confirmed by the person |
-| 8 | Review and finalize | Person | `finalize_batch.py --template` → `review_preflight.py` → `finalize_batch.py` | `figure_values_accepted.csv` — the only file to pool from |
+| 8 | Review and finalize | Person | `finalize_batch.py --template` → `review_preflight.py` → `finalize_batch.py` | `figure_values_accepted.csv` — the approved extraction |
 | 9 | After the numbers | AI → Person | [`ANALYSIS_RECONCILIATION.md`](ANALYSIS_RECONCILIATION.md), [`SYNTHESIS_HANDOFF.md`](SYNTHESIS_HANDOFF.md) | linkage to the analysis, synthesis inputs |
 
 ## 1. Intake — AI
@@ -170,7 +170,8 @@ Open the page locally. Choose a series and x position, click the marker center
 or bar end, and mark each visible error end separately. Leave unreadable ends
 blank. Enter the actual reader ID and reading date, then download the CSV
 before closing the page. The export contains raster coordinates and the source
-fingerprint. The current page supports one panel per export.
+fingerprint. The single-panel page exports one panel. The workbench exports
+the marked cells across its selected panels.
 
 Use the download as the complete reading input if this run has no other readings.
 Otherwise reconcile the download with the existing

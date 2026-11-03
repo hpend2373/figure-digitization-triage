@@ -12,6 +12,10 @@ from manual_digitize import digitizer_style, panel_data
 def build(run, proposals):
     geometry, identities, _, _ = make_plan.load_confirmations(str(run), None, None, None)
     panels = [panel_data(run, proposal, geometry, identities) for proposal in proposals]
+    return render(panels)
+
+
+def render(panels):
     for panel in panels:
         (v0, p0), (v1, p1) = panel["ticks"]
         if not all(map(math.isfinite, (v0, p0, v1, p1))) or v0 == v1:

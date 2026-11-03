@@ -46,7 +46,10 @@ jobs:
       - name: python suites
         run: bash .github/run_suites.sh
       - name: quickstart example
-        run: python examples/quickstart/quickstart.py /tmp/quickstart
+        run: |
+          python examples/quickstart/quickstart.py /tmp/quickstart
+          python examples/quickstart/quickstart.py --workbench /tmp/workbench
+          test -s /tmp/workbench/workbench.html
 
   full:
     runs-on: ubuntu-latest

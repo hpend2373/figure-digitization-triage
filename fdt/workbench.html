@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plot Digitizer · 작업대</title>
+<style>/* DIGITIZER_CSS */</style>
+</head>
+<body>
+<header><h1>Plot Digitizer <small>· 작업대</small></h1><small id="saved" role="status"></small></header>
+<main>
+<nav aria-label="패널 목록"><h2>패널</h2><div id="panels"></div></nav>
+<section aria-labelledby="panel-title">
+<h2 id="panel-title"></h2><p id="axis" class="muted"></p>
+<div class="tools" aria-label="판독 도구">
+<div class="tool-group" role="group" aria-label="표시 종류">
+<button data-mark="mean" aria-pressed="true">값</button>
+<button data-mark="upper" aria-pressed="false">위쪽 끝</button>
+<button data-mark="lower" aria-pressed="false">아래쪽 끝</button>
+</div>
+<button id="clear" aria-label="선택 표시 지우기">지우기</button>
+<div class="tool-group zoom" role="group" aria-label="그림 확대"><button id="minus" aria-label="축소">−</button><button id="fit">맞춤</button><button id="plus" aria-label="확대">+</button></div>
+</div>
+<div id="viewport" class="viewport"><svg id="plot" aria-label="원본 플롯"><image id="raster"/><g id="marks" pointer-events="none"/></svg></div>
+<p class="muted">판독표에서 셀을 고른 뒤 그림을 클릭하세요. 보이지 않는 오차막대 끝은 비워 두세요.</p>
+</section>
+<section class="readings" aria-labelledby="readings-title">
+<h2 id="readings-title">판독표</h2><p id="count" class="muted"></p>
+<div class="table"><table><thead><tr><th>계열 · 위치</th><th>값</th><th>위쪽</th><th>아래쪽</th></tr></thead><tbody id="cells"></tbody></table></div>
+<p class="muted">표의 숫자는 축 교정에 따른 미리보기입니다. CSV에는 원본 픽셀을 담습니다.</p>
+<div class="fields"><label>판독자 ID<input id="reader" autocomplete="off"></label><label>판독일<input id="date" type="date"></label></div>
+<p id="status" role="status"></p>
+<button id="download" class="primary" disabled>CSV 내보내기</button>
+</section>
+</main>
+<script type="application/json" id="data">/* WORKBENCH_DATA */</script>
+<script>/* WORKBENCH_JS */</script>
+</body>
+</html>

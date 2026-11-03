@@ -199,7 +199,7 @@ provenance intact. Resolve them against the run directory, not the working one.
 | finalize | `NOTHING_APPROVED` | no valid approval; the default |
 | finalize | `RUN_NOT_FINALIZABLE` | not a completed ATTESTED run |
 | finalize | `RUN_ARTIFACT_MODIFIED` | something changed after the run |
-| finalize | `FINALIZED` | the only state that produces poolable values |
+| finalize | `FINALIZED` | the only state that produces approved extraction values |
 
 **Never**
 
@@ -326,8 +326,7 @@ If the source supplies no panel letters, assign stable reading-order labels
 `P01`, `P02`, ... .  Record the count method, and the `Reviewer_ID` of the person
 who did the counting.
 
-`run_batch.py` stops at `figure_values_machine_qc.csv`.  Nothing it writes is
-poolable.  Each passing panel gets one `review_queue.csv` row whose
+`run_batch.py` stops at `figure_values_machine_qc.csv`.  Its values await extraction review.  Each passing panel gets one `review_queue.csv` row whose
 `Review_Mode` names the artifact a reviewer must open — almost always
 `review/<Panel_ID>_overlay.png`, the panel as printed with every mark the reader
 placed drawn on it, and `WPD_ONLY` with the project when that picture could not
@@ -348,7 +347,7 @@ accepted file is written.  This is what makes an approval a statement about a
 specific picture: swapping `review/P1_overlay.png` after the fact used to
 finalize, because the numbers were verified and the picture was not.
 
-Whether a run may produce poolable values is decided by `Reviewer_Record_Type`
+Whether a run may produce approved extraction values is decided by `Reviewer_Record_Type`
 (`HUMAN` or `DEMO_IDENTITY`) on the rows the inventory names, not by a flag at
 the call site — a flag does not travel with the manifests.  A run resting on a
 `DEMO_IDENTITY` reviewer is DEMO_ONLY wherever it is launched from: it may
@@ -1112,10 +1111,9 @@ A panel a person routed to MANUAL (`Read_Route=MANUAL` on the identity card, so
 `Panel_Mode=MANUAL`) used to stop at `MANUAL_POINT_READ` with every cell in the queue.
 The person chose (2026-10-18, option 1 of G01): **the AI agent reads the points first, on
 the 600 dpi raster, and the person confirms them on the overlay through the ordinary value
-review and `finalize_batch`.** Nothing about the door into the pool changed: a registered
-person's approval of the panel's overlay, bound to the run's fingerprint, is still the only
-way a value becomes poolable. What changed is that the person is confirming placed points
-instead of placing them.
+review and `finalize_batch`.** The registered reviewer confirms the placed points
+on an overlay bound to the run fingerprint. The direct digitization page also
+lets a person place points for a confirmed manual panel.
 
 **What the agent writes.** `seg/readings600/supplied_readings.csv` in the run, one row per
 cell, by the names the person confirmed on the identity card:
@@ -1694,9 +1692,11 @@ only rows whose panel reached `AUTO_PASS` and whose unit drew no gate problem;
 the raw file holds every reading, each row carrying `Value_Status`, `QC_Codes`
 and `Pooling_Eligible`.
 
-These are extraction-level gates. Accepted rows and a local `Pooling_Eligible`
-flag still require the applicable clinical, source, dependence, risk-of-bias and
-analysis-approval checks before entering a particular synthesis.
+These are extraction-level gates. New accepted rows carry
+`Value_Status=HUMAN_APPROVED` and `Pooling_Eligible=FALSE`. Apply clinical,
+source, dependence, risk-of-bias and analysis-approval checks separately.
+For direct point entry on confirmed MANUAL bar and line panels, see
+[Manual digitization](docs/PROCEDURE.md#7-manual-digitization).
 
 The reason for two files rather than one flagged file is that the failure mode
 is a *script*, not a person. A single `figure_values.csv` once carried eight

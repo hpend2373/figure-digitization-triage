@@ -39,7 +39,7 @@ Choose the first review for the review state machine, not for the science:
 ## The order
 
     1  python3 fdt/run_batch.py MANIFESTS OUT
-       stops at MACHINE_QC_PASSED. Nothing is poolable yet.
+       stops at MACHINE_QC_PASSED. Extraction approval is still pending.
 
     2  python3 fdt/finalize_batch.py OUT --template
        writes `value_review.csv` with every identifier pre-filled, and writes

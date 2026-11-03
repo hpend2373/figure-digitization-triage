@@ -3346,7 +3346,8 @@ def validate_finalization(run_dir, review_path=None, manifest_dir=None,
                         "the person who looked at it", approved=approved)
 
     keep["Value_Status"] = "HUMAN_APPROVED"
-    keep["Pooling_Eligible"] = "TRUE"
+    # Extraction approval is recorded in Value_Status. Synthesis needs separate evidence.
+    keep["Pooling_Eligible"] = "FALSE"
     keep["Review_ID"] = [_s(approved[p].get("Review_ID")) for p in keep["Run_Panel_ID"]]
     keep["Reviewer_ID"] = [_s(approved[p].get("Reviewer_ID")) for p in keep["Run_Panel_ID"]]
     keep["Reviewed_At"] = [_s(approved[p].get("Reviewed_At")) for p in keep["Run_Panel_ID"]]

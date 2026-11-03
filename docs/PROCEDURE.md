@@ -42,7 +42,7 @@ is a working folder for one corpus, both outside the repository.
 | 5 | Plans, and what is left | AI → Person | `make_plan.py`, `bundle_items.py` → `cross_check.py` → `bundle_page.py` → `bundle_route.py` → `census_copy.py` | one extraction plan per paper; one page of remaining questions |
 | 6 | Compile and read | AI | `compile_plan.py` → `run_batch.py` | values that passed machine QC, overlays, a review queue |
 | 7 | Panels no reader can read | AI → Person | supplied readings → `run_batch.py` → `value_page.py` | agent-placed points, confirmed by the person |
-| 8 | Review and finalize | Person | `finalize_batch.py --template` → `review_preflight.py` → `finalize_batch.py` | `figure_values_accepted.csv` — the only file to pool from |
+| 8 | Review and finalize | Person | `finalize_batch.py --template` → `review_preflight.py` → `finalize_batch.py` | `figure_values_accepted.csv` — the approved extraction |
 | 9 | After the numbers | AI → Person | [`ANALYSIS_RECONCILIATION.md`](ANALYSIS_RECONCILIATION.md), [`SYNTHESIS_HANDOFF.md`](SYNTHESIS_HANDOFF.md) | linkage to the analysis, synthesis inputs |
 
 ## 1. Intake — AI
@@ -147,20 +147,49 @@ grid, and ends every panel in exactly one state. It stops at
 anybody looked. What it could not do is in `manual_queue.csv` with the reason;
 cells whose number was not read off the ink are in `method_blocked_cells.csv`.
 
-## 7. Panels no reader can read — AI reads, Person confirms
+## 7. Manual digitization
 
-A panel routed to MANUAL (no released reader separates its series) is read by an
-AI agent: it places points on the 600 DPI raster in
-`seg/readings600/supplied_readings.csv` (schema:
-[`templates/supplied_readings_TEMPLATE.csv`](../templates/supplied_readings_TEMPLATE.csv)),
-`make_plan.py` / `compile_plan.py` carry them into the manifests, and
-`run_batch.py` turns each pixel into a value through the panel's calibration.
-The person then looks:
+For a bar or line panel with confirmed identity and calibration and
+`Read_Route=MANUAL`, generate a page using its `Proposal_ID`.
+
+    python3 fdt/manual_digitize.py --run RUN --panel PROPOSAL_ID --out RUN/manual.html
+
+For several confirmed panels, build a single offline workbench.
+
+    python3 fdt/workbench.py --run RUN --panel PROPOSAL_A PROPOSAL_B --out RUN/workbench.html
+
+The workbench shows a panel list, the source raster crop and a reading table.
+Draft coordinates stay in the current browser, keyed to the panel definitions
+and raster fingerprints in that page. Reopen the same file in the same browser
+to resume. Download the readings before changing browser or clearing its data.
+The table shows a calibrated preview. The plan and extraction gates consume the
+exported pixels and apply the recorded calibration. Regenerate the page after
+changing the frame, calibration or series definitions.
+
+Open the page locally. Choose a series and x position, click the marker center
+or bar end, and mark each visible error end separately. Leave unreadable ends
+blank. Enter the actual reader ID and reading date, then download the CSV
+before closing the page. The export contains raster coordinates and the source
+fingerprint. The single-panel page exports one panel. The workbench exports
+the marked cells across its selected panels.
+
+Use the download as the complete reading input if this run has no other readings.
+Otherwise reconcile the download with the existing
+`RUN/seg/readings600/supplied_readings.csv` in a separate file. Preserve other cells
+and keep one row per proposal, series and x label.
+
+    python3 fdt/make_plan.py --run RUN --out PLANS --run-date YYYY-MM-DD --readings READINGS.csv
+
+Carry any other plan options forward, then compile and run into new output
+directories. The existing pipeline applies calibration, dispersion rules and
+quality checks. It shows any remaining gaps in its queues. AI readers can
+supply the same intake columns with their actual reader provenance. The
+[manifest CSV template](../templates/supplied_readings_TEMPLATE.csv) describes
+the compiled schema with panel, series and position IDs.
 
     python3 fdt/value_page.py --run OUT --out OUT/values.html
 
-A symbol the agent could not place can be placed by the person in the same file
-(`Reader_Kind=PERSON`). See `SKILL.md`, "A panel no reader can read".
+Review the result using the next stage.
 
 ## 8. Review and finalize — Person
 

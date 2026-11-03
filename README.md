@@ -1,7 +1,7 @@
 # figure-digitization-triage (fdt)
 
-A reproducible pipeline for reading numbers off published figures for a
-systematic review, with quality control that fails closed. Many studies report
+A plot digitizer for published figures, with automatic reading, direct point
+entry, visual review, and a traceable CSV export. Many studies report
 their outcomes only as plots, and a number read off a plot is only usable if the
 pipeline that produced it can say exactly what it did: which raster, which
 calibration, which reader, which environment, and which person looked at it.
@@ -17,6 +17,30 @@ PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a p
      ─▶ a person reviews the overlays ─▶ figure_values_accepted.csv
 ```
 
+## Start with a sample plot
+
+From a terminal with Git and Python 3.11 installed:
+
+    git clone https://github.com/hpend2373/figure-digitization-triage
+    cd figure-digitization-triage
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -r requirements-lock.txt
+    python examples/quickstart/quickstart.py --workbench /tmp/fdt-workbench-demo
+
+1. Open `/tmp/fdt-workbench-demo/workbench.html` in a browser.
+2. Pick a cell from the reading table, then click the corresponding bar top.
+   Pick an error-end tool to mark a visible endpoint.
+3. Enter `DEMO` as the reader ID and today's date. Click **CSV 내보내기**
+   (Export CSV) to download `manual_readings.csv`. The file contains raster
+   pixels and the synthetic source fingerprint.
+
+This sample supplies a ready-to-use axis calibration and series labels. Use a
+new output directory if you run the command again. For automatic reading of the
+same chart, see the [automatic quickstart](examples/quickstart/). Node.js is used
+for development tests. PDF intake and tick OCR have
+[separate setup steps](docs/PROCEDURE.md#0-set-up).
+
 ## Three rules
 
 1. **No per-publication exception rules.** Validation is one factorial grid keyed
@@ -27,32 +51,7 @@ PDFs ─▶ draft inventory ─▶ panels a person drew ─▶ axes & series a p
 3. **Fail closed, and loudly.** Every panel ends in exactly one state, and
    anything short of a pass goes to a queue with its reason. Machine QC is not
    approval: only `finalize_batch.py`, given a registered person's review, writes
-   values you may pool.
-
-## Install
-
-Python 3.11 and Node.js (for the review pages' logic tests).
-
-    git clone https://github.com/hpend2373/figure-digitization-triage
-    cd figure-digitization-triage
-    python3 -m pip install -r requirements-lock.txt     # the exact versions results are reproducible on
-    # only for reading PDFs (intake) and OCR of tick labels:
-    python3 -m pip install -r requirements-intake.txt
-    sudo apt-get install poppler-utils tesseract-ocr
-
-No scipy: the statistics are written in NumPy so a missing scipy cannot silently
-change a number.
-
-## Try it in two minutes
-
-    python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart
-
-This draws a synthetic bar chart (heart rate, two postures, six sessions,
-mean ± SD — every true value known), compiles its plan, and reads it. Run as is,
-it ends in `DEMO_OUTPUT_REFUSED`: the plan's only reviewer is a demonstration
-identity, and a demonstration identity cannot stand behind a poolable value.
-Set your own name, ORCID and dates and it stops at `MACHINE_QC_PASSED` with an
-overlay for you to review — see [`examples/quickstart`](examples/quickstart/).
+   approved figure readings. Synthesis eligibility is assessed separately.
 
 ## Use it on your papers
 
@@ -75,6 +74,25 @@ Success is `OUT/figure_values_accepted.csv` beside a `finalize_stamp.json` whose
 **Keep papers, figures, runs and review answers outside the clone.** This
 repository is public, publisher material is not redistributable, and the test
 suite refuses a tracked PDF or any picture outside `tests/`.
+
+## Open the plot digitizer
+
+For your own figures, complete the intake, panel and axis/series confirmation
+steps first. The workbench takes a run directory (`RUN`) produced by those
+steps. Copy the `Proposal_ID` of a confirmed row with `Read_Route=MANUAL`
+from `RUN/seg/identity600/identity_decisions.csv`. Supply one or more of
+those IDs to open the corresponding plots.
+
+    python3 fdt/workbench.py --run RUN --panel PROPOSAL_A PROPOSAL_B --out RUN/workbench.html
+
+The workbench and single-panel page share compact controls. Exported coordinates
+go through the existing calibration and review stages. See the
+[direct digitization workflow](docs/PROCEDURE.md#7-manual-digitization).
+
+Finalized exports carry `Value_Status=HUMAN_APPROVED` and
+`Pooling_Eligible=FALSE`. Older exports can carry `TRUE` for extraction
+approval. Use the [synthesis handoff](docs/SYNTHESIS_HANDOFF.md) to establish
+eligibility for a specific analysis.
 
 ## For AI agents
 

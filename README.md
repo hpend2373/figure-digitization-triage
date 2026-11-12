@@ -6,6 +6,8 @@ their outcomes only as plots, and a number read off a plot is only usable if the
 pipeline that produced it can say exactly what it did: which raster, which
 calibration, which reader, which environment, and which person looked at it.
 
+![A bear checks a point on a printed plot against the axis ticks and records the reading](assets/figure-digitization-triage-banner.webp)
+
 It was built for a review of cardiovascular responses to spaceflight and
 head-down bed rest, but nothing in it is specific to one paper or one field:
 every check is keyed on a declared data type or dimension, never on a
@@ -73,7 +75,8 @@ Success is `OUT/figure_values_accepted.csv` beside a `finalize_stamp.json` whose
 
 **Keep papers, figures, runs and review answers outside the clone.** This
 repository is public, publisher material is not redistributable, and the test
-suite refuses a tracked PDF or any picture outside `tests/`.
+suite blocks tracked PDFs and allows pictures only under `tests/` and at the
+README cover path, where it checks the cover's SHA-256.
 
 ## Open the plot digitizer
 

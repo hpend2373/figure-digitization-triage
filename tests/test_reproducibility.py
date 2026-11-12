@@ -6,6 +6,7 @@ schemas, the skill contract, CI coverage, and what may never be tracked.
 import _paths  # noqa: E402,F401  (puts fdt/ on sys.path)
 import builtins
 import csv
+import hashlib
 import json
 import importlib.util
 import os
@@ -230,12 +231,14 @@ passed("CI runs every test file in the package (%d)" % len(_suites))
 # the history. `.gitignore` is the first fence and `git add -f` walks through it;
 # this is the second, and it runs in CI.
 #
-# THE RULE IS STRUCTURAL rather than a list of names: every tracked picture is a
-# synthetic test fixture under `tests/`, drawn by a `make_*` script or described
-# by a truth file, and no document format a publisher ships is tracked at all.
+# Tracked pictures are synthetic fixtures under tests/ or the generated
+# README illustration below. Pin the cover's bytes so the path cannot be
+# reused for a publisher figure.
 _RASTER = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".bmp", ".webp")
 _NEVER = (".pdf", ".tar", ".xls", ".xlsx", ".docx")
 _CORPUS = ("dig201.csv", "clips201.csv", "captions.csv", "proposals.csv")
+_README_COVER = "assets/figure-digitization-triage-banner.webp"
+_README_COVER_SHA256 = "a0226b74b8098b21403259331c770abca38a3ba10123279ae23f944fdf7ecca2"
 _index = subprocess.run(["git", "ls-files"], cwd=_paths.ROOT,
                         capture_output=True, text=True)
 if _index.returncode == 0 and _index.stdout.strip():
@@ -243,9 +246,15 @@ if _index.returncode == 0 and _index.stdout.strip():
     _bad = [t for t in _tracked
             if t.lower().endswith(_NEVER)
             or os.path.basename(t) in _CORPUS or t.startswith("clips/")
-            or (t.lower().endswith(_RASTER) and not t.startswith("tests/"))]
+            or (t.lower().endswith(_RASTER)
+                and not t.startswith("tests/") and t != _README_COVER)]
     assert not _bad, ("these must never be tracked in a public repository: %s"
                       % _bad)
+    if _README_COVER in _tracked:
+        _cover = subprocess.check_output(["git", "show", ":" + _README_COVER],
+                                         cwd=_paths.ROOT)
+        assert hashlib.sha256(_cover).hexdigest() == _README_COVER_SHA256, (
+            "the tracked README cover differs from the reviewed illustration")
     passed("no publisher figure, PDF or corpus file is tracked (%d paths checked)"
            % len(_tracked))
 else:

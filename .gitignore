@@ -16,8 +16,8 @@ tests/mono_line_fixture.png
 # It is public and they are not redistributable. Keep your own figures, PDFs,
 # runs and review answers OUTSIDE the clone (point --file-root / --doc-root at
 # them). `tests/test_reproducibility.py` also refuses a tracked PDF, archive,
-# spreadsheet or any picture outside tests/, because a .gitignore can be
-# overridden with `git add -f`.
+# spreadsheet or any picture outside tests/ except the SHA-256-pinned README
+# cover, because a .gitignore can be overridden with `git add -f`.
 *.pdf
 *.tar
 *.xls

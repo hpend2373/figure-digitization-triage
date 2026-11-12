@@ -1,5 +1,7 @@
 # figure-digitization-triage (fdt)
 
+**English** · [한국어](README.ko.md)
+
 A plot digitizer for published figures, with automatic reading, direct point
 entry, visual review, and a traceable CSV export. Many studies report
 their outcomes only as plots, and a number read off a plot is only usable if the
@@ -134,17 +136,3 @@ identity is `DEMO_ONLY` and never writes accepted values. An approval is bound t
 environment — so changing any of them after review makes it `APPROVAL_STALE`
 rather than inherited. `Human_Attestation` is a declared record, not a
 cryptographic signature: it buys traceability, not proof of authorship.
-
-## 한국어 요약
-
-체계적 문헌고찰에서 **그림으로만 보고된 수치**를 읽어 내는 파이프라인입니다.
-읽은 값마다 어느 그림·눈금·판독기·환경에서 나왔고 누가 확인했는지가 남으며,
-근거가 부족하면 값을 만들지 않고 이유와 함께 대기열로 보냅니다.
-
-- 처음이면 `python3 examples/quickstart/quickstart.py /tmp/fdt-quickstart`로 합성 그림
-  하나를 끝까지 돌려 보세요.
-- 실제 논문에는 [docs/PROCEDURE.md](docs/PROCEDURE.md)의 9단계를 따르세요. 단계마다
-  누가(스크립트·AI·사람) 하는지 적혀 있습니다.
-- 사람이 하는 검토는 [docs/REVIEW_RUNBOOK.md](docs/REVIEW_RUNBOOK.md)에 있습니다.
-  검토자·날짜·확인 칸은 사람만 채웁니다.
-- 원문 PDF·그림·실행 결과·답안은 저장소 밖에 두세요(공개 저장소입니다).
